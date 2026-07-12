@@ -23,6 +23,7 @@ from spindoctor.support.misc import mad_std
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 __all__ = [
+    'estimate_background_and_sky_sigma',
     'estimate_image_noise_sigma',
 ]
 
@@ -117,3 +118,85 @@ def estimate_image_noise_sigma(
         return float(mad_std(fallback))
 
     return float(mad_std(finite) / _LAPLACIAN_NORM)
+
+
+NOISE_CLIP_SIGMA: float = 3.0
+"""Sigmas above background at which a pixel stops counting as sky.
+
+Shared between the estimator's high-tail rejection (``clip_sigma``) and the
+blob technique's lit-pixel threshold
+(``nav_technique_body_blob._BLOB_NOISE_THRESHOLD_SIGMA``) so the model's
+detection-SNR estimate and the technique's actual threshold cannot drift
+apart.
+"""
+
+
+def estimate_background_and_sky_sigma(
+    image: NDArrayFloatType,
+    valid_mask: NDArrayBoolType,
+    *,
+    noise_sigma: float,
+    clip_sigma: float = NOISE_CLIP_SIGMA,
+) -> tuple[float, float]:
+    """Estimate the frame's background pedestal and sky-noise sigma.
+
+    Returns two frame-global quantities body-brightness photometry needs
+    (the BODY_BLOB centroid moment in ``BodyBlobNav`` and the BODY_BLOB
+    detection SNR in ``NavModelBodyBase`` share this estimate):
+
+    * **Background (bias + dark) pedestal.** Real raw frames carry a
+      non-zero bias/dark pedestal, and the sim adds a ``bias_dn`` pedestal
+      so dark sky is distinguishable from the missing-data marker.  That
+      pedestal sits on every pixel, so without subtracting it a
+      brightness-weighted moment is pulled toward the bbox geometric
+      center -- a bias that grows with phase as the lit signal
+      concentrates away from center.
+    * **Sky-noise sigma.** Lit-pixel thresholds must reject *sky* noise,
+      but the global ``image_noise_sigma`` is a MAD over the whole
+      sensor, which a bright body inflates (its brightness gradient widens
+      the global spread).  An inflated sigma raises the threshold and cuts
+      the dim crescent.  The sky noise estimated here, over the
+      body-excluded sky population, is the correct floor; for a small body
+      it equals the global sigma, so this only matters when a large body
+      would otherwise inflate it.
+
+    Both are estimated over the valid sky region (sensor data, excluding
+    saturation / cosmic rays) by seeding at the overall median and the
+    global sigma, then rejecting the bright body (the high tail) and
+    re-estimating the median and MAD of the surviving sky population.  On
+    a zero-background fixture this returns ``(~0, ~0)``.
+
+    Parameters:
+        image: The extended-FOV image (native units).
+        valid_mask: ``True`` where the pixel is real sensor data and not
+            saturated / a cosmic ray (the sky-candidate population).
+        noise_sigma: Global per-pixel image noise sigma (native units);
+            seeds the sky-population selection.
+        clip_sigma: High-tail rejection threshold in sigmas; pixels above
+            ``background + clip_sigma * sky_sigma`` are excluded from the
+            sky population on each iteration.
+
+    Returns:
+        ``(background, sky_sigma)`` in the image's native units;
+        ``(0.0, max(noise_sigma, 1e-9))`` when there are no valid pixels.
+    """
+    sigma0 = max(noise_sigma, 1e-9)
+    vals = image[valid_mask]
+    if vals.size == 0:
+        return 0.0, sigma0
+    background = float(np.median(vals))
+    sky_sigma = sigma0
+    for _ in range(3):
+        sky = vals[vals <= background + clip_sigma * sky_sigma]
+        if sky.size == 0:
+            break
+        new_bg = float(np.median(sky))
+        new_sigma = max(1.4826 * float(np.median(np.abs(sky - new_bg))), 1e-9)
+        converged = (
+            abs(new_bg - background) <= 1e-3 * sigma0
+            and abs(new_sigma - sky_sigma) <= 1e-3 * sigma0
+        )
+        background, sky_sigma = new_bg, new_sigma
+        if converged:
+            break
+    return background, sky_sigma

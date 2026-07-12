@@ -13,6 +13,8 @@ heuristics).
 """
 
 import math
+from statistics import NormalDist
+from typing import TYPE_CHECKING
 
 import numpy as np
 import scipy.ndimage as ndimage
@@ -34,21 +36,30 @@ from spindoctor.feature.geometry import BodyBlobGeometry
 from spindoctor.nav_model.body_shape import BodyShape
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
 from spindoctor.support.image import shift_array
+from spindoctor.support.noise_estimate import NOISE_CLIP_SIGMA, estimate_background_and_sky_sigma
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 from .nav_model import NavModel
 
+if TYPE_CHECKING:  # pragma: no cover - typing-only import
+    from spindoctor.nav_orchestrator.nav_context import NavContext
+
 __all__ = ['BODY_BLOB_MIN_DIAMETER_PX', 'NavModelBodyBase']
 
 
-BODY_BLOB_MIN_DIAMETER_PX: float = 8.0
+BODY_BLOB_MIN_DIAMETER_PX: float = 5.0
 """Minimum predicted disc diameter (px) at which BODY_BLOB is emitted.
 
-Below this diameter the predicted body silhouette is too small for a
-brightness-weighted centroid to pin the body to better than ~1 px, so
-the extractor emits no body feature for the image.  The per-body
-shape table can override this floor for known irregular / gas-giant
-bodies.
+Below this the silhouette covers so few pixels (< ~20) that the
+brightness-weighted centroid is dominated by the PSF and per-pixel
+noise rather than the body's position.  The floor admits the
+operator-curated ``below_resolution_body`` exemplars (a 6 px Enceladus
+whose sidecar requires ``BodyBlobNav`` to run); on the sim calibration
+campaign the 5-8 px band recovers planted offsets to under 0.15 px
+with honest 2-sigma coverage, so precision above the floor is the
+covariance's and the confidence formula's job, not the emission
+gate's.  The per-body shape table can override this floor upward for
+known difficult bodies (gas giants use 20).
 """
 
 
@@ -60,6 +71,37 @@ coincide to within pixel noise, and the direction toward the bright limb
 is undefined; the BODY_BLOB feature then carries ``(0.0, 0.0)`` and
 BodyBlobNav falls back to the filled-disc coarse template.
 """
+
+
+_BLOB_DETECTION_SNR_MIDPOINT: float = 3.0
+"""Detection SNR at which the blob reliability's SNR term crosses 0.5.
+
+Matches ``BodyBlobNav``'s 3-sigma lit-pixel threshold: pixels below
+``background + 3 * sky_sigma`` never contribute to the centroid moment,
+so a body whose brightest expected pixels sit at that level is at the
+technique's own usability boundary.  A detection SNR of 0 (nothing above
+the noise order-statistics in the search window) lands the term at
+``sigmoid(-3) ~ 0.05``, decisively below the 0.20 reliability gate for
+any body size.
+"""
+
+
+_BLOB_EXTENT_MIDPOINT_PX: float = 4.0
+"""Predicted diameter at which the blob reliability's extent term crosses 0.5.
+
+Below the :data:`BODY_BLOB_MIN_DIAMETER_PX` emission floor.  The floor
+already guarantees no undersized BODY_BLOB exists, so the extent term
+must not re-gate at-floor bodies (with the midpoint at the floor itself
+an at-floor body could never clear the 0.20 reliability gate: ``0.4 *
+0.5 * snr_term < 0.2`` for every finite SNR).  Sitting the midpoint
+just under the floor makes the term a mild near-floor discount that
+asks a smaller body for a stronger detection (SNR ~4.4 at 5 px, ~3.3
+at 8 px, ~3.1 at 20 px) rather than acting as a second size gate.
+"""
+
+
+_BLOB_EXTENT_SCALE_PX: float = 2.0
+"""Sigmoid scale (px) of the blob reliability's extent term."""
 
 
 class NavModelBodyBase(NavModel):
@@ -100,8 +142,119 @@ class NavModelBodyBase(NavModel):
         )
         return body_mask & neighbor
 
-    def _build_blob_feature(self, shape: BodyShape) -> NavFeature:
+    def _blob_detection_snr(self, context: 'NavContext') -> float:
+        """Measured per-pixel detection SNR for the body in its search window.
+
+        Answers the question the reliability gate needs answered before
+        any technique runs: *does the image contain body-scale signal
+        above the noise floor anywhere the body could be?*  The body's
+        true position differs from the prediction by the (unknown)
+        pointing error, which is bounded by the extfov margins, so the
+        search window is the predicted bbox expanded by those margins --
+        the same capture range ``BodyBlobNav``'s coarse acquisition
+        scans.
+
+        The estimate is order-statistics based so it needs no photometric
+        prediction (no albedo or flux calibration is available for
+        bodies):
+
+        1. Compute the model's *effective* lit pixel count ``N`` -- the
+           Kish effective sample size ``(sum w)^2 / sum(w^2)`` of the
+           rendered lit-pixel brightnesses -- how many image pixels
+           carry the body's predicted flux.  For a uniform silhouette
+           this equals the plain lit count; for a high-phase Lambert
+           crescent it concentrates on the bright core, so the
+           near-terminator tail of barely-lit model pixels (whose real
+           counterparts are routinely darker than the render predicts)
+           does not drag the estimate into the sky population.
+        2. Take the median of the ``N`` brightest valid pixels in the
+           search window, as sigmas above the frame background (the
+           shared iterative sky estimate,
+           :func:`~spindoctor.support.noise_estimate.estimate_background_and_sky_sigma`).
+        3. Subtract the level pure noise would produce -- the expected
+           median of the top ``N`` of ``M`` Gaussian draws, i.e. the
+           normal quantile at ``1 - N / (2 M)`` -- so an empty window
+           scores ~0 instead of inheriting the selection bias of taking
+           a maximum over many pixels.
+
+        If the body is present and detectable its lit pixels dominate the
+        top-``N`` population and the excess is the body's per-pixel SNR;
+        if nothing is there the top-``N`` median sits at the noise
+        quantile and the excess is ~0.  Other bright content in the
+        window (a ring, another body) can only raise the score -- a
+        false *admit* is cheap because the technique's own spurious
+        checks run downstream, while the false *veto* of a small bright
+        body is exactly the failure this estimator replaces.  A body
+        large relative to the frame pushes the background estimate up
+        toward its own brightness and scores low, consistent with the
+        technique's centroid, whose lit-pixel threshold fails the same
+        way; frame-filling bodies are limb / disc territory.
+
+        Parameters:
+            context: Per-image ``NavContext`` carrying the extended-FOV
+                image, validity masks, and the global noise sigma.
+
+        Returns:
+            Detection SNR in sigmas, >= 0.  0.0 when the model has no
+            lit pixels or the search window has no valid pixels.
+        """
+        assert self._model_img is not None
+        assert self._body_mask is not None
+        image_ext = np.asarray(context.image_ext, np.float64)
+        valid_mask = (
+            np.asarray(context.sensor_mask_ext, bool)
+            & ~np.asarray(context.saturation_mask_ext, bool)
+            & ~np.asarray(context.cosmic_ray_mask_ext, bool)
+        )
+        # Count only *observable* lit pixels: a mostly-offscreen body's
+        # silhouette extends past the sensor, and predicted flux that can
+        # never land on a valid pixel must not inflate N (it would push
+        # the top-N median into the sky population and falsely veto the
+        # visible part of the body).
+        lit_mask = self._body_mask & (self._model_img > 0.0) & valid_mask
+        lit_weights = np.asarray(self._model_img, np.float64)[lit_mask]
+        weight_sq_sum = float((lit_weights * lit_weights).sum())
+        if weight_sq_sum <= 0.0:
+            return 0.0
+        n_lit = max(1, int(float(lit_weights.sum()) ** 2 / weight_sq_sum))
+        background, sky_sigma = estimate_background_and_sky_sigma(
+            image_ext,
+            valid_mask,
+            noise_sigma=float(context.image_noise_sigma),
+            clip_sigma=NOISE_CLIP_SIGMA,
+        )
+        v_min, u_min, v_max, u_max = self._bbox_extfov_vu
+        margin_v = int(self._obs.extfov_margin_v)
+        margin_u = int(self._obs.extfov_margin_u)
+        v_lo = max(0, v_min - margin_v)
+        u_lo = max(0, u_min - margin_u)
+        v_hi = min(image_ext.shape[0], v_max + margin_v)
+        u_hi = min(image_ext.shape[1], u_max + margin_u)
+        if v_hi <= v_lo or u_hi <= u_lo:
+            return 0.0
+        window = image_ext[v_lo:v_hi, u_lo:u_hi]
+        window_vals = window[valid_mask[v_lo:v_hi, u_lo:u_hi]]
+        n_window = int(window_vals.size)
+        if n_window == 0:
+            return 0.0
+        n_top = min(n_lit, n_window)
+        top = np.partition(window_vals, n_window - n_top)[n_window - n_top :]
+        observed_sigma = (float(np.median(top)) - background) / sky_sigma
+        # Median of the top n_top of n_window standard-normal draws is
+        # (approximately) the quantile at 1 - n_top / (2 * n_window);
+        # n_top == n_window gives quantile 0.5, i.e. no correction.
+        null_sigma = NormalDist().inv_cdf(1.0 - n_top / (2.0 * n_window))
+        return max(0.0, observed_sigma - null_sigma)
+
+    def _build_blob_feature(self, shape: BodyShape, *, context: 'NavContext') -> NavFeature:
         """Construct the BODY_BLOB feature.
+
+        The reliability and centroid covariance are driven by the
+        *measured* detection SNR (:meth:`_blob_detection_snr`), so a
+        small body that is genuinely bright against the image noise is
+        admitted by the orchestrator's reliability gate while a
+        predicted body with no image signal anywhere in its search
+        window is culled.
 
         Three phase-aware decisions live here:
 
@@ -133,8 +286,7 @@ class NavModelBodyBase(NavModel):
         """
         assert self._model_img is not None
         assert self._body_mask is not None
-        # Estimate per-pixel SNR from the mean signal across the body.
-        snr = float(self._model_img[self._body_mask].mean()) if self._body_mask.any() else 0.0
+        snr = self._blob_detection_snr(context)
         sigma_centroid = self._predicted_diameter_px / (
             2.0 * math.sqrt(max(int(self._body_mask.sum()), 1)) * max(snr, 1e-6)
         )
@@ -414,8 +566,23 @@ class NavModelBodyBase(NavModel):
 
 
 def _blob_reliability(*, snr: float, diameter_px: float) -> float:
-    """Reliability of BODY_BLOB per the design (cap at 0.4)."""
-    return float(_sigmoid(snr) * _sigmoid(diameter_px / 8.0 - 1.0) * 0.4)
+    """Reliability of BODY_BLOB per the design (cap at 0.4).
+
+    ``snr`` is the measured detection SNR from
+    ``NavModelBodyBase._blob_detection_snr``.  Its sigmoid is centered
+    at :data:`_BLOB_DETECTION_SNR_MIDPOINT` (the technique's own
+    lit-pixel threshold) so a window with no signal above the noise
+    order-statistics scores ~0.02 (gated for any body size) while a
+    clearly detected body saturates the term.  The extent sigmoid
+    (midpoint :data:`_BLOB_EXTENT_MIDPOINT_PX`, below the
+    :data:`BODY_BLOB_MIN_DIAMETER_PX` emission floor) applies a mild
+    near-floor discount; detection is the primary discriminator against
+    the reliability gate's 0.20 threshold, which the combination crosses
+    at SNR ~3.0 for a 20 px body up to ~4.4 at the 5 px floor.
+    """
+    snr_term = _sigmoid(snr - _BLOB_DETECTION_SNR_MIDPOINT)
+    extent_term = _sigmoid((diameter_px - _BLOB_EXTENT_MIDPOINT_PX) / _BLOB_EXTENT_SCALE_PX)
+    return float(snr_term * extent_term * 0.4)
 
 
 def _sigmoid(x: float) -> float:

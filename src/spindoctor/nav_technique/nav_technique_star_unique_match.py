@@ -36,6 +36,7 @@ from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.nav_technique._star_helpers import (
     SimilarityFit,
     brightness_margin_mag,
+    detection_peak_ratio,
     local_centroid,
     predicted_snr,
     similarity_transform_fit,
@@ -153,6 +154,11 @@ class StarUniqueMatchNav(NavTechnique):
         self._two_star_confidence_cap = float(self.tuning['two_star_confidence_cap'])
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
+        self._one_star_min_peak_ratio = float(self.tuning['one_star_min_peak_ratio'])
+        if self._one_star_min_peak_ratio < 1.0:
+            raise ValueError(
+                f'one_star_min_peak_ratio must be >= 1; got {self._one_star_min_peak_ratio!r}'
+            )
         if not 0.0 <= self._one_star_confidence_cap <= 1.0:
             raise ValueError(
                 f'one_star_confidence_cap must lie in [0, 1]; got {self._one_star_confidence_cap!r}'
@@ -567,6 +573,37 @@ class StarUniqueMatchNav(NavTechnique):
                 fit_rotation=bool(context.fit_camera_rotation),
             )
         pred_v, pred_u = brightest.geometry.predicted_vu  # type: ignore[union-attr]
+        # A detection that barely beats the window's noise order
+        # statistics carries no positional information even though it
+        # cleared the absolute detection threshold: with a marginal
+        # star, the brightest pixel of a multi-thousand-pixel window is
+        # routinely a noise spike within a few percent of its
+        # runner-up.  The single-detection premise of this path demands
+        # the peak be unambiguous, so an ambiguous one is spurious.
+        peak_ratio = detection_peak_ratio(
+            image_ext,
+            (pred_v, pred_u),
+            det,
+            search_window_px=self._search_window_px,
+            exclude_half_px=self._centroid_box_half_px + 2,
+        )
+        if peak_ratio < self._one_star_min_peak_ratio:
+            diagnostics = StarUniqueMatchDiagnostics(
+                mode='one_star',
+                predicted_snr=brightest_snr,
+                brightness_margin_mag=margin_mag,
+                residual_px=0.0,
+                detection_peak_ratio=peak_ratio,
+            )
+            return self._fail(
+                features=[brightest],
+                diagnostics=diagnostics,
+                reason=(
+                    f'ambiguous_detection (peak/runner-up {peak_ratio:.3f} below '
+                    f'{self._one_star_min_peak_ratio:.3f})'
+                ),
+                fit_rotation=bool(context.fit_camera_rotation),
+            )
         offset_v = det[0] - pred_v
         offset_u = det[1] - pred_u
         residual_px = math.hypot(offset_v, offset_u)
@@ -580,6 +617,7 @@ class StarUniqueMatchNav(NavTechnique):
             predicted_snr=brightest_snr,
             brightness_margin_mag=margin_mag,
             residual_px=residual_px,
+            detection_peak_ratio=peak_ratio,
         )
         margin_v, margin_u = search_window_for_obs(context)
         at_edge = (

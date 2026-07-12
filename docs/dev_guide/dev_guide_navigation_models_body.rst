@@ -410,11 +410,18 @@ tools read the canonical values via these symbols.
   :attr:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` remains useful. Above this
   value the per-vertex normal uncertainty is too large for the DT-based limb fit; the
   extractor switches to :attr:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB`.
-- :data:`~spindoctor.nav_model.nav_model_body.BODY_BLOB_MIN_DIAMETER_PX` — float, ``8.0`` px.
+- :data:`~spindoctor.nav_model.nav_model_body.LIMB_ARC_MIN_VERTICES` — int, ``30`` vertices.
+  Minimum limb-polyline length to emit a
+  :attr:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC`; matches ``BodyLimbNav``'s
+  ``min_arc_vertices`` feasibility floor. The uncertainty cap cannot stand in for this check:
+  the per-vertex sigma scales the shape residual into pixels, so a distant small body passes
+  it precisely because it is tiny. Shorter arcs fall through to the BODY_BLOB branch.
+- :data:`~spindoctor.nav_model.nav_model_body.BODY_BLOB_MIN_DIAMETER_PX` — float, ``5.0`` px.
   Minimum predicted disc diameter at which
   :attr:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB` is emitted. Below this
-  diameter the brightness-weighted centroid cannot pin the body to better than ~1 px; the
-  per-body shape table can override this floor upward but not downward.
+  diameter the silhouette covers so few pixels that the brightness-weighted centroid is
+  PSF- and noise-dominated; the per-body shape table can override this floor upward but not
+  downward.
 - :data:`~spindoctor.nav_model.nav_model_body.BODY_DISC_MIN_VISIBLE_LIT_FRACTION` — float, ``0.4``
   (dimensionless). Minimum lit-and-in-FOV fraction for
   :attr:`~spindoctor.feature.feature_type.NavFeatureType.BODY_DISC` emission. Below 40 % the
@@ -581,7 +588,9 @@ Call path traced through
    :func:`~spindoctor.nav_model.body_shape.load_body_shape` and computes the limb-uncertainty
    scalar. Three branches follow, in order:
 
-   - When the limb polyline survived and its uncertainty is at or below
+   - When the limb polyline carries at least
+     :data:`~spindoctor.nav_model.nav_model_body.LIMB_ARC_MIN_VERTICES` vertices and its
+     uncertainty is at or below
      :data:`~spindoctor.nav_model.nav_model_body.LIMB_ARC_MAX_UNCERTAINTY_PX`, a
      :data:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` feature is emitted. The
      downstream disc gate then has a chance to fire alongside the limb arc when

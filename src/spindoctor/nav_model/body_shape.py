@@ -70,7 +70,7 @@ class BodyShape:
     crater_scale_km: float
     albedo_variation: float
     spice_orbital_residual_km: float
-    min_blob_diameter_px: float = 8.0
+    min_blob_diameter_px: float = 5.0
     shape_class_hint: str = 'unknown'
 
 
@@ -79,7 +79,7 @@ DEFAULT_BODY_SHAPE: BodyShape = BodyShape(
     crater_scale_km=5.0,
     albedo_variation=0.15,
     spice_orbital_residual_km=2.0,
-    min_blob_diameter_px=8.0,
+    min_blob_diameter_px=5.0,
     shape_class_hint='unknown',
 )
 """Fallback shape used when a body has no specific entry.
@@ -94,7 +94,7 @@ _SATURN_MOON_SHAPE: BodyShape = BodyShape(
     crater_scale_km=2.0,
     albedo_variation=0.10,
     spice_orbital_residual_km=0.5,
-    min_blob_diameter_px=8.0,
+    min_blob_diameter_px=5.0,
     shape_class_hint='regular',
 )
 """Profile for the major Saturn moons whose shape is well-measured."""
@@ -105,7 +105,7 @@ _IRREGULAR_MOON_SHAPE: BodyShape = BodyShape(
     crater_scale_km=5.0,
     albedo_variation=0.20,
     spice_orbital_residual_km=2.0,
-    min_blob_diameter_px=8.0,
+    min_blob_diameter_px=5.0,
     shape_class_hint='highly_irregular',
 )
 """Profile for very irregular bodies (Hyperion, Phoebe, etc.)."""

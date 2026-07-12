@@ -24,6 +24,9 @@ Modules:
         :class:`FakeObs` plus support classes
         :class:`FakePSF`, :class:`FakeFOV`,
         :class:`FakeMeshgrid`, :class:`FakeUV`.
+    ``context``
+        :func:`bare_nav_context`, a minimal ``NavContext`` factory for
+        feature-emission tests.
 """
 
 from tests.shims.backplane import (
@@ -38,6 +41,7 @@ from tests.shims.catalog import (
     install_fake_catalogs,
     make_star,
 )
+from tests.shims.context import bare_nav_context
 from tests.shims.obs import (
     FakeFOV,
     FakeMeshgrid,
@@ -57,6 +61,7 @@ __all__ = [
     'FakeStarCatalog',
     'FakeUV',
     'RingBackplaneData',
+    'bare_nav_context',
     'install_fake_catalogs',
     'make_star',
     'plant_circular_body',

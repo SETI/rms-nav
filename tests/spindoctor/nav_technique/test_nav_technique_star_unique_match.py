@@ -252,3 +252,50 @@ def test_star_unique_match_one_star_3dof_rotation_unobservable(
     assert result.covariance_px2.shape == (3, 3)
     assert result.rotation_rad == 0.0
     assert result.covariance_px2[2, 2] == pytest.approx(ROTATION_UNOBSERVABLE_VARIANCE)
+
+
+def test_star_unique_match_one_star_flags_ambiguous_detection(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """Two comparable faint peaks in the window make the match spurious.
+
+    The single-detection premise of the 1-star path fails when the
+    brightest peak barely beats its runner-up (a marginal star losing
+    to noise spikes, issue #211); the peak-to-runner-up gate must flag
+    the result rather than hand the ensemble a confident wrong offset.
+    """
+    shape = (200, 200)
+    image = np.zeros(shape, dtype=np.float64)
+    # Both peaks clear detection_sigma (4 * noise_sigma 1.0) but sit
+    # within ~10% of each other -- an ambiguous detection.
+    draw_gaussian_star(image, (95.0, 105.0), peak_dn=6.0, sigma=1.2)
+    draw_gaussian_star(image, (110.0, 90.0), peak_dn=5.5, sigma=1.2)
+    feature = make_star_feature('star:UCAC4:1', predicted_vu=(100.0, 100.0), predicted_snr=40.0)
+    technique = StarUniqueMatchNav()
+    context = make_nav_context(image)
+    result = technique.navigate([feature], context)
+    assert result.spurious is True
+    assert result.confidence == pytest.approx(0.0)
+    assert isinstance(result.diagnostics, StarUniqueMatchDiagnostics)
+    assert result.diagnostics.detection_peak_ratio < 1.5
+    assert result.diagnostics.detection_peak_ratio > 0.0
+
+
+def test_star_unique_match_one_star_reports_unambiguous_peak_ratio(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """A lone bright star on a clean frame reports an unambiguous ratio."""
+    shape = (200, 200)
+    image = np.zeros(shape, dtype=np.float64)
+    draw_gaussian_star(image, (100.0, 100.0), peak_dn=200.0, sigma=1.2)
+    feature = make_star_feature('star:UCAC4:1', predicted_vu=(98.0, 103.0), predicted_snr=40.0)
+    technique = StarUniqueMatchNav()
+    context = make_nav_context(image)
+    result = technique.navigate([feature], context)
+    assert result.spurious is False
+    assert isinstance(result.diagnostics, StarUniqueMatchDiagnostics)
+    assert result.diagnostics.detection_peak_ratio >= 1.5

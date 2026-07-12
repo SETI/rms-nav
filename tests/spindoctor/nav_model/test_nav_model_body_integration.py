@@ -15,7 +15,7 @@ from typing import Any, cast
 
 import numpy as np
 import pytest
-from tests.shims import FakeObs
+from tests.shims import FakeObs, bare_nav_context
 
 from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.feature.flags import (
@@ -64,7 +64,7 @@ def _build_body(
     overflow_fraction: float = 0.1,
     phase_factor: float = 0.5,
     km_per_pixel_at_limb: float = 1.0,
-    limb_vertices: int = 20,
+    limb_vertices: int = 40,
     terminator_vertices: int = 20,
 ) -> NavModelBody:
     """Build a NavModelBody with internal state populated for ``to_features``.
@@ -136,15 +136,15 @@ def fake_obs() -> FakeObs:
 def test_to_features_emits_limb_arc_when_uncertainty_is_low(fake_obs: FakeObs) -> None:
     """A well-resolved body emits a LIMB_ARC with the expected polyline payload."""
     model = _build_body(obs=fake_obs, km_per_pixel_at_limb=10.0)  # high resolution
-    features = model.to_features(cast(Any, None))
+    features = model.to_features(bare_nav_context(fake_obs))
     by_type = {f.feature_type: f for f in features}
     assert NavFeatureType.LIMB_ARC in by_type
     limb = by_type[NavFeatureType.LIMB_ARC]
     assert isinstance(limb.geometry, LimbPolyline)
     assert isinstance(limb.flags, LimbArcFlags)
     assert limb.flags.body_name == 'MIMAS'
-    assert limb.geometry.vertices_vu.shape == (20, 2)
-    assert limb.geometry.sigma_normal_per_vertex_px.shape == (20,)
+    assert limb.geometry.vertices_vu.shape == (40, 2)
+    assert limb.geometry.sigma_normal_per_vertex_px.shape == (40,)
 
 
 def test_to_features_emits_blob_instead_of_limb_when_uncertainty_high(
@@ -154,7 +154,7 @@ def test_to_features_emits_blob_instead_of_limb_when_uncertainty_high(
     # km_per_pixel_at_limb=1000 -> limb_uncertainty_px = 1.0/1000 = 0.001 (low),
     # so to force the high-uncertainty branch we lower the resolution.
     model = _build_body(obs=fake_obs, km_per_pixel_at_limb=0.001)
-    features = model.to_features(cast(Any, None))
+    features = model.to_features(bare_nav_context(fake_obs))
     types = {f.feature_type for f in features}
     assert NavFeatureType.LIMB_ARC not in types
     assert NavFeatureType.BODY_BLOB in types
@@ -162,6 +162,21 @@ def test_to_features_emits_blob_instead_of_limb_when_uncertainty_high(
     assert isinstance(blob.geometry, BodyBlobGeometry)
     assert isinstance(blob.flags, BodyBlobFlags)
     assert blob.flags.predicted_diameter_px == pytest.approx(30.0)
+
+
+def test_to_features_emits_blob_when_limb_arc_too_short(fake_obs: FakeObs) -> None:
+    """A limb polyline below the vertex floor falls through to BODY_BLOB.
+
+    The per-vertex uncertainty is excellent (high resolution), but the arc
+    is shorter than ``BodyLimbNav``'s feasibility floor -- the distant
+    small-body posture where the uncertainty test alone would emit a
+    guaranteed-infeasible LIMB_ARC and starve the body of its blob.
+    """
+    model = _build_body(obs=fake_obs, km_per_pixel_at_limb=10.0, limb_vertices=9)
+    features = model.to_features(bare_nav_context(fake_obs))
+    types = {f.feature_type for f in features}
+    assert NavFeatureType.LIMB_ARC not in types
+    assert NavFeatureType.BODY_BLOB in types
 
 
 def test_to_features_emits_disc_alongside_limb_when_visibility_high(
@@ -174,7 +189,7 @@ def test_to_features_emits_disc_alongside_limb_when_visibility_high(
         visible_lit_fraction=BODY_DISC_MIN_VISIBLE_LIT_FRACTION + 0.1,
         overflow_fraction=BODY_DISC_MAX_OVERFLOW_FRACTION - 0.1,
     )
-    features = model.to_features(cast(Any, None))
+    features = model.to_features(bare_nav_context(fake_obs))
     types = {f.feature_type for f in features}
     assert NavFeatureType.BODY_DISC in types
     disc = next(f for f in features if f.feature_type is NavFeatureType.BODY_DISC)
@@ -192,7 +207,7 @@ def test_to_features_skips_disc_when_overflow_high(fake_obs: FakeObs) -> None:
         visible_lit_fraction=0.9,
         overflow_fraction=BODY_DISC_MAX_OVERFLOW_FRACTION + 0.1,
     )
-    types = {f.feature_type for f in model.to_features(cast(Any, None))}
+    types = {f.feature_type for f in model.to_features(bare_nav_context(fake_obs))}
     assert NavFeatureType.BODY_DISC not in types
 
 
@@ -201,7 +216,7 @@ def test_to_features_emits_terminator_when_phase_factor_high(
 ) -> None:
     """A body with high phase factor emits TERMINATOR_ARC."""
     model = _build_body(obs=fake_obs, km_per_pixel_at_limb=10.0, phase_factor=0.8)
-    features = model.to_features(cast(Any, None))
+    features = model.to_features(bare_nav_context(fake_obs))
     types = {f.feature_type for f in features}
     assert NavFeatureType.TERMINATOR_ARC in types
     term = next(f for f in features if f.feature_type is NavFeatureType.TERMINATOR_ARC)
@@ -212,7 +227,7 @@ def test_to_features_emits_terminator_when_phase_factor_high(
 def test_to_features_skips_terminator_at_zero_phase(fake_obs: FakeObs) -> None:
     """A sub-solar-illuminated body emits no TERMINATOR_ARC."""
     model = _build_body(obs=fake_obs, km_per_pixel_at_limb=10.0, phase_factor=0.0)
-    types = {f.feature_type for f in model.to_features(cast(Any, None))}
+    types = {f.feature_type for f in model.to_features(bare_nav_context(fake_obs))}
     assert NavFeatureType.TERMINATOR_ARC not in types
 
 
@@ -223,7 +238,7 @@ def test_to_features_skips_terminator_when_polyline_too_short(fake_obs: FakeObs)
         km_per_pixel_at_limb=10.0,
         terminator_vertices=4,  # below TERMINATOR_MIN_VERTICES (8)
     )
-    types = {f.feature_type for f in model.to_features(cast(Any, None))}
+    types = {f.feature_type for f in model.to_features(bare_nav_context(fake_obs))}
     assert NavFeatureType.TERMINATOR_ARC not in types
 
 
@@ -244,11 +259,11 @@ def test_to_features_limb_uncertainty_at_threshold(fake_obs: FakeObs) -> None:
     """
     # km_per_pixel_at_limb=17 yields uncertainty ~ 2.94 < 3.0 -> LIMB_ARC.
     saturn_model = _build_body(obs=fake_obs, body_name='SATURN', km_per_pixel_at_limb=17.0)
-    features = saturn_model.to_features(cast(Any, None))
+    features = saturn_model.to_features(bare_nav_context(fake_obs))
     assert any(f.feature_type is NavFeatureType.LIMB_ARC for f in features)
     # km_per_pixel_at_limb=15 yields uncertainty ~ 3.33 > 3.0 -> blob branch.
     saturn_blob = _build_body(obs=fake_obs, body_name='SATURN', km_per_pixel_at_limb=15.0)
-    features_blob = saturn_blob.to_features(cast(Any, None))
+    features_blob = saturn_blob.to_features(bare_nav_context(fake_obs))
     types = {f.feature_type for f in features_blob}
     assert NavFeatureType.LIMB_ARC not in types
     # Uncertainty above threshold and diameter above the body's blob-min

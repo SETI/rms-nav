@@ -260,17 +260,23 @@ class StarUniqueMatchDiagnostics:
             star exists (a 1-star scene with no other predictable star, or a
             2-star scene with no third predictable star to compare against).
         residual_px: Detection-vs-prediction residual.
+        detection_peak_ratio: Background-subtracted peak-to-runner-up ratio of
+            the 1-star path's detection inside its search window (``inf`` when
+            the runner-up does not clear the background; 0.0 on the 2-star
+            path, which cross-checks via its assignment residual instead).
     """
 
     mode: str = ''
     predicted_snr: float = 0.0
     brightness_margin_mag: float = 0.0
     residual_px: float = 0.0
+    detection_peak_ratio: float = 0.0
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'mode': 'mode',
         'predicted_snr': 'predicted_snr',
         'brightness_margin_mag': 'brightness_margin_mag',
         'residual_px': 'residual_px',
+        'detection_peak_ratio': 'detection_peak_ratio',
     }
 
 

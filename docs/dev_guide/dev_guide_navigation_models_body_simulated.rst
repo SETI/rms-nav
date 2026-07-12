@@ -92,7 +92,7 @@ in via the per-instance ``sim_params`` dict. Expected keys:
   (see *Render geometry vs navigation geometry* below).
 
 Crater and anti-aliasing keys are accepted but ignored. The predicted silhouette diameter
-gates the blob (at least 8 px) and limb (at least 100 px) emission; the diameter floor on
+gates the blob (at least 5 px) and limb (at least 100 px) emission; the diameter floor on
 the limb keeps the LM-refined fit off marginally-resolved bodies, where it would inject
 cross-process jitter into the fused offset.
 

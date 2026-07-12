@@ -22,6 +22,7 @@ from spindoctor.feature.flags import BodyDiscFlags, LimbArcFlags
 from spindoctor.feature.geometry import BodyDiscGeometry, LimbPolyline
 from spindoctor.nav_model.body_shape import load_body_shape
 from spindoctor.nav_model.nav_model import NavModel
+from spindoctor.nav_model.nav_model_body import LIMB_ARC_MIN_VERTICES
 from spindoctor.nav_model.nav_model_body_base import BODY_BLOB_MIN_DIAMETER_PX, NavModelBodyBase
 from spindoctor.sim.sim_body import create_simulated_body
 from spindoctor.sim.sim_body_polyhedral import mesh_spec_from_params, render_mesh_body_image
@@ -35,11 +36,13 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
 __all__ = ['NavModelBodySimulated']
 
 # Minimum limb-polyline vertices to emit a LIMB_ARC.  Matches BodyLimbNav's
-# ``min_arc_vertices`` feasibility floor: a shorter arc cannot constrain the fit.
-_MIN_LIMB_ARC_VERTICES: int = 30
+# ``min_arc_vertices`` feasibility floor: a shorter arc cannot constrain the
+# fit.  Imported from the catalog body model so the two emission gates cannot
+# desync.
+_MIN_LIMB_ARC_VERTICES: int = LIMB_ARC_MIN_VERTICES
 # Minimum silhouette diameter to emit a LIMB_ARC.  The catalog body model gates
-# the limb on its ellipsoid-fit uncertainty (``<= 3 px``), which small or
-# low-resolution bodies fail; the sim has no km scale, so it gates on resolution
+# the limb on its ellipsoid-fit uncertainty (``<= 3 px``) plus the shared
+# vertex-count floor; the sim has no km scale, so it gates on resolution
 # directly.  Below this the limb fit is imprecise and -- because it is an
 # LM-refined distance-transform fit -- it injects cross-process jitter into the
 # fused offset of any body scene, so only a well-resolved body emits a limb.
@@ -407,7 +410,7 @@ class NavModelBodySimulated(NavModelBodyBase):
         shape = load_body_shape(self._body_name, config=self._config)
         blob_min_px = max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)
         if self._predicted_diameter_px >= blob_min_px:
-            features.append(self._build_blob_feature(shape))
+            features.append(self._build_blob_feature(shape, context=context))
         limb_feature = self._build_limb_arc_feature()
         if limb_feature is not None:
             features.append(limb_feature)
