@@ -21,7 +21,8 @@ is unobservable. The technique projects the returned covariance to be *exactly* 
 information exists the fused result carries
 :attr:`~spindoctor.support.status_reason.NavStatusReason.RANK_1_ONLY` with the offset
 reported as the minimum-norm representative along the edge and the unobservable axis
-surfaced through ``sigma_along_unobservable_px``.
+surfaced through
+:attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.sigma_along_unobservable_px`.
 
 Feasibility passes when at least one offered ``RING_EDGE`` has a non-empty polyline. A single
 non-empty edge is sufficient — even an all-flat scene produces a useful rank-1 constraint.
@@ -52,8 +53,9 @@ per-vertex normals' outer-product sum (polarity-sign-independent) and ``sigma_n^
 covariance's marginal variance along it. Exact singularity is the representation the
 ensemble is built around: ``pinvh`` keeps the normal-axis measurement when forming the
 information matrix, the combine's rank-deficiency test fires, and the unobservable axis is
-reported through the ``sigma_along_unobservable_px`` sentinel rather than an inflated
-per-axis sigma.
+reported through the
+:attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.sigma_along_unobservable_px`
+sentinel rather than an inflated per-axis sigma.
 
 Multi-edge inputs at different orbital radii share the same ring-plane normal but sample
 different points around the projected ring; the joint information matrix becomes full-rank

@@ -42,12 +42,14 @@ import math
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 
 from spindoctor.nav_model import build_models_for_obs
 from spindoctor.nav_orchestrator import NavOrchestrator
 from spindoctor.obs.obs_inst_sim import ObsSim
 from spindoctor.sim.scene import iter_scene_paths, load_sim_scene
+from spindoctor.support.status_reason import NavStatusReason
 
 # Recovery tolerance in pixels.  The disc/correlation techniques converge to a
 # few tenths of a pixel on these clean scenes; 1.0 px is a safe invariant bound.
@@ -207,10 +209,6 @@ def test_rank1_scene_reports_rank_1_only(path: Path) -> None:
     the ``sigma_along_unobservable_px`` sentinel; the fused covariance is
     exactly rank-deficient (the technique projects it onto the edge normal).
     """
-    import numpy as np
-
-    from spindoctor.support.status_reason import NavStatusReason
-
     result = _navigate(load_sim_scene(path))
     assert result.status == 'success'
     assert result.status_reason == NavStatusReason.RANK_1_ONLY
@@ -230,8 +228,6 @@ def test_rank1_scene_recovers_normal_component(path: Path) -> None:
     recovery error onto the observable axis — the fused covariance's only
     non-null eigenvector — and bounds that component alone.
     """
-    import numpy as np
-
     scene = load_sim_scene(path)
     result = _navigate(scene)
     assert result.offset_px is not None

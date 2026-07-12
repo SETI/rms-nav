@@ -367,10 +367,11 @@ class RingEdgeNav(NavTechnique):
                 # happens to enter and leave the frame — a false
                 # constraint.  Rebuild the translation covariance as the
                 # LM's marginal variance along the aggregate edge normal
-                # plus an effectively infinite tangent variance, so the
-                # ensemble's rank-deficiency test fires and the result
-                # surfaces as ``rank_1_only`` instead of a confidently
-                # full-rank fix (issue #203).
+                # with the tangent variance exactly zero (the Moore-Penrose
+                # null-space convention), so the ensemble's rank-deficiency
+                # test fires and the tangent axis is reported through the
+                # ``sigma_along_unobservable_px = inf`` sentinel instead of
+                # a confidently full-rank fix (issue #203).
                 covariance = _rank1_projected_covariance(covariance, polarity_normals)
             per_edge_rms_mean = per_edge_rms_summed / float(max(edge_count, 1))
             diagnostics = RingEdgeDiagnostics(
