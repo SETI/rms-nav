@@ -101,6 +101,11 @@ Public fields (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 - :attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.per_technique` — list of every
   technique's :class:`~spindoctor.nav_technique.technique_result.NavTechniqueResult` (kept or
   dropped by the ensemble).
+- :attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.excluded_from_consensus` —
+  technique names of viable results the ensemble left out of the reported combine
+  (outliers rejected against a multi-technique consensus, or the runner-up alternative
+  on a conflicted result); empty when every viable result contributed. Also emitted in
+  the metadata JSON.
 - :attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.feature_inventory` — list of
   per-feature :class:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary` entries.
 - :attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.image_classifier` — the

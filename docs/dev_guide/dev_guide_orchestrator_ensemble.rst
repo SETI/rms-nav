@@ -37,11 +37,10 @@ Every result with
 preserves an at-edge result when it is the only signal the orchestrator has — better a
 hint at a search-window edge than no answer at all.
 
-Step 3 — single-link Mahalanobis grouping
------------------------------------------
+Step 3 — pairwise agreement
+---------------------------
 
-Surviving results are clustered by single-linkage Mahalanobis-distance agreement. Two
-results :math:`(\mu_{a}, \Sigma_{a})` and :math:`(\mu_{b}, \Sigma_{b})` are linked when
+Two results :math:`(\mu_{a}, \Sigma_{a})` and :math:`(\mu_{b}, \Sigma_{b})` agree when
 
 .. math::
 
@@ -49,17 +48,34 @@ results :math:`(\mu_{a}, \Sigma_{a})` and :math:`(\mu_{b}, \Sigma_{b})` are link
                         (\mu_{a} - \mu_{b})}
 
 is at most ``agreement_sigma``, where the pseudoinverse uses
-:func:`scipy.linalg.pinvh` so rank-deficient covariances are handled. A result whose
+:func:`scipy.linalg.pinvh` so rank-deficient covariances are handled, *or* when their
+Euclidean translation distance is at most ``agreement_pixel_floor`` (default 5 px). The
+pixel floor exists because per-technique covariances are CRLB-tight — well below the
+actual position uncertainty driven by model error — so results agreeing visually to a
+few pixels can register as hundreds of sigmas apart. A result whose
 :math:`(\mu_{a} - \mu_{b})` projects into the null space of the summed covariance is
-treated as infinite distance — estimates cannot agree along an unobservable axis.
+treated as infinite Mahalanobis distance — estimates cannot agree along an
+unobservable axis.
 
-Step 4 — pick the highest summed-confidence group
--------------------------------------------------
+Step 4 — consensus-subset selection and outlier rejection
+---------------------------------------------------------
 
-For each connected component, sum the per-technique confidences and pick the group with
-the highest sum. When the runner-up's summed confidence is within ``agreement_gap`` of
-the winner's, the ensemble flags the conflict and returns a ``status='conflicted'``
-:class:`~spindoctor.nav_orchestrator.nav_result.NavResult` instead of fusing.
+Every surviving result sponsors a candidate subset: the results that agree with it
+pairwise under Step 3. The subset with the highest summed confidence wins and is the
+set the ensemble fuses; results outside it are *excluded from the consensus* and
+reported on
+:attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.excluded_from_consensus`.
+
+Exclusion forces the conflicted branch only when the excluded results constitute a
+genuine alternative answer: the strongest consensus formable among the excluded
+results alone either has at least two members (an alternative with quorum) or the
+winning subset is itself a singleton (no quorum anywhere). In that case, when the
+summed-confidence gap between winner and runner-up falls below ``agreement_gap``, the
+ensemble returns a ``status='conflicted'``
+:class:`~spindoctor.nav_orchestrator.nav_result.NavResult` instead of fusing. A lone
+dissenter against a multi-technique consensus is outlier-rejected: the consensus is
+fused normally (with the Step 6 disagreement penalty) and the dissenter appears only
+in ``excluded_from_consensus`` and ``per_technique``.
 
 Step 5 — precision-weighted merge
 ---------------------------------
@@ -75,7 +91,7 @@ unbounded marginal sigma.
 Step 6 — disagreement and conflict penalties
 --------------------------------------------
 
-When more than one Mahalanobis-distance group survived, the fused confidence is multiplied
+When any result was excluded from the consensus, the fused confidence is multiplied
 by ``disagreement_penalty`` (default 0.7). When the conflict branch fired in Step 4 the
 ``status='conflicted'`` :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` is returned with a further
 ``conflicted_confidence_multiplier`` (default 0.3) applied to the runner-up's summed
@@ -174,14 +190,17 @@ Examples
 penalty fires (only one group existed) so the fused confidence is the summed per-technique
 confidence (capped by the project-wide ceiling).
 
-**Single-link grouping with three techniques.**  Three techniques converge:
+**Consensus selection with three techniques.**  Three techniques converge:
 :math:`(7.0, -18.0)` ± 0.3, :math:`(8.0, -17.5)` ± 0.5, :math:`(11.6, 12.6)` ± 0.4. The
-first two are within ``agreement_sigma`` of each other; the third is several sigma off in
-both axes. Single-link grouping puts the first two in one cluster and the third in its
-own. The first cluster's summed confidence is 0.49; the third's is 0.74. When the gap
-:math:`0.74 - 0.49 = 0.25` falls below ``agreement_gap=0.5`` the ensemble flags the
-conflict and returns ``status='conflicted'`` rather than picking the higher-confidence
-isolated wrong answer (this is the documented ``multi_body`` test scene's behaviour).
+first two agree pairwise; the third is several sigma off in both axes. The candidate
+subsets are the agreeing pair (summed confidence 0.49) and the singleton (0.74); the
+singleton wins on summed confidence, and the excluded pair is an alternative *with
+quorum*. The gap :math:`0.74 - 0.49 = 0.25` falls below ``agreement_gap=0.5``, so the
+ensemble flags the conflict and returns ``status='conflicted'`` rather than picking the
+higher-confidence isolated wrong answer (this is the documented ``multi_body`` test
+scene's behaviour). Had a *third* technique joined the pair, the pair-plus-one subset
+would have outweighed the singleton and the ensemble would have fused it, excluding the
+dissenter as an outlier instead of conflicting.
 
 **Rank-deficient ring-edge fit.**  A flat-ring-only scene produces a
 :class:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav` result whose covariance is

@@ -471,7 +471,12 @@ These JSON files contain the navigation results, including:
 * Confidence scores
 * Metadata about the navigation process
 * Status information (success, error, etc.)
-* Technique-specific metadata
+* Technique-specific metadata (one ``per_technique`` entry per technique run,
+  with each technique's offset, covariance, confidence, spurious / at-edge
+  flags, and diagnostics)
+* ``excluded_from_consensus`` — technique names the ensemble left out of the
+  reported combine (outliers rejected against a multi-technique consensus, or
+  the runner-up alternative on a conflicted result)
 * Timestamps
 
 .. note::

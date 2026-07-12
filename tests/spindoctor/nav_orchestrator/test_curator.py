@@ -89,6 +89,7 @@ def test_metadata_dict_contains_top_level_keys() -> None:
         'confidence_rank',
         'covariance_px2',
         'techniques_used',
+        'excluded_from_consensus',
         'feature_count_by_type',
         'per_technique',
         'feature_inventory',

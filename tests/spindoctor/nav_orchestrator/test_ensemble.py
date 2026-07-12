@@ -851,3 +851,112 @@ def test_combine_confidence_weight_ignores_rotation_precision() -> None:
     # agreement_factor = 1 + 0.5*log2(2) = 1.5 -> combined = 0.75.  Far above
     # the ~0.2 the rotation-tight result would have forced under the old trace.
     assert combined == pytest.approx(0.75, abs=1e-9)
+
+
+# --- Consensus outlier rejection (issue #124) ---
+
+
+def _three_agreeing_plus_outlier() -> list[NavTechniqueResult]:
+    """Three techniques agreeing at ~(10, 5) plus one mis-converged outlier."""
+    cov = np.eye(2, dtype=np.float64) * 0.25
+    return [
+        _make_result(technique_name='BodyLimbNav', offset=(10.0, 5.0), cov=cov, confidence=0.8),
+        _make_result(
+            technique_name='BodyDiscCorrelateNav', offset=(10.1, 5.1), cov=cov, confidence=0.8
+        ),
+        _make_result(technique_name='RingEdgeNav', offset=(10.0, 5.0), cov=cov, confidence=0.7),
+        _make_result(
+            technique_name='BodyTerminatorNav', offset=(-3.0, 12.0), cov=cov, confidence=0.8
+        ),
+    ]
+
+
+def test_ensemble_rejects_lone_outlier_against_consensus() -> None:
+    """Three agreeing results plus one far-off dissenter yield consensus, not conflict."""
+    result = ensemble(
+        _three_agreeing_plus_outlier(),
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.excluded_from_consensus == ['BodyTerminatorNav']
+    assert result.offset_px is not None
+    # The combined offset comes from the agreeing trio, unperturbed by the outlier.
+    assert abs(result.offset_px[0] - 10.0) < 0.2
+    assert abs(result.offset_px[1] - 5.0) < 0.2
+    # All four techniques remain visible in per_technique for diagnostics.
+    assert len(result.per_technique) == 4
+
+
+def test_ensemble_outlier_rejection_applies_disagreement_penalty() -> None:
+    """Excluding an outlier still applies the disagreement penalty."""
+    with_outlier = ensemble(
+        _three_agreeing_plus_outlier(),
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    unanimous = ensemble(
+        _three_agreeing_plus_outlier()[:3],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert unanimous.excluded_from_consensus == []
+    assert with_outlier.confidence < unanimous.confidence
+
+
+def test_ensemble_two_pairs_disagreeing_across_pairs_conflict() -> None:
+    """Two internally-agreeing pairs with comparable confidence conflict (no quorum winner)."""
+    cov = np.eye(2, dtype=np.float64) * 0.25
+    results = [
+        _make_result(technique_name='TechniqueA', offset=(0.0, 0.0), cov=cov, confidence=0.6),
+        _make_result(technique_name='TechniqueB', offset=(0.5, 0.0), cov=cov, confidence=0.6),
+        _make_result(technique_name='TechniqueC', offset=(30.0, 30.0), cov=cov, confidence=0.55),
+        _make_result(technique_name='TechniqueD', offset=(30.5, 30.0), cov=cov, confidence=0.55),
+    ]
+    result = ensemble(
+        results,
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'conflicted'
+    assert result.excluded_from_consensus == ['TechniqueC', 'TechniqueD']
+
+
+def test_ensemble_dominant_pair_beats_weak_pair_without_conflict() -> None:
+    """A runner-up pair far below the winning pair's summed confidence does not conflict."""
+    cov = np.eye(2, dtype=np.float64) * 0.25
+    results = [
+        _make_result(technique_name='TechniqueA', offset=(0.0, 0.0), cov=cov, confidence=0.9),
+        _make_result(technique_name='TechniqueB', offset=(0.5, 0.0), cov=cov, confidence=0.9),
+        _make_result(technique_name='TechniqueC', offset=(30.0, 30.0), cov=cov, confidence=0.3),
+        _make_result(technique_name='TechniqueD', offset=(30.5, 30.0), cov=cov, confidence=0.3),
+    ]
+    result = ensemble(
+        results,
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.excluded_from_consensus == ['TechniqueC', 'TechniqueD']
+
+
+def test_ensemble_unanimous_consensus_reports_no_exclusions() -> None:
+    """A fully-agreeing input set reports an empty excluded_from_consensus."""
+    cov = np.eye(2, dtype=np.float64) * 0.25
+    results = [
+        _make_result(technique_name='TechniqueA', offset=(1.0, 2.0), cov=cov, confidence=0.8),
+        _make_result(technique_name='TechniqueB', offset=(1.05, 2.05), cov=cov, confidence=0.8),
+    ]
+    result = ensemble(
+        results,
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.excluded_from_consensus == []
