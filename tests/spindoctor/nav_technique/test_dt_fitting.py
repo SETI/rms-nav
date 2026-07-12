@@ -17,6 +17,7 @@ from spindoctor.nav_technique.dt_fitting import (
     LMRefineResult,
     RidgeRefineResult,
     coarse_ncc_search,
+    find_secondary_dt_minimum,
     gradient_ridge_refine,
     information_matrix_to_covariance,
     lm_subpixel_refine,
@@ -1031,3 +1032,72 @@ def test_lm_subpixel_refine_final_gradient_ridge_requires_gradient() -> None:
             use_polarity=False,
             final_gradient_ridge=True,
         )
+
+
+# --- find_secondary_dt_minimum (issue #125) ---
+
+
+def _two_line_dt(shape: tuple[int, int], u1: int, u2: int) -> np.ndarray:
+    """DT with zero cost along two vertical lines at columns ``u1`` and ``u2``."""
+    us = np.arange(shape[1], dtype=np.float64)
+    row = np.minimum(np.abs(us - u1), np.abs(us - u2))
+    return np.tile(row, (shape[0], 1))
+
+
+def _vertical_polyline(u: float, v_lo: int, v_hi: int) -> np.ndarray:
+    """Vertical polyline of vertices at column ``u`` spanning rows ``[v_lo, v_hi)``."""
+    vs = np.arange(v_lo, v_hi, dtype=np.float64)
+    return np.stack([vs, np.full_like(vs, u)], axis=-1)
+
+
+def test_find_secondary_dt_minimum_reports_competing_line() -> None:
+    """A second zero-cost line inside the window is reported as a rival basin."""
+    dt = _two_line_dt((100, 100), u1=30, u2=50)
+    vertices = _vertical_polyline(30.0, 20, 80)
+    basin = find_secondary_dt_minimum(
+        dt,
+        vertices,
+        converged_offset_vu=(0.0, 0.0),
+        search_window_vu=(2, 40),
+        exclude_radius_px=5.0,
+    )
+    assert basin is not None
+    assert basin.offset_vu == (0, 20)
+    assert basin.distance_px == pytest.approx(20.0)
+    assert basin.cost_px == pytest.approx(0.0)
+    assert basin.converged_cost_px == pytest.approx(0.0)
+
+
+def test_find_secondary_dt_minimum_exclude_radius_hides_converged_basin() -> None:
+    """Shifts inside the exclusion radius never count as rivals."""
+    dt = _two_line_dt((100, 100), u1=30, u2=30)  # single line: unimodal surface
+    vertices = _vertical_polyline(30.0, 20, 80)
+    basin = find_secondary_dt_minimum(
+        dt,
+        vertices,
+        converged_offset_vu=(0.0, 0.0),
+        search_window_vu=(2, 40),
+        exclude_radius_px=5.0,
+    )
+    assert basin is not None
+    # The best rival sits just outside the exclusion radius with a cost equal
+    # to its column distance from the single zero line -- clearly worse than
+    # the perfect converged fit. The minimum eligible cost is exactly 5.0
+    # (du = +/-5 needs |dv| >= 1 to clear the 5.0 px exclusion radius), and
+    # the cost-then-distance tie-break lands on (dv, du) = (+/-1, +/-5) at
+    # distance sqrt(26).
+    assert basin.cost_px == pytest.approx(5.0)
+    assert basin.distance_px == pytest.approx(math.sqrt(26.0))
+
+
+def test_find_secondary_dt_minimum_empty_polyline_returns_none() -> None:
+    """An empty polyline yields no basin verdict."""
+    dt = _two_line_dt((50, 50), u1=10, u2=30)
+    basin = find_secondary_dt_minimum(
+        dt,
+        np.zeros((0, 2), dtype=np.float64),
+        converged_offset_vu=(0.0, 0.0),
+        search_window_vu=(2, 10),
+        exclude_radius_px=5.0,
+    )
+    assert basin is None

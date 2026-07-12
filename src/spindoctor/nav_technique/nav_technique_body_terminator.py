@@ -28,8 +28,10 @@ from spindoctor.feature.geometry import TerminatorPolyline
 from spindoctor.nav_technique.confidence import evaluate_sigmoid_combination
 from spindoctor.nav_technique.diagnostics import BodyTerminatorDiagnostics
 from spindoctor.nav_technique.dt_fitting import (
+    _rotate_vertices,
     build_polyline_mask,
     coarse_ncc_search,
+    find_secondary_dt_minimum,
     lm_subpixel_refine,
 )
 from spindoctor.nav_technique.feasibility import NavFeasibilityReport
@@ -165,6 +167,9 @@ class BodyTerminatorNav(NavTechnique):
         self._model_error_floor_px = load_model_error_floor(self.tuning, self.name)
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
+        self._basin_cost_ratio_threshold = float(self.tuning['basin_cost_ratio_threshold'])
+        self._basin_exclude_radius_px = float(self.tuning['basin_exclude_radius_px'])
+        self._basin_cost_epsilon_px = float(self.tuning['basin_cost_epsilon_px'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries a usable terminator arc.
@@ -366,6 +371,49 @@ class BodyTerminatorNav(NavTechnique):
                 or inlier_fraction < self._spurious_min_inlier_fraction
                 or lm_displacement_px > self._spurious_max_lm_displacement_px
             )
+            # Basin second-opinion (#125): a textured surface can offer the
+            # DT fit a rival alignment (crater shadow, albedo boundary) that
+            # every technique-level residual metric scores as clean.  Scan
+            # the search window for a competing basin; when its cost rivals
+            # the converged cost the fit is not unimodal and the result is
+            # spurious.  Skipped when already spurious or disabled.
+            secondary_basin_distance_px: float | None = None
+            secondary_basin_cost_ratio: float | None = None
+            if not spurious and self._basin_cost_ratio_threshold > 0.0:
+                # The LM evaluates the DT at the *rotated* vertex positions
+                # when it fits rotation; the basin scan must score the same
+                # geometry, or the converged cost is inflated and a good
+                # rotated fit reads as non-unimodal.
+                basin_vertices = vertices
+                if fit_rotation and result.rotation_rad != 0.0:
+                    basin_vertices = _rotate_vertices(
+                        vertices, pivot_vu, float(result.rotation_rad)
+                    )
+                basin = find_secondary_dt_minimum(
+                    edge_dt,
+                    basin_vertices,
+                    converged_offset_vu=(dv_final, du_final),
+                    search_window_vu=(margin_v, margin_u),
+                    exclude_radius_px=self._basin_exclude_radius_px,
+                )
+                if basin is not None:
+                    denominator = max(basin.converged_cost_px, self._basin_cost_epsilon_px)
+                    secondary_basin_cost_ratio = basin.cost_px / denominator
+                    secondary_basin_distance_px = basin.distance_px
+                    if secondary_basin_cost_ratio < self._basin_cost_ratio_threshold:
+                        spurious = True
+                        self.logger.info(
+                            'Competing DT basin at (%d, %d) px (distance %.1f px) has cost '
+                            '%.3f px vs converged %.3f px (ratio %.3f < %.3f): fit is not '
+                            'unimodal, marking spurious',
+                            basin.offset_vu[0],
+                            basin.offset_vu[1],
+                            basin.distance_px,
+                            basin.cost_px,
+                            basin.converged_cost_px,
+                            secondary_basin_cost_ratio,
+                            self._basin_cost_ratio_threshold,
+                        )
             visible_terminator_arc_fraction = _aggregate_visible_arc_fraction(eligible_features)
             mean_phase = float(np.mean(phase_factors)) if phase_factors else 0.0
             mean_albedo = float(np.mean(albedo_penalties)) if albedo_penalties else 0.0
@@ -375,6 +423,8 @@ class BodyTerminatorNav(NavTechnique):
                 dt_fit_rms_px=float(result.rms_px),
                 lm_iterations=int(result.iterations),
                 tukey_inlier_count=int(result.inlier_count),
+                secondary_basin_distance_px=secondary_basin_distance_px,
+                secondary_basin_cost_ratio=secondary_basin_cost_ratio,
             )
             confidence_context = _TerminatorConfidenceContext(
                 at_edge=at_edge,

@@ -365,6 +365,21 @@ techniques:
       # bound.  The two scalars are not linked; refitting the limb floor
       # must revisit this one.
       model_error_floor_px: 0.92
+      # Basin second-opinion (#125): after LM convergence, scan the
+      # coarse search window for a competing DT-cost basin farther than
+      # basin_exclude_radius_px from the converged offset.  When the
+      # best competing mean per-vertex DT cost is below
+      # basin_cost_ratio_threshold times the converged cost (with
+      # basin_cost_epsilon_px guarding near-zero converged costs), the
+      # DT surface is not unimodal -- a crater shadow, albedo boundary,
+      # or second body offers a rival alignment the fit has no basis to
+      # rule out -- and the result is marked spurious.  This closes the
+      # lone-primary hole: the fallback-tier drop protects terminator
+      # results only when a limb or disc result exists to supersede
+      # them.  Set the ratio to 0 to disable the check.
+      basin_cost_ratio_threshold: 1.2
+      basin_exclude_radius_px: 5.0
+      basin_cost_epsilon_px: 0.25
 
   RingEdgeNav:
     # Sim campaign: n=596 usable, base rate 0.96, AUC 0.67 -> 0.69,

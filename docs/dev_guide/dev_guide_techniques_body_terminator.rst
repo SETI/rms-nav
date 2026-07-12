@@ -118,6 +118,21 @@ displacement from the coarse seed; when any of these fails, the result is flagge
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` and similarly forced
 to zero.
 
+A fit that passes every residual metric can still be a mis-convergence onto a rival
+alignment -- a crater shadow, an albedo boundary, or a second body's edge -- because a
+local DT minimum fits the polyline as cleanly as the true one. The *basin second-opinion*
+(:func:`~spindoctor.nav_technique.dt_fitting.find_secondary_dt_minimum`) closes this hole:
+after LM convergence the mean per-vertex DT cost is sampled at every integer shift in the
+coarse search window, and when the best shift farther than ``basin_exclude_radius_px``
+from the converged offset scores below ``basin_cost_ratio_threshold`` times the converged
+cost, the DT surface is not unimodal and the result is flagged spurious. The rival's
+distance and cost ratio are recorded on the diagnostics
+(:attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.secondary_basin_distance_px` /
+:attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.secondary_basin_cost_ratio`).
+This matters most for
+the lone-primary case: the ensemble's fallback-tier drop protects against a mis-converged
+terminator only when a limb or disc result exists on the same body to supersede it.
+
 Configuration
 =============
 
@@ -138,6 +153,14 @@ All numeric tunables for this technique live in ``techniques.BodyTerminatorNav.t
   distance from any search-window axis bound falls within this tolerance is flagged
   :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`. Matches the
   bilinear-DT half-cell width.
+- ``basin_cost_ratio_threshold`` — float, default ``1.2`` (dimensionless). A competing
+  DT basin whose mean per-vertex cost falls below this multiple of the converged cost
+  marks the fit spurious; ``0`` disables the basin second-opinion.
+- ``basin_exclude_radius_px`` — float, default ``5.0`` px. Shifts within this distance of
+  the converged offset belong to the converged basin and are never counted as rivals.
+- ``basin_cost_epsilon_px`` — float, default ``0.25`` px. Floor on the converged cost in
+  the ratio's denominator, so a near-perfect fit is not vetoed by numerical noise; a rival
+  must genuinely match a near-zero converged cost to fire the gate.
 - ``rotation_at_edge_fraction`` — float, default ``0.95`` (dimensionless). When
   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the
   converged rotation magnitude trips
@@ -148,7 +171,7 @@ All numeric tunables for this technique live in ``techniques.BodyTerminatorNav.t
 Per-instrument overrides
 ------------------------
 
-The six keys above are global; the per-instrument YAML files in
+The keys above are global; the per-instrument YAML files in
 ``src/spindoctor/config_files/config_4N0_inst_*.yaml`` do not override any of them. The
 search-window margin used by the at-edge test comes from the per-instrument
 :class:`~spindoctor.nav_orchestrator.instrument_config.InstrumentSettings` rather than from this
