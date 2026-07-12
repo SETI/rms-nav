@@ -105,7 +105,9 @@ def navigate_image_files(
         }
 
     image_file = image_files.image_files[0]
-    image_url = image_file.image_file_url
+    # resolve_image_url may correct the URL from the label contents, so it must
+    # run before the URL is read
+    image_url = image_file.resolve_image_url()
     image_path = image_file.image_file_path.absolute()
     image_name = image_path.name
     extra_params = image_file.extra_params

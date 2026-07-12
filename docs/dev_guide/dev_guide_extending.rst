@@ -30,6 +30,75 @@ Example:
 
 The dataset will automatically be available to the CLI once registered.
 
+PDS3 datasets additionally implement the static index-parsing hooks (private
+methods, so they are shown here rather than in the API reference). A minimal
+skeleton, using the Cassini ISS implementation
+(``src/spindoctor/dataset/dataset_pds3_cassini_iss.py``) as the reference:
+
+.. code-block:: python
+
+   from pathlib import Path
+
+   from spindoctor.dataset.dataset_pds3 import DataSetPDS3
+
+
+   class DataSetPDS3NewInstrument(DataSetPDS3):
+       _ALL_VOLUME_NAMES = tuple(f'NEWI_{n:04d}' for n in range(1, 12))
+       _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
+       _VOLUMES_DIR_NAME = 'volumes'
+
+       @staticmethod
+       def _get_label_filespec_from_index(row):
+           # Index row -> label filespec (the primary filespec).
+           return row['FILE_SPECIFICATION_NAME'].replace('.IMG', '.LBL')
+
+       @staticmethod
+       def _get_image_filespec_from_label_filespec(label_filespec):
+           # Index-time guess; see the label-pointer note below.
+           return label_filespec.replace('.LBL', '.IMG')
+
+       @staticmethod
+       def _get_img_name_from_label_filespec(filespec):
+           # 'data/<range>/NEW1234567890.LBL' -> 'NEW1234567890';
+           # None = valid but not processed; ValueError = malformed.
+           return filespec.rsplit('/', 1)[-1].split('.', 1)[0]
+
+       @staticmethod
+       def _img_name_valid(img_name):
+           return img_name.upper().startswith('NEW')
+
+       @staticmethod
+       def _extract_img_number(img_name):
+           return int(img_name[3:13])
+
+       @staticmethod
+       def _volset_and_volume(volume):
+           return f'NEWI_xxxx/{volume}'
+
+       @staticmethod
+       def _volume_to_index(volume):
+           return f'NEWI_xxxx/{volume}/{volume}_index.lbl'
+
+       @staticmethod
+       def _results_path_stub(volume, filespec):
+           return str(Path(f'{volume}/{filespec}').with_suffix(''))
+
+Two behaviors deserve attention:
+
+* ``_get_image_filespec_from_label_filespec`` is an index-time *guess* (typically an
+  extension swap). The definitive image filename is resolved lazily from the label's
+  ``^IMAGE`` pointer when the image is first retrieved, via the
+  :attr:`~spindoctor.dataset.dataset.ImageFile.image_url_resolver` installed on every
+  yielded :class:`~spindoctor.dataset.dataset.ImageFile`; the guess only needs to be
+  right often enough to serve as a display name and manifest entry.
+* ``_IMG_NUM_MONOTONIC_ACROSS_VOLUMES`` (class attribute, default ``True``) tells the
+  index scanner whether every image number in a volume exceeds every image number in
+  all earlier volumes, which permits stopping a ``--last-image-num`` scan after the
+  first volume that is entirely past the range. Set it to ``False`` when the
+  instrument's image counter resets between volumes (Voyager Flight Data Subsystem
+  (FDS) counts restart per spacecraft/encounter), at the cost of scanning every
+  requested volume.
+
 Implementing PDS4 bundle generation methods
 -------------------------------------------
 

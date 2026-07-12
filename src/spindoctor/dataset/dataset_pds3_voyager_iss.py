@@ -41,6 +41,11 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
     )
     _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
     _VOLUMES_DIR_NAME = 'volumes'
+    # FDS counts restart per spacecraft/encounter (the volume order interleaves VG1
+    # and VG2, and VG2's Neptune counts roll over below VG1's Jupiter counts), so an
+    # image-number range can match frames in any volume and no volume-level early
+    # exit is possible.
+    _IMG_NUM_MONOTONIC_ACROSS_VOLUMES = False
 
     # Methods inherited from DataSetPDS3
 

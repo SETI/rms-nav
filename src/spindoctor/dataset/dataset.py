@@ -1,13 +1,13 @@
 import argparse
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
 from filecache import FCPath
 
-from spindoctor.config import Config
+from spindoctor.config import MAIN_LOGGER, Config
 from spindoctor.support.nav_base import NavBase
 
 
@@ -22,6 +22,12 @@ class ImageFile:
         index_file_row: Optional metadata from index files.
         extra_params: Optional extra parameters that will be passed to the observation
             class's from_file method when the file is read.
+        image_url_resolver: Optional callable ``(image_file_url, label_file_path) ->
+            FCPath | None`` that determines the definitive image URL from the label
+            contents.  When set, it is invoked (at most once) before the image file
+            is first retrieved; a non-None return value replaces ``image_file_url``.
+            ``image_file_url`` is then a provisional guess until
+            :meth:`resolve_image_url` has run.
     """
 
     image_file_url: FCPath
@@ -29,6 +35,7 @@ class ImageFile:
     results_path_stub: str
     index_file_row: dict[str, Any] = field(default_factory=dict)
     extra_params: dict[str, Any] = field(default_factory=dict)
+    image_url_resolver: Callable[[FCPath, Path], FCPath | None] | None = None
     _image_file_path: Path | None = None
     _label_file_path: Path | None = None
 
@@ -50,11 +57,44 @@ class ImageFile:
         dispatch one ``ImageFile`` per worker thread.
         """
         if self._image_file_path is None:
-            self._image_file_path = cast(Path, self.image_file_url.get_local_path())
+            self._image_file_path = cast(Path, self.resolve_image_url().get_local_path())
         return self._image_file_path
 
+    def resolve_image_url(self) -> FCPath:
+        """The definitive image URL, consulting the label when a resolver is set.
+
+        When ``image_url_resolver`` is set, the label file is retrieved and the
+        resolver maps the label contents to the correct image URL, which replaces
+        ``image_file_url``.  The resolver runs at most once; subsequent calls
+        return the memoized URL.
+
+        A resolver failure (typically an unretrievable label) falls back to the
+        current ``image_file_url`` guess with a logged warning: resolution runs
+        before the pipeline's per-image error boundary is open, and the guess is
+        usable whenever the image file itself is retrievable.
+
+        Returns:
+            The image file URL, corrected from the label contents when a resolver
+            is set and reports a different filename.
+        """
+        if self.image_url_resolver is not None:
+            resolver, self.image_url_resolver = self.image_url_resolver, None
+            try:
+                resolved = resolver(self.image_file_url, self.label_file_path)
+            except OSError as exc:
+                MAIN_LOGGER.warning(
+                    'Image URL resolution from label %s failed (%s); keeping %s',
+                    self.label_file_url.as_posix(),
+                    exc,
+                    self.image_file_url.as_posix(),
+                )
+                resolved = None
+            if resolved is not None:
+                self.image_file_url = resolved
+        return self.image_file_url
+
     def retrieve_image_file(self) -> Path:
-        return cast(Path, self.image_file_url.retrieve())
+        return cast(Path, self.resolve_image_url().retrieve())
 
     @property
     def label_file_path(self) -> Path:
