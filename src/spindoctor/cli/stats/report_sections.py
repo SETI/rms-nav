@@ -4,8 +4,10 @@ import csv
 import math
 import re
 import statistics
-from pathlib import Path
+from io import StringIO
 from typing import Any
+
+from filecache import FCPath
 
 from spindoctor.cli.stats.report_common import (
     ReportContext,
@@ -515,7 +517,7 @@ def add_offset_by_group_section(ctx: ReportContext) -> None:
 # ---------------------------------------------------------------------------
 
 
-def write_csv_export(ctx: ReportContext) -> Path:
+def write_csv_export(ctx: ReportContext) -> FCPath:
     """Write a flattened one-row-per-image CSV next to ``report.md``.
 
     Columns are the ``images`` table columns (schema order) plus
@@ -537,12 +539,13 @@ def write_csv_export(ctx: ReportContext) -> Path:
         ctx.params_i,
     )
     csv_path = ctx.output_dir / 'images.csv'
-    with csv_path.open('w', newline='', encoding='utf-8') as handle:
-        writer = csv.writer(handle)
-        writer.writerow(
-            [*IMAGE_COLUMNS, 'n_technique_rows', 'n_feature_sources', 'n_features', 'n_gated']
-        )
-        writer.writerows(csv_rows)
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [*IMAGE_COLUMNS, 'n_technique_rows', 'n_feature_sources', 'n_features', 'n_gated']
+    )
+    writer.writerows(csv_rows)
+    csv_path.write_text(buffer.getvalue(), encoding='utf-8')
     ctx.lines += [
         '## CSV export',
         '',

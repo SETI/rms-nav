@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from filecache import FCPath
 
 from spindoctor.cli.stats.classify import date_from_image_et
 from spindoctor.cli.stats.ingest import ingest_metadata_files, main_ingest, rows_from_metadata
@@ -418,6 +419,19 @@ def test_build_report_writes_markdown_and_charts(tmp_path: Path) -> None:
     assert (out / 'status_counts.png').exists()
     assert (out / 'technique_usage.png').exists()
     assert (out / 'offsets_hist.png').exists()
+
+
+def test_build_report_accepts_fcpath_output_dir(tmp_path: Path) -> None:
+    """Every report artifact (markdown, charts, filelists, CSV) writes via FCPath."""
+    conn = _populated_db(tmp_path)
+    out = FCPath(str(tmp_path / 'report'))
+    report_path = build_report(conn, out, top_n=2, filelists=True, csv_export=True)
+    conn.close()
+    assert 'Total images: 3' in report_path.read_text(encoding='utf-8')
+    assert (tmp_path / 'report' / 'status_counts.png').exists()
+    assert (tmp_path / 'report' / 'images.csv').exists()
+    filelists = sorted(p.name for p in (tmp_path / 'report' / 'filelists').glob('*.txt'))
+    assert len(filelists) > 0
 
 
 def test_build_report_instrument_filter(tmp_path: Path) -> None:

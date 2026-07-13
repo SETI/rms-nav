@@ -5,8 +5,10 @@ import re
 import sqlite3
 import statistics
 from dataclasses import dataclass, field
-from pathlib import Path
+from io import BytesIO
 from typing import Any
+
+from filecache import FCPath
 
 __all__ = [
     'ReportContext',
@@ -72,7 +74,8 @@ class ReportContext:
         conn: Open statistics database connection (with the
             ``image_number`` SQL function registered).
         output_dir: Directory receiving ``report.md``, charts, and the
-            optional ``filelists/`` subdirectory.
+            optional ``filelists/`` subdirectory; a local directory or
+            any URL the ``filecache`` layer accepts.
         where: Images-table filter from :func:`where_clause` (empty string
             or a leading-space ``' WHERE ...'`` fragment).
         params: Bind values matching ``where``.
@@ -89,7 +92,7 @@ class ReportContext:
     """
 
     conn: sqlite3.Connection
-    output_dir: Path
+    output_dir: FCPath
     where: str
     params: list[Any]
     where_i: str
@@ -110,8 +113,6 @@ class ReportContext:
         Returns:
             The path of the written file, relative to ``output_dir``.
         """
-        filelists_dir = self.output_dir / 'filelists'
-        filelists_dir.mkdir(parents=True, exist_ok=True)
         relative = f'filelists/{safe_filename(stub)}.txt'
         (self.output_dir / relative).write_text(
             ''.join(f'{name}\n' for name in names), encoding='utf-8'
@@ -318,13 +319,31 @@ def import_pyplot() -> Any:
     return plt
 
 
+def _save_figure(fig: Any, plt: Any, path: FCPath) -> None:
+    """Render a figure to PNG bytes and write them through ``FCPath``.
+
+    Rendering to a buffer first means the destination can be a local path
+    or any URL the ``filecache`` layer accepts.
+
+    Parameters:
+        fig: Matplotlib figure to write.
+        plt: The pyplot module (from :func:`import_pyplot`); the figure is
+            closed here.
+        path: Destination PNG path.
+    """
+    buffer = BytesIO()
+    fig.savefig(buffer, dpi=100, format='png')
+    plt.close(fig)
+    path.write_bytes(buffer.getvalue())
+
+
 def write_bar_chart(
-    path: Path, labels: list[str], counts: list[int], *, title: str, xlabel: str
+    path: FCPath, labels: list[str], counts: list[int], *, title: str, xlabel: str
 ) -> None:
     """Write a horizontal bar chart PNG (deterministic, Agg backend).
 
     Parameters:
-        path: Destination PNG path.
+        path: Destination PNG path (local or ``filecache`` URL).
         labels: One bar label per row, top to bottom.
         counts: Bar lengths matching ``labels``.
         title: Chart title.
@@ -340,15 +359,14 @@ def write_bar_chart(
     ax.set_xlabel(xlabel)
     ax.set_title(title)
     fig.tight_layout()
-    fig.savefig(path, dpi=100)
-    plt.close(fig)
+    _save_figure(fig, plt, path)
 
 
-def write_offset_hist(path: Path, dv: list[float], du: list[float]) -> None:
+def write_offset_hist(path: FCPath, dv: list[float], du: list[float]) -> None:
     """Write the V/U offset histogram PNG.
 
     Parameters:
-        path: Destination PNG path.
+        path: Destination PNG path (local or ``filecache`` URL).
         dv: Fused V-axis offsets (pixels) of successful images.
         du: Fused U-axis offsets (pixels) of successful images.
     """
@@ -361,15 +379,14 @@ def write_offset_hist(path: Path, dv: list[float], du: list[float]) -> None:
         ax.set_ylabel('images')
     fig.suptitle('Fused offset distribution (successful images)')
     fig.tight_layout()
-    fig.savefig(path, dpi=100)
-    plt.close(fig)
+    _save_figure(fig, plt, path)
 
 
-def write_value_hist(path: Path, values: list[float], *, title: str, xlabel: str) -> None:
+def write_value_hist(path: FCPath, values: list[float], *, title: str, xlabel: str) -> None:
     """Write a single-panel histogram PNG for a value list.
 
     Parameters:
-        path: Destination PNG path.
+        path: Destination PNG path (local or ``filecache`` URL).
         values: Values to histogram; an empty list produces empty axes.
         title: Chart title.
         xlabel: X-axis label.
@@ -382,5 +399,4 @@ def write_value_hist(path: Path, values: list[float], *, title: str, xlabel: str
     ax.set_ylabel('images')
     ax.set_title(title)
     fig.tight_layout()
-    fig.savefig(path, dpi=100)
-    plt.close(fig)
+    _save_figure(fig, plt, path)

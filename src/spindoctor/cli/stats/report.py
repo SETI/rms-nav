@@ -8,6 +8,8 @@ import sqlite3
 import statistics
 from pathlib import Path
 
+from filecache import FCPath
+
 from spindoctor.cli.stats.report_common import (
     ReportContext,
     add_drilldown,
@@ -346,7 +348,7 @@ def _image_bound(value: str | None, *, option: str) -> int | None:
 
 def build_report(
     conn: sqlite3.Connection,
-    output_dir: Path,
+    output_dir: str | Path | FCPath,
     *,
     instrument: str | None = None,
     start_date: str | None = None,
@@ -357,7 +359,7 @@ def build_report(
     filelists: bool = False,
     suspect_fraction: float = 0.9,
     csv_export: bool = False,
-) -> Path:
+) -> FCPath:
     """Query the statistics database and write ``report.md`` plus charts.
 
     The report is deterministic: the same database and options always
@@ -368,7 +370,8 @@ def build_report(
         conn: Open statistics database connection.
         output_dir: Directory receiving ``report.md``, the PNG charts, and
             (with ``filelists`` / ``csv_export``) the ``filelists/``
-            subdirectory and ``images.csv`` (created if missing).
+            subdirectory and ``images.csv`` (created if missing).  A local
+            directory or any URL the ``filecache`` layer accepts.
         instrument: Optional instrument filter (``coiss`` / ``vgiss`` /
             ``gossi`` / ``nhlorri``).
         start_date: Optional inclusive UTC start date (``YYYY-MM-DD``).
@@ -396,7 +399,7 @@ def build_report(
     Raises:
         ValueError: If ``min_image`` or ``max_image`` contains no digits.
     """
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = FCPath(output_dir)
     register_image_number_function(conn)
     min_image_num = _image_bound(min_image, option='min_image')
     max_image_num = _image_bound(max_image, option='max_image')
@@ -418,7 +421,7 @@ def build_report(
     )
     ctx = ReportContext(
         conn=conn,
-        output_dir=output_dir,
+        output_dir=output_path,
         where=where,
         params=params,
         where_i=where_i,
@@ -453,7 +456,7 @@ def build_report(
     if csv_export:
         write_csv_export(ctx)
 
-    report_path = output_dir / 'report.md'
+    report_path = output_path / 'report.md'
     report_path.write_text('\n'.join(ctx.lines) + '\n', encoding='utf-8')
     return report_path
 
@@ -478,7 +481,8 @@ def main_report(cmdline: list[str] | None = None) -> int:
     parser.add_argument(
         '--output-dir',
         default='nav_stats_report',
-        help='Directory receiving report.md and charts (default: %(default)s)',
+        help='Directory (local path or filecache URL) receiving report.md and charts '
+        '(default: %(default)s)',
     )
     parser.add_argument(
         '--instrument',
@@ -541,7 +545,7 @@ def main_report(cmdline: list[str] | None = None) -> int:
     try:
         report_path = build_report(
             conn,
-            Path(arguments.output_dir),
+            arguments.output_dir,
             instrument=arguments.instrument,
             start_date=arguments.start_date,
             end_date=arguments.end_date,
