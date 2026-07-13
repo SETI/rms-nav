@@ -47,6 +47,9 @@ bodies.
   metadata, and browse products
 - **Backplane generation**: Computes per-pixel geometry products (longitude,
   latitude, angles, etc.)
+- **Run statistics**: Ingests navigation results into SQLite and generates
+  reports on success rates, technique usage, offsets, and cross-technique
+  agreement (`sd_stats_ingest` / `sd_stats_report`)
 
 ## Installation
 

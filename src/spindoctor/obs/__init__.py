@@ -41,6 +41,29 @@ def inst_name_to_obs_class(name: str) -> type[ObsSnapshotInst]:
         raise KeyError(f'unknown instrument name {name!r}; valid names: {valid}') from None
 
 
+def obs_class_to_inst_name(obs_class: type) -> str:
+    """Convert an observation class to its registered instrument name.
+
+    The reverse of :func:`inst_name_to_obs_class`.  Metadata writers use
+    this to record which instrument produced a result, so an unregistered
+    class maps to ``'unknown'`` rather than raising -- instrument identity
+    is bookkeeping and must never abort a navigation run.
+
+    Parameters:
+        obs_class: An ``ObsSnapshotInst`` subclass (or any class; only
+            exact matches against the registry count).
+
+    Returns:
+        The registered instrument name (``'coiss'``, ``'gossi'``,
+        ``'nhlorri'``, ``'sim'``, or ``'vgiss'``), or ``'unknown'`` when
+        the class is not registered.
+    """
+    for name, cls in _INST_NAME_TO_OBS_CLASS_MAPPING.items():
+        if cls is obs_class:
+            return name
+    return 'unknown'
+
+
 __all__ = [
     'Obs',
     'ObsCassiniISS',
@@ -52,4 +75,5 @@ __all__ = [
     'ObsVoyagerISS',
     'inst_name_to_obs_class',
     'inst_names',
+    'obs_class_to_inst_name',
 ]
