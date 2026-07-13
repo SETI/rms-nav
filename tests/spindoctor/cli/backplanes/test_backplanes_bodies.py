@@ -10,6 +10,9 @@ Simulated bodies synthesize a constant value confined to the simulated body mask
 """
 
 import math
+import os
+import subprocess
+import sys
 from typing import Any
 
 import numpy as np
@@ -104,6 +107,53 @@ def test_simulated_body_value_deterministic_within_process() -> None:
     val_first = first['MIMAS']['arrays']['body_latitude'][2, 3]
     val_second = second['MIMAS']['arrays']['body_latitude'][2, 3]
     assert val_first == val_second
+
+
+_SIM_VALUE_SCRIPT = """\
+from types import SimpleNamespace
+
+import numpy as np
+
+from spindoctor.cli.backplanes.backplanes_bodies import _create_simulated_body_backplane
+
+snapshot = SimpleNamespace(
+    data=np.zeros((8, 10), dtype=np.float32),
+    sim_body_mask_map={},
+    sim_body_order_near_to_far=[],
+    sim_body_index_map=None,
+)
+full, _ = _create_simulated_body_backplane(snapshot, 'MIMAS', 'body_latitude', 2, 3, 3, 5)
+print(repr(float(full[2, 3])))
+"""
+
+
+def test_simulated_body_value_deterministic_across_processes() -> None:
+    """The synthesized value must not depend on the interpreter hash seed.
+
+    A value derived from the salted built-in ``hash()`` would vary between
+    interpreter runs; generating it in fresh subprocesses under different
+    PYTHONHASHSEED values detects that, which a within-process rerun cannot.
+    The subprocesses drive ``_create_simulated_body_backplane`` on a minimal
+    stub snapshot and must agree with each other and with the value produced
+    in this process for the same MIMAS / body_latitude inputs.
+    """
+    snap, _ = _sim_snapshot_with_mimas()
+    result = create_body_backplanes(snap, _bodies_config().as_config(), logger=IMAGE_LOGGER)
+    in_process = float(result['MIMAS']['arrays']['body_latitude'][2, 3])
+    values = []
+    for seed in ('1', '2', '3'):
+        env = dict(os.environ)
+        env['PYTHONHASHSEED'] = seed
+        proc = subprocess.run(
+            [sys.executable, '-c', _SIM_VALUE_SCRIPT],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+        )
+        values.append(float(proc.stdout.strip()))
+    assert len(set(values)) == 1
+    assert values[0] == in_process
 
 
 def test_simulated_body_distance_from_inventory_range() -> None:
@@ -255,6 +305,13 @@ def _patch_backplane_constant(
     """
 
     def values_fn(method: str, body_name: str, shape: tuple[int, int]) -> Any:
+        """Return a constant masked array, optionally masking the first pixel.
+
+        Parameters:
+            method: The oops Backplane method name (ignored).
+            body_name: The body being evaluated (ignored).
+            shape: The meshgrid shape as (nv, nu).
+        """
         data = np.full(shape, value)
         mask = np.zeros(shape, dtype=bool)
         if masked_corner:
@@ -334,6 +391,13 @@ def test_real_body_no_stats_when_fully_masked(monkeypatch: pytest.MonkeyPatch) -
     """
 
     def values_fn(method: str, body_name: str, shape: tuple[int, int]) -> Any:
+        """Return a fully masked constant array (no valid pixel anywhere).
+
+        Parameters:
+            method: The oops Backplane method name (ignored).
+            body_name: The body being evaluated (ignored).
+            shape: The meshgrid shape as (nv, nu).
+        """
         return ma.MaskedArray(np.full(shape, 1.0), mask=np.ones(shape, dtype=bool))
 
     monkeypatch.setattr(bodies_mod, 'Backplane', make_fake_body_backplane_cls(values_fn))

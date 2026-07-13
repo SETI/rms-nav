@@ -236,9 +236,9 @@ def test_distance_entry_is_not_written_as_hdu(tmp_path: Path) -> None:
     master, body_id_map = merge_sources_into_master(
         snap, bodies_result={}, rings_result=rings_result
     )
-    fits_path = tmp_path / 'IMG1_backplanes.fits'
+    fits_path = FCPath(tmp_path) / 'IMG1_backplanes.fits'
     write_fits(
-        fits_file_path=FCPath(str(fits_path)),
+        fits_file_path=fits_path,
         snapshot=snap,
         master_by_type=master,
         body_id_map=body_id_map,
@@ -246,5 +246,5 @@ def test_distance_entry_is_not_written_as_hdu(tmp_path: Path) -> None:
         bodies_result={},
         rings_result=rings_result,
     )
-    with fits.open(fits_path) as hdul:
+    with fits.open(fits_path.get_local_path()) as hdul:
         assert 'DISTANCE' not in [hdu.name for hdu in hdul]

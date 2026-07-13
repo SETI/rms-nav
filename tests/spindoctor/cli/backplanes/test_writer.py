@@ -90,7 +90,7 @@ def _write(
     cfg = config if config is not None else _default_config()
     fits_path = tmp_path / f'{stub}_backplanes.fits'
     write_fits(
-        fits_file_path=FCPath(str(fits_path)),
+        fits_file_path=FCPath(fits_path),
         snapshot=snap,
         master_by_type=master,
         body_id_map=id_map,

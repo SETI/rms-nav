@@ -242,6 +242,12 @@ class FakeRingBackplane:
             raise AttributeError(method)
 
         def _call(target: str, **kwargs: Any) -> StubVals:
+            """Record the invocation and return the canned array for this method.
+
+            Parameters:
+                target: The oops target key the method is evaluated on.
+                **kwargs: Additional method keyword arguments, recorded verbatim.
+            """
             self.calls.append((method, target, dict(kwargs)))
             return StubVals(method_values[method])
 
@@ -268,13 +274,31 @@ def make_fake_body_backplane_cls(values_fn: BodyValuesFn) -> type:
     """
 
     class _FakeBodyBackplane:
+        """Fake per-body oops Backplane that answers every method via ``values_fn``."""
+
         def __init__(self, obs: Any, meshgrid: Any = None) -> None:
+            """Capture the meshgrid shape; the observation itself is unused.
+
+            Parameters:
+                obs: The observation the real Backplane would wrap (ignored).
+                meshgrid: The oops Meshgrid whose shape sizes the returned arrays.
+            """
             self.meshgrid_shape = cast('tuple[int, int]', tuple(int(x) for x in meshgrid.shape))
 
         def __getattr__(self, method: str) -> Callable[[str], StubVals]:
+            """Resolve any method name to a callable that evaluates ``values_fn``.
+
+            Parameters:
+                method: The oops Backplane method name being looked up.
+            """
             shape = self.__dict__['meshgrid_shape']
 
             def _call(body_name: str) -> StubVals:
+                """Return the canned array for this method, body, and meshgrid shape.
+
+                Parameters:
+                    body_name: The body the backplane method is evaluated for.
+                """
                 return StubVals(values_fn(method, body_name, shape))
 
             return _call

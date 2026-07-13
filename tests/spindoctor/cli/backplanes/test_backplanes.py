@@ -100,28 +100,28 @@ def test_default_config_angle_backplanes_declare_radians() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _image_files(tmp_path: Path, *stubs: str) -> ImageFiles:
+def _image_files(images_root: FCPath, *stubs: str) -> ImageFiles:
     """Build an ImageFiles batch with one local image file per stub.
 
     Parameters:
-        tmp_path: Directory that receives the placeholder image files.
+        images_root: Directory that receives the placeholder image files.
         *stubs: Results path stubs, one per image.
     """
     files = []
     for stub in stubs or ('IMG1',):
-        img = tmp_path / f'{stub}.IMG'
+        img = images_root / f'{stub}.IMG'
         img.write_bytes(b'')
         files.append(
             ImageFile(
-                image_file_url=FCPath(str(img)),
-                label_file_url=FCPath(str(img)),
+                image_file_url=img,
+                label_file_url=img,
                 results_path_stub=stub,
             )
         )
     return ImageFiles(image_files=files)
 
 
-def _write_nav_metadata(nav_root: Path, stub: str, doc: dict[str, Any]) -> None:
+def _write_nav_metadata(nav_root: FCPath, stub: str, doc: dict[str, Any]) -> None:
     """Write a navigation metadata JSON for the given stub.
 
     Parameters:
@@ -132,14 +132,14 @@ def _write_nav_metadata(nav_root: Path, stub: str, doc: dict[str, Any]) -> None:
     (nav_root / f'{stub}_metadata.json').write_text(json.dumps(doc))
 
 
-def _roots(tmp_path: Path) -> tuple[Path, Path]:
+def _roots(root: FCPath) -> tuple[FCPath, FCPath]:
     """Create and return (nav_results_root, backplane_results_root) directories.
 
     Parameters:
-        tmp_path: pytest-provided temporary directory.
+        root: Temporary directory the roots are created under.
     """
-    nav_root = tmp_path / 'nav'
-    bp_root = tmp_path / 'bp'
+    nav_root = root / 'nav'
+    bp_root = root / 'bp'
     nav_root.mkdir()
     bp_root.mkdir()
     return nav_root, bp_root
@@ -158,6 +158,8 @@ def _obs_class_for(obs: Any) -> tuple[type[ObsSnapshotInst], list[dict[str, Any]
     from_file_calls: list[dict[str, Any]] = []
 
     class _DriverObs(HermeticObs):
+        """HermeticObs whose from_file records its arguments and returns ``obs``."""
+
         calls: ClassVar[list[dict[str, Any]]] = from_file_calls
 
         @staticmethod
@@ -168,6 +170,14 @@ def _obs_class_for(obs: Any) -> tuple[type[ObsSnapshotInst], list[dict[str, Any]
             extfov_margin_vu: tuple[int, int] | None = None,
             **kwargs: Any,
         ) -> Obs:
+            """Record the call and return the fixed observation.
+
+            Parameters:
+                path: Image file path requested by the driver (recorded).
+                config: Ignored.
+                extfov_margin_vu: Extended-FOV margin requested (recorded).
+                **kwargs: Ignored.
+            """
             from_file_calls.append({'path': path, 'extfov_margin_vu': extfov_margin_vu})
             return cast(Obs, obs)
 
@@ -187,20 +197,46 @@ def _stub_pipeline(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     sentinel_master: dict[str, Any] = {'sentinel_plane': np.ones(SHAPE_VU, dtype=np.float32)}
 
     def fake_bodies(snapshot: Any, config: Any, *, logger: Any) -> dict[str, Any]:
+        """Record the snapshot and return a one-body sentinel bodies_result.
+
+        Parameters:
+            snapshot: The observation handed to the body stage (recorded).
+            config: Ignored.
+            logger: Ignored.
+        """
         calls['bodies'].append(snapshot)
         return {'FAKEBODY': {}}
 
     def fake_rings(snapshot: Any, config: Any, *, logger: Any) -> None:
+        """Record the snapshot and report no ring backplanes.
+
+        Parameters:
+            snapshot: The observation handed to the ring stage (recorded).
+            config: Ignored.
+            logger: Ignored.
+        """
         calls['rings'].append(snapshot)
         return None
 
     def fake_merge(
         snapshot: Any, *, bodies_result: Any, rings_result: Any
     ) -> tuple[dict[str, Any], np.ndarray]:
+        """Record the per-source results and return the sentinel master arrays.
+
+        Parameters:
+            snapshot: The observation handed to the merge (sizes the ID map).
+            bodies_result: Body-stage result (recorded).
+            rings_result: Ring-stage result (recorded).
+        """
         calls['merge'].append({'bodies_result': bodies_result, 'rings_result': rings_result})
         return sentinel_master, np.zeros(snapshot.data.shape, dtype=np.int32)
 
     def fake_write(**kwargs: Any) -> None:
+        """Record the writer keyword arguments without writing anything.
+
+        Parameters:
+            **kwargs: The write_fits keyword arguments (recorded verbatim).
+        """
         calls['write'].append(kwargs)
 
     monkeypatch.setattr(backplanes_mod, 'create_body_backplanes', fake_bodies)
@@ -216,11 +252,11 @@ def _run(
     metadata: dict[str, Any] | None,
     obs: Any | None = None,
     write_output_files: bool = True,
-) -> tuple[Any, list[dict[str, Any]], Path, Path]:
+) -> tuple[Any, list[dict[str, Any]], FCPath, FCPath]:
     """Prepare roots and metadata, run the driver, and return the pieces.
 
     Parameters:
-        tmp_path: pytest-provided temporary directory.
+        tmp_path: pytest-provided temporary directory, wrapped once into FCPath.
         metadata: Nav metadata document to write; None writes nothing.
         obs: Observation returned by from_file; defaults to a fresh simulated
             HermeticObs.
@@ -230,16 +266,17 @@ def _run(
         The observation, the recorded from_file calls, the nav root, and the
         backplane root.
     """
-    nav_root, bp_root = _roots(tmp_path)
+    root = FCPath(tmp_path)
+    nav_root, bp_root = _roots(root)
     if metadata is not None:
         _write_nav_metadata(nav_root, 'IMG1', metadata)
     snapshot = obs if obs is not None else make_snapshot(shape_vu=SHAPE_VU, simulated=True)
     obs_class, from_file_calls = _obs_class_for(snapshot)
     generate_backplanes_image_files(
         obs_class,
-        _image_files(tmp_path, 'IMG1'),
-        nav_results_root=FCPath(str(nav_root)),
-        backplane_results_root=FCPath(str(bp_root)),
+        _image_files(root, 'IMG1'),
+        nav_results_root=nav_root,
+        backplane_results_root=bp_root,
         write_output_files=write_output_files,
     )
     return snapshot, from_file_calls, nav_root, bp_root
@@ -256,14 +293,15 @@ def test_driver_rejects_multi_image_batches(tmp_path: Path) -> None:
     Parameters:
         tmp_path: pytest-provided temporary directory.
     """
-    nav_root, bp_root = _roots(tmp_path)
+    root = FCPath(tmp_path)
+    nav_root, bp_root = _roots(root)
     obs_class, _ = _obs_class_for(make_snapshot(shape_vu=SHAPE_VU, simulated=True))
     with pytest.raises(ValueError, match='exactly one image per batch'):
         generate_backplanes_image_files(
             obs_class,
-            _image_files(tmp_path, 'IMG1', 'IMG2'),
-            nav_results_root=FCPath(str(nav_root)),
-            backplane_results_root=FCPath(str(bp_root)),
+            _image_files(root, 'IMG1', 'IMG2'),
+            nav_results_root=nav_root,
+            backplane_results_root=bp_root,
         )
 
 
@@ -283,15 +321,16 @@ def test_driver_invalid_metadata_json_raises(tmp_path: Path) -> None:
     Parameters:
         tmp_path: pytest-provided temporary directory.
     """
-    nav_root, bp_root = _roots(tmp_path)
+    root = FCPath(tmp_path)
+    nav_root, bp_root = _roots(root)
     (nav_root / 'IMG1_metadata.json').write_text('this is not json')
     obs_class, _ = _obs_class_for(make_snapshot(shape_vu=SHAPE_VU, simulated=True))
     with pytest.raises(json.JSONDecodeError):
         generate_backplanes_image_files(
             obs_class,
-            _image_files(tmp_path, 'IMG1'),
-            nav_results_root=FCPath(str(nav_root)),
-            backplane_results_root=FCPath(str(bp_root)),
+            _image_files(root, 'IMG1'),
+            nav_results_root=nav_root,
+            backplane_results_root=bp_root,
         )
 
 
@@ -435,7 +474,7 @@ def test_driver_writes_fits_under_backplane_root(
     _, _, _, bp_root = _run(tmp_path, metadata={'status': 'success', 'offset': [0.0, 0.0]})
     assert len(calls['write']) == 1
     fits_file_path = calls['write'][0]['fits_file_path']
-    assert str(fits_file_path) == str(bp_root / 'IMG1_backplanes.fits')
+    assert fits_file_path.as_posix() == (bp_root / 'IMG1_backplanes.fits').as_posix()
 
 
 def test_driver_passes_merge_outputs_to_writer(
@@ -514,7 +553,7 @@ def test_end_to_end_simulated_image_writes_expected_fits(tmp_path: Path) -> None
     )
     fits_path = bp_root / 'IMG1_backplanes.fits'
     assert fits_path.exists()
-    with fits.open(fits_path) as hdul:
+    with fits.open(fits_path.get_local_path()) as hdul:
         names = [hdu.name for hdu in hdul]
         assert names[1] == 'BODY_ID_MAP'
         assert set(names[1:]) == {'BODY_ID_MAP'} | EXPECTED_BODY_HDUS
