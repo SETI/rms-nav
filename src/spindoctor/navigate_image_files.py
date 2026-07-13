@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
@@ -38,7 +38,12 @@ from spindoctor.support.file import json_as_string
 from spindoctor.support.misc import log_run_environment
 from spindoctor.support.summary_png import render_annotated_summary_rgb
 
-__all__ = ['build_metadata_from_result', 'navigate_image_files', 'write_summary_png']
+__all__ = [
+    'build_metadata_from_result',
+    'build_timing_section',
+    'navigate_image_files',
+    'write_summary_png',
+]
 
 
 _SPICE_DATA_HINTS = (
@@ -46,6 +51,41 @@ _SPICE_DATA_HINTS = (
     'SPICE(SPKINSUFFDATA)',
     'SPICE(NOFRAMECONNECT)',
 )
+
+
+def _iso8601_utc(moment: datetime) -> str:
+    """UTC ISO8601 string (``Z`` suffix) for a timezone-aware datetime.
+
+    Parameters:
+        moment: Timezone-aware datetime to format.
+
+    Returns:
+        The moment rendered in UTC as ``YYYY-MM-DDTHH:MM:SS.ffffffZ``.
+    """
+    return moment.astimezone(UTC).isoformat().replace('+00:00', 'Z')
+
+
+def build_timing_section(start: datetime, end: datetime) -> dict[str, Any]:
+    """Build the ``timing`` metadata section from run start and end moments.
+
+    Every metadata document carries this section so downstream statistics
+    (``sd_stats_ingest`` / ``sd_stats_report``) can aggregate per-image run
+    times.
+
+    Parameters:
+        start: Timezone-aware run start (captured before the image load).
+        end: Timezone-aware run end (captured after navigation, or at
+            error time).
+
+    Returns:
+        Dict with ``start_iso8601`` and ``end_iso8601`` (UTC ISO8601
+        strings) and ``elapsed_s`` (float seconds).
+    """
+    return {
+        'start_iso8601': _iso8601_utc(start),
+        'end_iso8601': _iso8601_utc(end),
+        'elapsed_s': (end - start).total_seconds(),
+    }
 
 
 def navigate_image_files(
@@ -90,6 +130,7 @@ def navigate_image_files(
         the curated JSON-friendly dict.
     """
     logger = IMAGE_LOGGER
+    run_start = datetime.now(UTC)
 
     if len(image_files.image_files) != 1:
         logger.error(
@@ -102,6 +143,8 @@ def navigate_image_files(
             'status_exception': (
                 f'Expected exactly one image per batch; got {len(image_files.image_files)}'
             ),
+            'observation': {'instrument': obs_class_to_inst_name(obs_class)},
+            'timing': build_timing_section(run_start, datetime.now(UTC)),
         }
 
     image_file = image_files.image_files[0]
@@ -128,7 +171,12 @@ def navigate_image_files(
                 snapshot = obs_class.from_file(image_url, **extra_params)
             except (OSError, RuntimeError) as exc:
                 metadata = _metadata_for_load_error(
-                    image_path, image_name, exc, logger, instrument=instrument
+                    image_path,
+                    image_name,
+                    exc,
+                    logger=logger,
+                    instrument=instrument,
+                    timing=build_timing_section(run_start, datetime.now(UTC)),
                 )
                 if write_output_files:
                     public_metadata_file.write_text(json_as_string(metadata))
@@ -141,8 +189,14 @@ def navigate_image_files(
                 only_techniques=nav_techniques or '*',
             )
             nav_result = orchestrator.navigate(snapshot_inst)
+            data_shape = snapshot_inst.data.shape
             metadata = build_metadata_from_result(
-                nav_result, image_path, image_name, instrument=instrument
+                nav_result,
+                image_path,
+                image_name,
+                instrument=instrument,
+                image_shape=(int(data_shape[0]), int(data_shape[1])),
+                timing=build_timing_section(run_start, datetime.now(UTC)),
             )
             if write_output_files:
                 logger.info('Writing metadata to %s', public_metadata_file)
@@ -159,11 +213,15 @@ def _metadata_for_load_error(
     image_path: Path,
     image_name: str,
     exc: BaseException,
-    logger: Any,
     *,
+    logger: Any,
     instrument: str,
+    timing: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build a metadata dict for an image-load or kernel-coverage failure."""
+    """Build a metadata dict for an image-load or kernel-coverage failure.
+
+    No image shape is recorded because the load never produced pixel data.
+    """
     message = str(exc)
     if any(hint in message for hint in _SPICE_DATA_HINTS):
         logger.exception('No SPICE kernel available for "%s": %s', image_path, message)
@@ -180,6 +238,7 @@ def _metadata_for_load_error(
             'image_name': image_name,
             'instrument': instrument,
         },
+        'timing': timing,
     }
 
 
@@ -189,6 +248,8 @@ def build_metadata_from_result(
     image_name: str,
     *,
     instrument: str,
+    image_shape: tuple[int, int] | None = None,
+    timing: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the JSON metadata dict from a NavResult.
 
@@ -204,16 +265,27 @@ def build_metadata_from_result(
         instrument: Registered instrument name for the observation class
             (see :func:`spindoctor.obs.obs_class_to_inst_name`); written to
             the ``observation.instrument`` field.
+        image_shape: ``(v, u)`` pixel dimensions of the loaded image data;
+            written to the ``observation.image_shape`` field.  None omits
+            the field.
+        timing: Run-timing section from :func:`build_timing_section`;
+            written to the top-level ``timing`` field.  None omits the
+            field.
     """
+    observation: dict[str, Any] = {
+        'image_path': str(image_path),
+        'image_name': image_name,
+        'instrument': instrument,
+    }
+    if image_shape is not None:
+        observation['image_shape'] = [int(image_shape[0]), int(image_shape[1])]
     metadata: dict[str, Any] = {
         'status': result.status,
-        'observation': {
-            'image_path': str(image_path),
-            'image_name': image_name,
-            'instrument': instrument,
-        },
+        'observation': observation,
         'navigation_result': build_metadata_dict(result),
     }
+    if timing is not None:
+        metadata['timing'] = timing
     if result.offset_px is not None:
         metadata['offset'] = list(result.offset_px)
     metadata['confidence'] = result.confidence

@@ -13,6 +13,7 @@ end-to-end against a synthetic ``Annotations`` collection.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifi
 from spindoctor.nav_orchestrator.nav_result import NavResult
 from spindoctor.nav_orchestrator.provenance import Provenance
 from spindoctor.navigate_image_files import (
+    build_timing_section,
     navigate_image_files,
     write_summary_png,
 )
@@ -117,6 +119,10 @@ def test_navigate_image_files_no_features_path(tmp_path: Path) -> None:
     assert metadata['confidence'] == 0.0
     # The fake observation class is not in the instrument registry.
     assert metadata['observation']['instrument'] == 'unknown'
+    assert metadata['observation']['image_shape'] == [32, 32]
+    assert metadata['timing']['elapsed_s'] >= 0.0
+    assert metadata['timing']['start_iso8601'].endswith('Z')
+    assert metadata['timing']['end_iso8601'].endswith('Z')
     assert 'navigation_result' in metadata
     nav_result = metadata['navigation_result']
     # Without registered real-scene models the classifier still runs.
@@ -172,6 +178,9 @@ def test_navigate_image_files_image_load_failure_records_status(tmp_path: Path) 
     assert metadata['status_error'] == 'image_read_error'
     assert 'cannot read fixture image' in metadata['status_exception']
     assert metadata['observation']['instrument'] == 'unknown'
+    # The image never loaded, so no shape is recorded; timing still is.
+    assert 'image_shape' not in metadata['observation']
+    assert metadata['timing']['elapsed_s'] >= 0.0
 
 
 def test_navigate_image_files_spice_load_failure_records_missing_kernel(
@@ -445,3 +454,16 @@ def test_navigate_image_files_rejects_multi_image_batch(tmp_path: Path) -> None:
     )
     assert success is False
     assert metadata['status_error'] == 'expected_one_image_per_batch'
+    # Even the validation early-return records the instrument and timing.
+    assert metadata['observation']['instrument'] == 'unknown'
+    assert metadata['timing']['elapsed_s'] >= 0.0
+
+
+def test_build_timing_section_formats_utc() -> None:
+    """The timing section carries UTC ISO8601 strings and float seconds."""
+    start = datetime(2026, 7, 11, 12, 0, 0, tzinfo=UTC)
+    end = datetime(2026, 7, 11, 12, 0, 2, 500000, tzinfo=UTC)
+    timing = build_timing_section(start, end)
+    assert timing['start_iso8601'] == '2026-07-11T12:00:00Z'
+    assert timing['end_iso8601'] == '2026-07-11T12:00:02.500000Z'
+    assert timing['elapsed_s'] == 2.5

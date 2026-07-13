@@ -249,12 +249,16 @@ def _run_manual_pass(
     that ``navigate_image_files`` uses, so the per-image stdout / file
     handlers are attached during prepare + dialog.
     """
-    from datetime import datetime
+    from datetime import UTC, datetime
     from itertools import islice
 
     from spindoctor.config import IMAGE_LOGGER, image_log_handlers
     from spindoctor.nav_technique import run_manual_nav
-    from spindoctor.navigate_image_files import build_metadata_from_result, write_summary_png
+    from spindoctor.navigate_image_files import (
+        build_metadata_from_result,
+        build_timing_section,
+        write_summary_png,
+    )
 
     assert DATASET is not None
     # Bound the dataset traversal to at most six items: we only need to
@@ -301,6 +305,7 @@ def _run_manual_pass(
 
     try:
         with IMAGE_LOGGER.open(str(image_url), handler=local_handlers):
+            run_start = datetime.now(UTC)
             obs = cast(ObsSnapshotInst, obs_class.from_file(image_url, **extra_params))
             result = run_manual_nav(obs, config=DEFAULT_CONFIG)
             if result is None:
@@ -313,11 +318,15 @@ def _run_manual_pass(
             dv, du = result.offset_px
             IMAGE_LOGGER.info('Manual nav: offset_dv_px=%.4f, offset_du_px=%.4f', dv, du)
             if write_output_files:
+                # The timing section's elapsed time is the manual-nav wall
+                # time: image load + dialog interaction until accept.
                 metadata = build_metadata_from_result(
                     result,
                     image_path,
                     image_name,
                     instrument=obs_class_to_inst_name(obs_class),
+                    image_shape=(int(obs.data.shape[0]), int(obs.data.shape[1])),
+                    timing=build_timing_section(run_start, datetime.now(UTC)),
                 )
                 IMAGE_LOGGER.info('Writing metadata to %s', public_metadata_file)
                 public_metadata_file.write_text(json_as_string(metadata))
