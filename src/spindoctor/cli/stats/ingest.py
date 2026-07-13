@@ -10,7 +10,7 @@ from typing import Any, cast
 
 from filecache import FCPath
 
-from spindoctor.cli.stats.classify import date_from_image_et, instrument_from_image_name
+from spindoctor.cli.stats.classify import date_from_image_et
 from spindoctor.cli.stats.schema import open_stats_db, upsert_image
 from spindoctor.config import MAIN_LOGGER
 
@@ -25,6 +25,23 @@ def _finite_or_none(value: Any) -> float | None:
         return None
     out = float(value)
     return out if math.isfinite(out) else None
+
+
+def _str_or_none(value: Any) -> str | None:
+    """Coerce a JSON value to a non-empty string, or None."""
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _image_shape(value: Any) -> tuple[int | None, int | None]:
+    """Per-axis ``(v, u)`` pixel dimensions from a metadata image_shape list."""
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None, None
+    try:
+        return int(value[0]), int(value[1])
+    except (TypeError, ValueError):
+        return None, None
 
 
 def _sigma_from_covariance(covariance: Any) -> tuple[float | None, float | None]:
@@ -74,18 +91,16 @@ def rows_from_metadata(
         :func:`~spindoctor.cli.stats.schema.upsert_image`.
 
     Raises:
-        ValueError: If the document lacks the observation image name.
+        ValueError: If the document lacks the observation image name or the
+            observation instrument.
     """
     observation = metadata.get('observation') or {}
     image_name = observation.get('image_name')
     if not image_name:
         raise ValueError(f'{source_file}: metadata lacks observation.image_name')
-    # The pipeline records the instrument in the metadata itself; the
-    # filename-shape classifier is the fallback for documents that lack
-    # the field.
     instrument = observation.get('instrument')
     if not isinstance(instrument, str) or not instrument:
-        instrument = instrument_from_image_name(str(image_name))
+        raise ValueError(f'{source_file}: metadata lacks observation.instrument')
     nav = metadata.get('navigation_result') or {}
     provenance = nav.get('provenance') or {}
     classifier = nav.get('image_classifier') or {}
@@ -93,6 +108,8 @@ def rows_from_metadata(
     sigma = nav.get('sigma_px') or [None, None]
     image_et = _finite_or_none(provenance.get('image_et'))
     per_technique = nav.get('per_technique') or []
+    timing = metadata.get('timing') or {}
+    shape_v, shape_u = _image_shape(observation.get('image_shape'))
 
     image_row: dict[str, Any] = {
         'image_name': image_name,
@@ -112,6 +129,11 @@ def rows_from_metadata(
         'excluded_from_consensus': json.dumps(sorted(nav.get('excluded_from_consensus') or [])),
         'image_class': classifier.get('class'),
         'noise_sigma': _finite_or_none(classifier.get('noise_sigma')),
+        'image_shape_v': shape_v,
+        'image_shape_u': shape_u,
+        'run_start': _str_or_none(timing.get('start_iso8601')),
+        'run_end': _str_or_none(timing.get('end_iso8601')),
+        'elapsed_s': _finite_or_none(timing.get('elapsed_s')),
         'config_hash': provenance.get('config_hash'),
         'git_sha': provenance.get('spindoctor_git_sha'),
         'pipeline_run': provenance.get('pipeline_run_iso8601'),

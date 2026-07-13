@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-__all__ = ['open_stats_db', 'upsert_image']
+__all__ = ['IMAGE_COLUMNS', 'open_stats_db', 'upsert_image']
 
 # One row per image (keyed by image name), with normalized child tables for
 # per-technique results and per-source feature usage.  Re-ingesting an image
@@ -28,6 +28,11 @@ CREATE TABLE IF NOT EXISTS images (
     excluded_from_consensus TEXT,
     image_class TEXT,
     noise_sigma REAL,
+    image_shape_v INTEGER,
+    image_shape_u INTEGER,
+    run_start TEXT,
+    run_end TEXT,
+    elapsed_s REAL,
     config_hash TEXT,
     git_sha TEXT,
     pipeline_run TEXT,
@@ -60,31 +65,38 @@ CREATE INDEX IF NOT EXISTS idx_techniques_image ON techniques(image_name);
 CREATE INDEX IF NOT EXISTS idx_sources_image ON feature_sources(image_name);
 """
 
-_IMAGES_COLUMNS = frozenset(
-    {
-        'image_name',
-        'instrument',
-        'image_path',
-        'image_et',
-        'image_date',
-        'status',
-        'status_reason',
-        'offset_dv',
-        'offset_du',
-        'sigma_dv',
-        'sigma_du',
-        'confidence',
-        'confidence_rank',
-        'n_techniques',
-        'excluded_from_consensus',
-        'image_class',
-        'noise_sigma',
-        'config_hash',
-        'git_sha',
-        'pipeline_run',
-        'source_file',
-    }
+# Column order of the ``images`` table, kept in sync with ``_SCHEMA``.  The
+# CSV export uses this so its column order is stable and documented.
+IMAGE_COLUMNS: tuple[str, ...] = (
+    'image_name',
+    'instrument',
+    'image_path',
+    'image_et',
+    'image_date',
+    'status',
+    'status_reason',
+    'offset_dv',
+    'offset_du',
+    'sigma_dv',
+    'sigma_du',
+    'confidence',
+    'confidence_rank',
+    'n_techniques',
+    'excluded_from_consensus',
+    'image_class',
+    'noise_sigma',
+    'image_shape_v',
+    'image_shape_u',
+    'run_start',
+    'run_end',
+    'elapsed_s',
+    'config_hash',
+    'git_sha',
+    'pipeline_run',
+    'source_file',
 )
+
+_IMAGES_COLUMNS = frozenset(IMAGE_COLUMNS)
 _TECHNIQUES_COLUMNS = frozenset(
     {
         'image_name',

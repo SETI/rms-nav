@@ -37,6 +37,11 @@ image's row and its child rows rather than duplicating them. Malformed files
 are logged and skipped; the exit status is nonzero only when nothing at all
 was ingested.
 
+Every ingestible document must carry ``observation.image_name`` and
+``observation.instrument`` (the pipeline records both in every metadata
+document it writes). A document missing either field is logged, skipped, and
+counted as an error, exactly like a file that fails to parse.
+
 Database schema
 ---------------
 
@@ -62,8 +67,8 @@ its row and children.
    * - ``instrument``
      - TEXT
      - ``coiss`` / ``vgiss`` / ``gossi`` / ``nhlorri`` / ``sim``, from the
-       metadata document's ``observation.instrument`` field (filename-shape
-       classification is the fallback for documents that lack the field).
+       metadata document's ``observation.instrument`` field (required; a
+       document without it is skipped as an ingest error).
    * - ``image_path``
      - TEXT
      - Absolute path of the source image at navigate time.
@@ -107,6 +112,19 @@ its row and children.
    * - ``noise_sigma``
      - REAL
      - Image-classifier noise estimate.
+   * - ``image_shape_v``, ``image_shape_u``
+     - INTEGER
+     - Pixel dimensions of the image data (V then U), from the metadata
+       document's ``observation.image_shape`` field; NULL when the image
+       never loaded (e.g. a read error).
+   * - ``run_start``, ``run_end``
+     - TEXT
+     - UTC ISO8601 run start and end of the navigation of this image, from
+       the metadata document's ``timing`` section; start is captured before
+       the image load and end after navigation (or at error time).
+   * - ``elapsed_s``
+     - REAL
+     - Wall-clock seconds between ``run_start`` and ``run_end``.
    * - ``config_hash``
      - TEXT
      - sha256 of the fully-resolved configuration used for the run.
@@ -244,15 +262,40 @@ Reporting
 ---------
 
 ``sd_stats_report [--db PATH] [--output-dir DIR] [--instrument NAME]
-[--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD]`` writes ``report.md`` and
-its charts into the output directory. All filters combine; dates are
-inclusive UTC image dates, so a single day's run is
-``--start-date D --end-date D``. The same inputs always produce the same
+[--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD] [--min-image NAME]
+[--max-image NAME] [--top-n N] [--filelists] [--suspect-fraction F]
+[--csv]`` writes ``report.md`` and its charts into the output directory.
+All filters combine and apply to every section; dates are inclusive UTC
+image dates, so a single day's run is ``--start-date D --end-date D``.
+``--min-image`` / ``--max-image`` bound the numeric portion of the image
+name (the first digit run in the basename, so ``--min-image N1454725799``
+and ``--min-image 1454725799`` are equivalent); both bounds are inclusive
+and either may be given alone. The same inputs always produce the same
 numbers and the same charts.
+
+Three options control drill-down output:
+
+- ``--top-n N`` makes each categorical section (failure reasons, failure
+  taxonomy, ensemble exclusions, suspect offsets) list up to N example
+  image names per category, caps the suspect-offset and worst-BOTSIM-pair
+  tables at N rows, and lists the N slowest images.
+- ``--filelists`` writes one plain-text file per category (one image name
+  per line, the full list rather than the top N) into the ``filelists/``
+  subdirectory of the output directory, ready to feed back into re-runs
+  and triage scripts.
+- ``--csv`` writes ``images.csv`` next to ``report.md``: one row per image
+  with every ``images`` column plus per-image technique and feature-source
+  counts, for pandas or spreadsheet analysis.
 
 The report contains:
 
 - **Success / failure counts** with a breakdown of failure reasons.
+- **Failure taxonomy by image content** — failed images classified from
+  their recorded feature inventory (``stars-only``, ``single-body``,
+  ``multi-body``, ``rings-only``, ``body+rings``, ``no-features``), with a
+  per-category failure-reason breakdown and a per-body table of how often
+  each named body appears in failed versus successful images (a body with
+  a high failure share points at a modeling problem for that body).
 - **Technique usage** — runs, non-spurious runs, and mean confidence per
   technique.
 - **Model and source usage** — which bodies, rings, and star catalogs
@@ -260,7 +303,23 @@ The report contains:
   reliability gate.
 - **Offset statistics** — mean, median, standard deviation, minimum, and
   maximum of the fused V and U offsets over successful images, with
-  histograms.
+  histograms, plus the same statistics grouped by (instrument, image size).
+- **Suspect offsets** — successful images whose fused offset reaches at
+  least ``--suspect-fraction`` (default 0.9) of the instrument's per-axis
+  maximum expected pointing offset (the configured ``extfov_margin_vu``
+  search margin; for Cassini ISS the NAC/WAC margin chosen from the image
+  name) on either axis. An offset pinned near the search boundary may be a
+  correlation artifact, so these images deserve operator review. When a
+  limit cannot be resolved for an image (unknown instrument, no recorded
+  image shape), the report says so rather than silently skipping it.
+- **BOTSIM pair consistency (Cassini ISS)** — BOTSIM observations shutter
+  the NAC and WAC simultaneously and the image names share one
+  spacecraft-clock count. One WAC pixel is ten NAC pixels, so a consistent
+  pair satisfies NAC offset = 10 x WAC offset per axis; the section reports
+  the count, median, and 95th percentile of the ``NAC - 10 x WAC``
+  residuals over pairs where both frames navigated successfully, and (with
+  ``--top-n``) the worst pairs. This is an end-to-end accuracy check that
+  needs no ground truth.
 - **Cross-technique agreement** — for every technique pair, the median and
   95th-percentile Euclidean distance between their offsets on images where
   both produced non-spurious results.
@@ -273,3 +332,7 @@ The report contains:
   tier.
 - **Ensemble outlier exclusions** — how often the ensemble excluded a
   technique from the consensus, and which techniques.
+- **Run-time statistics** — minimum, maximum, mean, median, standard
+  deviation, and total of the per-image wall-clock run times, a run-time
+  histogram, and (with ``--top-n``) the slowest images. The section is
+  omitted when no ingested document carries timing data.
