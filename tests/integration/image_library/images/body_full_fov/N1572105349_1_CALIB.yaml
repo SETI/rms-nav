@@ -1,70 +1,51 @@
 schema_version: 1
+# COISS | VGISS | GOSSI | NHLORRI
+mission: COISS
+# NAC | WAC | SSI | NA | WA | LORRI
+camera: NAC
 image_id: N1572105349_1_CALIB
-mission: COISS            # COISS | VGISS | GOSSI | NHLORRI
-camera: NAC              # NAC | WAC | SSI | NA | WA | LORRI
-filter_combo: 'CL1+IR1'          # canonicalized: filters sorted, '+'-joined
+image_datetime_utc: '2007-10-26T15:20:21.964'
+exposure_time_sec: 0.1800
+# canonicalized: filters sorted, '+'-joined
+filter_combo: 'CL1+IR1'
 image_url: 'pds3://calibrated/COISS_2xxx/COISS_2038/data/1572094226_1572114418/N1572105349_1_CALIB.IMG'
 
+# First tag is the primary class; must match the directory the
+# sidecar lives in.
 scene_tags:
-  - body_full_fov                      # First tag is the primary class;
-                                       # must match the directory the
-                                       # sidecar lives in.
+  - body_full_fov
 
 ground_truth:
-  offset_dv_px: 8.6806
-  offset_du_px: -17.3740
-  offset_uncertainty_px: 1.0           # 1sigma marginal; tighten
-                                       # for bright stars / sharp limbs.
+  offset_dv_px: 8.6800
+  offset_du_px: -17.3700
+  # 1sigma marginal; tighten for bright stars / sharp limbs.
+  offset_uncertainty_px: 1.0
   source: operator_verified
   operator: rfrench
-  verified_date: 2026-04-29
-  ui_version: 'spindoctor 0.1.dev25'
+  verified_date: 2026-07-13
+  ui_version: 'spindoctor 0.1.dev63'
   notes: |
-    Full-body view of Dione in the center.  Mostly lit with sliver
-    of terminator in upper left.  Predicted diameter 155 px,
-    overflow 0.0, visible-lit fraction 0.97 — textbook
-    body-fills-FOV scenario.
+    Regular body filling the FOV, navigable via its limb and disc.
+    Phase D reconciliation (2026-07-13): the sidecar previously expected
+    status failed - a stale label from an era when only the disc
+    correlator ran and could not close the frame. It is in fact
+    navigable (BodyLimbNav lands on this offset at (8.94, -17.36)), so
+    the operator re-verified and re-saved with fresh ground truth and
+    expected success.
 
-    Phase-5 status: BodyDiscCorrelateNav converges to (9.17, -17.01),
-    within 0.5 px of the operator's ground truth.  But the technique
-    flags itself spurious=True because the pyramid wrapper's
-    ``consistency`` (2.78 px disagreement between coarse and fine
-    pyramid levels in the auto-gradient pass) exceeds the
-    consistency_tol=2.0 threshold.  Gradient-mode picks a strong
-    peak (quality 19.96) but the pyramid drift trips the spurious
-    detector even though the final offset is correct.
-
-    BodyLimbNav does NOT run because the reliability gate drops the
-    LIMB_ARC feature.  The limb-reliability formula carries a
-    ``-0.7 * mean_incidence_factor`` term where the incidence-factor
-    cap is 4.76; on a fully-lit body the limb vertices live near
-    80-90 deg incidence and the penalty saturates, dragging
-    reliability to ~0.14, below the LIMB_ARC gate threshold (0.30).
-    The textbook full-disc body's limb is rejected before BodyLimbNav
-    can consume it.
-
-    Phase 6 / Phase 10 follow-ups:
-
-    1. Recalibrate the LIMB_ARC reliability formula so a fully-lit
-       limb does not saturate the incidence-factor penalty.
-       Candidates: lower the alpha on incidence_factor, replace the
-       penalty with a per-vertex sigma_normal-weighted average that
-       already encodes the photometric softness, or move the
-       incidence-factor consideration entirely into sigma_normal_px
-       (where it already lives) and drop it from reliability.
-    2. Loosen ``consistency_tol`` for BodyDiscCorrelateNav (or apply
-       it only when the auto-gradient picker swapped modes between
-       pyramid levels), so a strong, consistent gradient-mode peak
-       on a fully-in-FOV body does not get rejected for sub-3-px
-       coarse-vs-fine drift.
-
-    Today's behavior: status=failed (every technique spurious),
-    primary_technique=BodyDiscCorrelateNav (only technique that ran,
-    flagged spurious).
+    Known caveat (issue #222): on current main the pass-2 single-inlier
+    StarRefine, seeded from the disc/limb consensus, sits ~2 px off and
+    pulls the fused answer to (9.77, -15.97) - about 1.8 px from this
+    ground truth - while still reporting a high tier. The fused offset
+    therefore stays outside slack until #222 is fixed; the underlying
+    body fix (disc + limb) is correct.
 
 expected:
-  status: failed
-  confidence_tier: failed
-  primary_technique: BodyDiscCorrelateNav  # e.g. BodyLimbNav
-  techniques_must_run: [BodyDiscCorrelateNav]
-  techniques_must_skip: [BodyLimbNav, BodyTerminatorNav]
+  # success | failed | conflicted
+  status: success
+  # high | medium | low | failed
+  confidence_tier: medium
+  # e.g. BodyLimbNav
+  primary_technique: BodyLimbNav
+  techniques_must_run: []
+  techniques_must_skip: []
