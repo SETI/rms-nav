@@ -12,8 +12,8 @@ each critical-report finding mapped to the workstream(s) that retire it.*
 phase-10 hardening are merged); this plan is *calibration and validation*, not
 architecture change, so the validation effort targets stable code. The open
 phase-10 content — the curated image library, the confidence calibration, and the
-body-shape table — is exactly the WS-3/WS-5 territory below, sequenced against
-`plans/ROADMAP.md` sub-stream 1B. There is **no fixed accuracy specification** —
+body-shape table — is exactly the WS-3/WS-5 territory below, sequenced by `plans/PROGRAM_PLAN.md`
+Track A. There is **no fixed accuracy specification** —
 the goal is to characterize the best accuracy the system actually achieves,
 honestly and with its uncertainty, not to clear a numeric bar.
 
@@ -48,19 +48,27 @@ honestly and with its uncertainty, not to clear a numeric bar.
 
 ---
 
-## Relationship to `plans/ROADMAP.md`
+## Relationship to `plans/PROGRAM_PLAN.md`
 
-`plans/ROADMAP.md` is the ordered plan of record across all open GitHub issues,
-organized as a Cassini-first pipeline build-out. This plan is its companion for
-the validation and calibration program: ROADMAP says *when* the calibration and
-library work runs (sub-stream 1B, then 2E for the other instruments); this plan
+`plans/PROGRAM_PLAN.md` is the top-level plan of record across all remaining
+work. This plan is its Track A detail layer: PROGRAM_PLAN says *when* the
+validation and calibration work runs relative to everything else; this plan
 says *how* and defines what "validated" and "calibrated" mean. Where the two
-overlap, the methodology here is authoritative and the issue ordering there is
-authoritative.
+overlap, the methodology here is binding and the cross-track ordering there is
+binding.
+
+**Status note (2026-07-12).** Complete and out of the workstream list: WS-11
+(degenerate-rotation reporting) and WS-14 (provenance) shipped in PR #200;
+WS-5's interim half shipped in PR #208 — the confidence formulas and tier
+boundaries are now *sim-anchored* (fitted against simulated planted-truth
+recovery by the `util/calibration/` tooling), with `confidence_provisional`
+still true pending the real-anchored pass (#230). WS-6's honesty half (docs no
+longer overclaim) is done; the capability matrix remains (#231). Every
+still-open workstream now has a tracking issue (cross-map below).
 
 **Two shared decisions, declared once:**
 
-- **Confidence-calibration methodology (binding for #173).** Confidence is
+- **Confidence-calibration methodology (binding for #230, formerly #173).** Confidence is
   calibrated per WS-5: per-technique reliability diagrams against measured error
   anchors (WS-1 per-technique covariance where identifiable, pairwise combined
   covariance elsewhere, WS-2 sim recovery error where no multi-object cohort
@@ -69,10 +77,10 @@ authoritative.
   tiers are plausibility cross-checks and regression expectations, never fit
   targets.
 - **Library-size target (binding for #172 and WS-3).** One library, two stages:
-  the 49-image curated library (#172, playbook `plans/PHASE10_CURATION.md`) is
+  the 47-image curated library (#172, workflow `plans/COHORT_CURATION_PLAN.md`) is
   the first stage — it seeds regression baselines and the initial calibration
   cohort; WS-3 then grows the same library to >=20 images per instrument, >=120
-  total, which is the size the WS-1 agreement study needs. The 49-image stage is
+  total, which is the size the WS-1 agreement study needs. The 47-image stage is
   a milestone inside the WS-3 target, not a competing number.
 
 **Workstream-to-issue cross-map** (issues carry the trackable work; workstreams
@@ -80,21 +88,25 @@ carry the methodology and acceptance criteria):
 
 | Workstream | GitHub issue(s) | Note |
 |---|---|---|
-| WS-0 / WS-1 / WS-1b / WS-2 / WS-17 | none yet | The validation program itself; file issues when scheduled. ROADMAP's 1C (#35) reports statistics from metadata and consumes WS-1's per-frame disagreement metric; it is not the agreement study. |
-| WS-3 | #172, #174 | 49-image stage first, then the >=120 target above; discovery/review workflow in `plans/COHORT_CURATION_PLAN.md`. |
-| WS-4 | none yet | CI integration tiers. |
-| WS-5 | #173, #176 | #176 (constants into config) lands before calibration writes coefficients. |
-| WS-6 | none yet | Capability matrix. |
+| WS-0 | #224 | Estimator identifiability + bias-independence. |
+| WS-1 | #225 | The agreement study. The merged statistics system (#35) reports metadata statistics and consumes WS-1's per-frame disagreement metric; it is not the agreement study. |
+| WS-1b | #226 | Reprojection consistency. |
+| WS-2 | #227 (+ #223, #153, #84) | Sim de-circularization + realism. |
+| WS-17 | #228 | Distortion validation. |
+| WS-3 | #172, #174, #235 | 47-image stage first (#172), then the >=120 growth target (#235); discovery/review workflow in `plans/COHORT_CURATION_PLAN.md`. |
+| WS-4 | #229 | CI integration tiers. |
+| WS-5 | #230 (sim-anchored half done via #173/PR #208), #176 | Real-anchored recalibration once WS-1 anchors exist. |
+| WS-6 | #231 | Capability matrix (docs-honesty half already done). |
 | WS-7 | #60 | Titan: implement or scope out. |
-| WS-8 | #53, #67, #34 | PDS4 input + bundle generalization. |
-| WS-9 | #130, #176 | Constants and measured star SNR. |
+| WS-8 | #53, #67 | Output bundles for all four instruments (required). PDS4 input (#34) is availability-contingent and not required for completion. |
+| WS-9 | #233, #130, #176 | Measured star SNR + sensitivity tests (#233); constants inventory (#176); limiting magnitudes (#130). |
 | WS-10 | #150, #128 | Limb bias root cause and redesign. |
-| WS-11 | none yet | Degenerate-rotation reporting. |
+| WS-11 | done (PR #200) | Degenerate-rotation reporting. |
 | WS-12 | #93 | Instrument appendices. |
-| WS-13 | #153 | I/F realism ties into the sim calibration test layer. |
-| WS-14 | none yet | Remaining provenance fields (see WS-14 scope). |
-| WS-15 | #103, #134, #126 | Thread safety and performance. |
-| WS-18 | #28, #66 (partial) | End-product accuracy checks. |
+| WS-13 | #234 (+ #153) | Detector-noise model for the I/F render path. |
+| WS-14 | done (PR #200) | Provenance block complete. |
+| WS-15 | #236, #103, #134, #126 | Thread safety, profiling, batch-parallel throughput. |
+| WS-18 | #232 (+ #28, #66 partial) | End-product accuracy checks. |
 
 ---
 
@@ -623,12 +635,12 @@ trusted.
 
 ### WS-3: Expand the real-image regression cohort
 **Closes:** "real-image regression rests on ~13 hand-blessed images."
-**Tracked by:** #172 (the 49-image first stage; playbook
-`plans/PHASE10_CURATION.md`) and #174 (integration tests + baselines); this
-workstream then carries the growth beyond that stage.
+**Tracked by:** #172 (the 47-image first stage; workflow
+`plans/COHORT_CURATION_PLAN.md`) and #174 (integration tests + baselines);
+the growth beyond that stage is #235.
 
 **Tasks.**
-- Complete the 49-image curated stage (#172), then grow
+- Complete the 47-image curated stage (#172), then grow
  `tests/integration/image_library/` to the target of **≥20 per instrument, ≥120
  total** — the size the WS-1 agreement study needs — spanning the geometry
  taxonomy already present (full-FOV body, partial overflow, below-resolution,
@@ -641,7 +653,7 @@ workstream then carries the growth beyond that stage.
  system fails cleanly with the right status reason.
 
 **Acceptance criteria.**
-- Cohort size and per-category coverage meet the documented targets (49-image
+- Cohort size and per-category coverage meet the documented targets (47-image
  stage first, then ≥20 per instrument / ≥120 total).
 - `README.md` documents schema + curation + blessing + provenance; every sidecar
  records its ground-truth source.
@@ -694,8 +706,9 @@ provisioning in CI is the hard part; a cached fixture bundle is the mitigation.
 
 ### WS-5: Calibrate (or quarantine) confidence and tiers
 **Closes:** "ships a confidence it admits is meaningless."
-**Tracked by:** #173 (the calibration itself — this workstream defines its
-methodology, binding per the ROADMAP-relationship section above) and #176
+**Tracked by:** #230 (the real-anchored calibration — this workstream defines
+its methodology, binding per the relationship section above; the sim-anchored
+interim landed via #173 / PR #208) and #176
 (constants into config, which lands before calibration writes coefficients).
 The curated library's operator-assigned `confidence_tier` labels serve as
 plausibility cross-checks and regression expectations for the calibrated
@@ -813,28 +826,46 @@ or Titan is unambiguously documented as not-supported and handled gracefully.
 
 **Dependencies:** WS-1 if implementing. **Risk:** high if building (haze physics is genuinely hard).
 
-### WS-8: PDS4 — finish input and generalize bundle generation
+### WS-8: PDS4 — generalize output bundle generation (input is separate and external-dependent)
 **Closes:** "PDS4 is largely fictional."
-**Tracked by:** #53 (bundle generator parent), #67 (cloud-aware bundles), #34
-(PDS4 Cassini input when the archive is available).
+**Tracked by:** #53 (bundle generator parent — output bundles, required for all
+four instruments), #67 (cloud-aware bundles), #34 (PDS4 input — availability-
+contingent, not required for completion).
 
-**Problem.** `dataset_pds4.py` raises "not yet implemented" for all methods (no
-PDS4 input); `pds4_*` bundle hooks raise `NotImplementedError` for Voyager,
-Galileo, NH.
+**Scope split (binding).** PDS4 *output* (bundle generation) and PDS4 *input*
+(reading PDS4-archived data as a dataset source) are different deliverables.
+Output bundles are **mandatory for all four instruments**. Input is treated
+like any other future instrument: no PDS4 archive of these datasets exists
+yet, producing one is external development outside this project's control,
+and input support is **not required for project completion** — when an
+archive becomes available, implementing its `DataSetPDS4` replaces the PDS3
+source for that instrument.
 
-**Tasks (scope per release decision):**
-- **PDS4 input:** implement `DataSetPDS4` enumeration/reading, or remove the
- `*_pds4` dataset names from the user-facing list until implemented.
-- **Bundle generalization:** implement `pds4_*` hooks (template dir, LID/LIDVID,
- template variables) for Voyager/Galileo/NH using `DataSetPDS3CassiniISS` as the
- reference, with per-mission template trees under `src/pds4/templates/`; or
- document bundle generation as Cassini-only in the capability matrix.
+**Problem.** No instrument's bundle output works today: the Cassini path is
+partially implemented (hook pattern and collection machinery exist) but has
+no final templates, no tests, and no schema validation; the `pds4_*` bundle
+hooks raise `NotImplementedError` for Voyager, Galileo, NH.
+`dataset_pds4.py` (input) raises "not yet implemented" for all methods,
+correctly, since no input archive exists to read.
+
+**Tasks:**
+- **Finish and validate the Cassini path (required):** final templates,
+ tests, and schema validation for the partially implemented reference
+ implementation.
+- **Bundle generalization (required):** implement `pds4_*` hooks (template
+ dir, LID/LIDVID, template variables) for Voyager/Galileo/NH using the
+ completed Cassini path as the reference, with per-mission template trees.
 - Add bundle-validation tests (schema-validate generated `.lblx` against PDS4
- schemas) per supported instrument.
+ schemas) for all four instruments.
+- **PDS4 input (deferred until archives exist):** implement `DataSetPDS4`
+ enumeration/reading per instrument as each external archive appears (#34);
+ until then the capability matrix lists input as pending external archive
+ availability.
 
-**Acceptance criteria.** Every instrument's PDS4 status in the capability matrix
-matches reality; for each "supported" instrument, generated bundles pass PDS4
-schema validation in CI.
+**Acceptance criteria.** Generated bundles pass PDS4 schema validation in CI
+for all four instruments; the capability matrix records PDS4 input as pending
+external archive availability (or supported, once an archive exists and is
+implemented).
 
 **Dependencies:** WS-6. **Risk:** medium.
 
@@ -1094,7 +1125,7 @@ common-mode/identifiability/bias caveats together are the honest result.
 | 4 | Ships uncalibrated confidence/tiers | WS-5 | calibrated where per-technique covariance exists, sim-anchored elsewhere (basis recorded per value); reliability diagram; interim provisional label |
 | 5 | Mid-rewrite; docs ≠ code; vapor; dead config | WS-6 | test-verified capability matrix; docs/config reconciled |
 | 6a | Titan is a no-op | WS-7 | implemented+validated, or scoped-out + graceful |
-| 6b | PDS4 input absent; bundles Cassini-only | WS-8 | matrix matches code; bundles schema-validate per supported inst |
+| 6b | PDS4 input absent; bundles Cassini-only | WS-8 | bundles schema-validate for all four instruments; input recorded as pending external archive availability |
 | 6c | Empty instrument appendices | WS-12 | all four appendices written |
 | 7a | Covariance shaped by magic constants | WS-9 | each constant derived + sensitivity-bounded |
 | 7b | Star SNR fabricated from magnitude | WS-9 | measured-photometry SNR; covariance coverage passes |
@@ -1199,9 +1230,11 @@ report, none silently assumed):**
 - (Within-bin stationarity, covered above, is the broad limiter — it constrains the
  *pairwise* fallback too, which is *less* assumption-laden than the separation but
  not assumption-free.)
-- Scope decisions (Titan build vs scope-out; PDS4 breadth) should be made at the
- WS-6/WS-7/WS-8 decision gates before committing build effort; the plan supports
- either branch and the matrix keeps the docs honest regardless.
+- The Titan scope decision (build vs scope-out) should be made at the
+ WS-6/WS-7 decision gates before committing build effort; the plan supports
+ either branch and the matrix keeps the docs honest regardless. PDS4 output
+ bundles are required for all four instruments (WS-8); only PDS4 *input* is
+ external-dependent and out of the completion scope.
 - **Validation can come back bad.** There is no fixed accuracy spec to pass (goal is
  best-achievable, honestly characterized), so a poor result is not a go/no-go gate
  — but it is not merely reported either: a worse-than-hoped σ routes into the
