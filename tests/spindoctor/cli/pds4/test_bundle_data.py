@@ -423,13 +423,20 @@ def test_cassini_relative_template_dir_override_resolves_under_templates(
 
 
 def test_voyager_pds4_hooks_not_implemented(tmp_path: Path) -> None:
-    """The Voyager dataset's per-image PDS4 hooks are NotImplementedError walls."""
+    """The Voyager dataset's per-image PDS4 hooks are NotImplementedError walls.
+
+    The base-class walls raise a bare NotImplementedError, so the assertions
+    pin the empty message: a messaged NotImplementedError escaping from deeper
+    code would fail them.
+    """
     dataset = DataSetPDS3VoyagerISS(tmp_path / 'holdings')
     image_file = make_image_file('C1234567')
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(NotImplementedError) as stub_exc:
         dataset.pds4_path_stub(image_file)
-    with pytest.raises(NotImplementedError):
+    assert str(stub_exc.value) == ''
+    with pytest.raises(NotImplementedError) as lidvid_exc:
         dataset.pds4_image_name_to_data_lidvid('C1234567')
+    assert str(lidvid_exc.value) == ''
 
 
 # ---------------------------------------------------------------------------
