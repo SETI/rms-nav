@@ -161,6 +161,15 @@ design document, not code.
   items.
 - **#239** — implement whichever sub-5 px body policy the operator picks
   (see PROGRAM_PLAN decision gates).
+- **#254** — a fully dark body emits a BODY_BLOB where the body-model
+  dev guide says "otherwise nothing"; the two spec sources disagree
+  (the module docstring gates blobs on diameter alone). Resolve by
+  gating blob emission on a non-empty lit mask or by softening the dev
+  guide. Navigation-affecting: sequence behind the operator's Phase D
+  evaluation of current main, like every ensemble/model change.
+  Pipeline impact is likely nil today (the blob's reliability ~0.02 is
+  culled by the 0.20 gate); pinned by a non-strict xfail in
+  `tests/spindoctor/nav_model/test_nav_model_body_render.py`.
 
 ## Track C — Statistics and QA
 
@@ -202,21 +211,40 @@ plus hook implementations, mechanical but voluminous.
 
 Work items, in dependency order:
 
-1. **#139** (Essential) — the global-index
-   LID is malformed (missing `urn:nasa:pds:` prefix, wrong image part):
-  `src/spindoctor/cli/pds4/collections.py`. Fix with a label-round-trip
-   test.
-2. **#69, #30** — backplane FITS description in data labels; backplane
+1. **#139 and #256** (Essential, interacting — fix together) — the
+   global-index LID is malformed (missing `urn:nasa:pds:` prefix, wrong
+   image part), and the collection inventory LIDVIDs double-transform
+   the image name (the on-disk name is already LID-part form, then the
+   LID builder re-applies the Cassini rotate-first-char transform):
+   `src/spindoctor/cli/pds4/collections.py`. The #139 fix direction
+   (route through the dataset LID builder) hits the #256 double
+   transform, so land them as one change. Label-round-trip regression
+   tests already exist as strict xfails in
+   `tests/spindoctor/cli/pds4/test_collections.py` — flip them.
+   #256 also records two characterized defects to resolve in the same
+   area: every `template.write` ignores pdstemplate's error/warning
+   counts (an unresolved variable silently drops the label while the
+   run reports success), and the dev-guide "Output layout" section
+   describes a layout neither the code nor the user guide matches.
+2. **Template finalization acceptance list** — the ten items recorded
+   on #53 (2026-07-13 comment): schema validation, the unreferenced
+   `cassini:*` variables and hardcoded placeholders, TITLE/DESCRIPTION
+   wording, collection date ranges, unrendered bundle-level products,
+   variable-less global-index labels, FITS placement (#69/#30),
+   missing-value sentinels, non-navigated-image handling, and the
+   `.tab`/`.csv` + directory-layout decision. These are the acceptance
+   criteria for "final templates" in the paragraph above.
+3. **#69, #30** — backplane FITS description in data labels; backplane
    label design (couples to the #55 backplane-set decision).
-3. **#79** — scrape PDS4 context products for targets (feeds #73).
-4. **#71-#76, #47** — label/collection completeness items, each small:
+4. **#79** — scrape PDS4 context products for targets (feeds #73).
+5. **#71-#76, #47** — label/collection completeness items, each small:
    parameterized bundle name/version, target handling, ring geometry
    class fields, global-index labels, collection CSVs, ring incidence
    angle.
-5. **#66** — integrity-checking pass over a generated bundle.
-6. **#67** — cloud-aware bundle generation (with the Track D cloud
+6. **#66** — integrity-checking pass over a generated bundle.
+7. **#67** — cloud-aware bundle generation (with the Track D cloud
    audit).
-7. Schema-validate generated `.lblx` against the PDS4 schemas in CI for
+8. Schema-validate generated `.lblx` against the PDS4 schemas in CI for
    all four instruments (acceptance for the whole family).
 
 ### Backplane family (decision: #28 scope)
@@ -226,6 +254,21 @@ decisions that gate #54 (cropping), #77 (optional args), and #63 (bodies far fro
 planets). The generator machinery exists
 (`src/spindoctor/cli/backplanes/`); tests are Track E #241. End-product
 value correctness is Track A #232.
+
+Product-correctness defects found by the #241 test suite, each pinned
+by a strict xfail in `tests/spindoctor/cli/backplanes/`:
+
+- **#251** — ring-won pixels carry no BODY_ID_MAP entry, so a
+  rings-only image ships no ID map at all and viewer masking treats
+  ring pixels as invalid. Needs an ID-source decision first (the dev
+  guide's `bodn2c('SATURN_RINGS')` suggestion raises).
+- **#252** — an occluding ring never takes ownership of body planes or
+  the ID map, against the dev guide's nearest-source rule; plausibly
+  intentional (translucent rings), so this is a code-or-doc decision.
+- **#253** — the FITS sidecar lacks dev-guide-promised content
+  (per-plane mean and valid-pixel count, per-body NAIF IDs and
+  bounding boxes, an observation metadata block); couples to the
+  #55/#57 decisions.
 
 ### CK kernels (#188, prerequisite #50)
 
@@ -273,9 +316,12 @@ asserts the generated half matches the registries.
 ## Track E — Test and documentation debt
 
 - **#241 / #242** — unit tests for `spindoctor.cli.backplanes` and
-  `spindoctor.cli.pds4` (zero today). Mock the navigation inputs with
-  fixture metadata; test arg parsing, product layout, error paths, LID
-  construction. Do these before Track D's PDS4/backplane build-out.
+  `spindoctor.cli.pds4`. The backend halves are delivered by PRs #255
+  and #257 (99% coverage of both packages; hermetic, spec-first); the
+  remaining scope is the `sd_backplanes.py` / `sd_create_bundle.py`
+  driver arg-parsing layer, which should fold into the broader
+  sd_*-driver test effort. The suites found and pinned #251, #252,
+  #253, #256 (strict xfails ready to flip when each fix lands).
 - **#243** — direct tests for `nav_model/stars/conflicts.py`
   (`_check_one_star`, `mark_body_and_ring_conflicts`) with synthetic
   geometry; the existing per-pixel occlusion tests cover only the
