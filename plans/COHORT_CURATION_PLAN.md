@@ -211,9 +211,9 @@ batch per PR keeps the vote-to-merge mapping clean).
 **Stage E — baselines and consumption.** After sidecar PRs merge, seed
 regression baselines (`python -m tests.integration.update_baselines`), then
 hand off per consumer: calibration diagnostics collection for the
-real-anchored confidence recalibration (#230; the interim sim-anchored pass
-landed via #173 — reliability diagrams against measured error anchors, never
-tier-midpoint fitting), agreement-study runs per WS-1's harness plan (#225),
+real-anchored confidence recalibration (#230 — reliability diagrams
+against measured error anchors, never tier-midpoint fitting; the
+sim-anchored interim pass is done), agreement-study runs per WS-1's harness plan (#225),
 plate solves on the star-field cohort for distortion validation (#228). CI stays tiered per WS-4's
 "Library consumers and CI tiers" note: the full library and all offline
 analyses never run per-PR.
