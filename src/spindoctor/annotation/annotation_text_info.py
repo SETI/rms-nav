@@ -210,6 +210,7 @@ class AnnotationTextInfo:
         # with existing text or the avoid mask. If it doesn't conflict, put the text
         # (and optionally, arrow) and quit. This gives priority to the positions
         # earliest in the list.
+        placed = False
         for text_pos, text_v, text_u in self.text_loc:
             text_v = text_v + ext_offset_v
             text_u = text_u + ext_offset_u
@@ -371,10 +372,8 @@ class AnnotationTextInfo:
             if ann_num_mask is not None:
                 ann_num_mask[v0_margin:v1_margin, u0_margin:u1_margin] = ann_num + 1
 
+            placed = True
             if not show_all_positions:
                 break
-        else:
-            if not show_all_positions:
-                return False
 
-        return True
+        return placed

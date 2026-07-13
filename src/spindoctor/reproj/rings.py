@@ -956,10 +956,12 @@ class RingMosaic:
 
         bp_radius = bp.ring_radius(ring_body_name)
         bp_longitude = bp.ring_longitude(ring_body_name)
-        min_bp_radius = bp_radius.min()
-        max_bp_radius = bp_radius.max()
-        min_bp_longitude = bp_longitude.min()
-        max_bp_longitude = bp_longitude.max()
+        # builtins=True: a polymath Scalar comparison result cannot index a
+        # numpy array, so force plain floats here.
+        min_bp_radius = bp_radius.min(builtins=True)
+        max_bp_radius = bp_radius.max(builtins=True)
+        min_bp_longitude = bp_longitude.min(builtins=True)
+        max_bp_longitude = bp_longitude.max(builtins=True)
 
         goodr = (radii >= min_bp_radius) & (radii <= max_bp_radius)
         goodl = (longitudes >= min_bp_longitude) & (longitudes <= max_bp_longitude)
@@ -1150,6 +1152,9 @@ class RingMosaic:
                 limit=(end_u + 0.5, end_v + 0.5),
                 swap=True,
             )
+            # Every backplane product below is region-shaped; crop the data to
+            # match so masks and the region-relative pixel indices stay aligned.
+            data = data[start_v : end_v + 1, start_u : end_u + 1]
 
         bp = oops.backplane.Backplane(obs, meshgrid)
 

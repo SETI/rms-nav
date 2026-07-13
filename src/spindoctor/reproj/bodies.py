@@ -14,6 +14,7 @@ import numpy.ma as ma
 import oops
 import polymath
 from scipy.ndimage import maximum_filter
+from scipy.ndimage import zoom as ndimage_zoom
 
 from spindoctor.config import IMAGE_LOGGER
 from spindoctor.reproj._serialization import (
@@ -1122,7 +1123,15 @@ class BodyMosaic:
 
         if not mask_only:
             ok_body_mask_inv = np.logical_or(ok_body_mask_inv, ma.getmaskarray(bp_phase))
-            ok_body_mask_inv = np.logical_or(ok_body_mask_inv, zero_mask)
+            if zero_mask.shape == ok_body_mask_inv.shape:
+                ok_body_mask_inv = np.logical_or(ok_body_mask_inv, zero_mask)
+            else:
+                # Full-frame backplane with a subimage crop: embed the
+                # subimage-shaped zero mask; everything outside the subimage
+                # has no data and is invalid.
+                zero_mask_full = np.ones(ok_body_mask_inv.shape, dtype=np.bool_)
+                zero_mask_full[v_min : v_max + 1, u_min : u_max + 1] = zero_mask
+                ok_body_mask_inv = np.logical_or(ok_body_mask_inv, zero_mask_full)
 
         ok_body_mask = np.logical_not(ok_body_mask_inv)
 
@@ -1206,8 +1215,13 @@ class BodyMosaic:
         goodvmask = np.logical_and(v_pixels >= v_min, v_pixels <= v_max)
         goodmask = goodumask & goodvmask & ~pixmask
 
-        good_u = (u_pixels[goodmask] - u_min).astype('int')
-        good_v = (v_pixels[goodmask] - v_min).astype('int')
+        # Keep the fractional pixel positions: integer indices serve the mask
+        # and backplane lookups, while the fractions drive sub-pixel sampling
+        # when zoom > 1.
+        good_u_frac = u_pixels[goodmask] - u_min
+        good_v_frac = v_pixels[goodmask] - v_min
+        good_u = good_u_frac.astype('int')
+        good_v = good_v_frac.astype('int')
         good_lat = lat_bins[goodmask]
         good_lon = lon_bins[goodmask]
 
@@ -1252,6 +1266,8 @@ class BodyMosaic:
         goodmask2 = subimg[good_v, good_u] != 0.0
         good_u = good_u[goodmask2]
         good_v = good_v[goodmask2]
+        good_u_frac = good_u_frac[goodmask2]
+        good_v_frac = good_v_frac[goodmask2]
         good_lat = good_lat[goodmask2]
         good_lon = good_lon[goodmask2]
 
@@ -1267,6 +1283,8 @@ class BodyMosaic:
             ok_on_detector = ok_body_mask[good_v + v_min, good_u + u_min]
         good_u = good_u[ok_on_detector]
         good_v = good_v[ok_on_detector]
+        good_u_frac = good_u_frac[ok_on_detector]
+        good_v_frac = good_v_frac[ok_on_detector]
         good_lat = good_lat[ok_on_detector]
         good_lon = good_lon[ok_on_detector]
 
@@ -1280,10 +1298,19 @@ class BodyMosaic:
 
         # Zoom for interpolation (always copy when zoom==1: ``subimg`` may alias
         # ``obs.data``, which can be read-only mmap, and we must not mutate the obs.)
+        # The zoomed image must be interpolated, not block-replicated: sampling
+        # it at the fractional pixel positions is what gives zoom > 1 its
+        # documented sub-pixel meaning.
         if self._zoom == 1:
             zoom_data = np.array(subimg, copy=True)
         else:
-            zoom_data = array_zoom(subimg, (self._zoom, self._zoom))
+            zoom_data = ndimage_zoom(
+                np.asarray(subimg, dtype=np.float64),
+                self._zoom,
+                order=1,
+                mode='nearest',
+                grid_mode=True,
+            )
             if not zoom_data.flags.writeable:
                 zoom_data = np.array(zoom_data, copy=True)
 
@@ -1295,7 +1322,8 @@ class BodyMosaic:
         zoom_data[bad_data_mask_zoom] = 0.0
 
         interp_data = zoom_data[
-            (good_v * self._zoom).astype('int'), (good_u * self._zoom).astype('int')
+            np.floor(good_v_frac * self._zoom).astype('int'),
+            np.floor(good_u_frac * self._zoom).astype('int'),
         ]
 
         # Apply photometric correction if requested
@@ -1527,12 +1555,13 @@ class BodyMosaic:
         replace_mask = np.logical_and(replace_mask, limits_ok)
 
         if copy_slop > 0:
-            # Expand the replace mask using the slop radius
+            # Expand the replace mask using the slop radius: candidate pixels
+            # within the slop radius of a winning pixel are also copied, as
+            # long as they pass the limits themselves.
             replace_full = np.zeros((self._n_lat, self._n_lon), dtype=np.bool_)
             replace_full[rows, cols] = replace_mask
             replace_full = maximum_filter(replace_full, copy_slop * 2 + 1)
-            replace_mask_2d = replace_full[rows, cols]
-            replace_mask = replace_mask & replace_mask_2d
+            replace_mask = replace_full[rows, cols] & limits_ok
 
         r_rows = rows[replace_mask]
         r_cols = cols[replace_mask]
@@ -1573,10 +1602,19 @@ class BodyMosaic:
         if self._n_lat == 0 or not np.any(self._has_data):
             return None
 
-        lat_min = self._lat_min_bin * self._lat_resolution - math.pi / 2.0
-        lat_max = (self._lat_min_bin + self._n_lat - 1) * self._lat_resolution - math.pi / 2.0
-        lon_min = self._lon_min_bin * self._lon_resolution
-        lon_max = ((self._lon_min_bin + self._n_lon - 1) % self._n_full_lon) * self._lon_resolution
+        # Bounds of the valid data, not of the (possibly larger) internal
+        # buffer: an all-masked contribution can grow the buffer without
+        # adding any data.
+        data_rows = np.flatnonzero(np.any(self._has_data, axis=1))
+        data_cols = np.flatnonzero(np.any(self._has_data, axis=0))
+        lat_min = (self._lat_min_bin + int(data_rows[0])) * self._lat_resolution - math.pi / 2.0
+        lat_max = (self._lat_min_bin + int(data_rows[-1])) * self._lat_resolution - math.pi / 2.0
+        lon_min = (
+            (self._lon_min_bin + int(data_cols[0])) % self._n_full_lon
+        ) * self._lon_resolution
+        lon_max = (
+            (self._lon_min_bin + int(data_cols[-1])) % self._n_full_lon
+        ) * self._lon_resolution
         return (lat_min, lat_max), (lon_min, lon_max)
 
     def to_bounded(

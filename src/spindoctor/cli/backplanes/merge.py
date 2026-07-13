@@ -1,9 +1,27 @@
+import hashlib
 from typing import Any
 
 import cspyce
 import numpy as np
 
 from spindoctor.obs import ObsSnapshot
+
+
+def fake_naif_id(body_name: str) -> int:
+    """Return a deterministic fake NAIF ID for an unknown simulated body.
+
+    The ID is derived from a hashlib digest, not ``hash()``, because str
+    hashing is salted per interpreter run and the ID must be reproducible
+    across processes.
+
+    Parameters:
+        body_name: The (unknown) body name to synthesize an ID for.
+
+    Returns:
+        An int in the range [10000, 30000), stable across processes.
+    """
+    digest = hashlib.sha256(str(body_name).encode('utf-8')).digest()
+    return 10000 + (int.from_bytes(digest[:8], 'big') % 20000)
 
 
 def merge_sources_into_master(
@@ -20,7 +38,7 @@ def merge_sources_into_master(
         rings_result: The rings result from create_ring_backplanes (dict keyed by metadata key).
 
     Returns:
-        A tuple containing the master by type, body id map, and merge info.
+        A tuple containing the master arrays by backplane type and the body id map.
     """
 
     height, width = snapshot.data.shape
@@ -49,7 +67,7 @@ def merge_sources_into_master(
         except Exception:
             if snapshot.is_simulated:
                 # Unknown body name; create a deterministic fake NAIF ID in int32 range
-                naif_id = 10000 + (abs(hash(body_name)) % 20000)
+                naif_id = fake_naif_id(body_name)
             else:
                 raise  # This is a real problem
         body_sources.append(
@@ -85,9 +103,10 @@ def merge_sources_into_master(
         for body_source in body_sources:
             body_types.update(body_source['arrays'].keys())
 
-        # 1) Body backplanes: use nearest body among bodies only; rings do not affect these
+        # 1) Body backplanes: use nearest body among bodies only; rings do not affect these.
+        # Unclaimed pixels stay zero (the writer omits all-zero planes).
         for bp_type in sorted(body_types):
-            master = np.full((height, width), np.nan, dtype=np.float32)
+            master = np.zeros((height, width), dtype=np.float32)
             for body_idx, body_source in enumerate(body_sources):
                 arrays = body_source['arrays']
                 masks = body_source['masks']
@@ -117,9 +136,12 @@ def merge_sources_into_master(
         ring_distance: np.ndarray = rings_result['distance']
 
         for bp_type in sorted(ring_arrays.keys()):
+            if bp_type == 'distance':
+                # Merge-ordering input only; never a product backplane HDU
+                continue
             if bp_type not in ring_arrays or bp_type not in ring_masks:
                 raise ValueError(f'Backplane type {bp_type} array or mask not found for rings')
-            master = np.full((height, width), np.nan, dtype=np.float32)
+            master = np.zeros((height, width), dtype=np.float32)
             src_vals = ring_arrays[bp_type]
             src_mask = ring_masks[bp_type]
             # occlusion: if any body is present and nearer than ring, mask out ring

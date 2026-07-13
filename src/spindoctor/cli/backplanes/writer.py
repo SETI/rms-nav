@@ -53,8 +53,11 @@ def write_fits(
         if rp['name'] != 'distance':  # not written as a master backplane type
             units_map[rp['name']] = rp.get('units', '')
 
-    # Filter out zero-only backplanes
-    filtered_master = {k: v for k, v in master_by_type.items() if np.any(v != 0.0)}
+    # Filter out backplanes with no valid pixels (unclaimed pixels are zero;
+    # non-finite values never count as valid)
+    filtered_master = {
+        k: v for k, v in master_by_type.items() if np.any((v != 0.0) & np.isfinite(v))
+    }
 
     for name, arr in filtered_master.items():
         hdu = fits.ImageHDU(data=arr.astype('float32'), name=name.upper())
