@@ -713,8 +713,8 @@ The curated library's operator-assigned `confidence_tier` labels serve as
 plausibility cross-checks and regression expectations for the calibrated
 output; they are never fit targets.
 
-**Problem.** `confidence`/`confidence_tier` are emitted per image but the sigmoid
-coefficients and tiers are uncalibrated defaults
+**Problem.** `confidence`/`confidence_tier` are emitted per image; the sigmoid
+coefficients and tiers are sim-anchored but not yet real-anchored
 (`nav_technique/confidence*.py`, `confidence_config.py`,
 `config_510_techniques.yaml`).
 

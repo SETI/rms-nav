@@ -282,8 +282,9 @@ asserts the generated half matches the registries.
   occlusion-fraction path.
 - **#174** — regression baselines beyond the single frame: seed
   baselines for the full library (`python -m
-  tests.integration.update_baselines --all`) and commit them with the
-  per-image diff accounted for.
+  tests.integration.update_baselines --all`, which requires
+  `PDS3_HOLDINGS_DIR`) and commit them with the per-image diff
+  accounted for.
 - **#177** — unit tests for `spindoctor.support.summary_png`.
 - **#178** — missing dev-guide pages: filters, uncertainty (write
   after #230 makes sigmas load-bearing), troubleshooting.
