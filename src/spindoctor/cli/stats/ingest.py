@@ -100,7 +100,7 @@ def rows_from_metadata(
         'image_path': observation.get('image_path'),
         'image_et': image_et,
         'image_date': date_from_image_et(image_et),
-        'status': str(metadata.get('status', nav.get('status', 'unknown'))),
+        'status': str(metadata.get('status') or nav.get('status') or 'unknown'),
         'status_reason': nav.get('status_reason') or metadata.get('status_error'),
         'offset_dv': _finite_or_none(offset[0]),
         'offset_du': _finite_or_none(offset[1]),
@@ -166,10 +166,9 @@ def rows_from_metadata(
     return image_row, technique_rows, source_rows
 
 
-def _iter_metadata_files(root: str) -> Iterator[FCPath]:
-    """Yield every ``*_metadata.json`` under ``root`` (local path or URL)."""
-    root_path = FCPath(root)
-    yield from root_path.rglob('*_metadata.json')
+def _iter_metadata_files(root: FCPath) -> Iterator[FCPath]:
+    """Yield every ``*_metadata.json`` under ``root``."""
+    yield from root.rglob('*_metadata.json')
 
 
 def ingest_metadata_files(
@@ -177,6 +176,9 @@ def ingest_metadata_files(
     roots: list[str],
 ) -> tuple[int, int]:
     """Ingest every metadata file under the given roots.
+
+    The whole scan runs in a single database transaction, committed on
+    success (per-image commits do not scale to archive-wide runs).
 
     Parameters:
         conn: Open statistics database connection.
@@ -188,21 +190,25 @@ def ingest_metadata_files(
     """
     n_ingested = 0
     n_errors = 0
-    for root in roots:
-        for metadata_path in sorted(_iter_metadata_files(root), key=lambda p: p.as_posix()):
-            source = metadata_path.as_posix()
-            try:
-                local = cast(Path, metadata_path.get_local_path())
-                metadata = json.loads(local.read_text(encoding='utf-8'))
-                image_row, technique_rows, source_rows = rows_from_metadata(
-                    metadata, source_file=source
+    with conn:
+        for root in roots:
+            files = sorted(_iter_metadata_files(FCPath(root)), key=lambda p: p.as_posix())
+            for metadata_path in files:
+                source = metadata_path.as_posix()
+                try:
+                    local = cast(Path, metadata_path.get_local_path())
+                    metadata = json.loads(local.read_text(encoding='utf-8'))
+                    image_row, technique_rows, source_rows = rows_from_metadata(
+                        metadata, source_file=source
+                    )
+                except (OSError, ValueError) as exc:
+                    MAIN_LOGGER.warning('Skipping %s: %s', source, exc)
+                    n_errors += 1
+                    continue
+                upsert_image(
+                    conn, image_row, technique_rows=technique_rows, source_rows=source_rows
                 )
-            except (OSError, ValueError) as exc:
-                MAIN_LOGGER.warning('Skipping %s: %s', source, exc)
-                n_errors += 1
-                continue
-            upsert_image(conn, image_row, technique_rows, source_rows)
-            n_ingested += 1
+                n_ingested += 1
     return n_ingested, n_errors
 
 

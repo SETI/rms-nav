@@ -20,25 +20,44 @@ def _where_clause(
     instrument: str | None,
     start_date: str | None,
     end_date: str | None,
+    alias: str = '',
 ) -> tuple[str, list[str]]:
-    """Build the images-table filter shared by every query."""
+    """Build the images-table filter shared by every query.
+
+    Parameters:
+        instrument: Optional instrument filter value.
+        start_date: Optional inclusive UTC start date (``YYYY-MM-DD``).
+        end_date: Optional inclusive UTC end date (``YYYY-MM-DD``).
+        alias: Table alias prefix (e.g. ``'i.'``) qualifying the column
+            names, for queries that join the ``images`` table.
+
+    Returns:
+        ``(where, params)`` where ``where`` is ``''`` or a leading-space
+        ``' WHERE ...'`` fragment and ``params`` the bound values.
+    """
     clauses: list[str] = []
     params: list[str] = []
-    if instrument:
-        clauses.append('instrument = ?')
+    if instrument is not None:
+        clauses.append(f'{alias}instrument = ?')
         params.append(instrument)
-    if start_date:
-        clauses.append('image_date >= ?')
+    if start_date is not None:
+        clauses.append(f'{alias}image_date >= ?')
         params.append(start_date)
-    if end_date:
-        clauses.append('image_date <= ?')
+    if end_date is not None:
+        clauses.append(f'{alias}image_date <= ?')
         params.append(end_date)
-    if not clauses:
+    if len(clauses) == 0:
         return '', []
     return ' WHERE ' + ' AND '.join(clauses), params
 
 
+def _connector(where: str) -> str:
+    """The keyword joining an extra condition onto a ``_where_clause`` result."""
+    return ' AND ' if len(where) > 0 else ' WHERE '
+
+
 def _rows(conn: sqlite3.Connection, sql: str, params: list[str]) -> list[tuple[Any, ...]]:
+    """Execute a query and return all result rows as a list."""
     return list(conn.execute(sql, params))
 
 
@@ -51,7 +70,7 @@ def _fmt(value: float | None, digits: int = 3) -> str:
 
 def _offset_stats(values: list[float]) -> dict[str, float] | None:
     """Mean / median / stdev / min / max summary of a value list."""
-    if not values:
+    if len(values) == 0:
         return None
     return {
         'mean': statistics.fmean(values),
@@ -67,18 +86,25 @@ def _pairwise_disagreements(
 ) -> tuple[dict[tuple[str, str], list[float]], dict[str, list[float]]]:
     """Cross-technique agreement data.
 
+    Parameters:
+        conn: Open statistics database connection.
+        where: ``_where_clause`` fragment built with ``alias='i.'``.
+        params: Bound values matching ``where``.
+
     Returns:
         ``(per_pair, per_image_rank)`` where ``per_pair`` maps a sorted
         technique-name pair to the Euclidean distances between their offsets
         on images where both produced non-spurious results, and
         ``per_image_rank`` maps each image's ``confidence_rank`` to that
-        image's maximum pairwise disagreement.
+        image's maximum pairwise disagreement.  Images with a NULL
+        ``confidence_rank`` contribute to ``per_pair`` but not to
+        ``per_image_rank``.
     """
     sql = (
         'SELECT t.image_name, i.confidence_rank, t.technique_name, t.offset_dv, t.offset_du '
         'FROM techniques t JOIN images i ON i.image_name = t.image_name'
-        + where.replace('instrument', 'i.instrument').replace('image_date', 'i.image_date')
-        + (' AND ' if where else ' WHERE ')
+        + where
+        + _connector(where)
         + 't.spurious = 0 AND t.offset_dv IS NOT NULL AND t.offset_du IS NOT NULL '
         'ORDER BY t.image_name, t.technique_name'
     )
@@ -88,33 +114,48 @@ def _pairwise_disagreements(
         entries = list(group)
         if len(entries) < 2:
             continue
-        rank = str(entries[0][1])
+        rank = entries[0][1]
         image_max = 0.0
         for a, b in itertools.combinations(entries, 2):
             delta = math.hypot(a[3] - b[3], a[4] - b[4])
             pair = (min(a[2], b[2]), max(a[2], b[2]))
             per_pair.setdefault(pair, []).append(delta)
             image_max = max(image_max, delta)
-        per_image_rank.setdefault(rank, []).append(image_max)
+        if rank is not None:
+            per_image_rank.setdefault(str(rank), []).append(image_max)
     return per_pair, per_image_rank
 
 
 def _percentile(values: list[float], fraction: float) -> float:
-    """Nearest-rank percentile of a non-empty value list."""
+    """Nearest-rank percentile of a non-empty value list.
+
+    Parameters:
+        values: Non-empty list of values.
+        fraction: Percentile as a fraction in ``[0, 1]`` (e.g. ``0.95``).
+
+    Returns:
+        The nearest-rank percentile value.
+    """
     ordered = sorted(values)
     index = min(len(ordered) - 1, max(0, math.ceil(fraction * len(ordered)) - 1))
     return ordered[index]
+
+
+def _import_pyplot() -> Any:
+    """Import matplotlib with the deterministic Agg backend and return pyplot."""
+    import matplotlib
+
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    return plt
 
 
 def _write_bar_chart(
     path: Path, labels: list[str], counts: list[int], *, title: str, xlabel: str
 ) -> None:
     """Write a horizontal bar chart PNG (deterministic, Agg backend)."""
-    import matplotlib
-
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
+    plt = _import_pyplot()
     fig, ax = plt.subplots(figsize=(8, max(2.0, 0.4 * len(labels) + 1.0)))
     positions = range(len(labels))
     ax.barh(list(positions), counts, color='#4878d0')
@@ -130,14 +171,10 @@ def _write_bar_chart(
 
 def _write_offset_hist(path: Path, dv: list[float], du: list[float]) -> None:
     """Write the V/U offset histogram PNG."""
-    import matplotlib
-
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
+    plt = _import_pyplot()
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
     for ax, values, label in ((axes[0], dv, 'dV (px)'), (axes[1], du, 'dU (px)')):
-        if values:
+        if len(values) > 0:
             ax.hist(values, bins=40, color='#4878d0')
         ax.set_xlabel(label)
         ax.set_ylabel('images')
@@ -171,14 +208,18 @@ def build_report(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     where, params = _where_clause(instrument=instrument, start_date=start_date, end_date=end_date)
+    # Joined queries alias the images table as ``i``; same filter, qualified.
+    where_i, params_i = _where_clause(
+        instrument=instrument, start_date=start_date, end_date=end_date, alias='i.'
+    )
     lines: list[str] = ['# Navigation statistics report', '']
     filters = [
-        f'instrument = {instrument}' if instrument else None,
-        f'from {start_date}' if start_date else None,
-        f'to {end_date}' if end_date else None,
+        f'instrument = {instrument}' if instrument is not None else None,
+        f'from {start_date}' if start_date is not None else None,
+        f'to {end_date}' if end_date is not None else None,
     ]
-    active = [f for f in filters if f]
-    lines.append(f'Filters: {", ".join(active) if active else "none (full database)"}')
+    active = [f for f in filters if f is not None]
+    lines.append(f'Filters: {", ".join(active) if len(active) > 0 else "none (full database)"}')
     lines.append('')
 
     # --- Success / failure counts -----------------------------------------
@@ -190,7 +231,7 @@ def build_report(
     total = sum(r[1] for r in status_rows)
     lines += ['## Success / failure', '', '| status | images | fraction |', '|---|---|---|']
     for status, count in status_rows:
-        lines.append(f'| {status} | {count} | {count / total:.3f} |' if total else '')
+        lines.append(f'| {status} | {count} | {count / total:.3f} |' if total > 0 else '')
     lines += ['', f'Total images: {total}', '']
     _write_bar_chart(
         output_dir / 'status_counts.png',
@@ -204,11 +245,11 @@ def build_report(
     reason_rows = _rows(
         conn,
         f'SELECT status_reason, COUNT(*) FROM images{where}'
-        + (' AND ' if where else ' WHERE ')
+        + _connector(where)
         + "status != 'success' GROUP BY status_reason ORDER BY COUNT(*) DESC, status_reason",
         params,
     )
-    if reason_rows:
+    if len(reason_rows) > 0:
         lines += ['### Failure reasons', '', '| reason | images |', '|---|---|']
         lines += [f'| {reason or "(none)"} | {count} |' for reason, count in reason_rows]
         lines.append('')
@@ -226,9 +267,9 @@ def build_report(
         conn,
         'SELECT t.technique_name, COUNT(*), SUM(1 - t.spurious), AVG(t.confidence) '
         'FROM techniques t JOIN images i ON i.image_name = t.image_name'
-        + where.replace('instrument', 'i.instrument').replace('image_date', 'i.image_date')
+        + where_i
         + ' GROUP BY t.technique_name ORDER BY COUNT(*) DESC, t.technique_name',
-        params,
+        params_i,
     )
     lines += [
         '## Technique usage',
@@ -239,7 +280,7 @@ def build_report(
     for name, runs, good, mean_conf in tech_rows:
         lines.append(f'| {name} | {runs} | {good} | {_fmt(mean_conf)} |')
     lines.append('')
-    if tech_rows:
+    if len(tech_rows) > 0:
         _write_bar_chart(
             output_dir / 'technique_usage.png',
             [str(r[0]) for r in tech_rows],
@@ -255,10 +296,10 @@ def build_report(
         'SELECT s.source_model, s.source_name, COUNT(DISTINCT s.image_name), '
         'SUM(s.n_features), SUM(s.n_gated) '
         'FROM feature_sources s JOIN images i ON i.image_name = s.image_name'
-        + where.replace('instrument', 'i.instrument').replace('image_date', 'i.image_date')
+        + where_i
         + ' GROUP BY s.source_model, s.source_name '
         'ORDER BY s.source_model, COUNT(DISTINCT s.image_name) DESC, s.source_name',
-        params,
+        params_i,
     )
     lines += [
         '## Model and source usage',
@@ -274,7 +315,7 @@ def build_report(
     offset_rows = _rows(
         conn,
         f'SELECT offset_dv, offset_du FROM images{where}'
-        + (' AND ' if where else ' WHERE ')
+        + _connector(where)
         + "status = 'success' AND offset_dv IS NOT NULL",
         params,
     )
@@ -300,7 +341,7 @@ def build_report(
     lines += ['![offsets](offsets_hist.png)', '']
 
     # --- Cross-technique agreement -------------------------------------------
-    per_pair, per_image_rank = _pairwise_disagreements(conn, where, params)
+    per_pair, per_image_rank = _pairwise_disagreements(conn, where_i, params_i)
     lines += [
         '## Cross-technique agreement',
         '',
@@ -322,7 +363,7 @@ def build_report(
     rank_rows = _rows(
         conn,
         f'SELECT confidence_rank, COUNT(*) FROM images{where}'
-        + (' AND ' if where else ' WHERE ')
+        + _connector(where)
         + 'confidence_rank IS NOT NULL GROUP BY confidence_rank ORDER BY confidence_rank',
         params,
     )
@@ -345,7 +386,7 @@ def build_report(
             f'{_fmt(_percentile(disagreements, 0.95)) if disagreements else "-"} |'
         )
     lines.append('')
-    if per_image_rank:
+    if len(per_image_rank) > 0:
         ordered_ranks = sorted(per_image_rank)
         _write_bar_chart(
             output_dir / 'agreement_by_tier.png',
@@ -360,12 +401,12 @@ def build_report(
     excluded_rows = _rows(
         conn,
         f'SELECT excluded_from_consensus, COUNT(*) FROM images{where}'
-        + (' AND ' if where else ' WHERE ')
+        + _connector(where)
         + "excluded_from_consensus != '[]' "
         'GROUP BY excluded_from_consensus ORDER BY COUNT(*) DESC, excluded_from_consensus',
         params,
     )
-    if excluded_rows:
+    if len(excluded_rows) > 0:
         lines += [
             '## Ensemble outlier exclusions',
             '',

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-################################################################################
-# sd_stats_ingest.py
-#
-# Ingest per-image navigation metadata JSON files into a local SQLite
-# statistics database. See spindoctor.cli.stats for the system overview.
-################################################################################
+"""Ingest per-image navigation metadata JSON files into a SQLite database.
+
+Dispatch script for the ``sd_stats_ingest`` console entry point.  See
+``spindoctor.cli.stats`` for the statistics-system overview.
+"""
 
 import os
 import sys

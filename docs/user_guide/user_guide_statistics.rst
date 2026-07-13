@@ -25,8 +25,9 @@ Ingestion
 ---------
 
 ``sd_stats_ingest ROOT [ROOT ...] [--db PATH]`` scans each root recursively
-for ``*_metadata.json`` files (the documents ``navigate_image_files`` writes
-under ``nav_results_root``) and loads them into the database. Roots may be
+for ``*_metadata.json`` files (the documents
+:func:`~spindoctor.navigate_image_files.navigate_image_files` writes under
+``nav_results_root``) and loads them into the database. Roots may be
 local directories or any URL the project's ``filecache`` layer accepts, so
 cloud-hosted results ingest the same way as local ones.
 
@@ -36,21 +37,208 @@ image's row and its child rows rather than duplicating them. Malformed files
 are logged and skipped; the exit status is nonzero only when nothing at all
 was ingested.
 
-The schema has three tables:
+Database schema
+---------------
 
-- ``images`` — one row per image: instrument (from the metadata document's
-  ``observation.instrument`` field, falling back to filename-shape
-  classification for documents that lack the field), UTC image date (derived
-  from the SPICE epoch), status and failure
-  reason, fused offset / sigma / confidence / tier, ensemble consensus
-  exclusions, image-classifier verdict, and run provenance (config hash, git
-  SHA, pipeline timestamp).
-- ``techniques`` — one row per technique result: offset, per-axis sigma,
-  confidence, spurious / at-edge flags, the body or ring or catalog names it
-  used, and the full diagnostics dict as JSON.
-- ``feature_sources`` — per image, the feature counts by (feature type,
-  source model, source name), with how many were gated, so body / ring /
-  star-catalog usage can be aggregated.
+The database is plain SQLite; opening it directly (``sqlite3`` command-line
+shell, Python's ``sqlite3`` module, pandas, a GUI browser) is a supported way
+to answer questions the standard report does not. Three tables hold the data;
+``techniques`` and ``feature_sources`` reference ``images`` by
+``image_name`` with ``ON DELETE CASCADE``, and re-ingesting an image replaces
+its row and children.
+
+``images`` — one row per image, keyed by ``image_name``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 10 68
+
+   * - Column
+     - Type
+     - Meaning
+   * - ``image_name``
+     - TEXT
+     - Image filename (primary key), e.g. ``N1454725799_1_CALIB.IMG``.
+   * - ``instrument``
+     - TEXT
+     - ``coiss`` / ``vgiss`` / ``gossi`` / ``nhlorri`` / ``sim``, from the
+       metadata document's ``observation.instrument`` field (filename-shape
+       classification is the fallback for documents that lack the field).
+   * - ``image_path``
+     - TEXT
+     - Absolute path of the source image at navigate time.
+   * - ``image_et``
+     - REAL
+     - Observation midtime, TDB seconds past J2000.
+   * - ``image_date``
+     - TEXT
+     - UTC calendar date ``YYYY-MM-DD`` derived from ``image_et``; drives
+       the ``--start-date`` / ``--end-date`` report filters.
+   * - ``status``
+     - TEXT
+     - Navigation outcome: ``success``, ``failed``, or ``error``.
+   * - ``status_reason``
+     - TEXT
+     - Failure reason (e.g. ``no_features_extracted``,
+       ``missing_spice_data``); NULL for successes.
+   * - ``offset_dv``, ``offset_du``
+     - REAL
+     - Fused pointing offset in pixels (V then U); NULL when navigation
+       found no offset.
+   * - ``sigma_dv``, ``sigma_du``
+     - REAL
+     - Per-axis 1-sigma uncertainty of the fused offset, pixels.
+   * - ``confidence``
+     - REAL
+     - Fused confidence in ``[0, 1]``.
+   * - ``confidence_rank``
+     - TEXT
+     - Confidence tier label assigned by the ensemble.
+   * - ``n_techniques``
+     - INTEGER
+     - Number of per-technique results recorded for the image.
+   * - ``excluded_from_consensus``
+     - TEXT
+     - JSON list of technique names the ensemble excluded as outliers
+       (``[]`` when none).
+   * - ``image_class``
+     - TEXT
+     - Image-classifier verdict (e.g. ``clean``).
+   * - ``noise_sigma``
+     - REAL
+     - Image-classifier noise estimate.
+   * - ``config_hash``
+     - TEXT
+     - sha256 of the fully-resolved configuration used for the run.
+   * - ``git_sha``
+     - TEXT
+     - Short git SHA of the navigating code (``-dirty`` suffix when the
+       tree had uncommitted changes).
+   * - ``pipeline_run``
+     - TEXT
+     - UTC ISO8601 timestamp of the navigation run.
+   * - ``source_file``
+     - TEXT
+     - Path or URL of the ingested metadata document.
+
+``techniques`` — one row per technique result per image:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 10 68
+
+   * - Column
+     - Type
+     - Meaning
+   * - ``image_name``
+     - TEXT
+     - Foreign key into ``images``.
+   * - ``technique_name``
+     - TEXT
+     - Technique class name (e.g. ``BodyLimbNav``, ``StarUniqueMatchNav``).
+   * - ``offset_dv``, ``offset_du``
+     - REAL
+     - The technique's own offset estimate, pixels.
+   * - ``sigma_dv``, ``sigma_du``
+     - REAL
+     - Per-axis 1-sigma from the technique's covariance.
+   * - ``confidence``
+     - REAL
+     - The technique's calibrated confidence in ``[0, 1]``.
+   * - ``spurious``
+     - INTEGER
+     - 1 when the technique flagged its own result as spurious.
+   * - ``at_edge``
+     - INTEGER
+     - 1 when the fit landed at the edge of its search space.
+   * - ``source_names``
+     - TEXT
+     - JSON list of body / ring / catalog names the technique used.
+   * - ``diagnostics``
+     - TEXT
+     - The technique's full diagnostics dataclass as a JSON object.
+
+``feature_sources`` — per image, feature counts grouped by source:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 10 68
+
+   * - Column
+     - Type
+     - Meaning
+   * - ``image_name``
+     - TEXT
+     - Foreign key into ``images``.
+   * - ``feature_type``
+     - TEXT
+     - Feature type (e.g. ``BODY_DISC``, ``STAR``, ``RING_EDGE``).
+   * - ``source_model``
+     - TEXT
+     - NavModel family that produced the features (``body``, ``rings``,
+       ``stars``).
+   * - ``source_name``
+     - TEXT
+     - Body, ring, or catalog name (e.g. ``IAPETUS``, ``UCAC4``).
+   * - ``n_features``
+     - INTEGER
+     - Features of this type/source extracted for the image.
+   * - ``n_gated``
+     - INTEGER
+     - How many of them the reliability gate removed.
+
+Indexes exist on ``images(image_date)``, ``images(instrument)``, and the
+``image_name`` foreign keys.
+
+Querying the database directly
+------------------------------
+
+Success rate per instrument, from the ``sqlite3`` shell:
+
+.. code-block:: sql
+
+    SELECT instrument,
+           COUNT(*) AS images,
+           AVG(status = 'success') AS success_rate
+    FROM images
+    GROUP BY instrument;
+
+The ten largest fused offsets, with their confidence tier:
+
+.. code-block:: sql
+
+    SELECT image_name, offset_dv, offset_du, confidence_rank
+    FROM images
+    WHERE status = 'success'
+    ORDER BY MAX(ABS(offset_dv), ABS(offset_du)) DESC
+    LIMIT 10;
+
+JSON columns unpack with SQLite's built-in JSON functions -- for example,
+counting how often each technique was excluded from the consensus:
+
+.. code-block:: sql
+
+    SELECT excluded.value AS technique, COUNT(*) AS images
+    FROM images, json_each(images.excluded_from_consensus) AS excluded
+    GROUP BY excluded.value
+    ORDER BY COUNT(*) DESC;
+
+The same database loads straight into pandas:
+
+.. code-block:: python
+
+    import pandas as pd
+    import sqlite3
+
+    conn = sqlite3.connect('nav_stats.sqlite3')
+    images = pd.read_sql_query('SELECT * FROM images', conn)
+    per_technique = pd.read_sql_query(
+        'SELECT t.*, i.instrument, i.image_date '
+        'FROM techniques t JOIN images i USING (image_name)',
+        conn,
+    )
+    # Median per-technique confidence by instrument:
+    print(per_technique.groupby(['instrument', 'technique_name'])['confidence'].median())
 
 Reporting
 ---------
@@ -79,8 +267,8 @@ The report contains:
 - **Confidence calibration** — per confidence tier, the distribution of each
   image's maximum cross-technique disagreement. Without ground truth,
   agreement between independent techniques is the production proxy for
-  accuracy (the calibrated anchor is the simulation campaign; see the
-  developer guide's calibration documentation): a healthy pipeline shows
+  accuracy (the calibrated anchor is the simulation campaign; see
+  :doc:`/dev_guide/dev_guide_techniques_confidence`): a healthy pipeline shows
   high-tier images agreeing tightly and disagreement growing toward the low
   tier.
 - **Ensemble outlier exclusions** — how often the ensemble excluded a

@@ -179,6 +179,24 @@ def test_rows_from_metadata_instrument_falls_back_to_filename() -> None:
     assert image_row['instrument'] == 'coiss'
 
 
+def test_rows_from_metadata_null_status_falls_back() -> None:
+    """An explicit null top-level status falls through to the nav status."""
+    doc = _metadata()
+    doc['status'] = None
+    image_row, _, _ = rows_from_metadata(doc, source_file='x.json')
+    assert image_row['status'] == 'success'
+
+
+def test_upsert_image_rejects_unknown_column(tmp_path: Path) -> None:
+    """A row key that is not a schema column raises rather than reaching SQL."""
+    conn = open_stats_db(tmp_path / 'stats.sqlite3')
+    image_row, technique_rows, source_rows = rows_from_metadata(_metadata(), source_file='x.json')
+    image_row['nonsense; DROP TABLE images'] = 1
+    with pytest.raises(ValueError, match='unknown images column'):
+        upsert_image(conn, image_row, technique_rows=technique_rows, source_rows=source_rows)
+    conn.close()
+
+
 # --- ingestion ---
 
 
@@ -226,9 +244,11 @@ def test_ingest_skips_malformed_file(tmp_path: Path) -> None:
 def test_upsert_replaces_children(tmp_path: Path) -> None:
     conn = open_stats_db(tmp_path / 'stats.sqlite3')
     doc = _metadata(per_technique=[_technique('BodyLimbNav', (1.0, 1.0))])
-    upsert_image(conn, *rows_from_metadata(doc, source_file='x.json'))
+    image_row, technique_rows, source_rows = rows_from_metadata(doc, source_file='x.json')
+    upsert_image(conn, image_row, technique_rows=technique_rows, source_rows=source_rows)
     doc = _metadata(per_technique=[])
-    upsert_image(conn, *rows_from_metadata(doc, source_file='x.json'))
+    image_row, technique_rows, source_rows = rows_from_metadata(doc, source_file='x.json')
+    upsert_image(conn, image_row, technique_rows=technique_rows, source_rows=source_rows)
     count = conn.execute('SELECT COUNT(*) FROM techniques').fetchone()[0]
     assert count == 0
     conn.close()
@@ -277,7 +297,8 @@ def _populated_db(tmp_path: Path) -> sqlite3.Connection:
         ),
     ]
     for doc in docs:
-        upsert_image(conn, *rows_from_metadata(doc, source_file='x.json'))
+        image_row, technique_rows, source_rows = rows_from_metadata(doc, source_file='x.json')
+        upsert_image(conn, image_row, technique_rows=technique_rows, source_rows=source_rows)
     return conn
 
 

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-################################################################################
-# sd_stats_report.py
-#
-# Generate a deterministic statistics report (Markdown + charts) from a
-# database written by sd_stats_ingest. See spindoctor.cli.stats.
-################################################################################
+"""Generate a deterministic statistics report (Markdown + charts).
+
+Dispatch script for the ``sd_stats_report`` console entry point; reads a
+database written by ``sd_stats_ingest``.  See ``spindoctor.cli.stats``.
+"""
 
 import os
 import sys
