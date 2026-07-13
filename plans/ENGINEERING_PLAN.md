@@ -54,8 +54,8 @@ member cannot claim a tier better than that axis's honest sigma allows.
 geometry (rank-1 ring + blob) asserts the fused offset tracks the
 absolute constraint on the along-edge axis and the tier reflects the
 honest per-axis sigma. Existing rank-1 tests
-(`tests/spindoctor/nav_orchestrator/`, the `ring_only_flat` machinery
-from the rank-1 stack PR) stay green.
+(`tests/spindoctor/nav_orchestrator/`, the `ring_only_flat` machinery)
+stay green.
 
 ### #222 — Second-pass refinement votes as an independent opinion
 
@@ -121,8 +121,9 @@ guessed.
 
 ### #128 / #150 — Limb navigation redesign and the ~0.1 px systematic
 
-The strategic pair behind several symptoms (#125's mis-convergence
-class, #187 chaotic rotators). #150 is the measured ~0.09-0.13 px limb bias: the
+The strategic pair behind several symptoms (the terminator
+mis-convergence class, #187 chaotic rotators). #150 is the measured
+~0.09-0.13 px limb bias: the
 model predicts the geometric silhouette while the image's gradient ridge
 sits ~0.1 px inside it (PSF), so `gradient_ridge_refine` is disabled for
 the limb technique (`config_510_techniques.yaml`) while ring edges run
@@ -173,7 +174,7 @@ design document, not code.
   merge: `util/calibration/library_crosscheck.py` over the full library,
   every per-image delta accounted for; `sd_stats_ingest` /
   `sd_stats_report` over campaign outputs as the accuracy checkpoint
-  (both from the merged #35 system).
+  (both from the statistics system).
 
 ## Track D — Capability completion
 
@@ -277,12 +278,11 @@ asserts the generated half matches the registries.
   construction. Do these before Track D's PDS4/backplane build-out.
 - **#243** — direct tests for `nav_model/stars/conflicts.py`
   (`_check_one_star`, `mark_body_and_ring_conflicts`) with synthetic
-  geometry; the per-pixel occlusion tests from the #145 fix cover only
-  the occlusion-fraction path.
+  geometry; the existing per-pixel occlusion tests cover only the
+  occlusion-fraction path.
 - **#174** — regression baselines beyond the single frame: seed
   baselines for the full library (`python -m
-  tests.integration.update_baselines --all`) once the pending stack's
-  offset-affecting changes are merged, and commit them with the
+  tests.integration.update_baselines --all`) and commit them with the
   per-image diff accounted for.
 - **#177** — unit tests for `spindoctor.support.summary_png`.
 - **#178** — missing dev-guide pages: filters, uncertainty (write

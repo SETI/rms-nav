@@ -3,8 +3,7 @@
 *The top-level plan of record for all remaining work. It is written to be
 readable without knowledge of the code internals or the statistical
 methodology; the detail lives in the three sub-plans it points to. Last
-reconciled 2026-07-12, immediately after the nine-PR stack (#208,
-#213-#220) was prepared for merge.*
+reconciled 2026-07-12.*
 
 **Document map** (what to read for what):
 
@@ -45,25 +44,21 @@ uncertainties is not finished, it is merely running.
 
 The engineering core is built and healthy: the full navigation architecture
 (nine autonomous techniques plus manual), reprojection, backplanes,
-simulation, statistics reporting, and strict quality gates (typing,
-linting, ~1,700 tests) are in place. PDS4 bundle generation exists only
+simulation, rank-1 (single-axis) ring support, the statistics system
+(`sd_stats_ingest` / `sd_stats_report`), and strict quality gates (typing,
+linting, ~1,900 tests) are in place. PDS4 bundle generation exists only
 as partially implemented machinery (see Track D). An independent project
 review (2026-07-08) rated the engineering strong and the self-assessment
 honest.
 
 What the same review identified as the single real deficit still stands,
 half-addressed: **the validation program is designed but mostly not yet
-run.** Since that review, the first slice landed — the confidence formulas
-are now calibrated against simulated scenes with planted, known-truth
-offsets (PR #208), so confidence values are no longer arbitrary defaults.
-But the simulation's realism is itself unproven, which is why every output
-still carries a `confidence_provisional` marker. Turning that provisional
-story into a defensible one is Track A, the largest remaining block.
-
-Pending merges: the PR stack #208-#220 delivers the sim-anchored
-calibration, a set of navigation-correctness fixes, rank-1 (single-axis)
-ring support, and the statistics system. This plan assumes those merges;
-the issue index marks what they close.
+run.** The first slice is in place — the confidence formulas are calibrated
+against simulated scenes with planted, known-truth offsets, so confidence
+values are no longer arbitrary defaults. But the simulation's realism is
+itself unproven, which is why every output still carries a
+`confidence_provisional` marker. Turning that provisional story into a
+defensible one is Track A, the largest remaining block.
 
 The curated image library — the raw material for both regression testing
 and validation — stands at 62 operator-verified images (Cassini and
@@ -142,9 +137,9 @@ its section names):
    only the finer per-technique separation.
 6. **Wire real images into CI** (#229; WS-4) — a small cached tier on
    every PR, the full suite on a schedule.
-7. **Re-anchor confidence on real evidence** (#230, successor to #173;
-   WS-5) — re-run the existing calibration tooling against the agreement
-   study's measurements; retire the provisional marker.
+7. **Re-anchor confidence on real evidence** (#230; WS-5) — re-run the
+   existing calibration tooling against the agreement study's
+   measurements; retire the provisional marker.
 8. **Close the accuracy tail** (#233 measured star SNR and constant
    sensitivity, WS-9; #150/#128 the known ~0.1 px limb bias, WS-10; #234
    realistic noise for calibrated images, WS-13; #232 end-product
@@ -166,7 +161,7 @@ answer or fails on a navigable scene.
 
 **Why:** these defects poison the validation data (Track A consumes the
 navigator's output at scale) and are exactly what a user hits first.
-Most of this track landed in the pending stack; what remains:
+The known defects:
 
 - **#221** — a one-axis ring measurement outvotes an absolute
   position constraint, reporting a wrong answer at high confidence. Top
@@ -183,6 +178,9 @@ Most of this track landed in the pending stack; what remains:
 - **#237 / #238** — two unexplained triage failures (a multi-body trio, a
   Voyager scattered-light quintet); each is one debugging session.
 - **#239** — operator decision: how to treat bodies smaller than ~5 px.
+- **#210** — the NCC techniques' covariances are orders of magnitude
+  over-tight; the covariance-model review remains open even though the
+  original coverage symptom is fixed.
 - **#24, #130, #132, #133, #180** — smaller technique-quality and
   diagnosability items (#180 wires a per-image reason through every
   failure site — cheap and it makes debugging the rest of the track
@@ -195,11 +193,12 @@ before the agreement study consumes ensemble output at scale.
 
 **Goal:** navigation quality is continuously measured, not assumed.
 
-The statistics system itself (#35) is in the pending stack. Remaining:
-the library coverage-matrix invariant (#240), and the standing practice
-of re-running the library cross-check after every calibration-affecting
-change. Small track, mostly done, listed separately because it is the
-program's QA instrument.
+The statistics system (`sd_stats_ingest` / `sd_stats_report`) is built,
+tested, and documented in the user guide. Remaining: the library
+coverage-matrix invariant (#240), and the standing practice of re-running
+the library cross-check after every calibration-affecting change. Small
+track, mostly done, listed separately because it is the program's QA
+instrument.
 
 ### Track D — Capability completion (decision gates first)
 
@@ -285,7 +284,7 @@ star-navigation bug fixes (#19, #18) can start any time.
 
 ## 5. Suggested global order
 
-1. **Now (after the stack merges):** Track A items 1-4 start in parallel
+1. **Now:** Track A items 1-4 start in parallel
    (library growth, simulator design proposal, estimator proof,
    distortion validation). Track B's #221/#222. The Track D decisions go
    to the operator as a batch — they cost nothing to decide early and
@@ -321,20 +320,16 @@ and the five decision gates, not by any implementation.
 ## 7. Issue index
 
 Every open issue, by track. **Bold** = created 2026-07-12 during this
-reconciliation. Issues expected to close when the pending stack
-merges: #12, #35, #124, #125, #136, #145, #146, #202, #203, #209 (auto-close),
-plus #173, #204, #211 to be closed manually, and #210 to be closed or
-rescoped at the operator's discretion (its coverage symptom is fixed; the
-covariance-model review remains).
+reconciliation.
 
 | Track | Issues |
 |---|---|
 | A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, **#224**, **#225**, **#226**, **#227**, **#228**, **#229**, **#230**, **#232**, **#233**, **#234**, **#235** |
-| B — navigation correctness | #24, #25, #128, #130, #132, #133, #179, #180, #221, #222, **#237**, **#238**, **#239** |
-| C — statistics & QA | **#240** (and the merged #35 system as standing practice) |
+| B — navigation correctness | #24, #25, #128, #130, #132, #133, #179, #180, #210, #221, #222, **#237**, **#238**, **#239** |
+| C — statistics & QA | **#240** (plus the standing cross-check and campaign-report practice) |
 | D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #60, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #139, #141, #142, #188, **#231**, **#236** |
 | E — test & docs debt | #122, #129, #177, #178, **#241**, **#242**, **#243**, **#244**, **#245** |
-| F — instruments, features, hardening | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #82, #81, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #135, #137, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212 |
+| F — instruments, features, hardening | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #82, #81, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212 |
 
 Cross-listed items (listed once above, noted here): #150/#128 serve both
 Track A's limb-bias workstream and Track B's redesign; #103/#134/#126
@@ -347,6 +342,6 @@ infrastructure delivered as Track E test work.
 *History: this plan supersedes `plans/archive/ROADMAP_2026-07-12.md` (the
 issue-ordered pipeline build-out) and
 `plans/archive/FULL_PROGRAM_AFTER_MANUAL_WORK_2026-07-11.md` (the
-post-stack task inventory), consolidating both into one top-level view.
+six-track task inventory), consolidating both into one top-level view.
 The validation methodology and the curation playbook were already single
 documents and remain in place as the detail layer.*

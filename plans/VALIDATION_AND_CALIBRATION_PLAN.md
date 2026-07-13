@@ -8,12 +8,11 @@ each critical-report finding mapped to the workstream(s) that retire it.*
 
 ---
 
-**Premise.** The core rewrite architecture is stable (AUTONAV phases 0-9 plus the
-phase-10 hardening are merged); this plan is *calibration and validation*, not
-architecture change, so the validation effort targets stable code. The open
-phase-10 content — the curated image library, the confidence calibration, and the
-body-shape table — is exactly the WS-3/WS-5 territory below, sequenced by `plans/PROGRAM_PLAN.md`
-Track A. There is **no fixed accuracy specification** —
+**Premise.** The core architecture is stable; this plan is *calibration and
+validation*, not architecture change, so the validation effort targets stable
+code. The remaining open content — growing the curated image library and the
+real-anchored confidence calibration — is exactly the WS-3/WS-5 territory
+below, sequenced by `plans/PROGRAM_PLAN.md` Track A. There is **no fixed accuracy specification** —
 the goal is to characterize the best accuracy the system actually achieves,
 honestly and with its uncertainty, not to clear a numeric bar.
 
@@ -58,9 +57,9 @@ overlap, the methodology here is binding and the cross-track ordering there is
 binding.
 
 **Status note (2026-07-12).** Complete and out of the workstream list: WS-11
-(degenerate-rotation reporting) and WS-14 (provenance) shipped in PR #200;
-WS-5's interim half shipped in PR #208 — the confidence formulas and tier
-boundaries are now *sim-anchored* (fitted against simulated planted-truth
+(degenerate-rotation reporting) and WS-14 (provenance) are done;
+WS-5's interim half is done — the confidence formulas and tier
+boundaries are *sim-anchored* (fitted against simulated planted-truth
 recovery by the `util/calibration/` tooling), with `confidence_provisional`
 still true pending the real-anchored pass (#230). WS-6's honesty half (docs no
 longer overclaim) is done; the capability matrix remains (#231). Every
@@ -68,7 +67,7 @@ still-open workstream now has a tracking issue (cross-map below).
 
 **Two shared decisions, declared once:**
 
-- **Confidence-calibration methodology (binding for #230, formerly #173).** Confidence is
+- **Confidence-calibration methodology (binding for #230).** Confidence is
   calibrated per WS-5: per-technique reliability diagrams against measured error
   anchors (WS-1 per-technique covariance where identifiable, pairwise combined
   covariance elsewhere, WS-2 sim recovery error where no multi-object cohort
@@ -89,22 +88,22 @@ carry the methodology and acceptance criteria):
 | Workstream | GitHub issue(s) | Note |
 |---|---|---|
 | WS-0 | #224 | Estimator identifiability + bias-independence. |
-| WS-1 | #225 | The agreement study. The merged statistics system (#35) reports metadata statistics and consumes WS-1's per-frame disagreement metric; it is not the agreement study. |
+| WS-1 | #225 | The agreement study. The statistics system reports metadata statistics and consumes WS-1's per-frame disagreement metric; it is not the agreement study. |
 | WS-1b | #226 | Reprojection consistency. |
 | WS-2 | #227 (+ #223, #153, #84) | Sim de-circularization + realism. |
 | WS-17 | #228 | Distortion validation. |
 | WS-3 | #172, #174, #235 | 47-image stage first (#172), then the >=120 growth target (#235); discovery/review workflow in `plans/COHORT_CURATION_PLAN.md`. |
 | WS-4 | #229 | CI integration tiers. |
-| WS-5 | #230 (sim-anchored half done via #173/PR #208), #176 | Real-anchored recalibration once WS-1 anchors exist. |
+| WS-5 | #230 (sim-anchored half done), #176 | Real-anchored recalibration once WS-1 anchors exist. |
 | WS-6 | #231 | Capability matrix (docs-honesty half already done). |
 | WS-7 | #60 | Titan: implement or scope out. |
 | WS-8 | #53, #67 | Output bundles for all four instruments (required). PDS4 input (#34) is availability-contingent and not required for completion. |
 | WS-9 | #233, #130, #176 | Measured star SNR + sensitivity tests (#233); constants inventory (#176); limiting magnitudes (#130). |
 | WS-10 | #150, #128 | Limb bias root cause and redesign. |
-| WS-11 | done (PR #200) | Degenerate-rotation reporting. |
+| WS-11 | done | Degenerate-rotation reporting. |
 | WS-12 | #93 | Instrument appendices. |
 | WS-13 | #234 (+ #153) | Detector-noise model for the I/F render path. |
-| WS-14 | done (PR #200) | Provenance block complete. |
+| WS-14 | done | Provenance block complete. |
 | WS-15 | #236, #103, #134, #126 | Thread safety, profiling, batch-parallel throughput. |
 | WS-18 | #232 (+ #28, #66 partial) | End-product accuracy checks. |
 
@@ -708,7 +707,7 @@ provisioning in CI is the hard part; a cached fixture bundle is the mitigation.
 **Closes:** "ships a confidence it admits is meaningless."
 **Tracked by:** #230 (the real-anchored calibration — this workstream defines
 its methodology, binding per the relationship section above; the sim-anchored
-interim landed via #173 / PR #208) and #176
+interim is done) and #176
 (constants into config, which lands before calibration writes coefficients).
 The curated library's operator-assigned `confidence_tier` labels serve as
 plausibility cross-checks and regression expectations for the calibrated
