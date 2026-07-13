@@ -1,3 +1,4 @@
+import hashlib
 from typing import Any
 
 import numpy as np
@@ -37,7 +38,10 @@ def _create_simulated_body_backplane(
 
     full = np.zeros(snapshot.data.shape, dtype=np.float32)
     full_mask = np.zeros(snapshot.data.shape, dtype=bool)
-    seed = abs(hash((body_name, backplane_name))) % (2**32)
+    # hashlib, not hash(): str hashing is salted per interpreter run and the
+    # simulated values must be deterministic
+    digest = hashlib.sha256(f'{body_name}:{backplane_name}'.encode()).digest()
+    seed = int.from_bytes(digest[:8], 'big') % (2**32)
     rng = np.random.default_rng(seed)
     val = float(rng.uniform(1.0, 100.0))
     sub_mask = None

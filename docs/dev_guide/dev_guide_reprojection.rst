@@ -157,8 +157,8 @@ These propagate through the pipeline as follows:
    save/load round-trip.
 
 ``image_number`` is always ``uint16`` regardless of the dtype kwargs, capping
-a single mosaic at 65,535 contributing images. ``add()`` raises
-``OverflowError`` when that limit is exceeded.
+a single mosaic at 65,536 contributing images (image numbers 0 through
+65,535). ``add()`` raises ``OverflowError`` when that limit is exceeded.
 
 Serialization
 -------------
@@ -274,7 +274,7 @@ Implementations provided:
   ``cos(incidence)``, clamped at a minimum threshold to avoid division by
   near-zero values.
 - :class:`~spindoctor.reproj.photometric_model.LommelSeeligerModel`: divides by
-  ``cos(incidence) / (cos(incidence) + cos(emission))``.
+  ``2 * cos(incidence) / (cos(incidence) + cos(emission))``.
 - :class:`~spindoctor.reproj.photometric_model.MinnaertModel`: applies the
   Minnaert law ``cos(incidence)^k * cos(emission)^(k-1)`` for a
   user-specified exponent ``k``.

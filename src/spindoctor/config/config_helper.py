@@ -84,7 +84,7 @@ def get_pds4_bundle_results_root(arguments: argparse.Namespace, config: Config) 
 
     First look in arguments.bundle_results_root, then in
     config.environment.bundle_results_root, then in the environment variable
-    BUNDLE_RESULTS_ROOT.
+    NAV_BUNDLE_RESULTS_ROOT.
 
     Parameters:
         arguments: The parsed arguments. config: The configuration possibly containing the
@@ -130,7 +130,7 @@ def load_default_and_user_config(arguments: argparse.Namespace, config: Config) 
         if arguments.config_file:
             for config_file in arguments.config_file:
                 config.update_config(config_file)
-        return
+            return
     except AttributeError:
         pass
     # If they didn't, load the default config file

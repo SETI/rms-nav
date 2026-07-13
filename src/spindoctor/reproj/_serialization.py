@@ -26,8 +26,8 @@ fits
     dtype names, 2-tuples of scalars encoded as paired header keys) are stored in the
     PrimaryHDU header. Each array (and its mask when applicable) occupies
     a separate ImageHDU named ``<FIELDNAME>`` and ``<FIELDNAME>_MASK``.
-    Tuple-of-string payloads use a 1-D ``uint8`` ImageHDU (UTF-8 with ``NUL``
-    separators between entries).
+    Tuple-of-string payloads use a 1-D ``uint8`` ImageHDU (UTF-8 with a ``NUL``
+    terminator after every entry, so the entry count is unambiguous).
 
 Schema evolution
 ----------------
@@ -72,13 +72,18 @@ def tuple_of_strings_field(value: Any) -> tuple[str, ...]:
         flat = np.ravel(value)
         if flat.size == 0:
             return ()
-        # FITS: UTF-8 bytes written by ``_fits_encode_value`` for tuple-of-strings fields.
+        # FITS: UTF-8 bytes written by ``_fits_encode_value`` for tuple-of-strings
+        # fields; every entry carries a trailing NUL terminator.
         if flat.dtype == np.uint8:
             raw = flat.tobytes()
             if not raw:
                 return ()
+            if not raw.endswith(b'\0'):
+                raise ValueError(
+                    'Malformed tuple-of-strings FITS payload: missing entry terminator'
+                )
             try:
-                return tuple(p.decode('utf-8') for p in raw.split(b'\0'))
+                return tuple(p.decode('utf-8') for p in raw.split(b'\0')[:-1])
             except UnicodeDecodeError as exc:
                 _logger.error(
                     'Invalid UTF-8 in FITS tuple-of-strings buffer (%d bytes)',
@@ -456,6 +461,24 @@ def save_fits(
     fcpath.upload()
 
 
+def _fits_encode_header_scalar(hdr: Any, name: str, value: Any) -> None:
+    """Encode one scalar into a FITS header, handling non-finite floats.
+
+    FITS headers cannot hold NaN/inf values; a non-finite float is written
+    under ``<NAME>_NONF`` as its string form and reconstructed by
+    :func:`load_fits`.
+
+    Parameters:
+        hdr: The PrimaryHDU header.
+        name: Header keyword (already uppercased/suffixed by the caller).
+        value: The bool, int, float, or str value to write.
+    """
+    if isinstance(value, float) and not np.isfinite(value):
+        hdr[name + '_NONF'] = repr(value)
+    else:
+        hdr[name] = bool(value) if isinstance(value, bool) else value
+
+
 def _fits_encode_value(
     hdr: Any,
     hdus: list[Any],
@@ -487,12 +510,11 @@ def _fits_encode_value(
     elif isinstance(value, np.dtype):
         hdr[name] = value.str
     elif isinstance(value, tuple) and (len(value) == 0 or isinstance(value[0], str)):
-        # ImageHDU cannot represent NumPy Unicode dtypes; store UTF-8 bytes (uint8).
-        if len(value) == 0:
-            raw_arr = np.zeros((0,), dtype=np.uint8)
-        else:
-            raw = '\0'.join(str(s) for s in value).encode('utf-8')
-            raw_arr = np.frombuffer(raw, dtype=np.uint8).copy()
+        # ImageHDU cannot represent NumPy Unicode dtypes; store UTF-8 bytes
+        # (uint8) with a NUL terminator after EVERY entry, so N entries carry
+        # N terminators and ``('',)`` stays distinguishable from ``()``.
+        raw = ''.join(str(s) + '\0' for s in value).encode('utf-8')
+        raw_arr = np.frombuffer(raw, dtype=np.uint8).copy()
         hdus.append(fits.ImageHDU(data=_fits_image_hdu_data(raw_arr), name=name))
     elif isinstance(value, tuple):
         if len(value) != 2:
@@ -500,13 +522,13 @@ def _fits_encode_value(
                 f'Field {name!r}: only 2-tuples are supported for FITS header encoding, '
                 f'got tuple of length {len(value)}'
             )
-        hdr[name + '_0'] = value[0]
-        hdr[name + '_1'] = value[1]
+        _fits_encode_header_scalar(hdr, name + '_0', value[0])
+        _fits_encode_header_scalar(hdr, name + '_1', value[1])
     elif isinstance(value, dict):
         for k, v in value.items():
             _fits_encode_value(hdr, hdus, f'{name}__{k.upper()}', v)
     elif isinstance(value, (bool, int, float)):
-        hdr[name] = bool(value) if isinstance(value, bool) else value
+        _fits_encode_header_scalar(hdr, name, value)
     elif isinstance(value, str):
         hdr[name] = value
     else:
@@ -621,6 +643,12 @@ def load_fits(
         for name, data in hdu_map.items():
             if name not in result:
                 result[name] = data
+
+    # Reconstruct non-finite float header values first (written as
+    # ``<NAME>_NONF`` string cards because FITS headers cannot hold NaN/inf),
+    # so the tuple reconstruction below sees the plain ``_0``/``_1`` keys.
+    for k in [k for k in result if k.endswith('_NONF')]:
+        result[k[:-5]] = float(result.pop(k))
 
     # Post-process header scalars: reconstruct tuples and None sentinels
     keys_to_delete: list[str] = []
