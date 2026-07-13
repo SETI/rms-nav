@@ -42,6 +42,12 @@ Every ingestible document must carry ``observation.image_name`` and
 document it writes). A document missing either field is logged, skipped, and
 counted as an error, exactly like a file that fails to parse.
 
+The database is disposable, and there is no schema migration: opening a
+database whose ``images`` table does not match the current column set raises
+an error naming the mismatched columns. The remedy is always the same --
+delete the database file and re-run ``sd_stats_ingest`` (the source of truth
+is the metadata documents, so nothing is lost).
+
 Database schema
 ---------------
 

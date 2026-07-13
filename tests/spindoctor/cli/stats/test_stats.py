@@ -240,6 +240,17 @@ def test_upsert_image_rejects_unknown_column(tmp_path: Path) -> None:
     conn.close()
 
 
+def test_open_stats_db_rejects_mismatched_schema(tmp_path: Path) -> None:
+    """A database with a different images column set is rejected, not migrated."""
+    db_path = tmp_path / 'stats.sqlite3'
+    conn = sqlite3.connect(str(db_path))
+    conn.execute('CREATE TABLE images (image_name TEXT PRIMARY KEY, status TEXT)')
+    conn.commit()
+    conn.close()
+    with pytest.raises(ValueError, match='Delete the database file'):
+        open_stats_db(db_path)
+
+
 # --- ingestion ---
 
 

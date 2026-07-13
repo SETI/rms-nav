@@ -169,24 +169,59 @@ def where_clause(
 
 
 def connector(where: str) -> str:
-    """The keyword joining an extra condition onto a ``where_clause`` result."""
+    """The keyword joining an extra condition onto a ``where_clause`` result.
+
+    Parameters:
+        where: A filter fragment from :func:`where_clause` (empty string
+            or a leading-space ``' WHERE ...'`` fragment).
+
+    Returns:
+        ``' AND '`` when ``where`` already has conditions, else
+        ``' WHERE '``.
+    """
     return ' AND ' if len(where) > 0 else ' WHERE '
 
 
 def rows(conn: sqlite3.Connection, sql: str, params: list[Any]) -> list[tuple[Any, ...]]:
-    """Execute a query and return all result rows as a list."""
+    """Execute a query and return all result rows as a list.
+
+    Parameters:
+        conn: Open statistics database connection.
+        sql: SQL statement with ``?`` placeholders.
+        params: Bind values matching the placeholders.
+
+    Returns:
+        All result rows, in query order.
+    """
     return list(conn.execute(sql, params))
 
 
 def fmt(value: float | None, digits: int = 3) -> str:
-    """Format a float for a Markdown table cell."""
+    """Format a float for a Markdown table cell.
+
+    Parameters:
+        value: Value to format, or None.
+        digits: Decimal places.
+
+    Returns:
+        The fixed-point string, or ``'-'`` for None.
+    """
     if value is None:
         return '-'
     return f'{value:.{digits}f}'
 
 
 def offset_stats(values: list[float]) -> dict[str, float] | None:
-    """Mean / median / stdev / min / max summary of a value list."""
+    """Mean / median / stdev / min / max summary of a value list.
+
+    Parameters:
+        values: Values to summarize; may be empty.
+
+    Returns:
+        A dict with ``mean`` / ``median`` / ``stdev`` / ``min`` / ``max``
+        keys (``stdev`` is 0.0 for a single value), or None when
+        ``values`` is empty.
+    """
     if len(values) == 0:
         return None
     return {
@@ -214,7 +249,17 @@ def percentile(values: list[float], fraction: float) -> float:
 
 
 def safe_filename(stub: str) -> str:
-    """Collapse a category label into a filesystem-safe filename stub."""
+    """Collapse a category label into a filesystem-safe filename stub.
+
+    Parameters:
+        stub: Arbitrary category label (may contain spaces, slashes,
+            punctuation).
+
+    Returns:
+        The label with every run of unsafe characters replaced by ``_``
+        and leading/trailing underscores stripped; ``'unnamed'`` when
+        nothing survives.
+    """
     cleaned = re.sub(r'[^A-Za-z0-9._-]+', '_', stub).strip('_')
     return cleaned or 'unnamed'
 
@@ -259,7 +304,12 @@ def add_drilldown(
 
 
 def import_pyplot() -> Any:
-    """Import matplotlib with the deterministic Agg backend and return pyplot."""
+    """Import matplotlib with the deterministic Agg backend and return pyplot.
+
+    Returns:
+        The ``matplotlib.pyplot`` module, with the backend forced to Agg
+        so chart output is identical with or without a display.
+    """
     import matplotlib
 
     matplotlib.use('Agg')
@@ -271,7 +321,15 @@ def import_pyplot() -> Any:
 def write_bar_chart(
     path: Path, labels: list[str], counts: list[int], *, title: str, xlabel: str
 ) -> None:
-    """Write a horizontal bar chart PNG (deterministic, Agg backend)."""
+    """Write a horizontal bar chart PNG (deterministic, Agg backend).
+
+    Parameters:
+        path: Destination PNG path.
+        labels: One bar label per row, top to bottom.
+        counts: Bar lengths matching ``labels``.
+        title: Chart title.
+        xlabel: X-axis label.
+    """
     plt = import_pyplot()
     fig, ax = plt.subplots(figsize=(8, max(2.0, 0.4 * len(labels) + 1.0)))
     positions = range(len(labels))
@@ -287,7 +345,13 @@ def write_bar_chart(
 
 
 def write_offset_hist(path: Path, dv: list[float], du: list[float]) -> None:
-    """Write the V/U offset histogram PNG."""
+    """Write the V/U offset histogram PNG.
+
+    Parameters:
+        path: Destination PNG path.
+        dv: Fused V-axis offsets (pixels) of successful images.
+        du: Fused U-axis offsets (pixels) of successful images.
+    """
     plt = import_pyplot()
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
     for ax, values, label in ((axes[0], dv, 'dV (px)'), (axes[1], du, 'dU (px)')):
@@ -302,7 +366,14 @@ def write_offset_hist(path: Path, dv: list[float], du: list[float]) -> None:
 
 
 def write_value_hist(path: Path, values: list[float], *, title: str, xlabel: str) -> None:
-    """Write a single-panel histogram PNG for a value list."""
+    """Write a single-panel histogram PNG for a value list.
+
+    Parameters:
+        path: Destination PNG path.
+        values: Values to histogram; an empty list produces empty axes.
+        title: Chart title.
+        xlabel: X-axis label.
+    """
     plt = import_pyplot()
     fig, ax = plt.subplots(figsize=(8, 4))
     if len(values) > 0:

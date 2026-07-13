@@ -127,14 +127,36 @@ _SOURCES_COLUMNS = frozenset(
 def open_stats_db(db_path: str | Path) -> sqlite3.Connection:
     """Open (creating if necessary) the statistics database.
 
+    There is no schema migration: a database whose ``images`` table does
+    not match the current column set is rejected with instructions to
+    delete the file and re-ingest (ingestion is cheap and idempotent, so
+    the database is always disposable).
+
     Parameters:
         db_path: Filesystem path of the SQLite database.
 
     Returns:
         An open connection with foreign keys enabled and the schema applied.
+
+    Raises:
+        ValueError: If the database exists with a different ``images``
+            column set.
     """
     conn = sqlite3.connect(str(db_path))
     conn.execute('PRAGMA foreign_keys = ON')
+    # Check any pre-existing images table BEFORE applying the schema
+    # script -- the script's index statements fail confusingly against a
+    # table with a different column set.
+    found = {row[1] for row in conn.execute('PRAGMA table_info(images)')}
+    if len(found) > 0 and found != _IMAGES_COLUMNS:
+        missing = ', '.join(sorted(_IMAGES_COLUMNS - found)) or '(none)'
+        extra = ', '.join(sorted(found - _IMAGES_COLUMNS)) or '(none)'
+        conn.close()
+        raise ValueError(
+            f'{db_path}: images table does not match the current schema '
+            f'(missing: {missing}; unexpected: {extra}). Delete the database '
+            f'file and re-run sd_stats_ingest.'
+        )
     conn.executescript(_SCHEMA)
     return conn
 
