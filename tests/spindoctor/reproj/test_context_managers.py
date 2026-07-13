@@ -7,7 +7,9 @@ duration of the block and restores both original values on exit, even when the
 wrapped code raises.
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
+from typing import cast
 
 import oops
 import pytest
@@ -107,5 +109,8 @@ class TestReducedOopsPrecision:
 
     def test_dlt_is_keyword_only(self) -> None:
         """The dlt parameter cannot be passed positionally."""
-        with pytest.raises(TypeError, match='positional'), _reduced_oops_precision(2):  # type: ignore[misc]
+        # cast() makes the deliberately wrong positional call opaque to mypy;
+        # a type-ignore here is release-dependent (misc vs call-arg).
+        bad_call = cast('Callable[[int], AbstractContextManager[None]]', _reduced_oops_precision)
+        with pytest.raises(TypeError, match='positional'), bad_call(2):
             pass
