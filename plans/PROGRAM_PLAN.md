@@ -185,6 +185,10 @@ The known defects:
   diagnosability items (#180 wires a per-image reason through every
   failure site — cheap and it makes debugging the rest of the track
   easier, so do it early).
+- **#254** — a fully dark body emits a photometric BODY_BLOB feature
+  where the body-model dev guide says it should emit nothing; likely
+  harmless today (the reliability gate culls it) but it is a
+  model-emission spec conflict to resolve.
 
 **Parallelism:** fully parallel with Track A; #221/#222 should land
 before the agreement study consumes ensemble output at scale.
@@ -212,14 +216,15 @@ commitment:
 |---|---|
 | **Titan navigation** (#60): implement atmospheric-limb navigation or scope it out? | A new haze-limb model and technique (hard, physics-heavy), or graceful degradation plus honest docs. |
 | **CK kernels** (#188, prerequisite #50): ship updated-pointing SPICE kernels as a product? | The kernel writer and its validation — a headline deliverable either way. |
-| **Backplane content** (#28 family): finalize the backplane set and formats | #55, #54, #57, #77, then the generator hardening. |
+| **Backplane content** (#28 family): finalize the backplane set and formats | #55, #54, #57, #77, then the generator hardening (including the product-correctness defects #251, #252, #253 found by the #241 test suite). |
 
 **PDS4 output bundles are required for all four instruments** — not a
 scope decision — and **none of it works today**. The Cassini path is
 partially implemented machinery with no final templates, no tests, and
 no validation; Voyager, Galileo, and New Horizons additionally hit
 not-implemented walls. The work is: finish and validate the Cassini
-path (final templates, schema validation, tests), then generalize —
+path (final templates — acceptance list recorded on #53; schema
+validation; the interacting LID defects #139/#256), then generalize —
 per-mission label templates, LID builders, and collection machinery
 (#53 with #66, #67, #69, #71-#76, #79, #47, #30, #63). Distinct from this, **PDS4 *input***
 (#34) — reading PDS4-archived data instead of PDS3 — is treated like any
@@ -319,15 +324,16 @@ and the five decision gates, not by any implementation.
 
 ## 7. Issue index
 
-Every open issue, by track. **Bold** = created 2026-07-12 during this
-reconciliation.
+Every open issue, by track. **Bold** = created after the 2026-07-11
+review (the 2026-07-12 reconciliation; #251-#254 and #256 by the
+2026-07-13 backend test suites, PRs #255/#257).
 
 | Track | Issues |
 |---|---|
 | A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, **#224**, **#225**, **#226**, **#227**, **#228**, **#229**, **#230**, **#232**, **#233**, **#234**, **#235** |
-| B — navigation correctness | #24, #25, #128, #130, #132, #133, #179, #180, #210, #221, #222, **#237**, **#238**, **#239** |
+| B — navigation correctness | #24, #25, #128, #130, #132, #133, #179, #180, #210, #221, #222, **#237**, **#238**, **#239**, **#254** |
 | C — statistics & QA | **#240** (plus the standing cross-check and campaign-report practice) |
-| D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #60, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #139, #141, #142, #188, **#231**, **#236** |
+| D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #60, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #139, #141, #142, #188, **#231**, **#236**, **#251**, **#252**, **#253**, **#256** |
 | E — test & docs debt | #122, #129, #177, #178, **#241**, **#242**, **#243**, **#244**, **#245** |
 | F — instruments, features, hardening | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #82, #81, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212 |
 
