@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-__all__ = ['open_stats_db', 'upsert_image']
+__all__ = ['IMAGE_COLUMNS', 'open_stats_db', 'upsert_image']
 
 # One row per image (keyed by image name), with normalized child tables for
 # per-technique results and per-source feature usage.  Re-ingesting an image
@@ -28,6 +28,11 @@ CREATE TABLE IF NOT EXISTS images (
     excluded_from_consensus TEXT,
     image_class TEXT,
     noise_sigma REAL,
+    image_shape_v INTEGER,
+    image_shape_u INTEGER,
+    run_start TEXT,
+    run_end TEXT,
+    elapsed_s REAL,
     config_hash TEXT,
     git_sha TEXT,
     pipeline_run TEXT,
@@ -60,31 +65,38 @@ CREATE INDEX IF NOT EXISTS idx_techniques_image ON techniques(image_name);
 CREATE INDEX IF NOT EXISTS idx_sources_image ON feature_sources(image_name);
 """
 
-_IMAGES_COLUMNS = frozenset(
-    {
-        'image_name',
-        'instrument',
-        'image_path',
-        'image_et',
-        'image_date',
-        'status',
-        'status_reason',
-        'offset_dv',
-        'offset_du',
-        'sigma_dv',
-        'sigma_du',
-        'confidence',
-        'confidence_rank',
-        'n_techniques',
-        'excluded_from_consensus',
-        'image_class',
-        'noise_sigma',
-        'config_hash',
-        'git_sha',
-        'pipeline_run',
-        'source_file',
-    }
+# Column order of the ``images`` table, kept in sync with ``_SCHEMA``.  The
+# CSV export uses this so its column order is stable and documented.
+IMAGE_COLUMNS: tuple[str, ...] = (
+    'image_name',
+    'instrument',
+    'image_path',
+    'image_et',
+    'image_date',
+    'status',
+    'status_reason',
+    'offset_dv',
+    'offset_du',
+    'sigma_dv',
+    'sigma_du',
+    'confidence',
+    'confidence_rank',
+    'n_techniques',
+    'excluded_from_consensus',
+    'image_class',
+    'noise_sigma',
+    'image_shape_v',
+    'image_shape_u',
+    'run_start',
+    'run_end',
+    'elapsed_s',
+    'config_hash',
+    'git_sha',
+    'pipeline_run',
+    'source_file',
 )
+
+_IMAGES_COLUMNS = frozenset(IMAGE_COLUMNS)
 _TECHNIQUES_COLUMNS = frozenset(
     {
         'image_name',
@@ -115,14 +127,36 @@ _SOURCES_COLUMNS = frozenset(
 def open_stats_db(db_path: str | Path) -> sqlite3.Connection:
     """Open (creating if necessary) the statistics database.
 
+    There is no schema migration: a database whose ``images`` table does
+    not match the current column set is rejected with instructions to
+    delete the file and re-ingest (ingestion is cheap and idempotent, so
+    the database is always disposable).
+
     Parameters:
         db_path: Filesystem path of the SQLite database.
 
     Returns:
         An open connection with foreign keys enabled and the schema applied.
+
+    Raises:
+        ValueError: If the database exists with a different ``images``
+            column set.
     """
     conn = sqlite3.connect(str(db_path))
     conn.execute('PRAGMA foreign_keys = ON')
+    # Check any pre-existing images table BEFORE applying the schema
+    # script -- the script's index statements fail confusingly against a
+    # table with a different column set.
+    found = {row[1] for row in conn.execute('PRAGMA table_info(images)')}
+    if len(found) > 0 and found != _IMAGES_COLUMNS:
+        missing = ', '.join(sorted(_IMAGES_COLUMNS - found)) or '(none)'
+        extra = ', '.join(sorted(found - _IMAGES_COLUMNS)) or '(none)'
+        conn.close()
+        raise ValueError(
+            f'{db_path}: images table does not match the current schema '
+            f'(missing: {missing}; unexpected: {extra}). Delete the database '
+            f'file and re-run sd_stats_ingest.'
+        )
     conn.executescript(_SCHEMA)
     return conn
 
