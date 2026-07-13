@@ -252,9 +252,9 @@ def test_load_sidecar_accepts_rank_1_constraint(tmp_path: Path) -> None:
     constraint = sidecar.ground_truth.constraint
     assert constraint is not None
     assert constraint.type == 'rank_1'
-    assert constraint.normal_angle_deg == 60.0
-    assert constraint.offset_along_normal_px == 3.435
-    assert constraint.uncertainty_px == 0.4
+    assert constraint.normal_angle_deg == pytest.approx(60.0)
+    assert constraint.offset_along_normal_px == pytest.approx(3.435)
+    assert constraint.uncertainty_px == pytest.approx(0.4)
 
 
 def test_load_sidecar_constraint_absent_is_none(tmp_path: Path) -> None:
