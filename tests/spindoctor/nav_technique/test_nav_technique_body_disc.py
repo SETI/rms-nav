@@ -14,7 +14,10 @@ from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.feature.flags import BodyDiscFlags
 from spindoctor.feature.geometry import BodyDiscGeometry
 from spindoctor.nav_technique.diagnostics import BodyDiscDiagnostics
-from spindoctor.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE
+from spindoctor.nav_technique.nav_technique import (
+    ROTATION_UNOBSERVABLE_VARIANCE,
+    NCCCovarianceTuning,
+)
 from spindoctor.nav_technique.nav_technique_body_disc import (
     BodyDiscCorrelateNav,
     _RotationCandidate,
@@ -372,9 +375,10 @@ def test_body_disc_model_error_floor_inflates_covariance(
 ) -> None:
     """model_error_floor_px adds exactly its square to the covariance diagonal.
 
-    The NCC peak-curvature covariance measures photon statistics only; the
-    floor (calibrated against the simulated-scene campaign) carries the silhouette /
-    photometric model error of the template correlation.
+    The peak-curvature covariance measures statistical precision only; the
+    floor (calibrated against the simulated-scene campaign) carries the
+    size-independent pointing / interpolation model error.  Isolate the floor
+    by zeroing the localization and size terms in both runs.
     """
     shape = (160, 160)
     image_center = (80.0, 80.0)
@@ -389,10 +393,50 @@ def test_body_disc_model_error_floor_inflates_covariance(
     )
     context = make_nav_context(image, extfov_margin_vu=(16, 16))
     bare = BodyDiscCorrelateNav()
-    bare._model_error_floor_px = 0.0
+    bare._cov_tuning = NCCCovarianceTuning(
+        localization_uncertainty_scale=0.0, model_error_size_frac=0.0, model_error_floor_px=0.0
+    )
     floored = BodyDiscCorrelateNav()
-    floored._model_error_floor_px = 0.8
+    floored._cov_tuning = NCCCovarianceTuning(
+        localization_uncertainty_scale=0.0, model_error_size_frac=0.0, model_error_floor_px=0.8
+    )
     cov_bare = bare.navigate([feature], context).covariance_px2
     cov_floored = floored.navigate([feature], context).covariance_px2
     for axis in (0, 1):
         assert cov_floored[axis, axis] == pytest.approx(cov_bare[axis, axis] + 0.8**2, rel=1e-9)
+
+
+def test_body_disc_size_term_scales_covariance_with_diameter(
+    disc_image: DiscImageFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """model_error_size_frac adds (frac * body_diameter)**2 to the diagonal."""
+    shape = (160, 160)
+    image_center = (80.0, 80.0)
+    radius = 20.0
+    image = disc_image(shape, image_center, radius)
+    feature = _make_disc_feature(
+        'moonA',
+        extfov_shape=shape,
+        image_center_vu=image_center,
+        radius=radius,
+        planted_offset_vu=(2.0, -3.0),
+    )
+    context = make_nav_context(image, extfov_margin_vu=(16, 16))
+    bare = BodyDiscCorrelateNav()
+    bare._cov_tuning = NCCCovarianceTuning(
+        localization_uncertainty_scale=0.0, model_error_size_frac=0.0, model_error_floor_px=0.0
+    )
+    sized = BodyDiscCorrelateNav()
+    sized._cov_tuning = NCCCovarianceTuning(
+        localization_uncertainty_scale=0.0, model_error_size_frac=0.05, model_error_floor_px=0.0
+    )
+    size_px = BodyDiscCorrelateNav._max_body_extent_px([feature])
+    cov_bare = bare.navigate([feature], context).covariance_px2
+    cov_sized = sized.navigate([feature], context).covariance_px2
+    expected_extra = (0.05 * size_px) ** 2
+    assert expected_extra > 0.0
+    for axis in (0, 1):
+        assert cov_sized[axis, axis] == pytest.approx(
+            cov_bare[axis, axis] + expected_extra, rel=1e-9
+        )

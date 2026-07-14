@@ -59,7 +59,8 @@ reaching a 1/128 px resolution. The refinement is evaluated on the **raw-intensi
 surfaces even when the integer peak was chosen on the gradient surfaces, so a gradient-mode
 peak does not carry the gradient-magnitude rectification bias (the magnitude rectifies the
 signal, making the cross-power peak non-smooth at its apex) into the reported offset; the
-correlation-surface curvature provides the Cramer-Rao lower bound covariance.
+template gradient structure provides the matched-filter statistical covariance term (see
+"Sources of uncertainty").
 
 Sub-pixel refinement band-limit (``refine_lowpass_sigma_px``)
 -------------------------------------------------------------
@@ -132,8 +133,9 @@ schedule: the template is rotated about the body-centroid pivot at 11 angles spa
 :math:`\pm \mathrm{max\_rotation\_deg}` at the coarsest pyramid level, the best three
 rotations advance to a 5-sample refinement at the next level, and the best one advances to a
 3-sample fine refinement at the finest level. The (dv, du, theta) triple at the global
-maximum is returned with a 3x3 covariance whose translation block is the CRLB from the
-chosen rotation's correlation curvature. The technique reports its rotation as
+maximum is returned with a 3x3 covariance whose translation block is the matched-filter
+covariance (plus model-error terms) from the chosen rotation. The technique reports its
+rotation as
 unobservable: the NCC-peak quality is a PSR/PMR separation ratio rather than a
 log-likelihood, so it carries no calibrated Fisher information about rotation, and the
 rotation diagonal holds the
@@ -162,11 +164,34 @@ Restrictions and assumptions
 Sources of uncertainty
 ----------------------
 
-The reported covariance is the Cramer-Rao lower bound from the local NCC curvature at the
-chosen peak. It captures the noise-limited centroid uncertainty given the template /
-image power spectra; it does not capture systematic biases introduced by template-vs-image
-photometric mismatch (a body whose Lambert prediction differs from its true reflectance
-shifts the peak slightly), nor by the Z-buffer compositing itself when bodies are
+The reported covariance is a matched-filter (peak-curvature) statistical term plus three
+model-error terms added in quadrature on the translation diagonal.
+
+The statistical term is ``sigma_n**2 * inv(sum grad M grad M^T)``, evaluated on the aligned
+template ``M``. Both the residual noise ``sigma_n`` and the template gradients are measured
+on the **same** zero-mean, unit-std normalized surfaces, so the covariance is independent of
+the (arbitrary) template amplitude -- measuring the noise on a normalized residual while
+taking gradients on the raw template would shrink the covariance by the template variance and
+under-report the sigma by one to two orders of magnitude. A residual-correlation-area factor
+inflates this white-noise bound so spatially correlated residuals (camera PSF, anti-alias and
+sub-pixel-refine low-pass, coherent model error) are not counted as thousands of independent
+samples.
+
+On a well-matched template that statistical term is far smaller than the true registration
+error, which is dominated by silhouette / photometric model error rather than photon noise.
+Three model-error terms restore calibration so the reported sigma **tracks** the error across
+body size and resolution instead of pinning to a constant floor:
+
+- a **localization-spread** term ``(localization_uncertainty_scale * consistency)**2``, where
+  ``consistency`` is the inter-pyramid-level peak migration in pixels -- a peak that walks
+  between levels is empirically the less well-localized one;
+- a **silhouette** term ``(model_error_size_frac * body_diameter_px)**2`` -- a coherent shape
+  mismatch displaces the peak by a roughly fixed fraction of the body's extent, so a large
+  body's uncertainty is larger in absolute pixels than a small body's;
+- an absolute ``model_error_floor_px`` floor for the size-independent residual (pointing,
+  camera distortion, sub-pixel interpolation).
+
+The covariance still does not model the Z-buffer compositing bias when bodies are
 near-occluding. When the chosen peak sits within the at-edge tolerance of any axis bound,
 or when the rotation parameter is at the configured fraction of its cap, the result is
 flagged :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and the
@@ -194,6 +219,13 @@ in ``src/spindoctor/config_files/config_510_techniques.yaml``.
   Removes the sharp-edge cross-power aliasing that otherwise leaves a ~0.03 px (up to ~0.1 px
   at the worst two-axis phase) sub-pixel-phase S-curve in the recovered offset; ``0.0``
   disables it and restores that bias.
+- ``localization_uncertainty_scale`` — float, default ``1.0`` (dimensionless). Multiplies the
+  inter-pyramid-level peak migration (``consistency``, px) into an added translation sigma (see
+  "Sources of uncertainty"). ``0.0`` disables it.
+- ``model_error_size_frac`` — float, default ``0.005`` (fraction of the body diameter). The
+  silhouette model error as a fraction of the body's ext-FOV extent. ``0.0`` disables it.
+- ``model_error_floor_px`` — float, default ``0.05`` px. Absolute size-independent floor added
+  in quadrature. ``0.0`` disables it.
 
 The remaining numeric thresholds (NCC peak quality, consistency tolerance, top-k count) are
 shared across every pyramid-NCC technique and live as module-level constants in

@@ -79,13 +79,25 @@ techniques:
       # band-limited -- coarse pyramid levels keep sharp surfaces for
       # integer-peak selection.  0.0 disables it.
       refine_lowpass_sigma_px: 1.0
-      # Model-error floor (px), added in quadrature to the reported
-      # covariance diagonal (#210).  The NCC peak-curvature covariance
-      # measures photon statistics only (campaign 1-sigma coverage
-      # ~0.00 vs the 0.39 2D-Gaussian reference); this floor carries
-      # the silhouette / photometric model error and brings 2-sigma
-      # coverage to 0.865 on the campaign (util/calibration/fit_floors).
-      model_error_floor_px: 0.93
+      # Covariance model-error terms.  The peak-curvature (matched-filter)
+      # covariance measures only the statistical precision at the winning
+      # NCC peak; on a well-matched template that is far tighter than the
+      # true registration error, which is dominated by silhouette model
+      # error and localization ambiguity.  Three quadrature terms restore
+      # calibration so the reported sigma tracks the error across body size
+      # and resolution instead of pinning to a constant:
+      #  - localization_uncertainty_scale multiplies the inter-pyramid-level
+      #    peak migration (consistency, px); a peak that walks between
+      #    levels is empirically the poorer-localized one (campaign
+      #    corr(error, consistency) ~ 0.57).
+      #  - model_error_size_frac scales the body diameter (px): a coherent
+      #    silhouette mismatch displaces the peak by a roughly fixed
+      #    fraction of the extent (campaign corr(error, radius) ~ 0.51).
+      #  - model_error_floor_px is the size-independent floor (pointing,
+      #    camera distortion, sub-pixel interpolation).
+      localization_uncertainty_scale: 1.0
+      model_error_size_frac: 0.005
+      model_error_floor_px: 0.05
     terms:
       # PSR-style quality measure of the chosen NCC peak.  Campaign raw
       # p5/p50/p95 = 6.3/9.6/19.9, so the offset-6 divisor-14 transform
@@ -190,13 +202,19 @@ techniques:
       # Pixels of slack around the search-window axis bounds for the
       # at-edge check.  See ``RingEdgeNav.at_edge_tolerance_px``.
       at_edge_tolerance_px: 1.0
-      # Model-error floor (px), added in quadrature to the reported
-      # covariance diagonal: reported_cov = CRLB-form (+)
-      # model_error_floor_px**2.  Captures the pointing / body-shape
-      # error the per-blob centroid CRLB does not (#210).  Calibrated to
-      # bring the campaign's 2-sigma coverage to 0.865
-      # (util/calibration/fit_floors).
-      model_error_floor_px: 1.1
+      # Covariance model-error terms.  The per-blob centroid CRLB counts
+      # photon statistics only; the brightness-weighted centroid is a
+      # biased estimate of the geometric center (lit-hemisphere offset,
+      # shape irregularity) whose error scales with the body radius.
+      #  - model_error_size_frac is that centroid bias as a fraction of the
+      #    body radius; per-blob variances combine by inverse-variance so a
+      #    multi-blob fit tightens correctly (campaign corr(error, radius)
+      #    ~ 0.34).
+      #  - model_error_floor_px is the size-independent floor (pointing).
+      # localization_uncertainty_scale is unused here (no correlation
+      # pyramid) and left at its 0.0 default.
+      model_error_size_frac: 0.05
+      model_error_floor_px: 0.1
 
   BodyLimbNav:
     # Sim campaign (physical-body pass): n=311 usable, base rate
@@ -766,12 +784,17 @@ techniques:
       at_edge: true
       spurious: true
     tuning:
-      # Model-error floor (px), added in quadrature to the reported
-      # covariance diagonal (#210).  The NCC peak-curvature covariance
-      # measures photon statistics only (campaign 1-sigma coverage
-      # ~0.00 vs the 0.39 2D-Gaussian reference); this floor carries
-      # the ring-template model error and brings 2-sigma coverage to
-      # 0.865 on the campaign (util/calibration/fit_floors).
+      # Covariance model-error terms.  The peak-curvature covariance
+      # measures statistical precision at the winning NCC peak only.
+      #  - localization_uncertainty_scale multiplies the inter-pyramid-level
+      #    peak migration (consistency, px), the dominant per-scene
+      #    localization-uncertainty signal.
+      #  - model_error_size_frac (off by default) would scale the annulus
+      #    radial span; the ring-annulus bulk error does not track span,
+      #    so it stays 0.0 and the floor carries the template model error.
+      #  - model_error_floor_px is the size-independent floor.
+      localization_uncertainty_scale: 1.0
+      model_error_size_frac: 0.0
       model_error_floor_px: 0.13
 
 

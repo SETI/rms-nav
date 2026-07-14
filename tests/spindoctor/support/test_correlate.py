@@ -7,14 +7,17 @@ import pytest
 
 from spindoctor.support.correlate import (
     _MAX_PEAK_RATIO,
+    _residual_correlation_area,
     gradient_magnitude,
     masked_ncc,
+    matched_filter_covariance,
     navigate_single_scale_kpeaks,
     navigate_with_pyramid_kpeaks,
     nms_topk,
     peak_to_runner_up_ratio,
 )
-from spindoctor.support.image import pad_top_left
+from spindoctor.support.image import normalize_array, pad_top_left
+from spindoctor.support.misc import mad_std
 
 # =========================================================================
 # Helpers
@@ -598,3 +601,94 @@ def test_peak_to_runner_up_ratio_clamps_large_ordinary_ratio() -> None:
     """An ordinary ratio above the cap is clamped to _MAX_PEAK_RATIO."""
     ratio = peak_to_runner_up_ratio([(1e9, 0.0, 0.0), (1.0, 1.0, 1.0)])
     assert ratio == _MAX_PEAK_RATIO
+
+
+# =========================================================================
+# Matched-filter (peak-curvature) covariance
+# =========================================================================
+
+
+def _gaussian_model(sigma: float = 4.0, size: int = 64) -> np.ndarray:
+    """A centered unit-amplitude Gaussian bump with gradients on both axes."""
+    return _gaussian_patch((size, size), sigma)
+
+
+def test_matched_filter_covariance_matches_white_noise_crlb() -> None:
+    """cov (area=1) equals sigma_n^2 * inv(sum grad grad^T) within a tight factor."""
+    model = _gaussian_model()
+    sigma_n = 0.05
+    sx = np.gradient(model, axis=1)
+    expected_var_u = sigma_n**2 / float(np.sum(sx * sx))
+    cov = matched_filter_covariance(model, sigma_n, correlation_area=1.0)
+    assert cov[1, 1] == pytest.approx(expected_var_u, rel=0.5)
+
+
+def test_matched_filter_covariance_scales_with_noise_variance() -> None:
+    """Doubling the residual noise quadruples the covariance."""
+    model = _gaussian_model()
+    cov_lo = matched_filter_covariance(model, 0.05, correlation_area=1.0)
+    cov_hi = matched_filter_covariance(model, 0.10, correlation_area=1.0)
+    assert cov_hi[0, 0] == pytest.approx(4.0 * cov_lo[0, 0], rel=1e-6)
+
+
+def test_matched_filter_covariance_scales_with_correlation_area() -> None:
+    """The covariance is linear in the correlation-area inflation factor."""
+    model = _gaussian_model()
+    cov_1 = matched_filter_covariance(model, 0.05, correlation_area=1.0)
+    cov_10 = matched_filter_covariance(model, 0.05, correlation_area=10.0)
+    assert cov_10[0, 0] == pytest.approx(10.0 * cov_1[0, 0], rel=1e-6)
+
+
+def test_matched_filter_covariance_is_amplitude_invariant_when_normalized() -> None:
+    """A bright and a faint image give the same sigma once both are normalized.
+
+    This is the unit-consistency property the derivation restores: the
+    covariance must not scale with the (arbitrary) template amplitude.
+    """
+    rng = np.random.default_rng(3)
+    model = _gaussian_model()
+    noise = rng.normal(0.0, 0.02, model.shape)
+    sigmas = []
+    for amplitude in (1.0, 1000.0):
+        image = amplitude * model + amplitude * noise
+        model_scaled = amplitude * model
+        model_norm = normalize_array(model_scaled)
+        resid = normalize_array(image) - model_norm
+        cov = matched_filter_covariance(model_norm, mad_std(resid), correlation_area=1.0)
+        sigmas.append(float(np.sqrt(cov[0, 0])))
+    assert sigmas[1] == pytest.approx(sigmas[0], rel=0.05)
+
+
+def test_matched_filter_covariance_controlled_surface_within_factor() -> None:
+    """A known peak sharpness + known noise recovers the expected sigma (factor ~1.5).
+
+    Feeds the covariance a normalized model with a known gradient sum and a
+    controlled residual noise, and checks the reported per-axis sigma lands
+    within a factor of 1.5 of the closed-form matched-filter bound.
+    """
+    model = _gaussian_model(sigma=3.0)
+    model_norm = normalize_array(model)
+    sigma_n = 0.1
+    sx = np.gradient(model_norm, axis=1)
+    expected_sigma_u = np.sqrt(sigma_n**2 / float(np.sum(sx * sx)))
+    cov = matched_filter_covariance(model_norm, sigma_n, correlation_area=1.0)
+    reported_sigma_u = float(np.sqrt(cov[1, 1]))
+    assert 1.0 / 1.5 <= reported_sigma_u / expected_sigma_u <= 1.5
+
+
+def test_residual_correlation_area_white_noise_is_near_one() -> None:
+    """A white-noise residual has a correlation area close to 1 pixel."""
+    rng = np.random.default_rng(1)
+    white = rng.normal(0.0, 1.0, (96, 96))
+    area = _residual_correlation_area(white)
+    assert area < 2.5
+
+
+def test_residual_correlation_area_smoothed_field_exceeds_white() -> None:
+    """Spatially correlated residuals report a larger correlation area."""
+    from scipy.ndimage import gaussian_filter
+
+    rng = np.random.default_rng(2)
+    white = rng.normal(0.0, 1.0, (96, 96))
+    smoothed = gaussian_filter(white, sigma=3.0)
+    assert _residual_correlation_area(smoothed) > 5.0 * _residual_correlation_area(white)
