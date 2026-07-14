@@ -9,10 +9,9 @@ Titan is handled as a deliberate special case: its atmosphere is unique
 (transparent at some wavelengths), so its handling does not generalize to
 other thick-atmosphere bodies such as Venus.  This model is built and active
 whenever Titan is in the field of view (the shape-based ``NavModelBody``
-skips Titan).  It
-emits no features, so no technique navigates it; instead it records, per
-image, *why* a Titan scene cannot be navigated.  The orchestrator reads the
-marker it exposes and fails such a frame with
+skips Titan).  It emits no features, so no technique navigates it; instead
+it records, per image, *why* a Titan scene cannot be navigated.  The
+orchestrator reads the marker it exposes and fails such a frame with
 :attr:`~spindoctor.support.status_reason.NavStatusReason.TITAN_UNSUPPORTED`
 rather than a silent empty failure.
 """
