@@ -506,7 +506,7 @@ techniques:
       # the brightest pixel inside the search window is considered noise.
       detection_sigma: 4.0
       # Minimum background-subtracted peak-to-runner-up ratio for the
-      # 1-star detection.  The absolute detection_sigma test
+      # 1-star detection (#211).  The absolute detection_sigma test
       # cannot reject a noise spike: the maximum of the ~3700-pixel
       # search window sits at 3.5-4.5 sigma for pure noise, so a
       # marginal star routinely loses to a spike that clears 4 sigma.
@@ -517,10 +517,10 @@ techniques:
       # the result is spurious.  Unit-free (no DN-scale dependence).
       one_star_min_peak_ratio: 1.5
       # Maximum prediction-to-detection distance (px) accepted by the
-      # 1-star path when the peak-ratio gate above is vacuous.
+      # 1-star path when the peak-ratio gate above is vacuous (#259).
       # The ratio reports an infinite no-rival sentinel when the
       # window's runner-up never clears the background -- a flat or
-      # quantized frame where the ambiguity gate has measured nothing.  A
+      # quantized frame where the #211 gate has measured nothing.  A
       # real star on a real (noisy) background always has a finite
       # runner-up, so the sentinel case is exactly where a lone hot
       # pixel or artifact would otherwise auto-pass every check.  In
@@ -531,7 +531,7 @@ techniques:
       # ~3-sigma budget) and an uncorroborated no-rival detection far
       # from the prediction is far more likely an artifact than a
       # 2-3-sigma pointing error.  A finite peak ratio leaves
-      # acceptance to the measured ambiguity gate: operator-verified
+      # acceptance to the measured #211 gate: operator-verified
       # library matches carry genuine one-star offsets up to ~24 px,
       # so no uniform residual cut can sit below the search window.
       one_star_max_residual_px: 10.0
