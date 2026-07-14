@@ -5,21 +5,26 @@ Titan Navigation Model
 Overview
 ========
 
-:class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` is a registered placeholder for
-atmospheric-body navigation. Bodies with thick opaque atmospheres (Titan, Venus, Triton's
-nitrogen frost layer at low phase) need a fundamentally different algorithm than ellipsoid-
-limb fitting: the visible "limb" is the haze top, the haze top varies with wavelength, and
-the surface inside is invisible to optical wavelengths. The model exists in
-``NavModel._registry`` so the orchestrator's
-:func:`~spindoctor.nav_model.nav_model.build_models_for_obs` driver and the per-image curator know
-the placeholder is here, but it never emits features or annotations.
+:class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` is the atmospheric-body
+navigation model. Bodies with thick opaque atmospheres (Titan, and any other member of the
+``bodies.atmospheric_bodies`` config list) need a fundamentally different algorithm than
+ellipsoid-limb fitting: the visible "limb" is the haze top, the haze top varies with
+wavelength, and the surface inside is invisible to optical wavelengths. At high phase such a
+body is not even a circle. Ellipsoid disc / limb / terminator navigation is therefore
+systematically wrong, not merely noisy, so those features are never emitted for an
+atmospheric body.
 
-A Titan-bearing image proceeds through the orchestrator as though no Titan-aware model had
-registered: the placeholder's :meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs`
-inherits the base-class no-op, so the orchestrator constructs no instance and the technique
-pipeline sees no Titan-derived feature. The image still navigates against any other body,
-ring, or star in the FOV. A haze-aware extractor would override
-:meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs` to opt in.
+The model is built and active whenever an atmospheric body is in the extended FOV: the
+shape-based :class:`~spindoctor.nav_model.nav_model_body.NavModelBody` skips those bodies, and
+this model takes the slot instead. It emits no features, so no technique navigates it;
+instead it records, per image, *why* an atmospheric-body scene cannot be navigated. It
+exposes the atmospheric body name through an ``atmospheric_body_name`` property that the
+orchestrator reads: when an atmospheric body is the frame's only content the pipeline fails
+with :attr:`~spindoctor.support.status_reason.NavStatusReason.ATMOSPHERIC_BODY_UNSUPPORTED`
+rather than the generic no-features reason. A Titan-bearing image with other content (a
+resolved moon, a ring, stars) still navigates against that content; the atmospheric body
+simply contributes nothing. A haze-aware extractor would replace the no-result with a real
+per-filter limb fit.
 
 Theory
 ======
@@ -37,28 +42,31 @@ Atmospheric-body navigation is conceptually distinct from ellipsoid-limb fitting
 
 The corresponding algorithm requires a per-filter haze profile, a phase-aware limb-fit cost
 function, and per-image refraction modelling. None of those components are wired into the
-technique pipeline; the placeholder reserves the registry slot for a haze-aware extractor.
+technique pipeline, so the model records a no-result instead of guessing.
 
 Restrictions and assumptions
 ----------------------------
 
-The placeholder makes no algorithmic assumptions because it runs no algorithm. Every
-Titan-class body in an extended FOV produces no feature; downstream techniques receive
-no TITAN_LIMB feature.
+The model makes no algorithmic assumptions because it runs no fit. Every atmospheric body in
+an extended FOV produces no feature; downstream techniques receive no shape-based or
+haze-limb feature for it. When the atmospheric body is the frame's only navigable content the
+orchestrator records
+:attr:`~spindoctor.support.status_reason.NavStatusReason.ATMOSPHERIC_BODY_UNSUPPORTED`.
 
 Sources of uncertainty
 ----------------------
 
-The placeholder reports no uncertainty.
+The model reports no uncertainty.
 
 Configuration
 =============
 
-The placeholder consumes no YAML configuration of its own. The shared
-:class:`~spindoctor.config.config.Config` object is passed in for future use; the placeholder
-records ``stub: True`` on its
-:attr:`~spindoctor.nav_model.nav_model.NavModel.metadata` dict so the curator surfaces the slot in
-the per-image JSON sidecar.
+The set of atmospheric bodies is the ``bodies.atmospheric_bodies`` list in
+``src/spindoctor/config_files/config_040_bodies.yaml`` (Titan by default; extend it as other
+thick-atmosphere bodies enter the mission set). The model records
+``atmospheric_body: <NAME>`` and ``navigable: False`` on its
+:attr:`~spindoctor.nav_model.nav_model.NavModel.metadata` dict so the curator surfaces the
+refusal in the per-image JSON sidecar.
 
 Implementation
 ==============
@@ -72,27 +80,24 @@ Public class :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan`, base
 
 Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
 
-- :meth:`~spindoctor.nav_model.nav_model_titan.NavModelTitan.create_model` — no-op; records
-  ``stub: True`` on :attr:`~spindoctor.nav_model.nav_model.NavModel.metadata`.
+- :meth:`~spindoctor.nav_model.nav_model_titan.NavModelTitan.instances_for_obs` — returns one
+  instance per ``bodies.atmospheric_bodies`` member inside the extended FOV.
+- :meth:`~spindoctor.nav_model.nav_model_titan.NavModelTitan.create_model` — records
+  ``atmospheric_body`` / ``navigable`` metadata and logs the unsupported-navigation reason.
 - :meth:`~spindoctor.nav_model.nav_model_titan.NavModelTitan.to_features` — returns an empty
   list.
 - :meth:`~spindoctor.nav_model.nav_model_titan.NavModelTitan.to_annotations` — returns an empty
   :class:`~spindoctor.annotation.annotations.Annotations` collection.
-
-The class does not override
-:meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs`; the registry registers the
-class but the default base-class implementation returns an empty list, so the
-orchestrator never constructs an instance. A haze-aware extractor would override
-:meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs` to return one instance per
-visible Titan-class body.
+- ``atmospheric_body_name`` — read-only property naming the atmospheric body; the orchestrator
+  reads it to attribute an otherwise-empty frame to atmospheric-body non-support.
 
 Examples
 ========
 
-The Titan placeholder produces no per-image effect. A Titan-class scene proceeds
-through the orchestrator as if no Titan-bearing model had registered: the
-:meth:`~spindoctor.nav_model.nav_model_titan.NavModelTitan.to_features` return value is empty,
-:meth:`~spindoctor.nav_model.nav_model_titan.NavModelTitan.to_annotations` return is empty, and
-the per-image JSON sidecar's
-:attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.model_metadata` contains ``"stub": true``
-under the model's name as a record that the slot is reserved.
+A Titan-only scene fails with status ``failed`` and status_reason
+``atmospheric_body_unsupported``: the model builds, logs ``atmospheric body TITAN in FOV:
+navigation not supported``, and the per-image JSON sidecar's
+:attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.model_metadata` records
+``"atmospheric_body": "TITAN"`` and ``"navigable": false`` under the model's name. A scene with
+Titan plus a resolved moon or ring navigates on that other content; Titan contributes no
+feature and does not force the atmospheric status.

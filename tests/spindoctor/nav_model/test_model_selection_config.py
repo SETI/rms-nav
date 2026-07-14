@@ -77,11 +77,12 @@ def _config_with_titan_only_satellites(tmp_path: Path) -> Config:
 
 def test_body_selection_uses_config_satellite_catalog(tmp_path: Path) -> None:
     # The satellite catalog in the supplied config decides which bodies are
-    # even considered: an override shrinking Saturn's satellites to Titan
-    # must shrink the instantiated model set accordingly.
+    # even considered.  Titan is a thick-atmosphere body, so it never builds a
+    # shape-based NavModelBody even when it is the only satellite: only Saturn
+    # remains.
     config = _config_with_titan_only_satellites(tmp_path)
     instances = NavModelBody.instances_for_obs(cast(Any, _FakeSaturnObs()), config=config)
-    assert sorted(m.name for m in instances) == ['body:TITAN', 'body:saturn']
+    assert sorted(m.name for m in instances) == ['body:saturn']
     default_instances = NavModelBody.instances_for_obs(cast(Any, _FakeSaturnObs()))
     assert len(default_instances) > len(instances)
 

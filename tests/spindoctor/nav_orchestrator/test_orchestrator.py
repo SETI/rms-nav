@@ -111,6 +111,29 @@ class _FakeStarModel(NavModel):
         return Annotations()
 
 
+class _FakeAtmosphericModel(NavModel):
+    """Fake atmospheric-body model: active, emits no features, names its body."""
+
+    _abstract = True
+
+    def __init__(self, obs: Any, *, body_name: str = 'TITAN') -> None:
+        super().__init__(f'atmospheric:{body_name}', obs)
+        self._body_name = body_name
+
+    @property
+    def atmospheric_body_name(self) -> str:
+        return self._body_name
+
+    def create_model(self) -> None:
+        self._metadata['atmospheric_body'] = self._body_name
+
+    def to_features(self, context: NavContext) -> list[NavFeature]:
+        return []
+
+    def to_annotations(self, context: NavContext) -> Annotations:
+        return Annotations()
+
+
 class _FakeStarTechnique(NavTechnique):
     """Stand-in technique that always reports a fixed offset.
 
@@ -233,6 +256,30 @@ def test_orchestrator_no_features_emitted_yields_no_features_extracted(
     result = orch.navigate(obs)  # type: ignore[arg-type]
     assert result.status == 'failed'
     assert result.status_reason == NavStatusReason.NO_FEATURES_EXTRACTED
+
+
+def test_orchestrator_atmospheric_only_yields_atmospheric_unsupported(
+    fake_obs: _FakeObs,
+) -> None:
+    """A frame whose only content is an atmospheric body records the reason."""
+    obs = fake_obs
+    model = _FakeAtmosphericModel(obs, body_name='TITAN')
+    orch = NavOrchestrator([model])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'failed'
+    assert result.status_reason == NavStatusReason.ATMOSPHERIC_BODY_UNSUPPORTED
+
+
+def test_orchestrator_atmospheric_plus_stars_navigates_normally(
+    fake_obs: _FakeObs,
+) -> None:
+    """An atmospheric body alongside navigable stars does not force the atmospheric reason."""
+    obs = fake_obs
+    models = [_FakeStarModel(obs, feature_count=3), _FakeAtmosphericModel(obs)]
+    orch = NavOrchestrator(models, only_techniques=['_FakeStarTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'success'
+    assert result.status_reason != NavStatusReason.ATMOSPHERIC_BODY_UNSUPPORTED
 
 
 def test_normalize_model_patterns_expands_bare_prefix() -> None:

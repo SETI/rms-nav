@@ -212,6 +212,16 @@ def _normalize_model_patterns(patterns: str | list[str], names: list[str]) -> li
     return out
 
 
+def _atmospheric_bodies_in_models(models: list[NavModel]) -> list[str]:
+    """Return the atmospheric-body names among the built models.
+
+    Reads the ``atmospheric_body_name`` attribute the atmospheric-body model
+    exposes (duck-typed so no orchestrator import of the concrete model class
+    is needed); other models lack it and contribute nothing.
+    """
+    return [name for model in models if (name := getattr(model, 'atmospheric_body_name', ''))]
+
+
 def _feature_source_bodies(feature: NavFeature) -> frozenset[str]:
     """Return the set of body names a feature was emitted for.
 
@@ -420,8 +430,24 @@ class NavOrchestrator(NavBase):
         model_metadata = self._collect_model_metadata(built_models)
         annotations = self._collect_annotations(context, built_models)
         if not all_features:
+            # An atmospheric body (Titan and other opaque-haze bodies) emits no
+            # navigable features by design.  When it is the frame's only content
+            # the scene fails for lack of features -- but record *why* rather
+            # than the generic no-features reason, so a Titan-only image is not a
+            # silent empty failure.
+            atmospheric_bodies = _atmospheric_bodies_in_models(built_models)
+            if atmospheric_bodies:
+                self._logger.info(
+                    'Only atmospheric body content in FOV (%s); no navigable features',
+                    ', '.join(sorted(atmospheric_bodies)),
+                )
+            no_feature_reason = (
+                NavStatusReason.ATMOSPHERIC_BODY_UNSUPPORTED
+                if atmospheric_bodies
+                else NavStatusReason.NO_FEATURES_EXTRACTED
+            )
             return self._fail(
-                status_reason=NavStatusReason.NO_FEATURES_EXTRACTED,
+                status_reason=no_feature_reason,
                 image_classifier=image_classifier,
                 provenance=provenance,
                 feature_inventory=feature_inventory,

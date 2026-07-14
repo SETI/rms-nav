@@ -38,6 +38,10 @@ class NavStatusReason(StrEnum):
     - ``KERNELS_UNAVAILABLE``: SPICE coverage missing for the image ET.
     - ``INSTRUMENT_NOT_CONFIGURED``: no per-instrument YAML block for this
       camera.
+    - ``ATMOSPHERIC_BODY_UNSUPPORTED``: the only navigable content in the frame
+      is a thick-atmosphere body (e.g. Titan) whose opaque haze hides the
+      surface, so no shape-based or haze-limb navigation is available; the
+      pipeline records the refusal instead of a silent empty failure.
     - ``NO_FEATURES_EXTRACTED``: every extractor returned an empty list.
     - ``ALL_FEATURES_GATED``: features extracted but every one fell below the
       reliability gate.
@@ -65,6 +69,7 @@ class NavStatusReason(StrEnum):
     IMAGE_CORRUPT = 'image_corrupt'
     KERNELS_UNAVAILABLE = 'kernels_unavailable'
     INSTRUMENT_NOT_CONFIGURED = 'instrument_not_configured'
+    ATMOSPHERIC_BODY_UNSUPPORTED = 'atmospheric_body_unsupported'
     NO_FEATURES_EXTRACTED = 'no_features_extracted'
     ALL_FEATURES_GATED = 'all_features_gated'
     NO_FEASIBLE_TECHNIQUES = 'no_feasible_techniques'

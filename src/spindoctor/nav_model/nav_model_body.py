@@ -96,6 +96,8 @@ __all__ = [
     'TERMINATOR_MIN_PHASE_FACTOR',
     'TERMINATOR_MIN_VERTICES',
     'NavModelBody',
+    'atmospheric_body_set',
+    'bodies_in_extfov',
 ]
 
 
@@ -174,6 +176,71 @@ other body thresholds by issue #118 / CODE-NAV-MODEL-002).
 """
 
 
+def atmospheric_body_set(config: Config | None = None) -> frozenset[str]:
+    """Return the upper-cased set of thick-atmosphere body names.
+
+    These bodies (Titan at minimum; the ``bodies.atmospheric_bodies`` config
+    list is extensible) have an opaque haze that hides the surface, so
+    ellipsoid limb / terminator / disc navigation is systematically wrong.
+    They build no ``NavModelBody``; the atmospheric-body model records a
+    no-result instead.
+
+    Parameters:
+        config: Optional ``Config`` override; ``None`` uses ``DEFAULT_CONFIG``.
+
+    Returns:
+        Frozen set of upper-cased SPICE body names.
+    """
+    cfg = config if config is not None else DEFAULT_CONFIG
+    raw = cfg.bodies.get('atmospheric_bodies', ())
+    return frozenset(str(name).upper() for name in raw)
+
+
+def bodies_in_extfov(
+    obs: Observation, *, config: Config | None = None
+) -> list[tuple[str, dict[str, Any]]]:
+    """Return ``(body_name, inventory_entry)`` for each body inside the extfov.
+
+    Queries ``obs.inventory`` once with the planet plus its configured
+    satellites and keeps every body whose ``inventory_body_in_extfov``
+    predicate fires.  Shared by the shape-based body model and the
+    atmospheric-body model so both select from the same in-FOV body set.
+
+    Parameters:
+        obs: Observation snapshot.
+        config: Configuration whose satellite catalog decides which bodies are
+            considered; ``None`` uses ``DEFAULT_CONFIG``.
+
+    Returns:
+        List of ``(body_name, inventory_entry)`` pairs in planet-then-satellite
+        order; empty when the observation exposes no usable inventory.
+    """
+    cfg = config if config is not None else DEFAULT_CONFIG
+    planet = getattr(obs, 'closest_planet', None)
+    if planet is None:
+        return []
+    body_list: list[str] = [planet, *list(cfg.satellites(planet))]
+    inventory_method = getattr(obs, 'inventory', None)
+    if not callable(inventory_method):
+        return []
+    try:
+        inv = inventory_method(body_list, return_type='full')
+    except (TypeError, AttributeError, ValueError):
+        return []
+    in_extfov = getattr(obs, 'inventory_body_in_extfov', None)
+    if not callable(in_extfov):
+        return []
+    out: list[tuple[str, dict[str, Any]]] = []
+    for body_name in body_list:
+        entry = inv.get(body_name)
+        if entry is None:
+            continue
+        if not in_extfov(entry):
+            continue
+        out.append((body_name, entry))
+    return out
+
+
 @dataclass(frozen=True)
 class _PolylineSampler:
     """Bundle of sampled limb / terminator polyline data.
@@ -241,9 +308,11 @@ class NavModelBody(NavModelBodyBase):
     def instances_for_obs(cls, obs: Observation, *, config: Config | None = None) -> list[NavModel]:
         """Return one NavModelBody per body whose bbox lies inside extfov.
 
-        Calls ``obs.inventory`` once with the planet + satellites list
-        from ``config.satellites`` and constructs a NavModel for every
-        entry whose ``inventory_body_in_extfov`` predicate fires.
+        Selects every in-FOV body via :func:`bodies_in_extfov` and constructs
+        a NavModel for each.  Thick-atmosphere bodies (Titan and any other
+        member of ``bodies.atmospheric_bodies``) are excluded: their opaque
+        haze hides the surface, so ellipsoid-shape navigation is
+        systematically wrong and the atmospheric-body model handles them.
 
         Parameters:
             obs: Observation snapshot.
@@ -252,33 +321,17 @@ class NavModelBody(NavModelBodyBase):
                 uses ``DEFAULT_CONFIG``.
 
         Returns:
-            One ``NavModelBody`` per body present in the extfov.
+            One ``NavModelBody`` per non-atmospheric body present in the extfov.
         """
         # Simulated obs use the sim-params-driven NavModelBodySimulated instead.
         if getattr(obs, 'is_simulated', False):
             return []
         if config is None:
             config = DEFAULT_CONFIG
-        planet = getattr(obs, 'closest_planet', None)
-        if planet is None:
-            return []
-        body_list: list[str] = [planet, *list(config.satellites(planet))]
-        inventory_method = getattr(obs, 'inventory', None)
-        if not callable(inventory_method):
-            return []
-        try:
-            inv = inventory_method(body_list, return_type='full')
-        except (TypeError, AttributeError, ValueError):
-            return []
-        in_extfov = getattr(obs, 'inventory_body_in_extfov', None)
-        if not callable(in_extfov):
-            return []
+        atmospheric = atmospheric_body_set(config)
         out: list[NavModel] = []
-        for body_name in body_list:
-            entry = inv.get(body_name)
-            if entry is None:
-                continue
-            if not in_extfov(entry):
+        for body_name, entry in bodies_in_extfov(obs, config=config):
+            if body_name.upper() in atmospheric:
                 continue
             out.append(cls(f'body:{body_name}', obs, body_name, inventory=entry, config=config))
         return out
