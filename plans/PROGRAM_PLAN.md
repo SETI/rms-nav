@@ -231,9 +231,11 @@ operator-decided (below) or deferred.
 - In progress (agents): #237 and #238 triage attribution; #60 + #24
   body-participation policy; #210 NCC covariance-model rederivation;
   #128/#150 limb-bias diagnosis pass.
-- Operator decisions settled: #239 sub-5 px bodies are curated as
-  expected failures for now, with the relaxed-disc pathway revisited
-  after #210 lands honest sigmas. #60 Titan and other atmospheric bodies
+- Operator decisions settled: #239 sub-5 px bodies are to be curated as
+  expected failures, with the relaxed-disc pathway revisited after #210
+  lands honest sigmas; no qualifying frame exists in the current library
+  or triage set yet, so this waits on a targeted cohort scan (predicted
+  diameter at or below ~5 px, single-body scenes) as library-growth work. #60 Titan and other atmospheric bodies
   are hard-excluded from body navigation, with an active model/technique
   that always declines and records why. #24 highly-irregular bodies drop
   shape features (limb/terminator/disc) once resolved but may still
