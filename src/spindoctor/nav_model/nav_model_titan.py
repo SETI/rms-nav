@@ -60,10 +60,14 @@ class NavModelTitan(NavModel):
 
     @property
     def titan_in_fov(self) -> bool:
-        """True: this model is only built when Titan is in the field of view.
+        """Whether Titan is in the field of view.
 
         The orchestrator reads this to attribute an otherwise-empty frame to
         Titan non-support.
+
+        Returns:
+            Always True: the model is only built when Titan is in the
+            field of view.
         """
         return True
 
@@ -104,11 +108,27 @@ class NavModelTitan(NavModel):
             )
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
-        """Return an empty feature list -- Titan navigation is unsupported."""
+        """Return an empty feature list -- Titan navigation is unsupported.
+
+        Parameters:
+            context: Per-image navigation context; unused because the model
+                runs no fit.
+
+        Returns:
+            An empty list, always: Titan emits no navigable features.
+        """
         del context
         return []
 
     def to_annotations(self, context: NavContext) -> Annotations:
-        """Return an empty annotation collection."""
+        """Return an empty annotation collection.
+
+        Parameters:
+            context: Per-image navigation context; unused because the model
+                renders no overlay.
+
+        Returns:
+            An empty ``Annotations`` collection, always.
+        """
         del context
         return Annotations()

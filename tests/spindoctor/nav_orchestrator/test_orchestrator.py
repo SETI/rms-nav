@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -655,24 +656,7 @@ def test_orchestrator_low_reliability_features_all_gated(fake_obs: _FakeObs) -> 
 
     class _LowReliabilityStarModel(_FakeStarModel):
         def to_features(self, context: NavContext) -> list[NavFeature]:
-            features = super().to_features(context)
-            return [
-                NavFeature(
-                    feature_id=f.feature_id,
-                    feature_type=f.feature_type,
-                    source_model=f.source_model,
-                    geometry=f.geometry,
-                    subject_range_km=f.subject_range_km,
-                    position_cov_px=f.position_cov_px,
-                    intensity_sigma_rel=f.intensity_sigma_rel,
-                    preferred_filter=f.preferred_filter,
-                    reliability=0.01,
-                    reliability_reasons=f.reliability_reasons,
-                    usable_types=f.usable_types,
-                    flags=f.flags,
-                )
-                for f in features
-            ]
+            return [replace(f, reliability=0.01) for f in super().to_features(context)]
 
     model = _LowReliabilityStarModel(obs, feature_count=3)
     orch = NavOrchestrator([model])
@@ -743,24 +727,7 @@ def test_prepare_apply_gate_false_returns_gated_features() -> None:
 
     class _LowReliabilityModel(_FakeStarModel):
         def to_features(self, context: NavContext) -> list[NavFeature]:
-            features = super().to_features(context)
-            return [
-                NavFeature(
-                    feature_id=f.feature_id,
-                    feature_type=f.feature_type,
-                    source_model=f.source_model,
-                    geometry=f.geometry,
-                    subject_range_km=f.subject_range_km,
-                    position_cov_px=f.position_cov_px,
-                    intensity_sigma_rel=f.intensity_sigma_rel,
-                    preferred_filter=f.preferred_filter,
-                    reliability=0.01,
-                    reliability_reasons=f.reliability_reasons,
-                    usable_types=f.usable_types,
-                    flags=f.flags,
-                )
-                for f in features
-            ]
+            return [replace(f, reliability=0.01) for f in super().to_features(context)]
 
     obs = _FakeObs()
     model = _LowReliabilityModel(obs, feature_count=2)
@@ -1091,24 +1058,7 @@ def test_all_features_gated_emits_status_reason_info(
 
     class _LowReliabilityStarModel(_FakeStarModel):
         def to_features(self, context: NavContext) -> list[NavFeature]:
-            features = super().to_features(context)
-            return [
-                NavFeature(
-                    feature_id=f.feature_id,
-                    feature_type=f.feature_type,
-                    source_model=f.source_model,
-                    geometry=f.geometry,
-                    subject_range_km=f.subject_range_km,
-                    position_cov_px=f.position_cov_px,
-                    intensity_sigma_rel=f.intensity_sigma_rel,
-                    preferred_filter=f.preferred_filter,
-                    reliability=0.01,
-                    reliability_reasons=f.reliability_reasons,
-                    usable_types=f.usable_types,
-                    flags=f.flags,
-                )
-                for f in features
-            ]
+            return [replace(f, reliability=0.01) for f in super().to_features(context)]
 
     model = _LowReliabilityStarModel(obs, feature_count=3)
     orch = NavOrchestrator([model])
