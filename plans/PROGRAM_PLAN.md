@@ -216,6 +216,40 @@ The known defects:
   harmless today (the reliability gate culls it) but it is a
   model-emission spec conflict to resolve.
 
+**Status (2026-07-14):** the tier-honesty / gate cluster is in review as
+a batch of pull requests off `main`; the remaining items are either
+operator-decided (below) or deferred.
+
+- Open PRs awaiting review: #266 (#180 failure-reason emission + #254
+  dark-body blob gate), #267 (#132 rotation variance + #133 optimal star
+  inlier assignment), #268 (#259 one-star residual / no-rival gate),
+  #269 (#258 excluded-dissenter veto + #263 one-star tier cap), #270
+  (#221 rank-aware ensemble agreement + fused-offset zeroing fix), #271
+  (#222 pass-2 refine no longer corroborates its prior), #272 (#261
+  robust per-edge DT mis-convergence gate). #269 to #271 are a stack;
+  merge in that order.
+- In progress (agents): #237 and #238 triage attribution; #60 + #24
+  body-participation policy; #210 NCC covariance-model rederivation;
+  #128/#150 limb-bias diagnosis pass.
+- Operator decisions settled: #239 sub-5 px bodies are curated as
+  expected failures for now, with the relaxed-disc pathway revisited
+  after #210 lands honest sigmas. #60 Titan and other atmospheric bodies
+  are hard-excluded from body navigation, with an active model/technique
+  that always declines and records why. #24 highly-irregular bodies drop
+  shape features (limb/terminator/disc) once resolved but may still
+  navigate as point blobs. #210 gets a covariance-model rederivation, not
+  a rescale. #128/#150 starts with a diagnosis pass that separates a
+  genuine limb-fit bias from spacecraft-position / ephemeris error using
+  the simulator, and validates that the simulator's own limb render is
+  bias-free.
+- Residual-offset frames behind #270/#272 (N1867601758, N1867602424,
+  N1492091163) are now tier-honest but still land the wrong offset
+  because the coarse edge search locked the wrong ring-edge population;
+  correcting the offset is #179, deferred pending a calibration approach.
+- Deferred: #179 (coarse-lock calibration), #25 (high-resolution body
+  blurring), #130 (star limiting-magnitude calibration against real
+  fields).
+
 **Parallelism:** fully parallel with Track A; #221/#222 should land
 before the agreement study consumes ensemble output at scale.
 
