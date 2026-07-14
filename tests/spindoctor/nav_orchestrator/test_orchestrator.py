@@ -189,6 +189,7 @@ def _register_fakes() -> Iterator[None]:
         _FakeStarTechnique,
         _RaisingTechnique,
         _PassTwoTechnique,
+        _InfeasibleTechnique,
         _FakeBodyPrimary,
         _FakeBodyFallback,
     ]
@@ -491,6 +492,20 @@ class _PassTwoTechnique(NavTechnique):
             at_edge=False,
             diagnostics=StarFieldDiagnostics(n_inliers=len(features)),
         )
+
+
+class _InfeasibleTechnique(NavTechnique):
+    """NavTechnique whose ``is_feasible`` always refuses with a fixed reason."""
+
+    name = '_InfeasibleTechnique'
+    _abstract = True  # scoped to this module via _register_fakes
+    accepts_feature_types = frozenset({NavFeatureType.STAR})
+
+    def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
+        return NavFeasibilityReport(feasible=False, reason='needs at least 999 stars')
+
+    def navigate(self, features: list[NavFeature], context: NavContext) -> NavTechniqueResult:
+        raise AssertionError('an infeasible technique must never be navigated')
 
 
 def test_orchestrator_logs_when_to_features_raises(
@@ -997,3 +1012,180 @@ def test_orchestrator_calibrated_if_mostly_nan_short_circuits() -> None:
     assert result.status == 'failed'
     assert result.status_reason == NavStatusReason.MISSING_DATA_DOMINANT
     assert result.per_technique == []
+
+
+# --- Status-reason INFO emission at every failed-nav site (#180) ---
+#
+# pdslogger writes through its own stream handler, so the emitted lines
+# are captured with ``capsys`` (never ``caplog``).  Each test provokes
+# one NavResult.failed site and asserts the operator-readable
+# STATUS_REASON_INFO_TEMPLATE lines actually reached the log.
+
+
+def test_blank_image_failure_emits_status_reason_info(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The hard-failure short-circuit (blank frame) emits the templated INFO lines."""
+    obs = _FakeObs(image=np.zeros((64, 64), np.float64))
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    captured = capsys.readouterr()
+    assert result.status_reason == NavStatusReason.NO_SIGNAL_IN_IMAGE
+    assert 'Final: status=failed' in captured.out
+    assert 'Image classifier: blank / dark frame' in captured.out
+
+
+def test_overexposed_image_failure_emits_status_reason_info(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The hard-failure short-circuit (overexposed frame) emits the templated INFO lines."""
+    obs = _FakeObs(image=np.full((64, 64), 4095.0, np.float64))
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator(
+        [model],
+        image_quality_thresholds=ImageQualityThresholds(saturation_threshold_dn=4095.0),
+    )
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    captured = capsys.readouterr()
+    assert result.status_reason == NavStatusReason.IMAGE_OVEREXPOSED
+    assert 'Final: status=failed' in captured.out
+    assert 'Image classifier: most pixels at full-well DN' in captured.out
+
+
+def test_mostly_missing_failure_emits_status_reason_info(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The hard-failure short-circuit (missing-data frame) emits the templated INFO lines."""
+    image = np.full((64, 64), 0.5, np.float64)
+    image[:48, :] = np.nan  # 75% NaN, above the 0.30 clean threshold
+    obs = _FakeObs(image=image, inst_config=_ciss_calib_inst_config())
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    captured = capsys.readouterr()
+    assert result.status_reason == NavStatusReason.MISSING_DATA_DOMINANT
+    assert 'Final: status=failed' in captured.out
+    assert 'Image classifier: missing-data marker dominates' in captured.out
+
+
+def test_no_features_extracted_emits_status_reason_info(
+    fake_obs: _FakeObs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The no-features gate failure emits the templated INFO lines."""
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=0)
+    orch = NavOrchestrator([model])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    captured = capsys.readouterr()
+    assert result.status_reason == NavStatusReason.NO_FEATURES_EXTRACTED
+    assert 'Final: status=failed' in captured.out
+    assert 'No extractor produced a feature' in captured.out
+
+
+def test_all_features_gated_emits_status_reason_info(
+    fake_obs: _FakeObs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The all-features-gated failure emits the templated INFO lines."""
+    obs = fake_obs
+
+    class _LowReliabilityStarModel(_FakeStarModel):
+        def to_features(self, context: NavContext) -> list[NavFeature]:
+            features = super().to_features(context)
+            return [
+                NavFeature(
+                    feature_id=f.feature_id,
+                    feature_type=f.feature_type,
+                    source_model=f.source_model,
+                    geometry=f.geometry,
+                    subject_range_km=f.subject_range_km,
+                    position_cov_px=f.position_cov_px,
+                    intensity_sigma_rel=f.intensity_sigma_rel,
+                    preferred_filter=f.preferred_filter,
+                    reliability=0.01,
+                    reliability_reasons=f.reliability_reasons,
+                    usable_types=f.usable_types,
+                    flags=f.flags,
+                )
+                for f in features
+            ]
+
+    model = _LowReliabilityStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    captured = capsys.readouterr()
+    assert result.status_reason == NavStatusReason.ALL_FEATURES_GATED
+    assert 'Final: status=failed' in captured.out
+    assert 'Every feature dropped by the reliability gate' in captured.out
+
+
+def test_no_feasible_techniques_emits_status_reason_info(
+    fake_obs: _FakeObs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The no-feasible-techniques failure emits the templated INFO lines."""
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator(
+        [model],
+        only_techniques=[
+            '!_FakeStarTechnique',
+            '!_RaisingTechnique',
+            '!_InfeasibleTechnique',
+            '!Star*',
+        ],
+    )
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    captured = capsys.readouterr()
+    assert result.status_reason == NavStatusReason.NO_FEASIBLE_TECHNIQUES
+    assert 'Final: status=failed' in captured.out
+    assert "No technique's is_feasible returned True" in captured.out
+
+
+def test_all_techniques_spurious_emits_status_reason_info(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An ensemble failure (every result spurious) emits the templated INFO lines.
+
+    The failed NavResult is constructed inside ``ensemble``; the
+    orchestrator caller is responsible for emitting the templated
+    reason lines when it returns that result.
+    """
+    _FakeBodyPrimary.run_count = 0
+    _FakeBodyPrimary.spurious_override = True
+    try:
+        obs = _FakeObs()
+        model = _FakeBodyModel(obs, body_name='TestMoon')
+        orch = NavOrchestrator([model], only_techniques=['_FakeBodyPrimary'])
+        result = orch.navigate(obs)  # type: ignore[arg-type]
+    finally:
+        _FakeBodyPrimary.spurious_override = False
+    captured = capsys.readouterr()
+    assert result.status_reason == NavStatusReason.ALL_TECHNIQUES_SPURIOUS
+    assert 'Final: status=failed' in captured.out
+    assert 'Every technique returned spurious=True' in captured.out
+
+
+def test_infeasible_technique_rejection_logged_at_debug(
+    fake_obs: _FakeObs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An infeasible technique's rejection reason lands in the DEBUG log."""
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_InfeasibleTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    captured = capsys.readouterr()
+    assert result.status_reason == NavStatusReason.NO_FEASIBLE_TECHNIQUES
+    assert 'Technique _InfeasibleTechnique infeasible: needs at least 999 stars' in captured.out
+
+
+def test_feasible_technique_report_logged_at_debug(
+    fake_obs: _FakeObs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A feasible technique's consumed-feature report lands in the DEBUG log."""
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    captured = capsys.readouterr()
+    assert result.status == 'success'
+    assert 'Technique _FakeStarTechnique feasible: would consume 3 feature(s)' in captured.out

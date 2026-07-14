@@ -621,15 +621,17 @@ Call path traced through
      :data:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` feature is emitted. The
      downstream disc gate then has a chance to fire alongside the limb arc when
      ``visible_lit_fraction`` and ``overflow_fraction`` allow.
-   - When the limb arc was rejected and the predicted disc diameter is at least
+   - When the limb arc was rejected, the predicted disc diameter is at least
      ``max(`` :data:`~spindoctor.nav_model.nav_model_body.BODY_BLOB_MIN_DIAMETER_PX` ``,``
-     :attr:`~spindoctor.nav_model.body_shape.BodyShape.min_blob_diameter_px` ``)``, a
+     :attr:`~spindoctor.nav_model.body_shape.BodyShape.min_blob_diameter_px` ``)``, and the
+     rendered silhouette contains at least one lit pixel, a
      :data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB` feature is emitted instead.
      The blob feature carries the lit-weighted predicted centroid and the
      phase-and-irregularity factor :math:`\kappa` on its
      :class:`~spindoctor.feature.flags.BodyBlobFlags`.
    - Otherwise no body feature is emitted (the body is too small to fit and too unresolved
-     to centroid).
+     to centroid, or its silhouette is entirely in shadow and there is no photometric
+     signal to centroid).
 
 7. Independent of the limb / blob branch, a
    :data:`~spindoctor.feature.feature_type.NavFeatureType.TERMINATOR_ARC` feature is emitted

@@ -24,9 +24,12 @@ The feature-by-feature emission rules:
   LIMB_ARC_MAX_UNCERTAINTY_PX`` and there are surviving limb vertices.
 - ``BODY_BLOB`` is emitted when the predicted disc diameter is at
   least ``max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)``
-  *and* the limb uncertainty is too high for ``LIMB_ARC``.  The
-  per-body shape floor can override the global default upward but
-  not downward.
+  *and* the limb uncertainty is too high for ``LIMB_ARC`` *and* the
+  rendered silhouette contains at least one lit pixel.  A body whose
+  silhouette is entirely in shadow has zero photometric signal to
+  centroid, so it emits no blob (only the geometric features, per the
+  dev guide's Restrictions).  The per-body shape floor can override
+  the global default upward but not downward.
 - ``BODY_DISC`` is emitted alongside ``LIMB_ARC`` when the body fits
   inside the FOV with at least ``BODY_DISC_MIN_VISIBLE_LIT_FRACTION``
   of its lit side visible and ``overflow_fraction`` below
@@ -295,6 +298,7 @@ class NavModelBody(NavModelBodyBase):
         self._bbox_extfov_vu: tuple[int, int, int, int] = (0, 0, 0, 0)
         self._subject_range_km: float = float('inf')
         self._visible_lit_fraction: float = 0.0
+        self._lit_pixel_count: int = 0
         self._overflow_fraction: float = 1.0
         self._phase_angle_factor: float = 0.0
 
@@ -462,6 +466,7 @@ class NavModelBody(NavModelBodyBase):
         self._limb_sampler = sampler_data['limb_sampler']
         self._terminator_sampler = sampler_data['terminator_sampler']
         self._visible_lit_fraction = float(sampler_data['visible_lit_fraction'])
+        self._lit_pixel_count = int(sampler_data['lit_pixel_count'])
         self._overflow_fraction = float(sampler_data['overflow_fraction'])
         self._metadata['km_per_pixel_at_limb'] = self._km_per_pixel_at_limb
         self._metadata['predicted_diameter_px'] = self._predicted_diameter_px
@@ -680,6 +685,7 @@ class NavModelBody(NavModelBodyBase):
             'terminator_sampler': terminator_sampler,
             'km_per_pixel_mean': km_per_pixel_mean,
             'visible_lit_fraction': visible_lit_fraction,
+            'lit_pixel_count': int(np.count_nonzero(lit_mask)),
             'overflow_fraction': overflow_fraction,
         }
         return model_img, limb_mask, terminator_mask, body_mask, info
@@ -753,19 +759,20 @@ class NavModelBody(NavModelBodyBase):
                     )
                 )
                 limb_arc_emitted = True
-            elif self._predicted_diameter_px >= blob_min_px:
+            elif self._predicted_diameter_px >= blob_min_px and self._lit_pixel_count > 0:
                 features.append(self._build_blob_feature(shape, context=context))
             else:
                 self._logger.debug(
-                    'No body feature emitted: limb unusable (uncertainty %.3f vs '
-                    'max %.3f, vertices %d vs min %d) and predicted_diameter '
-                    '%.3f < %.3f',
+                    'No limb/blob feature emitted: limb unusable (uncertainty %.3f vs '
+                    'max %.3f, vertices %d vs min %d) and blob gate failed '
+                    '(predicted_diameter %.3f vs min %.3f, lit pixels %d)',
                     limb_uncertainty_px,
                     LIMB_ARC_MAX_UNCERTAINTY_PX,
                     limb_vertices,
                     LIMB_ARC_MIN_VERTICES,
                     self._predicted_diameter_px,
                     blob_min_px,
+                    self._lit_pixel_count,
                 )
 
             if not suppress_shape_features and self._should_emit_disc(limb_arc_emitted):

@@ -121,6 +121,17 @@ class FakePds4DataSet:
         """
         return f'{self._shard}/{image_file.image_file_url.stem}'
 
+    def pds4_lid_part_to_image_name(self, lid_part: str) -> str:
+        """Return the image name for the given LID part (identity round trip).
+
+        The builders here use the image name verbatim as the LID part, so the
+        inverse is the identity.
+
+        Parameters:
+            lid_part: The LID part (an on-disk product filename stem).
+        """
+        return lid_part
+
     def pds4_image_name_to_data_lid(self, image_name: str) -> str:
         """Return the canonical data LID for the given image name.
 
