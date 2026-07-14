@@ -81,6 +81,7 @@ def _make_body_model(*, body_name: str, diameter_px: float) -> NavModelBody:
     model_img = np.where(body_mask, 1.0, 0.0).astype(np.float64)
     model._body_mask = body_mask
     model._model_img = model_img
+    model._lit_pixel_count = int(np.count_nonzero(body_mask))
     model._limb_sampler = _limb_sampler(40)
     model._terminator_sampler = _limb_sampler(0)
     model._km_per_pixel_at_limb = 10.0
