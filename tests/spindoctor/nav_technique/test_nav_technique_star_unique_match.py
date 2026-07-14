@@ -283,6 +283,113 @@ def test_star_unique_match_one_star_flags_ambiguous_detection(
     assert result.diagnostics.detection_peak_ratio > 0.0
 
 
+def test_star_unique_match_one_star_rejects_far_no_rival_detection(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """No-rival ``inf`` sentinels cannot carry a far-off lone detection.
+
+    Issue #259's failure signature: a lone artifact on a flat background
+    reports ``inf`` for both ``detection_peak_ratio`` (no runner-up
+    above background) and ``brightness_margin_mag`` (no rival catalog
+    star), so both #211 ratio gates pass vacuously.  The residual gate
+    must reject the match when the detection sits outside the
+    pointing-prior core (here 18.2 px, mirroring C0164392700R).
+    """
+    shape = (200, 200)
+    image = np.zeros(shape, dtype=np.float64)
+    actual_vu = (100.0, 100.0)
+    # Lone bright source on a perfectly flat background: the runner-up
+    # never clears the window median, so the peak ratio is ``inf``.
+    draw_gaussian_star(image, actual_vu, peak_dn=200.0, sigma=1.2)
+    # Prediction 18.2 px away: inside the 30 px search window but beyond
+    # the 10 px residual gate.
+    planted = (12.0, -13.7)
+    pred_vu = (actual_vu[0] - planted[0], actual_vu[1] - planted[1])
+    # Single predictable star: the brightness margin is also ``inf``.
+    feature = make_star_feature('star:UCAC4:far', predicted_vu=pred_vu, predicted_snr=40.0)
+    technique = StarUniqueMatchNav()
+    context = make_nav_context(image)
+    result = technique.navigate([feature], context)
+    assert result.spurious is True
+    assert result.confidence == pytest.approx(0.0)
+    assert isinstance(result.diagnostics, StarUniqueMatchDiagnostics)
+    assert result.diagnostics.mode == 'one_star'
+    assert result.diagnostics.brightness_margin_mag == float('inf')
+    assert result.diagnostics.detection_peak_ratio == float('inf')
+    assert result.diagnostics.residual_px == pytest.approx(math.hypot(*planted), abs=0.5)
+    assert result.diagnostics.residual_px > 10.0
+
+
+def test_star_unique_match_one_star_accepts_genuine_lone_bright_star(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """A genuine lone bright star inside the residual gate still matches.
+
+    The no-rival ``inf`` sentinels must keep passing the ratio gates: a
+    single uniquely-predicted bright star on an otherwise empty frame is
+    the technique's canonical use case, and the residual gate alone
+    decides acceptance for it.
+    """
+    shape = (200, 200)
+    image = np.zeros(shape, dtype=np.float64)
+    actual_vu = (100.0, 100.0)
+    draw_gaussian_star(image, actual_vu, peak_dn=200.0, sigma=1.2)
+    planted = (4.0, -3.0)
+    pred_vu = (actual_vu[0] - planted[0], actual_vu[1] - planted[1])
+    feature = make_star_feature('star:UCAC4:lone', predicted_vu=pred_vu, predicted_snr=40.0)
+    technique = StarUniqueMatchNav()
+    context = make_nav_context(image)
+    result = technique.navigate([feature], context)
+    assert result.spurious is False
+    assert result.offset_px[0] == pytest.approx(planted[0], abs=0.5)
+    assert result.offset_px[1] == pytest.approx(planted[1], abs=0.5)
+    assert isinstance(result.diagnostics, StarUniqueMatchDiagnostics)
+    assert result.diagnostics.brightness_margin_mag == float('inf')
+    assert result.diagnostics.detection_peak_ratio == float('inf')
+    assert result.confidence > 0.0
+
+
+def test_star_unique_match_one_star_accepts_large_residual_with_finite_peak_ratio(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """A measured (finite) peak ratio keeps large genuine offsets matchable.
+
+    Operator-verified library frames carry genuine one-star offsets up
+    to ~24 px (e.g. N1555145539_1 at 13.1 px): on a real background the
+    runner-up is finite, the #211 gate measures actual uniqueness, and
+    the residual gate must not fire.  Plants a faint rival blob so the
+    peak ratio is finite yet far above ``one_star_min_peak_ratio``.
+    """
+    shape = (200, 200)
+    image = np.zeros(shape, dtype=np.float64)
+    actual_vu = (100.0, 100.0)
+    draw_gaussian_star(image, actual_vu, peak_dn=200.0, sigma=1.2)
+    # Faint runner-up inside the search window but outside the
+    # detection's exclusion box: the peak ratio becomes ~33 (finite).
+    draw_gaussian_star(image, (85.0, 115.0), peak_dn=6.0, sigma=1.2)
+    # Prediction 13.1 px away: beyond the 10 px no-rival gate, but the
+    # gate does not apply because the ratio was measured.
+    planted = (4.0, -12.5)
+    pred_vu = (actual_vu[0] - planted[0], actual_vu[1] - planted[1])
+    feature = make_star_feature('star:UCAC4:bright', predicted_vu=pred_vu, predicted_snr=40.0)
+    technique = StarUniqueMatchNav()
+    context = make_nav_context(image)
+    result = technique.navigate([feature], context)
+    assert result.spurious is False
+    assert result.offset_px[0] == pytest.approx(planted[0], abs=0.5)
+    assert result.offset_px[1] == pytest.approx(planted[1], abs=0.5)
+    assert isinstance(result.diagnostics, StarUniqueMatchDiagnostics)
+    assert math.isfinite(result.diagnostics.detection_peak_ratio)
+    assert result.diagnostics.detection_peak_ratio >= 1.5
+    assert result.diagnostics.residual_px > 10.0
+
+
 def test_star_unique_match_one_star_reports_unambiguous_peak_ratio(
     make_nav_context: NavContextFactory,
     make_star_feature: NavFeatureFactory,
