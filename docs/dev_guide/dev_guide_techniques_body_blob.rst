@@ -98,24 +98,21 @@ model (see :doc:`dev_guide_navigation_models_body`); the per-blob residual is
 
     r_{i} = \bar{x}_{\mathrm{obs},\,i} - \bar{x}_{\mathrm{pred},\,i}.
 
-Per-blob covariance
--------------------
+Per-blob weight
+---------------
 
-The per-blob centroid uncertainty follows the standard CRLB scaling for a uniform-brightness
-disc:
+Each blob is weighted by its photon-limited centroid precision, the standard CRLB scaling for
+a uniform-brightness disc:
 
 .. math::
 
     \sigma_{\mathrm{centroid}} \approx
-        \frac{D_{\mathrm{px}}}{2 \, \sqrt{N_{\mathrm{lit}}} \, \mathrm{SNR}}
+        \frac{D_{\mathrm{px}}}{2 \, \sqrt{N_{\mathrm{lit}}} \, \mathrm{SNR}},
+    \qquad w_{i} = \frac{1}{\sigma_{\mathrm{centroid},\,i}^{2}}
 
 where :math:`D_{\mathrm{px}}` is the predicted disc diameter in pixels,
 :math:`N_{\mathrm{lit}}` is the number of lit pixels inside the predicted bounding box, and
-SNR is the per-pixel signal-to-noise ratio. Two additional contributions are added in
-quadrature: a shape-irregularity sigma scaling with the body's
-phase-and-irregularity coupling :math:`\kappa`
-(see :doc:`dev_guide_navigation_models_body`) times half the predicted disc diameter, and the
-photon-noise floor. The total per-blob sigma populates a 2x2 isotropic covariance.
+SNR is the per-pixel signal-to-noise ratio.
 
 Joint translation fit
 ---------------------
@@ -125,7 +122,7 @@ The joint translation minimises
 .. math::
 
     C(\Delta v, \Delta u) = \sum_{i} w_{i} \,\bigl\| r_{i} - (\Delta v, \Delta u) \bigr\|^{2},
-    \qquad w_{i} = \frac{1}{\sigma_{i}^{2}}.
+    \qquad w_{i} = \frac{1}{\sigma_{\mathrm{centroid},\,i}^{2}}.
 
 The closed-form minimum is the inverse-variance-weighted mean of the per-blob residuals:
 
@@ -133,8 +130,26 @@ The closed-form minimum is the inverse-variance-weighted mean of the per-blob re
 
     (\Delta v, \Delta u)^{*} = \frac{\sum_{i} w_{i} \, r_{i}}{\sum_{i} w_{i}}.
 
-The reported translation covariance is :math:`\sigma^{2} I` with :math:`\sigma^{2} =
-1 / \sum_{i} w_{i}` — the standard precision-weighted-mean variance.
+Joint covariance
+----------------
+
+The photon-only weights above make the bare precision-weighted-mean variance far too tight:
+a brightness-weighted centroid is a biased estimate of the geometric center (lit-hemisphere
+offset, shape irregularity), and that bias -- not photon noise -- dominates the true error. It
+scales with the body radius, an error the per-blob CRLB is blind to. The reported per-axis
+variance is therefore the reduced-chi-square weighted mean (with a ``1 / sum(w_i)``
+inverse-precision floor) plus two model-error terms added in quadrature:
+
+- a size-scaled centroid-model-error variance ``(model_error_size_frac * R_i)**2`` per blob,
+  combined across blobs by inverse-variance (so a single blob reports exactly
+  ``(model_error_size_frac * R)**2`` and a multi-blob fit tightens correctly), which makes the
+  reported sigma track body size the way the photon-only weight cannot;
+- an absolute ``model_error_floor_px`` floor for the size-independent residual (pointing).
+
+The size term uses ``R_i = D_{\mathrm{px},\,i} / 2``. The
+:attr:`~spindoctor.feature.flags.BodyBlobFlags.phase_irregularity_factor` still feeds the
+confidence formula (down-weighting irregular high-phase scenes) but is not folded into the
+covariance.
 
 Restrictions and assumptions
 ----------------------------
@@ -178,7 +193,8 @@ Restrictions and assumptions
 Sources of uncertainty
 ----------------------
 
-The reported covariance is the precision-weighted-mean variance described above. It does
+The reported covariance is the reduced-chi-square weighted-mean variance plus the size-scaled
+centroid-model-error and absolute-floor terms described above. It does
 not capture systematic biases from a body whose true rotational orientation differs from the
 rendered ellipsoid (the
 :attr:`~spindoctor.feature.flags.BodyBlobFlags.phase_irregularity_factor` term tracks this so the
@@ -197,6 +213,10 @@ All numeric tunables for this technique live in ``techniques.BodyBlobNav.tuning`
 - ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
   distance from any search-window axis bound falls within this tolerance is flagged
   :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`.
+- ``model_error_size_frac`` — float, default ``0.05`` (fraction of the body radius). The
+  size-scaled centroid-model-error term (see "Joint covariance"). ``0.0`` disables it.
+- ``model_error_floor_px`` — float, default ``0.1`` px. Absolute size-independent floor added
+  in quadrature. ``0.0`` disables it.
 
 The remaining numeric thresholds (the per-blob CRLB scaling constants, the noise-floor
 detection threshold) are derived from the per-image
@@ -321,7 +341,7 @@ Call path traced through
      :class:`~spindoctor.nav_technique.diagnostics.BodyBlobDiagnostics`.
 
 4. The private joint-fit helper computes the inverse-variance-weighted-mean translation and
-   the precision-weighted-mean covariance.
+   the reduced-chi-square covariance with the size-scaled and absolute model-error terms.
 5. Apply the at-edge test against the search-window axis bounds.
 6. Result-shape branches on
    :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`:
