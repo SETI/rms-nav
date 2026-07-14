@@ -322,12 +322,12 @@ Work items, in dependency order:
    from each on-disk product stem before calling the canonical LID
    builders. The strict-xfail label-round-trip tests in
    `tests/spindoctor/cli/pds4/test_collections.py` are flipped. Two
-   characterized defects recorded on #256 remain open in the same area
-   (they need a home once #264 closes #256): every `template.write`
-   ignores pdstemplate's error/warning counts (an unresolved variable
-   silently drops the label while the run reports success), and the
-   dev-guide "Output layout" section describes a layout neither the code
-   nor the user guide matches.
+   characterized defects recorded on #256 are tracked by **#265** for
+   the same area: every `template.write` ignores pdstemplate's
+   error/warning counts (an unresolved variable silently drops the label
+   while the run reports success), and the dev-guide "Output layout"
+   section describes a layout neither the code nor the user guide
+   matches.
 2. **Template finalization acceptance list** — the ten items recorded
    on #53 (2026-07-13 comment): schema validation, the unreferenced
    `cassini:*` variables and hardcoded placeholders, TITLE/DESCRIPTION
