@@ -25,7 +25,7 @@ Modules:
         ``NavModelRingsSimulated`` — ring model rendered from operator
         simulation parameters.
     ``nav_model_titan``
-        ``NavModelTitan`` — atmospheric-body placeholder.
+        ``NavModelTitan`` — Titan placeholder; opaque haze, records a no-result.
     ``stars``
         Catalog-driven star ``NavModel`` and supporting helpers.
 """

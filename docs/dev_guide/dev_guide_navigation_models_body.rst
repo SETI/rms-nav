@@ -13,6 +13,16 @@ instance per body whose extended-FOV bounding box overlaps the observation; a Sa
 that catches Mimas, Tethys, and Dione in the same frame produces three instances, each free to
 emit any subset of the four feature types its silhouette geometry justifies.
 
+Two body classes are excluded from shape-based navigation. Titan builds no
+:class:`~spindoctor.nav_model.nav_model_body.NavModelBody` at all: its opaque haze hides the
+surface, so ellipsoid limb / terminator / disc navigation is systematically wrong. The
+:doc:`Titan model <dev_guide_navigation_models_titan>` records a no-result for it
+instead. Bodies tagged ``highly_irregular`` in the shape table (chaotic rotators, small
+potato moons) still build a body model but suppress their shape features once resolved beyond
+a few pixels, falling back to the point-like
+:data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB` (see *Feature emission gates*
+below).
+
 A simulated-image sibling (:class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated`)
 renders a body from operator-supplied ellipsoid parameters instead of SPICE prediction; both
 classes share the silhouette / annotation helpers on
@@ -233,6 +243,21 @@ the silhouette extraction:
 The terminator polyline gates fire when the surviving vertex count is at or above the
 configured minimum and the phase factor :math:`\sin\phi` is at or above its minimum.
 
+A body tagged ``highly_irregular`` in the shape table has no usable ellipsoid, so once it is
+**resolved beyond a few pixels** its rendered limb / terminator / disc silhouette does not
+match the real body. Such a body therefore emits none of
+:data:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC`,
+:data:`~spindoctor.feature.feature_type.NavFeatureType.TERMINATOR_ARC`, or
+:data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_DISC`; only the point-like
+:data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB` survives, navigating the
+body's centroid. The
+"resolved" threshold reuses the ``min_bounding_box_area`` config value: its square root is the
+equivalent linear pixel extent (default ``9`` px² gives a ``3`` px diameter cutoff), so a
+highly-irregular body whose predicted diameter exceeds that value drops its shape features.
+Below the threshold, and for bodies tagged merely ``irregular``, the shape features are
+unchanged — the continuous ellipsoid-residual widening in the per-vertex sigma budget already
+degrades an irregular body's limb reliability without dropping the feature outright.
+
 Restrictions and assumptions
 ----------------------------
 
@@ -253,6 +278,13 @@ Bodies whose predicted bounding box has zero overlap with the extended FOV produ
 and contribute no features. Bodies whose silhouette is entirely in shadow, or whose lit
 fraction falls below the photometric thresholds, emit only the geometric features (limb arc
 when its uncertainty allows; otherwise nothing).
+
+Titan produces no
+:class:`~spindoctor.nav_model.nav_model_body.NavModelBody` instance; the Titan model
+handles it. A ``highly_irregular`` body resolved beyond the ``min_bounding_box_area``-derived
+pixel threshold emits no shape features (limb / terminator / disc) and navigates only as a
+:data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB`; ``irregular`` bodies are
+unaffected.
 
 Sources of uncertainty
 ----------------------
@@ -292,7 +324,8 @@ matches the 30 bullets here.
 
 - ``min_bounding_box_area`` — int, default ``9`` px². Recorded on the model's metadata as
   ``size_ok``; sub-threshold bounding boxes are flagged for reviewer awareness. Does not by
-  itself suppress feature emission. Consumed by
+  itself suppress feature emission. Its square root is also the "resolved" diameter cutoff
+  above which a ``highly_irregular`` body drops its shape features. Consumed by
   :class:`~spindoctor.nav_model.nav_model_body.NavModelBody`.
 - ``min_emission_ring_body`` — int, default ``20`` px. Reserved for the per-body ring-emission
   gate that decides whether to emit RING_EDGE features near a body. Reserved as an unused
