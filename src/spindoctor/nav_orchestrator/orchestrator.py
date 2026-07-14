@@ -437,7 +437,10 @@ class NavOrchestrator(NavBase):
             # empty failure.
             titan_present = _titan_in_models(built_models)
             if titan_present:
-                self._logger.info('Only Titan content in FOV; no navigable features')
+                self._logger.info(
+                    'Titan in FOV and no navigable features extracted; '
+                    'failing with titan_unsupported'
+                )
             no_feature_reason = (
                 NavStatusReason.TITAN_UNSUPPORTED
                 if titan_present

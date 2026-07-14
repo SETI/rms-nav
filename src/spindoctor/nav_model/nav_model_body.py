@@ -188,8 +188,8 @@ limb / terminator / disc navigation is systematically wrong rather than
 merely noisy; at high phase Titan is not even a circle.  Titan builds no
 shape-based ``NavModelBody`` -- :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan`
 records a no-result instead.  Titan's atmosphere is unique (transparent in
-some wavelengths), so it is a deliberate special case, not the first entry
-of a general atmospheric-body list.
+some wavelengths), so it is handled as a deliberate special case; its
+handling does not generalize to other thick-atmosphere bodies such as Venus.
 """
 
 
@@ -200,8 +200,8 @@ def bodies_in_extfov(
 
     Queries ``obs.inventory`` once with the planet plus its configured
     satellites and keeps every body whose ``inventory_body_in_extfov``
-    predicate fires.  Shared by the shape-based body model and the
-    atmospheric-body model so both select from the same in-FOV body set.
+    predicate fires.  Shared by the shape-based body model and the Titan
+    model so both select from the same in-FOV body set.
 
     Parameters:
         obs: Observation snapshot.
@@ -222,7 +222,11 @@ def bodies_in_extfov(
         return []
     try:
         inv = inventory_method(body_list, return_type='full')
-    except (TypeError, AttributeError, ValueError):
+    except ValueError:
+        # oops raises ValueError for a body it cannot resolve in the scene;
+        # that is a recoverable "nothing in the extfov" outcome.  Let
+        # TypeError / AttributeError propagate -- they signal a malformed obs
+        # or a genuine bug, not an empty FOV.
         return []
     in_extfov = getattr(obs, 'inventory_body_in_extfov', None)
     if not callable(in_extfov):

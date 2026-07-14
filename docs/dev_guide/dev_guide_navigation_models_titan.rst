@@ -6,17 +6,14 @@ Overview
 ========
 
 :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` is the Titan navigation model.
-Titan needs a fundamentally different algorithm than ellipsoid-limb fitting: the visible
-"limb" is the haze top, the haze top varies with wavelength, and the surface inside is
-invisible to optical wavelengths. At high phase Titan is not even a circle. Ellipsoid disc /
-limb / terminator navigation is therefore systematically wrong, not merely noisy, so those
-features are never emitted for Titan.
-
-Titan is handled as a deliberate special case, not as one entry of a general atmospheric-body
-list. Its atmosphere is unique (transparent at some wavelengths), so what is true for Titan
-does not carry over to other thick-atmosphere bodies; Titan is therefore the single hardcoded
-special case, named by the ``TITAN_BODY_NAME`` constant in
-:mod:`spindoctor.nav_model.nav_model_body`.
+Titan needs a fundamentally different algorithm than ellipsoid-limb fitting: its visible
+"limb" is the haze top, which varies with wavelength, and the surface beneath is invisible at
+optical wavelengths, so at high phase Titan is not even a circle. Ellipsoid disc / limb /
+terminator navigation is therefore systematically wrong rather than merely noisy, and those
+features are never emitted for Titan. Because this haze behavior is unique to Titan (its
+atmosphere is even transparent at some wavelengths) and does not carry over to other
+thick-atmosphere bodies such as Venus, Titan is handled as a single hardcoded special case,
+named by the ``TITAN_BODY_NAME`` constant in :mod:`spindoctor.nav_model.nav_model_body`.
 
 The model is built and active whenever Titan is in the extended FOV: the shape-based
 :class:`~spindoctor.nav_model.nav_model_body.NavModelBody` skips Titan, and this model takes the
@@ -64,8 +61,8 @@ Configuration
 
 Titan is the single hardcoded special case, named by the ``TITAN_BODY_NAME`` constant in
 :mod:`spindoctor.nav_model.nav_model_body`; there is no config list. Titan's atmosphere is
-unique (transparent at some wavelengths), so it is handled as a special case rather than the
-first entry of a general atmospheric-body list. The model records ``body: TITAN`` and
+unique (transparent at some wavelengths), so its handling does not generalize to other
+thick-atmosphere bodies. The model records ``body: TITAN`` and
 ``navigable: False`` on its :attr:`~spindoctor.nav_model.nav_model.NavModel.metadata` dict so
 the curator surfaces the refusal in the per-image JSON sidecar.
 

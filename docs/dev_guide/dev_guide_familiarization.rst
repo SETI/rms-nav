@@ -309,10 +309,10 @@ Rings (model + ring techniques)
 Titan (model only)
 ------------------
 
-- :doc:`dev_guide_navigation_models_titans` — the Titan family.
 - :doc:`dev_guide_navigation_models_titan` —
   :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (registered
   placeholder; emits no features pending a haze-aware extractor).
+- :doc:`dev_guide_techniques_body_titan` — why Titan is unsupported today.
 - :mod:`spindoctor.nav_model.nav_model_titan`
 
 Manual

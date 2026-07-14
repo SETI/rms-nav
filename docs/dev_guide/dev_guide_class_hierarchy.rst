@@ -411,7 +411,7 @@ Per-family data models live alongside the renderer classes:
   without an implementation; the registered stub
   :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` reserves the
   registry slot, and ``NavModelTitanSimulated`` is reserved as the
-  simulated-image sibling. See :doc:`dev_guide_navigation_models_titans`
+  simulated-image sibling. See :doc:`dev_guide_navigation_models_titan`
   for details.
 
 NavTechnique

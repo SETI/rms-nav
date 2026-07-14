@@ -33,16 +33,14 @@ Registered concrete models, grouped by feature family:
   :class:`~spindoctor.nav_model.nav_model_body.NavModelBody` (catalog-driven; one instance per
   body whose bounding box overlaps the extended FOV) and
   :class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated`
-  (simulated-image GUI variant).
+  (simulated-image GUI variant). Titan is a body too, but its surface is hidden by haze, so
+  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` records a no-result instead of
+  shape features (its reserved ``NavModelTitanSimulated`` sibling is not implemented).
 - **Rings** (:doc:`dev_guide_navigation_models_rings`) —
   :class:`~spindoctor.nav_model.nav_model_rings.NavModelRings` (catalog-driven; one instance per
   planet whose ring system is configured and visible) and
   :class:`~spindoctor.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`
   (simulated-image GUI variant).
-- **Titan** (:doc:`dev_guide_navigation_models_titans`) —
-  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (registered placeholder for
-  Titan navigation; emits no features). A simulated-image sibling
-  ``NavModelTitanSimulated`` is reserved without an implementation.
 
 Shared annotation helpers live on
 :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase` (body silhouette
@@ -59,4 +57,3 @@ The API surface is summarised under
    dev_guide_navigation_models_stars
    dev_guide_navigation_models_bodies
    dev_guide_navigation_models_rings
-   dev_guide_navigation_models_titans

@@ -19,7 +19,9 @@ surface, so ellipsoid limb / terminator / disc navigation is systematically wron
 :doc:`Titan model <dev_guide_navigation_models_titan>` records a no-result for it
 instead. Bodies tagged ``highly_irregular`` in the shape table (chaotic rotators, small
 potato moons) still build a body model but suppress their shape features once resolved beyond
-a few pixels, falling back to the point-like BODY_BLOB (see *Feature emission gates* below).
+a few pixels, falling back to the point-like
+:data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB` (see *Feature emission gates*
+below).
 
 A simulated-image sibling (:class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated`)
 renders a body from operator-supplied ellipsoid parameters instead of SPICE prediction; both
@@ -243,8 +245,12 @@ configured minimum and the phase factor :math:`\sin\phi` is at or above its mini
 
 A body tagged ``highly_irregular`` in the shape table has no usable ellipsoid, so once it is
 **resolved beyond a few pixels** its rendered limb / terminator / disc silhouette does not
-match the real body. Such a body therefore emits none of LIMB_ARC, TERMINATOR_ARC, or
-BODY_DISC; only the point-like BODY_BLOB survives, navigating the body's centroid. The
+match the real body. Such a body therefore emits none of
+:data:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC`,
+:data:`~spindoctor.feature.feature_type.NavFeatureType.TERMINATOR_ARC`, or
+:data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_DISC`; only the point-like
+:data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB` survives, navigating the
+body's centroid. The
 "resolved" threshold reuses the ``min_bounding_box_area`` config value: its square root is the
 equivalent linear pixel extent (default ``9`` px² gives a ``3`` px diameter cutoff), so a
 highly-irregular body whose predicted diameter exceeds that value drops its shape features.
@@ -277,7 +283,8 @@ Titan produces no
 :class:`~spindoctor.nav_model.nav_model_body.NavModelBody` instance; the Titan model
 handles it. A ``highly_irregular`` body resolved beyond the ``min_bounding_box_area``-derived
 pixel threshold emits no shape features (limb / terminator / disc) and navigates only as a
-BODY_BLOB; ``irregular`` bodies are unaffected.
+:data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB`; ``irregular`` bodies are
+unaffected.
 
 Sources of uncertainty
 ----------------------

@@ -5,11 +5,11 @@ Titan needs a different algorithm than ellipsoid-limb fitting: its visible
 invisible.  At high phase Titan is not even a circle, so disc / limb /
 terminator navigation is systematically wrong rather than merely noisy.
 
-Titan is handled as a deliberate special case, not as one entry of a
-general atmospheric-body list: its atmosphere is unique (transparent at
-some wavelengths), so what is true for Titan does not carry over to other
-thick-atmosphere bodies.  This model is built and active whenever Titan is
-in the field of view (the shape-based ``NavModelBody`` skips Titan).  It
+Titan is handled as a deliberate special case: its atmosphere is unique
+(transparent at some wavelengths), so its handling does not generalize to
+other thick-atmosphere bodies such as Venus.  This model is built and active
+whenever Titan is in the field of view (the shape-based ``NavModelBody``
+skips Titan).  It
 emits no features, so no technique navigates it; instead it records, per
 image, *why* a Titan scene cannot be navigated.  The orchestrator reads the
 marker it exposes and fails such a frame with

@@ -2,8 +2,8 @@
 
 The Titan model is built and active whenever Titan is in the FOV, but it
 emits no features: it records, per image, that Titan navigation is not
-supported.  Titan is a deliberate special case, not one entry of a general
-atmospheric-body list.
+supported.  Titan is a deliberate special case; its handling does not
+generalize to other thick-atmosphere bodies.
 """
 
 from __future__ import annotations
