@@ -437,8 +437,8 @@ techniques:
       spurious_min_inlier_fraction: 0.5
       # The aggregate inlier-fraction veto above is waived for a
       # multi-edge fusion when its low fraction is fully explained by
-      # edges that are ABSENT from the image rather than mis-aligned
-      # (issue #261).  The waiver requires all of: (1) at least
+      # edges that are ABSENT from the image rather than mis-aligned.
+      # The waiver requires all of: (1) at least
       # ``spurious_waiver_min_well_fit_edges`` edges each clear
       # ``spurious_min_inlier_fraction`` (and ``spurious_min_inliers``)
       # on their OWN vertices; (2) the fit's translation covariance is

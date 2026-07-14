@@ -220,7 +220,7 @@ def test_ring_edge_nav_multi_edge_with_undetected_dominant_edges_not_spurious(
     make_ring_feature: NavFeatureFactory,
     make_nav_context: NavContextFactory,
 ) -> None:
-    """Absent edges waive the aggregate inlier-fraction veto (#261).
+    """Absent edges waive the aggregate inlier-fraction veto.
 
     Models the production false flag (Cassini C ring N1467344214): three
     RING_EDGE features feed the LM, one curved edge fits at sub-pixel
