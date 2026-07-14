@@ -80,13 +80,13 @@ exists (no runner-up detection above the window background, no other predictable
 star). The sentinels pass the ratio checks by design so a genuinely unique bright star
 stays matchable — but an infinite peak ratio also means the ambiguity gate measured
 nothing: on a real noisy background the runner-up is always finite, so the sentinel is the
-signature of a lone hot pixel or artifact on a flat or quantized frame (issue #259). In
+signature of a lone hot pixel or artifact on a flat or quantized frame. In
 that vacuous case the detection must additionally sit within ``one_star_max_residual_px``
 of the prediction. The residual on this path is the claimed offset itself, and with no
 rival statistics to lean on, a no-rival detection far from the prediction is far more
 likely an unrelated artifact than a large pointing error; the default bound is one third
 of ``search_window_px``, the ~1-sigma core of the pointing envelope the window is sized to
-bracket. A finite peak ratio leaves acceptance with the measured #211 gate: genuine
+bracket. A finite peak ratio leaves acceptance with the measured ambiguity gate: genuine
 one-star matches with offsets up to ~24 px exist in the operator-verified library, so no
 uniform residual cut below the search window is possible.
 
