@@ -43,6 +43,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 from scipy.ndimage import maximum_filter
+from scipy.optimize import linear_sum_assignment
 
 from spindoctor.config import Config
 from spindoctor.feature.feature import NavFeature
@@ -337,19 +338,27 @@ def _hash_distance_sq(
     return ratio_weight * (dr1 * dr1 + dr2 * dr2) + angle_weight * da * da
 
 
-def _greedy_inlier_count(
+def _optimal_inlier_assignment(
     detection_pts: NDArrayFloatType,
     catalog_pts: NDArrayFloatType,
     offset_vu: tuple[float, float],
     *,
     tolerance_px: float,
 ) -> tuple[int, list[tuple[int, int]]]:
-    """Greedy nearest-neighbour matching under the proposed translation.
+    """Optimal one-to-one detection-catalog matching under the proposed translation.
 
-    Each detection is paired with its closest catalog star (after
-    applying the offset to catalog positions) within
-    ``tolerance_px``.  Each catalog star can match at most one
-    detection — once consumed, it is removed from the candidate pool.
+    Detections are paired one-to-one with catalog stars (after applying
+    the offset to catalog positions) so that the number of pairs within
+    ``tolerance_px`` is maximised and, among maximum-cardinality
+    assignments, the total squared residual distance is minimised.  The
+    detection x catalog squared-distance matrix is solved as a linear
+    sum assignment (Hungarian algorithm); entries beyond the tolerance
+    are masked with a cost large enough that the solver never trades an
+    in-tolerance pair for masked ones, and masked pairs the solver is
+    still forced to emit are dropped afterwards.  Unlike a greedy
+    nearest-neighbour sweep, the result is independent of detection
+    ordering: when two detections compete for the same catalog star the
+    globally best one-to-one pairing wins.
 
     Parameters:
         detection_pts: ``(N_det, 2)`` array of detection (v, u).
@@ -367,22 +376,22 @@ def _greedy_inlier_count(
     if detection_pts.size == 0 or catalog_pts.size == 0:
         return 0, []
     shifted_catalog = catalog_pts + np.asarray(offset_vu, np.float64)[None, :]
-    n_det = detection_pts.shape[0]
-    n_cat = shifted_catalog.shape[0]
-    available = np.ones(n_cat, dtype=bool)
-    pairs: list[tuple[int, int]] = []
+    diffs = detection_pts[:, None, :] - shifted_catalog[None, :, :]
+    dist_sq = np.sum(diffs * diffs, axis=2)
     tol_sq = tolerance_px * tolerance_px
-    for d_idx in range(n_det):
-        d = detection_pts[d_idx]
-        if not available.any():
-            break
-        diffs = shifted_catalog - d[None, :]
-        dist_sq = np.sum(diffs * diffs, axis=1)
-        dist_sq[~available] = np.inf
-        c_idx = int(np.argmin(dist_sq))
-        if dist_sq[c_idx] <= tol_sq:
-            pairs.append((d_idx, c_idx))
-            available[c_idx] = False
+    # Any masked pair must cost more than every in-tolerance pair an
+    # assignment can contain combined, so maximum cardinality always
+    # beats any residual-distance trade.
+    n_assignable = min(detection_pts.shape[0], shifted_catalog.shape[0])
+    masked_cost = tol_sq * (n_assignable + 1.0) + 1.0
+    cost = np.where(dist_sq <= tol_sq, dist_sq, masked_cost)
+    det_indices, cat_indices = linear_sum_assignment(cost)
+    pairs = [
+        (int(d_idx), int(c_idx))
+        for d_idx, c_idx in zip(det_indices, cat_indices, strict=True)
+        if dist_sq[d_idx, c_idx] <= tol_sq
+    ]
+    pairs.sort()
     return len(pairs), pairs
 
 
@@ -910,8 +919,8 @@ class StarFieldFromCatalogNav(NavTechnique):
 
         Each (det_triplet, cat_triplet) candidate proposes the
         translation that maps the catalog-triplet centroid onto the
-        detection-triplet centroid.  Inliers are counted by greedy
-        nearest-neighbour matching under that translation.  The first
+        detection-triplet centroid.  Inliers are counted by optimal
+        one-to-one assignment under that translation.  The first
         candidate (in sorted order) that ties the best inlier count
         wins, which matches the deterministic-iteration contract.
         """
@@ -924,7 +933,7 @@ class StarFieldFromCatalogNav(NavTechnique):
                 det_indices=(det_a, det_b, det_c),
                 cat_indices=(cat.idx_a, cat.idx_b, cat.idx_c),
             )
-            n_inliers, pairs = _greedy_inlier_count(
+            n_inliers, pairs = _optimal_inlier_assignment(
                 det_points_arr,
                 cat_points_arr,
                 offset_vu=offset,

@@ -21,8 +21,8 @@ from spindoctor.nav_technique.nav_technique_star_field import (
     StarFieldFromCatalogNav,
     _detect_image_sources,
     _enumerate_triplets,
-    _greedy_inlier_count,
     _hash_distance_sq,
+    _optimal_inlier_assignment,
     _solve_translation,
     _triplet_hash,
 )
@@ -232,25 +232,84 @@ def test_solve_translation_recovers_constant_offset() -> None:
     assert du == pytest.approx(planted[1])
 
 
-def test_greedy_inlier_count_under_perfect_offset() -> None:
+def test_optimal_inlier_assignment_under_perfect_offset() -> None:
     """Every detection is an inlier when the offset perfectly aligns the catalog."""
     catalog = np.asarray([[10.0, 20.0], [30.0, 50.0], [70.0, 110.0]], dtype=np.float64)
     offset = (4.0, -2.5)
     detections = catalog + np.asarray(offset)
-    n_inliers, pairs = _greedy_inlier_count(detections, catalog, offset_vu=offset, tolerance_px=0.5)
+    n_inliers, pairs = _optimal_inlier_assignment(
+        detections, catalog, offset_vu=offset, tolerance_px=0.5
+    )
     assert n_inliers == 3
     assert sorted(pairs) == [(0, 0), (1, 1), (2, 2)]
 
 
-def test_greedy_inlier_count_does_not_double_match() -> None:
-    """Each catalog star matches at most one detection."""
+def test_optimal_inlier_assignment_does_not_double_match() -> None:
+    """Each catalog star matches at most one detection; the closer detection wins."""
     catalog = np.asarray([[10.0, 20.0]], dtype=np.float64)
     detections = np.asarray([[10.0, 20.0], [10.5, 19.9]], dtype=np.float64)
-    n_inliers, pairs = _greedy_inlier_count(
+    n_inliers, pairs = _optimal_inlier_assignment(
         detections, catalog, offset_vu=(0.0, 0.0), tolerance_px=2.0
     )
     assert n_inliers == 1
     assert pairs == [(0, 0)]
+
+
+def test_optimal_inlier_assignment_resolves_competing_detections() -> None:
+    """Two detections competing for one catalog star pair off one-to-one.
+
+    Detection 0 at (2.5, 0) is nearest to catalog star 1 at (4, 0); a
+    greedy sweep in detection order would consume star 1 for detection
+    0 and leave detection 1 at (4.5, 0) with only star 0 at (0, 0),
+    which is beyond tolerance -- one inlier.  The maximum-cardinality
+    assignment pairs detection 0 with star 0 (distance 2.5) and
+    detection 1 with star 1 (distance 0.5) -- two inliers.
+    """
+    catalog = np.asarray([[0.0, 0.0], [4.0, 0.0]], dtype=np.float64)
+    detections = np.asarray([[2.5, 0.0], [4.5, 0.0]], dtype=np.float64)
+    n_inliers, pairs = _optimal_inlier_assignment(
+        detections, catalog, offset_vu=(0.0, 0.0), tolerance_px=3.0
+    )
+    assert n_inliers == 2
+    assert pairs == [(0, 0), (1, 1)]
+
+
+def test_optimal_inlier_assignment_is_order_independent() -> None:
+    """Reversing the detection ordering leaves the assignment unchanged.
+
+    Same competing-detection geometry as above with the detection rows
+    swapped: the inlier count and the (detection, catalog) pairing set
+    must be identical up to the detection reindexing.
+    """
+    catalog = np.asarray([[0.0, 0.0], [4.0, 0.0]], dtype=np.float64)
+    detections = np.asarray([[4.5, 0.0], [2.5, 0.0]], dtype=np.float64)
+    n_inliers, pairs = _optimal_inlier_assignment(
+        detections, catalog, offset_vu=(0.0, 0.0), tolerance_px=3.0
+    )
+    assert n_inliers == 2
+    assert pairs == [(0, 1), (1, 0)]
+
+
+def test_optimal_inlier_assignment_prefers_min_residual_at_equal_cardinality() -> None:
+    """Among maximum-cardinality assignments the lowest total residual wins."""
+    catalog = np.asarray([[0.0, 0.0], [1.0, 0.0]], dtype=np.float64)
+    detections = np.asarray([[0.1, 0.0], [0.9, 0.0]], dtype=np.float64)
+    n_inliers, pairs = _optimal_inlier_assignment(
+        detections, catalog, offset_vu=(0.0, 0.0), tolerance_px=2.0
+    )
+    assert n_inliers == 2
+    assert pairs == [(0, 0), (1, 1)]
+
+
+def test_optimal_inlier_assignment_empty_inputs() -> None:
+    """Empty detection or catalog arrays produce zero inliers."""
+    empty = np.zeros((0, 2), dtype=np.float64)
+    catalog = np.asarray([[1.0, 2.0]], dtype=np.float64)
+    n_inliers, pairs = _optimal_inlier_assignment(
+        empty, catalog, offset_vu=(0.0, 0.0), tolerance_px=1.0
+    )
+    assert n_inliers == 0
+    assert pairs == []
 
 
 # ---------------------------------------------------------------------------
