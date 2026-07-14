@@ -311,21 +311,23 @@ plus hook implementations, mechanical but voluminous.
 
 Work items, in dependency order:
 
-1. **#139 and #256** (Essential, interacting — fix together) — the
-   global-index LID is malformed (missing `urn:nasa:pds:` prefix, wrong
-   image part), and the collection inventory LIDVIDs double-transform
-   the image name (the on-disk name is already LID-part form, then the
-   LID builder re-applies the Cassini rotate-first-char transform):
-   `src/spindoctor/cli/pds4/collections.py`. The #139 fix direction
-   (route through the dataset LID builder) hits the #256 double
-   transform, so land them as one change. Label-round-trip regression
-   tests already exist as strict xfails in
-   `tests/spindoctor/cli/pds4/test_collections.py` — flip them.
-   #256 also records two characterized defects to resolve in the same
-   area: every `template.write` ignores pdstemplate's error/warning
-   counts (an unresolved variable silently drops the label while the
-   run reports success), and the dev-guide "Output layout" section
-   describes a layout neither the code nor the user guide matches.
+1. **#139 and #256 — LID cross-referencing (fixed in PR #264)** — the
+   global-index LID was malformed (missing `urn:nasa:pds:` prefix, wrong
+   image part) and the collection inventory LIDVIDs double-transformed
+   the image name (the on-disk name is already LID-part form, so the LID
+   builder re-applied the Cassini rotate-first-char transform):
+   `src/spindoctor/cli/pds4/collections.py`. Both are resolved together
+   by a `DataSet.pds4_lid_part_to_image_name` inverse hook — the
+   collection and global-index scanners recover the original image name
+   from each on-disk product stem before calling the canonical LID
+   builders. The strict-xfail label-round-trip tests in
+   `tests/spindoctor/cli/pds4/test_collections.py` are flipped. Two
+   characterized defects recorded on #256 are tracked by **#265** for
+   the same area: every `template.write` ignores pdstemplate's
+   error/warning counts (an unresolved variable silently drops the label
+   while the run reports success), and the dev-guide "Output layout"
+   section describes a layout neither the code nor the user guide
+   matches.
 2. **Template finalization acceptance list** — the ten items recorded
    on #53 (2026-07-13 comment): schema validation, the unreferenced
    `cassini:*` variables and hardcoded placeholders, TITLE/DESCRIPTION
@@ -421,7 +423,8 @@ asserts the generated half matches the registries.
   remaining scope is the `sd_backplanes.py` / `sd_create_bundle.py`
   driver arg-parsing layer, which should fold into the broader
   sd_*-driver test effort. The suites found and pinned #251, #252,
-  #253, #256 (strict xfails ready to flip when each fix lands).
+  #253, #256; the #256 LID xfails are flipped by PR #264, and #251,
+  #252, #253 remain (strict xfails ready to flip when each fix lands).
 - **#243** — direct tests for `nav_model/stars/conflicts.py`
   (`_check_one_star`, `mark_body_and_ring_conflicts`) with synthetic
   geometry; the existing per-pixel occlusion tests cover only the
