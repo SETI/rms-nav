@@ -711,15 +711,6 @@ def test_no_features_for_subpixel_body(monkeypatch: pytest.MonkeyPatch) -> None:
     assert features == []
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        '#254: spec tension: dev_guide_navigation_models_body.rst says a fully-shadowed '
-        'silhouette emits only geometric features ("otherwise nothing"), but the '
-        'module docstring gates BODY_BLOB on diameter alone and the extractor emits '
-        'a BODY_BLOB for an all-dark disc'
-    ),
-)
 def test_fully_dark_body_emits_no_photometric_blob(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

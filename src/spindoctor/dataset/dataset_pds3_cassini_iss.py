@@ -469,6 +469,25 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         bundle_path = self.pds4_bundle_path_for_image(image_name)
         return f'{bundle_path.rstrip("/")}/{image_lid_part}'
 
+    def pds4_lid_part_to_image_name(self, lid_part: str) -> str:
+        """Returns the image name for the given LID part.
+
+        Inverts the transform applied by :meth:`pds4_path_stub` and the
+        ``pds4_image_name_to_*`` builders, which move the leading camera letter
+        (``N``/``W``) to a lowercase suffix (``N1454725799`` ->
+        ``1454725799n``). The inverse moves the trailing lowercase letter back
+        to the front as an uppercase prefix (``1454725799n`` -> ``N1454725799``).
+
+        Parameters:
+            lid_part: The LID part (an on-disk product filename stem).
+
+        Returns:
+            The image name that produced the given LID part.
+        """
+        if len(lid_part) < 2:
+            raise ValueError(f'invalid Cassini LID part {lid_part!r}: expected >= 2 characters')
+        return lid_part[-1].upper() + lid_part[:-1]
+
     def pds4_image_name_to_browse_lid(self, image_name: str) -> str:
         """Returns the browse LID for the given image name.
 
