@@ -10,22 +10,22 @@ Two paths share one technique:
   the configured one-star limit (default 0.7) because a single match
   cannot cross-check itself.
 
-  No-rival sentinels (#259): the ``one_star_min_peak_ratio`` ambiguity
-  gate (#211) and the brightness-margin gate both report ``inf`` when
-  no rival exists (no runner-up detection above the window background /
-  no other predictable catalog star).  The sentinels deliberately PASS
-  the ratio checks -- a genuinely unique bright star has no rival and
-  must remain matchable -- but an infinite peak ratio also means the
-  ambiguity gate measured nothing (a flat or quantized window, exactly
-  where a lone hot pixel or artifact would otherwise auto-pass every
-  check).  In that vacuous case acceptance is additionally gated on the
+  No-rival sentinels: the ``one_star_min_peak_ratio`` ambiguity gate and
+  the brightness-margin gate both report ``inf`` when no rival exists
+  (no runner-up detection above the window background / no other
+  predictable catalog star).  The sentinels deliberately PASS the ratio
+  checks -- a genuinely unique bright star has no rival and must remain
+  matchable -- but an infinite peak ratio also means the ambiguity gate
+  measured nothing (a flat or quantized window, exactly where a lone hot
+  pixel or artifact would otherwise auto-pass every check).  In that
+  vacuous case acceptance is additionally gated on the
   prediction-to-detection distance staying within
   ``one_star_max_residual_px``: with no rival statistics to lean on, a
   lone detection is only promoted to an identification when it sits
-  inside the pointing-prior core.  A finite peak ratio leaves
-  acceptance to the measured #211 gate; genuine one-star matches with
-  offsets up to ~24 px exist in the operator-verified library, so no
-  uniform residual cut below the search window is possible.
+  inside the pointing-prior core.  A finite peak ratio leaves acceptance
+  to the measured ambiguity gate; genuine one-star matches with offsets
+  up to ~24 px exist in the operator-verified library, so no uniform
+  residual cut below the search window is possible.
 
 - **Two-star path.**  With two predictable stars, the technique tries
   both detection-to-prediction assignments and picks the one whose
@@ -557,14 +557,14 @@ class StarUniqueMatchNav(NavTechnique):
 
         Acceptance requires, in order: the brightness-margin uniqueness
         gate, a detection above the noise threshold, the
-        peak-to-runner-up ambiguity gate (#211), and -- only when that
-        ratio is the infinite no-rival sentinel -- the residual gate
-        (#259) bounding the prediction-to-detection distance by
-        ``one_star_max_residual_px``.  The sentinel means the ambiguity
-        gate measured nothing (no runner-up ever cleared the window
-        background), so the residual gate carries the acceptance burden
-        there; a finite ratio was measured against real background
-        statistics and acceptance stays with the #211 gate.
+        peak-to-runner-up ambiguity gate, and -- only when that ratio is
+        the infinite no-rival sentinel -- the residual gate bounding the
+        prediction-to-detection distance by ``one_star_max_residual_px``.
+        The sentinel means the ambiguity gate measured nothing (no
+        runner-up ever cleared the window background), so the residual
+        gate carries the acceptance burden there; a finite ratio was
+        measured against real background statistics and acceptance stays
+        with the ambiguity gate.
         """
         brightest_snr = predicted_snr(brightest)
         next_snr = predicted_snr(rest[0]) if rest else 0.0
@@ -641,19 +641,18 @@ class StarUniqueMatchNav(NavTechnique):
         offset_v = det[0] - pred_v
         offset_u = det[1] - pred_u
         residual_px = math.hypot(offset_v, offset_u)
-        # Residual gate (#259), applied only when the #211 ambiguity
-        # gate is vacuous: an infinite peak ratio means no runner-up
-        # ever cleared the window background, so the gate measured
-        # nothing about the detection's uniqueness -- the signature of
-        # a lone hot pixel / artifact on a flat or quantized frame, not
-        # of a star on a real noisy background (whose runner-up is
-        # always finite).  With no rival statistics to lean on, and the
-        # residual being the claimed offset itself, acceptance demands
-        # the detection sit inside the pointing-prior core bounded by
-        # ``one_star_max_residual_px``.  A finite ratio keeps the
-        # measured #211 gate authoritative: genuine library matches
-        # carry one-star offsets up to ~24 px, so no uniform residual
-        # cut below the search window is possible.
+        # Residual gate, applied only when the ambiguity gate is vacuous:
+        # an infinite peak ratio means no runner-up ever cleared the
+        # window background, so the gate measured nothing about the
+        # detection's uniqueness -- the signature of a lone hot pixel /
+        # artifact on a flat or quantized frame, not of a star on a real
+        # noisy background (whose runner-up is always finite).  With no
+        # rival statistics to lean on, and the residual being the claimed
+        # offset itself, acceptance demands the detection sit inside the
+        # pointing-prior core bounded by ``one_star_max_residual_px``.  A
+        # finite ratio keeps the measured ambiguity gate authoritative:
+        # genuine library matches carry one-star offsets up to ~24 px, so
+        # no uniform residual cut below the search window is possible.
         if not math.isfinite(peak_ratio) and residual_px > self._one_star_max_residual_px:
             diagnostics = StarUniqueMatchDiagnostics(
                 mode='one_star',
