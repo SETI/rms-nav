@@ -382,9 +382,10 @@ per-planet ring navigation), the simulated-image siblings
 :class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated`
 and
 :class:`~spindoctor.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`
-(rendered from operator-supplied parameters), and the placeholder
-:class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (registered stub
-for atmospheric-body navigation; emits no features). A
+(rendered from operator-supplied parameters), and
+:class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (active whenever
+Titan is in the extended FOV; emits no features and instead records why a
+Titan scene cannot be navigated). A
 ``NavModelStarsSimulated`` slot is reserved without an implementation.
 
 Per-family data models live alongside the renderer classes:
@@ -407,11 +408,11 @@ Per-family data models live alongside the renderer classes:
   ``RingFeatureFilter``, ``RingRenderResult``, ``RingsRenderContext``,
   ``ring_math``, ``ring_types``); see
   :doc:`dev_guide_navigation_models_ring` for details.
-- **Titan** — placeholder only. A haze-aware data model is reserved
-  without an implementation; the registered stub
-  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` reserves the
-  registry slot, and ``NavModelTitanSimulated`` is reserved as the
-  simulated-image sibling. See :doc:`dev_guide_navigation_models_titans`
+- **Titan** — no haze-aware data model exists yet.
+  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` builds
+  whenever Titan is in the extended FOV, emits no features, and records a
+  no-result reason instead; ``NavModelTitanSimulated`` is reserved as the
+  simulated-image sibling. See :doc:`dev_guide_navigation_models_titan`
   for details.
 
 NavTechnique

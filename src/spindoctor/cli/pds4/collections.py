@@ -59,7 +59,8 @@ def generate_collection_files(
         writer = csv.writer(f)
         writer.writerow(['Member Status', 'LIDVID_LID'])
         for label_file in label_files:
-            image_name = label_file.stem.replace('_backplanes', '')
+            lid_part = label_file.stem.replace('_backplanes', '')
+            image_name = dataset.pds4_lid_part_to_image_name(lid_part)
             lidvid = dataset.pds4_image_name_to_data_lidvid(image_name)
             writer.writerow(['P', lidvid])
     collection_data_csv.upload()
@@ -91,7 +92,8 @@ def generate_collection_files(
         writer = csv.writer(f)
         writer.writerow(['Member Status', 'LIDVID_LID'])
         for label_file in label_files:
-            image_name = label_file.stem.replace('_backplanes', '')
+            lid_part = label_file.stem.replace('_backplanes', '')
+            image_name = dataset.pds4_lid_part_to_image_name(lid_part)
             lidvid = dataset.pds4_image_name_to_browse_lidvid(image_name)
             writer.writerow(['P', lidvid])
     collection_browse_csv.upload()
@@ -157,8 +159,6 @@ def generate_global_index_files(
     body_index_rows: list[dict[str, Any]] = []
     ring_index_rows: list[dict[str, Any]] = []
 
-    pds4_bundle_name = dataset.pds4_bundle_name()
-
     for suppl_file in supplemental_files:
         try:
             suppl_text = suppl_file.read_text()
@@ -178,8 +178,9 @@ def generate_global_index_files(
         pds4_path_stub = str(suppl_relative).replace('_supplemental.txt', '')
         pds4_path_stub = pds4_path_stub.replace('\\', '/')
 
-        image_name = suppl_file.stem.replace('_supplemental', '')
-        lid = f'{pds4_bundle_name}:data:{image_name}'
+        lid_part = suppl_file.stem.replace('_supplemental', '')
+        image_name = dataset.pds4_lid_part_to_image_name(lid_part)
+        lid = dataset.pds4_image_name_to_data_lid(image_name)
         # pds4_path_stub includes path and filename prefix
         # Path relative to data directory
         path_to_image = f'data/{pds4_path_stub}_backplanes.lblx'
