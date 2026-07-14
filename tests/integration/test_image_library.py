@@ -322,3 +322,26 @@ def test_load_sidecar_rejects_unknown_status_reason(tmp_path: Path) -> None:
     p.write_text(bad)
     with pytest.raises(SidecarValidationError, match=r'status_reason'):
         load_sidecar(p)
+
+
+def test_load_sidecar_accepts_pending_issue(tmp_path: Path) -> None:
+    """An ``expected.pending_issue`` of the form ``#<number>`` validates."""
+    good = _VALID_SIDECAR_TEXT.replace(
+        'primary_technique: BodyLimbNav',
+        'primary_technique: BodyLimbNav\n  pending_issue: "#285"',
+    )
+    p = tmp_path / 'TEST_IMG_0002.yaml'
+    p.write_text(good)
+    assert load_sidecar(p).expected.pending_issue == '#285'
+
+
+def test_load_sidecar_rejects_malformed_pending_issue(tmp_path: Path) -> None:
+    """``expected.pending_issue`` that is not a ``#<number>`` reference fails."""
+    bad = _VALID_SIDECAR_TEXT.replace(
+        'primary_technique: BodyLimbNav',
+        'primary_technique: BodyLimbNav\n  pending_issue: soon',
+    )
+    p = tmp_path / 'BAD.yaml'
+    p.write_text(bad)
+    with pytest.raises(SidecarValidationError, match=r'pending_issue'):
+        load_sidecar(p)

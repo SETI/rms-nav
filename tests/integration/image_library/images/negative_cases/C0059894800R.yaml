@@ -35,16 +35,17 @@ ground_truth:
     more than ~3-4 predicted stars with a detection.  The two-star fallback
     cannot lock the large unknown pointing offset and its brightest-pair
     margin (0.77 mag) is below the 1.5-mag floor.  The pipeline fails closed
-    with status=failed, reason=all_techniques_spurious, which is correct:
+    with status=failed, reason=all_techniques_spurious, which is a limit of the current pipeline, not a validated negative:
     fewer than the required number of stars are detectable and there is no
     resolved body or ring.
-    Ground-truth offset is a placeholder: the scene is unnavigable by design,
-    so no offset is measurable; the regression assertion is
+    Ground-truth offset is a placeholder: the current pipeline cannot navigate the scene,
+    so no offset is measurable; this fixture is provisional (pending_issue #285) and must be re-verified and reclassified when #285 (sparse-field star nav) and #284 (UCAC4 bright-end photometry) land; the regression assertion is
     expected.status=failed with reason=all_techniques_spurious.
 expected:
   status: failed
   confidence_tier: failed
   primary_technique: StarFieldFromCatalogNav
   status_reason: all_techniques_spurious
+  pending_issue: '#285'
   techniques_must_run: []
   techniques_must_skip: []
