@@ -21,8 +21,8 @@ from spindoctor.nav_technique.nav_technique_star_field import (
     StarFieldFromCatalogNav,
     _detect_image_sources,
     _enumerate_triplets,
-    _greedy_inlier_count,
     _hash_distance_sq,
+    _optimal_inlier_assignment,
     _solve_translation,
     _triplet_hash,
 )
@@ -232,25 +232,84 @@ def test_solve_translation_recovers_constant_offset() -> None:
     assert du == pytest.approx(planted[1])
 
 
-def test_greedy_inlier_count_under_perfect_offset() -> None:
+def test_optimal_inlier_assignment_under_perfect_offset() -> None:
     """Every detection is an inlier when the offset perfectly aligns the catalog."""
     catalog = np.asarray([[10.0, 20.0], [30.0, 50.0], [70.0, 110.0]], dtype=np.float64)
     offset = (4.0, -2.5)
     detections = catalog + np.asarray(offset)
-    n_inliers, pairs = _greedy_inlier_count(detections, catalog, offset_vu=offset, tolerance_px=0.5)
+    n_inliers, pairs = _optimal_inlier_assignment(
+        detections, catalog, offset_vu=offset, tolerance_px=0.5
+    )
     assert n_inliers == 3
     assert sorted(pairs) == [(0, 0), (1, 1), (2, 2)]
 
 
-def test_greedy_inlier_count_does_not_double_match() -> None:
-    """Each catalog star matches at most one detection."""
+def test_optimal_inlier_assignment_does_not_double_match() -> None:
+    """Each catalog star matches at most one detection; the closer detection wins."""
     catalog = np.asarray([[10.0, 20.0]], dtype=np.float64)
     detections = np.asarray([[10.0, 20.0], [10.5, 19.9]], dtype=np.float64)
-    n_inliers, pairs = _greedy_inlier_count(
+    n_inliers, pairs = _optimal_inlier_assignment(
         detections, catalog, offset_vu=(0.0, 0.0), tolerance_px=2.0
     )
     assert n_inliers == 1
     assert pairs == [(0, 0)]
+
+
+def test_optimal_inlier_assignment_resolves_competing_detections() -> None:
+    """Two detections competing for one catalog star pair off one-to-one.
+
+    Detection 0 at (2.5, 0) is nearest to catalog star 1 at (4, 0); a
+    greedy sweep in detection order would consume star 1 for detection
+    0 and leave detection 1 at (4.5, 0) with only star 0 at (0, 0),
+    which is beyond tolerance -- one inlier.  The maximum-cardinality
+    assignment pairs detection 0 with star 0 (distance 2.5) and
+    detection 1 with star 1 (distance 0.5) -- two inliers.
+    """
+    catalog = np.asarray([[0.0, 0.0], [4.0, 0.0]], dtype=np.float64)
+    detections = np.asarray([[2.5, 0.0], [4.5, 0.0]], dtype=np.float64)
+    n_inliers, pairs = _optimal_inlier_assignment(
+        detections, catalog, offset_vu=(0.0, 0.0), tolerance_px=3.0
+    )
+    assert n_inliers == 2
+    assert pairs == [(0, 0), (1, 1)]
+
+
+def test_optimal_inlier_assignment_is_order_independent() -> None:
+    """Reversing the detection ordering leaves the assignment unchanged.
+
+    Same competing-detection geometry as above with the detection rows
+    swapped: the inlier count and the (detection, catalog) pairing set
+    must be identical up to the detection reindexing.
+    """
+    catalog = np.asarray([[0.0, 0.0], [4.0, 0.0]], dtype=np.float64)
+    detections = np.asarray([[4.5, 0.0], [2.5, 0.0]], dtype=np.float64)
+    n_inliers, pairs = _optimal_inlier_assignment(
+        detections, catalog, offset_vu=(0.0, 0.0), tolerance_px=3.0
+    )
+    assert n_inliers == 2
+    assert pairs == [(0, 1), (1, 0)]
+
+
+def test_optimal_inlier_assignment_prefers_min_residual_at_equal_cardinality() -> None:
+    """Among maximum-cardinality assignments the lowest total residual wins."""
+    catalog = np.asarray([[0.0, 0.0], [1.0, 0.0]], dtype=np.float64)
+    detections = np.asarray([[0.1, 0.0], [0.9, 0.0]], dtype=np.float64)
+    n_inliers, pairs = _optimal_inlier_assignment(
+        detections, catalog, offset_vu=(0.0, 0.0), tolerance_px=2.0
+    )
+    assert n_inliers == 2
+    assert pairs == [(0, 0), (1, 1)]
+
+
+def test_optimal_inlier_assignment_empty_inputs() -> None:
+    """Empty detection or catalog arrays produce zero inliers."""
+    empty = np.zeros((0, 2), dtype=np.float64)
+    catalog = np.asarray([[1.0, 2.0]], dtype=np.float64)
+    n_inliers, pairs = _optimal_inlier_assignment(
+        empty, catalog, offset_vu=(0.0, 0.0), tolerance_px=1.0
+    )
+    assert n_inliers == 0
+    assert pairs == []
 
 
 # ---------------------------------------------------------------------------
@@ -770,17 +829,21 @@ def test_build_covariance_model_error_floor_inflates_by_square() -> None:
 
 
 def test_build_covariance_3dof_rotation_variance_analytic() -> None:
-    """3-DoF rotation variance matches the analytic lever-arm reduced chi-square.
+    """3-DoF rotation variance matches the analytic Fisher information.
 
     Four equal-weight points (w = 1), p = 3, dof = max(4 - 3, 1) = 1.
 
     Catalog positions (0,0),(0,4),(4,0),(4,4): weighted centroid (2,2),
-    each lever arm |cat - cc|**2 = 8, so spread = sum(w * 8) = 32.
+    lever arms dv = [-2,-2,2,2], du = [-2,2,-2,2].
 
     Residuals: r_v = [1, -1, 1, -1], r_u = [0, 0, 0, 0].
-        sum(w r_v^2) = 4, sum(w r_u^2) = 0,
-        chi2_nu_residual = 0.5 * (4 + 0) / 1 = 2.0,
-        sigma_theta^2 = max(2.0/32, 1/32) = 0.0625.
+        var_v = max(4/1, 1) = 4, var_u = max(0/1, 1) = 1 (floored),
+        I_theta = sum(du^2/var_v + dv^2/var_u) = 4*(4/4 + 4/1) = 20,
+        sigma_theta^2 = 1/20 = 0.05.
+
+    (The isotropic pooled lever-arm form would report
+    max(2.0/32, 1/32) = 0.0625 here -- the anisotropic residuals make
+    the exact value differ.)
 
     Translation block (p = 3, dof = 1):
         V: chi2_nu = 4/1 = 4, var = 4/4 = 1.0 (> floor 0.25).
@@ -796,10 +859,101 @@ def test_build_covariance_3dof_rotation_variance_analytic() -> None:
     assert cov.shape == (3, 3)
     assert cov[0, 0] == pytest.approx(1.0, abs=1e-9)
     assert cov[1, 1] == pytest.approx(0.25, abs=1e-9)
-    assert cov[2, 2] == pytest.approx(0.0625, abs=1e-9)
+    assert cov[2, 2] == pytest.approx(0.05, abs=1e-9)
     # Cross-terms are zero by construction.
     assert cov[0, 2] == pytest.approx(0.0, abs=1e-9)
     assert cov[1, 2] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_build_covariance_3dof_isotropic_limit_matches_lever_arm_form() -> None:
+    """In the isotropic limit the Fisher form reduces to the classic lever-arm value.
+
+    Same corner catalog (spread = 32, dof = 1) with isotropic
+    residuals: r_v = [1,-1,0,0], r_u = [0,0,1,-1] give
+    var_v = var_u = 2, so
+
+        I_theta = sum(du^2 + dv^2)/2 = 32/2 = 16
+        sigma_theta^2 = 1/16 = chi2_nu_residual/spread = 2/32.
+    """
+    technique = StarFieldFromCatalogNav()
+    weights = np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float64)
+    residuals = np.array([[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]], dtype=np.float64)
+    cat_inliers = np.array([[0.0, 0.0], [0.0, 4.0], [4.0, 0.0], [4.0, 4.0]], dtype=np.float64)
+    cov = technique._build_covariance_3dof(
+        weights=weights, residuals=residuals, cat_inliers=cat_inliers
+    )
+    assert cov[2, 2] == pytest.approx(1.0 / 16.0, abs=1e-9)
+
+
+def test_build_covariance_3dof_anisotropic_residuals_exact() -> None:
+    """Anisotropic residuals give the exact tangential rotation variance.
+
+    Five equal-weight points on the u axis: catalog
+    (0,-4),(0,-2),(0,0),(0,2),(0,4), centroid (0,0), lever arms
+    dv = 0, du = [-4,-2,0,2,4].  Every rotation Jacobian is purely
+    along v (the tangential direction of a u-axis lever arm), so only
+    the v-axis residual variance constrains theta.
+
+    Residuals: r_v = [2,-2,2,-2,0], r_u = [1,-1,1,-1,0]; dof = 2.
+        var_v = 16/2 = 8, var_u = 4/2 = 2 (no floor active),
+        I_theta = sum(du^2)/var_v = 40/8 = 5,
+        sigma_theta^2 = 0.2.
+
+    The isotropic pooled formula would report
+    0.5*(16+4)/2 / 40 = 0.125 -- a 1.6x underestimate; this is the
+    regression the exact form corrects.  The value is cross-checked
+    against a brute-force Fisher information built from a
+    finite-difference rotation Jacobian.
+    """
+    technique = StarFieldFromCatalogNav()
+    weights = np.ones(5, dtype=np.float64)
+    residuals = np.array(
+        [[2.0, 1.0], [-2.0, -1.0], [2.0, 1.0], [-2.0, -1.0], [0.0, 0.0]], dtype=np.float64
+    )
+    cat_inliers = np.array(
+        [[0.0, -4.0], [0.0, -2.0], [0.0, 0.0], [0.0, 2.0], [0.0, 4.0]], dtype=np.float64
+    )
+    cov = technique._build_covariance_3dof(
+        weights=weights, residuals=residuals, cat_inliers=cat_inliers
+    )
+    assert cov[2, 2] == pytest.approx(0.2, abs=1e-9)
+    old_isotropic = (0.5 * (16.0 + 4.0) / 2.0) / 40.0
+    assert cov[2, 2] != pytest.approx(old_isotropic, abs=1e-3)
+    # Brute-force Fisher information: finite-difference the rotated
+    # lever arm w.r.t. theta and accumulate per-axis precision.
+    dof = 2.0
+    var_v = float(np.sum(weights * residuals[:, 0] ** 2)) / dof
+    var_u = float(np.sum(weights * residuals[:, 1] ** 2)) / dof
+    centroid = np.sum(weights[:, None] * cat_inliers, axis=0) / float(np.sum(weights))
+    lever = cat_inliers - centroid[None, :]
+    eps = 1.0e-6
+
+    def _rotate(points: np.ndarray, theta: float) -> np.ndarray:
+        rot = np.array(
+            [[math.cos(theta), -math.sin(theta)], [math.sin(theta), math.cos(theta)]],
+            dtype=np.float64,
+        )
+        return points @ rot.T
+
+    jac = (_rotate(lever, eps) - _rotate(lever, -eps)) / (2.0 * eps)
+    fisher_numeric = float(np.sum(weights * (jac[:, 0] ** 2 / var_v + jac[:, 1] ** 2 / var_u)))
+    assert cov[2, 2] == pytest.approx(1.0 / fisher_numeric, rel=1e-9)
+
+
+def test_build_covariance_3dof_zero_residuals_floor() -> None:
+    """A noise-free fit floors both per-axis variances at 1 px^2.
+
+    With zero residuals var_v = var_u = 1 (floored), so the rotation
+    variance falls back to the inverse lever-arm spread 1/32.
+    """
+    technique = StarFieldFromCatalogNav()
+    weights = np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float64)
+    residuals = np.zeros((4, 2), dtype=np.float64)
+    cat_inliers = np.array([[0.0, 0.0], [0.0, 4.0], [4.0, 0.0], [4.0, 4.0]], dtype=np.float64)
+    cov = technique._build_covariance_3dof(
+        weights=weights, residuals=residuals, cat_inliers=cat_inliers
+    )
+    assert cov[2, 2] == pytest.approx(1.0 / 32.0, abs=1e-12)
 
 
 def test_build_covariance_3dof_coincident_catalog_is_rotation_unobservable() -> None:

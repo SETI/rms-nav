@@ -93,6 +93,13 @@ The full extension-point set:
   including the image name (e.g.
   ``1234xxxxxx/123456xxxx/1234567890w``). Builds the per-file paths under
   ``data/`` and ``browse/``.
+- :meth:`~spindoctor.dataset.dataset.DataSet.pds4_lid_part_to_image_name` —
+  inverse of the image-name transform baked into ``pds4_path_stub`` and the
+  ``pds4_image_name_to_*`` builders. Each product is stored on disk under a
+  filename whose stem is the LID part (e.g. ``1234567890w``); this hook lets
+  the collection and global-index scanners recover the original image name from
+  that stem and round-trip it back through the canonical LID builders instead
+  of re-applying the transform.
 - :meth:`~spindoctor.dataset.dataset.DataSet.pds4_image_name_to_browse_lid` /
   :meth:`~spindoctor.dataset.dataset.DataSet.pds4_image_name_to_browse_lidvid`
   — emit the browse-product Logical Identifier (LID) and LID + version
@@ -240,7 +247,9 @@ The end-to-end checklist:
    are :meth:`~spindoctor.dataset.dataset.DataSet.pds4_bundle_template_dir`,
    :meth:`~spindoctor.dataset.dataset.DataSet.pds4_bundle_name`,
    :meth:`~spindoctor.dataset.dataset.DataSet.pds4_path_stub`, the four
-   ``pds4_image_name_to_*_lid[vid]`` methods, and
+   ``pds4_image_name_to_*_lid[vid]`` methods,
+   :meth:`~spindoctor.dataset.dataset.DataSet.pds4_lid_part_to_image_name`
+   (the inverse of ``pds4_path_stub``'s image-name transform), and
    :meth:`~spindoctor.dataset.dataset.DataSet.pds4_template_variables`.
 2. Drop a per-dataset template directory under
    ``src/spindoctor/cli/pds4/templates/<dataset>_<version>/`` containing the ``.lblx``
