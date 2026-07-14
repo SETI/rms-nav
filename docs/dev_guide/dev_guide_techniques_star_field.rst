@@ -59,9 +59,12 @@ RANSAC inlier validation
 
 Each candidate correspondence proposes a similarity transform (rotation, translation, and an
 implied unit scale). The matcher applies the proposed transform to every catalog star and
-counts how many predicted positions land within ``inlier_tolerance_px`` of a detection.
-The transform with the most inliers wins; below ``pattern_match_min_inliers`` the technique
-reports spurious.
+counts how many predicted positions land within ``inlier_tolerance_px`` of a detection. The
+detection-to-catalog inliers within the tolerance ball are the maximum-cardinality one-to-one
+assignment (solved with :func:`scipy.optimize.linear_sum_assignment`), so the count is exact
+and independent of detection ordering rather than a greedy nearest-available match that could
+strand a detection when two compete for one catalog star. The transform with the most inliers
+wins; below ``pattern_match_min_inliers`` the technique reports spurious.
 
 PSF-fit inlier refinement
 -------------------------
@@ -109,12 +112,19 @@ Per-axis covariance
 -------------------
 
 The reported translation covariance is derived from the inlier residual scatter and the
-catalog-side centroid spread, per the same precision-weighted-mean form
-:class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav` uses; see
-:doc:`dev_guide_techniques_star_refine` for the algebra. When the per-instrument
+catalog-side centroid spread, via the precision-weighted-mean form; see
+:doc:`dev_guide_techniques_star_refine` for the translation algebra. When the per-instrument
 camera-rotation flag is on and the inlier count supports it, a 3x3 covariance with the
 rotation diagonal is reported; otherwise the 2x2 translation block is reported on its own
 or embedded in the rank-deficient 3x3.
+
+The rotation variance is the inverse of the rotation Fisher information computed directly
+from the per-vertex tangential lever-arm Jacobian ``(-du_i, dv_i)`` about the weighted
+catalog centroid, weighted by the per-axis residual precision. This is exact for
+anisotropic residuals — unlike a pooled isotropic form that averages the two per-axis
+residual variances and can be off by up to a factor of two when the inlier lever arms are
+distributed unevenly across the axes. (``StarRefineNav`` keeps its own pooled rotation form;
+the two are not shared.)
 
 Restrictions and assumptions
 ----------------------------

@@ -926,6 +926,27 @@ gradient-ridge refine is disabled for the limb technique
 ring-edge technique runs with it enabled (`:354`). The limb's current partial
 cancellation (integer DT quantization + Tukey) is accidental.
 
+**Status (2026-07-14) — diagnosis complete (PR #276, measurement only, no fitter
+change).** The instrumented diagnosis confirms the mechanism and quantifies it:
+the genuine algorithmic bias is 0.05–0.14 px, directional (points from the lit
+limb toward the interior — a limb-darkening / photometric roll-off signature, the
+geometric edge matching a gradient ridge ~0.5 px inside the true limb), varies
+with illumination direction, and is roughly flat with body size; a ~0.05 px
+sub-pixel interpolation ripple rides on top; below ~15 deg phase the fit is
+poorly conditioned. The simulator's own limb render was validated bias-free
+(<2e-5 px), so it is trustworthy ground truth. **Key finding that reframes the
+redesign:** on real limb+star frames the limb-vs-star gap is 0.5–1.8 px, an order
+of magnitude larger than the 0.1 px algorithmic bias — so the limb fitter explains
+only ~0.1 px and the remaining 0.4–1.7 px is spacecraft-position / body-ephemeris
+error (isolable only because the sim geometry is exact). Fixing the fitter buys
+~0.1 px; the dominant real-frame error is on the pointing-kernel side. Ranked
+redesign recommendation from the diagnosis: (1) fit a photometric limb (predict
+the limb-darkened-disc-convolved-with-PSF brightness profile and match it) rather
+than aligning a geometric edge to the gradient ridge; (2) a matched-filter edge
+estimator to remove the interpolation ripple; (3) gate low-phase (<~15 deg) fits;
+(4) a minor pixel-centre-convention audit. Harness and full report:
+`util/calibration/limb_bias/limb_navigation_bias_diagnosis.md`.
+
 **Tasks.**
 - Root-cause why gradient-ridge refine degrades the limb (the model-side limb-edge
  issue referenced as #150): the model predicts the geometric silhouette while the

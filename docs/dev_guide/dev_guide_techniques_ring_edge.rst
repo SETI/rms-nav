@@ -113,10 +113,27 @@ All numeric tunables for this technique live in ``techniques.RingEdgeNav.tuning`
   fraction (inliers over aggregated model vertices) below this marks the result spurious.
   This is the wrong-ringlet mis-convergence detector: a fit locked onto the wrong ring
   anchors a minority of the model vertices, while a correct fit whose faintest edge is
-  simply undetectable in the image still anchors a large majority. Residual statistics
-  cannot make that distinction — an undetected edge and a misaligned edge both sit a
-  ringlet spacing from the nearest image edge — which is why the gate is a support
-  fraction rather than a residual threshold.
+  simply undetectable in the image still anchors a large majority.
+- **Absent-edge waiver.** In a multi-edge fusion, a low aggregate inlier fraction can be
+  fully explained by an edge that is *absent* from the image (a faint edge nothing in the
+  frame can match) rather than *misaligned* (a wrong-ring lock). The two are separable by
+  the per-edge median DT residual: an absent edge sits far from every detected image edge
+  (a large median), while a wrong-lock leaves its rejected vertices lying *on* a detected
+  edge they disagree with (a near-zero median). The gate is therefore waived — the fit is
+  kept, not flagged spurious — only when all of: at least ``spurious_waiver_min_well_fit_edges``
+  edges each independently clear ``spurious_min_inlier_fraction`` and ``spurious_min_inliers``
+  on their own vertices (so the surviving edges genuinely constrain the offset); every
+  non-well-fit edge has a per-edge median DT residual of at least
+  ``spurious_waiver_absent_median_px`` (absent, not misaligned); the translation covariance
+  is full-rank; and at least two edges were consumed (a single-edge fit is never waived).
+  A waived fit receives a sigma floor added in quadrature so it lands at the ``'low'`` tier
+  and cannot outweigh a full-support result.
+- ``spurious_waiver_min_well_fit_edges`` — int, default ``1`` (count). Minimum number of
+  edges that must each independently clear the inlier-fraction and inlier-count gates for
+  the absent-edge waiver to apply.
+- ``spurious_waiver_absent_median_px`` — float, default ``5.0`` px. A non-well-fit edge
+  whose per-edge median DT residual is at least this large counts as *absent* (waivable)
+  rather than *misaligned* (a genuine mis-convergence).
 - ``rotation_at_edge_fraction`` — float, default ``0.95`` (dimensionless). When
   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the
   converged rotation magnitude trips

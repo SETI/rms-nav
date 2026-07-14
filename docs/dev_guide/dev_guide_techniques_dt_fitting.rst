@@ -360,7 +360,10 @@ per-vertex :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.residuals_
 estimate, the per-vertex final :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.weights`,
 the weighted :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.rms_px`, the unweighted
 :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.raw_rms_px` (well-defined even when the
-weighted RMS collapses to zero), the
+weighted RMS collapses to zero; averaged over the polarity-accepted vertices only, so a single
+polarity-rejected vertex's near-infinite synthetic residual cannot inflate it — the mis-convergence
+gate that consumes it stays meaningful in multi-body scenes where a secondary body contributes a
+few wrong-polarity vertices), the
 :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.iterations` count, the
 :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.converged` flag, the
 :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.degenerate` flag (set when no vertex

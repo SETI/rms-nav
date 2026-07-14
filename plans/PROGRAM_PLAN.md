@@ -244,6 +244,12 @@ operator-decided (below) or deferred.
   genuine limb-fit bias from spacecraft-position / ephemeris error using
   the simulator, and validates that the simulator's own limb render is
   bias-free.
+- Two operator-confirmed tier ratchets (N1530185128 medium -> high,
+  W1449079117 low -> medium) are #279, stacked on #271.
+- The #128/#150 diagnosis reframed the limb redesign: the fitter
+  contributes only ~0.1 px of real-frame error while spacecraft-position
+  / ephemeris error dominates (0.4-1.7 px), so the higher-leverage target
+  is the pointing-kernel side (Track D #188/#50), not the limb fitter.
 - Residual-offset frames behind #270/#272 (N1867601758, N1867602424,
   N1492091163) are now tier-honest but still land the wrong offset
   because the coarse edge search locked the wrong ring-edge population;

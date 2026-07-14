@@ -21,6 +21,26 @@ fields to match current behavior.
 
 ## Track B — Navigation correctness
 
+**Status (2026-07-14):** most of this track is now in review as a batch of
+pull requests off `main`; the per-item sections below record the original
+design intent and remain the reference for anything still open. Landed as
+PRs awaiting review: #180 + #254 (#266), #132 + #133 (#267), #259 (#268),
+#258 + #263 (#269), #221 (#270), #222 (#271), #261 (#272), #238 (#274,
+curated as negative cases — Galileo, not Voyager), #237 (#275, a real
+multi-body limb-RMS-pooling defect, fixed), #128/#150 diagnosis (#276,
+measurement only), #60 + #24 (#277), #210 (#278). Operator tier ratchets
+for two library frames are #279. Operator decisions taken 2026-07-14:
+#239 sub-5 px bodies become expected failures once a qualifying frame is
+curated (none exists in the current set — needs a targeted diameter-filtered
+cohort scan); #60 Titan and other atmospheric bodies are hard-excluded with
+an active model that records the decline; #24 highly-irregular bodies drop
+shape features once resolved; #210 gets a covariance-model rederivation, not
+a rescale; #128/#150 starts with the diagnosis pass. The #128 diagnosis
+reframed the redesign: the limb fitter contributes only ~0.1 px of real-frame
+error while spacecraft-position / ephemeris error dominates (0.4-1.7 px), so
+the higher-leverage target is the pointing-kernel side, not the fitter.
+Still deferred: #179 (coarse edge-lock calibration), #25, #130.
+
 Ordering within the track: the ensemble/gate cluster first. These are the
 confidently-wrong or correct-answer-discarded defects (issues #221, #222,
 #258, #259, #261, and #263) that the agreement study will consume ensemble
