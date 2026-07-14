@@ -447,7 +447,7 @@ def test_ring_edge_nav_marks_spurious_when_every_edge_fits_poorly(
     A genuinely mis-converged multi-edge fit where every edge retains
     only a few stray inliers must stay spurious: the well-fit-edge
     quorum is zero, so the aggregate inlier-fraction veto applies
-    exactly as before the absent-edge exemption.
+    exactly as before the #261 exemption.
     """
     from spindoctor.nav_technique import dt_fitting, nav_technique_ring_edge
 
@@ -511,8 +511,8 @@ def test_ring_edge_nav_single_edge_low_inlier_fraction_stays_spurious(
 ) -> None:
     """A single-edge fit below the inlier-fraction gate is spurious, unchanged.
 
-    One edge can never reach the two-edge well-fit quorum, so the
-    absent-edge exemption never applies to a single-edge fit: the aggregate
+    One edge can never reach the two-edge well-fit quorum, so the #261
+    exemption never applies to a single-edge fit: the aggregate
     inlier-fraction gate behaves exactly as before.
     """
     from spindoctor.nav_technique import dt_fitting, nav_technique_ring_edge
