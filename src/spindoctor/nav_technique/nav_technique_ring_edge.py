@@ -323,8 +323,8 @@ class RingEdgeNav(NavTechnique):
             # is pinned by a well-fit edge at sub-pixel RMS, yet the
             # missing edges' vertices drag the aggregate fraction below
             # the gate (Cassini C ring N1467344214 is the calibration
-            # case -- 821 / 3188 inliers on an operator-verified fit).
-            # What separates that from a wrong-ring lock
+            # case -- 821 / 3188 inliers on an operator-verified fit;
+            # issue #261).  What separates that from a wrong-ring lock
             # is the *median DT residual of the edges the robust fit
             # rejected*: an undetected edge sits far from every detected
             # image edge (medians of tens of px -- there is nothing
@@ -670,7 +670,7 @@ def _per_edge_rms_summed(features: list[NavFeature], residuals: NDArrayFloatType
 
 @dataclass(frozen=True)
 class _EdgeFitStat:
-    """Per-edge fit statistics for the spurious-veto waiver.
+    """Per-edge fit statistics for the spurious-veto waiver (issue #261).
 
     Parameters:
         inlier_count: Vertices of this edge with a strictly positive final
@@ -709,7 +709,7 @@ def _per_edge_fit_stats(
     distinguish a fusion whose vertices are rejected because some edges
     are undetectable in the image (large per-edge median residuals --
     nothing is there) from a wrong-ring lock that leaves a rejected edge
-    sitting on a detected image edge it disagrees with.
+    sitting on a detected image edge it disagrees with (issue #261).
 
     Parameters:
         features: The consumed features, in the order their vertices were
