@@ -212,6 +212,16 @@ def _normalize_model_patterns(patterns: str | list[str], names: list[str]) -> li
     return out
 
 
+def _titan_in_models(models: list[NavModel]) -> bool:
+    """Return whether the Titan model is among the built models.
+
+    Reads the ``titan_in_fov`` attribute the Titan model exposes (duck-typed
+    so no orchestrator import of the concrete model class is needed); other
+    models lack it and contribute nothing.
+    """
+    return any(getattr(model, 'titan_in_fov', False) for model in models)
+
+
 def _feature_source_bodies(feature: NavFeature) -> frozenset[str]:
     """Return the set of body names a feature was emitted for.
 
@@ -420,8 +430,24 @@ class NavOrchestrator(NavBase):
         model_metadata = self._collect_model_metadata(built_models)
         annotations = self._collect_annotations(context, built_models)
         if not all_features:
+            # Titan emits no navigable features by design (opaque haze hides
+            # the surface).  When Titan is the frame's only content the scene
+            # fails for lack of features -- but record *why* rather than the
+            # generic no-features reason, so a Titan-only image is not a silent
+            # empty failure.
+            titan_present = _titan_in_models(built_models)
+            if titan_present:
+                self._logger.info(
+                    'Titan in FOV and no navigable features extracted; '
+                    'failing with titan_unsupported'
+                )
+            no_feature_reason = (
+                NavStatusReason.TITAN_UNSUPPORTED
+                if titan_present
+                else NavStatusReason.NO_FEATURES_EXTRACTED
+            )
             return self._fail(
-                status_reason=NavStatusReason.NO_FEATURES_EXTRACTED,
+                status_reason=no_feature_reason,
                 image_classifier=image_classifier,
                 provenance=provenance,
                 feature_inventory=feature_inventory,
@@ -757,6 +783,14 @@ class NavOrchestrator(NavBase):
                 downstream gate that catches anything that slips
                 through).
 
+        Every candidate technique (right ``requires_prior`` and tier)
+        gets a per-technique DEBUG line reporting why it was skipped
+        (name filter, no accepted feature type available, infeasible
+        with the technique's own rejection reason) or, when feasible,
+        how many features it would consume — the per-technique
+        feasibility breakdown an engineer needs to answer "why didn't
+        technique X run on image Y" from the log alone.
+
         A misbehaving NavTechnique is logged with a full traceback and
         treated as if it produced no result.  Catching every exception is
         intentional for the same reason as ``_extract_features``: the
@@ -782,8 +816,17 @@ class NavOrchestrator(NavBase):
             if tier_filter is not None and cls.tier != tier_filter:
                 continue
             if cls.name not in kept_names:
+                self._logger.debug(
+                    'Technique %s skipped: excluded by the only_techniques filter',
+                    cls.name,
+                )
                 continue
             if not (cls.accepts_feature_types & available_types):
+                self._logger.debug(
+                    'Technique %s skipped: no feature of accepted type(s) %s available',
+                    cls.name,
+                    ', '.join(sorted(t.value for t in cls.accepts_feature_types)),
+                )
                 continue
             technique = cls(config=self.config)
             available_features = features
@@ -810,7 +853,17 @@ class NavOrchestrator(NavBase):
                     continue
             feasibility = technique.is_feasible(available_features)
             if not feasibility.feasible:
+                self._logger.debug(
+                    'Technique %s infeasible: %s',
+                    cls.name,
+                    feasibility.reason,
+                )
                 continue
+            self._logger.debug(
+                'Technique %s feasible: would consume %d feature(s)',
+                cls.name,
+                feasibility.consumed_feature_count,
+            )
             subset = [f for f in available_features if f.feature_type in cls.accepts_feature_types]
             try:
                 results.append(technique.navigate(subset, context))

@@ -269,6 +269,17 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         """Returns PDS4 path stub for bundle directory structure."""
         raise NotImplementedError
 
+    def pds4_lid_part_to_image_name(self, lid_part: str) -> str:
+        """Returns the image name for the given LID part.
+
+        Parameters:
+            lid_part: The LID part (an on-disk product filename stem).
+
+        Returns:
+            The image name that produced the given LID part.
+        """
+        raise NotImplementedError
+
     def pds4_image_name_to_browse_lid(self, image_name: str) -> str:
         """Returns the browse LID for the given image name.
 
