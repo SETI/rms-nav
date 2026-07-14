@@ -1,4 +1,8 @@
 bodies:
+  # Titan gets no shape-based body model: its opaque haze hides the surface,
+  # so ellipsoid limb / terminator / disc navigation is systematically wrong.
+  # Titan is a hardcoded special case (the TITAN_BODY_NAME constant in
+  # nav_model_body); NavModelTitan records a no-result for it instead.
   min_bounding_box_area: 9
   min_emission_ring_body: 20
   oversample_edge_limit: 512

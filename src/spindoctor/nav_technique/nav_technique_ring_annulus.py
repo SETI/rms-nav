@@ -36,9 +36,9 @@ from spindoctor.nav_technique.diagnostics import RingAnnulusDiagnostics
 from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import (
     NavTechnique,
-    add_model_error_floor,
+    add_size_scaled_model_error,
     embed_rotation_unobservable,
-    load_model_error_floor,
+    load_ncc_covariance_tuning,
     log_confidence_breakdown,
     rotation_unobservable_sigma_rad,
     search_window_for_obs,
@@ -80,6 +80,26 @@ def _filter_annulus_features(features: list[NavFeature]) -> list[NavFeature]:
     ]
 
 
+def _annulus_span_px(features: list[NavFeature]) -> float:
+    """Return the largest ext-FOV bbox extent across the annulus templates.
+
+    Used as the size term for the covariance silhouette-error model (off by
+    default for rings).
+
+    Parameters:
+        features: Consumed RING_ANNULUS features.
+
+    Returns:
+        The largest ``max(v_extent, u_extent)`` in pixels, or ``0.0`` when
+        ``features`` is empty.
+    """
+    max_extent_px = 0
+    for feature in features:
+        v_min, u_min, v_max, u_max = feature.geometry.bbox_extfov_vu
+        max_extent_px = max(max_extent_px, v_max - v_min, u_max - u_min)
+    return float(max_extent_px)
+
+
 class RingAnnulusNav(NavTechnique):
     """Ring-annulus full-template NCC translation fit (multi-planet, Z-buffer paint).
 
@@ -105,7 +125,7 @@ class RingAnnulusNav(NavTechnique):
     def __init__(self, *, config: Config | None = None) -> None:
         super().__init__(config=config)
         self.config.read_config()  # ensure cls.tuning is populated
-        self._model_error_floor_px = load_model_error_floor(self.tuning, self.name)
+        self._cov_tuning = load_ncc_covariance_tuning(self.tuning, self.name)
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable RING_ANNULUS feature.
@@ -200,6 +220,7 @@ class RingAnnulusNav(NavTechnique):
                 max_offset_vu=(margin_v, margin_u),
                 data_mask=context.sensor_mask_ext,
                 use_gradient='auto',
+                localization_uncertainty_scale=self._cov_tuning.localization_uncertainty_scale,
                 logger=self.logger,
             )
             dv = float(ncc_result['offset'][0])
@@ -207,8 +228,17 @@ class RingAnnulusNav(NavTechnique):
             covariance_2x2 = np.asarray(ncc_result['cov'], np.float64)
             if covariance_2x2.shape != (2, 2):
                 covariance_2x2 = covariance_2x2[:2, :2]
-            # Model-error floor (#210); rationale on load_model_error_floor.
-            covariance_2x2 = add_model_error_floor(covariance_2x2, self._model_error_floor_px)
+            # Size-scaled model error plus absolute floor (the localization-
+            # spread term was already folded in by the correlator).  The ring
+            # annulus size term is disabled by default (bulk error does not
+            # track the radial span), leaving the floor to cover the template
+            # model error.
+            covariance_2x2 = add_size_scaled_model_error(
+                covariance_2x2,
+                size_px=_annulus_span_px(eligible),
+                size_frac=self._cov_tuning.model_error_size_frac,
+                floor_px=self._cov_tuning.model_error_floor_px,
+            )
             fit_rotation = bool(context.fit_camera_rotation)
             covariance: NDArrayFloatType = (
                 embed_rotation_unobservable(covariance_2x2) if fit_rotation else covariance_2x2

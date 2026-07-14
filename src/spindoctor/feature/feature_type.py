@@ -29,7 +29,7 @@ class NavFeatureType(Enum):
     - ``RING_EDGE``: a single named ring edge expressed as a polyline.
     - ``RING_ANNULUS``: a multi-ring composite rendered as a pixel template,
       used when individual edges cannot be separated at the image resolution.
-    - ``TITAN_LIMB``: reserved for atmospheric-body navigation; never emitted
+    - ``TITAN_LIMB``: reserved for Titan navigation; never emitted
       by the current extractor set (the algorithm is unimplemented).
     - ``CARTOGRAPHIC_MODEL``: a pre-built cartographic mosaic of a body
       reprojected into the predicted body silhouette for high-detail

@@ -34,7 +34,11 @@ orchestrator:
     # Euclidean translation-distance fallback grouping threshold (px).
     agreement_pixel_floor: 5.0
     # Minimum summed-confidence gap between best and runner-up groups
-    # before declaring a conflict.
+    # before declaring a conflict.  Absolute when the runner-up has a
+    # quorum (two or more members); in a lone-vs-lone standoff the gap
+    # is measured relative to the winner (conflict only when
+    # best - runner_up < agreement_gap * best), so an excluded
+    # low-confidence dissenter cannot veto a clearly stronger singleton.
     agreement_gap: 0.5
     # Multiplier on combined confidence when more than one group existed.
     disagreement_penalty: 0.7
