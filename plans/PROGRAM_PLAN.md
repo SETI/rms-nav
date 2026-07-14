@@ -250,7 +250,9 @@ partially implemented machinery with no final templates, no tests, and
 no validation; Voyager, Galileo, and New Horizons additionally hit
 not-implemented walls. The work is: finish and validate the Cassini
 path (final templates — acceptance list recorded on #53; schema
-validation; the interacting LID defects #139/#256), then generalize —
+validation; the interacting LID defects #139/#256 fixed in PR #264,
+leaving two characterized #256 defects — swallowed `template.write`
+errors and the dev-guide output-layout mismatch), then generalize —
 per-mission label templates, LID builders, and collection machinery
 (#53 with #66, #67, #69, #71-#76, #79, #47, #30, #63). Distinct from this, **PDS4 *input***
 (#34) — reading PDS4-archived data instead of PDS3 — is treated like any
