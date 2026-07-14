@@ -507,7 +507,7 @@ def test_lm_subpixel_refine_rejects_polarity_vertex_with_enormous_sigma() -> Non
 
 
 def test_lm_subpixel_refine_raw_rms_excludes_polarity_rejected_vertices() -> None:
-    """Issue #237: polarity-rejected vertices must not inflate ``raw_rms_px``.
+    """Polarity-rejected vertices must not inflate ``raw_rms_px``.
 
     A polarity-rejected vertex carries the large ``_INFINITY_DT_PENALTY_PX``
     sentinel residual.  If ``raw_rms_px`` pooled that sentinel it would jump
@@ -555,7 +555,7 @@ def test_lm_subpixel_refine_raw_rms_retains_tukey_rejected_arc() -> None:
     """``raw_rms_px`` still surfaces a polarity-accepted, Tukey-rejected arc.
 
     The fix that excludes polarity-rejected vertices from ``raw_rms_px``
-    (issue #237) must not weaken the gate's original purpose: a wholly
+    must not weaken the gate's original purpose: a wholly
     mis-aligned but polarity-ACCEPTED arc that the Tukey reweighting drives
     to ~0 weight must still inflate the raw RMS so the spurious gate fires.
     """
