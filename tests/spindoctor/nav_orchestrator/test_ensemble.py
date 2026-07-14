@@ -13,7 +13,12 @@ from spindoctor.nav_orchestrator.ensemble import (
 )
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from spindoctor.nav_orchestrator.provenance import Provenance
-from spindoctor.nav_technique.diagnostics import BodyLimbDiagnostics
+from spindoctor.nav_technique.diagnostics import (
+    BodyLimbDiagnostics,
+    NavTechniqueDiagnostics,
+    StarRefineDiagnostics,
+    StarUniqueMatchDiagnostics,
+)
 from spindoctor.nav_technique.nav_technique import (
     ROTATION_UNOBSERVABLE_VARIANCE,
     embed_rotation_unobservable,
@@ -48,6 +53,7 @@ def _make_result(
     confidence: float = 0.8,
     spurious: bool = False,
     at_edge: bool = False,
+    diagnostics: NavTechniqueDiagnostics | None = None,
 ) -> NavTechniqueResult:
     """Build a minimal NavTechniqueResult for ensemble tests."""
     if cov is None:
@@ -60,7 +66,7 @@ def _make_result(
         confidence=confidence,
         spurious=spurious,
         at_edge=at_edge,
-        diagnostics=BodyLimbDiagnostics(),
+        diagnostics=diagnostics if diagnostics is not None else BodyLimbDiagnostics(),
     )
 
 
@@ -960,3 +966,165 @@ def test_ensemble_unanimous_consensus_reports_no_exclusions() -> None:
     )
     assert result.status == 'success'
     assert result.excluded_from_consensus == []
+
+
+def test_ensemble_lone_dissenter_half_confidence_is_outlier_not_conflict() -> None:
+    """A lone excluded dissenter at half the winner's confidence cannot veto it.
+
+    A singleton 0.8-confidence winner against a singleton 0.4-confidence
+    dissenter sits exactly on the relative-gap boundary (gap 0.4 ==
+    agreement_gap 0.5 * best 0.8) and must resolve as outlier rejection,
+    not a conflict.
+    """
+    cov = np.eye(2, dtype=np.float64) * 0.25
+    best = _make_result(technique_name='TechniqueA', offset=(18.2, 0.1), cov=cov, confidence=0.8)
+    dissenter = _make_result(
+        technique_name='TechniqueB', offset=(-1.0, 3.5), cov=cov, confidence=0.4
+    )
+    result = ensemble(
+        [best, dissenter],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.excluded_from_consensus == ['TechniqueB']
+    assert result.offset_px is not None
+    # The winner's offset carries through unperturbed by the dissenter.
+    assert result.offset_px[0] == pytest.approx(18.2)
+    assert result.offset_px[1] == pytest.approx(0.1)
+    # The disagreement penalty still applies to the combined confidence.
+    assert result.confidence == pytest.approx(0.8 * 0.7)
+
+
+def test_ensemble_lone_vs_lone_comparable_confidence_still_conflicts() -> None:
+    """A lone-vs-lone standoff with comparable confidences remains a conflict."""
+    cov = np.eye(2, dtype=np.float64) * 0.25
+    best = _make_result(technique_name='TechniqueA', offset=(0.0, 0.0), cov=cov, confidence=0.5)
+    dissenter = _make_result(
+        technique_name='TechniqueB', offset=(30.0, 30.0), cov=cov, confidence=0.45
+    )
+    result = ensemble(
+        [best, dissenter],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'conflicted'
+    assert result.confidence_rank == 'conflicted'
+
+
+def test_ensemble_single_inlier_refine_tier_caps_at_medium() -> None:
+    """A lone one-inlier refine never earns the high tier.
+
+    The single-inlier confidence cap (0.5) sits exactly on the high
+    tier's min_confidence boundary and the refine's localization sigma
+    is CRLB-tight, so without the guard the result would earn high.
+    """
+    res = _make_result(
+        technique_name='StarRefineNav',
+        offset=(3.06, -0.02),
+        cov=np.eye(2, dtype=np.float64) * 0.01,
+        confidence=0.5,
+        diagnostics=StarRefineDiagnostics(n_stars_used=1),
+    )
+    result = ensemble(
+        [res],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.confidence_rank == 'medium'
+
+
+def test_ensemble_one_star_unique_match_tier_caps_at_medium() -> None:
+    """A lone one-star unique match with tight sigma also tops out at medium."""
+    res = _make_result(
+        technique_name='StarUniqueMatchNav',
+        offset=(3.06, -0.02),
+        cov=np.eye(2, dtype=np.float64) * 0.01,
+        confidence=0.6,
+        diagnostics=StarUniqueMatchDiagnostics(mode='one_star'),
+    )
+    result = ensemble(
+        [res],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.confidence_rank == 'medium'
+
+
+def test_ensemble_two_single_star_members_still_cap_at_medium() -> None:
+    """Two agreeing single-star results are not an independent cross-check."""
+    cov = np.eye(2, dtype=np.float64) * 0.01
+    match = _make_result(
+        technique_name='StarUniqueMatchNav',
+        offset=(3.06, -0.02),
+        cov=cov,
+        confidence=0.5,
+        diagnostics=StarUniqueMatchDiagnostics(mode='one_star'),
+    )
+    refine = _make_result(
+        technique_name='StarRefineNav',
+        offset=(3.10, -0.05),
+        cov=cov,
+        confidence=0.5,
+        diagnostics=StarRefineDiagnostics(n_stars_used=1),
+    )
+    result = ensemble(
+        [match, refine],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.confidence_rank == 'medium'
+
+
+def test_ensemble_single_star_plus_body_technique_keeps_high() -> None:
+    """A single-star result cross-checked by a non-star technique may earn high."""
+    cov = np.eye(2, dtype=np.float64) * 0.01
+    refine = _make_result(
+        technique_name='StarRefineNav',
+        offset=(3.06, -0.02),
+        cov=cov,
+        confidence=0.6,
+        diagnostics=StarRefineDiagnostics(n_stars_used=1),
+    )
+    limb = _make_result(
+        technique_name='BodyLimbNav',
+        offset=(3.10, -0.05),
+        cov=cov,
+        confidence=0.6,
+        diagnostics=BodyLimbDiagnostics(),
+    )
+    result = ensemble(
+        [refine, limb],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.confidence_rank == 'high'
+
+
+def test_ensemble_multi_star_refine_keeps_high() -> None:
+    """A refine with several inliers is independently constrained; high stays."""
+    res = _make_result(
+        technique_name='StarRefineNav',
+        offset=(3.06, -0.02),
+        cov=np.eye(2, dtype=np.float64) * 0.01,
+        confidence=0.7,
+        diagnostics=StarRefineDiagnostics(n_stars_used=4),
+    )
+    result = ensemble(
+        [res],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.confidence_rank == 'high'
