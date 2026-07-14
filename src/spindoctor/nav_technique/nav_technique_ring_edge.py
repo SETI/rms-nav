@@ -13,6 +13,7 @@ body blob) before declaring a final answer.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
@@ -31,6 +32,7 @@ from spindoctor.nav_technique.dt_fitting import (
 from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import (
     NavTechnique,
+    add_model_error_floor,
     log_confidence_breakdown,
     rotation_pivot_distance_px,
     search_window_for_obs,
@@ -136,6 +138,13 @@ class RingEdgeNav(NavTechnique):
         self._spurious_dt_floor_px = float(self.tuning['spurious_dt_floor_px'])
         self._spurious_min_inliers = int(self.tuning['spurious_min_inliers'])
         self._spurious_min_inlier_fraction = float(self.tuning['spurious_min_inlier_fraction'])
+        self._spurious_waiver_min_well_fit_edges = int(
+            self.tuning['spurious_waiver_min_well_fit_edges']
+        )
+        self._spurious_waiver_absent_median_px = float(
+            self.tuning['spurious_waiver_absent_median_px']
+        )
+        self._spurious_waiver_sigma_floor_px = float(self.tuning['spurious_waiver_sigma_floor_px'])
         self._spurious_max_lm_displacement_px = float(
             self.tuning['spurious_max_lm_displacement_px']
         )
@@ -307,10 +316,86 @@ class RingEdgeNav(NavTechnique):
             # and >0.8 for a correct flat fit with one undetected edge,
             # so the gate is a minimum inlier fraction over the aggregated
             # vertices.
+            #
+            # The aggregate fraction alone over-reaches on a multi-edge
+            # fusion where the vertex count is dominated by edges that
+            # are simply not detectable in the image: the fused offset
+            # is pinned by a well-fit edge at sub-pixel RMS, yet the
+            # missing edges' vertices drag the aggregate fraction below
+            # the gate (Cassini C ring N1467344214 is the calibration
+            # case -- 821 / 3188 inliers on an operator-verified fit;
+            # issue #261).  What separates that from a wrong-ring lock
+            # is the *median DT residual of the edges the robust fit
+            # rejected*: an undetected edge sits far from every detected
+            # image edge (medians of tens of px -- there is nothing
+            # there), while a mis-locked fusion leaves at least one
+            # rejected edge lying ON a detected image edge it disagrees
+            # with (median well under a pixel; Cassini Tethys
+            # N1572472169's wrong lock rejects an edge whose median is
+            # 0.04 px).  The veto is therefore waived only when the low
+            # aggregate fraction is fully explained by absent edges:
+            # every non-well-fit edge must have a per-edge median DT
+            # residual of at least ``spurious_waiver_absent_median_px``,
+            # at least ``spurious_waiver_min_well_fit_edges`` edges must
+            # clear the inlier-fraction gate on their own vertices (with
+            # a non-negligible ``spurious_min_inliers`` count), and the
+            # fit's translation covariance must be full rank -- the
+            # weighted vertices are almost all from the well-fit subset,
+            # so a full-rank covariance certifies that the surviving
+            # edges constrain both offset axes on their own.  A
+            # single-edge fit never qualifies (its own fraction IS the
+            # aggregate), so single-edge behavior is unchanged.
             total_vertices = int(vertices.shape[0])
             inlier_fraction = (
                 float(result.inlier_count) / float(total_vertices) if total_vertices else 0.0
             )
+            edge_stats = _per_edge_fit_stats(
+                features, residuals=result.residuals_px, weights=result.weights
+            )
+            well_fit: list[_EdgeFitStat] = []
+            rejected: list[_EdgeFitStat] = []
+            for stat in edge_stats:
+                if (
+                    stat.inlier_count >= self._spurious_min_inliers
+                    and stat.inlier_fraction >= self._spurious_min_inlier_fraction
+                ):
+                    well_fit.append(stat)
+                else:
+                    rejected.append(stat)
+            self.logger.debug(
+                'Per-edge inliers/vertices: %s; median |DT| px: %s; straight: %s; '
+                'well-fit edges = %d of %d',
+                ', '.join(f'{s.inlier_count}/{s.vertex_count}' for s in edge_stats),
+                ', '.join(f'{s.median_abs_residual_px:.3f}' for s in edge_stats),
+                ', '.join(str(s.is_straight) for s in edge_stats),
+                len(well_fit),
+                len(edge_stats),
+            )
+            translation_full_rank = not result.degenerate and not (
+                every_straight or _is_rank_1(np.asarray(covariance, np.float64))
+            )
+            veto_waived = (
+                len(edge_stats) >= 2
+                and len(well_fit) >= self._spurious_waiver_min_well_fit_edges
+                and translation_full_rank
+                and all(
+                    stat.median_abs_residual_px >= self._spurious_waiver_absent_median_px
+                    for stat in rejected
+                )
+            )
+            inlier_fraction_low = inlier_fraction < self._spurious_min_inlier_fraction
+            inlier_fraction_veto = inlier_fraction_low and not veto_waived
+            if inlier_fraction_low and veto_waived:
+                self.logger.info(
+                    'Aggregate inlier fraction %.3f is below the %.2f gate, but %d of %d '
+                    'edges fit well independently and every rejected edge is absent from '
+                    'the image (median |DT| >= %.1f px); waiving the mis-convergence veto',
+                    inlier_fraction,
+                    self._spurious_min_inlier_fraction,
+                    len(well_fit),
+                    len(edge_stats),
+                    self._spurious_waiver_absent_median_px,
+                )
             if every_straight:
                 # As with at_edge above: the tangent component of the
                 # LM-vs-coarse displacement is unconstrained slide along the
@@ -332,7 +417,7 @@ class RingEdgeNav(NavTechnique):
                     self._spurious_dt_rms_factor * sigma_min_px,
                 )
                 or result.inlier_count < self._spurious_min_inliers
-                or inlier_fraction < self._spurious_min_inlier_fraction
+                or inlier_fraction_veto
                 or lm_displacement_px > self._spurious_max_lm_displacement_px
             )
             rotation_rad: float | None
@@ -373,6 +458,22 @@ class RingEdgeNav(NavTechnique):
                 # ``sigma_along_unobservable_px = inf`` sentinel instead of
                 # a confidently full-rank fix (issue #203).
                 covariance = _rank1_projected_covariance(covariance, polarity_normals)
+            if inlier_fraction_low and veto_waived:
+                # A veto-waived fit is carried by a minority of its model
+                # in a scene whose parallel ringlet structure offers alias
+                # alignments the DT cannot rule out (the whole point of
+                # the waived veto).  The LM covariance measures only the
+                # statistical precision of the anchored vertices, so add
+                # the waiver sigma floor in quadrature (the #210
+                # convention) to keep the fix below the medium tier's
+                # sigma cap: it surfaces as a low-tier result and cannot
+                # outweigh a full-support fix in the ensemble.
+                covariance = add_model_error_floor(covariance, self._spurious_waiver_sigma_floor_px)
+                self.logger.info(
+                    'Applying the spurious-waiver sigma floor of %.1f px to the '
+                    'reported covariance',
+                    self._spurious_waiver_sigma_floor_px,
+                )
             per_edge_rms_mean = per_edge_rms_summed / float(max(edge_count, 1))
             diagnostics = RingEdgeDiagnostics(
                 total_edge_length_px=total_edge_length_px,
@@ -565,6 +666,83 @@ def _per_edge_rms_summed(features: list[NavFeature], residuals: NDArrayFloatType
         rms = float(np.sqrt(np.mean(slice_residuals * slice_residuals)))
         total += rms
     return total
+
+
+@dataclass(frozen=True)
+class _EdgeFitStat:
+    """Per-edge fit statistics for the spurious-veto waiver (issue #261).
+
+    Parameters:
+        inlier_count: Vertices of this edge with a strictly positive final
+            weight (prior precision times Tukey biweight) -- the same
+            criterion ``LMRefineResult.inlier_count`` applies to the
+            aggregated vertex set.
+        vertex_count: Total vertices of this edge.
+        median_abs_residual_px: Median absolute DT residual of this edge's
+            vertices at the converged offset.  Small when the edge lies
+            along a detected image edge (whether or not the robust fit
+            kept it); tens of pixels when no image edge exists near it.
+        is_straight: The edge's ``is_straight_line`` flag; a straight edge
+            constrains only its normal axis (rank-1).
+    """
+
+    inlier_count: int
+    vertex_count: int
+    median_abs_residual_px: float
+    is_straight: bool
+
+    @property
+    def inlier_fraction(self) -> float:
+        """Fraction of this edge's vertices retained as Tukey inliers."""
+        return float(self.inlier_count) / float(self.vertex_count)
+
+
+def _per_edge_fit_stats(
+    features: list[NavFeature],
+    *,
+    residuals: NDArrayFloatType,
+    weights: NDArrayFloatType,
+) -> list[_EdgeFitStat]:
+    """Return per-edge fit statistics from the final LM residuals and weights.
+
+    Splitting the aggregate fit per edge lets the spurious gate
+    distinguish a fusion whose vertices are rejected because some edges
+    are undetectable in the image (large per-edge median residuals --
+    nothing is there) from a wrong-ring lock that leaves a rejected edge
+    sitting on a detected image edge it disagrees with (issue #261).
+
+    Parameters:
+        features: The consumed features, in the order their vertices were
+            concatenated for the LM fit.
+        residuals: Per-vertex raw DT residuals from the fit, in the same
+            concatenation order.
+        weights: Per-vertex final weights from the fit, in the same
+            concatenation order.
+
+    Returns:
+        One :class:`_EdgeFitStat` per consumed non-empty edge, in
+        concatenation order.
+    """
+    stats: list[_EdgeFitStat] = []
+    cursor = 0
+    for feat in features:
+        if not isinstance(feat.geometry, RingEdgePolyline):
+            continue
+        n = feat.geometry.vertices_vu.shape[0]
+        if n == 0:
+            continue
+        slice_weights = weights[cursor : cursor + n]
+        slice_residuals = residuals[cursor : cursor + n]
+        cursor += n
+        stats.append(
+            _EdgeFitStat(
+                inlier_count=int(np.count_nonzero(slice_weights > 0.0)),
+                vertex_count=n,
+                median_abs_residual_px=float(np.median(np.abs(slice_residuals))),
+                is_straight=bool(feat.geometry.is_straight_line),
+            )
+        )
+    return stats
 
 
 def _per_edge_median_max(features: list[NavFeature], residuals: NDArrayFloatType) -> float:
