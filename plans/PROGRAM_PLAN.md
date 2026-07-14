@@ -250,7 +250,10 @@ partially implemented machinery with no final templates, no tests, and
 no validation; Voyager, Galileo, and New Horizons additionally hit
 not-implemented walls. The work is: finish and validate the Cassini
 path (final templates — acceptance list recorded on #53; schema
-validation; the interacting LID defects #139/#256), then generalize —
+validation; the interacting LID defects #139/#256 fixed in PR #264,
+with two characterized #256 defects — swallowed `template.write`
+errors and the dev-guide output-layout mismatch — tracked by #265),
+then generalize —
 per-mission label templates, LID builders, and collection machinery
 (#53 with #66, #67, #69, #71-#76, #79, #47, #30, #63). Distinct from this, **PDS4 *input***
 (#34) — reading PDS4-archived data instead of PDS3 — is treated like any
@@ -353,14 +356,15 @@ and the five decision gates, not by any implementation.
 Every open issue, by track. **Bold** = created after the 2026-07-11
 review (the 2026-07-12 reconciliation; #251-#254 and #256 by the
 2026-07-13 backend test suites, PRs #255/#257; #258/#259/#261/#263 by the
-2026-07-13 Phase D operator review).
+2026-07-13 Phase D operator review; #265 split from #256 alongside the
+PR #264 LID fix).
 
 | Track | Issues |
 |---|---|
 | A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, **#224**, **#225**, **#226**, **#227**, **#228**, **#229**, **#230**, **#232**, **#233**, **#234**, **#235** |
 | B — navigation correctness | #24, #25, #128, #130, #132, #133, #179, #180, #210, #221, #222, **#237**, **#238**, **#239**, **#254**, **#258**, **#259**, **#261**, **#263** |
 | C — statistics & QA | **#240** (plus the standing cross-check and campaign-report practice) |
-| D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #60, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #139, #141, #142, #188, **#231**, **#236**, **#251**, **#252**, **#253**, **#256** |
+| D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #60, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #139, #141, #142, #188, **#231**, **#236**, **#251**, **#252**, **#253**, **#256**, **#265** |
 | E — test & docs debt | #122, #129, #177, #178, **#241**, **#242**, **#243**, **#244**, **#245** |
 | F — instruments, features, hardening | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #82, #81, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212 |
 
