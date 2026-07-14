@@ -579,16 +579,36 @@ def test_mahalanobis_null_space_groups_near_rank_deficient_agreement() -> None:
     assert result.status == 'success'
 
 
-def test_mahalanobis_null_space_separates_disagreement_along_null_axis() -> None:
-    """Two rank-1 results disagreeing ~3 px along the shared null axis do not group."""
-    # Exactly-singular rank-1 covariance: observable in u, fully unobservable
-    # in v.  pinvh projects the v axis into the null space, so any v
-    # disagreement is infinite distance.
+def test_mahalanobis_null_axis_junk_does_not_separate_agreeing_rank_1_pair() -> None:
+    """Junk along a shared unobservable axis no longer manufactures a conflict.
+
+    Two exactly-singular rank-1 results observe only u and agree there
+    exactly; their v components are meaningless fit residue.  The
+    agreement metric compares only the intersection of observable
+    subspaces, so the 3 px of v junk is ignored and the
+    pair groups as a rank-1 consensus.
+    """
     cov = np.array([[0.0, 0.0], [0.0, 0.04]], np.float64)
     a = _make_result(technique_name='A', offset=(0.0, 0.0), cov=cov, confidence=0.5)
-    # 3 px displacement along v, the unobservable null axis; agreement there is
-    # meaningless, so the Mahalanobis distance must be inf (-> separate groups).
     b = _make_result(technique_name='B', offset=(3.0, 0.0), cov=cov, confidence=0.5)
+    result = ensemble(
+        [a, b],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+        config=EnsembleConfig(agreement_pixel_floor=0.0),
+    )
+    assert result.status == 'success'
+    assert result.status_reason.value == 'rank_1_only'
+    assert result.excluded_from_consensus == []
+
+
+def test_mahalanobis_disagreement_along_shared_observable_axis_conflicts() -> None:
+    """Two rank-1 results disagreeing along the axis they both observe conflict."""
+    cov = np.array([[0.0, 0.0], [0.0, 0.04]], np.float64)
+    a = _make_result(technique_name='A', offset=(0.0, 0.0), cov=cov, confidence=0.5)
+    # 3 px displacement along u, the observable axis: a genuine standoff.
+    b = _make_result(technique_name='B', offset=(0.0, 3.0), cov=cov, confidence=0.5)
     result = ensemble(
         [a, b],
         feature_inventory=[],
@@ -1128,3 +1148,112 @@ def test_ensemble_multi_star_refine_keeps_high() -> None:
     )
     assert result.status == 'success'
     assert result.confidence_rank == 'high'
+
+
+def test_ensemble_rank_1_ring_and_full_rank_blob_agreeing_radially_fuse() -> None:
+    """A rank-1 ring edge and a full-rank blob that agree radially group.
+
+    The ring result observes only v (its u variance is exactly zero under
+    the Moore-Penrose convention) and carries junk in its u component;
+    the blob is a full-rank absolute fix.  They agree in v, so the
+    rank-aware metric groups them and the fusion combines the ring's
+    radial precision with the blob's along-edge constraint into a
+    full-rank result.
+    """
+    ring_cov = np.array([[0.04, 0.0], [0.0, 0.0]], np.float64)
+    blob_cov = np.eye(2, dtype=np.float64) * 0.09
+    ring = _make_result(
+        technique_name='RingEdgeNav', offset=(1.0, 50.0), cov=ring_cov, confidence=0.9
+    )
+    blob = _make_result(
+        technique_name='BodyBlobNav', offset=(1.1, 2.0), cov=blob_cov, confidence=0.4
+    )
+    result = ensemble(
+        [ring, blob],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.status_reason.value == 'ok'
+    assert result.excluded_from_consensus == []
+    assert result.offset_px is not None
+    # v combines both (ring dominates); u comes from the blob alone, not
+    # the ring's junk 50.0.
+    assert abs(result.offset_px[0] - 1.03) < 0.05
+    assert result.offset_px[1] == pytest.approx(2.0)
+    assert result.sigma_along_unobservable_px is None
+
+
+def test_ensemble_rank_1_ring_disagreeing_radially_does_not_group() -> None:
+    """A rank-1 ring edge that disagrees along its observable axis stays excluded."""
+    ring_cov = np.array([[0.04, 0.0], [0.0, 0.0]], np.float64)
+    blob_cov = np.eye(2, dtype=np.float64) * 0.09
+    ring = _make_result(
+        technique_name='RingEdgeNav', offset=(9.0, 50.0), cov=ring_cov, confidence=0.9
+    )
+    blob = _make_result(
+        technique_name='BodyBlobNav', offset=(1.1, 2.0), cov=blob_cov, confidence=0.4
+    )
+    result = ensemble(
+        [ring, blob],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    # The 7.9 px radial disagreement is genuine; the ring wins the
+    # consensus and the blob is excluded as an outlier.
+    assert result.excluded_from_consensus == ['BodyBlobNav']
+
+
+def test_ensemble_rotation_sentinel_does_not_zero_translation_offset() -> None:
+    """A 3-DoF result with the rotation-unobservable sentinel keeps its offset.
+
+    pinvh's relative eigenvalue cutoff against the 1e15 rotation sentinel
+    used to truncate the genuine translation information, collapsing the
+    fused offset to (0, 0) and mislabeling the result rank_1_only (seen
+    on a Galileo one-star frame and the flat-ring frames).
+    """
+    cov = embed_rotation_unobservable(np.diag([0.04, 0.04]).astype(np.float64))
+    res = NavTechniqueResult(
+        technique_name='StarUniqueMatchNav',
+        feature_ids=('StarUniqueMatchNav:f1',),
+        offset_px=(-12.3, -13.5),
+        covariance_px2=cov,
+        confidence=0.6,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=0.0,
+        sigma_rotation_rad=float(np.sqrt(ROTATION_UNOBSERVABLE_VARIANCE)),
+    )
+    result = ensemble(
+        [res],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.offset_px is not None
+    assert result.offset_px[0] == pytest.approx(-12.3)
+    assert result.offset_px[1] == pytest.approx(-13.5)
+    # An unobservable rotation does not make the translation fix rank-1.
+    assert result.status_reason.value == 'ok'
+    assert result.sigma_along_unobservable_px is None
+
+
+def test_ensemble_rank_deficient_fused_result_caps_at_medium() -> None:
+    """A rank-1 fused covariance never earns the high tier."""
+    ring_cov = np.array([[0.0004, 0.0], [0.0, 0.0]], np.float64)
+    res = _make_result(
+        technique_name='RingEdgeNav', offset=(0.0, 6.35), cov=ring_cov, confidence=0.95
+    )
+    result = ensemble(
+        [res],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.status_reason.value == 'rank_1_only'
+    assert result.confidence_rank == 'medium'

@@ -6,8 +6,11 @@ estimates become one offset.  Every step is honest:
 1. Drop ``spurious=True`` results.
 2. Drop ``at_edge=True`` results unless dropping them would empty the set.
 3. Select the consensus subset: every result sponsors the set of results
-   that agree with it pairwise (Mahalanobis distance or pixel floor); the
-   subset with the highest summed confidence wins.
+   that agree with it pairwise (Mahalanobis distance or pixel floor,
+   both measured only in the intersection of the two results' observable
+   subspaces, so a rank-1 flat-ring measurement and a full-rank absolute
+   fix that agree radially can group and fuse); the subset with the
+   highest summed confidence wins.
 4. Exclude results outside the consensus from the combine.  A lone
    dissenter against a multi-technique consensus is outlier-rejected;
    only a genuine alternative can force the conflicted branch: a
@@ -19,10 +22,12 @@ estimates become one offset.  Every step is honest:
 5. Combine offsets within the winning subset via precision-weighted
    (Kalman-style) merging.
 6. Apply optional disagreement / conflict penalties.
-7. Cap the confidence tier at ``medium`` when every combined member is
-   a single-star solution (a one-star unique match or one-inlier
-   refine) — such results carry no independent cross-check, so they
-   never earn ``high`` no matter how tight their localization sigma.
+7. Cap the confidence tier at ``medium`` when the fused covariance is
+   rank-deficient (one translation axis unobservable) or when every
+   combined member is a single-star solution (a one-star unique match
+   or one-inlier refine) — neither an assumed axis nor an
+   un-cross-checked star is ``high``-tier evidence, however tight the
+   localization sigma.
 8. Emit a NavResult carrying the excluded technique names.
 
 The ensemble is tested in isolation against synthetic per-technique results;
@@ -88,6 +93,21 @@ DEFAULT_TIER_THRESHOLDS: dict[str, dict[str, float | None]] = {
     'medium': {'min_confidence': 0.2, 'max_sigma_px': 2.0},
     'low': {'min_confidence': 0.2, 'max_sigma_px': None},
 }
+
+# Observability conventions.  A technique reports an unobservable direction
+# in one of two ways: an exactly-zero variance (the Moore-Penrose null-space
+# convention the rank-1 ring-edge path enforces) or a huge
+# axis-aligned sentinel variance (``ROTATION_UNOBSERVABLE_VARIANCE`` = 1e15
+# and the 1e12-scale translation sentinels).  The floor separates genuine
+# uncertainty from sentinels: 1e10 px^2 is a 1e5 px sigma, far beyond any
+# real constraint on a <= 4096 px image and far below the sentinels.  The
+# null threshold matches the rank-1 relative-eigenvalue test used by the
+# ring-edge technique.
+_UNOBSERVABLE_VARIANCE_FLOOR = 1.0e10
+_NULL_RELATIVE_THRESHOLD = 1.0e-8
+# Two projectors' summed eigenvalue must reach 2 (within tolerance) for a
+# direction to lie in the intersection of their subspaces.
+_INTERSECTION_EIGENVALUE_TOL = 1.0e-9
 
 
 @dataclass(frozen=True)
@@ -211,6 +231,106 @@ class EnsembleConfig:
         return cls(**kwargs)
 
 
+def _mixed_scale_pinvh(mat: NDArrayFloatType, *, rcond: float) -> NDArrayFloatType:
+    """Moore-Penrose ``pinvh`` with unobservable-sentinel axes quarantined.
+
+    ``pinvh``'s eigenvalue cutoff is relative to the *largest* eigenvalue,
+    so a huge unobservable-axis sentinel (``ROTATION_UNOBSERVABLE_VARIANCE``
+    or a 1e12-scale translation sentinel) raises the cutoff past every
+    genuine variance: a raw ``pinvh`` on ``diag(0.04, 0.04, 1e15)``
+    truncates the well-constrained 0.04 px^2 axes and the fused offset
+    silently collapses to zero along them.  Sentinel axes are axis-aligned
+    with zero cross-terms by construction, so they are detected by row
+    norm — at or above ``_UNOBSERVABLE_VARIANCE_FLOOR`` (covariance side)
+    or positive and at or below its reciprocal (information side) — and
+    inverted independently as ``1 / diag``; the remaining block gets an
+    ordinary Moore-Penrose ``pinvh``, which the information-form merge's
+    minimum-norm / orthogonal-projection semantics rely on (a merely
+    generalized inverse would project the fused offset obliquely).
+
+    Parameters:
+        mat: Symmetric PSD matrix (covariance or information form).
+        rcond: Relative eigenvalue cutoff for the non-sentinel block.
+
+    Returns:
+        The pseudo-inverse, same shape as ``mat``.
+    """
+    row_norm = np.linalg.norm(mat, axis=1)
+    sentinel = (row_norm >= _UNOBSERVABLE_VARIANCE_FLOOR) | (
+        (row_norm > 0.0) & (row_norm <= 1.0 / _UNOBSERVABLE_VARIANCE_FLOOR)
+    )
+    if not bool(sentinel.any()):
+        return cast(NDArrayFloatType, pinvh(mat, rtol=rcond))
+    out = np.zeros_like(mat)
+    for i in np.flatnonzero(sentinel):
+        out[i, i] = 1.0 / mat[i, i]
+    regular = np.flatnonzero(~sentinel)
+    if regular.size:
+        block = np.ascontiguousarray(mat[np.ix_(regular, regular)])
+        out[np.ix_(regular, regular)] = pinvh(block, rtol=rcond)
+    return out
+
+
+def _observable_basis(cov: NDArrayFloatType) -> NDArrayFloatType:
+    """Orthonormal basis (as columns) of a covariance's observable subspace.
+
+    A direction is unobservable when it is either a sentinel axis (a
+    diagonal variance at or above ``_UNOBSERVABLE_VARIANCE_FLOOR`` — the
+    sentinels are axis-aligned by construction) or a Moore-Penrose null
+    of the remaining block (a relative eigenvalue of the
+    correlation-form matrix below ``_NULL_RELATIVE_THRESHOLD``, so the
+    test is not distorted by mixed px/rad units).
+
+    Parameters:
+        cov: Symmetric PSD covariance, ``(n, n)``.
+
+    Returns:
+        ``(n, k)`` array with orthonormal columns; ``k`` may be zero.
+    """
+    n = cov.shape[0]
+    axes = np.flatnonzero(np.diag(cov) < _UNOBSERVABLE_VARIANCE_FLOOR)
+    if axes.size == 0:
+        return cast(NDArrayFloatType, np.zeros((n, 0), np.float64))
+    sub = cov[np.ix_(axes, axes)]
+    d = np.sqrt(np.clip(np.diag(sub), 0.0, None))
+    d_safe = np.where(d > 0.0, d, 1.0)
+    corr = sub / np.outer(d_safe, d_safe)
+    w, v = np.linalg.eigh(corr)
+    kept = v[:, w > _NULL_RELATIVE_THRESHOLD]
+    if kept.shape[1] == 0:
+        return cast(NDArrayFloatType, np.zeros((n, 0), np.float64))
+    # Map the correlation-space directions back to parameter space
+    # (range(sub) = D @ range(corr)) and re-orthonormalize via SVD.
+    embedded = np.zeros((n, kept.shape[1]), np.float64)
+    embedded[axes, :] = d[:, np.newaxis] * kept
+    u, s, _ = np.linalg.svd(embedded, full_matrices=False)
+    return cast(NDArrayFloatType, u[:, s > _NULL_RELATIVE_THRESHOLD * float(s.max())])
+
+
+def _observable_intersection_basis(
+    cov_a: NDArrayFloatType, cov_b: NDArrayFloatType
+) -> NDArrayFloatType:
+    """Orthonormal basis of the intersection of two observable subspaces.
+
+    Parameters:
+        cov_a: First covariance, ``(n, n)``.
+        cov_b: Second covariance, same shape.
+
+    Returns:
+        ``(n, k)`` array with orthonormal columns; ``k`` may be zero.
+    """
+    basis_a = _observable_basis(cov_a)
+    basis_b = _observable_basis(cov_b)
+    n = cov_a.shape[0]
+    if basis_a.shape[1] == 0 or basis_b.shape[1] == 0:
+        return cast(NDArrayFloatType, np.zeros((n, 0), np.float64))
+    # Eigenvalues of the summed projectors lie in [0, 2]; a direction lies
+    # in both subspaces iff its eigenvalue is 2.
+    proj_sum = basis_a @ basis_a.T + basis_b @ basis_b.T
+    w, v = np.linalg.eigh(proj_sum)
+    return cast(NDArrayFloatType, v[:, w > 2.0 - _INTERSECTION_EIGENVALUE_TOL])
+
+
 def _mahalanobis_distance(
     mu_a: NDArrayFloatType,
     cov_a: NDArrayFloatType,
@@ -221,29 +341,28 @@ def _mahalanobis_distance(
 ) -> float:
     """Return the Mahalanobis distance between two estimates.
 
-    Uses ``pinvh(cov_a + cov_b)`` so rank-deficient inputs are handled
-    correctly.  Components of ``mu_a - mu_b`` in the null space of the
-    summed covariance are treated as infinite distance — estimates cannot
-    agree along an unobservable axis.
+    Measured only in the intersection of the two estimates' observable
+    subspaces.  A direction one estimate cannot observe
+    carries junk in its parameter vector — the LM/centroid machinery
+    reports *something* there — so differencing it against an estimate
+    that does observe it manufactures disagreement out of nothing (the
+    flat-ring rank-1 result against a full-rank blob), and differencing
+    it against another junk value is meaningless either way.  Estimates
+    with no shared observable direction return 0.0: there is nothing to
+    disagree on, and grouping them lets the information-form combine
+    merge their complementary constraints.
     """
     delta = mu_a - mu_b
-    cov_sum = cov_a + cov_b
-    pinv = pinvh(cov_sum, rtol=rcond)
-    # Project delta back through pinv * cov_sum; residual lies in the null
-    # space.
-    null_proj = delta - cov_sum @ pinv @ delta
-    # Scale-invariant null-space disagreement test: the residual that lies in
-    # the null space of the summed covariance must be negligible relative to
-    # the size of ``delta`` itself, not against a fixed absolute pixel
-    # tolerance (which silently flips behavior as image/offset scales change).
-    rel_tol = 1.0e-6
-    eps = np.finfo(float).eps
-    if np.linalg.norm(null_proj) > rel_tol * max(float(np.linalg.norm(delta)), eps):
-        return float('inf')
-    d_sq = float(delta.T @ pinv @ delta)
+    basis = _observable_intersection_basis(cov_a, cov_b)
+    if basis.shape[1] == 0:
+        return 0.0
+    delta_r = basis.T @ delta
+    cov_r = basis.T @ (cov_a + cov_b) @ basis
+    pinv_r = _mixed_scale_pinvh(cov_r, rcond=rcond)
+    d_sq = float(delta_r.T @ pinv_r @ delta_r)
     if d_sq < 0:
-        # Numerical safety: pinv may yield a tiny negative quadratic form
-        # due to floating-point; clamp to zero.
+        # Numerical safety: the generalized inverse may yield a tiny
+        # negative quadratic form due to floating-point; clamp to zero.
         d_sq = 0.0
     return float(math.sqrt(d_sq))
 
@@ -400,8 +519,15 @@ def _agreement_adjacency(
                 )
             dist = _mahalanobis_distance(mu_i, cov_i, mu_j, cov_j, rcond=rcond)
             mahal_match = dist <= agreement_sigma
+            # The pixel floor is likewise measured only in the translation
+            # directions both results observe: a rank-1 result's junk
+            # along-edge component must not push a genuine radial agreement
+            # past the floor.
             translation_delta = mu_i[:2] - mu_j[:2]
-            pixel_dist = float(math.hypot(translation_delta[0], translation_delta[1]))
+            basis_t = _observable_intersection_basis(
+                np.ascontiguousarray(cov_i[:2, :2]), np.ascontiguousarray(cov_j[:2, :2])
+            )
+            pixel_dist = float(np.linalg.norm(basis_t.T @ translation_delta))
             pixel_match = agreement_pixel_floor > 0.0 and pixel_dist <= agreement_pixel_floor
             if mahal_match or pixel_match:
                 adj[i, j] = True
@@ -543,8 +669,11 @@ class _CombinedEstimate:
             input was 2-DoF.
         covariance_px2: Combined covariance, ``(2, 2)`` or ``(3, 3)``
             matching the input parameter dimensionality.
-        is_rank_deficient: True when the summed information matrix has a
-            near-zero eigenvalue relative to its largest.
+        is_rank_deficient: True when the *translation block* of the
+            combined covariance has an unobservable direction (a null or
+            sentinel axis).  An unobservable rotation alone — every
+            contributing technique reporting the rotation sentinel — does
+            not make the translation fix rank-deficient.
     """
 
     offset_px: tuple[float, float]
@@ -610,7 +739,7 @@ def _combine_precision_weighted(
                 f'mixed-DoF group passed to _combine_precision_weighted: '
                 f'expected {n_params}-DoF, got {cov.shape[0]} from {res.technique_name}'
             )
-        info = pinvh(cov, rtol=rcond)
+        info = _mixed_scale_pinvh(cov, rcond=rcond)
         mu = _result_param_vector(res)
         if cov.shape[0] == 3:
             theta = float(mu[2])
@@ -651,17 +780,16 @@ def _combine_precision_weighted(
             info_mu_sum = info_mu_sum + info @ mu
     assert info_sum is not None
     assert info_mu_sum is not None
-    cov_combined = pinvh(info_sum, rtol=rcond)
+    cov_combined = _mixed_scale_pinvh(info_sum, rcond=rcond)
     mu_combined = cov_combined @ info_mu_sum
-    # Check rank-deficiency by comparing combined info matrix's smallest
-    # eigenvalue to a small tolerance.
-    eigvals = np.linalg.eigvalsh(info_sum)
-    # Scale-independent rank-deficiency check: the smallest eigenvalue is
-    # tiny relative to the largest.  The eps guards divide-by-zero on a
-    # zero info matrix (which itself is degenerate).
-    rel_tol = 1.0e-8
-    eps = np.finfo(np.float64).eps
-    is_rank_deficient = bool(eigvals.min() / max(abs(eigvals.max()), eps) < rel_tol)
+    # Rank-deficiency is a property of the translation fix: the combined
+    # covariance's (v, u) block has an unobservable direction (exact null
+    # or sentinel-sized variance).  Judging the full parameter matrix
+    # instead would let an unobservable *rotation* (every input carrying
+    # the rotation sentinel) mislabel a fully-constrained 2-D offset as
+    # rank-1.
+    trans_basis = _observable_basis(np.ascontiguousarray(cov_combined[:2, :2]))
+    is_rank_deficient = trans_basis.shape[1] < 2
     rotation: float | None = None
     if n_params == 3:
         # Combine the rotation on the circle so angles near +-pi do not cancel
@@ -674,7 +802,7 @@ def _combine_precision_weighted(
     return _CombinedEstimate(
         offset_px=(float(mu_combined[0]), float(mu_combined[1])),
         rotation_rad=rotation,
-        covariance_px2=cast(NDArrayFloatType, cov_combined),
+        covariance_px2=cov_combined,
         is_rank_deficient=is_rank_deficient,
     )
 
@@ -724,7 +852,7 @@ def _combine_confidence(
         # trace (rather than det(info)^(1/p)) stays well-defined for the rank-1
         # ring-edge covariances whose unobservable axis carries zero precision.
         # The 2-DoF path is unchanged: cov[:2, :2] is then the whole matrix.
-        info_xy = pinvh(np.ascontiguousarray(cov[:2, :2]), rtol=rcond)
+        info_xy = _mixed_scale_pinvh(np.ascontiguousarray(cov[:2, :2]), rcond=rcond)
         weights.append(float(np.trace(info_xy)))
     w_total = sum(weights)
     if w_total <= 0.0:
@@ -1004,6 +1132,17 @@ def ensemble(
         sigma_px=(sigma_dv, sigma_du),
         tier_thresholds=cfg.tier_thresholds,
     )
+    if rank == 'high' and combined.is_rank_deficient:
+        # A fused result with an unobservable translation axis reports one
+        # axis as an assumption, not a measurement.  However precise the
+        # observable axis is, that is not a 'high'-tier absolute fix;
+        # ``sigma_along_unobservable_px`` carries the same verdict to the
+        # metadata.
+        IMAGE_LOGGER.info(
+            'Tier capped at medium: the fused covariance is rank-deficient '
+            '(one translation axis unobservable)'
+        )
+        rank = 'medium'
     if rank == 'high' and all(_is_single_star_result(r) for r in best_group):
         # A single-star solution's confidence is deliberately capped to say
         # "weak, no cross-check" (the one-inlier refine caps at exactly the
