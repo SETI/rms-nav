@@ -83,7 +83,7 @@ Apply these rules to ALL new and modified Python code. This project is a Python 
 - ALWAYS include a docstring for every module, class, function, and method.
 - Follow **PEP 257** using **Google style**. Use `Parameters:` (not `Args:`).
 - Include `Returns:`, `Raises:`, and any important behavioral notes.
-- NEVER mention backwards compatibility in docstrings, and never write a docstring whose only purpose is to record a user request or change history. Describe behavior; an issue number is fine as a trailing reference once the behavior is described.
+- NEVER mention backwards compatibility, a user request, change history, or an issue/ticket number in a docstring. Docstrings are usage documentation for the published API, not a place to explain the code's provenance; describe only observable behavior. (Issue references are allowed in inline `#` code comments per Section 4, and in commit messages and PR descriptions.)
 - Docstrings MUST be detailed enough to write a black-box test from the docstring alone.
 - Wrap docstring text to **90** characters.
 - ALWAYS update docstrings when the associated code changes.
