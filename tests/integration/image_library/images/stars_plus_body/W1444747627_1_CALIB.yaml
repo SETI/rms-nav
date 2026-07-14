@@ -26,17 +26,17 @@ ground_truth:
   ui_version: 'spindoctor 0.1.dev63'
   notes: |
     Cassini WAC clear+VIO frame from the COISS_1xxx Jupiter cruise leg
-    (2003), navigable via its star field and body. RECLASSIFIED from
-    ring_only_curved during Phase D (operator checklist D5b, 2026-07-13):
-    Saturn's rings are far too distant to appear in this frame, so the
-    original ring_only_curved label and its RingAnnulusNav expectation
-    were wrong (the rings model correctly emits no feature). Operator
-    verified the offset by star/body alignment in the manual-nav dialog.
-    The autonomous pipeline currently FAILS this frame
-    (all_techniques_spurious; only the two star techniques run and both
-    self-flag spurious) - a star-navigation gate gap, tracked separately;
-    expected below encodes the navigable truth, so the autonomous
-    regression will stay red locally until that gap is closed.
+    (2003), navigable via its star field and body. Saturn's rings are
+    far too distant to appear in this frame (the rings model correctly
+    emits no feature), so this is a stars_plus_body scene; an earlier
+    ring_only_curved classification with a RingAnnulusNav expectation
+    was wrong. Ground truth was operator-verified by star/body alignment
+    in the manual-nav dialog (2026-07-13). The default pipeline currently
+    fails this frame (all_techniques_spurious; only the two star
+    techniques run and both self-flag spurious) - a star-navigation gate
+    gap, tracked separately; expected below encodes the navigable truth,
+    so the autonomous regression stays red locally until that gap is
+    closed.
 
 expected:
   # success | failed | conflicted

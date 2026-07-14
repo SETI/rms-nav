@@ -25,12 +25,12 @@ ground_truth:
   verified_date: 2026-07-13
   ui_version: 'spindoctor 0.1.dev63'
   notes: |
-    Cassini WAC clear-filter star field, 26 s exposure. The sidecar
-    previously expected status failed (a label from the era of the broken
-    star gate); Phase D re-verification (operator checklist item D3,
-    2026-07-13) confirmed the catalog stars align with detections at the
-    proposed offset in the manual-nav dialog, so the entry was re-saved
-    with fresh ground truth and expected success/high.
+    Cassini WAC clear-filter star field, 26 s exposure. Navigable: the
+    catalog stars align with detections at this offset, operator-verified
+    in the manual-nav dialog (2026-07-13). An earlier version of this
+    entry expected status failed (from a period when a broken star gate
+    could not close the frame); ground truth and expected were re-saved
+    to success/high.
 
 expected:
   # success | failed | conflicted

@@ -22,15 +22,15 @@ fields to match current behavior.
 ## Track B — Navigation correctness
 
 Ordering within the track: the ensemble/gate cluster first. These are the
-confidently-wrong or correct-answer-discarded defects (issues
-#221/#222/#258/#259/#261) that the agreement study will consume ensemble
+confidently-wrong or correct-answer-discarded defects (issues #221, #222,
+#258, #259, #261, and #263) that the agreement study will consume ensemble
 output at scale, and that several curated library frames now pin as
 standing red regressions. Then the triage sessions (#237, #238), then
 the investigation/design items (#179, #25, #128/#150), with the smaller
-items (#24, #130, #132, #133, and #180) as fill. The five cluster defects
-were all surfaced or corroborated by the 2026-07-13 Phase D operator
-review on real frames; the library entries carrying their evidence are in
-the `phase-d-reconciliation` branch.
+items (#24, #130, #132, #133, and #180) as fill. The cluster defects were
+all surfaced or corroborated by the 2026-07-13 operator library review on
+real frames; the library entries carrying their evidence are in the
+`phase-d-reconciliation` branch.
 
 ### #221 — Rank-1 ring result outvotes an absolute constraint
 
@@ -152,6 +152,32 @@ worst single edge's median; drop or down-weight an outlier edge before
 the mis-convergence test; or make the gate rank-aware so a
 well-constrained subset carries the result. Coordinate with #179 (this
 frame is a concrete library datapoint for that calibration pass).
+
+### #263 — Single-inlier confidence cap collides with the high tier
+
+**Symptom** (Phase D D6, one_bright_star_no_body W1449079117): the
+pipeline reports success/**high** at fused confidence **exactly 0.50**.
+`derive_confidence_rank` grants high when `confidence >= 0.5` and
+`max_sigma <= 0.5 px` (`DEFAULT_TIER_THRESHOLDS['high']`), and the
+single-inlier refine path caps confidence at exactly 0.50 ("no
+cross-check on a 1-star refine"). So a one-star, no-cross-check
+solution, capped low *to express that it is weak*, lands on the high
+boundary and earns high tier whenever its centroid sigma is tight.
+
+**Where:** `src/spindoctor/nav_orchestrator/ensemble.py`
+(`DEFAULT_TIER_THRESHOLDS`, `derive_confidence_rank`);
+`src/spindoctor/nav_technique/nav_technique_star_refine.py`
+(`single_inlier_confidence_cap`, default 0.5). Mirrored in
+`config_540_orchestrator.yaml`.
+
+**Fix direction:** separate the two colliding constants - lower the
+single-inlier cap below the high threshold, make the high tier require
+`confidence > 0.5` strictly, or add a tier guard so a fused result whose
+winning member is a single-inlier/one-star solution tops out at medium.
+
+**Acceptance:** a one-star, single-inlier frame cannot report better
+than medium; W1449079117's sidecar (kept at `expected: low`) stops being
+a standing crosscheck disagreement.
 
 ### #237 — multi_body N17023890xx trio: all techniques spurious
 

@@ -25,15 +25,14 @@ ground_truth:
   verified_date: 2026-07-13
   ui_version: 'spindoctor 0.1.dev63'
   notes: |
-    Body partially overflowing the FOV with a visible limb arc.
-    Phase D re-verification (operator checklist D5a, 2026-07-13):
-    operator re-confirmed the frame is navigable by eye and corrected
-    the ground-truth offset from (11.0, 29.5) to (13.93, 28.72) px in
-    the manual-nav dialog. The autonomous pipeline currently FAILS this
-    frame (all_techniques_spurious; the disc correlator's best basin
-    lands at the search-window edge) - a gate gap tracked separately;
-    expected below encodes the navigable truth, so the autonomous
-    regression stays red locally until that gap is closed.
+    Body partially overflowing the FOV with a visible limb arc,
+    navigable by eye. Ground truth was operator-verified in the
+    manual-nav dialog (2026-07-13), correcting an earlier offset of
+    (11.0, 29.5) to (13.93, 28.72) px. The default pipeline currently
+    fails this frame (all_techniques_spurious; the disc correlator's
+    best basin lands at the search-window edge) - a gate gap tracked
+    separately; expected below encodes the navigable truth, so the
+    autonomous regression stays red locally until that gap is closed.
 
 expected:
   # success | failed | conflicted

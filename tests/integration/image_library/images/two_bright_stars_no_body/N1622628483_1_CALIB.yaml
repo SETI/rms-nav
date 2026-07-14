@@ -19,9 +19,9 @@ ground_truth:
     Selection: 2009; {"filter": "CL1", "maglim": 8.44, "n_detectable": 2, "star_vmags": [6.83, 6.88, 9.41], "texp_s": 0.15, "year": "2009"}.
     Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
     Offset produced by the triage rescue pass (rescue_config.yaml: relaxed uncalibrated technique alpha0 / spurious knobs, lowered ensemble min_confidence and reliability-gate thresholds via the orchestrator config section). The default pipeline failed this frame; the confidence value below is from the relaxed run and is not meaningful. Ground truth rests on the operator overlay verification.
-    Pipeline: status=success, confidence=0.604, rank=medium, techniques=['StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [9.6145, 8.5501], "StarRefineNav": [9.542, 7.9076]}.
+    First-curation pipeline snapshot (2026-07): status=success, confidence=0.604, rank=medium, techniques=['StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [9.6145, 8.5501], "StarRefineNav": [9.542, 7.9076]}.
     Operator comment: re-vote: rescued with relaxed gates (previous vote: None)
-    Phase D update (2026-07-13): the recalibration since batch review retired the relaxed-gate rescue - the DEFAULT pipeline now navigates this frame at high/0.99 on a clean run, and expected.confidence_tier was ratcheted to the achieved tier. The batch-era 'default pipeline failed / confidence not meaningful / rank=low' text above is superseded.
+    A later clean run of the default pipeline (2026-07-13) navigates this frame at high/0.99 after the confidence recalibration that followed first curation; expected.confidence_tier reflects that current behavior. The frame no longer needs the relaxed-gate rescue its earlier snapshot was taken under.
 expected:
   status: success
   confidence_tier: high
