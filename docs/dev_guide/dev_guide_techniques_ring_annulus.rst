@@ -10,8 +10,8 @@ translation by full-template normalised cross-correlation against a composite an
 fused from every offered ``RING_ANNULUS`` feature. Per-planet annulus templates are Z-buffer
 painted into a single postage stamp (the closer ring system's pixels overwrite the farther
 one's), the result is run through the shared pyramid-NCC machinery in
-:mod:`spindoctor.support.correlate`, and the chosen peak is returned with a Cramer-Rao-lower-bound
-covariance derived from the local correlation curvature.
+:mod:`spindoctor.support.correlate`, and the chosen peak is returned with a matched-filter
+covariance plus model-error terms (see "Sources of uncertainty").
 
 Multi-planet annulus composites improve disambiguation in the same way as multi-body disc
 composites: each annulus contributes its own translational constraint, the geometric
@@ -56,8 +56,9 @@ template and the observed image (or a mode-selected gradient of it):
 
 over the integer offsets in the per-instrument search window, with the masked inner product
 restricted to pixels where the annulus mask is True. Sub-pixel refinement comes from a
-quadratic fit to the correlation surface around the integer peak; the fitted curvature
-provides the CRLB covariance.
+quadratic fit to the correlation surface around the integer peak; the template gradient
+structure provides the matched-filter statistical covariance term (see "Sources of
+uncertainty").
 
 Mode selection (auto / raw / gradient)
 --------------------------------------
@@ -96,8 +97,15 @@ Restrictions and assumptions
 Sources of uncertainty
 ----------------------
 
-The reported covariance is the Cramer-Rao lower bound from the local NCC curvature at the
-chosen peak. When the chosen peak sits within the at-edge tolerance of any axis bound the
+The reported covariance is a matched-filter (peak-curvature) statistical term plus
+model-error terms added in quadrature, following the same derivation as
+:doc:`dev_guide_techniques_body_disc`: the statistical term measures noise and gradient
+content on unit-std-normalized surfaces (amplitude-invariant, inflated by the residual
+correlation area), and a ``localization_uncertainty_scale * consistency`` localization-spread
+term plus a ``model_error_floor_px`` absolute floor carry the template model error that
+dominates the true registration error. The ring annulus size (``model_error_size_frac``)
+term is disabled by default because the ring bulk error does not track the annulus radial
+span. When the chosen peak sits within the at-edge tolerance of any axis bound the
 result is flagged
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and the hard-zero
 gate forces confidence to zero. The pyramid consistency check flags peaks that drift across
@@ -106,9 +114,15 @@ levels as :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.s
 Configuration
 =============
 
-The technique itself has no per-technique ``tuning`` knobs in
-``config_510_techniques.yaml`` (the shared pyramid-NCC machinery owns the numeric thresholds
-for peak quality, consistency, and top-k count).
+The technique's only per-technique ``tuning`` knobs in ``config_510_techniques.yaml`` are the
+covariance model-error terms (the shared pyramid-NCC machinery owns the numeric thresholds for
+peak quality, consistency, and top-k count):
+
+- ``localization_uncertainty_scale`` — float, default ``1.0`` (dimensionless). Multiplies the
+  inter-pyramid-level peak migration (``consistency``, px) into an added translation sigma.
+- ``model_error_size_frac`` — float, default ``0.0`` (fraction of the annulus radial span);
+  disabled because the ring bulk error does not track span.
+- ``model_error_floor_px`` — float, default ``0.13`` px. Absolute floor added in quadrature.
 
 Feature-emission tunables (per-planet)
 --------------------------------------
