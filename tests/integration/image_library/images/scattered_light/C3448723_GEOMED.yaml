@@ -24,7 +24,7 @@ ground_truth:
 expected:
   status: success
   confidence_tier: medium
-  primary_technique: BodyLimbNav
+  primary_technique: BodyDiscCorrelateNav
   techniques_must_run:
   - BodyLimbNav
   techniques_must_skip: []
