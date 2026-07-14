@@ -98,7 +98,9 @@ __all__ = [
     'LIMB_ARC_MAX_UNCERTAINTY_PX',
     'TERMINATOR_MIN_PHASE_FACTOR',
     'TERMINATOR_MIN_VERTICES',
+    'TITAN_BODY_NAME',
     'NavModelBody',
+    'bodies_in_extfov',
 ]
 
 
@@ -177,6 +179,69 @@ other body thresholds by issue #118 / CODE-NAV-MODEL-002).
 """
 
 
+TITAN_BODY_NAME: str = 'TITAN'
+"""SPICE name of the one body handled as a special opaque-atmosphere case.
+
+Titan's thick haze hides the surface and its visible limb is the haze top,
+wavelength-dependent and hundreds of km above the ground, so ellipsoid
+limb / terminator / disc navigation is systematically wrong rather than
+merely noisy; at high phase Titan is not even a circle.  Titan builds no
+shape-based ``NavModelBody`` -- :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan`
+records a no-result instead.  Titan's atmosphere is unique (transparent in
+some wavelengths), so it is handled as a deliberate special case; its
+handling does not generalize to other thick-atmosphere bodies such as Venus.
+"""
+
+
+def bodies_in_extfov(
+    obs: Observation, *, config: Config | None = None
+) -> list[tuple[str, dict[str, Any]]]:
+    """Return ``(body_name, inventory_entry)`` for each body inside the extfov.
+
+    Queries ``obs.inventory`` once with the planet plus its configured
+    satellites and keeps every body whose ``inventory_body_in_extfov``
+    predicate fires.  Shared by the shape-based body model and the Titan
+    model so both select from the same in-FOV body set.
+
+    Parameters:
+        obs: Observation snapshot.
+        config: Configuration whose satellite catalog decides which bodies are
+            considered; ``None`` uses ``DEFAULT_CONFIG``.
+
+    Returns:
+        List of ``(body_name, inventory_entry)`` pairs in planet-then-satellite
+        order; empty when the observation exposes no usable inventory.
+    """
+    cfg = config if config is not None else DEFAULT_CONFIG
+    planet = getattr(obs, 'closest_planet', None)
+    if planet is None:
+        return []
+    body_list: list[str] = [planet, *list(cfg.satellites(planet))]
+    inventory_method = getattr(obs, 'inventory', None)
+    if not callable(inventory_method):
+        return []
+    try:
+        inv = inventory_method(body_list, return_type='full')
+    except ValueError:
+        # oops raises ValueError for a body it cannot resolve in the scene;
+        # that is a recoverable "nothing in the extfov" outcome.  Let
+        # TypeError / AttributeError propagate -- they signal a malformed obs
+        # or a genuine bug, not an empty FOV.
+        return []
+    in_extfov = getattr(obs, 'inventory_body_in_extfov', None)
+    if not callable(in_extfov):
+        return []
+    out: list[tuple[str, dict[str, Any]]] = []
+    for body_name in body_list:
+        entry = inv.get(body_name)
+        if entry is None:
+            continue
+        if not in_extfov(entry):
+            continue
+        out.append((body_name, entry))
+    return out
+
+
 @dataclass(frozen=True)
 class _PolylineSampler:
     """Bundle of sampled limb / terminator polyline data.
@@ -245,9 +310,11 @@ class NavModelBody(NavModelBodyBase):
     def instances_for_obs(cls, obs: Observation, *, config: Config | None = None) -> list[NavModel]:
         """Return one NavModelBody per body whose bbox lies inside extfov.
 
-        Calls ``obs.inventory`` once with the planet + satellites list
-        from ``config.satellites`` and constructs a NavModel for every
-        entry whose ``inventory_body_in_extfov`` predicate fires.
+        Selects every in-FOV body via :func:`bodies_in_extfov` and constructs
+        a NavModel for each.  Titan is excluded: its opaque haze hides the
+        surface, so ellipsoid-shape navigation is systematically wrong, and
+        :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` handles
+        it instead.
 
         Parameters:
             obs: Observation snapshot.
@@ -256,33 +323,16 @@ class NavModelBody(NavModelBodyBase):
                 uses ``DEFAULT_CONFIG``.
 
         Returns:
-            One ``NavModelBody`` per body present in the extfov.
+            One ``NavModelBody`` per non-Titan body present in the extfov.
         """
         # Simulated obs use the sim-params-driven NavModelBodySimulated instead.
         if getattr(obs, 'is_simulated', False):
             return []
         if config is None:
             config = DEFAULT_CONFIG
-        planet = getattr(obs, 'closest_planet', None)
-        if planet is None:
-            return []
-        body_list: list[str] = [planet, *list(config.satellites(planet))]
-        inventory_method = getattr(obs, 'inventory', None)
-        if not callable(inventory_method):
-            return []
-        try:
-            inv = inventory_method(body_list, return_type='full')
-        except (TypeError, AttributeError, ValueError):
-            return []
-        in_extfov = getattr(obs, 'inventory_body_in_extfov', None)
-        if not callable(in_extfov):
-            return []
         out: list[NavModel] = []
-        for body_name in body_list:
-            entry = inv.get(body_name)
-            if entry is None:
-                continue
-            if not in_extfov(entry):
+        for body_name, entry in bodies_in_extfov(obs, config=config):
+            if body_name.upper() == TITAN_BODY_NAME:
                 continue
             out.append(cls(f'body:{body_name}', obs, body_name, inventory=entry, config=config))
         return out
@@ -668,10 +718,36 @@ class NavModelBody(NavModelBodyBase):
                 LIMB_ARC_MIN_VERTICES,
                 shape.shape_class_hint,
             )
+            # Highly-irregular bodies (chaotic rotators, small potato moons)
+            # have no usable ellipsoid.  Once such a body is resolved beyond a
+            # few pixels the rendered limb / terminator / disc silhouette does
+            # not match the real body, so those shape features are suppressed;
+            # a point-like BODY_BLOB still navigates the centroid.  The
+            # 'resolved' threshold reuses the bodies-config
+            # ``min_bounding_box_area`` -- its square root is the equivalent
+            # linear pixel extent (default 9 px^2 -> 3 px).  Bodies tagged
+            # merely 'irregular' are left untouched: the continuous
+            # ellipsoid-residual widening in the sigma budget already degrades
+            # their limb reliability without dropping the feature.
+            resolved_diameter_px = math.sqrt(float(self._config.bodies.min_bounding_box_area))
+            suppress_shape_features = (
+                shape.shape_class_hint == 'highly_irregular'
+                and self._predicted_diameter_px > resolved_diameter_px
+            )
+            if suppress_shape_features:
+                self._logger.info(
+                    'Body %s is highly_irregular and resolved (predicted diameter '
+                    '%.2f px > %.2f px): suppressing LIMB_ARC / TERMINATOR_ARC / '
+                    'BODY_DISC; BODY_BLOB may still emit',
+                    self._body_name,
+                    self._predicted_diameter_px,
+                    resolved_diameter_px,
+                )
             limb_arc_emitted = False
             blob_min_px = max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)
             if (
-                limb_vertices >= LIMB_ARC_MIN_VERTICES
+                not suppress_shape_features
+                and limb_vertices >= LIMB_ARC_MIN_VERTICES
                 and limb_uncertainty_px <= LIMB_ARC_MAX_UNCERTAINTY_PX
             ):
                 assert self._limb_sampler is not None
@@ -703,10 +779,12 @@ class NavModelBody(NavModelBodyBase):
                     self._lit_pixel_count,
                 )
 
-            if self._should_emit_disc(limb_arc_emitted):
+            if not suppress_shape_features and self._should_emit_disc(limb_arc_emitted):
                 features.append(self._build_disc_feature(shape))
 
-            terminator_feature = self._maybe_build_terminator(shape)
+            terminator_feature = (
+                None if suppress_shape_features else self._maybe_build_terminator(shape)
+            )
             if terminator_feature is not None:
                 features.append(terminator_feature)
 

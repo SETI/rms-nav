@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -106,6 +107,28 @@ class _FakeStarModel(NavModel):
                 )
             )
         return features
+
+    def to_annotations(self, context: NavContext) -> Annotations:
+        return Annotations()
+
+
+class _FakeTitanModel(NavModel):
+    """Fake Titan model: active, emits no features, reports Titan in FOV."""
+
+    _abstract = True
+
+    def __init__(self, obs: Any) -> None:
+        super().__init__('titan:TITAN', obs)
+
+    @property
+    def titan_in_fov(self) -> bool:
+        return True
+
+    def create_model(self) -> None:
+        self._metadata['body'] = 'TITAN'
+
+    def to_features(self, context: NavContext) -> list[NavFeature]:
+        return []
 
     def to_annotations(self, context: NavContext) -> Annotations:
         return Annotations()
@@ -234,6 +257,30 @@ def test_orchestrator_no_features_emitted_yields_no_features_extracted(
     result = orch.navigate(obs)  # type: ignore[arg-type]
     assert result.status == 'failed'
     assert result.status_reason == NavStatusReason.NO_FEATURES_EXTRACTED
+
+
+def test_orchestrator_titan_only_yields_titan_unsupported(
+    fake_obs: _FakeObs,
+) -> None:
+    """A frame whose only content is Titan records the reason."""
+    obs = fake_obs
+    model = _FakeTitanModel(obs)
+    orch = NavOrchestrator([model])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'failed'
+    assert result.status_reason == NavStatusReason.TITAN_UNSUPPORTED
+
+
+def test_orchestrator_titan_plus_stars_navigates_normally(
+    fake_obs: _FakeObs,
+) -> None:
+    """Titan alongside navigable stars does not force the Titan reason."""
+    obs = fake_obs
+    models = [_FakeStarModel(obs, feature_count=3), _FakeTitanModel(obs)]
+    orch = NavOrchestrator(models, only_techniques=['_FakeStarTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'success'
+    assert result.status_reason != NavStatusReason.TITAN_UNSUPPORTED
 
 
 def test_normalize_model_patterns_expands_bare_prefix() -> None:
@@ -609,24 +656,7 @@ def test_orchestrator_low_reliability_features_all_gated(fake_obs: _FakeObs) -> 
 
     class _LowReliabilityStarModel(_FakeStarModel):
         def to_features(self, context: NavContext) -> list[NavFeature]:
-            features = super().to_features(context)
-            return [
-                NavFeature(
-                    feature_id=f.feature_id,
-                    feature_type=f.feature_type,
-                    source_model=f.source_model,
-                    geometry=f.geometry,
-                    subject_range_km=f.subject_range_km,
-                    position_cov_px=f.position_cov_px,
-                    intensity_sigma_rel=f.intensity_sigma_rel,
-                    preferred_filter=f.preferred_filter,
-                    reliability=0.01,
-                    reliability_reasons=f.reliability_reasons,
-                    usable_types=f.usable_types,
-                    flags=f.flags,
-                )
-                for f in features
-            ]
+            return [replace(f, reliability=0.01) for f in super().to_features(context)]
 
     model = _LowReliabilityStarModel(obs, feature_count=3)
     orch = NavOrchestrator([model])
@@ -697,24 +727,7 @@ def test_prepare_apply_gate_false_returns_gated_features() -> None:
 
     class _LowReliabilityModel(_FakeStarModel):
         def to_features(self, context: NavContext) -> list[NavFeature]:
-            features = super().to_features(context)
-            return [
-                NavFeature(
-                    feature_id=f.feature_id,
-                    feature_type=f.feature_type,
-                    source_model=f.source_model,
-                    geometry=f.geometry,
-                    subject_range_km=f.subject_range_km,
-                    position_cov_px=f.position_cov_px,
-                    intensity_sigma_rel=f.intensity_sigma_rel,
-                    preferred_filter=f.preferred_filter,
-                    reliability=0.01,
-                    reliability_reasons=f.reliability_reasons,
-                    usable_types=f.usable_types,
-                    flags=f.flags,
-                )
-                for f in features
-            ]
+            return [replace(f, reliability=0.01) for f in super().to_features(context)]
 
     obs = _FakeObs()
     model = _LowReliabilityModel(obs, feature_count=2)
@@ -1045,24 +1058,7 @@ def test_all_features_gated_emits_status_reason_info(
 
     class _LowReliabilityStarModel(_FakeStarModel):
         def to_features(self, context: NavContext) -> list[NavFeature]:
-            features = super().to_features(context)
-            return [
-                NavFeature(
-                    feature_id=f.feature_id,
-                    feature_type=f.feature_type,
-                    source_model=f.source_model,
-                    geometry=f.geometry,
-                    subject_range_km=f.subject_range_km,
-                    position_cov_px=f.position_cov_px,
-                    intensity_sigma_rel=f.intensity_sigma_rel,
-                    preferred_filter=f.preferred_filter,
-                    reliability=0.01,
-                    reliability_reasons=f.reliability_reasons,
-                    usable_types=f.usable_types,
-                    flags=f.flags,
-                )
-                for f in features
-            ]
+            return [replace(f, reliability=0.01) for f in super().to_features(context)]
 
     model = _LowReliabilityStarModel(obs, feature_count=3)
     orch = NavOrchestrator([model])
