@@ -715,10 +715,36 @@ class NavModelBody(NavModelBodyBase):
                 LIMB_ARC_MIN_VERTICES,
                 shape.shape_class_hint,
             )
+            # Highly-irregular bodies (chaotic rotators, small potato moons)
+            # have no usable ellipsoid.  Once such a body is resolved beyond a
+            # few pixels the rendered limb / terminator / disc silhouette does
+            # not match the real body, so those shape features are suppressed;
+            # a point-like BODY_BLOB still navigates the centroid.  The
+            # 'resolved' threshold reuses the bodies-config
+            # ``min_bounding_box_area`` -- its square root is the equivalent
+            # linear pixel extent (default 9 px^2 -> 3 px).  Bodies tagged
+            # merely 'irregular' are left untouched: the continuous
+            # ellipsoid-residual widening in the sigma budget already degrades
+            # their limb reliability without dropping the feature.
+            resolved_diameter_px = math.sqrt(float(self._config.bodies.min_bounding_box_area))
+            suppress_shape_features = (
+                shape.shape_class_hint == 'highly_irregular'
+                and self._predicted_diameter_px > resolved_diameter_px
+            )
+            if suppress_shape_features:
+                self._logger.info(
+                    'Body %s is highly_irregular and resolved (predicted diameter '
+                    '%.2f px > %.2f px): suppressing LIMB_ARC / TERMINATOR_ARC / '
+                    'BODY_DISC; BODY_BLOB may still emit',
+                    self._body_name,
+                    self._predicted_diameter_px,
+                    resolved_diameter_px,
+                )
             limb_arc_emitted = False
             blob_min_px = max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)
             if (
-                limb_vertices >= LIMB_ARC_MIN_VERTICES
+                not suppress_shape_features
+                and limb_vertices >= LIMB_ARC_MIN_VERTICES
                 and limb_uncertainty_px <= LIMB_ARC_MAX_UNCERTAINTY_PX
             ):
                 assert self._limb_sampler is not None
@@ -749,10 +775,12 @@ class NavModelBody(NavModelBodyBase):
                     blob_min_px,
                 )
 
-            if self._should_emit_disc(limb_arc_emitted):
+            if not suppress_shape_features and self._should_emit_disc(limb_arc_emitted):
                 features.append(self._build_disc_feature(shape))
 
-            terminator_feature = self._maybe_build_terminator(shape)
+            terminator_feature = (
+                None if suppress_shape_features else self._maybe_build_terminator(shape)
+            )
             if terminator_feature is not None:
                 features.append(terminator_feature)
 
