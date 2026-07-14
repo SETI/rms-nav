@@ -363,21 +363,139 @@ def nms_topk(
 
 
 # ==============================================================
-# Fisher / CRLB
+# Matched-filter (peak-curvature) covariance
 # ==============================================================
 
+# Lower bound on the number of statistically independent samples the
+# residual is allowed to represent.  The residual over the template
+# support is spatially correlated (camera PSF, anti-alias blur, the
+# sub-pixel refine low-pass, and coherent silhouette / photometric model
+# error), so a template covering thousands of pixels carries far fewer
+# independent constraints than its pixel count.  The correlation-area
+# inflation divides the effective sample count by the residual's
+# correlation area; this floor keeps a near-constant residual (whose
+# measured correlation area approaches the whole patch) from collapsing
+# the effective count to a value that would drive the covariance to
+# infinity.
+_MIN_EFFECTIVE_SAMPLES: float = 4.0
 
-def fisher_covariance(model_aligned: NDArrayFloatType, sigma_n: float) -> NDArrayFloatType:
+
+def _residual_correlation_area(resid: NDArrayFloatType) -> float:
+    """Estimate the residual's spatial correlation area in pixels.
+
+    The matched-filter Cramer-Rao bound assumes white (per-pixel
+    independent) noise.  A rendered-template residual is not white: the
+    camera PSF, the anti-alias and sub-pixel-refine low-pass filters, and
+    -- most importantly -- coherent model error (a silhouette or
+    photometric mismatch spread across the whole body) correlate
+    neighboring residual pixels.  The number of statistically independent
+    samples is therefore ``N_pixels / A_c`` where ``A_c`` is the
+    correlation area returned here, and the white-noise covariance must be
+    inflated by ``A_c`` to reflect the true information content.
+
+    ``A_c`` is estimated as the product of per-axis correlation lengths,
+    each the integral of the residual's normalized autocorrelation over
+    its central positive lobe (``1 + 2 * sum_{k>=1} rho(k)`` truncated at
+    the first non-positive lag).  A white residual yields ``A_c ~ 1``; a
+    residual correlated over ``L`` pixels per axis yields ``A_c ~ L**2``.
+
+    Parameters:
+        resid: 2-D residual field (image minus aligned model), any scale.
+
+    Returns:
+        Correlation area in pixels, floored at ``1.0``.
+    """
+    r = np.asarray(resid, np.float64)
+    r = r - float(r.mean())
+    if r.size == 0 or float(np.mean(r * r)) <= 1e-30:
+        return 1.0
+
+    def _axis_length(axis: int) -> float:
+        n = r.shape[axis]
+        if n < 3:
+            return 1.0
+        spec = np.fft.rfft(r, axis=axis)
+        power = (spec * np.conj(spec)).real
+        autocorr = np.fft.irfft(power, n=n, axis=axis)
+        # Collapse the perpendicular axis so the 1-D autocorrelation is the
+        # per-lag average across the other axis's lines.
+        autocorr_1d = autocorr.mean(axis=1 - axis)
+        zero_lag = float(autocorr_1d[0])
+        if zero_lag <= 0.0:
+            return 1.0
+        rho = autocorr_1d / zero_lag
+        length = 1.0
+        for k in range(1, n // 2):
+            rho_k = float(rho[k])
+            if rho_k <= 0.0:
+                break
+            length += 2.0 * rho_k
+        return max(length, 1.0)
+
+    area = _axis_length(0) * _axis_length(1)
+    # Never claim fewer than a handful of independent samples: cap the area
+    # so the effective count N_pixels / A_c stays at or above the floor.
+    max_area = max(r.size / _MIN_EFFECTIVE_SAMPLES, 1.0)
+    return float(min(max(area, 1.0), max_area))
+
+
+def matched_filter_covariance(
+    model_aligned: NDArrayFloatType,
+    sigma_n: float,
+    *,
+    correlation_area: float = 1.0,
+) -> NDArrayFloatType:
+    """Peak-curvature (matched-filter) covariance of a 2-D translation fit.
+
+    For a template ``M`` aligned to an image ``I = M(x - s) + n`` the shift
+    ``s`` maximum-likelihood estimate has Fisher information ``F_ab =
+    (1 / sigma_n**2) * sum_x (dM/dx_a)(dM/dx_b)`` and covariance
+    ``F**-1 = sigma_n**2 * inv(sum grad M grad M^T)``.
+
+    Two properties are essential for the reported sigma to track the true
+    error and are the reason this replaces the previous derivation:
+
+    - **Unit consistency.**  ``sigma_n`` and the gradients of ``M`` must be
+      measured on the same intensity scale, or the covariance scales with
+      the (arbitrary) template amplitude.  The caller passes a residual
+      noise ``sigma_n`` computed on the zero-mean, unit-std normalized
+      image and model; this function must therefore receive the *same*
+      normalized model so ``grad M`` shares that scale.  Passing the raw
+      template here (whose amplitude can be thousands of DN) shrinks the
+      covariance by the template variance and is the miscalibration this
+      derivation corrects.
+    - **Effective sample count.**  ``correlation_area`` inflates the
+      white-noise bound by the residual's spatial correlation area so
+      correlated model error is not counted as thousands of independent
+      constraints (see :func:`_residual_correlation_area`).
+
+    Parameters:
+        model_aligned: The aligned template on the *same normalized scale*
+            as the residual from which ``sigma_n`` was measured.
+        sigma_n: Residual noise standard deviation on that normalized
+            scale.
+        correlation_area: Residual correlation area in pixels (``>= 1``);
+            multiplies the covariance.  Default ``1.0`` reproduces the
+            white-noise Cramer-Rao bound.
+
+    Returns:
+        The ``2x2`` translation covariance in pixels squared.  A degenerate
+        (rank-deficient) gradient structure returns a large isotropic
+        covariance so the result is de-weighted rather than trusted.
+    """
     sy = np.gradient(model_aligned, axis=0)
     sx = np.gradient(model_aligned, axis=1)
-    Sxx = np.sum(sx * sx)
-    Syy = np.sum(sy * sy)
-    Sxy = np.sum(sx * sy)
-    F = (1.0 / (sigma_n**2 + 1e-18)) * np.array([[Sxx, Sxy], [Sxy, Syy]])
-    if np.linalg.cond(F) > 1e10:
+    Sxx = float(np.sum(sx * sx))
+    Syy = float(np.sum(sy * sy))
+    Sxy = float(np.sum(sx * sy))
+    var_n = float(sigma_n) ** 2 + 1e-18
+    area = max(float(correlation_area), 1.0)
+    fisher = (1.0 / var_n) * np.array([[Sxx, Sxy], [Sxy, Syy]], dtype=np.float64)
+    if np.linalg.cond(fisher) > 1e10:
         # Degenerate case: return large uncertainty
         return np.diag([1e6, 1e6])
-    return np.linalg.pinv(F + 1e-12 * np.eye(2))
+    cov_white = np.linalg.pinv(fisher + 1e-12 * np.eye(2))
+    return cast(NDArrayFloatType, area * cov_white)
 
 
 # ==============================================================
@@ -498,17 +616,23 @@ def evaluate_candidate(
     model_shift = fourier_shift(model_pad[:model_h, :model_w], dy, dx)
     model_crop = crop_center(model_shift, (image_h, image_w))
     image_crop = image_pad[:image_h, :image_w]
-    resid = normalize_array(image_crop) - normalize_array(model_crop)
+    # Normalize both surfaces to zero-mean unit-std before the residual so
+    # the residual noise and the template gradients that feed the
+    # matched-filter covariance share one intensity scale (a raw-DN
+    # template would otherwise shrink the covariance by its own variance).
+    model_norm = normalize_array(model_crop)
+    resid = normalize_array(image_crop) - model_norm
     sigma_n = mad_std(resid)
     if sigma_n <= 1e-12:
-        # When mad_std(resid) returns a value <= 1e-12, the code falls back to
-        # max(resid.std(), 1e-6). This might indicate a perfect match or a numerical
-        # issue, but the fallback silently continues. Consider logging this condition
-        # or investigating why the residual variance is zero.
-        # Add logging or a warning:
-        # self.logger.warning("Residual variance near zero; using fallback sigma")
+        # Near-perfect match (or a constant residual): fall back to the plain
+        # std so the covariance stays finite rather than dividing by zero.
         sigma_n = max(resid.std(), 1e-6)
-    cov = fisher_covariance(model_crop, sigma_n)
+    # Inflate the white-noise bound by the residual correlation area: the
+    # residual is spatially correlated (PSF, anti-alias / refine low-pass,
+    # and coherent silhouette / photometric model error), so its pixels are
+    # not independent samples.
+    correlation_area = _residual_correlation_area(resid)
+    cov = matched_filter_covariance(model_norm, sigma_n, correlation_area=correlation_area)
 
     # Quality metric
     peak_val = corr[p, q]
@@ -769,6 +893,7 @@ def navigate_with_pyramid_kpeaks(
     data_mask: NDArrayBoolType | None = None,
     use_gradient: bool | Literal['auto'] = False,
     refine_lowpass_sigma_px: float = 0.0,
+    localization_uncertainty_scale: float = 0.0,
     logger: PdsLogger | None = None,
 ) -> dict[str, Any]:
     """TODO Clean this up
@@ -814,6 +939,15 @@ def navigate_with_pyramid_kpeaks(
             - ``'auto'``: run both modes, pick the more confident result. A
               non-spurious result is preferred over a spurious one; within the
               same spurious bucket the higher-quality result wins.
+        localization_uncertainty_scale: Scales the inter-pyramid-level peak
+            migration (``consistency``, in px) into an added translation
+            uncertainty.  The peak-curvature covariance measures only the
+            statistical (photon / residual) precision at the winning peak; a
+            peak that walks between pyramid levels is empirically less well
+            localized than a peak that does not, so
+            ``(scale * consistency)**2`` is added in quadrature to the
+            translation covariance diagonal.  ``0.0`` (default) disables it
+            and leaves the bare peak-curvature covariance.
         logger: The logger to use for the navigation.
 
     Returns:
@@ -863,6 +997,7 @@ def navigate_with_pyramid_kpeaks(
             data_mask=data_mask,
             use_gradient=False,
             refine_lowpass_sigma_px=refine_lowpass_sigma_px,
+            localization_uncertainty_scale=localization_uncertainty_scale,
             logger=logger,
         )
         logger.debug('Auto-gradient: running gradient-magnitude pass')
@@ -882,6 +1017,7 @@ def navigate_with_pyramid_kpeaks(
             data_mask=data_mask,
             use_gradient=True,
             refine_lowpass_sigma_px=refine_lowpass_sigma_px,
+            localization_uncertainty_scale=localization_uncertainty_scale,
             logger=logger,
         )
         # Pick the better result by ordered tiers. At-edge comes before
@@ -1084,10 +1220,27 @@ def navigate_with_pyramid_kpeaks(
         for c in all_candidates
     ]
 
+    # Add the localization-spread uncertainty.  The peak-curvature
+    # covariance measures the statistical precision at the winning peak
+    # only; a peak that migrates across pyramid levels is empirically less
+    # trustworthy than a stable one, so fold ``(scale * consistency)**2``
+    # into the translation covariance diagonal (no-op when the scale is
+    # 0.0 or the peak is perfectly consistent).
+    cov_out = np.asarray(result['cov'], np.float64).copy()
+    sigma_xy_out = result['sigma_xy']
+    if localization_uncertainty_scale > 0.0 and cov_out.shape == (2, 2):
+        localization_var = (localization_uncertainty_scale * consistency) ** 2
+        cov_out[0, 0] += localization_var
+        cov_out[1, 1] += localization_var
+        sigma_xy_out = (
+            float(np.sqrt(cov_out[0, 0])),
+            float(np.sqrt(cov_out[1, 1])),
+        )
+
     ret = {
         'offset': result['offset'],
-        'cov': result['cov'],
-        'sigma_xy': result['sigma_xy'],
+        'cov': cov_out,
+        'sigma_xy': sigma_xy_out,
         'quality': result['quality'],
         'metric': metric,
         'consistency': consistency,
@@ -1100,7 +1253,7 @@ def navigate_with_pyramid_kpeaks(
     logger.debug(
         f'Correlation result: '
         f'offset dU {result["offset"][1]:.3f}, dV {result["offset"][0]:.3f}; '
-        f'sigma U {result["sigma_xy"][1]:.3f}, V {result["sigma_xy"][0]:.3f}; '
+        f'sigma U {sigma_xy_out[1]:.3f}, V {sigma_xy_out[0]:.3f}; '
         f'consistency {consistency:.3f}; '
         f'spurious {spurious}'
     )

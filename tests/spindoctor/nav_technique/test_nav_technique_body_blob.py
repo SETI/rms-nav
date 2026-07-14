@@ -19,6 +19,7 @@ from spindoctor.nav_technique.diagnostics import BodyBlobDiagnostics
 from spindoctor.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE
 from spindoctor.nav_technique.nav_technique_body_blob import (
     BodyBlobNav,
+    _centroid_model_error_var,
     _clamped_kernel_radius,
     _coarse_crescent_offset,
     _coarse_disc_offset,
@@ -397,7 +398,14 @@ def test_joint_covariance_two_point_reduced_chi_square() -> None:
     offsets_u = np.array([-1.0, 1.0], dtype=np.float64)
     dv = float(np.sum(weights * offsets_v) / weights.sum())  # 3.5
     du = float(np.sum(weights * offsets_u) / weights.sum())  # 0.5
-    cov = _joint_covariance(offsets_v=offsets_v, offsets_u=offsets_u, weights=weights, dv=dv, du=du)
+    cov = _joint_covariance(
+        offsets_v=offsets_v,
+        offsets_u=offsets_u,
+        weights=weights,
+        dv=dv,
+        du=du,
+        extents_px=np.zeros_like(offsets_v),
+    )
     assert cov[0, 0] == pytest.approx(0.75, abs=1e-9)
     assert cov[1, 1] == pytest.approx(0.75, abs=1e-9)
     assert cov[0, 1] == pytest.approx(0.0, abs=1e-9)
@@ -421,7 +429,14 @@ def test_joint_covariance_n_point_reduced_chi_square() -> None:
     offsets_u = np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float64)
     dv = float(np.sum(weights * offsets_v) / weights.sum())  # 3.0
     du = float(np.sum(weights * offsets_u) / weights.sum())  # 1.0
-    cov = _joint_covariance(offsets_v=offsets_v, offsets_u=offsets_u, weights=weights, dv=dv, du=du)
+    cov = _joint_covariance(
+        offsets_v=offsets_v,
+        offsets_u=offsets_u,
+        weights=weights,
+        dv=dv,
+        du=du,
+        extents_px=np.zeros_like(offsets_v),
+    )
     assert cov[0, 0] == pytest.approx(2.5, abs=1e-9)
     assert cov[1, 1] == pytest.approx(0.25, abs=1e-9)
 
@@ -441,7 +456,12 @@ def test_joint_covariance_single_blob_is_large_not_overconfident() -> None:
     offsets_v = np.array([3.0], dtype=np.float64)
     offsets_u = np.array([-4.0], dtype=np.float64)
     cov = _joint_covariance(
-        offsets_v=offsets_v, offsets_u=offsets_u, weights=weights, dv=3.0, du=-4.0
+        offsets_v=offsets_v,
+        offsets_u=offsets_u,
+        weights=weights,
+        dv=3.0,
+        du=-4.0,
+        extents_px=np.zeros_like(offsets_v),
     )
     # 1 / sum(w) = 1 / 0.01 = 100.0 on each axis.
     assert cov[0, 0] == pytest.approx(100.0, abs=1e-9)
@@ -463,7 +483,12 @@ def test_joint_covariance_model_error_floor_inflates_diagonal_by_square() -> Non
     dv = 3.5
     du = 0.5
     base = _joint_covariance(
-        offsets_v=offsets_v, offsets_u=offsets_u, weights=weights, dv=dv, du=du
+        offsets_v=offsets_v,
+        offsets_u=offsets_u,
+        weights=weights,
+        dv=dv,
+        du=du,
+        extents_px=np.zeros_like(offsets_v),
     )
     floored = _joint_covariance(
         offsets_v=offsets_v,
@@ -471,6 +496,7 @@ def test_joint_covariance_model_error_floor_inflates_diagonal_by_square() -> Non
         weights=weights,
         dv=dv,
         du=du,
+        extents_px=np.zeros_like(offsets_v),
         model_error_floor_px=2.0,
     )
     assert floored[0, 0] == pytest.approx(4.75, abs=1e-9)
@@ -478,6 +504,55 @@ def test_joint_covariance_model_error_floor_inflates_diagonal_by_square() -> Non
     assert floored[0, 0] - base[0, 0] == pytest.approx(4.0, abs=1e-9)
     assert floored[1, 1] - base[1, 1] == pytest.approx(4.0, abs=1e-9)
     assert floored[0, 1] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_centroid_model_error_var_single_blob_is_radius_fraction_squared() -> None:
+    """One blob's size-error variance is exactly (frac * radius)**2."""
+    extents = np.array([100.0], dtype=np.float64)  # diameter -> radius 50
+    var = _centroid_model_error_var(extents, 0.05)
+    assert var == pytest.approx((0.05 * 50.0) ** 2, rel=1e-9)
+
+
+def test_centroid_model_error_var_combines_by_inverse_variance() -> None:
+    """Two equal blobs halve the single-blob size-error variance."""
+    extents = np.array([100.0, 100.0], dtype=np.float64)
+    single = _centroid_model_error_var(extents[:1], 0.05)
+    both = _centroid_model_error_var(extents, 0.05)
+    assert both == pytest.approx(single / 2.0, rel=1e-9)
+
+
+def test_centroid_model_error_var_disabled_returns_zero() -> None:
+    """A zero fraction disables the size term."""
+    extents = np.array([100.0, 40.0], dtype=np.float64)
+    assert _centroid_model_error_var(extents, 0.0) == 0.0
+
+
+def test_joint_covariance_size_term_tracks_body_radius() -> None:
+    """A single-blob covariance scales with body size through the size term.
+
+    The reported per-axis sigma of a lone blob should land within a factor
+    of 1.5 of the size-scaled centroid-model error (frac * radius) plus the
+    absolute floor -- the calibration property the photon-only weight lacked.
+    """
+    weights = np.array([100.0], dtype=np.float64)  # bright: photon floor ~0.01 px
+    offsets_v = np.array([0.0], dtype=np.float64)
+    offsets_u = np.array([0.0], dtype=np.float64)
+    extents = np.array([200.0], dtype=np.float64)  # radius 100 px
+    frac = 0.05
+    floor = 0.1
+    cov = _joint_covariance(
+        offsets_v=offsets_v,
+        offsets_u=offsets_u,
+        weights=weights,
+        dv=0.0,
+        du=0.0,
+        extents_px=extents,
+        model_error_floor_px=floor,
+        centroid_model_error_frac=frac,
+    )
+    reported_sigma = float(np.sqrt(cov[0, 0]))
+    expected_sigma = float(np.sqrt((frac * 100.0) ** 2 + floor**2 + 1.0 / 100.0))
+    assert 1.0 / 1.5 <= reported_sigma / expected_sigma <= 1.5
 
 
 # ---------------------------------------------------------------------------
