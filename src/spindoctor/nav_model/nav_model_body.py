@@ -95,8 +95,8 @@ __all__ = [
     'LIMB_ARC_MAX_UNCERTAINTY_PX',
     'TERMINATOR_MIN_PHASE_FACTOR',
     'TERMINATOR_MIN_VERTICES',
+    'TITAN_BODY_NAME',
     'NavModelBody',
-    'atmospheric_body_set',
     'bodies_in_extfov',
 ]
 
@@ -176,24 +176,18 @@ other body thresholds by issue #118 / CODE-NAV-MODEL-002).
 """
 
 
-def atmospheric_body_set(config: Config | None = None) -> frozenset[str]:
-    """Return the upper-cased set of thick-atmosphere body names.
+TITAN_BODY_NAME: str = 'TITAN'
+"""SPICE name of the one body handled as a special opaque-atmosphere case.
 
-    These bodies (Titan at minimum; the ``bodies.atmospheric_bodies`` config
-    list is extensible) have an opaque haze that hides the surface, so
-    ellipsoid limb / terminator / disc navigation is systematically wrong.
-    They build no ``NavModelBody``; the atmospheric-body model records a
-    no-result instead.
-
-    Parameters:
-        config: Optional ``Config`` override; ``None`` uses ``DEFAULT_CONFIG``.
-
-    Returns:
-        Frozen set of upper-cased SPICE body names.
-    """
-    cfg = config if config is not None else DEFAULT_CONFIG
-    raw = cfg.bodies.get('atmospheric_bodies', ())
-    return frozenset(str(name).upper() for name in raw)
+Titan's thick haze hides the surface and its visible limb is the haze top,
+wavelength-dependent and hundreds of km above the ground, so ellipsoid
+limb / terminator / disc navigation is systematically wrong rather than
+merely noisy; at high phase Titan is not even a circle.  Titan builds no
+shape-based ``NavModelBody`` -- :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan`
+records a no-result instead.  Titan's atmosphere is unique (transparent in
+some wavelengths), so it is a deliberate special case, not the first entry
+of a general atmospheric-body list.
+"""
 
 
 def bodies_in_extfov(
@@ -309,10 +303,10 @@ class NavModelBody(NavModelBodyBase):
         """Return one NavModelBody per body whose bbox lies inside extfov.
 
         Selects every in-FOV body via :func:`bodies_in_extfov` and constructs
-        a NavModel for each.  Thick-atmosphere bodies (Titan and any other
-        member of ``bodies.atmospheric_bodies``) are excluded: their opaque
-        haze hides the surface, so ellipsoid-shape navigation is
-        systematically wrong and the atmospheric-body model handles them.
+        a NavModel for each.  Titan is excluded: its opaque haze hides the
+        surface, so ellipsoid-shape navigation is systematically wrong, and
+        :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` handles
+        it instead.
 
         Parameters:
             obs: Observation snapshot.
@@ -321,17 +315,16 @@ class NavModelBody(NavModelBodyBase):
                 uses ``DEFAULT_CONFIG``.
 
         Returns:
-            One ``NavModelBody`` per non-atmospheric body present in the extfov.
+            One ``NavModelBody`` per non-Titan body present in the extfov.
         """
         # Simulated obs use the sim-params-driven NavModelBodySimulated instead.
         if getattr(obs, 'is_simulated', False):
             return []
         if config is None:
             config = DEFAULT_CONFIG
-        atmospheric = atmospheric_body_set(config)
         out: list[NavModel] = []
         for body_name, entry in bodies_in_extfov(obs, config=config):
-            if body_name.upper() in atmospheric:
+            if body_name.upper() == TITAN_BODY_NAME:
                 continue
             out.append(cls(f'body:{body_name}', obs, body_name, inventory=entry, config=config))
         return out

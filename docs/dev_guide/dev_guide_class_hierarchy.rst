@@ -384,7 +384,7 @@ and
 :class:`~spindoctor.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`
 (rendered from operator-supplied parameters), and the placeholder
 :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (registered stub
-for atmospheric-body navigation; emits no features). A
+for Titan navigation; emits no features). A
 ``NavModelStarsSimulated`` slot is reserved without an implementation.
 
 Per-family data models live alongside the renderer classes:

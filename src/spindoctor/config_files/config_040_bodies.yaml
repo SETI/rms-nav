@@ -1,13 +1,10 @@
 bodies:
-  # Bodies whose thick, opaque atmosphere hides the surface entirely.  The
-  # visible edge is haze (wavelength-dependent, hundreds of km above the
-  # ground), so ellipsoid limb / terminator / disc navigation is not merely
-  # noisy but systematically wrong, and at high phase the body is not even a
-  # circle.  These bodies build no shape-based body model; an atmospheric-body
-  # model records a no-result instead.  Extend this list as other
-  # thick-atmosphere bodies enter the mission set.
-  atmospheric_bodies:
-    - TITAN
+  # Titan is handled as a special opaque-atmosphere case in code (the
+  # TITAN_BODY_NAME constant in nav_model_body), not via a config list: its
+  # haze hides the surface, so it builds no shape-based body model and
+  # NavModelTitan records a no-result instead.  Titan's atmosphere is unique
+  # (transparent at some wavelengths), so it is deliberately not generalized
+  # to a bodies.atmospheric_bodies list.
   min_bounding_box_area: 9
   min_emission_ring_body: 20
   oversample_edge_limit: 512

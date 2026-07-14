@@ -17,7 +17,7 @@ from spindoctor.support.status_reason import NavStatusReason
         'IMAGE_CORRUPT',
         'KERNELS_UNAVAILABLE',
         'INSTRUMENT_NOT_CONFIGURED',
-        'ATMOSPHERIC_BODY_UNSUPPORTED',
+        'TITAN_UNSUPPORTED',
         'NO_FEATURES_EXTRACTED',
         'ALL_FEATURES_GATED',
         'NO_FEASIBLE_TECHNIQUES',
@@ -44,7 +44,7 @@ def test_navstatusreason_count_matches_plan() -> None:
         (NavStatusReason.OK, 'ok'),
         (NavStatusReason.RANK_1_ONLY, 'rank_1_only'),
         (NavStatusReason.UNOBSERVABLE_OFFSET, 'unobservable_offset'),
-        (NavStatusReason.ATMOSPHERIC_BODY_UNSUPPORTED, 'atmospheric_body_unsupported'),
+        (NavStatusReason.TITAN_UNSUPPORTED, 'titan_unsupported'),
     ],
 )
 def test_navstatusreason_value_lowercase_snake_case(

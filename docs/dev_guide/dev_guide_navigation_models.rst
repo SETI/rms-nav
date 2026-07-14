@@ -41,7 +41,7 @@ Registered concrete models, grouped by feature family:
   (simulated-image GUI variant).
 - **Titan** (:doc:`dev_guide_navigation_models_titans`) —
   :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (registered placeholder for
-  atmospheric-body navigation; emits no features). A simulated-image sibling
+  Titan navigation; emits no features). A simulated-image sibling
   ``NavModelTitanSimulated`` is reserved without an implementation.
 
 Shared annotation helpers live on

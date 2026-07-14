@@ -13,11 +13,10 @@ instance per body whose extended-FOV bounding box overlaps the observation; a Sa
 that catches Mimas, Tethys, and Dione in the same frame produces three instances, each free to
 emit any subset of the four feature types its silhouette geometry justifies.
 
-Two body classes are excluded from shape-based navigation. Thick-atmosphere bodies (Titan and
-any other member of the ``bodies.atmospheric_bodies`` config list) build no
-:class:`~spindoctor.nav_model.nav_model_body.NavModelBody` at all: their opaque haze hides the
+Two body classes are excluded from shape-based navigation. Titan builds no
+:class:`~spindoctor.nav_model.nav_model_body.NavModelBody` at all: its opaque haze hides the
 surface, so ellipsoid limb / terminator / disc navigation is systematically wrong. The
-:doc:`atmospheric-body model <dev_guide_navigation_models_titan>` records a no-result for them
+:doc:`Titan model <dev_guide_navigation_models_titan>` records a no-result for it
 instead. Bodies tagged ``highly_irregular`` in the shape table (chaotic rotators, small
 potato moons) still build a body model but suppress their shape features once resolved beyond
 a few pixels, falling back to the point-like BODY_BLOB (see *Feature emission gates* below).
@@ -274,9 +273,9 @@ and contribute no features. Bodies whose silhouette is entirely in shadow, or wh
 fraction falls below the photometric thresholds, emit only the geometric features (limb arc
 when its uncertainty allows; otherwise nothing).
 
-Thick-atmosphere bodies (``bodies.atmospheric_bodies``) produce no
-:class:`~spindoctor.nav_model.nav_model_body.NavModelBody` instance; the atmospheric-body model
-handles them. A ``highly_irregular`` body resolved beyond the ``min_bounding_box_area``-derived
+Titan produces no
+:class:`~spindoctor.nav_model.nav_model_body.NavModelBody` instance; the Titan model
+handles it. A ``highly_irregular`` body resolved beyond the ``min_bounding_box_area``-derived
 pixel threshold emits no shape features (limb / terminator / disc) and navigates only as a
 BODY_BLOB; ``irregular`` bodies are unaffected.
 
@@ -313,16 +312,9 @@ bodies block
 Every key under ``bodies`` is listed below. Several keys are not consumed by
 :class:`~spindoctor.nav_model.nav_model_body.NavModelBody` itself; the second column names the
 module that does consume each key. The grep
-``grep -c '^  [a-z_]\+:' src/spindoctor/config_files/config_040_bodies.yaml`` returns 31 keys, which
-matches the 31 bullets here.
+``grep -c '^  [a-z_]\+:' src/spindoctor/config_files/config_040_bodies.yaml`` returns 30 keys, which
+matches the 30 bullets here.
 
-- ``atmospheric_bodies`` — list[str], default ``[TITAN]`` (upper-case SPICE names). Bodies
-  whose opaque atmosphere hides the surface. They build no
-  :class:`~spindoctor.nav_model.nav_model_body.NavModelBody`; the
-  :doc:`atmospheric-body model <dev_guide_navigation_models_titan>` records a no-result for
-  them instead. Consumed by
-  :meth:`~spindoctor.nav_model.nav_model_body.NavModelBody.instances_for_obs` and
-  :meth:`~spindoctor.nav_model.nav_model_titan.NavModelTitan.instances_for_obs`.
 - ``min_bounding_box_area`` — int, default ``9`` px². Recorded on the model's metadata as
   ``size_ok``; sub-threshold bounding boxes are flagged for reviewer awareness. Does not by
   itself suppress feature emission. Its square root is also the "resolved" diameter cutoff
