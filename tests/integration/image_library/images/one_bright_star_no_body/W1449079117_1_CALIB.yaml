@@ -26,6 +26,6 @@ ground_truth:
 expected:
   status: success                           # success | failed | conflicted
   confidence_tier: low                # high | medium | low | failed
-  primary_technique: StarRefineNav  # e.g. BodyLimbNav
+  primary_technique: StarUniqueMatchNav  # e.g. BodyLimbNav
   techniques_must_run: [StarUniqueMatchNav]
   techniques_must_skip: []

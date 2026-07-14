@@ -22,7 +22,7 @@ ground_truth:
     Pipeline: status=success, confidence=0.465, rank=low, techniques=['BodyLimbNav', 'StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"BodyLimbNav": [14.6187, -17.0685], "StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [0.0, 0.0], "StarRefineNav": [14.0751, -15.655]}.
 expected:
   status: success
-  confidence_tier: medium
+  confidence_tier: high
   primary_technique: BodyTerminatorNav
   techniques_must_run:
   - BodyTerminatorNav

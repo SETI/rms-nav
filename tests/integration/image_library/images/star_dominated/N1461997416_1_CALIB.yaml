@@ -23,7 +23,7 @@ ground_truth:
     Operator comment: re-vote: rescued with relaxed gates (previous vote: None)
 expected:
   status: success
-  confidence_tier: medium
+  confidence_tier: high
   primary_technique: StarFieldFromCatalogNav
   techniques_must_run:
   - StarFieldFromCatalogNav

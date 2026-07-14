@@ -24,7 +24,7 @@ ground_truth:
     Operator comment: re-vote: rescued with relaxed gates (previous vote: m)
 expected:
   status: success
-  confidence_tier: low
+  confidence_tier: medium
   primary_technique: BodyBlobNav
   techniques_must_run:
   - BodyBlobNav

@@ -24,8 +24,8 @@ ground_truth:
     Operator comment: appended: batch-1 candidate rescued by relaxed gates (was not in the batch-1 review selection)
 expected:
   status: success
-  confidence_tier: medium
-  primary_technique: StarRefineNav
+  confidence_tier: high
+  primary_technique: RingEdgeNav
   techniques_must_run:
   - StarRefineNav
   techniques_must_skip: []

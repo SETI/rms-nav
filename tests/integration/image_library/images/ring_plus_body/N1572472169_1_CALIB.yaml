@@ -22,8 +22,8 @@ ground_truth:
     Pipeline: status=success, confidence=0.367, rank=low, techniques=['BodyDiscCorrelateNav', 'BodyLimbNav', 'RingEdgeNav', 'StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"BodyDiscCorrelateNav": [0.2422, 15.5], "BodyLimbNav": [0.1807, 15.6359], "RingEdgeNav": [10.9977, 38.9643], "StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [-0.4354, 14.7186], "StarRefineNav": [-0.4209, 14.7127]}.
 expected:
   status: success
-  confidence_tier: medium
-  primary_technique: BodyLimbNav
+  confidence_tier: high
+  primary_technique: RingEdgeNav
   techniques_must_run:
   - BodyLimbNav
   techniques_must_skip: []

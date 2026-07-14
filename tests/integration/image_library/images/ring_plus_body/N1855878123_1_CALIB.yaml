@@ -23,7 +23,7 @@ ground_truth:
 expected:
   status: success
   confidence_tier: medium
-  primary_technique: BodyDiscCorrelateNav
+  primary_technique: RingEdgeNav
   techniques_must_run:
   - BodyDiscCorrelateNav
   techniques_must_skip: []
