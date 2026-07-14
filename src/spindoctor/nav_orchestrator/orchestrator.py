@@ -517,6 +517,7 @@ class NavOrchestrator(NavBase):
         # an explicitly untrustworthy "best group" offset, and installing it
         # would lock pass-2 toward one arbitrary mode instead of letting pass-2
         # evidence break the tie.  ('failed' already returned above.)
+        prior_sources: frozenset[str] = frozenset()
         if (
             pass1_ensemble.status == 'success'
             and pass1_ensemble.offset_px is not None
@@ -526,11 +527,25 @@ class NavOrchestrator(NavBase):
                 offset_px=pass1_ensemble.offset_px,
                 covariance_px2=pass1_ensemble.covariance_px2,
             )
+            prior_sources = frozenset(pass1_ensemble.consensus_techniques)
         else:
             pass2_context = context
         self._logger.info('Pass 2: running prior-required techniques')
         pass2_results = self._run_pass(kept, pass2_context, requires_prior=True)
         self._logger.info('Pass 2: %d technique result(s) produced', len(pass2_results))
+        if prior_sources and pass2_results:
+            # Stamp each pass-2 result with the techniques whose pass-1
+            # consensus seeded its prior; the final ensemble lets such a
+            # result refine those techniques' offset but not corroborate
+            # it (issue #222).
+            pass2_results = [
+                dataclasses.replace(r, prior_source_techniques=prior_sources) for r in pass2_results
+            ]
+            self._logger.debug(
+                'Stamped %d pass-2 result(s) with prior sources: %s',
+                len(pass2_results),
+                ', '.join(sorted(prior_sources)),
+            )
         # Final ensemble over the union of both passes' results.
         final = ensemble(
             pass1_results + pass2_results,

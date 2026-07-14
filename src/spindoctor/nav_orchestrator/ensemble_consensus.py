@@ -26,8 +26,37 @@ from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 __all__ = [
     'ConsensusSelection',
     'consensus_selection',
+    'corroborating_confidence',
+    'corroborating_members',
     'result_param_vector',
 ]
+
+
+def corroborating_members(group: list[NavTechniqueResult]) -> list[NavTechniqueResult]:
+    """Members of a group whose agreement is an independent opinion.
+
+    A pass-2 result searches a small window around the pass-1 prior, so
+    its offset is conditionally dependent on whichever techniques seeded
+    that prior (``prior_source_techniques``).  When any of those
+    techniques sits in the same group, the pass-2 result's agreement
+    with the group corroborates nothing — it re-observed its own seed —
+    so it is dropped from every quorum, summed-confidence, and
+    agreement-boost computation.  It still contributes its
+    precision to the combined offset.
+
+    Parameters:
+        group: Results forming one agreement subset.
+
+    Returns:
+        The members whose vote counts, in input order.
+    """
+    names = {r.technique_name for r in group}
+    return [r for r in group if not (r.prior_source_techniques & (names - {r.technique_name}))]
+
+
+def corroborating_confidence(group: list[NavTechniqueResult]) -> float:
+    """Summed confidence over a group's corroborating members only."""
+    return sum(r.confidence for r in corroborating_members(group))
 
 
 def result_param_vector(res: NavTechniqueResult) -> NDArrayFloatType:
@@ -58,12 +87,13 @@ class ConsensusSelection:
     Parameters:
         best: The winning consensus subset (never empty).
         excluded: Viable results outside the winning subset, in input order.
-        runner_up_confidence: Highest summed confidence of any consensus
-            subset formed within ``excluded`` alone; ``0.0`` when nothing
-            was excluded.
+        runner_up_confidence: Highest corroborating summed confidence of
+            any consensus subset formed within ``excluded`` alone; ``0.0``
+            when nothing was excluded.
         runner_up_has_quorum: True when that runner-up subset has at least
-            two members -- a genuine alternative consensus rather than a
-            lone dissenter.
+            two *corroborating* members -- a genuine alternative consensus
+            rather than a lone dissenter (or a dissenter echoed only by
+            its own prior-descendant).
     """
 
     best: list[NavTechniqueResult]
@@ -150,12 +180,14 @@ def _best_neighborhood(
     adj: NDArrayBoolType,
     candidate_indices: list[int],
 ) -> list[int]:
-    """The candidate neighborhood with the highest summed confidence.
+    """The candidate neighborhood with the highest corroborating confidence.
 
     Each candidate ``i`` sponsors the subset of ``candidate_indices`` that
-    agree with it pairwise (including itself).  Subsets are scored by
-    summed confidence; ties break toward the larger subset, then toward
-    the earlier candidate, so the selection is deterministic.
+    agree with it pairwise (including itself).  Subsets are scored by the
+    summed confidence of their *corroborating* members (a prior-descendant
+    whose seeding technique is in the subset adds no vote mass); ties break
+    toward the larger subset, then toward the earlier candidate, so the
+    selection is deterministic.
 
     Parameters:
         results: The full per-technique result list (for confidences).
@@ -169,7 +201,7 @@ def _best_neighborhood(
     best_key = (float('-inf'), 0)
     for i in candidate_indices:
         subset = [j for j in candidate_indices if adj[i, j]]
-        key = (sum(results[j].confidence for j in subset), len(subset))
+        key = (corroborating_confidence([results[j] for j in subset]), len(subset))
         if key > best_key:
             best = subset
             best_key = key
@@ -259,8 +291,9 @@ def consensus_selection(
     runner_up_has_quorum = False
     if excluded_indices:
         runner_indices = _best_neighborhood(results, adj, excluded_indices)
-        runner_up_confidence = sum(results[j].confidence for j in runner_indices)
-        runner_up_has_quorum = len(runner_indices) >= 2
+        runner_group = [results[j] for j in runner_indices]
+        runner_up_confidence = corroborating_confidence(runner_group)
+        runner_up_has_quorum = len(corroborating_members(runner_group)) >= 2
     return ConsensusSelection(
         best=[results[i] for i in sorted(best_set)],
         excluded=[results[i] for i in excluded_indices],

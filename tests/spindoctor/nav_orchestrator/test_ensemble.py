@@ -1257,3 +1257,139 @@ def test_ensemble_rank_deficient_fused_result_caps_at_medium() -> None:
     assert result.status == 'success'
     assert result.status_reason.value == 'rank_1_only'
     assert result.confidence_rank == 'medium'
+
+
+def _refine_result(
+    *,
+    offset: tuple[float, float],
+    confidence: float = 0.5,
+    prior_sources: frozenset[str] = frozenset(),
+    cov: np.ndarray | None = None,
+) -> NavTechniqueResult:
+    """Build a pass-2 StarRefineNav result seeded by ``prior_sources``."""
+    return NavTechniqueResult(
+        technique_name='StarRefineNav',
+        feature_ids=('StarRefineNav:f1',),
+        offset_px=offset,
+        covariance_px2=cov if cov is not None else np.eye(2, dtype=np.float64) * 0.25,
+        confidence=confidence,
+        spurious=False,
+        at_edge=False,
+        diagnostics=StarRefineDiagnostics(n_stars_used=1),
+        prior_source_techniques=prior_sources,
+    )
+
+
+def test_ensemble_prior_descendant_does_not_boost_confidence() -> None:
+    """A refine seeded by its groupmate adds no agreement boost.
+
+    The N1492091163 anatomy: a wrong pass-1 result seeds the prior, the
+    1-star refine locks onto whatever sits near the (wrong) predicted
+    position, and the pair's 'agreement' must not raise the combined
+    confidence above what the pass-1 result carries alone.
+    """
+    ring = _make_result(technique_name='RingEdgeNav', offset=(6.7, -118.6), confidence=0.9)
+    tagged = _refine_result(offset=(6.8, -118.5), prior_sources=frozenset({'RingEdgeNav'}))
+    untagged = _refine_result(offset=(6.8, -118.5))
+    with_tag = ensemble(
+        [ring, tagged],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    without_tag = ensemble(
+        [ring, untagged],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert with_tag.status == 'success'
+    assert without_tag.confidence > with_tag.confidence
+    # The tagged pair collapses to the precision-weighted average with no
+    # 2-member agreement factor: (0.9 + 0.5) / 2 with equal covariances.
+    assert with_tag.confidence == pytest.approx(0.7)
+    assert without_tag.confidence == pytest.approx(0.99)
+
+
+def test_ensemble_prior_descendant_still_refines_the_offset() -> None:
+    """A tagged refine keeps contributing its precision to the combined offset."""
+    ring = _make_result(technique_name='RingEdgeNav', offset=(6.0, -118.0), confidence=0.9)
+    refine = _refine_result(offset=(7.0, -119.0), prior_sources=frozenset({'RingEdgeNav'}))
+    result = ensemble(
+        [ring, refine],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.offset_px is not None
+    # Equal covariances: the combined offset is the arithmetic mean.
+    assert result.offset_px[0] == pytest.approx(6.5)
+    assert result.offset_px[1] == pytest.approx(-118.5)
+    assert result.consensus_techniques == ['RingEdgeNav', 'StarRefineNav']
+
+
+def test_ensemble_descendant_backed_winner_is_singleton_in_standoff() -> None:
+    """A winner echoed only by its own refine has no quorum against a dissenter.
+
+    Best subset {A 0.6, refine-of-A 0.5} versus a lone dissenter at 0.55:
+    with the descendant's vote removed, this is a lone-vs-lone standoff
+    with a relative gap of (0.6 - 0.55) / 0.6 << agreement_gap, so the
+    result is conflicted; counting the refine as a second member would
+    have declared quorum and outlier-rejected the dissenter.
+    """
+    cov = np.eye(2, dtype=np.float64) * 0.25
+    a = _make_result(technique_name='TechniqueA', offset=(0.0, 0.0), cov=cov, confidence=0.6)
+    refine = _refine_result(
+        offset=(0.1, 0.1), confidence=0.5, prior_sources=frozenset({'TechniqueA'})
+    )
+    dissenter = _make_result(
+        technique_name='TechniqueB', offset=(30.0, 30.0), cov=cov, confidence=0.55
+    )
+    result = ensemble(
+        [a, refine, dissenter],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'conflicted'
+    assert result.excluded_from_consensus == ['TechniqueB']
+
+
+def test_ensemble_descendant_backed_runner_up_has_no_quorum() -> None:
+    """An excluded pair of (result, its own refine) is a lone dissenter, not a quorum."""
+    cov = np.eye(2, dtype=np.float64) * 0.25
+    a1 = _make_result(technique_name='TechniqueA1', offset=(0.0, 0.0), cov=cov, confidence=0.6)
+    a2 = _make_result(technique_name='TechniqueA2', offset=(0.1, 0.0), cov=cov, confidence=0.6)
+    b = _make_result(technique_name='TechniqueB', offset=(30.0, 30.0), cov=cov, confidence=0.5)
+    b_refine = _refine_result(
+        offset=(30.1, 30.0), confidence=0.4, prior_sources=frozenset({'TechniqueB'})
+    )
+    result = ensemble(
+        [a1, a2, b, b_refine],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    # Without the corroboration fix the excluded pair counts as a
+    # two-member runner-up (summed 0.9 against best 1.2, gap 0.3 < 0.5)
+    # and forces the conflicted branch; as a lone dissenter it is
+    # outlier-rejected instead.
+    assert result.status == 'success'
+    assert result.excluded_from_consensus == ['TechniqueB', 'StarRefineNav']
+
+
+def test_ensemble_untagged_results_unchanged_by_lineage_logic() -> None:
+    """Results without prior_source_techniques keep full corroboration semantics."""
+    a = _make_result(technique_name='TechniqueA', offset=(1.0, 2.0), confidence=0.85)
+    b = _make_result(technique_name='TechniqueB', offset=(1.05, 2.05), confidence=0.85)
+    result = ensemble(
+        [a, b],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.consensus_techniques == ['TechniqueA', 'TechniqueB']
+    # Two independent members still earn the 2-member agreement factor.
+    assert result.confidence == pytest.approx(0.99)
