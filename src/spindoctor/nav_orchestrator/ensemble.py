@@ -10,12 +10,20 @@ estimates become one offset.  Every step is honest:
    subset with the highest summed confidence wins.
 4. Exclude results outside the consensus from the combine.  A lone
    dissenter against a multi-technique consensus is outlier-rejected;
-   only a genuine alternative (a runner-up consensus with at least two
-   members, or no quorum anywhere) can force the conflicted branch.
+   only a genuine alternative can force the conflicted branch: a
+   runner-up consensus with at least two members (absolute
+   summed-confidence gap test), or a lone-vs-lone standoff where the
+   dissenter's confidence is comparable to the winner's (gap measured
+   relative to the winner, so an already-excluded low-confidence
+   dissenter retains no veto over a clearly stronger singleton).
 5. Combine offsets within the winning subset via precision-weighted
    (Kalman-style) merging.
 6. Apply optional disagreement / conflict penalties.
-7. Emit a NavResult carrying the excluded technique names.
+7. Cap the confidence tier at ``medium`` when every combined member is
+   a single-star solution (a one-star unique match or one-inlier
+   refine) — such results carry no independent cross-check, so they
+   never earn ``high`` no matter how tight their localization sigma.
+8. Emit a NavResult carrying the excluded technique names.
 
 The ensemble is tested in isolation against synthetic per-technique results;
 correctness here is what makes the rest of the pipeline trustworthy.
@@ -40,6 +48,10 @@ from spindoctor.nav_orchestrator.feature_summary import NavFeatureSummary
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from spindoctor.nav_orchestrator.nav_result import ConfidenceRank, NavResult
 from spindoctor.nav_orchestrator.provenance import Provenance
+from spindoctor.nav_technique.diagnostics import (
+    StarRefineDiagnostics,
+    StarUniqueMatchDiagnostics,
+)
 from spindoctor.nav_technique.nav_technique import technique_tier
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.support.exceptions import NavContractError
@@ -99,7 +111,14 @@ class EnsembleConfig:
             register as hundreds of sigmas apart and never group.
             Set to ``0.0`` to disable the floor.
         agreement_gap: Minimum summed-confidence gap between best and
-            runner-up groups before declaring a conflict.
+            runner-up groups before declaring a conflict.  Applied as an
+            absolute gap when the runner-up has a quorum (two or more
+            members); in a lone-vs-lone standoff (singleton best against
+            a singleton excluded dissenter) the gap is measured relative
+            to the winner — conflict fires only when
+            ``best - runner_up < agreement_gap * best`` — so a dissenter
+            with well under ``(1 - agreement_gap)`` of the winner's
+            confidence cannot veto it.
         disagreement_penalty: Multiplier on combined confidence when more
             than one group existed.
         conflicted_confidence_multiplier: Additional multiplier when the
@@ -725,6 +744,24 @@ def _combine_confidence(
     return combined
 
 
+def _is_single_star_result(res: NavTechniqueResult) -> bool:
+    """Return True when a result rests on a single star with no cross-check.
+
+    A one-star ``StarUniqueMatchNav`` match and a one-inlier
+    ``StarRefineNav`` refine each localize the offset from a single
+    detection: nothing in the solution corroborates the identification
+    itself.  The ensemble caps the tier of a consensus built solely from
+    such results (see :func:`ensemble`).  Multi-star solutions and every
+    non-star technique return False.
+    """
+    diag = res.diagnostics
+    if isinstance(diag, StarUniqueMatchDiagnostics):
+        return diag.mode == 'one_star'
+    if isinstance(diag, StarRefineDiagnostics):
+        return diag.n_stars_used <= 1
+    return False
+
+
 def derive_confidence_rank(
     *,
     confidence: float,
@@ -880,24 +917,39 @@ def ensemble(
             annotations=ann,
         )
     # Conflict check.  Excluded results force the conflicted branch only when
-    # they constitute a genuine alternative: a runner-up consensus with at
-    # least two members, or a lone-vs-lone standoff (the winning subset has no
-    # quorum either).  A single dissenter against a multi-technique consensus
-    # is outlier-rejected instead -- reported via excluded_from_consensus and
+    # they constitute a genuine alternative.  A runner-up consensus with at
+    # least two members contests via the absolute summed-confidence gap.  In
+    # a lone-vs-lone standoff (the winning subset has no quorum either) the
+    # gap is measured *relative to the winner*: the consensus selection has
+    # already excluded the dissenter as an outlier, so it retains veto power
+    # only while its confidence is comparable to the winner's -- a dissenter
+    # at half the winner's confidence is outlier-rejected, not a conflict
+    # (issue #258).  A single dissenter against a multi-technique consensus
+    # is always outlier-rejected -- reported via excluded_from_consensus and
     # the disagreement penalty, not as a conflict.
     if excluded:
-        genuine_alternative = selection.runner_up_has_quorum or len(best_group) == 1
         gap = best_summed_conf - selection.runner_up_confidence
-        if genuine_alternative and gap < cfg.agreement_gap:
+        if selection.runner_up_has_quorum:
+            is_conflict = gap < cfg.agreement_gap
+        elif len(best_group) == 1:
+            is_conflict = gap < cfg.agreement_gap * best_summed_conf
+        else:
+            is_conflict = False
+        if is_conflict:
             conflicted_confidence = combined_confidence * cfg.conflicted_confidence_multiplier
+            effective_gap_threshold = (
+                cfg.agreement_gap
+                if selection.runner_up_has_quorum
+                else cfg.agreement_gap * best_summed_conf
+            )
             IMAGE_LOGGER.info(
                 'Conflicted: best-vs-runner-up summed-confidence gap %.3f is '
-                'below the agreement_gap threshold %.3f '
+                'below the effective agreement_gap threshold %.3f '
                 '(best %.3f, runner-up %.3f, runner-up quorum: %s); '
                 'conflicted confidence = %.3f '
                 '(combined %.3f x conflicted_multiplier %.3f)',
                 gap,
-                cfg.agreement_gap,
+                effective_gap_threshold,
                 best_summed_conf,
                 selection.runner_up_confidence,
                 selection.runner_up_has_quorum,
@@ -952,6 +1004,19 @@ def ensemble(
         sigma_px=(sigma_dv, sigma_du),
         tier_thresholds=cfg.tier_thresholds,
     )
+    if rank == 'high' and all(_is_single_star_result(r) for r in best_group):
+        # A single-star solution's confidence is deliberately capped to say
+        # "weak, no cross-check" (the one-inlier refine caps at exactly the
+        # high tier's confidence boundary), and its localization sigma is
+        # CRLB-tight, so it would otherwise clear the high gates.  A result
+        # whose every combined member rests on one star tops out at medium
+        # (issue #263).
+        IMAGE_LOGGER.info(
+            'Tier capped at medium: every consensus member is a single-star '
+            'solution with no independent cross-check (%s)',
+            ', '.join(r.technique_name for r in best_group),
+        )
+        rank = 'medium'
     if rank == 'failed':
         # Confidence + sigma combination doesn't earn any tier.  Distinguish the
         # two causes: if the combined confidence cleared the *lowest* tier's
