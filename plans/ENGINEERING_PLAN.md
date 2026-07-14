@@ -21,16 +21,16 @@ fields to match current behavior.
 
 ## Track B — Navigation correctness
 
-Ordering within the track: the ensemble/gate cluster first (#221, #222,
-#258, #259, #261 — confidently-wrong or correct-answer-discarded defects
-that the agreement study will consume ensemble output at scale, and that
-several curated library frames now pin as standing red regressions),
-then the triage sessions (#237, #238), then the investigation/design
-items (#179, #25, #128/#150), with the smaller items (#24, #130, #132,
-#133, #180) as fill. The five cluster defects were all surfaced or
-corroborated by the 2026-07-13 Phase D operator review on real frames;
-the library entries carrying their evidence are in the
-`phase-d-reconciliation` branch.
+Ordering within the track: the ensemble/gate cluster first. These are the
+confidently-wrong or correct-answer-discarded defects (issues
+#221/#222/#258/#259/#261) that the agreement study will consume ensemble
+output at scale, and that several curated library frames now pin as
+standing red regressions. Then the triage sessions (#237, #238), then
+the investigation/design items (#179, #25, #128/#150), with the smaller
+items (#24, #130, #132, #133, and #180) as fill. The five cluster defects
+were all surfaced or corroborated by the 2026-07-13 Phase D operator
+review on real frames; the library entries carrying their evidence are in
+the `phase-d-reconciliation` branch.
 
 ### #221 — Rank-1 ring result outvotes an absolute constraint
 

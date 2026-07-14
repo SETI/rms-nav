@@ -224,8 +224,9 @@ analyses never run per-PR.
 (PR #260) fills the last empty class, `ring_only_flat` (five rank-1
 frames plus a sixth 2-D frame, N1467344214, routed to `ring_only_curved`
 with the Phase D reconciliation because the DT gate over-rejects it,
-#261). The Phase D frame reconciliation (branch `phase-d-reconciliation`)
-re-verified five existing frames and awaits the operator tier ratchet.
+issue #261). The Phase D frame reconciliation (branch
+`phase-d-reconciliation`, PR #262) re-verified five frames and applied the
+D6 tier ratchet across the library.
 Batch 5 also queued manual-nav frames for `one_bright_star_no_body`,
 `faint_stars`, and `body_mostly_offscreen`, so step 2 is next.*
 

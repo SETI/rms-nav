@@ -109,9 +109,14 @@ def _check_one(sidecar_path_str: str) -> dict[str, Any]:
         row['offset_ok'] = None
     per_technique = nav_meta.get('per_technique', [])
     names = [entry.get('technique_name') for entry in per_technique]
-    if sidecar.expected.status == 'success' and per_technique:
+    # The primary is the highest-confidence NON-spurious technique: a
+    # spurious result is excluded from the ensemble, so it cannot be the
+    # primary even when its raw confidence is high (e.g. a rank-1 RingEdgeNav
+    # flagged spurious on a ring_plus_body frame).
+    non_spurious = [e for e in per_technique if not e.get('spurious', False)]
+    if sidecar.expected.status == 'success' and non_spurious:
         ordered = sorted(
-            per_technique,
+            non_spurious,
             key=lambda entry: (
                 -float(entry.get('confidence', 0.0)),
                 str(entry.get('technique_name')),

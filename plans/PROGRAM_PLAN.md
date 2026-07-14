@@ -67,8 +67,8 @@ Voyager only), against a first-stage budget of 47 spanning 17 scene classes
 and a final target of at least 120 across all four instruments. Review
 batch 5 is landing (PR #260, six frames) and fills the last empty class,
 `ring_only_flat`; the Phase D frame reconciliation (branch
-`phase-d-reconciliation`) is in progress and awaits the operator's tier
-ratchet pass.
+`phase-d-reconciliation`, PR #262) re-verified five frames and applied the
+D6 tier ratchet across the library.
 
 ## 3. Why validation dominates the remainder (plain-language version)
 
