@@ -35,8 +35,8 @@ from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import (
     ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
-    add_model_error_floor,
-    load_model_error_floor,
+    add_size_scaled_model_error,
+    load_ncc_covariance_tuning,
     log_confidence_breakdown,
     search_window_for_obs,
 )
@@ -236,7 +236,7 @@ class BodyDiscCorrelateNav(NavTechnique):
         )
         self._consistency_max_px = float(self.tuning['consistency_max_px'])
         self._refine_lowpass_sigma_px = float(self.tuning['refine_lowpass_sigma_px'])
-        self._model_error_floor_px = load_model_error_floor(self.tuning, self.name)
+        self._cov_tuning = load_ncc_covariance_tuning(self.tuning, self.name)
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable BODY_DISC feature.
@@ -336,6 +336,9 @@ class BodyDiscCorrelateNav(NavTechnique):
                     data_mask=context.sensor_mask_ext,
                     use_gradient='auto',
                     refine_lowpass_sigma_px=self._refine_lowpass_sigma_px,
+                    localization_uncertainty_scale=(
+                        self._cov_tuning.localization_uncertainty_scale
+                    ),
                     logger=self.logger,
                 )
             dv = float(ncc_result['offset'][0])
@@ -347,8 +350,17 @@ class BodyDiscCorrelateNav(NavTechnique):
                     f'covariance with shape {covariance_2x2.shape}; expected (2, 2). '
                     'Investigate the pyramid output rather than silently slicing.'
                 )
-            # Model-error floor (#210); rationale on load_model_error_floor.
-            covariance_2x2 = add_model_error_floor(covariance_2x2, self._model_error_floor_px)
+            # Size-scaled silhouette model error plus absolute floor: the bare
+            # peak-curvature covariance measures statistical precision only, so
+            # add the body-diameter-proportional shape-mismatch term and the
+            # pointing / distortion floor (the localization-spread term was
+            # already folded in by the correlator).
+            covariance_2x2 = add_size_scaled_model_error(
+                covariance_2x2,
+                size_px=self._max_body_extent_px(eligible),
+                size_frac=self._cov_tuning.model_error_size_frac,
+                floor_px=self._cov_tuning.model_error_floor_px,
+            )
             spurious = bool(ncc_result['spurious'])
             at_edge_translation = bool(ncc_result['at_edge'])
             quality = float(ncc_result['quality'])
@@ -448,12 +460,28 @@ class BodyDiscCorrelateNav(NavTechnique):
         """
         if not features:
             return self._consistency_max_px
+        scaled_px = self._consistency_max_fraction_of_diameter * self._max_body_extent_px(features)
+        return max(self._consistency_max_px, scaled_px)
+
+    @staticmethod
+    def _max_body_extent_px(features: list[NavFeature]) -> float:
+        """Return the largest ext-FOV bbox extent across the consumed features.
+
+        Used both as the diameter that scales the consistency cap and as the
+        silhouette-model-error size in the reported covariance.
+
+        Parameters:
+            features: Consumed BODY_DISC features.
+
+        Returns:
+            The largest ``max(v_extent, u_extent)`` in pixels, or ``0.0`` when
+            ``features`` is empty.
+        """
         max_extent_px = 0
         for feature in features:
             v_min, u_min, v_max, u_max = feature.geometry.bbox_extfov_vu
             max_extent_px = max(max_extent_px, v_max - v_min, u_max - u_min)
-        scaled_px = self._consistency_max_fraction_of_diameter * float(max_extent_px)
-        return max(self._consistency_max_px, scaled_px)
+        return float(max_extent_px)
 
     def _run_3dof_pyramid(
         self,
@@ -672,6 +700,7 @@ class BodyDiscCorrelateNav(NavTechnique):
             data_mask=data_mask,
             use_gradient='auto',
             refine_lowpass_sigma_px=self._refine_lowpass_sigma_px,
+            localization_uncertainty_scale=self._cov_tuning.localization_uncertainty_scale,
             logger=self.logger,
         )
 
