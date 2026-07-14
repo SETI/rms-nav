@@ -951,3 +951,19 @@ def test_orchestrator_calibrated_if_mostly_nan_short_circuits() -> None:
     assert result.status == 'failed'
     assert result.status_reason == NavStatusReason.MISSING_DATA_DOMINANT
     assert result.per_technique == []
+
+
+def test_orchestrator_stamps_pass2_prior_source_techniques(fake_obs: _FakeObs) -> None:
+    """Pass-2 results carry the technique names whose consensus seeded the prior."""
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator(
+        [model],
+        only_techniques=['_FakeStarTechnique', '_PassTwoTechnique'],
+    )
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'success'
+    by_name = {r.technique_name: r for r in result.per_technique}
+    assert by_name['_PassTwoTechnique'].prior_source_techniques == frozenset({'_FakeStarTechnique'})
+    # Pass-1 results are never stamped.
+    assert by_name['_FakeStarTechnique'].prior_source_techniques == frozenset()

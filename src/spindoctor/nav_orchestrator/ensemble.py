@@ -19,6 +19,10 @@ estimates become one offset.  Every step is honest:
    dissenter's confidence is comparable to the winner's (gap measured
    relative to the winner, so an already-excluded low-confidence
    dissenter retains no veto over a clearly stronger singleton).
+   Vote mass, quorum, and the agreement boost count only *corroborating*
+   members: a pass-2 result whose prior was seeded by a technique in the
+   same subset re-observed its own seed, so it refines the offset but
+   casts no independent vote.
 5. Combine offsets within the winning subset via precision-weighted
    (Kalman-style) merging.
 6. Apply optional disagreement / conflict penalties.
@@ -50,6 +54,8 @@ from spindoctor.feature.constants import (
 )
 from spindoctor.nav_orchestrator.ensemble_consensus import (
     consensus_selection,
+    corroborating_confidence,
+    corroborating_members,
     result_param_vector,
 )
 from spindoctor.nav_orchestrator.ensemble_observability import (
@@ -477,7 +483,16 @@ def _combine_confidence(
     weighted_avg = sum(w * r.confidence for w, r in zip(weights, group, strict=True))
     weighted_avg /= w_total
     significant_threshold = 0.1 * max(weights)
-    n_significant = sum(1 for w in weights if w > significant_threshold)
+    # The agreement boost reflects independent corroboration, so a
+    # prior-descendant whose seeding technique is in the group does not
+    # count toward it (issue #222) — its agreement re-observes its own seed.  Its
+    # precision still participates in the weighted average.
+    corroborating = set(corroborating_members(group))
+    n_significant = sum(
+        1
+        for w, r in zip(weights, group, strict=True)
+        if w > significant_threshold and r in corroborating
+    )
     if n_significant <= 1:
         agreement_factor = 1.0
     else:
@@ -630,7 +645,12 @@ def ensemble(
     best_group = selection.best
     excluded = selection.excluded
     excluded_names = [r.technique_name for r in excluded]
-    best_summed_conf = sum(r.confidence for r in best_group)
+    consensus_names = [r.technique_name for r in best_group]
+    # Vote mass and quorum count only corroborating members: a pass-2
+    # prior-descendant refines the offset but casts no independent vote
+    # (issue #222).
+    best_summed_conf = corroborating_confidence(best_group)
+    best_has_quorum = len(corroborating_members(best_group)) >= 2
     apply_disagreement_penalty = bool(excluded)
     try:
         combined = _combine_precision_weighted(
@@ -676,7 +696,7 @@ def ensemble(
         gap = best_summed_conf - selection.runner_up_confidence
         if selection.runner_up_has_quorum:
             is_conflict = gap < cfg.agreement_gap
-        elif len(best_group) == 1:
+        elif not best_has_quorum:
             is_conflict = gap < cfg.agreement_gap * best_summed_conf
         else:
             is_conflict = False
@@ -711,6 +731,7 @@ def ensemble(
                 image_classifier=image_classifier,
                 provenance=provenance,
                 excluded_from_consensus=excluded_names,
+                consensus_techniques=consensus_names,
                 model_metadata=md,
                 annotations=ann,
             )
@@ -824,6 +845,7 @@ def ensemble(
         provenance=provenance,
         sigma_along_unobservable_px=sigma_along_unobservable_px,
         excluded_from_consensus=excluded_names,
+        consensus_techniques=consensus_names,
         model_metadata=md,
         annotations=ann,
         rotation_rad=combined.rotation_rad,

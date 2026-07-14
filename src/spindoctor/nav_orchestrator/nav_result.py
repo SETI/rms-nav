@@ -55,6 +55,11 @@ class NavResult:
             against a multi-technique consensus, or (on a conflicted
             result) the runner-up alternative.  Empty when every viable
             result contributed.
+        consensus_techniques: Technique names of the results the ensemble
+            actually combined into the reported offset (the winning
+            consensus subset), in input order.  Empty on failure.  The
+            orchestrator uses this to stamp pass-2 results with the
+            techniques that seeded their prior.
         feature_inventory: Per-feature summary entries — what was
             extracted, what survived the gate, and why.
         image_classifier: The image-quality classifier's verdict.
@@ -82,6 +87,7 @@ class NavResult:
     image_classifier: NavImageClassifierResult
     provenance: Provenance
     excluded_from_consensus: list[str] = field(default_factory=list)
+    consensus_techniques: list[str] = field(default_factory=list)
     model_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
     annotations: Annotations = field(default_factory=Annotations)
     rotation_rad: float | None = None
@@ -170,6 +176,7 @@ class NavResult:
         provenance: Provenance,
         sigma_along_unobservable_px: float | None = None,
         excluded_from_consensus: list[str] | None = None,
+        consensus_techniques: list[str] | None = None,
         model_metadata: dict[str, dict[str, Any]] | None = None,
         annotations: Annotations | None = None,
         rotation_rad: float | None = None,
@@ -197,6 +204,7 @@ class NavResult:
             image_classifier=image_classifier,
             provenance=provenance,
             excluded_from_consensus=excluded_from_consensus or [],
+            consensus_techniques=consensus_techniques or [],
             model_metadata=model_metadata or {},
             annotations=annotations if annotations is not None else Annotations(),
             rotation_rad=rotation_rad,
@@ -215,6 +223,7 @@ class NavResult:
         image_classifier: NavImageClassifierResult,
         provenance: Provenance,
         excluded_from_consensus: list[str] | None = None,
+        consensus_techniques: list[str] | None = None,
         model_metadata: dict[str, dict[str, Any]] | None = None,
         annotations: Annotations | None = None,
     ) -> 'NavResult':
@@ -240,6 +249,7 @@ class NavResult:
             image_classifier=image_classifier,
             provenance=provenance,
             excluded_from_consensus=excluded_from_consensus or [],
+            consensus_techniques=consensus_techniques or [],
             model_metadata=model_metadata or {},
             annotations=annotations if annotations is not None else Annotations(),
         )
