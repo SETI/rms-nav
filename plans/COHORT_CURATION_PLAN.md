@@ -220,6 +220,15 @@ analyses never run per-PR.
 
 ## 5. Order of work
 
+*Status (2026-07-13): step 1 is essentially done. Review batch 5
+(PR #260) fills the last empty class, `ring_only_flat` (five rank-1
+frames plus a sixth 2-D frame, N1467344214, routed to `ring_only_curved`
+with the Phase D reconciliation because the DT gate over-rejects it,
+#261). The Phase D frame reconciliation (branch `phase-d-reconciliation`)
+re-verified five existing frames and awaits the operator tier ratchet.
+Batch 5 also queued manual-nav frames for `one_bright_star_no_body`,
+`faint_stars`, and `body_mostly_offscreen`, so step 2 is next.*
+
 1. Fill the empty scene classes of the first-stage budget first (per-class
    state: compare the appendix budget table against
    `tests/integration/image_library/images/*/`), one review batch.

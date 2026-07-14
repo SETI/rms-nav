@@ -46,9 +46,10 @@ The engineering core is built and healthy: the full navigation architecture
 (nine autonomous techniques plus manual), reprojection, backplanes,
 simulation, rank-1 (single-axis) ring support, the statistics system
 (`sd_stats_ingest` / `sd_stats_report`), and strict quality gates (typing,
-linting, ~1,900 tests) are in place. PDS4 bundle generation exists only
-as partially implemented machinery (see Track D). An independent project
-review (2026-07-08) rated the engineering strong and the self-assessment
+linting, ~2,600 tests) are in place. PDS4 bundle generation exists only
+as partially implemented machinery (see Track D), though its generator
+backend is now spec-tested (PR #257). An independent project review
+(2026-07-08) rated the engineering strong and the self-assessment
 honest.
 
 What the same review identified as the single real deficit still stands,
@@ -63,8 +64,11 @@ defensible one is Track A, the largest remaining block.
 The curated image library — the raw material for both regression testing
 and validation — stands at 62 operator-verified images (Cassini and
 Voyager only), against a first-stage budget of 47 spanning 17 scene classes
-(4 classes still empty or underfilled) and a final target of at least 120
-across all four instruments.
+and a final target of at least 120 across all four instruments. Review
+batch 5 is landing (PR #260, six frames) and fills the last empty class,
+`ring_only_flat`; the Phase D frame reconciliation (branch
+`phase-d-reconciliation`) is in progress and awaits the operator's tier
+ratchet pass.
 
 ## 3. Why validation dominates the remainder (plain-language version)
 
@@ -168,9 +172,25 @@ The known defects:
   of the track: it is a tier-honesty defect.
 - **#222** — second-pass star refinement corroborates its own first-pass
   input but votes as an independent opinion, inflating consensus
-  confidence. Same class of defect.
+  confidence. Same class of defect. Two real-frame instances found in
+  Phase D (N1686349893, N1572105349): the 1-star refine degrades an
+  otherwise-correct body fix to ~1.8 px error while keeping a high tier.
+- **#258** — an exact recovery is downgraded to `conflicted` by a
+  low-confidence dissenter the consensus logic has already excluded
+  (two stars_plus_body frames); the agreement-gap test still counts the
+  excluded member. Same ensemble cluster as #221/#222.
+- **#259** — a one-star match with an 18 px residual passes every gate
+  on a negative-case Galileo frame (no residual gate on the one-star
+  path; the #211 ambiguity gate is vacuous with no rival). Confidently
+  wrong on an unnavigable scene.
+- **#261** — the DT mis-convergence gate false-flags a correct
+  RingEdgeNav fit spurious (per-edge median driven by one poor edge in a
+  multi-edge fusion); the frame navigates but the pipeline discards its
+  own correct high-confidence result. Concrete library datapoint for
+  #179.
 - **#179** — the coarse search can lock onto the wrong edge population;
-  needs a calibration pass against the library.
+  needs a calibration pass against the library (feeds, and is fed by,
+  #261).
 - **#128 / #150** — the strategic limb-navigation redesign and the ~0.1 px
   limb systematic (shared with Track A's WS-10; design first, validate
   against real images before touching).
@@ -326,12 +346,13 @@ and the five decision gates, not by any implementation.
 
 Every open issue, by track. **Bold** = created after the 2026-07-11
 review (the 2026-07-12 reconciliation; #251-#254 and #256 by the
-2026-07-13 backend test suites, PRs #255/#257).
+2026-07-13 backend test suites, PRs #255/#257; #258, #259, #261 by the
+2026-07-13 Phase D operator review).
 
 | Track | Issues |
 |---|---|
 | A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, **#224**, **#225**, **#226**, **#227**, **#228**, **#229**, **#230**, **#232**, **#233**, **#234**, **#235** |
-| B — navigation correctness | #24, #25, #128, #130, #132, #133, #179, #180, #210, #221, #222, **#237**, **#238**, **#239**, **#254** |
+| B — navigation correctness | #24, #25, #128, #130, #132, #133, #179, #180, #210, #221, #222, **#237**, **#238**, **#239**, **#254**, **#258**, **#259**, **#261** |
 | C — statistics & QA | **#240** (plus the standing cross-check and campaign-report practice) |
 | D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #60, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #139, #141, #142, #188, **#231**, **#236**, **#251**, **#252**, **#253**, **#256** |
 | E — test & docs debt | #122, #129, #177, #178, **#241**, **#242**, **#243**, **#244**, **#245** |
