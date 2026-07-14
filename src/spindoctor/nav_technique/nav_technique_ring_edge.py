@@ -464,7 +464,7 @@ class RingEdgeNav(NavTechnique):
                 # alignments the DT cannot rule out (the whole point of
                 # the waived veto).  The LM covariance measures only the
                 # statistical precision of the anchored vertices, so add
-                # the waiver sigma floor in quadrature (the #210
+                # the waiver sigma floor in quadrature (the model-error-floor
                 # convention) to keep the fix below the medium tier's
                 # sigma cap: it surfaces as a low-tier result and cannot
                 # outweigh a full-support fix in the ensemble.
