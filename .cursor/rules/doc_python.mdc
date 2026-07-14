@@ -36,6 +36,10 @@ and build requirements without repeating them.
 - Describe the **current** state of the software only. Never anchor prose to a
   moment in time or to migration history: avoid "new", "legacy", "old",
   "now", "recently", "as before", "backwards compatible", and similar framing.
+- Do not cite issue/ticket numbers in documentation prose. Docs describe how the
+  software behaves, not the tracker items that shaped it; issue numbers belong in
+  commit messages, PR descriptions, and (only as a supporting reference, never as
+  the whole comment) code comments.
 - Do not use unicode smart quotes, em-dashes, or arrows inside `.py` files
   (they are acceptable in `.rst` and `.md`).
 
