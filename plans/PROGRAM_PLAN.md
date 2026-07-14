@@ -62,13 +62,15 @@ itself unproven, which is why every output still carries a
 defensible one is Track A, the largest remaining block.
 
 The curated image library — the raw material for both regression testing
-and validation — stands at 62 operator-verified images (Cassini and
-Voyager only), against a first-stage budget of 47 spanning 17 scene classes
-and a final target of at least 120 across all four instruments. Review
-batch 5 is landing (PR #260, six frames) and fills the last empty class,
-`ring_only_flat`; the Phase D frame reconciliation (branch
-`phase-d-reconciliation`, PR #262) re-verified five frames and applied the
-D6 tier ratchet across the library.
+and validation — stands at 69 operator-verified images (predominantly
+Cassini, with a few Voyager, Galileo, and New Horizons), against a
+first-stage budget of 47 spanning 17 scene classes and a final target of
+at least 120 across all four instruments. Review batch 5 (PR #260, six
+frames) merged and filled the last empty class, `ring_only_flat`; the
+operator library review (branch `phase-d-reconciliation`, PR #262)
+re-verified five frames, added a sixth, and applied the tier ratchet
+across the library. Batch 5 also queued manual-nav frames toward the
+per-class minima.
 
 ## 3. Why validation dominates the remainder (plain-language version)
 
