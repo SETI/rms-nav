@@ -1,0 +1,49 @@
+schema_version: 1
+# COISS | VGISS | GOSSI | NHLORRI
+mission: COISS
+# NAC | WAC | SSI | NA | WA | LORRI
+camera: WAC
+image_id: W1444747627_1_CALIB
+image_datetime_utc: '2003-10-13T14:25:18.657'
+exposure_time_sec: 1.8000
+# canonicalized: filters sorted, '+'-joined
+filter_combo: 'CL1+VIO'
+image_url: 'pds3://calibrated/COISS_1xxx/COISS_1008/data/1444744636_1444749812/W1444747627_1_CALIB.IMG'
+
+# First tag is the primary class; must match the directory the
+# sidecar lives in.
+scene_tags:
+  - stars_plus_body
+
+ground_truth:
+  offset_dv_px: 0.0000
+  offset_du_px: -3.3758
+  # 1sigma marginal; tighten for bright stars / sharp limbs.
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-13
+  ui_version: 'spindoctor 0.1.dev63'
+  notes: |
+    Cassini WAC clear+VIO frame from the COISS_1xxx Jupiter cruise leg
+    (2003), navigable via its star field and body. Saturn's rings are
+    far too distant to appear in this frame (the rings model correctly
+    emits no feature), so this is a stars_plus_body scene; an earlier
+    ring_only_curved classification with a RingAnnulusNav expectation
+    was wrong. Ground truth was operator-verified by star/body alignment
+    in the manual-nav dialog (2026-07-13). The default pipeline currently
+    fails this frame (all_techniques_spurious; only the two star
+    techniques run and both self-flag spurious) - a star-navigation gate
+    gap, tracked separately; expected below encodes the navigable truth,
+    so the autonomous regression stays red locally until that gap is
+    closed.
+
+expected:
+  # success | failed | conflicted
+  status: success
+  # high | medium | low | failed
+  confidence_tier: low
+  # e.g. BodyLimbNav
+  primary_technique: StarFieldFromCatalogNav
+  techniques_must_run: []
+  techniques_must_skip: []

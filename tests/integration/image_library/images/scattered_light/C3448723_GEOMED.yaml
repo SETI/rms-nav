@@ -19,11 +19,12 @@ ground_truth:
     scattered_light exemplar from cohort-curation review batch 004 (seq 014).
     Selection: VGISS | 1980; {"filter": "CH4_JS", "gradient_amplitude": 24.70885, "gradient_score": 8.4, "surrogate": "Saturn-target frame, nothing resolved in FOV", "target": "SATURN", "texp_s": 7.68, "year": "1980"}.
     Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
-    Pipeline: status=success, confidence=0.401, rank=low, techniques=['BodyDiscCorrelateNav', 'BodyLimbNav', 'StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"BodyDiscCorrelateNav": [-28.9297, -16.7656], "BodyLimbNav": [-28.8277, -17.0884], "StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [0.0, 0.0], "StarRefineNav": [-27.4357, -17.1837]}.
+    First-curation pipeline snapshot (2026-07): status=success, confidence=0.401, rank=low, techniques=['BodyDiscCorrelateNav', 'BodyLimbNav', 'StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"BodyDiscCorrelateNav": [-28.9297, -16.7656], "BodyLimbNav": [-28.8277, -17.0884], "StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [0.0, 0.0], "StarRefineNav": [-27.4357, -17.1837]}.
+    A later clean run of the default pipeline (2026-07-13) navigates this frame at medium/0.99 after the confidence recalibration that followed first curation; expected.confidence_tier reflects that current behavior. The frame no longer needs the relaxed-gate rescue its earlier snapshot was taken under.
 expected:
   status: success
-  confidence_tier: low
-  primary_technique: BodyLimbNav
+  confidence_tier: medium
+  primary_technique: BodyDiscCorrelateNav
   techniques_must_run:
   - BodyLimbNav
   techniques_must_skip: []

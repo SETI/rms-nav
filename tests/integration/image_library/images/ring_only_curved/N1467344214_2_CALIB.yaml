@@ -1,0 +1,51 @@
+schema_version: 1
+# COISS | VGISS | GOSSI | NHLORRI
+mission: COISS
+# NAC | WAC | SSI | NA | WA | LORRI
+camera: NAC
+image_id: N1467344214_2_CALIB
+image_datetime_utc: '2004-07-01T03:12:39.291'
+exposure_time_sec: 0.0050
+# canonicalized: filters sorted, '+'-joined
+filter_combo: 'CL1+CL2'
+image_url: 'pds3://calibrated/COISS_2xxx/COISS_2004/data/1466584989_1467427246/N1467344214_2_CALIB.IMG'
+
+# First tag is the primary class; must match the directory the
+# sidecar lives in.
+scene_tags:
+  - ring_only_curved
+
+ground_truth:
+  offset_dv_px: 42.9300
+  offset_du_px: -8.0859
+  # 1sigma marginal; tighten for bright stars / sharp limbs.
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-13
+  ui_version: 'spindoctor 0.1.dev63'
+  notes: |
+    Dark, faint C-ring edge frame (COISS_2004, 5 ms exposure), found by
+    the seed-20260708 metadata scan (cohort review batch 5). The
+    operator confirmed on a hard stretch that the overlay aligns at this
+    offset (2026-07-13). Full 2-D result (rank_1=False: the edge set
+    spans enough orientation to constrain both axes), so this is a
+    curved-ring scene, not a flat/rank-1 one.
+
+    RingEdgeNav converges to exactly this offset at RMS 0.21 px and
+    confidence 0.952, but the mis-convergence gate flags the result
+    spurious (per_edge_median_max 46.4 px, inliers 821/3188 = 26%: one
+    of the three edges fits poorly while the good edges pin the correct
+    offset), so the default pipeline reports failed. The offset is
+    correct; the spurious flag is a false positive - the gate gap this
+    entry marks (issue #261).
+
+expected:
+  # success | failed | conflicted
+  status: success
+  # high | medium | low | failed
+  confidence_tier: low
+  # e.g. BodyLimbNav
+  primary_technique: RingEdgeNav
+  techniques_must_run: [RingEdgeNav]
+  techniques_must_skip: []

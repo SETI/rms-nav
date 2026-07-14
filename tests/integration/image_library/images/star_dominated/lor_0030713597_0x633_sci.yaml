@@ -22,7 +22,7 @@ ground_truth:
     Pipeline: status=success, confidence=0.473, rank=low, techniques=['StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"StarFieldFromCatalogNav": [-1.1947, -1.4939], "StarUniqueMatchNav": [-1.1644, -1.6084], "StarRefineNav": [-1.1005, -1.5072]}.
 expected:
   status: success
-  confidence_tier: medium
+  confidence_tier: high
   primary_technique: StarFieldFromCatalogNav
   techniques_must_run:
   - StarFieldFromCatalogNav

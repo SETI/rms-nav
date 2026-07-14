@@ -1,41 +1,45 @@
 schema_version: 1
+# COISS | VGISS | GOSSI | NHLORRI
+mission: COISS
+# NAC | WAC | SSI | NA | WA | LORRI
+camera: NAC
 image_id: N1484593951_2_CALIB
-mission: COISS            # COISS | VGISS | GOSSI | NHLORRI
-camera: NAC              # NAC | WAC | SSI | NA | WA | LORRI
-filter_combo: 'CL1+CL2'          # canonicalized: filters sorted, '+'-joined
+image_datetime_utc: '2005-01-16T18:46:23.860'
+exposure_time_sec: 0.1000
+# canonicalized: filters sorted, '+'-joined
+filter_combo: 'CL1+CL2'
 image_url: 'pds3://calibrated/COISS_2xxx/COISS_2009/data/1484573295_1484664788/N1484593951_2_CALIB.IMG'
 
+# First tag is the primary class; must match the directory the
+# sidecar lives in.
 scene_tags:
-  - body_partial_overflow              # First tag is the primary class;
-                                       # must match the directory the
-                                       # sidecar lives in.
+  - body_partial_overflow
 
 ground_truth:
-  offset_dv_px: 11.0000
-  offset_du_px: 29.5000
-  offset_uncertainty_px: 1.0           # 1sigma marginal; tighten
-                                       # for bright stars / sharp limbs.
+  offset_dv_px: 13.9306
+  offset_du_px: 28.7209
+  # 1sigma marginal; tighten for bright stars / sharp limbs.
+  offset_uncertainty_px: 1.0
   source: operator_verified
   operator: rfrench
-  verified_date: 2026-04-29
-  ui_version: 'spindoctor 0.1.dev25'
+  verified_date: 2026-07-13
+  ui_version: 'spindoctor 0.1.dev63'
   notes: |
-    Large Rhea partially visible continuing to the upper right.
-    Good limb.  Body extractor reports overflow_fraction = 0.222
-    (i.e. 22 % of the disc is off-frame), which sits below the
-    BODY_DISC emission gate (overflow <= 0.3) so BodyDiscCorrelateNav
-    runs on this image — and correctly flags itself spurious because
-    the disc-template NCC peak collapses against the heavily-cropped
-    silhouette.  BodyLimbNav converges to (12.06, 30.53) px, within
-    the 1.0 px ground-truth uncertainty of the operator's (11.0,
-    29.5).  BodyTerminatorNav runs but flags itself spurious (0 / 895
-    inliers; LM did not iterate) so the spec's hard-zero gate forces
-    its confidence to 0.  BodyLimbNav is therefore the only
-    non-spurious technique and becomes the orchestrator's primary.
+    Body partially overflowing the FOV with a visible limb arc,
+    navigable by eye. Ground truth was operator-verified in the
+    manual-nav dialog (2026-07-13), correcting an earlier offset of
+    (11.0, 29.5) to (13.93, 28.72) px. The default pipeline currently
+    fails this frame (all_techniques_spurious; the disc correlator's
+    best basin lands at the search-window edge) - a gate gap tracked
+    separately; expected below encodes the navigable truth, so the
+    autonomous regression stays red locally until that gap is closed.
 
 expected:
-  status: success                           # success | failed | conflicted
-  confidence_tier: low                 # high | medium | low | failed
-  primary_technique: BodyLimbNav  # e.g. BodyLimbNav
-  techniques_must_run: [BodyLimbNav]
+  # success | failed | conflicted
+  status: success
+  # high | medium | low | failed
+  confidence_tier: low
+  # e.g. BodyLimbNav
+  primary_technique: BodyLimbNav
+  techniques_must_run: []
   techniques_must_skip: []

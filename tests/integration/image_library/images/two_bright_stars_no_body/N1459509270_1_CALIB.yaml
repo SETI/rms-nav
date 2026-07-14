@@ -22,7 +22,7 @@ ground_truth:
     Operator comment: this actually has two stars
 expected:
   status: success
-  confidence_tier: medium
+  confidence_tier: high
   primary_technique: StarUniqueMatchNav
   techniques_must_run:
   - StarUniqueMatchNav

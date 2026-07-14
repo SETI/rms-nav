@@ -21,11 +21,16 @@ fields to match current behavior.
 
 ## Track B — Navigation correctness
 
-Ordering within the track: #221 and #222 first (they are
-confidently-wrong-answer defects and the agreement study will consume
-ensemble output at scale), then the triage sessions (#237, #238), then
-the investigation/design items (#179, #25, #128/#150), with the
-smaller items (#24, #130, #132, #133, #180) as fill.
+Ordering within the track: the ensemble/gate cluster first. These are the
+confidently-wrong or correct-answer-discarded defects (issues #221, #222,
+#258, #259, #261, and #263) that the agreement study will consume ensemble
+output at scale, and that several curated library frames now pin as
+standing red regressions. Then the triage sessions (#237, #238), then
+the investigation/design items (#179, #25, #128/#150), with the smaller
+items (#24, #130, #132, #133, and #180) as fill. The cluster defects were
+all surfaced or corroborated by the 2026-07-13 operator library review on
+real frames; the library entries carrying their evidence are in the
+`phase-d-reconciliation` branch.
 
 ### #221 — Rank-1 ring result outvotes an absolute constraint
 
@@ -65,6 +70,16 @@ refinement), and is then counted as independent corroboration. A wrong
 pass-1 prior thereby gains confidence instead of being challenged; an
 expected-failed frame reported success at high tier.
 
+**Real-frame evidence** (Phase D, 2026-07-13; on #222): two frames,
+N1686349893 (stars_plus_body) and N1572105349 (body_full_fov), where
+disc and limb agree at the operator truth but the single-inlier
+StarRefine (capped to 0.5) sits ~2 px off and pulls the fused answer to
+~1.8 px error, still reported at high tier. The failure mode is not just
+inflated confidence on failed frames — it degrades accurate answers
+while keeping the tier. Both carry library sidecars pinned to that
+navigable truth, so their autonomous regressions stay red until this
+lands.
+
 **Where:** the two-pass flow in
 `src/spindoctor/nav_orchestrator/orchestrator.py` plus the ensemble's
 membership rules in `ensemble.py`.
@@ -78,6 +93,91 @@ non-independent. The metadata should record the distinction either way.
 **Acceptance:** a test where pass-1 produces a deliberately wrong prior
 asserts the pass-2 refinement cannot raise the consensus confidence;
 the expected-failed cross-check frame returns to failed.
+
+### #258 — Exact recovery downgraded by an excluded dissenter
+
+**Symptom** (Phase D, two stars_plus_body frames N1530185128,
+N1550270436): a lone correct `StarUniqueMatchNav` (conf 0.8, on the
+operator truth) is downgraded to `conflicted`/0.17 by a lone wrong
+`BodyBlobNav` (0.4) that the consensus logic has *already* placed in
+`excluded_from_consensus` — yet the best-vs-runner-up summed-confidence
+gap (0.4 < the 0.5 agreement threshold) still fires because the best is
+a singleton.
+
+**Where:** `src/spindoctor/nav_orchestrator/ensemble.py`
+(`_consensus_selection` / the conflicted-gap logic from #217).
+
+**Fix direction:** the agreement-gap test should compare against
+non-excluded runners-up only (an excluded member should not retain veto
+power over the tier), or a singleton best that beats every non-excluded
+alternative should not be declared conflicted.
+
+**Acceptance:** a test reconstructing the singleton-best-vs-excluded-
+dissenter geometry asserts the fused result tracks the best and reports
+success, not conflicted.
+
+### #259 — One-star match with a large residual passes every gate
+
+**Symptom** (Phase D, negative_cases Galileo frame C0164392700R):
+`StarUniqueMatchNav` one-star mode accepts an identification whose
+detection sits 18 px from the predicted position, reporting
+success/medium on an unnavigable scene. The `residual_px` (18.2) is
+never gated, and the #211 ambiguity gate (`detection_peak_ratio`,
+`brightness_margin_mag`) is vacuous because both return the no-rival
+sentinel. Also seen: the fused result reports `rank_1_only` with the
+offset zeroed while the sole technique returned a full 2-D result — a
+separate rank-bookkeeping bug on this path.
+
+**Where:** `src/spindoctor/nav_technique/nav_technique_star_unique_match.py`
+(one_star acceptance); overlaps #130 and the Track F Galileo cluster.
+
+**Fix direction:** gate the one-star path on the position residual
+(reject a match beyond a few px of prediction); make the ambiguity gate
+require an actual rival rather than pass on the sentinel.
+
+### #261 — DT mis-convergence gate false-flags a correct fit
+
+**Symptom** (Phase D, ring_only_curved N1467344214): `RingEdgeNav`
+converges to the operator-verified offset at RMS 0.21 px and confidence
+0.952, then flags itself spurious because `per_edge_median_max` = 46 px
+(one of three fused edges fits poorly; only 26% of vertices are inliers)
+trips the mis-convergence gate. The frame navigates; the pipeline
+discards its own correct result.
+
+**Where:** `src/spindoctor/nav_technique/dt_fitting.py` (per-edge DT
+statistics + spurious gate), `nav_technique_ring_edge.py`.
+
+**Fix direction:** gate on the fused/inlier residual rather than the
+worst single edge's median; drop or down-weight an outlier edge before
+the mis-convergence test; or make the gate rank-aware so a
+well-constrained subset carries the result. Coordinate with #179 (this
+frame is a concrete library datapoint for that calibration pass).
+
+### #263 — Single-inlier confidence cap collides with the high tier
+
+**Symptom** (Phase D D6, one_bright_star_no_body W1449079117): the
+pipeline reports success/**high** at fused confidence **exactly 0.50**.
+`derive_confidence_rank` grants high when `confidence >= 0.5` and
+`max_sigma <= 0.5 px` (`DEFAULT_TIER_THRESHOLDS['high']`), and the
+single-inlier refine path caps confidence at exactly 0.50 ("no
+cross-check on a 1-star refine"). So a one-star, no-cross-check
+solution, capped low *to express that it is weak*, lands on the high
+boundary and earns high tier whenever its centroid sigma is tight.
+
+**Where:** `src/spindoctor/nav_orchestrator/ensemble.py`
+(`DEFAULT_TIER_THRESHOLDS`, `derive_confidence_rank`);
+`src/spindoctor/nav_technique/nav_technique_star_refine.py`
+(`single_inlier_confidence_cap`, default 0.5). Mirrored in
+`config_540_orchestrator.yaml`.
+
+**Fix direction:** separate the two colliding constants - lower the
+single-inlier cap below the high threshold, make the high tier require
+`confidence > 0.5` strictly, or add a tier guard so a fused result whose
+winning member is a single-inlier/one-star solution tops out at medium.
+
+**Acceptance:** a one-star, single-inlier frame cannot report better
+than medium; W1449079117's sidecar (kept at `expected: low`) stops being
+a standing crosscheck disagreement.
 
 ### #237 — multi_body N17023890xx trio: all techniques spurious
 

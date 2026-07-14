@@ -1,31 +1,43 @@
 schema_version: 1
+# COISS | VGISS | GOSSI | NHLORRI
+mission: COISS
+# NAC | WAC | SSI | NA | WA | LORRI
+camera: WAC
 image_id: W1580760393_1_CALIB
-mission: COISS            # COISS | VGISS | GOSSI | NHLORRI
-camera: WAC              # NAC | WAC | SSI | NA | WA | LORRI
-filter_combo: 'CL1+CL2'          # canonicalized: filters sorted, '+'-joined
+image_datetime_utc: '2008-02-03T19:29:51.952'
+exposure_time_sec: 26.0000
+# canonicalized: filters sorted, '+'-joined
+filter_combo: 'CL1+CL2'
 image_url: 'pds3://calibrated/COISS_2xxx/COISS_2041/data/1580756433_1580830157/W1580760393_1_CALIB.IMG'
 
+# First tag is the primary class; must match the directory the
+# sidecar lives in.
 scene_tags:
-  - star_dominated                     # First tag is the primary class;
-                                       # must match the directory the
-                                       # sidecar lives in.
+  - star_dominated
 
 ground_truth:
-  offset_dv_px: -2.6792
-  offset_du_px: -3.6839
-  offset_uncertainty_px: 1.0           # 1sigma marginal; tighten
-                                       # for bright stars / sharp limbs.
+  offset_dv_px: -2.9821
+  offset_du_px: -3.6711
+  # 1sigma marginal; tighten for bright stars / sharp limbs.
+  offset_uncertainty_px: 1.0
   source: operator_verified
   operator: rfrench
-  verified_date: 2026-04-30
-  ui_version: 'spindoctor 0.1.dev25'
+  verified_date: 2026-07-13
+  ui_version: 'spindoctor 0.1.dev63'
   notes: |
-    Dense star field in FOV.
-    CLEAR filter.
+    Cassini WAC clear-filter star field, 26 s exposure. Navigable: the
+    catalog stars align with detections at this offset, operator-verified
+    in the manual-nav dialog (2026-07-13). An earlier version of this
+    entry expected status failed (from a period when a broken star gate
+    could not close the frame); ground truth and expected were re-saved
+    to success/high.
 
 expected:
-  status: failed                           # success | failed | conflicted
-  confidence_tier: failed                # high | medium | low | failed
-  primary_technique: StarFieldFromCatalogNav  # e.g. BodyLimbNav
+  # success | failed | conflicted
+  status: success
+  # high | medium | low | failed
+  confidence_tier: high
+  # e.g. BodyLimbNav
+  primary_technique: StarFieldFromCatalogNav
   techniques_must_run: [StarFieldFromCatalogNav]
   techniques_must_skip: []
