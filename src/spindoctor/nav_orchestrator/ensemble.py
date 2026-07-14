@@ -6,8 +6,11 @@ estimates become one offset.  Every step is honest:
 1. Drop ``spurious=True`` results.
 2. Drop ``at_edge=True`` results unless dropping them would empty the set.
 3. Select the consensus subset: every result sponsors the set of results
-   that agree with it pairwise (Mahalanobis distance or pixel floor); the
-   subset with the highest summed confidence wins.
+   that agree with it pairwise (Mahalanobis distance or pixel floor,
+   both measured only in the intersection of the two results' observable
+   subspaces, so a rank-1 flat-ring measurement and a full-rank absolute
+   fix that agree radially can group and fuse); the subset with the
+   highest summed confidence wins.
 4. Exclude results outside the consensus from the combine.  A lone
    dissenter against a multi-technique consensus is outlier-rejected;
    only a genuine alternative can force the conflicted branch: a
@@ -19,10 +22,12 @@ estimates become one offset.  Every step is honest:
 5. Combine offsets within the winning subset via precision-weighted
    (Kalman-style) merging.
 6. Apply optional disagreement / conflict penalties.
-7. Cap the confidence tier at ``medium`` when every combined member is
-   a single-star solution (a one-star unique match or one-inlier
-   refine) — such results carry no independent cross-check, so they
-   never earn ``high`` no matter how tight their localization sigma.
+7. Cap the confidence tier at ``medium`` when the fused covariance is
+   rank-deficient (one translation axis unobservable) or when every
+   combined member is a single-star solution (a one-star unique match
+   or one-inlier refine) — neither an assumed axis nor an
+   un-cross-checked star is ``high``-tier evidence, however tight the
+   localization sigma.
 8. Emit a NavResult carrying the excluded technique names.
 
 The ensemble is tested in isolation against synthetic per-technique results;
@@ -33,16 +38,23 @@ import copy
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
-from scipy.linalg import pinvh
 
 from spindoctor.annotation import Annotations
 from spindoctor.config import IMAGE_LOGGER
 from spindoctor.feature.constants import (
     AGREEMENT_FACTOR_CAP,
     COMBINED_CONFIDENCE_CAP,
+)
+from spindoctor.nav_orchestrator.ensemble_consensus import (
+    consensus_selection,
+    result_param_vector,
+)
+from spindoctor.nav_orchestrator.ensemble_observability import (
+    mixed_scale_pinvh,
+    observable_basis,
 )
 from spindoctor.nav_orchestrator.feature_summary import NavFeatureSummary
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
@@ -56,7 +68,7 @@ from spindoctor.nav_technique.nav_technique import technique_tier
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.support.exceptions import NavContractError
 from spindoctor.support.status_reason import NavStatusReason
-from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
+from spindoctor.support.types import NDArrayFloatType
 
 __all__ = [
     'EnsembleConfig',
@@ -211,64 +223,6 @@ class EnsembleConfig:
         return cls(**kwargs)
 
 
-def _mahalanobis_distance(
-    mu_a: NDArrayFloatType,
-    cov_a: NDArrayFloatType,
-    mu_b: NDArrayFloatType,
-    cov_b: NDArrayFloatType,
-    *,
-    rcond: float,
-) -> float:
-    """Return the Mahalanobis distance between two estimates.
-
-    Uses ``pinvh(cov_a + cov_b)`` so rank-deficient inputs are handled
-    correctly.  Components of ``mu_a - mu_b`` in the null space of the
-    summed covariance are treated as infinite distance — estimates cannot
-    agree along an unobservable axis.
-    """
-    delta = mu_a - mu_b
-    cov_sum = cov_a + cov_b
-    pinv = pinvh(cov_sum, rtol=rcond)
-    # Project delta back through pinv * cov_sum; residual lies in the null
-    # space.
-    null_proj = delta - cov_sum @ pinv @ delta
-    # Scale-invariant null-space disagreement test: the residual that lies in
-    # the null space of the summed covariance must be negligible relative to
-    # the size of ``delta`` itself, not against a fixed absolute pixel
-    # tolerance (which silently flips behavior as image/offset scales change).
-    rel_tol = 1.0e-6
-    eps = np.finfo(float).eps
-    if np.linalg.norm(null_proj) > rel_tol * max(float(np.linalg.norm(delta)), eps):
-        return float('inf')
-    d_sq = float(delta.T @ pinv @ delta)
-    if d_sq < 0:
-        # Numerical safety: pinv may yield a tiny negative quadratic form
-        # due to floating-point; clamp to zero.
-        d_sq = 0.0
-    return float(math.sqrt(d_sq))
-
-
-def _result_param_vector(res: NavTechniqueResult) -> NDArrayFloatType:
-    """Return the parameter vector for a per-technique result.
-
-    Two-DoF results emit ``(dv, du)``; 3-DoF results emit
-    ``(dv, du, rotation_rad)``.  The vector length always matches the
-    covariance shape — a 3x3 covariance with ``rotation_rad=None`` would be
-    inconsistent and raises here.
-    """
-    cov = np.asarray(res.covariance_px2, np.float64)
-    if cov.shape == (3, 3):
-        if res.rotation_rad is None:
-            raise ValueError(
-                f'{res.technique_name}: 3x3 covariance requires rotation_rad to be set'
-            )
-        return cast(
-            NDArrayFloatType,
-            np.array([res.offset_px[0], res.offset_px[1], res.rotation_rad], np.float64),
-        )
-    return cast(NDArrayFloatType, np.array([res.offset_px[0], res.offset_px[1]], np.float64))
-
-
 def _source_bodies(result: NavTechniqueResult) -> frozenset[str]:
     """Return the set of body names a result was computed against.
 
@@ -323,217 +277,6 @@ def _drop_superseded_fallbacks(
 
 
 @dataclass(frozen=True)
-class _ConsensusSelection:
-    """Output of :func:`_consensus_selection`.
-
-    Parameters:
-        best: The winning consensus subset (never empty).
-        excluded: Viable results outside the winning subset, in input order.
-        runner_up_confidence: Highest summed confidence of any consensus
-            subset formed within ``excluded`` alone; ``0.0`` when nothing
-            was excluded.
-        runner_up_has_quorum: True when that runner-up subset has at least
-            two members -- a genuine alternative consensus rather than a
-            lone dissenter.
-    """
-
-    best: list[NavTechniqueResult]
-    excluded: list[NavTechniqueResult]
-    runner_up_confidence: float
-    runner_up_has_quorum: bool
-
-
-def _agreement_adjacency(
-    results: list[NavTechniqueResult],
-    *,
-    agreement_sigma: float,
-    agreement_pixel_floor: float,
-    rcond: float,
-) -> NDArrayBoolType:
-    """Pairwise agreement matrix: Mahalanobis threshold with a pixel-floor fallback.
-
-    Two results agree iff *either* their pairwise Mahalanobis distance is
-    at most ``agreement_sigma`` *or* their Euclidean translation distance
-    (in pixels, ignoring the rotation component for 3-DoF results) is at
-    most ``agreement_pixel_floor``.
-
-    The Mahalanobis distance differences the rotation component of two
-    3-DoF results linearly; that is correct here because every input
-    rotation is bounded to the small-angle window enforced by the caller,
-    so the pairwise angle difference never approaches the ``+-pi`` wrap.
-
-    The pixel floor compensates for per-technique covariances that
-    report only a CRLB-style precision (FFT subpixel localization or
-    M-estimator information) and so under-estimate the actual position
-    uncertainty by orders of magnitude.  See ``EnsembleConfig`` for the
-    motivation.
-
-    Parameters:
-        results: List of two or more per-technique results.
-        agreement_sigma: Maximum pairwise Mahalanobis distance for agreement.
-        agreement_pixel_floor: Maximum pairwise Euclidean translation
-            distance (in pixels) for agreement; ``0.0`` disables.
-        rcond: rcond passed to ``pinvh``.
-
-    Returns:
-        Symmetric boolean ``(n, n)`` matrix with a True diagonal.
-
-    Raises:
-        ValueError: if 2-DoF and 3-DoF results are mixed.
-    """
-    n = len(results)
-    adj = np.eye(n, dtype=bool)
-    for i in range(n):
-        mu_i = _result_param_vector(results[i])
-        cov_i = np.asarray(results[i].covariance_px2, np.float64)
-        for j in range(i + 1, n):
-            mu_j = _result_param_vector(results[j])
-            cov_j = np.asarray(results[j].covariance_px2, np.float64)
-            if mu_i.shape != mu_j.shape:
-                # 2-DoF and 3-DoF results never coexist within one image.
-                # If the orchestrator routed mismatched shapes through the
-                # ensemble, fail loudly rather than coerce.
-                raise ValueError(
-                    'Mixed-DoF technique results in one ensemble: '
-                    f'{results[i].technique_name} produced {mu_i.shape} parameters; '
-                    f'{results[j].technique_name} produced {mu_j.shape}.'
-                )
-            dist = _mahalanobis_distance(mu_i, cov_i, mu_j, cov_j, rcond=rcond)
-            mahal_match = dist <= agreement_sigma
-            translation_delta = mu_i[:2] - mu_j[:2]
-            pixel_dist = float(math.hypot(translation_delta[0], translation_delta[1]))
-            pixel_match = agreement_pixel_floor > 0.0 and pixel_dist <= agreement_pixel_floor
-            if mahal_match or pixel_match:
-                adj[i, j] = True
-                adj[j, i] = True
-    return adj
-
-
-def _best_neighborhood(
-    results: list[NavTechniqueResult],
-    adj: NDArrayBoolType,
-    candidate_indices: list[int],
-) -> list[int]:
-    """The candidate neighborhood with the highest summed confidence.
-
-    Each candidate ``i`` sponsors the subset of ``candidate_indices`` that
-    agree with it pairwise (including itself).  Subsets are scored by
-    summed confidence; ties break toward the larger subset, then toward
-    the earlier candidate, so the selection is deterministic.
-
-    Parameters:
-        results: The full per-technique result list (for confidences).
-        adj: Pairwise agreement matrix over ``results``.
-        candidate_indices: Indices eligible for this selection round.
-
-    Returns:
-        The winning subset as a list of indices into ``results``.
-    """
-    best: list[int] = []
-    best_key = (float('-inf'), 0)
-    for i in candidate_indices:
-        subset = [j for j in candidate_indices if adj[i, j]]
-        key = (sum(results[j].confidence for j in subset), len(subset))
-        if key > best_key:
-            best = subset
-            best_key = key
-    return best
-
-
-def _consensus_selection(
-    results: list[NavTechniqueResult],
-    *,
-    agreement_sigma: float,
-    agreement_pixel_floor: float,
-    rcond: float,
-    max_allowed_rotation_deg: float,
-) -> _ConsensusSelection:
-    """Select the consensus subset the ensemble combines, and its outliers.
-
-    Every result sponsors a candidate subset -- the results that agree
-    with it pairwise (Mahalanobis distance within ``agreement_sigma`` or
-    translation distance within ``agreement_pixel_floor``).  The subset
-    with the highest summed confidence wins; results outside it are
-    excluded from the combine rather than forcing a conflict, and the
-    strongest consensus formable among the excluded results alone is
-    reported as the runner-up so the caller can distinguish a lone
-    mis-converged dissenter from a genuine alternative answer.
-
-    Unlike single-link transitive-closure grouping, a result that agrees
-    with only one member of the winning subset does not drag the whole
-    subset toward it: membership requires pairwise agreement with the
-    sponsoring result.
-
-    Parameters:
-        results: Non-empty list of per-technique results.
-        agreement_sigma: Maximum pairwise Mahalanobis distance for agreement.
-        agreement_pixel_floor: Maximum pairwise Euclidean translation
-            distance (in pixels) for agreement; ``0.0`` disables.
-        rcond: rcond passed to ``pinvh``.
-        max_allowed_rotation_deg: Small-angle bound; each 3-DoF input's
-            ``rotation_rad`` magnitude must stay strictly below this many
-            degrees for the linear rotation differencing to be valid.
-
-    Returns:
-        The selection: winning subset, excluded results, and runner-up
-        summary.
-
-    Raises:
-        NavContractError: if a 3-DoF input's rotation magnitude is at or
-            above the small-angle bound (an upstream programming error).
-        ValueError: if 2-DoF and 3-DoF results are mixed.
-    """
-    n = len(results)
-    max_rotation_rad = math.radians(max_allowed_rotation_deg)
-    for res in results:
-        cov = np.asarray(res.covariance_px2, np.float64)
-        # Small-angle assumption: a 3-DoF rotation outside +-max_rotation_deg
-        # is an upstream error (every technique clamps its rotation fit to
-        # this bound), and would break the linear rotation differencing.
-        # Raised as NavContractError (not a bare assert) so the check
-        # survives python -O and is never swallowed as an ordinary
-        # technique failure.
-        if (
-            cov.shape == (3, 3)
-            and res.rotation_rad is not None
-            and abs(res.rotation_rad) >= max_rotation_rad
-        ):
-            raise NavContractError(
-                f'{res.technique_name}: rotation '
-                f'{math.degrees(res.rotation_rad):.3f} deg violates small-angle '
-                f'bound +-{max_allowed_rotation_deg:.3f} deg'
-            )
-    if n == 1:
-        return _ConsensusSelection(
-            best=list(results),
-            excluded=[],
-            runner_up_confidence=0.0,
-            runner_up_has_quorum=False,
-        )
-    adj = _agreement_adjacency(
-        results,
-        agreement_sigma=agreement_sigma,
-        agreement_pixel_floor=agreement_pixel_floor,
-        rcond=rcond,
-    )
-    best_indices = _best_neighborhood(results, adj, list(range(n)))
-    best_set = set(best_indices)
-    excluded_indices = [i for i in range(n) if i not in best_set]
-    runner_up_confidence = 0.0
-    runner_up_has_quorum = False
-    if excluded_indices:
-        runner_indices = _best_neighborhood(results, adj, excluded_indices)
-        runner_up_confidence = sum(results[j].confidence for j in runner_indices)
-        runner_up_has_quorum = len(runner_indices) >= 2
-    return _ConsensusSelection(
-        best=[results[i] for i in sorted(best_set)],
-        excluded=[results[i] for i in excluded_indices],
-        runner_up_confidence=runner_up_confidence,
-        runner_up_has_quorum=runner_up_has_quorum,
-    )
-
-
-@dataclass(frozen=True)
 class _CombinedEstimate:
     """Output of :func:`_combine_precision_weighted`.
 
@@ -543,8 +286,11 @@ class _CombinedEstimate:
             input was 2-DoF.
         covariance_px2: Combined covariance, ``(2, 2)`` or ``(3, 3)``
             matching the input parameter dimensionality.
-        is_rank_deficient: True when the summed information matrix has a
-            near-zero eigenvalue relative to its largest.
+        is_rank_deficient: True when the *translation block* of the
+            combined covariance has an unobservable direction (a null or
+            sentinel axis).  An unobservable rotation alone — every
+            contributing technique reporting the rotation sentinel — does
+            not make the translation fix rank-deficient.
     """
 
     offset_px: tuple[float, float]
@@ -610,8 +356,8 @@ def _combine_precision_weighted(
                 f'mixed-DoF group passed to _combine_precision_weighted: '
                 f'expected {n_params}-DoF, got {cov.shape[0]} from {res.technique_name}'
             )
-        info = pinvh(cov, rtol=rcond)
-        mu = _result_param_vector(res)
+        info = mixed_scale_pinvh(cov, rcond=rcond)
+        mu = result_param_vector(res)
         if cov.shape[0] == 3:
             theta = float(mu[2])
             # Small-angle assumption: every contributing technique clamps its
@@ -651,17 +397,16 @@ def _combine_precision_weighted(
             info_mu_sum = info_mu_sum + info @ mu
     assert info_sum is not None
     assert info_mu_sum is not None
-    cov_combined = pinvh(info_sum, rtol=rcond)
+    cov_combined = mixed_scale_pinvh(info_sum, rcond=rcond)
     mu_combined = cov_combined @ info_mu_sum
-    # Check rank-deficiency by comparing combined info matrix's smallest
-    # eigenvalue to a small tolerance.
-    eigvals = np.linalg.eigvalsh(info_sum)
-    # Scale-independent rank-deficiency check: the smallest eigenvalue is
-    # tiny relative to the largest.  The eps guards divide-by-zero on a
-    # zero info matrix (which itself is degenerate).
-    rel_tol = 1.0e-8
-    eps = np.finfo(np.float64).eps
-    is_rank_deficient = bool(eigvals.min() / max(abs(eigvals.max()), eps) < rel_tol)
+    # Rank-deficiency is a property of the translation fix: the combined
+    # covariance's (v, u) block has an unobservable direction (exact null
+    # or sentinel-sized variance).  Judging the full parameter matrix
+    # instead would let an unobservable *rotation* (every input carrying
+    # the rotation sentinel) mislabel a fully-constrained 2-D offset as
+    # rank-1.
+    trans_basis = observable_basis(np.ascontiguousarray(cov_combined[:2, :2]))
+    is_rank_deficient = trans_basis.shape[1] < 2
     rotation: float | None = None
     if n_params == 3:
         # Combine the rotation on the circle so angles near +-pi do not cancel
@@ -674,7 +419,7 @@ def _combine_precision_weighted(
     return _CombinedEstimate(
         offset_px=(float(mu_combined[0]), float(mu_combined[1])),
         rotation_rad=rotation,
-        covariance_px2=cast(NDArrayFloatType, cov_combined),
+        covariance_px2=cov_combined,
         is_rank_deficient=is_rank_deficient,
     )
 
@@ -724,7 +469,7 @@ def _combine_confidence(
         # trace (rather than det(info)^(1/p)) stays well-defined for the rank-1
         # ring-edge covariances whose unobservable axis carries zero precision.
         # The 2-DoF path is unchanged: cov[:2, :2] is then the whole matrix.
-        info_xy = pinvh(np.ascontiguousarray(cov[:2, :2]), rtol=rcond)
+        info_xy = mixed_scale_pinvh(np.ascontiguousarray(cov[:2, :2]), rcond=rcond)
         weights.append(float(np.trace(info_xy)))
     w_total = sum(weights)
     if w_total <= 0.0:
@@ -875,7 +620,7 @@ def ensemble(
     interior = [r for r in viable if not r.at_edge]
     if interior:
         viable = interior
-    selection = _consensus_selection(
+    selection = consensus_selection(
         viable,
         agreement_sigma=cfg.agreement_sigma,
         agreement_pixel_floor=cfg.agreement_pixel_floor,
@@ -1004,6 +749,18 @@ def ensemble(
         sigma_px=(sigma_dv, sigma_du),
         tier_thresholds=cfg.tier_thresholds,
     )
+    if rank == 'high' and combined.is_rank_deficient:
+        # A fused result with an unobservable translation axis reports one
+        # axis as an assumption, not a measurement.  However precise the
+        # observable axis is, that is not a 'high'-tier absolute fix
+        # (issue #221);
+        # ``sigma_along_unobservable_px`` carries the same verdict to the
+        # metadata.
+        IMAGE_LOGGER.info(
+            'Tier capped at medium: the fused covariance is rank-deficient '
+            '(one translation axis unobservable)'
+        )
+        rank = 'medium'
     if rank == 'high' and all(_is_single_star_result(r) for r in best_group):
         # A single-star solution's confidence is deliberately capped to say
         # "weak, no cross-check" (the one-inlier refine caps at exactly the
