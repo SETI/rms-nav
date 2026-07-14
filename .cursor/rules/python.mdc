@@ -50,7 +50,8 @@ Apply these rules to ALL new and modified Python code. This project is a Python 
 ## 4. Comments
 
 - ALWAYS write self-documenting code: meaningful names, simple structure, limited nesting.
-- NEVER include comments that merely restate the code, reference user requests, or describe modification history.
+- NEVER write a comment whose ONLY content is a restatement of the code, a user request, or modification history. A comment must earn its place by describing behavior or rationale the code itself cannot show.
+- An issue/ticket number is welcome AS A REFERENCE once a comment already describes the behavior or rationale. Good: `# Cap the tier when the fit is rank-deficient: an unobservable axis is an assumption, not a measurement (#221).` — it explains the behavior and cites the issue for further context. Not acceptable: `# Fix for #221.` — that is only historical.
 - ALWAYS include comments that explain the **rationale** behind non-obvious or complex logic.
 - ALWAYS preserve existing comments that are still accurate and relevant. Remove or update stale comments.
 
@@ -82,7 +83,7 @@ Apply these rules to ALL new and modified Python code. This project is a Python 
 - ALWAYS include a docstring for every module, class, function, and method.
 - Follow **PEP 257** using **Google style**. Use `Parameters:` (not `Args:`).
 - Include `Returns:`, `Raises:`, and any important behavioral notes.
-- NEVER mention backwards compatibility or user requests in docstrings.
+- NEVER mention backwards compatibility, a user request, change history, or an issue/ticket number in a docstring. Docstrings are usage documentation for the published API, not a place to explain the code's provenance; describe only observable behavior. (Issue references are allowed in inline `#` code comments per Section 4, and in commit messages and PR descriptions.)
 - Docstrings MUST be detailed enough to write a black-box test from the docstring alone.
 - Wrap docstring text to **90** characters.
 - ALWAYS update docstrings when the associated code changes.
