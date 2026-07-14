@@ -942,9 +942,10 @@ error (isolable only because the sim geometry is exact). Fixing the fitter buys
 ~0.1 px; the dominant real-frame error is on the pointing-kernel side. Ranked
 redesign recommendation from the diagnosis: (1) fit a photometric limb (predict
 the limb-darkened-disc-convolved-with-PSF brightness profile and match it) rather
-than aligning a geometric edge to the gradient ridge; (2) a matched-filter edge
-estimator to remove the interpolation ripple; (3) gate low-phase (<~15 deg) fits;
-(4) a minor pixel-centre-convention audit. Harness and full report:
+than aligning a geometric edge to the gradient ridge (#150); (2) a matched-filter
+edge estimator to remove the interpolation ripple (#282); (3) gate low-phase
+(<~15 deg) fits (#281); (4) a minor pixel-centre-convention audit (#283). Harness
+and full report:
 `util/calibration/limb_bias/limb_navigation_bias_diagnosis.md`.
 
 **Tasks.**
