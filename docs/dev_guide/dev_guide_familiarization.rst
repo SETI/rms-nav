@@ -272,17 +272,22 @@ Stars (model + star techniques)
 - The shared ``_star_helpers`` module is internal and not part of the
   autodoc API.
 
-Body (additional techniques)
-----------------------------
+Body (additional techniques and Titan)
+--------------------------------------
 
 - :doc:`dev_guide_techniques_body_terminator` — illuminated-body
   terminator fitting (DT pipeline).
 - :doc:`dev_guide_techniques_body_blob` — small / unresolved body
   navigation.
 - :doc:`dev_guide_techniques_body_disc` — full-disc correlation.
+- :doc:`dev_guide_techniques_body_titan` — why Titan is unsupported today.
+- :doc:`dev_guide_navigation_models_titan` —
+  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (records a
+  no-result for Titan pending a haze-aware extractor).
 - :mod:`spindoctor.nav_technique.nav_technique_body_terminator`
 - :mod:`spindoctor.nav_technique.nav_technique_body_blob`
 - :mod:`spindoctor.nav_technique.nav_technique_body_disc`
+- :mod:`spindoctor.nav_model.nav_model_titan`
 
 Rings (model + ring techniques)
 -------------------------------
@@ -305,15 +310,6 @@ Rings (model + ring techniques)
 
 - :mod:`spindoctor.nav_technique.nav_technique_ring_edge`
 - :mod:`spindoctor.nav_technique.nav_technique_ring_annulus`
-
-Titan (model only)
-------------------
-
-- :doc:`dev_guide_navigation_models_titans` — the Titan family.
-- :doc:`dev_guide_navigation_models_titan` —
-  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (registered
-  placeholder; emits no features pending a haze-aware extractor).
-- :mod:`spindoctor.nav_model.nav_model_titan`
 
 Manual
 ------

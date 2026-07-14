@@ -48,9 +48,10 @@ For each candidate match, the technique slices a window of half-width ``search_w
 around the predicted position, takes the brightest pixel above
 ``detection_sigma * image_noise_sigma``, and fits a brightness-weighted moment over a
 ``centroid_box_half_px``-half-width box around that peak to recover the sub-pixel centroid.
-A peak that fails the noise threshold collapses the candidate; a centroid whose residual
-against the prediction exceeds ``max_residual_px`` (after the implied translation is
-applied) marks the result spurious.
+A peak that fails the noise threshold collapses the candidate; on the 2-star path a
+best-assignment residual exceeding ``max_residual_px`` triggers the fall back to the 1-star
+path, and on the 1-star path a no-rival detection whose prediction-to-detection distance
+exceeds ``one_star_max_residual_px`` marks the result spurious.
 
 1-star path
 -----------
@@ -73,6 +74,21 @@ of its runner-up; the ratio is unit-free, so no DN-scale or photometric calibrat
 the gate. The measured ratio is surfaced as the
 :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.detection_peak_ratio`
 diagnostic.
+
+The peak-ratio and brightness-margin gates both report an ``inf`` sentinel when no rival
+exists (no runner-up detection above the window background, no other predictable catalog
+star). The sentinels pass the ratio checks by design so a genuinely unique bright star
+stays matchable — but an infinite peak ratio also means the ambiguity gate measured
+nothing: on a real noisy background the runner-up is always finite, so the sentinel is the
+signature of a lone hot pixel or artifact on a flat or quantized frame. In
+that vacuous case the detection must additionally sit within ``one_star_max_residual_px``
+of the prediction. The residual on this path is the claimed offset itself, and with no
+rival statistics to lean on, a no-rival detection far from the prediction is far more
+likely an unrelated artifact than a large pointing error; the default bound is one third
+of ``search_window_px``, the ~1-sigma core of the pointing envelope the window is sized to
+bracket. A finite peak ratio leaves acceptance with the measured ambiguity gate: genuine
+one-star matches with offsets up to ~24 px exist in the operator-verified library, so no
+uniform residual cut below the search window is possible.
 
 2-star path
 -----------
@@ -128,8 +144,9 @@ per-feature CRLB floor for translation plus the analytic rotation variance deriv
 When the converged offset sits within the at-edge tolerance of any axis bound, or when the
 2-star rotation parameter is at the configured fraction of its cap, the result is flagged
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and the hard-zero
-gate forces confidence to zero. When the per-star residual exceeds ``max_residual_px`` the
-result is flagged :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
+gate forces confidence to zero. When a no-rival 1-star detection's
+prediction-to-detection distance exceeds ``one_star_max_residual_px`` the result is
+flagged :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
 Configuration
 =============
@@ -146,8 +163,7 @@ All numeric tunables for this technique live in ``techniques.StarUniqueMatchNav.
 - ``centroid_box_half_px`` — int, default ``3`` px. Half-width of the brightness-weighted
   moment box around the brightness peak.
 - ``max_residual_px`` — float, default ``4.0`` px. Maximum allowed best-assignment
-  residual in the 2-star path before falling back to the 1-star path; in the 1-star path
-  the same threshold marks the result spurious.
+  residual in the 2-star path before falling back to the 1-star path.
 - ``detection_sigma`` — float, default ``4.0`` (dimensionless). Detection-threshold
   multiplier on the per-image noise sigma.
 - ``one_star_confidence_cap`` — float, default ``0.7`` (dimensionless). Post-sigmoid
@@ -159,6 +175,12 @@ All numeric tunables for this technique live in ``techniques.StarUniqueMatchNav.
   background-subtracted peak-to-runner-up ratio for a 1-star detection; below it the
   result is spurious with an ``ambiguous_detection`` reason. Values below 1 are invalid
   (the peak is by definition at least the runner-up).
+- ``one_star_max_residual_px`` — float, default ``10.0`` px. Maximum
+  prediction-to-detection distance accepted by the 1-star path when the peak-ratio gate
+  is vacuous (its no-rival ``inf`` sentinel); beyond it the result is spurious with a
+  ``no_rival_detection`` reason. Default is one third of ``search_window_px`` (the
+  ~1-sigma core of the pointing envelope the window brackets). Not consulted when the
+  peak ratio is finite. Values at or below 0 are invalid.
 - ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
   distance from any search-window axis bound falls within this tolerance is flagged
   :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`.
@@ -283,7 +305,9 @@ Call path traced through
      path.
    - **1-star path.**  When only the brightest clears the margin (or the 2-star fallback
      fired), slice a window around the brightest's prediction, extract the sub-pixel
-     centroid, and report the per-star residual as the translation.
+     centroid, pass the peak-to-runner-up ambiguity gate (plus the
+     ``one_star_max_residual_px`` residual gate when that ratio is the no-rival
+     sentinel), and report the per-star residual as the translation.
 
 4. Result-shape branches on the chosen path and
    :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`:

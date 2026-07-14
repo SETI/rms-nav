@@ -7,11 +7,10 @@ Overview
 
 ``NavModelTitanSimulated`` is the simulated-image counterpart of
 :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan`. It is reserved without an
-implementation; the documentation slot exists so the toctree under
-:doc:`dev_guide_navigation_models_titans` is parallel with
-:doc:`dev_guide_navigation_models_bodies`,
-:doc:`dev_guide_navigation_models_rings`, and
-:doc:`dev_guide_navigation_models_stars`.
+implementation; the documentation slot exists so Titan's simulated sibling parallels
+:doc:`dev_guide_navigation_models_body_simulated`,
+:doc:`dev_guide_navigation_models_ring_simulated`, and
+:doc:`dev_guide_navigation_models_star_simulated`.
 
 A direct simulated-image counterpart is the logical complement of
 :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan`: the catalog-driven path needs a

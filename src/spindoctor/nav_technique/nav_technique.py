@@ -12,6 +12,7 @@ from __future__ import annotations
 import fnmatch
 import math
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import numpy as np
@@ -31,11 +32,14 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
 __all__ = [
     'ROTATION_AT_EDGE_FRACTION',
     'ROTATION_UNOBSERVABLE_VARIANCE',
+    'NCCCovarianceTuning',
     'NavTechnique',
     'add_model_error_floor',
+    'add_size_scaled_model_error',
     'embed_rotation_unobservable',
     'filter_technique_names',
     'load_model_error_floor',
+    'load_ncc_covariance_tuning',
     'log_confidence_breakdown',
     'rotation_pivot_distance_px',
     'rotation_unobservable_sigma_rad',
@@ -405,6 +409,103 @@ def add_model_error_floor(covariance: NDArrayFloatType, floor_px: float) -> NDAr
     out = covariance.copy()
     out[0, 0] += floor_px**2
     out[1, 1] += floor_px**2
+    return out
+
+
+@dataclass(frozen=True)
+class NCCCovarianceTuning:
+    """Model-error terms folded into an NCC technique's translation covariance.
+
+    The bare peak-curvature (matched-filter) covariance measures only the
+    statistical precision at the correlation peak.  On a well-matched
+    template that precision is far smaller than the true registration error,
+    which is dominated by silhouette / photometric model error and by
+    localization ambiguity.  Three quadrature terms restore calibration:
+
+    - ``localization_uncertainty_scale`` multiplies the inter-pyramid-level
+      peak migration (applied inside the correlator, carried here for
+      completeness of the covariance model).
+    - ``model_error_size_frac`` scales a body / template size in pixels into
+      a size-proportional silhouette-error sigma (a coherent shape mismatch
+      displaces the peak by a roughly fixed *fraction* of the extent).
+    - ``model_error_floor_px`` is a size-independent absolute floor
+      (pointing, camera distortion, sub-pixel interpolation).
+
+    Parameters:
+        localization_uncertainty_scale: Multiplier on the correlator
+            ``consistency`` (px); ``0.0`` disables it.
+        model_error_size_frac: Fraction of the template extent (px) taken as
+            the silhouette-error sigma; ``0.0`` disables it.
+        model_error_floor_px: Absolute floor (px); ``0.0`` disables it.
+    """
+
+    localization_uncertainty_scale: float
+    model_error_size_frac: float
+    model_error_floor_px: float
+
+
+def load_ncc_covariance_tuning(tuning: dict[str, Any], technique_name: str) -> NCCCovarianceTuning:
+    """Read and validate an NCC technique's covariance model-error tunables.
+
+    Parameters:
+        tuning: The technique's YAML ``tuning`` mapping.
+        technique_name: Technique name for error messages.
+
+    Returns:
+        The validated :class:`NCCCovarianceTuning`.
+
+    Raises:
+        ValueError: If any term is negative or non-finite.
+    """
+    floor_px = load_model_error_floor(tuning, technique_name)
+    scale = float(tuning.get('localization_uncertainty_scale', 0.0))
+    size_frac = float(tuning.get('model_error_size_frac', 0.0))
+    for name, value in (
+        ('localization_uncertainty_scale', scale),
+        ('model_error_size_frac', size_frac),
+    ):
+        if not math.isfinite(value) or value < 0.0:
+            raise ValueError(f'{technique_name}: {name} must be finite and >= 0; got {value!r}')
+    return NCCCovarianceTuning(
+        localization_uncertainty_scale=scale,
+        model_error_size_frac=size_frac,
+        model_error_floor_px=floor_px,
+    )
+
+
+def add_size_scaled_model_error(
+    covariance: NDArrayFloatType,
+    *,
+    size_px: float,
+    size_frac: float,
+    floor_px: float,
+) -> NDArrayFloatType:
+    """Add a size-proportional silhouette error and an absolute floor in quadrature.
+
+    Adds ``(size_frac * size_px)**2 + floor_px**2`` to the leading two
+    (translation) diagonal entries.  The size term makes the reported sigma
+    track body / template extent -- a large body's silhouette mismatch
+    displaces the correlation peak by more pixels than a small body's -- so a
+    single constant floor no longer has to cover the whole size range.  The
+    input is not mutated; the localization-spread term is applied separately
+    inside the correlator.
+
+    Parameters:
+        covariance: ``(2, 2)`` or ``(3, 3)`` covariance; only the translation
+            diagonal is modified.
+        size_px: Template extent in pixels (body diameter, ring radial span).
+        size_frac: Silhouette-error fraction of ``size_px``.
+        floor_px: Absolute floor in pixels.
+
+    Returns:
+        The inflated covariance (a copy when any term is positive).
+    """
+    extra = (size_frac * size_px) ** 2 + floor_px**2
+    if extra <= 0.0:
+        return covariance
+    out = covariance.copy()
+    out[0, 0] += extra
+    out[1, 1] += extra
     return out
 
 

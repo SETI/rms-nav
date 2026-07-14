@@ -118,6 +118,9 @@ def _build_body(
     )
     model._subject_range_km = 1.0e6
     model._visible_lit_fraction = visible_lit_fraction
+    # The helper's model_img renders the whole silhouette as lit, so the
+    # lit-pixel count (which gates BODY_BLOB emission) is the mask area.
+    model._lit_pixel_count = int(np.count_nonzero(body_mask))
     model._overflow_fraction = overflow_fraction
     model._phase_angle_factor = phase_factor
     return model

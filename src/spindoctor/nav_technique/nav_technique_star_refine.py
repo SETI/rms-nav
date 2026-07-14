@@ -442,8 +442,9 @@ class StarRefineNav(NavTechnique):
         offset_v_total = float(sim_fit.translation_vu[0])
         offset_u_total = float(sim_fit.translation_vu[1])
         # Rotation sigma from the inlier residual scatter against the
-        # weighted catalog spread.  Identical math to
-        # ``StarFieldFromCatalogNav._build_covariance_3dof``.
+        # weighted catalog spread (isotropic pooled lever-arm form;
+        # ``StarFieldFromCatalogNav._build_covariance_3dof`` uses the
+        # exact anisotropic Fisher-information form).
         total = float(weights.sum())
         if total <= 0.0:
             sigma_theta_sq = ROTATION_UNOBSERVABLE_VARIANCE
