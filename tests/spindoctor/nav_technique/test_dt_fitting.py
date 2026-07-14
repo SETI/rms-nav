@@ -506,6 +506,88 @@ def test_lm_subpixel_refine_rejects_polarity_vertex_with_enormous_sigma() -> Non
     assert result.offset_vu[1] == pytest.approx(-2.5, abs=0.05)
 
 
+def test_lm_subpixel_refine_raw_rms_excludes_polarity_rejected_vertices() -> None:
+    """Issue #237: polarity-rejected vertices must not inflate ``raw_rms_px``.
+
+    A polarity-rejected vertex carries the large ``_INFINITY_DT_PENALTY_PX``
+    sentinel residual.  If ``raw_rms_px`` pooled that sentinel it would jump
+    to ~1e6 / sqrt(N) the moment a single vertex is polarity-rejected,
+    degenerating the limb / terminator ``raw_rms_px > floor`` spurious gate
+    into "any polarity rejection is spurious".  In a multi-body frame a
+    small secondary body contributes wrong-polarity vertices while a
+    dominant body's limb fits cleanly, so that pooling wrongly killed the
+    whole fit.  ``raw_rms_px`` must average over the polarity-ACCEPTED
+    vertices only, so a clean accepted-vertex fit stays small regardless of
+    how many vertices are polarity-rejected.
+    """
+    shape = (96, 96)
+    radius = 18.0
+    dt = _build_dt_for_circle(shape, radius)
+    cv = shape[0] / 2.0 + 1.5
+    cu = shape[1] / 2.0 + 2.5
+    vertices, outward_normals = _build_circle_polyline((cv, cu), radius, 64)
+    normals = -outward_normals  # inward normals are accepted on a bright disc
+    # Flip a contiguous run of vertices (a stand-in for a small secondary
+    # body whose limb faces the wrong way) to the wrong polarity so the
+    # polarity filter rejects them and records the sentinel residual.
+    rejected = np.arange(0, 12)
+    normals[rejected] = outward_normals[rejected]
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    image = _render_image_with_circle(shape, (shape[0] / 2.0, shape[1] / 2.0), radius)
+    grad = compute_image_gradient_vu(image, sigma_px=DEFAULT_IMAGE_GRADIENT_SIGMA_PX)
+    result = lm_subpixel_refine(
+        vertices_vu=vertices,
+        normals_vu=normals,
+        sigma_normal_per_vertex_px=sigmas,
+        image_edge_dt=dt,
+        image_gradient_vu=grad,
+        initial_offset_vu=(-1.0, -2.0),
+        use_polarity=True,
+    )
+    # The 12 wrong-polarity vertices are excluded from the fit.
+    assert result.inlier_count == 52
+    # The accepted vertices align cleanly, so the unweighted raw RMS stays
+    # sub-pixel; the sentinel-poisoned value would be ~1e6 / sqrt(64) ~ 1e5.
+    assert result.raw_rms_px < 1.0
+
+
+def test_lm_subpixel_refine_raw_rms_retains_tukey_rejected_arc() -> None:
+    """``raw_rms_px`` still surfaces a polarity-accepted, Tukey-rejected arc.
+
+    The fix that excludes polarity-rejected vertices from ``raw_rms_px``
+    (issue #237) must not weaken the gate's original purpose: a wholly
+    mis-aligned but polarity-ACCEPTED arc that the Tukey reweighting drives
+    to ~0 weight must still inflate the raw RMS so the spurious gate fires.
+    """
+    shape = (96, 96)
+    radius = 18.0
+    dt = _build_dt_for_circle(shape, radius)
+    cv = shape[0] / 2.0
+    cu = shape[1] / 2.0
+    vertices, normals = _build_circle_polyline((cv, cu), radius, 100)
+    # Displace 20 % of the vertices far from the circle.  They keep the
+    # correct (accepted) polarity but sit tens of pixels off the edge, so
+    # Tukey rejects them while their real DT residuals remain large.
+    bad = np.arange(0, 100, 5)
+    vertices[bad, 0] += 25.0
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    image = _render_image_with_circle(shape, (cv, cu), radius)
+    grad = compute_image_gradient_vu(image, sigma_px=DEFAULT_IMAGE_GRADIENT_SIGMA_PX)
+    result = lm_subpixel_refine(
+        vertices_vu=vertices,
+        normals_vu=normals,
+        sigma_normal_per_vertex_px=sigmas,
+        image_edge_dt=dt,
+        image_gradient_vu=grad,
+        initial_offset_vu=(0.0, 0.0),
+        use_polarity=False,
+    )
+    # Weighted RMS collapses (Tukey rejected the bad arc) but the raw RMS
+    # over the accepted vertices retains the mis-aligned arc.
+    assert result.rms_px < 1.0
+    assert result.raw_rms_px > 3.0
+
+
 def test_lm_subpixel_refine_trust_region_caps_offset_displacement() -> None:
     """The trust-region kwarg physically prevents the LM from leaving the seed.
 
