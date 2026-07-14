@@ -17,6 +17,7 @@ failure later.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -91,6 +92,7 @@ ALLOWED_TIERS: frozenset[str] = frozenset({'high', 'medium', 'low', 'failed', 'c
 ALLOWED_GT_SOURCES: frozenset[str] = frozenset({'operator_verified'})
 ALLOWED_CONSTRAINT_TYPES: frozenset[str] = frozenset({'rank_1'})
 ALLOWED_STATUS_REASONS: frozenset[str] = frozenset({reason.value for reason in NavStatusReason})
+_PENDING_ISSUE_RE: re.Pattern[str] = re.compile(r'#\d+')
 
 CURRENT_SCHEMA_VERSION: int = 1
 
@@ -155,6 +157,15 @@ class Expected:
     asserts the orchestrator's discrete ``NavStatusReason`` (e.g.
     ``rank_1_only`` for a flat-ring frame whose only observable axis is the
     edge normal); when absent only the status / tier are checked.
+
+    ``pending_issue`` marks a fixture whose pinned outcome is provisional:
+    the frame is believed navigable in principle but the current pipeline
+    cannot yet navigate it, and the referenced issue (format ``#<number>``)
+    tracks closing that gap. The regression test still asserts the pinned
+    outcome, so when the issue is fixed and behaviour changes the test
+    fails loudly and prompts the fixture to be re-verified. It is a
+    machine-readable flag distinguishing "provisionally failing, revisit"
+    from a genuinely-unnavigable negative case.
     """
 
     status: str
@@ -163,6 +174,7 @@ class Expected:
     techniques_must_run: tuple[str, ...] = ()
     techniques_must_skip: tuple[str, ...] = ()
     status_reason: str | None = None
+    pending_issue: str | None = None
 
 
 @dataclass(frozen=True)
@@ -431,6 +443,14 @@ def _validate_expected(raw: dict[str, Any], *, path: Path) -> Expected:
             f'{path}: expected.status_reason must be one of '
             f'{sorted(ALLOWED_STATUS_REASONS)} when present, got {status_reason!r}'
         )
+    pending_issue = raw.get('pending_issue')
+    if pending_issue is not None and (
+        not isinstance(pending_issue, str) or not _PENDING_ISSUE_RE.fullmatch(pending_issue)
+    ):
+        raise SidecarValidationError(
+            f'{path}: expected.pending_issue must be an issue reference of the '
+            f'form "#<number>" when present, got {pending_issue!r}'
+        )
     return Expected(
         status=status,
         confidence_tier=confidence_tier,
@@ -438,6 +458,7 @@ def _validate_expected(raw: dict[str, Any], *, path: Path) -> Expected:
         techniques_must_run=techniques_must_run,
         techniques_must_skip=techniques_must_skip,
         status_reason=status_reason,
+        pending_issue=pending_issue,
     )
 
 

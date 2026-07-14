@@ -256,6 +256,26 @@ class DataSet(ABC, NavBase):
         # a DataSet that doesn't support PDS4 bundle generation
         raise NotImplementedError
 
+    def pds4_lid_part_to_image_name(self, lid_part: str) -> str:
+        """Returns the image name for the given LID part.
+
+        Inverse of the image-name transformation baked into
+        :meth:`pds4_path_stub` and the ``pds4_image_name_to_*`` builders. The
+        bundle stores each product under a filename whose stem is the LID part
+        (e.g. ``1234567890w``); recovering the original image name lets bundle
+        scanners round-trip that stem back through the canonical LID builders
+        instead of re-applying the transform.
+
+        Parameters:
+            lid_part: The LID part (an on-disk product filename stem).
+
+        Returns:
+            The image name that produced the given LID part.
+        """
+        # We don't make PDS4 methods as @abstractmethod because it's possible to make
+        # a DataSet that doesn't support PDS4 bundle generation
+        raise NotImplementedError
+
     def pds4_image_name_to_browse_lid(self, image_name: str) -> str:
         """Returns the browse LID for the given image name.
 

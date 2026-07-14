@@ -106,6 +106,16 @@ FRAME_PX = 1024.0
 FLAT_SAGITTA_PX = 0.5          # PHASE10 rank-1 curvature threshold
 FLAT_MIN_APPARENT_R_PX = FRAME_PX * FRAME_PX / (8.0 * FLAT_SAGITTA_PX)
 
+# Minimum clearly-bright catalog stars a stars-only scattered_light surrogate
+# must show to be autonomously navigable.  It mirrors the star-field pattern
+# matcher's inlier floor (config_510_techniques.yaml pattern_match_min_inliers);
+# with no resolved body or ring to fall back on, a frame carrying fewer stars
+# than that floor cannot reach a star-field solve, and the two-star fallback
+# needs a bounded pointing prior these surrogates lack.  See issue #238: the
+# Galileo C00598xx quintet each showed only ~2 bright stars and failed wholesale
+# with all_techniques_spurious.
+STAR_FIELD_MIN_INLIERS = 6
+
 LN_POGSON = math.log(2.512)
 
 
@@ -861,9 +871,17 @@ def scan_go() -> dict[str, list[dict]]:
         vm = star_vmags(fr['ra'], fr['dec'], FOV_DEG[('GOSSI', 'SSI')], lim)
         # navigable content requirement: batch-3 votes rejected frames
         # whose catalog stars sat at the detection limit ('just noise'),
-        # so demand clearly-bright stars with margin under the glare
+        # so demand clearly-bright stars with margin under the glare.
+        # The count floor mirrors the star-field matcher's inlier floor:
+        # issue #238 showed that ~2 bright stars is not enough for an
+        # autonomous solve on a stars-only surrogate (the Galileo
+        # C00598xx quintet failed wholesale with all_techniques_spurious),
+        # so require at least STAR_FIELD_MIN_INLIERS clearly-bright stars.
+        # NOTE: star_vmags reads UCAC4, whose photometry saturates at the
+        # bright end (it lists Pleiades members near V7 instead of V3); the
+        # count is therefore a conservative lower bound on bright content.
         n_clear = sum(1 for v in vm if v <= lim - 1.5)
-        if n_clear < 2:
+        if n_clear < STAR_FIELD_MIN_INLIERS:
             continue
         n_stray += 1
         out['scattered_light'].append(cand(

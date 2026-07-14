@@ -534,6 +534,25 @@ techniques:
       # ratio the single-detection premise of the 1-star path fails and
       # the result is spurious.  Unit-free (no DN-scale dependence).
       one_star_min_peak_ratio: 1.5
+      # Maximum prediction-to-detection distance (px) accepted by the
+      # 1-star path when the peak-ratio gate above is vacuous (#259).
+      # The ratio reports an infinite no-rival sentinel when the
+      # window's runner-up never clears the background -- a flat or
+      # quantized frame where the #211 gate has measured nothing.  A
+      # real star on a real (noisy) background always has a finite
+      # runner-up, so the sentinel case is exactly where a lone hot
+      # pixel or artifact would otherwise auto-pass every check.  In
+      # that case the residual (which on this path IS the reported
+      # offset) must stay inside the pointing-prior core: default is
+      # one third of search_window_px, since the window half-width
+      # brackets the per-instrument SPICE pointing-error envelope (a
+      # ~3-sigma budget) and an uncorroborated no-rival detection far
+      # from the prediction is far more likely an artifact than a
+      # 2-3-sigma pointing error.  A finite peak ratio leaves
+      # acceptance to the measured #211 gate: operator-verified
+      # library matches carry genuine one-star offsets up to ~24 px,
+      # so no uniform residual cut can sit below the search window.
+      one_star_max_residual_px: 10.0
       # Per-mode caps applied post-sigmoid; the 1-star path cannot
       # self-check, so its cap is lower than the 2-star path's.
       one_star_confidence_cap: 0.7

@@ -14,10 +14,11 @@ scans ``data/`` for ``*_supplemental.txt`` files and writes
 min/max columns for each configured backplane type formatted to 5 decimal
 places, plus their labels when templates exist.
 
-Known bug pinned here as strict xfail: #139 (the global-index LID is hand-built
-without the ``urn:nasa:pds:`` prefix and without the dataset's image-name
-transformation, so it cannot cross-reference the product LIDVIDs in the
-collection inventories).
+Both generators recover the original image name from each on-disk product stem
+via ``DataSet.pds4_lid_part_to_image_name`` before building LIDs, so the stem
+(which is already in LID-part form) is not fed back through the image-name
+transform.  This is what keeps the inventory LIDVIDs and global-index LIDs
+matching the product labels' DATA_LID (regression coverage for #139 and #256).
 """
 
 from pathlib import Path
@@ -366,12 +367,6 @@ def _cross_reference_env(tmp_path: Path) -> BundleEnv:
     return env
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason='#139: the global-index LID is hand-built as <bundle>:data:<image> without '
-    'the urn:nasa:pds: prefix and without the dataset LID builder, so it does not '
-    'match the product LIDVIDs in collection_data.tab',
-)
 def test_global_index_bodies_lid_matches_collection_inventory(tmp_path: Path) -> None:
     """#139 round trip: the bodies-index LID equals the collection inventory LID."""
     env = _cross_reference_env(tmp_path)
@@ -383,12 +378,6 @@ def test_global_index_bodies_lid_matches_collection_inventory(tmp_path: Path) ->
     assert bodies_rows[1][0] == inventory_lid
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason='#139: the global-index LID is hand-built as <bundle>:data:<image> without '
-    'the urn:nasa:pds: prefix and without the dataset LID builder, so it does not '
-    'match the product LIDVIDs in collection_data.tab',
-)
 def test_global_index_rings_lid_matches_collection_inventory(tmp_path: Path) -> None:
     """#139 round trip: the rings-index LID equals the collection inventory LID."""
     env = _cross_reference_env(tmp_path)
@@ -445,6 +434,27 @@ def test_cassini_browse_lid_uses_browse_collection(tmp_path: Path) -> None:
     assert lid == 'urn:nasa:pds:cassini_iss_saturn_backplanes_rsfrench2027:browse:1454725799n'
 
 
+def test_cassini_lid_part_to_image_name_inverts_rotation(tmp_path: Path) -> None:
+    """The LID-part inverse moves the trailing letter back to an uppercase prefix."""
+    dataset = _cassini_dataset(tmp_path)
+    assert dataset.pds4_lid_part_to_image_name('1454725799n') == 'N1454725799'
+
+
+def test_cassini_lid_part_round_trips_through_data_lid(tmp_path: Path) -> None:
+    """An on-disk LID part recovers the image name whose data LID embeds it."""
+    dataset = _cassini_dataset(tmp_path)
+    image_name = dataset.pds4_lid_part_to_image_name('1454725799n')
+    lid = dataset.pds4_image_name_to_data_lid(image_name)
+    assert lid.endswith(':data:1454725799n')
+
+
+def test_cassini_lid_part_to_image_name_rejects_too_short(tmp_path: Path) -> None:
+    """A LID part shorter than two characters is a programming error."""
+    dataset = _cassini_dataset(tmp_path)
+    with pytest.raises(ValueError, match='invalid Cassini LID part'):
+        dataset.pds4_lid_part_to_image_name('n')
+
+
 def test_cassini_lid_strips_version_suffix_and_extension(tmp_path: Path) -> None:
     """Image-name version suffixes and extensions do not leak into the LID."""
     dataset = _cassini_dataset(tmp_path)
@@ -453,14 +463,6 @@ def test_cassini_lid_strips_version_suffix_and_extension(tmp_path: Path) -> None
     assert suffixed == plain
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason='#256: generate_collection_files feeds the '
-    'on-disk image name (already LID-part form, e.g. 1454725799n) back into '
-    'pds4_image_name_to_data_lidvid, which re-applies the N1454725799 -> 1454725799n '
-    'rotation, yielding 454725799n1 - the inventory LIDVID cannot match the DATA_LID '
-    'rendered inside the product label',
-)
 def test_cassini_inventory_lidvid_matches_label_lid(tmp_path: Path) -> None:
     """The Cassini collection inventory LIDVID matches the label's DATA_LID."""
     dataset = _cassini_dataset(tmp_path)
