@@ -13,7 +13,12 @@ from spindoctor.nav_orchestrator.ensemble import (
 )
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from spindoctor.nav_orchestrator.provenance import Provenance
-from spindoctor.nav_technique.diagnostics import BodyLimbDiagnostics
+from spindoctor.nav_technique.diagnostics import (
+    BodyLimbDiagnostics,
+    NavTechniqueDiagnostics,
+    StarRefineDiagnostics,
+    StarUniqueMatchDiagnostics,
+)
 from spindoctor.nav_technique.nav_technique import (
     ROTATION_UNOBSERVABLE_VARIANCE,
     embed_rotation_unobservable,
@@ -48,6 +53,7 @@ def _make_result(
     confidence: float = 0.8,
     spurious: bool = False,
     at_edge: bool = False,
+    diagnostics: NavTechniqueDiagnostics | None = None,
 ) -> NavTechniqueResult:
     """Build a minimal NavTechniqueResult for ensemble tests."""
     if cov is None:
@@ -60,7 +66,7 @@ def _make_result(
         confidence=confidence,
         spurious=spurious,
         at_edge=at_edge,
-        diagnostics=BodyLimbDiagnostics(),
+        diagnostics=diagnostics if diagnostics is not None else BodyLimbDiagnostics(),
     )
 
 
@@ -573,16 +579,36 @@ def test_mahalanobis_null_space_groups_near_rank_deficient_agreement() -> None:
     assert result.status == 'success'
 
 
-def test_mahalanobis_null_space_separates_disagreement_along_null_axis() -> None:
-    """Two rank-1 results disagreeing ~3 px along the shared null axis do not group."""
-    # Exactly-singular rank-1 covariance: observable in u, fully unobservable
-    # in v.  pinvh projects the v axis into the null space, so any v
-    # disagreement is infinite distance.
+def test_mahalanobis_null_axis_junk_does_not_separate_agreeing_rank_1_pair() -> None:
+    """Junk along a shared unobservable axis no longer manufactures a conflict.
+
+    Two exactly-singular rank-1 results observe only u and agree there
+    exactly; their v components are meaningless fit residue.  The
+    agreement metric compares only the intersection of observable
+    subspaces, so the 3 px of v junk is ignored and the
+    pair groups as a rank-1 consensus.
+    """
     cov = np.array([[0.0, 0.0], [0.0, 0.04]], np.float64)
     a = _make_result(technique_name='A', offset=(0.0, 0.0), cov=cov, confidence=0.5)
-    # 3 px displacement along v, the unobservable null axis; agreement there is
-    # meaningless, so the Mahalanobis distance must be inf (-> separate groups).
     b = _make_result(technique_name='B', offset=(3.0, 0.0), cov=cov, confidence=0.5)
+    result = ensemble(
+        [a, b],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+        config=EnsembleConfig(agreement_pixel_floor=0.0),
+    )
+    assert result.status == 'success'
+    assert result.status_reason.value == 'rank_1_only'
+    assert result.excluded_from_consensus == []
+
+
+def test_mahalanobis_disagreement_along_shared_observable_axis_conflicts() -> None:
+    """Two rank-1 results disagreeing along the axis they both observe conflict."""
+    cov = np.array([[0.0, 0.0], [0.0, 0.04]], np.float64)
+    a = _make_result(technique_name='A', offset=(0.0, 0.0), cov=cov, confidence=0.5)
+    # 3 px displacement along u, the observable axis: a genuine standoff.
+    b = _make_result(technique_name='B', offset=(0.0, 3.0), cov=cov, confidence=0.5)
     result = ensemble(
         [a, b],
         feature_inventory=[],
@@ -960,3 +986,410 @@ def test_ensemble_unanimous_consensus_reports_no_exclusions() -> None:
     )
     assert result.status == 'success'
     assert result.excluded_from_consensus == []
+
+
+def test_ensemble_lone_dissenter_half_confidence_is_outlier_not_conflict() -> None:
+    """A lone excluded dissenter at half the winner's confidence cannot veto it.
+
+    A singleton 0.8-confidence winner against a singleton 0.4-confidence
+    dissenter sits exactly on the relative-gap boundary (gap 0.4 ==
+    agreement_gap 0.5 * best 0.8) and must resolve as outlier rejection,
+    not a conflict.
+    """
+    cov = np.eye(2, dtype=np.float64) * 0.25
+    best = _make_result(technique_name='TechniqueA', offset=(18.2, 0.1), cov=cov, confidence=0.8)
+    dissenter = _make_result(
+        technique_name='TechniqueB', offset=(-1.0, 3.5), cov=cov, confidence=0.4
+    )
+    result = ensemble(
+        [best, dissenter],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.excluded_from_consensus == ['TechniqueB']
+    assert result.offset_px is not None
+    # The winner's offset carries through unperturbed by the dissenter.
+    assert result.offset_px[0] == pytest.approx(18.2)
+    assert result.offset_px[1] == pytest.approx(0.1)
+    # The disagreement penalty still applies to the combined confidence.
+    assert result.confidence == pytest.approx(0.8 * 0.7)
+
+
+def test_ensemble_lone_vs_lone_comparable_confidence_still_conflicts() -> None:
+    """A lone-vs-lone standoff with comparable confidences remains a conflict."""
+    cov = np.eye(2, dtype=np.float64) * 0.25
+    best = _make_result(technique_name='TechniqueA', offset=(0.0, 0.0), cov=cov, confidence=0.5)
+    dissenter = _make_result(
+        technique_name='TechniqueB', offset=(30.0, 30.0), cov=cov, confidence=0.45
+    )
+    result = ensemble(
+        [best, dissenter],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'conflicted'
+    assert result.confidence_rank == 'conflicted'
+
+
+def test_ensemble_single_inlier_refine_tier_caps_at_medium() -> None:
+    """A lone one-inlier refine never earns the high tier.
+
+    The single-inlier confidence cap (0.5) sits exactly on the high
+    tier's min_confidence boundary and the refine's localization sigma
+    is CRLB-tight, so without the guard the result would earn high.
+    """
+    res = _make_result(
+        technique_name='StarRefineNav',
+        offset=(3.06, -0.02),
+        cov=np.eye(2, dtype=np.float64) * 0.01,
+        confidence=0.5,
+        diagnostics=StarRefineDiagnostics(n_stars_used=1),
+    )
+    result = ensemble(
+        [res],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.confidence_rank == 'medium'
+
+
+def test_ensemble_one_star_unique_match_tier_caps_at_medium() -> None:
+    """A lone one-star unique match with tight sigma also tops out at medium."""
+    res = _make_result(
+        technique_name='StarUniqueMatchNav',
+        offset=(3.06, -0.02),
+        cov=np.eye(2, dtype=np.float64) * 0.01,
+        confidence=0.6,
+        diagnostics=StarUniqueMatchDiagnostics(mode='one_star'),
+    )
+    result = ensemble(
+        [res],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.confidence_rank == 'medium'
+
+
+def test_ensemble_two_single_star_members_still_cap_at_medium() -> None:
+    """Two agreeing single-star results are not an independent cross-check."""
+    cov = np.eye(2, dtype=np.float64) * 0.01
+    match = _make_result(
+        technique_name='StarUniqueMatchNav',
+        offset=(3.06, -0.02),
+        cov=cov,
+        confidence=0.5,
+        diagnostics=StarUniqueMatchDiagnostics(mode='one_star'),
+    )
+    refine = _make_result(
+        technique_name='StarRefineNav',
+        offset=(3.10, -0.05),
+        cov=cov,
+        confidence=0.5,
+        diagnostics=StarRefineDiagnostics(n_stars_used=1),
+    )
+    result = ensemble(
+        [match, refine],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.confidence_rank == 'medium'
+
+
+def test_ensemble_single_star_plus_body_technique_keeps_high() -> None:
+    """A single-star result cross-checked by a non-star technique may earn high."""
+    cov = np.eye(2, dtype=np.float64) * 0.01
+    refine = _make_result(
+        technique_name='StarRefineNav',
+        offset=(3.06, -0.02),
+        cov=cov,
+        confidence=0.6,
+        diagnostics=StarRefineDiagnostics(n_stars_used=1),
+    )
+    limb = _make_result(
+        technique_name='BodyLimbNav',
+        offset=(3.10, -0.05),
+        cov=cov,
+        confidence=0.6,
+        diagnostics=BodyLimbDiagnostics(),
+    )
+    result = ensemble(
+        [refine, limb],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.confidence_rank == 'high'
+
+
+def test_ensemble_multi_star_refine_keeps_high() -> None:
+    """A refine with several inliers is independently constrained; high stays."""
+    res = _make_result(
+        technique_name='StarRefineNav',
+        offset=(3.06, -0.02),
+        cov=np.eye(2, dtype=np.float64) * 0.01,
+        confidence=0.7,
+        diagnostics=StarRefineDiagnostics(n_stars_used=4),
+    )
+    result = ensemble(
+        [res],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.confidence_rank == 'high'
+
+
+def test_ensemble_rank_1_ring_and_full_rank_blob_agreeing_radially_fuse() -> None:
+    """A rank-1 ring edge and a full-rank blob that agree radially group.
+
+    The ring result observes only v (its u variance is exactly zero under
+    the Moore-Penrose convention) and carries junk in its u component;
+    the blob is a full-rank absolute fix.  They agree in v, so the
+    rank-aware metric groups them and the fusion combines the ring's
+    radial precision with the blob's along-edge constraint into a
+    full-rank result.
+    """
+    ring_cov = np.array([[0.04, 0.0], [0.0, 0.0]], np.float64)
+    blob_cov = np.eye(2, dtype=np.float64) * 0.09
+    ring = _make_result(
+        technique_name='RingEdgeNav', offset=(1.0, 50.0), cov=ring_cov, confidence=0.9
+    )
+    blob = _make_result(
+        technique_name='BodyBlobNav', offset=(1.1, 2.0), cov=blob_cov, confidence=0.4
+    )
+    result = ensemble(
+        [ring, blob],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.status_reason.value == 'ok'
+    assert result.excluded_from_consensus == []
+    assert result.offset_px is not None
+    # v combines both (ring dominates); u comes from the blob alone, not
+    # the ring's junk 50.0.
+    assert abs(result.offset_px[0] - 1.03) < 0.05
+    assert result.offset_px[1] == pytest.approx(2.0)
+    assert result.sigma_along_unobservable_px is None
+
+
+def test_ensemble_rank_1_ring_disagreeing_radially_does_not_group() -> None:
+    """A rank-1 ring edge that disagrees along its observable axis stays excluded."""
+    ring_cov = np.array([[0.04, 0.0], [0.0, 0.0]], np.float64)
+    blob_cov = np.eye(2, dtype=np.float64) * 0.09
+    ring = _make_result(
+        technique_name='RingEdgeNav', offset=(9.0, 50.0), cov=ring_cov, confidence=0.9
+    )
+    blob = _make_result(
+        technique_name='BodyBlobNav', offset=(1.1, 2.0), cov=blob_cov, confidence=0.4
+    )
+    result = ensemble(
+        [ring, blob],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    # The 7.9 px radial disagreement is genuine; the ring wins the
+    # consensus and the blob is excluded as an outlier.
+    assert result.excluded_from_consensus == ['BodyBlobNav']
+
+
+def test_ensemble_rotation_sentinel_does_not_zero_translation_offset() -> None:
+    """A 3-DoF result with the rotation-unobservable sentinel keeps its offset.
+
+    pinvh's relative eigenvalue cutoff against the 1e15 rotation sentinel
+    used to truncate the genuine translation information, collapsing the
+    fused offset to (0, 0) and mislabeling the result rank_1_only (seen
+    on a Galileo one-star frame and the flat-ring frames).
+    """
+    cov = embed_rotation_unobservable(np.diag([0.04, 0.04]).astype(np.float64))
+    res = NavTechniqueResult(
+        technique_name='StarUniqueMatchNav',
+        feature_ids=('StarUniqueMatchNav:f1',),
+        offset_px=(-12.3, -13.5),
+        covariance_px2=cov,
+        confidence=0.6,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=0.0,
+        sigma_rotation_rad=float(np.sqrt(ROTATION_UNOBSERVABLE_VARIANCE)),
+    )
+    result = ensemble(
+        [res],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.offset_px is not None
+    assert result.offset_px[0] == pytest.approx(-12.3)
+    assert result.offset_px[1] == pytest.approx(-13.5)
+    # An unobservable rotation does not make the translation fix rank-1.
+    assert result.status_reason.value == 'ok'
+    assert result.sigma_along_unobservable_px is None
+
+
+def test_ensemble_rank_deficient_fused_result_caps_at_medium() -> None:
+    """A rank-1 fused covariance never earns the high tier."""
+    ring_cov = np.array([[0.0004, 0.0], [0.0, 0.0]], np.float64)
+    res = _make_result(
+        technique_name='RingEdgeNav', offset=(0.0, 6.35), cov=ring_cov, confidence=0.95
+    )
+    result = ensemble(
+        [res],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.status_reason.value == 'rank_1_only'
+    assert result.confidence_rank == 'medium'
+
+
+def _refine_result(
+    *,
+    offset: tuple[float, float],
+    confidence: float = 0.5,
+    prior_sources: frozenset[str] = frozenset(),
+    cov: np.ndarray | None = None,
+) -> NavTechniqueResult:
+    """Build a pass-2 StarRefineNav result seeded by ``prior_sources``."""
+    return NavTechniqueResult(
+        technique_name='StarRefineNav',
+        feature_ids=('StarRefineNav:f1',),
+        offset_px=offset,
+        covariance_px2=cov if cov is not None else np.eye(2, dtype=np.float64) * 0.25,
+        confidence=confidence,
+        spurious=False,
+        at_edge=False,
+        diagnostics=StarRefineDiagnostics(n_stars_used=1),
+        prior_source_techniques=prior_sources,
+    )
+
+
+def test_ensemble_prior_descendant_does_not_boost_confidence() -> None:
+    """A refine seeded by its groupmate adds no agreement boost.
+
+    The N1492091163 anatomy: a wrong pass-1 result seeds the prior, the
+    1-star refine locks onto whatever sits near the (wrong) predicted
+    position, and the pair's 'agreement' must not raise the combined
+    confidence above what the pass-1 result carries alone.
+    """
+    ring = _make_result(technique_name='RingEdgeNav', offset=(6.7, -118.6), confidence=0.9)
+    tagged = _refine_result(offset=(6.8, -118.5), prior_sources=frozenset({'RingEdgeNav'}))
+    untagged = _refine_result(offset=(6.8, -118.5))
+    with_tag = ensemble(
+        [ring, tagged],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    without_tag = ensemble(
+        [ring, untagged],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert with_tag.status == 'success'
+    assert without_tag.confidence > with_tag.confidence
+    # The tagged pair collapses to the precision-weighted average with no
+    # 2-member agreement factor: (0.9 + 0.5) / 2 with equal covariances.
+    assert with_tag.confidence == pytest.approx(0.7)
+    assert without_tag.confidence == pytest.approx(0.99)
+
+
+def test_ensemble_prior_descendant_still_refines_the_offset() -> None:
+    """A tagged refine keeps contributing its precision to the combined offset."""
+    ring = _make_result(technique_name='RingEdgeNav', offset=(6.0, -118.0), confidence=0.9)
+    refine = _refine_result(offset=(7.0, -119.0), prior_sources=frozenset({'RingEdgeNav'}))
+    result = ensemble(
+        [ring, refine],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.offset_px is not None
+    # Equal covariances: the combined offset is the arithmetic mean.
+    assert result.offset_px[0] == pytest.approx(6.5)
+    assert result.offset_px[1] == pytest.approx(-118.5)
+    assert result.consensus_techniques == ['RingEdgeNav', 'StarRefineNav']
+
+
+def test_ensemble_descendant_backed_winner_is_singleton_in_standoff() -> None:
+    """A winner echoed only by its own refine has no quorum against a dissenter.
+
+    Best subset {A 0.6, refine-of-A 0.5} versus a lone dissenter at 0.55:
+    with the descendant's vote removed, this is a lone-vs-lone standoff
+    with a relative gap of (0.6 - 0.55) / 0.6 << agreement_gap, so the
+    result is conflicted; counting the refine as a second member would
+    have declared quorum and outlier-rejected the dissenter.
+    """
+    cov = np.eye(2, dtype=np.float64) * 0.25
+    a = _make_result(technique_name='TechniqueA', offset=(0.0, 0.0), cov=cov, confidence=0.6)
+    refine = _refine_result(
+        offset=(0.1, 0.1), confidence=0.5, prior_sources=frozenset({'TechniqueA'})
+    )
+    dissenter = _make_result(
+        technique_name='TechniqueB', offset=(30.0, 30.0), cov=cov, confidence=0.55
+    )
+    result = ensemble(
+        [a, refine, dissenter],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'conflicted'
+    assert result.excluded_from_consensus == ['TechniqueB']
+
+
+def test_ensemble_descendant_backed_runner_up_has_no_quorum() -> None:
+    """An excluded pair of (result, its own refine) is a lone dissenter, not a quorum."""
+    cov = np.eye(2, dtype=np.float64) * 0.25
+    a1 = _make_result(technique_name='TechniqueA1', offset=(0.0, 0.0), cov=cov, confidence=0.6)
+    a2 = _make_result(technique_name='TechniqueA2', offset=(0.1, 0.0), cov=cov, confidence=0.6)
+    b = _make_result(technique_name='TechniqueB', offset=(30.0, 30.0), cov=cov, confidence=0.5)
+    b_refine = _refine_result(
+        offset=(30.1, 30.0), confidence=0.4, prior_sources=frozenset({'TechniqueB'})
+    )
+    result = ensemble(
+        [a1, a2, b, b_refine],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    # Without the corroboration fix the excluded pair counts as a
+    # two-member runner-up (summed 0.9 against best 1.2, gap 0.3 < 0.5)
+    # and forces the conflicted branch; as a lone dissenter it is
+    # outlier-rejected instead.
+    assert result.status == 'success'
+    assert result.excluded_from_consensus == ['TechniqueB', 'StarRefineNav']
+
+
+def test_ensemble_untagged_results_unchanged_by_lineage_logic() -> None:
+    """Results without prior_source_techniques keep full corroboration semantics."""
+    a = _make_result(technique_name='TechniqueA', offset=(1.0, 2.0), confidence=0.85)
+    b = _make_result(technique_name='TechniqueB', offset=(1.05, 2.05), confidence=0.85)
+    result = ensemble(
+        [a, b],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.consensus_techniques == ['TechniqueA', 'TechniqueB']
+    # Two independent members still earn the 2-member agreement factor.
+    assert result.confidence == pytest.approx(0.99)

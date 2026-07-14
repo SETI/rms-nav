@@ -39,6 +39,12 @@ class NavTechniqueResult:
             (from each consumed feature's structured ``body_name``).  Empty
             for ring / star techniques.  The ensemble's fallback-supersession
             filter reads this instead of parsing ``feature_ids`` strings.
+        prior_source_techniques: Technique names whose pass-1 results
+            seeded the prior this (pass-2) result refined; empty for
+            prior-free results.  Stamped by the orchestrator after the
+            pass-2 run.  The ensemble treats such a result as
+            conditionally dependent on these techniques: it may refine
+            their offset but not corroborate it.
     """
 
     technique_name: str
@@ -52,6 +58,7 @@ class NavTechniqueResult:
     rotation_rad: float | None = None
     sigma_rotation_rad: float | None = None
     source_bodies: frozenset[str] = frozenset()
+    prior_source_techniques: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         """Validate covariance shape and freeze the array."""
