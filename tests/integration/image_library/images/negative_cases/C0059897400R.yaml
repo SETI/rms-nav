@@ -1,0 +1,50 @@
+schema_version: 1
+image_id: C0059897400R
+mission: GOSSI
+camera: SSI
+filter_combo: CLEAR
+image_url: pds3://volumes/GO_0xxx/GO_0003/RAW_CAL/C0059897400R.IMG
+scene_tags:
+- negative_cases
+- moon_glare
+ground_truth:
+  offset_dv_px: 0.0
+  offset_du_px: 0.0
+  offset_uncertainty_px: 99.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-14
+  ui_version: spindoctor 0.0.0 (issue #238 triage)
+  notes: |
+    negative_cases curation for issue #238 (Galileo SSI 'scattered_light'
+    C00598xx quintet).  Instrument: Galileo SSI (GOSSI).  The tracking issue
+    labelled the quintet 'Voyager ISS', but the frames live under the GO_0xxx
+    volumes and carry instrument=gossi, so they are Galileo SSI; the label is
+    imprecise.  GO_0003, target MOON, 1990 Earth/Moon flyby, 0.05 s, CLEAR filter.
+    Stage-A selected this as a scattered_light surrogate (bright body in
+    inventory, unresolved on disc) with a real but gentle Moon-glare gradient
+    (prescan gradient_score ~7.4, amplitude ~4.5 DN).  The in-pipeline image
+    classifier scores the frame 'clean' (noise ~1 DN), so the glare does not
+    swamp detection: there is no photometric-path defect.
+    Why it is unnavigable: the field is a sparse Pleiades pointing whose only
+    genuinely bright catalog stars are two members (Eta Tau ~V2.8, 23 Tau
+    ~V4.2); the remaining ~11 predicted stars are V 6-8, at or below the
+    glare-elevated detection limit.  The star-field pattern matcher detects
+    30 sources (dominated by noise and cosmic-ray hits) but recovers only
+    1 inlier(s) against its floor of 6, and no single rigid offset aligns
+    more than ~3-4 predicted stars with a detection.  The two-star fallback
+    cannot lock the large unknown pointing offset and its brightest-pair
+    margin (0.77 mag) is below the 1.5-mag floor.  The pipeline fails closed
+    with status=failed, reason=all_techniques_spurious, which is correct:
+    fewer than the required number of stars are detectable and there is no
+    resolved body or ring.
+    Ground-truth offset is a placeholder: the scene is unnavigable by design,
+    so no offset is measurable; the regression assertion is
+    expected.status=failed with reason=all_techniques_spurious.
+expected:
+  status: failed
+  confidence_tier: failed
+  primary_technique: StarFieldFromCatalogNav
+  status_reason: all_techniques_spurious
+  techniques_must_run: []
+  techniques_must_skip: []
