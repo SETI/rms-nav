@@ -968,7 +968,7 @@ def test_orchestrator_calibrated_if_mostly_nan_short_circuits() -> None:
     assert result.per_technique == []
 
 
-# --- Status-reason INFO emission at every failed-nav site ---
+# --- Status-reason INFO emission at every failed-nav site (#180) ---
 #
 # pdslogger writes through its own stream handler, so the emitted lines
 # are captured with ``capsys`` (never ``caplog``).  Each test provokes
