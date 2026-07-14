@@ -1054,28 +1054,39 @@ class StarFieldFromCatalogNav(NavTechnique):
 
         Translation block follows :meth:`_build_covariance` with ``p =
         3`` (three parameters are co-fitted: dv, du, theta); the
-        rotation diagonal uses the reduced-chi-square lever-arm formula
+        rotation diagonal is the inverse of the rotation Fisher
+        information built from the per-vertex Jacobian of the residual
+        with respect to theta.  For an inlier with lever arm
+        ``(dv_i, du_i) = cat_i - cc`` about the (weighted) catalog
+        centroid ``cc``, that Jacobian is the tangential lever-arm
+        component ``(du_i, -dv_i)``, so with per-axis residual
+        variances the information is
 
         ::
 
-            sigma_theta**2 = chi2_nu_residual / sum_i w_i * |cat_i - cc|**2
+            I_theta = sum_i w_i * (du_i**2 / var_v + dv_i**2 / var_u)
+            sigma_theta**2 = 1 / I_theta
 
-        where ``cc`` is the (weighted) catalog centroid, ``|cat_i - cc|``
-        is each point's lever-arm distance from the rotation centre, and
+        where each per-axis variance is the reduced chi-square of the
+        fit residuals on that axis,
 
         ::
 
-            chi2_nu_residual = 0.5 * (sum_i w_i r_v_i**2 + sum_i w_i r_u_i**2)
-                               / max(N - 3, 1)
+            var_axis = max(sum_i w_i r_axis_i**2 / max(N - 3, 1), 1.0)
 
-        is the pooled per-axis reduced chi-square of the fit residuals.
-        Cross-terms are zero — under independent-isotropic-residual
-        assumptions the translation and rotation parameters of a
-        Procrustes fit are uncorrelated.  Whenever the catalog spread is
-        too small to constrain rotation (numerically zero or negative
-        spread, e.g. coincident inliers) the rotation diagonal collapses
-        to the rotation-unobservable sentinel so ``pinvh`` cleanly drops
-        the rotation contribution.
+        floored at 1 px**2 — the same positive-definite floor the
+        translation block applies — so a noise-free fit cannot report
+        a degenerate rotation variance.  This is exact for anisotropic
+        residuals (``var_v != var_u``); in the isotropic limit it
+        reduces to the classic lever-arm form
+        ``chi2_nu_residual / sum_i w_i * |cat_i - cc|**2``.
+        Cross-terms are zero — with the rotation taken about the
+        weighted catalog centroid the translation and rotation
+        parameters of a Procrustes fit are uncorrelated.  Whenever the
+        catalog spread is too small to constrain rotation (numerically
+        zero information, e.g. coincident inliers) the rotation
+        diagonal collapses to the rotation-unobservable sentinel so
+        ``pinvh`` cleanly drops the rotation contribution.
         """
         cov_2x2 = self._build_covariance(weights=weights, residuals=residuals, n_params=3)
         total = float(weights.sum())
@@ -1085,16 +1096,15 @@ class StarFieldFromCatalogNav(NavTechnique):
         cat_c_u = float(np.sum(weights * cat_inliers[:, 1]) / total)
         dv = cat_inliers[:, 0] - cat_c_v
         du = cat_inliers[:, 1] - cat_c_u
-        spread = float(np.sum(weights * (dv * dv + du * du)))
         n = residuals.shape[0]
         dof = max(n - 3, 1)
-        chi2_v = float(np.sum(weights * residuals[:, 0] ** 2))
-        chi2_u = float(np.sum(weights * residuals[:, 1] ** 2))
-        chi2_nu_residual = 0.5 * (chi2_v + chi2_u) / dof
-        if spread <= 0.0:
+        var_v = max(float(np.sum(weights * residuals[:, 0] ** 2)) / dof, 1.0)
+        var_u = max(float(np.sum(weights * residuals[:, 1] ** 2)) / dof, 1.0)
+        fisher_theta = float(np.sum(weights * (du * du / var_v + dv * dv / var_u)))
+        if fisher_theta <= 0.0:
             sigma_theta_sq = ROTATION_UNOBSERVABLE_VARIANCE
         else:
-            sigma_theta_sq = max(chi2_nu_residual / spread, 1.0 / spread)
+            sigma_theta_sq = 1.0 / fisher_theta
         cov = np.zeros((3, 3), dtype=np.float64)
         cov[:2, :2] = cov_2x2
         cov[2, 2] = sigma_theta_sq
