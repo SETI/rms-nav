@@ -1,0 +1,49 @@
+schema_version: 1
+mission: COISS
+camera: NAC
+image_id: N1863269574_1_CALIB
+image_datetime_utc: '2017-01-16T13:45:20.886'
+exposure_time_sec: 0.18
+filter_combo: CL1+CL2
+image_url: pds3://calibrated/COISS_2xxx/COISS_2110/data/1863269574_1863764768/N1863269574_1_CALIB.IMG
+scene_tags:
+- ring_only_flat
+- keeler_gap
+ground_truth:
+  offset_dv_px: 0.0
+  offset_du_px: 4.4777
+  offset_uncertainty_px: 1.0
+  constraint:
+    type: rank_1
+    normal_angle_deg: 90.0
+    offset_along_normal_px: 4.4777
+    uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-13
+  ui_version: spindoctor 0.1.dev63 (cohort review batch 005)
+  notes: |
+    ring_only_flat exemplar from cohort-curation review batch 005
+    (seq 033; Stage A metadata scan seed 20260708).
+    Selection: Keeler gap / A ring outer edge closeup, flattest edge
+    apparent curvature radius 149173 px (straight across the FOV), ring
+    opening -14.59 deg, no body in FOV; CL1+CL2, texp 0.18 s, year 2017.
+    Rank-1 scene: only the offset component along the edge normal is
+    operator-verified (vote y, 2026-07-13; per the batch instructions the
+    along-edge component carries no alignment judgment). The (dv, du) pair
+    is the ensemble's representative point on the constraint line.
+    normal_angle_deg comes from aggregate_edge_normal_angle_deg on the
+    frame's two straight RING_EDGE features (Keeler-A Ring OE IER, Keeler
+    IEG): exactly 90.0 deg (edges run along v; only du is observable).
+    Pipeline at review and at sidecar time: status=success,
+    confidence=0.952, rank=high, status_reason=rank_1_only; RingEdgeNav
+    raw fit (-49.4562, 4.4777) projects to 4.4777 px along the normal,
+    identical to the voted representative point.
+expected:
+  status: success
+  confidence_tier: high
+  status_reason: rank_1_only
+  primary_technique: RingEdgeNav
+  techniques_must_run:
+  - RingEdgeNav
+  techniques_must_skip: []
