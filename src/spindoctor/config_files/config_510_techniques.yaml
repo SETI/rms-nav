@@ -453,6 +453,38 @@ techniques:
       # lock anchors a minority of the model, a correct fit with one
       # missing edge anchors >0.8.
       spurious_min_inlier_fraction: 0.5
+      # The aggregate inlier-fraction veto above is waived for a
+      # multi-edge fusion when its low fraction is fully explained by
+      # edges that are ABSENT from the image rather than mis-aligned
+      # (issue #261).  The waiver requires all of: (1) at least
+      # ``spurious_waiver_min_well_fit_edges`` edges each clear
+      # ``spurious_min_inlier_fraction`` (and ``spurious_min_inliers``)
+      # on their OWN vertices; (2) the fit's translation covariance is
+      # full rank — the weighted vertices are almost all from the
+      # well-fit subset, so this certifies the surviving edges constrain
+      # both offset axes on their own; and (3) every
+      # non-well-fit edge has a per-edge median DT residual of at least
+      # ``spurious_waiver_absent_median_px`` — its vertices sit far from
+      # every detected image edge, i.e. there is nothing there to match.
+      # Calibration cases: Cassini C ring N1467344214 (correct fit,
+      # 821/3188 inliers; the two rejected edges have medians 46 and
+      # 17 px — absent — so the waiver fires) vs Cassini Tethys
+      # N1572472169 (wrong-ring lock, 739/1901 inliers; a rejected edge
+      # lies ON a detected image edge at median 0.04 px — internal
+      # disagreement — so the veto stands).  A single-edge fit never
+      # qualifies (its own fraction IS the aggregate), so single-edge
+      # behavior is unchanged.
+      spurious_waiver_min_well_fit_edges: 1
+      spurious_waiver_absent_median_px: 5.0
+      # Sigma floor (px) added in quadrature to the translation
+      # covariance whenever the waiver above fires.  A waived fit is
+      # carried by a minority of its model in a scene whose parallel
+      # ringlet structure can offer alias alignments the DT cannot rule
+      # out; the LM covariance measures only the statistical precision
+      # of the anchored vertices.  The floor sits above the medium
+      # tier's 2 px sigma cap so a waived fix surfaces as a low-tier
+      # result and cannot outweigh a full-support fix in the ensemble.
+      spurious_waiver_sigma_floor_px: 3.0
       # See ``BodyLimbNav.spurious_max_lm_displacement_px``.
       spurious_max_lm_displacement_px: 4.0
       # See ``BodyLimbNav.lm_trust_region_px``.

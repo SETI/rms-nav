@@ -213,6 +213,352 @@ def test_ring_edge_nav_marks_spurious_when_per_edge_rms_collapses_to_one(
     assert result.spurious is True
 
 
+def test_ring_edge_nav_multi_edge_with_undetected_dominant_edges_not_spurious(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """Absent edges waive the aggregate inlier-fraction veto.
+
+    Models the production false flag (Cassini C ring N1467344214): three
+    RING_EDGE features feed the LM, one curved edge fits at sub-pixel
+    RMS with every vertex an inlier, and the other two -- holding the
+    majority of the model vertices -- are undetectable in the image:
+    their vertices sit tens of pixels from every detected edge pixel and
+    are fully Tukey-rejected.  The aggregate inlier fraction falls below
+    the 0.5 gate even though the fused offset is correct.  Because the
+    rejected edges are absent (median DT residual far above the waiver
+    threshold) rather than mis-aligned against detected structure, the
+    mis-convergence veto must be waived and the result kept; the
+    per-edge diagnostics still record the missing edges' residual
+    signature unchanged.
+    """
+    from spindoctor.nav_technique import dt_fitting, nav_technique_ring_edge
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices_a, normals_a = circle_polyline((100.0, 100.0), 30.0, 120)
+    vertices_b, normals_b = circle_polyline((100.0, 100.0), 40.0, 120)
+    vertices_c, normals_c = circle_polyline((100.0, 100.0), 50.0, 120)
+    feat_a = make_ring_feature(
+        'inner', vertices=vertices_a, outward_normals=normals_a, is_straight_line=False
+    )
+    feat_b = make_ring_feature(
+        'middle', vertices=vertices_b, outward_normals=normals_b, is_straight_line=False
+    )
+    feat_c = make_ring_feature(
+        'outer', vertices=vertices_c, outward_normals=normals_c, is_straight_line=False
+    )
+    technique = RingEdgeNav()
+    context = make_nav_context(image)
+
+    # Edge A fits at 0.2 px with every vertex an inlier; edges B and C
+    # sit 17 and 46 px from every detected edge -- absent -- and are fully
+    # Tukey-rejected.  Aggregate inlier fraction is 120 / 360 = 0.33,
+    # below the 0.5 gate.
+    n_per_edge = 120
+    residuals = np.full(3 * n_per_edge, 0.2, dtype=np.float64)
+    residuals[n_per_edge : 2 * n_per_edge] = 17.0
+    residuals[2 * n_per_edge :] = 46.0
+    weights = np.zeros(3 * n_per_edge, dtype=np.float64)
+    weights[:n_per_edge] = 1.0
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(0.7, -1.3),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=residuals,
+        weights=weights,
+        rms_px=0.2,
+        raw_rms_px=float(np.sqrt(np.mean(residuals**2))),
+        iterations=10,
+        converged=True,
+        inlier_count=n_per_edge,
+        degenerate=False,
+    )
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+    # Pin the coarse seed next to the forged LM offset so the unrelated
+    # LM-displacement gate stays quiet.
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'coarse_ncc_search',
+        lambda *_args, **_kwargs: (1, -1),
+    )
+
+    result = technique.navigate([feat_a, feat_b, feat_c], context)
+    assert isinstance(result.diagnostics, RingEdgeDiagnostics)
+    assert result.diagnostics.edge_count == 3
+    # The diagnostics still expose the missing edges (stats unchanged);
+    # only the gate decision is robust to them.
+    assert result.diagnostics.per_edge_dt_median_max == pytest.approx(46.0)
+    assert result.spurious is False
+
+
+def test_ring_edge_nav_rejected_edge_on_detected_structure_stays_spurious(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A rejected edge lying ON a detected image edge blocks the waiver.
+
+    Models the wrong-ring lock (Cassini Tethys N1572472169): the fused
+    fit anchors one edge cleanly, but another rejected edge has a
+    sub-pixel median DT residual -- it sits on a detected image edge the
+    robust fit disagrees with.  That internal inconsistency is the
+    mis-convergence signature the veto exists for, so the result must
+    stay spurious even though one edge clears the per-edge gate.
+    """
+    from spindoctor.nav_technique import dt_fitting, nav_technique_ring_edge
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices_a, normals_a = circle_polyline((100.0, 100.0), 30.0, 60)
+    vertices_b, normals_b = circle_polyline((100.0, 100.0), 40.0, 200)
+    feat_a = make_ring_feature(
+        'locked', vertices=vertices_a, outward_normals=normals_a, is_straight_line=False
+    )
+    feat_b = make_ring_feature(
+        'disputed', vertices=vertices_b, outward_normals=normals_b, is_straight_line=False
+    )
+    technique = RingEdgeNav()
+    context = make_nav_context(image)
+
+    # Edge A: all 60 vertices inliers at 0.2 px.  Edge B: median DT
+    # residual 0.4 px (it lies along detected structure) but only 60 of
+    # its 200 vertices survive Tukey.  Aggregate inlier fraction is
+    # 120 / 260 = 0.46, below the 0.5 gate; edge B is not well-fit and
+    # not absent, so the veto must stand.
+    residuals = np.full(260, 0.4, dtype=np.float64)
+    residuals[:60] = 0.2
+    weights = np.zeros(260, dtype=np.float64)
+    weights[:120] = 1.0
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(0.7, -1.3),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=residuals,
+        weights=weights,
+        rms_px=0.2,
+        raw_rms_px=float(np.sqrt(np.mean(residuals**2))),
+        iterations=10,
+        converged=True,
+        inlier_count=120,
+        degenerate=False,
+    )
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'coarse_ncc_search',
+        lambda *_args, **_kwargs: (1, -1),
+    )
+
+    result = technique.navigate([feat_a, feat_b], context)
+    assert result.spurious is True
+
+
+def test_ring_edge_nav_rank1_well_fit_subset_stays_spurious(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    flat_polyline: FlatPolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """The waiver is rank-aware: a rank-1 constrained fit cannot carry it.
+
+    When the surviving vertices constrain only one offset axis (the
+    translation covariance is rank-1), the well-fit subset cannot vouch
+    for the full 2-D offset on its own; the aggregate inlier-fraction
+    veto must stand even when the rejected curved edge is absent from
+    the image.
+    """
+    from spindoctor.nav_technique import dt_fitting, nav_technique_ring_edge
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    flat_v, flat_n = flat_polyline(130.5, 20.0, 180.0, 60)
+    curved_v, curved_n = circle_polyline((100.0, 100.0), 50.0, 200)
+    flat_feat = make_ring_feature(
+        'flat', vertices=flat_v, outward_normals=flat_n, is_straight_line=True
+    )
+    curved_feat = make_ring_feature(
+        'curved', vertices=curved_v, outward_normals=curved_n, is_straight_line=False
+    )
+    technique = RingEdgeNav()
+    context = make_nav_context(image)
+
+    # The straight edge fits cleanly (60 / 60); the curved edge is
+    # absent (median 46 px, zero inliers).  Aggregate fraction is
+    # 60 / 260 = 0.23, below the gate; the surviving vertices only
+    # constrain the normal axis (rank-1 covariance), so the waiver
+    # must not fire.
+    residuals = np.full(260, 0.2, dtype=np.float64)
+    residuals[60:] = 46.0
+    weights = np.zeros(260, dtype=np.float64)
+    weights[:60] = 1.0
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(0.7, -1.3),
+        rotation_rad=0.0,
+        covariance=np.array([[0.04, 0.0], [0.0, 1.0e9]], dtype=np.float64),
+        residuals_px=residuals,
+        weights=weights,
+        rms_px=0.2,
+        raw_rms_px=float(np.sqrt(np.mean(residuals**2))),
+        iterations=10,
+        converged=True,
+        inlier_count=60,
+        degenerate=False,
+    )
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'coarse_ncc_search',
+        lambda *_args, **_kwargs: (1, -1),
+    )
+
+    result = technique.navigate([flat_feat, curved_feat], context)
+    assert result.spurious is True
+
+
+def test_ring_edge_nav_marks_spurious_when_every_edge_fits_poorly(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """No edge clears the per-edge gate, so the fraction veto stands.
+
+    A genuinely mis-converged multi-edge fit where every edge retains
+    only a few stray inliers must stay spurious: the well-fit-edge
+    quorum is zero, so the aggregate inlier-fraction veto applies
+    exactly as before the absent-edge exemption.
+    """
+    from spindoctor.nav_technique import dt_fitting, nav_technique_ring_edge
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    features = []
+    for name, radius in (('inner', 30.0), ('middle', 40.0), ('outer', 50.0)):
+        vertices, normals = circle_polyline((100.0, 100.0), radius, 60)
+        features.append(
+            make_ring_feature(
+                name, vertices=vertices, outward_normals=normals, is_straight_line=False
+            )
+        )
+    technique = RingEdgeNav()
+    context = make_nav_context(image)
+
+    # Every edge keeps only 5 of its 60 vertices as inliers: aggregate
+    # fraction 15 / 180 = 0.083 and no edge reaches the 0.5 per-edge
+    # gate (nor the 6-inlier per-edge minimum).
+    n_per_edge = 60
+    residuals = np.full(3 * n_per_edge, 25.0, dtype=np.float64)
+    weights = np.zeros(3 * n_per_edge, dtype=np.float64)
+    for edge_index in range(3):
+        start = edge_index * n_per_edge
+        residuals[start : start + 5] = 0.2
+        weights[start : start + 5] = 1.0
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(0.7, -1.3),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=residuals,
+        weights=weights,
+        rms_px=0.2,
+        raw_rms_px=float(np.sqrt(np.mean(residuals**2))),
+        iterations=10,
+        converged=True,
+        inlier_count=15,
+        degenerate=False,
+    )
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'coarse_ncc_search',
+        lambda *_args, **_kwargs: (1, -1),
+    )
+
+    result = technique.navigate(features, context)
+    assert result.spurious is True
+
+
+def test_ring_edge_nav_single_edge_low_inlier_fraction_stays_spurious(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A single-edge fit below the inlier-fraction gate is spurious, unchanged.
+
+    One edge can never reach the two-edge well-fit quorum, so the absent-edge
+    exemption never applies to a single-edge fit: the aggregate
+    inlier-fraction gate behaves exactly as before.
+    """
+    from spindoctor.nav_technique import dt_fitting, nav_technique_ring_edge
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices, normals = circle_polyline((100.0, 100.0), 30.0, 60)
+    feature = make_ring_feature(
+        'only', vertices=vertices, outward_normals=normals, is_straight_line=False
+    )
+    technique = RingEdgeNav()
+    context = make_nav_context(image)
+
+    # 10 of 60 vertices survive Tukey: fraction 0.167, below the gate.
+    residuals = np.full(60, 25.0, dtype=np.float64)
+    residuals[:10] = 0.2
+    weights = np.zeros(60, dtype=np.float64)
+    weights[:10] = 1.0
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(0.7, -1.3),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=residuals,
+        weights=weights,
+        rms_px=0.2,
+        raw_rms_px=float(np.sqrt(np.mean(residuals**2))),
+        iterations=10,
+        converged=True,
+        inlier_count=10,
+        degenerate=False,
+    )
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'coarse_ncc_search',
+        lambda *_args, **_kwargs: (1, -1),
+    )
+
+    result = technique.navigate([feature], context)
+    assert result.spurious is True
+
+
 def test_ring_edge_nav_flat_parallel_edges_with_minority_snaps_not_spurious(
     monkeypatch: pytest.MonkeyPatch,
     horizontal_step_image: HorizontalStepImageFactory,
