@@ -217,7 +217,16 @@ The known defects:
   latent, does not affect the limb path today, fold into #128.
 - **#25** — model blurring for very-high-resolution bodies (investigation).
 - **#237 / #238** — two unexplained triage failures (a multi-body trio, a
-  Voyager scattered-light quintet); each is one debugging session.
+  Galileo scattered-light quintet); each is one debugging session. #238 is
+  triaged: the quintet is a sparse Pleiades field the current pipeline
+  cannot lock (few bright stars, large offset), curated as pending fixtures
+  and split into #285 (sparse-field star nav) and #284 (UCAC4 bright-end
+  photometry).
+- **#284 / #285** — split out of the #238 triage: #284 is the UCAC4
+  bright-end saturation that corrupts predicted star brightness and the
+  navigable-content screen; #285 is the capability gap where autonomous
+  star nav cannot lock a large unknown offset from a sparse star field
+  (wants wide-offset asterism matching). #285 depends on #284.
 - **#239** — operator decision: how to treat bodies smaller than ~5 px.
 - **#210** — the NCC techniques' covariances are orders of magnitude
   over-tight; the covariance-model review remains open even though the
@@ -419,7 +428,7 @@ PR #264 LID fix).
 | Track | Issues |
 |---|---|
 | A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, **#224**, **#225**, **#226**, **#227**, **#228**, **#229**, **#230**, **#232**, **#233**, **#234**, **#235** |
-| B — navigation correctness | #24, #25, #128, #130, #132, #133, #179, #180, #210, #221, #222, **#237**, **#238**, **#239**, **#254**, **#258**, **#259**, **#261**, **#263**, **#281**, **#282**, **#283** |
+| B — navigation correctness | #24, #25, #128, #130, #132, #133, #179, #180, #210, #221, #222, **#237**, **#238**, **#239**, **#254**, **#258**, **#259**, **#261**, **#263**, **#281**, **#282**, **#283**, **#284**, **#285** |
 | C — statistics & QA | **#240** (plus the standing cross-check and campaign-report practice) |
 | D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #60, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #139, #141, #142, #188, **#231**, **#236**, **#251**, **#252**, **#253**, **#256**, **#265** |
 | E — test & docs debt | #122, #129, #177, #178, **#241**, **#242**, **#243**, **#244**, **#245** |
