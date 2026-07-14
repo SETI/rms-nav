@@ -670,7 +670,7 @@ def _per_edge_rms_summed(features: list[NavFeature], residuals: NDArrayFloatType
 
 @dataclass(frozen=True)
 class _EdgeFitStat:
-    """Per-edge fit statistics for the spurious-veto waiver (issue #261).
+    """Per-edge fit statistics for the spurious-veto waiver.
 
     Parameters:
         inlier_count: Vertices of this edge with a strictly positive final
@@ -709,7 +709,7 @@ def _per_edge_fit_stats(
     distinguish a fusion whose vertices are rejected because some edges
     are undetectable in the image (large per-edge median residuals --
     nothing is there) from a wrong-ring lock that leaves a rejected edge
-    sitting on a detected image edge it disagrees with (issue #261).
+    sitting on a detected image edge it disagrees with.
 
     Parameters:
         features: The consumed features, in the order their vertices were

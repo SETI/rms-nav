@@ -220,7 +220,7 @@ def test_ring_edge_nav_multi_edge_with_undetected_dominant_edges_not_spurious(
     make_ring_feature: NavFeatureFactory,
     make_nav_context: NavContextFactory,
 ) -> None:
-    """Absent edges waive the aggregate inlier-fraction veto (#261).
+    """Absent edges waive the aggregate inlier-fraction veto.
 
     Models the production false flag (Cassini C ring N1467344214): three
     RING_EDGE features feed the LM, one curved edge fits at sub-pixel
@@ -447,7 +447,7 @@ def test_ring_edge_nav_marks_spurious_when_every_edge_fits_poorly(
     A genuinely mis-converged multi-edge fit where every edge retains
     only a few stray inliers must stay spurious: the well-fit-edge
     quorum is zero, so the aggregate inlier-fraction veto applies
-    exactly as before the #261 exemption.
+    exactly as before the absent-edge exemption.
     """
     from spindoctor.nav_technique import dt_fitting, nav_technique_ring_edge
 
@@ -511,7 +511,7 @@ def test_ring_edge_nav_single_edge_low_inlier_fraction_stays_spurious(
 ) -> None:
     """A single-edge fit below the inlier-fraction gate is spurious, unchanged.
 
-    One edge can never reach the two-edge well-fit quorum, so the #261
+    One edge can never reach the two-edge well-fit quorum, so the absent-edge
     exemption never applies to a single-edge fit: the aggregate
     inlier-fraction gate behaves exactly as before.
     """
