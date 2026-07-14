@@ -10,8 +10,8 @@ Two paths share one technique:
   the configured one-star limit (default 0.7) because a single match
   cannot cross-check itself.
 
-  No-rival sentinels (#259): the ``one_star_min_peak_ratio`` ambiguity
-  gate (#211) and the brightness-margin gate both report ``inf`` when
+  No-rival sentinels: the ``one_star_min_peak_ratio`` ambiguity
+  gate and the brightness-margin gate both report ``inf`` when
   no rival exists (no runner-up detection above the window background /
   no other predictable catalog star).  The sentinels deliberately PASS
   the ratio checks -- a genuinely unique bright star has no rival and
@@ -23,7 +23,7 @@ Two paths share one technique:
   ``one_star_max_residual_px``: with no rival statistics to lean on, a
   lone detection is only promoted to an identification when it sits
   inside the pointing-prior core.  A finite peak ratio leaves
-  acceptance to the measured #211 gate; genuine one-star matches with
+  acceptance to the measured ambiguity gate; genuine one-star matches with
   offsets up to ~24 px exist in the operator-verified library, so no
   uniform residual cut below the search window is possible.
 
@@ -557,14 +557,14 @@ class StarUniqueMatchNav(NavTechnique):
 
         Acceptance requires, in order: the brightness-margin uniqueness
         gate, a detection above the noise threshold, the
-        peak-to-runner-up ambiguity gate (#211), and -- only when that
+        peak-to-runner-up ambiguity gate, and -- only when that
         ratio is the infinite no-rival sentinel -- the residual gate
-        (#259) bounding the prediction-to-detection distance by
+        bounding the prediction-to-detection distance by
         ``one_star_max_residual_px``.  The sentinel means the ambiguity
         gate measured nothing (no runner-up ever cleared the window
         background), so the residual gate carries the acceptance burden
         there; a finite ratio was measured against real background
-        statistics and acceptance stays with the #211 gate.
+        statistics and acceptance stays with the ambiguity gate.
         """
         brightest_snr = predicted_snr(brightest)
         next_snr = predicted_snr(rest[0]) if rest else 0.0

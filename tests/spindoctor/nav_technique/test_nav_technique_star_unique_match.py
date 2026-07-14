@@ -263,7 +263,7 @@ def test_star_unique_match_one_star_flags_ambiguous_detection(
 
     The single-detection premise of the 1-star path fails when the
     brightest peak barely beats its runner-up (a marginal star losing
-    to noise spikes, issue #211); the peak-to-runner-up gate must flag
+    to noise spikes); the peak-to-runner-up gate must flag
     the result rather than hand the ensemble a confident wrong offset.
     """
     shape = (200, 200)
@@ -290,10 +290,10 @@ def test_star_unique_match_one_star_rejects_far_no_rival_detection(
 ) -> None:
     """No-rival ``inf`` sentinels cannot carry a far-off lone detection.
 
-    Issue #259's failure signature: a lone artifact on a flat background
+    The failure signature: a lone artifact on a flat background
     reports ``inf`` for both ``detection_peak_ratio`` (no runner-up
     above background) and ``brightness_margin_mag`` (no rival catalog
-    star), so both #211 ratio gates pass vacuously.  The residual gate
+    star), so both ratio gates pass vacuously.  The residual gate
     must reject the match when the detection sits outside the
     pointing-prior core (here 18.2 px, mirroring C0164392700R).
     """
@@ -362,7 +362,7 @@ def test_star_unique_match_one_star_accepts_large_residual_with_finite_peak_rati
 
     Operator-verified library frames carry genuine one-star offsets up
     to ~24 px (e.g. N1555145539_1 at 13.1 px): on a real background the
-    runner-up is finite, the #211 gate measures actual uniqueness, and
+    runner-up is finite, the ambiguity gate measures actual uniqueness, and
     the residual gate must not fire.  Plants a faint rival blob so the
     peak ratio is finite yet far above ``one_star_min_peak_ratio``.
     """
