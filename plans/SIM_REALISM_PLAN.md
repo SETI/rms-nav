@@ -116,6 +116,13 @@ New package `src/spindoctor/sim/forward/` — the image side. The existing
 which side owns what. Geometry helpers may still be shared across the
 boundary (Section 3.2) — the split is about information, not lineage.
 
+Phase A gives `forward/body.py` and `forward/ring.py` their initial content
+by **porting the current rendering logic at present fidelity** — the image
+side gets its own working copy in A, so every scene still renders — and
+phases E and F then *replace* those ports with the topographic and
+optical-depth renderers. The ports may call the shared geometry helpers;
+they are not required to be rewrites.
+
 ```text
 src/spindoctor/sim/forward/
     scene_radiance.py    # composes the oversampled, noise-free radiance image
@@ -226,15 +233,17 @@ forward body renderer therefore makes the silhouette and terminator honest:
   field is band-limited noise, not per-pixel jitter, so the limb is *bumpy the
   way terrain is bumpy* — coherent over crater-scale arcs.
 - **Terminator raggedness.** The same relief, carried into the incidence
-  computation, displaces the terminator locally by `h * tan(incidence)` —
-  growing toward the terminator, where incidence approaches 90 deg, and
-  capped there by the horizon limit `sqrt(2 * R * h)` since the tangent
-  diverges — and casts approximate local shadows (a shadow march along the
-  projected sun direction at the oversampled grid — cheap and sufficient;
-  full ray-traced shadowing is out of scope). The relief field's domain and
-  the march are pinned exactly in Section 15.5. High-phase crescents then
-  have the ragged inner edge real ones do, which is the feature
-  `BodyTerminatorNav` actually fits.
+  computation, displaces the terminator locally by `H * tan(incidence)`
+  (H = h * R, the *absolute* height in px — the fractional field times the
+  local radius) — growing toward the terminator, where incidence
+  approaches 90 deg, and capped there by the horizon limit
+  `sqrt(2 * R * H)` since the tangent diverges — and casts approximate
+  local shadows (a shadow march along the projected sun direction at the
+  oversampled grid — cheap and sufficient; full ray-traced shadowing is
+  out of scope). The relief field's domain and the march are pinned
+  exactly in Section 15.5. High-phase crescents then have the ragged inner
+  edge real ones do, which is the feature `BodyTerminatorNav` actually
+  fits.
 - **True topographic option (CraterMaker, #78) — deferred (operator
   decision 2026-07-15).** The statistical limb field above is the mechanism;
   a CraterMaker-based global height map remains a possible future upgrade
@@ -465,9 +474,9 @@ express the regimes the star techniques must be proven in.
   has none for either); (b) swept amplitude as a tolerance
   study (how much residual the techniques and ensemble absorb before
   cross-technique disagreement inflates); (c) OFF in the Section 8
-  accuracy sweeps so mismatch curves stay unconfounded. The plate-scale
-  error of Section 13.1 is this stage's first-order term and shares the
-  implementation.
+  accuracy sweeps so mismatch curves stay unconfounded. Plate-scale error
+  — promoted out of the Section 13 triage into this stage — is its
+  first-order term and shares the implementation.
 
 ---
 
@@ -595,7 +604,9 @@ Detector/electronics artifacts:
   default gain state is 2 (~30 e-/DN NAC, ~28 e-/DN WAC — interim, from the
   calibration-report ratios), the tour-standard science state; a scene
   selects another via `detector.gain_state` (15.6), and the per-state
-  `gain_e_per_dn` tables live in `artifacts_catalog.py`. Cosmic rays:
+  `gain_e_per_dn` tables live in `artifacts_catalog.py`. Only state 2 is
+  catalogued for the WAC until its full table is sourced; selecting
+  another WAC state is a validation error, not a silent guess. Cosmic rays:
   no published ISS rate; use the standard interplanetary ~1-2 events/cm2/min
   over the 1.51 cm2 chip (order 1.5-3 hits per 60 s), flagged as an assumed
   default to be tuned by the Section 7 incidence match.
@@ -847,9 +858,9 @@ cannot silently drift from the schema. New/changed keys:
   modes, `edge_wave`, planted `orbit_error`, `navigable`, `phase_function`,
   shared `geometry` with opening angle) replaces the `rings:` list. On the
   integration branch, `rings:` remains valid until phase F, which converts
-  the three ring scenes (and `scene_gen.py`'s ring families) to two-edge
-  ringlet features with `navigable: true` and deletes the key; `main` never
-  sees a v2 schema that still accepts `rings:`.
+  the two `rings:` scenes (and `scene_gen.py`'s ring family) to two-edge
+  ringlet features with `navigable: true` and deletes the key; `main`
+  never sees a v2 schema that still accepts `rings:`.
 - top level: `optics` block (`psf`, `smear`, `ghosts`, `distortion`),
   `artifacts` block (per-mode incidence overrides), `oversample`.
 - `noise` keeps its meaning (detector stage parameters).
@@ -950,10 +961,12 @@ recovery error vs mismatch curve is the product (issue #227's core ask):
 Zero-mismatch columns are labelled "self-consistency floor (not accuracy)"
 everywhere they appear. A zero-mismatch scene is defined by *equality with
 the navigator's configuration*, not by the 15.3 empirical kernels: the
-image-side PSF sigma is set equal to the instrument's configured
+image-side PSF is a **pure Gaussian** (w = 0, sigma_v = sigma_u, no field
+variation — exactly the navigator's model) at the instrument's configured
 `star_psf_sigma` (WAC's configured 0.77 vs the empirical 0.64 — and the 3.0
 placeholders on gossi/vgiss/nhlorri — would otherwise plant a hidden PSF
-mismatch into the floor itself).
+mismatch into the floor itself, and empirical wings the navigator does not
+model are themselves a mismatch).
 
 Section 13 holds the axes reviewed but left unscoped in the 2026-07-15
 triage (mid-time error, field-rotation rate, rolling-readout shear,
@@ -976,11 +989,15 @@ Test layers:
   scenes (asserting failure/low confidence, never a confident wrong offset).
 - Realism: the Section 7 runner.
 
-`#223` sequencing inside this plan: the terminator realism verdict is the
-gate — Section 7 figure-of-merit 3 computed on the terminator side achieves
-the same divergence band the limb side achieves for Cassini. After it,
-`NavModelBodySimulated` emits `TERMINATOR_ARC` (phase I) and phase J's
-calibration pass refits `BodyTerminatorNav` alongside the rest.
+`#223` sequencing inside this plan: `NavModelBodySimulated` emits
+`TERMINATOR_ARC` in phase I (feature work, ungated), and phase J refits
+`BodyTerminatorNav` alongside the rest. The terminator realism verdict —
+Section 7 figure-of-merit 3 computed on the terminator side achieving the
+same divergence band the limb side achieves for Cassini, a phase-H
+deliverable — gates *trust*, not emission: until it passes, the refit
+technique's confidences stay `confidence_provisional`, the same interim
+safeguard every uncalibrated confidence already carries. H therefore still
+does not block the branch.
 
 ### Support for WS-0 (#224): estimator validation scenes
 
@@ -1123,15 +1140,20 @@ user-guide edits (Sections 9.2-9.3) — the feature, the control, and the
 prose are one unit of work, not three.
 
 - **A. Skeleton + boundary.** `sim/forward/` package with stage
-  interfaces; `render_combined_model` re-plumbed as a thin driver;
+  interfaces, its body/ring renderers seeded by porting the current logic
+  at present fidelity (3.1 — E and F replace the ports);
+  `render_combined_model` re-plumbed as a thin driver;
   `sim_body*`/`sim_ring` re-homed under `nav_model/`; the
   information-boundary filter (`obs.nav_params`) with its structural test
-  and the star-list replumb (3.2); the `ring_epoch` fix (15.6); scene
-  catalog converted to schema v2 (ring scenes keep `rings:` until F) and
-  re-rendered with the diff reviewed via the contact sheet (15.11);
-  `scene_gen.py` routed through the validator; the calibration-campaign
-  timing baseline recorded (15.9); `sd_create_simulated_image.py` split
-  into `cli/sim_editor/`; dev-guide architecture chapter rewritten.
+  and the star-list replumb (3.2); the `ring_epoch` fix (15.6); the
+  render-diff contact-sheet generator
+  (`tests/integration/render_contact_sheet.py`, 15.11) built and its
+  first sheet committed; scene catalog converted to schema v2 (ring
+  scenes keep `rings:` until F) and re-rendered with the diff reviewed
+  via that sheet; `scene_gen.py` routed through the validator; the
+  calibration-campaign timing baseline recorded (15.9);
+  `sd_create_simulated_image.py` split into `cli/sim_editor/`; dev-guide
+  architecture chapter rewritten.
 - **B. Scene-level optics + detector core.** Whole-scene PSF, smear
   (including differential per-object-class smear), SPK-error geometry knob,
   electrons/gain with the exposure-referenced unit chain (15.2), dark +
@@ -1158,9 +1180,9 @@ prose are one unit of work, not three.
   longitude and depth conventions, tau photometry lit/unlit, transparency
   compositing (#84 — which also delivers star occultation), per-feature
   orbit errors, edge modes/waves, spokes, embedded moonlets/propellers,
-  navigable subset; `ring_system` scene class; the three ring scenes and
-  `scene_gen.py`'s ring families converted, `rings:` and
-  `shade_solid_rings` removed.
+  navigable subset; `ring_system` scene class; the two `rings:` scenes
+  (`planted_offset_ring`, `planted_rank1_ring_flat`) and `scene_gen.py`'s
+  ring family converted, `rings:` and `shade_solid_rings` removed.
 - **G. Atmospheres.** Haze-limb bodies (Titan-class), the sim substrate
   for issue #60.
 - **H. Realism match.** Section 7 runner + tuning + per-instrument match
@@ -1178,18 +1200,22 @@ prose are one unit of work, not three.
   (2026-07-09/10, `util/calibration`, campaign seed 20260709) against the
   renderer this plan replaces, and are invalid the moment phases B-F
   change star brightness, limb gradients, and ring edges. Phase J re-runs
-  the calibration campaign on the new renderer, refits alphas, then
-  gates, then floors, then tiers in the documented `util/calibration`
-  order (a multi-pass loop: fit, write the YAML with curated comments,
-  re-collect, refit), re-verifies the 2-sigma fused-coverage check,
-  updates the provenance headers, and includes the #223
-  `BodyTerminatorNav` refit once phase I emits its features. **The branch
-  does not merge to `main` with stale sim-anchored coefficients.**
+  the calibration campaign on the new renderer and refits in the
+  `util/calibration` README's documented order: per-technique alphas
+  (`fit.py`), written into the YAML by hand with curated comments, then
+  re-collect (fused confidences depend on the alphas), then the
+  model-error floors (`fit_floors.py`, the ~0.865 2-sigma coverage
+  solve), then the tier boundaries and final gate (`fit_gates.py` — one
+  tool, one step). It updates the provenance headers and includes the
+  #223 `BodyTerminatorNav` refit once phase I emits its features. **The
+  branch does not merge to `main` with stale sim-anchored coefficients.**
 
-Dependencies: A then B; C-G in any order after B, except that J needs D and
-F first (its scene generator converts there); I after C-G; H whenever the
-cohort allows (it does not block the branch); J last. Per-phase acceptance
-criteria are Section 15.10.
+Dependencies: A then B; C-G in any order after B; I after C-G; H whenever
+the cohort allows (it does not block the branch — the terminator verdict
+it produces gates trust labels, not emission; Section 8); J after
+everything else on the branch (it recalibrates against the renderer B-G
+built and refits the technique I feeds). Per-phase acceptance criteria are
+Section 15.10.
 
 Phase A is deliberately the heaviest: it carries the architecture, the
 boundary, the conversion, and the GUI split at once. They are one phase
@@ -1598,13 +1624,25 @@ requirement in any direction, per the project's no-compatibility-shims rule:
 ```python
 @dataclass
 class SimFrame:
-    signal: NDArrayFloatType   # (V*os, U*os) float64, scene signal units
-    oversample: int            # os >= 1; detector grid is (V, U)
-    truth: dict[str, Any]      # feature truth accumulated by radiance stages
+    signal: NDArrayFloatType    # (V*os, U*os) float64, intensive scene
+                                # signal units (I/F-like): bodies, rings,
+                                # diffuse backgrounds
+    point_e: NDArrayFloatType   # (V*os, U*os) float64, ELECTRONS:
+                                # point sources (stars, moonlets), kept
+                                # separate because one array cannot carry
+                                # two unit systems through the detector
+                                # stage's signal->electron conversion
+    oversample: int             # os >= 1; detector grid is (V, U)
+    truth: dict[str, Any]       # feature truth accumulated by radiance stages
 class Stage(Protocol):
     def __call__(self, frame: SimFrame, *, params: Mapping[str, Any],
                  rng: np.random.Generator) -> None: ...
 ```
+
+The optics stage convolves and warps `signal` and `point_e` identically
+(they share every geometric transform); the detector stage converts
+`signal` to electrons and then adds `point_e` into the electron image
+before Poisson — so stars never pass through the intensive conversion.
 
 - Stages mutate `frame` in place, in the fixed order of Section 3.3; each
   stage receives its own `np.random.Generator` seeded via
@@ -1620,16 +1658,25 @@ class Stage(Protocol):
   electrons through the exposure, so extended sources and stars share one
   radiometric footing:
   `electrons = signal * signal_full_scale_frac * full_well_e *
-  (exposure_sec / exposure_ref_sec)`, where `exposure_ref_sec` is a new
-  per-instrument catalog value (the exposure at which a signal of 1.0
-  fills `signal_full_scale_frac` of the well; interim values in
-  `artifacts_catalog.py`, provenance-tagged) and `full_well_e` is a new
-  per-instrument value (Section 5: coiss_nac 110e3, coiss_wac 95e3, gossi
-  108e3, nhlorri 86e3 [ADC-limited: 4095 DN x 21 e-/DN, antiblooming CCD],
-  vgiss n/a — see below). Chain order: Poisson in electrons, read noise in
-  electrons, electron-domain full-well bleed (the `bloom` mode — Cassini
-  saturates at ~3600 DN at gain 2, *below* the ADC clip, per 5.2), then
-  `DN = electrons / gain_e_per_dn + bias_dn`, quantized, clipped at
+  (exposure_sec / exposure_ref_sec)`, where:
+  - `signal_full_scale_frac` is the existing sim config key
+    (`config_440_sim.yaml`, default 0.5): the well fraction a signal of
+    1.0 fills at the reference exposure. It keeps its meaning; only the
+    well it references changes from DN to electrons.
+  - `exposure_ref_sec` is a new per-instrument catalog value — interim
+    values, provenance-tagged as such: coiss_nac 1.0, coiss_wac 1.0,
+    gossi 0.2, nhlorri 0.1 s (each a typical science exposure, so a
+    converted scene at its instrument's typical exposure keeps today's
+    brightness scale); vgiss n/a (DN path below).
+  - `full_well_e` is a new per-instrument value (Section 5: coiss_nac
+    110e3, coiss_wac 95e3, gossi 108e3, nhlorri 86e3 [ADC-limited:
+    4095 DN x 21 e-/DN, antiblooming CCD], vgiss n/a).
+  Chain order: convert `signal` to electrons, add `point_e` (stars —
+  already electrons, never converted), then Poisson, then electron-domain
+  full-well bleed (the `bloom` mode — charge spills during integration,
+  before the read amplifier; Cassini saturates at ~3600 DN at gain 2,
+  *below* the ADC clip, per 5.2), then read noise (added at readout),
+  then `DN = electrons / gain_e_per_dn + bias_dn`, quantized, clipped at
   `saturation_dn`. `gain_e_per_dn` comes from the instrument's gain-state
   table in `artifacts_catalog.py` (Section 5 values), selected by the
   scene key `detector.gain_state` (defaults per Section 5). The
@@ -1639,18 +1686,29 @@ class Stage(Protocol):
   (`nav_model/stars/detection.py`, `support/image_quality.py`) and remains
   the published ADC-referenced value the navigator believes.
 - **Calibrated (I/F) path.** `data_units: calibrated_if` scenes render
-  through the same DN chain and then apply the calibration transform
-  (divide by the instrument's `calibration_scale_dn_per_if` catalog value
-  and the exposure), so calibrated products carry propagated shot/read
-  noise and quantization texture in I/F units. This replaces the
-  noise-free calibrated branch (`render.py` gates the detector stack on
-  `raw_dn` today) and is phase B scope. Voyager GEOMED scenes use this
+  through the same DN chain and then apply the calibration transform the
+  real pipeline applies:
+  `IF = (DN - bias_dn - dark_dn) / (calibration_scale_dn_per_s_per_if *
+  exposure_sec)` — bias and dark subtracted *before* the divide, exactly
+  as real calibration does, or every calibrated frame carries a spurious
+  pedestal (~545 DN for LORRI) that grows as 1/exposure and poisons the
+  Section 7 sky statistics. Calibrated products then carry propagated
+  shot/read noise and quantization texture in I/F units. This replaces
+  the noise-free calibrated branch (`render.py` gates the detector stack
+  on `raw_dn` today) and is phase B scope. Voyager GEOMED scenes use this
   path with the vidicon noise model below.
-- **Downsample convention.** The box downsample (pipeline step 3) is a
-  MEAN over the os^2 subsamples: intensive quantities pass through
-  unchanged. Point sources are extensive: the star renderer deposits
-  `total_electrons * os^2` across the oversampled unit-sum PSF, so the
-  detector-grid sum equals `total_electrons` after the mean.
+- **Point-source deposition and the downsample.** Stars are deposited
+  into `point_e` in stage 1 as sub-pixel-positioned point masses of
+  weight `total_electrons * os^2` — **not** pre-spread over any PSF; the
+  whole-scene optics stage is the ONLY PSF application, or stars would be
+  convolved twice (~sqrt(2) too wide) and their shape would desync from
+  the limb and ring-edge profiles that FOMs 2 and 3 cross-check. Floor
+  and converted legacy scenes therefore carry an explicit `optics.psf`
+  block (Section 8) so stars keep a finite PSF. The box downsample
+  (pipeline step 3) is a MEAN over the os^2 subsamples: intensive
+  `signal` passes through unchanged, and the point-mass weighting makes
+  the detector-grid electron sum exactly `total_electrons` after the
+  mean.
 - **Voyager exception.** The vidicon is not photon-noise dominated; its
   detector stage skips the electron conversion and applies the Section 5.3
   noise model directly in DN (line-correlated read noise + coherent
@@ -1658,11 +1716,12 @@ class Stage(Protocol):
   Vidicon star flux is specified directly in DN:
   `total_dn = star_flux_dn_per_s_vmag0 * 10**(-0.4 * vmag) * exposure_sec`,
   interim vgiss zero point 3e3 DN/s (provenance-tagged; sized so the 5.3
-  limiting magnitudes land at the matched-filter boundary), distributed
-  over the PSF like the CCD path.
+  limiting magnitudes land at the matched-filter boundary), deposited as a
+  point mass like the CCD path (the optics PSF shapes it).
 - **Star flux (CCD).** `total_electrons = star_flux_e_per_s_vmag0 *
-  10**(-0.4 * vmag) * exposure_sec`, rendered by distributing that total
-  over the PSF (flux normalization, not peak). Interim zero points, derived
+  10**(-0.4 * vmag) * exposure_sec`, deposited as a point mass into
+  `point_e` (flux normalization, not peak — the optics stage's PSF then
+  dictates the shape and the peak). Interim zero points, derived
   from the Section 5 limiting magnitudes at SNR ~5 (provenance-tagged):
   coiss_nac 1.0e7, coiss_wac 2.6e6, nhlorri 7e7, gossi 4e6 e-/s. This
   replaces the peak-based `2.512^-(vmag-4)` path, which is removed; star
@@ -1705,9 +1764,11 @@ parameters:
 is an interim estimate — 5.3 publishes no Voyager FWHM, and GEOMED
 resampling broadens whatever the vidicon delivered.) Cores come from the
 Section 5 measured FWHMs; wing parameters are **interim** (re-expressed as
-energy fractions from the unnormalized draft so the delivered kernels are
-unchanged, preserving the ~1e7 core-to-wing dynamic range check against
-5.2) and are the first thing phase H tunes. `star_psf_sigma` in existing
+energy fractions from an unnormalized draft so the delivered kernels are
+unchanged). The truncated kernel's in-window core-to-wing dynamic range is
+~2e6 for coiss_nac; the 1e7-1e8 of 5.2 lives in the far halo beyond the
+window, which is stray-light scope by the rule above. Wing parameters are
+the first thing phase H tunes. `star_psf_sigma` in existing
 configs remains the navigator's model; these kernels are the image side's;
 floor scenes use neither and set the image sigma equal to the navigator's
 configured value (Section 8).
@@ -1738,11 +1799,15 @@ it once and both sides call it.
   sky-plane circles (regression identity).
 - **Line-of-sight depth.** A point's depth relative to the ring center is
   `dlos = -y * cos(B_obs)`, positive toward the observer: for B_obs > 0
-  the near arm is the y < 0 half, and the near ansa sits at lam = 270 deg
-  when node = 0 (a unit test pins exactly this configuration at
-  B_obs = 30). Per-pixel compositing between the ring and bodies orders by
-  `range_km + dlos_km` where `range_km` is set (15.6); the far arm
-  composites behind the planet disc, the near arm in front.
+  the near arm is the y < 0 half, and the ring's *nearest point* sits at
+  lam = 270 deg when node = 0 (a unit test pins exactly this
+  configuration at B_obs = 30; note the ansae — the projected major-axis
+  tips at lam = 0/180 — have zero depth by construction). Per-pixel
+  compositing between the ring and bodies orders by observer distance
+  `range_km - dlos_km` where `range_km` is set (15.6) — dlos positive
+  toward the observer means *subtracting* it gives the nearer object the
+  smaller distance; the far arm composites behind the planet disc, the
+  near arm in front.
 - Single-scattering photometry with one-term Henyey-Greenstein
   `P(g, alpha)` (default g = -0.3 for main-ring backscatter; dusty features
   set g ~ +0.6):
@@ -1754,9 +1819,11 @@ it once and both sides call it.
 - Compositing, far-to-near: `img = I_ring + exp(-tau/mu) * img_behind`.
 - Edge waves: radial perturbation
   `dr(lam) = amp * exp(-(lam - lam0)/damp) * sin(2*pi*(lam - lam0)*a/wavelength)`
-  on the downstream side of lam0, with `damp` in radians and `a` the
-  feature's semimajor axis (so the sine argument is arc length over
-  wavelength, dimensionless);
+  applied ONLY for lam > lam0 (dr = 0 upstream — the exponential grows
+  without bound if evaluated for lam < lam0, so the clamp is load-bearing,
+  not cosmetic), with `damp` in radians and `a` the feature's semimajor
+  axis (so the sine argument is arc length over wavelength,
+  dimensionless);
   m-modes: `r(lam) = a - amp_m*cos(m*(lam - peri))` with `amp_m` = a*e in
   the same radial units as `a` and `peri` in the longitude frame above.
 
@@ -1797,17 +1864,29 @@ one consistent surface:
   `r_ellipse * (1 + delta)`. Shading normals keep the unperturbed e:
   relief moves the silhouette and the terminator, not the low-frequency
   disc shading.
-- **Terminator march.** For disc points within the march cap of the
-  terminator, march from the point toward the sun in *surface* distance
-  (step = 1 oversampled px of surface arc, corrected for foreshortening
-  near the limb — an image px near the limb spans a large surface step),
-  sampling h along the ray. The point is shadowed iff any upstream sample
-  at surface distance d satisfies `h_up - h_pt > d / tan(i_pt)`, where
-  i_pt is the local incidence (sun elevation = 90 deg - i). March cap:
-  `d_max = min((h_max - h_min) * tan(i_pt), sqrt(2 * R * h_max))` — the
+- **Terminator march.** All march arithmetic uses *absolute* heights
+  `H = h * R` in px (R the local body radius in px) — the fractional
+  field h (~0.01) and surface distances (px) must never be compared
+  directly; the factor of R is load-bearing. For disc points within the
+  march cap of the terminator, march from the point toward the sun in
+  *surface* distance (step = 1 oversampled px of surface arc, corrected
+  for foreshortening near the limb — an image px near the limb spans a
+  large surface step), sampling H along the ray. The point is shadowed
+  iff any upstream sample at surface distance d satisfies
+  `H_up - H_pt > d / tan(i_pt)`, where i_pt is the local incidence (sun
+  elevation = 90 deg - i). March cap:
+  `d_max = min((H_max - H_min) * tan(i_pt), sqrt(2 * R * H_max))` — the
   first term is the longest shadow the terrain can cast, the second the
   horizon limit that caps the tangent's divergence at the terminator
   itself — so cost is bounded and the geometry stays physical.
+- **Synthesis caveat.** A plain (lat, lon) FFT grid holds `corr_rad` in
+  latitude but over-corrugates high latitudes in longitude (a longitude
+  cycle spans `~cos(lat)` less surface arc), and the sub-observer limb
+  circle passes near the poles for equatorial views. At the default
+  15-deg correlation length the affected caps are small; if the phase-E
+  acceptance statistics miss because of it, substitute an equal-area or
+  spherical-harmonic synthesis — the contract fixes the spectrum and the
+  limb-slice statistics, not the synthesis mesh.
 - Defaults: `limb_relief_rms 0.0` (off); guidance values in scene
   comments — icy midsize moons 0.001-0.003, small cratered bodies
   0.01-0.03; `limb_relief_corr_deg 15` (degrees of surface arc; image
@@ -1884,8 +1963,8 @@ or **[T]** (truth: renderer-only, stripped by the boundary filter, 3.2).
   `ring_system.geometry` per 15.4 [I]; `ring_system.azimuthal` map
   (modulation/spokes/shadow wedge) [T]; `ring_system.moonlets` list [T].
 
-**v1 key dispositions** (all 24 v1 top-level keys — this is what makes the
-inventory complete rather than additive):
+**v1 key dispositions** (all 25 v1 top-level keys of `_ALLOWED_KEYS` —
+this is what makes the inventory complete rather than additive):
 
 | v1 key | v2 disposition |
 |---|---|
@@ -1903,6 +1982,13 @@ Phase A also fixes a latent v1 defect found in review: `ObsSim` reads
 honors `ring_epoch`; any precessing ring scene today carries an
 undocumented planted epoch error. The filtered view exposes `ring_epoch`
 [I] and the navigator-side ring model reads it.
+
+The machine-readable truth-key set lives as a `TRUTH_KEYS` frozenset (with
+per-object-block sub-maps) beside `_ALLOWED_KEYS` in `sim/scene.py`: the
+`ObsSim` boundary filter strips exactly this set, the 3.2 structural test
+iterates exactly this set, and a key added to the inventory without a
+`TRUTH_KEYS` / idealized classification fails a completeness assertion —
+that is what "extend the boundary test in the same PR" means concretely.
 
 The validator enforces this inventory exactly (unknown keys still fail).
 Every key above is authorable from the scene editor (Section 9.4); the
@@ -1981,14 +2067,18 @@ until star-field cohorts for those instruments exist (Section 4.4).
 ### 15.10 Per-phase acceptance
 
 - **A**: catalog converted to v2 and re-rendered, every scene's assertions
-  still hold, and the render-diff contact sheet is reviewed
-  panel-by-panel; information-boundary test green (every 15.6 truth key
-  unreachable through `nav_params`); star-list replumb landed
+  still hold; the contact-sheet generator exists
+  (`tests/integration/render_contact_sheet.py` — one
+  before/after/|difference| panel per scene, "before" sourced from the
+  prior commit's committed sheet PNGs) and its phase-A sheet is reviewed
+  panel-by-panel; information-boundary test green (every `TRUTH_KEYS`
+  entry unreachable through `nav_params`); star-list replumb landed
   (`sim_star_list` gone from the navigator path); `sim_body*`/`sim_ring`
-  re-homed; `ring_epoch` fix landed; `scene_gen.py` validates; timing
-  baseline recorded (15.9); stage registry + SimFrame landed;
-  `cli/sim_editor/` split done with the round-trip test; dev-guide
-  architecture chapter rewritten.
+  re-homed and `forward/` ports render the catalog at present fidelity;
+  `ring_epoch` fix landed; `scene_gen.py` validates; timing baseline
+  recorded (15.9); stage registry + SimFrame landed; `cli/sim_editor/`
+  split done with the round-trip test; dev-guide architecture chapter
+  rewritten.
 - **B**: PSF/smear/SPK/detector stages meet 15.2-15.3, including the
   calibrated (I/F) path carrying propagated noise; stage-disabled test
   (15.1) covers every new block; floor-equality rule (Section 8)
@@ -2008,11 +2098,12 @@ until star-field cohorts for those instruments exist (Section 4.4).
   disc-texture/transit scenes render.
 - **F**: projection reduces to circles at |B| = 90 (regression identity);
   photometry matches the 15.4 closed forms on analytic cases; the
-  depth-convention unit test passes (near ansa at lam = 270 for
-  B_obs = 30, node = 0); star behind the B ring (tau = 2) at B_obs = 30
+  depth-convention unit test passes (ring's nearest point at lam = 270
+  for B_obs = 30, node = 0, and it composites in front of a body at the
+  ring center's range); star behind the B ring (tau = 2) at B_obs = 30
   attenuated > 98% (exp(-4)); #84 compositing test (gap reveals
-  background); `rings:` and `shade_solid_rings` removed; ring scenes and
-  `scene_gen.py` ring families converted.
+  background); `rings:` and `shade_solid_rings` removed; the two `rings:`
+  scenes and `scene_gen.py`'s ring family converted.
 - **G**: Titan-class limb profile's tangent optical depth falls
   exponentially with the commanded scale height (asserted on the
   optically thin portion — above tau ~ 1 the intensity profile saturates
@@ -2030,13 +2121,13 @@ until star-field cohorts for those instruments exist (Section 4.4).
 - **I**: sweep tables regenerate; report restructured per 9.1; user guide
   revised per 9.3; both doc galleries re-rendered with panels for the new
   ingredients; `TERMINATOR_ARC` emitted.
-- **J**: calibration campaign re-collected on the new renderer; alphas,
-  gates, floors, and tiers refit in the documented order with the
-  fit/hand-edit/re-collect loop run to convergence; 2-sigma fused
-  coverage re-verified (~0.865); provenance headers in `config_510` /
-  `config_540` updated; `BodyTerminatorNav` refit included (#223). No
-  sim-anchored coefficient on the branch predates the renderer it ships
-  with.
+- **J**: calibration campaign re-collected on the new renderer; refit in
+  the README's order — alphas (`fit.py`), hand-written YAML, re-collect,
+  floors (`fit_floors.py`), then tiers + gate (`fit_gates.py`) — run to
+  convergence; 2-sigma fused coverage re-verified (~0.865); provenance
+  headers in `config_510` / `config_540` updated; `BodyTerminatorNav`
+  refit included (#223). No sim-anchored coefficient on the branch
+  predates the renderer it ships with.
 - **Every phase**: its schema keys are reachable from the editor, and its
   dev-guide section describes what it built. A phase that lands a renderer
   without its controls and its prose is not done.
