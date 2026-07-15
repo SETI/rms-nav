@@ -92,8 +92,10 @@ Restrictions and assumptions
   :data:`~spindoctor.nav_model.nav_model_body.TERMINATOR_MIN_PHASE_FACTOR` gate suppresses emission
   in that regime so the technique never sees those features.
 - The albedo penalty per body is supplied by the model side via the per-body
-  :class:`~spindoctor.nav_model.body_shape.BodyShape`; the technique reads it off the feature flags
-  but does not re-derive it.
+  :class:`~spindoctor.nav_model.body_shape.BodyShape`; the technique reads it off the
+  per-feature reliability breakdown
+  (:attr:`~spindoctor.feature.feature.NavFeature.reliability_reasons`'s ``albedo_penalty``,
+  not the feature flags) and does not re-derive it.
 - Multi-body inputs are fused into a single translation by concatenating their per-vertex
   arrays. The joint-translation parameterisation cannot represent disagreement between
   bodies about the offset; if SPICE relative geometry is wrong the joint fit walks toward the
@@ -104,7 +106,9 @@ Sources of uncertainty
 ----------------------
 
 The reported covariance is the Moore-Penrose pseudoinverse of the M-estimator information
-matrix at convergence, scaled by the per-vertex Tukey weights. It does not capture
+matrix at convergence, scaled by the per-vertex Tukey weights, with the calibrated
+``model_error_floor_px`` (0.92 px) added in quadrature to the translation diagonal.
+It does not capture
 systematic biases (an under-modelled per-body albedo gradient propagates straight into the
 covariance) and it does not capture model-side uncertainty in the SPICE prediction itself.
 When the converged offset sits within a small tolerance of any axis bound of the search
@@ -139,9 +143,9 @@ Configuration
 All numeric tunables for this technique live in ``techniques.BodyTerminatorNav.tuning`` in
 ``src/spindoctor/config_files/config_510_techniques.yaml``.
 
-- ``min_arc_px`` — float, default ``30.0`` px. Minimum surviving vertex count per
-  ``TERMINATOR_ARC`` for feasibility. Shorter terminators do not constrain a 2-D translation
-  enough to be worth the LM iteration.
+- ``min_arc_vertices`` — float, default ``30.0``. Minimum surviving vertex count per
+  ``TERMINATOR_ARC`` for feasibility. Arcs with fewer vertices do not constrain a 2-D
+  translation enough to be worth the LM iteration.
 - ``spurious_dt_rms_factor`` — float, default ``5.0`` (dimensionless). Final DT residual
   exceeding this many terminator-sigmas marks the result spurious.
 - ``spurious_dt_floor_px`` — float, default ``4.0`` px. Floor of the spurious-detection
@@ -149,6 +153,26 @@ All numeric tunables for this technique live in ``techniques.BodyTerminatorNav.t
   limb fit's.
 - ``spurious_min_inliers`` — int, default ``6`` (count). Below this Tukey-inlier count the
   M-estimator covariance is uninformative; the result is flagged spurious.
+- ``spurious_min_inlier_fraction`` — float, default ``0.20`` (dimensionless). Below this
+  inlier fraction the LM has almost certainly walked off the true terminator onto crater
+  shadows or surface boundaries; the result is flagged spurious. Same motivation as the
+  limb fit's identically-named knob.
+- ``spurious_max_lm_displacement_px`` — float, default ``4.0`` px. If the LM moves more
+  than this many pixels from the integer coarse-NCC seed, flag spurious. Defensive: with
+  the trust region below the LM cannot leave the coarse basin; the guard catches any
+  future regression that bypasses the trust region.
+- ``lm_trust_region_px`` — float, default ``1.0`` px. Maximum LM displacement from the
+  integer coarse-NCC seed; the LM rejects any trial step that would land outside this
+  radius. See :doc:`dev_guide_techniques_body_limb` for the rationale.
+- ``lm_tikhonov_alpha`` — float, default ``0.0`` (dimensionless). Tikhonov anchor strength
+  toward the coarse-NCC seed; 0 disables the anchor (the trust region is the harder
+  bound).
+- ``model_error_floor_px`` — float, default ``0.92`` px. Model-error floor added in
+  quadrature to the covariance's translation diagonal. Copied from ``BodyLimbNav``'s
+  calibrated value: the sim emits no terminator arcs to calibrate against, and a
+  terminator is a strictly softer edge than a limb fitted by the same DT machinery, so the
+  limb's floor is a lower bound. The two scalars are not linked; refitting the limb floor
+  must revisit this one.
 - ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
   distance from any search-window axis bound falls within this tolerance is flagged
   :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`. Matches the
@@ -242,6 +266,13 @@ Class attributes:
   — ``frozenset({TERMINATOR_ARC})``.
 - :attr:`~spindoctor.nav_technique.nav_technique_body_terminator.BodyTerminatorNav.requires_prior` —
   ``False``. Runs in pass 1 of the orchestrator's two-pass pipeline.
+- :attr:`~spindoctor.nav_technique.nav_technique_body_terminator.BodyTerminatorNav.tier` —
+  ``'fallback'``. The terminator is a photometric feature modulated by phase, albedo, and
+  local topography, and its failure modes (DT-fit locking onto crater shadows or other
+  local minima) have no per-technique signal that admits them; when a non-spurious primary
+  fit (limb or disc) is available for the same body the ensemble drops the terminator
+  result rather than risk a clean-looking mis-convergence overriding the geometric
+  techniques.
 - :attr:`~spindoctor.nav_technique.nav_technique_body_terminator.BodyTerminatorNav.confidence_attributes`
   — ``{'at_edge', 'spurious', 'visible_terminator_arc_fraction', 'visible_arc_px',
   'dt_fit_rms_px', 'lm_iterations', 'tukey_inlier_count', 'mean_phase_angle_factor',
@@ -269,6 +300,13 @@ Diagnostics
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.tukey_inlier_count` —
   number of vertices that retained a strictly positive Tukey weight at the final estimate.
   Consumed by the spurious-detection gate.
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.secondary_basin_distance_px`
+  — distance from the converged offset to the best competing DT-cost basin in the search
+  window; ``None`` when the scan did not run or found no eligible shift.
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.secondary_basin_cost_ratio`
+  — the competing basin's mean per-vertex DT cost divided by the (epsilon-guarded)
+  converged cost; values below ``basin_cost_ratio_threshold`` mark the fit spurious.
+  ``None`` when not measured.
 
 Call path traced through
 :meth:`~spindoctor.nav_technique.nav_technique_body_terminator.BodyTerminatorNav.navigate`:
@@ -277,7 +315,7 @@ Call path traced through
    :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.image_edge_dt_ext` or
    :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.image_gradient_vu_ext` is missing.
 2. Filter the offered features down to ``TERMINATOR_ARC`` polylines whose surviving vertex count
-   is at least ``min_arc_px``, then concatenate the per-feature vertex arrays via the
+   is at least ``min_arc_vertices``, then concatenate the per-feature vertex arrays via the
    private aggregation helper. The helper also computes per-body sigma scalars (mean of the
    per-vertex normal sigmas) and the per-body phase / albedo flags.
 3. Build a binary polyline mask and pull the search-window margin off the observation via
@@ -312,8 +350,13 @@ Call path traced through
      :exc:`RuntimeError`.
 
 7. Apply the at-edge tests against translation axis bounds and the rotation cap, plus the
-   spurious tests against the final RMS, the inlier count, and the per-feature
-   sigma-floor multiple.
+   spurious tests: the degenerate flag, the Tukey-weighted RMS and the unweighted (raw)
+   RMS — both against the threshold ``max(spurious_dt_floor_px,
+   spurious_dt_rms_factor * sigma_min)`` where ``sigma_min`` is the smallest per-body
+   sigma — the inlier count, the inlier fraction, and the LM displacement from the coarse
+   seed. A fit that passes all of those still runs the basin second-opinion scan, which
+   marks it spurious when a rival DT basin's cost ratio falls below
+   ``basin_cost_ratio_threshold``.
 8. Build a :class:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics`, evaluate the
    confidence spec via :func:`~spindoctor.nav_technique.confidence.evaluate_sigmoid_combination`,
    log the per-term breakdown via

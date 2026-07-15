@@ -548,9 +548,10 @@ covariance and emission gates:
   (``regular`` / ``irregular`` / ``highly_irregular`` / ``unknown``); used in human-readable
   logs and reviewer-facing diagnostics.
 
-The lookup chain is :func:`~spindoctor.nav_model.body_shape.load_body_shape`, which calls
-:func:`~spindoctor.nav_model.body_shape.load_body_shape` and returns the merged
-:class:`~spindoctor.nav_model.body_shape.BodyShape`. Priority order:
+The public entry point is :func:`~spindoctor.nav_model.body_shape.load_body_shape`,
+which resolves the operator-curated YAML entry (via the private ``_yaml_entry_for``
+helper), overlays its non-null fields onto the hard-coded baseline, and returns the
+merged :class:`~spindoctor.nav_model.body_shape.BodyShape`. Priority order:
 
 1. Operator-curated YAML (``config_220_body_shape.yaml``) — each non-null field overrides
    the baseline.

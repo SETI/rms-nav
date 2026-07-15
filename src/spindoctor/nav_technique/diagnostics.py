@@ -141,8 +141,8 @@ class BodyBlobDiagnostics:
             understates the centroid uncertainty for an irregular
             body.
         max_phase_irregularity_factor: Maximum
-            ``sin(phase/2) * (ellipsoid_rms_residual_km /
-            body_radius_km)`` across the consumed blobs.  The
+            ``(ellipsoid_rms_residual_km / body_radius_km) *
+            (1 + 2 * sin(phase/2)**2)`` across the consumed blobs.  The
             confidence formula uses this term to down-weight irregular
             high-phase scenes where the lit-weighted predicted centroid
             cannot fully correct for the unknown-orientation shadowing

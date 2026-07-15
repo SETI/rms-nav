@@ -223,9 +223,8 @@ analyses never run per-PR.
 *Status (2026-07-13): step 1 is essentially done. Review batch 5
 (PR #260) fills the last empty class, `ring_only_flat` (five rank-1
 frames plus a sixth 2-D frame, N1467344214, routed to `ring_only_curved`
-with the Phase D reconciliation because the DT gate over-rejects it,
-issue #261). The Phase D frame reconciliation (branch
-`phase-d-reconciliation`, PR #262) re-verified five frames and applied the
+with the operator library review because the DT gate over-rejects it,
+issue #261). The library frame reconciliation (PR #262) re-verified five frames and applied the
 D6 tier ratchet across the library.
 Batch 5 also queued manual-nav frames for `one_bright_star_no_body`,
 `faint_stars`, and `body_mostly_offscreen`, so step 2 is next.*
@@ -322,7 +321,7 @@ expected primary technique and record the judgment in the sidecar `notes`.
 | `one_bright_star_no_body`      | Exactly 1 unambiguous star (next-brightest >= 1.5 mag fainter)               | Cassini + NHLORRI star-cal frames                                 | Next-brightest within 1.5 mag (use the two-star class)        |
 | `two_bright_stars_no_body`     | Exactly 2 unambiguous stars; no body, no rings                               | Cassini + NHLORRI star-cal frames                                 | Saturated/faint pair (assignment ambiguous)                   |
 | `faint_stars`                  | Predicted SNR < 3.0 for every catalog star in FOV                            | Galileo SSI science frames; Voyager outer-leg                     | A clean frame where stars do show                             |
-| `scattered_light`              | Stray-light gradient AND navigable content (score >=5 plus >=3 stars or a resolved ring/limb) | Galileo Earth/Moon outer fields; Voyager encounter outer-leg | Already-flat frames; gradient-only frames with nothing to fit |
+| `scattered_light`              | Stray-light gradient AND navigable content (score >=5 plus a resolved ring/limb, or >=6 star-field inliers — raised from 3 after the C00598xx quintet, which had only ~2 bright stars each, was correctly declined) | Galileo Earth/Moon outer fields; Voyager encounter outer-leg | Already-flat frames; gradient-only frames with nothing to fit |
 | `high_phase_terminator`        | Crescent body, phase > 90 deg                                                | Cassini approach phases; Galileo Earth-departure crescent         | Crescent so thin no terminator pixels rise above noise        |
 | `below_resolution_body`        | Body diameter < 15 px (distant body, any mission)                            | Voyager / Cassini long-range satellite frames                     | Body so distant the centroid is sub-noise (use `negative_cases`) |
 | `negative_cases`               | Unnavigable: distant tiny body + sensor-limited stars; empty frames          | Spread across all four missions                                   | A scene that *barely* navigates (that is a `low`-tier entry)  |

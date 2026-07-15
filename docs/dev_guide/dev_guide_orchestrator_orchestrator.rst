@@ -27,7 +27,8 @@ are:
 - ``_HARD_FAILURE_TO_REASON`` — the
   :class:`~spindoctor.nav_orchestrator.image_classifier.NavImageClassifier` reports ``blank``,
   ``fully_overexposed``, ``mostly_missing_data``, or ``corrupt``.
-- ``NO_FEATURES_EXTRACTED`` — every :class:`~spindoctor.nav_model.nav_model.NavModel` emitted zero features.
+- ``NO_FEATURES_EXTRACTED`` — every :class:`~spindoctor.nav_model.nav_model.NavModel` emitted zero features
+  (recorded as ``TITAN_UNSUPPORTED`` instead when the Titan model is present).
 - ``ALL_FEATURES_GATED`` — the reliability gate dropped every emitted feature.
 - ``NO_FEASIBLE_TECHNIQUES`` — pass 1 produced zero technique results (no technique was
   feasible on the gated cohort).
@@ -48,8 +49,7 @@ Pipeline stages
    carries the extfov image, the per-image masks (sensor / saturation / cosmic-ray), the
    per-image noise sigma, the image-quality classifier verdict, the shared image-side
    derivatives (gradient magnitude, gradient vector, edge distance transform), and the
-   per-instrument settings (data units, rotation flag, max rotation cap, signal-to-image
-   scale).
+   per-instrument settings (data units, rotation flag, max rotation cap).
 2. **Model construction.**  Iterate the registered
    :class:`~spindoctor.nav_model.nav_model.NavModel` set, calling each model's
    :meth:`~spindoctor.nav_model.nav_model.NavModel.create_model` per the operator's
@@ -61,13 +61,17 @@ Pipeline stages
 4. **Reliability gate.**  The per-feature reliability gate (an instance of
    :class:`~spindoctor.feature.reliability.FeatureReliabilityGate`) drops features whose
    per-feature ``reliability`` score falls below the per-type floor.
-5. **Pass 1.**  Run every registered technique with
+5. **Pass 1.**  Run the registered techniques with
    :attr:`~spindoctor.nav_technique.nav_technique.NavTechnique.requires_prior` ``False`` whose
    :attr:`~spindoctor.nav_technique.nav_technique.NavTechnique.accepts_feature_types` overlaps the
-   surviving feature set and whose ``is_feasible`` reports feasible.
+   surviving feature set and whose ``is_feasible`` reports feasible. Primary-tier
+   techniques run first; fallback-tier techniques then run, skipping any technique whose
+   source body already has a non-spurious primary result, so a fallback runs only when
+   the primary fails on that body.
 6. **Pass-1 ensemble.**  Reconcile the pass-1 results via
-   :func:`~spindoctor.nav_orchestrator.ensemble.ensemble`. When the ensemble produces an offset,
-   that offset and its covariance become the pass-2 prior; when the ensemble fails the
+   :func:`~spindoctor.nav_orchestrator.ensemble.ensemble`. A ``'success'`` ensemble's
+   offset and covariance become the pass-2 prior; a ``'conflicted'`` ensemble installs no
+   prior (pass 2 still runs); when the ensemble fails the
    technique pipeline returns a failed
    :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` immediately.
 7. **Pass 2.**  Run every prior-required technique with the pass-2 context (a copy of the
@@ -107,8 +111,11 @@ Restrictions and assumptions
   :class:`~spindoctor.nav_technique.nav_technique.NavTechnique` subclasses are well-formed and
   non-malicious — the exception sandbox catches programmer bugs but cannot recover from
   state-corrupting plugins.
-- The pass-1 → pass-2 hand-off only fires when the pass-1 ensemble produces a non-failed
-  offset. When pass 1 fails, pass 2 does not run.
+- The pass-2 prior is seeded only when the pass-1 ensemble's status is ``'success'``. A
+  conflicted pass 1 still runs pass 2 — but with no prior installed, since a conflicted
+  best-group offset would lock pass 2 toward one arbitrary mode instead of letting pass-2
+  evidence break the tie. When pass 1 fails, the orchestrator returns immediately and
+  pass 2 does not run.
 - The image-quality classifier's hard-failure short-circuit fires before any model is
   constructed; a ``blank`` or ``fully_overexposed`` image never invokes a
   :class:`~spindoctor.nav_model.nav_model.NavModel`.
@@ -141,8 +148,9 @@ Per-instrument YAML keys (read via
 - ``noise.marker_value`` — missing-data marker DN.
 - ``image_quality_thresholds.*`` — the per-instrument
   :class:`~spindoctor.nav_orchestrator.image_classifier.ImageQualityThresholds` values.
-- ``camera_rotation.fit_camera_rotation`` — bool; turns on 3-DoF technique fits.
-- ``camera_rotation.max_rotation_deg`` — float; rotation cap.
+- ``fit_camera_rotation`` — bool, top-level in the per-camera block; turns on 3-DoF
+  technique fits.
+- ``max_rotation_deg`` — float, top-level in the per-camera block; rotation cap.
 
 Constructor-level overrides:
 
@@ -202,8 +210,12 @@ Public class :class:`~spindoctor.nav_orchestrator.orchestrator.NavOrchestrator`,
 Public methods (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
 - :meth:`~spindoctor.nav_orchestrator.orchestrator.NavOrchestrator.prepare` — build per-image
-  state without running any technique. Returns ``(context, features)``. Used by the
-  manual-nav dialog.
+  state without running any technique. Returns an
+  :class:`~spindoctor.nav_orchestrator.orchestrator.OrchestratorPrep` dataclass carrying
+  the context, provenance, image-classifier verdict, features, feature inventory,
+  per-model metadata, and merged annotations. The ``apply_gate`` keyword (default
+  ``True``) controls whether the reliability gate runs; the manual-nav dialog passes
+  ``apply_gate=False`` so the operator sees every emitted feature.
 - :meth:`~spindoctor.nav_orchestrator.orchestrator.NavOrchestrator.navigate` — run the full
   pipeline on one observation. Returns one
   :class:`~spindoctor.nav_orchestrator.nav_result.NavResult`.
@@ -228,15 +240,20 @@ Call path traced through
    (:meth:`~spindoctor.nav_model.nav_model.NavModel.to_features`, exception-sandboxed) and apply
    the reliability gate.
 6. Build the feature inventory, the model metadata snapshot, and the merged annotations.
-7. **Three short-circuit gates** on the gated cohort:
+7. **Two short-circuit gates** on the gated cohort:
 
-   - ``NO_FEATURES_EXTRACTED`` when every model emitted zero features.
+   - ``NO_FEATURES_EXTRACTED`` when every model emitted zero features — unless the
+     Titan model is present, in which case the failure is recorded as
+     ``TITAN_UNSUPPORTED`` so a Titan-only image (whose opaque haze emits no navigable
+     features by design) is not a silent empty failure.
    - ``ALL_FEATURES_GATED`` when the gate dropped every feature.
 
    Each returns a failed
    :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` via the ``_fail`` helper.
-8. **Pass 1.**  Run every prior-free technique whose feature types overlap the gated
-   cohort and whose ``is_feasible`` returns feasible. An exception in any technique is
+8. **Pass 1.**  Run the prior-free techniques whose feature types overlap the gated
+   cohort and whose ``is_feasible`` returns feasible: primary-tier techniques first,
+   then fallback-tier techniques excluding any body already covered by a non-spurious
+   primary result. An exception in any technique is
    logged and the technique contributes no result.
 9. **NO_FEASIBLE_TECHNIQUES** when pass 1 produced zero results — return a failed
    :class:`~spindoctor.nav_orchestrator.nav_result.NavResult`.
@@ -272,7 +289,7 @@ Examples
     selects BodyLimb's offset of ``(12.06, 30.53)`` px, the pass-2 prior is set, and pass 2
     runs no prior-required techniques (no STAR features in this scene). The final
     :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` reports
-    :attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.status` ``'ok'`` against the
+    :attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.status` ``'success'`` against the
     operator-verified offset :math:`(\Delta v, \Delta u) = (11.0, 29.5)` px.
 
 ``one_bright_star_no_body`` (Cassini ISS WAC, image ``W1449079117_1``)
@@ -284,7 +301,7 @@ Examples
     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.confidence` capped at
     0.5 by the single-inlier post-sigmoid cap. The final ensemble fuses both technique
     results and reports
-    :attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.status` ``'ok'`` against the
+    :attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.status` ``'success'`` against the
     operator-verified offset :math:`(\Delta v, \Delta u) = (3.06, -0.02)` px.
 
 ``star_dominated`` (Cassini ISS WAC, image ``W1580760393_1``)

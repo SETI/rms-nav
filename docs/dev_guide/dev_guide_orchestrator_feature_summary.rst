@@ -123,14 +123,18 @@ The gate drops it::
         source_model='body:DIONE',
         reliability=0.14,
         gated=True,
-        gate_reason='reliability_below_floor',
+        gate_reason='reliability_0.140_below_threshold_0.300',
         bbox_extfov_vu=(364, 364, 644, 644),
     )
 
-The reason string is stable across images: a campaign-level reviewer who counts
-``gate_reason='reliability_below_floor'`` occurrences across 1,000 ``body_full_fov``-class
-images learns directly how often the LIMB_ARC reliability formula's incidence-factor
-penalty saturates on full-disc bodies.
+The reason string embeds the feature's reliability and the per-type threshold
+(``'reliability_{r:.3f}_below_threshold_{t:.3f}'``); its ``reliability_`` prefix is
+stable across images (the embedded numbers vary per feature), so a campaign-level
+reviewer who counts LIMB_ARC entries whose ``gate_reason`` starts with
+``'reliability_'`` across 1,000 ``body_full_fov``-class images learns directly how
+often LIMB_ARC features fall below the reliability gate on full-disc bodies. The
+reason does not say which formula component drove the score down; that attribution
+comes from the feature's ``reliability_reasons`` breakdown.
 
 **Per-image inventory size.**  A multi-body Cassini fly-by image with 3 bodies plus 50
 predictable stars produces an inventory of 50 STAR plus up to 12 body-derived features

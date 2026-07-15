@@ -87,11 +87,15 @@ its row and children.
        the ``--start-date`` / ``--end-date`` report filters.
    * - ``status``
      - TEXT
-     - Navigation outcome: ``success``, ``failed``, or ``error``.
+     - Navigation outcome: ``success``, ``failed``, ``conflicted``, or
+       ``error`` (the last from image-load failures); ``unknown`` when the
+       metadata document carries no status at all.
    * - ``status_reason``
      - TEXT
-     - Failure reason (e.g. ``no_features_extracted``,
-       ``missing_spice_data``); NULL for successes.
+     - Outcome reason: successes hold ``ok`` or ``rank_1_only``; failures
+       hold the failure reason (e.g. ``no_features_extracted``,
+       ``missing_spice_data``). NULL only when the metadata carries
+       neither ``status_reason`` nor ``status_error``.
    * - ``offset_dv``, ``offset_du``
      - REAL
      - Fused pointing offset in pixels (V then U); NULL when navigation

@@ -261,18 +261,20 @@ The summary pass generates:
 Configuration
 =============
 
-PDS4 bundle generation is configured through a new ``pds4:`` section in configuration
+PDS4 bundle generation is configured through the ``pds4:`` section in configuration
 files. Each dataset can have its own configuration:
 
 .. code-block:: yaml
 
    pds4:
-     coiss_cruise:
-       template_dir: cassini_iss_cruise_1.0
-       bundle_name: cassini_iss_cruise_backplanes_rsfrench2027
      coiss_saturn:
        template_dir: cassini_iss_saturn_1.0
        bundle_name: cassini_iss_saturn_backplanes_rsfrench2027
+
+The ``cassini_iss_saturn_1.0`` template directory ships with the package; to
+configure another dataset, add an entry whose ``template_dir`` points at a
+template directory you create yourself (by name inside the package template
+root, or as an absolute path).
 
 Configuration Options
 ---------------------

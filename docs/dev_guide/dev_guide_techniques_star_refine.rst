@@ -58,7 +58,12 @@ The reported delta is the inverse-variance weighted mean
 where :math:`\mathrm{tr}(\Sigma_{i})` is the trace of the per-star feature covariance; a
 zero-or-missing covariance falls back to a unit weight. The reported translation on the result
 is :math:`\mathbf{p} + \Delta` (absolute, not delta-from-prior); the orchestrator's ensemble
-combine treats every per-technique offset as absolute.
+combine treats every per-technique offset as absolute. The orchestrator also stamps every
+pass-2 result with
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.prior_source_techniques`
+— the technique names whose pass-1 consensus seeded the prior — so the final ensemble lets a
+refine polish those techniques' offset without letting it *corroborate* them (a refine's
+vote is excluded from corroboration and quorum counts against its own prior's sources).
 
 Rotation-aware fit
 ------------------
@@ -101,7 +106,12 @@ Restrictions and assumptions
   same single observation that drove the pass-1 fit just gets polished. A documented
   post-sigmoid cap (default 0.5) prevents the technique from outranking
   :class:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav` on the same
-  one-star scene.
+  one-star scene. The cap is not the only safeguard: every pass-2 result is stamped with
+  the pass-1 consensus techniques that seeded its prior
+  (:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.prior_source_techniques`),
+  and the ensemble's ``corroborating_members`` filter excludes a refine's vote from
+  corroboration and quorum against those source techniques, so a refine cannot
+  self-corroborate the prior it was handed.
 
 Sources of uncertainty
 ----------------------
@@ -151,11 +161,14 @@ All numeric tunables for this technique live in ``techniques.StarRefineNav.tunin
   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.max_rotation_deg` at which the converged rotation magnitude trips :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`. Only the
   multi-inlier Procrustes path uses this threshold; a 1-inlier refine always reports rotation
   as unobservable.
+- ``model_error_floor_px`` — float, default ``0.22`` px. Calibrated model-error floor added
+  in quadrature to the covariance's translation diagonal: the calibration campaign's
+  2-sigma coverage was 0.60 versus the 0.865 reference before flooring, 0.86 after.
 
 Per-instrument overrides
 ------------------------
 
-The eight keys above are global; the per-instrument YAML files in
+The nine keys above are global; the per-instrument YAML files in
 ``src/spindoctor/config_files/config_4N0_inst_*.yaml`` do not override any of them. The
 camera-rotation flag (:attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`) and the rotation cap (:attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.max_rotation_deg`)
 that this technique reads off the per-image
@@ -166,24 +179,24 @@ Confidence formula
 ------------------
 
 The technique reports a calibrated confidence in :math:`[0, 1]` produced by the shared sigmoid
-combination, see :doc:`dev_guide_techniques_dt_fitting` for the per-term arithmetic and
+combination, see :doc:`dev_guide_techniques_confidence` for the per-term arithmetic and
 :doc:`dev_guide_techniques` for the family-level overview. The formula spec is
 ``techniques.StarRefineNav`` in the same YAML file and consumes attributes off
 :class:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics` plus :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- :attr:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics.n_stars_used` — alpha = 1.0,
+- :attr:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics.n_stars_used` — alpha = 1.144,
   offset = 0.0, divisor = 5.0, cap at 1.0. Number of stars that survived the per-star
   quality gates. More inliers earn confidence up to a five-star saturation point.
 - :attr:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics.median_pos_err_px` —
-  alpha = -1.0, offset = 0.0, divisor = 1.0, no cap. Median per-star Euclidean residual
+  alpha = -0.822, offset = 0.0, divisor = 1.0, no cap. Median per-star Euclidean residual
   (observed centroid vs. shifted prediction). Larger residuals pull confidence down.
 - :attr:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics.residual_scatter_px` —
-  alpha = -1.0, offset = 0.0, divisor = 1.0, no cap. Per-axis weighted RMS of the per-star
+  alpha = -0.213, offset = 0.0, divisor = 1.0, no cap. Per-axis weighted RMS of the per-star
   residuals about the fitted delta. Internally inconsistent inlier sets pull confidence
   down.
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces confidence to zero before the
-sigmoid is evaluated. The constant baseline is :math:`\alpha_{0} = -1.0`. No post-sigmoid
+sigmoid is evaluated. The constant baseline is :math:`\alpha_{0} = 1.888`. No post-sigmoid
 ``hard_cap`` is applied at the spec level; the ``single_inlier_confidence_cap`` above is
 applied by the technique itself only when exactly one inlier survived.
 
@@ -295,7 +308,10 @@ Call path traced through
     :class:`~spindoctor.nav_technique.technique_result.NavTechniqueResult`.
     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.feature_ids` preserves the
     inlier set; the orchestrator's curator uses it to attribute per-star contributions at
-    audit time.
+    audit time. The orchestrator then stamps the result with
+    :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.prior_source_techniques`
+    (the pass-1 consensus techniques that seeded the prior) so the final ensemble excludes
+    the refine's vote from corroboration and quorum against its own prior's sources.
 
 Examples
 ========

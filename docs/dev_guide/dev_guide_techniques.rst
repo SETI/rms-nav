@@ -8,7 +8,7 @@ A :class:`~spindoctor.nav_technique.nav_technique.NavTechnique` consumes a subse
 :class:`~spindoctor.nav_technique.technique_result.NavTechniqueResult` carrying a calibrated
 translation offset, a 2x2 (or 3x3 with rotation) covariance, a calibrated [0, 1] confidence,
 and a typed diagnostics dataclass. The orchestrator's ensemble combine reconciles every
-technique's result into a single :class:`~spindoctor.nav_orchestrator.nav_context.NavContext` outcome.
+technique's result into a single :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` outcome.
 
 Concrete subclasses self-register via ``__init_subclass__`` and are discovered by the
 orchestrator through ``NavTechnique._registry``. Each

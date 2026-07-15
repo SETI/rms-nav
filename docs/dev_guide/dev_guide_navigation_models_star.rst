@@ -379,8 +379,9 @@ Call path traced through
    motion, and per-catalog provenance.
 4. Mark body / ring conflicts on each star via
    :func:`~spindoctor.nav_model.stars.conflicts.mark_body_and_ring_conflicts`. The function
-   consults the per-image inventory and the YAML's ``ring_occlusion_radii_km`` to set
-   ``in_body_silhouette`` and ``in_ring_annulus`` flags.
+   consults the per-image inventory and the YAML's ``ring_occlusion_radii_km`` and
+   records each star's conflict; at feature-emission time both body and ring conflicts
+   set the ``in_body_silhouette`` flag (a ring conflict occludes the star the same way).
 5. Resolve the per-observation limiting magnitude from :meth:`obs.star_max_usable_vmag()
    <spindoctor.obs.obs_inst.ObsInst.star_max_usable_vmag>` and synthesise the
    magnitude-margin effective SNR for each star (used by the CRLB covariance and the

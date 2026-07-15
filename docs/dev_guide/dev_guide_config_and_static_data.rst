@@ -65,7 +65,9 @@ shipping sections:
 - ``rings`` — ring-model parameters (planet shadow removal, fade widths,
   per-planet ``ring_features``); see
   :doc:`dev_guide_navigation_models_ring`.
-- ``titan`` — Titan-specific parameters (placeholder).
+- ``titan`` — Titan-specific parameters. The ``config_060_titan.yaml`` section carries a
+  single ``atmosphere_height`` value (700 km) reserved for haze-aware Titan navigation;
+  the shipping Titan model records a no-result and does not consume it.
 - ``bootstrap`` — bootstrap navigation parameters.
 - ``backplanes`` — the list of body and ring backplanes to generate; see
   :doc:`dev_guide_backplanes`.

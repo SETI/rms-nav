@@ -17,8 +17,8 @@ Theory
 
 The curator picks JSON-friendly fields from a
 :class:`~spindoctor.nav_orchestrator.nav_result.NavResult`, rounds floats to documented
-precision, substitutes the ``JSON_INF_SENTINEL`` finite sentinel for non-finite floats (or
-zero for NaN), and emits the ``navigation_result`` block consumed by downstream readers.
+precision, substitutes the ``JSON_INF_SENTINEL`` finite sentinel for non-finite floats
+(including NaN), and emits the ``navigation_result`` block consumed by downstream readers.
 
 Float rounding policy
 ---------------------
@@ -54,7 +54,11 @@ Restrictions and assumptions
   future diagnostic dataclass needs nested structure the curator will need a recursive
   variant.
 - Non-finite floats (``+inf``, ``-inf``, ``nan``) are mapped: ``+inf`` becomes
-  ``JSON_INF_SENTINEL``, ``-inf`` becomes ``-JSON_INF_SENTINEL``, ``nan`` becomes ``0.0``.
+  ``JSON_INF_SENTINEL``, ``-inf`` becomes ``-JSON_INF_SENTINEL``, and ``nan`` becomes the
+  *positive* ``JSON_INF_SENTINEL``. The NaN mapping is deliberate: the only path that
+  produces a NaN here is a degenerate covariance/variance entry, and rendering that as
+  ``0.0`` would read as a zero-variance, infinitely confident value — the opposite of
+  the truth. The huge sentinel instead conveys unbounded uncertainty.
   The sentinel is a documented finite value the JSON schema reserves for "unbounded".
 - The curator does not include the per-image image array in the JSON (it would balloon
   the sidecar to multi-megabyte sizes). An external image-export step writes the image
@@ -106,13 +110,13 @@ Examples
 
     {
       "navigation_result": {
-        "status": "ok",
+        "status": "success",
         "offset_px": [11.06, 30.53],
         "sigma_px": [0.125, 0.122],
         "confidence_rank": "high",
         "confidence": 0.794,
         "confidence_provisional": true,
-        "status_reason": "OK",
+        "status_reason": "ok",
         "covariance_px2": [[0.0156, 0.0017], [0.0017, 0.0148]],
         "per_technique": [
           {
@@ -160,6 +164,8 @@ The build fails before the new field can silently disappear from the JSON sideca
 
 **Non-finite handling.**  A pathological technique reports ``rotation_rad = +inf`` (a
 genuine cost-collapse case the LM refiner mapped to the rotation-unobservable sentinel).
-The curator emits ``JSON_INF_SENTINEL`` (``1.0e30``) in the JSON instead of ``+inf``,
-keeping the file JSON-spec-compliant; downstream readers consult the sentinel to
-distinguish "intentionally unbounded" from a numerical NaN.
+The curator emits ``JSON_INF_SENTINEL`` (``1.0e9``) in the JSON instead of ``+inf``,
+keeping the file JSON-spec-compliant; downstream readers treat the sentinel as
+"unbounded / no information". A NaN (a degenerate covariance entry) maps to the same
+positive sentinel, so it also reads as unbounded uncertainty rather than a spuriously
+confident ``0.0``.

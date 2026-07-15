@@ -97,7 +97,11 @@ Sources of uncertainty
 ----------------------
 
 The reported covariance is the Moore-Penrose pseudoinverse of the M-estimator information
-matrix at convergence, scaled by the per-vertex Tukey weights. The covariance therefore
+matrix at convergence, scaled by the per-vertex Tukey weights, with the calibrated
+model-error floor added in quadrature to the translation diagonal
+(``add_model_error_floor(cov, model_error_floor_px)`` with the calibrated 0.92 px value —
+the Tukey-weighted DT covariance under-reports the limb model error, and the floor restores
+the campaign's 2-sigma coverage to the 2-D-Gaussian reference). The covariance
 reflects the *shape* of the cost surface near the minimum and the surviving inlier population;
 it does not capture systematic biases (e.g. an inflation of the per-vertex sigma due to
 unmodelled crater roughness) and it does not capture model-side uncertainty in the SPICE
@@ -128,7 +132,7 @@ clean planted-(0,0) recovery worsens from ~0.10 px to ~0.17 px. The ring edge, b
 symmetric transition whose gradient peak coincides with the geometric edge, does not have this
 offset and is already at its floor (~0.016 px) without the refine. The genuine remedy is a
 *model-side* fix that predicts the limb at the gradient-peak location (limb-darkening- and
-PSF-aware); that work is tracked in issue #150. Until then the limb fit is the least precise of
+PSF-aware); that fix has not yet been made. Until then the limb fit is the least precise of
 the point-feature techniques on a well-resolved body, though it stays well inside the
 navigability bound. When the converged offset
 sits within a small tolerance of any axis bound of the search window, or when the rotation
@@ -147,18 +151,44 @@ Configuration
 All numeric tunables for this technique live in ``techniques.BodyLimbNav.tuning`` in
 ``src/spindoctor/config_files/config_510_techniques.yaml``.
 
-- ``min_arc_px`` — float, default ``30.0`` px. Minimum surviving vertex count per ``LIMB_ARC``
-  for feasibility. Shorter limbs do not constrain a 2-D translation enough to be worth the
-  LM iteration.
+- ``min_arc_vertices`` — float, default ``30.0``. Minimum surviving vertex count per
+  ``LIMB_ARC`` for feasibility. Arcs with fewer vertices do not constrain a 2-D translation
+  enough to be worth the LM iteration.
 - ``spurious_dt_rms_factor`` — float, default ``5.0`` (dimensionless). Final DT residual
   exceeding this many limb-sigmas marks the result spurious.
 - ``spurious_dt_floor_px`` — float, default ``3.0`` px. Floor of the spurious-detection
   threshold; the threshold is the larger of the floor and the per-feature sigma multiple.
 - ``spurious_min_inliers`` — int, default ``6`` (count). Below this Tukey-inlier count the
   M-estimator covariance is uninformative; the result is flagged spurious.
-- ``spurious_min_inlier_fraction`` — float, default ``0.05`` (dimensionless). Below this
+- ``spurious_min_inlier_fraction`` — float, default ``0.20`` (dimensionless). Below this
   inlier fraction the LM has almost certainly walked off the true limb onto internal-body
-  features (crater rims, terminator); the result is flagged spurious.
+  features (crater rims, terminator, surface boundaries); the result is flagged spurious.
+  A clean limb fit on a fully-visible body retains 50 %+ of vertices as inliers, and image
+  dropouts and cosmic rays account for at most a few percent more rejection, so below 20 %
+  is a strong mis-convergence signature.
+- ``spurious_max_lm_displacement_px`` — float, default ``4.0`` px. If the LM moves more
+  than this many pixels from the integer coarse-NCC seed, flag spurious. Defensive: with
+  the trust region below the LM cannot leave the coarse basin, so this guard normally
+  never fires; it catches any future regression that bypasses the trust region. Set
+  slightly larger than ``lm_trust_region_px``.
+- ``lm_trust_region_px`` — float, default ``1.0`` px. Maximum LM displacement from the
+  integer coarse-NCC seed; the LM rejects any trial step that would land outside this
+  radius without committing. The coarse NCC returns the integer-pixel mask-overlap
+  maximum, so the true sub-pixel optimum is within ~0.71 px of the seed — 1.0 px gives
+  legitimate sub-pixel refinement headroom while denying the LM the runway to reach a
+  2-4 px-away spurious minimum.
+- ``lm_tikhonov_alpha`` — float, default ``0.0`` (dimensionless). Tikhonov anchor strength
+  toward the coarse-NCC seed. Zero by default: an anchor strong enough to prevent
+  multi-pixel walks on textured bodies also prevents legitimate sub-pixel refinement on
+  clean ones, and the trust region is the harder bound.
+- ``gradient_ridge_refine`` — int flag, default ``0`` (OFF). Final continuous
+  gradient-ridge sub-pixel refinement after the DT LM converges. Held off for the limb:
+  the dominant limb error is the model-vs-image edge offset discussed above, not DT
+  quantization, and refining onto the gradient peak sharpens that offset. See
+  :doc:`dev_guide_techniques_dt_fitting`.
+- ``model_error_floor_px`` — float, default ``0.92`` px. Calibrated model-error floor
+  added in quadrature to the covariance's translation diagonal (see "Sources of
+  uncertainty").
 - ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
   distance from any search-window axis bound falls within this tolerance is flagged
   :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`. Matches the bilinear-DT half-cell width.
@@ -169,7 +199,7 @@ All numeric tunables for this technique live in ``techniques.BodyLimbNav.tuning`
 Per-instrument overrides
 ------------------------
 
-The seven keys above are global; the per-instrument YAML files in
+The twelve keys above are global; the per-instrument YAML files in
 ``src/spindoctor/config_files/config_4N0_inst_*.yaml`` do not override any of them. The
 search-window margin used by the at-edge test comes from the per-instrument
 :class:`~spindoctor.nav_orchestrator.instrument_config.InstrumentSettings` rather than from this block.
@@ -178,7 +208,7 @@ Confidence formula
 ------------------
 
 The technique reports a calibrated confidence in :math:`[0, 1]` produced by the shared sigmoid
-combination, see :doc:`dev_guide_techniques_dt_fitting` for the per-term arithmetic and
+combination, see :doc:`dev_guide_techniques_confidence` for the per-term arithmetic and
 :doc:`dev_guide_techniques` for the family-level overview of confidence. The formula spec is
 ``techniques.BodyLimbNav`` in the same YAML file and consumes attributes off
 :class:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics` plus the :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
@@ -189,16 +219,16 @@ combination, see :doc:`dev_guide_techniques_dt_fitting` for the per-term arithme
   Fraction of the polyline (weighted by surviving vertex count across consumed ``LIMB_ARC``
   features) whose vertices were not pre-rejected by the model-side shadow / FOV gates. One
   means every offered vertex is usable.
-- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px` — alpha = -1.5,
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px` — alpha = -0.41,
   offset = 0.0, divisor = 1.0, no cap. Final root-mean-square DT residual after LM
   convergence; smaller is sharper.
-- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px` — alpha = 0.4,
-  offset = 0.0, divisor = 100.0, cap at 1.0. Total surviving polyline length in pixels,
-  capped after normalisation. More polyline earns confidence up to a 100-pixel saturation
-  point.
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px` — alpha = 1.254,
+  offset = 0.0, divisor = 440.0, cap at 1.0. Total surviving polyline length in pixels,
+  capped after normalisation. More polyline earns confidence up to a 440-pixel saturation
+  point (calibration campaign raw p5/p50/p95 = 151/280/440).
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces the confidence to zero before
-the sigmoid is evaluated. The constant baseline is :math:`\alpha_{0} = -1.0`. No post-sigmoid
+the sigmoid is evaluated. The constant baseline is :math:`\alpha_{0} = -2.386`. No post-sigmoid
 ``hard_cap`` is applied.
 
 Implementation
@@ -269,7 +299,7 @@ Call path traced through
    :func:`~spindoctor.nav_orchestrator.image_derivatives.compute_all_image_derivatives`; see
    :doc:`dev_guide_techniques_dt_fitting` for the surface those products expose.
 2. Filter the offered features down to ``LIMB_ARC`` polylines whose surviving vertex count is at
-   least ``min_arc_px``, then concatenate the per-feature vertex / normal / sigma arrays via
+   least ``min_arc_vertices``, then concatenate the per-feature vertex / normal / sigma arrays via
    the private ``_aggregate_limb_features`` helper. The geometric outward normals are negated
    in this step so that the polarity test in the LM refiner expects the image gradient to
    point *into* the body silhouette.
@@ -327,7 +357,7 @@ Examples
     ``LIMB_ARC`` feature; the technique consumes it and converges to
     :math:`(\Delta v, \Delta u) = (12.06, 30.53)` px against an operator-verified ground truth
     of ``(11.0, 29.5)`` px. Feasibility passes (one ``LIMB_ARC``, surviving vertex count well
-    above ``min_arc_px``), neither :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` nor :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` fires, and the technique
+    above ``min_arc_vertices``), neither :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` nor :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` fires, and the technique
     becomes the orchestrator's primary on this image.
 
 ``multi_body`` (Cassini ISS NAC, image ``N1487595731_1``)

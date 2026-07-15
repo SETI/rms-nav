@@ -7,8 +7,8 @@ Overview
 
 :class:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` is the pass-1
 multi-star pattern matcher. It hashes catalog and detection triplets into a translation- and
-rotation-invariant feature space, finds correspondences via a KD-tree match in that space,
-and runs a RANSAC similarity-transform fit to recover the translation (plus optional in-plane
+rotation-invariant feature space, finds correspondences by an exhaustive hash-distance scan
+in that space, and runs a RANSAC fit to recover the translation (plus optional in-plane
 rotation) that maps the predicted catalog cohort onto the observed detections. The technique
 runs without a prior — it is the ensemble's primary star path on scenes where the SPICE
 pointing error is too large for
@@ -30,10 +30,10 @@ Triplet hashing
 ---------------
 
 For every triplet of three predictable catalog stars the matcher computes a translation- and
-rotation-invariant hash: the two ratios of side lengths (sorted longest-to-shortest), plus
-the included angle at the longest-side vertex. The same hash is computed for every triplet
-of three detected sources in the image. Triplets with matching hashes (within a small
-tolerance) are candidate correspondences.
+rotation-invariant hash ``(d_AB / d_AC, d_BC / d_AC, angle BAC)``, where vertex ``A`` is
+canonicalised as the brightest star of the triplet and the other two follow in sorted-index
+order. The same hash is computed for every triplet of three detected sources in the image.
+Triplets with matching hashes (within a small tolerance) are candidate correspondences.
 
 Source detection
 ----------------
@@ -44,24 +44,28 @@ with a Gaussian PSF kernel of the configured ``psf_sigma_px``, peaks above
 each peak gives the sub-pixel centroid. Up to ``max_sources`` brightest detections feed the
 hash-space search; the catalog side is similarly capped.
 
-KD-tree match
--------------
+Hash-space match
+----------------
 
-The catalog and detection triplet hashes are loaded into a KD-tree in
-``(ratio_short_to_long, ratio_mid_to_long, angle_radians)`` space, weighted per axis
-(``hash_ratio_weight``, ``hash_angle_weight``); a query of every catalog hash against the
-detection KD-tree returns the nearest detection triplet within ``hash_match_tolerance``.
-Each match implies a per-star correspondence between three catalog vertices and three
-detection vertices.
+Every detection triplet's hash is compared against every catalog triplet's hash by a
+brute-force scan in ``(ratio, ratio, angle_radians)`` space, using a weighted Euclidean
+distance (``hash_ratio_weight``, ``hash_angle_weight``). ALL pairs whose hash distance falls
+within ``hash_match_tolerance`` survive as candidates, sorted by ``(hash_dist_sq, sorted
+detection-source indices ascending, catalog-triplet index)`` so iteration is deterministic
+across repeated invocations. Each candidate implies a per-star correspondence between three
+catalog vertices and three detection vertices.
 
 RANSAC inlier validation
 ------------------------
 
 Each candidate correspondence proposes a similarity transform (rotation, translation, and an
 implied unit scale). The matcher applies the proposed transform to every catalog star and
-counts how many predicted positions land within ``inlier_tolerance_px`` of a detection.
-The transform with the most inliers wins; below ``pattern_match_min_inliers`` the technique
-reports spurious.
+counts how many predicted positions land within ``inlier_tolerance_px`` of a detection. The
+detection-to-catalog inliers within the tolerance ball are the maximum-cardinality one-to-one
+assignment (solved with :func:`scipy.optimize.linear_sum_assignment`), so the count is exact
+and independent of detection ordering rather than a greedy nearest-available match that could
+strand a detection when two compete for one catalog star. The transform with the most inliers
+wins; below ``pattern_match_min_inliers`` the technique reports spurious.
 
 PSF-fit inlier refinement
 -------------------------
@@ -97,24 +101,38 @@ recovered-offset median from ~0.052 px (moment-only) to ~0.023 px, while a brigh
 instead *raise* the error to ~0.056 px by exposing the bias floor. See the simulator
 performance report's star-field centroiding section for the dim-vs-bright sweep.
 
-Similarity-transform refit
---------------------------
+Inlier refit
+------------
 
-Once the inlier set is known, the matcher runs a weighted Procrustes / Kabsch fit on the
-inlier correspondences (using the per-star inverse-trace covariance weights) to refine the
-similarity transform. The translation read off the fit is the reported offset; the
-rotation, when present, is the converged angle about the catalog-side weighted centroid.
+Once the inlier set is known, the matcher refines the transform with a Tukey-biweight-
+reweighted fit. With camera rotation off (the default) the refit is a reweighted mean
+translation: an unweighted pass seeds the residual scale, then one biweight-reweighted pass
+at the conventional 4.685 breakdown constant produces the final offset. When
+:attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is on, the
+same two-pass Tukey reweighting drives a Procrustes / Kabsch similarity fit instead. In both
+branches the weights are Tukey biweight values seeded from the unweighted pass — never
+per-star inverse-trace covariance weights. The translation read off the fit is the reported
+offset; the rotation, when fitted, is the converged angle about the catalog-side weighted
+centroid.
 
 Per-axis covariance
 -------------------
 
-The reported translation covariance is derived from the inlier residual scatter and the
-catalog-side centroid spread, per the same precision-weighted-mean form
-:class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav` uses; see
-:doc:`dev_guide_techniques_star_refine` for the algebra. When the per-instrument
-camera-rotation flag is on and the inlier count supports it, a 3x3 covariance with the
-rotation diagonal is reported; otherwise the 2x2 translation block is reported on its own
-or embedded in the rank-deficient 3x3.
+The reported translation covariance is derived from the Tukey-weighted inlier residual
+scatter alone: the per-axis reduced chi-square divided by the total weight, floored by the
+pure inverse-precision ``1 / sum(w)``, with the squared ``model_error_floor_px`` added to
+the diagonal. When the per-instrument camera-rotation flag is on, a 3x3 covariance is
+reported whose translation block follows the same algebra (with three fitted parameters)
+and whose rotation diagonal is described next; the catalog-side centroid spread enters only
+through that rotation term. Otherwise the 2x2 translation block is reported on its own.
+
+The rotation variance is the inverse of the rotation Fisher information computed directly
+from the per-vertex tangential lever-arm Jacobian ``(-du_i, dv_i)`` about the weighted
+catalog centroid, weighted by the per-axis residual precision. This is exact for
+anisotropic residuals — unlike a pooled isotropic form that averages the two per-axis
+residual variances and mis-weights the lever arms when the inlier residuals are
+anisotropic. (:class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav`
+keeps its own pooled rotation form; the two are not shared.)
 
 Restrictions and assumptions
 ----------------------------
@@ -122,7 +140,7 @@ Restrictions and assumptions
 - The matcher needs at least three usable stars to form one triplet. Below that count the
   technique reports infeasible without running.
 - The hash-space tolerance is empirically tuned to a typical centroid sigma of ~0.1 px;
-  significantly noisier centroids may cause the KD-tree match to miss correct
+  significantly noisier centroids may cause the hash match to miss correct
   correspondences.
 - The matcher is translation- and rotation-invariant by construction but not scale-invariant;
   a Procrustes refit explicitly forces unit scale, which is correct for navigation but means
@@ -163,9 +181,9 @@ in ``src/spindoctor/config_files/config_510_techniques.yaml``.
   loosen this once the integration library exercises the full instrument set.
 - ``centroid_box_half_px`` — int, default ``3`` px. Half-width of the brightness-weighted
   moment box around each accepted peak.
-- ``hash_match_tolerance`` — float, default ``0.05`` (dimensionless). KD-tree match radius
-  in the (ratio, ratio, angle_rad) hash space; weighted Euclidean. Empirical default for
-  centroid sigma ~0.1 px against typical triplet scales.
+- ``hash_match_tolerance`` — float, default ``0.05`` (dimensionless). Match radius in the
+  (ratio, ratio, angle_rad) hash space; weighted Euclidean. Empirical default for centroid
+  sigma ~0.1 px against typical triplet scales.
 - ``hash_ratio_weight`` — float, default ``1.0`` (dimensionless). Per-axis weight on the
   ratio dimensions in the hash distance metric.
 - ``hash_angle_weight`` — float, default ``1.0`` (dimensionless). Per-axis weight on the
@@ -192,6 +210,11 @@ in ``src/spindoctor/config_files/config_510_techniques.yaml``.
   variance and the
   :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.rotation_below_separability_floor`
   diagnostics flag instead of a confident near-zero value.
+- ``model_error_floor_px`` — float, default ``0.0`` px. Uncalibrated model-error floor,
+  added in quadrature to the reported covariance diagonal
+  (``reported_cov = CRLB-form (+) model_error_floor_px**2``). Captures the SPICE pointing
+  residual and body-shape error that the pattern-match residual scatter does not. The
+  default 0.0 is a no-op pending an integration-library calibration sweep.
 - ``psf_refine_enabled`` — int flag, default ``1``. ``1`` enables the PSF-fit re-centroiding
   of matched inliers; ``0`` keeps the brightness-weighted moment centroid everywhere.
 - ``psf_refine_box_px`` — int, default ``11`` px (odd). Square box side for the PSF fit and
@@ -221,24 +244,31 @@ sigmoid combination; see :doc:`dev_guide_techniques_confidence`. Spec is
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_inliers` — alpha = 1.0,
+- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_inliers` — alpha = 0.906,
   offset = 6.0, divisor = 6.0, cap at 1.0. Number of detection-to-catalog inliers after
   RANSAC. Saturates at 12 inliers (offset = 6 plus full cap).
 - :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.median_residual_px` —
-  alpha = -1.0, offset = 0.0, divisor = 1.0, no cap. Median position residual on inliers.
-  Larger residuals pull confidence down.
+  alpha = 0.0, offset = 0.0, divisor = 1.0, no cap. Median position residual on inliers.
+  Sign-constrained to zero by the calibration fit: with no failure class in the sim
+  campaign the residual carried no signal. Kept wired for a future real-anchored
+  calibration.
 - :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_detected_sources` —
   alpha = 0.0, offset = 0.0, divisor = 30.0, cap at 1.0. Number of bright sources detected
-  in the image. Carries no weight in the current confidence formula; the wiring is in place so a downstream
-  recalibration can tune the alpha.
+  in the image. Constant in the calibration campaign (the detector always fills its
+  ``max_sources`` budget, noise peaks included), so it carries no information as wired;
+  kept at zero weight.
 - :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_catalog_predicted` —
-  alpha = 0.0, offset = 0.0, divisor = 30.0, cap at 1.0. Number of catalog stars in the
-  extfov. Same posture as the detected-sources term.
+  alpha = 0.777, offset = 0.0, divisor = 30.0, cap at 1.0. Number of catalog stars in the
+  extfov.
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
 confidence to zero before the sigmoid evaluates. The constant baseline is
-:math:`\alpha_{0} = -2.0`. No post-sigmoid ``hard_cap`` is applied.
+:math:`\alpha_{0} = 2.339`. A post-sigmoid ``hard_cap`` of 0.95 clamps the result: the sim
+calibration campaign was single-class (every non-spurious pattern match recovered planted
+truth), and single-class evidence cannot support confidence above ~0.95 on real frames the
+sim cannot represent (distortion, smear, saturated bloom); the ceiling is conservative
+pending a real-anchored calibration.
 
 Implementation
 ==============
@@ -314,8 +344,9 @@ Call path traced through
 2. Run the matched-filter detection over
    :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.image_ext` to find the brightest
    sources. Cap the catalog and detection cohorts at ``max_sources`` each.
-3. Compute every catalog and detection triplet's (ratio, ratio, angle) hash. Load both
-   sets into a KD-tree and find correspondences within ``hash_match_tolerance``.
+3. Compute every catalog and detection triplet's (ratio, ratio, angle) hash. Scan every
+   detection-triplet / catalog-triplet pair and keep all candidates whose weighted hash
+   distance falls within ``hash_match_tolerance``, sorted for deterministic iteration.
 4. RANSAC: for each candidate correspondence triplet, propose a similarity transform and
    count inlier matches across the full catalog cohort using ``inlier_tolerance_px``.
    Keep the transform with the most inliers.
@@ -328,28 +359,30 @@ Call path traced through
    maximum-likelihood PSF fit (``obs.star_psf().find_position``, half-pixel-corrected);
    brighter inliers and failed fits keep the moment. Skipped entirely when
    ``psf_refine_enabled`` is ``0`` or the obs exposes no ``star_psf()``.
-6. Run a weighted Procrustes / Kabsch fit on the (refined) inlier correspondences via
-   ``similarity_transform_fit``. The fit returns the rotation and translation; the
-   translation is the reported offset.
+6. Refit on the (refined) inlier correspondences: with ``fit_camera_rotation`` false a
+   Tukey-biweight-reweighted mean translation (an unweighted pass seeds the residual scale,
+   then one biweight-reweighted pass); with it true, the same two-pass Tukey reweighting
+   drives a Procrustes / Kabsch fit via ``similarity_transform_fit``. The translation is
+   the reported offset.
 7. Result-shape branches on
-   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` and the inlier
-   count:
+   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`:
 
    - **Translation only** (``fit_camera_rotation`` false). The (2, 2) covariance comes
-     from the inlier residual scatter scaled by the catalog-side centroid spread.
+     from the Tukey-weighted inlier residual scatter (per-axis reduced chi-square over
+     the total weight, floored at the pure inverse-precision, plus the squared
+     ``model_error_floor_px``).
      :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.rotation_rad` and
      :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` are
      ``None``.
-   - **Rotation fit, two or more inliers.**  The (3, 3) covariance has the per-axis
-     translation variances and the rotation variance derived from the inlier residual
-     scatter against the catalog-side spread (same algebra as
-     :class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav` documented at
-     :doc:`dev_guide_techniques_star_refine`).
-   - **Rotation fit, one inlier.**  The (2, 2) translation block is embedded in a
-     rank-deficient (3, 3) via
-     :func:`~spindoctor.nav_technique.nav_technique.embed_rotation_unobservable`;
-     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is ``0.0``
-     and the sigma is the rotation-unobservable sentinel.
+   - **Rotation fit.**  The (3, 3) covariance has the per-axis translation variances
+     (same algebra as above with three fitted parameters) and the rotation variance from
+     the inverse rotation Fisher information built on the per-vertex lever arms about the
+     weighted catalog centroid. When the fitted rotation magnitude falls below the
+     ``rotation_separability_floor_deg`` floor,
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.rotation_rad` keeps
+     the fitted value but the rotation variance is replaced by the rotation-unobservable
+     sentinel. (A one-inlier rotation fit cannot occur: ``pattern_match_min_inliers`` is
+     validated to be at least 3 at load time.)
 
 8. Apply the at-edge tests against the search-window axis bounds and the rotation cap.
 9. Build a :class:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics`, evaluate the
@@ -397,8 +430,8 @@ Examples
     ``obs.star_max_usable_vmag()``. The stars model emits no ``STAR`` features that clear
     the magnitude gate. The technique's
     :meth:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav.is_feasible`
-    fails with reason ``no_usable_stars`` and the technique skips its navigate pass
-    entirely. The orchestrator falls back to whichever body- or ring-derived technique is
+    fails with reason ``fewer_than_3_predicted_stars (got 0)`` and the technique skips its
+    navigate pass entirely. The orchestrator falls back to whichever body- or ring-derived technique is
     feasible on the scene and surfaces the per-technique infeasibility on the per-image
     :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` so the curator records which gate
     fired.

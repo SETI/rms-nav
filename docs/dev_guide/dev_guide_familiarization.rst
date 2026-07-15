@@ -43,6 +43,7 @@ Goal: understand the shared infrastructure every subsystem depends on
 - :mod:`spindoctor.config` — config loader and module-level logger:
 
   - :mod:`spindoctor.config.config`
+  - :mod:`spindoctor.config.config_helper`
   - :mod:`spindoctor.config.logger`
 
 - ``src/spindoctor/config_files/`` — the bundled YAML defaults (numeric-prefix load
@@ -96,6 +97,7 @@ that the rest of the pipeline consumes.
   - :mod:`spindoctor.feature.flags`
   - :mod:`spindoctor.feature.composition`
   - :mod:`spindoctor.feature.reliability`
+  - :mod:`spindoctor.feature.constants`
 
 Stage 4 — First end-to-end pipeline: ``NavModelBody`` + ``BodyLimbNav``
 =======================================================================
@@ -148,6 +150,8 @@ Technique
 - :mod:`spindoctor.nav_technique.nav_technique` — abstract base + registry
   (:class:`~spindoctor.nav_technique.nav_technique.NavTechnique`).
 - :mod:`spindoctor.nav_technique.dt_fitting` — shared DT-fitting helpers.
+- :mod:`spindoctor.support.distance_transform` — the edge distance-transform
+  builder those helpers consume.
 - :mod:`spindoctor.nav_technique.nav_technique_body_limb` — the technique
   implementation
   (:class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`).
@@ -229,6 +233,10 @@ orchestrator returns.
 - Orchestrator-side helpers:
 
   - :mod:`spindoctor.nav_orchestrator.ensemble`
+  - :mod:`spindoctor.nav_orchestrator.ensemble_consensus` — consensus-subset
+    selection and the corroborating-member rules.
+  - :mod:`spindoctor.nav_orchestrator.ensemble_observability` — observable-
+    subspace bases and the sentinel-aware pseudo-inverse.
   - :mod:`spindoctor.nav_orchestrator.image_classifier`
   - :mod:`spindoctor.nav_orchestrator.image_classifier_result`
   - :mod:`spindoctor.nav_orchestrator.instrument_config`
@@ -265,6 +273,7 @@ Stars (model + star techniques)
   - :mod:`spindoctor.nav_model.stars.smeared_psf`
   - :mod:`spindoctor.nav_model.stars.conflicts`
   - :mod:`spindoctor.nav_model.stars.nav_model_stars`
+  - :mod:`spindoctor.nav_model.stars.nav_model_stars_simulated`
 
 - :mod:`spindoctor.nav_technique.nav_technique_star_unique_match`
 - :mod:`spindoctor.nav_technique.nav_technique_star_refine`
@@ -287,6 +296,8 @@ Body (additional techniques and Titan)
 - :mod:`spindoctor.nav_technique.nav_technique_body_terminator`
 - :mod:`spindoctor.nav_technique.nav_technique_body_blob`
 - :mod:`spindoctor.nav_technique.nav_technique_body_disc`
+- :mod:`spindoctor.support.correlate` — the shared pyramid-NCC / upsampled-DFT
+  correlation engine behind the disc, blob, and annulus techniques.
 - :mod:`spindoctor.nav_model.nav_model_titan`
 
 Rings (model + ring techniques)
@@ -331,13 +342,19 @@ sibling of each model family. These are used both by
 - :doc:`dev_guide_navigation_models_body_simulated`
 - :doc:`dev_guide_navigation_models_ring_simulated`
 - :doc:`dev_guide_navigation_models_titan_simulated`
+- :mod:`spindoctor.nav_model.stars.nav_model_stars_simulated`
 - :mod:`spindoctor.nav_model.nav_model_body_simulated`
 - :mod:`spindoctor.nav_model.nav_model_rings_simulated`
 - :mod:`spindoctor.sim` — the synthetic-image renderer:
 
   - :mod:`spindoctor.sim.render`
+  - :mod:`spindoctor.sim.scene`
   - :mod:`spindoctor.sim.sim_body`
+  - :mod:`spindoctor.sim.sim_body_polyhedral`
   - :mod:`spindoctor.sim.sim_ring`
+  - :mod:`spindoctor.sim.instruments`
+  - :mod:`spindoctor.sim.seeds`
+  - :mod:`spindoctor.sim.png_export`
 
 - ``src/spindoctor/dataset/dataset_sim.py`` and ``src/spindoctor/obs/obs_inst_sim.py``
   — the simulated-image dataset and observation wrappers (not autodoc'd).

@@ -69,7 +69,7 @@ Both templates clamp their radius to the frame's half-diagonal
 (``_clamped_kernel_radius``): a template
 larger than the frame adds no localization information, while the kernel array and its FFT
 convolution allocate memory quadratically in the predicted diameter — a mostly off-frame gas
-giant predicts tens of thousands of pixels and exhausted RAM before the clamp (issue #202).
+giant predicts tens of thousands of pixels, enough to exhaust RAM without the clamp.
 
 The crescent template needs the sub-solar direction. It is undefined near full phase (the lit
 and geometric centroids coincide), where the disc kernel is used anyway, and is reported as
@@ -241,23 +241,29 @@ off :class:`~spindoctor.nav_technique.diagnostics.BodyBlobDiagnostics` plus
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`.
 
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyBlobDiagnostics.body_snr_inside_predicted_bbox`
-  — alpha = 0.5, offset = 0.0, divisor = 4.0, cap at 1.0. Per-image SNR inside the
-  predicted bounding box. Brightness-weighted centroid uncertainty shrinks with SNR.
-- :attr:`~spindoctor.nav_technique.diagnostics.BodyBlobDiagnostics.body_extent_px` — alpha = 1.0,
-  offset = 8.0, divisor = 8.0, cap at 1.0. Predicted body's longer-axis extent in pixels.
-  Larger blobs carry more centroid signal up to a 16-pixel saturation point.
+  — alpha = 0.405, offset = 0.0, divisor = 600.0, cap at 1.0. Per-image SNR inside the
+  predicted bounding box. Brightness-weighted centroid uncertainty shrinks with SNR; the
+  calibration campaign's raw p5/p50/p95 is 34/109/679 (a heavy tail).
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyBlobDiagnostics.body_extent_px` —
+  alpha = -1.477, offset = 8.0, divisor = 130.0, cap at 1.0. Predicted body's longer-axis
+  extent in pixels. The alpha is *negative*, reversing the design's more-signal prior: the
+  lit-weighted-centroid model error grows with apparent size, so the absolute probability
+  of recovering within 1 px falls as the blob gets bigger. Small blobs are the technique's
+  tightest regime in absolute pixels — every usable sub-22 px row on the calibration
+  campaign recovered within 1 px. Campaign raw p5/p50/p95 is 11/24/110.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyBlobDiagnostics.blob_count` — alpha = 0.4,
   offset = 0.0, divisor = 3.0, cap at 1.0. Number of ``BODY_BLOB`` features fused.
   Multi-body geometry over-determines the joint translation up to a 3-blob saturation.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyBlobDiagnostics.max_phase_irregularity_factor`
-  — alpha = 0.0, offset = 0.0, divisor = 0.15, cap at 1.0. Maximum phase-and-irregularity
+  — alpha = -0.164, offset = 0.0, divisor = 0.35, cap at 1.0. Maximum phase-and-irregularity
   factor across the consumed blobs (see :doc:`dev_guide_navigation_models_body` for the
-  formula). The term carries no weight in the current confidence formula; the wiring is in place so a downstream
-  recalibration can tune the alpha without code changes.
+  formula); the divisor spans the campaign's raw p5/p50/p95 of 0.002/0.073/0.30. The
+  penalty is milder than a large-blob-only regime would suggest: with small blobs in the
+  fit the base rate rises and irregularity explains less of the residual failure mass.
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`
 firing forces confidence to zero before the sigmoid evaluates. The constant baseline is
-:math:`\alpha_{0} = -1.0`. A post-sigmoid ``hard_cap`` of ``0.4`` clamps the result: a
+:math:`\alpha_{0} = 1.963`. A post-sigmoid ``hard_cap`` of ``0.4`` clamps the result: a
 brightness-weighted centroid cannot drive the ensemble past 0.4 confidence even when every
 term saturates.
 
@@ -312,9 +318,11 @@ Diagnostics
   ``max_phase_irregularity_factor`` instead because raw phase understates the centroid
   uncertainty for an irregular body.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyBlobDiagnostics.max_phase_irregularity_factor` —
-  maximum :math:`\sin(\phi/2) \cdot \sigma_{\mathrm{ellipsoid}} / R_{\mathrm{body}}` across
-  consumed blobs. Consumed by the confidence formula (alpha=0.0 — the wiring is
-  in place so the formula picks up a recalibrated alpha without code changes).
+  maximum
+  :math:`(\sigma_{\mathrm{ellipsoid}} / R_{\mathrm{body}}) \cdot (1 + 2 \sin^{2}(\phi/2))`
+  across consumed blobs, where :math:`\sigma_{\mathrm{ellipsoid}}` is the body's ellipsoid
+  RMS shape residual in km and :math:`R_{\mathrm{body}}` its radius in km. Consumed by the
+  confidence formula.
 
 Call path
 ---------

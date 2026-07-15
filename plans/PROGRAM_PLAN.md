@@ -3,7 +3,7 @@
 *The top-level plan of record for all remaining work. It is written to be
 readable without knowledge of the code internals or the statistical
 methodology; the detail lives in the three sub-plans it points to. Last
-reconciled 2026-07-12.*
+reconciled 2026-07-14.*
 
 **Document map** (what to read for what):
 
@@ -63,11 +63,12 @@ defensible one is Track A, the largest remaining block.
 
 The curated image library — the raw material for both regression testing
 and validation — stands at 69 operator-verified images (predominantly
-Cassini, with a few Voyager, Galileo, and New Horizons), against a
+Cassini, with a few Voyager, Galileo, and New Horizons), plus five
+pending fixtures (the sparse-Pleiades quintet, held for #285/#284), against a
 first-stage budget of 47 spanning 17 scene classes and a final target of
 at least 120 across all four instruments. Review batch 5 (PR #260, six
 frames) merged and filled the last empty class, `ring_only_flat`; the
-operator library review (branch `phase-d-reconciliation`, PR #262)
+operator library review (PR #262)
 re-verified five frames, added a sixth, and applied the tier ratchet
 across the library. Batch 5 also queued manual-nav frames toward the
 per-class minima.
@@ -175,7 +176,7 @@ The known defects:
 - **#222** — second-pass star refinement corroborates its own first-pass
   input but votes as an independent opinion, inflating consensus
   confidence. Same class of defect. Two real-frame instances found in
-  Phase D (N1686349893, N1572105349): the 1-star refine degrades an
+  the 2026-07-13 operator library review (N1686349893, N1572105349): the 1-star refine degrades an
   otherwise-correct body fix to ~1.8 px error while keeping a high tier.
 - **#258** — an exact recovery is downgraded to `conflicted` by a
   low-confidence dissenter the consensus logic has already excluded
@@ -199,25 +200,94 @@ The known defects:
   #261).
 - **#128 / #150** — the strategic limb-navigation redesign and the ~0.1 px
   limb systematic (shared with Track A's WS-10; design first, validate
-  against real images before touching).
+  against real images before touching). The limb-bias diagnosis (measured
+  in two ground-truth channels) attributes the systematic to the
+  limb-darkening / photometric roll-off: the edge DT localizes the
+  gradient ridge, which sits ~0.5 px inside the geometric silhouette by an
+  illumination-dependent amount. The strongest fix is a photometric-limb
+  fit (predict the limb-darkened-disc-convolved-with-PSF profile), tracked
+  on #150. Three secondary findings split out as their own issues:
+- **#281** — `BodyLimbNav` mis-converges on low-phase (<15 deg) limbs
+  (a 2.71 px jump at phase 10 deg on noise-free planted truth); the
+  spurious gate misses it. Robustness, not precision.
+- **#282** — a ~0.05 px, one-pixel-period sub-pixel ripple rides on top of
+  the directional bias; a higher-order / matched-filter sub-pixel edge
+  estimator would remove it. Precision refinement, secondary to #150.
+- **#283** — pixel-centre convention mismatch (simulated `BODY_DISC`
+  predicted-centre metadata at `center` vs renderer at `center - 0.5`);
+  latent, does not affect the limb path today, fold into #128.
 - **#25** — model blurring for very-high-resolution bodies (investigation).
 - **#237 / #238** — two unexplained triage failures (a multi-body trio, a
-  Voyager scattered-light quintet); each is one debugging session.
+  Galileo scattered-light quintet); each is one debugging session. #238 is
+  triaged: the quintet is a sparse Pleiades field the current pipeline
+  cannot lock (few bright stars, large offset), curated as pending fixtures
+  and split into #285 (sparse-field star nav) and #284 (UCAC4 bright-end
+  photometry).
+- **#284 / #285** — split out of the #238 triage: #284 is the UCAC4
+  bright-end saturation that corrupts predicted star brightness and the
+  navigable-content screen; #285 is the capability gap where autonomous
+  star nav cannot lock a large unknown offset from a sparse star field
+  (wants wide-offset asterism matching). #285 depends on #284.
 - **#239** — operator decision: how to treat bodies smaller than ~5 px.
-- **#210** — the NCC techniques' covariances are orders of magnitude
-  over-tight; the covariance-model review remains open even though the
-  original coverage symptom is fixed.
-- **#24, #130, #132, #133, #180** — smaller technique-quality and
-  diagnosability items (#180 wires a per-image reason through every
-  failure site — cheap and it makes debugging the rest of the track
-  easier, so do it early).
+- **#210** — resolved: the NCC techniques' covariances were orders of
+  magnitude over-tight; the covariance-model rederivation merged as
+  PR #278.
+- **#130** — star limiting-magnitude calibration against real fields;
+  the last open item of the small technique-quality cluster (#24, #132,
+  #133, #180 all merged in the batch above).
 - **#254** — a fully dark body emits a photometric BODY_BLOB feature
   where the body-model dev guide says it should emit nothing; likely
   harmless today (the reliability gate culls it) but it is a
   model-emission spec conflict to resolve.
 
-**Parallelism:** fully parallel with Track A; #221/#222 should land
-before the agreement study consumes ensemble output at scale.
+**Status (2026-07-14):** the batch is merged; the remaining items are
+either operator-decided (below) or deferred.
+
+- Merged: #266 (#180 failure-reason emission + #254 dark-body blob gate),
+  #267 (#132 rotation variance + #133 optimal star inlier assignment),
+  #268 (#259 one-star residual / no-rival gate), #269 (#258
+  excluded-dissenter veto + #263 one-star tier cap), #270 (#221
+  rank-aware ensemble agreement + fused-offset zeroing fix), #271 (#222
+  pass-2 refine no longer corroborates its prior), #272 (#261 robust
+  per-edge DT mis-convergence gate), #274 (#238 quintet curated as
+  pending fixtures awaiting #285/#284), #275 (#237 multi-body
+  limb-RMS-pooling fix), #276 (#128/#150 limb-bias diagnosis; follow-ups
+  #281/#282/#283), #277 (#60 interim Titan exclusion + #24
+  highly-irregular exclusion), #278 (#210 covariance-model rederivation).
+- Operator decisions settled: #239 sub-5 px bodies are to be curated as
+  expected failures, with the relaxed-disc pathway revisited after #210
+  lands honest sigmas; no qualifying frame exists in the current library
+  or triage set yet, so this waits on a targeted cohort scan (predicted
+  diameter at or below ~5 px, single-body scenes) as library-growth work.
+  #60 Titan is hard-excluded from body navigation, with an active
+  model/technique that always declines and records why — a deliberate
+  special case, not a generic atmospheric-body class, because Titan's
+  atmosphere (transparent at some wavelengths) does not generalize to
+  bodies like Venus. #24 highly-irregular bodies drop
+  shape features (limb/terminator/disc) once resolved but may still
+  navigate as point blobs. #210 gets a covariance-model rederivation, not
+  a rescale. #128/#150 starts with a diagnosis pass that separates a
+  genuine limb-fit bias from spacecraft-position / ephemeris error using
+  the simulator, and validates that the simulator's own limb render is
+  bias-free.
+- Two operator-confirmed tier ratchets (N1530185128 medium -> high,
+  W1449079117 low -> medium) are #279, merged after the ensemble stack.
+- The #128/#150 diagnosis reframed the limb redesign: the fitter
+  contributes only ~0.1 px of real-frame error while spacecraft-position
+  / ephemeris error dominates (0.4-1.7 px), so the higher-leverage target
+  is the pointing-kernel side (Track D #188/#50), not the limb fitter.
+- Residual-offset frames behind #270/#272 (N1867601758, N1867602424,
+  N1492091163) are now tier-honest but still land the wrong offset
+  because the coarse edge search locked the wrong ring-edge population;
+  correcting the offset is #179, deferred pending a calibration approach.
+- Deferred: #179 (coarse-lock calibration), #25 (high-resolution body
+  blurring), #130 (star limiting-magnitude calibration against real
+  fields). The other open Track B items are classified above: #239 waits
+  on a qualifying frame, #128/#150 is the redesign, #60 is the full
+  haze-limb decision, and #281-#285 are the batch-spawned follow-ups.
+
+**Parallelism:** fully parallel with Track A; #221/#222 have landed
+(PRs #270/#271), unblocking the agreement study at scale.
 
 ### Track C — Statistics, QA, and the accuracy checkpoint
 
@@ -240,7 +310,7 @@ commitment:
 
 | Decision | Then the work is |
 |---|---|
-| **Titan navigation** (#60): implement atmospheric-limb navigation or scope it out? | A new haze-limb model and technique (hard, physics-heavy), or graceful degradation plus honest docs. |
+| **Titan navigation** (#60): implement haze-limb navigation or scope it out? The interim is in place: Titan is hard-excluded from shape navigation with an active model that records the decline (`titan_unsupported`), a deliberate Titan-only special case. | A new haze-limb model and technique (hard, physics-heavy), or keeping the recorded-decline interim plus honest capability-matrix docs. |
 | **CK kernels** (#188, prerequisite #50): ship updated-pointing SPICE kernels as a product? | The kernel writer and its validation — a headline deliverable either way. |
 | **Backplane content** (#28 family): finalize the backplane set and formats | #55, #54, #57, #77, then the generator hardening (including the product-correctness defects #251, #252, #253 found by the #241 test suite). |
 
@@ -309,7 +379,7 @@ enhancement backlog and code-quality tail are burned down.
   chaotic-rotator poses (#187), manual-nav dialog redesign (#186),
   gated-feature PNG styling (#185), stop-after-features flag (#182),
   body shape models (#23), sim polish (#84, #78, #151, #152, #157, #158).
-- **Hardening/cleanup** (any time, mostly small): #13, #15, #21, #38, #39, #43, #65, #92, #96-#105, #109, #110, #119, #135, #137, #139, #140, #143, #144, #147, #155, #212.
+- **Hardening/cleanup** (any time, mostly small): #13, #15, #21, #38, #39, #43, #65, #92, #96-#105, #109, #110, #119, #135, #137, #140, #143, #144, #147, #155, #212.
 
 **Parallelism:** hardening is permanent filler. Instrument work waits for
 Track A's Cassini verdict only in the sense that there is no point
@@ -320,7 +390,7 @@ star-navigation bug fixes (#19, #18) can start any time.
 
 1. **Now:** Track A items 1-4 start in parallel
    (library growth, simulator design proposal, estimator proof,
-   distortion validation). Track B's #221/#222. The Track D decisions go
+   distortion validation). The Track D decisions go
    to the operator as a batch — they cost nothing to decide early and
    unblock scoping.
 2. **Next:** Track A item 5 (agreement study, bulk layer first), with
@@ -347,22 +417,26 @@ and the five decision gates, not by any implementation.
 1. Simulator de-circularization design approval (#227) — before build.
 2. Titan: implement or scope out (#60).
 3. CK kernels as a delivered product (#188).
-4. Sub-5 px body policy (#239).
+4. Sub-5 px body policy (#239) — decided 2026-07-14 (expected-failure
+   curation); what remains is the targeted cohort scan for a qualifying
+   frame.
 5. Recurring: library batch votes; realism verdict; agreement-study frame
    selection; tier re-blessing after #230.
 
-## 7. Issue index
+## 7. Issue index (open work, with recently closed history)
 
-Every open issue, by track. **Bold** = created after the 2026-07-11
-review (the 2026-07-12 reconciliation; #251-#254 and #256 by the
-2026-07-13 backend test suites, PRs #255/#257; #258/#259/#261/#263 by the
-2026-07-13 Phase D operator review; #265 split from #256 alongside the
-PR #264 LID fix).
+Every open issue, by track; closed issues are retained in the rows as
+history once their narrative marks them done. **Bold** = created after
+the 2026-07-11 review (the 2026-07-12 reconciliation; #251-#254 and #256
+by the 2026-07-13 backend test suites, PRs #255/#257; #258/#259/#261/#263
+by the 2026-07-13 operator library review; #265 split from #256 alongside
+the PR #264 LID fix; #281-#283 by the 2026-07-14 limb-bias diagnosis;
+#284/#285 by the 2026-07-14 scattered-light triage).
 
 | Track | Issues |
 |---|---|
 | A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, **#224**, **#225**, **#226**, **#227**, **#228**, **#229**, **#230**, **#232**, **#233**, **#234**, **#235** |
-| B — navigation correctness | #24, #25, #128, #130, #132, #133, #179, #180, #210, #221, #222, **#237**, **#238**, **#239**, **#254**, **#258**, **#259**, **#261**, **#263** |
+| B — navigation correctness | #24, #25, #128, #130, #132, #133, #179, #180, #210, #221, #222, **#237**, **#238**, **#239**, **#254**, **#258**, **#259**, **#261**, **#263**, **#281**, **#282**, **#283**, **#284**, **#285** |
 | C — statistics & QA | **#240** (plus the standing cross-check and campaign-report practice) |
 | D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #60, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #139, #141, #142, #188, **#231**, **#236**, **#251**, **#252**, **#253**, **#256**, **#265** |
 | E — test & docs debt | #122, #129, #177, #178, **#241**, **#242**, **#243**, **#244**, **#245** |

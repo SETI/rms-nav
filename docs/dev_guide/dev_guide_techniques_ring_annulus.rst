@@ -6,7 +6,7 @@ Overview
 ========
 
 :class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` recovers a single
-translation by full-template normalised cross-correlation against a composite annulus
+translation by full-template normalized cross-correlation against a composite annulus
 fused from every offered ``RING_ANNULUS`` feature. Per-planet annulus templates are Z-buffer
 painted into a single postage stamp (the closer ring system's pixels overwrite the farther
 one's), the result is run through the shared pyramid-NCC machinery in
@@ -27,7 +27,7 @@ polylines were emitted as ``RING_EDGE`` features instead).
 Theory
 ======
 
-The technique fits a per-image translation by maximising the normalised cross-correlation
+The technique fits a per-image translation by maximizing the normalized cross-correlation
 between the composite annulus template and the observed image.
 
 Composite template construction
@@ -44,7 +44,7 @@ the orchestrator's
 Cost function
 -------------
 
-The technique maximises the masked normalised cross-correlation between the composite
+The technique maximises the masked normalized cross-correlation between the composite
 template and the observed image (or a mode-selected gradient of it):
 
 .. math::
@@ -56,8 +56,10 @@ template and the observed image (or a mode-selected gradient of it):
 
 over the integer offsets in the per-instrument search window, with the masked inner product
 restricted to pixels where the annulus mask is True. Sub-pixel refinement comes from a
-quadratic fit to the correlation surface around the integer peak; the template gradient
-structure provides the matched-filter statistical covariance term (see "Sources of
+localized upsampled DFT around the integer peak (the Guizar-Sicairos efficient
+subpixel-registration method, ``upsampled_dft`` in ``src/spindoctor/support/correlate.py``,
+applied by :func:`~spindoctor.support.correlate.navigate_with_pyramid_kpeaks`); the template
+gradient structure provides the matched-filter statistical covariance term (see "Sources of
 uncertainty").
 
 Mode selection (auto / raw / gradient)
@@ -75,7 +77,7 @@ Search strategy
 The shared pyramid-NCC entry point
 (:func:`~spindoctor.support.correlate.navigate_with_pyramid_kpeaks`) runs coarse-to-fine, keeps the
 top ``k`` peaks at each level, and reports the per-level consistency. See
-:doc:`dev_guide_techniques_dt_fitting` for the per-iteration mechanics that the body-disc
+:doc:`dev_guide_techniques_body_disc` for the pyramid-NCC mechanics that the body-disc
 technique shares. Rotation fitting is disabled for ring annuli (the rotation pivot
 of a ring system is its planet-centre, which is well outside the rendered template's
 support; an outer rotation search would have to rotate the template about a far-off-template
@@ -177,21 +179,20 @@ sigmoid combination; see :doc:`dev_guide_techniques_confidence`. The formula spe
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.ncc_peak` — alpha = 1.5,
-  offset = 0.0, divisor = 6.0, cap at 1.0. PSR-style quality measure of the chosen NCC
-  peak. Healthy annulus fits report quality 6 to 15.
+- :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.ncc_peak` — alpha = 1.184,
+  offset = 6.0, divisor = 45.0, cap at 1.0. PSR-style quality measure of the chosen NCC
+  peak. The calibration campaign's raw p5/p50/p95 is 11/33/52, so the offset-6 divisor-45
+  transform spans that range in [0, 1].
 - :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.peak_to_runner_up_ratio` —
-  alpha = 0.0, offset = 0.0, divisor = 2.0, cap at 1.0. Ratio of the winning peak's
-  quality to the next-best peak's outside the exclusion radius. Carries no weight in
-  the configured confidence formula; the wiring is in place so a downstream
-  recalibration can tune the alpha.
+  alpha = 1.106, offset = 0.0, divisor = 2.0, cap at 1.0. Ratio of the winning peak's
+  quality to the next-best peak's outside the exclusion radius.
 - :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.annulus_count` —
-  alpha = 0.4, offset = 0.0, divisor = 2.0, cap at 1.0. Number of ``RING_ANNULUS`` features
+  alpha = 0.321, offset = 0.0, divisor = 2.0, cap at 1.0. Number of ``RING_ANNULUS`` features
   fused. Multi-planet scenes saturate at 2 (vs ``body_count``'s 3).
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
-confidence to zero. The constant baseline is :math:`\alpha_{0} = -2.0`. No post-sigmoid
+confidence to zero. The constant baseline is :math:`\alpha_{0} = 0.895`. No post-sigmoid
 ``hard_cap`` is applied.
 
 Implementation

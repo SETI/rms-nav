@@ -99,6 +99,8 @@ an image is being processed):
   star navigation model.
 * ``general.log_level_model_rings`` (default: ``INFO``): Logging level for the
   ring navigation model.
+* ``general.log_level_model_titan`` (default: ``INFO``): Logging level for the
+  Titan navigation model.
 
 **Navigation technique loggers**:
 

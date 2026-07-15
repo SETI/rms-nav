@@ -804,24 +804,30 @@ vapor.
 
 **Dependencies:** light coupling to WS-7/8. **Risk:** low.
 
-### WS-7: Titan / atmospheric-body navigation — implement or scope out
+### WS-7: Titan navigation — implement or scope out
 **Closes:** "Titan is a no-op."
 **Tracked by:** #60 (Implement Titan navigation) for the "implement" branch.
 
-**Problem.** `nav_model_titan.py:48` `to_features()` returns `[]`.
+**Problem.** Titan's opaque haze hides the surface, so shape-based navigation
+is systematically wrong. The graceful-degradation half is done: Titan is
+hard-excluded from shape navigation as a deliberate Titan-only special case
+(its atmosphere, transparent at some wavelengths, does not generalize to
+other thick-atmosphere bodies), with an active model that emits no features
+and records the decline — a Titan-only frame fails with `titan_unsupported`
+rather than a silent empty result, and a Titan-plus-other-content frame
+navigates on the other content.
 
 **Decision gate (do this first):** is haze-limb navigation in scope for this
 release? Pick one:
 - **Implement:** a haze-aware limb model — per-filter haze-top altitude
  profiles, a haze-limb feature type, and a DT/edge technique that fits the haze
  top instead of the solid limb, validated on real Titan frames via WS-1.
-- **Scope out:** remove Titan from supported-target claims, mark it
- not-supported in the capability matrix, and ensure the orchestrator degrades
- gracefully (Titan in FOV falls back to rings/stars/other bodies, no silent
- empty-result confusion).
+- **Scope out:** keep the recorded-decline handling, remove Titan from
+ supported-target claims, and mark it not-supported in the capability matrix.
 
 **Acceptance criteria.** Either real Titan frames navigate within a stated bound,
-or Titan is unambiguously documented as not-supported and handled gracefully.
+or Titan is unambiguously documented as not-supported (the graceful handling
+already exists).
 
 **Dependencies:** WS-1 if implementing. **Risk:** high if building (haze physics is genuinely hard).
 
@@ -896,7 +902,7 @@ calibration).
 
 **Tasks.**
 - Inventory the load-bearing constants: `ROTATION_UNOBSERVABLE_VARIANCE = 1e15`
- (`nav_technique.py:46`), `DEFAULT_PINVH_RCOND = 1e-9` (`dt_fitting.py:94`),
+ (`nav_technique.py`), `DEFAULT_PINVH_RCOND = 1e-9` (`ensemble.py`),
  `SNR_REF = 8.0` / `SNR_FLOOR = 0.1` (`nav_model/stars/nav_model_stars.py:77-78`),
  blob noise thresholds, MAD factor, edge thresholds. For each: document its derivation,
  sensitivity, and the regime where it holds, next to its definition.
@@ -922,20 +928,41 @@ redesign).
 
 **Problem.** Limb bias ~0.09–0.13 px (≤0.25 px two-axis); the implemented
 gradient-ridge refine is disabled for the limb technique
-(`config_510_techniques.yaml:237`) because it worsens limb fits there, while the
-ring-edge technique runs with it enabled (`:354`). The limb's current partial
+(`techniques.BodyLimbNav.tuning.gradient_ridge_refine: 0` in
+`config_510_techniques.yaml`) because it worsens limb fits there, while the
+ring-edge technique runs with it enabled (`RingEdgeNav` sets `1`). The limb's current partial
 cancellation (integer DT quantization + Tukey) is accidental.
 
+**Status (2026-07-14) — diagnosis complete (PR #276, measurement only, no fitter
+change).** The instrumented diagnosis confirms the mechanism and quantifies it:
+the genuine algorithmic bias is 0.05–0.14 px, directional (points from the lit
+limb toward the interior — a limb-darkening / photometric roll-off signature, the
+geometric edge matching a gradient ridge ~0.5 px inside the true limb), varies
+with illumination direction, and is roughly flat with body size; a ~0.05 px
+sub-pixel interpolation ripple rides on top; below ~15 deg phase the fit is
+poorly conditioned. The simulator's own limb render was validated bias-free
+(<2e-5 px), so it is trustworthy ground truth. **Key finding that reframes the
+redesign:** on real limb+star frames the limb-vs-star gap is 0.5–1.8 px, an order
+of magnitude larger than the 0.1 px algorithmic bias — so the limb fitter explains
+only ~0.1 px and the remaining 0.4–1.7 px is spacecraft-position / body-ephemeris
+error (isolable only because the sim geometry is exact). Fixing the fitter buys
+~0.1 px; the dominant real-frame error is on the pointing-kernel side. Ranked
+redesign recommendation from the diagnosis: (1) fit a photometric limb (predict
+the limb-darkened-disc-convolved-with-PSF brightness profile and match it) rather
+than aligning a geometric edge to the gradient ridge (#150); (2) a matched-filter
+edge estimator to remove the interpolation ripple (#282); (3) gate low-phase
+(<~15 deg) fits (#281); (4) a minor pixel-centre-convention audit (#283). Harness
+and full report:
+`util/calibration/limb_bias/limb_navigation_bias_diagnosis.md`.
+
 **Tasks.**
-- Root-cause why gradient-ridge refine degrades the limb (the model-side limb-edge
- issue referenced as #150): the model predicts the geometric silhouette while the
- gradient ridge sits ~0.1 px inside it due to PSF. Two candidate fixes:
- 1. **Model the PSF-inward offset** in `nav_model_body.py` so the predicted limb
- position matches where the gradient ridge actually falls (forward-model the
- bias out), then enable continuous gradient-ridge refine.
- 2. **Sub-pixel DT** (replace integer-quantized distance transform with a
- continuous/interpolated one) so accuracy stops relying on a quantization
- accident.
+- Implement the diagnosis's ranked fixes, in order: the photometric-limb fit
+ (#150 — the dominant, illumination-tracking term), the matched-filter
+ sub-pixel edge estimator (#282), the low-phase gate (#281), and the
+ pixel-centre-convention audit (#283). The earlier candidate fixes (modeling
+ a PSF-inward offset in `nav_model_body.py`; a continuous sub-pixel DT) are
+ superseded: the diagnosis showed the dominant term is the photometric
+ roll-off, not DT quantization.
 - Re-measure limb accuracy on the WS-2 (mismatched-model) and WS-1 (real) cohorts;
  enable `gradient_ridge_refine` only if it demonstrably reduces real bias.
 

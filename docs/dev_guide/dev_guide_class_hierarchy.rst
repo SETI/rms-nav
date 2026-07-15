@@ -31,7 +31,8 @@ narrative below the diagram describes each group in turn.
       }
 
       class ObsSnapshot {
-          +backplane(...)
+          +bp
+          +ext_bp
           +ra_dec_limits_ext()
           +extfov_data_sensor_mask()
       }
@@ -57,6 +58,10 @@ narrative below the diagram describes each group in turn.
           +create_model()
           +to_features(context)
           +to_annotations(context)
+      }
+
+      class NavModelStarsSimulated {
+          +create_model()
       }
 
       class NavModelBodyBase {
@@ -144,6 +149,8 @@ narrative below the diagram describes each group in turn.
           +covariance_px2
           +confidence
           +spurious / at_edge
+          +source_bodies
+          +prior_source_techniques
           +diagnostics: NavTechniqueDiagnostics
       }
 
@@ -156,6 +163,8 @@ narrative below the diagram describes each group in turn.
           +confidence / confidence_rank
           +rotation_rad / sigma_rotation_rad
           +per_technique
+          +consensus_techniques
+          +excluded_from_consensus
           +feature_inventory
           +image_classifier
           +model_metadata
@@ -226,6 +235,7 @@ narrative below the diagram describes each group in turn.
       NavModel <|-- NavModelRingsBase
       NavModel <|-- NavModelTitan
 
+      NavModelStars <|-- NavModelStarsSimulated
       NavModelBodyBase <|-- NavModelBody
       NavModelBodyBase <|-- NavModelBodySimulated
       NavModelRingsBase <|-- NavModelRings
@@ -327,9 +337,11 @@ per-type threshold are emitted as
 :class:`~spindoctor.feature.reliability.GatedFeatureRecord` instances carrying a
 stable ``reason`` string; everything else passes through unmodified.
 
-Per-instance threshold overrides come from the configuration loader (the
-``features`` block in ``config_510_techniques.yaml`` and any per-instrument
-override under ``config_4N0_inst_*.yaml``). Threshold values are validated
+Per-instance threshold overrides come from the ``orchestrator.reliability_gate``
+block in ``config_540_orchestrator.yaml``, read by the orchestrator's
+constructor via
+:meth:`~spindoctor.feature.reliability.FeatureReliabilityGate.from_mapping`.
+Threshold values are validated
 on construction: they must be finite floats in :math:`[0, 1]` and keyed
 by :class:`~spindoctor.feature.feature_type.NavFeatureType` enum members. The
 gate is stateless — the same instance can be reused across images — and
@@ -379,14 +391,15 @@ star navigation, one instance per observation),
 per-body silhouette navigation),
 :class:`~spindoctor.nav_model.nav_model_rings.NavModelRings` (catalog-driven
 per-planet ring navigation), the simulated-image siblings
-:class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated`
+:class:`~spindoctor.nav_model.stars.nav_model_stars_simulated.NavModelStarsSimulated`
+(sources the star list from the sim renderer's ``obs.sim_star_list``),
+:class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated`,
 and
 :class:`~spindoctor.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`
 (rendered from operator-supplied parameters), and
 :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (active whenever
 Titan is in the extended FOV; emits no features and instead records why a
-Titan scene cannot be navigated). A
-``NavModelStarsSimulated`` slot is reserved without an implementation.
+Titan scene cannot be navigated).
 
 Per-family data models live alongside the renderer classes:
 
@@ -446,8 +459,9 @@ techniques are, by family:
   :class:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav`,
   :class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`.
 - **Titan** — no Titan-specific techniques are registered;
-  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` is a placeholder
-  that emits no features, so no technique consumes them.
+  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` is an active
+  registered model that emits no features (it records why a Titan scene
+  cannot be navigated), so no technique consumes them.
 
 The DT-based body / ring techniques share their coarse-NCC +
 Levenberg-Marquardt + Tukey-biweight machinery via

@@ -41,8 +41,9 @@ The decision tree is order-sensitive:
    ``partial_dropout_min_frac`` and ``max_missing_frac_clean``; ``noisy`` when the noise
    sigma exceeds ``noisy_threshold``.
 
-The orchestrator's ``_HARD_FAILURE_TO_REASON`` dispatch table maps the three hard-failure
-classes to
+The orchestrator's ``_HARD_FAILURE_TO_REASON`` dispatch table maps the four hard-failure
+classes — ``blank``, ``fully_overexposed``, ``mostly_missing_data``, and ``corrupt`` (an
+image that could not be read) — to
 :class:`~spindoctor.support.status_reason.NavStatusReason` values; the ``clean`` case proceeds
 through the pipeline regardless of the advisory flags.
 

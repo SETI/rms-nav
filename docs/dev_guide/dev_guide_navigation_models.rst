@@ -27,8 +27,10 @@ Registered concrete models, grouped by feature family:
 
 - **Stars** (:doc:`dev_guide_navigation_models_stars`) —
   :class:`~spindoctor.nav_model.stars.nav_model_stars.NavModelStars` (catalog-driven; one
-  instance per observation). A simulated-image sibling
-  ``NavModelStarsSimulated`` is reserved without an implementation.
+  instance per observation) and the simulated-image sibling
+  :class:`~spindoctor.nav_model.stars.nav_model_stars_simulated.NavModelStarsSimulated`
+  (sources the star list from the sim renderer's output; documented at
+  :doc:`dev_guide_navigation_models_star_simulated`).
 - **Bodies** (:doc:`dev_guide_navigation_models_bodies`) —
   :class:`~spindoctor.nav_model.nav_model_body.NavModelBody` (catalog-driven; one instance per
   body whose bounding box overlaps the extended FOV) and
