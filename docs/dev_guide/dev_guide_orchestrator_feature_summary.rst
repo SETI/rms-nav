@@ -129,10 +129,12 @@ The gate drops it::
 
 The reason string embeds the feature's reliability and the per-type threshold
 (``'reliability_{r:.3f}_below_threshold_{t:.3f}'``); its ``reliability_`` prefix is
-stable across images, so a campaign-level reviewer who counts LIMB_ARC entries whose
-``gate_reason`` starts with ``'reliability_'`` across 1,000 ``body_full_fov``-class
-images learns directly how often the LIMB_ARC reliability formula's incidence-factor
-penalty saturates on full-disc bodies.
+stable across images (the embedded numbers vary per feature), so a campaign-level
+reviewer who counts LIMB_ARC entries whose ``gate_reason`` starts with
+``'reliability_'`` across 1,000 ``body_full_fov``-class images learns directly how
+often LIMB_ARC features fall below the reliability gate on full-disc bodies. The
+reason does not say which formula component drove the score down; that attribution
+comes from the feature's ``reliability_reasons`` breakdown.
 
 **Per-image inventory size.**  A multi-body Cassini fly-by image with 3 bodies plus 50
 predictable stars produces an inventory of 50 STAR plus up to 12 body-derived features

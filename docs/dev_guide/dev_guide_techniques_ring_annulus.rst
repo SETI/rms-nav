@@ -6,7 +6,7 @@ Overview
 ========
 
 :class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` recovers a single
-translation by full-template normalised cross-correlation against a composite annulus
+translation by full-template normalized cross-correlation against a composite annulus
 fused from every offered ``RING_ANNULUS`` feature. Per-planet annulus templates are Z-buffer
 painted into a single postage stamp (the closer ring system's pixels overwrite the farther
 one's), the result is run through the shared pyramid-NCC machinery in
@@ -27,7 +27,7 @@ polylines were emitted as ``RING_EDGE`` features instead).
 Theory
 ======
 
-The technique fits a per-image translation by maximising the normalised cross-correlation
+The technique fits a per-image translation by maximizing the normalized cross-correlation
 between the composite annulus template and the observed image.
 
 Composite template construction
@@ -44,7 +44,7 @@ the orchestrator's
 Cost function
 -------------
 
-The technique maximises the masked normalised cross-correlation between the composite
+The technique maximises the masked normalized cross-correlation between the composite
 template and the observed image (or a mode-selected gradient of it):
 
 .. math::

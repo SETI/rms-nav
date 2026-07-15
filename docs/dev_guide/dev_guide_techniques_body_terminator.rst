@@ -106,7 +106,9 @@ Sources of uncertainty
 ----------------------
 
 The reported covariance is the Moore-Penrose pseudoinverse of the M-estimator information
-matrix at convergence, scaled by the per-vertex Tukey weights. It does not capture
+matrix at convergence, scaled by the per-vertex Tukey weights, with the calibrated
+``model_error_floor_px`` (0.92 px) added in quadrature to the translation diagonal.
+It does not capture
 systematic biases (an under-modelled per-body albedo gradient propagates straight into the
 covariance) and it does not capture model-side uncertainty in the SPICE prediction itself.
 When the converged offset sits within a small tolerance of any axis bound of the search
@@ -141,10 +143,9 @@ Configuration
 All numeric tunables for this technique live in ``techniques.BodyTerminatorNav.tuning`` in
 ``src/spindoctor/config_files/config_510_techniques.yaml``.
 
-- ``min_arc_vertices`` — float, default ``30.0`` (vertex count). Minimum surviving polyline
-  length per
-  ``TERMINATOR_ARC`` for feasibility. Shorter terminators do not constrain a 2-D translation
-  enough to be worth the LM iteration.
+- ``min_arc_vertices`` — float, default ``30.0``. Minimum surviving vertex count per
+  ``TERMINATOR_ARC`` for feasibility. Arcs with fewer vertices do not constrain a 2-D
+  translation enough to be worth the LM iteration.
 - ``spurious_dt_rms_factor`` — float, default ``5.0`` (dimensionless). Final DT residual
   exceeding this many terminator-sigmas marks the result spurious.
 - ``spurious_dt_floor_px`` — float, default ``4.0`` px. Floor of the spurious-detection

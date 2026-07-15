@@ -155,7 +155,7 @@ All numeric tunables for this technique live in ``techniques.RingEdgeNav.tuning`
   quantises detected edges to the integer pixel grid, so on dense real ring scenes many
   model vertices land exactly on edge pixels (DT of zero, zero gradient) and the DT-LM
   step stalls at the integer coarse-NCC seed; the continuous pass refines against the
-  un-thresholded gradient magnitude, recovering the sub-pixel offset the quantised DT
+  un-thresholded gradient magnitude, recovering the sub-pixel offset the quantized DT
   discards.
 - ``rotation_at_edge_fraction`` — float, default ``0.95`` (dimensionless). When
   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the
@@ -245,10 +245,11 @@ Diagnostics
   per-edge final DT RMS value (the sum divided by the edge count). Edge-count independent,
   so it — not the raw sum — is the scale the confidence formula consumes.
 - :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.per_edge_dt_median_max` —
-  largest per-edge median absolute DT residual (px). The mis-convergence gate statistic: a
-  wholly misaligned edge (the wrong-ringlet failure mode) drives its own median to the
-  ringlet spacing, while a minority of vertices snapping to a neighbouring parallel edge
-  leaves every median near the fit residual.
+  largest per-edge median absolute DT residual (px). The mis-convergence gate statistic,
+  and the waiver's discriminator: an edge absent from the image drives its own median to
+  the tens-of-pixel scale (nothing detected nearby), while a wrong-ring lock leaves at
+  least one rejected edge with a near-zero median — it sits on a detected edge it
+  disagrees with — so the waiver stands down and the veto holds.
 - :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.edge_count` — number of
   ``RING_EDGE`` features fused.
 - :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.is_rank_1` — True when every

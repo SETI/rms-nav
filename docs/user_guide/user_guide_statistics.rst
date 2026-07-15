@@ -88,7 +88,8 @@ its row and children.
    * - ``status``
      - TEXT
      - Navigation outcome: ``success``, ``failed``, ``conflicted``, or
-       ``error`` (the last from image-load failures).
+       ``error`` (the last from image-load failures); ``unknown`` when the
+       metadata document carries no status at all.
    * - ``status_reason``
      - TEXT
      - Outcome reason: successes hold ``ok`` or ``rank_1_only``; failures

@@ -6,7 +6,7 @@ Overview
 ========
 
 :class:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` recovers a single
-translation by full-disc normalised cross-correlation against a composite template fused
+translation by full-disc normalized cross-correlation against a composite template fused
 from every offered ``BODY_DISC`` feature. Per-body templates are Z-buffer painted into a single
 postage stamp (the closer body's pixels overwrite the farther body's), the result is run
 through the shared pyramid-NCC machinery in :mod:`spindoctor.support.correlate`, and the chosen
@@ -22,7 +22,7 @@ feasibility fails when no offered feature has one (a body model that emitted onl
 Theory
 ======
 
-The technique fits a per-image translation by maximising the normalised cross-correlation
+The technique fits a per-image translation by maximizing the normalized cross-correlation
 between the composite template and the observed image. It supports an optional in-plane
 rotation parameter that runs an outer NCC pyramid over a rotation schedule.
 
@@ -42,7 +42,7 @@ Cost function
 
 Let :math:`T` be the composite template image and :math:`M` the composite template mask.
 Let :math:`I` be the observed image (or a mode-selected gradient of it; see below). The
-technique maximises the normalised cross-correlation
+technique maximises the normalized cross-correlation
 
 .. math::
 
@@ -255,7 +255,7 @@ sigmoid combination; see :doc:`dev_guide_techniques_confidence`. The formula spe
   divisor-14 transform spans that range in [0, 1].
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_ratio` —
   alpha = -1.159, offset = 0.0, divisor = 1.0, no cap. Pyramid-level consistency
-  normalised by the per-image diameter-scaled spurious threshold: a ratio below 1.0 means
+  normalized by the per-image diameter-scaled spurious threshold: a ratio below 1.0 means
   the result is within budget, and a ratio of exactly 1.0 sits at the spurious edge, where
   the term contributes its full negative alpha to the sigmoid argument. Using the ratio
   rather than the raw pixel value lets the divisor stay at 1.0 while the underlying budget
@@ -324,8 +324,8 @@ Diagnostics
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_px` — maximum
   Euclidean drift across pyramid levels. Consumed by the spurious-detection gate.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_ratio` —
-  ``consistency_px`` normalised by the per-image diameter-scaled spurious threshold, so a
-  healthy fit on a large body is not penalised by the same divisor that suits a small
+  ``consistency_px`` normalized by the per-image diameter-scaled spurious threshold, so a
+  healthy fit on a large body is not penalized by the same divisor that suits a small
   body. Consumed by the confidence formula.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.used_gradient` — True when
   ``auto`` mode picked the gradient pass. Diagnostic only; not in the confidence formula.

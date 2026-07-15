@@ -282,7 +282,9 @@ either operator-decided (below) or deferred.
   correcting the offset is #179, deferred pending a calibration approach.
 - Deferred: #179 (coarse-lock calibration), #25 (high-resolution body
   blurring), #130 (star limiting-magnitude calibration against real
-  fields).
+  fields). The other open Track B items are classified above: #239 waits
+  on a qualifying frame, #128/#150 is the redesign, #60 is the full
+  haze-limb decision, and #281-#285 are the batch-spawned follow-ups.
 
 **Parallelism:** fully parallel with Track A; #221/#222 have landed
 (PRs #270/#271), unblocking the agreement study at scale.
@@ -421,7 +423,7 @@ and the five decision gates, not by any implementation.
 5. Recurring: library batch votes; realism verdict; agreement-study frame
    selection; tier re-blessing after #230.
 
-## 7. Issue index
+## 7. Issue index (open work, with recently closed history)
 
 Every open issue, by track; closed issues are retained in the rows as
 history once their narrative marks them done. **Bold** = created after

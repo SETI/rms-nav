@@ -956,15 +956,13 @@ and full report:
 `util/calibration/limb_bias/limb_navigation_bias_diagnosis.md`.
 
 **Tasks.**
-- Root-cause why gradient-ridge refine degrades the limb (the model-side limb-edge
- issue referenced as #150): the model predicts the geometric silhouette while the
- gradient ridge sits ~0.1 px inside it due to PSF. Two candidate fixes:
- 1. **Model the PSF-inward offset** in `nav_model_body.py` so the predicted limb
- position matches where the gradient ridge actually falls (forward-model the
- bias out), then enable continuous gradient-ridge refine.
- 2. **Sub-pixel DT** (replace integer-quantized distance transform with a
- continuous/interpolated one) so accuracy stops relying on a quantization
- accident.
+- Implement the diagnosis's ranked fixes, in order: the photometric-limb fit
+ (#150 — the dominant, illumination-tracking term), the matched-filter
+ sub-pixel edge estimator (#282), the low-phase gate (#281), and the
+ pixel-centre-convention audit (#283). The earlier candidate fixes (modeling
+ a PSF-inward offset in `nav_model_body.py`; a continuous sub-pixel DT) are
+ superseded: the diagnosis showed the dominant term is the photometric
+ roll-off, not DT quantization.
 - Re-measure limb accuracy on the WS-2 (mismatched-model) and WS-1 (real) cohorts;
  enable `gradient_ridge_refine` only if it demonstrably reduces real bias.
 

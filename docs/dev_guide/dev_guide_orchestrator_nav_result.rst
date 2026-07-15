@@ -26,7 +26,8 @@ outcomes:
 - ``'failed'`` — a short-circuit gate fired, every technique was spurious, or the ensemble
   combine fell below the confidence threshold. The result carries no offset.
 - ``'conflicted'`` — multiple non-overlapping technique groups had similar summed
-  confidences and the ensemble could not pick a winner.
+  confidences and the ensemble could not select a winner confidently (the best
+  group's offset is still reported).
 
 The dataclass enforces consistency invariants in ``__post_init__``:
 

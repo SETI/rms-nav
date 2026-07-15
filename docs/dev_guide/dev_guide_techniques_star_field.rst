@@ -130,9 +130,9 @@ The rotation variance is the inverse of the rotation Fisher information computed
 from the per-vertex tangential lever-arm Jacobian ``(-du_i, dv_i)`` about the weighted
 catalog centroid, weighted by the per-axis residual precision. This is exact for
 anisotropic residuals — unlike a pooled isotropic form that averages the two per-axis
-residual variances and can be off by up to a factor of two when the inlier lever arms are
-distributed unevenly across the axes. (``StarRefineNav`` keeps its own pooled rotation form;
-the two are not shared.)
+residual variances and mis-weights the lever arms when the inlier residuals are
+anisotropic. (:class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav`
+keeps its own pooled rotation form; the two are not shared.)
 
 Restrictions and assumptions
 ----------------------------

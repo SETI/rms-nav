@@ -151,10 +151,9 @@ Configuration
 All numeric tunables for this technique live in ``techniques.BodyLimbNav.tuning`` in
 ``src/spindoctor/config_files/config_510_techniques.yaml``.
 
-- ``min_arc_vertices`` — float, default ``30.0`` (vertex count). Minimum surviving polyline
-  length per ``LIMB_ARC``
-  for feasibility. Shorter limbs do not constrain a 2-D translation enough to be worth the
-  LM iteration.
+- ``min_arc_vertices`` — float, default ``30.0``. Minimum surviving vertex count per
+  ``LIMB_ARC`` for feasibility. Arcs with fewer vertices do not constrain a 2-D translation
+  enough to be worth the LM iteration.
 - ``spurious_dt_rms_factor`` — float, default ``5.0`` (dimensionless). Final DT residual
   exceeding this many limb-sigmas marks the result spurious.
 - ``spurious_dt_floor_px`` — float, default ``3.0`` px. Floor of the spurious-detection

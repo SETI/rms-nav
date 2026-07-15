@@ -242,7 +242,8 @@ The orchestrator-side helpers are:
 - :func:`~spindoctor.nav_technique.nav_technique.log_confidence_breakdown` — emits the breakdown at
   DEBUG always, and also at INFO when the calibrated confidence falls at or below a
   ``low_threshold`` (default 0.1). This is what surfaces "alpha=-0.41 dt_fit_rms_px=8.7
-  contribution=-3.57 drove confidence to zero" in the per-image log.
+  contribution=-3.57 drove confidence below the low-confidence threshold" in the
+  per-image log.
 
 Examples
 ========
