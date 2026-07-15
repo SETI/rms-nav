@@ -54,8 +54,7 @@ standing red regressions. Then the triage sessions (#237, #238), then
 the investigation/design items (#179, #25, #128/#150), with the smaller
 items (#24, #130, #132, #133, and #180) as fill. The cluster defects were
 all surfaced or corroborated by the 2026-07-13 operator library review on
-real frames; the library entries carrying their evidence are in the
-`phase-d-reconciliation` branch.
+real frames; the library entries carrying their evidence landed with PR #262.
 
 ### #221 — Rank-1 ring result outvotes an absolute constraint
 
@@ -95,7 +94,7 @@ refinement), and is then counted as independent corroboration. A wrong
 pass-1 prior thereby gains confidence instead of being challenged; an
 expected-failed frame reported success at high tier.
 
-**Real-frame evidence** (Phase D, 2026-07-13; on #222): two frames,
+**Real-frame evidence** (operator library review, 2026-07-13; on #222): two frames,
 N1686349893 (stars_plus_body) and N1572105349 (body_full_fov), where
 disc and limb agree at the operator truth but the single-inlier
 StarRefine (capped to 0.5) sits ~2 px off and pulls the fused answer to
@@ -121,7 +120,7 @@ the expected-failed cross-check frame returns to failed.
 
 ### #258 — Exact recovery downgraded by an excluded dissenter
 
-**Symptom** (Phase D, two stars_plus_body frames N1530185128,
+**Symptom** (2026-07-13 library review, two stars_plus_body frames N1530185128,
 N1550270436): a lone correct `StarUniqueMatchNav` (conf 0.8, on the
 operator truth) is downgraded to `conflicted`/0.17 by a lone wrong
 `BodyBlobNav` (0.4) that the consensus logic has *already* placed in
@@ -143,7 +142,7 @@ success, not conflicted.
 
 ### #259 — One-star match with a large residual passes every gate
 
-**Symptom** (Phase D, negative_cases Galileo frame C0164392700R):
+**Symptom** (2026-07-13 library review, negative_cases Galileo frame C0164392700R):
 `StarUniqueMatchNav` one-star mode accepts an identification whose
 detection sits 18 px from the predicted position, reporting
 success/medium on an unnavigable scene. The `residual_px` (18.2) is
@@ -162,7 +161,7 @@ require an actual rival rather than pass on the sentinel.
 
 ### #261 — DT mis-convergence gate false-flags a correct fit
 
-**Symptom** (Phase D, ring_only_curved N1467344214): `RingEdgeNav`
+**Symptom** (2026-07-13 library review, ring_only_curved N1467344214): `RingEdgeNav`
 converges to the operator-verified offset at RMS 0.21 px and confidence
 0.952, then flags itself spurious because `per_edge_median_max` = 46 px
 (one of three fused edges fits poorly; only 26% of vertices are inliers)
@@ -180,7 +179,7 @@ frame is a concrete library datapoint for that calibration pass).
 
 ### #263 — Single-inlier confidence cap collides with the high tier
 
-**Symptom** (Phase D D6, one_bright_star_no_body W1449079117): the
+**Symptom** (2026-07-13 library crosscheck, one_bright_star_no_body W1449079117): the
 pipeline reports success/**high** at fused confidence **exactly 0.50**.
 `derive_confidence_rank` grants high when `confidence >= 0.5` and
 `max_sigma <= 0.5 px` (`DEFAULT_TIER_THRESHOLDS['high']`), and the
@@ -201,8 +200,8 @@ single-inlier cap below the high threshold, make the high tier require
 winning member is a single-inlier/one-star solution tops out at medium.
 
 **Acceptance:** a one-star, single-inlier frame cannot report better
-than medium; W1449079117's sidecar (kept at `expected: low`) stops being
-a standing crosscheck disagreement.
+than medium; W1449079117's sidecar (since ratcheted to `medium` by
+PR #279) stops being a standing crosscheck disagreement.
 
 ### #237 — multi_body N17023890xx trio: all techniques spurious
 
@@ -217,7 +216,7 @@ failures. Outcome is either a fix plus regression test, or a documented
 verdict that the frames are genuinely unnavigable (then they become
 `negative_cases` candidates).
 
-### #238 — Voyager scattered_light C00598xx quintet fails wholesale
+### #238 — Galileo (GO_0003) scattered_light C00598xx quintet fails wholesale
 
 One debugging session. Separate two hypotheses: (a) the Voyager
 photometric path (stray-light gradient handling / DoG bandpass) breaks
@@ -290,10 +289,10 @@ design document, not code.
   dev guide says "otherwise nothing"; the two spec sources disagree
   (the module docstring gates blobs on diameter alone). Resolve by
   gating blob emission on a non-empty lit mask or by softening the dev
-  guide. Navigation-affecting: sequence behind the operator's Phase D
-  evaluation of current main, like every ensemble/model change.
+  guide. Navigation-affecting: sequence behind the operator's library
+  review of current main, like every ensemble/model change.
   Pipeline impact is likely nil today (the blob's reliability ~0.02 is
-  culled by the 0.20 gate); pinned by a non-strict xfail in
+  culled by the 0.20 gate); fixed by PR #266 and asserted positively in
   `tests/spindoctor/nav_model/test_nav_model_body_render.py`.
 
 ## Track C — Statistics and QA

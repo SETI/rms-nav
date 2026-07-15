@@ -3,7 +3,7 @@
 *The top-level plan of record for all remaining work. It is written to be
 readable without knowledge of the code internals or the statistical
 methodology; the detail lives in the three sub-plans it points to. Last
-reconciled 2026-07-12.*
+reconciled 2026-07-14.*
 
 **Document map** (what to read for what):
 
@@ -63,11 +63,12 @@ defensible one is Track A, the largest remaining block.
 
 The curated image library — the raw material for both regression testing
 and validation — stands at 69 operator-verified images (predominantly
-Cassini, with a few Voyager, Galileo, and New Horizons), against a
+Cassini, with a few Voyager, Galileo, and New Horizons), plus five
+pending fixtures (the sparse-Pleiades quintet, held for #285/#284), against a
 first-stage budget of 47 spanning 17 scene classes and a final target of
 at least 120 across all four instruments. Review batch 5 (PR #260, six
 frames) merged and filled the last empty class, `ring_only_flat`; the
-operator library review (branch `phase-d-reconciliation`, PR #262)
+operator library review (PR #262)
 re-verified five frames, added a sixth, and applied the tier ratchet
 across the library. Batch 5 also queued manual-nav frames toward the
 per-class minima.
@@ -175,7 +176,7 @@ The known defects:
 - **#222** — second-pass star refinement corroborates its own first-pass
   input but votes as an independent opinion, inflating consensus
   confidence. Same class of defect. Two real-frame instances found in
-  Phase D (N1686349893, N1572105349): the 1-star refine degrades an
+  the 2026-07-13 operator library review (N1686349893, N1572105349): the 1-star refine degrades an
   otherwise-correct body fix to ~1.8 px error while keeping a high tier.
 - **#258** — an exact recovery is downgraded to `conflicted` by a
   low-confidence dissenter the consensus logic has already excluded
@@ -228,13 +229,12 @@ The known defects:
   star nav cannot lock a large unknown offset from a sparse star field
   (wants wide-offset asterism matching). #285 depends on #284.
 - **#239** — operator decision: how to treat bodies smaller than ~5 px.
-- **#210** — the NCC techniques' covariances are orders of magnitude
-  over-tight; the covariance-model review remains open even though the
-  original coverage symptom is fixed.
-- **#24, #130, #132, #133, #180** — smaller technique-quality and
-  diagnosability items (#180 wires a per-image reason through every
-  failure site — cheap and it makes debugging the rest of the track
-  easier, so do it early).
+- **#210** — resolved: the NCC techniques' covariances were orders of
+  magnitude over-tight; the covariance-model rederivation merged as
+  PR #278.
+- **#130** — star limiting-magnitude calibration against real fields;
+  the last open item of the small technique-quality cluster (#24, #132,
+  #133, #180 all merged in the batch above).
 - **#254** — a fully dark body emits a photometric BODY_BLOB feature
   where the body-model dev guide says it should emit nothing; likely
   harmless today (the reliability gate culls it) but it is a
@@ -284,8 +284,8 @@ either operator-decided (below) or deferred.
   blurring), #130 (star limiting-magnitude calibration against real
   fields).
 
-**Parallelism:** fully parallel with Track A; #221/#222 should land
-before the agreement study consumes ensemble output at scale.
+**Parallelism:** fully parallel with Track A; #221/#222 have landed
+(PRs #270/#271), unblocking the agreement study at scale.
 
 ### Track C — Statistics, QA, and the accuracy checkpoint
 
@@ -377,7 +377,7 @@ enhancement backlog and code-quality tail are burned down.
   chaotic-rotator poses (#187), manual-nav dialog redesign (#186),
   gated-feature PNG styling (#185), stop-after-features flag (#182),
   body shape models (#23), sim polish (#84, #78, #151, #152, #157, #158).
-- **Hardening/cleanup** (any time, mostly small): #13, #15, #21, #38, #39, #43, #65, #92, #96-#105, #109, #110, #119, #135, #137, #139, #140, #143, #144, #147, #155, #212.
+- **Hardening/cleanup** (any time, mostly small): #13, #15, #21, #38, #39, #43, #65, #92, #96-#105, #109, #110, #119, #135, #137, #140, #143, #144, #147, #155, #212.
 
 **Parallelism:** hardening is permanent filler. Instrument work waits for
 Track A's Cassini verdict only in the sense that there is no point
@@ -388,7 +388,7 @@ star-navigation bug fixes (#19, #18) can start any time.
 
 1. **Now:** Track A items 1-4 start in parallel
    (library growth, simulator design proposal, estimator proof,
-   distortion validation). Track B's #221/#222. The Track D decisions go
+   distortion validation). The Track D decisions go
    to the operator as a batch — they cost nothing to decide early and
    unblock scoping.
 2. **Next:** Track A item 5 (agreement study, bulk layer first), with
@@ -415,17 +415,21 @@ and the five decision gates, not by any implementation.
 1. Simulator de-circularization design approval (#227) — before build.
 2. Titan: implement or scope out (#60).
 3. CK kernels as a delivered product (#188).
-4. Sub-5 px body policy (#239).
+4. Sub-5 px body policy (#239) — decided 2026-07-14 (expected-failure
+   curation); what remains is the targeted cohort scan for a qualifying
+   frame.
 5. Recurring: library batch votes; realism verdict; agreement-study frame
    selection; tier re-blessing after #230.
 
 ## 7. Issue index
 
-Every open issue, by track. **Bold** = created after the 2026-07-11
-review (the 2026-07-12 reconciliation; #251-#254 and #256 by the
-2026-07-13 backend test suites, PRs #255/#257; #258/#259/#261/#263 by the
-2026-07-13 Phase D operator review; #265 split from #256 alongside the
-PR #264 LID fix).
+Every open issue, by track; closed issues are retained in the rows as
+history once their narrative marks them done. **Bold** = created after
+the 2026-07-11 review (the 2026-07-12 reconciliation; #251-#254 and #256
+by the 2026-07-13 backend test suites, PRs #255/#257; #258/#259/#261/#263
+by the 2026-07-13 operator library review; #265 split from #256 alongside
+the PR #264 LID fix; #281-#283 by the 2026-07-14 limb-bias diagnosis;
+#284/#285 by the 2026-07-14 scattered-light triage).
 
 | Track | Issues |
 |---|---|

@@ -902,7 +902,7 @@ calibration).
 
 **Tasks.**
 - Inventory the load-bearing constants: `ROTATION_UNOBSERVABLE_VARIANCE = 1e15`
- (`nav_technique.py:46`), `DEFAULT_PINVH_RCOND = 1e-9` (`dt_fitting.py:94`),
+ (`nav_technique.py`), `DEFAULT_PINVH_RCOND = 1e-9` (`ensemble.py`),
  `SNR_REF = 8.0` / `SNR_FLOOR = 0.1` (`nav_model/stars/nav_model_stars.py:77-78`),
  blob noise thresholds, MAD factor, edge thresholds. For each: document its derivation,
  sensitivity, and the regime where it holds, next to its definition.
@@ -928,8 +928,9 @@ redesign).
 
 **Problem.** Limb bias ~0.09–0.13 px (≤0.25 px two-axis); the implemented
 gradient-ridge refine is disabled for the limb technique
-(`config_510_techniques.yaml:237`) because it worsens limb fits there, while the
-ring-edge technique runs with it enabled (`:354`). The limb's current partial
+(`techniques.BodyLimbNav.tuning.gradient_ridge_refine: 0` in
+`config_510_techniques.yaml`) because it worsens limb fits there, while the
+ring-edge technique runs with it enabled (`RingEdgeNav` sets `1`). The limb's current partial
 cancellation (integer DT quantization + Tukey) is accidental.
 
 **Status (2026-07-14) — diagnosis complete (PR #276, measurement only, no fitter
