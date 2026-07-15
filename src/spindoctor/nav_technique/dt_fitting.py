@@ -179,14 +179,15 @@ _INFINITY_DT_PENALTY_PX: float = 1.0e6
 A polarity-rejected vertex is excluded from the fit by zeroing its
 *weight* directly (the Tukey weight is multiplied by the polarity mask),
 so its exclusion is independent of its per-vertex sigma and never relies
-on this magnitude.  The penalty residual is still recorded in
-``raw_residuals`` so the unweighted ``raw_rms_px`` diagnostic reflects
-the wrong-polarity vertices; because the corresponding weight is zero it
-contributes nothing to the cost or the normal equations.  The value is a
-large-but-finite number (not literal ``inf``) only so those arrays stay
-numerically well-defined; it must not be enlarged without care, since
-``raw_rms_px`` -- and hence the limb / terminator spurious gate -- reads
-it directly.
+on this magnitude.  The penalty residual is recorded in ``raw_residuals``
+only so those arrays stay numerically well-defined; because the
+corresponding weight is zero it contributes nothing to the cost or the
+normal equations.  The ``raw_rms_px`` diagnostic deliberately excludes
+polarity-rejected vertices (it averages over the polarity-accepted
+residuals only), so this sentinel does not feed the limb / terminator
+spurious gate -- excessive polarity rejection is governed by the
+inlier-fraction gate instead.  The value is a large-but-finite number
+(not literal ``inf``) so downstream array arithmetic stays defined.
 """
 
 
@@ -664,16 +665,17 @@ class LMRefineResult:
             degenerate case), so the downstream spurious gates' ``rms_px
             > floor`` test fires instead of reading a zero RMS as a good
             fit.
-        raw_rms_px: Unweighted root-mean-square of the residuals,
-            computed as ``sqrt(mean(r**2))`` over ALL vertices with no
-            weighting.  This is well-defined even in the degenerate
-            (all-weights-zero) case, where the residuals still exist; a
-            fully-rejected fit therefore yields a large ``raw_rms_px``.
-            Because the Tukey reweighting can down-weight a wholly
-            mis-aligned arc to ~0, the weighted ``rms_px`` collapses to
-            near zero on exactly such a mis-convergence and slips past a
-            ``rms_px > floor`` gate; the raw RMS retains those outliers
-            and surfaces the bad fit.
+        raw_rms_px: Unweighted root-mean-square of the residuals over the
+            polarity-ACCEPTED vertices, computed as ``sqrt(mean(r**2))``
+            with no Tukey weighting.  Because the Tukey reweighting can
+            down-weight a wholly mis-aligned but polarity-accepted arc to
+            ~0, the weighted ``rms_px`` collapses to near zero on exactly
+            such a mis-convergence and slips past a ``rms_px > floor``
+            gate; the raw RMS retains those Tukey outliers and surfaces the
+            bad fit.  Polarity-rejected vertices are excluded (they carry
+            the ``_INFINITY_DT_PENALTY_PX`` sentinel and would otherwise
+            dominate the mean); ``float('inf')`` when every vertex is
+            polarity-rejected, so the degenerate case still trips the gate.
         iterations: Number of LM iterations actually performed.
         converged: True if the step-norm tolerance was met before the
             iteration cap.
@@ -1555,13 +1557,26 @@ def lm_subpixel_refine(
         # ``result.rms_px > floor`` spurious test fires; a zero RMS would
         # otherwise be read downstream as a perfect fit.
         rms_px = float('inf')
-    # Unweighted RMS over ALL vertices.  Unlike the Tukey-weighted
-    # ``rms_px``, this does not down-weight outliers, so a mis-converged
-    # fit whose bad arc was rejected to ~0 weight still reports a large
-    # raw RMS.  Well-defined even in the degenerate (all-weights-zero)
-    # case because the residuals exist regardless of the weights.
-    if final_residuals.size:
-        raw_rms_px = float(math.sqrt(float(np.mean(final_residuals**2))))
+    # Unweighted RMS over the POLARITY-ACCEPTED vertices, using their real
+    # DT residuals.  Unlike the Tukey-weighted ``rms_px``, this does not
+    # down-weight Tukey outliers, so a mis-converged fit whose bad arc was
+    # rejected to ~0 weight still reports a large raw RMS -- the gate's
+    # purpose.  Polarity-rejected vertices are excluded here: they carry the
+    # large ``_INFINITY_DT_PENALTY_PX`` sentinel in ``final_residuals``, so
+    # pooling them in would make ``raw_rms_px`` explode to ~1e6 / sqrt(N)
+    # whenever even one vertex is polarity-rejected, degenerating the
+    # limb / terminator ``raw_rms_px > floor`` gate into "any polarity
+    # rejection is spurious".  That wrongly kills multi-body fits where a
+    # small secondary body contributes wrong-polarity vertices while a
+    # dominant body's limb fits cleanly.  Polarity rejection is instead
+    # governed by the inlier-fraction gate; ``raw_rms_px`` measures only the
+    # geometry of the accepted vertices.  When every vertex is polarity-
+    # rejected there is no evidence, so report ``+inf`` (consistent with the
+    # ``rms_px = +inf`` degenerate branch above).
+    accepted = state.polarity_mask
+    if final_residuals.size and bool(accepted.any()):
+        accepted_residuals = final_residuals[accepted]
+        raw_rms_px = float(math.sqrt(float(np.mean(accepted_residuals**2))))
     else:
         raw_rms_px = float('inf')
     covariance: NDArrayFloatType
