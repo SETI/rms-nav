@@ -11,6 +11,7 @@ from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.feature.flags import RingAnnulusFlags
 from spindoctor.feature.geometry import RingAnnulusGeometry
 from spindoctor.nav_technique.diagnostics import RingAnnulusDiagnostics
+from spindoctor.nav_technique.nav_technique import NCCCovarianceTuning
 from spindoctor.nav_technique.nav_technique_ring_annulus import RingAnnulusNav
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
@@ -450,9 +451,10 @@ def test_ring_annulus_model_error_floor_inflates_covariance(
 ) -> None:
     """model_error_floor_px adds exactly its square to the covariance diagonal.
 
-    The NCC peak-curvature covariance measures photon statistics only; the
+    The peak-curvature covariance measures statistical precision only; the
     floor (calibrated against the simulated-scene campaign) carries the
-    template model error.
+    template model error.  Isolate the floor by zeroing the localization and
+    size terms in both runs.
     """
     shape = (180, 180)
     image_center = (90.0, 90.0)
@@ -467,9 +469,13 @@ def test_ring_annulus_model_error_floor_inflates_covariance(
     )
     context = make_nav_context(image, extfov_margin_vu=(16, 16))
     bare = RingAnnulusNav()
-    bare._model_error_floor_px = 0.0
+    bare._cov_tuning = NCCCovarianceTuning(
+        localization_uncertainty_scale=0.0, model_error_size_frac=0.0, model_error_floor_px=0.0
+    )
     floored = RingAnnulusNav()
-    floored._model_error_floor_px = 1.5
+    floored._cov_tuning = NCCCovarianceTuning(
+        localization_uncertainty_scale=0.0, model_error_size_frac=0.0, model_error_floor_px=1.5
+    )
     cov_bare = bare.navigate([feature], context).covariance_px2
     cov_floored = floored.navigate([feature], context).covariance_px2
     for axis in (0, 1):

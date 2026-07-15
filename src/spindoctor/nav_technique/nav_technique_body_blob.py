@@ -35,7 +35,7 @@ from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import (
     NavTechnique,
     embed_rotation_unobservable,
-    load_model_error_floor,
+    load_ncc_covariance_tuning,
     log_confidence_breakdown,
     rotation_unobservable_sigma_rad,
     search_window_for_obs,
@@ -550,7 +550,10 @@ def _collect_per_blob_residuals(
 
 
 def _joint_offset_from_residuals(
-    residuals: _BlobResiduals, *, model_error_floor_px: float = 0.0
+    residuals: _BlobResiduals,
+    *,
+    model_error_floor_px: float = 0.0,
+    centroid_model_error_frac: float = 0.0,
 ) -> _JointFit:
     """Solve the precision-weighted joint translation across the per-blob residuals."""
     offsets_v = residuals.offsets_v
@@ -567,9 +570,43 @@ def _joint_offset_from_residuals(
         weights=weights,
         dv=dv,
         du=du,
+        extents_px=np.asarray(residuals.extents, np.float64),
         model_error_floor_px=model_error_floor_px,
+        centroid_model_error_frac=centroid_model_error_frac,
     )
     return _JointFit(dv=dv, du=du, covariance=cov, residual_rms=rms)
+
+
+def _centroid_model_error_var(extents_px: NDArrayFloatType, frac: float) -> float:
+    """Return the size-scaled centroid-model-error variance for the joint fit.
+
+    A brightness-weighted centroid is a biased estimate of the geometric
+    center: the lit hemisphere and any shape irregularity shift it by a
+    roughly fixed *fraction* of the body radius, an error the photon-only
+    per-blob CRLB is blind to.  Each blob therefore carries a floor
+    variance ``(frac * R_i)**2`` with ``R_i`` its predicted radius.  These
+    combine by inverse-variance across blobs (the joint centroid is a
+    precision-weighted mean), so the joint size-error variance is
+    ``1 / sum_i 1 / (frac * R_i)**2`` -- for a single blob this is exactly
+    ``(frac * R)**2``, and it shrinks as more blobs constrain the fit.
+
+    Parameters:
+        extents_px: Per-blob predicted diameters in pixels.
+        frac: Fraction of the body radius taken as the centroid bias sigma;
+            ``0.0`` disables the term.
+
+    Returns:
+        The joint centroid-model-error variance in pixels squared (``0.0``
+        when disabled or no blob has a positive extent).
+    """
+    if frac <= 0.0:
+        return 0.0
+    radii = 0.5 * np.asarray(extents_px, np.float64)
+    per_blob_var = (frac * radii) ** 2
+    positive = per_blob_var[per_blob_var > 0.0]
+    if positive.size == 0:
+        return 0.0
+    return float(1.0 / np.sum(1.0 / positive))
 
 
 def _joint_covariance(
@@ -579,7 +616,9 @@ def _joint_covariance(
     weights: NDArrayFloatType,
     dv: float,
     du: float,
+    extents_px: NDArrayFloatType,
     model_error_floor_px: float = 0.0,
+    centroid_model_error_frac: float = 0.0,
 ) -> NDArrayFloatType:
     """Return the per-axis reduced-chi-square covariance of the joint fit.
 
@@ -603,9 +642,11 @@ def _joint_covariance(
     wrong power of ``sum w`` and carried no degrees-of-freedom factor.
 
     The positive-definite floor is ``1 / sum(w_i)`` (pure
-    inverse-precision), NOT ``1 / (sum w_i)^2``.  The uncalibrated
-    ``model_error_floor_px**2`` is finally added to the diagonal (a
-    no-op at the default 0.0).
+    inverse-precision), NOT ``1 / (sum w_i)^2``.  Two model-error terms
+    are then added in quadrature: the size-scaled centroid-bias variance
+    (see :func:`_centroid_model_error_var`), which makes the reported
+    sigma track body size the way the photon-only weights cannot, and the
+    absolute ``model_error_floor_px**2`` floor.
 
     The cross-term ``cov(v, u)`` is intentionally zero -- per-axis
     residuals are independent under the BODY_BLOB CRLB derivation,
@@ -617,7 +658,9 @@ def _joint_covariance(
     """
     total_weight = float(weights.sum())
     floor = 1.0 / max(total_weight, 1e-12)
-    model_error = model_error_floor_px * model_error_floor_px
+    model_error = model_error_floor_px * model_error_floor_px + _centroid_model_error_var(
+        extents_px, centroid_model_error_frac
+    )
     n = int(offsets_v.size)
     if n <= 1:
         # Single blob: under-determined for 2 translation params.  Report
@@ -672,10 +715,12 @@ class BodyBlobNav(NavTechnique):
         super().__init__(config=config)
         self.config.read_config()  # ensure cls.tuning is populated
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
-        # Uncalibrated model-error variance floor (px); added in quadrature to
-        # the reported covariance diagonal.  Default 0.0 -> no-op.  See
-        # ORCH-001 / config_510_techniques.yaml.
-        self._model_error_floor_px = load_model_error_floor(self.tuning, self.name)
+        # Covariance model-error terms: the brightness-weighted centroid is a
+        # biased estimator of the geometric center (lit-hemisphere offset,
+        # shape irregularity), and that bias scales with the body radius --
+        # a term the photon-only per-blob CRLB cannot see.  ``model_error_size_frac``
+        # carries it; ``model_error_floor_px`` is the absolute floor.
+        self._cov_tuning = load_ncc_covariance_tuning(self.tuning, self.name)
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable BODY_BLOB feature.
@@ -792,7 +837,9 @@ class BodyBlobNav(NavTechnique):
                     fit_rotation=bool(context.fit_camera_rotation),
                 )
             fit = _joint_offset_from_residuals(
-                residuals, model_error_floor_px=self._model_error_floor_px
+                residuals,
+                model_error_floor_px=self._cov_tuning.model_error_floor_px,
+                centroid_model_error_frac=self._cov_tuning.model_error_size_frac,
             )
             at_edge = (
                 abs(fit.dv) >= margin_v - self._at_edge_tolerance_px

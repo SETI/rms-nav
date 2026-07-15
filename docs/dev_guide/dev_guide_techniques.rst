@@ -61,6 +61,7 @@ Body techniques
    dev_guide_techniques_body_terminator
    dev_guide_techniques_body_disc
    dev_guide_techniques_body_blob
+   dev_guide_techniques_body_titan
 
 Ring techniques
 ---------------
@@ -70,15 +71,6 @@ Ring techniques
 
    dev_guide_techniques_ring_edge
    dev_guide_techniques_ring_annulus
-
-Titan techniques
-----------------
-
-No Titan-specific autonomous techniques are registered.
-:class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` is a registered
-placeholder that emits no features, so the technique pipeline runs
-without any Titan-derived contribution; the slot is reserved for a
-haze-aware extractor (see :doc:`dev_guide_navigation_models_titans`).
 
 Manual
 ------

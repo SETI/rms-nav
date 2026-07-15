@@ -18,8 +18,10 @@ from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import (
     NavTechnique,
     add_model_error_floor,
+    add_size_scaled_model_error,
     filter_technique_names,
     load_model_error_floor,
+    load_ncc_covariance_tuning,
     validate_registered_confidence_specs,
 )
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
@@ -202,3 +204,47 @@ def test_add_model_error_floor_zero_is_identity() -> None:
     """A disabled floor returns the input covariance object unchanged."""
     cov = np.array([[1.0, 0.0], [0.0, 1.0]])
     assert add_model_error_floor(cov, 0.0) is cov
+
+
+def test_add_size_scaled_model_error_adds_size_and_floor_in_quadrature() -> None:
+    """The size term and floor both square onto the translation diagonal."""
+    cov = np.array([[1.0, 0.1], [0.1, 4.0]])
+    out = add_size_scaled_model_error(cov, size_px=100.0, size_frac=0.02, floor_px=0.5)
+    extra = (0.02 * 100.0) ** 2 + 0.5**2  # 4.0 + 0.25 = 4.25
+    assert out[0, 0] == pytest.approx(1.0 + extra)
+    assert out[1, 1] == pytest.approx(4.0 + extra)
+    assert out[0, 1] == pytest.approx(0.1)
+
+
+def test_add_size_scaled_model_error_zero_terms_is_identity() -> None:
+    """Both terms disabled returns the input covariance object unchanged."""
+    cov = np.array([[1.0, 0.0], [0.0, 1.0]])
+    assert add_size_scaled_model_error(cov, size_px=100.0, size_frac=0.0, floor_px=0.0) is cov
+
+
+def test_load_ncc_covariance_tuning_reads_all_terms() -> None:
+    """All three covariance terms are read from the tuning mapping."""
+    tuning = {
+        'localization_uncertainty_scale': 1.0,
+        'model_error_size_frac': 0.005,
+        'model_error_floor_px': 0.05,
+    }
+    out = load_ncc_covariance_tuning(tuning, 'SomeNav')
+    assert out.localization_uncertainty_scale == pytest.approx(1.0)
+    assert out.model_error_size_frac == pytest.approx(0.005)
+    assert out.model_error_floor_px == pytest.approx(0.05)
+
+
+def test_load_ncc_covariance_tuning_defaults_disabled() -> None:
+    """Absent keys default every covariance term to disabled (0.0)."""
+    out = load_ncc_covariance_tuning({}, 'SomeNav')
+    assert out.localization_uncertainty_scale == 0.0
+    assert out.model_error_size_frac == 0.0
+    assert out.model_error_floor_px == 0.0
+
+
+@pytest.mark.parametrize('bad', [-1.0, float('nan')])
+def test_load_ncc_covariance_tuning_rejects_invalid_size_frac(bad: float) -> None:
+    """A negative or non-finite size fraction is rejected."""
+    with pytest.raises(ValueError, match='model_error_size_frac'):
+        load_ncc_covariance_tuning({'model_error_size_frac': bad}, 'SomeNav')

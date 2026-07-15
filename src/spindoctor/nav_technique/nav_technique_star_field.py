@@ -43,6 +43,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 from scipy.ndimage import maximum_filter
+from scipy.optimize import linear_sum_assignment
 
 from spindoctor.config import Config
 from spindoctor.feature.feature import NavFeature
@@ -337,19 +338,27 @@ def _hash_distance_sq(
     return ratio_weight * (dr1 * dr1 + dr2 * dr2) + angle_weight * da * da
 
 
-def _greedy_inlier_count(
+def _optimal_inlier_assignment(
     detection_pts: NDArrayFloatType,
     catalog_pts: NDArrayFloatType,
     offset_vu: tuple[float, float],
     *,
     tolerance_px: float,
 ) -> tuple[int, list[tuple[int, int]]]:
-    """Greedy nearest-neighbour matching under the proposed translation.
+    """Optimal one-to-one detection-catalog matching under the proposed translation.
 
-    Each detection is paired with its closest catalog star (after
-    applying the offset to catalog positions) within
-    ``tolerance_px``.  Each catalog star can match at most one
-    detection — once consumed, it is removed from the candidate pool.
+    Detections are paired one-to-one with catalog stars (after applying
+    the offset to catalog positions) so that the number of pairs within
+    ``tolerance_px`` is maximised and, among maximum-cardinality
+    assignments, the total squared residual distance is minimised.  The
+    detection x catalog squared-distance matrix is solved as a linear
+    sum assignment (Hungarian algorithm); entries beyond the tolerance
+    are masked with a cost large enough that the solver never trades an
+    in-tolerance pair for masked ones, and masked pairs the solver is
+    still forced to emit are dropped afterwards.  Unlike a greedy
+    nearest-neighbour sweep, the result is independent of detection
+    ordering: when two detections compete for the same catalog star the
+    globally best one-to-one pairing wins.
 
     Parameters:
         detection_pts: ``(N_det, 2)`` array of detection (v, u).
@@ -367,22 +376,22 @@ def _greedy_inlier_count(
     if detection_pts.size == 0 or catalog_pts.size == 0:
         return 0, []
     shifted_catalog = catalog_pts + np.asarray(offset_vu, np.float64)[None, :]
-    n_det = detection_pts.shape[0]
-    n_cat = shifted_catalog.shape[0]
-    available = np.ones(n_cat, dtype=bool)
-    pairs: list[tuple[int, int]] = []
+    diffs = detection_pts[:, None, :] - shifted_catalog[None, :, :]
+    dist_sq = np.sum(diffs * diffs, axis=2)
     tol_sq = tolerance_px * tolerance_px
-    for d_idx in range(n_det):
-        d = detection_pts[d_idx]
-        if not available.any():
-            break
-        diffs = shifted_catalog - d[None, :]
-        dist_sq = np.sum(diffs * diffs, axis=1)
-        dist_sq[~available] = np.inf
-        c_idx = int(np.argmin(dist_sq))
-        if dist_sq[c_idx] <= tol_sq:
-            pairs.append((d_idx, c_idx))
-            available[c_idx] = False
+    # Any masked pair must cost more than every in-tolerance pair an
+    # assignment can contain combined, so maximum cardinality always
+    # beats any residual-distance trade.
+    n_assignable = min(detection_pts.shape[0], shifted_catalog.shape[0])
+    masked_cost = tol_sq * (n_assignable + 1.0) + 1.0
+    cost = np.where(dist_sq <= tol_sq, dist_sq, masked_cost)
+    det_indices, cat_indices = linear_sum_assignment(cost)
+    pairs = [
+        (int(d_idx), int(c_idx))
+        for d_idx, c_idx in zip(det_indices, cat_indices, strict=True)
+        if dist_sq[d_idx, c_idx] <= tol_sq
+    ]
+    pairs.sort()
     return len(pairs), pairs
 
 
@@ -910,8 +919,8 @@ class StarFieldFromCatalogNav(NavTechnique):
 
         Each (det_triplet, cat_triplet) candidate proposes the
         translation that maps the catalog-triplet centroid onto the
-        detection-triplet centroid.  Inliers are counted by greedy
-        nearest-neighbour matching under that translation.  The first
+        detection-triplet centroid.  Inliers are counted by optimal
+        one-to-one assignment under that translation.  The first
         candidate (in sorted order) that ties the best inlier count
         wins, which matches the deterministic-iteration contract.
         """
@@ -924,7 +933,7 @@ class StarFieldFromCatalogNav(NavTechnique):
                 det_indices=(det_a, det_b, det_c),
                 cat_indices=(cat.idx_a, cat.idx_b, cat.idx_c),
             )
-            n_inliers, pairs = _greedy_inlier_count(
+            n_inliers, pairs = _optimal_inlier_assignment(
                 det_points_arr,
                 cat_points_arr,
                 offset_vu=offset,
@@ -1045,28 +1054,39 @@ class StarFieldFromCatalogNav(NavTechnique):
 
         Translation block follows :meth:`_build_covariance` with ``p =
         3`` (three parameters are co-fitted: dv, du, theta); the
-        rotation diagonal uses the reduced-chi-square lever-arm formula
+        rotation diagonal is the inverse of the rotation Fisher
+        information built from the per-vertex Jacobian of the residual
+        with respect to theta.  For an inlier with lever arm
+        ``(dv_i, du_i) = cat_i - cc`` about the (weighted) catalog
+        centroid ``cc``, that Jacobian is the tangential lever-arm
+        component ``(du_i, -dv_i)``, so with per-axis residual
+        variances the information is
 
         ::
 
-            sigma_theta**2 = chi2_nu_residual / sum_i w_i * |cat_i - cc|**2
+            I_theta = sum_i w_i * (du_i**2 / var_v + dv_i**2 / var_u)
+            sigma_theta**2 = 1 / I_theta
 
-        where ``cc`` is the (weighted) catalog centroid, ``|cat_i - cc|``
-        is each point's lever-arm distance from the rotation centre, and
+        where each per-axis variance is the reduced chi-square of the
+        fit residuals on that axis,
 
         ::
 
-            chi2_nu_residual = 0.5 * (sum_i w_i r_v_i**2 + sum_i w_i r_u_i**2)
-                               / max(N - 3, 1)
+            var_axis = max(sum_i w_i r_axis_i**2 / max(N - 3, 1), 1.0)
 
-        is the pooled per-axis reduced chi-square of the fit residuals.
-        Cross-terms are zero — under independent-isotropic-residual
-        assumptions the translation and rotation parameters of a
-        Procrustes fit are uncorrelated.  Whenever the catalog spread is
-        too small to constrain rotation (numerically zero or negative
-        spread, e.g. coincident inliers) the rotation diagonal collapses
-        to the rotation-unobservable sentinel so ``pinvh`` cleanly drops
-        the rotation contribution.
+        floored at 1 px**2 — the same positive-definite floor the
+        translation block applies — so a noise-free fit cannot report
+        a degenerate rotation variance.  This is exact for anisotropic
+        residuals (``var_v != var_u``); in the isotropic limit it
+        reduces to the classic lever-arm form
+        ``chi2_nu_residual / sum_i w_i * |cat_i - cc|**2``.
+        Cross-terms are zero — with the rotation taken about the
+        weighted catalog centroid the translation and rotation
+        parameters of a Procrustes fit are uncorrelated.  Whenever the
+        catalog spread is too small to constrain rotation (numerically
+        zero information, e.g. coincident inliers) the rotation
+        diagonal collapses to the rotation-unobservable sentinel so
+        ``pinvh`` cleanly drops the rotation contribution.
         """
         cov_2x2 = self._build_covariance(weights=weights, residuals=residuals, n_params=3)
         total = float(weights.sum())
@@ -1076,16 +1096,15 @@ class StarFieldFromCatalogNav(NavTechnique):
         cat_c_u = float(np.sum(weights * cat_inliers[:, 1]) / total)
         dv = cat_inliers[:, 0] - cat_c_v
         du = cat_inliers[:, 1] - cat_c_u
-        spread = float(np.sum(weights * (dv * dv + du * du)))
         n = residuals.shape[0]
         dof = max(n - 3, 1)
-        chi2_v = float(np.sum(weights * residuals[:, 0] ** 2))
-        chi2_u = float(np.sum(weights * residuals[:, 1] ** 2))
-        chi2_nu_residual = 0.5 * (chi2_v + chi2_u) / dof
-        if spread <= 0.0:
+        var_v = max(float(np.sum(weights * residuals[:, 0] ** 2)) / dof, 1.0)
+        var_u = max(float(np.sum(weights * residuals[:, 1] ** 2)) / dof, 1.0)
+        fisher_theta = float(np.sum(weights * (du * du / var_v + dv * dv / var_u)))
+        if fisher_theta <= 0.0:
             sigma_theta_sq = ROTATION_UNOBSERVABLE_VARIANCE
         else:
-            sigma_theta_sq = max(chi2_nu_residual / spread, 1.0 / spread)
+            sigma_theta_sq = 1.0 / fisher_theta
         cov = np.zeros((3, 3), dtype=np.float64)
         cov[:2, :2] = cov_2x2
         cov[2, 2] = sigma_theta_sq
