@@ -715,7 +715,7 @@ techniques:
       psf_sigma_px: 1.0
       # Centroid box half-width around each detection peak (px).
       centroid_box_half_px: 3
-      # KD-tree match radius in the (ratio, ratio, angle_rad) hash
+      # Match radius in the (ratio, ratio, angle_rad) hash
       # space; weighted Euclidean.  0.05 is the empirical default for
       # centroid sigma ~0.1 px against typical triplet scales (Part 3
       # §"Algorithm specifics").

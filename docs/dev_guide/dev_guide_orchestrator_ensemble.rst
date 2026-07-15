@@ -26,7 +26,12 @@ Step 1 — drop spurious
 Every result with
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` ``True`` is
 dropped unconditionally. Spurious is the technique's self-assessed structural failure
-flag; the ensemble does not second-guess it.
+flag; the ensemble does not second-guess it. A supersession filter then drops every
+fallback-tier result whose source body is already covered by a non-spurious
+primary-tier result on the same body (for example a
+:class:`~spindoctor.nav_technique.nav_technique_body_blob.BodyBlobNav` fallback when
+:class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` succeeded on that
+body); a fallback with no primary coverage for its body stays in the set.
 
 Step 2 — drop at-edge
 ---------------------
@@ -125,8 +130,8 @@ Step 6 — disagreement and conflict penalties
 When any result was excluded from the consensus, the fused confidence is multiplied
 by ``disagreement_penalty`` (default 0.7). When the conflict branch fired in Step 4 the
 ``status='conflicted'`` :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` is returned with a further
-``conflicted_confidence_multiplier`` (default 0.3) applied to the runner-up's summed
-confidence so the JSON sidecar reflects the conflict's severity.
+``conflicted_confidence_multiplier`` (default 0.3) applied to the winning group's
+combined confidence so the JSON sidecar reflects the conflict's severity.
 
 Step 7 — confidence-rank assignment
 -----------------------------------
@@ -186,6 +191,9 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
 
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.agreement_sigma` — float, default
   ``2.0``. Mahalanobis-distance threshold for grouping.
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.agreement_pixel_floor` — float,
+  default ``5.0``. Euclidean translation-distance fallback for grouping: two results
+  agree when either distance test passes (see Step 3). ``0.0`` disables the floor.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.agreement_gap` — float, default
   ``0.5``. Minimum summed-confidence gap between best and runner-up groups before
   declaring a conflict. Applied as an absolute gap when the runner-up has a quorum; in a
@@ -201,6 +209,11 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
   :meth:`~spindoctor.nav_orchestrator.nav_result.NavResult.success`.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.pinvh_rcond` — float, default
   ``1.0e-9``. Cutoff for :func:`scipy.linalg.pinvh`.
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.max_allowed_rotation_deg` — float,
+  default ``5.0``. Small-angle bound on a 3-DoF result's rotation magnitude. Every
+  contributing technique clamps its rotation fit to this bound, so a result arriving
+  outside it is an upstream programming error and raises
+  :class:`~spindoctor.support.exceptions.NavContractError`.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.tier_thresholds` — mapping
   ``rank -> {min_confidence, max_sigma_px}``; default thresholds give ``'high'`` for
   confidence at or above 0.5 with sigma at most 0.5 px, ``'medium'`` for confidence at
@@ -213,10 +226,22 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
 Implementation
 ==============
 
-Source file: ``src/spindoctor/nav_orchestrator/ensemble.py`` —
-:func:`~spindoctor.nav_orchestrator.ensemble.ensemble`,
-:func:`~spindoctor.nav_orchestrator.ensemble.derive_confidence_rank`, and
-:class:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig`.
+The ensemble is split across three modules under ``src/spindoctor/nav_orchestrator/``:
+
+- ``ensemble.py`` — the reconciler itself:
+  :func:`~spindoctor.nav_orchestrator.ensemble.ensemble`,
+  :func:`~spindoctor.nav_orchestrator.ensemble.derive_confidence_rank`, and
+  :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig`.
+- ``ensemble_consensus.py`` — consensus-subset selection:
+  :func:`~spindoctor.nav_orchestrator.ensemble_consensus.consensus_selection`,
+  :func:`~spindoctor.nav_orchestrator.ensemble_consensus.corroborating_members`,
+  :func:`~spindoctor.nav_orchestrator.ensemble_consensus.corroborating_confidence`, and
+  :func:`~spindoctor.nav_orchestrator.ensemble_consensus.result_param_vector`.
+- ``ensemble_observability.py`` — observable-subspace linear algebra:
+  :func:`~spindoctor.nav_orchestrator.ensemble_observability.mixed_scale_pinvh`,
+  :func:`~spindoctor.nav_orchestrator.ensemble_observability.observable_basis`,
+  :func:`~spindoctor.nav_orchestrator.ensemble_observability.observable_intersection_basis`,
+  and :func:`~spindoctor.nav_orchestrator.ensemble_observability.mahalanobis_distance`.
 
 Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
@@ -225,11 +250,17 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 - :func:`~spindoctor.nav_orchestrator.ensemble.derive_confidence_rank` — assign the
   five-bucket rank from a confidence / sigma pair.
 - :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig` — frozen dataclass carrying
-  the seven tunables documented above.
+  the nine tunables documented above.
 
-The function uses :func:`scipy.sparse.csgraph.connected_components` to find the
-Mahalanobis-distance clusters and :func:`scipy.linalg.pinvh` for both the per-pair
-distance test and the precision-weighted merge.
+Grouping is sponsored-neighborhood consensus selection
+(:func:`~spindoctor.nav_orchestrator.ensemble_consensus.consensus_selection`): every
+result sponsors the subset of results that agree with it pairwise, and the subset with
+the highest corroborating summed confidence wins. Unlike single-link transitive-closure
+grouping, a result that agrees with only one member of the winning subset does not drag
+the whole subset toward it — membership requires pairwise agreement with the sponsoring
+result. :func:`scipy.linalg.pinvh` (via
+:func:`~spindoctor.nav_orchestrator.ensemble_observability.mixed_scale_pinvh`) serves
+both the per-pair distance test and the precision-weighted merge.
 
 Examples
 ========
@@ -241,8 +272,11 @@ Examples
 (:math:`(7.00, -18.00)` ± 0.3 px). The Mahalanobis distance is well below
 ``agreement_sigma=2.0``; both end up in the same group. The fused offset is
 :math:`(6.93, -17.92)` px with combined per-axis sigma ~0.26 px. No disagreement
-penalty fires (only one group existed) so the fused confidence is the summed per-technique
-confidence (capped by the project-wide ceiling).
+penalty fires (only one group existed). The fused confidence is the precision-weighted
+average of the two per-technique confidences, boosted by the agreement factor
+:math:`1 + 0.5 \log_{2} n` over the :math:`n` significant corroborating members — here
+:math:`n = 2`, so a factor of 1.5 — and capped by the project-wide combined-confidence
+ceiling.
 
 **Consensus selection with three techniques.**  Three techniques converge:
 :math:`(7.0, -18.0)` ± 0.3, :math:`(8.0, -17.5)` ± 0.5, :math:`(11.6, 12.6)` ± 0.4. The

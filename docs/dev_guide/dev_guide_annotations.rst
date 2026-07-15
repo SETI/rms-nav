@@ -120,9 +120,9 @@ Per-model annotation contributions
 - **Simulated body / rings** — the simulated NavModels reuse their
   catalog-driven counterparts' annotation helpers, so a simulated
   scene's PNG overlay is visually indistinguishable from a real scene's.
-- **Titan** — the placeholder
+- **Titan** —
   :meth:`~spindoctor.nav_model.nav_model_titan.NavModelTitan.to_annotations`
-  returns an empty collection.
+  returns an empty collection (the model emits no features to annotate).
 
 API reference
 =============

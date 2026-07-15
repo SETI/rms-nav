@@ -265,6 +265,7 @@ Stars (model + star techniques)
   - :mod:`spindoctor.nav_model.stars.smeared_psf`
   - :mod:`spindoctor.nav_model.stars.conflicts`
   - :mod:`spindoctor.nav_model.stars.nav_model_stars`
+  - :mod:`spindoctor.nav_model.stars.nav_model_stars_simulated`
 
 - :mod:`spindoctor.nav_technique.nav_technique_star_unique_match`
 - :mod:`spindoctor.nav_technique.nav_technique_star_refine`
@@ -331,6 +332,7 @@ sibling of each model family. These are used both by
 - :doc:`dev_guide_navigation_models_body_simulated`
 - :doc:`dev_guide_navigation_models_ring_simulated`
 - :doc:`dev_guide_navigation_models_titan_simulated`
+- :mod:`spindoctor.nav_model.stars.nav_model_stars_simulated`
 - :mod:`spindoctor.nav_model.nav_model_body_simulated`
 - :mod:`spindoctor.nav_model.nav_model_rings_simulated`
 - :mod:`spindoctor.sim` — the synthetic-image renderer:

@@ -49,9 +49,16 @@ over every integer offset in :math:`[-m_{v}, m_{v}] \times [-m_{u}, m_{u}]`, whe
 :math:`(m_{v}, m_{u})` is the per-instrument SPICE pointing-error margin and
 :math:`N_{\mathrm{in\,bounds}}` is the number of polyline vertices that remain inside the
 image after the shift. Both inputs are binary; dividing the raw overlap count by the
-in-bounds vertex count makes the argmax the true binary normalised cross-correlation peak
-(the NCC is the square root of this fraction), so a shift cannot win merely by keeping more
-vertices in bounds or covering a denser local edge region.
+in-bounds vertex count removes the bias of a raw overlap count toward shifts that simply
+keep more vertices in bounds. This per-vertex match fraction is deliberately *not* the
+binary normalised cross-correlation (a binary NCC normalises by
+:math:`\sqrt{N_{\mathrm{in\,bounds}}}`, not :math:`N_{\mathrm{in\,bounds}}`, so its argmax
+can differ): the plain fraction fully cancels the in-bounds-count advantage, at the cost of
+over-rewarding shifts with very few surviving vertices. That failure mode is closed by a
+minimum-support guard — a shift whose in-bounds vertex fraction falls below
+:data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_COARSE_MIN_SUPPORT_FRACTION` (0.5) is
+ineligible, so a perfect score on a handful of edge-pixel stragglers cannot beat a dense
+well-supported match.
 
 Ties are broken by Manhattan distance from the origin (and lexicographic order among offsets at
 equal distance) so that on perfectly-flat inputs the nearest-to-origin shift wins
@@ -88,7 +95,11 @@ Each LM iteration:
 3. Solves the LM-damped normal equations :math:`(J^{\top} W J + \lambda \, \mathrm{diag}(J^{\top} W J))\, \delta = -J^{\top} W r`
    via :func:`numpy.linalg.solve`, falling back to the symmetric pseudoinverse on a singular
    step.
-4. Accepts the trial pose when the weighted-cost decreases (and shrinks the LM damping by a
+4. Before the trial cost is even evaluated, rejects any trial pose whose translation has
+   walked more than ``trust_region_px`` from the integer coarse seed (the damping is doubled
+   and the iteration retried); this denies the joint LM + Tukey IRLS the runway to drift the
+   polyline onto unrelated DT minima. Otherwise accepts the trial pose when the
+   weighted-cost decreases (and shrinks the LM damping by a
    factor of two), or rejects it (and grows the damping by a factor of two).
 5. After an accepted step, recomputes residuals / weights / Jacobian *at* the accepted pose
    so the cached state used by the final-iteration covariance reflects the committed
@@ -117,28 +128,39 @@ than ~1.5 px from the DT-LM pose. When the stage runs, the reported residuals / 
 covariance are recomputed against the DT at the refined pose so the spurious gates stay on the
 same footing as without it.
 
-The stage exists and is unit-tested but is **held off by default** (the per-technique
-``gradient_ridge_refine`` tuning flag is ``0``). It is correct for *symmetric* edges, but the
-DT techniques' two real consumers do not benefit:
+The per-technique ``gradient_ridge_refine`` tuning flag is **on (1) for
+RingEdgeNav and off (0) for the limb and terminator fits**. It is correct for *symmetric*
+edges only:
 
-- The ring edge is already at its floor (~0.016 px, below the 0.02 px target) because a ring
-  edge is a symmetric transition whose gradient peak coincides with the geometric edge.
+- The ring edge benefits on dense real ring scenes: the binary edge mask quantises detected
+  edges to the integer pixel grid, so a large fraction of model vertices land exactly on
+  edge pixels (a DT of zero and zero gradient) and the DT-LM step stalls at the integer
+  coarse-NCC seed. The continuous pass refines against the un-thresholded gradient
+  magnitude, recovering the sub-pixel offset the quantised DT discards. A ring edge is a
+  symmetric transition whose gradient peak coincides with the geometric edge, so refining
+  onto the peak is unbiased. (On clean sim scenes the DT-LM already reaches its ~0.016 px
+  floor, so the refine is a no-op there.)
 - The body limb is *worse* with it on. A limb is a one-sided transition, so its gradient peak
   sits ~0.1 px inside the geometric silhouette the model predicts; the DT-LM's quantization
   partially cancels that offset, and converging precisely onto the gradient peak removes the
   cancellation and sharpens the bias. The limb floor is therefore a model-vs-image edge offset,
-  not a DT-construction artifact; the genuine remedy is a model-side limb-edge prediction
-  (issue #150). See :doc:`dev_guide_techniques_body_limb`.
+  not a DT-construction artifact; the genuine remedy is a model-side prediction of the limb
+  at the gradient-peak location. See :doc:`dev_guide_techniques_body_limb`.
 
 Polarity filtering
 ------------------
 
-Concurrently with the cost evaluation, the refiner samples the per-pixel image gradient vector
-at each shifted vertex's position, dot-products it with the model's outward normal, and
-classifies the vertex as a *polarity match* when the dot product is strictly positive (and a
-*polarity mismatch* otherwise). Mismatched vertices are assigned a near-infinite synthetic
-DT residual on every iteration; the Tukey biweight zeroes their weight on the first
-reweighting. This keeps a body-limb fit from latching onto the body's interior crater rims
+When the caller enables polarity, the refiner classifies each vertex *once*, at the coarse
+integer seed, before the LM iteration starts: it samples the per-pixel image gradient vector
+at the seed-shifted vertex position, dot-products it with the model's outward normal, and
+marks the vertex a *polarity match* when the dot product is strictly positive (and a
+*polarity mismatch* otherwise). Mismatched vertices are excluded by zeroing their weight
+directly — the per-iteration weight is the product
+``inv_sigma_sq * tukey_w * polarity_mask`` — so their exclusion is independent of the
+per-vertex sigma. (A near-infinite synthetic residual is recorded for them in the raw
+residual array only to keep it numerically well-defined; with a zero weight it contributes
+nothing to the cost or the normal equations.) This keeps a body-limb fit from latching onto
+the body's interior crater rims
 (whose gradient direction is opposite the limb's), and a ring-edge fit from latching onto a
 neighbouring ring's edge (whose gradient sign reverses).
 
@@ -297,6 +319,25 @@ re-reading the source.
   (dimensionless). Cutoff passed to :func:`scipy.linalg.pinvh` for the
   information-to-covariance map. Eigenvalues smaller than this fraction of the largest are
   treated as null.
+- :data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_COARSE_MIN_SUPPORT_FRACTION` — float,
+  default ``0.5`` (dimensionless). Minimum in-bounds vertex fraction for a coarse-search
+  candidate shift to be eligible; guards the per-vertex match fraction against
+  over-rewarding shifts that clip most of the polyline off-frame. The zero shift keeps
+  every vertex in bounds, so at least one candidate is always eligible.
+- :data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_RIDGE_HALF_WIDTH_PX` — float, default
+  ``3.0`` px. Half-width of the gradient-ridge sub-pixel search window along each vertex
+  normal; wide enough to cover the residual a clean DT-LM convergence leaves, narrow
+  enough that the sampled profile contains a single edge ridge.
+- :data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_RIDGE_SAMPLE_STEP_PX` — float, default
+  ``0.5`` px. Spacing of the gradient-ridge sample points along each normal; the peak is
+  located by a three-point parabola fit around the discrete argmax.
+- :data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_RIDGE_MAX_ITERATIONS` — int, default
+  ``10`` (count). Maximum gradient-ridge Gauss-Newton iterations; the stage starts from
+  the DT-LM optimum so a handful suffices, and the cap is a safety net.
+- :data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_RIDGE_MAX_TOTAL_DISPLACEMENT_PX` —
+  float, default ``1.5`` px. Cap on how far the gradient-ridge stage may move the DT-LM
+  offset; beyond it the ridge result is discarded and the DT-LM offset kept (a defensive
+  guard against a pathological ridge walk onto an unrelated gradient feature).
 
 Implementation
 ==============
@@ -402,9 +443,13 @@ iteration.
 **Rank-deficient covariance.**  A perfectly straight ring-edge polyline produces an
 information matrix of rank one — only the radial direction is constrained; the along-edge
 direction is unobservable. The pseudoinverse via
-:data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_PINVH_RCOND` returns a covariance whose null
-eigenvalue is mapped to :math:`+\infty` (an unbounded variance along the along-edge
-direction). The orchestrator's ensemble combine, which uses the Moore-Penrose pseudoinverse
-to fuse covariances, treats the unbounded eigenvalue as a zero-information contribution along
-that direction and the technique's result is effectively a one-dimensional radial constraint
-in the joint solve.
+:data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_PINVH_RCOND` maps the null information
+eigenvalue to a *zero* covariance eigenvalue: the unobservable direction lies in the null
+space of both the information matrix and its pseudoinverse, so the marginal variance along
+the tangent is exactly zero (the same zero-variance / null-space convention the ring-edge
+rank-1 projection relies on). The orchestrator's ensemble combine, which uses the
+Moore-Penrose pseudoinverse to fuse covariances, recognises the null direction as a
+zero-information contribution rather than a perfectly measured axis, treats the technique's
+result as a one-dimensional radial constraint in the joint solve, and — when no other
+technique constrains the tangent — surfaces the unobservable axis through the
+``sigma_along_unobservable_px`` sentinel downstream instead of a numeric per-axis sigma.

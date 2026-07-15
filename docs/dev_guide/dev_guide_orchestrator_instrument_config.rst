@@ -76,11 +76,13 @@ The per-instrument YAML schema consumed by
 - ``image_quality_thresholds`` — block consumed by
   :class:`~spindoctor.nav_orchestrator.image_classifier.ImageQualityThresholds`. See
   :doc:`dev_guide_orchestrator_image_classifier` for the field-by-field schema.
-- ``camera_rotation.fit_camera_rotation`` — bool, default ``False``. When ``True`` every
-  technique adds in-plane camera rotation as a third parameter. Cassini ISS / NHLORRI
-  default to ``False``; VGISS / GOSSI default to ``True``.
-- ``camera_rotation.max_rotation_deg`` — float, default ``5.0`` deg. Maximum allowed
-  rotation magnitude when ``fit_camera_rotation`` is ``True``.
+- ``fit_camera_rotation`` — bool, top-level in the per-camera block, default ``False``.
+  When ``True`` every technique adds in-plane camera rotation as a third parameter.
+  Only GOSSI sets it ``True``; Cassini ISS / NHLORRI / VGISS set ``False`` (VGISS does
+  carry non-negligible attitude rotation residuals, but rotation fitting is too slow to
+  enable there).
+- ``max_rotation_deg`` — float, top-level in the per-camera block, default ``5.0`` deg.
+  Maximum allowed rotation magnitude when ``fit_camera_rotation`` is ``True``.
 
 Implementation
 ==============
@@ -120,9 +122,8 @@ Examples
 ========
 
 **Cassini ISS NAC.**  ``config_400_inst_coiss.yaml`` declares
-``data_units: raw_dn``, ``noise.saturation_dn: 4095.0``, ``noise.marker_value: 0``,
-``camera_rotation.fit_camera_rotation: false``, and
-``camera_rotation.max_rotation_deg: 5.0``.
+``data_units: raw_dn``, ``noise.saturation_dn: 4095``, ``noise.marker_value: 0``,
+``fit_camera_rotation: false``, and ``max_rotation_deg: 5.0``.
 :func:`~spindoctor.nav_orchestrator.instrument_config.instrument_settings_from_obs` returns::
 
     InstrumentSettings(
@@ -134,13 +135,15 @@ Examples
         max_rotation_deg=5.0,
     )
 
-**Voyager ISS.**  ``config_430_inst_vgiss.yaml`` declares
-``camera_rotation.fit_camera_rotation: true`` and
-``camera_rotation.max_rotation_deg: 10.0``. The orchestrator's per-image
+**Galileo SSI.**  ``config_410_inst_gossi.yaml`` declares
+``fit_camera_rotation: true`` (Galileo SSI carries non-negligible attitude rotation
+residuals) and ``max_rotation_deg: 5.0``. The orchestrator's per-image
 :class:`~spindoctor.nav_orchestrator.nav_context.NavContext`
 inherits ``fit_camera_rotation=True`` and every technique runs the 3-DoF path, so
 :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` reports a 3x3 covariance
-on Voyager imagery.
+on Galileo imagery. Voyager ISS (``config_430_inst_vgiss.yaml``) also carries rotation
+residuals but sets ``fit_camera_rotation: false`` — the rotation search is too slow to
+enable there — so Voyager navigation runs the 2-DoF path.
 
 **Cassini ISS CALIB pipeline.**  When the operator runs the calibrated-IF pipeline,
 ``data_units: calibrated_if``, ``noise.saturation_dn: null``, and

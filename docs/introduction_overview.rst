@@ -67,6 +67,29 @@ Navigation Phase
   and rings, used internally to test and validate the navigation pipeline (see
   the developer guide's :doc:`/dev_guide/dev_guide_simulator` chapter).
 
+* ``sd_consolidate_metadata`` - Copy each image's metadata JSON and/or summary
+  PNG to a single flat directory so results are easy to browse without
+  descending the per-volume path hierarchy.
+
+* ``sd_stats_ingest`` - Ingest per-image navigation metadata JSON files into a
+  SQLite database (see :doc:`/user_guide/user_guide_statistics`).
+
+* ``sd_stats_report`` - Generate success/failure, technique-usage, offset, and
+  agreement reports from the ingested statistics database (see
+  :doc:`/user_guide/user_guide_statistics`).
+
+Reprojection and Mosaic Phase
+-----------------------------
+
+* ``sd_mosaic`` - Reproject navigated images and combine them into ring or
+  body mosaics; also installed as the ``sd_mosaic_rings`` /
+  ``sd_mosaic_body`` entry points (see
+  :doc:`/user_guide/user_guide_reprojection`).
+
+* ``sd_mosaic_display`` - Interactive viewer for reprojection and mosaic
+  files; also installed as the ``sd_mosaic_display_rings`` /
+  ``sd_mosaic_display_body`` entry points.
+
 Backplanes Phase
 ----------------
 

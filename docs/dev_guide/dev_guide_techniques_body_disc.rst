@@ -249,24 +249,28 @@ sigmoid combination; see :doc:`dev_guide_techniques_confidence`. The formula spe
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.ncc_peak` — alpha = 1.5,
-  offset = 0.0, divisor = 6.0, cap at 1.0. PSR-style quality measure of the chosen NCC
-  peak. Healthy body-disc fits report quality 6 to 15; the divisor maps that range onto
-  the sigmoid's responsive interval.
-- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_px` — alpha = -1.0,
-  offset = 0.0, divisor = 2.0, no cap. Mean per-axis disagreement between coarse-pyramid
-  and full-resolution sub-pixel locations. Low values indicate a globally unambiguous peak.
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.ncc_peak` — alpha = 0.123,
+  offset = 6.0, divisor = 14.0, cap at 1.0. PSR-style quality measure of the chosen NCC
+  peak. The calibration campaign's raw p5/p50/p95 is 6.3/9.6/19.9, so the offset-6
+  divisor-14 transform spans that range in [0, 1].
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_ratio` —
+  alpha = -1.159, offset = 0.0, divisor = 1.0, no cap. Pyramid-level consistency
+  normalised by the per-image diameter-scaled spurious threshold: a ratio below 1.0 means
+  the result is within budget, and a ratio of exactly 1.0 sits at the spurious edge, where
+  the term contributes its full negative alpha to the sigmoid argument. Using the ratio
+  rather than the raw pixel value lets the divisor stay at 1.0 while the underlying budget
+  tracks body diameter.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.body_count` — alpha = 0.4,
   offset = 0.0, divisor = 3.0, cap at 1.0. Number of ``BODY_DISC`` features fused into the
   composite. More bodies sharpen the joint geometric constraint up to a 3-body saturation.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.peak_to_runner_up_ratio` —
-  alpha = 0.0, offset = 0.0, divisor = 2.0, cap at 1.0. Ratio of the winning peak's
+  alpha = 1.187, offset = 0.0, divisor = 2.0, cap at 1.0. Ratio of the winning peak's
   quality to the next-best peak outside the exclusion radius.
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
 confidence to zero before the sigmoid evaluates. The constant baseline is
-:math:`\alpha_{0} = -2.0`. No post-sigmoid ``hard_cap`` is applied.
+:math:`\alpha_{0} = 0.377`. No post-sigmoid ``hard_cap`` is applied.
 
 Implementation
 ==============
@@ -302,7 +306,7 @@ Class attributes:
   ``False``. Runs in pass 1 of the orchestrator's two-pass pipeline.
 - :attr:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.confidence_attributes`
   — ``{'at_edge', 'spurious', 'ncc_peak', 'peak_to_runner_up_ratio', 'consistency_px',
-  'used_gradient', 'body_count'}``.
+  'consistency_ratio', 'used_gradient', 'body_count'}``.
 
 Public methods (autodocumented at :doc:`/api_reference/api_nav_technique`):
 :meth:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.is_feasible` and
@@ -319,6 +323,10 @@ Diagnostics
   ratio of the winning peak's quality to the next-best peak's outside the exclusion radius.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_px` — maximum
   Euclidean drift across pyramid levels. Consumed by the spurious-detection gate.
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_ratio` —
+  ``consistency_px`` normalised by the per-image diameter-scaled spurious threshold, so a
+  healthy fit on a large body is not penalised by the same divisor that suits a small
+  body. Consumed by the confidence formula.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.used_gradient` — True when
   ``auto`` mode picked the gradient pass. Diagnostic only; not in the confidence formula.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.body_count` — number of
@@ -353,9 +361,11 @@ Call path traced through
      body-centroid pivot via the private template-rotate helper and the pyramid evaluates as
      usual. The (dv, du, theta) triple at the global maximum is returned with a 3x3
      covariance: the translation block is the CRLB from the winning rotation's correlation
-     curvature, the rotation diagonal is the inverse second derivative of the cost across
-     the rotation schedule (or the rotation-unobservable sentinel when the schedule is
-     flat).
+     curvature, and the rotation diagonal is always the rotation-unobservable sentinel —
+     the PSR/PMR-style peak quality is not a log-likelihood, so its curvature across the
+     rotation schedule carries no Fisher information about rotation, and no calibrated
+     curvature-to-variance map exists. The disc technique contributes a translation
+     estimate while abstaining on rotation (the theory section above discusses why).
 
 5. Apply the at-edge tests against the search-window axis bounds and the rotation cap, and
    the spurious tests using the pyramid wrapper's ``spurious`` and ``consistency``

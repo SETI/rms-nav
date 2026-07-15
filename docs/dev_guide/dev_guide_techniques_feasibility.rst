@@ -8,8 +8,9 @@ Overview
 Feasibility reporting is the small dataclass every navigation technique returns from its
 ``is_feasible`` method. The orchestrator consults the report before invoking ``navigate``;
 infeasible techniques are skipped silently and the human-readable reason is recorded so the
-per-image log surfaces "skipped — no ``LIMB_ARC`` features with sufficient visible arc" without
-the technique's per-image work running. Feasibility checks read feature *metadata* only —
+per-image log surfaces a DEBUG line of the form
+``Technique BodyLimbNav infeasible: no_limb_arc_features_with_sufficient_visible_arc``
+without the technique's per-image work running. Feasibility checks read feature *metadata* only —
 never image pixels — so they are cheap to obtain on every image.
 
 Theory
@@ -104,7 +105,7 @@ Examples
 
 **Feasible report, body limb fit.**  When :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`
 sees three offered ``LIMB_ARC`` features, two of which carry surviving vertex counts at or above
-``min_arc_px``, the report is::
+``min_arc_vertices``, the report is::
 
     NavFeasibilityReport(
         feasible=True,
@@ -117,7 +118,7 @@ The orchestrator invokes
 set; the technique itself drops the third polyline before fitting.
 
 **Infeasible report, body limb fit.**  When every offered ``LIMB_ARC`` has fewer surviving
-vertices than ``min_arc_px``, the report is::
+vertices than ``min_arc_vertices``, the report is::
 
     NavFeasibilityReport(
         feasible=False,

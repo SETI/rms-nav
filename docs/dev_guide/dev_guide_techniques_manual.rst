@@ -20,9 +20,14 @@ interactive driver calls
 :func:`~spindoctor.nav_technique.nav_technique_manual.run_manual_nav` directly when an operator
 wants to navigate an image by hand or override an autonomous result.
 
-Feasibility passes whenever the operator opens the dialog (the technique reports feasible
-on any feature set, since manual navigation looks at whatever the scene has rendered);
-infeasibility paths exist only as defensive errors when the dialog cannot be opened.
+Feasibility passes when at least one offered feature is renderable into the dialog overlay
+(a template, a non-empty polyline, a ``BODY_BLOB`` outline, or a ``STAR`` marker);
+:meth:`~spindoctor.nav_technique.nav_technique_manual.NavTechniqueManual.is_feasible` returns
+``feasible=False`` with reason ``no_renderable_features_for_manual_nav`` when nothing
+renders. :func:`~spindoctor.nav_technique.nav_technique_manual.run_manual_nav` additionally
+verifies the composed overlay against the ext-FOV shape and skips (with a logged warning)
+when the overlay mask is empty — every renderable feature clipped out of the frame — so an
+empty dialog is never opened.
 
 Theory
 ======
@@ -63,9 +68,12 @@ Restrictions and assumptions
   cannot open a window must not invoke this technique.
 - The auto-pick path consults the same NCC pyramid the
   :class:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` and
-  :class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` techniques use;
-  when the scene has no template-bearing feature the auto-pick is unavailable and only the
-  manual drag / type path remains.
+  :class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` techniques use,
+  correlating against the composite overlay image and mask. The ``Auto`` button is never
+  disabled: it runs unconditionally on whatever the overlay contains (templates, polyline
+  strokes, blob circles, star rectangles), so on scenes without a template-bearing feature
+  the correlation runs against outline artwork and its peak may be uninformative — the
+  operator judges the result and can always drag or type an offset instead.
 - Operator precision in the dialog is limited by zoom, eye, and screen pixels; the
   technique reports a per-axis 1 px sigma on the resulting covariance regardless of how the
   operator picked.
@@ -157,9 +165,11 @@ Call path traced through
    :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.confidence` ``1.0``,
    :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` ``False``,
    :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` ``False``, and a
-   diagnostics object capturing whatever the auto-pick scored (a
-   :class:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics` when the operator accepted
-   the auto-pick; otherwise zero-filled).
+   :class:`~spindoctor.nav_technique.diagnostics.ManualNavDiagnostics` with
+   ``operator_accepted=True`` (the diagnostics type is always ``ManualNavDiagnostics``
+   regardless of whether the auto-pick was used). Cancelling the dialog instead yields a
+   spurious zero-confidence result carrying ``ManualNavDiagnostics`` with
+   ``operator_accepted=False``.
 7. When the operator saves a sidecar, the merged annotations populate a labelled summary
    PNG alongside the JSON.
 
@@ -180,9 +190,9 @@ audit.
 autonomous :class:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`
 reported ``status=failed``. The composite overlay shows the predicted catalog stars as
 rectangle outlines. The operator manually drags the overlay until visible stars align with
-the predicted boxes and confirms. The dialog's ``Auto`` button is greyed out (the scene has
-no template-bearing feature for the masked-NCC pyramid to consume); only the manual path is
-available.
+the predicted boxes and confirms. The dialog's ``Auto`` button stays enabled — it would
+correlate against the rectangle-outline artwork, which rarely yields a meaningful peak on a
+star-only scene — so in practice the operator ignores it and uses the manual path.
 
 **Headless backend rejection.**  A CI runner invokes
 :func:`~spindoctor.nav_technique.nav_technique_manual.run_manual_nav` without a display server.

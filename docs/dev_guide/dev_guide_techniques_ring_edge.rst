@@ -34,8 +34,8 @@ Theory
 
 The technique fits a per-image translation by minimising the weighted squared distance from
 the model ring-edge polylines to the image edges, exactly as the limb fit does — see
-:doc:`dev_guide_techniques_dt_fitting` for the cost function, the LM mechanics, the polarity
-filter, and the Tukey biweight.
+:doc:`dev_guide_techniques_dt_fitting` for the cost function, the LM mechanics, and the
+Tukey biweight (the polarity filter is disabled for ring edges; see below).
 
 Rank-deficient covariance
 -------------------------
@@ -71,10 +71,10 @@ Restrictions and assumptions
   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.image_edge_dt_ext` and
   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.image_gradient_vu_ext`; in their
   absence the technique cannot evaluate the cost.
-- Per-vertex normals supplied by the upstream rings model are oriented so that the image
-  gradient should point from outside the ring system inward at a bright ring edge against a
-  dark background. Polarity-rejected vertices contribute a near-infinite synthetic
-  residual so the Tukey biweight zeroes their weight on the first reweighting.
+- Polarity filtering is entirely disabled for ring edges (the fit runs with
+  ``use_polarity=False``): predicting a ring edge's gradient polarity depends on lighting
+  and gap-vs-ringlet context that the ring catalog does not encode today, so every vertex
+  participates regardless of its local gradient direction.
 - Ring edges that have collapsed to a sub-pixel radial extent are emitted by the upstream
   model as ``RING_ANNULUS`` templates instead, so the technique never sees them. See
   :doc:`dev_guide_techniques_ring_annulus`.
@@ -134,6 +134,29 @@ All numeric tunables for this technique live in ``techniques.RingEdgeNav.tuning`
 - ``spurious_waiver_absent_median_px`` — float, default ``5.0`` px. A non-well-fit edge
   whose per-edge median DT residual is at least this large counts as *absent* (waivable)
   rather than *misaligned* (a genuine mis-convergence).
+- ``spurious_waiver_sigma_floor_px`` — float, default ``3.0`` px. Sigma floor added in
+  quadrature to the translation covariance whenever the absent-edge waiver fires. A waived
+  fit is carried by a minority of its model in a scene whose parallel ringlet structure
+  can offer alias alignments the DT cannot rule out; the floor sits above the medium
+  tier's 2 px sigma cap so a waived fit surfaces as a low-tier result and cannot outweigh
+  a full-support fit in the ensemble.
+- ``spurious_max_lm_displacement_px`` — float, default ``4.0`` px. If the LM moves more
+  than this many pixels from the integer coarse-NCC seed, flag spurious. Defensive: with
+  the trust region below the LM cannot leave the coarse basin, so this guard normally
+  never fires; it catches any future regression that bypasses the trust region.
+- ``lm_trust_region_px`` — float, default ``1.0`` px. Maximum LM displacement from the
+  integer coarse-NCC seed; the LM rejects any trial step that would land outside this
+  radius. See :doc:`dev_guide_techniques_dt_fitting`.
+- ``lm_tikhonov_alpha`` — float, default ``0.0`` (dimensionless). Tikhonov anchor strength
+  toward the coarse-NCC seed; 0 disables the anchor (the trust region is the harder
+  bound).
+- ``gradient_ridge_refine`` — int flag, default ``1`` (ON). Final continuous
+  gradient-ridge sub-pixel refinement after the DT LM converges. The binary edge mask
+  quantises detected edges to the integer pixel grid, so on dense real ring scenes many
+  model vertices land exactly on edge pixels (DT of zero, zero gradient) and the DT-LM
+  step stalls at the integer coarse-NCC seed; the continuous pass refines against the
+  un-thresholded gradient magnitude, recovering the sub-pixel offset the quantised DT
+  discards.
 - ``rotation_at_edge_fraction`` — float, default ``0.95`` (dimensionless). When
   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the
   converged rotation magnitude trips
@@ -157,15 +180,20 @@ sigmoid combination; see :doc:`dev_guide_techniques_confidence`. The formula spe
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`.
 
 - :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.total_edge_length_px` —
-  alpha = 1.0, offset = 0.0, divisor = 200.0, cap at 1.0. Cumulative pixel length of all
-  surviving ring-edge polylines. More polyline earns confidence up to a 200-pixel
-  saturation point.
-- :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.per_edge_dt_rms_summed` —
-  alpha = -2.0, offset = 0.0, divisor = 1.0, no cap. Sum of per-edge final DT RMS values.
-  Larger residuals pull confidence down.
+  alpha = 1.137, offset = 0.0, divisor = 1500.0, cap at 1.0. Cumulative pixel length of all
+  surviving ring-edge polylines. More polyline earns confidence up to a 1500-pixel
+  saturation point (calibration campaign raw p5/p50/p95 = 440/762/1552).
+- :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.per_edge_dt_rms_mean` —
+  alpha = 0.0, offset = 0.0, divisor = 1.0, no cap. Mean per-edge final DT RMS value; the
+  mean rather than the raw sum because the sum scales with the number of fused edges, so a
+  fixed divisor would penalise a frame purely for having more rings. The sim calibration
+  fit drives the alpha to its sign bound at 0.0: the campaign's failures are clean-residual
+  wrong-ringlet locks that the residual cannot see, and an unconstrained fit would have
+  given the term a positive (anti-calibrated) weight. Kept wired for a future
+  real-anchored calibration.
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`
-firing forces confidence to zero. The constant baseline is :math:`\alpha_{0} = -1.0`. No
+firing forces confidence to zero. The constant baseline is :math:`\alpha_{0} = 1.841`. No
 post-sigmoid ``hard_cap`` is applied.
 
 Implementation
@@ -196,8 +224,8 @@ Class attributes:
   ``frozenset({RING_EDGE})``.
 - :attr:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav.requires_prior` — ``False``.
 - :attr:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav.confidence_attributes` —
-  ``{'at_edge', 'total_edge_length_px', 'per_edge_dt_rms_summed', 'edge_count',
-  'is_rank_1'}``.
+  ``{'at_edge', 'total_edge_length_px', 'per_edge_dt_rms_summed', 'per_edge_dt_rms_mean',
+  'per_edge_dt_median_max', 'edge_count', 'is_rank_1'}``.
 
 Public methods (autodocumented at :doc:`/api_reference/api_nav_technique`):
 :meth:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav.is_feasible` and
@@ -212,7 +240,15 @@ Diagnostics
   cumulative pixel length of all surviving ring-edge polylines. Consumed by the confidence
   formula.
 - :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.per_edge_dt_rms_summed` — sum
-  of per-edge final DT RMS values. Consumed by the confidence formula.
+  of per-edge final DT RMS values.
+- :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.per_edge_dt_rms_mean` — mean
+  per-edge final DT RMS value (the sum divided by the edge count). Edge-count independent,
+  so it — not the raw sum — is the scale the confidence formula consumes.
+- :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.per_edge_dt_median_max` —
+  largest per-edge median absolute DT residual (px). The mis-convergence gate statistic: a
+  wholly misaligned edge (the wrong-ringlet failure mode) drives its own median to the
+  ringlet spacing, while a minority of vertices snapping to a neighbouring parallel edge
+  leaves every median near the fit residual.
 - :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.edge_count` — number of
   ``RING_EDGE`` features fused.
 - :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.is_rank_1` — True when every

@@ -48,6 +48,16 @@ spindoctor.nav_orchestrator
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.nav_orchestrator.ensemble_consensus
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.nav_orchestrator.ensemble_observability
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.nav_orchestrator.curator
    :members:
    :undoc-members:

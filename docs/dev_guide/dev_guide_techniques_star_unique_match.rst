@@ -6,12 +6,11 @@ Overview
 ========
 
 :class:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav` is the pass-1
-brightness-margin-gated 1-star or 2-star unique-match technique. When the predictable
-catalog cohort has exactly one (or two) stars whose predicted SNR is at least a configured
-magnitude brighter than every other predictable star in the field, the technique searches a
-small window around each prediction, takes the brightest peak above a noise threshold, and
-reports the implied translation (1-star path) or the implied similarity transform (2-star
-path). It runs without a prior — its job is to seed the pass-2
+1-star or 2-star unique-match technique. It searches a small window around the prediction of
+the brightest predictable star (or the brightest two), takes the brightest peak above a
+noise threshold, and reports the implied translation (1-star path) or the implied similarity
+transform (2-star path); the 1-star path additionally requires the star to be a configured
+magnitude margin brighter than every other predictable star in the field. It runs without a prior — its job is to seed the pass-2
 :class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav` on scenes where the SPICE
 pointing error is small enough that the brightest predictable star sits inside the
 per-instrument search window.
@@ -34,12 +33,14 @@ Procrustes alignment.
 Brightness-margin gate
 ----------------------
 
-For each predictable star the matcher computes a magnitude difference to the next-brightest
-predictable star in the FOV (using the standard relation
-:math:`\Delta m = 2.5 \log_{10}(\mathrm{SNR}_{1} / \mathrm{SNR}_{2})`). A star whose
-brightness margin exceeds the configured floor (``brightness_margin_to_next_catalog_star_mag``)
-is "uniquely bright" and a candidate for the 1-star path. When two stars each meet the
-margin against the third-brightest, the 2-star path is candidate.
+The matcher computes a magnitude difference between the brightest predictable star and the
+next-brightest predictable star in the FOV (using the standard relation
+:math:`\Delta m = 2.5 \log_{10}(\mathrm{SNR}_{1} / \mathrm{SNR}_{2})`). The margin floor
+(``brightness_margin_to_next_catalog_star_mag``) gates only the 1-star path: a star whose
+brightness margin falls below it is not "uniquely bright" and the 1-star path fails. The
+2-star path is attempted first whenever at least two usable stars exist, regardless of the
+margin; on that path the margin (to the next-brightest *unmatched* star) is computed as a
+diagnostic only.
 
 Local centroid
 --------------
@@ -58,8 +59,9 @@ exceeds ``one_star_max_residual_px`` marks the result spurious.
 
 The 1-star path reports the per-star residual (observed centroid minus predicted position)
 as the translation. The reported covariance is the per-feature Cramer-Rao lower bound from
-:attr:`~spindoctor.feature.feature.NavFeature.position_cov_px`. Rotation is unobservable on a
-single point match.
+:attr:`~spindoctor.feature.feature.NavFeature.position_cov_px`, inflated by ``residual_px**2``
+on the diagonal so a noisy match honestly reports its scatter rather than the noise-free
+CRLB floor. Rotation is unobservable on a single point match.
 
 The path rests on the premise that the search window holds a *single unambiguous*
 detection, and the absolute ``detection_sigma`` threshold alone cannot enforce that: the
@@ -93,9 +95,9 @@ uniform residual cut below the search window is possible.
 2-star path
 -----------
 
-When two stars each pass the brightness-margin gate, the technique runs a Procrustes /
-similarity-transform fit on the two correspondences and reports the recovered translation
-plus rotation. The rotation variance is derived analytically as
+When at least two usable stars exist, the technique first attempts the 2-star path: a
+Procrustes / similarity-transform fit on the two correspondences that reports the recovered
+translation plus rotation. The rotation variance is derived analytically as
 
 .. math::
 
@@ -139,8 +141,10 @@ Sources of uncertainty
 ----------------------
 
 The 1-star covariance is the per-feature CRLB floor from
-:attr:`~spindoctor.feature.feature.NavFeature.position_cov_px`. The 2-star covariance is the
-per-feature CRLB floor for translation plus the analytic rotation variance derived above.
+:attr:`~spindoctor.feature.feature.NavFeature.position_cov_px` inflated by ``residual_px**2``
+on the diagonal. The 2-star translation covariance is the average of the two stars'
+residual-inflated matrices, plus the analytic rotation variance derived above when rotation
+is fitted.
 When the converged offset sits within the at-edge tolerance of any axis bound, or when the
 2-star rotation parameter is at the configured fraction of its cap, the result is flagged
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and the hard-zero
@@ -207,21 +211,22 @@ sigmoid combination; see :doc:`dev_guide_techniques_confidence`. Spec is
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
 - :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.predicted_snr` —
-  alpha = 1.0, offset = 0.0, divisor = 20.0, cap at 1.0. Predicted SNR of the brightest
-  catalog star. Higher SNR shrinks the centroid CRLB; saturates near SNR=20.
+  alpha = 1.295, offset = 0.0, divisor = 100.0, cap at 1.0. Predicted SNR of the brightest
+  catalog star. Higher SNR shrinks the centroid CRLB; saturates at SNR=100 (calibration
+  campaign raw p5/p50/p95 = 9/42/308).
 - :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.brightness_margin_mag`
-  — alpha = 1.0, offset = 1.5, divisor = 1.5, cap at 1.0. Magnitude margin to the
-  next-brightest predictable star in the extfov. Below the 1.5 mag floor the technique
+  — alpha = 1.288, offset = 1.5, divisor = 1.5, cap at 1.0. Magnitude margin to the
+  next-brightest predictable star in the extfov. Below the 1.5 mag floor the 1-star path
   short-circuits before reaching the formula; above the floor, additional margin earns
   confidence up to a 1.5 mag span.
 - :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.residual_px` —
-  alpha = -1.0, offset = 0.0, divisor = 2.0, no cap. Detection-vs-prediction residual.
+  alpha = -0.45, offset = 0.0, divisor = 2.0, no cap. Detection-vs-prediction residual.
   Larger residuals pull confidence down.
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
 confidence to zero before the sigmoid evaluates. The constant baseline is
-:math:`\alpha_{0} = -1.0`. No post-sigmoid ``hard_cap`` is applied at the spec level; the
+:math:`\alpha_{0} = 1.156`. No post-sigmoid ``hard_cap`` is applied at the spec level; the
 per-mode caps above are applied by the technique itself.
 
 Implementation
@@ -292,10 +297,10 @@ Call path traced through
    (predictable and not occluded by a body silhouette or ring annulus).
 2. Sort the usable cohort by predicted SNR (brightest first) and compute the brightness
    margin between consecutive entries via ``brightness_margin_mag``.
-3. Branch on the brightness-margin gate:
+3. Branch on the usable-star count:
 
-   - **2-star path eligible.**  When the brightest two stars each clear the margin against
-     the third-brightest, run the 2-star branch. For each of the two stars, slice a
+   - **2-star path.**  Attempted first whenever at least two usable stars exist (no
+     brightness-margin precondition). For each of the brightest two stars, slice a
      ``search_window_px``-half-width window around its prediction in
      :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.image_ext` and call
      ``local_centroid`` to extract the sub-pixel detection. When both detections clear
@@ -303,8 +308,9 @@ Call path traced through
      ``similarity_transform_fit`` to recover translation and rotation. When the
      per-correspondence residual exceeds ``max_residual_px``, fall back to the 1-star
      path.
-   - **1-star path.**  When only the brightest clears the margin (or the 2-star fallback
-     fired), slice a window around the brightest's prediction, extract the sub-pixel
+   - **1-star path.**  When fewer than two stars are usable (or the 2-star fallback
+     fired), require the brightest to clear the brightness-margin floor, slice a window
+     around its prediction, extract the sub-pixel
      centroid, pass the peak-to-runner-up ambiguity gate (plus the
      ``one_star_max_residual_px`` residual gate when that ratio is the no-rival
      sentinel), and report the per-star residual as the translation.
@@ -312,8 +318,9 @@ Call path traced through
 4. Result-shape branches on the chosen path and
    :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`:
 
-   - **1-star, no rotation.**  (2, 2) CRLB covariance from
-     :attr:`~spindoctor.feature.feature.NavFeature.position_cov_px`;
+   - **1-star, no rotation.**  (2, 2) covariance: the CRLB floor from
+     :attr:`~spindoctor.feature.feature.NavFeature.position_cov_px` inflated by
+     ``residual_px**2`` on the diagonal;
      :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.rotation_rad` and
      :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` are
      ``None``.
@@ -321,10 +328,12 @@ Call path traced through
      :func:`~spindoctor.nav_technique.nav_technique.embed_rotation_unobservable`;
      :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is
      ``0.0`` and the sigma is the rotation-unobservable sentinel.
-   - **2-star, no rotation.**  (2, 2) CRLB covariance from the average of the two stars'
-     :attr:`~spindoctor.feature.feature.NavFeature.position_cov_px` floors.
+   - **2-star, no rotation.**  (2, 2) covariance from the average of the two stars'
+     residual-inflated
+     :attr:`~spindoctor.feature.feature.NavFeature.position_cov_px` matrices.
    - **2-star, rotation fit.**  Full (3, 3) covariance: the (2, 2) translation block is
-     the per-axis CRLB average, the rotation diagonal is the analytic
+     the average of the two residual-inflated per-star matrices, the rotation diagonal is
+     the analytic
      :math:`2 (\sigma_{v}^{2} + \sigma_{u}^{2}) / L^{2}` form derived from the catalog-pair
      separation :math:`L`.
      :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is the
@@ -366,7 +375,7 @@ Examples
     ``similarity_transform_fit`` on the catalog-vs-detection point pair to recover a
     translation plus rotation simultaneously. The reported covariance is the
     closed-form 3x3 from the similarity-transform residual scatter; the post-sigmoid
-    cap is the 2-star ``two_star_confidence_cap`` (default 0.85), allowing higher
+    cap is the 2-star ``two_star_confidence_cap`` (default 0.8), allowing higher
     final confidence than the 1-star path. The
     :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.mode` field on the
     diagnostics carries ``'two_star'`` so the curator surfaces which path fired.
@@ -376,7 +385,7 @@ Examples
     ``obs.star_max_usable_vmag()``. The stars model emits no ``STAR`` features that clear
     the magnitude gate, so the orchestrator does not offer any usable star feature to
     :meth:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.is_feasible`.
-    Feasibility fails with reason ``no_usable_stars`` and the technique skips its
+    Feasibility fails with reason ``no_usable_star_features`` and the technique skips its
     :meth:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`
     pass entirely. The orchestrator surfaces the infeasibility on the per-image
     :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` via the per-technique

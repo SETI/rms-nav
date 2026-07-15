@@ -357,16 +357,25 @@ The catalog-driven models register under these per-instance names:
   portion is the upper-case SPICE body name
   (``body:MIMAS``, ``body:DIONE``, ``body:SATURN``).
 * ``rings:PLANET`` —
-  :class:`~spindoctor.nav_model.nav_model_rings.NavModelRings` (one instance
-  per planet whose ring system has any radius inside the extended FOV;
-  Saturn, Uranus, and Neptune today).
+  :class:`~spindoctor.nav_model.nav_model_rings.NavModelRings` (at most one
+  instance, for the planet returned by ``obs.closest_planet``, and only
+  when that planet has an entry in the ``rings.ring_features`` catalog;
+  only Saturn's catalog is populated, so ``rings:SATURN`` is the only
+  instance in practice).
+* ``titan:TITAN`` —
+  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (one
+  instance whenever Titan is inside the extended FOV).  Titan's opaque
+  haze hides the surface, so the model emits no features: a frame whose
+  only navigable content is Titan fails with ``status_reason``
+  ``titan_unsupported``, while a frame containing Titan plus other
+  content navigates on the other content.
 
 Two convenience normalizations apply to model patterns:
 
 * The ``VALUE`` part of ``prefix:VALUE`` is upper-cased automatically,
   so ``body:saturn`` matches ``body:SATURN``.
 * A bare prefix without a colon and without glob characters
-  (``body``, ``rings``) is auto-expanded to ``prefix:*``, matching
+  (``body``, ``rings``, ``titan``) is auto-expanded to ``prefix:*``, matching
   every namespaced model under that prefix.  ``stars`` (which has no
   namespace) continues to match itself directly.
 
@@ -407,8 +416,8 @@ cannot be invoked by ``--nav-techniques``.
 
 Multiple feasible techniques run in parallel and the orchestrator
 combines their results via the ensemble step; ``--nav-techniques`` is
-not a "pick one technique" knob the way the legacy pipeline was — it
-restricts the candidate set the orchestrator considers.
+not a "pick one technique" knob — it restricts the candidate set the
+orchestrator considers.
 
 Examples
 --------
@@ -487,7 +496,9 @@ These JSON files contain the navigation results, including:
    the simulator's realism as an unquantified assumption and must not
    be read as probabilities of real-image accuracy.  The
    ``confidence_provisional: true`` field in every ``_metadata.json``
-   marks this sim-anchored basis.
+   that carries a navigation result marks this sim-anchored basis
+   (image-load-error metadata has no navigation result block and
+   therefore no such field).
 
 These files are also the input to the run-statistics tooling
 (``sd_stats_ingest`` / ``sd_stats_report``), which aggregates them into
@@ -680,8 +691,9 @@ ship out of the box: stars, planetary bodies, and planetary rings.
 Each contributes one or more *features* (typed predictions with their
 own per-feature uncertainty) to the navigator.  You can restrict which
 families run by passing ``--nav-models`` on the command line; valid
-entries are ``stars``, ``rings``, and body-specific entries of the form
-``body:NAME`` (glob patterns are allowed).
+entries are ``stars``, ``rings``, ``titan`` (equivalently
+``titan:TITAN``), and body-specific entries of the form ``body:NAME``
+(glob patterns are allowed).
 
 Star Navigation Model
 ---------------------
@@ -798,8 +810,9 @@ generic-icy-moon profile is used.
      - Apply per-body geometric albedo when computing brightness.
 
 The bodies considered for navigation are the planet returned by
-``obs.closest_planet`` plus the satellites configured under
-``planets.satellites``.
+``obs.closest_planet`` plus the satellites configured under the
+top-level ``satellites.<PLANET>`` mapping in
+``config_100_satellites.yaml``.
 
 Ring Navigation Model
 ---------------------
@@ -823,8 +836,10 @@ For each surviving ring feature the model emits one of:
 Per-edge feature definitions live in the per-planet ring files
 (``config_300_jupiter_rings.yaml``, ``config_310_saturn_rings.yaml``,
 ``config_320_uranus_rings.yaml``, ``config_330_neptune_rings.yaml``)
-under ``rings.ring_features.<PLANET>.features``.  See "Ring YAML
-configuration" in the developer guide for the full schema.
+under ``rings.ring_features.<PLANET>.features``.  Only the Saturn file
+carries features today; the Jupiter, Uranus, and Neptune files are
+empty placeholders.  See "Ring YAML configuration" in the developer
+guide for the full schema.
 
 Planet shadow removal
 ^^^^^^^^^^^^^^^^^^^^^

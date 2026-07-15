@@ -94,6 +94,7 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
   :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.ncc_peak`,
   :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.peak_to_runner_up_ratio`,
   :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_px`,
+  :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_ratio`,
   :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.used_gradient`,
   :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.body_count`.
 
@@ -109,7 +110,10 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
   :class:`~spindoctor.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`. Same shape as
   :class:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics` with
   ``visible_terminator_arc_fraction`` substituted for
-  ``visible_limb_arc_fraction``.
+  ``visible_limb_arc_fraction``, plus the basin second-opinion pair
+  :attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.secondary_basin_distance_px`
+  and
+  :attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.secondary_basin_cost_ratio`.
 
 - :class:`~spindoctor.nav_technique.diagnostics.BodyBlobDiagnostics` — emitted by
   :class:`~spindoctor.nav_technique.nav_technique_body_blob.BodyBlobNav`. Fields:
@@ -124,6 +128,8 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
   :class:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav`. Fields:
   :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.total_edge_length_px`,
   :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.per_edge_dt_rms_summed`,
+  :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.per_edge_dt_rms_mean`,
+  :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.per_edge_dt_median_max`,
   :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.edge_count`,
   :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.is_rank_1`.
 
@@ -148,13 +154,20 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
   :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.mode`,
   :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.predicted_snr`,
   :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.brightness_margin_mag`,
-  :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.residual_px`.
+  :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.residual_px`,
+  :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.detection_peak_ratio`.
 
 - :class:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics` — emitted by
   :class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav`. Fields:
   :attr:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics.n_stars_used`,
   :attr:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics.median_pos_err_px`,
   :attr:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics.residual_scatter_px`.
+
+- :class:`~spindoctor.nav_technique.diagnostics.ManualNavDiagnostics` — emitted by
+  :class:`~spindoctor.nav_technique.nav_technique_manual.NavTechniqueManual`. Single field:
+  :attr:`~spindoctor.nav_technique.diagnostics.ManualNavDiagnostics.operator_accepted`, kept
+  explicit so the JSON metadata records that a human, not an autonomous technique, set the
+  offset.
 
 The module also exports the
 :data:`~spindoctor.nav_technique.diagnostics.NavTechniqueDiagnostics` union type spanning every
@@ -190,7 +203,7 @@ raises :exc:`AssertionError` and fails the build before any image is processed.
           - feature: visible_limb_arc_fraction
             alpha: 3.0
           - feature: dt_fit_rms_px
-            alpha: -1.5
+            alpha: -0.41
 
 Each ``feature`` value names an attribute on
 :class:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics`. At config-load time
@@ -207,7 +220,7 @@ produces a per-technique block in the per-image JSON sidecar of the form::
       "feature_ids": ["limb_arc:DIONE"],
       "offset_px": [11.0, 29.5],
       "covariance_px2": [[0.0156, 0.0017], [0.0017, 0.0148]],
-      "confidence": 0.794,
+      "confidence": 0.585,
       "spurious": false,
       "at_edge": false,
       "diagnostics": {

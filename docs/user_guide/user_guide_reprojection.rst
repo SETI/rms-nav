@@ -801,11 +801,11 @@ Body-specific options
      - ``None``
      - Longitude extent (degrees); default full range.
    * - ``--max-incidence DEG``
-     - ``70``
-     - Maximum incidence angle for valid pixels.
+     - ``None``
+     - Maximum incidence angle for valid pixels; default no limit.
    * - ``--max-emission DEG``
-     - ``70``
-     - Maximum emission angle for valid pixels.
+     - ``None``
+     - Maximum emission angle for valid pixels; default no limit.
    * - ``--max-resolution KM``
      - ``None``
      - Maximum resolution (km/pixel) for valid pixels.

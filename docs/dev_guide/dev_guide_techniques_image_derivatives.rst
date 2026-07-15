@@ -101,8 +101,10 @@ Restrictions and assumptions
   contrast against the background.
 - The threshold is expressed as a multiple of the per-image noise sigma. An over-confident
   noise estimate (too small) lets noise spikes through; an under-confident one suppresses
-  real edges. The orchestrator reads the noise sigma from the image classifier and falls
-  back to a direct MAD estimate when the classifier returns zero.
+  real edges. The orchestrator always computes the noise sigma via
+  ``estimate_image_noise_sigma(image, sensor_mask)`` on the *filtered* working image (not
+  the raw classifier sigma), so the estimate stays self-consistent with the gradients the
+  DT techniques actually fit.
 - The input image must be 2-D and contain only finite values. NaN or +/-inf pixels would
   propagate through the Gaussian and Sobel passes and poison every downstream consumer; the
   pass raises rather than silently degrading. The orchestrator sanitises the per-instrument
@@ -226,7 +228,8 @@ worked examples below are numerical illustrations rather than image-library scen
 
 **One-pass cost on a typical extended-FOV image.**  A 1024 × 1024 extended-FOV image at the
 default ``image_gradient_sigma_px = 1.2`` runs one separable Gaussian (truncated by SciPy's
-default at four sigma, ~9 × 9 effective kernel) plus two separable Sobel passes — three
+default at four sigma, radius ``int(4.0 * 1.2 + 0.5) = 5``, an 11 × 11 effective kernel)
+plus two separable Sobel passes — three
 passes over the image, no full-image FFT. Reusing the
 :func:`~spindoctor.nav_orchestrator.image_derivatives.compute_all_image_derivatives` combined entry
 point keeps it at three passes; calling
