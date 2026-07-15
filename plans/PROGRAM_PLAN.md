@@ -240,28 +240,30 @@ The known defects:
   harmless today (the reliability gate culls it) but it is a
   model-emission spec conflict to resolve.
 
-**Status (2026-07-14):** the tier-honesty / gate cluster is in review as
-a batch of pull requests off `main`; the remaining items are either
-operator-decided (below) or deferred.
+**Status (2026-07-14):** the batch is merged; the remaining items are
+either operator-decided (below) or deferred.
 
-- Open PRs awaiting review: #266 (#180 failure-reason emission + #254
-  dark-body blob gate), #267 (#132 rotation variance + #133 optimal star
-  inlier assignment), #268 (#259 one-star residual / no-rival gate),
-  #269 (#258 excluded-dissenter veto + #263 one-star tier cap), #270
-  (#221 rank-aware ensemble agreement + fused-offset zeroing fix), #271
-  (#222 pass-2 refine no longer corroborates its prior), #272 (#261
-  robust per-edge DT mis-convergence gate). #269 to #271 are a stack;
-  merge in that order.
-- In progress (agents): #237 and #238 triage attribution; #60 + #24
-  body-participation policy; #210 NCC covariance-model rederivation;
-  #128/#150 limb-bias diagnosis pass.
+- Merged: #266 (#180 failure-reason emission + #254 dark-body blob gate),
+  #267 (#132 rotation variance + #133 optimal star inlier assignment),
+  #268 (#259 one-star residual / no-rival gate), #269 (#258
+  excluded-dissenter veto + #263 one-star tier cap), #270 (#221
+  rank-aware ensemble agreement + fused-offset zeroing fix), #271 (#222
+  pass-2 refine no longer corroborates its prior), #272 (#261 robust
+  per-edge DT mis-convergence gate), #274 (#238 quintet curated as
+  pending fixtures awaiting #285/#284), #275 (#237 multi-body
+  limb-RMS-pooling fix), #276 (#128/#150 limb-bias diagnosis; follow-ups
+  #281/#282/#283), #277 (#60 interim Titan exclusion + #24
+  highly-irregular exclusion), #278 (#210 covariance-model rederivation).
 - Operator decisions settled: #239 sub-5 px bodies are to be curated as
   expected failures, with the relaxed-disc pathway revisited after #210
   lands honest sigmas; no qualifying frame exists in the current library
   or triage set yet, so this waits on a targeted cohort scan (predicted
-  diameter at or below ~5 px, single-body scenes) as library-growth work. #60 Titan and other atmospheric bodies
-  are hard-excluded from body navigation, with an active model/technique
-  that always declines and records why. #24 highly-irregular bodies drop
+  diameter at or below ~5 px, single-body scenes) as library-growth work.
+  #60 Titan is hard-excluded from body navigation, with an active
+  model/technique that always declines and records why — a deliberate
+  special case, not a generic atmospheric-body class, because Titan's
+  atmosphere (transparent at some wavelengths) does not generalize to
+  bodies like Venus. #24 highly-irregular bodies drop
   shape features (limb/terminator/disc) once resolved but may still
   navigate as point blobs. #210 gets a covariance-model rederivation, not
   a rescale. #128/#150 starts with a diagnosis pass that separates a
@@ -269,7 +271,7 @@ operator-decided (below) or deferred.
   the simulator, and validates that the simulator's own limb render is
   bias-free.
 - Two operator-confirmed tier ratchets (N1530185128 medium -> high,
-  W1449079117 low -> medium) are #279, stacked on #271.
+  W1449079117 low -> medium) are #279, merged after the ensemble stack.
 - The #128/#150 diagnosis reframed the limb redesign: the fitter
   contributes only ~0.1 px of real-frame error while spacecraft-position
   / ephemeris error dominates (0.4-1.7 px), so the higher-leverage target
@@ -306,7 +308,7 @@ commitment:
 
 | Decision | Then the work is |
 |---|---|
-| **Titan navigation** (#60): implement atmospheric-limb navigation or scope it out? | A new haze-limb model and technique (hard, physics-heavy), or graceful degradation plus honest docs. |
+| **Titan navigation** (#60): implement haze-limb navigation or scope it out? The interim is in place: Titan is hard-excluded from shape navigation with an active model that records the decline (`titan_unsupported`), a deliberate Titan-only special case. | A new haze-limb model and technique (hard, physics-heavy), or keeping the recorded-decline interim plus honest capability-matrix docs. |
 | **CK kernels** (#188, prerequisite #50): ship updated-pointing SPICE kernels as a product? | The kernel writer and its validation — a headline deliverable either way. |
 | **Backplane content** (#28 family): finalize the backplane set and formats | #55, #54, #57, #77, then the generator hardening (including the product-correctness defects #251, #252, #253 found by the #241 test suite). |
 

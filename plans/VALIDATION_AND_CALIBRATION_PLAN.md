@@ -804,24 +804,30 @@ vapor.
 
 **Dependencies:** light coupling to WS-7/8. **Risk:** low.
 
-### WS-7: Titan / atmospheric-body navigation — implement or scope out
+### WS-7: Titan navigation — implement or scope out
 **Closes:** "Titan is a no-op."
 **Tracked by:** #60 (Implement Titan navigation) for the "implement" branch.
 
-**Problem.** `nav_model_titan.py:48` `to_features()` returns `[]`.
+**Problem.** Titan's opaque haze hides the surface, so shape-based navigation
+is systematically wrong. The graceful-degradation half is done: Titan is
+hard-excluded from shape navigation as a deliberate Titan-only special case
+(its atmosphere, transparent at some wavelengths, does not generalize to
+other thick-atmosphere bodies), with an active model that emits no features
+and records the decline — a Titan-only frame fails with `titan_unsupported`
+rather than a silent empty result, and a Titan-plus-other-content frame
+navigates on the other content.
 
 **Decision gate (do this first):** is haze-limb navigation in scope for this
 release? Pick one:
 - **Implement:** a haze-aware limb model — per-filter haze-top altitude
  profiles, a haze-limb feature type, and a DT/edge technique that fits the haze
  top instead of the solid limb, validated on real Titan frames via WS-1.
-- **Scope out:** remove Titan from supported-target claims, mark it
- not-supported in the capability matrix, and ensure the orchestrator degrades
- gracefully (Titan in FOV falls back to rings/stars/other bodies, no silent
- empty-result confusion).
+- **Scope out:** keep the recorded-decline handling, remove Titan from
+ supported-target claims, and mark it not-supported in the capability matrix.
 
 **Acceptance criteria.** Either real Titan frames navigate within a stated bound,
-or Titan is unambiguously documented as not-supported and handled gracefully.
+or Titan is unambiguously documented as not-supported (the graceful handling
+already exists).
 
 **Dependencies:** WS-1 if implementing. **Risk:** high if building (haze physics is genuinely hard).
 
