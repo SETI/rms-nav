@@ -468,10 +468,10 @@ express the regimes the star techniques must be proven in.
   residual between their positions, which is the WS-17 confound at its
   true amplitude. Uses: (a) ON in each instrument's realism defaults at
   the measured residual amplitude once #228 delivers it (interim
-  amplitudes ship meanwhile, Section 15.7; the Voyager and Galileo
-  amplitudes stay interim indefinitely until star-field cohorts exist for
-  those instruments, since #228's method needs star frames and the library
-  has none for either); (b) swept amplitude as a tolerance
+  amplitudes ship meanwhile, Section 15.7; #228's method needs star
+  frames, which exist for all four instruments — the FOV-twist experiment
+  lists are the Voyager/Galileo source, Section 7 FOM 2); (b) swept
+  amplitude as a tolerance
   study (how much residual the techniques and ensemble absorb before
   cross-technique disagreement inflates); (c) OFF in the Section 8
   accuracy sweeps so mismatch curves stay unconfounded. Plate-scale error
@@ -890,7 +890,14 @@ distribution overlays plus a scalar divergence):
    and the spatial power spectrum of a sky region (catches banding/coherent
    noise).
 2. **PSF / encircled energy**: star-cutout radial profiles where star frames
-   exist (Cassini, LORRI); limb-gradient-based proxy where they do not.
+   exist. All four instruments have them: Cassini and LORRI in the library
+   already, and Galileo and Voyager via the star-field frames of the #228
+   FOV-twist residual analysis (`experiments/fov_twist/config/` lists 18
+   GOSSI star-calibration frames and ~70 twist-verified VGISS frames
+   spanning both spacecraft and cameras), a selection of which joins the
+   library as `star_dominated` frames (curation batch 006). Where a cohort
+   still lacks star frames for some camera/mode, fall back to the
+   limb-gradient-based proxy and say so.
 3. **Limb gradient profile**: normalized profile across real vs sim limbs,
    binned by resolution and phase (this is what BodyLimbNav's DT actually
    sees). This is a *joint* match of PSF + limb topography + photometric
@@ -918,8 +925,10 @@ phase B scope rather than deferred work.
 Deliverable: `tests/integration/sim_realism.py` (runner producing the match
 report + figures) and a `realism` section in the simulator report presenting
 the per-instrument match quality. Cohort reality as of 2026-07-15: the
-library holds 62 Cassini / 8 Galileo / 2 Voyager / 2 LORRI frames, so this
-is a Cassini match first. The runner ships for all four instruments, reports
+library holds 62 Cassini / 8 Galileo / 2 Voyager / 2 LORRI frames, with a
+9-frame GOSSI/VGISS `star_dominated` selection (curation batch 006, from
+the FOV-twist lists) in operator review — so this is a Cassini match
+first, with FOM 2 reachable on every instrument once batch 006 lands. The runner ships for all four instruments, reports
 each against whatever cohort WS-3 has landed, and — where the cohort cannot
 support a statistic (an IQR of two frames is not a statistic) or no
 independent PSF/shape source exists — says so and labels that instrument's
@@ -1560,8 +1569,12 @@ Resolved (operator, 2026-07-15):
 
 Open, and owned outside this plan: the WS-3 cohort sizes for
 Voyager/Galileo/LORRI (phase H ships its runner regardless, reports against
-what exists, and labels the gaps); the #228 residual-distortion
-measurements (interim amplitudes ship meanwhile, Section 15.7).
+what exists, and labels the gaps — narrowed 2026-07-15 by the operator
+directing a selection of GOSSI/VGISS star frames from the FOV-twist lists
+into the library, which gives FOM 2 star cutouts on all four instruments;
+limb/ring-class cohort growth for Voyager/Galileo/LORRI remains WS-3
+work); the #228 residual-distortion measurements (interim amplitudes ship
+meanwhile, Section 15.7).
 
 ---
 
@@ -2012,8 +2025,8 @@ replaces the zeros with cohort-measured rates. This keeps "realism
 defaults" honest until they are measured, per the acceptance criteria.
 Residual-distortion interim amplitudes (ON under `instrument_defaults`):
 coiss 0.1 px, vgiss 1.0 px, gossi 0.05 px, nhlorri 0.05 px —
-provenance-tagged pending #228, and the vgiss/gossi values stay interim
-until star-field cohorts for those instruments exist (Section 4.4).
+provenance-tagged pending #228, which the FOV-twist star-frame lists make
+measurable for all four instruments (Sections 4.4, 7).
 
 ### 15.8 Navigator-side plumbing and truth records
 
