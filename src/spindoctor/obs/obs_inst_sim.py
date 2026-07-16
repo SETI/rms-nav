@@ -152,7 +152,7 @@ class ObsSim(ObsSnapshotInst):
         Derived from the scene's own detector model rather than anchored to a
         reference exposure the way the real instruments do it: the sim
         renderer draws a star's PSF peak at ``signal_full_scale_dn *
-        2.512**-vmag`` DN (see ``sim.render``), so the limiting magnitude is
+        2.512**-vmag`` DN (see ``spindoctor.sim.forward``), so the limiting magnitude is
         where that peak falls to twice the effective per-pixel noise sigma --
         the matched-filter detection boundary measured on single-star sim
         scenes.  Keeping this physical matters beyond the faint-star gate:
