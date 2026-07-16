@@ -323,7 +323,9 @@ _DETECTOR_KEYS: frozenset[str] = frozenset(
 _DETECTOR_MODELS: frozenset[str] = frozenset({'ccd', 'vidicon'})
 # Quantization sub-modes: 'exact' rounds to integer DN (uniform bins); the ADC
 # modes reproduce the documented histogram structure of each camera.
-_QUANTIZATION_MODES: frozenset[str] = frozenset({'exact', 'uneven_12bit', '8bit', 'sqrt_lut'})
+_QUANTIZATION_MODES: frozenset[str] = frozenset(
+    {'exact', 'uneven_12bit', '8bit', 'sqrt_lut', 'ls8b', 'contour_8bit'}
+)
 # The artifacts block: the two switches (the physical-chain opt-in and the
 # adversarial-placement flag) plus one map per artifact mode, keyed by exactly
 # the mode-key registry.  Unknown keys fail.

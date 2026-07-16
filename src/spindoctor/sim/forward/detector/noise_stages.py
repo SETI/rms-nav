@@ -26,6 +26,7 @@ __all__ = [
     'add_cosmic_rays',
     'add_dark_current',
     'add_hot_pixels',
+    'deposit_morphological_events',
 ]
 
 
@@ -223,14 +224,47 @@ def add_cosmic_rays(
     if expected <= 0.0:
         return
     n_events = int(rng.poisson(expected))
-    if n_events <= 0:
+    deposit_morphological_events(
+        electrons, n_events=n_events, amplitude_e=amplitude_e, rng=rng, amplitude_dist='lognormal'
+    )
+
+
+def deposit_morphological_events(
+    electrons: NDArrayFloatType,
+    *,
+    n_events: int,
+    amplitude_e: float,
+    rng: np.random.Generator,
+    amplitude_dist: str = 'lognormal',
+) -> None:
+    """Deposit a fixed count of morphological charge events (electrons) in place.
+
+    The event-type mix is the same for cosmic rays and for the Galileo radiation
+    regime -- mostly single-pixel point hits, some grazing streaks, a few
+    multi-pixel splatters -- but the amplitude distribution differs: cosmic-ray
+    events are lognormal about the deposit scale, while the radiation regime's
+    amplitudes fall steeply from a few DN (an exponential draw).  A zero count or
+    amplitude is a no-op.
+
+    Parameters:
+        electrons: The electron image, modified in place.
+        n_events: The number of events to deposit.
+        amplitude_e: The charge-deposit scale in electrons.
+        rng: The stage's seeded generator.
+        amplitude_dist: 'lognormal' (cosmic rays) or 'exponential' (radiation,
+            steeply-falling amplitudes).
+    """
+    if n_events <= 0 or amplitude_e <= 0.0:
         return
-    # Event-type mix: mostly point hits, some streaks, few splatters.
+    size_v, size_u = electrons.shape
     kinds = rng.choice(3, size=n_events, p=[0.80, 0.15, 0.05])
     for kind in kinds.tolist():
         v0 = int(rng.integers(0, size_v))
         u0 = int(rng.integers(0, size_u))
-        charge = amplitude_e * (1.0 + float(rng.lognormal(0.0, 1.0)))
+        if amplitude_dist == 'exponential':
+            charge = amplitude_e * float(rng.exponential(0.25))
+        else:
+            charge = amplitude_e * (1.0 + float(rng.lognormal(0.0, 1.0)))
         if kind == 0:
             electrons[v0, u0] += charge
         elif kind == 1:

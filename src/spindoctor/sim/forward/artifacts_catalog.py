@@ -10,6 +10,7 @@ Keys are sim instrument names (see ``spindoctor.sim.instruments.SIM_INSTRUMENTS`
 """
 
 import copy
+from collections.abc import Mapping
 from typing import Any
 
 from spindoctor.sim.forward.artifact_modes import ARTIFACT_MODES, MODE_KEYS
@@ -21,6 +22,7 @@ __all__ = [
     'MODE_KEYS',
     'PSF_KERNELS',
     'resolve_detector_defaults',
+    'resolve_mode_with_catalog',
 ]
 
 # The artifact-mode registry (:mod:`spindoctor.sim.forward.artifact_modes`) is the
@@ -137,6 +139,32 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'bias_col_gradient_dn': 0.5,  # 5.2 interim
         'bloom_length': 4,  # 5.2 interim (no antiblooming; column bleed above the well)
         'quantization': 'exact',
+        # Per-mode shape defaults (interim, 5.2).  incidence is never catalogued:
+        # a mode activates only when a scene sets it.  Shapes here are the values
+        # a scene inherits when it names a mode without spelling every parameter.
+        'artifact_modes': {
+            # ~30 e- NAC 2 Hz horizontal banding, line-readout-rate period.
+            'banding_coherent': {
+                'amplitude_e': 30.0,
+                'period_px': 64.0,
+                'orientation': 'horizontal',
+            },
+            # Per-image pedestal jitter plus readout-direction gradients.
+            'bias_structure': {
+                'pedestal_sigma_dn': 2.0,
+                'row_gradient_dn': 1.0,
+                'col_gradient_dn': 0.5,
+            },
+            # RBI-dominated dark grows toward the last readout line.
+            'dark_ramp': {'kind': 'dark_gradient', 'amplitude_e': 150.0},
+            'bloom': {'bloom_length': 4},
+            # Anti-blooming vertical 2-px pairs in unsummed long exposures.
+            'bright_dark_pairs': {'amplitude_e': 4.0e3},
+            # No published ISS rate; the interplanetary regime near full-well amp.
+            'radiation_transients': {'amplitude_e': 4.0e4},
+            # Dust donuts (<1% each) accumulating over the mission.
+            'fixed_pattern': {'dust_donut_count': 5},
+        },
     },
     'coiss_wac': {
         'detector_model': 'ccd',
@@ -159,6 +187,24 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'bias_col_gradient_dn': 0.5,
         'bloom_length': 4,  # 5.2 interim (no antiblooming; column bleed above the well)
         'quantization': 'exact',
+        # Per-mode shape defaults (interim, 5.2); ~6 e- WAC 4 Hz banding.
+        'artifact_modes': {
+            'banding_coherent': {
+                'amplitude_e': 6.0,
+                'period_px': 64.0,
+                'orientation': 'horizontal',
+            },
+            'bias_structure': {
+                'pedestal_sigma_dn': 2.0,
+                'row_gradient_dn': 1.0,
+                'col_gradient_dn': 0.5,
+            },
+            'dark_ramp': {'kind': 'dark_gradient', 'amplitude_e': 150.0},
+            'bloom': {'bloom_length': 4},
+            'bright_dark_pairs': {'amplitude_e': 3.5e3},
+            'radiation_transients': {'amplitude_e': 3.5e4},
+            'fixed_pattern': {'dust_donut_count': 5},
+        },
     },
     'gossi': {
         'detector_model': 'ccd',
@@ -181,6 +227,32 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'bias_col_gradient_dn': 0.5,
         'bloom_length': 6,  # 5.4 interim (early-blooming columns)
         'quantization': 'exact',
+        # Per-mode shape defaults (interim, 5.4).
+        'artifact_modes': {
+            # 42-px vertical supply-noise comb (~0.35 DN at gain 2 -> ~65 e-),
+            # plus a <8 Hz horizontal component in high gain (orientation both).
+            'banding_coherent': {'amplitude_e': 65.0, 'period_px': 42.0, 'orientation': 'both'},
+            'bias_structure': {
+                'pedestal_sigma_dn': 1.0,
+                'row_gradient_dn': 1.0,
+                'col_gradient_dn': 0.5,
+            },
+            # Shutter line-dependent exposure offset (~1.5 -> ~1.05 ms, line 1->800).
+            'dark_ramp': {'kind': 'exposure_shading', 'top_factor': 1.5, 'bottom_factor': 1.05},
+            'bloom': {'bloom_length': 6},
+            # Ganymede-distance regime: ~1e4 spikes/frame scale in the readout,
+            # amplitudes few DN steeply falling (near full well at the top).
+            'radiation_transients': {'amplitude_e': 4.0e4},
+            # 33-px photolithography stitch comb plus corner vignetting; the
+            # 8-bit ADC contours worst at DN multiples of 8.
+            'fixed_pattern': {
+                'stitch_period_px': 33,
+                'stitch_amplitude_dn': 1.0,
+                'vignetting_frac': 0.03,
+                'dust_donut_count': 4,
+            },
+            'contouring_8bit': {'step': 8},
+        },
     },
     'nhlorri': {
         'detector_model': 'ccd',
@@ -203,9 +275,32 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'bias_row_gradient_dn': 0.5,
         'bias_col_gradient_dn': 0.5,
         'bloom_length': 2,  # 5.5 interim (short column bleed)
-        # LORRI's 0.011 s frame-transfer smear will hook into
-        # instrument_defaults here when the telemetry-artifacts work lands.
         'quantization': 'exact',
+        # Per-mode shape defaults (interim, 5.5).  frame_transfer_smear is the
+        # one artifact mode LORRI turns on under instrument_defaults (the defining
+        # LORRI artifact, per 15.7): the detector resolver injects it at these
+        # nominal scrub/transfer times when instrument_defaults is on and the
+        # scene has not overridden it.  Every other mode stays off until a scene
+        # sets its incidence.
+        'artifact_modes': {
+            # ~12 ms pre-exposure scrub, ~11 ms post-exposure transfer.
+            'frame_transfer_smear': {'t_scrub_sec': 0.012, 't_transfer_sec': 0.011},
+            # Saturated compact sources undershoot up to ~12 DN along readout.
+            'serial_tail': {'amplitude_dn': 12.0, 'length_px': 8, 'direction': 'right'},
+            # <=1 DN horizontal striping plus ~0.8 DN vertical banding near low
+            # columns (~17 e-); orientation both approximates the two families.
+            'banding_coherent': {'amplitude_e': 17.0, 'period_px': 128.0, 'orientation': 'both'},
+            # ~4% corner vignetting, 0.9% PRNU, <=0.5 DN even/odd jail bars,
+            # ~1% dust donuts.
+            'fixed_pattern': {
+                'vignetting_frac': 0.04,
+                'prnu_rms': 0.009,
+                'jail_bar_dn': 0.5,
+                'dust_donut_count': 3,
+            },
+            # ~16 hits per readout-dominated short exposure; mostly single px.
+            'radiation_transients': {'amplitude_e': 8.6e4},
+        },
     },
     'vgiss': {
         'detector_model': 'vidicon',
@@ -224,6 +319,24 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
             # peak-to-peak).
             'coherent_amplitude_dn': 0.25,
             'coherent_period_px': 8.0,
+        },
+        # Per-mode shape defaults (interim, 5.3), all GEOMED-level: the beam-bend
+        # limb bias that survives reseau-anchored correction, the shortened
+        # erase-cycle residual image, the readout dark-current line ramp, the
+        # reseau-removal scars on the ~46-px lattice, and the GEOMED resample
+        # texture (blank border + missing-line interpolation banding).
+        'artifact_modes': {
+            'beam_bend': {'amplitude_px': 1.0},
+            'residual_image': {'amplitude': 0.05, 'prior': 'self_offset', 'offset_px': [5, 5]},
+            # 48 x n s readout ramp, nonlinear in wait time.
+            'dark_ramp': {'kind': 'dark_gradient', 'amplitude_e': 6.0, 'nonlinear': 1.5},
+            'contouring_8bit': {'step': 8},
+            'reseau_scars': {'spacing_px': 46, 'patch_radius_px': 4},
+            'resample_texture': {
+                'warp_amp_px': 0.3,
+                'blank_border_px': 2,
+                'missing_line_interp': False,
+            },
         },
     },
     # The instrument-agnostic 'generic' / 'sim' block: an ideal 12-bit detector
@@ -270,3 +383,37 @@ def resolve_detector_defaults(instrument: str | None) -> dict[str, Any]:
     key = 'generic' if instrument is None or instrument in ('generic', 'sim') else instrument
     entry = DETECTOR_DEFAULTS.get(key, DETECTOR_DEFAULTS['generic'])
     return copy.deepcopy(entry)
+
+
+def resolve_mode_with_catalog(
+    mode_name: str, scene_cfg: Mapping[str, Any], instrument: str | None
+) -> dict[str, Any]:
+    """Resolve an artifact mode's parameters with the per-instrument catalog.
+
+    The resolution precedence for a mode's shape parameters is scene value, then
+    the instrument's catalog default block (``artifact_modes`` in
+    ``DETECTOR_DEFAULTS``), then the registry default.  ``incidence`` is never
+    read from the catalog: a mode activates only when a scene sets its incidence
+    (or, for the one physical-signal-chain member LORRI turns on, when the
+    detector resolver injects it under ``instrument_defaults``).
+
+    Parameters:
+        mode_name: A registered artifact-mode name.
+        scene_cfg: The scene's map for the mode (already validated).
+        instrument: The sim instrument name, for the catalog lookup.
+
+    Returns:
+        A fresh dict carrying every parameter at its resolved value.
+    """
+    catalog_modes = resolve_detector_defaults(instrument).get('artifact_modes') or {}
+    catalog = catalog_modes.get(mode_name) or {}
+    resolved: dict[str, Any] = {}
+    for param in ARTIFACT_MODES[mode_name].params:
+        name = param.name
+        if name in scene_cfg and scene_cfg[name] is not None:
+            resolved[name] = scene_cfg[name]
+        elif name != 'incidence' and name in catalog:
+            resolved[name] = catalog[name]
+        else:
+            resolved[name] = param.default
+    return resolved

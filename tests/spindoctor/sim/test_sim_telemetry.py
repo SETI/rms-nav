@@ -438,9 +438,22 @@ def test_unknown_artifact_key_fails() -> None:
         validate_sim_params(scene)
 
 
-def test_reserved_detector_mode_fails_as_unimplemented() -> None:
-    """A reserved detector mode fails with a not-yet-implemented message."""
-    scene = {**_base_scene(), 'artifacts': {'bloom': {'incidence': 0.5}}}
+def test_detector_mode_validates_when_available() -> None:
+    """An implemented detector mode validates on an instrument it is available on."""
+    scene = {**_base_scene('coiss_nac'), 'artifacts': {'bloom': {'incidence': 0.5}}}
+    validate_sim_params(scene)
+
+
+def test_bloom_on_lorri_fails_with_bespoke_message() -> None:
+    """bloom on LORRI fails: an antiblooming CCD has no column bloom."""
+    scene = {**_base_scene('nhlorri'), 'artifacts': {'bloom': {'incidence': 0.5}}}
+    with pytest.raises(SimSceneValidationError, match='antiblooming'):
+        validate_sim_params(scene)
+
+
+def test_reserved_telemetry_artifact_mode_fails_as_unimplemented() -> None:
+    """A reserved telemetry-artifact mode fails with a not-yet-implemented message."""
+    scene = {**_base_scene('gossi'), 'artifacts': {'compression_dct': {'incidence': 0.5}}}
     with pytest.raises(SimSceneValidationError, match='not yet implemented'):
         validate_sim_params(scene)
 

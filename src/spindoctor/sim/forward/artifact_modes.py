@@ -34,8 +34,11 @@ from typing import Any
 
 __all__ = [
     'ARTIFACT_MODES',
+    'DETECTOR_MODE_ORDER',
     'MODE_KEYS',
     'STRUCTURED_LOSS_ORDER',
+    'TELEMETRY_POST_LOSS_ORDER',
+    'TELEMETRY_PRE_LOSS_ORDER',
     'ArtifactMode',
     'ModeParam',
     'mode_available',
@@ -127,6 +130,25 @@ def _telemetry_mode(
     return ArtifactMode(
         name=name,
         stage='telemetry',
+        implemented=True,
+        params=(_INCIDENCE, *extra_params),
+        availability=availability,
+        incidence_semantics=incidence_semantics,
+        unavailable_reason=unavailable_reason or {},
+    )
+
+
+def _detector_mode(
+    name: str,
+    *extra_params: ModeParam,
+    availability: frozenset[str],
+    incidence_semantics: str,
+    unavailable_reason: Mapping[str, str] | None = None,
+) -> ArtifactMode:
+    """Build an implemented detector-stage electronics mode with an incidence param."""
+    return ArtifactMode(
+        name=name,
+        stage='detector',
         implemented=True,
         params=(_INCIDENCE, *extra_params),
         availability=availability,
@@ -269,39 +291,142 @@ _IMPLEMENTED_MODES: tuple[ArtifactMode, ...] = (
     ),
 )
 
-# Reserved detector / electronics modes: named, staged, and availability-scoped
-# now so they drop in without a schema change; validation rejects them as
-# unimplemented until their rendering code lands (the next sub-delivery).
-_RESERVED_MODES: tuple[ArtifactMode, ...] = (
+# Detector / electronics modes.  Each renders inside the detector stage at the
+# physically right point in the unit chain (dark and dark_ramp with the dark
+# pedestal, banding in electrons pre-DN, fixed_pattern PRNU multiplicative
+# pre-Poisson, serial_tail as a post-gain DN undershoot, and so on); the exact
+# placement is documented per stage in the detector chain.  A mode with a
+# per-instrument shape reads its shape parameters from the catalog when the
+# scene leaves them unset, and an explicit mode wins over the generic noise-block
+# knob for the same mechanic (the precedence hot_pixels already uses).
+_DETECTOR_MODES: tuple[ArtifactMode, ...] = (
+    _detector_mode(
+        'banding_coherent',
+        ModeParam('amplitude_e', 'nonneg_number', None),
+        ModeParam('period_px', 'nonneg_number', None),
+        ModeParam('orientation', 'enum', 'horizontal', choices=('horizontal', 'vertical', 'both')),
+        ModeParam('freq_step_factor', 'nonneg_number', 1.0),
+        ModeParam('dark_step_dn', 'nonneg_number', 0.0),
+        availability=_ALL_INSTRUMENTS,
+        incidence_semantics='per-frame probability the coherent banding is active',
+    ),
+    _detector_mode(
+        'bias_structure',
+        ModeParam('pedestal_sigma_dn', 'nonneg_number', None),
+        ModeParam('row_gradient_dn', 'nonneg_number', None),
+        ModeParam('col_gradient_dn', 'nonneg_number', None),
+        availability=_ALL_INSTRUMENTS,
+        incidence_semantics='per-frame probability the bias pedestal / gradients are active',
+    ),
+    _detector_mode(
+        'dark_ramp',
+        ModeParam('kind', 'enum', 'dark_gradient', choices=('dark_gradient', 'exposure_shading')),
+        ModeParam('amplitude_e', 'nonneg_number', None),
+        ModeParam('nonlinear', 'nonneg_number', 1.0),
+        ModeParam('rbi_column_factor', 'unit_interval', 0.0),
+        ModeParam('top_factor', 'nonneg_number', None),
+        ModeParam('bottom_factor', 'nonneg_number', None),
+        availability=_ALL_INSTRUMENTS,
+        incidence_semantics='per-frame probability the readout / shutter line ramp is active',
+    ),
+    _detector_mode(
+        'bloom',
+        ModeParam('bloom_length', 'positive_int', None),
+        availability=frozenset({'coiss_nac', 'coiss_wac', 'gossi'}),
+        incidence_semantics='per-frame probability the electron-domain column bloom is active',
+        unavailable_reason={
+            'nhlorri': 'explicitly disabled for LORRI, an antiblooming CCD with no column bloom',
+        },
+    ),
+    _detector_mode(
+        'radiation_transients',
+        ModeParam('environment_factor', 'nonneg_number', 1.0),
+        ModeParam('readout_dwell_sec', 'nonneg_number', 0.0),
+        ModeParam('amplitude_e', 'nonneg_number', None),
+        availability=_ALL_CCD,
+        incidence_semantics='expected radiation spikes per frame at environment_factor 1 (Poisson)',
+    ),
+    _detector_mode(
+        'bright_dark_pairs',
+        ModeParam('amplitude_e', 'nonneg_number', None),
+        availability=frozenset({'coiss_nac', 'coiss_wac'}),
+        incidence_semantics=(
+            'expected bright/dark pairs per frame at unit exposure (Poisson; scales with exposure)'
+        ),
+    ),
+    _detector_mode(
+        'frame_transfer_smear',
+        ModeParam('t_scrub_sec', 'nonneg_number', None),
+        ModeParam('t_transfer_sec', 'nonneg_number', None),
+        availability=frozenset({'nhlorri'}),
+        incidence_semantics='per-frame probability the frame-transfer smear is applied',
+    ),
+    _detector_mode(
+        'serial_tail',
+        ModeParam('amplitude_dn', 'nonneg_number', 12.0),
+        ModeParam('length_px', 'positive_int', 8),
+        ModeParam('direction', 'enum', 'right', choices=('right', 'left')),
+        ModeParam('saturation_frac', 'unit_interval', 0.99),
+        availability=frozenset({'nhlorri'}),
+        incidence_semantics='per-frame probability the saturation serial tail is applied',
+    ),
+    _detector_mode(
+        'beam_bend',
+        ModeParam('amplitude_px', 'nonneg_number', 1.0),
+        availability=frozenset({'vgiss'}),
+        incidence_semantics='per-frame probability the brightness-dependent limb bend is applied',
+    ),
+    _detector_mode(
+        'residual_image',
+        ModeParam('amplitude', 'unit_interval', 0.05),
+        ModeParam('prior', 'enum', 'self_offset', choices=('self_offset', 'flat')),
+        ModeParam('offset_px', 'int_list', None, length=2),
+        availability=frozenset({'vgiss'}),
+        incidence_semantics='per-frame probability the prior-frame ghost is added',
+    ),
+    _detector_mode(
+        'quantization_lut',
+        availability=frozenset({'coiss_nac', 'coiss_wac'}),
+        incidence_semantics='per-frame probability the sqrt-companding LUT quantization is active',
+    ),
+    _detector_mode(
+        'quantization_ls8b',
+        availability=frozenset({'coiss_nac', 'coiss_wac'}),
+        incidence_semantics='per-frame probability the LS8B wraparound quantization is active',
+    ),
+    _detector_mode(
+        'contouring_8bit',
+        ModeParam('step', 'positive_int', 8),
+        availability=frozenset({'gossi', 'vgiss'}),
+        incidence_semantics='per-frame probability the 8-bit contouring quantization is active',
+    ),
+    _detector_mode(
+        'fixed_pattern',
+        ModeParam('prnu_rms', 'unit_interval', None),
+        ModeParam('vignetting_frac', 'unit_interval', None),
+        ModeParam('stitch_period_px', 'positive_int', None),
+        ModeParam('stitch_amplitude_dn', 'nonneg_number', None),
+        ModeParam('jail_bar_dn', 'nonneg_number', None),
+        ModeParam('dust_donut_count', 'nonneg_int', None),
+        availability=_ALL_INSTRUMENTS,
+        incidence_semantics='per-frame probability the static fixed-pattern composite is applied',
+    ),
+)
+
+# Telemetry-stage artifact modes beyond the structured loss modes: the lossy
+# compression blockiness (before structured loss) and the Voyager GEOMED
+# archive-processing scars (after structured loss).  ``resample_texture`` is a
+# telemetry mode, not a detector mode: it emulates the archive resample the
+# pipeline consumes, so it runs after the loss modes rather than in the detector.
+# Reserved until the telemetry-artifact rendering lands.
+_TELEMETRY_ARTIFACT_MODES: tuple[ArtifactMode, ...] = (
     _reserved_mode('compression_dct', 'telemetry', availability=_ALL_CCD),
     _reserved_mode('reseau_scars', 'telemetry', availability=frozenset({'vgiss'})),
-    _reserved_mode('resample_texture', 'detector', availability=frozenset({'vgiss'})),
-    _reserved_mode('banding_coherent', 'detector', availability=_ALL_INSTRUMENTS),
-    _reserved_mode('bias_structure', 'detector', availability=_ALL_INSTRUMENTS),
-    _reserved_mode('dark_ramp', 'detector', availability=_ALL_INSTRUMENTS),
-    _reserved_mode(
-        'bright_dark_pairs', 'detector', availability=frozenset({'coiss_nac', 'coiss_wac'})
-    ),
-    _reserved_mode(
-        'bloom', 'detector', availability=frozenset({'coiss_nac', 'coiss_wac', 'gossi'})
-    ),
-    _reserved_mode(
-        'quantization_lut', 'detector', availability=frozenset({'coiss_nac', 'coiss_wac'})
-    ),
-    _reserved_mode(
-        'quantization_ls8b', 'detector', availability=frozenset({'coiss_nac', 'coiss_wac'})
-    ),
-    _reserved_mode('contouring_8bit', 'detector', availability=frozenset({'gossi', 'vgiss'})),
-    _reserved_mode('fixed_pattern', 'detector', availability=_ALL_INSTRUMENTS),
-    _reserved_mode('radiation_transients', 'detector', availability=_ALL_CCD),
-    _reserved_mode('frame_transfer_smear', 'detector', availability=frozenset({'nhlorri'})),
-    _reserved_mode('serial_tail', 'detector', availability=frozenset({'nhlorri'})),
-    _reserved_mode('beam_bend', 'detector', availability=frozenset({'vgiss'})),
-    _reserved_mode('residual_image', 'detector', availability=frozenset({'vgiss'})),
+    _reserved_mode('resample_texture', 'telemetry', availability=frozenset({'vgiss'})),
 )
 
 ARTIFACT_MODES: dict[str, ArtifactMode] = {
-    mode.name: mode for mode in (*_IMPLEMENTED_MODES, *_RESERVED_MODES)
+    mode.name: mode for mode in (*_IMPLEMENTED_MODES, *_DETECTOR_MODES, *_TELEMETRY_ARTIFACT_MODES)
 }
 
 # The complete key set the ``artifacts`` block may carry beyond the two switch
@@ -327,6 +452,34 @@ STRUCTURED_LOSS_ORDER: tuple[str, ...] = (
     'pixel_spikes',
     'dead_pixels',
     'embedded_header',
+)
+
+# Telemetry-stage artifact modes that flank the structured loss loop.  Lossy DCT
+# compression runs first, on the transmitted signal before any loss (a lossy
+# codec compresses, then packets drop); the Voyager GEOMED archive-processing
+# scars run last, on the loss-bearing frame (they emulate the archive processing
+# the pipeline consumes, after the raw losses are already present).
+TELEMETRY_PRE_LOSS_ORDER: tuple[str, ...] = ('compression_dct',)
+TELEMETRY_POST_LOSS_ORDER: tuple[str, ...] = ('reseau_scars', 'resample_texture')
+
+# The detector-stage electronics modes, in the order the detector chain consults
+# them.  Placement inside the unit chain is per-mode (documented in the chain);
+# this order only fixes which mode's truth record is written first.
+DETECTOR_MODE_ORDER: tuple[str, ...] = (
+    'fixed_pattern',
+    'residual_image',
+    'dark_ramp',
+    'frame_transfer_smear',
+    'bright_dark_pairs',
+    'radiation_transients',
+    'bloom',
+    'banding_coherent',
+    'serial_tail',
+    'bias_structure',
+    'beam_bend',
+    'quantization_lut',
+    'quantization_ls8b',
+    'contouring_8bit',
 )
 
 
