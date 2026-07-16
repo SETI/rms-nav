@@ -100,6 +100,49 @@ def test_oversample_inventory_is_detector_scale() -> None:
     assert abs(inv['v_pixel_size'] - 24.0) < 1.0
 
 
+def test_oversample_star_records_are_detector_scale() -> None:
+    """The truth star records return to detector units alongside star_info.
+
+    At oversample 4 the radiance stage builds the records from os-scaled scene
+    entries, so the downsample must rescale them (position, motion vector, PSF
+    window) or they disagree with the detector-unit ``star_info`` entries by a
+    factor of the oversample.
+    """
+    scene: dict[str, Any] = {
+        'size_v': 60,
+        'size_u': 60,
+        'random_seed': 3,
+        'instrument': 'coiss_nac',
+        'oversample': 4,
+        'offset_v': 2.0,
+        'offset_u': -1.0,
+        'noise': {'poisson': False, 'read_noise_dn': 0.0, 'bias_dn': 0.0},
+        'stars': [
+            {
+                'name': 'S',
+                'v': 20.0,
+                'u': 24.0,
+                'vmag': 5.0,
+                'move_v': 2.0,
+                'move_u': -4.0,
+                'psf_size': [11, 11],
+            }
+        ],
+    }
+    _, meta = render_combined_model(scene)
+    star = meta['stars'][0]
+    assert star.v == 20.0
+    assert star.u == 24.0
+    assert star.move_v == 2.0
+    assert star.move_u == -4.0
+    assert star.psf_size == (11, 11)
+    # The records agree with the detector-unit hit-test entries: the rendered
+    # centre is the record's catalog position plus the planted offset.
+    info = meta['star_info'][0]
+    assert abs(info['center_v'] - (star.v + 2.0)) < 1e-9
+    assert abs(info['center_u'] - (star.u - 1.0)) < 1e-9
+
+
 def test_optics_scene_renders_deterministically() -> None:
     """A PSF scene (oversample 4) is bit-identical across renders."""
     scene = _body_scene(oversample=None)

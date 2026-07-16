@@ -27,6 +27,7 @@ on the image side of the information boundary and are never handed to the
 navigator-side models.
 """
 
+import copy
 import json
 from functools import lru_cache
 from typing import Any
@@ -344,9 +345,14 @@ def render_stars(
     # Point deposits are added (never clipped) on the oversampled grid; the optics
     # PSF spreads them and the detector conversion clips after the downsample.
     point_plane += cached_img
-    # The caller (and the downsample stage) rescale the hit-test entries in
-    # place, so hand out fresh copies rather than the cached dicts.
-    return point_plane, cached_star_list, [dict(info) for info in cached_star_info]
+    # The caller (and the downsample stage) rescale the hit-test entries and the
+    # star records in place, so hand out fresh copies rather than the cached
+    # objects.
+    return (
+        point_plane,
+        [copy.copy(star) for star in cached_star_list],
+        [dict(info) for info in cached_star_info],
+    )
 
 
 @lru_cache(maxsize=1)

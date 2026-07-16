@@ -214,3 +214,17 @@ def _downsample_truth(truth: dict[str, Any], os: int) -> None:
             for key in _STAR_INFO_PIXEL_KEYS:
                 if key in info:
                     info[key] = info[key] / os
+    # The rendered star records carry the same pixel-space fields the scaled
+    # scene entries did (catalog position, motion vector, PSF window), so they
+    # return to detector units alongside the hit-test entries.  The records are
+    # per-render copies (see render_stars), so the render cache stays on the
+    # oversampled grid.
+    stars = truth.get('stars')
+    if stars is not None:
+        for star in stars:
+            star.v = star.v / os
+            star.u = star.u / os
+            star.move_v = star.move_v / os
+            star.move_u = star.move_u / os
+            # psf_size was scaled by an exact integer multiply, so this is exact.
+            star.psf_size = (star.psf_size[0] // os, star.psf_size[1] // os)
