@@ -71,6 +71,22 @@ def test_vidicon_defaults_add_dn_domain_noise() -> None:
     assert not np.array_equal(plain, noisy)
 
 
+def test_vidicon_calibrated_if_is_exposure_invariant() -> None:
+    """The vgiss calibrated path reports the same I/F at 1, 2, and 4 seconds.
+
+    The vidicon forward mapping carries no exposure term, so the calibration
+    inverse must not divide the exposure back out: a scene's I/F is a property
+    of the geometry, not of how long the shutter was open.
+    """
+    peaks = []
+    for exposure in (1.0, 2.0, 4.0):
+        img, _ = render_combined_model(_disc('vgiss', exposure_sec=exposure))
+        peaks.append(float(img.max()))
+    assert abs(peaks[1] - peaks[0]) < 0.01
+    assert abs(peaks[2] - peaks[0]) < 0.01
+    assert peaks[0] > 0.9
+
+
 def test_floor_scene_has_no_noise() -> None:
     """A scene with neither artifacts nor a noise block renders a clean DN frame."""
     img, _ = render_combined_model(_disc('coiss_nac'))

@@ -269,18 +269,23 @@ def resolve_detector_params(params: Mapping[str, Any]) -> DetectorParams:
     scene_vidicon = dict(scene_noise.get('vidicon') or {})
     vidicon = {**catalog_vidicon, **{k: float(v) for k, v in scene_vidicon.items()}}
 
-    # Derived I/F calibration scale: a signal of 1.0 at the reference exposure,
-    # rendered noise-free, round-trips through the inverse transform to I/F 1.0.
-    # Uses the image-side DN well (frac * full_well_e / gain for the CCD path,
-    # frac * full_well_dn for the vidicon path).
+    # Derived I/F calibration scale: a noise-free signal of 1.0 round-trips
+    # through the inverse transform to I/F 1.0.  Uses the image-side DN well
+    # (frac * full_well_e / gain for the CCD path, frac * full_well_dn for the
+    # vidicon path).  The shared inverse divides by scale * exposure_sec; the
+    # CCD forward chain scales electrons by exposure_sec / exposure_ref_sec, so
+    # its scale carries 1 / exposure_ref_sec, while the vidicon forward mapping
+    # has no exposure term at all, so its scale folds in 1 / exposure_sec and
+    # the exposure cancels (the inverse divides by the DN full scale alone).
     if detector_model == 'vidicon':
         image_well_dn = signal_full_scale_frac * full_well_dn
+        calibration_scale = image_well_dn / exposure_sec if exposure_sec > 0.0 else image_well_dn
     else:
         image_well_dn = signal_full_scale_frac * full_well_e / gain_e_per_dn
+        calibration_scale = (
+            image_well_dn / exposure_ref_sec if exposure_ref_sec > 0.0 else image_well_dn
+        )
     dark_dn = 0.0 if detector_model == 'vidicon' else dark_current * exposure_sec / gain_e_per_dn
-    calibration_scale = (
-        image_well_dn / exposure_ref_sec if exposure_ref_sec > 0.0 else image_well_dn
-    )
 
     return DetectorParams(
         detector_model=detector_model,
