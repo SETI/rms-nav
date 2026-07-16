@@ -85,8 +85,12 @@ _coiss_alias(DISTORTION_RESIDUAL_RMS_PX)
 # The 'instrument_defaults' physical-chain knobs (dark_current_e_per_sec,
 # hot_pixel_fraction, hot_pixel_amplitude_e, banding_amplitude_e,
 # banding_period_px, bias_pedestal_sigma_dn, bias_row_gradient_dn,
-# bias_col_gradient_dn, quantization) are interim placeholders sized from the
-# 5.2-5.6 descriptions; per-scene overrides ride in the truth-side noise block.
+# bias_col_gradient_dn, bloom_length, quantization) are interim placeholders
+# sized from the 5.2-5.6 descriptions; per-scene overrides ride in the
+# truth-side noise block.  instrument_defaults also turns on Poisson shot
+# noise (a property of the electron chain itself, not a per-camera number);
+# the loss modes (cosmic rays, missing data) are artifact incidences and stay
+# at zero.
 #
 # The vidicon (Voyager) path skips the electron conversion; its noise is applied
 # directly in DN (5.3): line-correlated read noise (per-line offset +
@@ -116,6 +120,7 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'bias_pedestal_sigma_dn': 2.0,  # 5.2 interim (per-image pedestal jitter)
         'bias_row_gradient_dn': 1.0,  # 5.2 interim (readout-direction gradient)
         'bias_col_gradient_dn': 0.5,  # 5.2 interim
+        'bloom_length': 4,  # 5.2 interim (no antiblooming; column bleed above the well)
         'quantization': 'exact',
     },
     'coiss_wac': {
@@ -137,6 +142,7 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'bias_pedestal_sigma_dn': 2.0,
         'bias_row_gradient_dn': 1.0,
         'bias_col_gradient_dn': 0.5,
+        'bloom_length': 4,  # 5.2 interim (no antiblooming; column bleed above the well)
         'quantization': 'exact',
     },
     'gossi': {
@@ -157,6 +163,7 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'bias_pedestal_sigma_dn': 1.0,
         'bias_row_gradient_dn': 1.0,  # 5.4 (summation-mode L-R shading ramp)
         'bias_col_gradient_dn': 0.5,
+        'bloom_length': 6,  # 5.4 interim (early-blooming columns)
         'quantization': 'exact',
     },
     'nhlorri': {
@@ -179,6 +186,9 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'bias_pedestal_sigma_dn': 1.0,
         'bias_row_gradient_dn': 0.5,
         'bias_col_gradient_dn': 0.5,
+        'bloom_length': 2,  # 5.5 interim (short column bleed)
+        # LORRI's 0.011 s frame-transfer smear will hook into
+        # instrument_defaults here when the telemetry-artifacts work lands.
         'quantization': 'exact',
     },
     'vgiss': {
@@ -221,6 +231,7 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'bias_pedestal_sigma_dn': 0.0,
         'bias_row_gradient_dn': 0.0,
         'bias_col_gradient_dn': 0.0,
+        'bloom_length': 0,
         'quantization': 'exact',
     },
 }

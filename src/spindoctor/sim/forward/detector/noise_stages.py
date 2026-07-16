@@ -37,9 +37,10 @@ def add_dark_current(
 ) -> None:
     """Add a uniform dark-current pedestal (electrons) in place, pre-Poisson.
 
-    The dark signal accumulates over the exposure and, added before the Poisson
-    draw, carries its own shot noise the way a real detector's dark does.  A
-    zero rate is a no-op.
+    The dark signal accumulates over the exposure.  Because the chain adds it
+    before the Poisson stage, it carries its own shot noise whenever that
+    stage is on (as it is under ``instrument_defaults``); with Poisson
+    explicitly disabled it is a noise-free pedestal.  A zero rate is a no-op.
 
     Parameters:
         electrons: The electron image, modified in place.

@@ -9,14 +9,17 @@ Resolution precedence, highest first: an explicit scene key (``detector`` block,
 then ``noise`` block), then the catalog value when ``instrument_defaults`` is on,
 then the disabled floor (physical-chain artifacts default to zero so an
 unconfigured scene renders a clean DN frame, per the stage-activation rule).
+``instrument_defaults`` turns on the whole physical chain, including Poisson
+shot noise and the catalog's electron-domain full-well bloom; the loss modes
+(cosmic rays, missing data) are artifact incidences, not physical-chain noise,
+and stay at zero.
 
-The read-noise override keeps the historical ``noise.read_noise_dn`` key working:
-it is a DN value, converted to electrons through the resolved gain so a scene
-that pinned a DN read-noise level keeps that DN-level behavior under the electron
-chain.  ``signal_full_scale_frac`` keeps its meaning (the well fraction a signal
-of 1.0 fills at the reference exposure); the image-side DN well is derived
-(``full_well_e / gain_e_per_dn``) and the navigator-side ``full_well_dn`` config
-key is left untouched.
+The ``noise.read_noise_dn`` key is a DN value, converted to electrons through
+the resolved gain, so a scene that pins a DN read-noise level gets exactly that
+DN-level behavior out of the electron chain.  ``signal_full_scale_frac`` is the
+well fraction a signal of 1.0 fills at the reference exposure; the image-side
+DN well is derived (``full_well_e / gain_e_per_dn``) and the navigator-side
+``full_well_dn`` config key is a separate published value.
 """
 
 from __future__ import annotations
@@ -208,9 +211,22 @@ def resolve_detector_params(params: Mapping[str, Any]) -> DetectorParams:
     else:
         read_noise_e = 0.0
 
-    # Poisson defaults off (the honest floor); a noise block opts in explicitly.
-    poisson = bool(scene_noise.get('poisson', False))
-    bloom_length = int(scene_noise.get('bloom_length', sim_noise.get('bloom_length', 0)))
+    # Poisson: an explicit noise key wins (noise: {poisson: false} turns it off
+    # even under instrument_defaults); otherwise the physical-chain opt-in turns
+    # shot noise on, and the floor is off.
+    if 'poisson' in scene_noise:
+        poisson = bool(scene_noise['poisson'])
+    else:
+        poisson = instrument_defaults
+    # Full-well bloom follows the same precedence: explicit scene value, else
+    # the catalog's electron-domain bloom when instrument_defaults is on, else
+    # the disabled floor.
+    if 'bloom_length' in scene_noise:
+        bloom_length = int(scene_noise['bloom_length'])
+    elif instrument_defaults:
+        bloom_length = int(catalog.get('bloom_length', 0))
+    else:
+        bloom_length = int(sim_noise.get('bloom_length', 0))
     cosmic_ray_rate = float(
         scene_noise.get('cosmic_ray_rate_per_sec', sim_noise.get('cosmic_ray_rate_per_sec', 0.0))
     )
