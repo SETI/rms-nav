@@ -172,6 +172,29 @@ def test_obs_sim_exposes_only_the_filtered_view() -> None:
     assert not hasattr(obs, 'sim_star_list')
 
 
+def test_star_limit_is_independent_of_scene_noise() -> None:
+    """The star detection limit derives from published config, not scene noise.
+
+    Two observations differing only in the truth-side ``noise`` block must
+    report the same ``star_max_usable_vmag``: the navigator's limiting
+    magnitude comes from the emulated instrument's published detector model,
+    so the scene's planted noise cannot leak through this channel.  A scene
+    that plants noise different from the published values gets an
+    honestly-wrong detection limit by design.
+    """
+    scene_quiet = _truth_exercising_scene()
+    scene_noisy = _truth_exercising_scene()
+    scene_noisy['noise'] = {
+        'poisson': False,
+        'read_noise_dn': 250.0,
+        'bias_dn': 0.0,
+        'signal_full_scale_frac': 0.01,
+    }
+    obs_quiet = ObsSim.from_file('/tmp/boundary_probe.yaml', sim_params=scene_quiet)
+    obs_noisy = ObsSim.from_file('/tmp/boundary_probe.yaml', sim_params=scene_noisy)
+    assert obs_noisy.star_max_usable_vmag() == obs_quiet.star_max_usable_vmag()
+
+
 def test_nav_params_values_are_isolated_copies() -> None:
     """Mutating the filtered view cannot reach back into the scene."""
     scene = _truth_exercising_scene()

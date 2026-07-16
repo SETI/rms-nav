@@ -149,18 +149,21 @@ class ObsSim(ObsSnapshotInst):
     def star_max_usable_vmag(self) -> float:
         """Returns the maximum usable magnitude for stars in this observation.
 
-        Derived from the scene's own detector model rather than anchored to a
-        reference exposure the way the real instruments do it: the sim
+        Derived from the emulated instrument's PUBLISHED detector model, never
+        from the scene's truth-side ``noise`` block: the navigator may know
+        only what a real pipeline could know about the camera.  The sim
         renderer draws a star's PSF peak at ``signal_full_scale_dn *
         2.512**-vmag`` DN (see ``spindoctor.sim.forward``), so the limiting magnitude is
         where that peak falls to twice the effective per-pixel noise sigma --
         the matched-filter detection boundary measured on single-star sim
-        scenes.  Keeping this physical matters beyond the faint-star gate:
-        the star NavModel synthesises each STAR feature's predicted SNR (and
-        from it the CRLB position covariance and reliability score) from how
-        far the star sits above this limit, so an arbitrarily permissive
-        placeholder inflates every simulated star's SNR by tens of orders of
-        magnitude and collapses its covariance to zero.
+        scenes.  A scene that plants noise different from the published values
+        therefore produces an honestly-wrong detection limit, which is desired
+        model error, not a defect.  Keeping this physical matters beyond the
+        faint-star gate: the star NavModel synthesises each STAR feature's
+        predicted SNR (and from it the CRLB position covariance and
+        reliability score) from how far the star sits above this limit, so an
+        arbitrarily permissive placeholder inflates every simulated star's SNR
+        by tens of orders of magnitude and collapses its covariance to zero.
 
         Returns:
             The maximum usable magnitude for stars in this observation.  For
@@ -174,19 +177,16 @@ class ObsSim(ObsSnapshotInst):
             # calibrated_if: the renderer leaves the composed I/F signal
             # noise-free (detector noise there is deferred sim scope).
             return 30.0
-        # Mirror the renderer's resolution order: scene noise block first,
-        # then the emulated instrument's config, then the sim defaults.
+        # Published values only: the resolved per-instrument block (which
+        # already carries any idealized instrument_config overrides), with the
+        # generic sim block supplying the sim-only full-scale fraction.  The
+        # scene's truth-side noise block is deliberately not consulted.
         sim_noise = self.config.category('sim')['noise']
-        scene_noise = self.sim_params.get('noise') or {}
         full_scale_frac = float(
-            scene_noise.get('signal_full_scale_frac', sim_noise['signal_full_scale_frac'])
+            inst_noise.get('signal_full_scale_frac', sim_noise['signal_full_scale_frac'])
         )
-        signal_full_scale_dn = float(
-            scene_noise.get(
-                'signal_full_scale_dn', full_scale_frac * float(inst_noise['full_well_dn'])
-            )
-        )
-        read_noise_dn = float(scene_noise.get('read_noise_dn', inst_noise['read_noise_dn']))
+        signal_full_scale_dn = full_scale_frac * float(inst_noise['full_well_dn'])
+        read_noise_dn = float(inst_noise['read_noise_dn'])
         # Poisson shot noise on the star's own counts keeps the effective
         # sigma above ~1 DN even on a read-noise-free frame.
         sigma_eff = max(read_noise_dn, 1.0)
