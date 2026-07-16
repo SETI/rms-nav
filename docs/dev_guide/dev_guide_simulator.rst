@@ -1756,7 +1756,9 @@ realism addition needs -- live in their own module:
        hosted in the Optics tab's stray-light group).
    * - ``background_stars.py``
      - Background-sky ``sky_counts`` controls (density factor, count-law a and
-       b, diffuse floor) plus the scene-level ``star_catalog_scatter_px`` control.
+       b, diffuse floor) behind a whole-block enable checkbox under absent-key
+       discipline, plus the scene-level ``star_catalog_scatter_px`` control
+       under the same discipline.
    * - ``expected_outcome.py``
      - The test-only ``expected`` block: a checkable Expected-outcome group on
        the General tab (status, confidence tier, status reason).

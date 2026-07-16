@@ -391,6 +391,39 @@ def test_star_companion_spin_writes_sub_key(model: Any) -> None:
     assert model.sim_params['stars'][0]['companion']['sep_px'] == 4.0
 
 
+def test_sky_counts_absent_by_default(model: Any) -> None:
+    """A fresh scene carries no sky_counts block (absent means no sky)."""
+    assert 'sky_counts' not in model.sim_params
+    assert model._sky_counts_check.isChecked() is False
+
+
+def test_sky_counts_toggle_inserts_and_removes(model: Any) -> None:
+    """The background-sky checkbox inserts and removes the whole block."""
+    model._sky_counts_check.click()
+    assert set(model.sim_params['sky_counts']) == {
+        'a',
+        'b',
+        'density_factor',
+        'diffuse_e_per_px',
+    }
+    model._sky_counts_check.click()
+    assert 'sky_counts' not in model.sim_params
+
+
+def test_sky_density_edit_writes_when_enabled(model: Any) -> None:
+    """A density edit updates the block once the group is enabled."""
+    model._sky_counts_check.click()
+    model._sky_density_spin.setValue(12.0)
+    assert model.sim_params['sky_counts']['density_factor'] == 12.0
+
+
+def test_sky_value_edit_never_creates_the_block(model: Any) -> None:
+    """A value-widget change with the group disabled inserts no key."""
+    model._sky_density_spin.setValue(12.0)
+    model._sky_a_spin.setValue(-2.0)
+    assert 'sky_counts' not in model.sim_params
+
+
 def test_star_scatter_toggle_inserts_and_removes(model: Any) -> None:
     """The star-catalog-scatter checkbox inserts and removes the top-level key."""
     model._star_scatter_check.click()

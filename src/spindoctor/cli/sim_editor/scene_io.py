@@ -50,12 +50,6 @@ class SceneIoMixin(SimEditorBase):
 
     def _apply_params_dict(self, params: dict[str, Any]) -> None:
         """Rebuild sim_params from a loaded params dict and sync every widget."""
-        sky = params.get('sky_counts')
-        sky_block = (
-            dict(sky)
-            if isinstance(sky, dict)
-            else {'a': -3.1, 'b': 0.34, 'density_factor': 0.0, 'diffuse_e_per_px': 0.0}
-        )
         self.sim_params = {
             'size_v': int(params.get('size_v', 512)),
             'size_u': int(params.get('size_u', 512)),
@@ -65,7 +59,6 @@ class SceneIoMixin(SimEditorBase):
             'exposure_sec': float(params.get('exposure_sec', 1.0)),
             'random_seed': int(params.get('random_seed', 42)),
             'instrument': str(params.get('instrument', 'generic')),
-            'sky_counts': sky_block,
             'time': float(params.get('time', 0.0)),
             'ring_epoch': float(params.get('ring_epoch', 0.0)),
             'closest_planet': params.get('closest_planet') or 'SATURN',
@@ -77,6 +70,8 @@ class SceneIoMixin(SimEditorBase):
         # Carry the block-valued schema keys through unchanged; the tab-specific
         # sync methods below then drive their widgets from these blocks (and the
         # instrument-config / midtime / fit-rotation keys the General tab reads).
+        # sky_counts follows the absent-key discipline: a scene without the key
+        # must not gain one, so it passes through rather than being defaulted.
         for passthrough_key in (
             'noise',
             'optics',
@@ -87,6 +82,7 @@ class SceneIoMixin(SimEditorBase):
             'instrument_config',
             'midtime_utc',
             'fit_camera_rotation',
+            'sky_counts',
             'star_catalog_scatter_px',
             'expected',
         ):
@@ -166,8 +162,14 @@ class SceneIoMixin(SimEditorBase):
         # (instrument defaults, detector override) sync from their own blocks.
         self._sync_optics_from_params()
         self._sync_artifacts_from_params()
-        # Update background-sky (sky_counts) controls
+        # Update background-sky (sky_counts) controls.  Absent-key discipline:
+        # a scene without the block leaves the enable checkbox unchecked (and
+        # the value widgets disabled, showing the would-be defaults).
+        has_sky = isinstance(self.sim_params.get('sky_counts'), dict)
         sky = self.sim_params.get('sky_counts') or {}
+        self._sky_counts_check.blockSignals(True)
+        self._sky_counts_check.setChecked(has_sky)
+        self._sky_counts_check.blockSignals(False)
         for widget, value in (
             (self._sky_density_spin, float(sky.get('density_factor', 0.0))),
             (self._sky_a_spin, float(sky.get('a', -3.1))),
@@ -180,6 +182,7 @@ class SceneIoMixin(SimEditorBase):
         self._sky_density_slider.blockSignals(True)
         self._sky_density_slider.setValue(int(float(sky.get('density_factor', 0.0)) * 10))
         self._sky_density_slider.blockSignals(False)
+        self._set_sky_widgets_enabled(has_sky)
         # Sync the scene-level star-catalog-scatter control.
         has_scatter = self.sim_params.get('star_catalog_scatter_px') is not None
         self._star_scatter_check.blockSignals(True)

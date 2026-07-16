@@ -88,7 +88,6 @@ class CreateSimulatedImageModel(
                 'cosmic_ray_rate_per_sec': 0.0,
                 'missing_data_rate': 0.0,
             },
-            'sky_counts': {'a': -3.1, 'b': 0.34, 'density_factor': 0.0, 'diffuse_e_per_px': 0.0},
             'shade_solid_rings': False,
             'stars': [],
             'bodies': [],

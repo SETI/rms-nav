@@ -615,6 +615,51 @@ def test_gui_authored_mode_scene_validates(
     assert loaded['artifacts']['adversarial'] is True
 
 
+def test_scene_without_sky_counts_does_not_gain_it(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """An opened and re-saved scene never gains a sky_counts block.
+
+    The whole block follows the absent-key discipline: loading a scene without
+    the key leaves the background-sky group unchecked, and saving writes no
+    default block.
+    """
+    scene = {'instrument': 'coiss_nac', 'size_v': 64, 'size_u': 64, 'random_seed': 1}
+    src = tmp_path / 'no_sky.yaml'
+    save_sim_scene(scene, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    assert model._sky_counts_check.isChecked() is False
+    assert 'sky_counts' not in model.sim_params
+
+    out = tmp_path / 'no_sky_resaved.yaml'
+    monkeypatch.setattr(
+        QFileDialog, 'getSaveFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    model._save_scene()
+    resaved = load_sim_scene(out)
+    assert 'sky_counts' not in resaved
+
+
+def test_load_scene_with_sky_counts_checks_group(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Loading a scene that authors sky_counts checks and populates the group."""
+    src = tmp_path / 'full.yaml'
+    save_sim_scene(_FULL_SCENE, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    assert model._sky_counts_check.isChecked() is True
+    assert model._sky_density_spin.value() == 8.0
+    assert model._sky_diffuse_spin.value() == 2.5
+
+
 def test_load_full_scene_syncs_star_asymmetry_controls(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
