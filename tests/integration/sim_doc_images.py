@@ -129,12 +129,98 @@ def _scatter_stars(
 _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
     ('ellipsoid_body', _scene([_ellipsoid()]), {'gamma': 1.1}),
     ('mesh_body', _scene([_mesh()]), {'gamma': 1.1}),
+    ('mesh_body_gouraud', _scene([_mesh(shading='gouraud')]), {'gamma': 1.1}),
     (
         'body_craters',
         _scene([_ellipsoid(axis2=150.0, crater_fill=0.5, crater_max_radius=0.3)]),
         {'gamma': 1.1},
     ),
     ('crescent_body', _scene([_mesh(phase_angle=130.0)]), {'gamma': 1.4}),
+    (
+        'topographic_limb',
+        _scene([_ellipsoid(limb_relief_rms=0.03, limb_relief_corr_deg=12.0)]),
+        {'gamma': 1.1},
+    ),
+    (
+        'ragged_terminator',
+        _scene([_ellipsoid(phase_angle=125.0, limb_relief_rms=0.035, limb_relief_corr_deg=10.0)]),
+        {'gamma': 1.4},
+    ),
+    (
+        'banded_transit',
+        _scene(
+            [
+                _ellipsoid(
+                    axis1=180.0,
+                    axis2=180.0,
+                    axis3=180.0,
+                    illumination_angle=20.0,
+                    phase_angle=25.0,
+                    disc_texture={
+                        'band_amplitude': 0.22,
+                        'band_wavenumber': 8.0,
+                        'storms': [
+                            {
+                                'lat_deg': -25.0,
+                                'lon_deg': 90.0,
+                                'radius_deg': 8.0,
+                                'albedo_factor': 1.35,
+                            }
+                        ],
+                    },
+                    transits=[
+                        {
+                            'moon': {
+                                'dv_px': -28.0,
+                                'du_px': 36.0,
+                                'radius_px': 11.0,
+                                'albedo_factor': 1.3,
+                            }
+                        },
+                        {
+                            'shadow': {
+                                'dv_px': 10.0,
+                                'du_px': -32.0,
+                                'radius_px': 9.0,
+                                'darkness': 0.85,
+                            }
+                        },
+                    ],
+                )
+            ]
+        ),
+        {'gamma': 1.1},
+    ),
+    (
+        'mutual_event',
+        _scene(
+            [
+                _ellipsoid(
+                    name='FAR',
+                    center_v=110.0,
+                    center_u=95.0,
+                    axis1=110.0,
+                    axis2=110.0,
+                    axis3=110.0,
+                    illumination_angle=20.0,
+                    phase_angle=30.0,
+                    range_km=700000.0,
+                ),
+                _ellipsoid(
+                    name='NEAR',
+                    center_v=110.0,
+                    center_u=125.0,
+                    axis1=120.0,
+                    axis2=120.0,
+                    axis3=120.0,
+                    illumination_angle=20.0,
+                    phase_angle=30.0,
+                    range_km=500000.0,
+                ),
+            ]
+        ),
+        {'gamma': 1.1},
+    ),
     (
         'rings',
         _scene(
@@ -214,6 +300,25 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
             exposure_sec=2.0,
         ),
         {'gamma': 1.3, 'high_percentile': 99.7},
+    ),
+    (
+        'telemetry_loss',
+        _scene(
+            [
+                _ellipsoid(
+                    axis1=150.0,
+                    axis2=150.0,
+                    axis3=150.0,
+                    illumination_angle=25.0,
+                    phase_angle=30.0,
+                )
+            ],
+            artifacts={
+                'missing_lines': {'incidence': 10.0},
+                'partial_lines': {'incidence': 10.0},
+            },
+        ),
+        {'gamma': 1.15},
     ),
     (
         'stray_light_gradient',

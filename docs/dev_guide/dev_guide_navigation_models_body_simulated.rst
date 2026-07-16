@@ -54,9 +54,11 @@ Restrictions and assumptions
 - The operator must supply finite, positive ellipsoid axes. Degenerate inputs (zero
   radius, negative axes) are rejected by
   :func:`~spindoctor.nav_model.sim_body.create_simulated_body`.
-- Crater and anti-aliasing scene keys are truth keys the boundary filter strips, so
-  this model never sees them; the predicted template always renders at maximum
-  anti-aliasing and zero surface relief.
+- The body appearance keys -- crater terrain, the limb-relief field, the photometric
+  law and opposition surge, the albedo and disc textures and transits, the mesh
+  shading mode and pose scatter, and anti-aliasing -- are truth keys the boundary
+  filter strips, so this model never sees them; the predicted template always
+  renders as a smooth Lambert body at maximum anti-aliasing and zero surface relief.
 - The simulated body is rendered onto a fixed extfov image without per-instrument noise
   or PSF smearing; the operator's downstream noise-injection pipeline supplies those.
 

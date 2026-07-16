@@ -138,6 +138,7 @@ _FULL_SCENE: dict[str, Any] = {
             'mesh_n_lat': 20,
             'mesh_n_lon': 40,
             'mesh_seed': 3,
+            'mesh_detail_octaves': 2,
             'pose_euler_deg': [10.0, 35.0, 0.0],
             'crater_fill': 1.5,
             'crater_min_radius': 0.05,
@@ -146,9 +147,32 @@ _FULL_SCENE: dict[str, Any] = {
             'crater_relief_scale': 0.6,
             'limb_relief_rms': 0.015,
             'limb_relief_corr_deg': 12.0,
-            'photometric_law': 'lommel_seeliger',
+            'photometric_law': 'minnaert',
             'minnaert_k': 0.6,
             'opposition_surge': {'amplitude': 0.4, 'width_deg': 5.0},
+            'albedo_texture': {
+                'rms': 0.05,
+                'corr_px': 18.0,
+                'spots': [
+                    {'lat_deg': 10.0, 'lon_deg': 45.0, 'radius_deg': 8.0, 'albedo_factor': 0.7}
+                ],
+            },
+            'disc_texture': {
+                'band_amplitude': 0.1,
+                'band_wavenumber': 8.0,
+                'band_phase_deg': 0.0,
+                'storms': [
+                    {'lat_deg': -20.0, 'lon_deg': 120.0, 'radius_deg': 6.0, 'albedo_factor': 1.3}
+                ],
+            },
+            'transits': [
+                {
+                    'moon': {'dv_px': 10.0, 'du_px': -5.0, 'radius_px': 6.0, 'albedo_factor': 0.9},
+                    'shadow': {'dv_px': 12.0, 'du_px': -4.0, 'radius_px': 6.0, 'darkness': 0.8},
+                }
+            ],
+            'shading': 'gouraud',
+            'pose_scatter': {'sigma_deg': 1.5},
             'seed': 11,
             'anti_aliasing': 0.5,
             'nav_override': {

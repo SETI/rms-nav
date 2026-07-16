@@ -455,3 +455,176 @@ def test_expected_reason_line_edit_sets_and_clears(model: Any) -> None:
     assert model.sim_params['expected']['status_reason'] == 'no_signal_in_image'
     model._expected_reason_edit.setText('')
     assert 'status_reason' not in model.sim_params['expected']
+
+
+# ---- Per-body appearance controls (relief, photometry, texture, mesh extras) ----
+
+
+def _body_tab(model: Any) -> Any:
+    """Add a body and return the widget of its tab."""
+    model._add_body_tab()
+    tab_idx = model._find_tab_by_properties('body', 0)
+    assert tab_idx is not None
+    return model._tabs.widget(tab_idx)
+
+
+def _body(model: Any) -> Any:
+    """Return the first body dict."""
+    return model.sim_params['bodies'][0]
+
+
+def test_body_relief_toggle_inserts_and_removes(model: Any) -> None:
+    """The limb-relief group inserts both keys and removes them when disabled."""
+    tab = _body_tab(model)
+    tab.relief_group.setChecked(True)
+    assert 'limb_relief_rms' in _body(model)
+    assert 'limb_relief_corr_deg' in _body(model)
+    tab.relief_group.setChecked(False)
+    assert 'limb_relief_rms' not in _body(model)
+
+
+def test_body_relief_value_edit_writes_key(model: Any) -> None:
+    """A relief-RMS spin edit writes its own key once enabled."""
+    tab = _body_tab(model)
+    tab.relief_group.setChecked(True)
+    tab.relief_rms_spin.setValue(0.03)
+    assert _body(model)['limb_relief_rms'] == 0.03
+
+
+def test_body_photometry_toggle_inserts_and_removes(model: Any) -> None:
+    """The photometric-law group inserts and removes photometric_law."""
+    tab = _body_tab(model)
+    tab.photometry_group.setChecked(True)
+    assert 'photometric_law' in _body(model)
+    tab.photometry_group.setChecked(False)
+    assert 'photometric_law' not in _body(model)
+
+
+def test_body_minnaert_law_gates_k_key(model: Any) -> None:
+    """Choosing minnaert inserts minnaert_k; a non-minnaert law drops it."""
+    tab = _body_tab(model)
+    tab.photometry_group.setChecked(True)
+    tab.photometry_law_combo.setCurrentText('minnaert')
+    assert 'minnaert_k' in _body(model)
+    tab.photometry_law_combo.setCurrentText('lambert')
+    assert 'minnaert_k' not in _body(model)
+
+
+def test_body_minnaert_k_spin_disabled_off_minnaert(model: Any) -> None:
+    """The Minnaert exponent spin is enabled only under the minnaert law."""
+    tab = _body_tab(model)
+    tab.photometry_group.setChecked(True)
+    tab.photometry_law_combo.setCurrentText('lommel_seeliger')
+    assert tab.minnaert_k_spin.isEnabled() is False
+
+
+def test_body_surge_toggle_inserts_and_removes(model: Any) -> None:
+    """The opposition-surge group inserts the map with both keys and removes it."""
+    tab = _body_tab(model)
+    tab.surge_group.setChecked(True)
+    assert set(_body(model)['opposition_surge']) == {'amplitude', 'width_deg'}
+    tab.surge_group.setChecked(False)
+    assert 'opposition_surge' not in _body(model)
+
+
+def test_body_albedo_toggle_inserts_and_removes(model: Any) -> None:
+    """The albedo-texture group inserts the map with a spots list and removes it."""
+    tab = _body_tab(model)
+    tab.albedo_group.setChecked(True)
+    assert set(_body(model)['albedo_texture']) == {'rms', 'corr_px', 'spots'}
+    assert _body(model)['albedo_texture']['spots'] == []
+    tab.albedo_group.setChecked(False)
+    assert 'albedo_texture' not in _body(model)
+
+
+def test_body_albedo_add_and_remove_spot(model: Any) -> None:
+    """Adding a spot appends a schema entry; removing it empties the list."""
+    tab = _body_tab(model)
+    tab.albedo_group.setChecked(True)
+    model._on_body_add_spot(0)
+    spots = _body(model)['albedo_texture']['spots']
+    assert set(spots[0]) == {'lat_deg', 'lon_deg', 'radius_deg', 'albedo_factor'}
+    model._remove_spot_row(0, tab.spot_rows[0])
+    assert _body(model)['albedo_texture']['spots'] == []
+
+
+def test_body_disc_toggle_inserts_and_removes(model: Any) -> None:
+    """The disc-texture group inserts the band map with a storms list and removes it."""
+    tab = _body_tab(model)
+    tab.disc_group.setChecked(True)
+    assert set(_body(model)['disc_texture']) == {
+        'band_amplitude',
+        'band_wavenumber',
+        'band_phase_deg',
+        'storms',
+    }
+    tab.disc_group.setChecked(False)
+    assert 'disc_texture' not in _body(model)
+
+
+def test_body_disc_add_storm_appends_entry(model: Any) -> None:
+    """Adding a storm appends a schema entry to the storms list."""
+    tab = _body_tab(model)
+    tab.disc_group.setChecked(True)
+    model._on_body_add_storm(0)
+    storms = _body(model)['disc_texture']['storms']
+    assert set(storms[0]) == {'lat_deg', 'lon_deg', 'radius_deg', 'albedo_factor'}
+
+
+def test_body_transits_toggle_and_add(model: Any) -> None:
+    """Enabling transits inserts an empty list; adding one seeds a moon disc."""
+    tab = _body_tab(model)
+    tab.transits_group.setChecked(True)
+    assert _body(model)['transits'] == []
+    model._on_body_add_transit(0)
+    assert 'moon' in _body(model)['transits'][0]
+
+
+def test_body_transit_shadow_sub_group_writes_shadow(model: Any) -> None:
+    """Checking a transit's shadow sub-group adds a shadow map to the entry."""
+    tab = _body_tab(model)
+    tab.transits_group.setChecked(True)
+    model._on_body_add_transit(0)
+    tab.transit_rows[0].shadow_group.setChecked(True)
+    assert 'shadow' in _body(model)['transits'][0]
+    assert set(_body(model)['transits'][0]['shadow']) == {
+        'dv_px',
+        'du_px',
+        'radius_px',
+        'darkness',
+    }
+
+
+def test_body_shading_combo_absent_for_flat(model: Any) -> None:
+    """Gouraud writes the shading key; flat drops it (absent means flat)."""
+    tab = _body_tab(model)
+    tab.shading_combo.setCurrentText('gouraud')
+    assert _body(model)['shading'] == 'gouraud'
+    tab.shading_combo.setCurrentText('flat')
+    assert 'shading' not in _body(model)
+
+
+def test_body_mesh_octaves_zero_leaves_key_absent(model: Any) -> None:
+    """A positive octave count writes the key; zero drops it (absent means 0)."""
+    tab = _body_tab(model)
+    tab.mesh_octaves_spin.setValue(3)
+    assert _body(model)['mesh_detail_octaves'] == 3
+    tab.mesh_octaves_spin.setValue(0)
+    assert 'mesh_detail_octaves' not in _body(model)
+
+
+def test_body_pose_scatter_toggle_inserts_and_removes(model: Any) -> None:
+    """The pose-scatter group inserts the sigma map and removes it."""
+    tab = _body_tab(model)
+    tab.pose_scatter_group.setChecked(True)
+    assert set(_body(model)['pose_scatter']) == {'sigma_deg'}
+    tab.pose_scatter_group.setChecked(False)
+    assert 'pose_scatter' not in _body(model)
+
+
+def test_body_mesh_extras_gated_by_shape(model: Any) -> None:
+    """The mesh-extras group is disabled for an ellipsoid, enabled for a mesh."""
+    tab = _body_tab(model)
+    assert tab.mesh_extras_group.isEnabled() is False
+    model._on_body_shape_model(0, 'polyhedral_mesh')
+    assert tab.mesh_extras_group.isEnabled() is True
