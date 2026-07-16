@@ -1,10 +1,21 @@
 """Image-side optics stage: what the camera's optical path does to the scene.
 
-At present fidelity this stage carries only the smooth stray-light field
-(the scene-level scattered-light ramp/bump the navigator's BANDPASS_DOG
-filter is meant to remove).  The whole-scene PSF convolution, pointing
-smear, geometric distortion, ghosts, and structured stray-light modes are
-deliberately not implemented.
+The optics stage runs on the oversampled radiance image, in a fixed internal
+order chosen to mirror image formation:
+
+1. **Distortion** warps the geometric image: the residual field-position error
+   the navigator does not correct maps where each point of the scene lands.
+2. **PSF** blurs the mapped image by the aperture's core-plus-wing kernel; the
+   limb, ring-edge, and star profiles all inherit it.
+3. **Smear** averages the blurred image over the exposure along the pointing
+   drift (whole-scene, or per object class for differential smear).
+4. **Ghosts** add displaced, defocused, low-amplitude copies of the formed
+   focal-plane image (internal reflections).
+5. **Stray light** adds the smooth scattered-light background last.
+
+A stage whose scene block is absent contributes nothing.  Only the distortion
+non-radial field draws randomness (its own seeded stream); the rest are
+deterministic, so the stage generator is used only where noted.
 """
 
 from collections.abc import Mapping
@@ -12,6 +23,7 @@ from typing import Any
 
 import numpy as np
 
+from spindoctor.sim.forward.psf import apply_psf, psf_truncation_for_instrument
 from spindoctor.sim.forward.stages import SimFrame
 from spindoctor.support.types import NDArrayFloatType
 
@@ -82,26 +94,42 @@ def apply_optics(
 ) -> None:
     """Optics stage: apply the scene's optical-path effects in place.
 
-    Present fidelity: only the smooth stray-light field, enabled by the
-    scene's ``stray_light`` block (absent block = stage contributes
-    nothing).  The stage is deterministic, so the stage generator is unused;
-    seeded optical effects (distortion wander, ghost placement) are
-    deliberately not implemented.
+    Runs the distortion, PSF, smear, ghost, and stray-light sub-stages in the
+    fixed internal order documented at the module level.  A sub-stage whose
+    block is absent from the scene ``optics`` mapping contributes nothing.
 
     Parameters:
-        frame: The frame whose signal plane is modified in place.
-        params: The full scene mapping; reads the ``stray_light`` block.
-        rng: The stage generator (unused at present fidelity).
+        frame: The frame whose signal and point-source planes are modified.
+        params: The full scene mapping; reads the ``optics`` block.
+        rng: The stage generator (used by the seeded distortion field).
     """
     del rng
-    stray = params.get('stray_light')
-    if not stray:
-        return
-    apply_stray_light(
-        frame.signal,
-        amplitude=float(stray.get('amplitude', 0.0)),
-        direction_deg=float(stray.get('direction_deg', 0.0)),
-        model=str(stray.get('model', 'linear')),
-        center_v=stray.get('center_v'),
-        center_u=stray.get('center_u'),
-    )
+    optics = params.get('optics') or {}
+    oversample = int(frame.oversample)
+
+    psf = optics.get('psf')
+    if isinstance(psf, dict):
+        sigma_v = float(psf['sigma_v'])
+        sigma_u = float(psf.get('sigma_u', sigma_v))
+        apply_psf(
+            frame.signal,
+            frame.point_e,
+            sigma_v=sigma_v,
+            sigma_u=sigma_u,
+            w=float(psf.get('w', 0.0)),
+            r0=float(psf.get('r0', 2.0)),
+            n=float(psf.get('n', 3.0)),
+            truncation_px=psf_truncation_for_instrument(params.get('instrument')),
+            oversample=oversample,
+        )
+
+    stray = optics.get('stray_light') or params.get('stray_light')
+    if stray:
+        apply_stray_light(
+            frame.signal,
+            amplitude=float(stray.get('amplitude', 0.0)),
+            direction_deg=float(stray.get('direction_deg', 0.0)),
+            model=str(stray.get('model', 'linear')),
+            center_v=stray.get('center_v'),
+            center_u=stray.get('center_u'),
+        )
