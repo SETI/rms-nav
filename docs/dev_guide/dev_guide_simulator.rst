@@ -82,7 +82,7 @@ scene -- including every planted error, noise knob, and contaminant. It lives in
        hot pixels, banding, bias structure, cosmic rays). Carries the vidicon
        DN path and the calibrated-I/F inversion (see :ref:`sim-detector-stage`).
    * - ``telemetry.py``
-     - Transmission loss; carries the per-pixel missing-data markers today.
+     - Transmission loss; carries the per-pixel missing-data markers.
    * - ``atmosphere.py``
      - Reserved slot for haze-limb (Titan-class) rendering; currently empty.
    * - ``artifacts_catalog.py``
@@ -195,13 +195,16 @@ scene (:mod:`spindoctor.sim.forward.pipeline`):
 
    * - Stage name
      - Callable
-     - What it does today
+     - What it does
    * - ``scene_radiance``
      - :func:`~spindoctor.sim.forward.scene_radiance.compose_scene_radiance`
      - Composes the noise-free signal: background stars, catalog stars, then
        bodies and rings depth-sorted far to near (nearer objects overwrite),
-       with the planted offset and camera roll applied. Accumulates feature
-       truth (star records, masks, inventory, z-order) into ``frame.truth``.
+       with the planted offset and camera roll applied. Stars render
+       Gaussian-pre-spread when the scene has no whole-scene PSF, and as
+       sub-pixel point masses when one is active (see
+       :ref:`sim-star-params`). Accumulates feature truth (star records,
+       masks, inventory, z-order) into ``frame.truth``.
    * - ``optics``
      - :func:`~spindoctor.sim.forward.optics.apply_optics`
      - Applies the optical-path effects in a fixed internal order -- motion
@@ -238,22 +241,24 @@ signal to detector counts -- that is what makes a DN frame -- but the stochastic
 and structured noise activates only through a scene ``noise`` block (which pins
 the individual parameters, e.g. ``poisson: true`` with a ``read_noise_dn``) or
 the ``artifacts: {instrument_defaults: true}`` opt-in (which turns on the
-emulated camera's physical signal chain at catalog values). A scene with none of
-those blocks renders a clean DN frame: the self-consistency floor. A
-single-variable sweep therefore relies on every other block staying absent so it
-attributes error to the one effect it varies.
+emulated camera's physical signal chain -- including Poisson shot noise and the
+catalog full-well bloom -- at catalog values). A scene with none of those
+blocks renders a clean DN frame: the self-consistency floor. A single-variable
+sweep therefore relies on every other block staying absent so it attributes
+error to the one effect it varies.
 
 ``SimFrame`` carries the mutable image state between stages:
 
 - ``signal`` -- the ``(V*os, U*os)`` float64 image. It holds normalized
-  [0, ~1] intensive scene units through the radiance and optics stages; the
-  detector stage converts it to electrons through the exposure and digitizes it
-  to DN in place (the electron unit chain).
-- ``point_e`` -- a same-shaped plane reserved for point sources in electrons.
+  [0, ~1] intensive scene units through the radiance and optics stages (a
+  point-mass star deposit may legitimately spike above 1.0 on the oversampled
+  grid before the PSF spreads it); the detector stage converts it to electrons
+  through the exposure and digitizes it to DN in place (the electron unit
+  chain).
+- ``point_e`` -- a same-shaped plane reserved for electron-unit point sources.
   The detector adds it into the electron image after the intensive conversion
-  and before Poisson, so point sources never pass through the signal scale.
-  Star deposition into this plane is a later fidelity step; today the radiance
-  stage still draws stars PSF-spread in signal units, so the plane stays zeroed.
+  and before Poisson, so anything in it never passes through the signal scale.
+  Stars deposit in signal units, so this plane stays zeroed.
 - ``oversample`` -- the oversampling factor. A scene with an active PSF (an
   ``optics.psf`` block or ``instrument_defaults``) renders the radiance on a 4x
   oversampled grid and the box downsample returns it to the detector grid;
@@ -355,10 +360,10 @@ intensive signal passes through the electron unit chain in
    through ``signal_full_scale_frac * full_well_e * (exposure_sec /
    exposure_ref_sec)``.
 2. **Point sources.** The point-source electron plane (``frame.point_e``) is
-   added after the intensive conversion and before Poisson, so point sources
-   never pass through the signal scale. (Star deposition into ``point_e`` is a
-   later fidelity step; today the radiance stage still draws stars PSF-spread in
-   signal units, so the plane stays zeroed.)
+   added after the intensive conversion and before Poisson, so anything in it
+   never passes through the signal scale. (Stars deposit in signal units --
+   pre-spread or point-mass, see :ref:`sim-star-params` -- so the plane stays
+   zeroed.)
 3. **Dark current, then Poisson.** A dark pedestal accumulates over the
    exposure before the shot term, so the shot noise grows with the dark signal.
    Poisson shot noise then acts on the electron image.
@@ -386,10 +391,11 @@ it is what makes a DN frame -- while each stochastic sub-effect is a no-op when
 its gating amplitude, fraction, or rate is zero.
 
 **Quantization sub-modes.** ``exact`` rounds to integer DN (uniform bins);
-``8bit`` bins for an 8-bit ADC; ``uneven_12bit`` snaps values near the
-power-of-two carry boundaries to reproduce the histogram spikes of an ADC with
-unequal bit weights; ``sqrt_lut`` companding encodes to 8 bits through a
-square-root LUT and back, leaving a signal-dependent quantization residual.
+``8bit`` rounds to integer DN and clips at the 255 code ceiling (the output
+word width, independent of ``saturation_dn``); ``uneven_12bit`` snaps values
+near the power-of-two carry boundaries to reproduce the histogram spikes of an
+ADC with unequal bit weights; ``sqrt_lut`` companding encodes to 8 bits through
+a square-root LUT and back, leaving a signal-dependent quantization residual.
 
 **The vidicon path.** The Voyager vidicon
 (:func:`~spindoctor.sim.forward.detector.chain.apply_detector`, vidicon branch)
@@ -428,11 +434,14 @@ The instrument-defaults switch and the artifacts catalog
 emulated camera's physical signal chain at catalog values: the whole-scene PSF
 kernel and the residual-distortion amplitude
 (:func:`~spindoctor.sim.forward.optics.instrument_defaults_on` gates the optics
-side), and the detector electron-chain read noise, dark current, hot pixels,
-banding, and bias structure (the detector side reads the same switch). It turns
-on only the *physical* chain: the per-mode loss incidences (whole-line
-telemetry loss, compression-block dropouts, and the like) stay at zero, so a
-defaults scene is a clean-but-realistic frame, not a damaged one.
+side), and the detector electron chain's Poisson shot noise, read noise, dark
+current, hot pixels, full-well bloom, banding, and bias structure (the
+detector side reads the same switch). An explicit ``noise`` key still wins in
+either direction -- ``noise: {poisson: false}`` turns the shot term off under
+instrument defaults. It turns on only the *physical* chain: the per-mode loss
+incidences (cosmic rays, whole-line telemetry loss, compression-block
+dropouts, and the like) stay at zero, so a defaults scene is a
+clean-but-realistic frame, not a damaged one.
 
 :mod:`spindoctor.sim.forward.artifacts_catalog` is the single home for those
 per-instrument values: ``PSF_KERNELS`` (core sigma and wing parameters),
@@ -454,30 +463,40 @@ The self-consistency floor
 With no ``optics``, ``noise``, ``detector``, or ``artifacts`` block a scene
 renders the *self-consistency floor*: the detector converts the composed signal
 to DN and nothing else acts -- no PSF, no shot or read noise, no dark, hot
-pixels, banding, bias structure, distortion, smear, ghosts, or stray light. Each
-effect is off unless asked for, and a single-variable sweep relies on every
-other block staying absent so it attributes error to the one effect it varies.
-The floor's matching PSF configuration is ``optics: {psf: {match_navigator:
-true}}``, which the validator resolves into the navigator's own model -- a pure
-Gaussian at the emulated instrument's ``star_psf_sigma``, no Moffat wing, no
-field variation -- so the image-side PSF equals the navigator-side PSF exactly
-and the only residual is the one the scene plants elsewhere.
+pixels, bloom, banding, bias structure, distortion, smear, ghosts, or stray
+light. Each effect is off unless asked for, and a single-variable sweep relies
+on every other block staying absent so it attributes error to the one effect it
+varies. The floor's matching PSF configuration is ``optics: {psf:
+{match_navigator: true}}``: the authored form is preserved through validation,
+saving, and loading, and the renderer resolves it into the navigator's own
+model -- a pure Gaussian at the emulated instrument's ``star_psf_sigma``, no
+Moffat wing, no field variation -- when it builds the kernel. Because an active
+whole-scene PSF is the *only* convolution a star receives (stars deposit as
+point masses, never pre-spread-then-convolved), a floor scene's rendered star
+sigma equals the navigator's configured sigma exactly and the only residual is
+the one the scene plants elsewhere.
 
 .. _sim-perf-budget:
 
 The render performance budget
 =============================
 
-A 512x512 scene with a whole-scene PSF plus the full detector stack at
-oversample 4 must render in under 2 s single-core, and a 1024x1024
-Cassini-class scene in under 8 s (``tests/integration/test_sim_perf.py``). The
-budget is a *cold-render* budget: the render caches are cleared so the timed
-render pays the kernel-build and compile costs a first render pays. The harness
-pins itself: it sets the process CPU affinity to one core and caps the
-BLAS/OpenMP thread-count environment variables for the duration, so an unpinned
-numpy FFT cannot silently multithread and fake the budget. Under heavy machine
-load the timed render can exceed the budget purely from contention; a failure is
-reported and investigated, not blessed by raising the budget.
+A 512x512 star-field scene with a whole-scene PSF plus the full detector stack
+at oversample 4 must render in under 2 s single-core, and a 1024x1024
+Cassini-class star-field scene in under 8 s
+(``tests/integration/test_sim_perf.py``). The budgets bound the optics +
+detector stack -- the PSF convolution on the oversampled grid and the electron
+chain -- which is what the harness scenes exercise. A scene with a large lit
+body at oversample 4 currently exceeds them, because the body renderer's
+per-subsample shading dominates the render; that cost is outside these budgets
+pending the body-renderer replacement. The budget is a *cold-render* budget:
+the render caches are cleared so the timed render pays the kernel-build and
+compile costs a first render pays. The harness pins itself: it sets the
+process CPU affinity to one core and caps the BLAS/OpenMP thread-count
+environment variables for the duration, so an unpinned numpy FFT cannot
+silently multithread and fake the budget. Under heavy machine load the timed
+render can exceed the budget purely from contention; a failure is reported and
+investigated, not blessed by raising the budget.
 
 Scene ingredients
 =================
@@ -908,11 +927,18 @@ Ring parameters
 Each entry of ``rings`` is a dict with ``name``, a ``feature_type`` of
 ``RINGLET`` (adds brightness) or ``GAP`` (subtracts it), a ``center_v`` /
 ``center_u``, a ``shading_distance`` (edge-fade width in pixels), a ``range``
-depth key, and ``inner_data`` / ``outer_data`` edge lists. At least one edge is
-required. Each edge is a list of mode dicts; the required mode-1 dict carries the
-elliptical orbit: ``a`` (semi-major axis, px), ``ae`` (eccentricity times ``a``,
-px), ``long_peri`` (longitude of pericenter, deg), and ``rate_peri`` (precession
-rate, deg/day, applied across the scene-level ``time`` minus ``ring_epoch``).
+depth key, an optional physical ``range_km``, and ``inner_data`` /
+``outer_data`` edge lists. At least one edge is required. Each edge is a list
+of mode dicts; the required mode-1 dict carries the elliptical orbit: ``a``
+(semi-major axis, px), ``ae`` (eccentricity times ``a``, px), ``long_peri``
+(longitude of pericenter, deg), and ``rate_peri`` (precession rate, deg/day,
+applied across the scene-level ``time`` minus ``ring_epoch``).
+
+A ring carrying ``range_km`` depth-orders physically against the bodies'
+``range_km`` values and receives the spk_error parallax at that range (an
+spk_error scene requires it on every ring); without it, the hint-unit
+``range`` key orders the ring, which is only meaningful against bodies at
+their default ranges.
 
 All ring keys are idealized at the current fidelity: the mode-1 orbits *are*
 the catalog orbits, with no planted per-feature error.
@@ -935,9 +961,21 @@ Random background stars are added by the truth-side top-level keys
 ``background_stars_num``, ``background_stars_psf_sigma``, and
 ``background_stars_distribution_exponent``.
 
-Stars are rendered with a half-pixel PSF-evaluation offset so a star's
-brightness centroid lands exactly at its predicted ``(v, u)``, which keeps star
-navigation free of a constant half-pixel bias.
+Stars render in one of two modes, decided by whether the scene has an active
+whole-scene optics PSF (an explicit ``optics.psf`` block, the
+navigator-matched form, or ``instrument_defaults``):
+
+- **No optics PSF**: each star is Gaussian-pre-spread at its sigma (the
+  per-star ``psf_sigma`` or the instrument's ``star_psf_sigma``), with a
+  half-pixel PSF-evaluation offset so the brightness centroid lands exactly at
+  the predicted ``(v, u)`` -- star navigation stays free of a constant
+  half-pixel bias.
+- **Active optics PSF**: each star's total signal is deposited as a
+  sub-pixel-positioned point mass (centroid-exact after the downsample), so
+  the scene PSF is the *only* convolution a star receives and the rendered
+  star profile is the scene kernel. Pre-spreading here would convolve the
+  star twice and widen it by sqrt(2). Background stars follow the same rule,
+  and the star hit-test metadata records the scene kernel's core sigma.
 
 .. _sim-noise:
 
@@ -947,7 +985,10 @@ Detector-noise block
 The optional ``noise`` dict (truth-side) pins the truth-side detector noise the
 scene plants. The detector stage consumes most of it; the missing-data markers
 are applied by the telemetry stage. Each field is off at the floor unless the
-block sets it (or ``artifacts.instrument_defaults`` turns on the catalog chain).
+block sets it (or ``artifacts.instrument_defaults`` turns on the catalog
+chain); an explicit noise key always wins over the catalog value. The
+validator checks the block against exactly this inventory, so an unknown noise
+key fails loudly.
 
 .. list-table::
    :widths: 30 12 12 46
@@ -959,12 +1000,15 @@ block sets it (or ``artifacts.instrument_defaults`` turns on the catalog chain).
      - Meaning
    * - ``poisson``
      - bool
-     - False
-     - Apply Poisson shot noise to the signal.
+     - False (floor)
+     - Apply Poisson shot noise to the electron image. On under
+       ``instrument_defaults`` unless the block sets it false.
    * - ``read_noise_dn``
      - float
-     - instrument
-     - Gaussian read-noise sigma in DN.
+     - 0 (off)
+     - Gaussian read-noise sigma in DN (converted to electrons through the
+       resolved gain). ``instrument_defaults`` supplies the catalog
+       electrons value instead.
    * - ``bias_dn``
      - float
      - instrument
@@ -974,14 +1018,69 @@ block sets it (or ``artifacts.instrument_defaults`` turns on the catalog chain).
      - float
      - 0.0
      - Cosmic-ray fluence (events / cm^2 / sec), scaled by ``exposure_sec``.
+       Stays 0 under ``instrument_defaults`` (a loss mode, not physical-chain
+       noise).
    * - ``missing_data_rate``
      - float
      - 0.0
-     - Fraction of pixels (0-1) set to the missing-data marker.
+     - Fraction of pixels (0-1) set to the missing-data marker (telemetry
+       stage). Stays 0 under ``instrument_defaults``.
+   * - ``bloom_length``
+     - int
+     - 0 (off)
+     - Full-well column-bloom half-length in pixels; ``instrument_defaults``
+       supplies the catalog value.
+   * - ``signal_full_scale_frac``
+     - float
+     - instrument
+     - Well fraction a signal of 1.0 fills at the reference exposure.
+   * - ``pixel_area_cm2``
+     - float
+     - 1.0
+     - Detector pixel area; scales the cosmic-ray count.
+   * - ``dark_current_e_per_sec``
+     - float
+     - 0 (off)
+     - Dark-current pedestal rate in electrons / sec, added pre-Poisson.
+   * - ``hot_pixel_fraction``
+     - float
+     - 0 (off)
+     - Fraction of pixels that are hot (a fixed per-seed population).
+   * - ``hot_pixel_amplitude_e``
+     - float
+     - catalog
+     - Hot-pixel charge scale in electrons (exponentially distributed).
+   * - ``hot_pixel_column_factor``
+     - float
+     - catalog
+     - Fraction of a hot pixel's TOTAL charge bled up its column (the warm
+       streak's integral, frame-size-invariant).
+   * - ``banding_amplitude_e``
+     - float
+     - 0 (off)
+     - Coherent horizontal-banding amplitude in electrons.
+   * - ``banding_period_px``
+     - float
+     - catalog
+     - Banding spatial period along the row axis, in pixels.
+   * - ``bias_pedestal_sigma_dn``
+     - float
+     - 0 (off)
+     - Per-image bias-pedestal jitter sigma (DN).
+   * - ``bias_row_gradient_dn`` / ``bias_col_gradient_dn``
+     - float
+     - 0 (off)
+     - Peak-to-peak low-order bias gradients (DN).
+   * - ``vidicon``
+     - dict
+     - catalog
+     - Vidicon DN-noise sub-map (vidicon path only): ``read_noise_line_dn``,
+       ``read_noise_pixel_dn``, ``coherent_amplitude_dn``,
+       ``coherent_period_px``.
 
-Saturation clips at the instrument's full-well DN after noise; cameras with
-documented column bloom can carry a ``bloom_length`` that spreads saturated
-excess along the column.
+Physical saturation caps the electron image at the full well before gain (with
+``bloom_length`` spreading the excess along the column); the ADC clip at
+``saturation_dn`` applies after quantization.
 
 .. _sim-optics:
 
@@ -1180,12 +1279,14 @@ realism addition needs -- live in their own module:
      - Poisson, read noise, bias, cosmic-ray rate, missing-data rate, bloom,
        signal full-scale fraction, pixel area (General tab).
    * - ``optics_tab.py``
-     - The Optics tab: PSF, motion smear, distortion, ghosts, the relocated
-       stray-light panel, oversample, and the spacecraft-ephemeris error group.
-       Each optical sub-block is a checkable group under absent-key discipline.
+     - The Optics tab: PSF, motion smear, distortion, ghosts, the stray-light
+       panel, oversample, and the spacecraft-ephemeris error group. Each
+       optical sub-block is a checkable group under absent-key discipline.
    * - ``artifacts_tab.py``
      - The Artifacts tab: the instrument-defaults switch and the detector
-       override (gain state, detector model, exposure reference).
+       override (gain state, detector model, exposure reference, quantization)
+       under per-key discipline -- an edit writes only its own key, so
+       unedited keys keep tracking the instrument catalog.
    * - ``stray_light.py``
      - Stray-light amplitude, direction, model, radial center (its panel is
        hosted in the Optics tab's stray-light group).
@@ -1206,10 +1307,8 @@ realism addition needs -- live in their own module:
 
 The GUI exposes the full scene parameter surface, so any scene that can be
 written by hand in YAML can also be built in the GUI. The parameters the GUI
-does not edit are the nested ``instrument_config`` overrides, multi-mode ring
-edges (the renderer reads only mode 1), the absolute ``signal_full_scale_dn``
-alias (its fractional form is exposed instead), and the detector
-``quantization`` sub-mode (the catalog default applies). Scenes
+does not edit are the nested ``instrument_config`` overrides and multi-mode
+ring edges (the renderer reads only mode 1). Scenes
 round-trip through the **Load / Save Scene (YAML)** buttons, so a scene rendered
 in the GUI can be saved as a catalog artifact and a catalog scene can be loaded
 back to edit; ``tests/main/test_sim_editor_round_trip.py`` asserts the

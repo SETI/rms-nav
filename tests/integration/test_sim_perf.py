@@ -1,8 +1,11 @@
 """Single-core cold-render performance budget for the forward model.
 
-A 512x512 scene with a whole-scene PSF plus the full detector stack at
-oversample 4 must render in under 2 s single-core, and a 1024x1024
-Cassini-class scene in under 8 s (plan Section 15.9).  The budget is a
+A 512x512 star-field scene with a whole-scene PSF plus the full detector stack
+at oversample 4 must render in under 2 s single-core, and a 1024x1024
+Cassini-class star-field scene in under 8 s.  The budgets bound the optics +
+detector stack; a scene with a large lit body at oversample 4 currently exceeds
+them because the body renderer's per-subsample shading dominates, a cost
+outside these budgets pending the body-renderer replacement.  The budget is a
 *cold-render* budget: the render caches are cleared so the timed render pays the
 kernel-build and compile costs a first render pays.
 
@@ -66,11 +69,11 @@ def _psf_detector_scene(size: int) -> dict[str, Any]:
     """A size x size Cassini-class star field with a PSF and the full detector stack.
 
     A body-free star-navigation frame at oversample 4 exercises exactly the
-    phase-B cost the budget bounds: the whole-scene PSF convolution on the
-    oversampled grid and the electron detector stack (shot + read noise, dark,
-    hot pixels, banding, bias structure, cosmic rays, bloom, quantization).  A
-    large lit body would dominate the timing with the body renderer's
-    oversampled shading cost, which is outside the detector-stage budget.
+    cost the budget bounds: the whole-scene PSF convolution on the oversampled
+    grid and the electron detector stack (shot + read noise, dark, hot pixels,
+    banding, bias structure, cosmic rays, bloom, quantization).  A large lit
+    body would dominate the timing with the body renderer's oversampled
+    shading cost, which is outside the optics + detector budget.
     """
     return {
         'size_v': size,
