@@ -37,9 +37,10 @@ from spindoctor.sim.forward.detector.noise_stages import (
     add_hot_pixels,
 )
 from spindoctor.sim.forward.detector.params import DetectorParams, resolve_detector_params
+from spindoctor.sim.forward.feature_loci import dilated_pixels, extract_feature_loci
 from spindoctor.sim.forward.stages import SimFrame
 from spindoctor.sim.seeds import derive_effect_seed
-from spindoctor.support.types import NDArrayFloatType
+from spindoctor.support.types import NDArrayFloatType, NDArrayIntType
 
 __all__ = ['apply_detector', 'apply_saturation', 'quantize_dn']
 
@@ -47,6 +48,21 @@ __all__ = ['apply_detector', 'apply_saturation', 'quantize_dn']
 def _stage_rng(seed: int, effect: str) -> np.random.Generator:
     """A generator for one detector sub-effect, seeded independently by name."""
     return np.random.default_rng(derive_effect_seed(seed, f'detector/{effect}'))
+
+
+def _hot_pixel_pool(
+    frame: SimFrame, dp: DetectorParams
+) -> tuple[NDArrayIntType, NDArrayIntType] | None:
+    """The adversarial hot-pixel placement pool, or None for uniform placement.
+
+    When the hot_pixels artifact mode requests adversarial placement, the
+    population is biased onto the pixels on and beside the navigation features
+    (limb / ring-edge arcs and star positions, dilated by a few pixels).
+    """
+    if not dp.hot_pixel_adversarial:
+        return None
+    loci = extract_feature_loci(frame.truth, frame.signal.shape)
+    return dilated_pixels(loci, radius=3, shape=frame.signal.shape)
 
 
 def apply_saturation(
@@ -155,6 +171,7 @@ def _apply_ccd(frame: SimFrame, dp: DetectorParams, rng: np.random.Generator) ->
         amplitude_e=dp.hot_pixel_amplitude_e,
         column_factor=dp.hot_pixel_column_factor,
         rng=_stage_rng(dp.random_seed, 'hot_pixels'),
+        candidate_pool=_hot_pixel_pool(frame, dp),
     )
     apply_saturation(electrons, full_well_e=dp.full_well_e, bloom_length=dp.bloom_length)
     # Cosmic rays deposit well above the full well AFTER the bloom cap, so they

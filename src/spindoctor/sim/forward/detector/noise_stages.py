@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from spindoctor.support.types import NDArrayFloatType
+from spindoctor.support.types import NDArrayFloatType, NDArrayIntType
 
 __all__ = [
     'add_banding',
@@ -59,6 +59,7 @@ def add_hot_pixels(
     amplitude_e: float,
     column_factor: float,
     rng: np.random.Generator,
+    candidate_pool: tuple[NDArrayIntType, NDArrayIntType] | None = None,
 ) -> None:
     """Add a fixed per-seed hot-pixel population (electrons) in place.
 
@@ -77,6 +78,9 @@ def add_hot_pixels(
             column: the warm streak's integral is ``column_factor`` times the
             hot pixel's charge, independent of the frame height.
         rng: The stage's seeded generator.
+        candidate_pool: Optional ``(v, u)`` coordinate pool the population is
+            drawn from (adversarial placement onto the navigation features).
+            When None or empty, the placement is uniform over the frame.
     """
     if fraction <= 0.0 or amplitude_e <= 0.0:
         return
@@ -84,8 +88,14 @@ def add_hot_pixels(
     n_hot = round(fraction * size_v * size_u)
     if n_hot <= 0:
         return
-    hot_v = rng.integers(0, size_v, size=n_hot)
-    hot_u = rng.integers(0, size_u, size=n_hot)
+    if candidate_pool is not None and candidate_pool[0].size > 0:
+        pool_v, pool_u = candidate_pool
+        pick = rng.integers(0, pool_v.size, size=n_hot)
+        hot_v = pool_v[pick]
+        hot_u = pool_u[pick]
+    else:
+        hot_v = rng.integers(0, size_v, size=n_hot)
+        hot_u = rng.integers(0, size_u, size=n_hot)
     amps = amplitude_e * rng.exponential(1.0, size=n_hot)
     np.add.at(electrons, (hot_v, hot_u), amps)
     if column_factor <= 0.0:

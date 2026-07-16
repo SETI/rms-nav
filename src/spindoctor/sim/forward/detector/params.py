@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from spindoctor.config import DEFAULT_CONFIG
+from spindoctor.sim.forward.artifact_modes import mode_available, resolve_mode_config
 from spindoctor.sim.forward.artifacts_catalog import resolve_detector_defaults
 from spindoctor.sim.instruments import resolve_sim_inst_config
 
@@ -75,6 +76,9 @@ class DetectorParams:
         dark_dn: Dark pedestal in DN subtracted before the I/F divide.
         random_seed: The scene seed for the per-effect sub-streams.
         instrument_defaults: Whether the physical-chain opt-in is on.
+        hot_pixel_adversarial: Whether the hot-pixel population is placed
+            adversarially (biased onto the navigation features) rather than
+            uniformly.
     """
 
     detector_model: str
@@ -107,6 +111,7 @@ class DetectorParams:
     dark_dn: float
     random_seed: int = 42
     instrument_defaults: bool = False
+    hot_pixel_adversarial: bool = False
 
 
 def _default_or_zero(
@@ -262,6 +267,29 @@ def resolve_detector_params(params: Mapping[str, Any]) -> DetectorParams:
         scene_noise.get('banding_period_px', catalog.get('banding_period_px', 64.0))
     )
 
+    # The hot_pixels artifact mode (routed here from the registry) wins over the
+    # noise-block / instrument_defaults hot-pixel knobs: an explicit mode is a
+    # deliberate placement, so it overrides the generic stress path.  incidence
+    # is the hot-pixel fraction; amplitude and column factor fall back to the
+    # catalog when the mode leaves them unset.  The mode is honored only where
+    # it is available (validation already rejects it elsewhere, e.g. LORRI).
+    hot_pixel_adversarial = False
+    hot_cfg = artifacts.get('hot_pixels') if isinstance(artifacts, Mapping) else None
+    if isinstance(hot_cfg, Mapping) and mode_available('hot_pixels', instrument):
+        resolved = resolve_mode_config('hot_pixels', hot_cfg)
+        hot_pixel_fraction = float(resolved['incidence'])
+        mode_amplitude = resolved.get('amplitude_e')
+        if mode_amplitude is not None:
+            hot_pixel_amplitude = float(mode_amplitude)
+        elif hot_pixel_amplitude <= 0.0:
+            hot_pixel_amplitude = float(catalog.get('hot_pixel_amplitude_e', 0.0))
+        mode_column_factor = resolved.get('column_factor')
+        if mode_column_factor is not None:
+            hot_pixel_column_factor = float(mode_column_factor)
+        elif hot_pixel_column_factor <= 0.0:
+            hot_pixel_column_factor = float(catalog.get('hot_pixel_column_factor', 0.0))
+        hot_pixel_adversarial = bool(artifacts.get('adversarial', False))
+
     # The vidicon DN-noise sub-parameters activate on the vidicon path only, and
     # like every physical-chain artifact stay disabled until instrument_defaults
     # is on or the scene sets them explicitly (the stage-activation floor).
@@ -318,4 +346,5 @@ def resolve_detector_params(params: Mapping[str, Any]) -> DetectorParams:
         dark_dn=dark_dn,
         random_seed=int(params.get('random_seed', 42)),
         instrument_defaults=instrument_defaults,
+        hot_pixel_adversarial=hot_pixel_adversarial,
     )
