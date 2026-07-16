@@ -531,7 +531,9 @@ def render_single_body(
         name, inventory item, and model params.
     """
     size_v, size_u = img.shape
-    body_name = body_params.get('name', 'SIM-BODY').upper()
+    # The positional fallback matches the default the radiance stage assigns,
+    # so a direct caller and the pipeline agree on an unnamed body's identity.
+    body_name = str(body_params.get('name', f'SIM-BODY-{body_index + 1}')).upper()
 
     center_v = float(body_params.get('center_v', size_v / 2.0)) + offset_v
     center_u = float(body_params.get('center_u', size_u / 2.0)) + offset_u

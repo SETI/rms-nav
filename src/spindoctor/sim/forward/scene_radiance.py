@@ -117,6 +117,10 @@ def compose_scene_radiance(
     bodies_with_ranges = []
     for body_number, body_params in enumerate(bodies_params):
         body_params_copy = dict(body_params)
+        # Positional default name, applied once here so every name-keyed
+        # consumer (render order, masks, inventory) sees the same identity
+        # and two unnamed bodies cannot collide.
+        body_params_copy.setdefault('name', f'SIM-BODY-{body_number + 1}')
         if 'range_km' in body_params_copy:
             body_params_copy['range_km'] = float(body_params_copy['range_km'])
         else:
@@ -131,7 +135,10 @@ def compose_scene_radiance(
             )
         bodies_with_ranges.append(body_params_copy)
 
-    # Combine rings and bodies, sort by range (far to near)
+    # Combine rings and bodies, sort by range (far to near).  Rings sort by
+    # their hint-unit 'range' key against bodies' physical 'range_km'; the
+    # comparison is meaningful only because ring defaults start at 1000
+    # (dies with the ring-system rework).
     render_items: list[tuple[float, str, Any, int]] = []
     for idx, ring_params in enumerate(rings_params):
         render_items.append((ring_params['range'], 'ring', ring_params, idx))
@@ -161,9 +168,7 @@ def compose_scene_radiance(
 
     # Build order_near_to_far for bodies (needed for body_index_map)
     sorted_bodies_by_range = sorted(bodies_with_ranges, key=lambda x: x['range_km'])
-    order_near_to_far = [
-        bp.get('name', f'SIM-BODY-{i + 1}').upper() for i, bp in enumerate(sorted_bodies_by_range)
-    ]
+    order_near_to_far = [str(bp['name']).upper() for bp in sorted_bodies_by_range]
 
     for _range_val, item_type, item_params, orig_idx in render_items:
         if item_type == 'ring':
