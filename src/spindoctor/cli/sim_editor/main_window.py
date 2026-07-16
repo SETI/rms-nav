@@ -27,11 +27,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from spindoctor.cli.sim_editor.artifacts_tab import ArtifactsTabMixin
 from spindoctor.cli.sim_editor.background_stars import BackgroundStarsMixin
 from spindoctor.cli.sim_editor.base import SimEditorBase
 from spindoctor.cli.sim_editor.body_tab import BodyTabMixin
 from spindoctor.cli.sim_editor.global_fields import GlobalFieldsMixin
 from spindoctor.cli.sim_editor.noise import NoiseMixin
+from spindoctor.cli.sim_editor.optics_tab import OpticsTabMixin
 from spindoctor.cli.sim_editor.render_display import RenderDisplayMixin
 from spindoctor.cli.sim_editor.ring_tab import RingTabMixin
 from spindoctor.cli.sim_editor.scene_io import SceneIoMixin
@@ -46,6 +48,8 @@ class CreateSimulatedImageModel(
     GlobalFieldsMixin,
     NoiseMixin,
     StrayLightMixin,
+    OpticsTabMixin,
+    ArtifactsTabMixin,
     BackgroundStarsMixin,
     BodyTabMixin,
     RingTabMixin,
@@ -108,6 +112,7 @@ class CreateSimulatedImageModel(
         self._show_visual_aids = True
         self._show_saturation_overlay = False
         self._zoom_sharp = True
+        self._syncing = False
 
         self._updater = ParameterUpdater(140)
         self._updater.update_requested.connect(self._update_image)
@@ -191,12 +196,13 @@ class CreateSimulatedImageModel(
         gen_layout = QFormLayout(self._general_tab)
         self._build_global_fields(gen_layout)
         self._build_noise_panel(gen_layout)
-        self._build_stray_panel(gen_layout)
         self._build_psf_preview(gen_layout)
         self._build_background_stars_panel(gen_layout)
 
-        # Add General tab first
+        # Add General tab first, then the fixed Optics and Artifacts tabs.
         self._tabs.addTab(self._general_tab, 'General')
+        self._tabs.addTab(self._build_optics_tab(), 'Optics')
+        self._tabs.addTab(self._build_artifacts_tab(), 'Artifacts')
 
         # Add "+" tab for adding new objects (fake tab - just header, no content, always last)
         self._add_tab_widget = QWidget()

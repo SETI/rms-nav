@@ -166,15 +166,15 @@ class ObsSim(ObsSnapshotInst):
 
         Returns:
             The maximum usable magnitude for stars in this observation.  For
-            calibrated-unit sim instruments the renderer applies no detector
-            noise, so any rendered star is detectable and the limit is a
-            generous constant.
+            calibrated-unit sim instruments the published block carries no
+            DN full-well to anchor a matched-filter limit, so the navigator
+            uses a generous constant.
         """
         inst_config = self._inst_config or {}
         inst_noise = inst_config.get('noise') or {}
         if inst_config.get('data_units', 'raw_dn') != 'raw_dn':
-            # calibrated_if: the renderer leaves the composed I/F signal
-            # noise-free (detector noise there is deferred sim scope).
+            # calibrated_if: no published DN full-well to anchor the limit, so
+            # the navigator-side detection limit is a generous constant.
             return 30.0
         # Published values only: the resolved per-instrument block (which
         # already carries any idealized instrument_config overrides), with the

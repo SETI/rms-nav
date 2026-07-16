@@ -75,6 +75,31 @@ class RingTabMixin(SimEditorBase):
         rng.valueChanged.connect(lambda v, i=idx: self._on_ring_field(i, 'range', v))
         fl.addRow('Range:', rng)
 
+        # Physical range (km): optional-key discipline -- absent unless set.
+        # Required on every ring of an spk_error scene; when present it also
+        # depth-orders the ring physically against body range_km values.
+        has_range_km = p.get('range_km') is not None
+        range_km_check = QCheckBox('Set physical range (km)')
+        range_km_check.setChecked(has_range_km)
+        range_km_check.setToolTip(
+            'Write a physical range_km on this ring (depth ordering and '
+            'spk_error parallax); unchecked leaves the key absent.'
+        )
+        range_km_spin = QDoubleSpinBox()
+        range_km_spin.setRange(0.01, 1.0e12)
+        range_km_spin.setDecimals(1)
+        range_km_spin.setValue(float(p.get('range_km', 1.0e6)))
+        range_km_spin.setEnabled(has_range_km)
+        range_km_check.clicked.connect(
+            lambda checked, i=idx, spin=range_km_spin: self._on_ring_range_km_enabled(
+                i, checked, spin
+            )
+        )
+        range_km_spin.valueChanged.connect(lambda v, i=idx: self._on_ring_range_km_value(i, v))
+        fl.addRow(range_km_check, range_km_spin)
+        w.range_km_check = range_km_check  # type: ignore[attr-defined]
+        w.range_km_spin = range_km_spin  # type: ignore[attr-defined]
+
         # Shading distance parameter
         shading_distance = QDoubleSpinBox()
         shading_distance.setRange(0.0, 1000.0)
@@ -252,6 +277,25 @@ class RingTabMixin(SimEditorBase):
                 float(value) if isinstance(value, (int, float)) else value
             )
             self._updater.request_update()
+
+    def _on_ring_range_km_enabled(self, idx: int, enabled: bool, spin: QDoubleSpinBox) -> None:
+        """Insert or remove the ring's optional physical range_km key."""
+        if 0 <= idx < len(self.sim_params['rings']):
+            ring = self.sim_params['rings'][idx]
+            if enabled:
+                ring['range_km'] = float(spin.value())
+            else:
+                ring.pop('range_km', None)
+            spin.setEnabled(enabled)
+            self._updater.request_update()
+
+    def _on_ring_range_km_value(self, idx: int, value: float) -> None:
+        """Update the ring's physical range_km when the key is enabled."""
+        if 0 <= idx < len(self.sim_params['rings']):
+            ring = self.sim_params['rings'][idx]
+            if 'range_km' in ring:
+                ring['range_km'] = float(value)
+                self._updater.request_update()
 
     def _on_ring_name(self, idx: int, text: str) -> None:
         """Rename a ring and refresh the tab titles."""

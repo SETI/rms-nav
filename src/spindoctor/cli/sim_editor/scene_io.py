@@ -73,12 +73,16 @@ class SceneIoMixin(SimEditorBase):
             'stars': list(params.get('stars', [])),
             'rings': list(params.get('rings', [])),
         }
-        # Preserve catalog-only blocks the General tab does not yet edit
-        # (noise model, stray light, exposure, instrument-config overrides) so
-        # loading a scene spec round-trips them instead of silently dropping them.
+        # Carry the block-valued schema keys through unchanged; the tab-specific
+        # sync methods below then drive their widgets from these blocks (and the
+        # instrument-config / midtime / fit-rotation keys the General tab reads).
         for passthrough_key in (
             'noise',
-            'stray_light',
+            'optics',
+            'spk_error',
+            'oversample',
+            'detector',
+            'artifacts',
             'instrument_config',
             'midtime_utc',
             'fit_camera_rotation',
@@ -154,26 +158,11 @@ class SceneIoMixin(SimEditorBase):
         self._pixel_area_spin.blockSignals(True)
         self._pixel_area_spin.setValue(float(self._noise_value('pixel_area_cm2', 1.0)))
         self._pixel_area_spin.blockSignals(False)
-        # Update stray-light controls from the loaded stray_light block.
-        self._stray_amplitude_spin.blockSignals(True)
-        self._stray_amplitude_spin.setValue(float(self._stray_value('amplitude', 0.0)))
-        self._stray_amplitude_spin.blockSignals(False)
-        self._stray_direction_spin.blockSignals(True)
-        self._stray_direction_spin.setValue(float(self._stray_value('direction_deg', 0.0)))
-        self._stray_direction_spin.blockSignals(False)
-        self._stray_model_combo.blockSignals(True)
-        stray_model_index = self._stray_model_combo.findText(
-            str(self._stray_value('model', 'linear'))
-        )
-        if stray_model_index >= 0:
-            self._stray_model_combo.setCurrentIndex(stray_model_index)
-        self._stray_model_combo.blockSignals(False)
-        self._stray_center_v_spin.blockSignals(True)
-        self._stray_center_v_spin.setValue(float(self._stray_value('center_v', 0.0)))
-        self._stray_center_v_spin.blockSignals(False)
-        self._stray_center_u_spin.blockSignals(True)
-        self._stray_center_u_spin.setValue(float(self._stray_value('center_u', 0.0)))
-        self._stray_center_u_spin.blockSignals(False)
+        # The Optics-tab controls (PSF, smear, distortion, ghosts, stray
+        # light, oversample, spk_error) and the Artifacts-tab controls
+        # (instrument defaults, detector override) sync from their own blocks.
+        self._sync_optics_from_params()
+        self._sync_artifacts_from_params()
         # Update background stars controls
         self._background_stars_slider.blockSignals(True)
         self._background_stars_slider.setValue(self.sim_params['background_stars_num'])

@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFormLayout,
     QGroupBox,
     QLabel,
     QLineEdit,
@@ -27,6 +28,7 @@ from PyQt6.QtWidgets import (
     QSlider,
     QSpinBox,
     QTabWidget,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -52,6 +54,7 @@ class SimEditorBase(QMainWindow):
     _show_visual_aids: bool
     _show_saturation_overlay: bool
     _zoom_sharp: bool
+    _syncing: bool
     _updater: ParameterUpdater
     _zoom_ctl: ZoomPanController
 
@@ -93,12 +96,49 @@ class SimEditorBase(QMainWindow):
     _signal_frac_spin: QDoubleSpinBox
     _pixel_area_spin: QDoubleSpinBox
 
-    # ---- General tab: stray-light panel ----
+    # ---- Optics tab: stray-light panel ----
     _stray_amplitude_spin: QDoubleSpinBox
     _stray_direction_spin: QDoubleSpinBox
     _stray_model_combo: QComboBox
     _stray_center_v_spin: QDoubleSpinBox
     _stray_center_u_spin: QDoubleSpinBox
+
+    # ---- Optics tab: fixed tab and its sub-block groups ----
+    _optics_tab: QWidget
+    _psf_optics_group: QGroupBox
+    _psf_match_nav_check: QCheckBox
+    _psf_sigma_v_spin: QDoubleSpinBox
+    _psf_sigma_u_spin: QDoubleSpinBox
+    _psf_w_spin: QDoubleSpinBox
+    _psf_r0_spin: QDoubleSpinBox
+    _psf_n_spin: QDoubleSpinBox
+    _smear_group: QGroupBox
+    _smear_rows_layout: QVBoxLayout
+    _smear_rows: list[Any]
+    _distortion_group: QGroupBox
+    _distortion_k1_spin: QDoubleSpinBox
+    _distortion_k2_spin: QDoubleSpinBox
+    _distortion_center_v_spin: QDoubleSpinBox
+    _distortion_center_u_spin: QDoubleSpinBox
+    _distortion_nonradial_spin: QDoubleSpinBox
+    _ghosts_group: QGroupBox
+    _ghosts_rows_layout: QVBoxLayout
+    _ghost_rows: list[Any]
+    _stray_group: QGroupBox
+    _oversample_check: QCheckBox
+    _oversample_spin: QSpinBox
+    _spk_error_group: QGroupBox
+    _spk_dv_spin: QDoubleSpinBox
+    _spk_du_spin: QDoubleSpinBox
+    _spk_range_spin: QDoubleSpinBox
+
+    # ---- Artifacts tab: fixed tab and its groups ----
+    _artifacts_tab: QWidget
+    _instrument_defaults_check: QCheckBox
+    _detector_group: QGroupBox
+    _detector_gain_state_spin: QSpinBox
+    _detector_model_combo: QComboBox
+    _detector_exposure_ref_spin: QDoubleSpinBox
 
     # ---- General tab: PSF preview ----
     _psf_group: QGroupBox
@@ -165,4 +205,36 @@ class SimEditorBase(QMainWindow):
 
     def _stray_value(self, key: str, default: Any) -> Any:
         """Read from the stray_light block (implemented in StrayLightMixin)."""
+        raise NotImplementedError
+
+    def _build_stray_panel(self, gen_layout: QFormLayout) -> None:
+        """Populate a stray-light form (implemented in StrayLightMixin)."""
+        raise NotImplementedError
+
+    def _set_stray(self, key: str, value: Any) -> None:
+        """Write into the stray_light block (implemented in StrayLightMixin)."""
+        raise NotImplementedError
+
+    def _on_stray_center(self, key: str, value: float) -> None:
+        """Set or omit a stray-light centre (implemented in StrayLightMixin)."""
+        raise NotImplementedError
+
+    def _build_optics_tab(self) -> QWidget:
+        """Build the Optics tab (implemented in OpticsTabMixin)."""
+        raise NotImplementedError
+
+    def _build_artifacts_tab(self) -> QWidget:
+        """Build the Artifacts tab (implemented in ArtifactsTabMixin)."""
+        raise NotImplementedError
+
+    def _sync_optics_from_params(self) -> None:
+        """Sync the Optics-tab widgets from sim_params (OpticsTabMixin)."""
+        raise NotImplementedError
+
+    def _sync_artifacts_from_params(self) -> None:
+        """Sync the Artifacts-tab widgets from sim_params (ArtifactsTabMixin)."""
+        raise NotImplementedError
+
+    def _refresh_detector_catalog_defaults(self) -> None:
+        """Refresh displayed detector catalog defaults (ArtifactsTabMixin)."""
         raise NotImplementedError

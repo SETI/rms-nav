@@ -13,7 +13,10 @@ parses and validates a file and returns that dict; ``save_sim_scene`` validates 
 ``sim_params`` dict and writes it (injecting ``schema_version`` and
 ``scene_name``); ``validate_sim_params`` validates an in-memory dict for
 programmatic scene authors.  The validator is hand-rolled (no pydantic
-dependency).
+dependency): the key inventory and boundary classification live in
+:mod:`spindoctor.sim.scene_schema` and the per-field type checks in
+:mod:`spindoctor.sim.scene_checks`; this module is the public entry point and
+re-exports the boundary names.
 
 **The information boundary.**  Every key in the schema is classified as either
 idealized (information the production pipeline could know from catalogs,
@@ -22,20 +25,73 @@ or truth (nature's values, planted errors, variance knobs, and contaminants:
 readable only by the image-side renderer).  ``build_nav_params`` constructs
 the filtered idealized view; :data:`TRUTH_KEYS` is the machine-readable truth
 set the boundary test iterates.  A key added to the schema without a
-classification fails the import-time completeness assertion, so every future
-schema change must extend the boundary in the same change.
+classification fails the import-time completeness assertion (which runs when
+:mod:`spindoctor.sim.scene_schema` is imported here), so every future schema
+change must extend the boundary in the same change.
 """
 
 from __future__ import annotations
 
 import copy
-import math
 from pathlib import Path
 from typing import Any
 
 from ruamel.yaml import YAML
 
 from spindoctor.sim.instruments import GENERIC_INSTRUMENT_ALIASES, SIM_INSTRUMENTS
+from spindoctor.sim.scene_checks import (
+    _check_artifacts,
+    _check_body_object,
+    _check_detector,
+    _check_noise,
+    _check_optics,
+    _check_optional_bool,
+    _check_optional_mapping,
+    _check_optional_mapping_list,
+    _check_optional_nonnegative_int,
+    _check_optional_number,
+    _check_optional_positive_int,
+    _check_optional_positive_number,
+    _check_optional_str,
+    _check_ring_object,
+    _check_spk_error,
+    _check_star_object,
+    _require_int,
+    _require_positive_int,
+    _require_ranges_for_spk_error,
+    _require_str,
+)
+
+# The two private inventories keep their redundant aliases: they are explicit
+# re-exports (the schema tests exercise them through this module).
+from spindoctor.sim.scene_schema import (
+    _ALLOWED_KEYS as _ALLOWED_KEYS,
+)
+from spindoctor.sim.scene_schema import (
+    _OBJECT_BLOCKS as _OBJECT_BLOCKS,
+)
+from spindoctor.sim.scene_schema import (
+    TOP_LEVEL_IDEALIZED_KEYS,
+    TOP_LEVEL_TRUTH_KEYS,
+    TRUTH_KEYS,
+    SimSceneValidationError,
+)
+
+__all__ = [
+    'ALLOWED_INSTRUMENTS',
+    'CURRENT_SCHEMA_VERSION',
+    'DECLARED_SIM_SCENE_CLASSES',
+    'TOP_LEVEL_IDEALIZED_KEYS',
+    'TOP_LEVEL_TRUTH_KEYS',
+    'TRUTH_KEYS',
+    'SimSceneValidationError',
+    'build_nav_params',
+    'iter_scene_paths',
+    'load_sim_scene',
+    'save_sim_scene',
+    'scene_class_for_path',
+    'validate_sim_params',
+]
 
 # Scene classes for the sim catalog.  The structural test asserts every
 # subdirectory under a catalog root is one of these so typos fail loudly.
@@ -56,227 +112,6 @@ DECLARED_SIM_SCENE_CLASSES: frozenset[str] = frozenset(
 ALLOWED_INSTRUMENTS: frozenset[str] = frozenset(SIM_INSTRUMENTS) | GENERIC_INSTRUMENT_ALIASES
 
 CURRENT_SCHEMA_VERSION: int = 2
-
-# ---------------------------------------------------------------------------
-# Key inventory and information-boundary classification.
-#
-# _ALLOWED_KEYS / _*_KEYS are the complete inventory (unknown keys fail
-# validation so typos do not silently render the default scene).  The
-# *_IDEALIZED_KEYS / *_TRUTH_KEYS sets classify every inventory key for the
-# information boundary; the import-time assertion below keeps the
-# classification complete and disjoint.
-# ---------------------------------------------------------------------------
-
-# Every top-level key a scene may carry.  These are the flat runtime sim_params
-# names the renderer / ObsSim consume directly, plus the schema_version /
-# scene_name metadata the renderer ignores.
-_ALLOWED_KEYS: frozenset[str] = frozenset(
-    {
-        'schema_version',
-        'scene_name',
-        'instrument',
-        'size_v',
-        'size_u',
-        'random_seed',
-        'exposure_sec',
-        'offset_v',
-        'offset_u',
-        'offset_rotation_deg',
-        'midtime_utc',
-        'closest_planet',
-        'time',
-        'ring_epoch',
-        'shade_solid_rings',
-        'bodies',
-        'rings',
-        'stars',
-        'background_stars_num',
-        'background_stars_psf_sigma',
-        'background_stars_distribution_exponent',
-        'noise',
-        'stray_light',
-        'instrument_config',
-        'fit_camera_rotation',
-    }
-)
-
-# Top-level idealized keys: frame identity, emulated-instrument configuration,
-# and epoch/timing values the production pipeline reads from labels and
-# published models.  'ring_epoch' is deliberately idealized: the precessing
-# ring model's epoch is catalog knowledge the navigator-side ring model reads.
-TOP_LEVEL_IDEALIZED_KEYS: frozenset[str] = frozenset(
-    {
-        'schema_version',
-        'scene_name',
-        'instrument',
-        'size_v',
-        'size_u',
-        'exposure_sec',
-        'midtime_utc',
-        'closest_planet',
-        'time',
-        'ring_epoch',
-        'bodies',
-        'rings',
-        'stars',
-        'instrument_config',
-        'fit_camera_rotation',
-    }
-)
-
-# Top-level truth keys: the planted pointing error the navigator must recover,
-# the RNG realization, and the contaminant / noise fields.  The renderer's
-# appearance knob 'shade_solid_rings' is image-side only (the navigator's
-# ring template is always solid-shaded by its own convention).
-TOP_LEVEL_TRUTH_KEYS: frozenset[str] = frozenset(
-    {
-        'random_seed',
-        'offset_v',
-        'offset_u',
-        'offset_rotation_deg',
-        'shade_solid_rings',
-        'background_stars_num',
-        'background_stars_psf_sigma',
-        'background_stars_distribution_exponent',
-        'noise',
-        'stray_light',
-    }
-)
-
-# Per-body idealized keys: the ellipsoid/mesh geometry, pose, lighting, and
-# physical scale the production pipeline knows from SPICE and shape catalogs.
-# The mesh keys are idealized because the published shape model of an
-# irregular body is catalog knowledge; a scene plants shape error through
-# 'nav_override', not by hiding the mesh.
-_BODY_IDEALIZED_KEYS: frozenset[str] = frozenset(
-    {
-        'name',
-        'shape_model',
-        'center_v',
-        'center_u',
-        'axis1',
-        'axis2',
-        'axis3',
-        'rotation_z',
-        'rotation_tilt',
-        'illumination_angle',
-        'phase_angle',
-        'range_km',
-        'km_per_pixel',
-        'mesh_lumpiness',
-        'mesh_n_lat',
-        'mesh_n_lon',
-        'mesh_seed',
-        'pose_euler_deg',
-    }
-)
-
-# Per-body truth keys: surface texture (craters) is nature's terrain, 'seed'
-# is its realization, and 'anti_aliasing' is an image-side rendering-fidelity
-# knob (the navigator's template always renders at full anti-aliasing).
-# 'nav_override' is special: its VALUES are what the navigator believes
-# (idealized), so build_nav_params overlays them onto the body and drops the
-# key; the underlying overridden true values never cross.
-_BODY_TRUTH_KEYS: frozenset[str] = frozenset(
-    {
-        'crater_fill',
-        'crater_min_radius',
-        'crater_max_radius',
-        'crater_power_law_exponent',
-        'crater_relief_scale',
-        'seed',
-        'anti_aliasing',
-        'nav_override',
-    }
-)
-
-_BODY_KEYS: frozenset[str] = _BODY_IDEALIZED_KEYS | _BODY_TRUTH_KEYS
-
-# Per-star idealized keys: catalog identity, position, magnitude, spectral
-# class, the predicted smear vector (the pipeline computes it from attitude
-# telemetry), and the PSF fitting-window size (instrument configuration).
-_STAR_IDEALIZED_KEYS: frozenset[str] = frozenset(
-    {
-        'name',
-        'catalog_name',
-        'v',
-        'u',
-        'vmag',
-        'spectral_class',
-        'move_v',
-        'move_u',
-        'psf_size',
-    }
-)
-
-# Per-star truth keys: a per-star PSF width override is an anomaly of the
-# rendered image (the navigator only knows the instrument's published PSF).
-_STAR_TRUTH_KEYS: frozenset[str] = frozenset({'psf_sigma'})
-
-_STAR_KEYS: frozenset[str] = _STAR_IDEALIZED_KEYS | _STAR_TRUTH_KEYS
-
-# Per-ring keys (all idealized at present fidelity: the mode-1 orbits ARE the
-# catalog orbits, with no planted per-feature error until the phase-F
-# ring_system block lands).  'range' here is the z-order/depth hint of the
-# legacy rings list, which phase F replaces wholesale.
-_RING_IDEALIZED_KEYS: frozenset[str] = frozenset(
-    {
-        'name',
-        'feature_type',
-        'center_v',
-        'center_u',
-        'shading_distance',
-        'inner_data',
-        'outer_data',
-        'range',
-    }
-)
-
-_RING_TRUTH_KEYS: frozenset[str] = frozenset()
-
-_RING_KEYS: frozenset[str] = _RING_IDEALIZED_KEYS | _RING_TRUTH_KEYS
-
-# The object blocks of the schema: block name -> (allowed, idealized, truth).
-_OBJECT_BLOCKS: dict[str, tuple[frozenset[str], frozenset[str], frozenset[str]]] = {
-    'bodies': (_BODY_KEYS, _BODY_IDEALIZED_KEYS, _BODY_TRUTH_KEYS),
-    'stars': (_STAR_KEYS, _STAR_IDEALIZED_KEYS, _STAR_TRUTH_KEYS),
-    'rings': (_RING_KEYS, _RING_IDEALIZED_KEYS, _RING_TRUTH_KEYS),
-}
-
-# The machine-readable truth-key set the ObsSim boundary filter strips and
-# the structural boundary test iterates.  Per-object-block entries use dotted
-# '<block>.<key>' paths; top-level entries are bare key names.
-TRUTH_KEYS: frozenset[str] = frozenset(TOP_LEVEL_TRUTH_KEYS) | frozenset(
-    f'{block}.{key}'
-    for block, (_allowed, _idealized, truth) in _OBJECT_BLOCKS.items()
-    for key in truth
-)
-
-
-def _assert_boundary_classification_complete() -> None:
-    """Every schema key must be classified idealized or truth, never both.
-
-    Runs at import so a schema change that adds a key without classifying it
-    fails everything loudly, not just one test.
-    """
-    overlap = TOP_LEVEL_IDEALIZED_KEYS & TOP_LEVEL_TRUTH_KEYS
-    assert not overlap, f'top-level keys classified both idealized and truth: {sorted(overlap)}'
-    unclassified = _ALLOWED_KEYS - (TOP_LEVEL_IDEALIZED_KEYS | TOP_LEVEL_TRUTH_KEYS)
-    assert not unclassified, f'top-level keys with no boundary class: {sorted(unclassified)}'
-    unknown = (TOP_LEVEL_IDEALIZED_KEYS | TOP_LEVEL_TRUTH_KEYS) - _ALLOWED_KEYS
-    assert not unknown, f'classified top-level keys not in the inventory: {sorted(unknown)}'
-    for block, (allowed, idealized, truth) in _OBJECT_BLOCKS.items():
-        overlap = idealized & truth
-        assert not overlap, f'{block} keys classified both idealized and truth: {sorted(overlap)}'
-        unclassified = allowed - (idealized | truth)
-        assert not unclassified, f'{block} keys with no boundary class: {sorted(unclassified)}'
-
-
-_assert_boundary_classification_complete()
-
-
-class SimSceneValidationError(ValueError):
-    """Raised when a sim scene YAML is missing or malformed."""
 
 
 def iter_scene_paths(root: Path) -> list[Path]:
@@ -327,14 +162,18 @@ def save_sim_scene(sim_params: dict[str, Any], path: Path) -> None:
     """Validate ``sim_params`` and write it to ``path`` as a flat YAML scene.
 
     The ``schema_version`` and ``scene_name`` (= the filename stem) keys are
-    injected so the written file validates on reload.
+    injected so the written file validates on reload.  Saving never mutates
+    ``sim_params`` (the scene is deep-copied first), and the authored form is
+    persisted verbatim -- in particular ``optics.psf: {match_navigator: true}``
+    is written as authored, so it survives a save / load round-trip and is
+    resolved only when the renderer builds the kernel.
 
     Parameters:
         sim_params: The flat GUI / render parameter mapping.
         path: Destination ``<scene_name>.yaml`` path; its stem is the scene name.
     """
     scene: dict[str, Any] = {
-        **sim_params,
+        **copy.deepcopy(sim_params),
         'schema_version': CURRENT_SCHEMA_VERSION,
         'scene_name': path.stem,
     }
@@ -355,6 +194,11 @@ def validate_sim_params(
     campaign generator, the doc-image galleries), which build dicts rather
     than files.  ``schema_version`` and ``scene_name`` are optional here (a
     dict author has no filename); when present, the version must be current.
+
+    Validation never rewrites the scene: ``optics.psf: {match_navigator: true}``
+    stays in its authored form (the renderer resolves it into the navigator's
+    concrete Gaussian when it builds the kernel), so an editor's live mapping
+    and the persisted file both keep the author's intent.
 
     Parameters:
         sim_params: The flat scene parameter mapping.
@@ -413,9 +257,13 @@ def validate_sim_params(
     _check_optional_bool(
         sim_params.get('fit_camera_rotation'), 'fit_camera_rotation', source=source
     )
-    _check_optional_mapping(sim_params.get('noise'), 'noise', source=source)
-    _check_optional_mapping(sim_params.get('stray_light'), 'stray_light', source=source)
+    _check_noise(sim_params.get('noise'), source=source)
     _check_optional_mapping(sim_params.get('instrument_config'), 'instrument_config', source=source)
+    _check_optional_positive_int(sim_params.get('oversample'), 'oversample', source=source)
+    _check_optics(sim_params.get('optics'), source=source)
+    _check_detector(sim_params.get('detector'), instrument=instrument, source=source)
+    _check_artifacts(sim_params.get('artifacts'), source=source)
+    _check_spk_error(sim_params.get('spk_error'), source=source)
 
     for block in ('bodies', 'rings', 'stars'):
         _check_optional_mapping_list(sim_params.get(block), block, source=source)
@@ -432,6 +280,9 @@ def validate_sim_params(
                 _check_ring_object(obj, index=index, source=source)
             else:
                 _check_star_object(obj, index=index, source=source)
+
+    if sim_params.get('spk_error') is not None:
+        _require_ranges_for_spk_error(sim_params, source=source)
 
     return sim_params
 
@@ -482,169 +333,3 @@ def build_nav_params(sim_params: dict[str, Any]) -> dict[str, Any]:
             )
         nav[block] = filtered_objects
     return nav
-
-
-def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
-    """Validate one ``bodies`` entry's field types."""
-    label = f'bodies[{index}]'
-    _check_optional_str(obj.get('name'), f'{label}.name', source=source)
-    shape_model = obj.get('shape_model')
-    if shape_model is not None and shape_model not in ('ellipsoid', 'polyhedral_mesh'):
-        raise SimSceneValidationError(
-            f"{source}: {label}.shape_model must be 'ellipsoid' or 'polyhedral_mesh' "
-            f'when present; got {shape_model!r}'
-        )
-    for key in (
-        'center_v',
-        'center_u',
-        'axis1',
-        'axis2',
-        'axis3',
-        'rotation_z',
-        'rotation_tilt',
-        'illumination_angle',
-        'phase_angle',
-        'range_km',
-        'km_per_pixel',
-        'mesh_lumpiness',
-        'crater_fill',
-        'crater_min_radius',
-        'crater_max_radius',
-        'crater_power_law_exponent',
-        'crater_relief_scale',
-        'anti_aliasing',
-    ):
-        _check_optional_number(obj.get(key), f'{label}.{key}', source=source)
-    for key in ('mesh_n_lat', 'mesh_n_lon', 'mesh_seed', 'seed'):
-        if obj.get(key) is not None:
-            _require_int(obj, key, source=f'{source}: {label}')
-    pose = obj.get('pose_euler_deg')
-    if pose is not None:
-        if not isinstance(pose, (list, tuple)) or len(pose) != 3:
-            raise SimSceneValidationError(
-                f'{source}: {label}.pose_euler_deg must be a list of 3 angles when present'
-            )
-        for angle in pose:
-            _check_optional_number(angle, f'{label}.pose_euler_deg[]', source=source)
-    override = obj.get('nav_override')
-    if override is not None:
-        if not isinstance(override, dict):
-            raise SimSceneValidationError(
-                f'{source}: {label}.nav_override must be a mapping when present'
-            )
-        # The override expresses what the navigator BELIEVES about idealized
-        # geometry, so only idealized body keys may appear in it.
-        bad = set(override) - _BODY_IDEALIZED_KEYS
-        if bad:
-            raise SimSceneValidationError(
-                f'{source}: {label}.nav_override may only override idealized body '
-                f'keys; got {sorted(bad)}'
-            )
-
-
-def _check_ring_object(obj: dict[str, Any], *, index: int, source: str) -> None:
-    """Validate one ``rings`` entry's field types."""
-    label = f'rings[{index}]'
-    _check_optional_str(obj.get('name'), f'{label}.name', source=source)
-    feature_type = obj.get('feature_type')
-    if feature_type is not None and feature_type not in ('RINGLET', 'GAP'):
-        raise SimSceneValidationError(
-            f"{source}: {label}.feature_type must be 'RINGLET' or 'GAP' when present; "
-            f'got {feature_type!r}'
-        )
-    for key in ('center_v', 'center_u', 'shading_distance', 'range'):
-        _check_optional_number(obj.get(key), f'{label}.{key}', source=source)
-    for key in ('inner_data', 'outer_data'):
-        _check_optional_mapping_list(obj.get(key), f'{label}.{key}', source=source)
-
-
-def _check_star_object(obj: dict[str, Any], *, index: int, source: str) -> None:
-    """Validate one ``stars`` entry's field types."""
-    label = f'stars[{index}]'
-    _check_optional_str(obj.get('name'), f'{label}.name', source=source)
-    _check_optional_str(obj.get('catalog_name'), f'{label}.catalog_name', source=source)
-    _check_optional_str(obj.get('spectral_class'), f'{label}.spectral_class', source=source)
-    for key in ('v', 'u', 'vmag', 'move_v', 'move_u'):
-        _check_optional_number(obj.get(key), f'{label}.{key}', source=source)
-    _check_optional_positive_number(obj.get('psf_sigma'), f'{label}.psf_sigma', source=source)
-    psf_size = obj.get('psf_size')
-    if psf_size is not None:
-        valid = isinstance(psf_size, (list, tuple)) and len(psf_size) == 2
-        if not valid or any(isinstance(x, bool) or not isinstance(x, int) for x in psf_size):
-            raise SimSceneValidationError(
-                f'{source}: {label}.psf_size must be a list of 2 integers when present'
-            )
-
-
-def _require_str(raw: dict[str, Any], key: str, *, source: str) -> str:
-    value = raw.get(key)
-    if not isinstance(value, str) or not value:
-        raise SimSceneValidationError(f'{source}: {key} must be a non-empty string')
-    return value
-
-
-def _require_int(raw: dict[str, Any], key: str, *, source: str) -> int:
-    value = raw.get(key)
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise SimSceneValidationError(f'{source}: {key} must be an integer')
-    return value
-
-
-def _require_positive_int(raw: dict[str, Any], key: str, *, source: str) -> int:
-    value = _require_int(raw, key, source=source)
-    if value <= 0:
-        raise SimSceneValidationError(f'{source}: {key} must be a positive integer')
-    return value
-
-
-def _check_optional_number(value: Any, key: str, *, source: str) -> None:
-    if value is None:
-        return
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise SimSceneValidationError(f'{source}: {key} must be a number when present')
-    if not math.isfinite(float(value)):
-        raise SimSceneValidationError(f'{source}: {key} must be finite; got {value!r}')
-
-
-def _check_optional_positive_number(value: Any, key: str, *, source: str) -> None:
-    if value is None:
-        return
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-        raise SimSceneValidationError(f'{source}: {key} must be a positive number when present')
-
-
-def _check_optional_nonnegative_int(value: Any, key: str, *, source: str) -> None:
-    if value is None:
-        return
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise SimSceneValidationError(
-            f'{source}: {key} must be a non-negative integer when present'
-        )
-
-
-def _check_optional_str(value: Any, key: str, *, source: str) -> None:
-    if value is None:
-        return
-    if not isinstance(value, str):
-        raise SimSceneValidationError(f'{source}: {key} must be a string when present')
-
-
-def _check_optional_bool(value: Any, key: str, *, source: str) -> None:
-    if value is None:
-        return
-    if not isinstance(value, bool):
-        raise SimSceneValidationError(f'{source}: {key} must be a boolean when present')
-
-
-def _check_optional_mapping(value: Any, key: str, *, source: str) -> None:
-    if value is None:
-        return
-    if not isinstance(value, dict):
-        raise SimSceneValidationError(f'{source}: {key} must be a mapping when present')
-
-
-def _check_optional_mapping_list(value: Any, key: str, *, source: str) -> None:
-    if value is None:
-        return
-    if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
-        raise SimSceneValidationError(f'{source}: {key} must be a list of mappings')

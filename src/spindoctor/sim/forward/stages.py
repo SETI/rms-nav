@@ -13,16 +13,21 @@ realization is independent of which other stages are enabled.  A stage name
 is therefore part of its scenes' noise realization: renaming a stage reseeds
 it and regenerates the affected baselines.
 
-Placeholders at present fidelity (deliberately not implemented):
+A scene with an active whole-scene PSF renders its radiance on an oversampled
+grid (``oversample`` > 1) so the convolution resolves sub-detector-pixel edge
+structure; the box downsample after optics returns the image and the
+pixel-space truth metadata to the detector grid.  A scene with no optics block
+renders at ``oversample`` 1, where the downsample is a no-op.
 
-- ``oversample`` is always 1: the radiance stage composes directly on the
-  detector grid and :func:`downsample_to_detector` is a no-op.
-- ``point_e`` is allocated but unused: stars are drawn PSF-spread in
-  normalized signal units by the radiance stage rather than deposited as
-  point-mass electrons for a whole-scene optics PSF.
-- ``signal`` carries normalized [0, ~1] scene units through the optics
-  stage and is converted to DN in place by the detector stage; the
-  electrons/gain unit chain is not implemented yet.
+The ``signal`` plane carries normalized [0, ~1] intensive scene units through
+the optics stage; the detector stage converts it to electrons through the
+exposure and digitizes it to DN in place (the electron unit chain).  Stars
+render into the signal plane: Gaussian-pre-spread when no whole-scene PSF is
+active, or as sub-pixel point masses when one is (so the scene PSF is their
+only convolution).  The ``point_e`` plane is reserved for electron-unit point
+sources -- it is added into the electron image after the signal conversion and
+before Poisson, so anything in it never passes through the intensive scale --
+and stays zeroed until an electron-unit source uses it.
 """
 
 from collections.abc import Mapping
@@ -44,17 +49,19 @@ class SimFrame:
         signal: ``(V*os, U*os)`` float64 image of intensive scene signal
             (I/F-like normalized units): bodies, rings, and diffuse
             backgrounds.  The detector stage converts it to DN in place.
-        point_e: ``(V*os, U*os)`` float64 image reserved for point sources
-            (stars, moonlets) in electrons, kept separate because one array
-            cannot carry two unit systems through the detector stage's
-            signal-to-electron conversion.  Unused at present fidelity (see
-            the module docstring).
+        point_e: ``(V*os, U*os)`` float64 image reserved for electron-unit
+            point sources, kept separate because one array cannot carry two
+            unit systems through the detector stage's signal-to-electron
+            conversion.  Stars deposit in signal units, so this plane stays
+            zeroed (see the module docstring).
         oversample: Oversampling factor ``os >= 1``; the detector grid is
-            ``(V, U)``.  Always 1 at present fidelity.
+            ``(V, U)``.
         truth: Feature truth accumulated by the radiance stage (the rendered
             star records, body masks, inventory, and z-order maps).  This is
             renderer output metadata; none of it crosses the information
-            boundary to the navigator side.
+            boundary to the navigator side.  Pixel-space entries are carried on
+            the oversampled grid and returned to the detector grid by the
+            downsample stage.
     """
 
     signal: NDArrayFloatType
@@ -89,7 +96,7 @@ def new_sim_frame(size_v: int, size_u: int, *, oversample: int = 1) -> SimFrame:
     Parameters:
         size_v: Detector-grid height in pixels.
         size_u: Detector-grid width in pixels.
-        oversample: Oversampling factor (1 at present fidelity).
+        oversample: Oversampling factor of the radiance grid.
 
     Returns:
         A frame with zeroed ``signal`` and ``point_e`` planes.
@@ -102,6 +109,48 @@ def new_sim_frame(size_v: int, size_u: int, *, oversample: int = 1) -> SimFrame:
     )
 
 
+# Truth-metadata keys carrying a per-pixel array on the render grid.  The
+# masks classify pixels, so they are sampled at each detector pixel's central
+# subsample rather than averaged (an averaged bool has no meaning).
+_TRUTH_MASK_KEYS: tuple[str, ...] = ('body_masks', 'ring_masks')
+# Truth-metadata inventory-bbox fields in pixel units (scaled back by 1/os);
+# the 'range' entry is a physical distance and is left unscaled.
+_INVENTORY_PIXEL_KEYS: tuple[str, ...] = (
+    'v_min_unclipped',
+    'v_max_unclipped',
+    'u_min_unclipped',
+    'u_max_unclipped',
+    'v_pixel_size',
+    'u_pixel_size',
+)
+_STAR_INFO_PIXEL_KEYS: tuple[str, ...] = (
+    'center_v',
+    'center_u',
+    'sigma',
+    'psf_half_v',
+    'psf_half_u',
+)
+
+
+def _center_subsample(array: Any, os: int) -> Any:
+    """Sample the central subsample of each ``os x os`` detector-pixel block.
+
+    Classifying arrays (boolean masks, integer index maps) cannot be averaged,
+    so each detector pixel takes the value of the subsample nearest its centre.
+
+    Parameters:
+        array: A ``(V*os, U*os)`` array on the render grid.
+        os: The oversampling factor.
+
+    Returns:
+        The ``(V, U)`` detector-grid array.
+    """
+    size_v = array.shape[0] // os
+    size_u = array.shape[1] // os
+    mid = os // 2
+    return array.reshape(size_v, os, size_u, os)[:, mid, :, mid]
+
+
 def downsample_to_detector(
     frame: SimFrame,
     *,
@@ -111,10 +160,12 @@ def downsample_to_detector(
     """Box-downsample the oversampled planes to the detector grid.
 
     The box filter is a mean over the ``os**2`` subsamples, so the intensive
-    ``signal`` passes through unchanged in level.  At present fidelity the
-    pipeline runs at ``oversample == 1`` and this stage is a no-op; it holds
-    the pipeline slot so an oversampled optics stage can slot in without
-    reordering.
+    ``signal`` passes through unchanged in level.  The pixel-space truth
+    metadata (body/ring masks, the body index map, inventory bounding boxes,
+    and star hit-test records) is returned to the detector grid alongside the
+    image: classifying arrays are sampled at each detector pixel's central
+    subsample, and pixel-unit scalars are divided by ``os``.  At
+    ``oversample == 1`` this stage is a no-op.
 
     Parameters:
         frame: The frame to downsample in place.
@@ -132,3 +183,32 @@ def downsample_to_detector(
     # os**2 at deposition, so the mean conserves the per-star electron sum.
     frame.point_e = frame.point_e.reshape(size_v, os, size_u, os).mean(axis=(1, 3))
     frame.oversample = 1
+    _downsample_truth(frame.truth, os)
+
+
+def _downsample_truth(truth: dict[str, Any], os: int) -> None:
+    """Return the pixel-space truth metadata to the detector grid in place."""
+    index_map = truth.get('body_index_map')
+    if index_map is not None:
+        truth['body_index_map'] = _center_subsample(index_map, os)
+    for key in _TRUTH_MASK_KEYS:
+        masks = truth.get(key)
+        if masks is not None:
+            truth[key] = [_center_subsample(mask, os) for mask in masks]
+    mask_map = truth.get('body_mask_map')
+    if isinstance(mask_map, dict):
+        truth['body_mask_map'] = {
+            name: _center_subsample(mask, os) for name, mask in mask_map.items()
+        }
+    inventory = truth.get('inventory')
+    if isinstance(inventory, dict):
+        for item in inventory.values():
+            for key in _INVENTORY_PIXEL_KEYS:
+                if key in item:
+                    item[key] = item[key] / os
+    star_info = truth.get('star_info')
+    if star_info is not None:
+        for info in star_info:
+            for key in _STAR_INFO_PIXEL_KEYS:
+                if key in info:
+                    info[key] = info[key] / os

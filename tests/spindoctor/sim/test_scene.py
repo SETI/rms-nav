@@ -139,6 +139,80 @@ def test_validate_sim_params_rejects_unknown_ring_key() -> None:
         validate_sim_params(params)
 
 
+def test_validate_sim_params_rejects_unknown_noise_key() -> None:
+    """An unmodeled noise key fails validation instead of silently doing nothing."""
+    params = _sim_params()
+    params['noise'] = {'poisson': True, 'shot_noise': True}
+    with pytest.raises(SimSceneValidationError, match=r'noise.*shot_noise'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_the_full_noise_inventory() -> None:
+    """Every accepted noise key (including the vidicon sub-map) validates."""
+    params = _sim_params()
+    params['noise'] = {
+        'poisson': True,
+        'read_noise_dn': 4.0,
+        'bias_dn': 20.0,
+        'cosmic_ray_rate_per_sec': 0.001,
+        'missing_data_rate': 0.01,
+        'signal_full_scale_frac': 0.5,
+        'pixel_area_cm2': 1.0,
+        'dark_current_e_per_sec': 5.0,
+        'hot_pixel_fraction': 0.002,
+        'hot_pixel_amplitude_e': 4.0e4,
+        'hot_pixel_column_factor': 0.3,
+        'banding_amplitude_e': 30.0,
+        'banding_period_px': 64.0,
+        'bias_pedestal_sigma_dn': 2.0,
+        'bias_row_gradient_dn': 1.0,
+        'bias_col_gradient_dn': 0.5,
+        'bloom_length': 4,
+        'vidicon': {
+            'read_noise_line_dn': 1.8,
+            'read_noise_pixel_dn': 1.8,
+            'coherent_amplitude_dn': 0.25,
+            'coherent_period_px': 8.0,
+        },
+    }
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_mistyped_noise_value() -> None:
+    """A non-boolean poisson value fails with the offending key named."""
+    params = _sim_params()
+    params['noise'] = {'poisson': 'yes'}
+    with pytest.raises(SimSceneValidationError, match=r'noise\.poisson'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_unknown_vidicon_key() -> None:
+    """An unmodeled vidicon sub-key fails validation."""
+    params = _sim_params()
+    params['noise'] = {'vidicon': {'sweep_rate_dn': 1.0}}
+    with pytest.raises(SimSceneValidationError, match=r'vidicon.*sweep_rate_dn'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_uncatalogued_wac_gain_state() -> None:
+    """A WAC gain state outside the catalog fails at validation time."""
+    params = _sim_params()
+    params['instrument'] = 'coiss_wac'
+    params['detector'] = {'gain_state': 3}
+    with pytest.raises(
+        SimSceneValidationError, match=r'gain_state 3 is not catalogued.*coiss_wac.*\[2\]'
+    ):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_catalogued_gain_state() -> None:
+    """The catalogued WAC state 2 validates."""
+    params = _sim_params()
+    params['instrument'] = 'coiss_wac'
+    params['detector'] = {'gain_state': 2}
+    assert validate_sim_params(params) is params
+
+
 def test_validate_sim_params_rejects_v1_body_range_key() -> None:
     """The v1 per-body 'range' key is gone; 'range_km' replaced it."""
     params = _sim_params()

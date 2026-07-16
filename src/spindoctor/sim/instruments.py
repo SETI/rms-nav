@@ -31,6 +31,7 @@ from spindoctor.config import Config
 __all__ = [
     'GENERIC_INSTRUMENT_ALIASES',
     'SIM_INSTRUMENTS',
+    'navigator_matched_psf',
     'resolve_extfov_margin',
     'resolve_sim_inst_config',
 ]
@@ -129,6 +130,35 @@ def _resolve_base_block(config: Config, instrument: str | None) -> Mapping[str, 
             f'is not a mapping; got {type(detector_block).__name__}'
         )
     return detector_block
+
+
+def navigator_matched_psf(
+    config: Config,
+    instrument: str | None,
+    overrides: Mapping[str, Any] | None = None,
+) -> dict[str, float]:
+    """Return the navigator-matched whole-scene PSF block for an instrument.
+
+    The self-consistency floor sets the image-side PSF equal to the navigator's
+    own model: a pure Gaussian at the emulated instrument's configured
+    ``star_psf_sigma``, with no Moffat wing and no field variation.  A scene
+    authors this as ``optics.psf: {match_navigator: true}``; that authored form
+    is preserved through save / load and in the editor, and the renderer calls
+    this helper to resolve it into concrete kernel parameters when it builds
+    the kernel.
+
+    Parameters:
+        config: The active configuration.
+        instrument: The sim instrument name, a generic alias, or ``None``.
+        overrides: Optional scene-level ``instrument_config`` overrides.
+
+    Returns:
+        A concrete PSF parameter mapping (``sigma_v``, ``sigma_u``, ``w``,
+        ``r0``, ``n``) equal to the navigator's Gaussian.
+    """
+    inst_config = resolve_sim_inst_config(config, instrument, overrides)
+    sigma = float(inst_config['star_psf_sigma'])
+    return {'sigma_v': sigma, 'sigma_u': sigma, 'w': 0.0, 'r0': 2.0, 'n': 3.0}
 
 
 def resolve_extfov_margin(

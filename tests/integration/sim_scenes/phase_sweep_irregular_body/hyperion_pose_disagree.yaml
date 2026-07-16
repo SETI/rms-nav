@@ -37,3 +37,8 @@ bodies:
 offset_v: 1.43
 offset_u: -0.61
 offset_rotation_deg: 0.0
+# The detector stage adds noise only when a scene requests it; this block
+# carries the shot + read noise this scene has always rendered with.
+noise:
+  poisson: true
+  read_noise_dn: 4.0

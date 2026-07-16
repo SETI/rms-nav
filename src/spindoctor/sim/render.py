@@ -30,13 +30,14 @@ def clear_render_caches() -> None:
     stale in production, but determinism tests must re-execute the cached
     paths to prove reproducibility.
     """
-    from spindoctor.sim.forward import body, body_mesh, star
+    from spindoctor.sim.forward import body, body_mesh, psf, star
 
     _render_combined_model_cached.cache_clear()
     star._render_stars_cached.cache_clear()
     star._render_background_stars_cached.cache_clear()
     body._render_body_shape_cached.cache_clear()
     body_mesh._render_mesh_shape_cached.cache_clear()
+    psf.psf_kernel.cache_clear()
 
 
 @lru_cache(maxsize=1)
@@ -55,11 +56,42 @@ def _render_combined_model_cached(
     size_v = int(sim_params['size_v'])
     size_u = int(sim_params['size_u'])
 
-    # Present fidelity renders on the detector grid; the oversampled radiance
-    # path arrives with the phase-B whole-scene optics.
-    frame = new_sim_frame(size_v, size_u, oversample=1)
+    # A whole-scene PSF is applied on an oversampled radiance grid so limb, ring
+    # edge, and star profiles carry sub-detector-pixel structure into the
+    # convolution; the box downsample after optics returns to the detector grid.
+    # A scene with no optics block renders at oversample 1 (identical to a
+    # frame with no sub-pixel optics to resolve).
+    oversample = resolve_oversample(sim_params)
+    frame = new_sim_frame(size_v, size_u, oversample=oversample)
     run_pipeline(frame, sim_params)
     return frame.signal, frame.truth
+
+
+def resolve_oversample(sim_params: dict[str, Any]) -> int:
+    """Return the radiance oversampling factor for a scene.
+
+    An explicit ``oversample`` key wins.  Otherwise a scene with an active PSF
+    -- an ``optics.psf`` block or the ``instrument_defaults`` opt-in, either of
+    which puts a kernel on the frame -- oversamples 4x by default so the
+    convolution resolves sub-pixel edge structure; a scene with no PSF renders on
+    the detector grid at oversample 1.
+
+    Parameters:
+        sim_params: The full scene mapping.
+
+    Returns:
+        The oversampling factor (a positive integer >= 1).
+    """
+    explicit = sim_params.get('oversample')
+    if explicit is not None:
+        return max(1, int(explicit))
+    optics = sim_params.get('optics')
+    psf_active = isinstance(optics, dict) and isinstance(optics.get('psf'), dict)
+    artifacts = sim_params.get('artifacts')
+    instrument_defaults = isinstance(artifacts, dict) and bool(
+        artifacts.get('instrument_defaults', False)
+    )
+    return 4 if (psf_active or instrument_defaults) else 1
 
 
 def render_combined_model(

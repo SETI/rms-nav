@@ -1,8 +1,8 @@
-"""Stray-light panel for the General tab.
+"""Stray-light panel, hosted in the Optics tab's stray-light group.
 
 An additive low-frequency gradient the navigator's BANDPASS_DOG filter is meant
-to suppress.  Writes the ``sim_params['stray_light']`` block; amplitude 0
-(default) means off.
+to suppress.  Writes the ``sim_params['optics']['stray_light']`` block;
+amplitude 0 (default) means off.
 """
 
 from typing import Any
@@ -16,10 +16,10 @@ class StrayLightMixin(SimEditorBase):
     """Builds and handles the stray-light panel."""
 
     def _build_stray_panel(self, gen_layout: QFormLayout) -> None:
-        """Add the stray-light rows to the General tab layout.
+        """Add the stray-light rows to the hosting group's form layout.
 
         Parameters:
-            gen_layout: The General tab's form layout.
+            gen_layout: The form layout of the Optics tab's stray-light group.
         """
         self._stray_amplitude_spin = QDoubleSpinBox()
         self._stray_amplitude_spin.setRange(0.0, 1.0)
@@ -66,18 +66,25 @@ class StrayLightMixin(SimEditorBase):
         gen_layout.addRow('Stray light center U:', self._stray_center_u_spin)
 
     def _stray_value(self, key: str, default: Any) -> Any:
-        """Read a value from the sim_params stray_light block, or a default."""
-        stray = self.sim_params.get('stray_light')
+        """Read a value from the optics.stray_light block, or a default."""
+        optics = self.sim_params.get('optics')
+        stray = optics.get('stray_light') if isinstance(optics, dict) else None
         if isinstance(stray, dict) and key in stray:
             return stray[key]
         return default
 
     def _set_stray(self, key: str, value: Any) -> None:
-        """Write a value into the sim_params stray_light block and re-render."""
-        stray = self.sim_params.setdefault('stray_light', {})
+        """Write a value into the optics.stray_light block and re-render."""
+        if self._syncing:
+            return
+        optics = self.sim_params.setdefault('optics', {})
+        if not isinstance(optics, dict):
+            optics = {}
+            self.sim_params['optics'] = optics
+        stray = optics.setdefault('stray_light', {})
         if not isinstance(stray, dict):
             stray = {}
-            self.sim_params['stray_light'] = stray
+            optics['stray_light'] = stray
         stray[key] = value
         self._updater.request_update()
 
@@ -95,9 +102,12 @@ class StrayLightMixin(SimEditorBase):
 
     def _on_stray_center(self, key: str, value: float) -> None:
         """Set or omit a radial-model bump centre coordinate."""
+        if self._syncing:
+            return
         # 0 means "use the frame centre": omit the key so the renderer defaults it.
         if value == 0.0:
-            stray = self.sim_params.get('stray_light')
+            optics = self.sim_params.get('optics')
+            stray = optics.get('stray_light') if isinstance(optics, dict) else None
             if isinstance(stray, dict):
                 stray.pop(key, None)
             self._updater.request_update()

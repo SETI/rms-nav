@@ -31,6 +31,7 @@ def render_ring(
     time: float = 0.0,
     epoch: float = 0.0,
     shade_solid: bool = False,
+    resolution: float = 1.0,
 ) -> None:
     """Render a single ring or gap into the image.
 
@@ -50,6 +51,10 @@ def render_ring(
         epoch: Epoch time in TDB seconds (default 0.0).
         shade_solid: If True, solid rings (with both edges) are shaded on both sides
             as if they were two rings (one with inner edge only, one with outer edge only).
+        resolution: Edge anti-aliasing width in pixels of the grid being rendered
+            (the oversampling factor when rendering on an oversampled grid), so a
+            ring edge spans one detector pixel of transition regardless of the
+            render resolution.
 
     Raises:
         ValueError: If neither an inner nor an outer edge is specified.
@@ -82,9 +87,6 @@ def render_ring(
 
     # Compute angles
     angles = np.arctan2(dv, du)
-
-    # Compute edge radii at each angle
-    resolution = 1.0  # Pixel resolution for anti-aliasing
 
     # Get shading distance parameter (default 20.0 pixels)
     shading_distance = float(ring_params.get('shading_distance', 20.0))
@@ -195,6 +197,7 @@ def composite_ring(
     time: float,
     epoch: float,
     shade_solid: bool,
+    resolution: float = 1.0,
 ) -> NDArrayBoolType:
     """Composite one ring feature into the scene image at its z-order slot.
 
@@ -211,6 +214,8 @@ def composite_ring(
         time: Current time in TDB seconds.
         epoch: Ring epoch in TDB seconds.
         shade_solid: Whether solid ringlets shade from both edges.
+        resolution: Edge anti-aliasing width in pixels of the render grid (the
+            oversampling factor on an oversampled grid).
 
     Returns:
         Boolean mask of the pixels this feature painted.
@@ -228,6 +233,7 @@ def composite_ring(
             time=time,
             epoch=epoch,
             shade_solid=shade_solid,
+            resolution=resolution,
         )
         # ring_img now contains just the ring_coverage (since 0 + coverage = coverage)
         ring_mask: NDArrayBoolType = ring_img > 0.0
@@ -245,6 +251,7 @@ def composite_ring(
         time=time,
         epoch=epoch,
         shade_solid=shade_solid,
+        resolution=resolution,
     )
     # gap_coverage is what was subtracted: 1.0 - result
     gap_mask: NDArrayBoolType = temp_bg < 1.0

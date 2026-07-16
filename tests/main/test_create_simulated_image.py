@@ -177,8 +177,8 @@ def test_load_preserves_stray_light_block(
 ) -> None:
     """Loading a scene round-trips the catalog-only stray_light block."""
     stray = {'amplitude': 0.3, 'model': 'radial'}
-    _load_scene_with(monkeypatch, model, tmp_path, {'stray_light': stray})
-    assert model.sim_params['stray_light'] == stray
+    _load_scene_with(monkeypatch, model, tmp_path, {'optics': {'stray_light': stray}})
+    assert model.sim_params['optics']['stray_light'] == stray
 
 
 def test_default_has_no_dead_background_noise_key(model: Any) -> None:
@@ -232,32 +232,32 @@ def test_stray_light_defaults_off(model: Any) -> None:
 
 
 def test_stray_amplitude_updates_block(model: Any) -> None:
-    """The amplitude spin writes into the stray_light block."""
+    """The amplitude spin writes into the optics.stray_light block."""
     model._stray_amplitude_spin.setValue(0.4)
-    assert model.sim_params['stray_light']['amplitude'] == 0.4
+    assert model.sim_params['optics']['stray_light']['amplitude'] == 0.4
 
 
 def test_stray_direction_updates_block(model: Any) -> None:
-    """The direction spin writes direction_deg into the stray_light block."""
+    """The direction spin writes direction_deg into the optics.stray_light block."""
     model._stray_direction_spin.setValue(45.0)
-    assert model.sim_params['stray_light']['direction_deg'] == 45.0
+    assert model.sim_params['optics']['stray_light']['direction_deg'] == 45.0
 
 
 def test_stray_model_updates_block(model: Any) -> None:
-    """The model combo writes the stray_light model."""
+    """The model combo writes the optics.stray_light model."""
     model._stray_model_combo.setCurrentText('radial')
-    assert model.sim_params['stray_light']['model'] == 'radial'
+    assert model.sim_params['optics']['stray_light']['model'] == 'radial'
 
 
 def test_load_stray_light_syncs_widgets(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
-    """Loading a stray_light block syncs the panel widgets."""
+    """Loading an optics.stray_light block syncs the panel widgets."""
     _load_scene_with(
         monkeypatch,
         model,
         tmp_path,
-        {'stray_light': {'amplitude': 0.25, 'direction_deg': 90.0, 'model': 'radial'}},
+        {'optics': {'stray_light': {'amplitude': 0.25, 'direction_deg': 90.0, 'model': 'radial'}}},
     )
     assert model._stray_amplitude_spin.value() == 0.25
     assert model._stray_direction_spin.value() == 90.0
@@ -480,9 +480,9 @@ def test_noise_bias_and_bloom_handlers(model: Any) -> None:
 def test_stray_center_zero_is_omitted(model: Any) -> None:
     """A stray-light centre of 0 is omitted (frame centre); non-zero is kept."""
     model._on_stray_center_v(40.0)
-    assert model.sim_params['stray_light']['center_v'] == 40.0
+    assert model.sim_params['optics']['stray_light']['center_v'] == 40.0
     model._on_stray_center_v(0.0)
-    assert 'center_v' not in model.sim_params.get('stray_light', {})
+    assert 'center_v' not in model.sim_params.get('optics', {}).get('stray_light', {})
 
 
 def test_body_seed_auto_omits(model: Any) -> None:
@@ -510,12 +510,14 @@ def test_full_parameter_round_trip(
             'midtime_utc': '2010-01-01T00:00:00Z',
             'fit_camera_rotation': True,
             'noise': {'poisson': True, 'read_noise_dn': 4.0, 'bias_dn': 18.0, 'bloom_length': 3},
-            'stray_light': {
-                'amplitude': 0.3,
-                'direction_deg': 35.0,
-                'model': 'radial',
-                'center_v': 40.0,
-                'center_u': 50.0,
+            'optics': {
+                'stray_light': {
+                    'amplitude': 0.3,
+                    'direction_deg': 35.0,
+                    'model': 'radial',
+                    'center_v': 40.0,
+                    'center_u': 50.0,
+                }
             },
             'bodies': [
                 {
@@ -571,7 +573,7 @@ def test_full_parameter_round_trip(
     assert p['fit_camera_rotation'] is True
     assert p['noise']['bias_dn'] == 18.0
     assert p['noise']['bloom_length'] == 3
-    assert p['stray_light']['center_v'] == 40.0
+    assert p['optics']['stray_light']['center_v'] == 40.0
     body = p['bodies'][0]
     assert body['mesh_n_lat'] == 20
     assert body['mesh_n_lon'] == 40

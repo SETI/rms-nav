@@ -400,10 +400,12 @@ def gen_star_field(rng: random.Random) -> dict[str, Any]:
         )
     params['stars'] = stars
     if rng.random() < 0.25:
-        params['stray_light'] = {
-            'amplitude': rng.uniform(0.05, 0.5),
-            'direction_deg': rng.uniform(0.0, 360.0),
-            'model': 'linear',
+        params['optics'] = {
+            'stray_light': {
+                'amplitude': rng.uniform(0.05, 0.5),
+                'direction_deg': rng.uniform(0.0, 360.0),
+                'model': 'linear',
+            }
         }
     return params
 

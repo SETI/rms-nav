@@ -6,11 +6,12 @@ size_u: 220
 random_seed: 7
 exposure_sec: 1.0
 # The disc-correlation invariant on an I/F-calibrated instrument (coiss_calib_nac)
-# rather than a raw-DN one.  The calibrated_if render path leaves the composed
-# signal in [0, 1] I/F units and applies no DN detector model, and the navigation
-# techniques key on scale-invariant quantities (normalised cross-correlation, a
-# MAD-relative noise threshold), so the disc recovers the planted offset the same
-# way it does on a raw-DN frame -- demonstrating navigation is unit-agnostic.
+# rather than a raw-DN one.  The calibrated_if render path runs the full DN
+# detector chain and then inverts the calibration transform, so the frame carries
+# propagated shot and read noise in I/F units.  The navigation techniques key on
+# scale-invariant quantities (normalised cross-correlation, a MAD-relative noise
+# threshold), so the disc recovers the planted offset the same way it does on a
+# raw-DN frame -- demonstrating navigation is unit-agnostic.
 bodies:
   - name: RHEA
     center_v: 110.0
@@ -24,3 +25,7 @@ rings: []
 offset_v: 1.43
 offset_u: -0.61
 offset_rotation_deg: 0.0
+# Propagated shot + read noise, carried through the calibration inverse into I/F.
+noise:
+  poisson: true
+  read_noise_dn: 4.0
