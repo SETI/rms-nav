@@ -5,6 +5,8 @@ the statistical properties of each term can be asserted in DN, plus each
 structured noise stage in isolation for its shape and its disabled floor.
 """
 
+from typing import Any
+
 import numpy as np
 
 from spindoctor.sim.forward.detector import (
@@ -32,7 +34,7 @@ def _run_detector(
     signal_value: float,
     *,
     size: int = 160,
-    noise: dict | None = None,
+    noise: dict[str, Any] | None = None,
     seed: int = 1,
     **extra: object,
 ) -> np.ndarray:
@@ -41,7 +43,7 @@ def _run_detector(
         signal=np.full((size, size), signal_value, dtype=np.float64),
         point_e=np.zeros((size, size), dtype=np.float64),
     )
-    params: dict = {'instrument': 'coiss_nac', 'random_seed': seed, 'exposure_sec': 1.0}
+    params: dict[str, Any] = {'instrument': 'coiss_nac', 'random_seed': seed, 'exposure_sec': 1.0}
     if noise is not None:
         params['noise'] = noise
     params.update(extra)
