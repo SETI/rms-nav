@@ -473,8 +473,8 @@ def test_validate_sim_params_rejects_out_of_range_opening() -> None:
 def test_validate_sim_params_rejects_unknown_ring_feature_key() -> None:
     """An unmodeled feature key fails validation."""
     params = _ring_system_params()
-    params['ring_system']['features'][0]['wavelength'] = 5.0
-    with pytest.raises(SimSceneValidationError, match=r'features\[0\].*wavelength'):
+    params['ring_system']['features'][0]['contrast'] = 5.0
+    with pytest.raises(SimSceneValidationError, match=r'features\[0\].*contrast'):
         validate_sim_params(params)
 
 
@@ -486,21 +486,148 @@ def test_validate_sim_params_rejects_unknown_ring_feature_kind() -> None:
         validate_sim_params(params)
 
 
-@pytest.mark.parametrize('kind', ['edge', 'ramp', 'wave'])
-def test_validate_sim_params_rejects_unimplemented_ring_feature_kind(kind: str) -> None:
-    """The vocabulary kinds the renderer does not draw yet fail as such."""
-    params = _ring_system_params()
-    params['ring_system']['features'][0]['kind'] = kind
-    with pytest.raises(SimSceneValidationError, match='not yet implemented'):
-        validate_sim_params(params)
-
-
 @pytest.mark.parametrize('key', ['tau', 'width'])
 def test_validate_sim_params_requires_ring_feature_scalars(key: str) -> None:
-    """tau and width are required on every feature."""
+    """tau (every kind) and width (the banded kinds) are required."""
     params = _ring_system_params()
     del params['ring_system']['features'][0][key]
     with pytest.raises(SimSceneValidationError, match=f'{key} is required'):
+        validate_sim_params(params)
+
+
+def _edge_feature() -> dict[str, Any]:
+    """A minimal one-sided edge feature."""
+    return {'name': 'E1', 'kind': 'edge', 'tau': 1.0, 'orbit': {'a': 40.0}}
+
+
+def _wave_feature() -> dict[str, Any]:
+    """A minimal density-wave-train feature."""
+    return {
+        'name': 'W1',
+        'kind': 'wave',
+        'tau': 0.4,
+        'wavelength': 6.0,
+        'damping': 12.0,
+        'orbit': {'a': 40.0},
+    }
+
+
+def test_validate_sim_params_accepts_edge_ramp_wave_kinds() -> None:
+    """The one-sided, ramp, and wave kinds validate with their shape keys."""
+    params = _ring_system_params()
+    params['ring_system']['features'] = [
+        dict(_edge_feature(), side='out'),
+        {
+            'name': 'R1',
+            'kind': 'ramp',
+            'tau': 0.8,
+            'width': 12.0,
+            'side': 'in',
+            'orbit': {'a': 60.0},
+        },
+        _wave_feature(),
+    ]
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_width_on_an_edge() -> None:
+    """A one-sided edge has no radial width; a stray width fails loudly."""
+    params = _ring_system_params()
+    params['ring_system']['features'] = [dict(_edge_feature(), width=5.0)]
+    with pytest.raises(SimSceneValidationError, match=r"width is not allowed for kind 'edge'"):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_side_on_a_ringlet() -> None:
+    """side belongs to the one-sided kinds only."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['side'] = 'in'
+    with pytest.raises(SimSceneValidationError, match=r"side is not allowed for kind 'ringlet'"):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_bad_side_vocabulary() -> None:
+    """side must be 'in' or 'out'."""
+    params = _ring_system_params()
+    params['ring_system']['features'] = [dict(_edge_feature(), side='left')]
+    with pytest.raises(SimSceneValidationError, match=r"side must be 'in' or 'out'"):
+        validate_sim_params(params)
+
+
+@pytest.mark.parametrize('key', ['wavelength', 'damping'])
+def test_validate_sim_params_requires_wave_train_keys(key: str) -> None:
+    """A wave feature needs both its radial train parameters."""
+    params = _ring_system_params()
+    feature = _wave_feature()
+    del feature[key]
+    params['ring_system']['features'] = [feature]
+    with pytest.raises(SimSceneValidationError, match=f"{key} is required for kind 'wave'"):
+        validate_sim_params(params)
+
+
+@pytest.mark.parametrize('key', ['wavelength', 'damping'])
+def test_validate_sim_params_rejects_wave_keys_on_other_kinds(key: str) -> None:
+    """The wave-train keys are rejected on kinds that ignore them."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0][key] = 5.0
+    with pytest.raises(SimSceneValidationError, match=f'{key} is not allowed for kind'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_orbit_modes_and_edge_wave() -> None:
+    """An orbit with m-modes and an edge wave validates."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit'] = {
+        'a': 40.0,
+        'ae': 1.0,
+        'long_peri': 10.0,
+        'rate_peri': 0.5,
+        'modes': [{'m': 2, 'amp': 1.5, 'peri': 30.0}],
+        'edge_wave': {'amp': 1.0, 'wavelength': 8.0, 'damp': 0.5, 'lam0': 90.0},
+    }
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_mode_1_in_modes_list() -> None:
+    """The modes list carries m >= 2 only (mode 1 is the base ellipse)."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit']['modes'] = [{'m': 1, 'amp': 1.0, 'peri': 0.0}]
+    with pytest.raises(SimSceneValidationError, match=r'modes\[0\]\.m must be an integer >= 2'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_unknown_mode_key() -> None:
+    """An unmodeled m-mode key fails validation."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit']['modes'] = [
+        {'m': 2, 'amp': 1.0, 'peri': 0.0, 'rate': 1.0}
+    ]
+    with pytest.raises(SimSceneValidationError, match=r'modes\[0\].*rate'):
+        validate_sim_params(params)
+
+
+@pytest.mark.parametrize('key', ['wavelength', 'damp'])
+def test_validate_sim_params_requires_edge_wave_scales(key: str) -> None:
+    """An edge wave needs its wavelength and damping constants."""
+    params = _ring_system_params()
+    wave = {'amp': 1.0, 'wavelength': 8.0, 'damp': 0.5, 'lam0': 90.0}
+    del wave[key]
+    params['ring_system']['features'][0]['orbit']['edge_wave'] = wave
+    with pytest.raises(SimSceneValidationError, match=f'edge_wave.{key} is required'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_unknown_edge_wave_key() -> None:
+    """An unmodeled edge-wave key fails validation."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit']['edge_wave'] = {
+        'amp': 1.0,
+        'wavelength': 8.0,
+        'damp': 0.5,
+        'lam0': 90.0,
+        'phase': 1.0,
+    }
+    with pytest.raises(SimSceneValidationError, match=r'edge_wave.*phase'):
         validate_sim_params(params)
 
 

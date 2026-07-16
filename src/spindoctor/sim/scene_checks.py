@@ -65,14 +65,19 @@ _RING_SYSTEM_GEOMETRY_KEYS: frozenset[str] = frozenset(
     {'center_v', 'center_u', 'opening_deg_obs', 'opening_deg_sun', 'node_deg'}
 )
 _RING_FEATURE_KEYS: frozenset[str] = frozenset(
-    {'name', 'kind', 'width', 'tau', 'orbit', 'albedo', 'phase_g'}
+    {'name', 'kind', 'width', 'tau', 'orbit', 'side', 'wavelength', 'damping', 'albedo', 'phase_g'}
 )
-# The full kind vocabulary; the profile kinds not yet implemented fail
-# validation as such (the artifact-mode pattern), so a scene cannot silently
-# render nothing for a kind the renderer does not draw yet.
 _RING_FEATURE_KINDS: frozenset[str] = frozenset({'ringlet', 'gap', 'edge', 'ramp', 'wave'})
-_RING_FEATURE_KINDS_IMPLEMENTED: frozenset[str] = frozenset({'ringlet', 'gap'})
-_RING_FEATURE_ORBIT_KEYS: frozenset[str] = frozenset({'a', 'ae', 'long_peri', 'rate_peri'})
+_RING_FEATURE_ORBIT_KEYS: frozenset[str] = frozenset(
+    {'a', 'ae', 'long_peri', 'rate_peri', 'modes', 'edge_wave'}
+)
+_RING_ORBIT_MODE_KEYS: frozenset[str] = frozenset({'m', 'amp', 'peri'})
+_RING_EDGE_WAVE_KEYS: frozenset[str] = frozenset({'amp', 'wavelength', 'damp', 'lam0'})
+# Which kinds take which shape keys: a stray key on a kind that ignores it
+# would silently author a different feature than intended, so it fails.
+_RING_KINDS_WITH_WIDTH: frozenset[str] = frozenset({'ringlet', 'gap', 'ramp'})
+_RING_KINDS_WITH_SIDE: frozenset[str] = frozenset({'edge', 'ramp'})
+_RING_FEATURE_SIDES: frozenset[str] = frozenset({'in', 'out'})
 
 
 def _check_ring_system(value: Any, *, source: str) -> None:
@@ -136,7 +141,23 @@ def _check_ring_system(value: Any, *, source: str) -> None:
 
 
 def _check_ring_feature(obj: dict[str, Any], *, index: int, source: str) -> None:
-    """Validate one ``ring_system.features`` entry."""
+    """Validate one ``ring_system.features`` entry.
+
+    The shape keys are kind-specific: ``width`` is required by the banded
+    kinds (ringlet / gap / ramp) and rejected elsewhere, ``side`` belongs to
+    the one-sided kinds (edge / ramp), and ``wavelength`` / ``damping`` are
+    the ``wave`` kind's radial train parameters.  A stray shape key on a
+    kind that ignores it fails loudly rather than silently authoring a
+    different feature.
+
+    Parameters:
+        obj: The feature mapping.
+        index: The feature's index in the list (for error messages).
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: On any unknown, missing, or invalid field.
+    """
     label = f'ring_system.features[{index}]'
     unknown = set(obj) - _RING_FEATURE_KEYS
     if unknown:
@@ -147,17 +168,60 @@ def _check_ring_feature(obj: dict[str, Any], *, index: int, source: str) -> None
         raise SimSceneValidationError(
             f'{source}: {label}.kind must be one of {sorted(_RING_FEATURE_KINDS)}; got {kind!r}'
         )
-    if kind not in _RING_FEATURE_KINDS_IMPLEMENTED:
-        raise SimSceneValidationError(f'{source}: {label}.kind {kind!r} is not yet implemented')
     tau = obj.get('tau')
     if tau is None:
         raise SimSceneValidationError(f'{source}: {label}.tau is required')
     _check_optional_nonnegative_number(tau, f'{label}.tau', source=source)
     width = obj.get('width')
-    if width is None:
-        raise SimSceneValidationError(f'{source}: {label}.width is required')
-    _check_optional_positive_number(width, f'{label}.width', source=source)
-    orbit = obj.get('orbit')
+    if kind in _RING_KINDS_WITH_WIDTH:
+        if width is None:
+            raise SimSceneValidationError(f'{source}: {label}.width is required for kind {kind!r}')
+        _check_optional_positive_number(width, f'{label}.width', source=source)
+    elif width is not None:
+        raise SimSceneValidationError(f'{source}: {label}.width is not allowed for kind {kind!r}')
+    side = obj.get('side')
+    if side is not None and kind not in _RING_KINDS_WITH_SIDE:
+        raise SimSceneValidationError(f'{source}: {label}.side is not allowed for kind {kind!r}')
+    if side is not None and side not in _RING_FEATURE_SIDES:
+        raise SimSceneValidationError(f"{source}: {label}.side must be 'in' or 'out'; got {side!r}")
+    for key in ('wavelength', 'damping'):
+        value = obj.get(key)
+        if kind == 'wave':
+            if value is None:
+                raise SimSceneValidationError(
+                    f"{source}: {label}.{key} is required for kind 'wave'"
+                )
+            _check_optional_positive_number(value, f'{label}.{key}', source=source)
+        elif value is not None:
+            raise SimSceneValidationError(
+                f'{source}: {label}.{key} is not allowed for kind {kind!r}'
+            )
+    _check_ring_feature_orbit(obj.get('orbit'), label=label, source=source)
+    _check_optional_nonnegative_number(obj.get('albedo'), f'{label}.albedo', source=source)
+    phase_g = obj.get('phase_g')
+    _check_optional_number(phase_g, f'{label}.phase_g', source=source)
+    if phase_g is not None and not -1.0 < float(phase_g) < 1.0:
+        raise SimSceneValidationError(
+            f'{source}: {label}.phase_g must lie in (-1, 1); got {phase_g!r}'
+        )
+
+
+def _check_ring_feature_orbit(orbit: Any, *, label: str, source: str) -> None:
+    """Validate one feature's ``orbit`` mapping (mode 1 + modes + edge wave).
+
+    Every orbital angle (``long_peri``, mode ``peri``, edge-wave ``lam0``)
+    is a ring-plane longitude in degrees measured from the ascending node;
+    the edge-wave ``damp`` is in RADIANS of downstream longitude, and
+    ``amp`` / ``wavelength`` are radial / arc-length pixel quantities.
+
+    Parameters:
+        orbit: The ``orbit`` value (must be a mapping).
+        label: The feature label for error messages.
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: On any unknown, missing, or invalid field.
+    """
     if not isinstance(orbit, dict):
         raise SimSceneValidationError(f'{source}: {label}.orbit is required (a mapping)')
     unknown = set(orbit) - _RING_FEATURE_ORBIT_KEYS
@@ -169,13 +233,39 @@ def _check_ring_feature(obj: dict[str, Any], *, index: int, source: str) -> None
     _check_optional_nonnegative_number(orbit.get('ae'), f'{label}.orbit.ae', source=source)
     _check_optional_number(orbit.get('long_peri'), f'{label}.orbit.long_peri', source=source)
     _check_optional_number(orbit.get('rate_peri'), f'{label}.orbit.rate_peri', source=source)
-    _check_optional_nonnegative_number(obj.get('albedo'), f'{label}.albedo', source=source)
-    phase_g = obj.get('phase_g')
-    _check_optional_number(phase_g, f'{label}.phase_g', source=source)
-    if phase_g is not None and not -1.0 < float(phase_g) < 1.0:
-        raise SimSceneValidationError(
-            f'{source}: {label}.phase_g must lie in (-1, 1); got {phase_g!r}'
-        )
+    modes = orbit.get('modes')
+    _check_optional_mapping_list(modes, f'{label}.orbit.modes', source=source)
+    for mode_index, mode in enumerate(modes or []):
+        mode_label = f'{label}.orbit.modes[{mode_index}]'
+        unknown = set(mode) - _RING_ORBIT_MODE_KEYS
+        if unknown:
+            raise SimSceneValidationError(
+                f'{source}: {mode_label}: unknown keys: {sorted(unknown)}'
+            )
+        m = mode.get('m')
+        if isinstance(m, bool) or not isinstance(m, int) or m < 2:
+            raise SimSceneValidationError(
+                f'{source}: {mode_label}.m must be an integer >= 2; got {m!r}'
+            )
+        _check_optional_nonnegative_number(mode.get('amp'), f'{mode_label}.amp', source=source)
+        _check_optional_number(mode.get('peri'), f'{mode_label}.peri', source=source)
+    wave = orbit.get('edge_wave')
+    if wave is not None:
+        wave_label = f'{label}.orbit.edge_wave'
+        if not isinstance(wave, dict):
+            raise SimSceneValidationError(f'{source}: {wave_label} must be a mapping when present')
+        unknown = set(wave) - _RING_EDGE_WAVE_KEYS
+        if unknown:
+            raise SimSceneValidationError(
+                f'{source}: {wave_label}: unknown keys: {sorted(unknown)}'
+            )
+        _check_optional_nonnegative_number(wave.get('amp'), f'{wave_label}.amp', source=source)
+        for key in ('wavelength', 'damp'):
+            value = wave.get(key)
+            if value is None:
+                raise SimSceneValidationError(f'{source}: {wave_label}.{key} is required')
+            _check_optional_positive_number(value, f'{wave_label}.{key}', source=source)
+        _check_optional_number(wave.get('lam0'), f'{wave_label}.lam0', source=source)
 
 
 def _check_star_object(obj: dict[str, Any], *, index: int, source: str) -> None:

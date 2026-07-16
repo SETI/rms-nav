@@ -287,13 +287,16 @@ _RING_SYSTEM_GEOMETRY_KEYS: frozenset[str] = frozenset(
     {'center_v', 'center_u', 'opening_deg_obs', 'opening_deg_sun', 'node_deg'}
 )
 
-# Per-feature idealized keys: the feature kind, its catalog orbit, its radial
-# width, and its declared optical depth are catalog knowledge the navigator
-# is entitled to.  NOTE: the 'navigable' subset key is a later phase; until
-# it lands, NO feature crosses the boundary (the filter drops the whole
-# feature list), which is the safe direction -- these keys classify what a
-# navigable feature will expose once the flag exists.
-_RING_FEATURE_IDEALIZED_KEYS: frozenset[str] = frozenset({'name', 'kind', 'width', 'tau', 'orbit'})
+# Per-feature idealized keys: the feature kind, its catalog orbit (mode-1
+# ellipse plus m-modes and edge wave), its radial shape (width / side /
+# wave train), and its declared optical depth are catalog knowledge the
+# navigator is entitled to.  NOTE: the 'navigable' subset key is a later
+# phase; until it lands, NO feature crosses the boundary (the filter drops
+# the whole feature list), which is the safe direction -- these keys
+# classify what a navigable feature will expose once the flag exists.
+_RING_FEATURE_IDEALIZED_KEYS: frozenset[str] = frozenset(
+    {'name', 'kind', 'width', 'tau', 'orbit', 'side', 'wavelength', 'damping'}
+)
 
 # Per-feature truth keys: the single-scattering albedo and the
 # Henyey-Greenstein asymmetry parameter are nature's scattering behavior

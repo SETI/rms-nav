@@ -27,26 +27,37 @@ edges land in projected positions by construction.  The conventions:
   ``dlos = -y * cos(B)``, positive toward the observer, so for ``B > 0`` the
   near arm is the ``y < 0`` half and the ansae have zero depth.
 
-Every function takes explicit geometry arguments; none reads a scene
-parameter mapping, so no truth-side information can cross the information
-boundary here (see ``spindoctor.sim.scene``).
+Every function takes explicit geometry arguments; the only scene fragment
+read here is the per-feature ``orbit`` mapping (via
+:func:`ring_orbit_from_mapping`), which is an idealized block both sides are
+entitled to, so no truth-side information can cross the information boundary
+here (see ``spindoctor.sim.scene``).  The renderer applies its planted
+``orbit_error`` truth values on its own side, before calling in.
 """
 
 import math
-from typing import cast
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from typing import Any, cast
 
 import numpy as np
 
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 __all__ = [
+    'RingEdgeWave',
+    'RingOrbit',
+    'RingOrbitMode',
     'compute_antialiasing_shade',
     'compute_border_atop_simulated',
     'compute_edge_radii_array',
     'compute_edge_radius_at_angle',
     'compute_edge_radius_mode1',
+    'compute_edge_wave_dr',
     'compute_fade_factor',
+    'compute_orbit_radii',
     'ring_los_depth',
+    'ring_orbit_from_mapping',
     'ring_plane_from_sky',
     'ring_radial_scale',
     'ring_sky_from_plane',
@@ -206,6 +217,245 @@ def compute_edge_radii_array(
     r = a * (1.0 - e * e) / (1.0 + e * np.cos(true_anomaly))
 
     return cast(NDArrayFloatType, r)
+
+
+@dataclass(frozen=True)
+class RingOrbitMode:
+    """One m >= 2 radial mode of a ring-feature orbit.
+
+    The mode perturbs the edge radius by ``-amp * cos(m * (lam - peri))``
+    with ``lam`` the ring-plane longitude from the ascending node, so for a
+    pure m-mode on a circular base orbit ``r(lam) = a - amp * cos(m * (lam -
+    peri))`` exactly (the normative closed form).  ``amp`` is ``a * e`` in
+    the same radial units as the semimajor axis; ``peri`` is the mode's
+    pericenter longitude in degrees, in the ring-plane frame (the sky node
+    angle never enters the orbit model).
+
+    Parameters:
+        m: Mode number (2 or greater; the mode-1 shape is the base ellipse).
+        amp: Radial amplitude in the orbit's radial units.
+        peri: Pericenter longitude in degrees (ring-plane frame).
+    """
+
+    m: int
+    amp: float
+    peri: float
+
+
+@dataclass(frozen=True)
+class RingEdgeWave:
+    """A satellite edge wave (Daphnis/Pan-style) on a ring-feature orbit.
+
+    The radial perturbation is
+    ``dr(lam) = amp * exp(-(lam - lam0) / damp) *
+    sin(2 * pi * (lam - lam0) * a / wavelength)``
+    evaluated ONLY downstream of ``lam0``: the longitude difference is taken
+    modulo 2*pi into [0, 2*pi), so the exponential argument is never
+    negative.  The clamp is load-bearing, not cosmetic -- the exponential
+    grows without bound if evaluated for ``lam < lam0`` -- and the modular
+    form is its periodic implementation: immediately upstream of ``lam0``
+    the wave has wrapped nearly a full turn and carries ``exp(-2*pi/damp)``
+    of its launch amplitude (negligible for any physical damping).
+
+    Parameters:
+        amp: Radial amplitude in the orbit's radial units.
+        wavelength: Azimuthal wavelength as an arc length, in the orbit's
+            radial units (the sine argument is arc length over wavelength).
+        damp: Azimuthal damping constant in RADIANS of downstream longitude.
+        lam0: Launch longitude in degrees (ring-plane frame; the perturbing
+            moon's longitude).
+    """
+
+    amp: float
+    wavelength: float
+    damp: float
+    lam0: float
+
+
+@dataclass(frozen=True)
+class RingOrbit:
+    """A ring feature's full orbit model: mode-1 ellipse plus perturbations.
+
+    This is the shared parsed form of the idealized per-feature ``orbit``
+    scene mapping: the image-side renderer draws through it (after applying
+    its planted orbit error on its own side) and the navigator-side model
+    predicts through it unmodified, so both sides interpret the same catalog
+    values identically by construction.
+
+    Parameters:
+        a: Semimajor axis (pixels; any consistent radial unit).
+        ae: Eccentricity times semimajor axis, same units.
+        long_peri: Mode-1 pericenter longitude in degrees (ring-plane frame).
+        rate_peri: Mode-1 pericenter precession rate in degrees/day.
+        modes: The m >= 2 radial modes.
+        edge_wave: The satellite edge wave, or None.
+    """
+
+    a: float
+    ae: float
+    long_peri: float
+    rate_peri: float
+    modes: tuple[RingOrbitMode, ...] = ()
+    edge_wave: RingEdgeWave | None = None
+
+    def widened(self, dr: float) -> 'RingOrbit':
+        """The same orbit shape displaced outward by ``dr`` radial units.
+
+        A feature's outer edge is its inner-edge orbit widened by the radial
+        width: the ellipse grows by ``dr`` while every perturbation keeps its
+        amplitude and phase, so the band has constant radial width.
+
+        Parameters:
+            dr: Radial displacement in the orbit's radial units.
+
+        Returns:
+            The widened orbit.
+        """
+        return replace(self, a=self.a + dr)
+
+    def scaled(self, factor: float) -> 'RingOrbit':
+        """The orbit with every radial quantity scaled by ``factor``.
+
+        Used to move detector-pixel scene values onto an oversampled render
+        grid: radii and radial amplitudes scale; angles, rates, and the
+        (angular) edge-wave damping do not.
+
+        Parameters:
+            factor: The radial scale factor (the oversampling factor).
+
+        Returns:
+            The scaled orbit.
+        """
+        return replace(
+            self,
+            a=self.a * factor,
+            ae=self.ae * factor,
+            modes=tuple(replace(m, amp=m.amp * factor) for m in self.modes),
+            edge_wave=(
+                None
+                if self.edge_wave is None
+                else replace(
+                    self.edge_wave,
+                    amp=self.edge_wave.amp * factor,
+                    wavelength=self.edge_wave.wavelength * factor,
+                )
+            ),
+        )
+
+
+def ring_orbit_from_mapping(orbit: Mapping[str, Any]) -> RingOrbit:
+    """Parse a validated per-feature ``orbit`` scene mapping into a RingOrbit.
+
+    This is the single interpretation of the idealized orbit block, shared by
+    the forward renderer and the navigator-side model so both sides apply
+    the same defaults to the same catalog values.
+
+    Parameters:
+        orbit: The validated ``ring_system.features[].orbit`` mapping.
+
+    Returns:
+        The parsed orbit.
+    """
+    modes = tuple(
+        RingOrbitMode(
+            m=int(mode['m']),
+            amp=float(mode.get('amp', 0.0)),
+            peri=float(mode.get('peri', 0.0)),
+        )
+        for mode in orbit.get('modes') or []
+    )
+    wave_map = orbit.get('edge_wave')
+    edge_wave = (
+        None
+        if wave_map is None
+        else RingEdgeWave(
+            amp=float(wave_map.get('amp', 0.0)),
+            wavelength=float(wave_map['wavelength']),
+            damp=float(wave_map['damp']),
+            lam0=float(wave_map.get('lam0', 0.0)),
+        )
+    )
+    return RingOrbit(
+        a=float(orbit.get('a', 0.0)),
+        ae=float(orbit.get('ae', 0.0)),
+        long_peri=float(orbit.get('long_peri', 0.0)),
+        rate_peri=float(orbit.get('rate_peri', 0.0)),
+        modes=modes,
+        edge_wave=edge_wave,
+    )
+
+
+def compute_orbit_radii(
+    lam: NDArrayFloatType,
+    orbit: RingOrbit,
+    *,
+    epoch: float,
+    time: float,
+) -> NDArrayFloatType:
+    """Edge radii of a full orbit model at ring-plane longitudes ``lam``.
+
+    The mode-1 precessing ellipse (exact conic form) minus each m >= 2
+    mode's ``amp * cos(m * (lam - peri))``, plus the edge wave's downstream
+    perturbation when the orbit carries one.  All longitudes -- ``lam``, the
+    pericenters, the wave's launch longitude -- live in the ring-plane frame
+    measured from the ascending node; the sky node angle enters only the
+    final projection, never here.
+
+    Parameters:
+        lam: Ring-plane longitudes from the ascending node, in radians.
+        orbit: The parsed orbit model.
+        epoch: Ring epoch (TDB seconds) for mode-1 precession.
+        time: Scene time (TDB seconds).
+
+    Returns:
+        Edge radii at each longitude, in the orbit's radial units.
+
+    Raises:
+        ValueError: If ``ae / a`` is an eccentricity of 1 or more.
+    """
+    r = compute_edge_radii_array(
+        lam,
+        a=orbit.a,
+        ae=orbit.ae,
+        long_peri=orbit.long_peri,
+        rate_peri=orbit.rate_peri,
+        epoch=epoch,
+        time=time,
+    )
+    for mode in orbit.modes:
+        r = r - mode.amp * np.cos(mode.m * (lam - math.radians(mode.peri)))
+    if orbit.edge_wave is not None:
+        r = r + compute_edge_wave_dr(lam, orbit.edge_wave, a=orbit.a)
+    return r
+
+
+def compute_edge_wave_dr(
+    lam: NDArrayFloatType,
+    wave: RingEdgeWave,
+    *,
+    a: float,
+) -> NDArrayFloatType:
+    """The satellite edge wave's radial perturbation at longitudes ``lam``.
+
+    ``dr = amp * exp(-dlam / damp) * sin(2 * pi * dlam * a / wavelength)``
+    with ``dlam = (lam - lam0) mod 2*pi`` in [0, 2*pi): the wave exists only
+    DOWNSTREAM of the launch longitude, so the exponential argument is never
+    negative (evaluating the raw form for ``lam < lam0`` would grow without
+    bound -- the clamp is load-bearing).  ``a`` is the feature's semimajor
+    axis, making the sine argument arc length over wavelength
+    (dimensionless).
+
+    Parameters:
+        lam: Ring-plane longitudes from the ascending node, in radians.
+        wave: The edge-wave parameters (``damp`` in radians).
+        a: The feature's semimajor axis, in the wave's radial units.
+
+    Returns:
+        Radial perturbations at each longitude, in the wave's radial units.
+    """
+    dlam = np.mod(lam - math.radians(wave.lam0), 2.0 * math.pi)
+    dr = wave.amp * np.exp(-dlam / wave.damp) * np.sin(2.0 * math.pi * dlam * a / wave.wavelength)
+    return cast(NDArrayFloatType, dr)
 
 
 def compute_border_atop_simulated(

@@ -1,14 +1,35 @@
 """Image-side optical-depth ring-system renderer.
 
-Draws the ``ring_system`` scene block: radial tau features (ringlets and
-gaps) on mode-1 eccentric precessing orbits, projected through the shared
-opening-angle geometry (:mod:`spindoctor.sim.ring_geometry`) and lit by the
-single-scattering closed forms.  The output is a set of per-pixel maps --
-emitted intensity, transmission ``exp(-tau/mu)``, and line-of-sight depth --
-that the radiance stage composites against the body stack as a transmission
-screen: ``img = I_ring + exp(-tau/mu) * img_behind``, evaluated far to near
-per pixel, so low-tau features reveal the background instead of erasing it
-and stars behind the ring attenuate physically.
+Draws the ``ring_system`` scene block: radial tau features (ringlets, gaps,
+one-sided edges, ramps, and damped density-wave trains) on mode-1 eccentric
+precessing orbits with optional m >= 2 modes and satellite edge waves,
+projected through the shared opening-angle geometry
+(:mod:`spindoctor.sim.ring_geometry`) and lit by the single-scattering
+closed forms.  The output is a set of per-pixel maps -- emitted intensity,
+transmission ``exp(-tau/mu)``, and line-of-sight depth -- that the radiance
+stage composites against the body stack as a transmission screen:
+``img = I_ring + exp(-tau/mu) * img_behind``, evaluated far to near per
+pixel, so low-tau features reveal the background instead of erasing it and
+stars behind the ring attenuate physically.
+
+Radial tau profiles by feature kind (``r_e(lam)`` the feature's perturbed
+orbit radius, ``w`` its radial width, distances in ring-plane radial units):
+
+- ``ringlet``: ``tau`` between ``r_e`` and ``r_e + w`` (anti-aliased edges).
+- ``gap``: the same band as a tau suppression (subtracts, clipped at zero).
+- ``edge``: a one-sided step; ``side: 'in'`` carries ``tau`` for
+  ``r <= r_e`` (a sheet bounded by its outer edge, the B-ring-edge case),
+  ``side: 'out'`` for ``r >= r_e``.
+- ``ramp``: a linear transition across ``[r_e, r_e + w]``; ``side: 'out'``
+  rises from 0 at ``r_e`` to ``tau`` at ``r_e + w`` (compose with an
+  ``edge`` there for a sheet with a gradual inner boundary), ``side: 'in'``
+  mirrors it.  Zero outside the band; the sharp end is anti-aliased.
+- ``wave``: a damped radial sinusoid launched at ``r_e``:
+  ``dtau(x) = tau * exp(-x / damping) * sin(2*pi*x / wavelength)`` for
+  ``x = r - r_e >= 0`` and exactly zero upstream (the clamp mirrors the
+  azimuthal edge wave's: the envelope grows without bound for ``x < 0``).
+  A density-wave train is visual clutter riding on a sheet; its negative
+  lobes subtract from the composed tau.
 
 Photometry (the normative equation set), with ``mu = |sin B_obs|``,
 ``mu0 = |sin B_sun|``, lit iff ``sign(B_obs) == sign(B_sun)``, and one-term
@@ -32,14 +53,16 @@ which reduces exactly to the closed form for any single feature.
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
 from spindoctor.sim.ring_geometry import (
+    RingOrbit,
     compute_antialiasing_shade,
-    compute_edge_radii_array,
+    compute_orbit_radii,
     ring_los_depth,
+    ring_orbit_from_mapping,
     ring_plane_from_sky,
     ring_radial_scale,
 )
@@ -212,44 +235,30 @@ def render_ring_system(
     # pixel regardless of the foreshortening direction.
     radial_scale = ring_radial_scale(r, x, y, opening_deg_obs=b_obs)
 
-    # Compose the radial tau profile: ringlets add their tau between their
-    # edges, gaps subtract (tau suppression), and the sum clips at zero.  The
-    # emission's A/4 * P factor is the tau-weighted mean over the positive
-    # contributions, so a single feature reproduces its closed form exactly.
+    # Compose the radial tau profile: emitting kinds add their tau, gaps
+    # subtract (tau suppression), a wave's negative lobes subtract, and the
+    # sum clips at zero.  The emission's A/4 * P factor is the tau-weighted
+    # mean over the positive contributions, so a single feature reproduces
+    # its closed form exactly.
     tau_map = np.zeros(shape, dtype=np.float64)
     ap_weighted = np.zeros(shape, dtype=np.float64)
     ap_weight = np.zeros(shape, dtype=np.float64)
     for feature in features:
         kind = str(feature.get('kind'))
-        if kind not in ('ringlet', 'gap'):
-            raise ValueError(f'ring feature kind {kind!r} is not renderable')
-        orbit = feature.get('orbit') or {}
-        a = float(orbit.get('a', 0.0)) * os
-        ae = float(orbit.get('ae', 0.0)) * os
-        long_peri = float(orbit.get('long_peri', 0.0))
-        rate_peri = float(orbit.get('rate_peri', 0.0))
-        width = float(feature.get('width', 0.0)) * os
-        tau = float(feature.get('tau', 0.0))
-        # Inner and outer edges share the orbit shape; the outer edge is the
-        # same ellipse widened by the radial width.  lam is ring-plane
-        # longitude, so long_peri lives in the ring-plane frame (the node
-        # angle entered only the sky projection above).
-        r_inner = compute_edge_radii_array(
-            lam, a=a, ae=ae, long_peri=long_peri, rate_peri=rate_peri, epoch=epoch, time=time
-        )
-        r_outer = compute_edge_radii_array(
-            lam,
-            a=a + width,
-            ae=ae,
-            long_peri=long_peri,
-            rate_peri=rate_peri,
+        # The catalog orbit, scaled to the render grid.  lam is ring-plane
+        # longitude, so every orbital angle lives in the ring-plane frame
+        # (the node angle entered only the sky projection above).
+        orbit = ring_orbit_from_mapping(feature.get('orbit') or {}).scaled(float(os))
+        contribution = _feature_tau_profile(
+            feature,
+            orbit,
+            r=r,
+            lam=lam,
+            radial_scale=radial_scale,
+            os=os,
             epoch=epoch,
             time=time,
         )
-        inner_shade = compute_antialiasing_shade((r - r_inner) / radial_scale, float(os))
-        outer_shade = compute_antialiasing_shade((r_outer - r) / radial_scale, float(os))
-        coverage = np.minimum(inner_shade, outer_shade)
-        contribution = tau * coverage
         if kind == 'gap':
             tau_map -= contribution
         else:
@@ -257,8 +266,9 @@ def render_ring_system(
             albedo = float(feature.get('albedo', RING_ALBEDO_DEFAULT))
             phase_g = float(feature.get('phase_g', RING_PHASE_G_DEFAULT))
             ap = albedo / 4.0 * henyey_greenstein_phase(phase_g, alpha_deg)
-            ap_weighted += ap * contribution
-            ap_weight += contribution
+            positive = np.clip(contribution, 0.0, None)
+            ap_weighted += ap * positive
+            ap_weight += positive
     np.clip(tau_map, 0.0, None, out=tau_map)
 
     ap_map = np.divide(
@@ -283,3 +293,80 @@ def render_ring_system(
         mask=mask,
         depth_km=depth_km,
     )
+
+
+def _feature_tau_profile(
+    feature: Mapping[str, Any],
+    orbit: RingOrbit,
+    *,
+    r: NDArrayFloatType,
+    lam: NDArrayFloatType,
+    radial_scale: NDArrayFloatType,
+    os: int,
+    epoch: float,
+    time: float,
+) -> NDArrayFloatType:
+    """One feature's per-pixel tau contribution (the module's profile forms).
+
+    All radial arithmetic runs in render-grid ring-plane units (``orbit``
+    arrives pre-scaled); dividing signed radial distances by ``radial_scale``
+    converts them to image pixels so anti-aliased boundaries span one
+    detector pixel regardless of foreshortening.  Only the ``wave`` kind can
+    return negative values (its subtracting lobes); a ``gap``'s contribution
+    is positive here and subtracted by the caller.
+
+    Parameters:
+        feature: The validated feature mapping.
+        orbit: The feature's orbit, scaled to the render grid.
+        r: Per-pixel ring-plane radii on the render grid.
+        lam: Per-pixel ring-plane longitudes (radians).
+        radial_scale: Per-pixel radial foreshortening scale.
+        os: The oversampling factor.
+        epoch: Ring epoch (TDB seconds).
+        time: Scene time (TDB seconds).
+
+    Returns:
+        The per-pixel tau contribution.
+
+    Raises:
+        ValueError: If the feature's kind is not a renderable profile (the
+            validator rejects these; this guards direct callers).
+    """
+    kind = str(feature.get('kind'))
+    tau = float(feature.get('tau', 0.0))
+    r_edge = compute_orbit_radii(lam, orbit, epoch=epoch, time=time)
+    if kind in ('ringlet', 'gap'):
+        width = float(feature.get('width', 0.0)) * os
+        r_outer = compute_orbit_radii(lam, orbit.widened(width), epoch=epoch, time=time)
+        inner_shade = compute_antialiasing_shade((r - r_edge) / radial_scale, float(os))
+        outer_shade = compute_antialiasing_shade((r_outer - r) / radial_scale, float(os))
+        return cast(NDArrayFloatType, tau * np.minimum(inner_shade, outer_shade))
+    if kind == 'edge':
+        side = str(feature.get('side', 'in'))
+        signed = (r_edge - r) if side == 'in' else (r - r_edge)
+        return tau * compute_antialiasing_shade(signed / radial_scale, float(os))
+    if kind == 'ramp':
+        width = float(feature.get('width', 0.0)) * os
+        side = str(feature.get('side', 'out'))
+        r_outer = compute_orbit_radii(lam, orbit.widened(width), epoch=epoch, time=time)
+        x = np.clip((r - r_edge) / width, 0.0, 1.0)
+        frac = x if side == 'out' else 1.0 - x
+        # The linear transition is continuous at its zero end; the tau end is
+        # a step, anti-aliased like any other sharp boundary.
+        if side == 'out':
+            sharp = compute_antialiasing_shade((r_outer - r) / radial_scale, float(os))
+        else:
+            sharp = compute_antialiasing_shade((r - r_edge) / radial_scale, float(os))
+        return cast(NDArrayFloatType, tau * frac * sharp)
+    if kind == 'wave':
+        wavelength = float(feature.get('wavelength', 0.0)) * os
+        damping = float(feature.get('damping', 0.0)) * os
+        # Clamp to the downstream (outward) side: clipping x at zero makes
+        # the upstream profile exactly zero (sin(0) = 0) and keeps the
+        # envelope from growing without bound inward of the launch radius.
+        x = np.clip(r - r_edge, 0.0, None)
+        return cast(
+            NDArrayFloatType,
+            tau * np.exp(-x / damping) * np.sin(2.0 * np.pi * x / wavelength),
+        )
+    raise ValueError(f'ring feature kind {kind!r} is not renderable')
