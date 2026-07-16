@@ -1,11 +1,19 @@
 """Image-side star rendering: scene stars and the background star field.
 
-Each star is drawn peak-normalized (`2.512 ** -(vmag - 4)` at the PSF peak)
-and PSF-spread directly into the normalized signal plane.  The electron
-unit chain is not implemented: flux-normalized point-mass deposition into
-``SimFrame.point_e`` (with the whole-scene optics PSF as the only PSF
-application) is deliberately absent, and stars are deposited PSF-spread in
-signal units instead.
+Stars render in one of two modes, decided by whether the scene has an active
+whole-scene optics PSF:
+
+- **No optics PSF** (the plain detector-grid render): each star is drawn
+  peak-normalized (``2.512 ** -(vmag - 4)`` at the PSF peak) and
+  Gaussian-pre-spread directly into the normalized signal plane, exactly as a
+  scene with no optics block has always rendered.
+- **Active optics PSF** (an explicit ``optics.psf`` block, the
+  navigator-matched form, or ``instrument_defaults``): each star's *total*
+  signal is deposited as a sub-pixel-positioned point mass (a bilinear splat
+  into the oversampled signal grid; a per-star smear vector distributes the
+  mass along its track), so the whole-scene PSF convolution is the ONLY PSF
+  a star receives and the rendered star profile equals the scene kernel.
+  Pre-spreading here would convolve the star twice and widen it by sqrt(2).
 
 The rendered :class:`~spindoctor.support.types.MutableStar` records and the
 ``star_info`` hit-test entries are renderer *output* metadata (they carry the
@@ -26,6 +34,55 @@ from spindoctor.support.types import MutableStar, NDArrayFloatType
 __all__ = ['render_background_stars', 'render_stars']
 
 
+def _deposit_point_mass(
+    img: NDArrayFloatType,
+    v: float,
+    u: float,
+    *,
+    total: float,
+    move_v: float = 0.0,
+    move_u: float = 0.0,
+) -> None:
+    """Bilinearly deposit a point source's total signal at a sub-pixel position.
+
+    The splat conserves the total and places the deposited centroid exactly at
+    ``(v, u)`` (pixel-centre convention: integer index ``i`` is coordinate
+    ``i``).  A non-zero motion vector distributes the mass evenly along the
+    centred drift track, the point-mass analogue of the pre-spread renderer's
+    PSF ``movement``.
+
+    Parameters:
+        img: The (oversampled) signal plane, modified in place.
+        v: Centroid v coordinate on the grid of ``img``.
+        u: Centroid u coordinate on the grid of ``img``.
+        total: Total signal to deposit.
+        move_v: Total drift along v over the exposure, in grid pixels.
+        move_u: Total drift along u over the exposure, in grid pixels.
+    """
+    track = float(np.hypot(move_v, move_u))
+    n_samples = 1 if track < 1e-9 else max(2, int(np.ceil(track)) + 1)
+    offsets = [0.0] if n_samples == 1 else list(np.linspace(-0.5, 0.5, n_samples))
+    weight = total / n_samples
+    size_v, size_u = img.shape
+    for t in offsets:
+        pos_v = v + t * move_v
+        pos_u = u + t * move_u
+        v0 = int(np.floor(pos_v))
+        u0 = int(np.floor(pos_u))
+        fv = pos_v - v0
+        fu = pos_u - u0
+        for dv, du, frac in (
+            (0, 0, (1.0 - fv) * (1.0 - fu)),
+            (1, 0, fv * (1.0 - fu)),
+            (0, 1, (1.0 - fv) * fu),
+            (1, 1, fv * fu),
+        ):
+            vv = v0 + dv
+            uu = u0 + du
+            if 0 <= vv < size_v and 0 <= uu < size_u:
+                img[vv, uu] += weight * frac
+
+
 @lru_cache(maxsize=1)
 def _render_stars_cached(
     size_v: int,
@@ -36,6 +93,8 @@ def _render_stars_cached(
     offset_u: float,
     default_psf_sigma: float,
     rotation_deg: float,
+    point_mass: bool,
+    oversample: int,
 ) -> tuple[Any, ...]:
     """Internal cached function to compute star rendering."""
     stars_params = json.loads(stars_params_json)
@@ -135,10 +194,30 @@ def _render_stars_cached(
         scale_factor = star.dn / (2.512**4.0)
         star_psf = star_psf * scale_factor
 
-        img[
-            v_int - psf_size_half_v : v_int + psf_size_half_v + 1,
-            u_int - psf_size_half_u : u_int + psf_size_half_u + 1,
-        ] += star_psf
+        if point_mass:
+            # An active whole-scene optics PSF is the star's only convolution:
+            # deposit the star's total signal (the flux its pre-spread profile
+            # would have carried) as a sub-pixel point mass; the optics stage
+            # shapes it.  The spike legitimately exceeds 1.0 on the oversampled
+            # grid; the detector conversion clips after the downsample.  The
+            # (os - 1) / 2 term maps a detector-pixel-centre coordinate scaled
+            # by os onto the oversampled sample whose box-downsample centroid
+            # is that detector coordinate, so the deposited star lands exactly
+            # at its catalog position after the downsample.
+            grid_shift = (oversample - 1) / 2.0
+            _deposit_point_mass(
+                img,
+                star_offset_v + grid_shift,
+                star_offset_u + grid_shift,
+                total=float(star_psf.sum()),
+                move_v=star.move_v,
+                move_u=star.move_u,
+            )
+        else:
+            img[
+                v_int - psf_size_half_v : v_int + psf_size_half_v + 1,
+                u_int - psf_size_half_u : u_int + psf_size_half_u + 1,
+            ] += star_psf
 
         star_info.append(
             {
@@ -162,6 +241,8 @@ def render_stars(
     offset_u: float,
     default_psf_sigma: float = 3.0,
     rotation_deg: float = 0.0,
+    point_mass: bool = False,
+    oversample: int = 1,
 ) -> tuple[NDArrayFloatType, list[MutableStar], list[dict[str, Any]]]:
     """Render stars into img. Returns (img, sim_star_list, star_render_info).
 
@@ -175,6 +256,12 @@ def render_stars(
         rotation_deg: Camera-roll angle (degrees) applied about the image centre
             before the translation offset, modelling a pointing rotation the star
             techniques recover.
+        point_mass: Deposit each star's total signal as a sub-pixel point mass
+            instead of pre-spreading it (used when a whole-scene optics PSF is
+            active, so that PSF is the star's only convolution).
+        oversample: The render-grid oversampling factor; point-mass deposits
+            use it to land each star's post-downsample centroid exactly at its
+            catalog position.
     """
     size_v, size_u = img.shape
     stars_params_json = json.dumps(stars_params, sort_keys=True)
@@ -186,10 +273,19 @@ def render_stars(
         offset_u=offset_u,
         default_psf_sigma=default_psf_sigma,
         rotation_deg=rotation_deg,
+        point_mass=point_mass,
+        oversample=oversample,
     )
-    # Add cached stars to input image (don't overwrite background noise/stars)
-    img[:] = np.clip(img + cached_img, 0.0, 1.0)
-    return img, cached_star_list, cached_star_info
+    if point_mass:
+        # Point deposits legitimately exceed 1.0 on the oversampled grid; the
+        # optics PSF spreads them and the detector conversion clips afterward.
+        img += cached_img
+    else:
+        # Add cached stars to input image (don't overwrite background noise/stars)
+        img[:] = np.clip(img + cached_img, 0.0, 1.0)
+    # The caller (and the downsample stage) rescale the hit-test entries in
+    # place, so hand out fresh copies rather than the cached dicts.
+    return img, cached_star_list, [dict(info) for info in cached_star_info]
 
 
 @lru_cache(maxsize=1)
@@ -201,6 +297,7 @@ def _render_background_stars_cached(
     seed: int,
     psf_sigma: float,
     distribution_exponent: float,
+    point_mass: bool,
 ) -> NDArrayFloatType:
     """Internal cached function to compute background star additions."""
     rng = np.random.default_rng(seed)
@@ -253,11 +350,16 @@ def _render_background_stars_cached(
         else:
             star_psf = star_psf * intensities[i]
 
-        # Add to star additions accumulator
-        star_additions[
-            v_int - psf_size_half : v_int + psf_size_half + 1,
-            u_int - psf_size_half : u_int + psf_size_half + 1,
-        ] += star_psf
+        if point_mass:
+            # Same rule as catalog stars: with an active whole-scene optics
+            # PSF, deposit the total signal and let that PSF shape the star.
+            _deposit_point_mass(star_additions, v, u, total=float(star_psf.sum()))
+        else:
+            # Add to star additions accumulator
+            star_additions[
+                v_int - psf_size_half : v_int + psf_size_half + 1,
+                u_int - psf_size_half : u_int + psf_size_half + 1,
+            ] += star_psf
 
     return star_additions
 
@@ -269,6 +371,7 @@ def render_background_stars(
     *,
     psf_sigma: float = 0.9,
     distribution_exponent: float = 2.5,
+    point_mass: bool = False,
 ) -> None:
     """Add random background stars to the image.
 
@@ -279,6 +382,9 @@ def render_background_stars(
         psf_sigma: PSF sigma value for star rendering (default 0.9).
         distribution_exponent: Power law exponent for intensity distribution (default 2.5).
             Higher values make dimmer stars more common.
+        point_mass: Deposit each star's total signal as a sub-pixel point mass
+            instead of pre-spreading it (used when a whole-scene optics PSF is
+            active, so that PSF is the star's only convolution).
     """
     if n_stars <= 0:
         return
@@ -290,5 +396,9 @@ def render_background_stars(
         seed=seed,
         psf_sigma=psf_sigma,
         distribution_exponent=distribution_exponent,
+        point_mass=point_mass,
     )
-    img[:] = np.clip(img + star_additions, 0.0, 1.0)
+    if point_mass:
+        img += star_additions
+    else:
+        img[:] = np.clip(img + star_additions, 0.0, 1.0)

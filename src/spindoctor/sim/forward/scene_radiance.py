@@ -6,11 +6,13 @@ applying the scene's planted pointing offset and camera roll.  Feature truth
 (rendered star records, body masks, inventory, z-order maps) is accumulated
 into ``frame.truth`` for the renderer's output metadata.
 
-Present-fidelity placeholders: composition happens directly on the detector
-grid (``oversample == 1``) with per-element anti-aliasing instead of an
-oversampled radiance image, stars are PSF-spread in signal units rather than
-deposited into ``point_e`` as electrons, and occlusion is mask-overwrite
-rather than transparency compositing.
+Stars render in signal units in one of two modes: with no active whole-scene
+optics PSF they are Gaussian-pre-spread at the instrument's ``star_psf_sigma``
+(the plain detector-grid render); with one active (an explicit ``optics.psf``
+block, the navigator-matched form, or ``instrument_defaults``) each star's
+total signal is deposited as a sub-pixel point mass so the scene PSF is the
+only convolution a star receives.  Occlusion is mask-overwrite rather than
+transparency compositing.
 """
 
 from collections.abc import Mapping
@@ -20,6 +22,7 @@ import numpy as np
 
 from spindoctor.config import DEFAULT_CONFIG
 from spindoctor.sim.forward.body import render_single_body
+from spindoctor.sim.forward.optics import effective_psf
 from spindoctor.sim.forward.ring import composite_ring
 from spindoctor.sim.forward.stages import SimFrame
 from spindoctor.sim.forward.star import render_background_stars, render_stars
@@ -81,6 +84,14 @@ def compose_scene_radiance(
     )
     star_psf_sigma = float(inst_config['star_psf_sigma']) * os
 
+    # With an active whole-scene optics PSF, stars are deposited as sub-pixel
+    # point masses so the optics kernel is the only convolution they receive
+    # (pre-spreading and then convolving would widen every star by sqrt(2)).
+    # Without one, stars pre-spread at their Gaussian sigma exactly as a
+    # detector-grid render always has.
+    scene_psf = effective_psf(params)
+    star_point_mass = scene_psf is not None
+
     # Background stars are part of the sky signal, composed before noise.
     background_stars_num = int(params.get('background_stars_num', 0))
     bg_psf_sigma_raw = params.get('background_stars_psf_sigma')
@@ -96,6 +107,7 @@ def compose_scene_radiance(
         background_stars_seed,
         psf_sigma=background_stars_psf_sigma,
         distribution_exponent=background_stars_distribution_exponent,
+        point_mass=star_point_mass,
     )
 
     stars_params = params.get('stars', []) or []
@@ -114,7 +126,18 @@ def compose_scene_radiance(
         offset_u=offset_u,
         default_psf_sigma=star_psf_sigma,
         rotation_deg=offset_rotation_deg,
+        point_mass=star_point_mass,
+        oversample=os,
     )
+    if scene_psf is not None:
+        # The hit-test entries record the rendered star shape.  A point-mass
+        # star's rendered profile is the scene kernel, so record its core
+        # sigma (the larger axis, as a hit-test radius) instead of the
+        # pre-spread sigma that was never applied.
+        sigma_v_psf = float(scene_psf['sigma_v'])
+        rendered_sigma = max(sigma_v_psf, float(scene_psf.get('sigma_u', sigma_v_psf)))
+        for info in star_info:
+            info['sigma'] = rendered_sigma * os
 
     # The camera roll and the planted spacecraft-ephemeris parallax are both
     # detector-space displacements; geometry is built in detector coordinates
@@ -302,6 +325,7 @@ def compose_scene_radiance(
             background_stars_seed,
             psf_sigma=background_stars_psf_sigma,
             distribution_exponent=background_stars_distribution_exponent,
+            point_mass=star_point_mass,
         )
         render_stars(
             stars_layer,
@@ -310,6 +334,8 @@ def compose_scene_radiance(
             offset_u=offset_u,
             default_psf_sigma=star_psf_sigma,
             rotation_deg=offset_rotation_deg,
+            point_mass=star_point_mass,
+            oversample=os,
         )
         bodies_layer = np.zeros((size_v, size_u), dtype=np.float64)
         rings_layer = np.zeros((size_v, size_u), dtype=np.float64)

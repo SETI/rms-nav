@@ -21,12 +21,13 @@ renders at ``oversample`` 1, where the downsample is a no-op.
 
 The ``signal`` plane carries normalized [0, ~1] intensive scene units through
 the optics stage; the detector stage converts it to electrons through the
-exposure and digitizes it to DN in place (the electron unit chain).  The
-``point_e`` plane is added into the electron image after that conversion and
-before Poisson, so point sources never pass through the intensive scale; at
-present fidelity the radiance stage still draws stars PSF-spread in signal units
-rather than depositing point-mass electrons into ``point_e``, so it stays zeroed
-(the plumbing is exact for when star deposition lands).
+exposure and digitizes it to DN in place (the electron unit chain).  Stars
+render into the signal plane: Gaussian-pre-spread when no whole-scene PSF is
+active, or as sub-pixel point masses when one is (so the scene PSF is their
+only convolution).  The ``point_e`` plane is reserved for electron-unit point
+sources -- it is added into the electron image after the signal conversion and
+before Poisson, so anything in it never passes through the intensive scale --
+and stays zeroed until an electron-unit source uses it.
 """
 
 from collections.abc import Mapping
@@ -48,11 +49,11 @@ class SimFrame:
         signal: ``(V*os, U*os)`` float64 image of intensive scene signal
             (I/F-like normalized units): bodies, rings, and diffuse
             backgrounds.  The detector stage converts it to DN in place.
-        point_e: ``(V*os, U*os)`` float64 image reserved for point sources
-            (stars, moonlets) in electrons, kept separate because one array
-            cannot carry two unit systems through the detector stage's
-            signal-to-electron conversion.  Unused at present fidelity (see
-            the module docstring).
+        point_e: ``(V*os, U*os)`` float64 image reserved for electron-unit
+            point sources, kept separate because one array cannot carry two
+            unit systems through the detector stage's signal-to-electron
+            conversion.  Stars deposit in signal units, so this plane stays
+            zeroed (see the module docstring).
         oversample: Oversampling factor ``os >= 1``; the detector grid is
             ``(V, U)``.
         truth: Feature truth accumulated by the radiance stage (the rendered
@@ -95,7 +96,7 @@ def new_sim_frame(size_v: int, size_u: int, *, oversample: int = 1) -> SimFrame:
     Parameters:
         size_v: Detector-grid height in pixels.
         size_u: Detector-grid width in pixels.
-        oversample: Oversampling factor (1 at present fidelity).
+        oversample: Oversampling factor of the radiance grid.
 
     Returns:
         A frame with zeroed ``signal`` and ``point_e`` planes.
