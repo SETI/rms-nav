@@ -215,32 +215,35 @@ Each stage is a callable matching the
 :class:`~spindoctor.sim.forward.stages.Stage` protocol: it mutates a
 :class:`~spindoctor.sim.forward.stages.SimFrame` in place, reads its parameters
 from the full scene mapping, and draws randomness only from the
-``numpy.random.Generator`` it is handed. Whether a stage contributes anything
-when its scene block is absent differs by stage. The stray-light and telemetry
-effects are **off unless asked for**: with no ``stray_light`` block no field is
-added, and with no ``missing_data_rate`` no pixels are dropped. The detector
-stage is **on by default**: a raw-DN scene with no ``noise`` block still gets
-Poisson shot noise, read noise, and the bias pedestal at the emulated
-instrument's published parameter values, and a scene ``noise`` block overrides
-individual parameters (so silencing the detector is itself an explicit
-override, e.g. ``poisson: false`` with zero read noise and bias). A
-single-variable sweep therefore relies on the off-by-default blocks staying
-absent and on scenes explicitly pinning the detector parameters they are not
-sweeping.
+``numpy.random.Generator`` it is handed. Every effect is **off unless asked
+for**: with no ``stray_light`` block no field is added, with no
+``missing_data_rate`` no pixels are dropped, and with no ``noise``, ``detector``,
+or ``artifacts`` block the detector adds no shot noise, read noise, dark, hot
+pixels, banding, or bias structure. The detector always converts the composed
+signal to detector counts -- that is what makes a DN frame -- but the stochastic
+and structured noise activates only through a scene ``noise`` block (which pins
+the individual parameters, e.g. ``poisson: true`` with a ``read_noise_dn``) or
+the ``artifacts: {instrument_defaults: true}`` opt-in (which turns on the
+emulated camera's physical signal chain at catalog values). A scene with none of
+those blocks renders a clean DN frame: the self-consistency floor. A
+single-variable sweep therefore relies on every other block staying absent so it
+attributes error to the one effect it varies.
 
 ``SimFrame`` carries the mutable image state between stages:
 
 - ``signal`` -- the ``(V*os, U*os)`` float64 image. It holds normalized
-  [0, ~1] scene units through the radiance and optics stages and is converted
-  to DN in place by the detector stage.
+  [0, ~1] intensive scene units through the radiance and optics stages; the
+  detector stage converts it to electrons through the exposure and digitizes it
+  to DN in place (the electron unit chain).
 - ``point_e`` -- a same-shaped plane reserved for point sources in electrons.
-  It is allocated but **unused today**: stars are drawn PSF-spread in signal
-  units by the radiance stage. The plane exists so a whole-scene optics PSF
-  can later convolve extended and point sources identically while the detector
-  stage keeps their unit systems separate.
-- ``oversample`` -- the oversampling factor; **fixed at 1 today** (the
-  radiance stage composes directly on the detector grid with per-element
-  anti-aliasing).
+  The detector adds it into the electron image after the intensive conversion
+  and before Poisson, so point sources never pass through the signal scale.
+  Star deposition into this plane is a later fidelity step; today the radiance
+  stage still draws stars PSF-spread in signal units, so the plane stays zeroed.
+- ``oversample`` -- the oversampling factor. A scene with an active PSF (an
+  ``optics.psf`` block or ``instrument_defaults``) renders the radiance on a 4x
+  oversampled grid and the box downsample returns it to the detector grid;
+  otherwise it is 1.
 - ``truth`` -- renderer output metadata (rendered star records, body masks,
   inventory, z-order maps). None of it crosses the information boundary.
 
@@ -273,8 +276,10 @@ configuration block drives the detector model and PSF
 and ``vgiss``, plus ``generic`` (alias ``sim``) for the instrument-agnostic
 defaults. Calibrated (``*_calib_*``) instruments are in I/F units with a NaN
 missing-data marker and no full-well; raw instruments are in DN with a 0 marker.
-Calibrated scenes render noise-free (the detector stack applies to the raw-DN
-path). A scene can pin or override individual instrument settings with
+Calibrated scenes render through the full DN chain and then invert the
+calibration transform, so they carry propagated shot/read noise and quantization
+texture in I/F units. A scene can pin or override individual instrument settings
+with
 ``instrument_config`` (see :ref:`sim-instrument-config`).
 
 Scene ingredients
