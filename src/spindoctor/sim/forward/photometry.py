@@ -33,10 +33,12 @@ signature while keeping the normalized signal plane within [0, 1] (a scene
 at large phase renders darker by ``1 / (1 + amplitude)`` rather than the
 opposition frame clipping at the full scale).
 
-The dark-side floor keeps today's semantics: every visible-hemisphere
-pixel is clipped to [0.01, 1] (none of the supported laws defines a
-dark-side term, so geometric night renders at the floor), and the far
-hemisphere is 0.
+The dark-side floor keeps today's semantics: :func:`shade_surface` clips
+every visible-hemisphere pixel to [0.01, 1] (none of the supported laws
+defines a dark-side term, so geometric night renders at the floor), and
+the far hemisphere is 0.  The floor is a guarantee on the *shading stage's
+output only*: later multiplicative stages -- a transit's cast shadow in
+particular -- may darken lit-disc pixels below it.
 """
 
 import math
@@ -61,7 +63,9 @@ PHOTOMETRIC_LAWS: frozenset[str] = frozenset(
 )
 
 # Visible-hemisphere intensity floor, matching the Lambert renderer's
-# dark-side clamp: geometric night and shadow both render at this level.
+# dark-side clamp: geometric night and terminator-march shadow render at
+# this level in the shading stage.  Downstream multiplicative stages
+# (transit shadows) may push lit-disc pixels below it.
 DARK_SIDE_FLOOR = 0.01
 
 # McEwen (1991) lunar-Lambert blend coefficients (phase in degrees).
