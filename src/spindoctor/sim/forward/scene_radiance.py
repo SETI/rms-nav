@@ -290,6 +290,58 @@ def compose_scene_radiance(
             # Should not happen, but create empty mask if missing
             ring_masks.append(np.zeros((size_v, size_u), dtype=np.bool_))
 
+    # Differential smear blurs each object class by its own motion, so it needs
+    # the per-class radiance in isolation.  Capture the star, body, and ring
+    # layers only when the scene asks for it, rendered with the same scaled
+    # geometry and z-order as the composite so occlusion is consistent.
+    if _optics_needs_layers(params):
+        stars_layer = np.zeros((size_v, size_u), dtype=np.float64)
+        render_background_stars(
+            stars_layer,
+            background_stars_num,
+            background_stars_seed,
+            psf_sigma=background_stars_psf_sigma,
+            distribution_exponent=background_stars_distribution_exponent,
+        )
+        render_stars(
+            stars_layer,
+            stars_params_scaled,
+            offset_v,
+            offset_u=offset_u,
+            default_psf_sigma=star_psf_sigma,
+            rotation_deg=offset_rotation_deg,
+        )
+        bodies_layer = np.zeros((size_v, size_u), dtype=np.float64)
+        rings_layer = np.zeros((size_v, size_u), dtype=np.float64)
+        for _range_val, item_type, item_params, orig_idx in render_items:
+            if item_type == 'ring':
+                composite_ring(
+                    rings_layer,
+                    item_params,
+                    offset_v,
+                    offset_u=offset_u,
+                    time=time,
+                    epoch=epoch,
+                    shade_solid=shade_solid,
+                    resolution=float(os),
+                )
+            else:
+                render_single_body(
+                    bodies_layer,
+                    item_params,
+                    offset_v,
+                    offset_u=offset_u,
+                    seed=crater_seed,
+                    body_index=orig_idx,
+                    ref_center_v=ref_center_v,
+                    ref_center_u=ref_center_u,
+                )
+        frame.truth['radiance_layers'] = {
+            'stars': stars_layer,
+            'bodies': bodies_layer,
+            'rings': rings_layer,
+        }
+
     frame.truth.update(
         {
             'stars': sim_star_list,
@@ -304,6 +356,25 @@ def compose_scene_radiance(
             'body_mask_map': body_mask_map_dict,
         }
     )
+
+
+def _optics_needs_layers(params: Mapping[str, Any]) -> bool:
+    """True when the scene's optics require per-class radiance layers.
+
+    Differential smear (a smear entry addressing a single object class rather
+    than the whole scene) is the only effect that needs the classes separated.
+
+    Parameters:
+        params: The full scene mapping.
+
+    Returns:
+        Whether the radiance stage should capture per-class layers.
+    """
+    optics = params.get('optics')
+    if not isinstance(optics, dict):
+        return False
+    smear = optics.get('smear') or []
+    return any(entry.get('object_class', 'all') != 'all' for entry in smear)
 
 
 def _scale_star_params(star_params: dict[str, Any], os: int) -> dict[str, Any]:

@@ -3,12 +3,14 @@
 The optics stage runs on the oversampled radiance image, in a fixed internal
 order chosen to mirror image formation:
 
-1. **Distortion** warps the geometric image: the residual field-position error
+1. **Smear** averages the scene radiance over the exposure along the pointing
+   drift (whole-scene, or per object class for differential smear).  It runs
+   first, while the per-class layers are still separable, so the optics below
+   form the image of the time-averaged radiance.
+2. **Distortion** warps the geometric image: the residual field-position error
    the navigator does not correct maps where each point of the scene lands.
-2. **PSF** blurs the mapped image by the aperture's core-plus-wing kernel; the
+3. **PSF** blurs the mapped image by the aperture's core-plus-wing kernel; the
    limb, ring-edge, and star profiles all inherit it.
-3. **Smear** averages the blurred image over the exposure along the pointing
-   drift (whole-scene, or per object class for differential smear).
 4. **Ghosts** add displaced, defocused, low-amplitude copies of the formed
    focal-plane image (internal reflections).
 5. **Stray light** adds the smooth scattered-light background last.
@@ -24,6 +26,7 @@ from typing import Any
 import numpy as np
 
 from spindoctor.sim.forward.psf import apply_psf, psf_truncation_for_instrument
+from spindoctor.sim.forward.smear import apply_smear
 from spindoctor.sim.forward.stages import SimFrame
 from spindoctor.support.types import NDArrayFloatType
 
@@ -106,6 +109,10 @@ def apply_optics(
     del rng
     optics = params.get('optics') or {}
     oversample = int(frame.oversample)
+
+    smear = optics.get('smear')
+    if smear:
+        apply_smear(frame, smear=smear, oversample=oversample)
 
     psf = optics.get('psf')
     if isinstance(psf, dict):
