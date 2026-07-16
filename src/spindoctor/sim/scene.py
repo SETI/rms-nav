@@ -48,12 +48,12 @@ from spindoctor.sim.scene_checks import (
     _check_optional_bool,
     _check_optional_mapping,
     _check_optional_mapping_list,
-    _check_optional_nonnegative_int,
     _check_optional_number,
     _check_optional_positive_int,
     _check_optional_positive_number,
     _check_optional_str,
     _check_ring_object,
+    _check_sky_counts,
     _check_spk_error,
     _check_star_object,
     _require_int,
@@ -241,17 +241,6 @@ def validate_sim_params(
     )
     _check_optional_number(sim_params.get('time'), 'time', source=source)
     _check_optional_number(sim_params.get('ring_epoch'), 'ring_epoch', source=source)
-    _check_optional_positive_number(
-        sim_params.get('background_stars_psf_sigma'), 'background_stars_psf_sigma', source=source
-    )
-    _check_optional_number(
-        sim_params.get('background_stars_distribution_exponent'),
-        'background_stars_distribution_exponent',
-        source=source,
-    )
-    _check_optional_nonnegative_int(
-        sim_params.get('background_stars_num'), 'background_stars_num', source=source
-    )
     _check_optional_str(sim_params.get('midtime_utc'), 'midtime_utc', source=source)
     _check_optional_str(sim_params.get('closest_planet'), 'closest_planet', source=source)
     _check_optional_bool(sim_params.get('shade_solid_rings'), 'shade_solid_rings', source=source)
@@ -265,6 +254,7 @@ def validate_sim_params(
     _check_detector(sim_params.get('detector'), instrument=instrument, source=source)
     _check_artifacts(sim_params.get('artifacts'), instrument=instrument, source=source)
     _check_spk_error(sim_params.get('spk_error'), source=source)
+    _check_sky_counts(sim_params.get('sky_counts'), source=source)
 
     for block in ('bodies', 'rings', 'stars'):
         _check_optional_mapping_list(sim_params.get(block), block, source=source)

@@ -18,6 +18,9 @@ newhorizons_lorri:
     expected_noise_dn: 4.0         # PLACEHOLDER — calibrate in Phase 10
     marker_value: 0
     read_noise_dn: 4.0             # PLACEHOLDER — calibrate in Phase 10
+    # interim: photometric zero point (DN a vmag-0 star deposits per second),
+    # the electron zero point over the single gain state.
+    star_flux_dn_per_s_vmag0: 3.33e6
   image_quality_thresholds:
     blank_max_dn: 5.0              # PLACEHOLDER — calibrate in Phase 10
     saturation_threshold_dn: 4095  # 12-bit ADC

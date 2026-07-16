@@ -536,6 +536,38 @@ def _check_spk_error(value: Any, *, source: str) -> None:
     )
 
 
+# The background-sky star-count law: cumulative log10 N(<m) = a + b*m per square
+# degree, a local-density multiplier, and an optional flat diffuse-sky floor.
+_SKY_COUNTS_KEYS: frozenset[str] = frozenset({'a', 'b', 'density_factor', 'diffuse_e_per_px'})
+
+
+def _check_sky_counts(value: Any, *, source: str) -> None:
+    """Validate the scene-level ``sky_counts`` block's field types.
+
+    Parameters:
+        value: The ``sky_counts`` mapping, or None when the block is absent.
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: On any unknown or invalid sky_counts field.
+    """
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(f'{source}: sky_counts must be a mapping when present')
+    unknown = set(value) - _SKY_COUNTS_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{source}: sky_counts: unknown keys: {sorted(unknown)}')
+    _check_optional_number(value.get('a'), 'sky_counts.a', source=source)
+    _check_optional_number(value.get('b'), 'sky_counts.b', source=source)
+    _check_optional_nonnegative_number(
+        value.get('density_factor'), 'sky_counts.density_factor', source=source
+    )
+    _check_optional_nonnegative_number(
+        value.get('diffuse_e_per_px'), 'sky_counts.diffuse_e_per_px', source=source
+    )
+
+
 def _require_ranges_for_spk_error(sim_params: dict[str, Any], *, source: str) -> None:
     """Every body and ring feature needs a physical ``range_km`` under spk_error.
 

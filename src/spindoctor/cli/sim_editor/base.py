@@ -148,13 +148,12 @@ class SimEditorBase(QMainWindow):
     _psf_image_label: QLabel
     _psf_info_label: QLabel
 
-    # ---- General tab: background stars ----
-    _background_stars_slider: QSlider
-    _background_stars_spin: QSpinBox
-    _background_stars_psf_sigma_slider: QSlider
-    _background_stars_psf_sigma_spin: QDoubleSpinBox
-    _background_stars_dist_exp_slider: QSlider
-    _background_stars_dist_exp_spin: QDoubleSpinBox
+    # ---- General tab: background sky (sky_counts) ----
+    _sky_density_slider: QSlider
+    _sky_density_spin: QDoubleSpinBox
+    _sky_a_spin: QDoubleSpinBox
+    _sky_b_spin: QDoubleSpinBox
+    _sky_diffuse_spin: QDoubleSpinBox
 
     # ---- Action buttons and visual toggles ----
     _save_img_btn: QPushButton

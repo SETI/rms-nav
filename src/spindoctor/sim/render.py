@@ -34,7 +34,7 @@ def clear_render_caches() -> None:
 
     _render_combined_model_cached.cache_clear()
     star._render_stars_cached.cache_clear()
-    star._render_background_stars_cached.cache_clear()
+    star._render_sky_counts_cached.cache_clear()
     body._render_body_shape_cached.cache_clear()
     body_mesh._render_mesh_shape_cached.cache_clear()
     psf.psf_kernel.cache_clear()

@@ -50,7 +50,12 @@ class SceneIoMixin(SimEditorBase):
 
     def _apply_params_dict(self, params: dict[str, Any]) -> None:
         """Rebuild sim_params from a loaded params dict and sync every widget."""
-        background_stars_val = params.get('background_stars_num', 0)
+        sky = params.get('sky_counts')
+        sky_block = (
+            dict(sky)
+            if isinstance(sky, dict)
+            else {'a': -3.1, 'b': 0.34, 'density_factor': 0.0, 'diffuse_e_per_px': 0.0}
+        )
         self.sim_params = {
             'size_v': int(params.get('size_v', 512)),
             'size_u': int(params.get('size_u', 512)),
@@ -60,11 +65,7 @@ class SceneIoMixin(SimEditorBase):
             'exposure_sec': float(params.get('exposure_sec', 1.0)),
             'random_seed': int(params.get('random_seed', 42)),
             'instrument': str(params.get('instrument', 'generic')),
-            'background_stars_num': int(background_stars_val),
-            'background_stars_psf_sigma': float(params.get('background_stars_psf_sigma', 0.9)),
-            'background_stars_distribution_exponent': float(
-                params.get('background_stars_distribution_exponent', 2.5)
-            ),
+            'sky_counts': sky_block,
             'time': float(params.get('time', 0.0)),
             'ring_epoch': float(params.get('ring_epoch', 0.0)),
             'closest_planet': params.get('closest_planet') or 'SATURN',
@@ -163,31 +164,20 @@ class SceneIoMixin(SimEditorBase):
         # (instrument defaults, detector override) sync from their own blocks.
         self._sync_optics_from_params()
         self._sync_artifacts_from_params()
-        # Update background stars controls
-        self._background_stars_slider.blockSignals(True)
-        self._background_stars_slider.setValue(self.sim_params['background_stars_num'])
-        self._background_stars_slider.blockSignals(False)
-        self._background_stars_spin.blockSignals(True)
-        self._background_stars_spin.setValue(self.sim_params['background_stars_num'])
-        self._background_stars_spin.blockSignals(False)
-        # Update background stars PSF sigma controls
-        self._background_stars_psf_sigma_slider.blockSignals(True)
-        psf_sigma_val = int(self.sim_params['background_stars_psf_sigma'] * 100)
-        self._background_stars_psf_sigma_slider.setValue(psf_sigma_val)
-        self._background_stars_psf_sigma_slider.blockSignals(False)
-        self._background_stars_psf_sigma_spin.blockSignals(True)
-        psf_sigma_spin_val = self.sim_params['background_stars_psf_sigma']
-        self._background_stars_psf_sigma_spin.setValue(psf_sigma_spin_val)
-        self._background_stars_psf_sigma_spin.blockSignals(False)
-        # Update background stars distribution exponent controls
-        self._background_stars_dist_exp_slider.blockSignals(True)
-        dist_exp_slider_val = int(self.sim_params['background_stars_distribution_exponent'] * 100)
-        self._background_stars_dist_exp_slider.setValue(dist_exp_slider_val)
-        self._background_stars_dist_exp_slider.blockSignals(False)
-        self._background_stars_dist_exp_spin.blockSignals(True)
-        dist_exp_spin_val = self.sim_params['background_stars_distribution_exponent']
-        self._background_stars_dist_exp_spin.setValue(dist_exp_spin_val)
-        self._background_stars_dist_exp_spin.blockSignals(False)
+        # Update background-sky (sky_counts) controls
+        sky = self.sim_params.get('sky_counts') or {}
+        for widget, value in (
+            (self._sky_density_spin, float(sky.get('density_factor', 0.0))),
+            (self._sky_a_spin, float(sky.get('a', -3.1))),
+            (self._sky_b_spin, float(sky.get('b', 0.34))),
+            (self._sky_diffuse_spin, float(sky.get('diffuse_e_per_px', 0.0))),
+        ):
+            widget.blockSignals(True)
+            widget.setValue(value)
+            widget.blockSignals(False)
+        self._sky_density_slider.blockSignals(True)
+        self._sky_density_slider.setValue(int(float(sky.get('density_factor', 0.0)) * 10))
+        self._sky_density_slider.blockSignals(False)
         # Rebuild tabs
         self._rebuild_dynamic_tabs()
         self._update_tab_titles()
