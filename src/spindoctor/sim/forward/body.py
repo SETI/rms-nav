@@ -717,6 +717,8 @@ def render_single_body(
             anti_aliasing=anti_aliasing,
             ref_center_v=ref_center_v,
             ref_center_u=ref_center_u,
+            seed=seed,
+            body_index=body_index,
         )
 
     has_texture = any(

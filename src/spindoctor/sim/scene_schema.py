@@ -151,19 +151,25 @@ _BODY_IDEALIZED_KEYS: frozenset[str] = frozenset(
         'mesh_n_lat',
         'mesh_n_lon',
         'mesh_seed',
+        'mesh_detail_octaves',
         'pose_euler_deg',
     }
 )
 
 # Per-body truth keys: surface texture (craters, the multiplicative albedo
-# texture) and the limb-relief field are nature's terrain, 'seed' is its
+# texture, giant-planet bands/storms, transiting moons and their shadows)
+# and the limb-relief field are nature's terrain, 'seed' is its
 # realization, the photometric law and opposition surge are nature's
-# scattering behavior (the navigator's template always shades Lambert), and
-# 'anti_aliasing' is an image-side rendering-fidelity knob (the navigator's
-# template always renders at full anti-aliasing).  'nav_override' is
-# special: its VALUES are what the navigator believes (idealized), so
-# build_nav_params overlays them onto the body and drops the key; the
-# underlying overridden true values never cross.
+# scattering behavior (the navigator's template always shades Lambert),
+# 'shading' is the rendered mesh's smooth-shading mode (the shared
+# rasterizer gains the capability; the navigator's predicted mesh keeps
+# flat shading because this key never crosses), 'pose_scatter' is a
+# per-frame unmodelable rotation-state error (the navigator predicts the
+# catalog pose), and 'anti_aliasing' is an image-side rendering-fidelity
+# knob (the navigator's template always renders at full anti-aliasing).
+# 'nav_override' is special: its VALUES are what the navigator believes
+# (idealized), so build_nav_params overlays them onto the body and drops
+# the key; the underlying overridden true values never cross.
 _BODY_TRUTH_KEYS: frozenset[str] = frozenset(
     {
         'crater_fill',
@@ -179,6 +185,8 @@ _BODY_TRUTH_KEYS: frozenset[str] = frozenset(
         'albedo_texture',
         'disc_texture',
         'transits',
+        'shading',
+        'pose_scatter',
         'seed',
         'anti_aliasing',
         'nav_override',

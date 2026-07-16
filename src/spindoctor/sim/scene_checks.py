@@ -72,6 +72,15 @@ def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
     for key in ('mesh_n_lat', 'mesh_n_lon', 'mesh_seed', 'seed'):
         if obj.get(key) is not None:
             _require_int(obj, key, source=f'{source}: {label}')
+    _check_optional_nonnegative_int(
+        obj.get('mesh_detail_octaves'), f'{label}.mesh_detail_octaves', source=source
+    )
+    shading = obj.get('shading')
+    if shading is not None and shading not in ('flat', 'gouraud'):
+        raise SimSceneValidationError(
+            f"{source}: {label}.shading must be 'flat' or 'gouraud' when present; got {shading!r}"
+        )
+    _check_pose_scatter(obj.get('pose_scatter'), label=label, source=source)
     _check_body_relief_and_photometry(obj, label=label, source=source)
     _check_albedo_texture(obj.get('albedo_texture'), label=label, source=source)
     _check_disc_texture(obj.get('disc_texture'), label=label, source=source)
@@ -104,6 +113,29 @@ def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
 # surge: amplitude plus angular e-folding width in degrees of phase).  The
 # photometric-law vocabulary is the renderer's own PHOTOMETRIC_LAWS.
 _OPPOSITION_SURGE_KEYS: frozenset[str] = frozenset({'amplitude', 'width_deg'})
+
+# The per-frame pose scatter: a seeded Gaussian perturbation (sigma per
+# Euler axis, degrees) added to the RENDERED mesh pose only; the navigator
+# predicts the catalog pose.
+_POSE_SCATTER_KEYS: frozenset[str] = frozenset({'sigma_deg'})
+
+
+def _check_pose_scatter(value: Any, *, label: str, source: str) -> None:
+    """Validate one body's ``pose_scatter`` map (per-frame pose perturbation)."""
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(
+            f'{source}: {label}.pose_scatter must be a mapping when present'
+        )
+    unknown = set(value) - _POSE_SCATTER_KEYS
+    if unknown:
+        raise SimSceneValidationError(
+            f'{source}: {label}.pose_scatter: unknown keys: {sorted(unknown)}'
+        )
+    _check_optional_nonnegative_number(
+        value.get('sigma_deg'), f'{label}.pose_scatter.sigma_deg', source=source
+    )
 
 
 def _check_body_relief_and_photometry(obj: dict[str, Any], *, label: str, source: str) -> None:

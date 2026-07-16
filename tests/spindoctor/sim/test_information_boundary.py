@@ -81,6 +81,8 @@ _TRUTH_SAMPLES: dict[str, Any] = {
             'shadow': {'dv_px': 1.0, 'du_px': 4.0, 'radius_px': 3.0, 'darkness': 0.8},
         }
     ],
+    'bodies.shading': 'gouraud',
+    'bodies.pose_scatter': {'sigma_deg': 2.0},
     'bodies.seed': 11,
     'bodies.anti_aliasing': 0.7,
     'bodies.nav_override': {'mesh_lumpiness': 0.0},
@@ -121,6 +123,8 @@ def _truth_exercising_scene() -> dict[str, Any]:
                 'range_km': 500000.0,
                 'mesh_lumpiness': _TRUE_MESH_LUMPINESS,
                 'mesh_seed': 3,
+                'shading': _TRUTH_SAMPLES['bodies.shading'],
+                'pose_scatter': dict(_TRUTH_SAMPLES['bodies.pose_scatter']),
                 'crater_fill': _TRUTH_SAMPLES['bodies.crater_fill'],
                 'crater_min_radius': _TRUTH_SAMPLES['bodies.crater_min_radius'],
                 'crater_max_radius': _TRUTH_SAMPLES['bodies.crater_max_radius'],
