@@ -59,7 +59,7 @@ def _check_ring_object(obj: dict[str, Any], *, index: int, source: str) -> None:
 # optical-depth features.  Key inventories mirror the boundary classification
 # in scene_schema (which asserts completeness over them at import).
 _RING_SYSTEM_BLOCK_KEYS: frozenset[str] = frozenset(
-    {'geometry', 'features', 'range_km', 'km_per_pixel', 'phase_deg'}
+    {'geometry', 'features', 'range_km', 'km_per_pixel', 'phase_deg', 'azimuthal', 'moonlets'}
 )
 _RING_SYSTEM_GEOMETRY_KEYS: frozenset[str] = frozenset(
     {'center_v', 'center_u', 'opening_deg_obs', 'opening_deg_sun', 'node_deg'}
@@ -100,6 +100,18 @@ _RING_ORBIT_SIGMA_KEYS: frozenset[str] = frozenset(
 _RING_KINDS_WITH_WIDTH: frozenset[str] = frozenset({'ringlet', 'gap', 'ramp'})
 _RING_KINDS_WITH_SIDE: frozenset[str] = frozenset({'edge', 'ramp'})
 _RING_FEATURE_SIDES: frozenset[str] = frozenset({'in', 'out'})
+# Truth-side azimuthal structure (intensity only, never tau) and embedded
+# moonlets (opaque discs at ring depth, with optional propeller lobes).
+_RING_AZIMUTHAL_KEYS: frozenset[str] = frozenset({'modulation', 'spokes', 'shadow'})
+_RING_MODULATION_KEYS: frozenset[str] = frozenset({'amplitude', 'm', 'phase_deg'})
+_RING_SHADOW_KEYS: frozenset[str] = frozenset({'start_deg', 'extent_deg', 'darkness'})
+_RING_SPOKES_KEYS: frozenset[str] = frozenset(
+    {'count', 'r_inner', 'r_outer', 'contrast', 'width_deg'}
+)
+_RING_MOONLET_KEYS: frozenset[str] = frozenset(
+    {'a', 'lam_deg', 'radius_px', 'amplitude', 'propeller'}
+)
+_RING_PROPELLER_KEYS: frozenset[str] = frozenset({'length_deg', 'width_px', 'contrast'})
 
 
 def _check_ring_system(value: Any, *, source: str) -> None:
@@ -160,6 +172,157 @@ def _check_ring_system(value: Any, *, source: str) -> None:
     _check_optional_mapping_list(features, 'ring_system.features', source=source)
     for index, feature in enumerate(features or []):
         _check_ring_feature(feature, index=index, source=source)
+    _check_ring_azimuthal(value.get('azimuthal'), source=source)
+    moonlets = value.get('moonlets')
+    _check_optional_mapping_list(moonlets, 'ring_system.moonlets', source=source)
+    for index, moonlet in enumerate(moonlets or []):
+        _check_ring_moonlet(moonlet, index=index, source=source)
+
+
+def _check_ring_azimuthal(value: Any, *, source: str) -> None:
+    """Validate the truth-side ``ring_system.azimuthal`` structure block.
+
+    ``modulation`` is a low-frequency brightness modulation
+    (self-gravity-wake asymmetry), ``shadow`` a planet-shadow darkening
+    wedge, and ``spokes`` a seeded field of azimuthally sharp, radially
+    broad albedo wedges.  All three modulate the emitted intensity only --
+    they are albedo/illumination structure, not optical depth.
+
+    Parameters:
+        value: The ``azimuthal`` mapping, or None when absent.
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: On any unknown, missing, or invalid field.
+    """
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(
+            f'{source}: ring_system.azimuthal must be a mapping when present'
+        )
+    unknown = set(value) - _RING_AZIMUTHAL_KEYS
+    if unknown:
+        raise SimSceneValidationError(
+            f'{source}: ring_system.azimuthal: unknown keys: {sorted(unknown)}'
+        )
+    modulation = value.get('modulation')
+    if modulation is not None:
+        label = 'ring_system.azimuthal.modulation'
+        if not isinstance(modulation, dict):
+            raise SimSceneValidationError(f'{source}: {label} must be a mapping when present')
+        unknown = set(modulation) - _RING_MODULATION_KEYS
+        if unknown:
+            raise SimSceneValidationError(f'{source}: {label}: unknown keys: {sorted(unknown)}')
+        if modulation.get('amplitude') is None:
+            raise SimSceneValidationError(f'{source}: {label}.amplitude is required')
+        _check_optional_nonnegative_number(
+            modulation.get('amplitude'), f'{label}.amplitude', source=source
+        )
+        m = modulation.get('m')
+        if m is not None and (isinstance(m, bool) or not isinstance(m, int) or m < 1):
+            raise SimSceneValidationError(
+                f'{source}: {label}.m must be an integer >= 1 when present; got {m!r}'
+            )
+        _check_optional_number(modulation.get('phase_deg'), f'{label}.phase_deg', source=source)
+    shadow = value.get('shadow')
+    if shadow is not None:
+        label = 'ring_system.azimuthal.shadow'
+        if not isinstance(shadow, dict):
+            raise SimSceneValidationError(f'{source}: {label} must be a mapping when present')
+        unknown = set(shadow) - _RING_SHADOW_KEYS
+        if unknown:
+            raise SimSceneValidationError(f'{source}: {label}: unknown keys: {sorted(unknown)}')
+        if shadow.get('extent_deg') is None:
+            raise SimSceneValidationError(f'{source}: {label}.extent_deg is required')
+        _check_optional_positive_number(
+            shadow.get('extent_deg'), f'{label}.extent_deg', source=source
+        )
+        _check_optional_number(shadow.get('start_deg'), f'{label}.start_deg', source=source)
+        darkness = shadow.get('darkness')
+        if darkness is None:
+            raise SimSceneValidationError(f'{source}: {label}.darkness is required')
+        _check_optional_number(darkness, f'{label}.darkness', source=source)
+        if not 0.0 <= float(darkness) <= 1.0:
+            raise SimSceneValidationError(
+                f'{source}: {label}.darkness must lie in [0, 1]; got {darkness!r}'
+            )
+    spokes = value.get('spokes')
+    if spokes is not None:
+        label = 'ring_system.azimuthal.spokes'
+        if not isinstance(spokes, dict):
+            raise SimSceneValidationError(f'{source}: {label} must be a mapping when present')
+        unknown = set(spokes) - _RING_SPOKES_KEYS
+        if unknown:
+            raise SimSceneValidationError(f'{source}: {label}: unknown keys: {sorted(unknown)}')
+        count = spokes.get('count')
+        if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+            raise SimSceneValidationError(
+                f'{source}: {label}.count must be an integer >= 1; got {count!r}'
+            )
+        for key in ('r_inner', 'r_outer', 'width_deg'):
+            if spokes.get(key) is None:
+                raise SimSceneValidationError(f'{source}: {label}.{key} is required')
+            _check_optional_positive_number(spokes.get(key), f'{label}.{key}', source=source)
+        if float(spokes['r_outer']) <= float(spokes['r_inner']):
+            raise SimSceneValidationError(
+                f'{source}: {label}.r_outer must exceed r_inner; got '
+                f'{spokes["r_inner"]!r}..{spokes["r_outer"]!r}'
+            )
+        if spokes.get('contrast') is None:
+            raise SimSceneValidationError(f'{source}: {label}.contrast is required')
+        _check_optional_number(spokes.get('contrast'), f'{label}.contrast', source=source)
+
+
+def _check_ring_moonlet(obj: dict[str, Any], *, index: int, source: str) -> None:
+    """Validate one ``ring_system.moonlets`` entry.
+
+    A moonlet is an opaque disc embedded in the ring plane at polar
+    placement ``(a, lam_deg)``, emitting ``amplitude`` in normalized signal
+    units, optionally with a stylized propeller disturbance (two tau lobes
+    straddling it radially and azimuthally).
+
+    Parameters:
+        obj: The moonlet mapping.
+        index: The moonlet's index in the list (for error messages).
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: On any unknown, missing, or invalid field.
+    """
+    label = f'ring_system.moonlets[{index}]'
+    unknown = set(obj) - _RING_MOONLET_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{source}: {label}: unknown keys: {sorted(unknown)}')
+    if obj.get('a') is None:
+        raise SimSceneValidationError(f'{source}: {label}.a is required')
+    _check_optional_positive_number(obj.get('a'), f'{label}.a', source=source)
+    if obj.get('lam_deg') is None:
+        raise SimSceneValidationError(f'{source}: {label}.lam_deg is required')
+    _check_optional_number(obj.get('lam_deg'), f'{label}.lam_deg', source=source)
+    if obj.get('amplitude') is None:
+        raise SimSceneValidationError(f'{source}: {label}.amplitude is required')
+    _check_optional_nonnegative_number(obj.get('amplitude'), f'{label}.amplitude', source=source)
+    _check_optional_positive_number(obj.get('radius_px'), f'{label}.radius_px', source=source)
+    propeller = obj.get('propeller')
+    if propeller is not None:
+        prop_label = f'{label}.propeller'
+        if not isinstance(propeller, dict):
+            raise SimSceneValidationError(f'{source}: {prop_label} must be a mapping when present')
+        unknown = set(propeller) - _RING_PROPELLER_KEYS
+        if unknown:
+            raise SimSceneValidationError(
+                f'{source}: {prop_label}: unknown keys: {sorted(unknown)}'
+            )
+        for key in ('length_deg', 'width_px'):
+            if propeller.get(key) is None:
+                raise SimSceneValidationError(f'{source}: {prop_label}.{key} is required')
+            _check_optional_positive_number(
+                propeller.get(key), f'{prop_label}.{key}', source=source
+            )
+        if propeller.get('contrast') is None:
+            raise SimSceneValidationError(f'{source}: {prop_label}.contrast is required')
+        _check_optional_number(propeller.get('contrast'), f'{prop_label}.contrast', source=source)
 
 
 def _check_ring_feature(obj: dict[str, Any], *, index: int, source: str) -> None:

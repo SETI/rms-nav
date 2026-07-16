@@ -275,9 +275,11 @@ _RING_SYSTEM_IDEALIZED_KEYS: frozenset[str] = frozenset(
     {'geometry', 'features', 'range_km', 'km_per_pixel', 'phase_deg'}
 )
 
-# Block-level truth keys: none yet.  The azimuthal-structure and moonlet
-# blocks land in later phases and will classify here as truth.
-_RING_SYSTEM_TRUTH_KEYS: frozenset[str] = frozenset()
+# Block-level truth keys: 'azimuthal' (brightness modulation, seeded spokes,
+# planet-shadow wedge) is non-navigable clutter crossing the navigable
+# edges, and 'moonlets' are embedded confounders sitting on the features --
+# neither is catalog knowledge, so neither reaches the navigator.
+_RING_SYSTEM_TRUTH_KEYS: frozenset[str] = frozenset({'azimuthal', 'moonlets'})
 
 _RING_SYSTEM_KEYS: frozenset[str] = _RING_SYSTEM_IDEALIZED_KEYS | _RING_SYSTEM_TRUTH_KEYS
 

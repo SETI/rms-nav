@@ -111,12 +111,12 @@ def compose_scene_radiance(
     # convention and are frozen once committed scenes draw from them: renaming
     # one (including 'scene_radiance/background_stars') would reseed its stream
     # and change every scene that uses it.  Ring-system randomized effects
-    # (spokes, moonlet fields -- later phases) will derive
-    # 'scene_radiance/ring_system/<effect>' streams here; the phase-F ring
-    # system is fully deterministic and draws none yet.
+    # derive 'scene_radiance/ring_system/<effect>' streams; the spoke field is
+    # the only one today.
     background_stars_seed = derive_effect_seed(random_seed, 'scene_radiance/background_stars')
     crater_seed = derive_effect_seed(random_seed, 'scene_radiance/craters')
     catalog_scatter_seed = derive_effect_seed(random_seed, 'scene_radiance/catalog_scatter')
+    ring_spokes_seed = derive_effect_seed(random_seed, 'scene_radiance/ring_system/spokes')
     # Scene-level per-star position-scatter sigma (detector pixels), scaled to
     # the oversampled render grid alongside the other star pixel quantities.
     catalog_scatter_px = float(params.get('star_catalog_scatter_px', 0.0)) * os
@@ -412,6 +412,7 @@ def compose_scene_radiance(
             time=time,
             epoch=epoch,
             os=os,
+            spokes_seed=ring_spokes_seed,
         )
         _check_ring_system_ambiguity(
             painted_items,
@@ -641,6 +642,7 @@ def _resolve_ring_system_maps(
     time: float,
     epoch: float,
     os: int,
+    spokes_seed: int,
 ) -> RingSystemMaps:
     """Place the ring system on the sky and render its per-pixel maps.
 
@@ -663,6 +665,7 @@ def _resolve_ring_system_maps(
         time: Scene time in TDB seconds.
         epoch: Ring epoch in TDB seconds.
         os: The oversampling factor.
+        spokes_seed: The spoke field's realization sub-seed.
 
     Returns:
         The rendered :class:`RingSystemMaps`.
@@ -693,6 +696,7 @@ def _resolve_ring_system_maps(
         time=time,
         epoch=epoch,
         oversample=os,
+        spokes_seed=spokes_seed,
     )
 
 

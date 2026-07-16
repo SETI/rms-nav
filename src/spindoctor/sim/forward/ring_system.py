@@ -48,6 +48,11 @@ The albedo ``A`` and asymmetry ``g`` are per-feature truth keys; where
 features overlap radially the composed emission uses the tau-weighted mean
 of their ``A/4 * P`` factors over the positive (ringlet) contributions,
 which reduces exactly to the closed form for any single feature.
+
+Truth-side clutter: the ``azimuthal`` block (brightness modulation, a
+planet-shadow wedge, seeded spokes) scales the emitted intensity without
+touching tau or transmission, and the ``moonlets`` list embeds opaque discs
+at the ring's depth, each optionally carrying a propeller tau disturbance.
 """
 
 import math
@@ -65,6 +70,7 @@ from spindoctor.sim.ring_geometry import (
     ring_orbit_from_mapping,
     ring_plane_from_sky,
     ring_radial_scale,
+    ring_sky_from_plane,
 )
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
@@ -170,6 +176,7 @@ def render_ring_system(
     time: float = 0.0,
     epoch: float = 0.0,
     oversample: int = 1,
+    spokes_seed: int = 0,
 ) -> RingSystemMaps:
     """Render a ring system's per-pixel intensity/transmission/depth maps.
 
@@ -191,6 +198,9 @@ def render_ring_system(
         oversample: The render-grid oversampling factor; radii, widths, and
             the anti-aliasing window scale by it, and the depth map converts
             back through it so ``depth_km`` is grid-independent.
+        spokes_seed: Seed for the azimuthal spoke field's realization
+            (derived by the caller from the scene seed via the
+            'scene_radiance/ring_system/spokes' stream).
 
     Returns:
         The rendered :class:`RingSystemMaps`.
@@ -213,7 +223,8 @@ def render_ring_system(
     if b_obs == 0.0 or b_sun == 0.0:
         return zero_maps
     features = ring_system.get('features') or []
-    if not features:
+    moonlets = ring_system.get('moonlets') or []
+    if not features and not moonlets:
         return zero_maps
 
     os = int(oversample)
@@ -276,12 +287,48 @@ def render_ring_system(
             ap_weight += positive
     np.clip(tau_map, 0.0, None, out=tau_map)
 
+    # Propeller lobes are local density disturbances, so they modify the
+    # composed tau before the photometry evaluates it.
+    for moonlet in moonlets:
+        propeller = moonlet.get('propeller')
+        if propeller:
+            tau_map *= _propeller_tau_factor(moonlet, propeller, r=r, lam=lam, os=os)
+
     ap_map = np.divide(
         ap_weighted, ap_weight, out=np.zeros(shape, dtype=np.float64), where=ap_weight > 0.0
     )
     intensity = ap_map * ring_reflection_factor(tau_map, mu, mu0, lit=lit)
     transmission: NDArrayFloatType = np.exp(-tau_map / mu)
     mask: NDArrayBoolType = tau_map > 0.0
+
+    # Azimuthal structure (modulation, planet-shadow wedge, seeded spokes)
+    # is albedo/illumination structure: it scales the emitted intensity and
+    # leaves the optical depth -- and so the transmission -- untouched.
+    azimuthal = ring_system.get('azimuthal')
+    if azimuthal:
+        intensity *= _azimuthal_intensity_factor(
+            azimuthal, r=r, lam=lam, os=os, spokes_seed=spokes_seed
+        )
+
+    # Moonlet discs: opaque point-like bodies at the ring's depth.  Each
+    # disc replaces the ring emission with its own, extinguishes the
+    # background through the transmission screen, and joins the composited
+    # mask so a moonlet sitting in an empty gap still composites.
+    for moonlet in moonlets:
+        coverage = _moonlet_disc_coverage(
+            moonlet,
+            v_grid,
+            u_grid,
+            center_v=center_v,
+            center_u=center_u,
+            b_obs=b_obs,
+            node_deg=node_deg,
+            os=os,
+        )
+        amplitude = float(moonlet.get('amplitude', 0.0))
+        intensity = intensity * (1.0 - coverage) + amplitude * coverage
+        transmission = transmission * (1.0 - coverage)
+        mask = mask | (coverage > 0.0)
 
     depth_km: NDArrayFloatType | None = None
     range_km = ring_system.get('range_km')
@@ -298,6 +345,168 @@ def render_ring_system(
         mask=mask,
         depth_km=depth_km,
     )
+
+
+def _wrap_dlam(lam: NDArrayFloatType, center_rad: float) -> NDArrayFloatType:
+    """Longitude differences wrapped into [-pi, pi)."""
+    return cast(NDArrayFloatType, np.mod(lam - center_rad + math.pi, 2.0 * math.pi) - math.pi)
+
+
+def _azimuthal_intensity_factor(
+    azimuthal: Mapping[str, Any],
+    *,
+    r: NDArrayFloatType,
+    lam: NDArrayFloatType,
+    os: int,
+    spokes_seed: int,
+) -> NDArrayFloatType:
+    """The truth-side azimuthal brightness factor (intensity only, never tau).
+
+    - ``modulation``: ``1 + amplitude * cos(m * (lam - phase_deg))`` -- the
+      self-gravity-wake quadrant asymmetry.
+    - ``shadow``: a multiplicative ``1 - darkness`` wedge over
+      ``[start_deg, start_deg + extent_deg)`` -- the planet-shadow boundary,
+      a strong non-navigable edge crossing every feature.
+    - ``spokes``: ``count`` seeded wedges, azimuthally sharp (quartic wedge
+      profile) and radially broad (sin^2 envelope over ``r_inner..r_outer``),
+      each with a drawn contrast in ``[0.5, 1] * contrast`` (negative for
+      the dark low-phase appearance) and a drawn width in ``[0.5, 1.5] *
+      width_deg``.
+
+    The combined factor clips at zero: azimuthal structure can darken to
+    black but never drive the emission negative.
+
+    Parameters:
+        azimuthal: The validated ``ring_system.azimuthal`` mapping.
+        r: Per-pixel ring-plane radii on the render grid.
+        lam: Per-pixel ring-plane longitudes (radians).
+        os: The oversampling factor (scales the spoke radial band).
+        spokes_seed: The spoke field's realization seed.
+
+    Returns:
+        The per-pixel intensity factor (non-negative).
+    """
+    factor = np.ones_like(r)
+    modulation = azimuthal.get('modulation')
+    if modulation:
+        amplitude = float(modulation.get('amplitude', 0.0))
+        m = int(modulation.get('m', 1))
+        phase = math.radians(float(modulation.get('phase_deg', 0.0)))
+        factor = factor * (1.0 + amplitude * np.cos(m * (lam - phase)))
+    shadow = azimuthal.get('shadow')
+    if shadow:
+        start = math.radians(float(shadow.get('start_deg', 0.0)))
+        extent = math.radians(float(shadow.get('extent_deg', 0.0)))
+        darkness = float(shadow.get('darkness', 0.0))
+        in_wedge = np.mod(lam - start, 2.0 * math.pi) < extent
+        factor = factor * np.where(in_wedge, 1.0 - darkness, 1.0)
+    spokes = azimuthal.get('spokes')
+    if spokes:
+        rng = np.random.default_rng(spokes_seed)
+        count = int(spokes.get('count', 0))
+        r_inner = float(spokes.get('r_inner', 0.0)) * os
+        r_outer = float(spokes.get('r_outer', 0.0)) * os
+        contrast = float(spokes.get('contrast', 0.0))
+        width_deg = float(spokes.get('width_deg', 0.0))
+        band = np.clip((r - r_inner) / max(r_outer - r_inner, 1e-12), 0.0, 1.0)
+        radial_env = np.sin(math.pi * band) ** 2
+        radial_env[(r < r_inner) | (r > r_outer)] = 0.0
+        spoke_sum = np.zeros_like(r)
+        for _ in range(count):
+            lam_k = rng.uniform(0.0, 2.0 * math.pi)
+            half_width = math.radians(width_deg * rng.uniform(0.5, 1.5)) / 2.0
+            c_k = contrast * rng.uniform(0.5, 1.0)
+            dlam = _wrap_dlam(lam, lam_k)
+            wedge = np.clip(1.0 - (dlam / half_width) ** 4, 0.0, 1.0)
+            spoke_sum += c_k * wedge
+        factor = factor * (1.0 + spoke_sum * radial_env)
+    clipped: NDArrayFloatType = np.clip(factor, 0.0, None)
+    return clipped
+
+
+def _propeller_tau_factor(
+    moonlet: Mapping[str, Any],
+    propeller: Mapping[str, Any],
+    *,
+    r: NDArrayFloatType,
+    lam: NDArrayFloatType,
+    os: int,
+) -> NDArrayFloatType:
+    """A propeller's multiplicative tau disturbance around its moonlet.
+
+    Two Gaussian lobes straddle the moonlet radially by ``width_px`` and
+    azimuthally by ``length_deg / 2`` in opposite senses (the leading lobe
+    outward, the trailing lobe inward -- the stylized S shape of a real
+    propeller), each with radial sigma ``width_px`` and azimuthal sigma
+    ``length_deg / 4``.  ``contrast`` scales the disturbance: negative
+    values carve the local partial gaps a physical propeller opens, positive
+    values pile density up.  The factor clips at zero.
+
+    Parameters:
+        moonlet: The moonlet mapping (placement).
+        propeller: The moonlet's ``propeller`` mapping.
+        r: Per-pixel ring-plane radii on the render grid.
+        lam: Per-pixel ring-plane longitudes (radians).
+        os: The oversampling factor.
+
+    Returns:
+        The per-pixel multiplicative tau factor (non-negative).
+    """
+    a_m = float(moonlet.get('a', 0.0)) * os
+    lam_m = math.radians(float(moonlet.get('lam_deg', 0.0)))
+    length = math.radians(float(propeller.get('length_deg', 0.0)))
+    width = float(propeller.get('width_px', 0.0)) * os
+    contrast = float(propeller.get('contrast', 0.0))
+    sigma_lam = length / 4.0
+    disturbance = np.zeros_like(r)
+    for radial_sign, azimuthal_sign in ((1.0, 1.0), (-1.0, -1.0)):
+        dr = (r - (a_m + radial_sign * width)) / width
+        dlam = _wrap_dlam(lam, lam_m + azimuthal_sign * length / 2.0) / sigma_lam
+        disturbance += np.exp(-0.5 * (dr * dr + dlam * dlam))
+    return cast(NDArrayFloatType, np.clip(1.0 + contrast * disturbance, 0.0, None))
+
+
+def _moonlet_disc_coverage(
+    moonlet: Mapping[str, Any],
+    v_grid: NDArrayFloatType,
+    u_grid: NDArrayFloatType,
+    *,
+    center_v: float,
+    center_u: float,
+    b_obs: float,
+    node_deg: float,
+    os: int,
+) -> NDArrayFloatType:
+    """A moonlet's anti-aliased disc coverage on the render grid.
+
+    The moonlet sits in the ring plane at polar placement ``(a, lam_deg)``,
+    projected to the sky through the shared projection; the disc is drawn in
+    sky coordinates (a body, not a ring-plane band, so it does not
+    foreshorten with the ring).
+
+    Parameters:
+        moonlet: The moonlet mapping.
+        v_grid: Per-pixel v centers on the render grid.
+        u_grid: Per-pixel u centers on the render grid.
+        center_v: Ring-system center v on the render grid.
+        center_u: Ring-system center u on the render grid.
+        b_obs: Observer ring opening angle in degrees.
+        node_deg: Sky position angle of the ascending node in degrees.
+        os: The oversampling factor.
+
+    Returns:
+        Per-pixel coverage in [0, 1].
+    """
+    a_m = float(moonlet.get('a', 0.0)) * os
+    lam_m = math.radians(float(moonlet.get('lam_deg', 0.0)))
+    radius = float(moonlet.get('radius_px', 1.0)) * os
+    dv, du = ring_sky_from_plane(
+        np.asarray([a_m]), np.asarray([lam_m]), opening_deg_obs=b_obs, node_deg=node_deg
+    )
+    pos_v = center_v + float(dv[0])
+    pos_u = center_u + float(du[0])
+    dist = np.hypot(v_grid - pos_v, u_grid - pos_u)
+    return compute_antialiasing_shade(radius - dist, float(os))
 
 
 def _orbit_with_error(orbit: RingOrbit, error: Mapping[str, Any] | None) -> RingOrbit:

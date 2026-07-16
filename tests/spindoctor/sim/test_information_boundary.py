@@ -99,6 +99,20 @@ _TRUTH_SAMPLES: dict[str, Any] = {
         'delta_ae_px': 0.4,
         'delta_long_peri_deg': 10.0,
     },
+    'ring_system.azimuthal': {
+        'modulation': {'amplitude': 0.2, 'm': 2, 'phase_deg': 30.0},
+        'shadow': {'start_deg': 100.0, 'extent_deg': 40.0, 'darkness': 0.9},
+        'spokes': {'count': 3, 'r_inner': 3.0, 'r_outer': 6.0, 'contrast': -0.4, 'width_deg': 12.0},
+    },
+    'ring_system.moonlets': [
+        {
+            'a': 6.0,
+            'lam_deg': 45.0,
+            'radius_px': 1.0,
+            'amplitude': 0.4,
+            'propeller': {'length_deg': 20.0, 'width_px': 1.0, 'contrast': -0.6},
+        }
+    ],
 }
 
 # The true (rendered) values nav_override hides from the navigator.
@@ -217,6 +231,8 @@ def _truth_exercising_scene() -> dict[str, Any]:
                     'orbit_error': dict(_TRUTH_SAMPLES['ring_system.features.orbit_error']),
                 }
             ],
+            'azimuthal': dict(_TRUTH_SAMPLES['ring_system.azimuthal']),
+            'moonlets': list(_TRUTH_SAMPLES['ring_system.moonlets']),
         },
     }
     for key in TOP_LEVEL_TRUTH_KEYS:
