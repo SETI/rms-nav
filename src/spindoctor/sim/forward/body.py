@@ -675,7 +675,10 @@ def finish_single_body(
         'u_max_unclipped': center_u + half_extent_u,
         'v_pixel_size': 2 * half_extent_v,
         'u_pixel_size': 2 * half_extent_u,
-        'range': body_params.get('range', 1.0),
+        # The inventory mirrors the oops inventory contract for real frames,
+        # whose distance key is named 'range'; the scene schema key is the
+        # per-body 'range_km'.
+        'range': body_params.get('range_km', 1.0),
     }
 
     return mask, {

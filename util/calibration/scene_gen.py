@@ -466,6 +466,10 @@ def generate_scenes(
     Returns:
         List of ``(scene_id, sim_params)`` pairs.
     """
+    # Local import keeps this module importable without the package installed
+    # (mirrors the deferred config import above).
+    from spindoctor.sim.scene import validate_sim_params
+
     if family not in _GENERATORS:
         raise ValueError(f'unknown scene family {family!r}; valid: {sorted(_GENERATORS)}')
     generator = _GENERATORS[family]
@@ -473,5 +477,7 @@ def generate_scenes(
     for index in range(count):
         rng = random.Random(f'{campaign_seed}/{family}/{index}')
         scene_id = f'{family}_{index:05d}'
-        scenes.append((scene_id, generator(rng)))
+        # Campaign scenes are dict-authored (never files), so they validate
+        # here; a generator drifting from the schema fails at generation.
+        scenes.append((scene_id, validate_sim_params(generator(rng), source=scene_id)))
     return scenes

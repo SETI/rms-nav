@@ -199,7 +199,7 @@ class NavModelBodySimulated(NavModelBodyBase):
 
             - ``name``
             - ``center_v``, ``center_u`` (pixel coordinates of the centre)
-            - ``range`` (km; subject distance, defaults to inf)
+            - ``range_km`` (km; subject distance, defaults to inf)
             - ``axis1``, ``axis2``, ``axis3`` (km; ellipsoid semi-axes)
             - ``rotation_z`` (deg; rotation about the line of sight)
             - ``rotation_tilt`` (deg; tilt of the body)
@@ -355,7 +355,7 @@ class NavModelBodySimulated(NavModelBodyBase):
             center_v + ext_margin_v,
             center_u + ext_margin_u,
         )
-        self._subject_range_km = float(p.get('range', float('inf')))
+        self._subject_range_km = float(p.get('range_km', float('inf')))
         # Predicted disc diameter: the longer pixel extent of the rendered
         # silhouette.  Drives the BODY_BLOB emission gate and covariance.
         self._predicted_diameter_px = _silhouette_diameter_px(body_mask)

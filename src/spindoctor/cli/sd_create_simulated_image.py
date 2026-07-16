@@ -1167,7 +1167,7 @@ class CreateSimulatedImageModel(QMainWindow):
                 'name': unique_name,
                 'center_v': self.sim_params['size_v'] // 2 + 0.5,
                 'center_u': self.sim_params['size_u'] // 2 + 0.5,
-                'range': self._find_unique_range(),
+                'range_km': self._find_unique_range(),
                 'shape_model': 'ellipsoid',
                 'axis1': 100.0,
                 'axis2': 80.0,
@@ -1402,7 +1402,7 @@ class CreateSimulatedImageModel(QMainWindow):
         body_indices = list(range(len(self.sim_params['bodies'])))
         body_indices.sort(
             key=lambda i: (
-                self.sim_params['bodies'][i].get('range', float('inf')),
+                self.sim_params['bodies'][i].get('range_km', float('inf')),
                 self.sim_params['bodies'][i].get('name', f'Body{i + 1}').lower(),
             )
         )
@@ -1505,9 +1505,9 @@ class CreateSimulatedImageModel(QMainWindow):
         rng = QDoubleSpinBox()
         rng.setRange(-1e9, 1e9)
         rng.setDecimals(3)
-        rng.setValue(p.get('range', idx + 1))
+        rng.setValue(p.get('range_km', idx + 1))
         rng.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'range', v, trigger_validate=True)
+            lambda v, i=idx: self._on_body_field(i, 'range_km', v, trigger_validate=True)
         )
         fl.addRow('Range:', rng)
 
@@ -2166,7 +2166,7 @@ class CreateSimulatedImageModel(QMainWindow):
                 float(value) if isinstance(value, (int, float)) else value
             )
             self._updater.request_update()
-            if trigger_validate and key == 'range':
+            if trigger_validate and key == 'range_km':
                 self._validate_ranges()
 
     def _on_body_seed(self, idx: int, value: int) -> None:
@@ -2570,7 +2570,7 @@ class CreateSimulatedImageModel(QMainWindow):
         """Find a unique range value by incrementing from 1 until one doesn't exist."""
         existing_ranges = set()
         for body in self.sim_params.get('bodies', []):
-            range_val = body.get('range')
+            range_val = body.get('range_km')
             if range_val is not None:
                 existing_ranges.add(float(range_val))
         for ring in self.sim_params.get('rings', []):
@@ -2588,7 +2588,7 @@ class CreateSimulatedImageModel(QMainWindow):
         """Check for duplicate body ranges and display a warning if found."""
         ranges = []
         for i in range(len(self.sim_params['bodies'])):
-            range_val = self.sim_params['bodies'][i].get('range')
+            range_val = self.sim_params['bodies'][i].get('range_km')
             if range_val is not None:
                 ranges.append(float(range_val))
         duplicates = len(ranges) != len(set(ranges))

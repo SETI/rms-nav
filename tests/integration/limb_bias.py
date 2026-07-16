@@ -183,7 +183,7 @@ def build_body_scene(
     """
     center = size_px / 2.0
     scene: dict[str, Any] = {
-        'schema_version': 1,
+        'schema_version': 2,
         'scene_name': 'limb_bias_probe',
         'instrument': 'coiss_nac',
         'size_v': size_px,

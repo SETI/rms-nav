@@ -59,7 +59,7 @@ def _load_scene_with(
 ) -> None:
     """Merge ``payload`` into a minimal valid scene, write it, and drive ``_load_scene``."""
     scene: dict[str, Any] = {
-        'schema_version': 1,
+        'schema_version': 2,
         'scene_name': 'params',
         'instrument': 'generic',
         'size_v': 128,
@@ -401,7 +401,7 @@ def test_load_scene_populates_model(
     """Loading a scene YAML populates the data model from it."""
     scene_yaml = tmp_path / 'loadme.yaml'
     scene_yaml.write_text(
-        'schema_version: 1\nscene_name: loadme\ninstrument: gossi\n'
+        'schema_version: 2\nscene_name: loadme\ninstrument: gossi\n'
         'size_v: 96\nsize_u: 96\nrandom_seed: 5\n'
     )
     monkeypatch.setattr(

@@ -117,10 +117,10 @@ def compose_scene_radiance(
     bodies_with_ranges = []
     for body_number, body_params in enumerate(bodies_params):
         body_params_copy = dict(body_params)
-        if 'range' in body_params_copy:
-            body_params_copy['range'] = float(body_params_copy['range'])
+        if 'range_km' in body_params_copy:
+            body_params_copy['range_km'] = float(body_params_copy['range_km'])
         else:
-            body_params_copy['range'] = float(body_number + 1)
+            body_params_copy['range_km'] = float(body_number + 1)
         if offset_rotation_deg != 0.0:
             cv = float(body_params_copy.get('center_v', roll_center_v)) - roll_center_v
             cu = float(body_params_copy.get('center_u', roll_center_u)) - roll_center_u
@@ -136,7 +136,7 @@ def compose_scene_radiance(
     for idx, ring_params in enumerate(rings_params):
         render_items.append((ring_params['range'], 'ring', ring_params, idx))
     for idx, body_params in enumerate(bodies_with_ranges):
-        render_items.append((body_params['range'], 'body', body_params, idx))
+        render_items.append((body_params['range_km'], 'body', body_params, idx))
 
     # Sort all items by range (far to near)
     render_items.sort(key=lambda x: x[0], reverse=True)
@@ -160,7 +160,7 @@ def compose_scene_radiance(
     ref_center_u = size_u / 2.0
 
     # Build order_near_to_far for bodies (needed for body_index_map)
-    sorted_bodies_by_range = sorted(bodies_with_ranges, key=lambda x: x['range'])
+    sorted_bodies_by_range = sorted(bodies_with_ranges, key=lambda x: x['range_km'])
     order_near_to_far = [
         bp.get('name', f'SIM-BODY-{i + 1}').upper() for i, bp in enumerate(sorted_bodies_by_range)
     ]
