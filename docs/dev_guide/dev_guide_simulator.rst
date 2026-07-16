@@ -63,8 +63,10 @@ scene -- including every planted error, noise knob, and contaminant. It lives in
    * - ``scene_radiance.py``
      - Composes the noise-free signal image: background stars, catalog stars,
        and the body/ring stack depth-sorted far to near.
-   * - ``body.py`` / ``body_mesh.py``
-     - Ellipsoid and polyhedral-mesh body renderers.
+   * - ``body.py`` / ``body_topo.py`` / ``body_texture.py`` / ``body_mesh.py``
+     - The ellipsoid body renderer and its topographic path (relief, photometric
+       laws, surface texture, transits), and the polyhedral-mesh renderer (see
+       :ref:`sim-body-renderer`).
    * - ``ring.py``
      - Ring-feature renderer (mode-1 elliptical edges, edge shading).
    * - ``star.py``
@@ -113,8 +115,11 @@ exposure, body ellipsoid/mesh geometry and pose, ring orbits and epochs, star
 catalog positions and magnitudes, and the per-star ``navigable`` flag.
 **Truth** keys are nature's values and the test's contaminants: the planted
 pointing offset and roll, the RNG realization, the noise and stray-light blocks,
-crater terrain, the per-star PSF anomaly and planted catalog error, the
-background sky, and the ``nav_override`` channel. **Test-only** keys are the
+crater terrain and the limb-relief field, the surface photometric law and
+opposition surge, the albedo and disc textures and transiting moons and their
+shadows, the mesh shading mode and per-frame pose scatter, the per-star PSF
+anomaly and planted catalog error, the background sky, and the ``nav_override``
+channel. **Test-only** keys are the
 scene's declared navigation outcome (the ``expected`` block): read only by the
 integration suite's assertion machinery, and by neither the renderer nor the
 navigator. :data:`spindoctor.sim.scene.TRUTH_KEYS` is the machine-readable truth
@@ -820,27 +825,235 @@ point masses, never pre-spread-then-convolved), a floor scene's rendered star
 sigma equals the navigator's configured sigma exactly and the only residual is
 the one the scene plants elsewhere.
 
+.. _sim-body-renderer:
+
+The body renderer
+=================
+
+A body is drawn by one of two renderers chosen by ``shape_model``: the
+ellipsoid renderer (``body.py``) and the polyhedral-mesh renderer
+(``body_mesh.py``), both sharing the axis convention below. A smooth Lambert
+ellipsoid at oversample 1 renders through the classic path unchanged. Whenever
+an ellipsoid body needs more than that -- a limb-relief field, a non-Lambert
+photometric law or opposition surge, a surface texture or a transit, or simply
+an oversampled radiance grid -- it dispatches to the *topographic path*
+(``body_topo.py``). All of the extra ingredients are truth keys: the
+navigator's predicted body is always the smooth Lambert template, so every one
+plants a known model error the technique must survive.
+
+The topographic path
+--------------------
+
+**The relief field.** Limb relief is a 2-D fractional-height field
+``h(lat, lon)`` on the body surface, not a 1-D profile on the limb, so the
+limb perturbation and the terminator shadowing are two slices of one
+consistent surface (``relief.py``). The field is a periodic Gaussian random
+field synthesized by FFT: the spectral coefficients are independent complex
+Gaussians with variance ``S(k) proportional to exp(-(|k| corr_rad / 2)**2)``
+(``corr_rad`` the correlation length in radians of surface arc), band-limited
+at ``kmax = ceil(8 / corr_rad)`` where ``S`` has fallen to ~1e-7 of its peak.
+The field's poles sit on the observer axis, so the sub-observer horizon circle
+-- the limb -- is the field's equator, where the grid metric is exact and the
+commanded RMS and correlation length hold with no map distortion.
+
+Modes with total wavenumber below **3** are zeroed before use: degree-1 radius
+content is, to first order, a translation of the body -- an untruthed center
+offset no limb fit could separate from the pointing error -- and degree-2
+content aliases ellipsoid shape error, which is a separate scene knob. After
+the cutoff the field is rescaled so the *limb slice's* standard deviation
+equals the commanded ``limb_relief_rms`` per realization.
+
+**Limb and terminator application.** The renderer's normalized ellipse radial
+function ``e(p)`` (1 exactly at the unperturbed limb) is divided by
+``1 + delta(theta)`` -- ``delta`` the relief sampled along the sub-observer
+horizon circle -- so the perturbed limb lands at ``r_ellipse (1 + delta)`` and
+the silhouette turns ragged. The relief azimuth ``theta`` is the elliptical
+parametric angle in the body's rotated frame, not the image azimuth about the
+body center: the field is attached to the body, so the silhouette and the
+terminator march sample one consistent surface under any in-plane rotation
+(for a circular disc the two are identical). Shading normals keep the
+unperturbed ``e`` (the
+disc shading is low-frequency; relief moves the edge, not the interior).
+Near-terminator disc points are then shadowed by a march against upstream
+terrain in absolute heights ``H = h R`` (pixels): a point is shadowed when some
+upstream sample at surface distance ``d`` toward the sun satisfies
+``H_up - H_pt > d / tan(i)``. The march is capped at
+``d_max = min((H_max - H_min) tan(i), sqrt(2 R H_max))`` -- the longest shadow
+the terrain can cast, and the horizon limit that bounds the tangent's
+divergence at the terminator -- so raggedness grows toward the terminator while
+the cost stays bounded. The march steps at ``max(1.0, field_cell_arc / 4)``
+pixels of surface arc -- about 16 samples per shortest terrain wavelength,
+never finer than one render pixel -- which is why it is both accurate and
+cheap.
+
+Split-resolution performance
+----------------------------
+
+Disc shading is low-frequency by construction, so the topographic path
+computes the shading field (surface normals, crater texture, photometric law)
+once at **detector resolution** and bilinearly upsamples it, while only the
+sharp content -- the relief-perturbed silhouette mask and the terminator march
+-- is rasterized at the full oversampled working grid. This replaces the
+per-subsample shading that made an oversampled body ~16x more expensive than
+its detector-grid equivalent. It is what lets a body-bearing scene meet the
+render budget below, and it makes the topographic path the *fast* path at
+oversample > 1 even for a plain Lambert body. The budget harness
+(``tests/integration/test_sim_perf.py``) holds a large-lit-body-with-relief
+frame to its measured budget for exactly this reason.
+
+Photometric laws
+----------------
+
+The topographic renderer shades an ellipsoid with a scene-selected law
+(``photometry.py``), each normalized to 1 at disc center under head-on
+illumination and written in ``mu0 = cos(incidence)`` and ``mu = cos(emission)``:
+
+.. list-table::
+   :widths: 22 10 68
+   :header-rows: 1
+
+   * - ``photometric_law``
+     - Side
+     - Form
+   * - ``lambert``
+     - truth
+     - ``I = mu0`` (the navigator's own template law).
+   * - ``lommel_seeliger``
+     - truth
+     - ``I = 2 mu0 / (mu0 + mu)`` -- limb-brightened, clipped at the signal
+       ceiling.
+   * - ``minnaert``
+     - truth
+     - ``I = mu0**k mu**(k - 1)`` with ``minnaert_k``; ``k = 1`` is Lambert,
+       ``k = 0.5`` the classic lunar value.
+   * - ``lunar_lambert``
+     - truth
+     - ``2 L(a) mu0 / (mu0 + mu) + (1 - L(a)) mu0`` with the McEwen (1991)
+       cubic blend ``L(a)`` in phase ``a``: Lommel-Seeliger at opposition,
+       Lambert once the cubic reaches 0 near 119 deg.
+
+An optional ``opposition_surge`` (truth) multiplies the law by a normalized
+exponential ``(1 + amplitude exp(-a / width)) / (1 + amplitude)`` -- 1 at exact
+opposition, ``1 / (1 + amplitude)`` far from it -- so it plants the
+brightness-versus-phase surge signature while keeping the normalized signal
+plane within [0, 1]. Because the navigator always shades Lambert, any non-Lambert
+law or surge moves the terminator and the limb-darkening profile by a known
+amount.
+
+Surface texture and transits
+-----------------------------
+
+Three multiplicative-texture families sit on the body *shading* (never the
+silhouette), so they change what disc correlation sees without moving the limb
+the navigator fits (``body_texture.py``):
+
+- ``albedo_texture`` (truth): a band-limited multiplicative noise field
+  (``rms``, ``corr_px`` in detector pixels on the disc) plus discrete circular
+  ``spots`` -- the disc contrast of an icy moon. The noise reuses the relief
+  spectral synthesis on its own seeded stream, zeroing only the mean (albedo
+  cannot alias a translation the way relief can, and large-scale hemispheric
+  contrast is exactly what the texture exists to plant).
+- ``disc_texture`` (truth): a low-frequency latitude band pattern
+  ``1 + band_amplitude cos(band_wavenumber lat_p + band_phase)`` plus discrete
+  storm ovals -- the zones/belts and a great-red-spot-class storm of a giant
+  planet.
+- ``transits`` (truth): a list of entries, each a transiting moon disc
+  (``moon``: ``dv_px``, ``du_px``, ``radius_px``, ``albedo_factor``) and/or its
+  cast shadow (``shadow``: ``dv_px``, ``du_px``, ``radius_px``, ``darkness``),
+  in detector pixels from the body center. Every shadow multiplies the textured
+  shading first, then every moon disc overwrites on top, and a transiting disc
+  renders only where it overlaps the parent silhouette.
+
+The cast shadow is the point of the confound: it is a sharp, high-contrast
+circular *false crater* on the disc. A disc-correlation or blob technique that
+starts chasing the shadow (or the storm) moves the offset baseline, so a banded
+planet with a transit and shadow is the regression tripwire for that failure --
+the measured behavior is that the correlation and limb fit stay accurate
+against the smooth Lambert template, and the scene fails loudly if that stops
+being true.
+
+Mesh shading, detail, relief, and pose scatter
+----------------------------------------------
+
+The mesh renderer builds the same irregular polyhedron the navigator predicts
+(the primitives live in the shared ``mesh_geometry`` module), then adds its own
+truth-key upgrades on top, none of which the prediction consumes:
+
+- ``shading`` (truth) selects the shared rasterizer's mode for the *rendered*
+  image: ``flat`` (default) or ``gouraud`` per-vertex smooth shading. The
+  rasterizer capability is shared, and each side chooses its own mode; the
+  navigator's predicted mesh keeps flat shading because the key never crosses
+  the boundary. The gallery renders the same body flat and gouraud so the
+  difference is visible.
+- ``mesh_detail_octaves`` (idealized) adds banks of higher-frequency shape
+  modes to the base relief spectrum (0 = base only). It is idealized because a
+  published shape model carries its own detail.
+- ``limb_relief_rms`` / ``limb_relief_corr_deg`` (truth) apply the same relief
+  machinery as a per-vertex radial perturbation of the unit mesh, sampled in
+  body-fixed coordinates so the terrain rotates with the pose.
+- ``pose_scatter`` (truth): a seeded per-frame Gaussian perturbation
+  (``sigma_deg`` per Euler axis) added to the *rendered* pose only. The
+  navigator predicts the catalog pose, so the drawn rotation is a known-wrong
+  rotation state; the draw is recorded in the render truth as
+  ``pose_scatter_drawn_deg``.
+
+The non-Lambert photometric laws, opposition surge, and the surface-texture and
+transit families are ellipsoid-topographic-path features; a mesh body carries
+the relief, shading, detail, and pose-scatter keys.
+
+Mutual events
+-------------
+
+A scene can place two bodies so the nearer one occludes part of the farther one
+(depth-ordered by ``range_km``). The renderer draws the true occlusion and
+records the outcome in the render truth (``body_occlusion``): each body's
+visible fraction and the angular extent of any hidden limb arc. This is
+bookkeeping the test can read, not something the navigator sees.
+
+The measured technique-level behavior is robust: the navigator predicts *both*
+full limbs (it does not know the hidden arc -- that arc is model error, and the
+occluded body's limb feature still reports full ``visible_arc_fraction``), the
+joint limb fit rejects the hidden arc through its Tukey biweight loss, and both
+techniques land within a fraction of a pixel and fuse to an accurate result. No
+confident-wrong result and no double-counting conflict was observed across
+grazing, half, and deep overlap.
+
+The honest caveat, which the mutual-event scenes pin so a regression fails
+loudly: the occluded limb still *claims* full reliability. The technique
+succeeds because the robust loss discards the hidden arc, not because the model
+masks it -- the confidence a hidden-arc limb feature reports is optimistic, and
+a future change that made the fit trust that arc would move the answer.
+
 .. _sim-perf-budget:
 
 The render performance budget
 =============================
 
-A 512x512 star-field scene with a whole-scene PSF plus the full detector stack
-at oversample 4 must render in under 2 s single-core, and a 1024x1024
-Cassini-class star-field scene in under 8 s
-(``tests/integration/test_sim_perf.py``). The budgets bound the optics +
-detector stack -- the PSF convolution on the oversampled grid and the electron
-chain -- which is what the harness scenes exercise. A scene with a large lit
-body at oversample 4 currently exceeds them, because the body renderer's
-per-subsample shading dominates the render; that cost is outside these budgets
-pending the body-renderer replacement. The budget is a *cold-render* budget:
+A 512x512 scene with a whole-scene PSF plus the full detector stack at
+oversample 4 must render in under 2 s single-core, and a 1024x1024
+Cassini-class scene in under 8 s (``tests/integration/test_sim_perf.py``).
+The harness holds two scene families to those budgets: a star field (the PSF
+convolution on the oversampled grid and the electron chain) and a frame
+dominated by a large lit body with limb relief (the topographic body
+renderer's split-resolution path -- detector-grid shading upsampled under an
+oversampled silhouette -- plus the capped terminator shadow march). The
+budget is a *cold-render* budget:
 the render caches are cleared so the timed render pays the kernel-build and
-compile costs a first render pays. The harness pins itself: it sets the
-process CPU affinity to one core and caps the BLAS/OpenMP thread-count
-environment variables for the duration, so an unpinned numpy FFT cannot
-silently multithread and fake the budget. Under heavy machine load the timed
-render can exceed the budget purely from contention; a failure is reported and
-investigated, not blessed by raising the budget.
+compile costs a first render pays, while one-time non-render costs (the lazy
+config-YAML load) are paid by an untimed warm-up first. The harness pins
+itself: it sets the process CPU affinity to one core and caps every
+BLAS/OpenMP pool to one thread via ``threadpoolctl`` for the duration, so an
+unpinned numpy FFT cannot silently multithread and fake the budget. The
+assertion reads CPU time on the pinned core -- far less load-sensitive than
+wall time, though heavy memory-bandwidth contention can still inflate it by
+roughly 10-25%, and by 40% or more while a parallel test battery saturates
+every core -- and takes the best of up to three cold attempts, passing as
+soon as one meets the budget. That absorbs transient contention but not the
+sustained kind, so ``scripts/run-all-checks.sh`` excludes the budget file
+from its parallel pytest run and executes it as a dedicated serial step
+afterwards; run it the same way when measuring by hand. A breach across all
+attempts on an otherwise-quiet host is reported and investigated, not
+blessed by raising the budget.
 
 Scene ingredients
 =================
@@ -861,6 +1074,13 @@ The panels below are rendered by ``python -m tests.integration.sim_doc_images``
 
    Irregular polyhedral-mesh body of the same axes at a three-axis pose.
 
+.. figure:: _sim_images/mesh_body_gouraud.png
+   :width: 45%
+   :align: center
+
+   The same mesh body under ``gouraud`` smooth shading, for comparison with the
+   flat-shaded panel above. The navigator's predicted mesh keeps flat shading.
+
 .. figure:: _sim_images/body_craters.png
    :width: 45%
    :align: center
@@ -872,6 +1092,36 @@ The panels below are rendered by ``python -m tests.integration.sim_doc_images``
    :align: center
 
    High-phase (130 deg) mesh body rendered as a thin lit crescent.
+
+.. figure:: _sim_images/topographic_limb.png
+   :width: 45%
+   :align: center
+
+   A lit ellipsoid with a limb-relief field: the silhouette is visibly ragged
+   and relief pockets shadow near the limb, while the disc shading stays smooth.
+
+.. figure:: _sim_images/ragged_terminator.png
+   :width: 45%
+   :align: center
+
+   A high-phase crescent with limb relief: the terminator turns ragged and the
+   relief march casts shadows that grow toward it.
+
+.. figure:: _sim_images/banded_transit.png
+   :width: 45%
+   :align: center
+
+   A banded planet disc with a storm oval, a bright transiting moon, and its
+   cast shadow -- the sharp circular false crater the disc techniques must not
+   chase.
+
+.. figure:: _sim_images/mutual_event.png
+   :width: 45%
+   :align: center
+
+   A mutual event: the nearer body occludes part of the farther one. The
+   navigator still predicts both full limbs and the robust fit discards the
+   hidden arc.
 
 .. figure:: _sim_images/rings.png
    :width: 45%
@@ -904,6 +1154,13 @@ The panels below are rendered by ``python -m tests.integration.sim_doc_images``
 
    Detector model: read + shot noise, sparse cosmic-ray spikes (bright) and
    missing-data dropouts (dark).
+
+.. figure:: _sim_images/telemetry_loss.png
+   :width: 45%
+   :align: center
+
+   Structured telemetry loss: whole missing lines and partial-line dropouts
+   across the disc.
 
 .. figure:: _sim_images/stray_light_gradient.png
    :width: 45%
@@ -1231,10 +1488,14 @@ Ellipsoid bodies add ``rotation_z`` and ``rotation_tilt`` (degrees, idealized).
 Mesh bodies (``shape_model: polyhedral_mesh``) instead read the idealized mesh
 keys ``mesh_lumpiness`` (relief amplitude as a fraction of the unit radius,
 default 0.3), ``mesh_seed`` (which irregular shape is generated, default 0),
-``mesh_n_lat`` / ``mesh_n_lon`` (mesh resolution, defaults 16 / 32), and
+``mesh_n_lat`` / ``mesh_n_lon`` (mesh resolution, defaults 16 / 32),
+``mesh_detail_octaves`` (higher-frequency shape-mode banks, default 0), and
 ``pose_euler_deg`` (intrinsic X, Y, Z Euler angles, default ``[0, 0, 0]``).
 
-The truth-side body keys never reach the navigator:
+The truth-side body keys never reach the navigator. The relief, photometry,
+texture, and transit keys are consumed by the topographic path and the mesh
+extras by the mesh renderer (see :ref:`sim-body-renderer`); the navigator's
+predicted body is always the smooth Lambert template.
 
 .. list-table::
    :widths: 30 70
@@ -1246,9 +1507,36 @@ The truth-side body keys never reach the navigator:
        ``crater_power_law_exponent``, ``crater_relief_scale``
      - Procedural crater terrain -- nature's surface, which the navigator's
        smooth predicted template does not know.
+   * - ``limb_relief_rms``, ``limb_relief_corr_deg``
+     - The limb/terminator relief field: RMS of the limb slice and its
+       correlation length in degrees of surface arc. Ragged silhouette plus
+       terminator march shadows (ellipsoid and mesh bodies).
+   * - ``photometric_law``, ``minnaert_k``
+     - The surface-scattering law (``lambert`` / ``lommel_seeliger`` /
+       ``minnaert`` / ``lunar_lambert``) and its Minnaert exponent; ellipsoid
+       topographic path.
+   * - ``opposition_surge``
+     - ``{amplitude, width_deg}`` -- the normalized brightness surge near
+       opposition.
+   * - ``albedo_texture``
+     - ``{rms, corr_px, spots}`` -- a multiplicative noise field plus circular
+       albedo spots on the disc shading.
+   * - ``disc_texture``
+     - ``{band_amplitude, band_wavenumber, band_phase_deg, storms}`` -- a
+       giant-planet latitude band pattern plus storm ovals.
+   * - ``transits``
+     - A list of ``{moon, shadow}`` discs (each ``dv_px``, ``du_px``,
+       ``radius_px``, and a brightness/darkness) on the parent disc; the cast
+       shadow is the sharp *false crater* the disc techniques must not chase.
+   * - ``shading``
+     - Rendered mesh shading mode (``flat`` default, ``gouraud`` smooth); the
+       predicted mesh always renders flat.
+   * - ``pose_scatter``
+     - ``{sigma_deg}`` -- a seeded per-frame Gaussian perturbation of the
+       *rendered* mesh pose only; the navigator predicts the catalog pose.
    * - ``seed``
-     - The crater realization (a stable hash of the body geometry when
-       absent).
+     - The crater / texture / relief realization (a stable hash of the body
+       geometry when absent).
    * - ``anti_aliasing``
      - Image-side rendering-fidelity knob; the predicted template always
        renders at full anti-aliasing.
@@ -1710,7 +1998,11 @@ change alters rendered output:
 The two documentation galleries (``docs/dev_guide/_sim_images/`` and
 ``docs/simulator_report/_scene_images/``, both written by
 ``python -m tests.integration.sim_doc_images``) are re-rendered under the same
-rule.
+rule -- and the rule is enforced mechanically:
+``tests/integration/test_sim_doc_images.py`` (integration tier) regenerates
+every gallery image into a temporary directory and fails, naming the stale
+files and the regeneration command, whenever a committed PNG no longer
+matches a fresh render.
 
 The simulated-image GUI
 =======================
@@ -1762,12 +2054,18 @@ realism addition needs -- live in their own module:
    * - ``expected_outcome.py``
      - The test-only ``expected`` block: a checkable Expected-outcome group on
        the General tab (status, confidence tier, status reason).
-   * - ``body_tab.py`` / ``ring_tab.py`` / ``star_tab.py``
-     - The per-object tabs (geometry, shape model and mesh controls, crater
-       controls, navigation-override group; ring edges and shading; star
-       position, magnitude, PSF, smear, catalog label, and the per-star
-       information-asymmetry controls -- navigable flag, catalog error,
-       companion, variable-brightness delta).
+   * - ``body_tab.py`` / ``body_appearance.py`` / ``ring_tab.py`` /
+       ``star_tab.py``
+     - The per-object tabs. The body tab carries geometry, shape model and mesh
+       controls, crater controls, and the navigation-override group
+       (``body_tab.py``); the truth-side appearance groups -- limb relief,
+       photometric law and opposition surge, albedo texture and its spots, disc
+       texture and its storms, transits, and the mesh-only shading / detail /
+       pose-scatter extras (enabled only for a mesh body) -- live in
+       ``body_appearance.py``, each under absent-key discipline. Ring tabs carry
+       edges and shading; star tabs carry position, magnitude, PSF, smear,
+       catalog label, and the per-star information-asymmetry controls (navigable
+       flag, catalog error, companion, variable-brightness delta).
    * - ``tabs.py``
      - Object-tab lifecycle (the ``+`` tab, ordering, rebuild).
    * - ``scene_io.py``

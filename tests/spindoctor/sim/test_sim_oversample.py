@@ -143,6 +143,26 @@ def test_oversample_star_records_are_detector_scale() -> None:
     assert abs(info['center_u'] - (star.u - 1.0)) < 1e-9
 
 
+def test_oversample_defaulted_psf_size_survives_the_round_trip() -> None:
+    """A star with no explicit psf_size keeps the default window at oversample 4.
+
+    The radiance stage materializes and scales the record builder's default
+    window alongside the explicit entries, so the downsample's divide returns
+    it to the default detector-pixel size instead of (11 // os, 11 // os).
+    """
+    scene: dict[str, Any] = {
+        'size_v': 60,
+        'size_u': 60,
+        'random_seed': 3,
+        'instrument': 'coiss_nac',
+        'oversample': 4,
+        'noise': {'poisson': False, 'read_noise_dn': 0.0, 'bias_dn': 0.0},
+        'stars': [{'name': 'S', 'v': 20.0, 'u': 24.0, 'vmag': 5.0}],
+    }
+    _, meta = render_combined_model(scene)
+    assert meta['stars'][0].psf_size == (11, 11)
+
+
 def test_optics_scene_renders_deterministically() -> None:
     """A PSF scene (oversample 4) is bit-identical across renders."""
     scene = _body_scene(oversample=None)

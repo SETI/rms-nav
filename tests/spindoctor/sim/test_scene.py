@@ -124,6 +124,61 @@ def test_validate_sim_params_rejects_unknown_body_key() -> None:
         validate_sim_params(params)
 
 
+def test_validate_sim_params_accepts_body_relief_and_photometry_keys() -> None:
+    """The topographic truth keys validate with well-typed values."""
+    params = _sim_params()
+    params['bodies'][0].update(
+        {
+            'limb_relief_rms': 0.02,
+            'limb_relief_corr_deg': 12.0,
+            'photometric_law': 'minnaert',
+            'minnaert_k': 0.6,
+            'opposition_surge': {'amplitude': 0.5, 'width_deg': 5.0},
+        }
+    )
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_negative_limb_relief_rms() -> None:
+    """A negative relief RMS fails validation."""
+    params = _sim_params()
+    params['bodies'][0]['limb_relief_rms'] = -0.01
+    with pytest.raises(SimSceneValidationError, match=r'limb_relief_rms'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_nonpositive_relief_corr() -> None:
+    """A non-positive relief correlation length fails validation."""
+    params = _sim_params()
+    params['bodies'][0]['limb_relief_corr_deg'] = 0.0
+    with pytest.raises(SimSceneValidationError, match=r'limb_relief_corr_deg'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_unknown_photometric_law() -> None:
+    """A law outside the renderer's vocabulary fails with the choices listed."""
+    params = _sim_params()
+    params['bodies'][0]['photometric_law'] = 'hapke'
+    with pytest.raises(SimSceneValidationError, match=r'photometric_law.*lommel_seeliger'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_unknown_surge_key() -> None:
+    """An unmodeled opposition_surge key fails validation."""
+    params = _sim_params()
+    params['bodies'][0]['opposition_surge'] = {'amplitude': 0.5, 'sharpness': 2.0}
+    with pytest.raises(SimSceneValidationError, match=r'opposition_surge.*sharpness'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_nonpositive_surge_width() -> None:
+    """A non-positive surge width fails validation."""
+    params = _sim_params()
+    params['bodies'][0]['opposition_surge'] = {'amplitude': 0.5, 'width_deg': 0.0}
+    with pytest.raises(SimSceneValidationError, match=r'width_deg'):
+        validate_sim_params(params)
+
+
 def test_validate_sim_params_rejects_unknown_star_key() -> None:
     """An unmodeled per-star key fails validation."""
     params = _sim_params()

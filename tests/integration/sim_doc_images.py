@@ -129,12 +129,98 @@ def _scatter_stars(
 _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
     ('ellipsoid_body', _scene([_ellipsoid()]), {'gamma': 1.1}),
     ('mesh_body', _scene([_mesh()]), {'gamma': 1.1}),
+    ('mesh_body_gouraud', _scene([_mesh(shading='gouraud')]), {'gamma': 1.1}),
     (
         'body_craters',
         _scene([_ellipsoid(axis2=150.0, crater_fill=0.5, crater_max_radius=0.3)]),
         {'gamma': 1.1},
     ),
     ('crescent_body', _scene([_mesh(phase_angle=130.0)]), {'gamma': 1.4}),
+    (
+        'topographic_limb',
+        _scene([_ellipsoid(limb_relief_rms=0.03, limb_relief_corr_deg=12.0)]),
+        {'gamma': 1.1},
+    ),
+    (
+        'ragged_terminator',
+        _scene([_ellipsoid(phase_angle=125.0, limb_relief_rms=0.035, limb_relief_corr_deg=10.0)]),
+        {'gamma': 1.4},
+    ),
+    (
+        'banded_transit',
+        _scene(
+            [
+                _ellipsoid(
+                    axis1=180.0,
+                    axis2=180.0,
+                    axis3=180.0,
+                    illumination_angle=20.0,
+                    phase_angle=25.0,
+                    disc_texture={
+                        'band_amplitude': 0.22,
+                        'band_wavenumber': 8.0,
+                        'storms': [
+                            {
+                                'lat_deg': -25.0,
+                                'lon_deg': 90.0,
+                                'radius_deg': 8.0,
+                                'albedo_factor': 1.35,
+                            }
+                        ],
+                    },
+                    transits=[
+                        {
+                            'moon': {
+                                'dv_px': -28.0,
+                                'du_px': 36.0,
+                                'radius_px': 11.0,
+                                'albedo_factor': 1.3,
+                            }
+                        },
+                        {
+                            'shadow': {
+                                'dv_px': 10.0,
+                                'du_px': -32.0,
+                                'radius_px': 9.0,
+                                'darkness': 0.85,
+                            }
+                        },
+                    ],
+                )
+            ]
+        ),
+        {'gamma': 1.1},
+    ),
+    (
+        'mutual_event',
+        _scene(
+            [
+                _ellipsoid(
+                    name='FAR',
+                    center_v=110.0,
+                    center_u=95.0,
+                    axis1=110.0,
+                    axis2=110.0,
+                    axis3=110.0,
+                    illumination_angle=20.0,
+                    phase_angle=30.0,
+                    range_km=700000.0,
+                ),
+                _ellipsoid(
+                    name='NEAR',
+                    center_v=110.0,
+                    center_u=125.0,
+                    axis1=120.0,
+                    axis2=120.0,
+                    axis3=120.0,
+                    illumination_angle=20.0,
+                    phase_angle=30.0,
+                    range_km=500000.0,
+                ),
+            ]
+        ),
+        {'gamma': 1.1},
+    ),
     (
         'rings',
         _scene(
@@ -214,6 +300,25 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
             exposure_sec=2.0,
         ),
         {'gamma': 1.3, 'high_percentile': 99.7},
+    ),
+    (
+        'telemetry_loss',
+        _scene(
+            [
+                _ellipsoid(
+                    axis1=150.0,
+                    axis2=150.0,
+                    axis3=150.0,
+                    illumination_angle=25.0,
+                    phase_angle=30.0,
+                )
+            ],
+            artifacts={
+                'missing_lines': {'incidence': 10.0},
+                'partial_lines': {'incidence': 10.0},
+            },
+        ),
+        {'gamma': 1.15},
     ),
     (
         'stray_light_gradient',
@@ -308,16 +413,31 @@ plus a per-image gamma).
 """
 
 
-def generate() -> list[Path]:
-    """Render both galleries and write their NOTES files; return all paths."""
+def generate(*, gui_dir: Path | None = None, report_dir: Path | None = None) -> list[Path]:
+    """Render both galleries and write their NOTES files; return all paths.
+
+    Parameters:
+        gui_dir: Output directory for the developer-guide gallery; the
+            committed ``docs/dev_guide/_sim_images/`` when None.  The
+            staleness test points this at a temporary directory to compare
+            a fresh render against the committed PNGs.
+        report_dir: Output directory for the report scene gallery; the
+            committed ``docs/simulator_report/_scene_images/`` when None.
+
+    Returns:
+        The written paths (the gallery PNGs; the NOTES files are written
+        alongside but not returned).
+    """
+    gui_dir = _GUI_DIR if gui_dir is None else gui_dir
+    report_dir = _REPORT_DIR if report_dir is None else report_dir
     written: list[Path] = []
-    _GUI_DIR.mkdir(parents=True, exist_ok=True)
+    gui_dir.mkdir(parents=True, exist_ok=True)
     for name, params, kwargs in _GUI_GALLERY:
         validate_sim_params(params, source=f'_GUI_GALLERY[{name}]')
-        written.append(render_scene_png(params, _GUI_DIR / f'{name}.png', upscale=2, **kwargs))
-    (_GUI_DIR / 'NOTES.md').write_text(_GUI_NOTES)
+        written.append(render_scene_png(params, gui_dir / f'{name}.png', upscale=2, **kwargs))
+    (gui_dir / 'NOTES.md').write_text(_GUI_NOTES)
 
-    _REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    report_dir.mkdir(parents=True, exist_ok=True)
     for name, rel_path, kwargs in _REPORT_SCENES:
         scene_path = _SCENES_ROOT / rel_path
         if not scene_path.is_file():
@@ -326,10 +446,10 @@ def generate() -> list[Path]:
         params = load_sim_scene(scene_path)
         written.append(
             render_scene_png(
-                params, _REPORT_DIR / f'{name}.png', ignore_offset=False, upscale=2, **kwargs
+                params, report_dir / f'{name}.png', ignore_offset=False, upscale=2, **kwargs
             )
         )
-    (_REPORT_DIR / 'NOTES.md').write_text(_REPORT_NOTES)
+    (report_dir / 'NOTES.md').write_text(_REPORT_NOTES)
     return written
 
 

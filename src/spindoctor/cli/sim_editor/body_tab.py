@@ -96,9 +96,7 @@ class BodyTabMixin(SimEditorBase):
         shape_index = shape_combo.findText(str(p.get('shape_model', 'ellipsoid')))
         if shape_index >= 0:
             shape_combo.setCurrentIndex(shape_index)
-        shape_combo.currentTextChanged.connect(
-            lambda t, i=idx: self._on_body_field(i, 'shape_model', t)
-        )
+        shape_combo.currentTextChanged.connect(lambda t, i=idx: self._on_body_shape_model(i, t))
         fl.addRow('Shape model:', shape_combo)
 
         mesh_lump = QDoubleSpinBox()
@@ -331,6 +329,11 @@ class BodyTabMixin(SimEditorBase):
             sp.valueChanged.connect(_update_override)
         fl.addRow(nav_group)
 
+        # Truth-side appearance groups (relief, photometry, texture, transits,
+        # mesh extras); each follows the absent-key discipline and stores its
+        # widget refs on ``w``.
+        self._build_body_appearance_groups(w, idx, main_layout)
+
         # Delete button at bottom
         delete_btn = QPushButton('Delete')
         delete_btn.clicked.connect(
@@ -353,6 +356,17 @@ class BodyTabMixin(SimEditorBase):
             self._updater.request_update()
             if trigger_validate and key == 'range_km':
                 self._validate_ranges()
+
+    def _on_body_shape_model(self, idx: int, text: str) -> None:
+        """Set the shape model and gate the mesh-only appearance controls."""
+        if 0 <= idx < len(self.sim_params['bodies']):
+            self.sim_params['bodies'][idx]['shape_model'] = text
+            tab_idx = self._find_tab_by_properties('body', idx)
+            if tab_idx is not None:
+                tab_w = self._tabs.widget(tab_idx)
+                if tab_w is not None:
+                    self._sync_body_mesh_enabled(tab_w, text == 'polyhedral_mesh')
+            self._updater.request_update()
 
     def _on_body_seed(self, idx: int, value: int) -> None:
         """Set an integer crater seed, or remove it (Auto) when value is -1."""

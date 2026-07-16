@@ -91,6 +91,7 @@ def make_irregular_mesh(
     lumpiness: float = 0.3,
     n_modes: int = 6,
     seed: int = 0,
+    detail_octaves: int = 0,
 ) -> Mesh:
     """Build a lumpy unit-radius mesh (a UV sphere with low-frequency relief).
 
@@ -98,26 +99,51 @@ def make_irregular_mesh(
     body is smoothly irregular rather than spiky.  The same seed always yields
     the same mesh.
 
+    ``detail_octaves`` adds banks of higher-frequency modes with geometric
+    amplitude falloff: octave ``k`` draws ``n_modes`` fresh modes with angular
+    wavenumbers in ``[3 * 2**(k-1) + 1, 3 * 2**k]`` (the base modes occupy
+    1..3) at amplitude ``0.5**k`` relative to the base bank.  Octave draws
+    consume the generator after the base draws, so ``detail_octaves = 0``
+    reproduces the base mesh bit-exactly and raising the count never changes
+    the base shape.  The mesh resolution must support the frequency content:
+    ``n_lat`` / ``n_lon`` should exceed roughly four samples per top-octave
+    cycle (``12 * 2**detail_octaves``) or the extra modes alias.
+
     Parameters:
         n_lat: Number of latitude bands (>= 2).
         n_lon: Number of longitude divisions (>= 3).
         lumpiness: Relief amplitude as a fraction of the unit radius.
-        n_modes: Number of random angular modes summed into the relief.
+        n_modes: Number of random angular modes per bank.
         seed: Seed for the relief modes.
+        detail_octaves: Number of higher-frequency mode banks (0 = base only).
 
     Returns:
         An outward-wound :class:`Mesh`.
     """
     rng = np.random.default_rng(seed)
+    banks: list[tuple[NDArrayFloatType, NDArrayIntType, NDArrayIntType, NDArrayFloatType, float]]
+    banks = []
     amps = rng.uniform(-1.0, 1.0, size=n_modes)
     m_lat = rng.integers(1, 4, size=n_modes)
     m_lon = rng.integers(1, 4, size=n_modes)
     phases = rng.uniform(0.0, 2.0 * np.pi, size=n_modes)
+    banks.append((amps, m_lat, m_lon, phases, 1.0))
+    for octave in range(1, max(int(detail_octaves), 0) + 1):
+        octave_amps = rng.uniform(-1.0, 1.0, size=n_modes)
+        low = 3 * 2 ** (octave - 1) + 1
+        high = 3 * 2**octave + 1
+        octave_m_lat = rng.integers(low, high, size=n_modes)
+        octave_m_lon = rng.integers(low, high, size=n_modes)
+        octave_phases = rng.uniform(0.0, 2.0 * np.pi, size=n_modes)
+        banks.append((octave_amps, octave_m_lat, octave_m_lon, octave_phases, 0.5**octave))
 
     def radius(theta: float, phi: float) -> float:
-        relief = sum(
-            amps[k] * np.cos(m_lat[k] * theta + m_lon[k] * phi + phases[k]) for k in range(n_modes)
-        )
+        relief = 0.0
+        for bank_amps, bank_m_lat, bank_m_lon, bank_phases, falloff in banks:
+            relief += falloff * sum(
+                bank_amps[k] * np.cos(bank_m_lat[k] * theta + bank_m_lon[k] * phi + bank_phases[k])
+                for k in range(n_modes)
+            )
         # relief spans about [-n_modes, n_modes]; normalise so lumpiness is the
         # fractional relief amplitude.
         return float(max(1.0 + lumpiness * relief / max(n_modes, 1), 0.2))
@@ -192,8 +218,18 @@ def render_polyhedral_body(
     illumination_angle: float = 0.0,
     phase_angle: float = 0.0,
     anti_aliasing: float = 1.0,
+    shading: str = 'flat',
 ) -> NDArrayFloatType:
     """Render a mesh body to a [0, 1] shaded silhouette.
+
+    Two shading modes share one rasterization (the same front-face set, the
+    same z-buffer, the same silhouette): ``'flat'`` shades each face by its
+    own normal, ``'gouraud'`` computes per-vertex normals as the
+    area-weighted average of the adjacent face normals and interpolates the
+    per-vertex intensities barycentrically across each face, removing the
+    facet-boundary shading discontinuities.  The mode never moves the
+    silhouette; each caller picks its own mode (the navigator's predicted
+    mesh keeps flat shading unless told otherwise).
 
     Parameters:
         size: ``(size_v, size_u)`` output image size in pixels.
@@ -205,10 +241,17 @@ def render_polyhedral_body(
         illumination_angle: Image-plane light azimuth in radians (0 = top).
         phase_angle: Phase angle in radians (0 = fully lit, pi = back-lit).
         anti_aliasing: 0 disables supersampling; (0, 1] supersamples the limb.
+        shading: ``'flat'`` (per-face) or ``'gouraud'`` (per-vertex
+            interpolated).
 
     Returns:
         A ``(size_v, size_u)`` float array in [0, 1].
+
+    Raises:
+        ValueError: On an unknown shading mode.
     """
+    if shading not in ('flat', 'gouraud'):
+        raise ValueError(f"shading must be 'flat' or 'gouraud'; got {shading!r}")
     size_v, size_u = size
     aa_scale = int(1 + 3 * anti_aliasing) if anti_aliasing > 0 else 1
     height = size_v * aa_scale
@@ -235,6 +278,18 @@ def render_polyhedral_body(
     unit_normals = normals / norm_mag[:, None]
     light = _light_direction(illumination_angle, phase_angle)
     face_intensity = np.clip(unit_normals @ light, _DARK_SIDE_ILLUM, 1.0)
+
+    vertex_intensity: NDArrayFloatType | None = None
+    if shading == 'gouraud':
+        # Per-vertex normals: the area-weighted average of the adjacent face
+        # normals.  The raw cross products carry twice the face area as their
+        # magnitude, so summing them per vertex IS the area weighting.
+        vertex_normals = np.zeros_like(verts_cam)
+        for corner in range(3):
+            np.add.at(vertex_normals, mesh.faces[:, corner], normals)
+        vn_mag = np.maximum(np.linalg.norm(vertex_normals, axis=1), 1e-12)
+        vertex_normals = vertex_normals / vn_mag[:, None]
+        vertex_intensity = np.clip(vertex_normals @ light, _DARK_SIDE_ILLUM, 1.0)
 
     front = (unit_normals[:, 2] > 0.0) & (norm_mag > 1e-9)
 
@@ -270,7 +325,14 @@ def render_polyhedral_body(
         sub = z_buffer[min_y : max_y + 1, min_x : max_x + 1]
         win = inside & (depth_pix > sub)
         sub[win] = depth_pix[win]
-        intensity[min_y : max_y + 1, min_x : max_x + 1][win] = float(face_intensity[face_idx])
+        if vertex_intensity is None:
+            intensity[min_y : max_y + 1, min_x : max_x + 1][win] = float(face_intensity[face_idx])
+        else:
+            # Gouraud: interpolate the vertex intensities with the same
+            # barycentric weight-to-vertex pairing as the depth above.
+            iv = vertex_intensity[tri]
+            shade_pix = w0 * iv[2] + w1 * iv[0] + w2 * iv[1]
+            intensity[min_y : max_y + 1, min_x : max_x + 1][win] = shade_pix[win]
 
     if aa_scale > 1:
         intensity = intensity.reshape(size_v, aa_scale, size_u, aa_scale).mean(axis=(1, 3))
@@ -291,6 +353,8 @@ class MeshBodySpec:
         n_lon: Mesh longitude divisions.
         seed: Seed selecting which irregular shape is generated.
         pose_euler_deg: Body orientation as intrinsic X, Y, Z Euler angles, deg.
+        detail_octaves: Higher-frequency mode banks added to the base relief
+            (see :func:`make_irregular_mesh`); part of the published shape.
     """
 
     lumpiness: float = 0.3
@@ -298,6 +362,7 @@ class MeshBodySpec:
     n_lon: int = 32
     seed: int = 0
     pose_euler_deg: tuple[float, float, float] = field(default=(0.0, 0.0, 0.0))
+    detail_octaves: int = 0
 
 
 def mesh_spec_from_params(body_params: Mapping[str, Any]) -> MeshBodySpec:
@@ -326,6 +391,7 @@ def mesh_spec_from_params(body_params: Mapping[str, Any]) -> MeshBodySpec:
         n_lon=int(body_params.get('mesh_n_lon', 32)),
         seed=int(body_params.get('mesh_seed', 0)),
         pose_euler_deg=(values[0], values[1], values[2]),
+        detail_octaves=int(body_params.get('mesh_detail_octaves', 0)),
     )
 
 
@@ -357,7 +423,11 @@ def render_mesh_body_image(
         A ``(size_v, size_u)`` float array in [0, 1].
     """
     mesh = make_irregular_mesh(
-        n_lat=spec.n_lat, n_lon=spec.n_lon, lumpiness=spec.lumpiness, seed=spec.seed
+        n_lat=spec.n_lat,
+        n_lon=spec.n_lon,
+        lumpiness=spec.lumpiness,
+        seed=spec.seed,
+        detail_octaves=spec.detail_octaves,
     )
     return render_polyhedral_body(
         size=size,

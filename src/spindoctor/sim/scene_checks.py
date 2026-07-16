@@ -1,11 +1,13 @@
 """Field-type validators for the sim-scene schema.
 
 The ``_check_*`` / ``_require_*`` helpers here enforce the per-field types of
-every scene block: the per-object bodies / rings / stars entries, the optics
+every scene block: the per-object rings / stars entries, the optics
 sub-blocks (PSF, smear, distortion, ghosts, stray light), the noise, detector,
 artifacts, and spk_error blocks, plus the primitive scalar checks they all
 share.  Each block's key inventory lives beside its checker (unknown keys fail
 validation, so a typo cannot silently render an un-blurred or clean frame).
+The ``bodies``-entry checkers, the schema's largest block, live in the sibling
+:mod:`spindoctor.sim.scene_checks_body` and build on the same primitives.
 
 :func:`spindoctor.sim.scene.validate_sim_params` drives these helpers; every
 violation raises :class:`spindoctor.sim.scene_schema.SimSceneValidationError`.
@@ -23,7 +25,7 @@ from spindoctor.sim.forward.artifact_modes import (
     mode_available,
     mode_unavailable_message,
 )
-from spindoctor.sim.scene_schema import _BODY_IDEALIZED_KEYS, SimSceneValidationError
+from spindoctor.sim.scene_schema import SimSceneValidationError
 from spindoctor.support.status_reason import NavStatusReason
 
 # The scene-level ``expected`` block's allowed vocabularies.  These mirror the
@@ -35,64 +37,6 @@ _EXPECTED_KEYS: frozenset[str] = frozenset({'status', 'status_reason', 'confiden
 _EXPECTED_STATUSES: frozenset[str] = frozenset({'success', 'failed', 'conflicted'})
 _EXPECTED_TIERS: frozenset[str] = frozenset({'high', 'medium', 'low', 'failed', 'conflicted'})
 _EXPECTED_STATUS_REASONS: frozenset[str] = frozenset(reason.value for reason in NavStatusReason)
-
-
-def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
-    """Validate one ``bodies`` entry's field types."""
-    label = f'bodies[{index}]'
-    _check_optional_str(obj.get('name'), f'{label}.name', source=source)
-    shape_model = obj.get('shape_model')
-    if shape_model is not None and shape_model not in ('ellipsoid', 'polyhedral_mesh'):
-        raise SimSceneValidationError(
-            f"{source}: {label}.shape_model must be 'ellipsoid' or 'polyhedral_mesh' "
-            f'when present; got {shape_model!r}'
-        )
-    for key in (
-        'center_v',
-        'center_u',
-        'axis1',
-        'axis2',
-        'axis3',
-        'rotation_z',
-        'rotation_tilt',
-        'illumination_angle',
-        'phase_angle',
-        'range_km',
-        'km_per_pixel',
-        'mesh_lumpiness',
-        'crater_fill',
-        'crater_min_radius',
-        'crater_max_radius',
-        'crater_power_law_exponent',
-        'crater_relief_scale',
-        'anti_aliasing',
-    ):
-        _check_optional_number(obj.get(key), f'{label}.{key}', source=source)
-    for key in ('mesh_n_lat', 'mesh_n_lon', 'mesh_seed', 'seed'):
-        if obj.get(key) is not None:
-            _require_int(obj, key, source=f'{source}: {label}')
-    pose = obj.get('pose_euler_deg')
-    if pose is not None:
-        if not isinstance(pose, (list, tuple)) or len(pose) != 3:
-            raise SimSceneValidationError(
-                f'{source}: {label}.pose_euler_deg must be a list of 3 angles when present'
-            )
-        for angle in pose:
-            _check_optional_number(angle, f'{label}.pose_euler_deg[]', source=source)
-    override = obj.get('nav_override')
-    if override is not None:
-        if not isinstance(override, dict):
-            raise SimSceneValidationError(
-                f'{source}: {label}.nav_override must be a mapping when present'
-            )
-        # The override expresses what the navigator BELIEVES about idealized
-        # geometry, so only idealized body keys may appear in it.
-        bad = set(override) - _BODY_IDEALIZED_KEYS
-        if bad:
-            raise SimSceneValidationError(
-                f'{source}: {label}.nav_override may only override idealized body '
-                f'keys; got {sorted(bad)}'
-            )
 
 
 def _check_ring_object(obj: dict[str, Any], *, index: int, source: str) -> None:

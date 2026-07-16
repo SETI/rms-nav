@@ -20,6 +20,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
+from scipy import ndimage
 
 from spindoctor.config import DEFAULT_CONFIG
 from spindoctor.sim.forward.artifacts_catalog import (
@@ -34,6 +35,7 @@ from spindoctor.sim.forward.stages import SimFrame
 from spindoctor.sim.forward.star import faint_sky_cutoff_mag, render_sky_counts, render_stars
 from spindoctor.sim.instruments import resolve_sim_inst_config
 from spindoctor.sim.seeds import derive_effect_seed
+from spindoctor.sim.star_records import DEFAULT_PSF_SIZE
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType
 
 __all__ = ['compose_scene_radiance']
@@ -75,7 +77,7 @@ def compose_scene_radiance(
             ``truth`` dict receives the renderer output metadata (``stars``,
             ``bodies``, ``rings``, ``inventory``, ``star_info``,
             ``body_masks``, ``ring_masks``, ``order_near_to_far``,
-            ``body_index_map``, ``body_mask_map``).
+            ``body_index_map``, ``body_mask_map``, ``body_occlusion``).
         params: The full scene mapping.
         rng: The stage generator.  Unused directly: this stage's randomized
             sub-effects (background stars, craters) run behind parameter-keyed
@@ -281,6 +283,8 @@ def compose_scene_radiance(
     body_mask_map_dict: dict[str, NDArrayBoolType] = {}
     inventory_dict: dict[str, dict[str, float]] = {}
     body_index_map: NDArrayIntType = np.zeros((size_v, size_u), dtype=np.int32)
+    # Bodies in render (far-to-near) order, for the mutual-event occlusion truth.
+    rendered_bodies: list[tuple[str, NDArrayBoolType]] = []
 
     ref_center_v = size_v / 2.0
     ref_center_u = size_u / 2.0
@@ -312,12 +316,14 @@ def compose_scene_radiance(
                 body_index=orig_idx,
                 ref_center_v=ref_center_v,
                 ref_center_u=ref_center_u,
+                oversample=os,
             )
             # Store mask by original index for proper ordering
             body_mask_map_by_idx[orig_idx] = body_mask
             body_mask_map_dict[body_info['name']] = body_mask
             body_models_dict[body_info['name']] = body_info['params']
             inventory_dict[body_info['name']] = body_info['inventory']
+            rendered_bodies.append((body_info['name'], body_mask))
             # Index into near-to-far order is 1-based
             near_index = order_near_to_far.index(body_info['name']) + 1
             body_index_map[body_mask] = near_index
@@ -390,6 +396,7 @@ def compose_scene_radiance(
                     body_index=orig_idx,
                     ref_center_v=ref_center_v,
                     ref_center_u=ref_center_u,
+                    oversample=os,
                 )
         frame.truth['radiance_layers'] = {
             'stars': stars_layer,
@@ -409,8 +416,64 @@ def compose_scene_radiance(
             'order_near_to_far': order_near_to_far,
             'body_index_map': body_index_map,
             'body_mask_map': body_mask_map_dict,
+            'body_occlusion': _body_occlusion_truth(rendered_bodies),
         }
     )
+
+
+def _body_occlusion_truth(
+    rendered_bodies: list[tuple[str, NDArrayBoolType]],
+) -> dict[str, dict[str, float]]:
+    """Per-body mutual-event truth measured from the rendered silhouettes.
+
+    For each body, against the union of every NEARER body's silhouette
+    (bodies rendered after it in the far-to-near compositing order):
+
+    - ``visible_fraction``: visible pixels / unoccluded silhouette pixels.
+    - ``occluded_limb_arc_deg``: the arc of the body's limb hidden by the
+      occluders, measured as the occluded fraction of its silhouette-boundary
+      pixels times 360.  Boundary pixels of a rasterized silhouette are
+      uniform per unit arc length, so for the (near-)circular discs the
+      mutual-event scenes plant this is the hidden limb arc; strongly
+      elongated silhouettes weight it by arc length rather than angle.
+
+    Ring occlusion is not counted: mutual events are body-body geometry, and
+    a body's silhouette clipped by the frame edge counts its on-frame
+    boundary only.
+
+    Parameters:
+        rendered_bodies: ``(name, unoccluded silhouette mask)`` per body in
+            render (far-to-near) order.
+
+    Returns:
+        ``{body_name: {'visible_fraction': ..., 'occluded_limb_arc_deg': ...}}``.
+    """
+    occlusion: dict[str, dict[str, float]] = {}
+    if not rendered_bodies:
+        return occlusion
+    # Suffix unions: nearer_union[i] = union of masks rendered after body i.
+    nearer_union = np.zeros_like(rendered_bodies[0][1])
+    nearer_by_body: list[NDArrayBoolType] = []
+    for _name, mask in reversed(rendered_bodies):
+        nearer_by_body.append(nearer_union.copy())
+        nearer_union = nearer_union | mask
+    nearer_by_body.reverse()
+
+    for (name, mask), nearer in zip(rendered_bodies, nearer_by_body, strict=True):
+        unoccluded = int(np.count_nonzero(mask))
+        if unoccluded == 0:
+            occlusion[name] = {'visible_fraction': 1.0, 'occluded_limb_arc_deg': 0.0}
+            continue
+        visible = int(np.count_nonzero(mask & ~nearer))
+        boundary = mask & ~ndimage.binary_erosion(mask)
+        boundary_total = int(np.count_nonzero(boundary))
+        boundary_occluded = int(np.count_nonzero(boundary & nearer))
+        arc_deg = 360.0 * boundary_occluded / boundary_total if boundary_total else 0.0
+        occlusion[name] = {
+            'visible_fraction': visible / unoccluded,
+            'occluded_limb_arc_deg': arc_deg,
+        }
+    return occlusion
 
 
 def _render_sky(
@@ -491,10 +554,11 @@ def _optics_needs_layers(params: Mapping[str, Any]) -> bool:
 def _scale_star_params(star_params: dict[str, Any], os: int) -> dict[str, Any]:
     """Scale a star's pixel-space fields to the oversampled render grid.
 
-    Catalog position, per-star PSF width, smear vector, PSF fitting-window size,
-    the planted catalog-error displacement, and the companion separation are all
-    pixel-space, so they scale with the oversampling factor.  At ``os == 1`` the
-    copy is numerically identical to the input.
+    Catalog position, per-star PSF width, smear vector, PSF fitting-window size
+    (the record builder's default is materialized so it scales like an explicit
+    entry), the planted catalog-error displacement, and the companion separation
+    are all pixel-space, so they scale with the oversampling factor.  At
+    ``os == 1`` every scaled value equals its input value.
 
     Parameters:
         star_params: One scene star entry.
@@ -507,9 +571,12 @@ def _scale_star_params(star_params: dict[str, Any], os: int) -> dict[str, Any]:
     for key in ('v', 'u', 'psf_sigma', 'move_v', 'move_u', 'catalog_error_v', 'catalog_error_u'):
         if star_params.get(key) is not None:
             scaled[key] = float(star_params[key]) * os
-    psf_size = star_params.get('psf_size')
-    if psf_size is not None:
-        scaled['psf_size'] = [int(psf_size[0]) * os, int(psf_size[1]) * os]
+    # The record builder's default window is materialized here so a defaulted
+    # entry scales exactly like an explicit one: the downsample stage divides
+    # every record's psf_size by os, which would otherwise shrink a defaulted
+    # window to (11 // os, 11 // os) detector pixels.
+    psf_size = star_params.get('psf_size', DEFAULT_PSF_SIZE)
+    scaled['psf_size'] = [int(psf_size[0]) * os, int(psf_size[1]) * os]
     companion = star_params.get('companion')
     if isinstance(companion, dict) and companion.get('sep_px') is not None:
         scaled_companion = dict(companion)

@@ -1,0 +1,45 @@
+schema_version: 2
+scene_name: mutual_grazing
+instrument: coiss_nac
+size_v: 256
+size_u: 256
+random_seed: 42
+exposure_sec: 1.0
+# Mutual event, grazing overlap: two well-resolved spheres whose limbs just
+# interlock (centers 100 px apart, radii 60 + 50, ~10 px of overlap depth).
+# Rendered truth (body_occlusion): FAR visible_fraction ~0.97, occluded limb
+# arc ~51 deg; NEAR fully visible.  The navigator predicts a FULL limb for
+# both bodies -- the hidden arc is genuine model error -- and BodyLimbNav's
+# robust (Tukey) fit downweights it, so navigation succeeds within a few
+# tenths of a pixel.  test_sim_mutual_event pins the offset tolerance; the
+# expected block pins the fused status/tier the ensemble measured.
+bodies:
+  - name: FAR
+    shape_model: ellipsoid
+    center_v: 128.0
+    center_u: 95.0
+    axis1: 120.0
+    axis2: 120.0
+    axis3: 120.0
+    illumination_angle: 20.0
+    phase_angle: 30.0
+    range_km: 700000.0
+  - name: NEAR
+    shape_model: ellipsoid
+    center_v: 128.0
+    center_u: 195.0
+    axis1: 100.0
+    axis2: 100.0
+    axis3: 100.0
+    illumination_angle: 20.0
+    phase_angle: 30.0
+    range_km: 500000.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 2.5
+offset_u: -1.5
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: medium

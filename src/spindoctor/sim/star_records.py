@@ -22,7 +22,12 @@ from starcat import Star
 
 from spindoctor.support.types import MutableStar
 
-__all__ = ['star_record_from_params']
+__all__ = ['DEFAULT_PSF_SIZE', 'star_record_from_params']
+
+# The PSF fitting-window size a star entry gets when the scene omits one,
+# in detector pixels.  Renderer-side scaling to an oversampled grid must
+# materialize this default so the downsample's rescale returns it intact.
+DEFAULT_PSF_SIZE: tuple[int, int] = (11, 11)
 
 
 def star_record_from_params(
@@ -66,7 +71,7 @@ def star_record_from_params(
     star.ra_pm = 0.0
     star.dec_pm = 0.0
     star.conflicts = ''
-    star.psf_size = tuple(star_params.get('psf_size', (11, 11)))
+    star.psf_size = tuple(star_params.get('psf_size', DEFAULT_PSF_SIZE))
     # Catalog-relative flux in the navigator's DN convention (see
     # nav_model/stars/catalog.py); derived from vmag, never from the render.
     star.dn = 2.512 ** -(star.vmag - 4.0)

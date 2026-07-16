@@ -20,7 +20,7 @@ import numpy as np
 
 from spindoctor.support.types import NDArrayFloatType
 
-__all__ = ['ellipsoid_image_normals', 'lambert_from_normals']
+__all__ = ['ellipsoid_image_normals', 'illumination_vector', 'lambert_from_normals']
 
 
 def ellipsoid_image_normals(
@@ -85,6 +85,50 @@ def ellipsoid_image_normals(
     return normal_v, normal_u, normal_z_local
 
 
+def illumination_vector(
+    *, illumination_angle: float, phase_angle: float
+) -> tuple[float, float, float]:
+    """The unit body-to-sun direction in image coordinates.
+
+    Both simulator sides derive the light direction here, so their
+    illumination conventions cannot diverge.
+
+    The in-plane direction comes from ``illumination_angle`` (0 = from the
+    top of the image, pi/2 = from the right; the v component is negated
+    because v increases downward).  The out-of-plane component encodes the
+    phase angle -- the observer-body-sun angle: ``z = cos(phase_angle)`` so
+    phase 0 (full) lights the visible face head-on and phase pi (new) lights
+    it from behind, while the in-plane magnitude is ``sin(phase_angle)``.
+
+    Parameters:
+        illumination_angle: In-plane light direction in radians; 0 is from
+            the top of the image, pi/2 from the right.
+        phase_angle: Phase angle in radians; 0 is fully lit, pi is backlit.
+
+    Returns:
+        Tuple of (v, u, z) components of the unit illumination direction;
+        z points toward the observer.
+    """
+    illum_v_2d = -np.cos(illumination_angle)  # Negative because v increases downward
+    illum_u_2d = np.sin(illumination_angle)
+
+    illum_z = np.cos(phase_angle)
+    illum_scale_2d = np.sin(phase_angle)
+    illum_v_3d = illum_v_2d * illum_scale_2d
+    illum_u_3d = illum_u_2d * illum_scale_2d
+
+    # Normalize the 3D illumination direction (already unit up to rounding;
+    # the guard covers a degenerate zero vector only).
+    illum_mag = np.sqrt(illum_v_3d**2 + illum_u_3d**2 + illum_z**2)
+    if illum_mag > 1e-10:
+        illum_v_3d /= illum_mag
+        illum_u_3d /= illum_mag
+        illum_z_norm = illum_z / illum_mag
+    else:
+        illum_z_norm = 1.0  # Directly toward observer
+    return float(illum_v_3d), float(illum_u_3d), float(illum_z_norm)
+
+
 def lambert_from_normals(
     normal_v: NDArrayFloatType,
     normal_u: NDArrayFloatType,
@@ -110,42 +154,9 @@ def lambert_from_normals(
     Returns:
         Illumination strength array in [0, 1]; 0 on the far hemisphere.
     """
-    # Illumination direction in 3D space
-    # illumination_angle: 0 = top, pi/2 = right, pi = bottom, 3pi/2 = left
-    # This is the direction in the image plane
-    illum_v_2d = -np.cos(illumination_angle)  # Negative because v increases downward
-    illum_u_2d = np.sin(illumination_angle)
-
-    # Phase angle: angle between observer-body-sun
-    # phase_angle = 0: full moon (observer and sun on same side, visible face fully lit)
-    # phase_angle = pi/2: quarter moon (observer and sun perpendicular)
-    # phase_angle = pi: new moon (observer and sun opposite, visible face dark/backlit)
-    #
-    # The illumination vector points from body toward sun.
-    # For phase_angle = 0: sun is behind observer, so illumination comes from direction
-    #   that lights the visible face (positive dot product with visible normals).
-    # For phase_angle = pi: sun is behind body, so illumination comes from direction
-    #   that doesn't light the visible face (negative dot product with visible normals).
-    #
-    # The z-component of illumination: when phase_angle = pi, we want backlit (dark),
-    # so z should be negative (illumination away from observer) to make dot product negative.
-    # When phase_angle = 0, we want fully lit, so z should be positive to make dot product
-    # positive.  So: z = cos(phase_angle) gives phase_angle=0 -> z=+1, phase_angle=pi -> z=-1
-    illum_z = np.cos(phase_angle)
-
-    # The in-plane component magnitude
-    illum_scale_2d = np.sin(phase_angle)
-    illum_v_3d = illum_v_2d * illum_scale_2d
-    illum_u_3d = illum_u_2d * illum_scale_2d
-
-    # Normalize the 3D illumination direction
-    illum_mag = np.sqrt(illum_v_3d**2 + illum_u_3d**2 + illum_z**2)
-    if illum_mag > 1e-10:
-        illum_v_3d /= illum_mag
-        illum_u_3d /= illum_mag
-        illum_z_norm = illum_z / illum_mag
-    else:
-        illum_z_norm = 1.0  # Directly toward observer
+    illum_v_3d, illum_u_3d, illum_z_norm = illumination_vector(
+        illumination_angle=illumination_angle, phase_angle=phase_angle
+    )
 
     # Only illuminate points on the visible hemisphere (facing toward observer)
     # The z-component of the normal should be positive (pointing toward observer)

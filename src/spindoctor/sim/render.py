@@ -30,13 +30,15 @@ def clear_render_caches() -> None:
     stale in production, but determinism tests must re-execute the cached
     paths to prove reproducibility.
     """
-    from spindoctor.sim.forward import body, body_mesh, psf, star
+    from spindoctor.sim.forward import body, body_mesh, psf, relief, star
 
     _render_combined_model_cached.cache_clear()
     star._render_stars_cached.cache_clear()
     star._render_sky_counts_cached.cache_clear()
     body._render_body_shape_cached.cache_clear()
+    body._render_topo_shape_cached.cache_clear()
     body_mesh._render_mesh_shape_cached.cache_clear()
+    relief.clear_relief_caches()
     psf.psf_kernel.cache_clear()
 
 
@@ -110,7 +112,9 @@ def render_combined_model(
         A tuple containing the image and metadata.  Metadata keys: ``stars``
         (rendered star records), ``bodies``, ``rings``, ``inventory``,
         ``star_info``, ``body_masks``, ``ring_masks``, ``order_near_to_far``,
-        ``body_index_map``, and ``body_mask_map``.
+        ``body_index_map``, ``body_mask_map``, and ``body_occlusion``
+        (per-body mutual-event truth: ``visible_fraction`` and
+        ``occluded_limb_arc_deg`` against every nearer body).
     """
     # Create cache key from parameters.  When ignore_offset is True the cached
     # function zeroes the planted offset AND roll, so all three keys are

@@ -202,6 +202,14 @@ class SimEditorBase(QMainWindow):
         """Build a body tab widget (implemented in BodyTabMixin)."""
         raise NotImplementedError
 
+    def _build_body_appearance_groups(self, w: QWidget, idx: int, layout: QVBoxLayout) -> None:
+        """Add the appearance groups to a body tab (BodyAppearanceMixin)."""
+        raise NotImplementedError
+
+    def _sync_body_mesh_enabled(self, w: QWidget, is_mesh: bool) -> None:
+        """Gate the mesh-extras group by shape (BodyAppearanceMixin)."""
+        raise NotImplementedError
+
     def _build_ring_tab(self, idx: int) -> QWidget:
         """Build a ring tab widget (implemented in RingTabMixin)."""
         raise NotImplementedError
