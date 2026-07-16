@@ -13,6 +13,10 @@ grid.  It applies its sub-effects in the physical order of transmission:
    (commanded frame shapes, then line losses, then block losses, then garble,
    then per-pixel losses, then the row-0 header), with the commanded
    ``truth_window`` carve-out resolved first and passed to ``missing_blocks``.
+   Each mode is honored only where its registry availability lists the
+   instrument, and its shape parameters resolve through the per-instrument
+   catalog (scene value over catalog default over registry default), like the
+   flanking artifact loops.
 3. Voyager GEOMED archive-processing scars, applied to the already-loss-bearing
    frame: ``reseau_scars`` (reseau-removal smudges on the lattice) then
    ``resample_texture`` (the GEOMED resample warp, blank border, and
@@ -96,6 +100,7 @@ def apply_telemetry(
         DEFAULT_CONFIG, params.get('instrument'), params.get('instrument_config')
     )
     marker_dn = _marker_value(inst_config)
+    dn_ceiling = _saturation_value(inst_config)
     random_seed = int(params.get('random_seed', 42))
     adversarial = bool(artifacts.get('adversarial', False))
     loci = extract_feature_loci(frame.truth, frame.signal.shape) if adversarial else _EMPTY_LOCI
@@ -119,14 +124,15 @@ def apply_telemetry(
     # Sub-stage 2: structured data loss.
     for mode_name in STRUCTURED_LOSS_ORDER:
         raw_cfg = artifacts.get(mode_name)
-        if raw_cfg is None:
+        if raw_cfg is None or not mode_available(mode_name, instrument):
             continue
-        cfg = resolve_mode_config(mode_name, raw_cfg)
+        cfg = resolve_mode_with_catalog(mode_name, raw_cfg, instrument)
         mode_rng = np.random.default_rng(derive_effect_seed(random_seed, f'telemetry/{mode_name}'))
         result = LOSS_APPLIERS[mode_name](
             frame.signal,
             cfg,
             marker_dn=marker_dn,
+            dn_ceiling=dn_ceiling,
             rng=mode_rng,
             loci=loci,
             adversarial=adversarial,
@@ -159,6 +165,17 @@ def _marker_value(inst_config: Mapping[str, Any]) -> float:
     """The emulated instrument's missing-data marker DN (0, or NaN for calib)."""
     inst_noise = inst_config.get('noise') or {}
     return float(inst_noise.get('marker_value', 0))
+
+
+def _saturation_value(inst_config: Mapping[str, Any]) -> float:
+    """The emulated instrument's ADC ceiling in DN (255 for the 8-bit cameras).
+
+    The loss appliers bound the wrong values they write (garble fills, pixel
+    spikes) by this ceiling, so an 8-bit camera never carries an impossible DN.
+    """
+    inst_noise = inst_config.get('noise') or {}
+    sim_noise = DEFAULT_CONFIG.category('sim')['noise']
+    return float(inst_noise.get('saturation_dn', sim_noise['saturation_dn']))
 
 
 def _resolve_truth_window(

@@ -30,8 +30,9 @@ __all__ = [
     'apply_reseau_scars',
 ]
 
-# The Voyager reseau grid carries 202 marks per camera; the lattice is clipped
-# to that many points however large the frame.
+# The Voyager reseau grid carries 202 marks per camera; the lattice is thinned
+# uniformly to that many points however large the frame, so the marks span the
+# whole frame rather than crowding its top rows.
 _RESEAU_MARK_COUNT = 202
 
 
@@ -95,14 +96,23 @@ def apply_compression_dct(
 
 
 def _reseau_lattice(size_v: int, size_u: int, spacing: int) -> list[tuple[int, int]]:
-    """The triangular reseau lattice points, clipped to the 202-mark count."""
+    """The triangular reseau lattice points, thinned uniformly to the 202-mark count.
+
+    The full triangular lattice at ``spacing`` is generated first; when it holds
+    more than the mark count, every-kth subsampling across the row-major
+    ordering keeps exactly 202 marks spread over the whole frame (a truncation
+    would instead crowd the marks into the top rows at archive frame sizes).
+    """
     dv = max(1, round(spacing * np.sqrt(3.0) / 2.0))
     points: list[tuple[int, int]] = []
     for i, v in enumerate(range(0, size_v, dv)):
         offset = (spacing // 2) if (i % 2) else 0
         for u in range(offset, size_u, spacing):
             points.append((v, u))
-    return points[:_RESEAU_MARK_COUNT]
+    if len(points) <= _RESEAU_MARK_COUNT:
+        return points
+    indices = np.linspace(0, len(points) - 1, _RESEAU_MARK_COUNT).round().astype(int)
+    return [points[i] for i in indices]
 
 
 def apply_reseau_scars(

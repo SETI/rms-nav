@@ -178,12 +178,17 @@ _IMPLEMENTED_MODES: tuple[ArtifactMode, ...] = (
         'alternating_lines',
         ModeParam('period', 'enum', 2, choices=(2, 4)),
         ModeParam('phase', 'nonneg_int', 0),
+        # 'drop' blanks every Nth line (severe-Huffman entropy dropout); 'keep'
+        # blanks all BUT every Nth line (Galileo HMA/HCA vertical decimation).
+        ModeParam('mode', 'enum', 'drop', choices=('drop', 'keep')),
         availability=frozenset({'coiss_nac', 'coiss_wac', 'gossi'}),
-        incidence_semantics='per-frame probability the periodic line dropout is active',
+        incidence_semantics='per-frame probability the periodic line pattern is active',
     ),
     _telemetry_mode(
         'edited_frame',
-        ModeParam('band_width_px', 'positive_int', None),
+        # The Voyager IM edited-mode band width, so a bare incidence keeps a
+        # physical centred band; an explicit half_frame wins over the band.
+        ModeParam('band_width_px', 'positive_int', 440),
         ModeParam('half_frame', 'bool', False),
         ModeParam('half', 'enum', 'top', choices=('top', 'bottom')),
         availability=frozenset({'vgiss', 'gossi'}),
@@ -191,7 +196,9 @@ _IMPLEMENTED_MODES: tuple[ArtifactMode, ...] = (
     ),
     _telemetry_mode(
         'truncated_frame',
-        ModeParam('fraction', 'unit_interval', None),
+        # A quarter-frame cut by default, so a bare incidence truncates; an
+        # explicit lines count wins over the fraction.
+        ModeParam('fraction', 'unit_interval', 0.25),
         ModeParam('lines', 'nonneg_int', None),
         ModeParam('from', 'enum', 'bottom', choices=('bottom', 'top')),
         availability=frozenset({'coiss_nac', 'coiss_wac', 'gossi'}),

@@ -186,6 +186,43 @@ def test_alternating_lines_period_four_phase_one() -> None:
     assert record['alternating_lines']['lines'] == list(range(1, _SIZE, 4))
 
 
+def test_alternating_lines_drop_is_the_default_semantics() -> None:
+    """The default 'drop' mode loses one line per period (a quarter at period 4)."""
+    frame = _frame()
+    record = _render(
+        frame,
+        {'alternating_lines': {'incidence': 1.0, 'period': 4}},
+        instrument='coiss_nac',
+    )
+    assert record['alternating_lines']['mode'] == 'drop'
+    assert len(record['alternating_lines']['lines']) == _SIZE // 4
+
+
+def test_alternating_lines_keep_blanks_all_but_every_nth() -> None:
+    """The 'keep' mode (HMA/HCA decimation) blanks 3/4 of the lines at period 4."""
+    frame = _frame()
+    record = _render(
+        frame,
+        {'alternating_lines': {'incidence': 1.0, 'period': 4, 'phase': 0, 'mode': 'keep'}},
+        instrument='coiss_nac',
+    )
+    assert record['alternating_lines']['mode'] == 'keep'
+    assert len(record['alternating_lines']['lines']) == _SIZE * 3 // 4
+    assert np.all(frame.signal[0] == 1.0)
+    assert np.all(frame.signal[1] == 0.0)
+    assert np.all(frame.signal[4] == 1.0)
+
+
+def test_gossi_catalog_defaults_alternating_lines_to_keep() -> None:
+    """The Galileo catalog's HMA/HCA 'keep' default is honored by the loss loop."""
+    frame = _frame()
+    record = _render(
+        frame, {'alternating_lines': {'incidence': 1.0, 'period': 4}}, instrument='gossi'
+    )
+    assert record['alternating_lines']['mode'] == 'keep'
+    assert len(record['alternating_lines']['lines']) == _SIZE * 3 // 4
+
+
 def test_edited_frame_keeps_only_a_centred_band() -> None:
     """An edited frame keeps a centred vertical band and blanks the rest."""
     frame = _frame()
@@ -196,6 +233,30 @@ def test_edited_frame_keeps_only_a_centred_band() -> None:
     assert np.all(frame.signal[:, u0:u1] == 1.0)
     assert np.all(frame.signal[:, :u0] == 0.0)
     assert np.all(frame.signal[:, u1:] == 0.0)
+
+
+def test_edited_frame_bare_incidence_keeps_the_default_band() -> None:
+    """A bare incidence renders the default 440-px Voyager IM centred band."""
+    frame = _frame(size=512)
+    record = _render(frame, {'edited_frame': {'incidence': 1.0}}, instrument='vgiss')
+    u0, u1 = record['edited_frame']['kept_band']
+    assert u1 - u0 == 440
+    assert np.all(frame.signal[:, :u0] == 0.0)
+    assert np.all(frame.signal[:, u1:] == 0.0)
+    assert np.all(frame.signal[:, u0:u1] == 1.0)
+
+
+def test_edited_frame_explicit_half_frame_wins_over_the_band_default() -> None:
+    """An explicit half_frame renders the half shape, not the default band."""
+    frame = _frame()
+    record = _render(
+        frame,
+        {'edited_frame': {'incidence': 1.0, 'half_frame': True, 'half': 'bottom'}},
+        instrument='vgiss',
+    )
+    assert record['edited_frame']['kept_rows'] == [_SIZE // 2, _SIZE]
+    assert np.all(frame.signal[: _SIZE // 2] == 0.0)
+    assert np.all(frame.signal[_SIZE // 2 :] == 1.0)
 
 
 def test_edited_frame_half_frame_keeps_one_half() -> None:
@@ -222,6 +283,15 @@ def test_truncated_frame_cuts_the_bottom() -> None:
     assert record['truncated_frame']['lines'] == 10
     assert np.all(frame.signal[-10:] == 0.0)
     assert np.all(frame.signal[:-10] == 1.0)
+
+
+def test_truncated_frame_bare_incidence_cuts_a_quarter() -> None:
+    """A bare incidence renders the default quarter-frame bottom truncation."""
+    frame = _frame()
+    record = _render(frame, {'truncated_frame': {'incidence': 1.0}}, instrument='gossi')
+    assert record['truncated_frame']['lines'] == _SIZE // 4
+    assert np.all(frame.signal[-_SIZE // 4 :] == 0.0)
+    assert np.all(frame.signal[: -_SIZE // 4] == 1.0)
 
 
 def test_truncated_frame_fraction_from_top() -> None:
@@ -314,6 +384,53 @@ def test_pixel_spikes_bitflip_shifts_by_a_power_of_two() -> None:
     delta = abs(round(float(frame.signal[v, u])) - 100)
     assert delta > 0
     assert (delta & (delta - 1)) == 0  # a power of two
+
+
+def test_vgiss_pixel_spikes_stay_inside_the_8bit_word() -> None:
+    """Voyager bit-flip spikes never exceed the vidicon's 255 DN ceiling."""
+    frame = _frame(fill=200.0)
+    record = _render(frame, {'pixel_spikes': {'incidence': 50.0}}, instrument='vgiss')
+    assert record['pixel_spikes']['pixels']
+    assert float(frame.signal.max()) <= 255.0
+
+
+def test_vgiss_uniform_spikes_stay_inside_the_8bit_word() -> None:
+    """Voyager uniform spikes draw inside the 255 DN word, not the 12-bit one."""
+    frame = _frame(fill=200.0)
+    record = _render(
+        frame, {'pixel_spikes': {'incidence': 50.0, 'amplitude': 'uniform'}}, instrument='vgiss'
+    )
+    assert record['pixel_spikes']['pixels']
+    assert float(frame.signal.max()) <= 255.0
+
+
+def test_vgiss_line_garble_stays_inside_the_8bit_word() -> None:
+    """Voyager garbage fills stay inside the vidicon's 255 DN ceiling."""
+    frame = _frame(fill=200.0)
+    record = _render(frame, {'line_garble': {'incidence': 20.0}}, instrument='vgiss')
+    assert record['line_garble']['lines']
+    assert float(frame.signal.max()) <= 255.0
+
+
+def test_12bit_line_garble_keeps_the_deep_word() -> None:
+    """A 12-bit detector's garbage still spans DN above 255 up to 4095."""
+    frame = _frame(fill=200.0)
+    record = _render(frame, {'line_garble': {'incidence': 20.0}})
+    assert record['line_garble']['lines']
+    assert float(frame.signal.max()) > 255.0
+    assert float(frame.signal.max()) <= 4095.0
+
+
+def test_unavailable_loss_mode_via_dict_path_is_skipped() -> None:
+    """A mode unavailable on the instrument is skipped even without validation.
+
+    Scenes that reach the telemetry stage as raw dicts bypass the scene
+    validator, so the loss loop itself must honor the registry availability.
+    """
+    frame = _frame(fill=200.0)
+    record = _render(frame, {'pixel_spikes': {'incidence': 50.0}}, instrument='coiss_nac')
+    assert 'pixel_spikes' not in record
+    assert np.all(frame.signal == 200.0)
 
 
 def test_dead_pixels_fixed_count_sets_low_response() -> None:
@@ -573,6 +690,16 @@ def test_reseau_scars_smooth_lattice_patches() -> None:
     )
     assert record['active'] is True
     assert record['marks'] > 0
+
+
+def test_reseau_lattice_spans_the_archive_frame() -> None:
+    """At the 800x800 archive size the 202 marks span the full frame height."""
+    from spindoctor.sim.forward.telemetry_artifacts import _reseau_lattice
+
+    points = _reseau_lattice(800, 800, 46)
+    assert len(points) == 202
+    rows = [v for v, _u in points]
+    assert max(rows) - min(rows) >= 0.9 * 800
 
 
 def test_reseau_scars_disabled_at_zero_incidence() -> None:

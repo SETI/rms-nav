@@ -15,6 +15,9 @@ the compression-block row grid, a spike flips a pixel to a wrong value rather
 than a marker, and a garbled line carries noise rather than the zero marker.
 The appliers share one keyword signature so the telemetry stage can dispatch
 them from the registry's order list; each uses the arguments its shape needs.
+The stage passes each applier the emulated instrument's ADC ceiling
+(``dn_ceiling``), so the wrong values a garble or spike writes stay inside the
+camera's word depth (255 on an 8-bit camera, 4095 on a 12-bit one).
 """
 
 from __future__ import annotations
@@ -43,11 +46,6 @@ __all__ = [
     'apply_truncated_frame',
 ]
 
-# The DN word depth used for the salt-and-pepper bit-flip spikes and the
-# garbage / housekeeping fills when the frame carries no brighter reference.
-_DEFAULT_DN_CEILING = 4095.0
-_BITFLIP_BITS = 12
-
 
 def _poisson_count(rng: np.random.Generator, incidence: float, cap: int) -> int:
     """Draw a Poisson event count from an incidence, capped at ``cap``."""
@@ -63,10 +61,15 @@ def _activated(rng: np.random.Generator, incidence: float) -> bool:
     return bool(rng.random() < incidence)
 
 
-def _dn_ceiling(signal: NDArrayFloatType) -> float:
+def _garbage_ceiling(signal: NDArrayFloatType, dn_ceiling: float) -> float:
     """A plausible DN ceiling for garbage fills: the frame's peak, or the ADC word."""
     peak = float(signal.max()) if signal.size else 0.0
-    return max(peak, _DEFAULT_DN_CEILING)
+    return max(peak, dn_ceiling)
+
+
+def _word_bits(dn_ceiling: float) -> int:
+    """The ADC word width in bits for a given DN ceiling (255 -> 8, 4095 -> 12)."""
+    return max(1, int(math.log2(max(dn_ceiling, 1.0))) + 1)
 
 
 def apply_missing_lines(
@@ -152,22 +155,30 @@ def apply_alternating_lines(
     adversarial: bool,
     **_ignored: Any,
 ) -> dict[str, Any]:
-    """Blank every Nth line (the jail-bar / severe-Huffman alternating-line shape).
+    """Blank lines on a periodic grid (the jail-bar alternating-line shape).
 
-    The pattern is periodic and deterministic once active, so adversarial
-    placement does not steer it; the incidence only decides whether the entropy-
-    driven dropout fires this frame.
+    Two semantics share the periodic grid, selected by ``mode``: ``drop``
+    blanks every Nth line from the phase (the severe-Huffman entropy dropout,
+    which loses one line per period), while ``keep`` blanks every line EXCEPT
+    the Nth (the Galileo HMA / HCA vertical decimation, where only every Nth
+    line carries valid data).  The pattern is periodic and deterministic once
+    active, so adversarial placement does not steer it; the incidence only
+    decides whether the pattern fires this frame.
     """
     del loci, adversarial
     incidence = float(cfg['incidence'])
     period = int(cfg['period'])
     phase = int(cfg['phase']) % period
+    line_mode = str(cfg['mode'])
     size_v = signal.shape[0]
     if not _activated(rng, incidence):
         return {'active': False, 'lines': []}
-    lines = list(range(phase, size_v, period))
+    if line_mode == 'keep':
+        lines = [row for row in range(size_v) if (row - phase) % period != 0]
+    else:
+        lines = list(range(phase, size_v, period))
     signal[lines, :] = marker_dn
-    return {'active': True, 'period': period, 'phase': phase, 'lines': lines}
+    return {'active': True, 'mode': line_mode, 'period': period, 'phase': phase, 'lines': lines}
 
 
 def apply_edited_frame(
@@ -180,22 +191,16 @@ def apply_edited_frame(
 ) -> dict[str, Any]:
     """Keep only a centred vertical band of each line, or a half-height frame.
 
-    A band width keeps a centred column band and blanks the rest of every line
-    (the Voyager edited modes); ``half_frame`` keeps one half of the frame
-    height (the 2:1 scan modes).  A commanded mode: activation is by incidence.
+    An explicit ``half_frame`` keeps one half of the frame height (the 2:1
+    scan modes); otherwise a band width keeps a centred column band and blanks
+    the rest of every line (the Voyager edited modes, whose registry default
+    of 440 px matches the Voyager IM band widths, so a bare incidence renders
+    the band shape).  A commanded mode: activation is by incidence.
     """
     incidence = float(cfg['incidence'])
     if not _activated(rng, incidence):
         return {'active': False}
     size_v, size_u = signal.shape
-    band_width = cfg.get('band_width_px')
-    if band_width is not None:
-        width = int(band_width)
-        u0 = max(0, (size_u - width) // 2)
-        u1 = min(size_u, u0 + width)
-        signal[:, :u0] = marker_dn
-        signal[:, u1:] = marker_dn
-        return {'active': True, 'kept_band': [u0, u1]}
     if bool(cfg.get('half_frame')):
         half = str(cfg['half'])
         mid = size_v // 2
@@ -204,6 +209,14 @@ def apply_edited_frame(
             return {'active': True, 'kept_rows': [0, mid]}
         signal[:mid, :] = marker_dn
         return {'active': True, 'kept_rows': [mid, size_v]}
+    band_width = cfg.get('band_width_px')
+    if band_width is not None:
+        width = int(band_width)
+        u0 = max(0, (size_u - width) // 2)
+        u1 = min(size_u, u0 + width)
+        signal[:, :u0] = marker_dn
+        signal[:, u1:] = marker_dn
+        return {'active': True, 'kept_band': [u0, u1]}
     return {'active': False}
 
 
@@ -215,7 +228,11 @@ def apply_truncated_frame(
     rng: np.random.Generator,
     **_ignored: Any,
 ) -> dict[str, Any]:
-    """Cut a clean full-width band of lines from the bottom or top of the frame."""
+    """Cut a clean full-width band of lines from the bottom or top of the frame.
+
+    An explicit ``lines`` count wins over ``fraction``; the registry's fraction
+    default of 0.25 gives a bare incidence the common quarter-frame truncation.
+    """
     incidence = float(cfg['incidence'])
     if not _activated(rng, incidence):
         return {'active': False}
@@ -305,6 +322,7 @@ def apply_line_garble(
     signal: NDArrayFloatType,
     cfg: dict[str, Any],
     *,
+    dn_ceiling: float,
     rng: np.random.Generator,
     loci: FeatureLoci,
     adversarial: bool,
@@ -314,14 +332,15 @@ def apply_line_garble(
 
     A variable-length code cannot resync mid-line, so the remainder of the line
     carries garbage values rather than the zero marker (Voyager IDC / Galileo
-    Reed-Solomon overflow).
+    Reed-Solomon overflow).  The garbage stays inside the instrument's ADC word
+    (``dn_ceiling``), so an 8-bit camera never carries a 12-bit garbage value.
     """
     incidence = float(cfg['incidence'])
     size_v, size_u = signal.shape
     n = _poisson_count(rng, incidence, size_v)
     if n == 0 or size_u < 1:
         return {'lines': []}
-    ceiling = _dn_ceiling(signal)
+    ceiling = _garbage_ceiling(signal, dn_ceiling)
     rows = choose_rows(loci, n, size_v, rng, adversarial=adversarial)
     garbled: list[dict[str, int]] = []
     for row in rows.tolist():
@@ -335,6 +354,7 @@ def apply_pixel_spikes(
     signal: NDArrayFloatType,
     cfg: dict[str, Any],
     *,
+    dn_ceiling: float,
     rng: np.random.Generator,
     loci: FeatureLoci,
     adversarial: bool,
@@ -344,7 +364,9 @@ def apply_pixel_spikes(
 
     The ``bitflip`` amplitude model XORs a power-of-two bit into the integer DN
     (the Voyager uncompressed-era bit error, which shifts a pixel by a power of
-    2); the ``uniform`` model replaces it with a random DN.
+    2); the ``uniform`` model replaces it with a random DN.  Both stay inside
+    the instrument's ADC word: the flipped bit positions and the uniform draw
+    are bounded by ``dn_ceiling``, so an 8-bit camera never spikes above 255.
     """
     incidence = float(cfg['incidence'])
     model = str(cfg['amplitude'])
@@ -354,11 +376,12 @@ def apply_pixel_spikes(
         return {'pixels': []}
     vs, us = choose_pixels(loci, n, (size_v, size_u), rng, adversarial=adversarial)
     if model == 'bitflip':
-        bits = (1 << rng.integers(0, _BITFLIP_BITS, size=vs.size)).astype(np.int64)
+        bits = (1 << rng.integers(0, _word_bits(dn_ceiling), size=vs.size)).astype(np.int64)
         current = np.rint(signal[vs, us]).astype(np.int64)
-        signal[vs, us] = (current ^ bits).astype(np.float64)
+        flipped = np.minimum((current ^ bits).astype(np.float64), dn_ceiling)
+        signal[vs, us] = flipped
     else:
-        signal[vs, us] = rng.uniform(0.0, _dn_ceiling(signal), size=vs.size)
+        signal[vs, us] = rng.uniform(0.0, _garbage_ceiling(signal, dn_ceiling), size=vs.size)
     pixels = [[int(v), int(u)] for v, u in zip(vs.tolist(), us.tolist(), strict=True)]
     return {'pixels': pixels}
 

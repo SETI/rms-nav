@@ -252,6 +252,9 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
                 'dust_donut_count': 4,
             },
             'contouring_8bit': {'step': 8},
+            # HMA/HCA vertical decimation (5.4): only every Nth line carries
+            # valid data, so the Galileo periodic-line default is 'keep'.
+            'alternating_lines': {'mode': 'keep'},
         },
     },
     'nhlorri': {
