@@ -138,7 +138,7 @@ def apply_optics(
     if ghosts:
         apply_ghosts(frame, ghosts=ghosts, oversample=oversample)
 
-    stray = optics.get('stray_light') or params.get('stray_light')
+    stray = optics.get('stray_light')
     if stray:
         apply_stray_light(
             frame.signal,

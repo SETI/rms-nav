@@ -97,7 +97,6 @@ _ALLOWED_KEYS: frozenset[str] = frozenset(
         'background_stars_psf_sigma',
         'background_stars_distribution_exponent',
         'noise',
-        'stray_light',
         'instrument_config',
         'fit_camera_rotation',
     }
@@ -145,7 +144,6 @@ TOP_LEVEL_TRUTH_KEYS: frozenset[str] = frozenset(
         'background_stars_psf_sigma',
         'background_stars_distribution_exponent',
         'noise',
-        'stray_light',
     }
 )
 
@@ -421,7 +419,6 @@ def validate_sim_params(
         sim_params.get('fit_camera_rotation'), 'fit_camera_rotation', source=source
     )
     _check_optional_mapping(sim_params.get('noise'), 'noise', source=source)
-    _check_optional_mapping(sim_params.get('stray_light'), 'stray_light', source=source)
     _check_optional_mapping(sim_params.get('instrument_config'), 'instrument_config', source=source)
     _check_optional_positive_int(sim_params.get('oversample'), 'oversample', source=source)
     _check_optics(sim_params.get('optics'), source=source)

@@ -74,11 +74,13 @@ class SceneIoMixin(SimEditorBase):
             'rings': list(params.get('rings', [])),
         }
         # Preserve catalog-only blocks the General tab does not yet edit
-        # (noise model, stray light, exposure, instrument-config overrides) so
-        # loading a scene spec round-trips them instead of silently dropping them.
+        # (noise model, optics including stray light, exposure, instrument-config
+        # overrides) so loading a scene round-trips them instead of dropping them.
         for passthrough_key in (
             'noise',
-            'stray_light',
+            'optics',
+            'spk_error',
+            'oversample',
             'instrument_config',
             'midtime_utc',
             'fit_camera_rotation',

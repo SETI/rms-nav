@@ -72,12 +72,14 @@ _FULL_SCENE: dict[str, Any] = {
         'signal_full_scale_frac': 0.6,
         'pixel_area_cm2': 1.5,
     },
-    'stray_light': {
-        'amplitude': 0.3,
-        'direction_deg': 35.0,
-        'model': 'radial',
-        'center_v': 40.0,
-        'center_u': 50.0,
+    'optics': {
+        'stray_light': {
+            'amplitude': 0.3,
+            'direction_deg': 35.0,
+            'model': 'radial',
+            'center_v': 40.0,
+            'center_u': 50.0,
+        }
     },
     'instrument_config': {'inherit': 'coiss_nac'},
     'bodies': [

@@ -56,7 +56,16 @@ Fields
   background_stars_distribution_exponent (float)  background-star brightness slope
   noise            (mapping, opt)    poisson, read_noise_dn, cosmic_ray_rate_per_sec,
                                      missing_data_rate, bloom_length, signal_full_scale_frac
-  stray_light      (mapping, opt)    amplitude, direction_deg, model (linear|radial)
+  oversample       (int, opt)        radiance oversampling factor (default 4 when a PSF
+                                     is active, else 1)
+  optics           (mapping, opt)    whole-scene optical effects: psf (sigma_v, sigma_u,
+                                     w, r0, n; or match_navigator), smear (list of
+                                     dv_px/du_px/object_class), distortion (k1, k2,
+                                     center_v, center_u, nonradial_rms_px), ghosts (list
+                                     of dv_px/du_px/amplitude/defocus_sigma), stray_light
+                                     (amplitude, direction_deg, model linear|radial)
+  spk_error        (mapping, opt)    planted spacecraft-ephemeris parallax: dv_px, du_px,
+                                     reference_range_km (needs range_km on each body/ring)
   instrument_config (mapping, opt)   per-instrument config overrides deep-merged over
                                      the named instrument's block (star_psf_sigma,
                                      data_units, noise.*, extfov_margin_vu, ...).  Omit

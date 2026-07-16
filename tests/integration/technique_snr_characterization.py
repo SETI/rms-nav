@@ -98,7 +98,7 @@ def _sim_params(
     params['offset_u'] = offset[1]
     params['noise'] = {**params.get('noise', {}), 'poisson': True, 'read_noise_dn': read_noise}
     if stray is not None:
-        params['stray_light'] = dict(stray)
+        params['optics'] = {'stray_light': dict(stray)}
     if seed is not None:
         params['random_seed'] = seed
     return params

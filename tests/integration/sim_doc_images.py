@@ -164,7 +164,7 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
         'stray_light_gradient',
         _scene(
             [_ellipsoid(axis1=120.0, axis2=95.0, axis3=85.0)],
-            stray_light={'amplitude': 0.5, 'direction_deg': 35.0, 'model': 'linear'},
+            optics={'stray_light': {'amplitude': 0.5, 'direction_deg': 35.0, 'model': 'linear'}},
         ),
         {'gamma': 1.2},
     ),

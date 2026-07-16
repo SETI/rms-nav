@@ -75,7 +75,7 @@ def _scene(*, stray: dict[str, Any] | None) -> dict[str, Any]:
         'noise': {'poisson': False, 'read_noise_dn': 0.0},
     }
     if stray is not None:
-        params['stray_light'] = stray
+        params['optics'] = {'stray_light': stray}
     return params
 
 
