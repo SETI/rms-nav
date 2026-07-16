@@ -1,0 +1,50 @@
+schema_version: 2
+scene_name: relief_psf_stray_light
+instrument: coiss_nac
+size_v: 256
+size_u: 256
+random_seed: 31
+exposure_sec: 1.0
+# A lit body with limb relief under a whole-scene PSF and an off-center
+# radial stray-light bump.  The explicit PSF activates oversample 4, so
+# this is the catalog's pin on the topographic renderer's
+# split-resolution path (detector-grid shading upsampled under the
+# oversampled relief silhouette), the defaulted PSF kernel size at
+# oversample, and the stray-light center_v/center_u scaling onto the
+# oversampled grid -- any change to that mapping must flip this
+# baseline.  All of relief, PSF, and stray light are truth-side: the
+# navigator fits its smooth sharp Lambert template against the blurred
+# ragged limb over a sloped background.  Measured behavior: the limb
+# fit and the disc correlation both survive the blur and the sloped
+# background and fuse to an accurate success (fused offset within
+# ~0.45 px of the planted value).
+bodies:
+  - name: RUGGED
+    shape_model: ellipsoid
+    center_v: 128.0
+    center_u: 128.0
+    axis1: 140.0
+    axis2: 140.0
+    axis3: 140.0
+    illumination_angle: 20.0
+    phase_angle: 35.0
+    limb_relief_rms: 0.02
+    limb_relief_corr_deg: 12.0
+optics:
+  psf:
+    sigma_v: 0.7
+    sigma_u: 0.7
+  stray_light:
+    amplitude: 0.35
+    model: radial
+    center_v: 40.0
+    center_u: 210.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 2.5
+offset_u: -1.5
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: medium
