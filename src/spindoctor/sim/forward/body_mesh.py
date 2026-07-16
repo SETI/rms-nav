@@ -162,9 +162,10 @@ def render_single_mesh_body(
         img: Image array to modify in-place.
         body_params: Body parameters dictionary (mesh keys are parsed by
             ``mesh_spec_from_params``; the truth keys ``shading``,
-            ``limb_relief_*``, and ``pose_scatter`` are read here).  When a
-            pose scatter is drawn, its value is recorded into this mapping
-            as ``pose_scatter_drawn_deg`` (render truth metadata).
+            ``limb_relief_*``, and ``pose_scatter`` are read here).  The
+            mapping is never mutated: when a pose scatter is drawn, the
+            returned body info's ``params`` is a copy of this mapping with
+            ``pose_scatter_drawn_deg`` added (render truth metadata).
         body_name: Upper-cased body name for the inventory keys.
         center_v: Body center V in the image (offset already applied).
         center_u: Body center U in the image (offset already applied).
@@ -192,7 +193,12 @@ def render_single_mesh_body(
 
     # The relief terrain and the pose scatter each draw from their own named
     # stream of the per-body identity seed, mirroring the ellipsoid path, so
-    # they are independent of each other and of any crater draws.
+    # they are independent of each other and of any crater draws.  The drawn
+    # scatter travels to the render truth through the returned body info's
+    # params copy; body_params itself stays untouched (the caller's scene
+    # mapping must remain schema-valid, and pose_scatter_drawn_deg is not a
+    # schema key).
+    truth_params = body_params
     relief_seed = 0
     if relief_rms > 0.0 or scatter_sigma_deg > 0.0:
         identity_seed = _mesh_identity_seed(
@@ -209,7 +215,7 @@ def render_single_mesh_body(
         if scatter_sigma_deg > 0.0:
             rng = np.random.default_rng(derive_effect_seed(identity_seed, 'pose_scatter'))
             drawn = rng.normal(0.0, scatter_sigma_deg, size=3)
-            body_params['pose_scatter_drawn_deg'] = [float(d) for d in drawn]
+            truth_params = {**body_params, 'pose_scatter_drawn_deg': [float(d) for d in drawn]}
             spec = dataclasses.replace(
                 spec,
                 pose_euler_deg=(
@@ -240,7 +246,7 @@ def render_single_mesh_body(
     return finish_single_body(
         img,
         body_shape,
-        body_params,
+        truth_params,
         body_name=body_name,
         center_v=center_v,
         center_u=center_u,

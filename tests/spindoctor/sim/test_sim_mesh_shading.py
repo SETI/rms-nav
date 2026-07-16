@@ -8,6 +8,7 @@ and the per-frame pose scatter moves the RENDERED pose by the recorded
 drawn amount while the navigator's catalog view is unmoved.
 """
 
+import copy
 import math
 from typing import Any
 
@@ -214,6 +215,40 @@ def test_pose_scatter_moves_the_render_by_the_recorded_drawn_amount() -> None:
         _pose_scatter_scene(sigma_deg=0.0, pose_override=equivalent_pose)
     )
     assert np.array_equal(scattered_img, explicit_img)
+
+
+def test_pose_scatter_does_not_mutate_the_input_mapping() -> None:
+    """The drawn scatter reaches the render truth without touching the input.
+
+    ``render_single_mesh_body`` must leave the caller's body mapping exactly
+    as given (a mutated scene dict would no longer re-validate, since the
+    drawn value is not a schema key); the draw is returned through the body
+    info's ``params`` copy instead.
+    """
+    body: dict[str, Any] = {**_MESH_SPHERE, 'pose_scatter': {'sigma_deg': 3.0}}
+    snapshot = copy.deepcopy(body)
+    img = np.zeros((_SIZE, _SIZE), dtype=np.float64)
+    _, info = render_single_mesh_body(
+        img,
+        body,
+        'LUMP',
+        center_v=_CENTER,
+        center_u=_CENTER,
+        axis1=2.0 * _RADIUS,
+        axis2=2.0 * _RADIUS,
+        axis3=2.0 * _RADIUS,
+        illumination_angle=0.0,
+        phase_angle=math.radians(5.0),
+        anti_aliasing=0.0,
+        ref_center_v=_CENTER,
+        ref_center_u=_CENTER,
+        seed=99,
+        body_index=0,
+    )
+    assert body == snapshot
+    drawn = info['params']['pose_scatter_drawn_deg']
+    assert len(drawn) == 3
+    assert any(abs(d) > 1e-6 for d in drawn)
 
 
 def test_pose_scatter_changes_the_rendered_frame() -> None:
