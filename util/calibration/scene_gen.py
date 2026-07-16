@@ -38,6 +38,12 @@ import random
 from collections.abc import Callable
 from typing import Any
 
+# The body families deliberately do not yet draw the newer body truth axes
+# (photometric_law / opposition_surge, limb_relief_*, albedo_texture,
+# disc_texture / transits, mesh shading / pose_scatter): those axes join
+# the sweep when the calibration campaign is re-collected on this renderer
+# and every sim-anchored coefficient is refit, so no coefficient ships
+# ahead of the renderer it was fit on.
 FAMILIES = (
     'disc',
     'limb',

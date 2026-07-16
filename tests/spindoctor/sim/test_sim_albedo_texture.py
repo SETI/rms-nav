@@ -92,23 +92,23 @@ def test_noise_texture_is_multiplicative_on_the_shading() -> None:
 def test_spot_lands_at_commanded_surface_position() -> None:
     """A dark spot at (lat, lon) darkens exactly the predicted disc location."""
     lat_deg = 40.0
-    albedo = AlbedoTextureSpec(rms=0.0, spots=((lat_deg, 0.0, 10.0, 0.5),), seed=0)
+    albedo = AlbedoTextureSpec(rms=0.0, spots=((lat_deg, 90.0, 10.0, 0.5),), seed=0)
     smooth = _render(None)
     textured = _render(albedo)
-    # Observer frame: lat = arcsin(z), lon = atan2(y, x) with x = v_rot / a.
-    # lon 0 puts the spot on the +v axis at v = center + R * cos(lat).
-    spot_v = int(_CENTER + _RADIUS * math.cos(math.radians(lat_deg)))
+    # Body-polar frame: lat = arcsin(x) with x = v_rot / a, lon 90 = the
+    # sub-observer meridian, so the spot sits at v = center + R * sin(lat).
+    spot_v = int(_CENTER + _RADIUS * math.sin(math.radians(lat_deg)))
     spot_u = int(_CENTER)
     assert textured[spot_v, spot_u] / smooth[spot_v, spot_u] == pytest.approx(0.5, abs=1e-9)
-    # The antipodal-longitude location (lon 180) is untouched, so the spot is
-    # a localized mark, not a global rescale.
-    anti_v = int(_CENTER - _RADIUS * math.cos(math.radians(lat_deg)))
+    # The mirror latitude (lat -40) is untouched, so the spot is a localized
+    # mark, not a global rescale.
+    anti_v = int(_CENTER - _RADIUS * math.sin(math.radians(lat_deg)))
     assert textured[anti_v, spot_u] == smooth[anti_v, spot_u]
 
 
 def test_spot_factor_is_multiplicative_at_the_spot() -> None:
     """The spot multiplies the local shading by its commanded factor exactly."""
-    albedo = AlbedoTextureSpec(rms=0.0, spots=((90.0, 0.0, 12.0, 0.6),), seed=0)
+    albedo = AlbedoTextureSpec(rms=0.0, spots=((0.0, 90.0, 12.0, 0.6),), seed=0)
     spec = dataclasses.replace(_spec(albedo), illumination_angle=0.3)
     smooth_spec = dataclasses.replace(spec, albedo_texture=None)
     textured = create_topographic_body((_SIZE, _SIZE), (_CENTER, _CENTER), spec)

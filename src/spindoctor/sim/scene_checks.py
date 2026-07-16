@@ -175,8 +175,8 @@ def _check_body_relief_and_photometry(obj: dict[str, Any], *, label: str, source
 
 # The multiplicative albedo texture: a band-limited noise field (rms +
 # correlation length in detector pixels on the disc) plus discrete circular
-# spots in the observer-centered surface frame (lat 90 = disc center,
-# lat 0 = the limb).
+# spots in the body-polar surface frame (pole along axis1; longitude 90 deg
+# is the sub-observer meridian).
 _ALBEDO_TEXTURE_KEYS: frozenset[str] = frozenset({'rms', 'corr_px', 'spots'})
 _SURFACE_SPOT_KEYS: frozenset[str] = frozenset(
     {'lat_deg', 'lon_deg', 'radius_deg', 'albedo_factor'}

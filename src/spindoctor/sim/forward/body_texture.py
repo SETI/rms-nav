@@ -19,26 +19,24 @@ limb the navigator fits:
   shadow is the sharp, high-contrast circular *false crater* that disc
   correlation and blob techniques can lock onto.
 
-**Coordinate conventions.**  Surface points come from the topographic
+**Coordinate convention.**  Surface points come from the topographic
 renderer's unit-sphere parameterization ``(x, y, z)`` with
 ``x = v_rot / semi_a``, ``y = u_rot / semi_b``, ``z = sqrt(1 - x^2 - y^2)``
-(so ``x^2 + y^2 + z^2 = 1`` on the disc).
-
-- The *albedo* frame is observer-centered, matching the relief field:
-  latitude is elevation out of the limb plane toward the observer
-  (``lat = arcsin(z)``; 90 deg = the sub-observer point at disc center,
-  0 = the limb), longitude is azimuth around the limb measured from the
-  body's +axis1 direction toward +axis2 (``lon = atan2(y, x)``).
-- The *band/storm* frame is body-polar: the pole is the body's axis1
-  direction, so bands follow ``lat_p = arcsin(x)`` and rotate in the image
-  with the body's ``rotation_z`` pose exactly as a planet's belts do.
-  Storm longitude is measured from +axis2 toward the observer
-  (``lon_p = atan2(z, y)``; 90 deg = the sub-observer meridian).
+(so ``x^2 + y^2 + z^2 = 1`` on the disc).  Every texture -- the albedo
+noise field, albedo spots, bands, and storms -- lives in one body-polar
+frame: the pole is the body's axis1 direction (``lat = arcsin(x)``), and
+longitude is measured from +axis2 toward the observer
+(``lon = atan2(z, y)``; 90 deg = the sub-observer meridian).  Texture is
+terrain attached to the body, so it rotates in the image with the body's
+``rotation_z`` pose, bands follow the planet's belts, and the lat-lon
+synthesis grid's polar pinch sits at the foreshortened limb points on the
+pole axis rather than anywhere on the disc face.
 
 The commanded albedo correlation length is ``corr_px`` in *detector pixels
 on the disc*: it is converted to degrees of surface arc using the body's
-mean projected radius, so it is exact at disc center and foreshortens
-toward the limb the way real surface texture does.
+mean projected radius, so it is exact where the surface is face-on (the
+field's equator crosses the disc center) and foreshortens toward the limb
+the way real surface texture does.
 
 Transit geometry (``dv_px`` / ``du_px`` offsets from the body center and
 ``radius_px``) is in detector pixels on the image plane, consumed directly
@@ -85,7 +83,7 @@ class AlbedoTextureSpec:
             (0 disables the field; spots still apply).
         corr_px: Noise correlation length in detector pixels on the disc.
         spots: Circular albedo spots as ``(lat_deg, lon_deg, radius_deg,
-            albedo_factor)`` tuples in the observer-centered albedo frame.
+            albedo_factor)`` tuples in the body-polar frame.
         seed: The 'albedo' stream seed of the noise-field realization.
     """
 
@@ -297,28 +295,26 @@ def surface_texture_factor(
     if albedo is None and disc_texture is None:
         return None
     factor = np.ones_like(x)
+    # One body-polar frame for every texture: pole along axis1 (x),
+    # longitudes from +axis2 (y) toward the observer (z).
+    lat_p = np.arcsin(np.clip(x, -1.0, 1.0))
 
     if albedo is not None:
         if albedo.rms > 0.0 and albedo.corr_px > 0.0 and mean_radius_px > 0.0:
-            # corr_px of image distance at disc center = corr_px of surface
-            # arc = corr_px / R radians of arc.
+            # corr_px of image distance where the surface is face-on =
+            # corr_px of surface arc = corr_px / R radians of arc.
             corr_deg = math.degrees(albedo.corr_px / mean_radius_px)
             field = synthesize_albedo_field(albedo.rms, corr_deg, albedo.seed)
-            lat = np.arcsin(np.clip(z, -1.0, 1.0))
-            lon = np.mod(np.arctan2(y, x), 2.0 * np.pi)
-            factor *= 1.0 + field.sample(lat, lon)
-        # Observer frame: pole toward the observer (z), equator on the limb.
-        _spot_factor(factor, albedo.spots, axis_a=z, axis_b=x, axis_c=y)
+            lon_p = np.mod(np.arctan2(z, y), 2.0 * np.pi)
+            factor *= 1.0 + field.sample(lat_p, lon_p)
+        _spot_factor(factor, albedo.spots, axis_a=x, axis_b=y, axis_c=z)
 
     if disc_texture is not None:
         if disc_texture.band_amplitude > 0.0:
-            lat_p = np.arcsin(np.clip(x, -1.0, 1.0))
             phase = math.radians(disc_texture.band_phase_deg)
             factor *= 1.0 + disc_texture.band_amplitude * np.cos(
                 disc_texture.band_wavenumber * lat_p + phase
             )
-        # Body-polar frame: pole along axis1 (x), longitudes from +axis2
-        # toward the observer.
         _spot_factor(factor, disc_texture.storms, axis_a=x, axis_b=y, axis_c=z)
 
     return np.asarray(np.maximum(factor, 0.0), dtype=np.float64)
