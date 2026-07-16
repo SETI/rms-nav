@@ -12,10 +12,11 @@ from typing import Any, cast
 from filecache import FCPath, FileCache
 from pdstable import PdsTable
 
-from spindoctor.config import Config
+from spindoctor.config import Config, get_nav_results_root
 from spindoctor.support.misc import flatten_list
 
 from .dataset import DataSet, ImageFile, ImageFiles
+from .results_filter import RESULTS_FILTER_BATCH_SIZE, ResultsFilter
 
 # A PDS3 ^IMAGE pointer naming the data file that holds the image object, e.g.
 #   ^IMAGE = ("N1454725799_1.IMG",4)
@@ -235,11 +236,6 @@ class DataSetPDS3(DataSet):
             type=str,
             help='Specific image name(s) to process',
         )
-        # group.add_argument(
-        #     '--planet', default='saturn',
-        #     type=_validate_planet,
-        #     help=f"""Which planet to process: jupiter, saturn, uranus, neptune
-        #              (saturn is the default)""")
         group.add_argument(
             '--first-image-num',
             type=int,
@@ -292,30 +288,51 @@ class DataSetPDS3(DataSet):
             help="""A file that contains filespecs or names of images to process;
             the list is still subject to other selection criteria.""",
         )
-        # group.add_argument(
-        #     '--has-offset-file', action='store_true', default=False,
-        #     help='Only process images that already have an offset file')
-        # group.add_argument(
-        #     '--has-no-offset-file', action='store_true', default=False,
-        #     help='Only process images that don\'t already have an offset file')
-        # group.add_argument(
-        #     '--has-png-file', action='store_true', default=False,
-        #     help='Only process images that already have a PNG file')
-        # group.add_argument(
-        #     '--has-no-png-file', action='store_true', default=False,
-        #     help='Only process images that don\'t already have a PNGfile')
-        # group.add_argument(
-        #     '--has-offset-error', action='store_true', default=False,
-        #     help="""Only process images if the offset file exists and
-        #             indicates a fatal error""")
-        # group.add_argument(
-        #     '--has-offset-nonspice-error', action='store_true', default=False,
-        #     help="""Only process images if the offset file exists and
-        #             indicates a fatal error other than missing SPICE data""")
-        # group.add_argument(
-        #     '--has-offset-spice-error', action='store_true', default=False,
-        #     help="""Only process images if the offset file exists and
-        #             indicates a fatal error from missing SPICE data""")
+        group.add_argument(
+            '--has-offset-file',
+            action='store_true',
+            default=False,
+            help='Only process images that already have an offset metadata file',
+        )
+        group.add_argument(
+            '--has-no-offset-file',
+            action='store_true',
+            default=False,
+            help="Only process images that don't already have an offset metadata file",
+        )
+        group.add_argument(
+            '--has-png-file',
+            action='store_true',
+            default=False,
+            help='Only process images that already have a summary PNG file',
+        )
+        group.add_argument(
+            '--has-no-png-file',
+            action='store_true',
+            default=False,
+            help="Only process images that don't already have a summary PNG file",
+        )
+        group.add_argument(
+            '--has-offset-error',
+            action='store_true',
+            default=False,
+            help="""Only process images if the offset metadata file exists and
+            indicates a fatal error""",
+        )
+        group.add_argument(
+            '--has-offset-spice-error',
+            action='store_true',
+            default=False,
+            help="""Only process images if the offset metadata file exists and
+            indicates a fatal error from missing SPICE data""",
+        )
+        group.add_argument(
+            '--has-offset-nonspice-error',
+            action='store_true',
+            default=False,
+            help="""Only process images if the offset metadata file exists and
+            indicates a fatal error other than missing SPICE data""",
+        )
         # group.add_argument(
         #     '--selection-expr', type=str, metavar='EXPR',
         #     help='Expression to evaluate to decide whether to reprocess an offset')
@@ -427,14 +444,6 @@ class DataSetPDS3(DataSet):
         if arguments.volumes:
             volumes = [x for y in arguments.volumes for x in y.split(',')]
 
-        # if use_index_files:
-        #     yield_function = yield_image_filenames_index
-        # else:
-        #     yield_function = yield_image_filenames
-
-        # last_image_name = None
-        # last_image_path = None
-
         yield from self.yield_image_files_index(
             img_start_num=first_image_number,
             img_end_num=last_image_number,
@@ -443,45 +452,17 @@ class DataSetPDS3(DataSet):
             volumes=volumes,
             img_name_list=img_name_list,
             img_filespec_list=img_filespec_list,
-            # TODO
-            # force_has_offset_file=arguments.has_offset_file,
-            # force_has_no_offset_file=arguments.has_no_offset_file,
-            # force_has_png_file=arguments.has_png_file,
-            # force_has_no_png_file=arguments.has_no_png_file,
-            # force_has_offset_error=arguments.has_offset_error,
-            # force_has_offset_spice_error=arguments.has_offset_spice_error,
-            # force_has_offset_nonspice_error=arguments.has_offset_nonspice_error,
-            # selection_expr=arguments.selection_expr,
+            has_offset_file=arguments.has_offset_file,
+            has_no_offset_file=arguments.has_no_offset_file,
+            has_png_file=arguments.has_png_file,
+            has_no_png_file=arguments.has_no_png_file,
+            has_offset_error=arguments.has_offset_error,
+            has_offset_spice_error=arguments.has_offset_spice_error,
+            has_offset_nonspice_error=arguments.has_offset_nonspice_error,
+            # TODO selection_expr=arguments.selection_expr,
             choose_random_images=arguments.choose_random_images,
             arguments=arguments,
         )
-        #     # Before returning a matching image, see if we need to combine BOTSIM
-        #     # images. We do this by looking at adjacent pairs of returned images to
-        #     # see if they match.
-        #     _, image_name = os.path.split(image_path)
-        #     image_name = image_name[img_lim_start:img_lim_end]
-        #     if (combine_botsim and
-        #         last_image_name is not None and
-        #         last_image_name[0] == 'N' and
-        #         image_name[0] == 'W' and
-        #         image_name[1:] == last_image_name[1:]):
-        #         yield (last_image_path, image_path)
-        #         last_image_path = None
-        #         last_image_name = None
-        #     else:
-        #         if last_image_path is not None:
-        #             if combine_botsim:
-        #                 yield (last_image_path, None)
-        #             else:
-        #                 yield last_image_path
-        #         last_image_path = image_path
-        #         last_image_name = image_name
-
-        # if last_image_path is not None:
-        #     if combine_botsim:
-        #         yield (last_image_path, None)
-        #     else:
-        #         yield last_image_path
 
     @staticmethod
     def _image_filename_from_label(label_path: Path) -> str | None:
@@ -584,14 +565,18 @@ class DataSetPDS3(DataSet):
             img_filespec_list: Optional[list[str]] = None,
                 Label filespecs; each is resolved to an image base name into local
                 ``img_name_filter_list`` (unresolvable entries skipped).
-            force_has_offset_file: bool = False,
-            force_has_no_offset_file: bool = False,
-            force_has_png_file: bool = False,
-            force_has_no_png_file: bool = False,
-            force_has_offset_error: bool = False,
-            force_has_offset_spice_error: bool = False,
-            force_has_offset_nonspice_error: bool = False,
-            selection_expr: Optional[str] = None,
+            has_offset_file: bool = False,
+            has_no_offset_file: bool = False,
+            has_png_file: bool = False,
+            has_no_png_file: bool = False,
+            has_offset_error: bool = False,
+            has_offset_spice_error: bool = False,
+            has_offset_nonspice_error: bool = False,
+                Results-based filters matching the same-named command-line options;
+                see :class:`spindoctor.dataset.results_filter.ResultsFilter`.
+            nav_results_root: str | Path | FCPath | None = None,
+                Results root for the filters above.  None resolves via the
+                arguments, configuration, or NAV_RESULTS_ROOT environment variable.
             choose_random_images: int | None = False,
             max_filenames: Optional[int] = None,
             suffix: Optional[str] = None,
@@ -610,6 +595,14 @@ class DataSetPDS3(DataSet):
         camera: str | None = kwargs.pop('camera', None)
         img_name_list: list[str] | None = kwargs.pop('img_name_list', None)
         img_name_filter_list: list[str] | None = kwargs.pop('img_filespec_list', None)
+        has_offset_file: bool = kwargs.pop('has_offset_file', False)
+        has_no_offset_file: bool = kwargs.pop('has_no_offset_file', False)
+        has_png_file: bool = kwargs.pop('has_png_file', False)
+        has_no_png_file: bool = kwargs.pop('has_no_png_file', False)
+        has_offset_error: bool = kwargs.pop('has_offset_error', False)
+        has_offset_spice_error: bool = kwargs.pop('has_offset_spice_error', False)
+        has_offset_nonspice_error: bool = kwargs.pop('has_offset_nonspice_error', False)
+        nav_results_root: str | Path | FCPath | None = kwargs.pop('nav_results_root', None)
         choose_random_images: int | None = kwargs.pop('choose_random_images', None)
         max_filenames: int | None = kwargs.pop('max_filenames', None)
         arguments: argparse.Namespace | None = kwargs.pop('arguments', None)
@@ -623,16 +616,18 @@ class DataSetPDS3(DataSet):
         logger.info(f'*** Image number range: {img_start_num} - {img_end_num}')
         logger.info(f'*** Volume range:       {vol_start} - {vol_end}')
         logger.info(f'*** Camera:             {camera}')
-        # logger.info('*** Results root directory:  %s', CB_RESULTS_ROOT)
-        # logger.info('*** Instrument host:         %s', arguments.instrument_host)
-        # if arguments.image_full_path:
-        #     log('*** Images explicitly from full paths:')
-        #     for image_path in arguments.image_full_path:
-        #         log('        %s', image_path)
-        # log('*** Already has offset file: %s', arguments.has_offset_file)
-        # log('*** Has no offset file:      %s', arguments.has_no_offset_file)
-        # log('*** Already has PNG file:    %s', arguments.has_png_file)
-        # log('*** Has no PNG file:         %s', arguments.has_no_png_file)
+        results_filter_flags = {
+            'has_offset_file': has_offset_file,
+            'has_no_offset_file': has_no_offset_file,
+            'has_png_file': has_png_file,
+            'has_no_png_file': has_no_png_file,
+            'has_offset_error': has_offset_error,
+            'has_offset_spice_error': has_offset_spice_error,
+            'has_offset_nonspice_error': has_offset_nonspice_error,
+        }
+        active_filter_flags = [name for name, value in results_filter_flags.items() if value]
+        if active_filter_flags:
+            logger.info(f'*** Results filters:    {", ".join(active_filter_flags)}')
         if img_name_list:
             logger.info('*** Explicit image names:')
             for explicit_img_name in img_name_list:
@@ -684,6 +679,25 @@ class DataSetPDS3(DataSet):
             )
         ]
 
+        # Build the results-based filter, if any of its flags is active. Presence
+        # filters walk the results tree once per selected volume (at construction);
+        # absence and error filters are applied in batches as images are accepted.
+        results_filter: ResultsFilter | None = None
+        if any(results_filter_flags.values()):
+            if nav_results_root is None:
+                nav_results_root = get_nav_results_root(
+                    arguments if arguments is not None else argparse.Namespace(), self.config
+                )
+            if isinstance(nav_results_root, FCPath):
+                results_root = nav_results_root
+            else:
+                # Results are not shared with other processes and may change between
+                # runs, so use a private temporary cache like the writers do.
+                results_root = FileCache(None).new_path(nav_results_root)
+            results_filter = ResultsFilter(
+                valid_volumes, results_root, logger=logger, **results_filter_flags
+            )
+
         # URLs to the volume raw directory and index directory
         volume_raw_dir_url = self.pds3_holdings_root / volumes_dir_name
         index_dir_url = self.pds3_holdings_root / 'metadata'
@@ -731,47 +745,6 @@ class DataSetPDS3(DataSet):
                 999999999999 if img_end_num is None else img_end_num,
                 max([self._extract_img_number(x) for x in img_name_filter_list]),
             )
-
-        # TODO When yielding via an index, we don't get to optimize searching for
-        # offset/png files. We just always look through the index files, and then check
-        # out the offset/png files later. This could definitely be improved.
-
-        # search_volume_path = None
-        # search_suffix = None
-
-        # if (force_has_offset_error or force_has_offset_nonspice_error or
-        #     force_has_offset_spice_error):
-        #     force_has_offset_file = True
-
-        # assert not (force_has_offset_file and force_has_png_file)
-        # if force_has_offset_file:
-        #     # If we need an offset file, then we're actually looking for files in
-        #     # the offsets directories, not the image directories. This is much faster
-        #     # than going through the image directories and checking each one when there
-        #     # aren't a lot of offset files.
-        #     search_volume_path = clean_join(CB_RESULTS_ROOT, 'offsets')
-        #     search_suffix = '-OFFSET.dat'
-        # if force_has_png_file:
-        #     # If we need an offset file, then we're actually looking for files in
-        #     # the png directories, not the image directories. This is much faster
-        #     # than going through the image directories and checking each one when there
-        #     # aren't a lot of png files.
-        #     search_volume_path = clean_join(CB_RESULTS_ROOT, 'png')
-        #     search_suffix = '.png'
-        # # The directory format if searching_offset or searching_png is:
-        # #       <search_volume_path>/<VOLUME>/<RANGE>/<IMGNAME><search_suffix>
-        # # The directory format if NOT searching_offset or searching_png is:
-        # #       <search_volume_path>/<VOLUME>/[data]/<RANGE>/IMGNAME_<SUFFIX>
-
-        # What part of the filename do we look at to get the image number?
-
-        # index_volume_path = clean_join(CB_HOLDINGS_ROOT,
-        #                             instrument_host_config['index_volume_path'][planet])
-        # index_path = instrument_host_config['index_path']
-        # volume_prefix = instrument_host_config['volume_prefix']
-
-        # logger.debug('Index files exist in: %s', index_volume_path)
-        # logger.debug('Data exists in: %s', data_volume_path)
 
         # Limit the number of returned yields from this method if necessary
         limit_yields = choose_random_images if choose_random_images else None
@@ -875,37 +848,53 @@ class DataSetPDS3(DataSet):
             ):
                 return None, False
 
+            # Check the filters answerable from the walked results sets (set
+            # lookups, no round trips)
+            results_path_stub = self._results_path_stub(search_vol, label_filespec)
+            if results_filter is not None and not results_filter.passes_presence(results_path_stub):
+                return None, False
+
             imagefile = ImageFile(
                 image_file_url=img_url,
                 label_file_url=label_url,
                 index_file_row=row,
-                results_path_stub=self._results_path_stub(search_vol, label_filespec),
+                results_path_stub=results_path_stub,
                 image_url_resolver=self._image_url_from_label,
             )
             return imagefile, False
 
         if choose_random_images:
-            # Random sampling: for each volume we visit, read its index ONCE, collect
-            # every row passing all active filters into a pool, then sample without
-            # replacement from that pool. Volumes whose pool is exhausted (or empty) are
-            # never revisited, so the loop is bounded by the set of volumes and cannot
-            # livelock even when filters reject most rows.
-            num_yields = 0
-            remaining_volumes = list(valid_volumes)
-            while remaining_volumes and (limit_yields is None or num_yields < limit_yields):
-                search_vol = remaining_volumes.pop(random.randint(0, len(remaining_volumes) - 1))
+            # Uniform random sampling across every selected volume: collect every row
+            # passing the cheap filters (index-derived criteria plus the walked
+            # results-presence sets) into one pool, shuffle it, then rejection-sample
+            # through the batched absence/error filters until the requested count is
+            # reached. Reading every volume's index is required for cross-volume
+            # uniformity (the indexes are cached locally, so repeat runs are cheap);
+            # the pool holds one ImageFile per qualifying image, so an unconstrained
+            # sample costs memory proportional to the archive's image count.
+            pool: list[ImageFile] = []
+            for search_vol in valid_volumes:
                 rows, index_tab_url = _read_index_rows(search_vol)
-                pool: list[ImageFile] = []
+                all_rows_past_end = bool(rows)
                 for row in rows:
-                    imagefile, _past_end = _row_to_imagefile(row, search_vol, index_tab_url)
+                    imagefile, past_end = _row_to_imagefile(row, search_vol, index_tab_url)
+                    if not past_end:
+                        all_rows_past_end = False
                     if imagefile is not None:
                         pool.append(imagefile)
-                if not pool:
-                    continue
-                needed = len(pool) if limit_yields is None else limit_yields - num_yields
-                for imagefile in random.sample(pool, min(needed, len(pool))):
+                if all_rows_past_end and self._IMG_NUM_MONOTONIC_ACROSS_VOLUMES:
+                    break
+            random.shuffle(pool)
+            num_yields = 0
+            for batch_start in range(0, len(pool), RESULTS_FILTER_BATCH_SIZE):
+                batch = pool[batch_start : batch_start + RESULTS_FILTER_BATCH_SIZE]
+                if results_filter is not None:
+                    batch = results_filter.filter_batch(batch)
+                for imagefile in batch:
                     yield imagefile
                     num_yields += 1
+                    if limit_yields is not None and num_yields >= limit_yields:
+                        return
             return
 
         # Sequential scanning over the requested volumes in order. Index rows are
@@ -918,8 +907,26 @@ class DataSetPDS3(DataSet):
         # every row is past the end of the requested range; otherwise (Voyager,
         # whose FDS counts roll over between encounter volume sets) no
         # image-number-based stop applies and every requested volume is scanned,
-        # though a requested result limit can still end the scan early.
+        # though a requested result limit can still end the scan early. Accepted
+        # images pass through the batched absence/error filters in buffered chunks
+        # (amortizing the per-batch cloud round trips) while preserving enumeration
+        # order; with no batch filtering active the buffer flushes immediately.
         num_yields = 0
+        pending: list[ImageFile] = []
+        pending_flush_size = (
+            RESULTS_FILTER_BATCH_SIZE
+            if results_filter is not None and results_filter.needs_batch_filtering
+            else 1
+        )
+
+        def _flush_pending() -> list[ImageFile]:
+            """Run the pending buffer through the batched results filters."""
+            nonlocal pending
+            batch, pending = pending, []
+            if results_filter is not None:
+                batch = results_filter.filter_batch(batch)
+            return batch
+
         for search_vol in valid_volumes:
             rows, index_tab_url = _read_index_rows(search_vol)
             all_rows_past_end = bool(rows)
@@ -929,11 +936,20 @@ class DataSetPDS3(DataSet):
                     all_rows_past_end = False
                 if imagefile is None:
                     continue
-                yield imagefile
-                num_yields += 1
-                if limit_yields is not None and num_yields >= limit_yields:
-                    return
+                pending.append(imagefile)
+                if len(pending) < pending_flush_size:
+                    continue
+                for filtered in _flush_pending():
+                    yield filtered
+                    num_yields += 1
+                    if limit_yields is not None and num_yields >= limit_yields:
+                        return
             if all_rows_past_end and self._IMG_NUM_MONOTONIC_ACROSS_VOLUMES:
+                break
+        for filtered in _flush_pending():
+            yield filtered
+            num_yields += 1
+            if limit_yields is not None and num_yields >= limit_yields:
                 return
 
     def _check_additional_image_selection_criteria(
