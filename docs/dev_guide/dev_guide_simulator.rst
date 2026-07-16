@@ -198,13 +198,13 @@ scene (:mod:`spindoctor.sim.forward.pipeline`):
      - What it does
    * - ``scene_radiance``
      - :func:`~spindoctor.sim.forward.scene_radiance.compose_scene_radiance`
-     - Composes the noise-free signal: background stars, catalog stars, then
-       bodies and rings depth-sorted far to near (nearer objects overwrite),
-       with the planted offset and camera roll applied. Stars render
-       Gaussian-pre-spread when the scene has no whole-scene PSF, and as
-       sub-pixel point masses when one is active (see
-       :ref:`sim-star-params`). Accumulates feature truth (star records,
-       masks, inventory, z-order) into ``frame.truth``.
+     - Composes the noise-free signal: bodies and rings depth-sorted far to
+       near (nearer objects overwrite) into ``frame.signal``, and the star
+       field (catalog stars plus the background sky) into the point-source
+       plane ``frame.point_e``, with the planted offset and camera roll
+       applied. Stars are flux-normalized point masses shaped only by the
+       whole-scene PSF (see :ref:`sim-star-params`). Accumulates feature truth
+       (star records, masks, inventory, z-order) into ``frame.truth``.
    * - ``optics``
      - :func:`~spindoctor.sim.forward.optics.apply_optics`
      - Applies the optical-path effects in a fixed internal order -- motion
@@ -359,11 +359,11 @@ intensive signal passes through the electron unit chain in
 1. **Signal to electrons.** The intensive [0, 1] signal is scaled to electrons
    through ``signal_full_scale_frac * full_well_e * (exposure_sec /
    exposure_ref_sec)``.
-2. **Point sources.** The point-source electron plane (``frame.point_e``) is
-   added after the intensive conversion and before Poisson, so anything in it
-   never passes through the signal scale. (Stars deposit in signal units --
-   pre-spread or point-mass, see :ref:`sim-star-params` -- so the plane stays
-   zeroed.)
+2. **Point sources.** The point-source plane (``frame.point_e``) carries the
+   stars: for a CCD it is electrons, added after the intensive conversion and
+   before Poisson so it never passes through the signal scale; for the Voyager
+   vidicon it is DN, added onto the converted signal before the DN-domain
+   noise (see :ref:`sim-star-params`).
 3. **Dark current, then Poisson.** A dark pedestal accumulates over the
    exposure before the shot term, so the shot noise grows with the dark signal.
    Poisson shot noise then acts on the electron image.
@@ -925,7 +925,7 @@ ring, a couple of stars, and a planted offset the navigator must recover -- read
        outer_data: [{mode: 1, a: 98.0, ae: 6.0}]
        shading_distance: 10.0
        range: 1000.0
-   background_stars_num: 40
+   sky_counts: {density_factor: 40.0}
    stars:
      - {name: S1, v: 30.0, u: 60.0, vmag: 6.0}
      - {name: S2, v: 180.0, u: 150.0, vmag: 7.5}
@@ -1032,22 +1032,16 @@ Top-level fields
      - idealized
      - Explicit star dicts (see :ref:`sim-star-params`); ``psf_sigma`` is
        truth-side.
-   * - ``background_stars_num``
-     - int
-     - 0
-     - truth
-     - Random background-star count (0-1000). Background stars are
-       contaminants: the navigator receives no catalog for them.
-   * - ``background_stars_psf_sigma``
-     - float
+   * - ``sky_counts``
+     - map
      - none
      - truth
-     - PSF sigma of the background-star field.
-   * - ``background_stars_distribution_exponent``
-     - float
-     - none
-     - truth
-     - Brightness power-law exponent of the background-star field.
+     - Background-sky star field: ``a`` and ``b`` set the cumulative count law
+       ``log10 N(<m) = a + b*m`` per square degree, ``density_factor`` scales
+       the count (1 is mid galactic latitude), and ``diffuse_e_per_px`` adds an
+       optional flat diffuse-sky floor. The sky stars are contaminants: the
+       navigator receives no catalog for them, and they render through the same
+       flux/point-mass path as catalog stars.
    * - ``noise``
      - dict
      - off
@@ -1243,25 +1237,24 @@ instrument knowledge a real pipeline has. The one truth-side star key is
 ``psf_sigma``: a per-star PSF width override is an anomaly of the rendered
 image, and the navigator knows only the instrument's published PSF.
 
-Random background stars are added by the truth-side top-level keys
-``background_stars_num``, ``background_stars_psf_sigma``, and
-``background_stars_distribution_exponent``.
+A background-sky star field is added by the truth-side top-level ``sky_counts``
+map: star counts are drawn from the cumulative law ``log10 N(<m) = a + b*m`` per
+square degree (interim mid-galactic-latitude values ``a = -3.1``, ``b = 0.34``),
+scaled by the frame's field of view and the ``density_factor`` multiplier, down
+to a faint cutoff, and rendered through the same flux/point-mass path as catalog
+stars. An optional ``diffuse_e_per_px`` adds a flat diffuse-sky floor.
 
-Stars render in one of two modes, decided by whether the scene has an active
-whole-scene optics PSF (an explicit ``optics.psf`` block, the
-navigator-matched form, or ``instrument_defaults``):
-
-- **No optics PSF**: each star is Gaussian-pre-spread at its sigma (the
-  per-star ``psf_sigma`` or the instrument's ``star_psf_sigma``), with a
-  half-pixel PSF-evaluation offset so the brightness centroid lands exactly at
-  the predicted ``(v, u)`` -- star navigation stays free of a constant
-  half-pixel bias.
-- **Active optics PSF**: each star's total signal is deposited as a
-  sub-pixel-positioned point mass (centroid-exact after the downsample), so
-  the scene PSF is the *only* convolution a star receives and the rendered
-  star profile is the scene kernel. Pre-spreading here would convolve the
-  star twice and widen it by sqrt(2). Background stars follow the same rule,
-  and the star hit-test metadata records the scene kernel's core sigma.
+Every star -- catalog or sky -- is a flux-normalized point source: its total
+signal is ``zero_point * 10**(-0.4 * vmag) * exposure_sec`` (the per-instrument
+photometric zero point, in electrons for a CCD or DN for the vidicon), deposited
+as a sub-pixel-positioned point mass in ``frame.point_e`` (centroid-exact after
+the downsample). The whole-scene optics PSF is the *only* convolution a star
+receives, so the rendered star profile is the scene kernel and its peak follows
+from the PSF. Pre-spreading a star would convolve it twice and widen it by
+sqrt(2). Sky stars follow the same rule, and the star hit-test metadata records
+the scene kernel's core sigma. A scene with no PSF renders each star as a
+one-pixel spike (the undersampled limit), so the converted floor scenes carry an
+explicit ``optics.psf`` block.
 
 .. _sim-noise:
 
@@ -1636,7 +1629,8 @@ realism addition needs -- live in their own module:
      - Stray-light amplitude, direction, model, radial center (its panel is
        hosted in the Optics tab's stray-light group).
    * - ``background_stars.py``
-     - Background-star count, PSF sigma, distribution exponent.
+     - Background-sky ``sky_counts`` controls: density factor, count-law a and
+       b, diffuse floor.
    * - ``body_tab.py`` / ``ring_tab.py`` / ``star_tab.py``
      - The per-object tabs (geometry, shape model and mesh controls, crater
        controls, navigation-override group; ring edges and shading; star
