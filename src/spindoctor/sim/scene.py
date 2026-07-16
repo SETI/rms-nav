@@ -15,7 +15,8 @@ parses and validates a file and returns that dict; ``save_sim_scene`` validates 
 programmatic scene authors.  The validator is hand-rolled (no pydantic
 dependency): the key inventory and boundary classification live in
 :mod:`spindoctor.sim.scene_schema` and the per-field type checks in
-:mod:`spindoctor.sim.scene_checks`; this module is the public entry point and
+:mod:`spindoctor.sim.scene_checks` (body entries:
+:mod:`spindoctor.sim.scene_checks_body`); this module is the public entry point and
 re-exports the boundary names.
 
 **The information boundary.**  Every key in the schema is classified as either
@@ -41,7 +42,6 @@ from ruamel.yaml import YAML
 from spindoctor.sim.instruments import GENERIC_INSTRUMENT_ALIASES, SIM_INSTRUMENTS
 from spindoctor.sim.scene_checks import (
     _check_artifacts,
-    _check_body_object,
     _check_detector,
     _check_expected,
     _check_noise,
@@ -63,6 +63,7 @@ from spindoctor.sim.scene_checks import (
     _require_ranges_for_spk_error,
     _require_str,
 )
+from spindoctor.sim.scene_checks_body import _check_body_object
 
 # The two private inventories keep their redundant aliases: they are explicit
 # re-exports (the schema tests exercise them through this module).
