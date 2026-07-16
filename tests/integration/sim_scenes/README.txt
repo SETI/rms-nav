@@ -34,6 +34,16 @@ Scene classes
                                 telemetry loss (missing / truncated lines), in
                                 uniform and adversarial placement variants; the
                                 navigator must still recover the offset
+  star_confounder             - one/two/three navigable stars in fields of
+                                non-navigable confounders (the 1/2/3-star lock
+                                regimes), plus a saturated-star and a double-star
+                                scene; the navigator recovers the offset within a
+                                tolerance that absorbs any centroid bias
+  expected_fail               - scenes whose correct outcome is failure / low
+                                confidence, never a confident wrong offset (every
+                                star scattered off catalog, or a lone star drowned
+                                in clutter); each carries an ``expected`` block
+                                asserted by the sim expected-outcome machinery
 
 Fields
 ------
@@ -55,11 +65,30 @@ Fields
   shade_solid_rings (bool, optional) shade solid rings (default false)
   bodies           (list, optional)  per-body params (see below)
   rings            (list, optional)  per-ring params
-  stars            (list, optional)  explicit star dicts (name, v, u, vmag, ...)
+  stars            (list, optional)  explicit star dicts (name, v, u, vmag,
+                                     navigable, catalog_error_v/u, companion,
+                                     delta_mag, ...).  navigable=false renders the
+                                     star as a confounder the navigator never
+                                     learns (dropped from nav_params); the
+                                     catalog_error, companion (sep_px/delta_mag/
+                                     angle_deg), and delta_mag keys displace or
+                                     rebrighten the RENDERED star off its catalog
+                                     values -- image-side truth the navigator does
+                                     not see
+  star_catalog_scatter_px (float, opt) scene-level per-star position-scatter sigma
+                                     (px): every rendered star is displaced by a
+                                     seeded Gaussian draw of this sigma, added to
+                                     any explicit per-star catalog_error
   sky_counts       (mapping, opt)    background-sky star field: a (intercept),
                                      b (slope) of log10 N(<m) = a + b*m per
                                      square degree, density_factor multiplier,
                                      diffuse_e_per_px flat floor
+  expected         (mapping, opt)    the scene's expected navigation outcome
+                                     (status success|failed|conflicted,
+                                     confidence_tier or null, optional
+                                     status_reason); read only by the sim
+                                     expected-outcome test machinery -- fed to
+                                     neither the renderer nor the navigator
   noise            (mapping, opt)    poisson, read_noise_dn, bias_dn,
                                      cosmic_ray_rate_per_sec, missing_data_rate,
                                      bloom_length, signal_full_scale_frac, pixel_area_cm2,
