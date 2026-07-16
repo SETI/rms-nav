@@ -25,13 +25,17 @@ wall time.  CPU time is far less load-sensitive than wall time (it does not
 charge the render for time slices consumed by unrelated processes), but it
 is not immune to load: cache and memory-bandwidth contention from a busy
 host makes each instruction cost more cycles, inflating CPU time by roughly
-10-25% under heavy neighbors.  The budget check therefore takes the best of
-up to three cold attempts, passing as soon as one attempt meets the budget:
-contention inflation is transient, so one clean attempt proves the code
-meets the budget, while a genuine regression fails all three.  A persistent
-breach across all attempts is a real regression to investigate, not to
-bless by raising the budget.  Wall time is measured and reported alongside
-CPU time in the failure message for context.
+10-25% under heavy neighbors -- and by 40% or more, sustained for the whole
+run, when a parallel test battery saturates every core.  The budget check
+takes the best of up to three cold attempts, passing as soon as one attempt
+meets the budget; that absorbs transient contention, but not the sustained
+kind, which is why ``scripts/run-all-checks.sh`` excludes this file from its
+parallel pytest run and executes it as a dedicated serial step afterwards.
+Run this file on its own (not under a concurrent battery) when measuring.
+A breach across all attempts on an otherwise-quiet host is a real
+regression to investigate, not to bless by raising the budget.  Wall time
+is measured and reported alongside CPU time in the failure message for
+context.
 """
 
 from __future__ import annotations

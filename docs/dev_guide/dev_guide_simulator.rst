@@ -1046,10 +1046,14 @@ BLAS/OpenMP pool to one thread via ``threadpoolctl`` for the duration, so an
 unpinned numpy FFT cannot silently multithread and fake the budget. The
 assertion reads CPU time on the pinned core -- far less load-sensitive than
 wall time, though heavy memory-bandwidth contention can still inflate it by
-roughly 10-25% -- and takes the best of up to three cold attempts, passing as
-soon as one meets the budget: transient contention is absorbed, while a
-genuine regression fails all three. A persistent breach across all attempts
-is reported and investigated, not blessed by raising the budget.
+roughly 10-25%, and by 40% or more while a parallel test battery saturates
+every core -- and takes the best of up to three cold attempts, passing as
+soon as one meets the budget. That absorbs transient contention but not the
+sustained kind, so ``scripts/run-all-checks.sh`` excludes the budget file
+from its parallel pytest run and executes it as a dedicated serial step
+afterwards; run it the same way when measuring by hand. A breach across all
+attempts on an otherwise-quiet host is reported and investigated, not
+blessed by raising the budget.
 
 Scene ingredients
 =================
