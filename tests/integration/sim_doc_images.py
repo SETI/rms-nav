@@ -123,12 +123,20 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
     ),
     (
         'star_field',
-        _scene([], background_stars_num=70, background_stars_psf_sigma=1.0),
+        _scene(
+            [],
+            optics={'psf': {'match_navigator': True}},
+            sky_counts={'density_factor': 300.0},
+        ),
         {'gamma': 1.9, 'high_percentile': 99.9},
     ),
     (
         'body_and_stars',
-        _scene([_ellipsoid(axis1=120.0, axis2=95.0, axis3=85.0)], background_stars_num=60),
+        _scene(
+            [_ellipsoid(axis1=120.0, axis2=95.0, axis3=85.0)],
+            optics={'psf': {'match_navigator': True}},
+            sky_counts={'density_factor': 200.0},
+        ),
         {'gamma': 1.6, 'high_percentile': 99.9},
     ),
     (
@@ -172,7 +180,8 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
         'composite_scene',
         _scene(
             [_mesh(name='MOON', center_v=140.0, center_u=95.0, axis1=90.0, axis2=72.0, axis3=66.0)],
-            background_stars_num=40,
+            optics={'psf': {'match_navigator': True}},
+            sky_counts={'density_factor': 150.0},
             rings=[
                 {
                     'name': 'RINGLET',

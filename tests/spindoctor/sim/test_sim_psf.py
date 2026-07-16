@@ -1,8 +1,11 @@
-"""Per-instrument star PSF for the simulator (B5).
+"""Whole-scene PSF shaping of the simulator's point-source stars.
 
-Sim stars use the selected instrument's ``star_psf_sigma`` so their centroid and
-spread match the PSF the navigator fits.  These tests check that the rendered
-star spread scales with the PSF sigma and differs between instruments.
+Stars deposit as point masses; the scene optics PSF is their only convolution,
+so the rendered star spread scales with the PSF sigma.  The navigator-matched
+floor form (``optics.psf: {match_navigator: true}``) resolves to the emulated
+instrument's configured ``star_psf_sigma``, so a coiss frame renders tighter
+stars than a gossi frame.  A faint magnitude keeps the star unsaturated so the
+moment measurement sees the whole profile.
 """
 
 from typing import Any
@@ -25,37 +28,30 @@ def _rms_spread(image: np.ndarray) -> float:
 
 
 def _render_one_star(sigma: float) -> np.ndarray:
-    """Render a single centered star at the given per-star PSF sigma."""
+    """Render a single centered faint star through a scene PSF of the given sigma."""
     scene: dict[str, Any] = {
         'size_v': 41,
         'size_u': 41,
         'random_seed': 1,
         'instrument': 'coiss_nac',
+        'exposure_sec': 1.0,
         'noise': {'poisson': False, 'read_noise_dn': 0.0, 'bias_dn': 0.0},
-        'stars': [
-            {
-                'name': 's',
-                'v': 20.0,
-                'u': 20.0,
-                'vmag': 0.0,
-                'psf_size': (31, 31),
-                'psf_sigma': sigma,
-            }
-        ],
+        'optics': {'psf': {'sigma_v': sigma, 'sigma_u': sigma, 'w': 0.0, 'r0': 2.0, 'n': 3.0}},
+        'stars': [{'name': 's', 'v': 20.0, 'u': 20.0, 'vmag': 8.0}],
     }
     img, _ = render_combined_model(scene)
     return img
 
 
 def test_spread_increases_with_sigma() -> None:
-    """A larger PSF sigma yields a broader rendered star."""
+    """A larger scene PSF sigma yields a broader rendered star."""
     narrow = _rms_spread(_render_one_star(0.6))
     wide = _rms_spread(_render_one_star(3.0))
     assert wide > narrow
 
 
 def test_spread_monotonic_across_sigmas() -> None:
-    """Rendered star spread rises monotonically with PSF sigma."""
+    """Rendered star spread rises monotonically with the scene PSF sigma."""
     spreads = [_rms_spread(_render_one_star(s)) for s in (0.6, 1.0, 2.0, 3.0)]
     assert all(spreads[i + 1] > spreads[i] for i in range(len(spreads) - 1))
 
@@ -67,20 +63,24 @@ def test_coiss_and_gossi_psf_sigmas_differ() -> None:
     assert coiss < gossi
 
 
-def _noiseless_star_scene(instrument: str, *, size: int = 41) -> dict[str, Any]:
-    """A single-star scene with detector noise disabled for a clean PSF."""
+def _match_navigator_star_scene(instrument: str, *, size: int = 41) -> dict[str, Any]:
+    """A single faint star through the instrument's navigator-matched PSF."""
     return {
         'size_v': size,
         'size_u': size,
         'random_seed': 1,
         'instrument': instrument,
+        'exposure_sec': 1.0,
         'noise': {'poisson': False, 'read_noise_dn': 0.0, 'bias_dn': 0.0},
-        'stars': [{'name': 's', 'v': size / 2, 'u': size / 2, 'vmag': 0.0, 'psf_size': (31, 31)}],
+        'optics': {'psf': {'match_navigator': True}},
+        # Bright enough to survive gossi's coarse gain, faint enough to stay
+        # below the coiss_nac full well: both frames keep an unclipped profile.
+        'stars': [{'name': 's', 'v': size / 2, 'u': size / 2, 'vmag': 5.5}],
     }
 
 
 def test_render_uses_instrument_psf_sigma() -> None:
     """A coiss frame renders tighter stars than a gossi frame end-to-end."""
-    coiss_img, _ = render_combined_model(_noiseless_star_scene('coiss_nac'))
-    gossi_img, _ = render_combined_model(_noiseless_star_scene('gossi'))
+    coiss_img, _ = render_combined_model(_match_navigator_star_scene('coiss_nac'))
+    gossi_img, _ = render_combined_model(_match_navigator_star_scene('gossi'))
     assert _rms_spread(coiss_img) < _rms_spread(gossi_img)

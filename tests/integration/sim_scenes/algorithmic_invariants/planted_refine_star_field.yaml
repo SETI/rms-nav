@@ -18,6 +18,11 @@ exposure_sec: 1.0
 # contributor among the fused star techniques.  The field mirrors
 # planted_offset_star_field (six bright, well-spread stars) so the pass-1
 # ensemble is well-conditioned and several stars survive as refine inliers.
+# Stars deposit as point masses; an explicit navigator-matched PSF gives them a
+# finite (floor-form) profile instead of a 1-pixel spike.
+optics:
+  psf:
+    match_navigator: true
 bodies: []
 rings: []
 stars:

@@ -29,9 +29,7 @@ _TRUTH_SAMPLES: dict[str, Any] = {
     'offset_u': -1.5,
     'offset_rotation_deg': 0.4,
     'shade_solid_rings': True,
-    'background_stars_num': 25,
-    'background_stars_psf_sigma': 1.2,
-    'background_stars_distribution_exponent': 2.0,
+    'sky_counts': {'a': -3.1, 'b': 0.34, 'density_factor': 5.0, 'diffuse_e_per_px': 1.0},
     'noise': {'poisson': True, 'read_noise_dn': 4.0, 'bias_dn': 12.0},
     'oversample': 4,
     'optics': {

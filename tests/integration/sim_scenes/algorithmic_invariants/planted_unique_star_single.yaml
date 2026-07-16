@@ -15,6 +15,11 @@ exposure_sec: 1.0
 # technique recovers it geometrically (non-spurious), but its one-star confidence
 # cap and the placeholder-alpha star confidences keep the fused status off a
 # stable 'success', so the scene is held out of the full-ensemble assertions.
+# Stars deposit as point masses; an explicit navigator-matched PSF gives them a
+# finite (floor-form) profile instead of a 1-pixel spike.
+optics:
+  psf:
+    match_navigator: true
 bodies: []
 rings: []
 stars:

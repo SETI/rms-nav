@@ -28,7 +28,7 @@ def _sim_params() -> dict[str, Any]:
         'offset_u': -2.0,
         'bodies': [{'name': 'RHEA', 'center_v': 64.0, 'center_u': 64.0, 'axis1': 80.0}],
         'noise': {'poisson': True, 'read_noise_dn': 4.0},
-        'background_stars_num': 12,
+        'sky_counts': {'density_factor': 12.0},
     }
 
 
@@ -52,7 +52,7 @@ def test_loaded_scene_is_the_flat_sim_params(tmp_path: Path) -> None:
     assert scene['offset_v'] == 3.0
     assert scene['offset_u'] == -2.0
     assert scene['bodies'][0]['name'] == 'RHEA'
-    assert scene['background_stars_num'] == 12
+    assert scene['sky_counts']['density_factor'] == 12.0
 
 
 def test_save_then_load_preserves_values(tmp_path: Path) -> None:

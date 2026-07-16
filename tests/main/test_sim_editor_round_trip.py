@@ -58,9 +58,7 @@ _FULL_SCENE: dict[str, Any] = {
     'time': 100.0,
     'ring_epoch': 50.0,
     'shade_solid_rings': True,
-    'background_stars_num': 12,
-    'background_stars_psf_sigma': 1.1,
-    'background_stars_distribution_exponent': 2.3,
+    'sky_counts': {'a': -3.0, 'b': 0.35, 'density_factor': 8.0, 'diffuse_e_per_px': 2.5},
     'fit_camera_rotation': True,
     'noise': {
         'poisson': True,

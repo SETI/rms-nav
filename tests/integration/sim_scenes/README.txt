@@ -56,9 +56,10 @@ Fields
   bodies           (list, optional)  per-body params (see below)
   rings            (list, optional)  per-ring params
   stars            (list, optional)  explicit star dicts (name, v, u, vmag, ...)
-  background_stars_num (int, opt)    random background-star count (default 0)
-  background_stars_psf_sigma (float) background-star PSF sigma (px)
-  background_stars_distribution_exponent (float)  background-star brightness slope
+  sky_counts       (mapping, opt)    background-sky star field: a (intercept),
+                                     b (slope) of log10 N(<m) = a + b*m per
+                                     square degree, density_factor multiplier,
+                                     diffuse_e_per_px flat floor
   noise            (mapping, opt)    poisson, read_noise_dn, bias_dn,
                                      cosmic_ray_rate_per_sec, missing_data_rate,
                                      bloom_length, signal_full_scale_frac, pixel_area_cm2,

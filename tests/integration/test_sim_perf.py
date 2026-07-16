@@ -89,7 +89,7 @@ def _psf_detector_scene(size: int) -> dict[str, Any]:
             'cosmic_ray_rate_per_sec': 0.001,
             'bloom_length': 2,
         },
-        'background_stars_num': 60,
+        'sky_counts': {'density_factor': 200.0},
     }
 
 
