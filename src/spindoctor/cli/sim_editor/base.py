@@ -154,6 +154,14 @@ class SimEditorBase(QMainWindow):
     _sky_a_spin: QDoubleSpinBox
     _sky_b_spin: QDoubleSpinBox
     _sky_diffuse_spin: QDoubleSpinBox
+    _star_scatter_check: QCheckBox
+    _star_scatter_spin: QDoubleSpinBox
+
+    # ---- General tab: expected outcome (test-only) ----
+    _expected_group: QGroupBox
+    _expected_status_combo: QComboBox
+    _expected_tier_combo: QComboBox
+    _expected_reason_edit: QLineEdit
 
     # ---- Action buttons and visual toggles ----
     _save_img_btn: QPushButton

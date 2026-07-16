@@ -59,6 +59,12 @@ _FULL_SCENE: dict[str, Any] = {
     'ring_epoch': 50.0,
     'shade_solid_rings': True,
     'sky_counts': {'a': -3.0, 'b': 0.35, 'density_factor': 8.0, 'diffuse_e_per_px': 2.5},
+    'star_catalog_scatter_px': 0.4,
+    'expected': {
+        'status': 'success',
+        'confidence_tier': 'high',
+        'status_reason': 'ok',
+    },
     'fit_camera_rotation': True,
     'noise': {
         'poisson': True,
@@ -175,7 +181,22 @@ _FULL_SCENE: dict[str, Any] = {
             'move_u': -2.0,
             'psf_size': [11, 11],
             'psf_sigma': 1.2,
-        }
+        },
+        {
+            # A non-navigable confounder star carrying every truth-side star key:
+            # a planted catalog-position error, an unresolved companion, and a
+            # variable-brightness delta.
+            'name': 'S2',
+            'catalog_name': 'UCAC4',
+            'v': 80.0,
+            'u': 90.0,
+            'vmag': 8.0,
+            'navigable': False,
+            'catalog_error_v': 0.6,
+            'catalog_error_u': -0.4,
+            'delta_mag': 0.5,
+            'companion': {'sep_px': 2.5, 'delta_mag': 1.5, 'angle_deg': 30.0},
+        },
     ],
 }
 
@@ -847,3 +868,159 @@ def test_gui_authored_mode_scene_validates(
     loaded = load_sim_scene(out)
     assert loaded['artifacts']['missing_lines'] == {'incidence': 2.0}
     assert loaded['artifacts']['adversarial'] is True
+
+
+# ---- Per-star information-asymmetry controls ----
+
+
+def _star_tab(model: Any) -> Any:
+    """Return the widget of the first star's tab."""
+    tab_idx = model._find_tab_by_properties('star', 0)
+    assert tab_idx is not None
+    return model._tabs.widget(tab_idx)
+
+
+def test_star_default_omits_navigable_key(model: Any) -> None:
+    """A GUI-added star leaves the navigable key absent (absent means navigable)."""
+    model._add_star_tab()
+    assert 'navigable' not in model.sim_params['stars'][0]
+
+
+def test_star_navigable_uncheck_writes_false(model: Any) -> None:
+    """Unchecking navigable writes the present ``navigable: false`` key."""
+    model._add_star_tab()
+    _star_tab(model).navigable_check.click()
+    assert model.sim_params['stars'][0]['navigable'] is False
+
+
+def test_star_navigable_recheck_removes_key(model: Any) -> None:
+    """Re-checking navigable drops the key back to absent."""
+    model._add_star_tab()
+    check = _star_tab(model).navigable_check
+    check.click()
+    check.click()
+    assert 'navigable' not in model.sim_params['stars'][0]
+
+
+def test_star_catalog_error_toggle_writes_both_keys(model: Any) -> None:
+    """Enabling catalog error inserts both v and u keys; disabling removes them."""
+    model._add_star_tab()
+    check = _star_tab(model).catalog_error_check
+    check.click()
+    star = model.sim_params['stars'][0]
+    assert 'catalog_error_v' in star
+    assert 'catalog_error_u' in star
+    check.click()
+    assert 'catalog_error_v' not in star
+    assert 'catalog_error_u' not in star
+
+
+def test_star_catalog_error_spin_writes_value(model: Any) -> None:
+    """A catalog-error spin edit writes its own key once enabled."""
+    model._add_star_tab()
+    tab = _star_tab(model)
+    tab.catalog_error_check.click()
+    tab.catalog_error_v_spin.setValue(1.5)
+    assert model.sim_params['stars'][0]['catalog_error_v'] == 1.5
+
+
+def test_star_delta_mag_toggle_inserts_and_removes(model: Any) -> None:
+    """The variable-star enable inserts and removes the delta_mag key."""
+    model._add_star_tab()
+    check = _star_tab(model).delta_mag_check
+    check.click()
+    assert 'delta_mag' in model.sim_params['stars'][0]
+    check.click()
+    assert 'delta_mag' not in model.sim_params['stars'][0]
+
+
+def test_star_companion_toggle_inserts_and_removes(model: Any) -> None:
+    """The companion group inserts the map with its three keys and removes it."""
+    model._add_star_tab()
+    group = _star_tab(model).companion_group
+    group.setChecked(True)
+    assert set(model.sim_params['stars'][0]['companion']) == {'sep_px', 'delta_mag', 'angle_deg'}
+    group.setChecked(False)
+    assert 'companion' not in model.sim_params['stars'][0]
+
+
+def test_star_companion_spin_writes_sub_key(model: Any) -> None:
+    """A companion spin edit updates its own sub-key in the companion map."""
+    model._add_star_tab()
+    tab = _star_tab(model)
+    tab.companion_group.setChecked(True)
+    tab.companion_sep_spin.setValue(4.0)
+    assert model.sim_params['stars'][0]['companion']['sep_px'] == 4.0
+
+
+def test_star_scatter_toggle_inserts_and_removes(model: Any) -> None:
+    """The star-catalog-scatter checkbox inserts and removes the top-level key."""
+    model._star_scatter_check.click()
+    model._star_scatter_spin.setValue(0.5)
+    assert model.sim_params['star_catalog_scatter_px'] == 0.5
+    model._star_scatter_check.click()
+    assert 'star_catalog_scatter_px' not in model.sim_params
+
+
+def test_expected_toggle_inserts_and_removes(model: Any) -> None:
+    """The expected group inserts the block with a status and removes it."""
+    model._expected_group.setChecked(True)
+    assert model.sim_params['expected']['status'] == 'success'
+    model._expected_group.setChecked(False)
+    assert 'expected' not in model.sim_params
+
+
+def test_expected_tier_none_writes_null(model: Any) -> None:
+    """The confidence-tier (none) choice stores a null tier (assert status only)."""
+    model._expected_group.setChecked(True)
+    model._expected_tier_combo.setCurrentText('(none)')
+    assert model.sim_params['expected']['confidence_tier'] is None
+
+
+def test_expected_reason_line_edit_sets_and_clears(model: Any) -> None:
+    """The status-reason edit writes a non-empty token and drops an empty one."""
+    model._expected_group.setChecked(True)
+    model._expected_reason_edit.setText('no_signal_in_image')
+    assert model.sim_params['expected']['status_reason'] == 'no_signal_in_image'
+    model._expected_reason_edit.setText('')
+    assert 'status_reason' not in model.sim_params['expected']
+
+
+def test_load_full_scene_syncs_star_asymmetry_controls(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Loading the full scene populates the scene-level star controls."""
+    src = tmp_path / 'full.yaml'
+    save_sim_scene(_FULL_SCENE, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    assert model._star_scatter_check.isChecked() is True
+    assert model._star_scatter_spin.value() == 0.4
+    assert model._expected_group.isChecked() is True
+    assert model._expected_status_combo.currentText() == 'success'
+    assert model._expected_tier_combo.currentText() == 'high'
+
+
+def test_load_full_scene_syncs_confounder_star_tab(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """The confounder star's tab reflects its planted truth keys after load."""
+    src = tmp_path / 'full.yaml'
+    save_sim_scene(_FULL_SCENE, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    # S2 is the non-navigable confounder; find its tab by name.
+    s2_index = next(i for i, s in enumerate(model.sim_params['stars']) if s['name'] == 'S2')
+    tab_idx = model._find_tab_by_properties('star', s2_index)
+    assert tab_idx is not None
+    tab = model._tabs.widget(tab_idx)
+    assert tab.navigable_check.isChecked() is False
+    assert tab.catalog_error_check.isChecked() is True
+    assert tab.companion_group.isChecked() is True
+    assert tab.delta_mag_check.isChecked() is True

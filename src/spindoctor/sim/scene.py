@@ -294,10 +294,10 @@ def build_nav_params(sim_params: dict[str, Any]) -> dict[str, Any]:
     classified idealized, with every :data:`TRUTH_KEYS` entry stripped.  For
     bodies, a ``nav_override`` mapping is overlaid first and the key dropped,
     so the navigator sees the geometry it *believes* without learning the
-    true values underneath.  Objects marked non-navigable are dropped
-    entirely (the ``navigable`` flag itself lands with later phases; the
-    mechanism is in place).  All values are deep copies, so navigator-side
-    code cannot mutate the renderer's scene.
+    true values underneath.  An object flagged ``navigable: false`` is dropped
+    entirely, so a surviving object's flag is always true and carries no hidden
+    truth.  All values are deep copies, so navigator-side code cannot mutate the
+    renderer's scene.
 
     Parameters:
         sim_params: The full scene mapping (the renderer's input).

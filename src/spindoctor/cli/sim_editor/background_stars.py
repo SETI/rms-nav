@@ -12,6 +12,7 @@ from typing import Any
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
@@ -24,7 +25,14 @@ from spindoctor.cli.sim_editor.base import SimEditorBase
 
 
 class BackgroundStarsMixin(SimEditorBase):
-    """Builds and handles the background-sky (sky_counts) panel."""
+    """Builds and handles the background-sky (sky_counts) panel.
+
+    Alongside the ``sky_counts`` rows this panel carries the scene-level
+    ``star_catalog_scatter_px`` control: a truth-side per-star position-scatter
+    sigma that displaces every rendered star off its catalog position.  It sits
+    with the star-related global controls and follows the absent-key discipline
+    (enabled writes the key, unchecked leaves it absent).
+    """
 
     def _sky_counts(self) -> dict[str, Any]:
         """The scene's ``sky_counts`` block, created with defaults if absent."""
@@ -95,6 +103,27 @@ class BackgroundStarsMixin(SimEditorBase):
         self._sky_diffuse_spin.valueChanged.connect(self._on_sky_diffuse_spin)
         gen_layout.addRow('Sky diffuse floor (e-/px):', self._sky_diffuse_spin)
 
+        # Scene-level star catalog scatter (truth): a per-star Gaussian position
+        # sigma that displaces every rendered star off its catalog position.
+        # Absent-key discipline: enabled writes the top-level key, unchecked
+        # leaves it absent.
+        has_scatter = self.sim_params.get('star_catalog_scatter_px') is not None
+        self._star_scatter_check = QCheckBox('Star catalog scatter (px sigma)')
+        self._star_scatter_check.setChecked(has_scatter)
+        self._star_scatter_check.setToolTip(
+            'Displace every rendered star by a seeded Gaussian of this sigma off '
+            'its catalog position; unchecked leaves the key absent.'
+        )
+        self._star_scatter_spin = QDoubleSpinBox()
+        self._star_scatter_spin.setRange(0.0, 50.0)
+        self._star_scatter_spin.setDecimals(3)
+        self._star_scatter_spin.setSingleStep(0.1)
+        self._star_scatter_spin.setValue(float(self.sim_params.get('star_catalog_scatter_px', 0.0)))
+        self._star_scatter_spin.setEnabled(has_scatter)
+        self._star_scatter_check.clicked.connect(self._on_star_scatter_enabled)
+        self._star_scatter_spin.valueChanged.connect(self._on_star_scatter_value)
+        gen_layout.addRow(self._star_scatter_check, self._star_scatter_spin)
+
     def _on_sky_density_slider(self, value: int) -> None:
         """Sync the density spin box and store the value."""
         density = value / 10.0
@@ -126,3 +155,18 @@ class BackgroundStarsMixin(SimEditorBase):
         """Store the diffuse-sky floor."""
         self._sky_counts()['diffuse_e_per_px'] = value
         self._updater.request_update()
+
+    def _on_star_scatter_enabled(self, checked: bool) -> None:
+        """Insert or remove the scene-level star_catalog_scatter_px key."""
+        if checked:
+            self.sim_params['star_catalog_scatter_px'] = float(self._star_scatter_spin.value())
+        else:
+            self.sim_params.pop('star_catalog_scatter_px', None)
+        self._star_scatter_spin.setEnabled(checked)
+        self._updater.request_update()
+
+    def _on_star_scatter_value(self, value: float) -> None:
+        """Update the star-catalog-scatter sigma when the key is enabled."""
+        if 'star_catalog_scatter_px' in self.sim_params:
+            self.sim_params['star_catalog_scatter_px'] = float(value)
+            self._updater.request_update()

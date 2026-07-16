@@ -87,6 +87,8 @@ class SceneIoMixin(SimEditorBase):
             'instrument_config',
             'midtime_utc',
             'fit_camera_rotation',
+            'star_catalog_scatter_px',
+            'expected',
         ):
             if passthrough_key in params:
                 self.sim_params[passthrough_key] = params[passthrough_key]
@@ -178,6 +180,36 @@ class SceneIoMixin(SimEditorBase):
         self._sky_density_slider.blockSignals(True)
         self._sky_density_slider.setValue(int(float(sky.get('density_factor', 0.0)) * 10))
         self._sky_density_slider.blockSignals(False)
+        # Sync the scene-level star-catalog-scatter control.
+        has_scatter = self.sim_params.get('star_catalog_scatter_px') is not None
+        self._star_scatter_check.blockSignals(True)
+        self._star_scatter_check.setChecked(has_scatter)
+        self._star_scatter_check.blockSignals(False)
+        self._star_scatter_spin.blockSignals(True)
+        self._star_scatter_spin.setValue(float(self.sim_params.get('star_catalog_scatter_px', 0.0)))
+        self._star_scatter_spin.setEnabled(has_scatter)
+        self._star_scatter_spin.blockSignals(False)
+        # Sync the test-only expected-outcome block.
+        expected = self.sim_params.get('expected')
+        has_expected = isinstance(expected, dict)
+        block: dict[str, Any] = expected if isinstance(expected, dict) else {}
+        self._expected_group.blockSignals(True)
+        self._expected_group.setChecked(has_expected)
+        self._expected_group.blockSignals(False)
+        self._expected_status_combo.blockSignals(True)
+        status_index = self._expected_status_combo.findText(str(block.get('status', 'success')))
+        if status_index >= 0:
+            self._expected_status_combo.setCurrentIndex(status_index)
+        self._expected_status_combo.blockSignals(False)
+        self._expected_tier_combo.blockSignals(True)
+        tier = block.get('confidence_tier')
+        tier_index = self._expected_tier_combo.findText('(none)' if tier is None else str(tier))
+        if tier_index >= 0:
+            self._expected_tier_combo.setCurrentIndex(tier_index)
+        self._expected_tier_combo.blockSignals(False)
+        self._expected_reason_edit.blockSignals(True)
+        self._expected_reason_edit.setText(str(block.get('status_reason') or ''))
+        self._expected_reason_edit.blockSignals(False)
         # Rebuild tabs
         self._rebuild_dynamic_tabs()
         self._update_tab_titles()
