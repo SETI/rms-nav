@@ -159,6 +159,7 @@ def main() -> None:
     obs_class = inst_name_to_obs_class(inst_name)
 
     if arguments.output_cloud_tasks_file:
+        MAIN_LOGGER.info('Writing cloud_tasks file to %s', arguments.output_cloud_tasks_file)
         tasks_json = []
         for imagefile_idx, imagefiles in enumerate(
             DATASET.yield_image_files_from_arguments(arguments)
