@@ -431,11 +431,11 @@ def validate_sim_params(
     _check_optional_bool(
         sim_params.get('fit_camera_rotation'), 'fit_camera_rotation', source=source
     )
-    _check_optional_mapping(sim_params.get('noise'), 'noise', source=source)
+    _check_noise(sim_params.get('noise'), source=source)
     _check_optional_mapping(sim_params.get('instrument_config'), 'instrument_config', source=source)
     _check_optional_positive_int(sim_params.get('oversample'), 'oversample', source=source)
     _check_optics(sim_params.get('optics'), source=source)
-    _check_detector(sim_params.get('detector'), source=source)
+    _check_detector(sim_params.get('detector'), instrument=instrument, source=source)
     _check_artifacts(sim_params.get('artifacts'), source=source)
     _check_spk_error(sim_params.get('spk_error'), source=source)
 
@@ -757,6 +757,45 @@ def _check_stray_light_block(value: Any, *, source: str) -> None:
         )
 
 
+# The complete inventory of the truth-side noise block: the detector stage's
+# stochastic / structured knobs plus the telemetry stage's missing-data rate.
+# Unknown noise keys fail validation, so a typo cannot silently render the
+# clean floor.  'poisson' is the only boolean; 'bloom_length' is an integer;
+# 'vidicon' is a sub-mapping with its own inventory; everything else is a
+# non-negative number.
+_NOISE_BOOL_KEYS: frozenset[str] = frozenset({'poisson'})
+_NOISE_INT_KEYS: frozenset[str] = frozenset({'bloom_length'})
+_NOISE_NUMBER_KEYS: frozenset[str] = frozenset(
+    {
+        'read_noise_dn',
+        'bias_dn',
+        'cosmic_ray_rate_per_sec',
+        'missing_data_rate',
+        'signal_full_scale_frac',
+        'pixel_area_cm2',
+        'dark_current_e_per_sec',
+        'hot_pixel_fraction',
+        'hot_pixel_amplitude_e',
+        'hot_pixel_column_factor',
+        'banding_amplitude_e',
+        'banding_period_px',
+        'bias_pedestal_sigma_dn',
+        'bias_row_gradient_dn',
+        'bias_col_gradient_dn',
+    }
+)
+_NOISE_KEYS: frozenset[str] = (
+    _NOISE_BOOL_KEYS | _NOISE_INT_KEYS | _NOISE_NUMBER_KEYS | frozenset({'vidicon'})
+)
+_VIDICON_NOISE_KEYS: frozenset[str] = frozenset(
+    {
+        'read_noise_line_dn',
+        'read_noise_pixel_dn',
+        'coherent_amplitude_dn',
+        'coherent_period_px',
+    }
+)
+
 # The detector block selects the electron-chain gain state, the detector model
 # (CCD electron chain or the Voyager vidicon DN path), the exposure the well
 # fraction references, and the ADC quantization sub-mode.  Per-instrument
@@ -773,15 +812,53 @@ _QUANTIZATION_MODES: frozenset[str] = frozenset({'exact', 'uneven_12bit', '8bit'
 _ARTIFACTS_KEYS: frozenset[str] = frozenset({'instrument_defaults'})
 
 
-def _check_detector(value: Any, *, source: str) -> None:
+def _check_noise(value: Any, *, source: str) -> None:
+    """Validate the scene-level ``noise`` block against its full key inventory.
+
+    Parameters:
+        value: The ``noise`` mapping, or None when the block is absent.
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: On any unknown or mistyped noise field.
+    """
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(f'{source}: noise must be a mapping when present')
+    unknown = set(value) - _NOISE_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{source}: noise: unknown keys: {sorted(unknown)}')
+    for key in _NOISE_BOOL_KEYS:
+        _check_optional_bool(value.get(key), f'noise.{key}', source=source)
+    for key in _NOISE_INT_KEYS:
+        _check_optional_nonnegative_int(value.get(key), f'noise.{key}', source=source)
+    for key in _NOISE_NUMBER_KEYS:
+        _check_optional_nonnegative_number(value.get(key), f'noise.{key}', source=source)
+    vidicon = value.get('vidicon')
+    if vidicon is None:
+        return
+    if not isinstance(vidicon, dict):
+        raise SimSceneValidationError(f'{source}: noise.vidicon must be a mapping when present')
+    unknown = set(vidicon) - _VIDICON_NOISE_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{source}: noise.vidicon: unknown keys: {sorted(unknown)}')
+    for key in _VIDICON_NOISE_KEYS:
+        _check_optional_nonnegative_number(vidicon.get(key), f'noise.vidicon.{key}', source=source)
+
+
+def _check_detector(value: Any, *, instrument: str, source: str) -> None:
     """Validate the scene-level ``detector`` block's field types.
 
     Parameters:
         value: The ``detector`` mapping, or None when the block is absent.
+        instrument: The scene's (already validated) instrument name, used to
+            check the selected gain state against the instrument's catalog.
         source: Label used in error messages.
 
     Raises:
-        SimSceneValidationError: On any unknown or invalid detector field.
+        SimSceneValidationError: On any unknown or invalid detector field,
+            including a gain state the instrument does not catalogue.
     """
     if value is None:
         return
@@ -791,9 +868,21 @@ def _check_detector(value: Any, *, source: str) -> None:
     if unknown:
         raise SimSceneValidationError(f'{source}: detector: unknown keys: {sorted(unknown)}')
     if value.get('gain_state') is not None:
-        _require_int(
+        gain_state = _require_int(
             {'gain_state': value['gain_state']}, 'gain_state', source=f'{source}: detector'
         )
+        # A gain state the instrument does not catalogue fails here, at
+        # validation, with the catalogued alternatives in the message; the
+        # render-time resolver keeps its own guard as a backstop for scenes
+        # that bypass validation.
+        from spindoctor.sim.forward.artifacts_catalog import resolve_detector_defaults
+
+        table = resolve_detector_defaults(instrument).get('gain_e_per_dn_by_state') or {0: 1.0}
+        if gain_state not in table:
+            raise SimSceneValidationError(
+                f'{source}: detector.gain_state {gain_state} is not catalogued for '
+                f'instrument {instrument!r}; available states: {sorted(table)}'
+            )
     model = value.get('detector_model')
     if model is not None and model not in _DETECTOR_MODELS:
         raise SimSceneValidationError(

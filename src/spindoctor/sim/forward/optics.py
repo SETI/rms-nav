@@ -199,7 +199,7 @@ def apply_optics(
 ) -> None:
     """Optics stage: apply the scene's optical-path effects in place.
 
-    Runs the distortion, PSF, smear, ghost, and stray-light sub-stages in the
+    Runs the smear, distortion, PSF, ghost, and stray-light sub-stages in the
     fixed internal order documented at the module level.  A sub-stage whose
     block is absent from the scene ``optics`` mapping contributes nothing.
 

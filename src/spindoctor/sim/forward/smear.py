@@ -136,5 +136,7 @@ def apply_smear(
         if kernel is not None:
             layer = fftconvolve(layer, kernel, mode='same')
         result += layer
-    np.clip(result, 0.0, 1.0, out=result)
+    # No clip: the signal plane is unclipped through the optics stage on both
+    # smear paths (point-mass star deposits legitimately exceed 1.0 before the
+    # PSF spreads them); the detector conversion clips after the downsample.
     frame.signal[:] = result

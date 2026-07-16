@@ -227,13 +227,17 @@ def compose_scene_radiance(
                 body_params_copy[axis_key] = float(axis_val) * os
         bodies_with_ranges.append(body_params_copy)
 
-    # Combine rings and bodies, sort by range (far to near).  Rings sort by
-    # their hint-unit 'range' key against bodies' physical 'range_km'; the
-    # comparison is meaningful only because ring defaults start at 1000
-    # (dies with the ring-system rework).
+    # Combine rings and bodies, sort by range (far to near).  A ring that
+    # carries a physical 'range_km' (spk_error scenes require one on every
+    # ring) sorts by it against the bodies' physical 'range_km', so mixed
+    # scenes order physically.  A ring without one falls back to the
+    # hint-unit 'range' key; that comparison is meaningful only because ring
+    # defaults start at 1000 (dies with the ring-system rework).
     render_items: list[tuple[float, str, Any, int]] = []
     for idx, ring_scaled in enumerate(rings_scaled):
-        render_items.append((ring_scaled['range'], 'ring', ring_scaled, idx))
+        ring_range_km = ring_scaled.get('range_km')
+        sort_range = float(ring_range_km) if ring_range_km is not None else ring_scaled['range']
+        render_items.append((sort_range, 'ring', ring_scaled, idx))
     for idx, body_params in enumerate(bodies_with_ranges):
         render_items.append((body_params['range_km'], 'body', body_params, idx))
 

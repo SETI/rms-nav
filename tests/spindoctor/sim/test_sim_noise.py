@@ -121,6 +121,20 @@ def test_exact_quantization_rounds_to_integer() -> None:
     assert np.array_equal(out, np.array([[10.0, 11.0]]))
 
 
+def test_8bit_quantization_rounds_and_clips_at_255() -> None:
+    """The 8-bit sub-mode rounds to integer DN and clips at the 255 code ceiling."""
+    dn = np.array([[10.4, 254.6, 300.0]], dtype=np.float64)
+    out = quantize_dn(dn, mode='8bit', saturation_dn=4095.0)
+    assert np.array_equal(out, np.array([[10.0, 255.0, 255.0]]))
+
+
+def test_8bit_ceiling_is_independent_of_saturation_dn() -> None:
+    """A deeper detector's saturation_dn does not raise the 8-bit code ceiling."""
+    dn = np.array([[1000.0]], dtype=np.float64)
+    out = quantize_dn(dn, mode='8bit', saturation_dn=65535.0)
+    assert float(out[0, 0]) == 255.0
+
+
 def test_uneven_12bit_snaps_to_power_of_two_boundaries() -> None:
     """The uneven-12bit sub-mode concentrates codes at power-of-two boundaries."""
     dn = np.array([[255.0, 256.0, 257.0]], dtype=np.float64)
@@ -164,6 +178,48 @@ def test_hot_pixels_elevate_a_sparse_population() -> None:
         rng=np.random.default_rng(3),
     )
     assert int((electrons > 0.0).sum()) > 0
+
+
+def test_hot_pixel_warm_column_is_a_total_charge_fraction() -> None:
+    """The warm-column integral is bounded by column_factor times the charge.
+
+    The column contamination is a fraction of the hot pixel's TOTAL charge
+    spread along the column, not a per-pixel amplitude, so the streak stays
+    conservative and frame-size-invariant.
+    """
+    electrons = np.zeros((512, 512), dtype=np.float64)
+    column_factor = 0.3
+    add_hot_pixels(
+        electrons,
+        fraction=1.0 / (512 * 512),  # exactly one hot pixel
+        amplitude_e=4.0e4,
+        column_factor=column_factor,
+        rng=np.random.default_rng(7),
+    )
+    hot_v, hot_u = np.unravel_index(int(np.argmax(electrons)), electrons.shape)
+    hot_charge = float(electrons[hot_v, hot_u])
+    column_integral = float(electrons[:hot_v, hot_u].sum())
+    assert hot_charge > 0.0
+    assert column_integral > 0.0
+    assert column_integral <= column_factor * hot_charge + 1e-6
+
+
+def test_hot_pixel_warm_column_is_frame_size_invariant() -> None:
+    """The same column_factor bleeds the same total charge at any frame height."""
+    integrals = []
+    for size in (128, 512):
+        electrons = np.zeros((size, size), dtype=np.float64)
+        add_hot_pixels(
+            electrons,
+            fraction=1.0 / (size * size),
+            amplitude_e=4.0e4,
+            column_factor=0.3,
+            rng=np.random.default_rng(7),
+        )
+        hot_v, hot_u = np.unravel_index(int(np.argmax(electrons)), electrons.shape)
+        hot_charge = float(electrons[hot_v, hot_u])
+        integrals.append(float(electrons[:hot_v, hot_u].sum()) / hot_charge)
+    assert abs(integrals[0] - integrals[1]) < 1e-9
 
 
 def test_hot_pixels_disabled_at_zero_fraction() -> None:

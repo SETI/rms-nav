@@ -114,7 +114,9 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'dark_current_e_per_sec': 5.0,  # 5.2 interim (RBI-dominated dark)
         'hot_pixel_fraction': 2.0e-3,  # 5.2 interim (~0.15-0.28% of pixels)
         'hot_pixel_amplitude_e': 4.0e4,  # 5.2 interim (near full well)
-        'hot_pixel_column_factor': 0.3,  # 5.2 interim (warm column above a hot pixel)
+        # 5.2 interim: total-charge fraction bled into the warm column above a
+        # hot pixel (the streak integral, not a per-pixel amplitude).
+        'hot_pixel_column_factor': 0.3,
         'banding_amplitude_e': 30.0,  # 5.2 interim (~30 e- NAC 2 Hz)
         'banding_period_px': 64.0,  # 5.2 interim (line-readout-rate period)
         'bias_pedestal_sigma_dn': 2.0,  # 5.2 interim (per-image pedestal jitter)
@@ -157,7 +159,8 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'dark_current_e_per_sec': 10.0,  # 5.4 interim (RTG-driven dark spikes)
         'hot_pixel_fraction': 3.0e-3,
         'hot_pixel_amplitude_e': 4.0e4,
-        'hot_pixel_column_factor': 0.5,  # 5.4 interim (early-blooming columns)
+        # 5.4 interim (early-blooming columns; total-charge fraction).
+        'hot_pixel_column_factor': 0.5,
         'banding_amplitude_e': 65.0,  # 5.4 interim (~0.35 DN at gain 2 -> ~65 e-)
         'banding_period_px': 42.0,  # 5.4 (2400 Hz supply-noise comb every 42 px)
         'bias_pedestal_sigma_dn': 1.0,

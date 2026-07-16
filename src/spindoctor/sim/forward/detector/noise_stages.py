@@ -73,7 +73,9 @@ def add_hot_pixels(
         fraction: Fraction of pixels that are hot.
         amplitude_e: Hot-pixel amplitude scale in electrons (exponentially
             distributed about this scale, so a few are very hot).
-        column_factor: Fraction of a hot pixel's charge bled up its column.
+        column_factor: Fraction of a hot pixel's TOTAL charge bled up its
+            column: the warm streak's integral is ``column_factor`` times the
+            hot pixel's charge, independent of the frame height.
         rng: The stage's seeded generator.
     """
     if fraction <= 0.0 or amplitude_e <= 0.0:
@@ -88,13 +90,17 @@ def add_hot_pixels(
     np.add.at(electrons, (hot_v, hot_u), amps)
     if column_factor <= 0.0:
         return
-    # Warm column: each hot pixel bleeds a fraction of its charge onto the
-    # pixels above it (decreasing toward the read register), a CCD readout scar.
+    # Warm column: each hot pixel bleeds charge onto the pixels above it
+    # (decreasing toward the read register), a CCD readout scar.  The linear
+    # ramp is normalized so its INTEGRAL is column_factor * amp: the column
+    # carries a fixed fraction of the hot pixel's charge however tall the
+    # frame is, keeping the contamination conservative and size-invariant.
     for v, u, amp in zip(hot_v.tolist(), hot_u.tolist(), amps.tolist(), strict=True):
         if v <= 0:
             continue
-        streak = column_factor * amp * np.linspace(1.0, 0.0, v, endpoint=False)
-        electrons[:v, u] += streak
+        weights = np.linspace(1.0, 0.0, v, endpoint=False)
+        weights /= weights.sum()
+        electrons[:v, u] += column_factor * amp * weights
 
 
 def add_banding(

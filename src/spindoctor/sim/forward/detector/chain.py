@@ -84,10 +84,11 @@ def quantize_dn(dn: NDArrayFloatType, *, mode: str, saturation_dn: float) -> NDA
 
     Parameters:
         dn: The DN image (float).
-        mode: 'exact' (round to integer, uniform bins), '8bit' (integer bins for
-            an 8-bit ADC), 'uneven_12bit' (integer bins with histogram spikes at
-            the power-of-two bit boundaries), or 'sqrt_lut' (square-root
-            companding to 8 bits and back, leaving a signal-dependent residual).
+        mode: 'exact' (round to integer, uniform bins), '8bit' (integer bins
+            with a hard 255 code ceiling), 'uneven_12bit' (integer bins with
+            histogram spikes at the power-of-two bit boundaries), or
+            'sqrt_lut' (square-root companding to 8 bits and back, leaving a
+            signal-dependent residual).
         saturation_dn: The ADC ceiling, used to scale the companding LUT.
 
     Returns:
@@ -96,8 +97,13 @@ def quantize_dn(dn: NDArrayFloatType, *, mode: str, saturation_dn: float) -> NDA
     Raises:
         ValueError: If ``mode`` is not a known quantization sub-mode.
     """
-    if mode in ('exact', '8bit'):
+    if mode == 'exact':
         return np.rint(dn)
+    if mode == '8bit':
+        # An 8-bit output word: integer DN clipped at the 255 code ceiling.
+        # The ceiling is the word width, not the scene's saturation_dn, so an
+        # 8-bit mode on a deeper detector still tops out at 255.
+        return np.clip(np.rint(dn), 0.0, 255.0)
     if mode == 'uneven_12bit':
         # Uneven bit weights concentrate codes at the power-of-two carry
         # boundaries: values within one DN of a 2^m boundary snap to it, which
