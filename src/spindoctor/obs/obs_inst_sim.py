@@ -94,7 +94,6 @@ class ObsSim(ObsSnapshotInst):
         snapshot.sim_offset_v = offset_v
         snapshot.sim_offset_u = offset_u
         snapshot.sim_time = float(sim_params.get('time', 0.0))
-        snapshot.sim_epoch = float(sim_params.get('ring_epoch', 0.0))
 
         # The information boundary: nav_params is sim_params with every
         # truth key stripped and per-body nav_override overlaid (the
