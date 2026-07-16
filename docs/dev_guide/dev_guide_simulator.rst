@@ -70,16 +70,25 @@ scene -- including every planted error, noise knob, and contaminant. It lives in
    * - ``star.py``
      - Star and background-star-field renderers.
    * - ``optics.py``
-     - Optical-path effects; carries the smooth stray-light field today.
-   * - ``detector.py``
-     - Signal to noisy detector counts (Poisson, read noise, bias, cosmic
-       rays, saturation and bloom).
+     - The optical-path stage: it runs motion smear, residual distortion, the
+       whole-scene PSF, ghost reflections, and the stray-light field in a fixed
+       internal order (see :ref:`sim-optics-stage`). The smear, distortion,
+       PSF, and ghost sub-stages live in the sibling modules ``smear.py``,
+       ``distortion.py``, ``psf.py``, and ``ghosts.py``.
+   * - ``detector/``
+     - The detector stage as a package: the CCD electron unit chain
+       (``chain.py``), the resolved-parameter view (``params.py``), and the
+       stochastic / structured noise sub-effects (``noise_stages.py`` -- dark,
+       hot pixels, banding, bias structure, cosmic rays). Carries the vidicon
+       DN path and the calibrated-I/F inversion (see :ref:`sim-detector-stage`).
    * - ``telemetry.py``
      - Transmission loss; carries the per-pixel missing-data markers today.
    * - ``atmosphere.py``
      - Reserved slot for haze-limb (Titan-class) rendering; currently empty.
    * - ``artifacts_catalog.py``
-     - Reserved slot for per-instrument artifact defaults; currently empty.
+     - Per-instrument PSF, distortion-residual, and detector-chain defaults the
+       ``instrument_defaults`` switch turns on (see
+       :ref:`sim-artifacts-catalog`).
 
 **The navigator side** predicts what the scene *should* look like, exactly the
 way the SPICE-backed models predict a real frame. Its renderers live under
@@ -195,18 +204,23 @@ scene (:mod:`spindoctor.sim.forward.pipeline`):
        truth (star records, masks, inventory, z-order) into ``frame.truth``.
    * - ``optics``
      - :func:`~spindoctor.sim.forward.optics.apply_optics`
-     - Adds the smooth stray-light field (linear ramp or radial bump) when the
-       scene carries a ``stray_light`` block.
+     - Applies the optical-path effects in a fixed internal order -- motion
+       smear, residual distortion, the whole-scene PSF, ghost reflections, then
+       the stray-light field -- each contributing only when its ``optics``
+       sub-block is present (see :ref:`sim-optics-stage`).
    * - ``downsample``
      - :func:`~spindoctor.sim.forward.stages.downsample_to_detector`
-     - Box-downsamples the oversampled planes to the detector grid; a no-op at
-       the current fixed ``oversample == 1`` (it holds the pipeline slot).
+     - Box-downsamples the oversampled planes to the detector grid. A scene
+       with an active PSF renders on a 4x oversampled grid and downsamples here;
+       with no PSF the factor is 1 and this is a no-op.
    * - ``detector``
      - :func:`~spindoctor.sim.forward.detector.apply_detector`
-     - Converts the composed [0, 1] signal to DN and applies Poisson shot
-       noise, Gaussian read noise, the bias pedestal, cosmic-ray spikes,
-       column bloom, and the full-well clip, all keyed to the emulated
-       instrument's configuration.
+     - Runs the electron unit chain: converts the composed [0, 1] signal to
+       electrons through the exposure, applies Poisson shot noise, full-well
+       bloom, read noise, banding, gain to DN, bias structure, quantization, and
+       the ADC clip (see :ref:`sim-detector-stage`). The Voyager vidicon takes
+       the DN-domain path; a calibrated instrument inverts the calibration
+       transform afterward.
    * - ``telemetry``
      - :func:`~spindoctor.sim.forward.telemetry.apply_telemetry`
      - Applies the per-pixel missing-data markers.
@@ -281,6 +295,189 @@ calibration transform, so they carry propagated shot/read noise and quantization
 texture in I/F units. A scene can pin or override individual instrument settings
 with
 ``instrument_config`` (see :ref:`sim-instrument-config`).
+
+.. _sim-optics-stage:
+
+The optics stage
+================
+
+The optics stage runs on the oversampled radiance image in a fixed internal
+order that mirrors image formation
+(:func:`~spindoctor.sim.forward.optics.apply_optics`). Each sub-stage
+contributes only when its ``optics`` sub-block is present, so a scene names
+exactly the optical effects it wants and leaves the rest at the floor.
+
+1. **Motion smear** (:mod:`~spindoctor.sim.forward.smear`) averages the
+   radiance over the exposure along the pointing drift. It runs first, while
+   the per-object-class radiance layers are still separable, so the optics
+   below form the image of the time-averaged radiance. A single
+   ``object_class: all`` entry smears the whole scene; several entries give
+   differential smear, where each class carries its own drift vector.
+2. **Residual distortion** (:mod:`~spindoctor.sim.forward.distortion`) warps
+   the geometric image by the low-order radial polynomial (``k1``, ``k2`` about
+   the optical centre) plus an optional seeded non-radial wander -- the field
+   error left after the navigator applies each camera's known distortion model.
+   A limb fitted at the frame edge then disagrees with a ring fitted through the
+   centre by the differential residual, which the navigator gets no model to
+   remove.
+3. **Whole-scene PSF** (:mod:`~spindoctor.sim.forward.psf`) convolves the image
+   by a core-Gaussian-plus-Moffat-wing kernel, so the limb gradient, the
+   ring-edge gradient, and every star shape inherit one profile. The core is
+   elliptical (``sigma_v`` may differ from ``sigma_u``); ``w`` is exactly the
+   fraction of the kernel's energy in the isotropic wing, and each term is
+   normalized so the kernel conserves flux. The Cassini cameras get a wider
+   truncation window for their documented long wings.
+4. **Ghost reflections** (:mod:`~spindoctor.sim.forward.ghosts`) add displaced,
+   defocused, low-amplitude copies of the formed focal-plane image (internal
+   reflections). Each ghost copies the pre-ghost signal, so ghosts do not
+   reflect one another.
+5. **Stray light** adds the smooth low-frequency scattered-light field (a linear
+   ramp or a radial bump) last, before the detector stage. It is additive, so it
+   brightens dark sky as well as lit features; the navigator's source-image
+   background filter is meant to remove it.
+
+Only the distortion non-radial field draws randomness, and it derives its own
+seeded stream from the scene seed, so the optics stage does not consume the
+pipeline generator. A sub-stage whose block is a true no-op (all-zero radial
+distortion, an amplitude-0 ghost) renders bit-identically to one without it.
+
+.. _sim-detector-stage:
+
+The detector stage
+==================
+
+The detector stage (:mod:`spindoctor.sim.forward.detector`, a package) is the
+normative unit chain of the forward model. For a CCD instrument the composed
+intensive signal passes through the electron unit chain in
+:func:`~spindoctor.sim.forward.detector.chain.apply_detector`:
+
+1. **Signal to electrons.** The intensive [0, 1] signal is scaled to electrons
+   through ``signal_full_scale_frac * full_well_e * (exposure_sec /
+   exposure_ref_sec)``.
+2. **Point sources.** The point-source electron plane (``frame.point_e``) is
+   added after the intensive conversion and before Poisson, so point sources
+   never pass through the signal scale. (Star deposition into ``point_e`` is a
+   later fidelity step; today the radiance stage still draws stars PSF-spread in
+   signal units, so the plane stays zeroed.)
+3. **Dark current, then Poisson.** A dark pedestal accumulates over the
+   exposure before the shot term, so the shot noise grows with the dark signal.
+   Poisson shot noise then acts on the electron image.
+4. **Hot pixels and full-well bloom.** Hot pixels are stamped, then charge above
+   ``full_well_e`` spills along the column up to ``bloom_length`` pixels each
+   way and the image is capped at the well. A camera's physical saturation
+   therefore emerges from ``full_well_e / gain_e_per_dn`` (below the ADC ceiling
+   for Cassini), not from the ADC clip.
+5. **Cosmic rays and read noise.** Cosmic rays deposit above the well after the
+   bloom cap, so they reach the ADC ceiling and land on the orchestrator's
+   masks. Gaussian read noise is added in electrons.
+6. **Banding, gain to DN, bias structure.** Coherent banding is added in
+   electrons; the image is divided by ``gain_e_per_dn`` and offset by the bias
+   pedestal into DN; low-order bias structure (per-image pedestal jitter,
+   row/column gradients) is added in DN.
+7. **Quantize and clip.** The DN image is quantized by the selected ADC sub-mode
+   and clipped at ``saturation_dn``.
+
+The stochastic and structured sub-effects (dark, hot pixels, banding, bias
+structure, cosmic rays) live in
+:mod:`~spindoctor.sim.forward.detector.noise_stages`; the chain draws each one
+an independent RNG stream from the scene seed, so toggling one never perturbs
+another's realization. The deterministic signal-to-DN conversion always runs --
+it is what makes a DN frame -- while each stochastic sub-effect is a no-op when
+its gating amplitude, fraction, or rate is zero.
+
+**Quantization sub-modes.** ``exact`` rounds to integer DN (uniform bins);
+``8bit`` bins for an 8-bit ADC; ``uneven_12bit`` snaps values near the
+power-of-two carry boundaries to reproduce the histogram spikes of an ADC with
+unequal bit weights; ``sqrt_lut`` companding encodes to 8 bits through a
+square-root LUT and back, leaving a signal-dependent quantization residual.
+
+**The vidicon path.** The Voyager vidicon
+(:func:`~spindoctor.sim.forward.detector.chain.apply_detector`, vidicon branch)
+is not photon-noise dominated, so it skips the electron conversion: the signal
+maps straight to the 8-bit DN full scale and the noise is applied in DN -- a
+line-correlated read-noise term (a per-line offset plus a within-line white
+component) and a faint vertical coherent periodic component -- then 8-bit
+quantization.
+
+**The calibrated-I/F path.** A calibrated (``coiss_calib_*``) instrument renders
+through the full DN chain and then inverts the calibration transform: the bias
+and dark pedestals are subtracted before the exposure divide (matching the real
+pipeline), so a calibrated frame carries no spurious 1/exposure pedestal and
+comes out in I/F units with propagated shot / read noise and quantization
+texture. The calibration scale is derived so a noise-free signal of 1.0 at the
+reference exposure round-trips to I/F 1.0.
+
+:func:`~spindoctor.sim.forward.detector.params.resolve_detector_params`
+collapses the emulated instrument's config block, the per-instrument catalog
+defaults, the scene ``detector`` / ``noise`` blocks, and the
+``artifacts.instrument_defaults`` switch into one flat
+:class:`~spindoctor.sim.forward.detector.params.DetectorParams` view the chain
+reads. Resolution precedence, highest first: an explicit scene key (``detector``
+block, then ``noise`` block), then the catalog value when ``instrument_defaults``
+is on, then the disabled floor -- the physical-chain artifacts default to zero,
+so an unconfigured scene renders a clean DN frame. A scene that selects a gain
+state the instrument does not catalogue is a validation error, not a silent
+guess.
+
+.. _sim-artifacts-catalog:
+
+The instrument-defaults switch and the artifacts catalog
+========================================================
+
+``artifacts: {instrument_defaults: true}`` opts the whole scene into the
+emulated camera's physical signal chain at catalog values: the whole-scene PSF
+kernel and the residual-distortion amplitude
+(:func:`~spindoctor.sim.forward.optics.instrument_defaults_on` gates the optics
+side), and the detector electron-chain read noise, dark current, hot pixels,
+banding, and bias structure (the detector side reads the same switch). It turns
+on only the *physical* chain: the per-mode loss incidences (whole-line
+telemetry loss, compression-block dropouts, and the like) stay at zero, so a
+defaults scene is a clean-but-realistic frame, not a damaged one.
+
+:mod:`spindoctor.sim.forward.artifacts_catalog` is the single home for those
+per-instrument values: ``PSF_KERNELS`` (core sigma and wing parameters),
+``DISTORTION_RESIDUAL_RMS_PX`` (the residual field error), and
+``DETECTOR_DEFAULTS`` (the full electron-chain, gain-table, read-noise, and
+vidicon numbers). Every value is provenance-tagged in a comment beside it, and
+every value is interim -- sized from published FWHMs, gain tables, and
+documented residual-error bounds, pending the per-instrument measurement passes
+-- so the wing parameters and noise amplitudes are the first quantities the
+realism-match pass revisits. The calibrated Cassini instrument names alias their
+raw entries, and ``generic`` (alias ``sim``) is an instrument-agnostic ideal
+12-bit detector whose electron well equals its DN depth at unit gain.
+
+.. _sim-floor:
+
+The self-consistency floor
+==========================
+
+With no ``optics``, ``noise``, ``detector``, or ``artifacts`` block a scene
+renders the *self-consistency floor*: the detector converts the composed signal
+to DN and nothing else acts -- no PSF, no shot or read noise, no dark, hot
+pixels, banding, bias structure, distortion, smear, ghosts, or stray light. Each
+effect is off unless asked for, and a single-variable sweep relies on every
+other block staying absent so it attributes error to the one effect it varies.
+The floor's matching PSF configuration is ``optics: {psf: {match_navigator:
+true}}``, which the validator resolves into the navigator's own model -- a pure
+Gaussian at the emulated instrument's ``star_psf_sigma``, no Moffat wing, no
+field variation -- so the image-side PSF equals the navigator-side PSF exactly
+and the only residual is the one the scene plants elsewhere.
+
+.. _sim-perf-budget:
+
+The render performance budget
+=============================
+
+A 512x512 scene with a whole-scene PSF plus the full detector stack at
+oversample 4 must render in under 2 s single-core, and a 1024x1024
+Cassini-class scene in under 8 s (``tests/integration/test_sim_perf.py``). The
+budget is a *cold-render* budget: the render caches are cleared so the timed
+render pays the kernel-build and compile costs a first render pays. The harness
+pins itself: it sets the process CPU affinity to one core and caps the
+BLAS/OpenMP thread-count environment variables for the duration, so an unpinned
+numpy FFT cannot silently multithread and fake the budget. Under heavy machine
+load the timed render can exceed the budget purely from contention; a failure is
+reported and investigated, not blessed by raising the budget.
 
 Scene ingredients
 =================
@@ -548,14 +745,37 @@ Top-level fields
      - Brightness power-law exponent of the background-star field.
    * - ``noise``
      - dict
-     - instrument
+     - off
      - truth
      - Detector-noise block (see :ref:`sim-noise`).
-   * - ``stray_light``
+   * - ``oversample``
+     - int
+     - auto
+     - truth
+     - Pins the render oversampling factor; omit to let the renderer choose (4
+       with an active PSF, else 1).
+   * - ``optics``
      - dict
      - off
      - truth
-     - Stray-light block (see :ref:`sim-stray-light`).
+     - Optical-path block: PSF, smear, distortion, ghosts, stray light (see
+       :ref:`sim-optics`).
+   * - ``spk_error``
+     - dict
+     - off
+     - truth
+     - Planted spacecraft-ephemeris parallax error (see :ref:`sim-spk-error`).
+   * - ``detector``
+     - dict
+     - off
+     - truth
+     - Detector-chain override: gain state, detector model, exposure reference
+       (see :ref:`sim-detector-block`).
+   * - ``artifacts``
+     - dict
+     - off
+     - truth
+     - Physical-chain opt-in switch (see :ref:`sim-artifacts-block`).
    * - ``shade_solid_rings``
      - bool
      - none
@@ -724,9 +944,10 @@ navigation free of a constant half-pixel bias.
 Detector-noise block
 --------------------
 
-The optional ``noise`` dict (truth-side) overrides the emulated instrument's
-detector defaults. The detector stage consumes most of it; the missing-data
-markers are applied by the telemetry stage.
+The optional ``noise`` dict (truth-side) pins the truth-side detector noise the
+scene plants. The detector stage consumes most of it; the missing-data markers
+are applied by the telemetry stage. Each field is off at the floor unless the
+block sets it (or ``artifacts.instrument_defaults`` turns on the catalog chain).
 
 .. list-table::
    :widths: 30 12 12 46
@@ -738,7 +959,7 @@ markers are applied by the telemetry stage.
      - Meaning
    * - ``poisson``
      - bool
-     - True
+     - False
      - Apply Poisson shot noise to the signal.
    * - ``read_noise_dn``
      - float
@@ -762,16 +983,126 @@ Saturation clips at the instrument's full-well DN after noise; cameras with
 documented column bloom can carry a ``bloom_length`` that spreads saturated
 excess along the column.
 
+.. _sim-optics:
+
+Optics block
+------------
+
+The optional ``optics`` dict (truth-side) carries the optical-path sub-blocks
+the optics stage applies in its fixed internal order (see
+:ref:`sim-optics-stage`). Every sub-block is optional and absent by default; a
+sub-block that is present but a true no-op renders bit-identically to one that
+is absent.
+
+``optics.psf`` -- the whole-scene point-spread function. Either the explicit
+core-plus-wing form or the exclusive navigator-matched form:
+
+.. list-table::
+   :widths: 24 12 12 52
+   :header-rows: 1
+
+   * - Field
+     - Type
+     - Default
+     - Meaning
+   * - ``sigma_v`` / ``sigma_u``
+     - float
+     - required
+     - Gaussian core sigma along v / u, in detector pixels.
+   * - ``w``
+     - float
+     - 0.0
+     - Moffat wing energy fraction, in [0, 1].
+   * - ``r0``
+     - float
+     - 2.0
+     - Moffat core radius in detector pixels.
+   * - ``n``
+     - float
+     - 3.0
+     - Moffat index.
+   * - ``match_navigator``
+     - bool
+     - --
+     - Exclusive alternative: resolve the PSF to the navigator's own Gaussian
+       at the instrument ``star_psf_sigma`` (no other PSF key may appear).
+
+``optics.smear`` -- a list of per-object-class motion-smear entries. Each entry
+has ``dv_px`` / ``du_px`` (drift in pixels) and ``object_class`` (one of
+``all``, ``stars``, ``bodies``, ``rings``; default ``all``). One ``all`` entry
+smears the whole scene; several give differential smear.
+
+``optics.distortion`` -- the residual geometric distortion:
+
+.. list-table::
+   :widths: 24 12 12 52
+   :header-rows: 1
+
+   * - Field
+     - Type
+     - Default
+     - Meaning
+   * - ``k1`` / ``k2``
+     - float
+     - 0.0
+     - Radial polynomial coefficients about the optical centre.
+   * - ``center_v`` / ``center_u``
+     - float
+     - frame centre
+     - Optical-centre position in pixels.
+   * - ``nonradial_rms_px``
+     - float
+     - 0.0
+     - RMS amplitude of the seeded smooth non-radial wander, in pixels.
+
+``optics.ghosts`` -- a list of ghost reflections. Each entry has ``dv_px`` /
+``du_px`` (offset in pixels), ``amplitude`` (fraction; 0 disables the entry),
+and ``defocus_sigma`` (blur sigma in pixels).
+
 .. _sim-stray-light:
 
-Stray-light block
------------------
+``optics.stray_light`` -- the smooth scattered-light field applied last, before
+the detector stage: ``amplitude`` (peak fraction of full scale; 0 disables it),
+``direction_deg`` (ramp direction for the ``linear`` model), ``model``
+(``linear`` ramp or ``radial`` bump), and ``center_v`` / ``center_u`` (the
+radial-model bump centre; omit for the frame centre). It exercises the
+navigator's source-image background filter.
 
-The optional ``stray_light`` dict (truth-side, applied by the optics stage)
-adds a background contribution before the detector model: ``amplitude`` (peak
-fraction of full scale; 0 disables it), ``direction_deg`` (ramp direction for
-the ``linear`` model), and ``model`` (``linear`` ramp or ``radial`` bump). It
-exercises the navigator's source-image background filter.
+.. _sim-spk-error:
+
+Spacecraft-ephemeris error block
+--------------------------------
+
+The optional ``spk_error`` dict (truth-side) plants a spacecraft-ephemeris
+parallax error: ``dv_px`` / ``du_px`` (the displacement at the reference range)
+and ``reference_range_km`` (the range the displacement is quoted at). The
+parallax displacement scales as ``reference_range_km / range_km`` per object, so
+a scene that sets ``spk_error`` must give every body and ring a physical
+``range_km`` -- the validator enforces this.
+
+.. _sim-detector-block:
+
+Detector block
+--------------
+
+The optional ``detector`` dict (truth-side) overrides the resolved detector
+chain: ``gain_state`` (the electron-chain gain state, which must be catalogued
+for the instrument), ``detector_model`` (``ccd`` electron chain or ``vidicon``
+DN chain), ``exposure_ref_sec`` (the exposure the signal full-scale fraction
+references), and ``quantization`` (the ADC sub-mode: ``exact``, ``8bit``,
+``uneven_12bit``, or ``sqrt_lut``). Omitted keys fall back to the instrument's
+catalog defaults.
+
+.. _sim-artifacts-block:
+
+Artifacts block
+---------------
+
+The optional ``artifacts`` dict (truth-side) carries the physical-chain opt-in
+switch ``instrument_defaults`` (see :ref:`sim-artifacts-catalog`). With it on,
+the emulated camera's catalog PSF, distortion residual, and detector noise chain
+render at their per-instrument values; the per-mode loss incidences stay at
+zero. Leaving it off keeps those keys absent (the self-consistency floor).
 
 .. _sim-instrument-config:
 
@@ -847,9 +1178,17 @@ realism addition needs -- live in their own module:
        selector, camera-rotation-fit override, midtime, closest planet.
    * - ``noise.py``
      - Poisson, read noise, bias, cosmic-ray rate, missing-data rate, bloom,
-       signal full-scale fraction, pixel area.
+       signal full-scale fraction, pixel area (General tab).
+   * - ``optics_tab.py``
+     - The Optics tab: PSF, motion smear, distortion, ghosts, the relocated
+       stray-light panel, oversample, and the spacecraft-ephemeris error group.
+       Each optical sub-block is a checkable group under absent-key discipline.
+   * - ``artifacts_tab.py``
+     - The Artifacts tab: the instrument-defaults switch and the detector
+       override (gain state, detector model, exposure reference).
    * - ``stray_light.py``
-     - Stray-light amplitude, direction, model, radial center.
+     - Stray-light amplitude, direction, model, radial center (its panel is
+       hosted in the Optics tab's stray-light group).
    * - ``background_stars.py``
      - Background-star count, PSF sigma, distribution exponent.
    * - ``body_tab.py`` / ``ring_tab.py`` / ``star_tab.py``
@@ -868,8 +1207,9 @@ realism addition needs -- live in their own module:
 The GUI exposes the full scene parameter surface, so any scene that can be
 written by hand in YAML can also be built in the GUI. The parameters the GUI
 does not edit are the nested ``instrument_config`` overrides, multi-mode ring
-edges (the renderer reads only mode 1), and the absolute
-``signal_full_scale_dn`` alias (its fractional form is exposed instead). Scenes
+edges (the renderer reads only mode 1), the absolute ``signal_full_scale_dn``
+alias (its fractional form is exposed instead), and the detector
+``quantization`` sub-mode (the catalog default applies). Scenes
 round-trip through the **Load / Save Scene (YAML)** buttons, so a scene rendered
 in the GUI can be saved as a catalog artifact and a catalog scene can be loaded
 back to edit; ``tests/main/test_sim_editor_round_trip.py`` asserts the
