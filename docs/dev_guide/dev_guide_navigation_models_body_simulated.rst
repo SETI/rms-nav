@@ -53,7 +53,7 @@ Restrictions and assumptions
 
 - The operator must supply finite, positive ellipsoid axes. Degenerate inputs (zero
   radius, negative axes) are rejected by
-  :func:`~spindoctor.sim.sim_body.create_simulated_body`.
+  :func:`~spindoctor.nav_model.sim_body.create_simulated_body`.
 - Crater and anti-aliasing keys in the sim-params dict are accepted but ignored; the
   simulated renderer always uses maximum anti-aliasing.
 - The simulated body is rendered onto a fixed extfov image without per-instrument noise
@@ -84,7 +84,7 @@ in via the per-instance ``sim_params`` dict. Expected keys:
   degrees).
 - ``shape_model`` — ``ellipsoid`` (default) or ``polyhedral_mesh`` for an irregular body;
   a mesh reads ``mesh_lumpiness``, ``mesh_seed``, and ``pose_euler_deg`` (see
-  :func:`~spindoctor.sim.sim_body_polyhedral.mesh_spec_from_params`).
+  :func:`~spindoctor.sim.mesh_geometry.mesh_spec_from_params`).
 - ``km_per_pixel`` — optional physical scale at the limb; when absent the
   phase-irregularity factor collapses to the regular-body case.
 - ``nav_override`` — optional mapping overlaid on the body params to build the
@@ -149,8 +149,8 @@ Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
 
 - :meth:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated.create_model` —
   renders the simulated body (ellipsoid via
-  :func:`~spindoctor.sim.sim_body.create_simulated_body`, or a mesh via
-  :func:`~spindoctor.sim.sim_body_polyhedral.render_mesh_body_image`), computes the limb mask via
+  :func:`~spindoctor.nav_model.sim_body.create_simulated_body`, or a mesh via
+  :func:`~spindoctor.sim.mesh_geometry.render_mesh_body_image`), computes the limb mask via
   the shared :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase` helper, and
   records the predicted diameter and tight bounding box used to gate and emit features.
 - :meth:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_features` — emits
@@ -175,7 +175,7 @@ Call path traced through
 1. Open a logged section. Read the operator-supplied sim parameters off the per-instance
    dict.
 2. Convert per-axis rotations and angle parameters from degrees to radians.
-3. Call :func:`~spindoctor.sim.sim_body.create_simulated_body` with the per-axis radii and
+3. Call :func:`~spindoctor.nav_model.sim_body.create_simulated_body` with the per-axis radii and
    geometry; the helper returns the rendered simulated body image.
 4. Derive the body mask from the rendered image (every non-zero pixel is on the body).
 5. Compute the limb mask via

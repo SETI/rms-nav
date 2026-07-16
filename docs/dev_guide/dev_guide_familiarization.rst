@@ -349,9 +349,9 @@ sibling of each model family. These are used both by
 
   - :mod:`spindoctor.sim.render`
   - :mod:`spindoctor.sim.scene`
-  - :mod:`spindoctor.sim.sim_body`
-  - :mod:`spindoctor.sim.sim_body_polyhedral`
-  - :mod:`spindoctor.sim.sim_ring`
+  - :mod:`spindoctor.nav_model.sim_body`
+  - :mod:`spindoctor.sim.mesh_geometry`
+  - :mod:`spindoctor.nav_model.sim_ring`
   - :mod:`spindoctor.sim.instruments`
   - :mod:`spindoctor.sim.seeds`
   - :mod:`spindoctor.sim.png_export`
