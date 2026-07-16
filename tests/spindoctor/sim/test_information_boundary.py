@@ -41,6 +41,13 @@ _TRUTH_SAMPLES: dict[str, Any] = {
         'ghosts': [{'dv_px': 5.0, 'du_px': -3.0, 'amplitude': 0.05, 'defocus_sigma': 2.0}],
         'stray_light': {'amplitude': 0.2, 'direction_deg': 30.0, 'model': 'linear'},
     },
+    'detector': {
+        'gain_state': 2,
+        'detector_model': 'ccd',
+        'exposure_ref_sec': 1.0,
+        'quantization': 'exact',
+    },
+    'artifacts': {'instrument_defaults': True},
     'spk_error': {'dv_px': 0.8, 'du_px': -0.4, 'reference_range_km': 100000.0},
     'bodies.crater_fill': 0.4,
     'bodies.crater_min_radius': 0.06,

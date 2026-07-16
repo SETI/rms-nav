@@ -71,9 +71,10 @@ def resolve_oversample(sim_params: dict[str, Any]) -> int:
     """Return the radiance oversampling factor for a scene.
 
     An explicit ``oversample`` key wins.  Otherwise a scene with an active PSF
-    (an ``optics.psf`` block) oversamples 4x by default so the convolution
-    resolves sub-pixel edge structure; a scene with no PSF renders on the
-    detector grid at oversample 1.
+    -- an ``optics.psf`` block or the ``instrument_defaults`` opt-in, either of
+    which puts a kernel on the frame -- oversamples 4x by default so the
+    convolution resolves sub-pixel edge structure; a scene with no PSF renders on
+    the detector grid at oversample 1.
 
     Parameters:
         sim_params: The full scene mapping.
@@ -86,7 +87,11 @@ def resolve_oversample(sim_params: dict[str, Any]) -> int:
         return max(1, int(explicit))
     optics = sim_params.get('optics')
     psf_active = isinstance(optics, dict) and isinstance(optics.get('psf'), dict)
-    return 4 if psf_active else 1
+    artifacts = sim_params.get('artifacts')
+    instrument_defaults = isinstance(artifacts, dict) and bool(
+        artifacts.get('instrument_defaults', False)
+    )
+    return 4 if (psf_active or instrument_defaults) else 1
 
 
 def render_combined_model(

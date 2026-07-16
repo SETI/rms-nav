@@ -19,14 +19,14 @@ structure; the box downsample after optics returns the image and the
 pixel-space truth metadata to the detector grid.  A scene with no optics block
 renders at ``oversample`` 1, where the downsample is a no-op.
 
-Placeholders at present fidelity (deliberately not implemented):
-
-- ``point_e`` is allocated but unused: stars are drawn PSF-spread in
-  normalized signal units by the radiance stage rather than deposited as
-  point-mass electrons.
-- ``signal`` carries normalized [0, ~1] scene units through the optics
-  stage and is converted to DN in place by the detector stage; the
-  electrons/gain unit chain is not implemented yet.
+The ``signal`` plane carries normalized [0, ~1] intensive scene units through
+the optics stage; the detector stage converts it to electrons through the
+exposure and digitizes it to DN in place (the electron unit chain).  The
+``point_e`` plane is added into the electron image after that conversion and
+before Poisson, so point sources never pass through the intensive scale; at
+present fidelity the radiance stage still draws stars PSF-spread in signal units
+rather than depositing point-mass electrons into ``point_e``, so it stays zeroed
+(the plumbing is exact for when star deposition lands).
 """
 
 from collections.abc import Mapping

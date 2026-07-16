@@ -111,11 +111,13 @@ def test_raw_dn_render_is_in_dn() -> None:
 
 
 def test_gossi_scales_to_8bit_well() -> None:
-    """The gossi render scales to its 8-bit well rather than the 12-bit default."""
-    img, _ = render_combined_model(_lit_body_scene('gossi'))
-    # full_well 255 * default frac 0.5 -> lit signal peaks near ~128 DN, so the
-    # frame stays well under the 12-bit default scale.
-    assert float(img.max()) < 255.0
+    """The gossi render is bounded by its 8-bit ADC ceiling, unlike 12-bit coiss."""
+    gossi_img, _ = render_combined_model(_lit_body_scene('gossi'))
+    coiss_img, _ = render_combined_model(_lit_body_scene('coiss_nac'))
+    # Galileo's 8-bit ADC clips at 255 DN (the CCD full well sits above it in DN),
+    # while the Cassini 12-bit chain reaches well past 255.
+    assert float(gossi_img.max()) <= 255.0
+    assert float(coiss_img.max()) > 255.0
 
 
 def test_calibrated_if_render_stays_in_if_range() -> None:

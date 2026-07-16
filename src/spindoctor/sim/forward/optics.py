@@ -25,6 +25,10 @@ from typing import Any
 
 import numpy as np
 
+from spindoctor.sim.forward.artifacts_catalog import (
+    DISTORTION_RESIDUAL_RMS_PX,
+    PSF_KERNELS,
+)
 from spindoctor.sim.forward.distortion import apply_distortion
 from spindoctor.sim.forward.ghosts import apply_ghosts
 from spindoctor.sim.forward.psf import apply_psf, psf_truncation_for_instrument
@@ -32,7 +36,93 @@ from spindoctor.sim.forward.smear import apply_smear
 from spindoctor.sim.forward.stages import SimFrame
 from spindoctor.support.types import NDArrayFloatType
 
-__all__ = ['apply_optics', 'apply_stray_light']
+__all__ = ['apply_optics', 'apply_stray_light', 'instrument_defaults_on']
+
+
+def instrument_defaults_on(params: Mapping[str, Any]) -> bool:
+    """Whether the scene opts into the instrument's physical signal chain."""
+    artifacts = params.get('artifacts')
+    return isinstance(artifacts, dict) and bool(artifacts.get('instrument_defaults', False))
+
+
+def _effective_psf(params: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The PSF block to apply: an explicit optics.psf, else the catalog kernel.
+
+    An explicit ``optics.psf`` block wins; otherwise ``instrument_defaults``
+    supplies the instrument's 15.3 kernel from the catalog.  Absent both, there
+    is no PSF (the stage-activation floor).
+
+    Parameters:
+        params: The full scene mapping.
+
+    Returns:
+        The resolved PSF parameter mapping, or None when no PSF is active.
+    """
+    optics = params.get('optics') or {}
+    explicit = optics.get('psf')
+    if isinstance(explicit, dict):
+        return explicit
+    if instrument_defaults_on(params):
+        kernel = PSF_KERNELS.get(str(params.get('instrument')))
+        if kernel is not None:
+            return dict(kernel)
+    return None
+
+
+def _effective_distortion(params: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The distortion block to apply: explicit optics.distortion, else residual.
+
+    An explicit block wins; otherwise ``instrument_defaults`` supplies the 15.7
+    interim residual, an RMS displacement over the frame mapped to the radial
+    ``k1`` coefficient (with ``k2 = 0``).
+
+    Parameters:
+        params: The full scene mapping.
+
+    Returns:
+        The resolved distortion parameter mapping, or None when no distortion is
+        active.
+    """
+    optics = params.get('optics') or {}
+    explicit = optics.get('distortion')
+    if isinstance(explicit, dict):
+        return explicit
+    if not instrument_defaults_on(params):
+        return None
+    rms_px = DISTORTION_RESIDUAL_RMS_PX.get(str(params.get('instrument')))
+    if not rms_px:
+        return None
+    size_v = int(params.get('size_v', 0))
+    size_u = int(params.get('size_u', 0))
+    if size_v <= 0 or size_u <= 0:
+        return None
+    return {'k1': _k1_for_rms(rms_px, size_v, size_u), 'k2': 0.0}
+
+
+def _k1_for_rms(rms_px: float, size_v: int, size_u: int) -> float:
+    """Solve the radial coefficient k1 for a target RMS displacement over the frame.
+
+    The radial displacement at a detector pixel is ``k1 * |r|^3 / rho_ref^2`` with
+    ``rho_ref`` half the detector diagonal, so its frame RMS is
+    ``k1 / rho_ref^2 * sqrt(mean(|r|^6))``; this inverts that for k1.
+
+    Parameters:
+        rms_px: Target RMS displacement over the frame, in detector pixels.
+        size_v: Detector-grid height in pixels.
+        size_u: Detector-grid width in pixels.
+
+    Returns:
+        The radial coefficient k1 (k2 held at 0).
+    """
+    center_v = size_v / 2.0
+    center_u = size_u / 2.0
+    rho_ref = 0.5 * float(np.hypot(size_v, size_u))
+    vv, uu = np.mgrid[0:size_v, 0:size_u].astype(np.float64)
+    r2 = (vv - center_v) ** 2 + (uu - center_u) ** 2
+    mean_r6 = float(np.mean(r2**3))
+    if mean_r6 <= 0.0:
+        return 0.0
+    return rms_px * rho_ref**2 / float(np.sqrt(mean_r6))
 
 
 def apply_stray_light(
@@ -116,9 +206,11 @@ def apply_optics(
     if smear:
         apply_smear(frame, smear=smear, oversample=oversample)
 
-    apply_distortion(frame, params=params, oversample=oversample)
+    apply_distortion(
+        frame, params=params, oversample=oversample, distortion=_effective_distortion(params)
+    )
 
-    psf = optics.get('psf')
+    psf = _effective_psf(params)
     if isinstance(psf, dict):
         sigma_v = float(psf['sigma_v'])
         sigma_u = float(psf.get('sigma_u', sigma_v))

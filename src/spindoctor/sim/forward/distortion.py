@@ -66,6 +66,7 @@ def apply_distortion(
     *,
     params: Mapping[str, Any],
     oversample: int,
+    distortion: Mapping[str, Any] | None = None,
 ) -> None:
     """Warp the signal and point-source planes by the residual distortion.
 
@@ -75,13 +76,18 @@ def apply_distortion(
 
     Parameters:
         frame: The frame whose planes are warped in place.
-        params: The full scene mapping; reads ``optics.distortion`` and the
-            scene ``random_seed`` for the non-radial field's stream.
+        params: The full scene mapping; supplies the scene ``random_seed`` for
+            the non-radial field's stream and, when ``distortion`` is not passed,
+            the ``optics.distortion`` block.
         oversample: The render-grid oversampling factor (centre and amplitude
             are in detector pixels and scale to the render grid).
+        distortion: An explicit distortion block; when None the block is read
+            from ``params['optics']['distortion']`` (the instrument-defaults
+            residual is passed here explicitly).
     """
-    optics = params.get('optics') or {}
-    distortion = optics.get('distortion')
+    if distortion is None:
+        optics = params.get('optics') or {}
+        distortion = optics.get('distortion')
     if not isinstance(distortion, dict):
         return
     k1 = float(distortion.get('k1', 0.0))

@@ -50,7 +50,7 @@ def psf_truncation_for_instrument(instrument: str | None) -> int:
     return DEFAULT_TRUNCATION_PX
 
 
-@lru_cache(maxsize=32)
+@lru_cache(maxsize=8)
 def psf_kernel(
     sigma_v: float,
     sigma_u: float,

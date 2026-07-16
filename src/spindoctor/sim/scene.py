@@ -89,6 +89,8 @@ _ALLOWED_KEYS: frozenset[str] = frozenset(
         'shade_solid_rings',
         'oversample',
         'optics',
+        'detector',
+        'artifacts',
         'spk_error',
         'bodies',
         'rings',
@@ -139,6 +141,8 @@ TOP_LEVEL_TRUTH_KEYS: frozenset[str] = frozenset(
         'shade_solid_rings',
         'oversample',
         'optics',
+        'detector',
+        'artifacts',
         'spk_error',
         'background_stars_num',
         'background_stars_psf_sigma',
@@ -422,6 +426,8 @@ def validate_sim_params(
     _check_optional_mapping(sim_params.get('instrument_config'), 'instrument_config', source=source)
     _check_optional_positive_int(sim_params.get('oversample'), 'oversample', source=source)
     _check_optics(sim_params.get('optics'), source=source)
+    _check_detector(sim_params.get('detector'), source=source)
+    _check_artifacts(sim_params.get('artifacts'), source=source)
     _check_spk_error(sim_params.get('spk_error'), source=source)
 
     for block in ('bodies', 'rings', 'stars'):
@@ -741,6 +747,82 @@ def _check_stray_light_block(value: Any, *, source: str) -> None:
         raise SimSceneValidationError(
             f"{source}: optics.stray_light.model must be 'linear' or 'radial'; got {model!r}"
         )
+
+
+# The detector block selects the electron-chain gain state, the detector model
+# (CCD electron chain or the Voyager vidicon DN path), the exposure the well
+# fraction references, and the ADC quantization sub-mode.  Per-instrument
+# defaults come from artifacts_catalog.py; scene keys override them.
+_DETECTOR_KEYS: frozenset[str] = frozenset(
+    {'gain_state', 'detector_model', 'exposure_ref_sec', 'quantization'}
+)
+_DETECTOR_MODELS: frozenset[str] = frozenset({'ccd', 'vidicon'})
+# Quantization sub-modes: 'exact' rounds to integer DN (uniform bins); the ADC
+# modes reproduce the documented histogram structure of each camera.
+_QUANTIZATION_MODES: frozenset[str] = frozenset({'exact', 'uneven_12bit', '8bit', 'sqrt_lut'})
+# The artifacts block: at this fidelity only the physical-chain opt-in switch
+# (per-mode loss incidences and adversarial placement land with later phases).
+_ARTIFACTS_KEYS: frozenset[str] = frozenset({'instrument_defaults'})
+
+
+def _check_detector(value: Any, *, source: str) -> None:
+    """Validate the scene-level ``detector`` block's field types.
+
+    Parameters:
+        value: The ``detector`` mapping, or None when the block is absent.
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: On any unknown or invalid detector field.
+    """
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(f'{source}: detector must be a mapping when present')
+    unknown = set(value) - _DETECTOR_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{source}: detector: unknown keys: {sorted(unknown)}')
+    if value.get('gain_state') is not None:
+        _require_int(
+            {'gain_state': value['gain_state']}, 'gain_state', source=f'{source}: detector'
+        )
+    model = value.get('detector_model')
+    if model is not None and model not in _DETECTOR_MODELS:
+        raise SimSceneValidationError(
+            f'{source}: detector.detector_model must be one of {sorted(_DETECTOR_MODELS)}; '
+            f'got {model!r}'
+        )
+    _check_optional_positive_number(
+        value.get('exposure_ref_sec'), 'detector.exposure_ref_sec', source=source
+    )
+    quantization = value.get('quantization')
+    if quantization is not None and quantization not in _QUANTIZATION_MODES:
+        raise SimSceneValidationError(
+            f'{source}: detector.quantization must be one of {sorted(_QUANTIZATION_MODES)}; '
+            f'got {quantization!r}'
+        )
+
+
+def _check_artifacts(value: Any, *, source: str) -> None:
+    """Validate the scene-level ``artifacts`` block's field types.
+
+    Parameters:
+        value: The ``artifacts`` mapping, or None when the block is absent.
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: On any unknown or invalid artifacts field.
+    """
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(f'{source}: artifacts must be a mapping when present')
+    unknown = set(value) - _ARTIFACTS_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{source}: artifacts: unknown keys: {sorted(unknown)}')
+    _check_optional_bool(
+        value.get('instrument_defaults'), 'artifacts.instrument_defaults', source=source
+    )
 
 
 def _check_spk_error(value: Any, *, source: str) -> None:
