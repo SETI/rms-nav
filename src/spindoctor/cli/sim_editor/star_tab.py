@@ -74,7 +74,7 @@ class StarTabMixin(SimEditorBase):
         psf = QDoubleSpinBox()
         psf.setRange(0.1, 20.0)
         psf.setDecimals(2)
-        psf.setValue(p.get('psf_sigma', 3.0))
+        psf.setValue(p.get('psf_sigma', 1.0))
         psf.valueChanged.connect(lambda v, i=idx: self._on_star_field(i, 'psf_sigma', v))
         fl.addRow('PSF sigma:', psf)
 
