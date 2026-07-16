@@ -298,6 +298,49 @@ def test_star_confounder_ensemble_replicates_each_point() -> None:
         assert len(seeds) == spec.ensemble_seeds
 
 
+def test_star_catalog_scatter_zero_recovers() -> None:
+    """With a perfect catalog (scatter 0) every seed recovers the planted offset."""
+    rows = _rows('star_catalog_scatter')
+    clean = [row for row in rows if row.value == 0.0]
+    assert clean
+    for row in clean:
+        assert row.status == 'success'
+        assert row.offset_error_px is not None
+        assert row.offset_error_px < _RECOVERY_TOLERANCE_PX
+
+
+def test_star_catalog_scatter_wholesale_error_never_succeeds() -> None:
+    """In the wholesale-catalog-error regime no seed ever reports success.
+
+    Only the safety envelope is asserted: clean recovery at scatter 0 (above)
+    and no success once the scatter reaches the wholesale-error regime the
+    wrong_catalog expected_fail scene pins at 8 px.  The intermediate region is
+    deliberately NOT asserted -- it is characterization raw material, recorded
+    below for the confidence recalibration work.
+    """
+    rows = _rows('star_catalog_scatter')
+    wholesale = [row for row in rows if row.value >= 6.0]
+    assert wholesale
+    for row in wholesale:
+        assert row.status != 'success'
+
+
+# Measured star_catalog_scatter curve (2026-07-16, seeds 7-9), recorded for the
+# astrometric-residual characterization: this is observed behavior, not asserted
+# correctness (#291).  The intermediate region degrades gracefully but the
+# navigator does not yet self-flag the growing astrometric residual:
+#   scatter 0.5-1.0 px: all seeds success, errors 0.16-0.67 px, high tiers;
+#   scatter 1.5 px:     first outright failure (1 of 3 seeds);
+#   scatter 2.0 px:     all seeds "success" at 0.6-1.3 px error (a medium-tier
+#                       success at ~1.2 px error is the currently-observed
+#                       behavior, never asserted as correct);
+#   scatter 3.0 px:     2 of 3 seeds fail; the surviving success errs 0.7 px;
+#   scatter 4.0 px:     population splits -- 2 of 3 seeds fail, one seed still
+#                       reports a medium-tier (0.66) success at 2.8 px error,
+#                       which is why the never-succeeds assertion starts at 6;
+#   scatter 6.0-8.0 px: every seed fails (all techniques spurious).
+
+
 # The per-technique dense and wide offset sweeps (``*_offset_fine`` /
 # ``*_offset_wide``) are characterization runs, not assertions: they are executed
 # by ``sim_sweep_runner`` to produce the report's figures, and the specific defect
