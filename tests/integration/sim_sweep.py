@@ -126,12 +126,21 @@ def _set_dotted(params: dict[str, Any], dotted: str, value: float) -> None:
     """Set ``value`` at a dotted path into a sim-params mapping.
 
     Supports mapping keys and integer list indices, e.g. ``bodies.0.phase_angle``
-    or ``noise.read_noise_dn``.
+    or ``noise.read_noise_dn``.  A missing intermediate mapping key is created
+    (an empty map) as the path is walked, so a sweep can address a nested key the
+    base scene omits -- for example ``artifacts.missing_lines.incidence`` on a
+    base scene with no ``artifacts`` block.  A missing *list* index is an error:
+    a sweep cannot invent a body or ring the base scene did not author.
     """
     keys = dotted.split('.')
     node: Any = params
     for key in keys[:-1]:
-        node = node[int(key)] if isinstance(node, list) else node[key]
+        if isinstance(node, list):
+            node = node[int(key)]
+        else:
+            if key not in node:
+                node[key] = {}
+            node = node[key]
     last = keys[-1]
     if isinstance(node, list):
         node[int(last)] = value
