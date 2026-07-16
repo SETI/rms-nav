@@ -107,9 +107,7 @@ def test_instrument_defaults_turns_on_poisson_and_catalog_bloom() -> None:
     """The physical-chain opt-in resolves shot noise on and the catalog bloom."""
     from spindoctor.sim.forward.detector.params import resolve_detector_params
 
-    resolved = resolve_detector_params(
-        _disc('coiss_nac', artifacts={'instrument_defaults': True})
-    )
+    resolved = resolve_detector_params(_disc('coiss_nac', artifacts={'instrument_defaults': True}))
     assert resolved.poisson is True
     assert resolved.bloom_length == 4
     # Loss modes are artifact incidences, not physical-chain noise; they stay 0.
