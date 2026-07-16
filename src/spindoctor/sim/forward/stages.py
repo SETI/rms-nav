@@ -129,6 +129,8 @@ _STAR_INFO_PIXEL_KEYS: tuple[str, ...] = (
     'sigma',
     'psf_half_v',
     'psf_half_u',
+    'catalog_error_v',
+    'catalog_error_u',
 )
 
 

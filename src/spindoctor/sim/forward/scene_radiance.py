@@ -96,6 +96,10 @@ def compose_scene_radiance(
     random_seed = int(params.get('random_seed', 42))
     background_stars_seed = derive_effect_seed(random_seed, 'scene_radiance/background_stars')
     crater_seed = derive_effect_seed(random_seed, 'scene_radiance/craters')
+    catalog_scatter_seed = derive_effect_seed(random_seed, 'scene_radiance/catalog_scatter')
+    # Scene-level per-star position-scatter sigma (detector pixels), scaled to
+    # the oversampled render grid alongside the other star pixel quantities.
+    catalog_scatter_px = float(params.get('star_catalog_scatter_px', 0.0)) * os
 
     offset_v = float(params.get('offset_v', 0.0)) * os
     offset_u = float(params.get('offset_u', 0.0)) * os
@@ -153,6 +157,8 @@ def compose_scene_radiance(
         rendered_sigma=rendered_sigma,
         rotation_deg=offset_rotation_deg,
         oversample=os,
+        catalog_scatter_px=catalog_scatter_px,
+        catalog_scatter_seed=catalog_scatter_seed,
     )
     del flux_domain
 
@@ -479,9 +485,10 @@ def _optics_needs_layers(params: Mapping[str, Any]) -> bool:
 def _scale_star_params(star_params: dict[str, Any], os: int) -> dict[str, Any]:
     """Scale a star's pixel-space fields to the oversampled render grid.
 
-    Catalog position, per-star PSF width, smear vector, and PSF fitting-window
-    size are pixel-space, so they scale with the oversampling factor.  At
-    ``os == 1`` the copy is numerically identical to the input.
+    Catalog position, per-star PSF width, smear vector, PSF fitting-window size,
+    the planted catalog-error displacement, and the companion separation are all
+    pixel-space, so they scale with the oversampling factor.  At ``os == 1`` the
+    copy is numerically identical to the input.
 
     Parameters:
         star_params: One scene star entry.
@@ -491,12 +498,17 @@ def _scale_star_params(star_params: dict[str, Any], os: int) -> dict[str, Any]:
         A scaled copy of the star entry.
     """
     scaled = dict(star_params)
-    for key in ('v', 'u', 'psf_sigma', 'move_v', 'move_u'):
+    for key in ('v', 'u', 'psf_sigma', 'move_v', 'move_u', 'catalog_error_v', 'catalog_error_u'):
         if star_params.get(key) is not None:
             scaled[key] = float(star_params[key]) * os
     psf_size = star_params.get('psf_size')
     if psf_size is not None:
         scaled['psf_size'] = [int(psf_size[0]) * os, int(psf_size[1]) * os]
+    companion = star_params.get('companion')
+    if isinstance(companion, dict) and companion.get('sep_px') is not None:
+        scaled_companion = dict(companion)
+        scaled_companion['sep_px'] = float(companion['sep_px']) * os
+        scaled['companion'] = scaled_companion
     return scaled
 
 

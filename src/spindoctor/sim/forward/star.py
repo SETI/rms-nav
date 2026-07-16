@@ -156,6 +156,8 @@ def _render_stars_cached(
     rendered_sigma: float,
     rotation_deg: float,
     oversample: int,
+    catalog_scatter_px: float,
+    catalog_scatter_seed: int,
 ) -> tuple[Any, ...]:
     """Internal cached function to compute star deposition."""
     stars_params = json.loads(stars_params_json)
@@ -183,10 +185,17 @@ def _render_stars_cached(
     # The hit-test half-window records the rendered star extent (a few sigma of
     # the scene PSF), in oversampled units; the downsample scales it back.
     psf_half = max(1, int(np.round(3.0 * rendered_sigma)))
+    # A scene-level catalog-scatter sigma draws a per-star position error from a
+    # seeded stream (byte-stable across processes), added to any explicit
+    # per-star catalog_error.  The stream is consumed in star order so a scene's
+    # scatter realization is reproducible; scenes with no scatter draw nothing.
+    scatter_rng = np.random.default_rng(catalog_scatter_seed) if catalog_scatter_px > 0.0 else None
 
     for i, star_params in enumerate(stars_params):
         # The record is built by the builder shared with the navigator-side star
-        # model, so both sides' catalog defaults match.
+        # model, so both sides' catalog defaults match.  It reads only idealized
+        # keys, so the record carries the catalog (v, u) and vmag -- never the
+        # planted error that displaces the rendered star below.
         star = star_record_from_params(
             star_params, index=i, default_v=size_v / 2, default_u=size_u / 2
         )
@@ -196,11 +205,24 @@ def _render_stars_cached(
         rel_u = star.u - roll_center_u
         rot_v = cos_t * rel_v - sin_t * rel_u
         rot_u = sin_t * rel_v + cos_t * rel_u
-        star_offset_v = roll_center_v + rot_v + offset_v
-        star_offset_u = roll_center_u + rot_u + offset_u
+        # The planted per-star catalog error (explicit plus the seeded scene
+        # scatter draw) displaces the RENDERED star off the catalog position the
+        # navigator predicts from; it is unrecoverable astrometric residual.
+        err_v = float(star_params.get('catalog_error_v', 0.0))
+        err_u = float(star_params.get('catalog_error_u', 0.0))
+        if scatter_rng is not None:
+            err_v += float(scatter_rng.normal(0.0, catalog_scatter_px))
+            err_u += float(scatter_rng.normal(0.0, catalog_scatter_px))
+        star_offset_v = roll_center_v + rot_v + offset_v + err_v
+        star_offset_u = roll_center_u + rot_u + offset_u + err_u
 
+        # A variable star renders at a brightness delta_mag off its catalog vmag
+        # (positive = fainter); the catalog vmag stays what the navigator sees.
         vmag = star.vmag if star.vmag is not None else 8.0
-        total = total_flux_for_vmag(float(vmag), zero_point=zero_point, exposure_sec=exposure_sec)
+        delta_mag = float(star_params.get('delta_mag', 0.0))
+        total = total_flux_for_vmag(
+            float(vmag) + delta_mag, zero_point=zero_point, exposure_sec=exposure_sec
+        )
         _deposit_point_mass(
             img,
             star_offset_v + grid_shift,
@@ -209,6 +231,38 @@ def _render_stars_cached(
             move_v=star.move_v,
             move_u=star.move_u,
         )
+
+        # An unresolved companion is a second point mass at sep_px / angle_deg,
+        # companion.delta_mag fainter than the (already variable-adjusted)
+        # primary.  Both convolve through the scene PSF, so the blended
+        # photocenter sits off the catalog position by a magnitude-weighted
+        # amount -- a physical catalog error, rendered here, never told to the
+        # navigator.
+        companion = star_params.get('companion')
+        has_companion = isinstance(companion, dict) and float(companion.get('sep_px', 0.0)) > 0.0
+        if has_companion:
+            sep = float(companion.get('sep_px', 0.0))
+            angle = np.radians(float(companion.get('angle_deg', 0.0)))
+            comp_dmag = float(companion.get('delta_mag', 0.0))
+            comp_total = total_flux_for_vmag(
+                float(vmag) + delta_mag + comp_dmag,
+                zero_point=zero_point,
+                exposure_sec=exposure_sec,
+            )
+            _deposit_point_mass(
+                img,
+                star_offset_v + grid_shift + sep * float(np.cos(angle)),
+                star_offset_u + grid_shift + sep * float(np.sin(angle)),
+                total=comp_total * oversample**2,
+                move_v=star.move_v,
+                move_u=star.move_u,
+            )
+
+        # Truth metadata: the rendered-vs-catalog delta (position error and
+        # magnitude offset), whether a companion was planted, and the realized
+        # navigable flag.  The position keys are oversampled-grid pixels; the
+        # downsample stage divides them back to detector pixels alongside
+        # center_v/center_u.  These stay on the image side of the boundary.
         star_info.append(
             {
                 'name': star.name,
@@ -218,6 +272,11 @@ def _render_stars_cached(
                 'psf_half_v': psf_half,
                 'psf_half_u': psf_half,
                 'total_flux': total,
+                'catalog_error_v': err_v,
+                'catalog_error_u': err_u,
+                'delta_mag': delta_mag,
+                'has_companion': has_companion,
+                'navigable': bool(star_params.get('navigable', True)),
             }
         )
 
@@ -235,13 +294,18 @@ def render_stars(
     rendered_sigma: float,
     rotation_deg: float = 0.0,
     oversample: int = 1,
+    catalog_scatter_px: float = 0.0,
+    catalog_scatter_seed: int = 0,
 ) -> tuple[NDArrayFloatType, list[MutableStar], list[dict[str, Any]]]:
     """Deposit catalog stars into the point-source plane. Returns (plane, list, info).
 
     Each star's total flux (``zero_point * 10**(-0.4 * vmag) * exposure_sec``) is
     deposited as a sub-pixel point mass carrying the ``oversample**2`` weight, so
     the box-mean downsample conserves the per-star sum and the whole-scene optics
-    PSF is the star's only convolution.
+    PSF is the star's only convolution.  A star may render off its catalog
+    position (a per-star ``catalog_error_*`` plus the seeded scene scatter), at a
+    variable brightness (``delta_mag``), and with an unresolved ``companion`` --
+    all image-side truth the navigator is not told (see the star truth keys).
 
     Parameters:
         point_plane: The (oversampled) point-source plane, deposited into in
@@ -257,6 +321,9 @@ def render_stars(
             before the translation offset, modelling a pointing rotation the star
             techniques recover.
         oversample: The render-grid oversampling factor.
+        catalog_scatter_px: Scene-level per-star position-scatter sigma
+            (oversampled units); 0 disables it.
+        catalog_scatter_seed: Seed for the per-star scatter stream.
     """
     size_v, size_u = point_plane.shape
     stars_params_json = json.dumps(stars_params, sort_keys=True)
@@ -271,6 +338,8 @@ def render_stars(
         rendered_sigma=rendered_sigma,
         rotation_deg=rotation_deg,
         oversample=oversample,
+        catalog_scatter_px=catalog_scatter_px,
+        catalog_scatter_seed=catalog_scatter_seed,
     )
     # Point deposits are added (never clipped) on the oversampled grid; the optics
     # PSF spreads them and the detector conversion clips after the downsample.
