@@ -93,12 +93,22 @@ spindoctor.sim
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.sim.forward.detector.electronics_stages
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.sim.forward.telemetry
    :members:
    :undoc-members:
    :show-inheritance:
 
 .. automodule:: spindoctor.sim.forward.telemetry_loss
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.sim.forward.telemetry_artifacts
    :members:
    :undoc-members:
    :show-inheritance:

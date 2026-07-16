@@ -395,7 +395,22 @@ its gating amplitude, fraction, or rate is zero.
 word width, independent of ``saturation_dn``); ``uneven_12bit`` snaps values
 near the power-of-two carry boundaries to reproduce the histogram spikes of an
 ADC with unequal bit weights; ``sqrt_lut`` companding encodes to 8 bits through
-a square-root LUT and back, leaving a signal-dependent quantization residual.
+a square-root LUT and back, leaving a signal-dependent quantization residual;
+``ls8b`` keeps only the low 8 bits, so a value above 255 wraps modulo 256 (the
+banded wraparound on a bright target); and ``contour_8bit`` posterizes an 8-bit
+word to multiples of its step, the visible contouring of a coarse ADC. The
+``quantization_lut``, ``quantization_ls8b``, and ``contouring_8bit`` artifact
+modes select these last three.
+
+**Artifact modes in the chain.** The registry's detector modes (see
+:ref:`sim-artifacts-block`) render at their physical point in this chain: the
+fixed-pattern response before Poisson, the dark ramp with the dark pedestal, the
+frame-transfer smear as integrated charge, the anti-blooming pairs and radiation
+transients after the shot term, coherent banding in electrons before the gain
+divide, and the additive fixed pattern and serial tail on the digitized DN.
+Their mechanics live in
+:mod:`~spindoctor.sim.forward.detector.electronics_stages`, each drawn its own
+seeded stream and a no-op at zero incidence.
 
 **The vidicon path.** The Voyager vidicon
 (:func:`~spindoctor.sim.forward.detector.chain.apply_detector`, vidicon branch)
@@ -447,13 +462,19 @@ clean-but-realistic frame, not a damaged one.
 per-instrument values: ``PSF_KERNELS`` (core sigma and wing parameters),
 ``DISTORTION_RESIDUAL_RMS_PX`` (the residual field error), and
 ``DETECTOR_DEFAULTS`` (the full electron-chain, gain-table, read-noise, and
-vidicon numbers). Every value is provenance-tagged in a comment beside it, and
-every value is interim -- sized from published FWHMs, gain tables, and
-documented residual-error bounds, pending the per-instrument measurement passes
--- so the wing parameters and noise amplitudes are the first quantities the
-realism-match pass revisits. The calibrated Cassini instrument names alias their
-raw entries, and ``generic`` (alias ``sim``) is an instrument-agnostic ideal
-12-bit detector whose electron well equals its DN depth at unit gain.
+vidicon numbers, plus an ``artifact_modes`` sub-map of per-mode shape defaults --
+banding amplitudes and periods, frame-transfer scrub/transfer times, fixed-
+pattern components, and the rest). A scene that names an artifact mode with only
+its incidence inherits these shapes (``resolve_mode_with_catalog`` resolves scene
+value over catalog default over registry default); ``incidence`` itself is never
+catalogued, so naming an instrument never plants a defect on its own. Every value
+is provenance-tagged in a comment beside it, and every value is interim -- sized
+from published FWHMs, gain tables, and documented residual-error bounds, pending
+the per-instrument measurement passes -- so the wing parameters and noise
+amplitudes are the first quantities the realism-match pass revisits. The
+calibrated Cassini instrument names alias their raw entries, and ``generic``
+(alias ``sim``) is an instrument-agnostic ideal 12-bit detector whose electron
+well equals its DN depth at unit gain.
 
 .. _sim-floor:
 
@@ -1198,10 +1219,65 @@ Artifacts block
 ---------------
 
 The optional ``artifacts`` dict (truth-side) carries the physical-chain opt-in
-switch ``instrument_defaults`` (see :ref:`sim-artifacts-catalog`). With it on,
-the emulated camera's catalog PSF, distortion residual, and detector noise chain
-render at their per-instrument values; the per-mode loss incidences stay at
-zero. Leaving it off keeps those keys absent (the self-consistency floor).
+switch ``instrument_defaults`` (see :ref:`sim-artifacts-catalog`), the
+``adversarial`` placement flag, and one map per **artifact mode**. With
+``instrument_defaults`` on, the emulated camera's catalog PSF, distortion
+residual, and detector noise chain render at their per-instrument values; the
+per-mode incidences stay at zero (naming an instrument selects a signal chain,
+not a set of defects), with the one exception that LORRI turns on
+``frame_transfer_smear`` -- its defining artifact -- at the catalog's nominal
+scrub/transfer times. Leaving ``instrument_defaults`` off keeps those keys
+absent (the self-consistency floor).
+
+The artifact modes are registered once in
+:mod:`spindoctor.sim.forward.artifact_modes` -- the single source of truth for
+each mode's rendering stage (``detector`` or ``telemetry``), per-instrument
+availability, and parameter schema. Every mode carries an ``incidence``: for a
+count mode it is the expected number of events per frame (drawn Poisson); for a
+commanded / periodic mode it is the per-frame probability the mode fires. An
+incidence of 0 is a no-op, so a scene plants exactly the defects it names. A
+mode named on an instrument it is unavailable on fails validation (for example
+``hot_pixels`` and ``bloom`` on LORRI, which has neither). Each applied mode
+records its realized geometry into ``frame.truth['artifacts'][mode]`` for the
+later planted-versus-measured incidence match.
+
+**Detector / electronics modes** render inside the detector stage at the
+physically right point in the unit chain (see :ref:`sim-detector-stage`):
+``banding_coherent`` (the Cassini 2 Hz / Galileo 42-px / LORRI striping family,
+horizontal and/or vertical, with an optional mid-image frequency and dark-level
+step), ``bias_structure`` (per-image pedestal plus low-order gradients),
+``dark_ramp`` (a readout dark gradient or a shutter exposure shading),
+``bloom`` (electron-domain column bleed), ``radiation_transients`` (the
+morphological cosmic model scaled to the Galileo regime by an environment
+factor and readout dwell), ``bright_dark_pairs`` (Cassini anti-blooming vertical
+pairs), ``frame_transfer_smear`` and ``serial_tail`` (LORRI column pedestal and
+saturation undershoot tail), ``beam_bend`` and ``residual_image`` (Voyager
+brightness-dependent limb bias and erase-cycle ghost), ``fixed_pattern``
+(stitch combs, vignetting, dust donuts, jail bars, PRNU), and the quantization
+modes ``quantization_lut``, ``quantization_ls8b``, and ``contouring_8bit``. The
+mechanics live in
+:mod:`spindoctor.sim.forward.detector.electronics_stages`; an explicit mode
+wins over the generic noise-block knob for the same mechanic (banding, bias,
+bloom, quantization), the precedence ``hot_pixels`` already uses.
+
+**Telemetry-artifact modes** flank the structured loss loop in the telemetry
+stage (:mod:`spindoctor.sim.forward.telemetry_artifacts`):
+``compression_dct`` runs first (the lossy 8x8 DCT blockiness a codec plants
+before packets drop, leaving any commanded ``truth_window`` clean), and the
+Voyager GEOMED archive-processing scars run last -- ``reseau_scars``
+(reseau-removal smudges on the ~46-px lattice) then ``resample_texture`` (the
+GEOMED resample warp, blank border, and missing-line interpolation banding).
+
+**Adversarial placement.** With ``adversarial: true`` the stochastic modes place
+their events preferentially on the navigation features (a limb arc, a ring edge,
+a star) rather than uniformly, turning the artifact sweep from average-case into
+worst-case. Deterministic-shape modes (banding, fixed pattern, frame-transfer
+smear, the quantization modes) are unaffected by the flag -- their shape does not
+depend on where the features are.
+
+Per-instrument shape defaults for every mode live in ``artifacts_catalog.py``
+(see :ref:`sim-artifacts-catalog`); a scene inherits them by naming a mode with
+only its incidence, and overrides any parameter it spells out.
 
 .. _sim-instrument-config:
 
