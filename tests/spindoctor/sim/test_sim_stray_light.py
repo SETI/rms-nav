@@ -10,7 +10,8 @@ from typing import Any
 import numpy as np
 import pytest
 
-from spindoctor.sim.render import apply_stray_light, render_combined_model
+from spindoctor.sim.forward.optics import apply_stray_light
+from spindoctor.sim.render import render_combined_model
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec, apply_filter
 
 

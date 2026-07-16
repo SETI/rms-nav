@@ -108,10 +108,10 @@ def make_irregular_mesh(
     Returns:
         An outward-wound :class:`Mesh`.
     """
-    rng = np.random.RandomState(seed)
+    rng = np.random.default_rng(seed)
     amps = rng.uniform(-1.0, 1.0, size=n_modes)
-    m_lat = rng.randint(1, 4, size=n_modes)
-    m_lon = rng.randint(1, 4, size=n_modes)
+    m_lat = rng.integers(1, 4, size=n_modes)
+    m_lon = rng.integers(1, 4, size=n_modes)
     phases = rng.uniform(0.0, 2.0 * np.pi, size=n_modes)
 
     def radius(theta: float, phi: float) -> float:
