@@ -112,7 +112,9 @@ def render_combined_model(
         A tuple containing the image and metadata.  Metadata keys: ``stars``
         (rendered star records), ``bodies``, ``rings``, ``inventory``,
         ``star_info``, ``body_masks``, ``ring_masks``, ``order_near_to_far``,
-        ``body_index_map``, and ``body_mask_map``.
+        ``body_index_map``, ``body_mask_map``, and ``body_occlusion``
+        (per-body mutual-event truth: ``visible_fraction`` and
+        ``occluded_limb_arc_deg`` against every nearer body).
     """
     # Create cache key from parameters.  When ignore_offset is True the cached
     # function zeroes the planted offset AND roll, so all three keys are

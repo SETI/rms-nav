@@ -20,6 +20,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
+from scipy import ndimage
 
 from spindoctor.config import DEFAULT_CONFIG
 from spindoctor.sim.forward.artifacts_catalog import (
@@ -76,7 +77,7 @@ def compose_scene_radiance(
             ``truth`` dict receives the renderer output metadata (``stars``,
             ``bodies``, ``rings``, ``inventory``, ``star_info``,
             ``body_masks``, ``ring_masks``, ``order_near_to_far``,
-            ``body_index_map``, ``body_mask_map``).
+            ``body_index_map``, ``body_mask_map``, ``body_occlusion``).
         params: The full scene mapping.
         rng: The stage generator.  Unused directly: this stage's randomized
             sub-effects (background stars, craters) run behind parameter-keyed
@@ -282,6 +283,8 @@ def compose_scene_radiance(
     body_mask_map_dict: dict[str, NDArrayBoolType] = {}
     inventory_dict: dict[str, dict[str, float]] = {}
     body_index_map: NDArrayIntType = np.zeros((size_v, size_u), dtype=np.int32)
+    # Bodies in render (far-to-near) order, for the mutual-event occlusion truth.
+    rendered_bodies: list[tuple[str, NDArrayBoolType]] = []
 
     ref_center_v = size_v / 2.0
     ref_center_u = size_u / 2.0
@@ -320,6 +323,7 @@ def compose_scene_radiance(
             body_mask_map_dict[body_info['name']] = body_mask
             body_models_dict[body_info['name']] = body_info['params']
             inventory_dict[body_info['name']] = body_info['inventory']
+            rendered_bodies.append((body_info['name'], body_mask))
             # Index into near-to-far order is 1-based
             near_index = order_near_to_far.index(body_info['name']) + 1
             body_index_map[body_mask] = near_index
@@ -412,8 +416,64 @@ def compose_scene_radiance(
             'order_near_to_far': order_near_to_far,
             'body_index_map': body_index_map,
             'body_mask_map': body_mask_map_dict,
+            'body_occlusion': _body_occlusion_truth(rendered_bodies),
         }
     )
+
+
+def _body_occlusion_truth(
+    rendered_bodies: list[tuple[str, NDArrayBoolType]],
+) -> dict[str, dict[str, float]]:
+    """Per-body mutual-event truth measured from the rendered silhouettes.
+
+    For each body, against the union of every NEARER body's silhouette
+    (bodies rendered after it in the far-to-near compositing order):
+
+    - ``visible_fraction``: visible pixels / unoccluded silhouette pixels.
+    - ``occluded_limb_arc_deg``: the arc of the body's limb hidden by the
+      occluders, measured as the occluded fraction of its silhouette-boundary
+      pixels times 360.  Boundary pixels of a rasterized silhouette are
+      uniform per unit arc length, so for the (near-)circular discs the
+      mutual-event scenes plant this is the hidden limb arc; strongly
+      elongated silhouettes weight it by arc length rather than angle.
+
+    Ring occlusion is not counted: mutual events are body-body geometry, and
+    a body's silhouette clipped by the frame edge counts its on-frame
+    boundary only.
+
+    Parameters:
+        rendered_bodies: ``(name, unoccluded silhouette mask)`` per body in
+            render (far-to-near) order.
+
+    Returns:
+        ``{body_name: {'visible_fraction': ..., 'occluded_limb_arc_deg': ...}}``.
+    """
+    occlusion: dict[str, dict[str, float]] = {}
+    if not rendered_bodies:
+        return occlusion
+    # Suffix unions: nearer_union[i] = union of masks rendered after body i.
+    nearer_union = np.zeros_like(rendered_bodies[0][1])
+    nearer_by_body: list[NDArrayBoolType] = []
+    for _name, mask in reversed(rendered_bodies):
+        nearer_by_body.append(nearer_union.copy())
+        nearer_union = nearer_union | mask
+    nearer_by_body.reverse()
+
+    for (name, mask), nearer in zip(rendered_bodies, nearer_by_body, strict=True):
+        unoccluded = int(np.count_nonzero(mask))
+        if unoccluded == 0:
+            occlusion[name] = {'visible_fraction': 1.0, 'occluded_limb_arc_deg': 0.0}
+            continue
+        visible = int(np.count_nonzero(mask & ~nearer))
+        boundary = mask & ~ndimage.binary_erosion(mask)
+        boundary_total = int(np.count_nonzero(boundary))
+        boundary_occluded = int(np.count_nonzero(boundary & nearer))
+        arc_deg = 360.0 * boundary_occluded / boundary_total if boundary_total else 0.0
+        occlusion[name] = {
+            'visible_fraction': visible / unoccluded,
+            'occluded_limb_arc_deg': arc_deg,
+        }
+    return occlusion
 
 
 def _render_sky(
