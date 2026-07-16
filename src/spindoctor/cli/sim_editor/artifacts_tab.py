@@ -43,7 +43,14 @@ from spindoctor.sim.forward.artifact_modes import ARTIFACT_MODES
 from spindoctor.sim.forward.artifacts_catalog import resolve_detector_defaults
 
 _DETECTOR_MODELS: list[str] = ['ccd', 'vidicon']
-_QUANTIZATION_MODES: list[str] = ['exact', '8bit', 'uneven_12bit', 'sqrt_lut']
+_QUANTIZATION_MODES: list[str] = [
+    'exact',
+    '8bit',
+    'uneven_12bit',
+    'sqrt_lut',
+    'ls8b',
+    'contour_8bit',
+]
 
 # The rendering stages the mode rows are grouped under, in tab order.
 _STAGE_TITLES: tuple[tuple[str, str], ...] = (

@@ -153,7 +153,10 @@ class ModeRow:
         spins: list[QSpinBox] = []
         for _ in range(param.length or 0):
             spin = QSpinBox()
-            spin.setRange(0, _INT_MAX)
+            # The validator accepts any integers in a list parameter (a ghost
+            # offset such as residual_image.offset_px is legitimately negative),
+            # so the spins must not clip below zero.
+            spin.setRange(int(_NUMBER_MIN), _INT_MAX)
             layout.addWidget(spin)
             spins.append(spin)
         self._list_checks[param.name] = check
