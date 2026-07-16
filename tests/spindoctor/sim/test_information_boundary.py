@@ -64,6 +64,11 @@ _TRUTH_SAMPLES: dict[str, Any] = {
     'bodies.photometric_law': 'lommel_seeliger',
     'bodies.minnaert_k': 0.6,
     'bodies.opposition_surge': {'amplitude': 0.5, 'width_deg': 5.0},
+    'bodies.albedo_texture': {
+        'rms': 0.15,
+        'corr_px': 12.0,
+        'spots': [{'lat_deg': 45.0, 'lon_deg': 20.0, 'radius_deg': 8.0, 'albedo_factor': 0.6}],
+    },
     'bodies.seed': 11,
     'bodies.anti_aliasing': 0.7,
     'bodies.nav_override': {'mesh_lumpiness': 0.0},
@@ -131,6 +136,7 @@ def _truth_exercising_scene() -> dict[str, Any]:
                 'photometric_law': _TRUTH_SAMPLES['bodies.photometric_law'],
                 'minnaert_k': _TRUTH_SAMPLES['bodies.minnaert_k'],
                 'opposition_surge': dict(_TRUTH_SAMPLES['bodies.opposition_surge']),
+                'albedo_texture': dict(_TRUTH_SAMPLES['bodies.albedo_texture']),
             },
         ],
         'stars': [

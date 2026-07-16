@@ -40,6 +40,13 @@ from dataclasses import dataclass
 import numpy as np
 
 from spindoctor.sim.ellipsoid_geometry import ellipsoid_image_normals, illumination_vector
+from spindoctor.sim.forward.body_texture import (
+    AlbedoTextureSpec,
+    DiscTextureSpec,
+    TransitSpec,
+    apply_transits,
+    surface_texture_factor,
+)
 from spindoctor.sim.forward.photometry import (
     DARK_SIDE_FLOOR,
     incidence_cosines,
@@ -97,6 +104,11 @@ class TopoBodySpec:
         minnaert_k: Minnaert exponent (law 'minnaert' only).
         surge_amplitude: Opposition-surge amplitude (0 = none).
         surge_width_deg: Opposition-surge angular width in degrees.
+        albedo_texture: Multiplicative albedo texture (noise field + spots),
+            or None.  Applied to the shading, never the silhouette.
+        disc_texture: Banded zones/belts plus storm ovals, or None.
+        transits: Transiting moon discs and cast shadows (texture on the
+            rendered disc).
     """
 
     axis1: float
@@ -121,6 +133,9 @@ class TopoBodySpec:
     minnaert_k: float = 0.5
     surge_amplitude: float = 0.0
     surge_width_deg: float = 6.0
+    albedo_texture: AlbedoTextureSpec | None = None
+    disc_texture: DiscTextureSpec | None = None
+    transits: tuple[TransitSpec, ...] = ()
 
 
 @dataclass
@@ -392,7 +407,58 @@ def _shade_disc(
         surge_amplitude=spec.surge_amplitude,
         surge_width_deg=spec.surge_width_deg,
     )
-    return intensity, cos_i_smooth
+    return _apply_surface_textures(intensity, grid, spec), cos_i_smooth
+
+
+def _apply_surface_textures(
+    intensity: NDArrayFloatType,
+    grid: _Grid,
+    spec: TopoBodySpec,
+) -> NDArrayFloatType:
+    """Apply the spec's multiplicative textures and transits to the shading.
+
+    Texture layering: the albedo/disc texture factor multiplies the law
+    shading first, then transit shadows multiply the textured result, then
+    transiting moon discs overwrite on top (from the pre-texture smooth-law
+    shading -- a foreground moon does not inherit the parent's texture).
+    Everything happens on the shading grid, so the silhouette (rasterized
+    separately on the working grid) is untouched by construction.
+
+    Parameters:
+        intensity: The law-shaded intensity on the shading grid.
+        grid: The shading-resolution geometry.
+        spec: The body spec (texture and transit fields are read).
+
+    Returns:
+        The textured intensity (the input array, unchanged, when the spec
+        has no texture and no transits).
+    """
+    if spec.albedo_texture is None and spec.disc_texture is None and not spec.transits:
+        return intensity
+    x = grid.v_rot / grid.semi_a
+    y = grid.u_rot / grid.semi_b
+    z = np.sqrt(np.maximum(0.0, 1.0 - grid.e2))
+    factor = surface_texture_factor(
+        spec.albedo_texture,
+        spec.disc_texture,
+        x=x,
+        y=y,
+        z=z,
+        mean_radius_px=(grid.semi_a + grid.semi_b) / 2.0,
+    )
+    textured = intensity if factor is None else np.clip(intensity * factor, 0.0, 1.0)
+    if spec.transits:
+        if textured is intensity:
+            textured = intensity.copy()
+        apply_transits(
+            textured,
+            spec.transits,
+            base_intensity=intensity,
+            v_ctr=grid.v_ctr,
+            u_ctr=grid.u_ctr,
+            disc_mask=grid.e2 < 1.0,
+        )
+    return textured
 
 
 def _crater_heights(grid: _Grid, spec: TopoBodySpec) -> NDArrayFloatType:

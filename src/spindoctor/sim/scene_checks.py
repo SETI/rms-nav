@@ -73,6 +73,7 @@ def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
         if obj.get(key) is not None:
             _require_int(obj, key, source=f'{source}: {label}')
     _check_body_relief_and_photometry(obj, label=label, source=source)
+    _check_albedo_texture(obj.get('albedo_texture'), label=label, source=source)
     pose = obj.get('pose_euler_deg')
     if pose is not None:
         if not isinstance(pose, (list, tuple)) or len(pose) != 3:
@@ -136,6 +137,58 @@ def _check_body_relief_and_photometry(obj: dict[str, Any], *, label: str, source
     _check_optional_positive_number(
         surge.get('width_deg'), f'{label}.opposition_surge.width_deg', source=source
     )
+
+
+# The multiplicative albedo texture: a band-limited noise field (rms +
+# correlation length in detector pixels on the disc) plus discrete circular
+# spots in the observer-centered surface frame (lat 90 = disc center,
+# lat 0 = the limb).
+_ALBEDO_TEXTURE_KEYS: frozenset[str] = frozenset({'rms', 'corr_px', 'spots'})
+_SURFACE_SPOT_KEYS: frozenset[str] = frozenset(
+    {'lat_deg', 'lon_deg', 'radius_deg', 'albedo_factor'}
+)
+
+
+def _check_surface_spot_list(value: Any, *, key: str, source: str) -> None:
+    """Validate one spots/storms list (circular multiplicative albedo marks)."""
+    if value is None:
+        return
+    _check_optional_mapping_list(value, key, source=source)
+    for index, spot in enumerate(value):
+        label = f'{key}[{index}]'
+        unknown = set(spot) - _SURFACE_SPOT_KEYS
+        if unknown:
+            raise SimSceneValidationError(f'{source}: {label}: unknown keys: {sorted(unknown)}')
+        _check_optional_number(spot.get('lat_deg'), f'{label}.lat_deg', source=source)
+        _check_optional_number(spot.get('lon_deg'), f'{label}.lon_deg', source=source)
+        _check_optional_positive_number(
+            spot.get('radius_deg'), f'{label}.radius_deg', source=source
+        )
+        _check_optional_nonnegative_number(
+            spot.get('albedo_factor'), f'{label}.albedo_factor', source=source
+        )
+
+
+def _check_albedo_texture(value: Any, *, label: str, source: str) -> None:
+    """Validate one body's ``albedo_texture`` map (noise field + spots)."""
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(
+            f'{source}: {label}.albedo_texture must be a mapping when present'
+        )
+    unknown = set(value) - _ALBEDO_TEXTURE_KEYS
+    if unknown:
+        raise SimSceneValidationError(
+            f'{source}: {label}.albedo_texture: unknown keys: {sorted(unknown)}'
+        )
+    _check_optional_nonnegative_number(
+        value.get('rms'), f'{label}.albedo_texture.rms', source=source
+    )
+    _check_optional_positive_number(
+        value.get('corr_px'), f'{label}.albedo_texture.corr_px', source=source
+    )
+    _check_surface_spot_list(value.get('spots'), key=f'{label}.albedo_texture.spots', source=source)
 
 
 def _check_ring_object(obj: dict[str, Any], *, index: int, source: str) -> None:

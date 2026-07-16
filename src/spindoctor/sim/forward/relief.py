@@ -50,11 +50,23 @@ from scipy import ndimage
 
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
-__all__ = ['MarchStats', 'ReliefField', 'march_shadows', 'synthesize_relief_field']
+__all__ = [
+    'MarchStats',
+    'ReliefField',
+    'march_shadows',
+    'synthesize_albedo_field',
+    'synthesize_relief_field',
+]
 
 # Spectral modes with total angular wavenumber below this are zeroed
 # (degree 1 = body translation, degree 2 = ellipsoid shape aliasing).
 _LOW_DEGREE_CUTOFF = 3.0
+# The albedo field only zeroes the mean (k = 0): albedo texture multiplies
+# the shading and never moves the silhouette, so its low-degree content
+# cannot alias a body translation or an ellipsoid shape error the way
+# relief's can, and large-scale albedo asymmetry is exactly the realistic
+# hemispheric contrast the texture exists to plant.
+_ALBEDO_LOW_DEGREE_CUTOFF = 1.0
 # Band limit factor: kmax = ceil(8 / corr_rad); S(kmax) is ~1e-7 of peak.
 _BAND_LIMIT_FACTOR = 8.0
 # Synthesis grid bounds: at least 64 for a usable limb slice, at most 8192
@@ -129,21 +141,19 @@ class ReliefField:
         return np.interp(wrapped, phi_nodes, values)
 
 
-@lru_cache(maxsize=8)
-def _unit_relief_grid(corr_deg: float, seed: int) -> NDArrayFloatType:
-    """A field realization normalized to unit limb-slice standard deviation.
-
-    The RMS knob scales the field linearly, so realizations are cached per
-    (correlation length, seed) at unit limb RMS and scaled on request.
+def _shaped_spectrum_field(
+    corr_deg: float, seed: int, *, low_degree_cutoff: float
+) -> NDArrayFloatType:
+    """Synthesize the raw band-limited field (no amplitude normalization).
 
     Parameters:
         corr_deg: Correlation length in degrees of surface arc.
         seed: The realization seed (fresh Gaussian coefficient draws per seed).
+        low_degree_cutoff: Spectral modes with total wavenumber strictly below
+            this are zeroed.
 
     Returns:
-        The ``(n, n)`` unit-normalized field grid.  All-zero when the band
-        ``[3, kmax]`` is empty (a correlation length so long that no mode
-        survives the low-degree zeroing).
+        The ``(n, n)`` un-normalized field grid.
     """
     corr_rad = math.radians(corr_deg)
     kmax = math.ceil(_BAND_LIMIT_FACTOR / corr_rad)
@@ -161,14 +171,58 @@ def _unit_relief_grid(corr_deg: float, seed: int) -> NDArrayFloatType:
     k_lon = np.fft.rfftfreq(n, d=1.0 / n)
     k_total = np.hypot(k_lat[:, np.newaxis], k_lon[np.newaxis, :])
     amplitude = np.exp(-((k_total * corr_rad / 2.0) ** 2) / 2.0)
-    amplitude[k_total < _LOW_DEGREE_CUTOFF] = 0.0
+    amplitude[k_total < low_degree_cutoff] = 0.0
     amplitude[k_total > kmax] = 0.0
 
-    field = np.fft.irfft2(spectrum * amplitude, s=(n, n))
+    return np.asarray(np.fft.irfft2(spectrum * amplitude, s=(n, n)), dtype=np.float64)
+
+
+@lru_cache(maxsize=8)
+def _unit_relief_grid(corr_deg: float, seed: int) -> NDArrayFloatType:
+    """A field realization normalized to unit limb-slice standard deviation.
+
+    The RMS knob scales the field linearly, so realizations are cached per
+    (correlation length, seed) at unit limb RMS and scaled on request.
+
+    Parameters:
+        corr_deg: Correlation length in degrees of surface arc.
+        seed: The realization seed (fresh Gaussian coefficient draws per seed).
+
+    Returns:
+        The ``(n, n)`` unit-normalized field grid.  All-zero when the band
+        ``[3, kmax]`` is empty (a correlation length so long that no mode
+        survives the low-degree zeroing).
+    """
+    field = _shaped_spectrum_field(corr_deg, seed, low_degree_cutoff=_LOW_DEGREE_CUTOFF)
+    n = field.shape[0]
     limb_std = float(np.std(field[n // 2]))
     if limb_std <= 0.0:
         return np.zeros((n, n), dtype=np.float64)
     return np.asarray(field / limb_std, dtype=np.float64)
+
+
+@lru_cache(maxsize=8)
+def _unit_albedo_grid(corr_deg: float, seed: int) -> NDArrayFloatType:
+    """An albedo-field realization normalized to unit global standard deviation.
+
+    Unlike the relief grid, the normalization is over the whole surface (the
+    commanded RMS is the disc-wide texture contrast, not a limb statistic) and
+    only the mean is zeroed (see :data:`_ALBEDO_LOW_DEGREE_CUTOFF`).
+
+    Parameters:
+        corr_deg: Correlation length in degrees of surface arc.
+        seed: The realization seed (fresh Gaussian coefficient draws per seed).
+
+    Returns:
+        The ``(n, n)`` unit-normalized field grid; all-zero when no mode
+        survives the band limit.
+    """
+    field = _shaped_spectrum_field(corr_deg, seed, low_degree_cutoff=_ALBEDO_LOW_DEGREE_CUTOFF)
+    n = field.shape[0]
+    std = float(np.std(field))
+    if std <= 0.0:
+        return np.zeros((n, n), dtype=np.float64)
+    return np.asarray(field / std, dtype=np.float64)
 
 
 def synthesize_relief_field(rms: float, corr_deg: float, seed: int) -> ReliefField:
@@ -193,9 +247,40 @@ def synthesize_relief_field(rms: float, corr_deg: float, seed: int) -> ReliefFie
     )
 
 
+def synthesize_albedo_field(rms: float, corr_deg: float, seed: int) -> ReliefField:
+    """Synthesize one multiplicative-albedo field realization.
+
+    The albedo texture reuses the relief field's spectral synthesis and its
+    :class:`ReliefField` sampling container, with two deliberate differences:
+    the commanded RMS is the field's *global* standard deviation (disc-wide
+    texture contrast rather than a limb statistic), and only the spectral
+    mean is zeroed -- albedo multiplies the shading and never moves the
+    silhouette, so low-degree content cannot alias pointing or shape error.
+
+    Parameters:
+        rms: Commanded global standard deviation of the fractional albedo
+            perturbation; 0 yields the all-zero field.
+        corr_deg: Correlation length in degrees of surface arc.
+        seed: The realization seed, derived from the body's 'albedo' stream.
+
+    Returns:
+        The scaled :class:`ReliefField` realization (holding the albedo
+        perturbation; the multiplicative factor is ``1 + field``).
+    """
+    grid = _unit_albedo_grid(float(corr_deg), int(seed)) * float(rms)
+    return ReliefField(
+        grid=grid,
+        rms=float(rms),
+        corr_deg=float(corr_deg),
+        h_min=float(grid.min()),
+        h_max=float(grid.max()),
+    )
+
+
 def clear_relief_caches() -> None:
     """Drop the cached field realizations (test/tooling helper)."""
     _unit_relief_grid.cache_clear()
+    _unit_albedo_grid.cache_clear()
 
 
 @dataclass(frozen=True)

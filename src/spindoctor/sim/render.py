@@ -38,7 +38,7 @@ def clear_render_caches() -> None:
     body._render_body_shape_cached.cache_clear()
     body._render_topo_shape_cached.cache_clear()
     body_mesh._render_mesh_shape_cached.cache_clear()
-    relief._unit_relief_grid.cache_clear()
+    relief.clear_relief_caches()
     psf.psf_kernel.cache_clear()
 
 

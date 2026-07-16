@@ -22,6 +22,11 @@ import numpy as np
 from scipy import ndimage
 
 from spindoctor.sim.ellipsoid_geometry import ellipsoid_image_normals, lambert_from_normals
+from spindoctor.sim.forward.body_texture import (
+    albedo_spec_from_params,
+    disc_texture_spec_from_params,
+    transit_specs_from_params,
+)
 from spindoctor.sim.forward.body_topo import TopoBodySpec, create_topographic_body
 from spindoctor.sim.seeds import derive_effect_seed, stable_param_seed
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType
@@ -714,29 +719,40 @@ def render_single_body(
             ref_center_u=ref_center_u,
         )
 
+    has_texture = any(
+        body_params.get(key) is not None for key in ('albedo_texture', 'disc_texture', 'transits')
+    )
+
     # The classic smooth-Lambert path stays byte-for-byte for the scenes it
     # has always rendered; anything more (relief, a non-Lambert law, a surge,
-    # or an oversampled grid, where the split-resolution shading is also the
-    # render-time fast path) goes to the topographic renderer.
+    # surface texture / transits, or an oversampled grid, where the
+    # split-resolution shading is also the render-time fast path) goes to the
+    # topographic renderer.
     use_topo = (
         oversample > 1
         or limb_relief_rms > 0.0
         or photometric_law != 'lambert'
         or surge_amplitude > 0.0
+        or has_texture
     )
     if use_topo:
-        # The relief terrain draws from its own named stream of the per-body
-        # identity seed, so it is independent of the crater draws and stable
-        # when craters are toggled.
+        # The relief terrain and the albedo noise field each draw from their
+        # own named stream of the per-body identity seed, so they are
+        # independent of the crater draws (and of each other) and stable when
+        # other randomized features are toggled.
         relief_seed = 0
-        if limb_relief_rms > 0.0:
+        albedo_seed = 0
+        if limb_relief_rms > 0.0 or body_params.get('albedo_texture') is not None:
             if seed is not None:
                 identity_seed = derive_effect_seed(seed, f'body:{body_index}:{body_name}')
             elif body_params.get('seed') is not None:
                 identity_seed = int(body_params['seed']) & 0x7FFFFFFF
             else:
                 identity_seed = stable_param_seed(axis1, axis2, axis3, body_index, body_name)
-            relief_seed = derive_effect_seed(identity_seed, 'relief')
+            if limb_relief_rms > 0.0:
+                relief_seed = derive_effect_seed(identity_seed, 'relief')
+            if body_params.get('albedo_texture') is not None:
+                albedo_seed = derive_effect_seed(identity_seed, 'albedo')
         spec = TopoBodySpec(
             axis1=axis1,
             axis2=axis2,
@@ -760,6 +776,9 @@ def render_single_body(
             minnaert_k=minnaert_k,
             surge_amplitude=surge_amplitude,
             surge_width_deg=surge_width_deg,
+            albedo_texture=albedo_spec_from_params(body_params, seed=albedo_seed),
+            disc_texture=disc_texture_spec_from_params(body_params),
+            transits=transit_specs_from_params(body_params),
         )
         body_shape = _render_topo_shape_cached(size_v, size_u, spec)
     else:

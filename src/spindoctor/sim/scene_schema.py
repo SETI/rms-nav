@@ -155,15 +155,15 @@ _BODY_IDEALIZED_KEYS: frozenset[str] = frozenset(
     }
 )
 
-# Per-body truth keys: surface texture (craters) and the limb-relief field
-# are nature's terrain, 'seed' is its realization, the photometric law and
-# opposition surge are nature's scattering behavior (the navigator's
-# template always shades Lambert), and 'anti_aliasing' is an image-side
-# rendering-fidelity knob (the navigator's template always renders at full
-# anti-aliasing).  'nav_override' is special: its VALUES are what the
-# navigator believes (idealized), so build_nav_params overlays them onto
-# the body and drops the key; the underlying overridden true values never
-# cross.
+# Per-body truth keys: surface texture (craters, the multiplicative albedo
+# texture) and the limb-relief field are nature's terrain, 'seed' is its
+# realization, the photometric law and opposition surge are nature's
+# scattering behavior (the navigator's template always shades Lambert), and
+# 'anti_aliasing' is an image-side rendering-fidelity knob (the navigator's
+# template always renders at full anti-aliasing).  'nav_override' is
+# special: its VALUES are what the navigator believes (idealized), so
+# build_nav_params overlays them onto the body and drops the key; the
+# underlying overridden true values never cross.
 _BODY_TRUTH_KEYS: frozenset[str] = frozenset(
     {
         'crater_fill',
@@ -176,6 +176,7 @@ _BODY_TRUTH_KEYS: frozenset[str] = frozenset(
         'photometric_law',
         'minnaert_k',
         'opposition_surge',
+        'albedo_texture',
         'seed',
         'anti_aliasing',
         'nav_override',
