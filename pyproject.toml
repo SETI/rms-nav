@@ -61,6 +61,7 @@ dev = [
   "pytest-xdist",
   "ruff",
   "rms-spindoctor[docs]",
+  "threadpoolctl",
 ]
 # Sphinx stack only. ``pip install -e ".[docs]"`` (ReadTheDocs: ``path: .`` +
 # ``extra_requirements: [docs]``) installs these *plus* ``[project] dependencies``.
@@ -136,6 +137,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "starcat.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "threadpoolctl"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

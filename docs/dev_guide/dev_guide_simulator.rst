@@ -1039,12 +1039,17 @@ renderer's split-resolution path -- detector-grid shading upsampled under an
 oversampled silhouette -- plus the capped terminator shadow march). The
 budget is a *cold-render* budget:
 the render caches are cleared so the timed render pays the kernel-build and
-compile costs a first render pays. The harness pins itself: it sets the
-process CPU affinity to one core and caps the BLAS/OpenMP thread-count
-environment variables for the duration, so an unpinned numpy FFT cannot
-silently multithread and fake the budget. Under heavy machine load the timed
-render can exceed the budget purely from contention; a failure is reported and
-investigated, not blessed by raising the budget.
+compile costs a first render pays, while one-time non-render costs (the lazy
+config-YAML load) are paid by an untimed warm-up first. The harness pins
+itself: it sets the process CPU affinity to one core and caps every
+BLAS/OpenMP pool to one thread via ``threadpoolctl`` for the duration, so an
+unpinned numpy FFT cannot silently multithread and fake the budget. The
+assertion reads CPU time on the pinned core -- far less load-sensitive than
+wall time, though heavy memory-bandwidth contention can still inflate it by
+roughly 10-25% -- and takes the best of up to three cold attempts, passing as
+soon as one meets the budget: transient contention is absorbed, while a
+genuine regression fails all three. A persistent breach across all attempts
+is reported and investigated, not blessed by raising the budget.
 
 Scene ingredients
 =================
