@@ -1099,9 +1099,11 @@ Top-level fields
      - Background-sky star field: ``a`` and ``b`` set the cumulative count law
        ``log10 N(<m) = a + b*m`` per square degree, ``density_factor`` scales
        the count (1 is mid galactic latitude), and ``diffuse_e_per_px`` adds an
-       optional flat diffuse-sky floor. The sky stars are contaminants: the
-       navigator receives no catalog for them, and they render through the same
-       flux/point-mass path as catalog stars.
+       optional flat diffuse-sky floor in the detector's native point-source
+       unit (electrons per pixel on a CCD, DN per pixel on the Voyager
+       vidicon). The sky stars are contaminants: the navigator receives no
+       catalog for them, and they render through the same flux/point-mass path
+       as catalog stars.
    * - ``star_catalog_scatter_px``
      - float
      - none
@@ -1354,7 +1356,9 @@ map: star counts are drawn from the cumulative law ``log10 N(<m) = a + b*m`` per
 square degree (interim mid-galactic-latitude values ``a = -3.1``, ``b = 0.34``),
 scaled by the frame's field of view and the ``density_factor`` multiplier, down
 to a faint cutoff, and rendered through the same flux/point-mass path as catalog
-stars. An optional ``diffuse_e_per_px`` adds a flat diffuse-sky floor. The sky
+stars. An optional ``diffuse_e_per_px`` adds a flat diffuse-sky floor,
+expressed in the detector's native point-source unit (electrons per pixel on a
+CCD, DN per pixel on the Voyager vidicon, like the plane it adds to). The sky
 stars carry no catalog, so to the navigator they are pure confounders.
 
 Every star -- catalog or sky -- is a flux-normalized point source: its total

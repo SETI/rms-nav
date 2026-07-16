@@ -584,6 +584,9 @@ def _check_spk_error(value: Any, *, source: str) -> None:
 
 # The background-sky star-count law: cumulative log10 N(<m) = a + b*m per square
 # degree, a local-density multiplier, and an optional flat diffuse-sky floor.
+# diffuse_e_per_px is detector-native despite the '_e_' in its name: electrons
+# per pixel on a CCD, DN per pixel on the Voyager vidicon (which has no electron
+# domain), matching the unit domain of the point-source plane it adds to.
 _SKY_COUNTS_KEYS: frozenset[str] = frozenset({'a', 'b', 'density_factor', 'diffuse_e_per_px'})
 
 
