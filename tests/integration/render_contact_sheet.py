@@ -25,14 +25,18 @@ looks wrong is a conversion bug, and this review is what catches it.
 
 The generator reads its *before* images from ``render_diffs/current/`` as
 committed, so run it once per change; a second run would diff the new render
-against itself (restore ``current/`` from git to redo a sheet).  Pass
-``--before-dir`` to source the before images from somewhere else (for
-example, a directory of renders produced by another checkout).
+against itself (restore ``current/`` from git to redo a sheet).  The entry
+point refuses to run when ``current/`` has uncommitted changes and no
+``--before-dir`` was given, so a self-diff sheet cannot be published by
+accident (``--force`` overrides).  Pass ``--before-dir`` to source the
+before images from somewhere else (for example, a directory of renders
+produced by another checkout).
 """
 
 from __future__ import annotations
 
 import argparse
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -176,6 +180,18 @@ def generate(*, before_dir: Path | None = None) -> list[Path]:
     return written
 
 
+def _current_dir_is_dirty() -> bool:
+    """True when ``render_diffs/current/`` has uncommitted changes in git."""
+    result = subprocess.run(
+        ['git', 'status', '--porcelain', str(_CURRENT_DIR)],
+        cwd=Path(__file__).parent,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return bool(result.stdout.strip())
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point: regenerate the contact sheets and the current renders."""
     parser = argparse.ArgumentParser(
@@ -187,7 +203,20 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help='directory of before PNGs (default: the committed render_diffs/current/)',
     )
+    parser.add_argument(
+        '--force',
+        action='store_true',
+        help='run even when render_diffs/current/ has uncommitted changes',
+    )
     args = parser.parse_args(argv)
+    if args.before_dir is None and not args.force and _current_dir_is_dirty():
+        print(
+            'render_diffs/current/ has uncommitted changes: a run now would diff\n'
+            'the new renders against an already-regenerated "before" and publish\n'
+            'a self-diff sheet.  Commit or restore current/ first (git restore),\n'
+            'point --before-dir at the real before renders, or pass --force.'
+        )
+        return 1
     paths = generate(before_dir=args.before_dir)
     print(f'Wrote {len(paths)} render-diff file(s):')
     for path in paths:
