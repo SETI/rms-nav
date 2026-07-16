@@ -4,13 +4,17 @@ Every top-level and per-object key a scene may carry is inventoried here
 (unknown keys fail validation so typos do not silently render the default
 scene), and every inventory key is classified as either idealized
 (information the production pipeline could know from catalogs, SPICE, labels,
-or config: exposed to the navigator through ``obs.nav_params``) or truth
+or config: exposed to the navigator through ``obs.nav_params``), truth
 (nature's values, planted errors, variance knobs, and contaminants: readable
-only by the image-side renderer).  :data:`TRUTH_KEYS` is the machine-readable
-truth set the ObsSim boundary filter strips and the structural boundary test
-iterates.  The import-time completeness assertion below keeps the
-classification complete and disjoint, so a key added to the schema without a
-classification fails everything loudly, not just one test.
+only by the image-side renderer), or test-only (the scene's expected
+navigation outcome: read by the integration-test assertion machinery, and by
+neither the renderer nor the navigator).  :data:`TRUTH_KEYS` is the
+machine-readable truth set the ObsSim boundary filter strips and the
+structural boundary test iterates; the test-only keys are likewise stripped
+from the filtered view (default-deny), so they never reach the navigator
+either.  The import-time completeness assertion below keeps the classification
+complete and disjoint over all three classes, so a key added to the schema
+without a classification fails everything loudly, not just one test.
 
 :mod:`spindoctor.sim.scene` is the public entry point: it consumes this
 inventory for validation, builds the filtered navigator view from the
@@ -58,6 +62,8 @@ _ALLOWED_KEYS: frozenset[str] = frozenset(
         'artifacts',
         'spk_error',
         'sky_counts',
+        'star_catalog_scatter_px',
+        'expected',
         'bodies',
         'rings',
         'stars',
@@ -108,9 +114,18 @@ TOP_LEVEL_TRUTH_KEYS: frozenset[str] = frozenset(
         'artifacts',
         'spk_error',
         'sky_counts',
+        'star_catalog_scatter_px',
         'noise',
     }
 )
+
+# Top-level test-only keys: the scene's expected navigation outcome.  It is
+# read only by the sim integration suite's assertion machinery -- consumed by
+# neither the image-side renderer nor the navigator, so it is neither idealized
+# information the pipeline could know nor a planted truth the renderer draws.
+# It is a third, disjoint class; the boundary filter's default-deny keeps it
+# out of ``nav_params`` alongside the truth keys.
+TOP_LEVEL_TEST_ONLY_KEYS: frozenset[str] = frozenset({'expected'})
 
 # Per-body idealized keys: the ellipsoid/mesh geometry, pose, lighting, and
 # physical scale the production pipeline knows from SPICE and shape catalogs.
@@ -164,6 +179,9 @@ _BODY_KEYS: frozenset[str] = _BODY_IDEALIZED_KEYS | _BODY_TRUTH_KEYS
 # Per-star idealized keys: catalog identity, position, magnitude, spectral
 # class, the predicted smear vector (the pipeline computes it from attitude
 # telemetry), and the PSF fitting-window size (instrument configuration).
+# 'navigable' is idealized: it is the flag that drives the boundary filter --
+# a non-navigable star is dropped from nav_params entirely, so a surviving
+# star's flag is always true and carries no hidden truth.
 _STAR_IDEALIZED_KEYS: frozenset[str] = frozenset(
     {
         'name',
@@ -175,12 +193,20 @@ _STAR_IDEALIZED_KEYS: frozenset[str] = frozenset(
         'move_v',
         'move_u',
         'psf_size',
+        'navigable',
     }
 )
 
 # Per-star truth keys: a per-star PSF width override is an anomaly of the
-# rendered image (the navigator only knows the instrument's published PSF).
-_STAR_TRUTH_KEYS: frozenset[str] = frozenset({'psf_sigma'})
+# rendered image (the navigator only knows the instrument's published PSF);
+# 'catalog_error_v/u' displace the RENDERED star from the catalog position the
+# navigator predicts from; 'companion' plants an unresolved binary whose
+# photocenter sits off the catalog position (a physical catalog error); and
+# 'delta_mag' renders a variable star at a brightness other than its cataloged
+# vmag.  None of these are knowable from a catalog, so all are truth.
+_STAR_TRUTH_KEYS: frozenset[str] = frozenset(
+    {'psf_sigma', 'catalog_error_v', 'catalog_error_u', 'companion', 'delta_mag'}
+)
 
 _STAR_KEYS: frozenset[str] = _STAR_IDEALIZED_KEYS | _STAR_TRUTH_KEYS
 
@@ -224,16 +250,31 @@ TRUTH_KEYS: frozenset[str] = frozenset(TOP_LEVEL_TRUTH_KEYS) | frozenset(
 
 
 def _assert_boundary_classification_complete() -> None:
-    """Every schema key must be classified idealized or truth, never both.
+    """Every schema key must be classified idealized, truth, or test-only.
 
-    Runs at import so a schema change that adds a key without classifying it
-    fails everything loudly, not just one test.
+    The three top-level classes must partition the inventory: every key falls
+    in exactly one, and no key falls in two.  Runs at import so a schema change
+    that adds a key without classifying it fails everything loudly, not just one
+    test.
     """
-    overlap = TOP_LEVEL_IDEALIZED_KEYS & TOP_LEVEL_TRUTH_KEYS
-    assert not overlap, f'top-level keys classified both idealized and truth: {sorted(overlap)}'
-    unclassified = _ALLOWED_KEYS - (TOP_LEVEL_IDEALIZED_KEYS | TOP_LEVEL_TRUTH_KEYS)
+    classes = {
+        'idealized': TOP_LEVEL_IDEALIZED_KEYS,
+        'truth': TOP_LEVEL_TRUTH_KEYS,
+        'test-only': TOP_LEVEL_TEST_ONLY_KEYS,
+    }
+    for (name_a, set_a), (name_b, set_b) in (
+        (('idealized', classes['idealized']), ('truth', classes['truth'])),
+        (('idealized', classes['idealized']), ('test-only', classes['test-only'])),
+        (('truth', classes['truth']), ('test-only', classes['test-only'])),
+    ):
+        overlap = set_a & set_b
+        assert not overlap, (
+            f'top-level keys classified both {name_a} and {name_b}: {sorted(overlap)}'
+        )
+    classified = TOP_LEVEL_IDEALIZED_KEYS | TOP_LEVEL_TRUTH_KEYS | TOP_LEVEL_TEST_ONLY_KEYS
+    unclassified = _ALLOWED_KEYS - classified
     assert not unclassified, f'top-level keys with no boundary class: {sorted(unclassified)}'
-    unknown = (TOP_LEVEL_IDEALIZED_KEYS | TOP_LEVEL_TRUTH_KEYS) - _ALLOWED_KEYS
+    unknown = classified - _ALLOWED_KEYS
     assert not unknown, f'classified top-level keys not in the inventory: {sorted(unknown)}'
     for block, (allowed, idealized, truth) in _OBJECT_BLOCKS.items():
         overlap = idealized & truth

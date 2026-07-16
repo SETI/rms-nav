@@ -43,6 +43,7 @@ from spindoctor.sim.scene_checks import (
     _check_artifacts,
     _check_body_object,
     _check_detector,
+    _check_expected,
     _check_noise,
     _check_optics,
     _check_optional_bool,
@@ -55,6 +56,7 @@ from spindoctor.sim.scene_checks import (
     _check_ring_object,
     _check_sky_counts,
     _check_spk_error,
+    _check_star_catalog_scatter,
     _check_star_object,
     _require_int,
     _require_positive_int,
@@ -72,6 +74,7 @@ from spindoctor.sim.scene_schema import (
 )
 from spindoctor.sim.scene_schema import (
     TOP_LEVEL_IDEALIZED_KEYS,
+    TOP_LEVEL_TEST_ONLY_KEYS,
     TOP_LEVEL_TRUTH_KEYS,
     TRUTH_KEYS,
     SimSceneValidationError,
@@ -82,6 +85,7 @@ __all__ = [
     'CURRENT_SCHEMA_VERSION',
     'DECLARED_SIM_SCENE_CLASSES',
     'TOP_LEVEL_IDEALIZED_KEYS',
+    'TOP_LEVEL_TEST_ONLY_KEYS',
     'TOP_LEVEL_TRUTH_KEYS',
     'TRUTH_KEYS',
     'SimSceneValidationError',
@@ -255,6 +259,8 @@ def validate_sim_params(
     _check_artifacts(sim_params.get('artifacts'), instrument=instrument, source=source)
     _check_spk_error(sim_params.get('spk_error'), source=source)
     _check_sky_counts(sim_params.get('sky_counts'), source=source)
+    _check_star_catalog_scatter(sim_params.get('star_catalog_scatter_px'), source=source)
+    _check_expected(sim_params.get('expected'), source=source)
 
     for block in ('bodies', 'rings', 'stars'):
         _check_optional_mapping_list(sim_params.get(block), block, source=source)
