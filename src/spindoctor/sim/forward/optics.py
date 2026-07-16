@@ -25,6 +25,8 @@ from typing import Any
 
 import numpy as np
 
+from spindoctor.sim.forward.distortion import apply_distortion
+from spindoctor.sim.forward.ghosts import apply_ghosts
 from spindoctor.sim.forward.psf import apply_psf, psf_truncation_for_instrument
 from spindoctor.sim.forward.smear import apply_smear
 from spindoctor.sim.forward.stages import SimFrame
@@ -114,6 +116,8 @@ def apply_optics(
     if smear:
         apply_smear(frame, smear=smear, oversample=oversample)
 
+    apply_distortion(frame, params=params, oversample=oversample)
+
     psf = optics.get('psf')
     if isinstance(psf, dict):
         sigma_v = float(psf['sigma_v'])
@@ -129,6 +133,10 @@ def apply_optics(
             truncation_px=psf_truncation_for_instrument(params.get('instrument')),
             oversample=oversample,
         )
+
+    ghosts = optics.get('ghosts')
+    if ghosts:
+        apply_ghosts(frame, ghosts=ghosts, oversample=oversample)
 
     stray = optics.get('stray_light') or params.get('stray_light')
     if stray:
