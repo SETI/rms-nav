@@ -262,7 +262,7 @@ def validate_sim_params(
     _check_optional_positive_int(sim_params.get('oversample'), 'oversample', source=source)
     _check_optics(sim_params.get('optics'), source=source)
     _check_detector(sim_params.get('detector'), instrument=instrument, source=source)
-    _check_artifacts(sim_params.get('artifacts'), source=source)
+    _check_artifacts(sim_params.get('artifacts'), instrument=instrument, source=source)
     _check_spk_error(sim_params.get('spk_error'), source=source)
 
     for block in ('bodies', 'rings', 'stars'):

@@ -12,12 +12,25 @@ Keys are sim instrument names (see ``spindoctor.sim.instruments.SIM_INSTRUMENTS`
 import copy
 from typing import Any
 
+from spindoctor.sim.forward.artifact_modes import ARTIFACT_MODES, MODE_KEYS
+
 __all__ = [
+    'ARTIFACT_MODES',
     'DETECTOR_DEFAULTS',
     'DISTORTION_RESIDUAL_RMS_PX',
+    'MODE_KEYS',
     'PSF_KERNELS',
     'resolve_detector_defaults',
 ]
+
+# The artifact-mode registry (:mod:`spindoctor.sim.forward.artifact_modes`) is the
+# single source of truth for the ``artifacts`` block's per-mode keys, their
+# rendering stage, per-instrument availability, and parameter schemas.  It is
+# re-exported here so the detector catalog and the mode registry share one
+# import point.  Every *loss-mode* incidence defaults to 0 even under
+# ``instrument_defaults`` -- naming an instrument selects a signal chain, not a
+# set of transmission defects -- so loss modes are planted only by scenes that
+# configure them explicitly.
 
 # Whole-scene PSF kernel parameters per instrument, all radii in detector
 # pixels.  The core sigma comes from each camera's measured FWHM (sigma =

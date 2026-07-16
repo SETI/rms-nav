@@ -16,6 +16,13 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from spindoctor.sim.forward.artifact_modes import (
+    ARTIFACT_MODES,
+    MODE_KEYS,
+    ModeParam,
+    mode_available,
+    mode_unavailable_message,
+)
 from spindoctor.sim.scene_schema import _BODY_IDEALIZED_KEYS, SimSceneValidationError
 
 
@@ -317,9 +324,11 @@ _DETECTOR_MODELS: frozenset[str] = frozenset({'ccd', 'vidicon'})
 # Quantization sub-modes: 'exact' rounds to integer DN (uniform bins); the ADC
 # modes reproduce the documented histogram structure of each camera.
 _QUANTIZATION_MODES: frozenset[str] = frozenset({'exact', 'uneven_12bit', '8bit', 'sqrt_lut'})
-# The artifacts block: at this fidelity only the physical-chain opt-in switch
-# (per-mode loss incidences and adversarial placement land with later phases).
-_ARTIFACTS_KEYS: frozenset[str] = frozenset({'instrument_defaults'})
+# The artifacts block: the two switches (the physical-chain opt-in and the
+# adversarial-placement flag) plus one map per artifact mode, keyed by exactly
+# the mode-key registry.  Unknown keys fail.
+_ARTIFACTS_SWITCH_KEYS: frozenset[str] = frozenset({'instrument_defaults', 'adversarial'})
+_ARTIFACTS_KEYS: frozenset[str] = _ARTIFACTS_SWITCH_KEYS | MODE_KEYS
 
 
 def _check_noise(value: Any, *, source: str) -> None:
@@ -410,15 +419,25 @@ def _check_detector(value: Any, *, instrument: str, source: str) -> None:
         )
 
 
-def _check_artifacts(value: Any, *, source: str) -> None:
-    """Validate the scene-level ``artifacts`` block's field types.
+def _check_artifacts(value: Any, *, instrument: str, source: str) -> None:
+    """Validate the scene-level ``artifacts`` block against the mode registry.
+
+    Beyond the two switch keys, the block is keyed by exactly the artifact-mode
+    registry (unknown keys fail).  A mode that has no implementation yet fails
+    as not-yet-implemented, and a mode unavailable on the scene's instrument
+    fails with the registry's message (the LORRI hot-pixel case carries a
+    bespoke one).  Each present mode's parameters are then type-checked against
+    its schema.
 
     Parameters:
         value: The ``artifacts`` mapping, or None when the block is absent.
+        instrument: The scene's (already validated) instrument name, used to
+            check per-mode availability.
         source: Label used in error messages.
 
     Raises:
-        SimSceneValidationError: On any unknown or invalid artifacts field.
+        SimSceneValidationError: On any unknown, unimplemented, unavailable, or
+            mistyped artifacts field.
     """
     if value is None:
         return
@@ -430,6 +449,73 @@ def _check_artifacts(value: Any, *, source: str) -> None:
     _check_optional_bool(
         value.get('instrument_defaults'), 'artifacts.instrument_defaults', source=source
     )
+    _check_optional_bool(value.get('adversarial'), 'artifacts.adversarial', source=source)
+    for mode_name in set(value) & MODE_KEYS:
+        _check_artifact_mode(mode_name, value[mode_name], instrument=instrument, source=source)
+
+
+def _check_artifact_mode(mode_name: str, config: Any, *, instrument: str, source: str) -> None:
+    """Validate one artifact-mode map: availability, implementation, and params."""
+    label = f'artifacts.{mode_name}'
+    if not isinstance(config, dict):
+        raise SimSceneValidationError(f'{source}: {label} must be a mapping when present')
+    mode = ARTIFACT_MODES[mode_name]
+    if not mode.implemented:
+        raise SimSceneValidationError(
+            f'{source}: artifact mode {mode_name!r} is not yet implemented'
+        )
+    if not mode_available(mode_name, instrument):
+        raise SimSceneValidationError(
+            f'{source}: {mode_unavailable_message(mode_name, instrument)}'
+        )
+    param_map = mode.param_map
+    unknown = set(config) - set(param_map)
+    if unknown:
+        raise SimSceneValidationError(f'{source}: {label}: unknown keys: {sorted(unknown)}')
+    for name, param in param_map.items():
+        if name in config:
+            _check_mode_param(config[name], param, key=f'{label}.{name}', source=source)
+
+
+def _check_mode_param(value: Any, param: ModeParam, *, key: str, source: str) -> None:
+    """Type-check one artifact-mode parameter value against its schema kind."""
+    kind = param.kind
+    if kind == 'bool':
+        _check_optional_bool(value, key, source=source)
+    elif kind == 'nonneg_number':
+        _check_optional_nonnegative_number(value, key, source=source)
+    elif kind == 'unit_interval':
+        _check_optional_nonnegative_number(value, key, source=source)
+        if value is not None and float(value) > 1.0:
+            raise SimSceneValidationError(f'{source}: {key} must lie in [0, 1]; got {value!r}')
+    elif kind == 'int':
+        _check_optional_number(value, key, source=source)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+            raise SimSceneValidationError(f'{source}: {key} must be an integer when present')
+    elif kind == 'nonneg_int':
+        _check_optional_nonnegative_int(value, key, source=source)
+    elif kind == 'positive_int':
+        _check_optional_positive_int(value, key, source=source)
+    elif kind == 'enum':
+        if param.choices is not None and value not in param.choices:
+            raise SimSceneValidationError(
+                f'{source}: {key} must be one of {list(param.choices)}; got {value!r}'
+            )
+    elif kind == 'int_list':
+        _check_int_list(value, param.length, key=key, source=source)
+    else:  # pragma: no cover - guards a registry authoring mistake
+        raise SimSceneValidationError(f'{source}: {key} has unknown parameter kind {kind!r}')
+
+
+def _check_int_list(value: Any, length: int | None, *, key: str, source: str) -> None:
+    """Fail validation unless ``value`` is a list of ``length`` integers."""
+    if value is None:
+        return
+    valid = isinstance(value, (list, tuple)) and (length is None or len(value) == length)
+    if not valid or any(isinstance(x, bool) or not isinstance(x, int) for x in value):
+        raise SimSceneValidationError(
+            f'{source}: {key} must be a list of {length} integers when present'
+        )
 
 
 def _check_spk_error(value: Any, *, source: str) -> None:
