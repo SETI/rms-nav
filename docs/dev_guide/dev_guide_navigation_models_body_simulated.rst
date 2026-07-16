@@ -54,8 +54,9 @@ Restrictions and assumptions
 - The operator must supply finite, positive ellipsoid axes. Degenerate inputs (zero
   radius, negative axes) are rejected by
   :func:`~spindoctor.nav_model.sim_body.create_simulated_body`.
-- Crater and anti-aliasing keys in the sim-params dict are accepted but ignored; the
-  simulated renderer always uses maximum anti-aliasing.
+- Crater and anti-aliasing scene keys are truth keys the boundary filter strips, so
+  this model never sees them; the predicted template always renders at maximum
+  anti-aliasing and zero surface relief.
 - The simulated body is rendered onto a fixed extfov image without per-instrument noise
   or PSF smearing; the operator's downstream noise-injection pipeline supplies those.
 
@@ -70,11 +71,12 @@ Configuration
 =============
 
 The simulated body model consumes no YAML configuration of its own; every parameter comes
-in via the per-instance ``sim_params`` dict. Expected keys:
+in via the per-body entry of the observation's filtered scene view
+(``obs.nav_params['bodies']``, see :doc:`dev_guide_simulator`). Expected keys:
 
 - ``name`` — body label used in metadata and the summary PNG.
 - ``center_v``, ``center_u`` — pixel coordinates of the body centre.
-- ``range`` — subject distance in km (defaults to ``+inf``).
+- ``range_km`` — subject distance in km (defaults to ``+inf``).
 - ``axis1``, ``axis2``, ``axis3`` — ellipsoid semi-axes in km. ``axis3`` defaults to
   ``min(axis1, axis2)``.
 - ``rotation_z`` — rotation about the line of sight (degrees).
@@ -87,11 +89,13 @@ in via the per-instance ``sim_params`` dict. Expected keys:
   :func:`~spindoctor.sim.mesh_geometry.mesh_spec_from_params`).
 - ``km_per_pixel`` — optional physical scale at the limb; when absent the
   phase-irregularity factor collapses to the regular-body case.
-- ``nav_override`` — optional mapping overlaid on the body params to build the
-  predicted body, separating the render geometry from the navigation geometry
+- ``nav_override`` — optional scene mapping overlaid onto the body's idealized view by
+  the information-boundary filter before this model sees it, separating the render
+  geometry from the navigation geometry
   (see *Render geometry vs navigation geometry* below).
 
-Crater and anti-aliasing keys are accepted but ignored. The predicted silhouette diameter
+Crater and anti-aliasing keys never reach this model (the boundary filter strips them,
+so the template is a smooth, fully anti-aliased body). The predicted silhouette diameter
 gates the blob (at least 5 px) and limb (at least 100 px) emission; the diameter floor on
 the limb keeps the LM-refined fit off marginally-resolved bodies, where it would inject
 cross-process jitter into the fused offset.
@@ -107,8 +111,10 @@ the body params. By default the predicted body is built from the same params the
 renderer drew, so the navigator knows the truth (the agreeing case).
 
 An optional ``nav_override`` mapping breaks that tie. The renderer ignores it and
-always draws the true geometry; the navigator builds its predicted body from the
-body params with ``nav_override`` overlaid (``_nav_params``). This is the channel
+always draws the true geometry; the boundary filter
+(:func:`~spindoctor.sim.scene.build_nav_params`) overlays ``nav_override`` onto the
+body's idealized view and drops the key, so the predicted body is built from what the
+navigator *believes* without the true values underneath. This is the channel
 that lets the navigation geometry diverge from the render geometry, which the
 irregular-body scenarios exercise:
 

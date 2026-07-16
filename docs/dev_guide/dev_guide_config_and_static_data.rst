@@ -363,7 +363,7 @@ merged only after the reviewer marks the PR with the
 Validation tests
 ----------------
 
-``tests/nav/config_files/test_body_shape_citations.py`` enforces:
+``tests/spindoctor/config_files/test_body_shape_citations.py`` enforces:
 
 - Every body declares a ``_sources`` mapping.
 - Every required numeric / list field on a body has a corresponding
@@ -404,5 +404,5 @@ When a new YAML knob is added:
    ``bodies``). The page lists name, type, default, units, and consumer.
 4. If the key represents static data (a measured constant rather than a
    knob), add the ``_sources`` entry per the citation discipline above.
-5. Add or extend a unit test under ``tests/nav/config_files/`` that asserts
+5. Add or extend a unit test under ``tests/spindoctor/config_files/`` that asserts
    the loader exposes the key with the expected default.

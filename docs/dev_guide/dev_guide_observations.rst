@@ -149,8 +149,9 @@ Shipping subclasses:
   values pass through). Delegates to
   ``oops.hosts.newhorizons.lorri.from_file``.
 - :class:`~spindoctor.obs.obs_inst_sim.ObsSim` — simulated-image observation
-  backed by a description of bodies and stars, consumed by
-  ``sd_create_simulated_image`` and the simulated-image GUI driver.
+  backed by a validated YAML scene (bodies, rings, stars); renders the frame via
+  the forward model and exposes the navigator the filtered idealized scene view
+  ``obs.nav_params`` (see :doc:`dev_guide_simulator`).
 
 Each subclass overrides :meth:`~spindoctor.obs.obs_inst.ObsInst.from_file` to pull the right
 ``oops`` host, wires up the per-instrument PSF and photometric window, and forwards

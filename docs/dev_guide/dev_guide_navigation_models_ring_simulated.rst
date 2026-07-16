@@ -62,7 +62,8 @@ Configuration
 =============
 
 The simulated ring model consumes no YAML configuration of its own; every parameter comes
-in via the per-instance ``sim_params`` dict. Expected keys:
+in via the per-ring entry of the observation's filtered scene view
+(``obs.nav_params['rings']``, see :doc:`dev_guide_simulator`). Expected keys:
 
 - ``name`` — ring-system label used in metadata.
 - ``feature_type`` — ``RINGLET`` (bright ring) or ``GAP`` (dark gap).

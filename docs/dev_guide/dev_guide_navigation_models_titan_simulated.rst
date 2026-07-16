@@ -56,9 +56,10 @@ The slot has no source file. A direct simulated-image counterpart would live at
 ``src/spindoctor/nav_model/nav_model_titan_simulated.py`` and self-register via
 ``__init_subclass__``; like
 :class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated` and
-:class:`~spindoctor.nav_model.nav_model_rings_simulated.NavModelRingsSimulated` it would not
-override :meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs`, so the orchestrator's
-autonomous registry would not build an instance during real-image runs.
+:class:`~spindoctor.nav_model.nav_model_rings_simulated.NavModelRingsSimulated` it would
+override :meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs` to decline real
+observations, so the orchestrator's autonomous registry would not build an instance
+during real-image runs.
 
 Examples
 ========

@@ -532,11 +532,11 @@ Simulated Images
 SpinDoctor includes an image simulator used to test and validate the navigation
 pipeline. It is not needed for navigating real data, but a simulated frame can be
 navigated through the same pipeline by passing the ``sim`` dataset name and a path
-to a JSON parameter file:
+to a YAML scene file:
 
 .. code-block:: bash
 
-   sd_offset sim /path/to/simulated_image.json
+   sd_offset sim /path/to/scene.yaml
 
 The simulator, its scene formats, and the ``sd_create_simulated_image`` GUI are
 documented for developers in the :doc:`/dev_guide/dev_guide_simulator` chapter.
