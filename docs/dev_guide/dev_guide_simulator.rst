@@ -122,6 +122,15 @@ The boundary is enforced structurally, not by convention:
 - The navigator-side models read **only** ``obs.nav_params``. None of the
   renderer's output -- rendered star records, body masks, z-order maps, all
   accumulated on the frame's ``truth`` metadata -- ever crosses.
+- Navigator-side quantities that depend on the detector are derived from the
+  emulated instrument's **published** configuration, never from the scene's
+  truth-side blocks. The star detection limit
+  (:meth:`~spindoctor.obs.obs_inst_sim.ObsSim.star_max_usable_vmag`) is the
+  worked example: it comes from the resolved per-instrument config block
+  (including any idealized ``instrument_config`` overrides) and is independent
+  of the scene's ``noise`` block, so a scene that plants noise different from
+  the published values produces an honestly-wrong detection limit -- planted
+  model error, exactly what such a scene is for.
 - ``tests/spindoctor/sim/test_information_boundary.py`` constructs a scene
   exercising every ``TRUTH_KEYS`` entry and asserts none is reachable through
   the filtered view. This test is the independence guarantee: any change that
@@ -140,8 +149,14 @@ record defaults) the planted error is the *only* error in a recovery
 measurement. Independent implementations would each carry their own
 conventions, and any delta between them would land as an unknown systematic
 inside the measured error -- contaminating the truth reference every simulator
-result rests on. The shared helpers take explicit geometry arguments and never
-read a scene mapping, so they cannot smuggle truth across.
+result rests on. The discipline the shared helpers follow: they never read the
+scene dict and never accept a truth key. Most take explicit geometry
+arguments; the two record parsers
+(:func:`spindoctor.sim.star_records.star_record_from_params` and
+:func:`spindoctor.sim.mesh_geometry.mesh_spec_from_params`) parse per-object
+mappings restricted to idealized keys, and on the navigator side they only
+ever receive entries that have already passed the boundary filter. Either
+way, truth cannot be smuggled across.
 
 The honest residual: a bug in a shared helper that makes rendered features
 subtly unlike *real* features leaves both sides consistent and recovery clean
@@ -200,11 +215,18 @@ Each stage is a callable matching the
 :class:`~spindoctor.sim.forward.stages.Stage` protocol: it mutates a
 :class:`~spindoctor.sim.forward.stages.SimFrame` in place, reads its parameters
 from the full scene mapping, and draws randomness only from the
-``numpy.random.Generator`` it is handed. **A stage whose scene block is absent
-is disabled** and contributes nothing to the rendered image. This is a design
-property, not a convenience: a single-variable sweep can only attribute error
-to one effect if every other effect is off, and the self-consistency floor is
-by definition the render with every mismatch stage disabled.
+``numpy.random.Generator`` it is handed. Whether a stage contributes anything
+when its scene block is absent differs by stage. The stray-light and telemetry
+effects are **off unless asked for**: with no ``stray_light`` block no field is
+added, and with no ``missing_data_rate`` no pixels are dropped. The detector
+stage is **on by default**: a raw-DN scene with no ``noise`` block still gets
+Poisson shot noise, read noise, and the bias pedestal at the emulated
+instrument's published parameter values, and a scene ``noise`` block overrides
+individual parameters (so silencing the detector is itself an explicit
+override, e.g. ``poisson: false`` with zero read noise and bias). A
+single-variable sweep therefore relies on the off-by-default blocks staying
+absent and on scenes explicitly pinning the detector parameters they are not
+sweeping.
 
 ``SimFrame`` carries the mutable image state between stages:
 
