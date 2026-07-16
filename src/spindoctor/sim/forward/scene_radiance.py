@@ -14,10 +14,10 @@ vidicon), so the whole-scene optics PSF is the star's only convolution.  The
 background sky draws its counts from a cumulative star-count law and renders them
 through the same flux/point-mass path.
 
-Occlusion: bodies and the legacy ``rings`` paint far to near by ``range_km``
-(overlaps without explicit ranges are a scene error).  The optical-depth
-``ring_system`` composites over that stack as a transmission screen, per pixel
-and depth-ordered against the bodies (``img = I_ring + exp(-tau/mu) *
+Occlusion: bodies paint far to near by ``range_km`` (overlaps without
+explicit ranges are a scene error).  The optical-depth ``ring_system``
+composites over that stack as a transmission screen, per pixel and
+depth-ordered against the bodies (``img = I_ring + exp(-tau/mu) *
 img_behind``).  Point sources sit at infinity: the ring screen attenuates
 them and an opaque body's silhouette extinguishes them (the painted, lit
 silhouette -- a fully dark night side does not occult, a stated
@@ -38,7 +38,6 @@ from spindoctor.sim.forward.artifacts_catalog import (
 )
 from spindoctor.sim.forward.body import render_single_body
 from spindoctor.sim.forward.optics import effective_psf
-from spindoctor.sim.forward.ring import composite_ring
 from spindoctor.sim.forward.ring_system import RingSystemMaps, render_ring_system
 from spindoctor.sim.forward.stages import SimFrame
 from spindoctor.sim.forward.star import faint_sky_cutoff_mag, render_sky_counts, render_stars
@@ -85,10 +84,9 @@ def compose_scene_radiance(
     Parameters:
         frame: The frame whose signal plane is composed in place; its
             ``truth`` dict receives the renderer output metadata (``stars``,
-            ``bodies``, ``rings``, ``ring_features``, ``inventory``,
-            ``star_info``, ``body_masks``, ``ring_masks``,
-            ``order_near_to_far``, ``body_index_map``, ``body_mask_map``,
-            ``body_occlusion``).
+            ``bodies``, ``ring_features``, ``inventory``, ``star_info``,
+            ``body_masks``, ``ring_masks``, ``order_near_to_far``,
+            ``body_index_map``, ``body_mask_map``, ``body_occlusion``).
         params: The full scene mapping.
         rng: The stage generator.  Unused directly: this stage's randomized
             sub-effects (background stars, craters) run behind parameter-keyed
@@ -158,7 +156,6 @@ def compose_scene_radiance(
 
     stars_params = params.get('stars', []) or []
     bodies_params = params.get('bodies', []) or []
-    rings_params = params.get('rings', []) or []
 
     # Star positions and smear vectors are pixel-space, so they scale with the
     # oversampling factor for rendering; at os == 1 the copy is numerically
@@ -203,29 +200,6 @@ def compose_scene_radiance(
         factor = spk_ref_range / range_km
         return spk_dv * factor, spk_du * factor
 
-    # Process rings: apply parallax and scale every pixel-space quantity to
-    # the oversampled grid.  The original scene entries keep their
-    # detector-space values for the truth metadata.
-    rings_scaled: list[dict[str, Any]] = []
-    for ring_params in rings_params:
-        ring_scaled = dict(ring_params)
-        cv = float(ring_params.get('center_v', det_center_v))
-        cu = float(ring_params.get('center_u', det_center_u))
-        ring_range_km = ring_params.get('range_km')
-        if ring_range_km is not None:
-            sdv, sdu = _spk_shift(float(ring_range_km))
-            cv += sdv
-            cu += sdu
-        ring_scaled['center_v'] = cv * os
-        ring_scaled['center_u'] = cu * os
-        if ring_params.get('shading_distance') is not None:
-            ring_scaled['shading_distance'] = float(ring_params['shading_distance']) * os
-        if ring_params.get('inner_data') is not None:
-            ring_scaled['inner_data'] = _scale_ring_modes(ring_params['inner_data'], os)
-        if ring_params.get('outer_data') is not None:
-            ring_scaled['outer_data'] = _scale_ring_modes(ring_params['outer_data'], os)
-        rings_scaled.append(ring_scaled)
-
     # Process bodies: assign default ranges, apply parallax and the camera roll,
     # and scale centres and axes to the oversampled grid.  A roll rotates each
     # body's centre about the boresight and adds to its line-of-sight pose
@@ -264,29 +238,19 @@ def compose_scene_radiance(
                 body_params_copy[axis_key] = float(axis_val) * os
         bodies_with_ranges.append(body_params_copy)
 
-    # Combine rings and bodies and order far to near.  The ordering key is
-    # the physical 'range_km' -- there is no hint-unit fallback.  A ring
-    # without one has no depth and sorts as farthest (behind everything);
-    # a body without one keeps the positional default (index + 1) that the
-    # truth metadata contract materializes.  Either default is only a
-    # deterministic placement, never a depth claim: the paint loop below
-    # raises when objects without an explicit range_km actually overlap,
-    # so an ambiguous stack is a scene-authoring error, not a guess.  The
-    # descending (depth, is-ring, index) key renders unranked rings in
-    # reverse list order behind the bodies, matching the retired hint
-    # defaults exactly.
-    render_items: list[tuple[tuple[float, int, int], str, Any, int, bool]] = []
-    for idx, ring_scaled in enumerate(rings_scaled):
-        ring_range_km = ring_scaled.get('range_km')
-        depth = float(ring_range_km) if ring_range_km is not None else float('inf')
-        render_items.append(((depth, 1, idx), 'ring', ring_scaled, idx, ring_range_km is not None))
+    # Order the bodies far to near.  The ordering key is the physical
+    # 'range_km' -- there is no hint-unit fallback.  A body without one
+    # keeps the positional default (index + 1) that the truth metadata
+    # contract materializes; that default is only a deterministic
+    # placement, never a depth claim: the paint loop below raises when
+    # bodies without an explicit range_km actually overlap, so an
+    # ambiguous stack is a scene-authoring error, not a guess.
+    render_items: list[tuple[tuple[float, int], dict[str, Any], int, bool]] = []
     for idx, (body_params, body_scaled) in enumerate(
         zip(bodies_params, bodies_with_ranges, strict=True)
     ):
         explicit = body_params.get('range_km') is not None
-        render_items.append(
-            ((float(body_scaled['range_km']), 0, idx), 'body', body_scaled, idx, explicit)
-        )
+        render_items.append(((float(body_scaled['range_km']), idx), body_scaled, idx, explicit))
 
     # Sort all items far to near.
     render_items.sort(key=lambda x: x[0], reverse=True)
@@ -294,9 +258,6 @@ def compose_scene_radiance(
     # Render in range order (far to near)
     time = float(params.get('time', 0.0))
     epoch = float(params.get('ring_epoch', 0.0))
-    shade_solid = bool(params.get('shade_solid_rings', False))
-    # Track ring masks in original order for click detection
-    ring_mask_map: dict[int, NDArrayBoolType] = {}
 
     # Track body data for final metadata
     body_models_dict: dict[str, dict[str, Any]] = {}
@@ -316,9 +277,9 @@ def compose_scene_radiance(
     order_near_to_far = [str(bp['name']).upper() for bp in sorted_bodies_by_range]
 
     # Painted-so-far tracking for the depth-ambiguity check: overlapping
-    # objects must ALL carry an explicit scene range_km, or their stacking
+    # bodies must ALL carry an explicit scene range_km, or their stacking
     # would be a silent guess.
-    painted_items: list[tuple[str, NDArrayBoolType, bool, str]] = []
+    painted_items: list[tuple[str, NDArrayBoolType, bool]] = []
     # Per-pixel observer distance of the nearest painted body, for the ring
     # system's per-pixel compositing; built only when the scene has one.
     ring_system_params = params.get('ring_system')
@@ -327,51 +288,33 @@ def compose_scene_radiance(
         np.full((size_v, size_u), np.inf, dtype=np.float64) if has_ring_system else None
     )
 
-    for sort_key, item_type, item_params, orig_idx, explicit_depth in render_items:
-        item_mask: NDArrayBoolType
-        if item_type == 'ring':
-            item_mask = composite_ring(
-                img,
-                item_params,
-                offset_v,
-                offset_u=offset_u,
-                time=time,
-                epoch=epoch,
-                shade_solid=shade_solid,
-                resolution=float(os),
-            )
-            ring_mask_map[orig_idx] = item_mask
-            item_label = str(item_params.get('name', f'rings[{orig_idx}]'))
-        else:
-            # Render single body
-            body_mask, body_info = render_single_body(
-                img,
-                item_params,
-                offset_v,
-                offset_u=offset_u,
-                seed=crater_seed,
-                body_index=orig_idx,
-                ref_center_v=ref_center_v,
-                ref_center_u=ref_center_u,
-                oversample=os,
-            )
-            # Store mask by original index for proper ordering
-            body_mask_map_by_idx[orig_idx] = body_mask
-            body_mask_map_dict[body_info['name']] = body_mask
-            body_models_dict[body_info['name']] = body_info['params']
-            inventory_dict[body_info['name']] = body_info['inventory']
-            rendered_bodies.append((body_info['name'], body_mask))
-            # Index into near-to-far order is 1-based
-            near_index = order_near_to_far.index(body_info['name']) + 1
-            body_index_map[body_mask] = near_index
-            if body_depth_map is not None:
-                # Painting runs far to near, so the last writer per pixel is
-                # the nearest body.
-                body_depth_map[body_mask] = sort_key[0]
-            item_mask = body_mask
-            item_label = body_info['name']
-        _check_depth_ambiguity(painted_items, item_label, item_mask, explicit_depth)
-        painted_items.append((item_label, item_mask, explicit_depth, item_type))
+    for sort_key, item_params, orig_idx, explicit_depth in render_items:
+        body_mask, body_info = render_single_body(
+            img,
+            item_params,
+            offset_v,
+            offset_u=offset_u,
+            seed=crater_seed,
+            body_index=orig_idx,
+            ref_center_v=ref_center_v,
+            ref_center_u=ref_center_u,
+            oversample=os,
+        )
+        # Store mask by original index for proper ordering
+        body_mask_map_by_idx[orig_idx] = body_mask
+        body_mask_map_dict[body_info['name']] = body_mask
+        body_models_dict[body_info['name']] = body_info['params']
+        inventory_dict[body_info['name']] = body_info['inventory']
+        rendered_bodies.append((body_info['name'], body_mask))
+        # Index into near-to-far order is 1-based
+        near_index = order_near_to_far.index(body_info['name']) + 1
+        body_index_map[body_mask] = near_index
+        if body_depth_map is not None:
+            # Painting runs far to near, so the last writer per pixel is
+            # the nearest body.
+            body_depth_map[body_mask] = sort_key[0]
+        _check_depth_ambiguity(painted_items, body_info['name'], body_mask, explicit_depth)
+        painted_items.append((body_info['name'], body_mask, explicit_depth))
 
     # Build body_masks in original order (matching bodies_params)
     body_masks: list[NDArrayBoolType] = []
@@ -381,15 +324,6 @@ def compose_scene_radiance(
         else:
             # Should not happen, but create empty mask if missing
             body_masks.append(np.zeros((size_v, size_u), dtype=np.bool_))
-
-    # Build ring_masks in original order for click detection
-    ring_masks: list[NDArrayBoolType] = []
-    for idx in range(len(rings_params)):
-        if idx in ring_mask_map:
-            ring_masks.append(ring_mask_map[idx])
-        else:
-            # Should not happen, but create empty mask if missing
-            ring_masks.append(np.zeros((size_v, size_u), dtype=np.bool_))
 
     # The optical-depth ring system composites as a transmission screen over
     # the painted stack, per pixel and depth-ordered against the bodies: the
@@ -431,9 +365,7 @@ def compose_scene_radiance(
 
     # Point sources sit at infinity: the ring screen attenuates them wherever
     # it carries optical depth (a body in front of the ring zeroes them below
-    # anyway), and an opaque body extinguishes them entirely.  The legacy
-    # painted 'rings' deliberately do not occlude stars: that path keeps its
-    # exact historical output until the ring_system conversion retires it.
+    # anyway), and an opaque body extinguishes them entirely.
     body_occlusion_mask: NDArrayBoolType | None = None
     if body_masks and bool(np.any(point_e)):
         body_occlusion_mask = np.zeros((size_v, size_u), dtype=np.bool_)
@@ -480,34 +412,21 @@ def compose_scene_radiance(
             stars_layer[body_occlusion_mask] = 0.0
         bodies_layer = np.zeros((size_v, size_u), dtype=np.float64)
         rings_layer = np.zeros((size_v, size_u), dtype=np.float64)
-        for _sort_key, item_type, item_params, orig_idx, _explicit in render_items:
-            if item_type == 'ring':
-                composite_ring(
-                    rings_layer,
-                    item_params,
-                    offset_v,
-                    offset_u=offset_u,
-                    time=time,
-                    epoch=epoch,
-                    shade_solid=shade_solid,
-                    resolution=float(os),
-                )
-            else:
-                render_single_body(
-                    bodies_layer,
-                    item_params,
-                    offset_v,
-                    offset_u=offset_u,
-                    seed=crater_seed,
-                    body_index=orig_idx,
-                    ref_center_v=ref_center_v,
-                    ref_center_u=ref_center_u,
-                    oversample=os,
-                )
+        for _sort_key, item_params, orig_idx, _explicit in render_items:
+            render_single_body(
+                bodies_layer,
+                item_params,
+                offset_v,
+                offset_u=offset_u,
+                seed=crater_seed,
+                body_index=orig_idx,
+                ref_center_v=ref_center_v,
+                ref_center_u=ref_center_u,
+                oversample=os,
+            )
         # The ring system's emission belongs to the rings class and its screen
         # dims the bodies behind it, so the per-class sum reproduces the
-        # composite exactly (a legacy ring under the screen is a scene error,
-        # checked above, so the += cannot double-paint).
+        # composite exactly.
         if ring_maps is not None and ring_apply is not None:
             bodies_layer[ring_apply] *= ring_maps.transmission[ring_apply]
             rings_layer[ring_apply] += ring_maps.intensity[ring_apply]
@@ -533,11 +452,17 @@ def compose_scene_radiance(
                 }
             )
 
+    # The ring system's visibly composited pixels, as the single entry of
+    # the ring-mask truth list (the adversarial feature loci and the GUI's
+    # click mapping consume it).
+    ring_masks: list[NDArrayBoolType] = []
+    if ring_apply is not None and ring_apply.any():
+        ring_masks.append(ring_apply)
+
     frame.truth.update(
         {
             'stars': sim_star_list,
             'bodies': body_models_dict,
-            'rings': rings_params,
             'ring_features': ring_feature_truth,
             'inventory': inventory_dict,
             'star_info': star_info,
@@ -552,25 +477,25 @@ def compose_scene_radiance(
 
 
 def _check_depth_ambiguity(
-    painted_items: list[tuple[str, NDArrayBoolType, bool, str]],
+    painted_items: list[tuple[str, NDArrayBoolType, bool]],
     item_label: str,
     item_mask: NDArrayBoolType,
     explicit_depth: bool,
 ) -> None:
-    """Fail when overlapping objects are stacked without explicit depths.
+    """Fail when overlapping bodies are stacked without explicit depths.
 
-    ``range_km`` is the compositing depth.  Two objects whose painted pixels
+    ``range_km`` is the compositing depth.  Two bodies whose painted pixels
     overlap must both carry an explicit scene ``range_km``, or their stacking
     order would be a silent guess; a scene that leaves it off an overlapping
-    object is malformed and fails loudly here.  Non-overlapping objects need
+    body is malformed and fails loudly here.  Non-overlapping bodies need
     no ranges: their paint order is unobservable.
 
     Parameters:
-        painted_items: ``(label, painted mask, explicit range_km?, type)`` for
-            every object already painted, in render order.
-        item_label: Name of the object just painted.
-        item_mask: Pixels the object just painted.
-        explicit_depth: Whether the object carries an explicit ``range_km``.
+        painted_items: ``(label, painted mask, explicit range_km?)`` for
+            every body already painted, in render order.
+        item_label: Name of the body just painted.
+        item_mask: Pixels the body just painted.
+        explicit_depth: Whether the body carries an explicit ``range_km``.
 
     Raises:
         SimSceneValidationError: If the new object overlaps a painted one and
@@ -578,7 +503,7 @@ def _check_depth_ambiguity(
     """
     if not item_mask.any():
         return
-    for other_label, other_mask, other_explicit, _other_type in painted_items:
+    for other_label, other_mask, other_explicit in painted_items:
         if explicit_depth and other_explicit:
             continue
         if np.any(item_mask & other_mask):
@@ -589,21 +514,19 @@ def _check_depth_ambiguity(
 
 
 def _check_ring_system_ambiguity(
-    painted_items: list[tuple[str, NDArrayBoolType, bool, str]],
+    painted_items: list[tuple[str, NDArrayBoolType, bool]],
     ring_mask: NDArrayBoolType,
     *,
     ring_explicit: bool,
 ) -> None:
-    """Fail when the ring system overlaps painted objects without depths.
+    """Fail when the ring system overlaps painted bodies without depths.
 
     Per-pixel depth ordering against a body needs an explicit ``range_km`` on
-    both the ring system and the body.  A legacy painted ring has no
-    per-pixel depth at all, so overlapping one is always a scene error (the
-    conversion to a ``ring_system`` feature is the fix).
+    both the ring system and the body.
 
     Parameters:
-        painted_items: ``(label, painted mask, explicit range_km?, type)`` for
-            every painted body and legacy ring.
+        painted_items: ``(label, painted mask, explicit range_km?)`` for
+            every painted body.
         ring_mask: Pixels where the ring system carries optical depth.
         ring_explicit: Whether the ring system carries an explicit
             ``range_km``.
@@ -614,14 +537,9 @@ def _check_ring_system_ambiguity(
     """
     if not ring_mask.any():
         return
-    for label, mask, explicit, item_type in painted_items:
+    for label, mask, explicit in painted_items:
         if not np.any(mask & ring_mask):
             continue
-        if item_type == 'ring':
-            raise SimSceneValidationError(
-                f'ring_system overlaps legacy ring {label!r}, which has no per-pixel '
-                f'depth; convert it to a ring_system feature or separate them'
-            )
         if not (ring_explicit and explicit):
             raise SimSceneValidationError(
                 f'ring_system and body {label!r} overlap but do not both carry an '
@@ -862,26 +780,3 @@ def _scale_star_params(star_params: dict[str, Any], os: int) -> dict[str, Any]:
         scaled_companion['sep_px'] = float(companion['sep_px']) * os
         scaled['companion'] = scaled_companion
     return scaled
-
-
-def _scale_ring_modes(modes: Any, os: int) -> list[dict[str, Any]]:
-    """Scale each ring-edge mode's radius amplitudes to the oversampled grid.
-
-    The semi-major-axis ``a`` and the eccentric radius ``ae`` are pixel-space
-    radii; the longitude and precession-rate fields are angular and unchanged.
-
-    Parameters:
-        modes: The ``inner_data`` / ``outer_data`` list of mode mappings.
-        os: The oversampling factor.
-
-    Returns:
-        A list of scaled copies of the mode mappings.
-    """
-    scaled_modes: list[dict[str, Any]] = []
-    for mode in modes:
-        scaled_mode = dict(mode)
-        for key in ('a', 'ae'):
-            if mode.get(key) is not None:
-                scaled_mode[key] = float(mode[key]) * os
-        scaled_modes.append(scaled_mode)
-    return scaled_modes

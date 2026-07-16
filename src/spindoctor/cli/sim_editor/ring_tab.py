@@ -1,8 +1,14 @@
 """Ring tab builder and change handlers.
 
-Builds the per-ring editing tab (feature type, centre, physical range,
-shading, and the inner / outer mode-1 edge parameters with enable checkboxes)
-and owns the handlers that write ring fields back into the data model.
+Builds one editing tab per ``ring_system`` feature (kind, navigability,
+optical depth, the kind-specific shape keys, the mode-1 catalog orbit, and
+the photometric truth scalars) and owns the handlers that write ring fields
+back into the data model.  The first feature's tab additionally carries the
+system-level controls: the shared projection geometry (center, opening
+angles, node), the phase angle, and the optional physical range / pixel
+scale.  The orbit's m-mode / edge-wave lists and the truth-side
+orbit_error / declared_orbit_sigma / azimuthal / moonlets blocks are
+authorable in scene YAML but have no widgets yet.
 """
 
 from typing import Any
@@ -21,13 +27,29 @@ from PyQt6.QtWidgets import (
 
 from spindoctor.cli.sim_editor.base import SimEditorBase
 
+# The kind vocabulary, and which kinds take which shape keys (mirrors the
+# schema validator: a stray shape key fails validation, so the handlers
+# insert and remove keys as the kind changes).
+_RING_KINDS = ('ringlet', 'gap', 'edge', 'ramp', 'wave')
+_KINDS_WITH_WIDTH = frozenset({'ringlet', 'gap', 'ramp'})
+_KINDS_WITH_SIDE = frozenset({'edge', 'ramp'})
+
 
 class RingTabMixin(SimEditorBase):
-    """Builds and handles the per-ring editing tab."""
+    """Builds and handles the per-feature ring_system editing tabs."""
+
+    def _ring_features(self) -> list[dict[str, Any]]:
+        """The live ring_system feature list ([] when the scene has none)."""
+        ring_system = self.sim_params.get('ring_system')
+        if not isinstance(ring_system, dict):
+            return []
+        features = ring_system.get('features')
+        return features if isinstance(features, list) else []
 
     def _build_ring_tab(self, idx: int) -> QWidget:
-        """Build the editing tab widget for the ring at ``idx``."""
-        p = self.sim_params['rings'][idx]
+        """Build the editing tab widget for the ring_system feature at ``idx``."""
+        features = self._ring_features()
+        p = features[idx]
         w = QWidget()
         w.setProperty('kind', 'ring')
         w.setProperty('data_index', idx)
@@ -39,218 +61,121 @@ class RingTabMixin(SimEditorBase):
         name_edit.textChanged.connect(lambda t, i=idx: self._on_ring_name(i, t))
         fl.addRow('Name:', name_edit)
 
-        # Feature type (RINGLET or GAP)
-        feature_type_combo = QComboBox()
-        feature_type_combo.addItems(['RINGLET', 'GAP'])
-        feature_type = p.get('feature_type', 'RINGLET')
-        feature_type_combo.setCurrentText(feature_type)
-        feature_type_combo.currentTextChanged.connect(
-            lambda t, i=idx: self._on_ring_field(i, 'feature_type', t)
+        kind_combo = QComboBox()
+        kind_combo.addItems(list(_RING_KINDS))
+        kind_combo.setCurrentText(str(p.get('kind', 'ringlet')))
+        kind_combo.currentTextChanged.connect(lambda t, i=idx: self._on_ring_kind(i, t))
+        fl.addRow('Kind:', kind_combo)
+
+        navigable_check = QCheckBox('Navigable (the navigator is told about this feature)')
+        navigable_check.setChecked(bool(p.get('navigable', False)))
+        navigable_check.setToolTip(
+            'Unchecked features render as confounders the navigator has no '
+            'knowledge of (dropped from nav_params).'
         )
-        fl.addRow('Feature type:', feature_type_combo)
+        navigable_check.clicked.connect(lambda checked, i=idx: self._on_ring_navigable(i, checked))
+        fl.addRow(navigable_check, QLabel(''))
 
-        center_v = QDoubleSpinBox()
-        center_v.setRange(-10000.0, 20000.0)
-        center_v.setDecimals(1)
-        center_v.setValue(p.get('center_v', 0.0))
-        center_v.valueChanged.connect(lambda v, i=idx: self._on_ring_field(i, 'center_v', v))
-        fl.addRow('Center V:', center_v)
-        center_u = QDoubleSpinBox()
-        center_u.setRange(-10000.0, 20000.0)
-        center_u.setDecimals(1)
-        center_u.setValue(p.get('center_u', 0.0))
-        center_u.valueChanged.connect(lambda v, i=idx: self._on_ring_field(i, 'center_u', v))
-        fl.addRow('Center U:', center_u)
-        # Keep references so drag updates can sync the UI
-        w.center_v_spin = center_v  # type: ignore[attr-defined]
-        w.center_u_spin = center_u  # type: ignore[attr-defined]
+        tau_spin = QDoubleSpinBox()
+        tau_spin.setRange(0.0, 100.0)
+        tau_spin.setDecimals(3)
+        tau_spin.setValue(float(p.get('tau', 1.0)))
+        tau_spin.valueChanged.connect(lambda v, i=idx: self._on_ring_field(i, 'tau', v))
+        fl.addRow('Optical depth (tau):', tau_spin)
 
-        # Physical range (km): optional-key discipline -- absent unless set.
-        # Required on every ring of an spk_error scene; range_km is the only
-        # depth-ordering key (a ring without one is drawn behind everything,
-        # and overlapping a ranged object without one is a render error).
-        has_range_km = p.get('range_km') is not None
-        range_km_check = QCheckBox('Set physical range (km)')
-        range_km_check.setChecked(has_range_km)
-        range_km_check.setToolTip(
-            'Write a physical range_km on this ring (depth ordering and '
-            'spk_error parallax); unchecked leaves the key absent.'
+        kind = str(p.get('kind', 'ringlet'))
+        width_spin = QDoubleSpinBox()
+        width_spin.setRange(0.1, 10000.0)
+        width_spin.setDecimals(1)
+        width_spin.setSuffix(' px')
+        width_spin.setValue(float(p.get('width', 20.0)))
+        width_spin.setEnabled(kind in _KINDS_WITH_WIDTH)
+        width_spin.valueChanged.connect(lambda v, i=idx: self._on_ring_shape(i, 'width', v))
+        fl.addRow('Radial width:', width_spin)
+
+        side_combo = QComboBox()
+        side_combo.addItems(['in', 'out'])
+        side_combo.setCurrentText(str(p.get('side', 'in' if kind == 'edge' else 'out')))
+        side_combo.setEnabled(kind in _KINDS_WITH_SIDE)
+        side_combo.currentTextChanged.connect(lambda t, i=idx: self._on_ring_shape(i, 'side', t))
+        fl.addRow('Side (edge/ramp):', side_combo)
+
+        wavelength_spin = QDoubleSpinBox()
+        wavelength_spin.setRange(0.1, 10000.0)
+        wavelength_spin.setDecimals(1)
+        wavelength_spin.setSuffix(' px')
+        wavelength_spin.setValue(float(p.get('wavelength', 8.0)))
+        wavelength_spin.setEnabled(kind == 'wave')
+        wavelength_spin.valueChanged.connect(
+            lambda v, i=idx: self._on_ring_shape(i, 'wavelength', v)
         )
-        range_km_spin = QDoubleSpinBox()
-        range_km_spin.setRange(0.01, 1.0e12)
-        range_km_spin.setDecimals(1)
-        range_km_spin.setValue(float(p.get('range_km', 1.0e6)))
-        range_km_spin.setEnabled(has_range_km)
-        range_km_check.clicked.connect(
-            lambda checked, i=idx, spin=range_km_spin: self._on_ring_range_km_enabled(
-                i, checked, spin
-            )
+        fl.addRow('Wave wavelength:', wavelength_spin)
+
+        damping_spin = QDoubleSpinBox()
+        damping_spin.setRange(0.1, 10000.0)
+        damping_spin.setDecimals(1)
+        damping_spin.setSuffix(' px')
+        damping_spin.setValue(float(p.get('damping', 16.0)))
+        damping_spin.setEnabled(kind == 'wave')
+        damping_spin.valueChanged.connect(lambda v, i=idx: self._on_ring_shape(i, 'damping', v))
+        fl.addRow('Wave damping:', damping_spin)
+
+        w.width_spin = width_spin  # type: ignore[attr-defined]
+        w.side_combo = side_combo  # type: ignore[attr-defined]
+        w.wavelength_spin = wavelength_spin  # type: ignore[attr-defined]
+        w.damping_spin = damping_spin  # type: ignore[attr-defined]
+
+        orbit = p.get('orbit') or {}
+        fl.addRow(QLabel('<b>Catalog orbit (mode 1)</b>'), QLabel(''))
+        orbit_a = QDoubleSpinBox()
+        orbit_a.setRange(0.1, 1.0e6)
+        orbit_a.setDecimals(1)
+        orbit_a.setValue(float(orbit.get('a', 100.0)))
+        orbit_a.valueChanged.connect(lambda v, i=idx: self._on_ring_orbit(i, 'a', v))
+        fl.addRow('a:', orbit_a)
+        orbit_ae = QDoubleSpinBox()
+        orbit_ae.setRange(0.0, 1.0e5)
+        orbit_ae.setDecimals(2)
+        orbit_ae.setValue(float(orbit.get('ae', 0.0)))
+        orbit_ae.valueChanged.connect(lambda v, i=idx: self._on_ring_orbit(i, 'ae', v))
+        fl.addRow('ae:', orbit_ae)
+        orbit_long_peri = QDoubleSpinBox()
+        orbit_long_peri.setRange(-360.0, 360.0)
+        orbit_long_peri.setDecimals(1)
+        orbit_long_peri.setSuffix(' deg')
+        orbit_long_peri.setValue(float(orbit.get('long_peri', 0.0)))
+        orbit_long_peri.valueChanged.connect(
+            lambda v, i=idx: self._on_ring_orbit(i, 'long_peri', v)
         )
-        range_km_spin.valueChanged.connect(lambda v, i=idx: self._on_ring_range_km_value(i, v))
-        fl.addRow(range_km_check, range_km_spin)
-        w.range_km_check = range_km_check  # type: ignore[attr-defined]
-        w.range_km_spin = range_km_spin  # type: ignore[attr-defined]
-
-        # Shading distance parameter
-        shading_distance = QDoubleSpinBox()
-        shading_distance.setRange(0.0, 1000.0)
-        shading_distance.setDecimals(1)
-        shading_distance.setSuffix(' px')
-        shading_distance.setValue(p.get('shading_distance', 20.0))
-        shading_distance.valueChanged.connect(
-            lambda v, i=idx: self._on_ring_field(i, 'shading_distance', v)
+        fl.addRow('long_peri:', orbit_long_peri)
+        orbit_rate_peri = QDoubleSpinBox()
+        orbit_rate_peri.setRange(-1000.0, 1000.0)
+        orbit_rate_peri.setDecimals(3)
+        orbit_rate_peri.setSuffix(' deg/day')
+        orbit_rate_peri.setValue(float(orbit.get('rate_peri', 0.0)))
+        orbit_rate_peri.valueChanged.connect(
+            lambda v, i=idx: self._on_ring_orbit(i, 'rate_peri', v)
         )
-        fl.addRow('Shading distance:', shading_distance)
+        fl.addRow('rate_peri:', orbit_rate_peri)
 
-        # Inner edge checkbox and mode 1 parameters
-        inner_data = p.get('inner_data', [])
-        has_inner = len(inner_data) > 0 and any(m.get('mode') == 1 for m in inner_data)
-        inner_mode1: dict[str, Any] = next((m for m in inner_data if m.get('mode') == 1), {})
+        fl.addRow(QLabel('<b>Photometric truth</b>'), QLabel(''))
+        albedo_spin = QDoubleSpinBox()
+        albedo_spin.setRange(0.0, 10.0)
+        albedo_spin.setDecimals(3)
+        albedo_spin.setValue(float(p.get('albedo', 0.5)))
+        albedo_spin.valueChanged.connect(lambda v, i=idx: self._on_ring_field(i, 'albedo', v))
+        fl.addRow('Albedo (A):', albedo_spin)
+        phase_g_spin = QDoubleSpinBox()
+        phase_g_spin.setRange(-0.99, 0.99)
+        phase_g_spin.setDecimals(2)
+        phase_g_spin.setSingleStep(0.05)
+        phase_g_spin.setValue(float(p.get('phase_g', -0.3)))
+        phase_g_spin.valueChanged.connect(lambda v, i=idx: self._on_ring_field(i, 'phase_g', v))
+        fl.addRow('Phase asymmetry (g):', phase_g_spin)
 
-        inner_checkbox = QCheckBox('Enable Inner Edge')
-        inner_checkbox.setChecked(has_inner)
-        inner_checkbox.clicked.connect(
-            lambda checked, i=idx, cb=inner_checkbox: self._on_ring_inner_enabled(i, checked, cb)
-        )
-        fl.addRow(inner_checkbox, QLabel(''))
+        if idx == 0:
+            self._build_ring_system_group(w, fl)
 
-        inner_label = QLabel('<b>Inner Edge (Mode 1)</b>')
-        fl.addRow(inner_label, QLabel(''))
-
-        inner_a = QDoubleSpinBox()
-        inner_a.setRange(1.0, 10000.0)
-        inner_a.setDecimals(1)
-        inner_a.setValue(inner_mode1.get('a', 100.0))
-        inner_a.setEnabled(has_inner)
-        inner_a.valueChanged.connect(lambda v, i=idx: self._on_ring_inner_mode1(i, 'a', v))
-        fl.addRow('Inner a:', inner_a)
-        inner_ae = QDoubleSpinBox()
-        inner_ae.setRange(0.0, 1000.0)
-        inner_ae.setDecimals(2)
-        inner_ae.setValue(inner_mode1.get('ae', 0.0))
-        inner_ae.setEnabled(has_inner)
-        inner_ae.valueChanged.connect(lambda v, i=idx: self._on_ring_inner_mode1(i, 'ae', v))
-        fl.addRow('Inner ae:', inner_ae)
-        inner_long_peri = QDoubleSpinBox()
-        inner_long_peri.setRange(0.0, 360.0)
-        inner_long_peri.setDecimals(1)
-        inner_long_peri.setSuffix('°')
-        inner_long_peri.setValue(inner_mode1.get('long_peri', 0.0))
-        inner_long_peri.setEnabled(has_inner)
-        inner_long_peri.valueChanged.connect(
-            lambda v, i=idx: self._on_ring_inner_mode1(i, 'long_peri', v)
-        )
-        fl.addRow('Inner long_peri:', inner_long_peri)
-        inner_rate_peri = QDoubleSpinBox()
-        inner_rate_peri.setRange(-1000.0, 1000.0)
-        inner_rate_peri.setDecimals(3)
-        inner_rate_peri.setSuffix('°/day')
-        inner_rate_peri.setValue(inner_mode1.get('rate_peri', 0.0))
-        inner_rate_peri.setEnabled(has_inner)
-        inner_rate_peri.valueChanged.connect(
-            lambda v, i=idx: self._on_ring_inner_mode1(i, 'rate_peri', v)
-        )
-        fl.addRow('Inner rate_peri:', inner_rate_peri)
-        inner_rms = QDoubleSpinBox()
-        inner_rms.setRange(0.0, 1000.0)
-        inner_rms.setDecimals(3)
-        inner_rms.setValue(inner_mode1.get('rms', 1.0))
-        inner_rms.setEnabled(has_inner)
-        inner_rms.valueChanged.connect(lambda v, i=idx: self._on_ring_inner_mode1(i, 'rms', v))
-        fl.addRow('Inner rms:', inner_rms)
-
-        # Store references for enabling/disabling
-        w.inner_checkbox = inner_checkbox  # type: ignore[attr-defined]
-        w.inner_controls = [  # type: ignore[attr-defined]
-            inner_label,
-            inner_a,
-            inner_ae,
-            inner_long_peri,
-            inner_rate_peri,
-            inner_rms,
-        ]
-        # Store individual spinbox references for reading values
-        w.inner_a = inner_a  # type: ignore[attr-defined]
-        w.inner_ae = inner_ae  # type: ignore[attr-defined]
-        w.inner_long_peri = inner_long_peri  # type: ignore[attr-defined]
-        w.inner_rate_peri = inner_rate_peri  # type: ignore[attr-defined]
-        w.inner_rms = inner_rms  # type: ignore[attr-defined]
-
-        # Outer edge checkbox and mode 1 parameters
-        outer_data = p.get('outer_data', [])
-        has_outer = len(outer_data) > 0 and any(m.get('mode') == 1 for m in outer_data)
-        outer_mode1: dict[str, Any] = next((m for m in outer_data if m.get('mode') == 1), {})
-
-        outer_checkbox = QCheckBox('Enable Outer Edge')
-        outer_checkbox.setChecked(has_outer)
-        outer_checkbox.clicked.connect(
-            lambda checked, i=idx, cb=outer_checkbox: self._on_ring_outer_enabled(i, checked, cb)
-        )
-        fl.addRow(outer_checkbox, QLabel(''))
-
-        outer_label = QLabel('<b>Outer Edge (Mode 1)</b>')
-        fl.addRow(outer_label, QLabel(''))
-
-        outer_a = QDoubleSpinBox()
-        outer_a.setRange(1.0, 10000.0)
-        outer_a.setDecimals(1)
-        outer_a.setValue(outer_mode1.get('a', 120.0))
-        outer_a.setEnabled(has_outer)
-        outer_a.valueChanged.connect(lambda v, i=idx: self._on_ring_outer_mode1(i, 'a', v))
-        fl.addRow('Outer a:', outer_a)
-        outer_ae = QDoubleSpinBox()
-        outer_ae.setRange(0.0, 1000.0)
-        outer_ae.setDecimals(2)
-        outer_ae.setValue(outer_mode1.get('ae', 0.0))
-        outer_ae.setEnabled(has_outer)
-        outer_ae.valueChanged.connect(lambda v, i=idx: self._on_ring_outer_mode1(i, 'ae', v))
-        fl.addRow('Outer ae:', outer_ae)
-        outer_long_peri = QDoubleSpinBox()
-        outer_long_peri.setRange(0.0, 360.0)
-        outer_long_peri.setDecimals(1)
-        outer_long_peri.setSuffix('°')
-        outer_long_peri.setValue(outer_mode1.get('long_peri', 0.0))
-        outer_long_peri.setEnabled(has_outer)
-        outer_long_peri.valueChanged.connect(
-            lambda v, i=idx: self._on_ring_outer_mode1(i, 'long_peri', v)
-        )
-        fl.addRow('Outer long_peri:', outer_long_peri)
-        outer_rate_peri = QDoubleSpinBox()
-        outer_rate_peri.setRange(-1000.0, 1000.0)
-        outer_rate_peri.setDecimals(3)
-        outer_rate_peri.setSuffix('°/day')
-        outer_rate_peri.setValue(outer_mode1.get('rate_peri', 0.0))
-        outer_rate_peri.setEnabled(has_outer)
-        outer_rate_peri.valueChanged.connect(
-            lambda v, i=idx: self._on_ring_outer_mode1(i, 'rate_peri', v)
-        )
-        fl.addRow('Outer rate_peri:', outer_rate_peri)
-        outer_rms = QDoubleSpinBox()
-        outer_rms.setRange(0.0, 1000.0)
-        outer_rms.setDecimals(3)
-        outer_rms.setValue(outer_mode1.get('rms', 1.0))
-        outer_rms.setEnabled(has_outer)
-        outer_rms.valueChanged.connect(lambda v, i=idx: self._on_ring_outer_mode1(i, 'rms', v))
-        fl.addRow('Outer rms:', outer_rms)
-
-        # Store references for enabling/disabling
-        w.outer_checkbox = outer_checkbox  # type: ignore[attr-defined]
-        w.outer_controls = [  # type: ignore[attr-defined]
-            outer_label,
-            outer_a,
-            outer_ae,
-            outer_long_peri,
-            outer_rate_peri,
-            outer_rms,
-        ]
-        # Store individual spinbox references for reading values
-        w.outer_a = outer_a  # type: ignore[attr-defined]
-        w.outer_ae = outer_ae  # type: ignore[attr-defined]
-        w.outer_long_peri = outer_long_peri  # type: ignore[attr-defined]
-        w.outer_rate_peri = outer_rate_peri  # type: ignore[attr-defined]
-        w.outer_rms = outer_rms  # type: ignore[attr-defined]
-
-        # Delete button at bottom
         delete_btn = QPushButton('Delete')
         delete_btn.clicked.connect(
             lambda _checked=False, i=idx: self._delete_tab_by_index('ring', i)
@@ -260,224 +185,197 @@ class RingTabMixin(SimEditorBase):
 
         return w
 
+    def _build_ring_system_group(self, w: QWidget, fl: QFormLayout) -> None:
+        """Add the system-level controls (shared geometry, range, phase)."""
+        ring_system = self.sim_params['ring_system']
+        geometry = ring_system.setdefault('geometry', {})
+        fl.addRow(QLabel('<b>Ring system (shared)</b>'), QLabel(''))
+
+        center_v = QDoubleSpinBox()
+        center_v.setRange(-1.0e6, 1.0e6)
+        center_v.setDecimals(1)
+        center_v.setValue(float(geometry.get('center_v', self.sim_params['size_v'] / 2.0)))
+        center_v.valueChanged.connect(lambda v: self._on_ring_geometry('center_v', v))
+        fl.addRow('Center V:', center_v)
+        center_u = QDoubleSpinBox()
+        center_u.setRange(-1.0e6, 1.0e6)
+        center_u.setDecimals(1)
+        center_u.setValue(float(geometry.get('center_u', self.sim_params['size_u'] / 2.0)))
+        center_u.valueChanged.connect(lambda v: self._on_ring_geometry('center_u', v))
+        fl.addRow('Center U:', center_u)
+        # Keep references so drag updates can sync the UI.
+        w.center_v_spin = center_v  # type: ignore[attr-defined]
+        w.center_u_spin = center_u  # type: ignore[attr-defined]
+
+        for key, label, low, default in (
+            ('opening_deg_obs', 'Opening B (observer):', -89.9, 90.0),
+            ('opening_deg_sun', 'Opening B (sun):', -89.9, 90.0),
+            ('node_deg', 'Node angle:', -360.0, 0.0),
+        ):
+            spin = QDoubleSpinBox()
+            spin.setRange(low, 360.0)
+            spin.setDecimals(1)
+            spin.setSuffix(' deg')
+            spin.setValue(float(geometry.get(key, default)))
+            spin.valueChanged.connect(lambda v, k=key: self._on_ring_geometry(k, v))
+            fl.addRow(label, spin)
+
+        phase_spin = QDoubleSpinBox()
+        phase_spin.setRange(0.0, 180.0)
+        phase_spin.setDecimals(1)
+        phase_spin.setSuffix(' deg')
+        phase_spin.setValue(float(ring_system.get('phase_deg', 0.0)))
+        phase_spin.valueChanged.connect(lambda v: self._on_ring_system_field('phase_deg', v))
+        fl.addRow('Phase angle:', phase_spin)
+
+        # Physical range (km): optional-key discipline -- absent unless set.
+        # Required whenever the system overlaps a body or the scene plants
+        # spk_error; it is the system's per-pixel depth anchor.
+        has_range_km = ring_system.get('range_km') is not None
+        range_km_check = QCheckBox('Set physical range (km)')
+        range_km_check.setChecked(has_range_km)
+        range_km_check.setToolTip(
+            'Write a physical range_km on the ring system (depth ordering '
+            'against bodies and spk_error parallax); unchecked leaves the key '
+            'absent.'
+        )
+        range_km_spin = QDoubleSpinBox()
+        range_km_spin.setRange(0.01, 1.0e12)
+        range_km_spin.setDecimals(1)
+        range_km_spin.setValue(float(ring_system.get('range_km') or 1.0e6))
+        range_km_spin.setEnabled(has_range_km)
+        range_km_check.clicked.connect(
+            lambda checked, spin=range_km_spin: self._on_ring_range_km_enabled(checked, spin)
+        )
+        range_km_spin.valueChanged.connect(self._on_ring_range_km_value)
+        fl.addRow(range_km_check, range_km_spin)
+        w.range_km_check = range_km_check  # type: ignore[attr-defined]
+        w.range_km_spin = range_km_spin  # type: ignore[attr-defined]
+
+        km_per_pixel_spin = QDoubleSpinBox()
+        km_per_pixel_spin.setRange(0.001, 1.0e9)
+        km_per_pixel_spin.setDecimals(3)
+        km_per_pixel_spin.setValue(float(ring_system.get('km_per_pixel', 1.0)))
+        km_per_pixel_spin.valueChanged.connect(
+            lambda v: self._on_ring_system_field('km_per_pixel', v)
+        )
+        fl.addRow('km per pixel:', km_per_pixel_spin)
+
     # ---- Field handlers ----
     def _on_ring_field(self, idx: int, key: str, value: Any) -> None:
-        """Write a scalar ring field into the data model and re-render."""
-        if 0 <= idx < len(self.sim_params['rings']):
-            self.sim_params['rings'][idx][key] = (
-                float(value) if isinstance(value, (int, float)) else value
-            )
+        """Write a scalar feature field into the data model and re-render."""
+        features = self._ring_features()
+        if 0 <= idx < len(features):
+            features[idx][key] = float(value) if isinstance(value, (int, float)) else value
             self._updater.request_update()
 
-    def _on_ring_range_km_enabled(self, idx: int, enabled: bool, spin: QDoubleSpinBox) -> None:
-        """Insert or remove the ring's optional physical range_km key."""
-        if 0 <= idx < len(self.sim_params['rings']):
-            ring = self.sim_params['rings'][idx]
-            if enabled:
-                ring['range_km'] = float(spin.value())
-            else:
-                ring.pop('range_km', None)
-            spin.setEnabled(enabled)
+    def _on_ring_shape(self, idx: int, key: str, value: Any) -> None:
+        """Write a kind-specific shape field (only when the kind takes it)."""
+        features = self._ring_features()
+        if not 0 <= idx < len(features):
+            return
+        kind = str(features[idx].get('kind', 'ringlet'))
+        allowed = (
+            (key == 'width' and kind in _KINDS_WITH_WIDTH)
+            or (key == 'side' and kind in _KINDS_WITH_SIDE)
+            or (key in ('wavelength', 'damping') and kind == 'wave')
+        )
+        if not allowed:
+            return
+        features[idx][key] = float(value) if isinstance(value, (int, float)) else value
+        self._updater.request_update()
+
+    def _on_ring_kind(self, idx: int, kind: str) -> None:
+        """Change a feature's kind, adjusting its shape keys to the vocabulary."""
+        features = self._ring_features()
+        if not 0 <= idx < len(features):
+            return
+        feature = features[idx]
+        feature['kind'] = kind
+        self._apply_ring_kind_constraints(feature)
+        # Enable exactly the shape widgets the new kind takes.
+        tab_idx = self._find_tab_by_properties('ring', idx)
+        if tab_idx is not None:
+            tab_w = self._tabs.widget(tab_idx)
+            if tab_w is not None:
+                tab_w.width_spin.setEnabled(kind in _KINDS_WITH_WIDTH)  # type: ignore[attr-defined]
+                tab_w.side_combo.setEnabled(kind in _KINDS_WITH_SIDE)  # type: ignore[attr-defined]
+                tab_w.wavelength_spin.setEnabled(kind == 'wave')  # type: ignore[attr-defined]
+                tab_w.damping_spin.setEnabled(kind == 'wave')  # type: ignore[attr-defined]
+        self._updater.request_update()
+
+    def _apply_ring_kind_constraints(self, feature: dict[str, Any]) -> None:
+        """Insert required shape keys and drop disallowed ones for the kind.
+
+        The schema rejects a stray shape key on a kind that ignores it, so a
+        kind switch must rewrite the feature's shape keys, defaulting any
+        newly required one.
+        """
+        kind = str(feature.get('kind', 'ringlet'))
+        if kind in _KINDS_WITH_WIDTH:
+            feature.setdefault('width', 20.0)
+        else:
+            feature.pop('width', None)
+        if kind not in _KINDS_WITH_SIDE:
+            feature.pop('side', None)
+        if kind == 'wave':
+            feature.setdefault('wavelength', 8.0)
+            feature.setdefault('damping', 16.0)
+        else:
+            feature.pop('wavelength', None)
+            feature.pop('damping', None)
+
+    def _on_ring_navigable(self, idx: int, checked: bool) -> None:
+        """Toggle the feature's navigability flag."""
+        features = self._ring_features()
+        if 0 <= idx < len(features):
+            features[idx]['navigable'] = bool(checked)
             self._updater.request_update()
 
-    def _on_ring_range_km_value(self, idx: int, value: float) -> None:
-        """Update the ring's physical range_km when the key is enabled."""
-        if 0 <= idx < len(self.sim_params['rings']):
-            ring = self.sim_params['rings'][idx]
-            if 'range_km' in ring:
-                ring['range_km'] = float(value)
-                self._updater.request_update()
+    def _on_ring_orbit(self, idx: int, key: str, value: float) -> None:
+        """Update a mode-1 catalog-orbit parameter."""
+        features = self._ring_features()
+        if 0 <= idx < len(features):
+            orbit = features[idx].setdefault('orbit', {})
+            orbit[key] = float(value)
+            self._updater.request_update()
 
     def _on_ring_name(self, idx: int, text: str) -> None:
-        """Rename a ring and refresh the tab titles."""
-        if 0 <= idx < len(self.sim_params['rings']):
-            self.sim_params['rings'][idx]['name'] = text
+        """Rename a feature and refresh the tab titles."""
+        features = self._ring_features()
+        if 0 <= idx < len(features):
+            features[idx]['name'] = text
             self._update_tab_titles()
             self._updater.request_update()
 
-    def _get_or_create_mode1(
-        self, data_list: list[dict[str, Any]], default_a: float
-    ) -> dict[str, Any]:
-        """Find or create mode 1 dictionary in the given data list.
-
-        Parameters:
-            data_list: List of mode dictionaries (inner_data or outer_data).
-            default_a: Default 'a' value to use when creating new mode 1.
-
-        Returns:
-            Mode 1 dictionary (existing or newly created).
-        """
-        mode1 = next((m for m in data_list if m.get('mode') == 1), None)
-        if mode1 is None:
-            mode1 = {
-                'mode': 1,
-                'a': default_a,
-                'rms': 1.0,
-                'ae': 0.0,
-                'long_peri': 0.0,
-                'rate_peri': 0.0,
-            }
-            data_list.append(mode1)
-        return mode1
-
-    def _on_ring_inner_mode1(self, idx: int, key: str, value: float) -> None:
-        """Update a mode-1 inner-edge parameter."""
-        if 0 <= idx < len(self.sim_params['rings']):
-            ring = self.sim_params['rings'][idx]
-            if 'inner_data' not in ring:
-                ring['inner_data'] = []
-            inner_data = ring['inner_data']
-            mode1 = self._get_or_create_mode1(inner_data, 100.0)
-            mode1[key] = float(value)
-            # Ensure rms is always present
-            if 'rms' not in mode1:
-                mode1['rms'] = 1.0
+    def _on_ring_geometry(self, key: str, value: float) -> None:
+        """Update a shared projection-geometry field."""
+        ring_system = self.sim_params.get('ring_system')
+        if isinstance(ring_system, dict):
+            ring_system.setdefault('geometry', {})[key] = float(value)
             self._updater.request_update()
 
-    def _on_ring_outer_mode1(self, idx: int, key: str, value: float) -> None:
-        """Update a mode-1 outer-edge parameter."""
-        if 0 <= idx < len(self.sim_params['rings']):
-            ring = self.sim_params['rings'][idx]
-            if 'outer_data' not in ring:
-                ring['outer_data'] = []
-            outer_data = ring['outer_data']
-            mode1 = self._get_or_create_mode1(outer_data, 120.0)
-            mode1[key] = float(value)
-            # Ensure rms is always present
-            if 'rms' not in mode1:
-                mode1['rms'] = 1.0
+    def _on_ring_system_field(self, key: str, value: float) -> None:
+        """Update a system-level scalar (phase_deg, km_per_pixel)."""
+        ring_system = self.sim_params.get('ring_system')
+        if isinstance(ring_system, dict):
+            ring_system[key] = float(value)
             self._updater.request_update()
 
-    def _on_ring_inner_enabled(self, idx: int, enabled: bool, checkbox: QCheckBox) -> None:
-        """Handle inner edge checkbox state change.
-
-        Parameters:
-            idx: Ring index.
-            enabled: Whether the inner edge checkbox is now enabled.
-            checkbox: The inner edge checkbox widget.
-        """
-        if 0 <= idx < len(self.sim_params['rings']):
-            ring = self.sim_params['rings'][idx]
-
-            # Get the outer checkbox state directly
-            tab_idx = self._find_tab_by_properties('ring', idx)
-            if tab_idx is not None:
-                tab_widget = self._tabs.widget(tab_idx)
-                if tab_widget is not None:
-                    outer_checkbox = tab_widget.outer_checkbox  # type: ignore[attr-defined]
-                    has_outer_checked = outer_checkbox.isChecked()
-                else:
-                    # Fallback to data model if widget not found
-                    outer_data = ring.get('outer_data', [])
-                    has_outer_checked = len(outer_data) > 0 and any(
-                        m.get('mode') == 1 for m in outer_data
-                    )
-            else:
-                # Fallback to data model if tab not found
-                outer_data = ring.get('outer_data', [])
-                has_outer_checked = len(outer_data) > 0 and any(
-                    m.get('mode') == 1 for m in outer_data
-                )
-
-            # Prevent disabling if outer is also disabled
-            if not enabled and not has_outer_checked:
-                # Re-enable the checkbox - block signals to prevent recursion
-                checkbox.blockSignals(True)
-                checkbox.setChecked(True)
-                checkbox.blockSignals(False)
-                return
-
+    def _on_ring_range_km_enabled(self, enabled: bool, spin: QDoubleSpinBox) -> None:
+        """Insert or remove the system's optional physical range_km key."""
+        ring_system = self.sim_params.get('ring_system')
+        if isinstance(ring_system, dict):
             if enabled:
-                # Enable inner edge - ensure mode 1 exists
-                if 'inner_data' not in ring:
-                    ring['inner_data'] = []
-                inner_data = ring['inner_data']
-                mode1 = self._get_or_create_mode1(inner_data, 100.0)
-                # Read current values from UI controls instead of using defaults
-                if tab_idx is not None:
-                    tab_widget = self._tabs.widget(tab_idx)
-                    if tab_widget is not None:
-                        mode1['a'] = float(tab_widget.inner_a.value())  # type: ignore[attr-defined]
-                        mode1['ae'] = float(tab_widget.inner_ae.value())  # type: ignore[attr-defined]
-                        mode1['long_peri'] = float(tab_widget.inner_long_peri.value())  # type: ignore[attr-defined]
-                        mode1['rate_peri'] = float(tab_widget.inner_rate_peri.value())  # type: ignore[attr-defined]
-                        mode1['rms'] = float(tab_widget.inner_rms.value())  # type: ignore[attr-defined]
+                ring_system['range_km'] = float(spin.value())
             else:
-                # Disable inner edge - remove inner_data
-                ring.pop('inner_data', None)
-
-            # Update UI controls
-            if tab_idx is not None:
-                tab_widget = self._tabs.widget(tab_idx)
-                if tab_widget is not None:
-                    for control in tab_widget.inner_controls:  # type: ignore[attr-defined]
-                        control.setEnabled(enabled)
-
+                ring_system.pop('range_km', None)
+            spin.setEnabled(enabled)
             self._updater.request_update()
 
-    def _on_ring_outer_enabled(self, idx: int, enabled: bool, checkbox: QCheckBox) -> None:
-        """Handle outer edge checkbox state change.
-
-        Parameters:
-            idx: Ring index.
-            enabled: Whether the outer edge checkbox is now enabled.
-            checkbox: The outer edge checkbox widget.
-        """
-        if 0 <= idx < len(self.sim_params['rings']):
-            ring = self.sim_params['rings'][idx]
-
-            # Get the inner checkbox state directly
-            tab_idx = self._find_tab_by_properties('ring', idx)
-            if tab_idx is not None:
-                tab_widget = self._tabs.widget(tab_idx)
-                if tab_widget is not None:
-                    inner_checkbox = tab_widget.inner_checkbox  # type: ignore[attr-defined]
-                    has_inner_checked = inner_checkbox.isChecked()
-                else:
-                    # Fallback to data model if widget not found
-                    inner_data = ring.get('inner_data', [])
-                    has_inner_checked = len(inner_data) > 0 and any(
-                        m.get('mode') == 1 for m in inner_data
-                    )
-            else:
-                # Fallback to data model if tab not found
-                inner_data = ring.get('inner_data', [])
-                has_inner_checked = len(inner_data) > 0 and any(
-                    m.get('mode') == 1 for m in inner_data
-                )
-
-            # Prevent disabling if inner is also disabled
-            if not enabled and not has_inner_checked:
-                # Re-enable the checkbox - block signals to prevent recursion
-                checkbox.blockSignals(True)
-                checkbox.setChecked(True)
-                checkbox.blockSignals(False)
-                return
-
-            if enabled:
-                # Enable outer edge - ensure mode 1 exists
-                if 'outer_data' not in ring:
-                    ring['outer_data'] = []
-                outer_data = ring['outer_data']
-                mode1 = self._get_or_create_mode1(outer_data, 120.0)
-                # Read current values from UI controls instead of using defaults
-                if tab_idx is not None:
-                    tab_widget = self._tabs.widget(tab_idx)
-                    if tab_widget is not None:
-                        mode1['a'] = float(tab_widget.outer_a.value())  # type: ignore[attr-defined]
-                        mode1['ae'] = float(tab_widget.outer_ae.value())  # type: ignore[attr-defined]
-                        mode1['long_peri'] = float(tab_widget.outer_long_peri.value())  # type: ignore[attr-defined]
-                        mode1['rate_peri'] = float(tab_widget.outer_rate_peri.value())  # type: ignore[attr-defined]
-                        mode1['rms'] = float(tab_widget.outer_rms.value())  # type: ignore[attr-defined]
-            else:
-                # Disable outer edge - remove outer_data
-                ring.pop('outer_data', None)
-
-            # Update UI controls
-            if tab_idx is not None:
-                tab_widget = self._tabs.widget(tab_idx)
-                if tab_widget is not None:
-                    for control in tab_widget.outer_controls:  # type: ignore[attr-defined]
-                        control.setEnabled(enabled)
-
+    def _on_ring_range_km_value(self, value: float) -> None:
+        """Update the system's physical range_km when the key is enabled."""
+        ring_system = self.sim_params.get('ring_system')
+        if isinstance(ring_system, dict) and 'range_km' in ring_system:
+            ring_system['range_km'] = float(value)
             self._updater.request_update()

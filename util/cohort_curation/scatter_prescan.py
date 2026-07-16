@@ -24,8 +24,7 @@ from vicar import VicarImage
 # Derived from the same environment variable the pipeline uses (set by
 # /seti/newnav/setup.sh); the literal fallback matches the operator host.
 HOLDINGS_VOLUMES = (
-    Path(os.environ.get('PDS3_HOLDINGS_DIR', '/mnt/ganymede/PDS/holdings'))
-    / 'volumes'
+    Path(os.environ.get('PDS3_HOLDINGS_DIR', '/mnt/ganymede/PDS/holdings')) / 'volumes'
 )
 
 MIN_SCORE = 5.0
@@ -99,8 +98,7 @@ def prescan(cands: list[dict], *, keep: int) -> list[dict]:
             n_missing += 1
             continue
         try:
-            data = VicarImage.from_file(
-                str(path), strict=False).data_2d.astype(np.float64)
+            data = VicarImage.from_file(str(path), strict=False).data_2d.astype(np.float64)
         except Exception:
             n_missing += 1
             continue
@@ -115,7 +113,9 @@ def prescan(cands: list[dict], *, keep: int) -> list[dict]:
         c['selection']['gradient_amplitude'] = round(amp, 5)
         scored.append((score, c))
     scored.sort(key=lambda t: (-t[0], t[1]['filespec']))
-    print(f'scatter prescan: {len(cands)} candidates, {n_read} read, '
-          f'{n_missing} unreadable, {len(scored)} above score '
-          f'{MIN_SCORE}, keeping {min(keep, len(scored))}')
+    print(
+        f'scatter prescan: {len(cands)} candidates, {n_read} read, '
+        f'{n_missing} unreadable, {len(scored)} above score '
+        f'{MIN_SCORE}, keeping {min(keep, len(scored))}'
+    )
     return [c for _, c in scored[:keep]]

@@ -53,7 +53,6 @@ from spindoctor.sim.scene_checks import (
     _check_optional_positive_int,
     _check_optional_positive_number,
     _check_optional_str,
-    _check_ring_object,
     _check_ring_system,
     _check_sky_counts,
     _check_spk_error,
@@ -254,7 +253,6 @@ def validate_sim_params(
     _check_optional_number(sim_params.get('ring_epoch'), 'ring_epoch', source=source)
     _check_optional_str(sim_params.get('midtime_utc'), 'midtime_utc', source=source)
     _check_optional_str(sim_params.get('closest_planet'), 'closest_planet', source=source)
-    _check_optional_bool(sim_params.get('shade_solid_rings'), 'shade_solid_rings', source=source)
     _check_optional_bool(
         sim_params.get('fit_camera_rotation'), 'fit_camera_rotation', source=source
     )
@@ -270,7 +268,7 @@ def validate_sim_params(
     _check_star_catalog_scatter(sim_params.get('star_catalog_scatter_px'), source=source)
     _check_expected(sim_params.get('expected'), source=source)
 
-    for block in ('bodies', 'rings', 'stars'):
+    for block in ('bodies', 'stars'):
         _check_optional_mapping_list(sim_params.get(block), block, source=source)
         allowed = _OBJECT_BLOCKS[block][0]
         for index, obj in enumerate(sim_params.get(block) or []):
@@ -281,8 +279,6 @@ def validate_sim_params(
                 )
             if block == 'bodies':
                 _check_body_object(obj, index=index, source=source)
-            elif block == 'rings':
-                _check_ring_object(obj, index=index, source=source)
             else:
                 _check_star_object(obj, index=index, source=source)
 

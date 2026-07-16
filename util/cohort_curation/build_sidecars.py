@@ -39,7 +39,7 @@ OUT_DIR = REPO / '_work/cohort_curation'
 LIBRARY = REPO / 'tests/integration/image_library/images'
 HOLDINGS_PREFIX = '/mnt/ganymede/PDS/holdings/'
 
-DEFERRED_CLASSES = {'ring_only_flat'}   # rank-1 GT unsupported (#203/#204)
+DEFERRED_CLASSES = {'ring_only_flat'}  # rank-1 GT unsupported (#203/#204)
 
 # ground_truth.offset_uncertainty_px per class (PHASE10 rubric: 1.0 for
 # sharp limbs / bright stars, 2.0 for soft features or star-poor).
@@ -106,8 +106,7 @@ def str_representer(dumper: yaml.Dumper, data: str) -> yaml.ScalarNode:
         data: The string being represented.
     """
     if '\n' in data:
-        return dumper.represent_scalar(
-            'tag:yaml.org,2002:str', data, style='|')
+        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
     return dumper.represent_scalar('tag:yaml.org,2002:str', data)
 
 
@@ -143,12 +142,10 @@ def primary_technique(rec: dict, meta: dict) -> str:
     if cls in PRIMARY_MAP:
         return PRIMARY_MAP[cls]
     per_tech = (meta.get('navigation_result') or {}).get('per_technique') or []
-    live = [t for t in per_tech
-            if not t.get('spurious') and (t.get('confidence') or 0) > 0]
+    live = [t for t in per_tech if not t.get('spurious') and (t.get('confidence') or 0) > 0]
     if live:
         # Rubric tie-break: (-confidence, technique_name) ascending.
-        live.sort(key=lambda t: (-(t.get('confidence') or 0),
-                                 t.get('technique_name') or ''))
+        live.sort(key=lambda t: (-(t.get('confidence') or 0), t.get('technique_name') or ''))
         return str(live[0]['technique_name'])
     if cls == 'stars_plus_body':
         return 'StarFieldFromCatalogNav'
@@ -157,8 +154,9 @@ def primary_technique(rec: dict, meta: dict) -> str:
 
 def scene_tag_secondary(rec: dict, meta: dict) -> str | None:
     """Body / morphology tag to accompany the class tag."""
-    target = ((rec.get('selection') or {}).get('target')
-              or (rec.get('selection') or {}).get('tgt') or '')
+    target = (
+        (rec.get('selection') or {}).get('target') or (rec.get('selection') or {}).get('tgt') or ''
+    )
     if target and target not in ('DARK', 'SKY'):
         return str(target).lower()
     sel_type = (rec.get('selection') or {}).get('type') or ''
@@ -167,8 +165,7 @@ def scene_tag_secondary(rec: dict, meta: dict) -> str | None:
     return None
 
 
-def build_one(entry: dict, rec: dict, *, ui_version: str,
-              verified_date: datetime.date) -> Path:
+def build_one(entry: dict, rec: dict, *, ui_version: str, verified_date: datetime.date) -> Path:
     """Write the sidecar + companion PNG for one y-voted frame.
 
     Parameters:
@@ -185,7 +182,7 @@ def build_one(entry: dict, rec: dict, *, ui_version: str,
 
     url = image_path
     if url.startswith(HOLDINGS_PREFIX):
-        url = 'pds3://' + url[len(HOLDINGS_PREFIX):]
+        url = 'pds3://' + url[len(HOLDINGS_PREFIX) :]
 
     tags = [cls]
     sec = scene_tag_secondary(rec, meta)
@@ -310,8 +307,9 @@ def main() -> None:
 
     batch_dir = REPO / '_work/cohort_review' / f'batch_{args.batch:03d}'
     votes = yaml.safe_load((batch_dir / 'votes.yaml').read_text())
-    report_name = ('triage_report.yaml' if args.batch == 1
-                   else f'triage_report_batch{args.batch:03d}.yaml')
+    report_name = (
+        'triage_report.yaml' if args.batch == 1 else f'triage_report_batch{args.batch:03d}.yaml'
+    )
     report = yaml.safe_load((OUT_DIR / report_name).read_text())
     byname = {r['image_name']: r for r in report['results']}
     # frames appended from other batches (e.g. late rescues) carry their
@@ -341,37 +339,53 @@ def main() -> None:
         vote = entry.get('vote')
         comment = (entry.get('comment') or '').strip()
         if comment.lower().startswith('reclassify:'):
-            reclassify.append({'image_name': entry['image_name'],
-                               'from': entry['scene_class'],
-                               'to': comment.split(':', 1)[1].strip(),
-                               'seq': entry['seq']})
+            reclassify.append(
+                {
+                    'image_name': entry['image_name'],
+                    'from': entry['scene_class'],
+                    'to': comment.split(':', 1)[1].strip(),
+                    'seq': entry['seq'],
+                }
+            )
         if vote == 'm':
-            manual_queue.append({'image_name': entry['image_name'],
-                                 'scene_class': entry['scene_class'],
-                                 'seq': entry['seq'],
-                                 'comment': comment or None})
+            manual_queue.append(
+                {
+                    'image_name': entry['image_name'],
+                    'scene_class': entry['scene_class'],
+                    'seq': entry['seq'],
+                    'comment': comment or None,
+                }
+            )
             continue
         if vote != 'y' or not rec:
             continue
-        if (vote == 'y' and entry['scene_class'] != 'negative_cases'
-                and rec.get('offset_px') is None):
+        if (
+            vote == 'y'
+            and entry['scene_class'] != 'negative_cases'
+            and rec.get('offset_px') is None
+        ):
             # y without a verified offset cannot become ground truth;
             # treat as m (good example, offset pending manual nav)
-            manual_queue.append({'image_name': entry['image_name'],
-                                 'scene_class': entry['scene_class'],
-                                 'seq': entry['seq'],
-                                 'comment': 'y-vote without proposed offset; '
-                                            'routed to manual queue'})
+            manual_queue.append(
+                {
+                    'image_name': entry['image_name'],
+                    'scene_class': entry['scene_class'],
+                    'seq': entry['seq'],
+                    'comment': 'y-vote without proposed offset; routed to manual queue',
+                }
+            )
             continue
         if entry['scene_class'] in DEFERRED_CLASSES:
-            deferred.append({'image_name': entry['image_name'],
-                             'scene_class': entry['scene_class'],
-                             'seq': entry['seq'],
-                             'reason': 'rank-1 ground truth unsupported '
-                                       '(#203/#204)'})
+            deferred.append(
+                {
+                    'image_name': entry['image_name'],
+                    'scene_class': entry['scene_class'],
+                    'seq': entry['seq'],
+                    'reason': 'rank-1 ground truth unsupported (#203/#204)',
+                }
+            )
             continue
-        out = build_one(entry, rec, ui_version=ui_version,
-                        verified_date=verified_date)
+        out = build_one(entry, rec, ui_version=ui_version, verified_date=verified_date)
         written.append(str(out.relative_to(REPO)))
         print(f'wrote {out.relative_to(REPO)}')
 
@@ -384,8 +398,9 @@ def main() -> None:
     fu_path = OUT_DIR / f'batch_{args.batch:03d}_followups.yaml'
     fu_path.write_text(yaml.safe_dump(followups, sort_keys=False))
     print(f'\n{len(written)} sidecars; followups -> {fu_path}')
-    print(f'manual queue {len(manual_queue)}, deferred {len(deferred)}, '
-          f'reclassify {len(reclassify)}')
+    print(
+        f'manual queue {len(manual_queue)}, deferred {len(deferred)}, reclassify {len(reclassify)}'
+    )
 
 
 if __name__ == '__main__':

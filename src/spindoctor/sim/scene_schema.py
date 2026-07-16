@@ -55,7 +55,6 @@ _ALLOWED_KEYS: frozenset[str] = frozenset(
         'closest_planet',
         'time',
         'ring_epoch',
-        'shade_solid_rings',
         'oversample',
         'optics',
         'detector',
@@ -65,7 +64,6 @@ _ALLOWED_KEYS: frozenset[str] = frozenset(
         'star_catalog_scatter_px',
         'expected',
         'bodies',
-        'rings',
         'ring_system',
         'stars',
         'noise',
@@ -91,7 +89,6 @@ TOP_LEVEL_IDEALIZED_KEYS: frozenset[str] = frozenset(
         'time',
         'ring_epoch',
         'bodies',
-        'rings',
         'ring_system',
         'stars',
         'instrument_config',
@@ -100,16 +97,13 @@ TOP_LEVEL_IDEALIZED_KEYS: frozenset[str] = frozenset(
 )
 
 # Top-level truth keys: the planted pointing error the navigator must recover,
-# the RNG realization, and the contaminant / noise fields.  The renderer's
-# appearance knob 'shade_solid_rings' is image-side only (the navigator's
-# ring template is always solid-shaded by its own convention).
+# the RNG realization, and the contaminant / noise fields.
 TOP_LEVEL_TRUTH_KEYS: frozenset[str] = frozenset(
     {
         'random_seed',
         'offset_v',
         'offset_u',
         'offset_rotation_deg',
-        'shade_solid_rings',
         'oversample',
         'optics',
         'detector',
@@ -231,33 +225,13 @@ _STAR_TRUTH_KEYS: frozenset[str] = frozenset(
 
 _STAR_KEYS: frozenset[str] = _STAR_IDEALIZED_KEYS | _STAR_TRUTH_KEYS
 
-# Per-ring keys, all idealized at present fidelity: the mode-1 orbits ARE the
-# catalog orbits, with no planted per-feature error.  'range_km' is the
-# physical compositing depth (the only ordering key; the old hint-unit
-# 'range' is gone); the list and its keys remain valid until the
-# ring_system block's conversion retires them.
-_RING_IDEALIZED_KEYS: frozenset[str] = frozenset(
-    {
-        'name',
-        'feature_type',
-        'center_v',
-        'center_u',
-        'shading_distance',
-        'inner_data',
-        'outer_data',
-        'range_km',
-    }
-)
-
-_RING_TRUTH_KEYS: frozenset[str] = frozenset()
-
-_RING_KEYS: frozenset[str] = _RING_IDEALIZED_KEYS | _RING_TRUTH_KEYS
-
 # The object blocks of the schema: block name -> (allowed, idealized, truth).
+# Rings are not an object block: the optical-depth ring system is a single
+# mapping (shared projection geometry plus a feature list) with its own
+# two-level classification below.
 _OBJECT_BLOCKS: dict[str, tuple[frozenset[str], frozenset[str], frozenset[str]]] = {
     'bodies': (_BODY_KEYS, _BODY_IDEALIZED_KEYS, _BODY_TRUTH_KEYS),
     'stars': (_STAR_KEYS, _STAR_IDEALIZED_KEYS, _STAR_TRUTH_KEYS),
-    'rings': (_RING_KEYS, _RING_IDEALIZED_KEYS, _RING_TRUTH_KEYS),
 }
 
 # ---------------------------------------------------------------------------

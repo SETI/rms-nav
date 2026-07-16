@@ -67,9 +67,10 @@ class RingFeature:
     consistent throughout the pipeline: multiple filter passes, render calls, and
     annotation creation all see the same data.
 
-    Owns backplane-based rendering for real observations. For simulated
-    observations, data access and annotations are used but rendering is
-    delegated to ``sim_ring.render_ring()`` in ``NavModelRingsSimulated``.
+    Owns backplane-based rendering for real observations.  (Simulated
+    observations never build RingFeatures: ``NavModelRingsSimulated``
+    predicts scene ring_system features through
+    ``spindoctor.nav_model.sim_ring`` instead.)
     """
 
     key: str

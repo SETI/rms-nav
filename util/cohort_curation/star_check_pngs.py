@@ -34,9 +34,14 @@ OUT_DIR = REPO / '_work/cohort_curation'
 
 # scattered_light is included for the hard stretch alone: the summary
 # PNG's linear scale hides the measured low-order gradient.
-STAR_CLASSES = {'stars_plus_body', 'two_bright_stars_no_body',
-                'faint_stars', 'one_bright_star_no_body',
-                'star_dominated', 'scattered_light'}
+STAR_CLASSES = {
+    'stars_plus_body',
+    'two_bright_stars_no_body',
+    'faint_stars',
+    'one_bright_star_no_body',
+    'star_dominated',
+    'scattered_light',
+}
 
 # extfov_margin_vu per instrument (src/spindoctor/config_files/
 # config_4N0_inst_*.yaml), keyed by image size where it varies.
@@ -45,16 +50,15 @@ MARGINS = {
     ('COISS', 'WAC'): {1024: (5, 10), 512: (5, 10), 256: (5, 10)},
     ('VGISS', 'NA'): {1000: (400, 400)},
     ('VGISS', 'WA'): {1000: (400, 400)},
-    ('GOSSI', 'SSI'): None,   # size-independent
-    ('NHLORRI', 'LORRI'): {256: (15, 15), 512: (30, 30),
-                           1024: (60, 60)},
+    ('GOSSI', 'SSI'): None,  # size-independent
+    ('NHLORRI', 'LORRI'): {256: (15, 15), 512: (30, 30), 1024: (60, 60)},
 }
 MARGIN_FLAT = {('GOSSI', 'SSI'): (350, 350)}
 
 # Stretch and overlay tuning.
-MAD_TO_SIGMA = 1.4826            # normal-consistency factor for the MAD
-STRETCH_SOFTNESS_SIGMA = 3.0     # asinh knee, in robust sigmas
-CLIP_PERCENTILE = 99.9           # clip the brightest tail before scaling
+MAD_TO_SIGMA = 1.4826  # normal-consistency factor for the MAD
+STRETCH_SOFTNESS_SIGMA = 3.0  # asinh knee, in robust sigmas
+CLIP_PERCENTILE = 99.9  # clip the brightest tail before scaling
 U8_MAX = 255.0
 CIRCLE_RADIUS_PX = 14
 
@@ -112,18 +116,17 @@ def render_one(rec: dict, entry: dict, batch_dir: Path) -> str | None:
     if not image_path:
         return None
     nav = meta.get('navigation_result') or {}
-    stars = [f for f in (nav.get('feature_inventory') or [])
-             if f.get('feature_type') == 'STAR']
+    stars = [f for f in (nav.get('feature_inventory') or []) if f.get('feature_type') == 'STAR']
 
     # strict=False: Galileo SSI labels carry keywords longer than the
     # 32-character VICAR limit (UNEVEN_BIT_WEIGHT_CORRECTION_FLAG).
     # NH LORRI images are FITS, not VICAR; fall back to astropy.
     try:
-        data = VicarImage.from_file(
-            image_path, strict=False).data_2d.astype(np.float64)
+        data = VicarImage.from_file(image_path, strict=False).data_2d.astype(np.float64)
     except Exception:
         try:
             from astropy.io import fits
+
             with fits.open(image_path) as hdul:
                 data = np.asarray(hdul[0].data, dtype=np.float64)
             if data.ndim == 3:
@@ -151,15 +154,22 @@ def render_one(rec: dict, entry: dict, batch_dir: Path) -> str | None:
         label = f'{float(rel):.2f}' if rel is not None else '?'
         draw.text((u + r + 3, v - 7), label, fill=color)
     if not stars:
-        note = ('NO star features in nav metadata (stars gated or '
-                'navigation errored); inspect for star dots manually')
+        note = (
+            'NO star features in nav metadata (stars gated or '
+            'navigation errored); inspect for star dots manually'
+        )
     elif dv_du:
         note = 'circles at predicted star positions + proposed offset'
     else:
-        note = ('circles at PREDICTED star positions (no offset; actual '
-                'stars sit nearby, shifted by the true offset)')
-    draw.text((8, 8), f'#{entry["seq"]:03d} {entry["image_name"]} '
-                      f'hard stretch; {note}', fill=(255, 80, 80))
+        note = (
+            'circles at PREDICTED star positions (no offset; actual '
+            'stars sit nearby, shifted by the true offset)'
+        )
+    draw.text(
+        (8, 8),
+        f'#{entry["seq"]:03d} {entry["image_name"]} hard stretch; {note}',
+        fill=(255, 80, 80),
+    )
 
     out_name = f'{entry["seq"]:03d}_{entry["image_name"]}_stars.png'
     img.save(batch_dir / out_name)
@@ -179,8 +189,9 @@ def main() -> None:
 
     batch_dir = REPO / '_work/cohort_review' / f'batch_{args.batch:03d}'
     votes = yaml.safe_load((batch_dir / 'votes.yaml').read_text())
-    report_name = ('triage_report.yaml' if args.batch == 1
-                   else f'triage_report_batch{args.batch:03d}.yaml')
+    report_name = (
+        'triage_report.yaml' if args.batch == 1 else f'triage_report_batch{args.batch:03d}.yaml'
+    )
     report = yaml.safe_load((OUT_DIR / report_name).read_text())
     byname = {r['image_name']: r for r in report['results']}
 

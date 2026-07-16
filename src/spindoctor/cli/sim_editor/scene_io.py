@@ -62,10 +62,8 @@ class SceneIoMixin(SimEditorBase):
             'time': float(params.get('time', 0.0)),
             'ring_epoch': float(params.get('ring_epoch', 0.0)),
             'closest_planet': params.get('closest_planet') or 'SATURN',
-            'shade_solid_rings': bool(params.get('shade_solid_rings', False)),
             'bodies': list(params.get('bodies', [])),
             'stars': list(params.get('stars', [])),
-            'rings': list(params.get('rings', [])),
         }
         # Carry the block-valued schema keys through unchanged; the tab-specific
         # sync methods below then drive their widgets from these blocks (and the
@@ -73,6 +71,7 @@ class SceneIoMixin(SimEditorBase):
         # sky_counts follows the absent-key discipline: a scene without the key
         # must not gain one, so it passes through rather than being defaulted.
         for passthrough_key in (
+            'ring_system',
             'noise',
             'optics',
             'spk_error',
@@ -88,10 +87,6 @@ class SceneIoMixin(SimEditorBase):
         ):
             if passthrough_key in params:
                 self.sim_params[passthrough_key] = params[passthrough_key]
-        # Sync the shade-solid-rings checkbox
-        self._shade_solid_rings_check.blockSignals(True)
-        self._shade_solid_rings_check.setChecked(bool(self.sim_params['shade_solid_rings']))
-        self._shade_solid_rings_check.blockSignals(False)
         # Update general UI
         self._size_v_spin.setValue(self.sim_params['size_v'])
         self._size_u_spin.setValue(self.sim_params['size_u'])

@@ -152,7 +152,8 @@ class TabsMixin(SimEditorBase):
     def _find_unique_name(self, base_name: str) -> str:
         """Find a unique name by incrementing the number suffix if needed.
 
-        Checks bodies, stars, and rings to ensure the name is unique.
+        Checks bodies, stars, and ring_system features to ensure the name is
+        unique.
         """
         # Collect all existing names (case-insensitive)
         existing_names = set()
@@ -160,8 +161,8 @@ class TabsMixin(SimEditorBase):
             existing_names.add(body.get('name', '').lower())
         for star in self.sim_params.get('stars', []):
             existing_names.add(star.get('name', '').lower())
-        for ring in self.sim_params.get('rings', []):
-            existing_names.add(ring.get('name', '').lower())
+        for feature in self._ring_features():
+            existing_names.add(feature.get('name', '').lower())
 
         # Try the base name first
         if base_name.lower() not in existing_names:
@@ -227,41 +228,36 @@ class TabsMixin(SimEditorBase):
         self._updater.request_update()
 
     def _add_ring_tab(self, params: dict[str, Any] | None = None) -> None:
-        """Append a ring to the data model and select its new tab."""
+        """Append a ring_system feature (creating the block) and select its tab."""
+        ring_system = self.sim_params.setdefault(
+            'ring_system',
+            {
+                'geometry': {
+                    'center_v': self.sim_params['size_v'] / 2.0,
+                    'center_u': self.sim_params['size_u'] / 2.0,
+                    'opening_deg_obs': 90.0,
+                    'opening_deg_sun': 90.0,
+                    'node_deg': 0.0,
+                },
+                'features': [],
+            },
+        )
+        features = ring_system.setdefault('features', [])
         if params is None:
-            default_name = f'Ring{len(self.sim_params["rings"]) + 1}'
+            default_name = f'Ring{len(features) + 1}'
             unique_name = self._find_unique_name(default_name)
             p = {
                 'name': unique_name,
-                'feature_type': 'RINGLET',
-                'center_v': self.sim_params['size_v'] // 2 + 0.5,
-                'center_u': self.sim_params['size_u'] // 2 + 0.5,
-                'shading_distance': 20.0,
-                'inner_data': [
-                    {
-                        'mode': 1,
-                        'a': 100.0,
-                        'rms': 1.0,
-                        'ae': 0.0,
-                        'long_peri': 0.0,
-                        'rate_peri': 0.0,
-                    }
-                ],
-                'outer_data': [
-                    {
-                        'mode': 1,
-                        'a': 120.0,
-                        'rms': 1.0,
-                        'ae': 0.0,
-                        'long_peri': 0.0,
-                        'rate_peri': 0.0,
-                    }
-                ],
+                'kind': 'ringlet',
+                'tau': 1.0,
+                'width': 20.0,
+                'navigable': True,
+                'orbit': {'a': 100.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0},
             }
         else:
             p = params
-        idx = len(self.sim_params['rings'])
-        self.sim_params['rings'].append(p)
+        idx = len(features)
+        features.append(p)
         # Rebuild tabs to ensure consistency and proper ordering
         self._rebuild_dynamic_tabs()
         # Find and select the newly added tab
@@ -352,8 +348,13 @@ class TabsMixin(SimEditorBase):
             if 0 <= data_index < len(self.sim_params['bodies']):
                 del self.sim_params['bodies'][data_index]
         elif kind == 'ring':
-            if 0 <= data_index < len(self.sim_params['rings']):
-                del self.sim_params['rings'][data_index]
+            features = self._ring_features()
+            if 0 <= data_index < len(features):
+                del features[data_index]
+            # Deleting the last feature retires the whole block: an empty
+            # ring_system renders nothing and only clutters the saved scene.
+            if not features and not self.sim_params.get('ring_system', {}).get('moonlets'):
+                self.sim_params.pop('ring_system', None)
         elif kind == 'star':
             if 0 <= data_index < len(self.sim_params['stars']):
                 del self.sim_params['stars'][data_index]
@@ -401,8 +402,9 @@ class TabsMixin(SimEditorBase):
                             )
                             target_tab_name = body_name
                     elif widget_kind == 'ring' and widget_data_index is not None:
-                        if 0 <= widget_data_index < len(self.sim_params['rings']):
-                            ring_name = self.sim_params['rings'][widget_data_index].get(
+                        features = self._ring_features()
+                        if 0 <= widget_data_index < len(features):
+                            ring_name = features[widget_data_index].get(
                                 'name', f'Ring{widget_data_index + 1}'
                             )
                             target_tab_name = ring_name
@@ -443,14 +445,12 @@ class TabsMixin(SimEditorBase):
             tab_name = self.sim_params['bodies'][i].get('name', f'Body{i + 1}')
             self._tabs.addTab(tab, tab_name)
 
-        # Add ring tabs (sorted by name)
-        ring_indices = list(range(len(self.sim_params['rings'])))
-        ring_indices.sort(
-            key=lambda i: self.sim_params['rings'][i].get('name', f'Ring{i + 1}').lower()
-        )
-        for i in ring_indices:
+        # Add ring-feature tabs (in feature-list order: the first feature's
+        # tab carries the shared system-level controls, so it stays first)
+        ring_features = self._ring_features()
+        for i in range(len(ring_features)):
             tab = self._build_ring_tab(i)
-            tab_name = self.sim_params['rings'][i].get('name', f'Ring{i + 1}')
+            tab_name = ring_features[i].get('name', f'Ring{i + 1}')
             self._tabs.addTab(tab, tab_name)
 
         # Add star tabs (sorted by name)
@@ -516,10 +516,9 @@ class TabsMixin(SimEditorBase):
             range_val = body.get('range_km')
             if range_val is not None:
                 existing_ranges.add(float(range_val))
-        for ring in self.sim_params.get('rings', []):
-            range_val = ring.get('range_km')
-            if range_val is not None:
-                existing_ranges.add(float(range_val))
+        ring_system = self.sim_params.get('ring_system')
+        if isinstance(ring_system, dict) and ring_system.get('range_km') is not None:
+            existing_ranges.add(float(ring_system['range_km']))
 
         # Start from 1 and increment until we find a unique range
         candidate = 1.0

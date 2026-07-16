@@ -2,9 +2,10 @@
 
 Pins the single-scattering photometry (lit and unlit closed forms, the
 mu0 -> mu limit, the Henyey-Greenstein defaults), the flat-ring regression
-identity against the legacy annulus renderer at |B| = 90, the per-pixel
-depth compositing (near arm in front of a body at the ring center's range,
-far arm behind), the transmission-screen behavior (a gap reveals the
+identity (at |B| = 90 the projection reduces to sky-plane circles and the
+tau map is the anti-aliased annulus coverage exactly), the per-pixel depth
+compositing (near arm in front of a body at the ring center's range, far
+arm behind), the transmission-screen behavior (a gap reveals the
 background; a star behind a tau = 2 ring at B = 30 attenuates by exp(-4)),
 and opaque-body star extinction.
 """
@@ -15,7 +16,6 @@ from typing import Any
 import numpy as np
 import pytest
 
-from spindoctor.sim.forward.ring import render_ring
 from spindoctor.sim.forward.ring_system import (
     RING_ALBEDO_DEFAULT,
     RING_PHASE_G_DEFAULT,
@@ -129,36 +129,32 @@ def _ringlet(a: float, width: float, tau: float, **extra: Any) -> dict[str, Any]
     return feature
 
 
-def test_face_on_system_matches_the_legacy_annulus() -> None:
-    """|B| = 90 regression identity: tau map == tau * legacy coverage.
+def test_face_on_system_reduces_to_sky_plane_circles() -> None:
+    """|B| = 90 regression identity: tau map == tau * annulus coverage.
 
-    A circular ringlet rendered face-on must reproduce the legacy sky-plane
-    annulus exactly: same edges, same anti-aliasing, so the tau map is the
-    feature tau times the legacy coverage image, pixel for pixel.
+    A circular ringlet rendered face-on must reproduce the sky-plane
+    annulus exactly: the ring-plane radius equals the pixel-center distance
+    from the projected center, and the tau map is the feature tau times the
+    one-pixel anti-aliased band coverage
+    ``min(clip(0.5 + (d - a_in), 0, 1), clip(0.5 + (a_out - d), 0, 1))``,
+    pixel for pixel.
     """
-    tau = 1.7
+    tau, a_inner, a_outer = 1.7, 20.0, 28.0
     maps = render_ring_system(
         (96, 96),
-        _system([_ringlet(20.0, 8.0, tau)], b_obs=90.0, b_sun=90.0),
+        _system([_ringlet(a_inner, a_outer - a_inner, tau)], b_obs=90.0, b_sun=90.0),
         center_v=48.0,
         center_u=48.0,
         node_deg=0.0,
     )
-    legacy = np.zeros((96, 96), dtype=np.float64)
-    render_ring(
-        legacy,
-        {
-            'center_v': 48.0,
-            'center_u': 48.0,
-            'feature_type': 'RINGLET',
-            'inner_data': [{'mode': 1, 'a': 20.0}],
-            'outer_data': [{'mode': 1, 'a': 28.0}],
-        },
-        0.0,
-        offset_u=0.0,
-    )
+    coords = np.arange(96, dtype=np.float64) + 0.5
+    v_grid, u_grid = np.meshgrid(coords, coords, indexing='ij')
+    distances = np.hypot(v_grid - 48.0, u_grid - 48.0)
+    inner_shade = np.clip(0.5 + (distances - a_inner), 0.0, 1.0)
+    outer_shade = np.clip(0.5 + (a_outer - distances), 0.0, 1.0)
+    coverage = np.minimum(inner_shade, outer_shade)
     tau_map = -np.log(maps.transmission)  # mu = 1 face-on, so tau = -ln(T)
-    np.testing.assert_allclose(tau_map, tau * legacy, atol=1e-12)
+    np.testing.assert_allclose(tau_map, tau * coverage, atol=1e-12)
 
 
 def test_default_photometry_matches_the_closed_form() -> None:
@@ -359,25 +355,6 @@ def test_ring_system_over_body_requires_both_ranges() -> None:
     ring_system = _system([_ringlet(20.0, 4.0, 1.0)], b_obs=30.0, b_sun=30.0)
     scene = _scene(bodies=[_body_at_center(1.0e6)], ring_system=ring_system)
     with pytest.raises(SimSceneValidationError, match=r"ring_system and body 'DISC' overlap"):
-        render_combined_model(scene)
-
-
-def test_ring_system_over_legacy_ring_is_an_error() -> None:
-    """A legacy painted ring has no per-pixel depth to order against."""
-    legacy = {
-        'name': 'OLD',
-        'feature_type': 'RINGLET',
-        'center_v': 48.0,
-        'center_u': 48.0,
-        'range_km': 2.0e6,
-        'inner_data': [{'mode': 1, 'a': 8.0}],
-        'outer_data': [{'mode': 1, 'a': 30.0}],
-    }
-    ring_system = _system(
-        [_ringlet(20.0, 4.0, 1.0)], b_obs=30.0, b_sun=30.0, range_km=1.0e6, km_per_pixel=1000.0
-    )
-    scene = _scene(rings=[legacy], ring_system=ring_system)
-    with pytest.raises(SimSceneValidationError, match='overlaps legacy ring'):
         render_combined_model(scene)
 
 

@@ -276,11 +276,19 @@ def test_validate_sim_params_rejects_expected_status_reason() -> None:
         validate_sim_params(params)
 
 
-def test_validate_sim_params_rejects_unknown_ring_key() -> None:
-    """An unmodeled per-ring key fails validation."""
+def test_validate_sim_params_rejects_legacy_rings_key() -> None:
+    """The retired painted-annulus 'rings' list is an unknown key now."""
     params = _sim_params()
-    params['rings'] = [{'name': 'R', 'feature_type': 'RINGLET', 'tau': 0.5}]
-    with pytest.raises(SimSceneValidationError, match=r'rings\[0\].*tau'):
+    params['rings'] = [{'name': 'R'}]
+    with pytest.raises(SimSceneValidationError, match=r'unknown scene keys.*rings'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_legacy_shade_solid_rings_key() -> None:
+    """The retired 'shade_solid_rings' knob is an unknown key now."""
+    params = _sim_params()
+    params['shade_solid_rings'] = True
+    with pytest.raises(SimSceneValidationError, match=r'unknown scene keys.*shade_solid_rings'):
         validate_sim_params(params)
 
 

@@ -35,7 +35,6 @@ bodies:
     phase_angle: 30.0
     nav_override:
       mesh_lumpiness: 0.0
-rings: []
 noise:
   poisson: true
   read_noise_dn: 4.0

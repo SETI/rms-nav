@@ -19,7 +19,6 @@ optics:
   psf:
     match_navigator: true
 bodies: []
-rings: []
 stars:
   - name: N1
     v: 100.0

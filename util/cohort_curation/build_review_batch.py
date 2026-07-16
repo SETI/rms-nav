@@ -25,7 +25,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 HERE = Path(__file__).parent
 REPO = HERE.parent.parent
-OUT_DIR = REPO / '_work/cohort_curation'   # generated outputs (gitignored)
+OUT_DIR = REPO / '_work/cohort_curation'  # generated outputs (gitignored)
 
 VOTE_INSTRUCTIONS = (
     'Set vote to y, m, or n per image (optional comment). '
@@ -74,8 +74,7 @@ def compose(rec: dict, out_path: Path, seq: int) -> None:
     else:
         img = Image.new('RGB', (1024, 1024), (30, 30, 30))
         d = ImageDraw.Draw(img)
-        d.text((40, 480), 'NO SUMMARY PNG (pipeline failed)',
-               fill=(255, 80, 80), font=FONT)
+        d.text((40, 480), 'NO SUMMARY PNG (pipeline failed)', fill=(255, 80, 80), font=FONT)
 
     margin = 96
     canvas = Image.new('RGB', (img.width, img.height + margin), (12, 12, 12))
@@ -83,23 +82,26 @@ def compose(rec: dict, out_path: Path, seq: int) -> None:
     d = ImageDraw.Draw(canvas)
 
     off = rec.get('offset_px')
-    off_txt = (f'proposed (dv, du) = ({off[0]:+.2f}, {off[1]:+.2f}) px'
-               if off else 'NO PROPOSED OFFSET')
+    off_txt = (
+        f'proposed (dv, du) = ({off[0]:+.2f}, {off[1]:+.2f}) px' if off else 'NO PROPOSED OFFSET'
+    )
     conf = rec.get('confidence')
-    conf_txt = (f'conf {conf:.2f} ({rec.get("confidence_rank")})'
-                if conf is not None else 'conf n/a')
-    line1 = (f'#{seq:03d}  {rec["image_name"]}  '
-             f'[{rec["scene_class"]}]  {rec["mission"]}/{rec["camera"]}')
+    conf_txt = f'conf {conf:.2f} ({rec.get("confidence_rank")})' if conf is not None else 'conf n/a'
+    line1 = (
+        f'#{seq:03d}  {rec["image_name"]}  [{rec["scene_class"]}]  {rec["mission"]}/{rec["camera"]}'
+    )
     line2 = f'{off_txt}   {conf_txt}   status={rec.get("status")}'
     warn = '; '.join(rec.get('triage_warnings') or [])
     if rec.get('needs_visual'):
-        warn = ('VISUAL CHECK (class needs eyeball confirmation); ' + warn
-                if warn else 'VISUAL CHECK (class needs eyeball confirmation)')
+        warn = (
+            'VISUAL CHECK (class needs eyeball confirmation); ' + warn
+            if warn
+            else 'VISUAL CHECK (class needs eyeball confirmation)'
+        )
     d.text((10, 8), line1, fill=(255, 255, 255), font=FONT)
     d.text((10, 34), line2, fill=(200, 200, 200), font=FONT)
     if warn:
-        d.text((10, 60), f'! {warn}'[:130], fill=(255, 200, 80),
-               font=FONT_SMALL)
+        d.text((10, 60), f'! {warn}'[:130], fill=(255, 200, 80), font=FONT_SMALL)
     canvas.save(out_path)
 
 
@@ -145,8 +147,7 @@ def select(promoted: list[dict]) -> list[dict]:
         for r in group:
             strata.setdefault(r.get('strata', ''), []).append(r)
         for s in strata.values():
-            s.sort(key=lambda r: (r.get('offset_px') is None,
-                                  r.get('technique_spread_px') or 0.0))
+            s.sort(key=lambda r: (r.get('offset_px') is None, r.get('technique_spread_px') or 0.0))
         chosen: list[dict] = []
         keys = sorted(strata)
         rng.shuffle(keys)
@@ -164,17 +165,21 @@ def main() -> None:
     ap.add_argument('--batch', type=int, default=1)
     args = ap.parse_args()
 
-    report_name = ('triage_report.yaml' if args.batch == 1
-                   else f'triage_report_batch{args.batch:03d}.yaml')
+    report_name = (
+        'triage_report.yaml' if args.batch == 1 else f'triage_report_batch{args.batch:03d}.yaml'
+    )
     report = yaml.safe_load((OUT_DIR / report_name).read_text())
     promoted = [r for r in report['results'] if r.get('triage') == 'promoted']
     for r in report['results']:
-        if (r.get('triage') == 'dropped'
-                and r['scene_class'] in RESCUE_CLASSES
-                and r.get('summary_png')):
+        if (
+            r.get('triage') == 'dropped'
+            and r['scene_class'] in RESCUE_CLASSES
+            and r.get('summary_png')
+        ):
             r['triage_warnings'] = (r.get('triage_warnings') or []) + [
                 'manual_nav_queue',
-                f'rescued: pipeline said {r.get("status_reason")}']
+                f'rescued: pipeline said {r.get("status_reason")}',
+            ]
             promoted.append(r)
     promoted = select(promoted)
     promoted.sort(key=lambda r: (r['scene_class'], r['image_name']))
@@ -186,22 +191,26 @@ def main() -> None:
     for seq, rec in enumerate(promoted, 1):
         png_name = f'{seq:03d}_{rec["image_name"]}.png'
         compose(rec, batch_dir / png_name, seq)
-        votes.append({
-            'seq': seq,
-            'image_name': rec['image_name'],
-            'scene_class': rec['scene_class'],
-            'png': png_name,
-            'proposed_offset_dv_du_px': rec.get('offset_px'),
-            'warnings': rec.get('triage_warnings') or [],
-            'vote': None,
-            'comment': '',
-        })
+        votes.append(
+            {
+                'seq': seq,
+                'image_name': rec['image_name'],
+                'scene_class': rec['scene_class'],
+                'png': png_name,
+                'proposed_offset_dv_du_px': rec.get('offset_px'),
+                'warnings': rec.get('triage_warnings') or [],
+                'vote': None,
+                'comment': '',
+            }
+        )
 
-    (batch_dir / 'votes.yaml').write_text(yaml.safe_dump(
-        {'batch': args.batch,
-         'instructions': VOTE_INSTRUCTIONS,
-         'images': votes},
-        sort_keys=False, width=100))
+    (batch_dir / 'votes.yaml').write_text(
+        yaml.safe_dump(
+            {'batch': args.batch, 'instructions': VOTE_INSTRUCTIONS, 'images': votes},
+            sort_keys=False,
+            width=100,
+        )
+    )
     print(f'wrote {batch_dir}/votes.yaml with {len(votes)} images')
 
 

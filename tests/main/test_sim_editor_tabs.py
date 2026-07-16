@@ -126,15 +126,40 @@ def test_distortion_center_uncheck_drops_both_keys(model: Any) -> None:
 
 
 def test_ring_range_km_unchecked_leaves_key_absent(model: Any) -> None:
-    """Disabling the ring physical-range control removes the key."""
+    """Disabling the ring-system physical-range control removes the key."""
     model._add_ring_tab()
     tab_idx = model._find_tab_by_properties('ring', 0)
     assert tab_idx is not None
     ring_tab = model._tabs.widget(tab_idx)
     ring_tab.range_km_check.click()
-    assert 'range_km' in model.sim_params['rings'][0]
+    assert 'range_km' in model.sim_params['ring_system']
     ring_tab.range_km_check.click()
-    assert 'range_km' not in model.sim_params['rings'][0]
+    assert 'range_km' not in model.sim_params['ring_system']
+
+
+def test_ring_kind_switch_rewrites_shape_keys(model: Any) -> None:
+    """Switching a feature's kind swaps in exactly the kind's shape keys."""
+    model._add_ring_tab()
+    feature = model.sim_params['ring_system']['features'][0]
+    assert 'width' in feature
+    tab_idx = model._find_tab_by_properties('ring', 0)
+    assert tab_idx is not None
+    model._on_ring_kind(0, 'wave')
+    assert 'width' not in feature
+    assert feature['wavelength'] > 0.0
+    assert feature['damping'] > 0.0
+    model._on_ring_kind(0, 'ringlet')
+    assert 'wavelength' not in feature
+    assert 'damping' not in feature
+    assert feature['width'] > 0.0
+
+
+def test_deleting_the_last_ring_feature_retires_the_block(model: Any) -> None:
+    """Removing the only feature drops the whole ring_system key."""
+    model._add_ring_tab()
+    assert 'ring_system' in model.sim_params
+    model._delete_tab_by_index('ring', 0)
+    assert 'ring_system' not in model.sim_params
 
 
 def test_match_navigator_disables_kernel_spins(model: Any) -> None:

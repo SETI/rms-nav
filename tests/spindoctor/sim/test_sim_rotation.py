@@ -29,7 +29,6 @@ def _noiseless_params(**overrides: object) -> dict[str, object]:
         'offset_v': 0.0,
         'offset_u': 0.0,
         'bodies': [],
-        'rings': [],
         'noise': {'poisson': False, 'read_noise_dn': 0.0, 'bias_dn': 0.0},
     }
     params.update(overrides)

@@ -107,7 +107,6 @@ class ObsSim(ObsSnapshotInst):
         snapshot.insert_subfield('data', img_rendered)
         # Renderer output metadata (truth side; never read by NavModels).
         snapshot.sim_body_models = meta.get('bodies', {})
-        snapshot.sim_rings = meta.get('rings', [])
         snapshot.sim_inventory = meta.get('inventory', {})
         snapshot.sim_body_order_near_to_far = meta.get('order_near_to_far', [])
         snapshot.sim_body_index_map = meta.get('body_index_map')

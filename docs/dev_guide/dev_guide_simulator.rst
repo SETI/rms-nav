@@ -67,8 +67,11 @@ scene -- including every planted error, noise knob, and contaminant. It lives in
      - The ellipsoid body renderer and its topographic path (relief, photometric
        laws, surface texture, transits), and the polyhedral-mesh renderer (see
        :ref:`sim-body-renderer`).
-   * - ``ring.py``
-     - Ring-feature renderer (mode-1 elliptical edges, edge shading).
+   * - ``ring_system.py``
+     - The optical-depth ring-system renderer: radial tau features on
+       perturbed orbits, projected through the shared opening-angle
+       geometry, lit by the single-scattering closed forms, and composited
+       as a transmission screen (see :ref:`sim-ring-system`).
    * - ``star.py``
      - Star and background-star-field renderers.
    * - ``optics.py``
@@ -208,11 +211,13 @@ scene (:mod:`spindoctor.sim.forward.pipeline`):
      - What it does
    * - ``scene_radiance``
      - :func:`~spindoctor.sim.forward.scene_radiance.compose_scene_radiance`
-     - Composes the noise-free signal: bodies and rings depth-sorted far to
-       near (nearer objects overwrite) into ``frame.signal``, and the star
-       field (catalog stars plus the background sky) into the point-source
-       plane ``frame.point_e``, with the planted offset and camera roll
-       applied. Stars are flux-normalized point masses shaped only by the
+     - Composes the noise-free signal: bodies depth-sorted far to near
+       (nearer bodies overwrite) into ``frame.signal``, with the ring
+       system composited over the stack as a per-pixel transmission
+       screen, and the star field (catalog stars plus the background sky)
+       into the point-source plane ``frame.point_e``, with the planted
+       offset and camera roll applied. Stars are flux-normalized point
+       masses shaped only by the
        whole-scene PSF (see :ref:`sim-star-params`). Accumulates feature truth
        (star records, masks, inventory, z-order) into ``frame.truth``.
    * - ``optics``
@@ -1127,7 +1132,8 @@ The panels below are rendered by ``python -m tests.integration.sim_doc_images``
    :width: 45%
    :align: center
 
-   Two eccentric ringlets with a gap between them.
+   Two ring_system ringlets (the outer one eccentric) lit by the
+   single-scattering tau photometry.
 
 .. figure:: _sim_images/star_field.png
    :width: 45%
@@ -1196,8 +1202,8 @@ scene authors -- the calibration-campaign generator
 ``tests/integration/sim_doc_images.py`` -- validate their in-memory dicts
 through the same core, :func:`spindoctor.sim.scene.validate_sim_params`.
 Validation is strict: an unknown key at the top level or inside a ``bodies`` /
-``rings`` / ``stars`` entry fails loudly, so a typo cannot silently render the
-default scene.
+``stars`` / ``ring_system`` entry fails loudly, so a typo cannot silently
+render the default scene.
 
 The scene classes (for example ``algorithmic_invariants``,
 ``phase_sweep_regular_body``, ``phase_sweep_irregular_body``, ``range_sweep``,
@@ -1232,15 +1238,20 @@ ring, a couple of stars, and a planted offset the navigator must recover -- read
        axis3: 95.0
        illumination_angle: 25.0
        phase_angle: 40.0
-   rings:
-     - name: RINGLET
-       feature_type: RINGLET
+   ring_system:
+     geometry:
        center_v: 110.0
        center_u: 110.0
-       inner_data: [{mode: 1, a: 90.0, ae: 6.0}]
-       outer_data: [{mode: 1, a: 98.0, ae: 6.0}]
-       shading_distance: 10.0
-       range: 1000.0
+       opening_deg_obs: 90.0
+       opening_deg_sun: 90.0
+       node_deg: 0.0
+     features:
+       - name: RINGLET
+         kind: ringlet
+         tau: 1.2
+         width: 8.0
+         navigable: true
+         orbit: {a: 90.0, ae: 6.0}
    sky_counts: {density_factor: 40.0}
    stars:
      - {name: S1, v: 30.0, u: 60.0, vmag: 6.0}
@@ -1337,11 +1348,13 @@ Top-level fields
      - idealized
      - Per-body parameter dicts (see :ref:`sim-body-params`); some per-body
        keys are truth-side.
-   * - ``rings``
-     - list
-     - ``[]``
+   * - ``ring_system``
+     - dict
+     - none
      - idealized
-     - Per-ring parameter dicts (see :ref:`sim-ring-params`).
+     - The optical-depth ring system (see :ref:`sim-ring-system`); its
+       ``azimuthal`` / ``moonlets`` blocks and some per-feature keys are
+       truth-side.
    * - ``stars``
      - list
      - ``[]``
@@ -1402,12 +1415,6 @@ Top-level fields
      - off
      - truth
      - Physical-chain opt-in switch (see :ref:`sim-artifacts-block`).
-   * - ``shade_solid_rings``
-     - bool
-     - none
-     - truth
-     - Image-side ring-appearance knob (the navigator's ring template is
-       always solid-shaded by its own convention).
    * - ``instrument_config``
      - dict
      - none
@@ -1565,29 +1572,92 @@ irregular-body scenarios use to render a lumpy mesh but predict its smooth
 override never moves the center, so the planted offset is still recoverable.
 See :doc:`dev_guide_navigation_models_body_simulated`.
 
-.. _sim-ring-params:
+.. _sim-ring-system:
 
-Ring parameters
+The ring system
 ---------------
 
-Each entry of ``rings`` is a dict with ``name``, a ``feature_type`` of
-``RINGLET`` (adds brightness) or ``GAP`` (subtracts it), a ``center_v`` /
-``center_u``, a ``shading_distance`` (edge-fade width in pixels), a ``range``
-depth key, an optional physical ``range_km``, and ``inner_data`` /
-``outer_data`` edge lists. At least one edge is required. Each edge is a list
-of mode dicts; the required mode-1 dict carries the elliptical orbit: ``a``
-(semi-major axis, px), ``ae`` (eccentricity times ``a``, px), ``long_peri``
-(longitude of pericenter, deg), and ``rate_peri`` (precession rate, deg/day,
-applied across the scene-level ``time`` minus ``ring_epoch``).
+``ring_system`` is a single mapping describing an optical-depth ring system:
+a shared projection geometry, a list of radial tau features, and truth-side
+azimuthal / moonlet clutter. The renderer draws the whole system; the
+navigator is told only about the features flagged ``navigable``.
 
-A ring carrying ``range_km`` depth-orders physically against the bodies'
-``range_km`` values and receives the spk_error parallax at that range (an
-spk_error scene requires it on every ring); without it, the hint-unit
-``range`` key orders the ring, which is only meaningful against bodies at
-their default ranges.
+**Geometry and projection.** The required ``geometry`` block carries
+``center_v`` / ``center_u`` (the projected ring center), ``opening_deg_obs``
+and ``opening_deg_sun`` (the observer and sun ring opening angles B, in
+(-90, 90], positive north; both required, and an exactly edge-on 0 renders
+nothing), and ``node_deg`` (the sky position angle of the ascending node,
+counterclockwise from +u toward -v). The system is rendered in ring-plane
+coordinates and projected through B and the node, so an inclined view
+produces the foreshortened ellipse geometry, radial resolution gradient, and
+near/far-arm asymmetry real ring images have; ``|B| = 90`` reduces to
+sky-plane circles. Ring-plane longitude is measured from the ascending node
+*in the ring plane*: every orbital angle lives in that frame, and the node
+angle enters only the final sky rotation. Both sides project through the
+same helpers (:mod:`spindoctor.sim.ring_geometry`), so predicted edges land
+in projected positions by construction.
 
-All ring keys are idealized at the current fidelity: the mode-1 orbits *are*
-the catalog orbits, with no planted per-feature error.
+**Photometry and compositing.** Brightness derives from the composed tau and
+the viewing/lighting geometry via the single-scattering closed forms with a
+one-term Henyey-Greenstein phase function evaluated at the block's
+``phase_deg``; the unlit side (opening angles of opposite sign) produces the
+real inversion, moderate-tau features bright from the dark side and high-tau
+features nearly black. The system composites over the body stack as a
+per-pixel transmission screen (``img = I_ring + exp(-tau/mu) * img_behind``)
+ordered by observer distance: with the block-level ``range_km`` and
+``km_per_pixel`` set, the near arm crosses in front of a body at the ring
+center's range and the far arm passes behind it, gaps reveal the background
+instead of erasing it, and stars behind the ring attenuate by
+``exp(-tau/mu)`` (a scene whose system overlaps a body must range both).
+
+**Features.** Each entry of ``features`` carries ``name``, ``kind``, ``tau``
+(the normal optical depth), kind-specific shape keys, a catalog ``orbit``,
+and ``navigable`` (default false). The kinds and their shape keys:
+
+- ``ringlet`` — ``tau`` between the orbit radius and orbit + ``width``
+  (required); a ``gap`` is the same band as a tau suppression.
+- ``edge`` — a one-sided step; ``side: 'in'`` (default) carries tau inside
+  the orbit radius (a sheet bounded by its outer edge), ``'out'`` outside.
+- ``ramp`` — a linear transition across ``width``; ``side: 'out'`` (default)
+  rises from 0 at the orbit radius to ``tau`` at orbit + ``width``.
+- ``wave`` — a damped radial sinusoid launched at the orbit radius
+  (``wavelength`` and ``damping``, both required, in radial px): a
+  density-wave train, typically non-navigable clutter riding on a sheet.
+
+The ``orbit`` map is the catalog orbit: the mode-1 precessing ellipse
+(``a``, ``ae``, ``long_peri``, ``rate_peri``, applied across the scene-level
+``time`` minus ``ring_epoch``), optional m >= 2 ``modes``
+(``{m, amp, peri}``: ``r = a - amp*cos(m*(lam - peri))``, the resonantly
+forced edge shape), and an optional satellite ``edge_wave``
+(``{amp, wavelength, damp, lam0}``: a damped sinusoid downstream of the
+perturbing moon's longitude ``lam0``, with ``damp`` in radians and the sine
+argument arc length over ``wavelength``).
+
+**Planted orbit error.** A feature's truth-side ``orbit_error`` map
+(``delta_a_px``, ``delta_ae_px``, ``delta_long_peri_deg``) displaces the
+*rendered* feature while the navigator predicts from the catalog orbit, so
+features are misplaced relative to the model exactly as real ring features
+are relative to their published orbit solutions -- the ring analog of the
+body ephemeris-error axis. The idealized ``declared_orbit_sigma``
+(``sigma_a_px``, ``sigma_ae_px``, ``sigma_long_peri_deg``) is the
+uncertainty the navigator is entitled to know; the drawn error values never
+cross the boundary. Per-feature ``albedo`` and ``phase_g`` (the
+Henyey-Greenstein asymmetry; negative backscatters, positive
+forward-scatters) are photometric truth.
+
+**Azimuthal clutter and moonlets (truth).** The ``azimuthal`` block scales
+the emitted intensity only, never tau: ``modulation``
+(``{amplitude, m, phase_deg}``, the self-gravity-wake asymmetry), ``shadow``
+(``{start_deg, extent_deg, darkness}``, a planet-shadow wedge -- a strong
+non-navigable edge crossing every feature), and ``spokes``
+(``{count, r_inner, r_outer, contrast, width_deg}``, a seeded field of
+azimuthally sharp, radially broad wedges drawn from the
+``scene_radiance/ring_system/spokes`` stream; negative contrast for the dark
+low-phase appearance). The ``moonlets`` list embeds opaque discs at the
+ring's depth (``{a, lam_deg, radius_px, amplitude}``), each optionally
+carrying a stylized ``propeller`` tau disturbance
+(``{length_deg, width_px, contrast}``): blob/star confounders sitting
+exactly on the navigable features.
 
 .. _sim-star-params:
 

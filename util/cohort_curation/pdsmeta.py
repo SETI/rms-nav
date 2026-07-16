@@ -17,10 +17,7 @@ from pathlib import Path
 
 # Derived from the same environment variable the pipeline uses (set by
 # /seti/newnav/setup.sh); the literal fallback matches the operator host.
-METADATA_ROOT = (
-    Path(os.environ.get('PDS3_HOLDINGS_DIR', '/mnt/ganymede/PDS/holdings'))
-    / 'metadata'
-)
+METADATA_ROOT = Path(os.environ.get('PDS3_HOLDINGS_DIR', '/mnt/ganymede/PDS/holdings')) / 'metadata'
 
 _NAME_RE = re.compile(r'^\s*NAME\s*=\s*"?([A-Za-z0-9_]+)"?')
 _ITEMS_RE = re.compile(r'^\s*ITEMS\s*=\s*(\d+)')
@@ -71,11 +68,7 @@ class SummaryTable:
         self.path = tab_path
         self.cols = parse_label_columns(lbl_path)
         with open(tab_path, errors='replace', newline='') as f:
-            self.rows = [
-                [field.strip() for field in row]
-                for row in csv.reader(f)
-                if row
-            ]
+            self.rows = [[field.strip() for field in row] for row in csv.reader(f) if row]
 
     def get(self, row: list[str], name: str, *alt_names: str) -> str | None:
         """String value of the first matching column, or None.
@@ -145,6 +138,8 @@ def volumes(volset: str) -> list[str]:
     root = METADATA_ROOT / volset
     if not root.exists():
         return []
-    return sorted(p.name for p in root.iterdir()
-                  if p.is_dir() and not p.name.startswith('.')
-                  and not p.name.endswith('999'))
+    return sorted(
+        p.name
+        for p in root.iterdir()
+        if p.is_dir() and not p.name.startswith('.') and not p.name.endswith('999')
+    )

@@ -90,10 +90,8 @@ class CreateSimulatedImageModel(
                 'cosmic_ray_rate_per_sec': 0.0,
                 'missing_data_rate': 0.0,
             },
-            'shade_solid_rings': False,
             'stars': [],
             'bodies': [],
-            'rings': [],
         }
 
         # Render cache/meta
@@ -241,10 +239,6 @@ class CreateSimulatedImageModel(
         self._zoom_sharp_check.setChecked(self._zoom_sharp)
         self._zoom_sharp_check.stateChanged.connect(self._toggle_zoom_sharp)
         vis_row.addWidget(self._zoom_sharp_check)
-        self._shade_solid_rings_check = QCheckBox('Shade solid rings')
-        self._shade_solid_rings_check.setChecked(self.sim_params.get('shade_solid_rings', False))
-        self._shade_solid_rings_check.stateChanged.connect(self._toggle_shade_solid_rings)
-        vis_row.addWidget(self._shade_solid_rings_check)
         self._saturation_overlay_check = QCheckBox('Saturation overlay')
         self._saturation_overlay_check.setChecked(self._show_saturation_overlay)
         self._saturation_overlay_check.setToolTip(
@@ -379,12 +373,6 @@ class CreateSimulatedImageModel(
         """Toggle nearest-neighbour (sharp) vs smooth zoom scaling."""
         self._zoom_sharp = state == int(cast(int, Qt.CheckState.Checked.value))
         self._update_display()
-
-    def _toggle_shade_solid_rings(self, state: Any) -> None:
-        """Toggle the solid-ring shading render flag."""
-        checked = state == int(cast(int, Qt.CheckState.Checked.value))
-        self.sim_params['shade_solid_rings'] = checked
-        self._updater.request_update()
 
 
 def main() -> None:

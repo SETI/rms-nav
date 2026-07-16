@@ -62,9 +62,27 @@ Fields
   midtime_utc      (str, optional)   ISO timestamp, informational
   closest_planet   (str, optional)   ring-model planet (default SATURN)
   time, ring_epoch (float, opt)      TDB seconds for ring calculations
-  shade_solid_rings (bool, optional) shade solid rings (default false)
   bodies           (list, optional)  per-body params (see below)
-  rings            (list, optional)  per-ring params
+  ring_system      (mapping, opt)    the optical-depth ring system: a shared
+                                     geometry block (center_v/u, opening_deg_obs,
+                                     opening_deg_sun, node_deg), optional
+                                     range_km / km_per_pixel (per-pixel depth
+                                     ordering against bodies) and phase_deg,
+                                     a features list, and truth-side azimuthal
+                                     (modulation / spokes / shadow) and moonlets
+                                     blocks.  Each feature carries kind (ringlet
+                                     | gap | edge | ramp | wave), tau, the
+                                     kind-specific shape keys (width, side,
+                                     wavelength, damping), navigable (false by
+                                     default: non-navigable features render as
+                                     confounders the navigator never learns), a
+                                     catalog orbit (a, ae, long_peri, rate_peri,
+                                     m >= 2 modes, edge_wave), an idealized
+                                     declared_orbit_sigma, and truth-side
+                                     orbit_error / albedo / phase_g -- the
+                                     planted ephemeris error displaces only the
+                                     RENDERED feature; the navigator predicts
+                                     from the catalog orbit
   stars            (list, optional)  explicit star dicts (name, v, u, vmag,
                                      navigable, catalog_error_v/u, companion,
                                      delta_mag, ...).  navigable=false renders the
@@ -118,7 +136,8 @@ Fields
                                      (PSF, distortion residual, shot noise, dark / hot /
                                      bloom / banding / bias); loss modes stay 0
   spk_error        (mapping, opt)    planted spacecraft-ephemeris parallax: dv_px, du_px,
-                                     reference_range_km (needs range_km on each body/ring)
+                                     reference_range_km (needs range_km on each body
+                                     and on the ring_system)
   instrument_config (mapping, opt)   per-instrument config overrides deep-merged over
                                      the named instrument's block (star_psf_sigma,
                                      data_units, noise.*, extfov_margin_vu, ...).  Omit

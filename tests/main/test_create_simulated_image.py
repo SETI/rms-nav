@@ -1,9 +1,9 @@
 """GUI smoke tests for ``spindoctor.cli.sd_create_simulated_image``.
 
-These cover the ``_load_scene`` YAML-load path, specifically that
-``shade_solid_rings`` round-trips into both the data model and its checkbox,
-and that a missing or null ``closest_planet`` falls back to ``SATURN`` without
-raising (``QComboBox.findText(None)`` would otherwise raise ``TypeError``).
+These cover the ``_load_scene`` YAML-load path, specifically that a
+``ring_system`` block round-trips into the data model, and that a missing or
+null ``closest_planet`` falls back to ``SATURN`` without raising
+(``QComboBox.findText(None)`` would otherwise raise ``TypeError``).
 """
 
 import importlib
@@ -86,36 +86,38 @@ def _load_scene_with(
     model._load_scene()
 
 
-def test_load_shade_solid_rings_true_syncs_param(
+def test_load_ring_system_block_round_trips(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
-    """Loading ``shade_solid_rings: true`` sets the data-model flag to True."""
-    _load_scene_with(monkeypatch, model, tmp_path, {'shade_solid_rings': True})
-    assert model.sim_params['shade_solid_rings'] is True
-
-
-def test_load_shade_solid_rings_true_checks_box(
-    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
-) -> None:
-    """Loading ``shade_solid_rings: true`` checks the wired checkbox."""
-    _load_scene_with(monkeypatch, model, tmp_path, {'shade_solid_rings': True})
-    assert model._shade_solid_rings_check.isChecked() is True
-
-
-def test_load_shade_solid_rings_false_unchecks_box(
-    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
-) -> None:
-    """Loading ``shade_solid_rings: false`` clears the wired checkbox."""
-    model._shade_solid_rings_check.setChecked(True)
-    _load_scene_with(monkeypatch, model, tmp_path, {'shade_solid_rings': False})
-    assert model._shade_solid_rings_check.isChecked() is False
+    """Loading a ring_system block carries it into the data model verbatim."""
+    ring_system = {
+        'geometry': {
+            'center_v': 64.0,
+            'center_u': 64.0,
+            'opening_deg_obs': 90.0,
+            'opening_deg_sun': 90.0,
+            'node_deg': 0.0,
+        },
+        'features': [
+            {
+                'name': 'R1',
+                'kind': 'ringlet',
+                'tau': 1.0,
+                'width': 10.0,
+                'navigable': True,
+                'orbit': {'a': 30.0},
+            }
+        ],
+    }
+    _load_scene_with(monkeypatch, model, tmp_path, {'ring_system': ring_system})
+    assert model.sim_params['ring_system'] == ring_system
 
 
 def test_load_missing_closest_planet_defaults_to_saturn(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
     """A scene with no ``closest_planet`` key falls back to ``SATURN``."""
-    _load_scene_with(monkeypatch, model, tmp_path, {'shade_solid_rings': False})
+    _load_scene_with(monkeypatch, model, tmp_path, {})
     assert model.sim_params['closest_planet'] == 'SATURN'
 
 

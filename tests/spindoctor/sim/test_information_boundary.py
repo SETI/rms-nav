@@ -30,7 +30,6 @@ _TRUTH_SAMPLES: dict[str, Any] = {
     'offset_v': 2.5,
     'offset_u': -1.5,
     'offset_rotation_deg': 0.4,
-    'shade_solid_rings': True,
     'sky_counts': {'a': -3.1, 'b': 0.34, 'density_factor': 5.0, 'diffuse_e_per_px': 1.0},
     'noise': {'poisson': True, 'read_noise_dn': 4.0, 'bias_dn': 12.0},
     'oversample': 4,
@@ -192,20 +191,9 @@ def _truth_exercising_scene() -> dict[str, Any]:
                 'delta_mag': _TRUTH_SAMPLES['stars.delta_mag'],
             }
         ],
-        'rings': [
-            {
-                'name': 'R1',
-                'feature_type': 'RINGLET',
-                'center_v': 48.0,
-                'center_u': 48.0,
-                'range_km': 200000.0,
-                'inner_data': [{'mode': 1, 'a': 30.0}],
-                'outer_data': [{'mode': 1, 'a': 38.0}],
-            }
-        ],
         # A small inclined ring system in the frame corner, clear of the
-        # bodies and the legacy annulus (overlap without explicit depth is a
-        # render error), carrying the per-feature photometric truth keys.
+        # bodies (overlap without explicit depth is a render error),
+        # carrying the per-feature photometric truth keys.
         'ring_system': {
             'geometry': {
                 'center_v': 12.0,
@@ -309,7 +297,7 @@ def test_idealized_keys_survive_the_filter() -> None:
     assert nav['bodies'][0]['range_km'] == 500000.0
     star = nav['stars'][0]
     assert star['vmag'] == 4.0
-    assert nav['rings'][0]['inner_data'] == [{'mode': 1, 'a': 30.0}]
+    assert nav['ring_system']['features'][0]['orbit']['a'] == 4.0
 
 
 def test_ring_system_geometry_crosses_with_the_navigable_feature() -> None:
@@ -476,6 +464,6 @@ def test_nav_params_values_are_isolated_copies() -> None:
     scene = _truth_exercising_scene()
     nav = build_nav_params(scene)
     nav['bodies'][0]['axis1'] = 999.0
-    nav['rings'][0]['inner_data'][0]['a'] = 999.0
+    nav['ring_system']['features'][0]['orbit']['a'] = 999.0
     assert scene['bodies'][0]['axis1'] == 30.0
-    assert scene['rings'][0]['inner_data'][0]['a'] == 30.0
+    assert scene['ring_system']['features'][0]['orbit']['a'] == 4.0

@@ -58,7 +58,7 @@ spindoctor.sim
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: spindoctor.sim.forward.ring
+.. automodule:: spindoctor.sim.forward.ring_system
    :members:
    :undoc-members:
    :show-inheritance:

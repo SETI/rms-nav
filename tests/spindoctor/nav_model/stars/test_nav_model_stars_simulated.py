@@ -31,7 +31,6 @@ def _obs(stars: list[dict[str, Any]] | None) -> ObsSim:
         'instrument': 'coiss_nac',
         'random_seed': 7,
         'bodies': [],
-        'rings': [],
     }
     if stars is not None:
         sim_params['stars'] = stars
