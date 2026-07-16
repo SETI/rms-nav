@@ -102,7 +102,17 @@ _FULL_SCENE: dict[str, Any] = {
         'exposure_ref_sec': 1.0,
         'quantization': 'exact',
     },
-    'artifacts': {'instrument_defaults': True},
+    'artifacts': {
+        'instrument_defaults': True,
+        'adversarial': True,
+        # One representative mode per stage family: a telemetry structured loss,
+        # a detector-electronics mode, and a routed quantization mode -- all
+        # available on coiss_nac -- so the round-trip exercises the generated
+        # mode rows, not only the two switches.
+        'missing_lines': {'incidence': 2.0, 'contiguous_run': True},
+        'banding_coherent': {'incidence': 0.5, 'amplitude_e': 3.0},
+        'quantization_lut': {'incidence': 1.0},
+    },
     'instrument_config': {'inherit': 'coiss_nac'},
     'bodies': [
         {
@@ -707,3 +717,135 @@ def test_load_then_disable_optics_clears_blocks(
     model._load_scene()
     model._detector_group.setChecked(False)
     assert 'detector' not in model.sim_params
+
+
+# ---- Registry-driven artifact-mode rows ----
+
+
+def test_every_registry_mode_has_a_row(model: Any) -> None:
+    """The tab generates one row per registered artifact mode."""
+    from spindoctor.sim.forward.artifact_modes import ARTIFACT_MODES
+
+    assert set(model._mode_rows) == set(ARTIFACT_MODES)
+
+
+def test_adversarial_check_toggles_key(model: Any) -> None:
+    """The adversarial checkbox inserts and removes the artifacts.adversarial key."""
+    model._adversarial_check.setChecked(True)
+    assert model.sim_params['artifacts'] == {'adversarial': True}
+    model._adversarial_check.setChecked(False)
+    assert 'artifacts' not in model.sim_params
+
+
+def test_mode_enable_inserts_empty_map(model: Any) -> None:
+    """Enabling a mode row inserts an empty map (absent-key discipline)."""
+    model._mode_rows['missing_lines'].group.setChecked(True)
+    assert model.sim_params['artifacts'] == {'missing_lines': {}}
+
+
+def test_mode_param_edit_writes_only_edited_key(model: Any) -> None:
+    """Editing one mode parameter writes only that key into the mode map."""
+    row = model._mode_rows['missing_lines']
+    row.group.setChecked(True)
+    row._scalar_widgets['incidence'].setValue(3.0)
+    assert model.sim_params['artifacts']['missing_lines'] == {'incidence': 3.0}
+
+
+def test_mode_disable_removes_key_and_prunes_block(model: Any) -> None:
+    """Disabling the only enabled mode removes the artifacts block entirely."""
+    row = model._mode_rows['missing_lines']
+    row.group.setChecked(True)
+    row._scalar_widgets['incidence'].setValue(3.0)
+    row.group.setChecked(False)
+    assert 'artifacts' not in model.sim_params
+
+
+def test_mode_enum_param_writes_native_choice(model: Any) -> None:
+    """An enum row writes the choice in its native type (an int period)."""
+    row = model._mode_rows['alternating_lines']
+    row.group.setChecked(True)
+    row._scalar_widgets['period'].setCurrentText('4')
+    assert model.sim_params['artifacts']['alternating_lines']['period'] == 4
+
+
+def test_mode_int_list_param_absent_until_set(model: Any) -> None:
+    """A rect/window list key stays absent until its enable box is checked."""
+    row = model._mode_rows['cutout_window']
+    row.group.setChecked(True)
+    assert 'rect' not in model.sim_params['artifacts']['cutout_window']
+    row._list_checks['rect'].setChecked(True)
+    for index, spin in enumerate(row._list_spins['rect']):
+        spin.setValue(10 + index)
+    assert model.sim_params['artifacts']['cutout_window']['rect'] == [10, 11, 12, 13]
+
+
+def test_switches_and_modes_coexist_in_block(model: Any) -> None:
+    """Instrument-defaults, adversarial, and a mode share one artifacts block."""
+    model._instrument_defaults_check.setChecked(True)
+    model._adversarial_check.setChecked(True)
+    model._mode_rows['missing_lines'].group.setChecked(True)
+    assert model.sim_params['artifacts'] == {
+        'instrument_defaults': True,
+        'adversarial': True,
+        'missing_lines': {},
+    }
+
+
+def test_mode_availability_disables_unavailable_row(model: Any) -> None:
+    """A mode unavailable on the instrument is disabled with the registry reason."""
+    model.sim_params['instrument'] = 'nhlorri'
+    model._refresh_artifact_mode_availability()
+    row = model._mode_rows['hot_pixels']
+    assert row.group.isEnabled() is False
+    assert 'LORRI' in row.group.toolTip()
+
+
+def test_mode_availability_enables_available_row(model: Any) -> None:
+    """An available mode is enabled and carries its incidence semantics tooltip."""
+    model.sim_params['instrument'] = 'coiss_nac'
+    model._refresh_artifact_mode_availability()
+    row = model._mode_rows['hot_pixels']
+    assert row.group.isEnabled() is True
+    assert 'incidence' in row.group.toolTip()
+
+
+def test_load_full_scene_syncs_mode_rows(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Loading the full-inventory scene checks its adversarial switch and modes."""
+    src = tmp_path / 'full.yaml'
+    save_sim_scene(_FULL_SCENE, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    assert model._adversarial_check.isChecked() is True
+    assert model._mode_rows['missing_lines'].group.isChecked() is True
+    assert model._mode_rows['banding_coherent'].group.isChecked() is True
+    assert model._mode_rows['quantization_lut'].group.isChecked() is True
+    incidence = model._mode_rows['missing_lines']._scalar_widgets['incidence'].value()
+    assert incidence == 2.0
+
+
+def test_gui_authored_mode_scene_validates(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """A scene authored through the mode rows saves and reloads cleanly."""
+    model.sim_params['instrument'] = 'coiss_nac'
+    model.sim_params['size_v'] = 128
+    model.sim_params['size_u'] = 128
+    row = model._mode_rows['missing_lines']
+    row.group.setChecked(True)
+    row._scalar_widgets['incidence'].setValue(2.0)
+    model._adversarial_check.setChecked(True)
+
+    out = tmp_path / 'modes.yaml'
+    monkeypatch.setattr(
+        QFileDialog, 'getSaveFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._save_scene()
+    loaded = load_sim_scene(out)
+    assert loaded['artifacts']['missing_lines'] == {'incidence': 2.0}
+    assert loaded['artifacts']['adversarial'] is True
