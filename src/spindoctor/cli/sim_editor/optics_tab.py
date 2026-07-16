@@ -399,23 +399,26 @@ class OpticsTabMixin(SimEditorBase):
             tooltip='Radial k2 coefficient.',
         )
         form.addRow('k2:', self._distortion_k2_spin)
-        # The optical centre is an optional key pair: absent means the frame
-        # centre, so the spins only author the keys when explicitly enabled
-        # (a legitimate 0.0 centre is then expressible).
+        # The optical centre is an optional key pair: an absent key means the
+        # frame centre, so a centre spin only authors its own key when the
+        # enable is on and the spin itself is edited (a legitimate 0.0 centre
+        # is then expressible, and a partial block keeps its absent key).
         has_center = 'center_v' in block or 'center_u' in block
         self._distortion_center_check = QCheckBox('Set optical centre')
         self._distortion_center_check.setChecked(has_center)
         self._distortion_center_check.setToolTip(
-            'Author explicit optical-centre keys; unchecked leaves them '
-            'absent (the renderer uses the frame centre).'
+            'Enable authoring explicit optical-centre keys; each spin edit '
+            'writes only its own key.  Unchecked drops the keys (the '
+            'renderer uses the frame centre).'
         )
         form.addRow(self._distortion_center_check)
+        default_center_v, default_center_u = self._distortion_center_defaults()
         self._distortion_center_v_spin = _dspin(
             minimum=0.0,
             maximum=20000.0,
             decimals=2,
             step=1.0,
-            value=float(block.get('center_v', 0.0)),
+            value=float(block.get('center_v', default_center_v)),
             tooltip='Optical-centre v (px); absent = frame centre.',
         )
         self._distortion_center_v_spin.setEnabled(has_center)
@@ -425,7 +428,7 @@ class OpticsTabMixin(SimEditorBase):
             maximum=20000.0,
             decimals=2,
             step=1.0,
-            value=float(block.get('center_u', 0.0)),
+            value=float(block.get('center_u', default_center_u)),
             tooltip='Optical-centre u (px); absent = frame centre.',
         )
         self._distortion_center_u_spin.setEnabled(has_center)
@@ -442,55 +445,95 @@ class OpticsTabMixin(SimEditorBase):
 
         self._distortion_group = group
         group.setChecked(isinstance(distortion, dict))
-        for spin in (
-            self._distortion_k1_spin,
-            self._distortion_k2_spin,
-            self._distortion_center_v_spin,
-            self._distortion_center_u_spin,
-            self._distortion_nonradial_spin,
-        ):
-            spin.valueChanged.connect(self._on_distortion_value)
+        # Connect after the initial values so the build does not write.
+        self._distortion_k1_spin.valueChanged.connect(self._on_distortion_k1)
+        self._distortion_k2_spin.valueChanged.connect(self._on_distortion_k2)
+        self._distortion_center_v_spin.valueChanged.connect(self._on_distortion_center_v)
+        self._distortion_center_u_spin.valueChanged.connect(self._on_distortion_center_u)
+        self._distortion_nonradial_spin.valueChanged.connect(self._on_distortion_nonradial)
         self._distortion_center_check.toggled.connect(self._on_distortion_center_check)
         group.toggled.connect(self._on_distortion_group_toggled)
         return group
 
-    def _distortion_block_from_widgets(self) -> dict[str, Any]:
-        """Assemble the distortion block; the optical centre only when enabled."""
-        block: dict[str, Any] = {
-            'k1': float(self._distortion_k1_spin.value()),
-            'k2': float(self._distortion_k2_spin.value()),
-            'nonradial_rms_px': float(self._distortion_nonradial_spin.value()),
-        }
-        if self._distortion_center_check.isChecked():
-            block['center_v'] = float(self._distortion_center_v_spin.value())
-            block['center_u'] = float(self._distortion_center_u_spin.value())
-        return block
+    def _distortion_center_defaults(self) -> tuple[float, float]:
+        """The effective optical-centre default: the frame centre, in pixels."""
+        return (
+            float(self.sim_params.get('size_v', 512)) / 2.0,
+            float(self.sim_params.get('size_u', 512)) / 2.0,
+        )
 
-    def _on_distortion_center_check(self, checked: bool) -> None:
-        """Enable the optical-centre spins and add or drop the centre keys."""
-        self._distortion_center_v_spin.setEnabled(checked)
-        self._distortion_center_u_spin.setEnabled(checked)
-        self._write_distortion()
-
-    def _write_distortion(self) -> None:
-        """Write the distortion block when the group is enabled."""
-        if self._syncing:
+    def _set_distortion_key(self, key: str, value: Any) -> None:
+        """Write one distortion key, preserving every other authored key."""
+        if self._syncing or not self._distortion_group.isChecked():
             return
-        if self._distortion_group.isChecked():
-            self._put_optics('distortion', self._distortion_block_from_widgets())
+        optics = self._optics_map()
+        block = optics.get('distortion')
+        if not isinstance(block, dict):
+            block = {}
+            optics['distortion'] = block
+        block[key] = value
+        self._updater.request_update()
 
     def _on_distortion_group_toggled(self, on: bool) -> None:
-        """Insert or remove the distortion block."""
+        """Insert an empty distortion block, or remove the block entirely.
+
+        The block starts empty so unedited keys stay absent (the renderer's
+        defaults keep applying); each widget edit then writes only its key.
+        """
         if self._syncing:
             return
         if on:
-            self._put_optics('distortion', self._distortion_block_from_widgets())
+            optics = self._optics_map()
+            if not isinstance(optics.get('distortion'), dict):
+                optics['distortion'] = {}
+            self._updater.request_update()
         else:
             self._drop_optics('distortion')
 
-    def _on_distortion_value(self, _value: float) -> None:
-        """Rewrite the distortion block on a spin edit."""
-        self._write_distortion()
+    def _on_distortion_center_check(self, checked: bool) -> None:
+        """Enable the optical-centre spins; unchecking drops the centre keys.
+
+        Checking writes nothing by itself: an absent centre key stays absent
+        (the frame centre keeps applying) until its own spin is edited.
+        """
+        self._distortion_center_v_spin.setEnabled(checked)
+        self._distortion_center_u_spin.setEnabled(checked)
+        if self._syncing or checked:
+            return
+        optics = self.sim_params.get('optics')
+        block = optics.get('distortion') if isinstance(optics, dict) else None
+        if isinstance(block, dict) and ('center_v' in block or 'center_u' in block):
+            block.pop('center_v', None)
+            block.pop('center_u', None)
+            self._updater.request_update()
+        # The keys are now absent, so show the effective default.  The spins
+        # are disabled and their handlers check the enable, so this never
+        # writes the keys back.
+        default_center_v, default_center_u = self._distortion_center_defaults()
+        self._distortion_center_v_spin.setValue(default_center_v)
+        self._distortion_center_u_spin.setValue(default_center_u)
+
+    def _on_distortion_k1(self, value: float) -> None:
+        """Write the radial k1 coefficient on a spin edit."""
+        self._set_distortion_key('k1', float(value))
+
+    def _on_distortion_k2(self, value: float) -> None:
+        """Write the radial k2 coefficient on a spin edit."""
+        self._set_distortion_key('k2', float(value))
+
+    def _on_distortion_nonradial(self, value: float) -> None:
+        """Write the non-radial wander RMS on a spin edit."""
+        self._set_distortion_key('nonradial_rms_px', float(value))
+
+    def _on_distortion_center_v(self, value: float) -> None:
+        """Write the optical-centre v key on a spin edit, when enabled."""
+        if self._distortion_center_check.isChecked():
+            self._set_distortion_key('center_v', float(value))
+
+    def _on_distortion_center_u(self, value: float) -> None:
+        """Write the optical-centre u key on a spin edit, when enabled."""
+        if self._distortion_center_check.isChecked():
+            self._set_distortion_key('center_u', float(value))
 
     # ---- Ghosts group ----
 
@@ -824,9 +867,11 @@ class OpticsTabMixin(SimEditorBase):
         self._distortion_k2_spin.setValue(float(block.get('k2', 0.0)))
         has_center = 'center_v' in block or 'center_u' in block
         self._distortion_center_check.setChecked(has_center)
-        self._distortion_center_v_spin.setValue(float(block.get('center_v', 0.0)))
+        # An absent centre key displays its effective default (frame centre).
+        default_center_v, default_center_u = self._distortion_center_defaults()
+        self._distortion_center_v_spin.setValue(float(block.get('center_v', default_center_v)))
         self._distortion_center_v_spin.setEnabled(has_center)
-        self._distortion_center_u_spin.setValue(float(block.get('center_u', 0.0)))
+        self._distortion_center_u_spin.setValue(float(block.get('center_u', default_center_u)))
         self._distortion_center_u_spin.setEnabled(has_center)
         self._distortion_nonradial_spin.setValue(float(block.get('nonradial_rms_px', 0.0)))
         self._distortion_group.setChecked(isinstance(distortion, dict))

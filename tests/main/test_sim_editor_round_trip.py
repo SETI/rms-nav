@@ -423,6 +423,70 @@ def test_distortion_center_zero_is_authorable(model: Any) -> None:
     assert block['center_u'] == 0.0
 
 
+def test_partial_distortion_edit_leaves_center_u_absent(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """A k1 edit on a partial {k1, center_v} block never backfills center_u."""
+    scene = {
+        'instrument': 'coiss_nac',
+        'size_v': 64,
+        'size_u': 64,
+        'random_seed': 1,
+        'optics': {'distortion': {'k1': 0.01, 'center_v': 40.0}},
+    }
+    src = tmp_path / 'partial_distortion.yaml'
+    save_sim_scene(scene, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    model._distortion_k1_spin.setValue(0.02)
+    assert 'center_u' not in model.sim_params['optics']['distortion']
+
+    out = tmp_path / 'partial_distortion_edited.yaml'
+    monkeypatch.setattr(
+        QFileDialog, 'getSaveFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    model._save_scene()
+    resaved = load_sim_scene(out)
+    assert resaved['optics']['distortion'] == {'k1': 0.02, 'center_v': 40.0}
+
+
+def test_partial_distortion_center_u_displays_frame_center(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """The centre-u spin shows the effective default (frame centre) when absent."""
+    scene = {
+        'instrument': 'coiss_nac',
+        'size_v': 64,
+        'size_u': 64,
+        'random_seed': 1,
+        'optics': {'distortion': {'k1': 0.01, 'center_v': 40.0}},
+    }
+    src = tmp_path / 'partial_distortion.yaml'
+    save_sim_scene(scene, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    assert model._distortion_center_v_spin.value() == 40.0
+    assert model._distortion_center_u_spin.value() == 32.0
+
+
+def test_distortion_center_uncheck_drops_both_keys(model: Any) -> None:
+    """Unchecking the optical-centre enable removes both centre keys."""
+    model._distortion_group.setChecked(True)
+    model._distortion_center_check.setChecked(True)
+    model._distortion_center_v_spin.setValue(40.0)
+    model._distortion_center_u_spin.setValue(50.0)
+    model._distortion_center_check.setChecked(False)
+    block = model.sim_params['optics']['distortion']
+    assert 'center_v' not in block
+    assert 'center_u' not in block
+
+
 def test_ring_spk_error_scene_authors_and_validates(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
