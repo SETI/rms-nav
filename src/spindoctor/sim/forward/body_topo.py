@@ -517,6 +517,12 @@ def _silhouette_mask(grid: _Grid, field: ReliefField | None) -> NDArrayFloatType
     ``|e - 1| <= |delta|_max`` around the smooth limb, so azimuths and the
     limb slice are evaluated on that band only.
 
+    The relief azimuth ``phi`` is the elliptical parametric angle in the
+    body's rotated frame, NOT the image azimuth about the body center: the
+    relief field is attached to the body, so the silhouette slice and the
+    terminator march sample one consistent surface under any in-plane
+    rotation.  For a circular disc the two conventions coincide.
+
     Parameters:
         grid: The working-grid geometry.
         field: The relief realization, or None for the smooth limb.
@@ -532,6 +538,8 @@ def _silhouette_mask(grid: _Grid, field: ReliefField | None) -> NDArrayFloatType
         band = (grid.e2 > low * low) & (grid.e2 < high * high)
         if band.any():
             e_band = np.sqrt(grid.e2[band])
+            # Body-attached azimuth: the rotated-frame elliptical parametric
+            # angle (identical to the image azimuth for a circular disc).
             phi = np.arctan2(grid.u_rot[band] / grid.semi_b, grid.v_rot[band] / grid.semi_a)
             delta = field.limb_delta(phi)
             mask[band] = e_band <= 1.0 + delta
@@ -629,6 +637,9 @@ def _apply_terminator_shadows(
     x = grid.v_rot[region_v, region_u] / grid.semi_a
     y = grid.u_rot[region_v, region_u] / grid.semi_b
     z_n = np.sqrt(np.clip(1.0 - x * x - y * y, 1e-12, 1.0))
+    # The sample longitude arctan2(y, x) is the same body-attached
+    # rotated-frame parametric azimuth the silhouette slice uses, so the
+    # march heights and the limb perturbation read one consistent field.
     h_frac = field.sample(np.arcsin(np.clip(z_n, -1.0, 1.0)), np.mod(np.arctan2(y, x), 2 * np.pi))
     radius_local = np.sqrt(
         (grid.semi_a * x) ** 2 + (grid.semi_b * y) ** 2 + (grid.semi_c * z_n) ** 2

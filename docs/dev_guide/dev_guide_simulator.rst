@@ -867,7 +867,12 @@ equals the commanded ``limb_relief_rms`` per realization.
 function ``e(p)`` (1 exactly at the unperturbed limb) is divided by
 ``1 + delta(theta)`` -- ``delta`` the relief sampled along the sub-observer
 horizon circle -- so the perturbed limb lands at ``r_ellipse (1 + delta)`` and
-the silhouette turns ragged. Shading normals keep the unperturbed ``e`` (the
+the silhouette turns ragged. The relief azimuth ``theta`` is the elliptical
+parametric angle in the body's rotated frame, not the image azimuth about the
+body center: the field is attached to the body, so the silhouette and the
+terminator march sample one consistent surface under any in-plane rotation
+(for a circular disc the two are identical). Shading normals keep the
+unperturbed ``e`` (the
 disc shading is low-frequency; relief moves the edge, not the interior).
 Near-terminator disc points are then shadowed by a march against upstream
 terrain in absolute heights ``H = h R`` (pixels): a point is shadowed when some
