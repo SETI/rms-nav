@@ -542,15 +542,17 @@ calibrated path); garble and spikes write *wrong* values instead.
      - nac, wac, vgiss
      - count
    * - ``alternating_lines``
-     - every Nth line blanked (the jail-bar / severe-Huffman pattern)
+     - every Nth line dropped, or (``mode: keep``, the Galileo HMA / HCA
+       catalog default) only every Nth line kept
      - nac, wac, gossi
      - probability
    * - ``edited_frame``
-     - only a centred column band, or one half-height, kept
+     - only a centred column band (440 px by default), or one half-height, kept
      - gossi, vgiss
      - probability
    * - ``truncated_frame``
-     - a clean full-width band of lines cut from the top or bottom
+     - a clean full-width band of lines (a quarter frame by default) cut from
+       the top or bottom
      - nac, wac, gossi
      - probability
    * - ``missing_blocks``
@@ -649,7 +651,7 @@ which mode's truth record is written first.
      - all CCD
      - count
    * - ``bright_dark_pairs``
-     - charge-transfer bright / dark pixel pairs
+     - anti-blooming-mode vertical bright / dark pixel pairs
      - nac, wac
      - count
    * - ``frame_transfer_smear``
