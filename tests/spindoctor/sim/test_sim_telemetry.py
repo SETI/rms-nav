@@ -67,14 +67,25 @@ def test_registry_covers_every_5_1_mode_key() -> None:
     assert len(MODE_KEYS) == 31
 
 
-def test_structured_loss_order_covers_implemented_telemetry_modes() -> None:
-    """Every implemented telemetry loss mode except truth_window is in the order."""
+def test_structured_loss_order_covers_the_loss_modes() -> None:
+    """The loss order holds exactly the telemetry loss modes.
+
+    The truth window is a protective carve-out, and the compression and GEOMED
+    archive-scar modes flank the loss loop in their own sub-stages, so none of
+    those belong in the structured-loss order.
+    """
+    from spindoctor.sim.forward.artifact_modes import (
+        TELEMETRY_POST_LOSS_ORDER,
+        TELEMETRY_PRE_LOSS_ORDER,
+    )
+
     telemetry_modes = {
         name
         for name, mode in ARTIFACT_MODES.items()
         if mode.implemented and mode.stage == 'telemetry' and name != 'truth_window'
     }
-    assert set(STRUCTURED_LOSS_ORDER) == telemetry_modes
+    flanking = set(TELEMETRY_PRE_LOSS_ORDER) | set(TELEMETRY_POST_LOSS_ORDER)
+    assert set(STRUCTURED_LOSS_ORDER) == telemetry_modes - flanking
 
 
 def test_generic_instrument_accepts_every_mode() -> None:
@@ -451,13 +462,6 @@ def test_bloom_on_lorri_fails_with_bespoke_message() -> None:
         validate_sim_params(scene)
 
 
-def test_reserved_telemetry_artifact_mode_fails_as_unimplemented() -> None:
-    """A reserved telemetry-artifact mode fails with a not-yet-implemented message."""
-    scene = {**_base_scene('gossi'), 'artifacts': {'compression_dct': {'incidence': 0.5}}}
-    with pytest.raises(SimSceneValidationError, match='not yet implemented'):
-        validate_sim_params(scene)
-
-
 def test_hot_pixels_on_lorri_fails_with_bespoke_message() -> None:
     """hot_pixels on LORRI fails with the explicit LORRI message."""
     scene = {**_base_scene('nhlorri'), 'artifacts': {'hot_pixels': {'incidence': 0.01}}}
@@ -500,3 +504,130 @@ def test_resolve_mode_config_fills_defaults() -> None:
     """Resolving a mode config fills unset parameters with their defaults."""
     resolved = resolve_mode_config('missing_lines', {'incidence': 2.0})
     assert resolved == {'incidence': 2.0, 'contiguous_run': False}
+
+
+# --- telemetry-artifact modes: compression and GEOMED scars -----------------
+
+
+def test_compression_dct_changes_the_frame_and_is_blockwise() -> None:
+    """DCT compression quantizes 8x8 coefficients, altering a textured frame."""
+    from spindoctor.sim.forward.telemetry_artifacts import apply_compression_dct
+
+    rng = np.random.default_rng(0)
+    signal = rng.uniform(0.0, 100.0, size=(_SIZE, _SIZE))
+    before = signal.copy()
+    record = apply_compression_dct(
+        signal,
+        {'incidence': 1.0, 'scale_factor': 40.0, 'block': 8},
+        rng=np.random.default_rng(1),
+        protect=None,
+    )
+    assert record['active'] is True
+    assert not np.array_equal(signal, before)
+
+
+def test_compression_dct_leaves_the_truth_window_clean() -> None:
+    """A protected truth window survives compression untouched."""
+    from spindoctor.sim.forward.telemetry_artifacts import apply_compression_dct
+
+    rng = np.random.default_rng(2)
+    signal = rng.uniform(0.0, 100.0, size=(_SIZE, _SIZE))
+    protect = (16, 32, 16, 32)
+    saved = signal[16:32, 16:32].copy()
+    apply_compression_dct(
+        signal,
+        {'incidence': 1.0, 'scale_factor': 40.0, 'block': 8},
+        rng=np.random.default_rng(1),
+        protect=protect,
+    )
+    assert np.array_equal(signal[16:32, 16:32], saved)
+
+
+def test_compression_dct_disabled_at_zero_incidence() -> None:
+    """A zero incidence leaves the frame untouched."""
+    from spindoctor.sim.forward.telemetry_artifacts import apply_compression_dct
+
+    rng = np.random.default_rng(3)
+    signal = rng.uniform(0.0, 100.0, size=(_SIZE, _SIZE))
+    before = signal.copy()
+    record = apply_compression_dct(
+        signal,
+        {'incidence': 0.0, 'scale_factor': 40.0, 'block': 8},
+        rng=np.random.default_rng(1),
+        protect=None,
+    )
+    assert record['active'] is False
+    assert np.array_equal(signal, before)
+
+
+def test_reseau_scars_smooth_lattice_patches() -> None:
+    """Reseau scars smooth patches on the lattice, lowering local variation."""
+    from spindoctor.sim.forward.telemetry_artifacts import apply_reseau_scars
+
+    rng = np.random.default_rng(4)
+    signal = rng.uniform(0.0, 100.0, size=(128, 128))
+    record = apply_reseau_scars(
+        signal,
+        {'incidence': 1.0, 'spacing_px': 46, 'patch_radius_px': 4},
+        rng=np.random.default_rng(1),
+    )
+    assert record['active'] is True
+    assert record['marks'] > 0
+
+
+def test_reseau_scars_disabled_at_zero_incidence() -> None:
+    """A zero incidence plants no scars."""
+    from spindoctor.sim.forward.telemetry_artifacts import apply_reseau_scars
+
+    rng = np.random.default_rng(5)
+    signal = rng.uniform(0.0, 100.0, size=(128, 128))
+    before = signal.copy()
+    record = apply_reseau_scars(
+        signal,
+        {'incidence': 0.0, 'spacing_px': 46, 'patch_radius_px': 4},
+        rng=np.random.default_rng(1),
+    )
+    assert record['active'] is False
+    assert np.array_equal(signal, before)
+
+
+def test_resample_texture_blank_border_zeroes_the_edge() -> None:
+    """The resample blank border zeroes a frame of the requested width."""
+    from spindoctor.sim.forward.telemetry_artifacts import apply_resample_texture
+
+    signal = np.full((_SIZE, _SIZE), 50.0, dtype=np.float64)
+    record = apply_resample_texture(
+        signal,
+        {'incidence': 1.0, 'warp_amp_px': 0.0, 'blank_border_px': 3, 'missing_line_interp': False},
+        rng=np.random.default_rng(1),
+    )
+    assert record['active'] is True
+    assert np.all(signal[:3, :] == 0.0)
+    assert np.all(signal[-3:, :] == 0.0)
+    assert float(signal[_SIZE // 2, _SIZE // 2]) == 50.0
+
+
+def test_resample_texture_disabled_at_zero_incidence() -> None:
+    """A zero incidence leaves the frame untouched."""
+    from spindoctor.sim.forward.telemetry_artifacts import apply_resample_texture
+
+    signal = np.full((_SIZE, _SIZE), 50.0, dtype=np.float64)
+    before = signal.copy()
+    record = apply_resample_texture(
+        signal,
+        {'incidence': 0.0, 'warp_amp_px': 0.3, 'blank_border_px': 3, 'missing_line_interp': True},
+        rng=np.random.default_rng(1),
+    )
+    assert record['active'] is False
+    assert np.array_equal(signal, before)
+
+
+def test_telemetry_artifact_modes_record_truth_end_to_end() -> None:
+    """Compression and reseau scars record their truth through the telemetry stage."""
+    frame = _frame(fill=80.0, size=96)
+    record = _render(
+        frame,
+        {'compression_dct': {'incidence': 1.0, 'scale_factor': 30.0}},
+        instrument='gossi',
+    )
+    assert record['compression_dct']['active'] is True

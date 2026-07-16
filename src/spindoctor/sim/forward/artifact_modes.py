@@ -157,28 +157,6 @@ def _detector_mode(
     )
 
 
-def _reserved_mode(
-    name: str,
-    stage: str,
-    *,
-    availability: frozenset[str],
-) -> ArtifactMode:
-    """Build a reserved (not-yet-implemented) mode: name, stage, availability.
-
-    The parameter schema is deliberately minimal (incidence only): validation
-    rejects a reserved mode as unimplemented before it ever reaches the
-    parameters, so the eventual implementation defines the real schema.
-    """
-    return ArtifactMode(
-        name=name,
-        stage=stage,
-        implemented=False,
-        params=(_INCIDENCE,),
-        availability=availability,
-        incidence_semantics='reserved; defined when the mode is implemented',
-    )
-
-
 # ---------------------------------------------------------------------------
 # The registry.
 # ---------------------------------------------------------------------------
@@ -418,11 +396,29 @@ _DETECTOR_MODES: tuple[ArtifactMode, ...] = (
 # archive-processing scars (after structured loss).  ``resample_texture`` is a
 # telemetry mode, not a detector mode: it emulates the archive resample the
 # pipeline consumes, so it runs after the loss modes rather than in the detector.
-# Reserved until the telemetry-artifact rendering lands.
 _TELEMETRY_ARTIFACT_MODES: tuple[ArtifactMode, ...] = (
-    _reserved_mode('compression_dct', 'telemetry', availability=_ALL_CCD),
-    _reserved_mode('reseau_scars', 'telemetry', availability=frozenset({'vgiss'})),
-    _reserved_mode('resample_texture', 'telemetry', availability=frozenset({'vgiss'})),
+    _telemetry_mode(
+        'compression_dct',
+        ModeParam('scale_factor', 'nonneg_number', 8.0),
+        ModeParam('block', 'positive_int', 8),
+        availability=_ALL_CCD,
+        incidence_semantics='per-frame probability the lossy DCT compression is applied',
+    ),
+    _telemetry_mode(
+        'reseau_scars',
+        ModeParam('spacing_px', 'positive_int', 46),
+        ModeParam('patch_radius_px', 'positive_int', 4),
+        availability=frozenset({'vgiss'}),
+        incidence_semantics='per-frame probability the reseau-removal scars are applied',
+    ),
+    _telemetry_mode(
+        'resample_texture',
+        ModeParam('warp_amp_px', 'nonneg_number', 0.3),
+        ModeParam('blank_border_px', 'nonneg_int', 0),
+        ModeParam('missing_line_interp', 'bool', False),
+        availability=frozenset({'vgiss'}),
+        incidence_semantics='per-frame probability the GEOMED resample texture is applied',
+    ),
 )
 
 ARTIFACT_MODES: dict[str, ArtifactMode] = {

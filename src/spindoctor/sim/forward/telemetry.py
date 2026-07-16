@@ -5,13 +5,18 @@ its loss geometry is not coupled to the oversampling factor: a missing line is
 one detector line, and a missing block aligns to the detector-row compression
 grid.  It applies its sub-effects in the physical order of transmission:
 
-1. Lossy-compression artifacts (reserved; no implemented modes yet).
+1. Lossy DCT compression (``compression_dct``): the codec blockiness a lossy
+   downlink plants on the transmitted signal before any packet loss, honoring
+   the commanded ``truth_window`` carve-out.
 2. Structured data loss: the registry loss modes in
    :data:`~spindoctor.sim.forward.artifact_modes.STRUCTURED_LOSS_ORDER`
    (commanded frame shapes, then line losses, then block losses, then garble,
    then per-pixel losses, then the row-0 header), with the commanded
    ``truth_window`` carve-out resolved first and passed to ``missing_blocks``.
-3. Reseau marks (reserved; vidicon-only, not yet implemented).
+3. Voyager GEOMED archive-processing scars, applied to the already-loss-bearing
+   frame: ``reseau_scars`` (reseau-removal smudges on the lattice) then
+   ``resample_texture`` (the GEOMED resample warp, blank border, and
+   missing-line interpolation banding).
 4. Missing-data markers: the generic per-pixel ``noise.missing_data_rate``
    dropout knob (a worst-case stress knob, not an instrument artifact),
    applied on the raw-DN path only.
@@ -33,10 +38,19 @@ import numpy as np
 from spindoctor.config import DEFAULT_CONFIG
 from spindoctor.sim.forward.artifact_modes import (
     STRUCTURED_LOSS_ORDER,
+    TELEMETRY_POST_LOSS_ORDER,
+    TELEMETRY_PRE_LOSS_ORDER,
+    mode_available,
     resolve_mode_config,
 )
+from spindoctor.sim.forward.artifacts_catalog import resolve_mode_with_catalog
 from spindoctor.sim.forward.feature_loci import FeatureLoci, extract_feature_loci
 from spindoctor.sim.forward.stages import SimFrame
+from spindoctor.sim.forward.telemetry_artifacts import (
+    apply_compression_dct,
+    apply_resample_texture,
+    apply_reseau_scars,
+)
 from spindoctor.sim.forward.telemetry_loss import LOSS_APPLIERS
 from spindoctor.sim.instruments import resolve_sim_inst_config
 from spindoctor.sim.seeds import derive_effect_seed
@@ -86,13 +100,23 @@ def apply_telemetry(
     adversarial = bool(artifacts.get('adversarial', False))
     loci = extract_feature_loci(frame.truth, frame.signal.shape) if adversarial else _EMPTY_LOCI
 
+    instrument = params.get('instrument')
     records: dict[str, Any] = {}
-    # Sub-stage 1: lossy-compression artifacts (reserved; compression_dct and
-    # friends land in the next sub-delivery, ahead of structured loss).
-
-    # Sub-stage 2: structured data loss.  The commanded truth window is resolved
-    # first so missing_blocks can leave it clean.
+    # The commanded truth window is resolved first so both compression and
+    # missing_blocks can leave it clean.
     protect = _resolve_truth_window(artifacts, frame.signal.shape, random_seed, records)
+
+    # Sub-stage 1: lossy DCT compression, on the transmitted signal before any
+    # packet loss (a lossy codec compresses, then packets drop).
+    for mode_name in TELEMETRY_PRE_LOSS_ORDER:
+        raw_cfg = artifacts.get(mode_name)
+        if raw_cfg is None or not mode_available(mode_name, instrument):
+            continue
+        cfg = resolve_mode_with_catalog(mode_name, raw_cfg, instrument)
+        mode_rng = np.random.default_rng(derive_effect_seed(random_seed, f'telemetry/{mode_name}'))
+        records[mode_name] = apply_compression_dct(frame.signal, cfg, rng=mode_rng, protect=protect)
+
+    # Sub-stage 2: structured data loss.
     for mode_name in STRUCTURED_LOSS_ORDER:
         raw_cfg = artifacts.get(mode_name)
         if raw_cfg is None:
@@ -110,8 +134,19 @@ def apply_telemetry(
         )
         records[mode_name] = result
 
-    # Sub-stage 3: reseau marks (reserved; vidicon GEOMED scars, not yet
-    # implemented).
+    # Sub-stage 3: Voyager GEOMED archive-processing scars, applied to the
+    # already-loss-bearing frame (they emulate archive processing, not raw
+    # readout): reseau-removal smudges, then the GEOMED resample texture.
+    for mode_name in TELEMETRY_POST_LOSS_ORDER:
+        raw_cfg = artifacts.get(mode_name)
+        if raw_cfg is None or not mode_available(mode_name, instrument):
+            continue
+        cfg = resolve_mode_with_catalog(mode_name, raw_cfg, instrument)
+        mode_rng = np.random.default_rng(derive_effect_seed(random_seed, f'telemetry/{mode_name}'))
+        if mode_name == 'reseau_scars':
+            records[mode_name] = apply_reseau_scars(frame.signal, cfg, rng=mode_rng)
+        else:
+            records[mode_name] = apply_resample_texture(frame.signal, cfg, rng=mode_rng)
 
     # Sub-stage 4: the generic missing-data markers (raw-DN path only).
     _apply_missing_data_markers(frame, params, inst_config, marker_dn, rng)
