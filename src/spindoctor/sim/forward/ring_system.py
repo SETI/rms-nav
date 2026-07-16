@@ -52,7 +52,7 @@ which reduces exactly to the closed form for any single feature.
 
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, cast
 
 import numpy as np
@@ -245,10 +245,15 @@ def render_ring_system(
     ap_weight = np.zeros(shape, dtype=np.float64)
     for feature in features:
         kind = str(feature.get('kind'))
-        # The catalog orbit, scaled to the render grid.  lam is ring-plane
-        # longitude, so every orbital angle lives in the ring-plane frame
-        # (the node angle entered only the sky projection above).
-        orbit = ring_orbit_from_mapping(feature.get('orbit') or {}).scaled(float(os))
+        # The catalog orbit with the planted (truth-side) ephemeris error
+        # applied on this side only -- the navigator predicts from the
+        # catalog values -- then scaled to the render grid.  lam is
+        # ring-plane longitude, so every orbital angle lives in the
+        # ring-plane frame (the node angle entered only the sky projection
+        # above).
+        orbit = _orbit_with_error(
+            ring_orbit_from_mapping(feature.get('orbit') or {}), feature.get('orbit_error')
+        ).scaled(float(os))
         contribution = _feature_tau_profile(
             feature,
             orbit,
@@ -292,6 +297,34 @@ def render_ring_system(
         transmission=transmission,
         mask=mask,
         depth_km=depth_km,
+    )
+
+
+def _orbit_with_error(orbit: RingOrbit, error: Mapping[str, Any] | None) -> RingOrbit:
+    """The catalog orbit with the planted per-feature ephemeris error applied.
+
+    ``orbit_error`` is a truth key: the render side displaces the drawn
+    feature by these deltas while the navigator predicts from the unmodified
+    catalog orbit, so features are misplaced relative to the model (and to
+    each other) exactly as real ring features are relative to their
+    published orbit solutions.  A negative ``delta_ae_px`` larger than the
+    catalog ``ae`` clamps at a circular edge (a negative radial amplitude is
+    not physical).
+
+    Parameters:
+        orbit: The parsed catalog orbit, in detector pixels.
+        error: The feature's ``orbit_error`` mapping, or None.
+
+    Returns:
+        The orbit actually rendered.
+    """
+    if not error:
+        return orbit
+    return replace(
+        orbit,
+        a=orbit.a + float(error.get('delta_a_px', 0.0)),
+        ae=max(0.0, orbit.ae + float(error.get('delta_ae_px', 0.0))),
+        long_peri=orbit.long_peri + float(error.get('delta_long_peri_deg', 0.0)),
     )
 
 

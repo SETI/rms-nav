@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from spindoctor.obs.obs_inst_sim import ObsSim
+from spindoctor.sim.render import render_combined_model
 from spindoctor.sim.scene import (
     TOP_LEVEL_TEST_ONLY_KEYS,
     TOP_LEVEL_TRUTH_KEYS,
@@ -93,6 +94,11 @@ _TRUTH_SAMPLES: dict[str, Any] = {
     'stars.delta_mag': 0.7,
     'ring_system.features.albedo': 0.7,
     'ring_system.features.phase_g': 0.4,
+    'ring_system.features.orbit_error': {
+        'delta_a_px': 1.5,
+        'delta_ae_px': 0.4,
+        'delta_long_peri_deg': 10.0,
+    },
 }
 
 # The true (rendered) values nav_override hides from the navigator.
@@ -203,9 +209,12 @@ def _truth_exercising_scene() -> dict[str, Any]:
                     'kind': 'ringlet',
                     'tau': 1.2,
                     'width': 3.0,
+                    'navigable': True,
                     'orbit': {'a': 4.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0},
+                    'declared_orbit_sigma': {'sigma_a_px': 0.5},
                     'albedo': _TRUTH_SAMPLES['ring_system.features.albedo'],
                     'phase_g': _TRUTH_SAMPLES['ring_system.features.phase_g'],
+                    'orbit_error': dict(_TRUTH_SAMPLES['ring_system.features.orbit_error']),
                 }
             ],
         },
@@ -287,14 +296,14 @@ def test_idealized_keys_survive_the_filter() -> None:
     assert nav['rings'][0]['inner_data'] == [{'mode': 1, 'a': 30.0}]
 
 
-def test_ring_system_geometry_crosses_but_features_do_not() -> None:
-    """The shared projection geometry is idealized; the feature list is not.
+def test_ring_system_geometry_crosses_with_the_navigable_feature() -> None:
+    """The shared geometry and the navigable feature's catalog view cross.
 
     Both sides project through the geometry block by design, so it crosses
-    with the block-level scale keys.  Features cross only when flagged
-    navigable, and the navigable-subset key is a later phase: today the
-    filtered feature list is empty, so the rendered system is structure the
-    navigator was never told about.
+    with the block-level scale keys.  The probe feature is navigable, so it
+    crosses too -- carrying its idealized keys (kind, shape, catalog orbit,
+    declared orbit uncertainty) and none of its truth (the parametrized
+    boundary test covers albedo / phase_g / orbit_error explicitly).
     """
     nav = build_nav_params(_truth_exercising_scene())
     ring_system = nav['ring_system']
@@ -303,7 +312,45 @@ def test_ring_system_geometry_crosses_but_features_do_not() -> None:
     assert ring_system['range_km'] == 300000.0
     assert ring_system['km_per_pixel'] == 500.0
     assert ring_system['phase_deg'] == 40.0
-    assert ring_system['features'] == []
+    features = ring_system['features']
+    assert len(features) == 1
+    assert features[0]['name'] == 'F1'
+    assert features[0]['kind'] == 'ringlet'
+    assert features[0]['orbit'] == {'a': 4.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
+    assert features[0]['declared_orbit_sigma'] == {'sigma_a_px': 0.5}
+    assert features[0]['navigable'] is True
+
+
+def test_non_navigable_ring_feature_is_dropped_but_still_renders() -> None:
+    """A non-navigable feature is invisible to the navigator yet on the frame.
+
+    The default ``navigable: false`` drops the feature from ``nav_params``
+    entirely, while the renderer draws it regardless -- the false-lock /
+    distractor regime.  The rendered frame must change when the confounder
+    is added; the navigator's view must not.
+    """
+    scene = _truth_exercising_scene()
+    confounder = {
+        'name': 'CONFOUNDER',
+        'kind': 'ringlet',
+        'tau': 2.0,
+        'width': 2.0,
+        'orbit': {'a': 8.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0},
+    }
+    with_confounder = _truth_exercising_scene()
+    with_confounder['ring_system']['features'] = [
+        *with_confounder['ring_system']['features'],
+        confounder,
+    ]
+    validate_sim_params(with_confounder, source='boundary_probe')
+
+    nav_without = build_nav_params(scene)
+    nav_with = build_nav_params(with_confounder)
+    assert nav_with['ring_system'] == nav_without['ring_system']
+
+    img_without, _meta0 = render_combined_model(scene)
+    img_with, _meta1 = render_combined_model(with_confounder)
+    assert bool((img_with != img_without).any())
 
 
 def test_obs_sim_exposes_only_the_filtered_view() -> None:

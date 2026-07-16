@@ -348,12 +348,13 @@ def _filter_ring_system(ring_system: dict[str, Any]) -> dict[str, Any]:
 
     Block-level idealized keys (the shared projection geometry, range, pixel
     scale, phase angle) pass through as deep copies.  Features cross only
-    when flagged ``navigable: true`` -- and the navigable-subset key is a
-    later phase, so today NO feature crosses: the rendered system is full of
-    structure the navigator was never told about, which is the distractor
-    regime the ring system exists to produce.  When the flag lands, a
-    crossing feature exposes only its idealized keys (kind, orbit, width,
-    tau), never the photometric truth (albedo, phase_g).
+    when flagged ``navigable: true`` (the default is false), so the rendered
+    system is full of structure the navigator was never told about -- the
+    distractor regime the ring system exists to produce.  A crossing feature
+    exposes only its idealized keys (kind, shape, catalog orbit, tau, and
+    the declared orbit uncertainty), never the photometric truth (albedo,
+    phase_g) or the planted ``orbit_error`` -- the navigator knows the error
+    bars, never the drawn error values.
 
     Parameters:
         ring_system: The full ``ring_system`` mapping (renderer input).

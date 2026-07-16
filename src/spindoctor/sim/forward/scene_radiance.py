@@ -85,9 +85,10 @@ def compose_scene_radiance(
     Parameters:
         frame: The frame whose signal plane is composed in place; its
             ``truth`` dict receives the renderer output metadata (``stars``,
-            ``bodies``, ``rings``, ``inventory``, ``star_info``,
-            ``body_masks``, ``ring_masks``, ``order_near_to_far``,
-            ``body_index_map``, ``body_mask_map``, ``body_occlusion``).
+            ``bodies``, ``rings``, ``ring_features``, ``inventory``,
+            ``star_info``, ``body_masks``, ``ring_masks``,
+            ``order_near_to_far``, ``body_index_map``, ``body_mask_map``,
+            ``body_occlusion``).
         params: The full scene mapping.
         rng: The stage generator.  Unused directly: this stage's randomized
             sub-effects (background stars, craters) run behind parameter-keyed
@@ -515,11 +516,28 @@ def compose_scene_radiance(
             'rings': rings_layer,
         }
 
+    # Ring-system scene truth: the per-feature applied orbit error (the
+    # planted ephemeris misplacement the navigator must absorb) alongside
+    # each feature's identity and navigability, for the recovery harnesses.
+    ring_feature_truth: list[dict[str, Any]] = []
+    if has_ring_system:
+        assert isinstance(ring_system_params, Mapping)
+        for feature in ring_system_params.get('features') or []:
+            ring_feature_truth.append(
+                {
+                    'name': feature.get('name'),
+                    'kind': feature.get('kind'),
+                    'navigable': bool(feature.get('navigable', False)),
+                    'orbit_error': dict(feature.get('orbit_error') or {}),
+                }
+            )
+
     frame.truth.update(
         {
             'stars': sim_star_list,
             'bodies': body_models_dict,
             'rings': rings_params,
+            'ring_features': ring_feature_truth,
             'inventory': inventory_dict,
             'star_info': star_info,
             'body_masks': body_masks,

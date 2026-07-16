@@ -303,6 +303,61 @@ def test_standalone_wave_clips_at_zero_tau() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Planted per-feature orbit errors (render side only)
+# ---------------------------------------------------------------------------
+
+
+def test_orbit_error_displaces_the_rendered_feature() -> None:
+    """delta_a_px moves the drawn band; the catalog orbit stays where it was."""
+    feature = {'kind': 'ringlet', 'tau': 1.0, 'width': 4.0, 'orbit': {'a': 15.0}}
+    planted = dict(feature, orbit_error={'delta_a_px': 5.0})
+    catalog = _tau_map([feature])
+    errored = _tau_map([planted])
+    # The catalog band spans radii 15-19; the planted error moves it to 20-24.
+    assert _probe(catalog, 17) == pytest.approx(1.0, rel=1e-12)
+    assert _probe(errored, 17) == 0.0
+    assert _probe(errored, 22) == pytest.approx(1.0, rel=1e-12)
+
+
+def test_orbit_error_rotates_the_pericenter() -> None:
+    """delta_long_peri_deg turns the rendered ellipse about the ring center."""
+    feature = {
+        'kind': 'ringlet',
+        'tau': 1.0,
+        'width': 3.0,
+        'orbit': {'a': 15.0, 'ae': 6.0, 'long_peri': 0.0},
+    }
+    rotated = dict(feature, orbit_error={'delta_long_peri_deg': 180.0})
+    base = _tau_map([feature])
+    errored = _tau_map([rotated])
+    rotated_reference = _tau_map(
+        [
+            {
+                'kind': 'ringlet',
+                'tau': 1.0,
+                'width': 3.0,
+                'orbit': {'a': 15.0, 'ae': 6.0, 'long_peri': 180.0},
+            }
+        ]
+    )
+    np.testing.assert_allclose(errored, rotated_reference, atol=1e-12)
+    assert bool((errored != base).any())
+
+
+def test_orbit_error_ae_clamps_at_a_circular_edge() -> None:
+    """A negative delta_ae_px larger than the catalog ae renders a circle."""
+    feature = {
+        'kind': 'ringlet',
+        'tau': 1.0,
+        'width': 3.0,
+        'orbit': {'a': 15.0, 'ae': 2.0},
+        'orbit_error': {'delta_ae_px': -5.0},
+    }
+    circular = {'kind': 'ringlet', 'tau': 1.0, 'width': 3.0, 'orbit': {'a': 15.0, 'ae': 0.0}}
+    np.testing.assert_allclose(_tau_map([feature]), _tau_map([circular]), atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
 # Frame conventions under projection
 # ---------------------------------------------------------------------------
 

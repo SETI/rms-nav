@@ -65,7 +65,21 @@ _RING_SYSTEM_GEOMETRY_KEYS: frozenset[str] = frozenset(
     {'center_v', 'center_u', 'opening_deg_obs', 'opening_deg_sun', 'node_deg'}
 )
 _RING_FEATURE_KEYS: frozenset[str] = frozenset(
-    {'name', 'kind', 'width', 'tau', 'orbit', 'side', 'wavelength', 'damping', 'albedo', 'phase_g'}
+    {
+        'name',
+        'kind',
+        'width',
+        'tau',
+        'orbit',
+        'side',
+        'wavelength',
+        'damping',
+        'navigable',
+        'declared_orbit_sigma',
+        'orbit_error',
+        'albedo',
+        'phase_g',
+    }
 )
 _RING_FEATURE_KINDS: frozenset[str] = frozenset({'ringlet', 'gap', 'edge', 'ramp', 'wave'})
 _RING_FEATURE_ORBIT_KEYS: frozenset[str] = frozenset(
@@ -73,6 +87,14 @@ _RING_FEATURE_ORBIT_KEYS: frozenset[str] = frozenset(
 )
 _RING_ORBIT_MODE_KEYS: frozenset[str] = frozenset({'m', 'amp', 'peri'})
 _RING_EDGE_WAVE_KEYS: frozenset[str] = frozenset({'amp', 'wavelength', 'damp', 'lam0'})
+# The planted per-feature ephemeris error (truth: render side only) and the
+# uncertainty the navigator is entitled to know (idealized error bars).
+_RING_ORBIT_ERROR_KEYS: frozenset[str] = frozenset(
+    {'delta_a_px', 'delta_ae_px', 'delta_long_peri_deg'}
+)
+_RING_ORBIT_SIGMA_KEYS: frozenset[str] = frozenset(
+    {'sigma_a_px', 'sigma_ae_px', 'sigma_long_peri_deg'}
+)
 # Which kinds take which shape keys: a stray key on a kind that ignores it
 # would silently author a different feature than intended, so it fails.
 _RING_KINDS_WITH_WIDTH: frozenset[str] = frozenset({'ringlet', 'gap', 'ramp'})
@@ -197,6 +219,33 @@ def _check_ring_feature(obj: dict[str, Any], *, index: int, source: str) -> None
                 f'{source}: {label}.{key} is not allowed for kind {kind!r}'
             )
     _check_ring_feature_orbit(obj.get('orbit'), label=label, source=source)
+    _check_optional_bool(obj.get('navigable'), f'{label}.navigable', source=source)
+    orbit_error = obj.get('orbit_error')
+    if orbit_error is not None:
+        error_label = f'{label}.orbit_error'
+        if not isinstance(orbit_error, dict):
+            raise SimSceneValidationError(f'{source}: {error_label} must be a mapping when present')
+        unknown = set(orbit_error) - _RING_ORBIT_ERROR_KEYS
+        if unknown:
+            raise SimSceneValidationError(
+                f'{source}: {error_label}: unknown keys: {sorted(unknown)}'
+            )
+        for key in _RING_ORBIT_ERROR_KEYS:
+            _check_optional_number(orbit_error.get(key), f'{error_label}.{key}', source=source)
+    sigma = obj.get('declared_orbit_sigma')
+    if sigma is not None:
+        sigma_label = f'{label}.declared_orbit_sigma'
+        if not isinstance(sigma, dict):
+            raise SimSceneValidationError(f'{source}: {sigma_label} must be a mapping when present')
+        unknown = set(sigma) - _RING_ORBIT_SIGMA_KEYS
+        if unknown:
+            raise SimSceneValidationError(
+                f'{source}: {sigma_label}: unknown keys: {sorted(unknown)}'
+            )
+        for key in _RING_ORBIT_SIGMA_KEYS:
+            _check_optional_nonnegative_number(
+                sigma.get(key), f'{sigma_label}.{key}', source=source
+            )
     _check_optional_nonnegative_number(obj.get('albedo'), f'{label}.albedo', source=source)
     phase_g = obj.get('phase_g')
     _check_optional_number(phase_g, f'{label}.phase_g', source=source)
