@@ -16,8 +16,8 @@ order chosen to mirror image formation:
 5. **Stray light** adds the smooth scattered-light background last.
 
 A stage whose scene block is absent contributes nothing.  Only the distortion
-non-radial field draws randomness (its own seeded stream); the rest are
-deterministic, so the stage generator is used only where noted.
+non-radial field draws randomness, and it derives its own seeded stream from
+the scene seed, so the optics stage does not consume the pipeline generator.
 """
 
 from collections.abc import Mapping

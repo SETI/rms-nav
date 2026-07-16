@@ -98,3 +98,13 @@ def test_oversample_inventory_is_detector_scale() -> None:
     _, meta = render_combined_model(_body_scene(oversample=4))
     inv = meta['inventory']['B']
     assert abs(inv['v_pixel_size'] - 24.0) < 1.0
+
+
+def test_optics_scene_renders_deterministically() -> None:
+    """A PSF scene (oversample 4) is bit-identical across renders."""
+    scene = _body_scene(oversample=None)
+    scene['optics'] = {'psf': {'sigma_v': 1.0, 'sigma_u': 1.0, 'w': 0.02}}
+    first, _ = render_combined_model(scene)
+    second, _ = render_combined_model(scene)
+    assert np.array_equal(first, second)
+    assert first.shape == (60, 60)
