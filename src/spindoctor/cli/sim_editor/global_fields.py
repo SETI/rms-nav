@@ -213,6 +213,9 @@ class GlobalFieldsMixin(SimEditorBase):
         """Update the emulated instrument and refresh the PSF preview."""
         self.sim_params['instrument'] = text or 'generic'
         self._update_psf_preview()
+        # The Artifacts tab displays the instrument's detector catalog
+        # defaults for keys the scene does not override.
+        self._refresh_detector_catalog_defaults()
         self._updater.request_update()
 
     def _on_closest_planet(self, text: str) -> None:

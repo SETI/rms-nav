@@ -158,8 +158,8 @@ class SceneIoMixin(SimEditorBase):
         self._pixel_area_spin.blockSignals(True)
         self._pixel_area_spin.setValue(float(self._noise_value('pixel_area_cm2', 1.0)))
         self._pixel_area_spin.blockSignals(False)
-        # The Optics-tab controls (PSF, smear, distortion, ghosts, relocated
-        # stray light, oversample, spk_error) and the Artifacts-tab controls
+        # The Optics-tab controls (PSF, smear, distortion, ghosts, stray
+        # light, oversample, spk_error) and the Artifacts-tab controls
         # (instrument defaults, detector override) sync from their own blocks.
         self._sync_optics_from_params()
         self._sync_artifacts_from_params()

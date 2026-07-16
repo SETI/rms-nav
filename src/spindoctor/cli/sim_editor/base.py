@@ -234,3 +234,7 @@ class SimEditorBase(QMainWindow):
     def _sync_artifacts_from_params(self) -> None:
         """Sync the Artifacts-tab widgets from sim_params (ArtifactsTabMixin)."""
         raise NotImplementedError
+
+    def _refresh_detector_catalog_defaults(self) -> None:
+        """Refresh displayed detector catalog defaults (ArtifactsTabMixin)."""
+        raise NotImplementedError

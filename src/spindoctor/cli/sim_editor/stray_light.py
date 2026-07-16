@@ -1,4 +1,4 @@
-"""Stray-light panel for the General tab.
+"""Stray-light panel, hosted in the Optics tab's stray-light group.
 
 An additive low-frequency gradient the navigator's BANDPASS_DOG filter is meant
 to suppress.  Writes the ``sim_params['optics']['stray_light']`` block;
@@ -16,10 +16,10 @@ class StrayLightMixin(SimEditorBase):
     """Builds and handles the stray-light panel."""
 
     def _build_stray_panel(self, gen_layout: QFormLayout) -> None:
-        """Add the stray-light rows to the General tab layout.
+        """Add the stray-light rows to the hosting group's form layout.
 
         Parameters:
-            gen_layout: The General tab's form layout.
+            gen_layout: The form layout of the Optics tab's stray-light group.
         """
         self._stray_amplitude_spin = QDoubleSpinBox()
         self._stray_amplitude_spin.setRange(0.0, 1.0)

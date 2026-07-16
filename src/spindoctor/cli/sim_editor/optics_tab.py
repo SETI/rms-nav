@@ -6,10 +6,9 @@ group: unchecking it removes the key from ``sim_params`` entirely, so a disabled
 sub-block is absent rather than zeroed and the absent-block semantics survive a
 save / load round-trip.  The controls cover the whole-scene PSF (an explicit
 core-plus-wing kernel or a navigator-matched form), the motion-smear entry list,
-the residual distortion field, the ghost-reflection entry list, the relocated
-stray-light panel, the render oversampling factor, and the planted
-spacecraft-ephemeris parallax error.  Every edit re-renders through the shared
-debounced updater.
+the residual distortion field, the ghost-reflection entry list, the stray-light
+panel, the render oversampling factor, and the planted spacecraft-ephemeris
+parallax error.  Every edit re-renders through the shared debounced updater.
 """
 
 from dataclasses import dataclass
@@ -400,14 +399,26 @@ class OpticsTabMixin(SimEditorBase):
             tooltip='Radial k2 coefficient.',
         )
         form.addRow('k2:', self._distortion_k2_spin)
+        # The optical centre is an optional key pair: absent means the frame
+        # centre, so the spins only author the keys when explicitly enabled
+        # (a legitimate 0.0 centre is then expressible).
+        has_center = 'center_v' in block or 'center_u' in block
+        self._distortion_center_check = QCheckBox('Set optical centre')
+        self._distortion_center_check.setChecked(has_center)
+        self._distortion_center_check.setToolTip(
+            'Author explicit optical-centre keys; unchecked leaves them '
+            'absent (the renderer uses the frame centre).'
+        )
+        form.addRow(self._distortion_center_check)
         self._distortion_center_v_spin = _dspin(
             minimum=0.0,
             maximum=20000.0,
             decimals=2,
             step=1.0,
             value=float(block.get('center_v', 0.0)),
-            tooltip='Optical-centre v (px); 0 = frame centre.',
+            tooltip='Optical-centre v (px); absent = frame centre.',
         )
+        self._distortion_center_v_spin.setEnabled(has_center)
         form.addRow('Center V (px):', self._distortion_center_v_spin)
         self._distortion_center_u_spin = _dspin(
             minimum=0.0,
@@ -415,8 +426,9 @@ class OpticsTabMixin(SimEditorBase):
             decimals=2,
             step=1.0,
             value=float(block.get('center_u', 0.0)),
-            tooltip='Optical-centre u (px); 0 = frame centre.',
+            tooltip='Optical-centre u (px); absent = frame centre.',
         )
+        self._distortion_center_u_spin.setEnabled(has_center)
         form.addRow('Center U (px):', self._distortion_center_u_spin)
         self._distortion_nonradial_spin = _dspin(
             minimum=0.0,
@@ -438,23 +450,27 @@ class OpticsTabMixin(SimEditorBase):
             self._distortion_nonradial_spin,
         ):
             spin.valueChanged.connect(self._on_distortion_value)
+        self._distortion_center_check.toggled.connect(self._on_distortion_center_check)
         group.toggled.connect(self._on_distortion_group_toggled)
         return group
 
     def _distortion_block_from_widgets(self) -> dict[str, Any]:
-        """Assemble the distortion block; a zero optical centre is omitted."""
+        """Assemble the distortion block; the optical centre only when enabled."""
         block: dict[str, Any] = {
             'k1': float(self._distortion_k1_spin.value()),
             'k2': float(self._distortion_k2_spin.value()),
             'nonradial_rms_px': float(self._distortion_nonradial_spin.value()),
         }
-        center_v = float(self._distortion_center_v_spin.value())
-        center_u = float(self._distortion_center_u_spin.value())
-        if center_v != 0.0:
-            block['center_v'] = center_v
-        if center_u != 0.0:
-            block['center_u'] = center_u
+        if self._distortion_center_check.isChecked():
+            block['center_v'] = float(self._distortion_center_v_spin.value())
+            block['center_u'] = float(self._distortion_center_u_spin.value())
         return block
+
+    def _on_distortion_center_check(self, checked: bool) -> None:
+        """Enable the optical-centre spins and add or drop the centre keys."""
+        self._distortion_center_v_spin.setEnabled(checked)
+        self._distortion_center_u_spin.setEnabled(checked)
+        self._write_distortion()
 
     def _write_distortion(self) -> None:
         """Write the distortion block when the group is enabled."""
@@ -599,7 +615,7 @@ class OpticsTabMixin(SimEditorBase):
         """Rewrite the ghost list on a numeric edit."""
         self._write_ghosts()
 
-    # ---- Stray-light group (relocated under Optics) ----
+    # ---- Stray-light group ----
 
     def _build_stray_group(self) -> QGroupBox:
         """Build the stray-light group by reusing the stray-light panel."""
@@ -773,8 +789,11 @@ class OpticsTabMixin(SimEditorBase):
         match = bool(block.get('match_navigator'))
         self._apply_psf_match_state(match)
         if not match:
-            self._psf_sigma_v_spin.setValue(float(block.get('sigma_v', 0.55)))
-            self._psf_sigma_u_spin.setValue(float(block.get('sigma_u', 0.55)))
+            sigma_v = float(block.get('sigma_v', 0.55))
+            self._psf_sigma_v_spin.setValue(sigma_v)
+            # The renderer defaults sigma_u to sigma_v, so the widget shows
+            # the same value for a block that omits sigma_u.
+            self._psf_sigma_u_spin.setValue(float(block.get('sigma_u', sigma_v)))
             self._psf_w_spin.setValue(float(block.get('w', 0.0)))
             self._psf_r0_spin.setValue(float(block.get('r0', 2.0)))
             self._psf_n_spin.setValue(float(block.get('n', 3.0)))
@@ -803,8 +822,12 @@ class OpticsTabMixin(SimEditorBase):
         block = distortion if isinstance(distortion, dict) else {}
         self._distortion_k1_spin.setValue(float(block.get('k1', 0.0)))
         self._distortion_k2_spin.setValue(float(block.get('k2', 0.0)))
+        has_center = 'center_v' in block or 'center_u' in block
+        self._distortion_center_check.setChecked(has_center)
         self._distortion_center_v_spin.setValue(float(block.get('center_v', 0.0)))
+        self._distortion_center_v_spin.setEnabled(has_center)
         self._distortion_center_u_spin.setValue(float(block.get('center_u', 0.0)))
+        self._distortion_center_u_spin.setEnabled(has_center)
         self._distortion_nonradial_spin.setValue(float(block.get('nonradial_rms_px', 0.0)))
         self._distortion_group.setChecked(isinstance(distortion, dict))
 

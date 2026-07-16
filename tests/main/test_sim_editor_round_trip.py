@@ -96,7 +96,12 @@ _FULL_SCENE: dict[str, Any] = {
         },
     },
     'spk_error': {'dv_px': 0.5, 'du_px': -0.5, 'reference_range_km': 1000.0},
-    'detector': {'gain_state': 2, 'detector_model': 'ccd', 'exposure_ref_sec': 1.0},
+    'detector': {
+        'gain_state': 2,
+        'detector_model': 'ccd',
+        'exposure_ref_sec': 1.0,
+        'quantization': 'exact',
+    },
     'artifacts': {'instrument_defaults': True},
     'instrument_config': {'inherit': 'coiss_nac'},
     'bodies': [
@@ -346,6 +351,121 @@ def test_match_navigator_writes_canonical_form(model: Any) -> None:
     assert model.sim_params['optics']['psf'] == {'match_navigator': True}
 
 
+def test_match_navigator_survives_save_and_load(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Saving persists the authored match-navigator form and never mutates it.
+
+    The renderer resolves the navigator-matched PSF only when it builds the
+    kernel, so both the live editor state and the file keep the authored form
+    and the checkbox is still set after a reload.
+    """
+    model.sim_params['instrument'] = 'coiss_wac'
+    model._psf_optics_group.setChecked(True)
+    model._psf_match_nav_check.setChecked(True)
+
+    out = tmp_path / 'floor.yaml'
+    monkeypatch.setattr(
+        QFileDialog, 'getSaveFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._save_scene()
+    # Saving does not rewrite the live editor state.
+    assert model.sim_params['optics']['psf'] == {'match_navigator': True}
+    saved = load_sim_scene(out)
+    assert saved['optics']['psf'] == {'match_navigator': True}
+
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    model._load_scene()
+    assert model.sim_params['optics']['psf'] == {'match_navigator': True}
+    assert model._psf_match_nav_check.isChecked() is True
+
+
+def test_psf_sigma_u_widget_defaults_to_sigma_v(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """A PSF block omitting sigma_u displays the renderer's default (sigma_v)."""
+    scene = {
+        'instrument': 'coiss_nac',
+        'size_v': 64,
+        'size_u': 64,
+        'random_seed': 1,
+        'optics': {'psf': {'sigma_v': 1.3}},
+    }
+    src = tmp_path / 'psf.yaml'
+    save_sim_scene(scene, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    assert model._psf_sigma_u_spin.value() == 1.3
+
+
+def test_distortion_center_keys_absent_unless_enabled(model: Any) -> None:
+    """The distortion block omits the optical-centre keys until enabled."""
+    model._distortion_group.setChecked(True)
+    block = model.sim_params['optics']['distortion']
+    assert 'center_v' not in block
+    assert 'center_u' not in block
+
+
+def test_distortion_center_zero_is_authorable(model: Any) -> None:
+    """An explicit 0.0 optical centre survives (no 0.0-to-absent flip)."""
+    model._distortion_group.setChecked(True)
+    model._distortion_center_check.setChecked(True)
+    model._distortion_center_v_spin.setValue(0.0)
+    model._distortion_center_u_spin.setValue(0.0)
+    block = model.sim_params['optics']['distortion']
+    assert block['center_v'] == 0.0
+    assert block['center_u'] == 0.0
+
+
+def test_ring_spk_error_scene_authors_and_validates(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """A ring + spk_error scene authored through the editor saves cleanly.
+
+    spk_error requires range_km on every ring; the ring tab's physical-range
+    control makes the key authorable (absent unless set).
+    """
+    model.sim_params['instrument'] = 'coiss_nac'
+    model.sim_params['size_v'] = 128
+    model.sim_params['size_u'] = 128
+    model._add_ring_tab()
+    tab_idx = model._find_tab_by_properties('ring', 0)
+    assert tab_idx is not None
+    ring_tab = model._tabs.widget(tab_idx)
+    ring_tab.range_km_check.click()
+    ring_tab.range_km_spin.setValue(2.0e6)
+    assert model.sim_params['rings'][0]['range_km'] == 2.0e6
+    model._spk_error_group.setChecked(True)
+
+    out = tmp_path / 'ring_spk.yaml'
+    monkeypatch.setattr(
+        QFileDialog, 'getSaveFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._save_scene()
+    loaded = load_sim_scene(out)
+    assert loaded['rings'][0]['range_km'] == 2.0e6
+    assert loaded['spk_error']['reference_range_km'] > 0.0
+
+
+def test_ring_range_km_unchecked_leaves_key_absent(model: Any) -> None:
+    """Disabling the ring physical-range control removes the key."""
+    model._add_ring_tab()
+    tab_idx = model._find_tab_by_properties('ring', 0)
+    assert tab_idx is not None
+    ring_tab = model._tabs.widget(tab_idx)
+    ring_tab.range_km_check.click()
+    assert 'range_km' in model.sim_params['rings'][0]
+    ring_tab.range_km_check.click()
+    assert 'range_km' not in model.sim_params['rings'][0]
+
+
 def test_match_navigator_disables_kernel_spins(model: Any) -> None:
     """Matching the navigator disables the explicit-kernel spins."""
     model._psf_optics_group.setChecked(True)
@@ -402,21 +522,99 @@ def test_instrument_defaults_toggles_artifacts_key(model: Any) -> None:
 
 
 def test_detector_group_toggles_key(model: Any) -> None:
-    """The detector override group inserts and removes the detector block."""
+    """The detector group inserts an empty block and removes it when disabled.
+
+    The block starts empty (per-key discipline): unedited keys stay absent so
+    the instrument's catalog defaults keep applying.
+    """
     model._detector_group.setChecked(True)
-    assert set(model.sim_params['detector']) == {
-        'gain_state',
-        'detector_model',
-        'exposure_ref_sec',
-    }
+    assert model.sim_params['detector'] == {}
     model._detector_group.setChecked(False)
     assert 'detector' not in model.sim_params
+
+
+def test_detector_edit_writes_only_the_edited_key(model: Any) -> None:
+    """A single spin edit writes its own key and nothing else."""
+    model._detector_group.setChecked(True)
+    model._detector_gain_state_spin.setValue(3)
+    assert model.sim_params['detector'] == {'gain_state': 3}
+
+
+def test_detector_quantization_is_authorable(model: Any) -> None:
+    """The quantization combo writes the detector.quantization key."""
+    model._detector_group.setChecked(True)
+    model._detector_quantization_combo.setCurrentText('sqrt_lut')
+    assert model.sim_params['detector'] == {'quantization': 'sqrt_lut'}
+
+
+def test_partial_detector_scene_edit_preserves_authored_keys(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Nudging one detector spin keeps an authored quantization key intact."""
+    scene = {
+        'instrument': 'coiss_nac',
+        'size_v': 64,
+        'size_u': 64,
+        'random_seed': 1,
+        'detector': {'quantization': 'sqrt_lut'},
+    }
+    src = tmp_path / 'partial.yaml'
+    save_sim_scene(scene, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    model._detector_gain_state_spin.setValue(3)
+
+    out = tmp_path / 'partial_edited.yaml'
+    monkeypatch.setattr(
+        QFileDialog, 'getSaveFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    model._save_scene()
+    resaved = load_sim_scene(out)
+    assert resaved['detector'] == {'quantization': 'sqrt_lut', 'gain_state': 3}
+
+
+def test_vgiss_scene_stays_vidicon_through_an_edit(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Editing a vgiss detector spin never backfills a ccd detector_model."""
+    scene = {
+        'instrument': 'vgiss',
+        'size_v': 64,
+        'size_u': 64,
+        'random_seed': 1,
+        'detector': {'exposure_ref_sec': 2.0},
+    }
+    src = tmp_path / 'vgiss.yaml'
+    save_sim_scene(scene, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    # The widgets display the vgiss catalog defaults for unauthored keys.
+    assert model._detector_model_combo.currentText() == 'vidicon'
+    model._detector_exposure_ref_spin.setValue(3.0)
+
+    out = tmp_path / 'vgiss_edited.yaml'
+    monkeypatch.setattr(
+        QFileDialog, 'getSaveFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    model._save_scene()
+    resaved = load_sim_scene(out)
+    assert resaved['detector'] == {'exposure_ref_sec': 3.0}
+
+    from spindoctor.sim.forward.detector.params import resolve_detector_params
+
+    assert resolve_detector_params(resaved).detector_model == 'vidicon'
 
 
 def test_load_full_optics_syncs_group_states(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
-    """Loading the full-inventory scene checks every phase-B group."""
+    """Loading the full-inventory scene checks every optics/artifacts group."""
     src = tmp_path / 'full.yaml'
     save_sim_scene(_FULL_SCENE, src)
     monkeypatch.setattr(
