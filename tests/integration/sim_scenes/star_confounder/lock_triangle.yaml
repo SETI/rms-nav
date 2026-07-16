@@ -1,0 +1,43 @@
+schema_version: 2
+scene_name: lock_triangle
+instrument: coiss_nac
+size_v: 200
+size_u: 200
+random_seed: 7
+exposure_sec: 1.0
+# Three-star triangle lock in a field of near-equal-brightness confounders.
+# Three navigable stars (vmag 3.0) reach the navigator's catalog; six
+# non-navigable confounders render at vmag 3.2 -- barely dimmer than the lock
+# stars, so brightness alone does not separate them.  StarFieldFromCatalogNav's
+# RANSAC triangle match is what wins here: it matches the predicted three-star
+# pattern against detected peaks by triangle geometry, which the scattered
+# confounders do not reproduce, so the false peaks fall out as outliers rather
+# than seeding a wrong lock.  This is the regime that motivates the pattern
+# matcher over the one-star path -- it tolerates a confounder density that
+# defeats brightness-uniqueness matching.  Crowding the field further eventually
+# manufactures a spurious triangle and the lock breaks; six confounders is below
+# that density.
+optics:
+  psf:
+    match_navigator: true
+bodies: []
+rings: []
+stars:
+  - {name: N1, v: 60.0, u: 70.0, vmag: 3.0}
+  - {name: N2, v: 140.0, u: 120.0, vmag: 3.0}
+  - {name: N3, v: 80.0, u: 150.0, vmag: 3.0}
+  - {name: X0, v: 40.0, u: 160.0, vmag: 3.2, navigable: false}
+  - {name: X1, v: 160.0, u: 40.0, vmag: 3.2, navigable: false}
+  - {name: X2, v: 45.0, u: 45.0, vmag: 3.2, navigable: false}
+  - {name: X3, v: 155.0, u: 155.0, vmag: 3.2, navigable: false}
+  - {name: X4, v: 100.0, u: 45.0, vmag: 3.2, navigable: false}
+  - {name: X5, v: 45.0, u: 120.0, vmag: 3.2, navigable: false}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: high

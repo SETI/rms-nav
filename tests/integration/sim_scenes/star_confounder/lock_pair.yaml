@@ -1,0 +1,39 @@
+schema_version: 2
+scene_name: lock_pair
+instrument: coiss_nac
+size_v: 200
+size_u: 200
+random_seed: 7
+exposure_sec: 1.0
+# Two-star lock in a field of confounders.  Two navigable bright stars reach the
+# navigator's catalog; six non-navigable confounders (vmag 4.0) render but are
+# dropped from nav_params.  With only two predicted stars StarFieldFromCatalogNav
+# is still infeasible (it needs three), so StarUniqueMatchNav's two-star path
+# carries the lock: it matches the predicted pair against detected peaks by their
+# relative geometry, which the dimmer scattered confounders do not reproduce, and
+# StarRefineNav then refines both inliers -- a two-star cross-check that lifts the
+# result to the high tier.  The planted offset is recovered to a few hundredths
+# of a pixel.
+optics:
+  psf:
+    match_navigator: true
+bodies: []
+rings: []
+stars:
+  - {name: N1, v: 70.0, u: 70.0, vmag: 2.5}
+  - {name: N2, v: 130.0, u: 140.0, vmag: 2.8}
+  - {name: X0, v: 40.0, u: 160.0, vmag: 4.0, navigable: false}
+  - {name: X1, v: 160.0, u: 40.0, vmag: 4.0, navigable: false}
+  - {name: X2, v: 45.0, u: 45.0, vmag: 4.0, navigable: false}
+  - {name: X3, v: 155.0, u: 155.0, vmag: 4.0, navigable: false}
+  - {name: X4, v: 100.0, u: 45.0, vmag: 4.0, navigable: false}
+  - {name: X5, v: 45.0, u: 120.0, vmag: 4.0, navigable: false}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: high
