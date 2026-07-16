@@ -115,6 +115,7 @@ DECLARED_SIM_SCENE_CLASSES: frozenset[str] = frozenset(
         'regression',
         'artifact_sweep',
         'star_confounder',
+        'ring_system',
         'expected_fail',
     }
 )

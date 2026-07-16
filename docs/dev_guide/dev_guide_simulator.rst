@@ -1208,7 +1208,8 @@ render the default scene.
 The scene classes (for example ``algorithmic_invariants``,
 ``phase_sweep_regular_body``, ``phase_sweep_irregular_body``, ``range_sweep``,
 ``noise_sweep``, ``multi_body_geometry``, ``regression``, ``artifact_sweep``,
-``star_confounder``, ``expected_fail``) scope what each scene is testing and are
+``star_confounder``, ``ring_system``, ``expected_fail``) scope what each scene
+is testing and are
 enforced by the structural test. The scene README at
 ``tests/integration/sim_scenes/README.txt`` documents the schema alongside the
 code.

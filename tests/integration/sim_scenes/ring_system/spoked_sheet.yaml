@@ -1,0 +1,44 @@
+schema_version: 2
+scene_name: spoked_sheet
+instrument: coiss_nac
+size_v: 220
+size_u: 220
+random_seed: 13
+exposure_sec: 1.0
+# A broad navigable sheet (radii 45-85 px) crossed by six seeded dark
+# spokes (contrast -0.5, azimuthally sharp, radially broad over 50-80 px).
+# The spokes are truth-side albedo clutter the navigator was never told
+# about: strong non-radial brightness edges crossing the two navigable
+# band edges, the moving-confounder regime of real B-ring frames.  The
+# planted offset must still be recovered from the band edges.
+bodies: []
+ring_system:
+  geometry:
+    center_v: 110.0
+    center_u: 110.0
+    opening_deg_obs: 90.0
+    opening_deg_sun: 90.0
+    node_deg: 0.0
+  features:
+    - name: BSHEET
+      kind: ringlet
+      tau: 1.5
+      width: 40.0
+      navigable: true
+      orbit: {a: 45.0, ae: 0.0, long_peri: 0.0, rate_peri: 0.0}
+  azimuthal:
+    spokes:
+      count: 6
+      r_inner: 50.0
+      r_outer: 80.0
+      contrast: -0.5
+      width_deg: 14.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 0.9
+offset_u: 1.4
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: high

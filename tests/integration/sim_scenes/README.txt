@@ -39,6 +39,14 @@ Scene classes
                                 regimes), plus a saturated-star and a double-star
                                 scene; the navigator recovers the offset within a
                                 tolerance that absorbs any centroid bias
+  ring_system                 - optical-depth ring systems exercising the
+                                perturbed-orbit and clutter machinery: a
+                                satellite edge wave, an m = 2 forced ringlet,
+                                seeded spokes, an embedded moonlet/propeller
+                                with a non-navigable gap, and a planted
+                                per-feature orbit error; each carries an
+                                ``expected`` block pinned to its measured
+                                outcome
   expected_fail               - scenes whose correct outcome is failure / low
                                 confidence, never a confident wrong offset (every
                                 star scattered off catalog, or a lone star drowned
