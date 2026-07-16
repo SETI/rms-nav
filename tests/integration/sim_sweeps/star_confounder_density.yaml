@@ -1,0 +1,20 @@
+sweep_name: star_confounder_density
+# Confounder-density breakdown curve on the one-star lock geometry.  The base
+# scene (lock_single_dense) is a single navigable star in a raised-brightness
+# background-sky field; this sweep walks the field's density_factor from a clean
+# frame up past the breakdown, so the recovery goes from a confident sub-pixel
+# lock to a failed / low-confidence result.  The measured transition point is the
+# deliverable: at low density the one-star path recovers the planted offset, and
+# as comparable-brightness confounders crowd the search window the
+# brightness-uniqueness gate trips and the technique returns spurious -- never a
+# confident wrong offset.
+#
+# ensemble_seeds replicates each density across several seeds (the geometry
+# fixed, the confounder field redrawn per seed), so each point is a small
+# population rather than a single realization: near the cliff the population
+# splits between recovery and failure, which is exactly the estimator-validation
+# raw material that mechanism supplies.  It is kept small (4 seeds) for CI.
+base_scene: star_confounder/lock_single_dense.yaml
+parameters: [sky_counts.density_factor]
+values: [1.0, 25.0, 50.0, 100.0, 150.0, 200.0, 300.0, 400.0]
+ensemble_seeds: 4

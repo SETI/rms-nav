@@ -237,6 +237,67 @@ def test_artifact_sweep_degrades_to_failure() -> None:
     assert rows[-1].status == 'failed'
 
 
+_CONFOUNDER_RECOVERY_TOLERANCE_PX = 0.5
+# A success whose recovered offset lands farther than this from the planted
+# truth is a confident wrong offset -- the failure mode the confounder work
+# exists to rule out.  A true false lock is many pixels off, so a generous
+# threshold keeps the invariant immune to the sub-pixel cross-process jitter.
+_CONFIDENT_WRONG_PX = 1.0
+
+
+def test_star_confounder_low_density_recovers() -> None:
+    """At the lowest confounder density every seed recovers the planted offset."""
+    rows = _rows('star_confounder_density')
+    lowest = min(row.value for row in rows)
+    low_rows = [row for row in rows if row.value == lowest]
+    assert low_rows
+    for row in low_rows:
+        assert row.status == 'success'
+        assert row.offset_error_px is not None
+        assert row.offset_error_px < _CONFOUNDER_RECOVERY_TOLERANCE_PX
+
+
+def test_star_confounder_never_confidently_wrong() -> None:
+    """No sweep point returns a confident wrong offset.
+
+    The deliverable safety property: at every density the navigator either
+    recovers the offset within tolerance or reports failure / low confidence --
+    it never locks confidently onto a confounder.  A success farther than the
+    confident-wrong threshold from the planted offset fails this test.
+    """
+    rows = _rows('star_confounder_density')
+    for row in rows:
+        if row.status == 'success':
+            assert row.offset_error_px is not None
+            assert row.offset_error_px < _CONFIDENT_WRONG_PX
+
+
+def test_star_confounder_breaks_down_at_high_density() -> None:
+    """Rising confounder density degrades the success rate to the failure regime.
+
+    The curve's whole point is that it breaks: the high-density success rate sits
+    below the clean floor, and at least one high-density realization fails
+    outright.  The specific cliff location jitters across processes, so the
+    assertion is on the aggregate degradation, not a per-point status.
+    """
+    rows = _rows('star_confounder_density')
+    high_rows = [row for row in rows if row.value >= 200.0]
+    assert high_rows
+    high_success_rate = sum(row.status == 'success' for row in high_rows) / len(high_rows)
+    assert high_success_rate < 1.0
+    assert any(row.status != 'success' for row in high_rows)
+
+
+def test_star_confounder_ensemble_replicates_each_point() -> None:
+    """The ensemble mode navigates every density across the full seed population."""
+    spec = load_sweep(_SWEEPS_ROOT / 'star_confounder_density.yaml')
+    rows = run_sweep(spec)
+    assert len(rows) == len(spec.values) * spec.ensemble_seeds
+    for value in spec.values:
+        seeds = {row.seed for row in rows if row.value == value}
+        assert len(seeds) == spec.ensemble_seeds
+
+
 # The per-technique dense and wide offset sweeps (``*_offset_fine`` /
 # ``*_offset_wide``) are characterization runs, not assertions: they are executed
 # by ``sim_sweep_runner`` to produce the report's figures, and the specific defect
