@@ -413,16 +413,31 @@ plus a per-image gamma).
 """
 
 
-def generate() -> list[Path]:
-    """Render both galleries and write their NOTES files; return all paths."""
+def generate(*, gui_dir: Path | None = None, report_dir: Path | None = None) -> list[Path]:
+    """Render both galleries and write their NOTES files; return all paths.
+
+    Parameters:
+        gui_dir: Output directory for the developer-guide gallery; the
+            committed ``docs/dev_guide/_sim_images/`` when None.  The
+            staleness test points this at a temporary directory to compare
+            a fresh render against the committed PNGs.
+        report_dir: Output directory for the report scene gallery; the
+            committed ``docs/simulator_report/_scene_images/`` when None.
+
+    Returns:
+        The written paths (the gallery PNGs; the NOTES files are written
+        alongside but not returned).
+    """
+    gui_dir = _GUI_DIR if gui_dir is None else gui_dir
+    report_dir = _REPORT_DIR if report_dir is None else report_dir
     written: list[Path] = []
-    _GUI_DIR.mkdir(parents=True, exist_ok=True)
+    gui_dir.mkdir(parents=True, exist_ok=True)
     for name, params, kwargs in _GUI_GALLERY:
         validate_sim_params(params, source=f'_GUI_GALLERY[{name}]')
-        written.append(render_scene_png(params, _GUI_DIR / f'{name}.png', upscale=2, **kwargs))
-    (_GUI_DIR / 'NOTES.md').write_text(_GUI_NOTES)
+        written.append(render_scene_png(params, gui_dir / f'{name}.png', upscale=2, **kwargs))
+    (gui_dir / 'NOTES.md').write_text(_GUI_NOTES)
 
-    _REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    report_dir.mkdir(parents=True, exist_ok=True)
     for name, rel_path, kwargs in _REPORT_SCENES:
         scene_path = _SCENES_ROOT / rel_path
         if not scene_path.is_file():
@@ -431,10 +446,10 @@ def generate() -> list[Path]:
         params = load_sim_scene(scene_path)
         written.append(
             render_scene_png(
-                params, _REPORT_DIR / f'{name}.png', ignore_offset=False, upscale=2, **kwargs
+                params, report_dir / f'{name}.png', ignore_offset=False, upscale=2, **kwargs
             )
         )
-    (_REPORT_DIR / 'NOTES.md').write_text(_REPORT_NOTES)
+    (report_dir / 'NOTES.md').write_text(_REPORT_NOTES)
     return written
 
 

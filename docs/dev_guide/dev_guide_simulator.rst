@@ -1994,7 +1994,11 @@ change alters rendered output:
 The two documentation galleries (``docs/dev_guide/_sim_images/`` and
 ``docs/simulator_report/_scene_images/``, both written by
 ``python -m tests.integration.sim_doc_images``) are re-rendered under the same
-rule.
+rule -- and the rule is enforced mechanically:
+``tests/integration/test_sim_doc_images.py`` (integration tier) regenerates
+every gallery image into a temporary directory and fails, naming the stale
+files and the regeneration command, whenever a committed PNG no longer
+matches a fresh render.
 
 The simulated-image GUI
 =======================
