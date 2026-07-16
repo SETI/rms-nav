@@ -336,14 +336,18 @@ def save_sim_scene(sim_params: dict[str, Any], path: Path) -> None:
     """Validate ``sim_params`` and write it to ``path`` as a flat YAML scene.
 
     The ``schema_version`` and ``scene_name`` (= the filename stem) keys are
-    injected so the written file validates on reload.
+    injected so the written file validates on reload.  Saving never mutates
+    ``sim_params`` (the scene is deep-copied first), and the authored form is
+    persisted verbatim -- in particular ``optics.psf: {match_navigator: true}``
+    is written as authored, so it survives a save / load round-trip and is
+    resolved only when the renderer builds the kernel.
 
     Parameters:
         sim_params: The flat GUI / render parameter mapping.
         path: Destination ``<scene_name>.yaml`` path; its stem is the scene name.
     """
     scene: dict[str, Any] = {
-        **sim_params,
+        **copy.deepcopy(sim_params),
         'schema_version': CURRENT_SCHEMA_VERSION,
         'scene_name': path.stem,
     }
@@ -364,6 +368,11 @@ def validate_sim_params(
     campaign generator, the doc-image galleries), which build dicts rather
     than files.  ``schema_version`` and ``scene_name`` are optional here (a
     dict author has no filename); when present, the version must be current.
+
+    Validation never rewrites the scene: ``optics.psf: {match_navigator: true}``
+    stays in its authored form (the renderer resolves it into the navigator's
+    concrete Gaussian when it builds the kernel), so an editor's live mapping
+    and the persisted file both keep the author's intent.
 
     Parameters:
         sim_params: The flat scene parameter mapping.
@@ -448,7 +457,6 @@ def validate_sim_params(
 
     if sim_params.get('spk_error') is not None:
         _require_ranges_for_spk_error(sim_params, source=source)
-    _resolve_match_navigator_psf(sim_params)
 
     return sim_params
 
@@ -861,38 +869,6 @@ def _require_ranges_for_spk_error(sim_params: dict[str, Any], *, source: str) ->
                 raise SimSceneValidationError(
                     f'{source}: {block}[{index}] needs range_km when spk_error is present'
                 )
-
-
-def _resolve_match_navigator_psf(sim_params: dict[str, Any]) -> None:
-    """Resolve ``optics.psf.match_navigator`` into a concrete Gaussian in place.
-
-    The floor configuration (the self-consistency baseline of the sweeps) sets
-    the image-side PSF equal to the navigator's own model: a pure Gaussian at
-    the emulated instrument's configured ``star_psf_sigma``, with no Moffat
-    wing and no field variation.  Resolving it to concrete numbers at
-    validation time keeps the render cache key stable and makes the resolved
-    kernel inspectable.
-
-    Parameters:
-        sim_params: The validated scene mapping; its ``optics.psf`` block is
-            rewritten when it requests navigator matching.
-    """
-    optics = sim_params.get('optics')
-    if not isinstance(optics, dict):
-        return
-    psf = optics.get('psf')
-    if not isinstance(psf, dict) or not psf.get('match_navigator'):
-        return
-    # Import here to avoid a module-load cycle: the resolver needs the live
-    # config only when a scene actually asks for navigator matching.
-    from spindoctor.config import DEFAULT_CONFIG
-    from spindoctor.sim.instruments import resolve_sim_inst_config
-
-    inst_config = resolve_sim_inst_config(
-        DEFAULT_CONFIG, sim_params.get('instrument'), sim_params.get('instrument_config')
-    )
-    sigma = float(inst_config['star_psf_sigma'])
-    optics['psf'] = {'sigma_v': sigma, 'sigma_u': sigma, 'w': 0.0, 'r0': 2.0, 'n': 3.0}
 
 
 def _require_str(raw: dict[str, Any], key: str, *, source: str) -> str:

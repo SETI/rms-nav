@@ -3,19 +3,22 @@
 A floor scene sets the image-side PSF equal to the navigator's own model -- a
 pure Gaussian at the instrument's configured ``star_psf_sigma``, with no Moffat
 wing and no field variation -- via ``optics.psf: {match_navigator: true}``.
-Resolving it to concrete numbers at validation keeps the render cache key
-stable.  These tests check the resolution on coiss_wac, whose configured 0.77
-differs from its empirical 0.64.
+The authored form is preserved by validation, saving, and loading (so it
+survives an editor round-trip); the renderer resolves it into concrete kernel
+parameters only when it builds the kernel.  These tests check the resolution
+on coiss_wac, whose configured 0.77 differs from its empirical 0.64.
 """
 
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from spindoctor.config import DEFAULT_CONFIG
+from spindoctor.sim.forward.optics import effective_psf
 from spindoctor.sim.forward.psf import psf_kernel
 from spindoctor.sim.instruments import resolve_sim_inst_config
-from spindoctor.sim.scene import validate_sim_params
+from spindoctor.sim.scene import load_sim_scene, save_sim_scene, validate_sim_params
 
 
 def _floor_scene(instrument: str) -> dict[str, Any]:
@@ -31,25 +34,35 @@ def _floor_scene(instrument: str) -> dict[str, Any]:
     }
 
 
-def test_match_navigator_resolves_to_the_configured_wac_sigma() -> None:
-    """coiss_wac resolves to a pure 0.77 Gaussian, not the empirical 0.64."""
+def test_validate_preserves_the_authored_match_navigator_form() -> None:
+    """Validation leaves the authored match-navigator block untouched."""
     scene = validate_sim_params(_floor_scene('coiss_wac'))
-    psf = scene['optics']['psf']
+    assert scene['optics']['psf'] == {'match_navigator': True}
+
+
+def test_save_load_round_trips_the_authored_form(tmp_path: Path) -> None:
+    """A saved floor scene persists match_navigator and loads it back as authored."""
+    scene = _floor_scene('coiss_wac')
+    path = tmp_path / 'floor.yaml'
+    save_sim_scene(scene, path)
+    assert scene['optics']['psf'] == {'match_navigator': True}
+    loaded = load_sim_scene(path)
+    assert loaded['optics']['psf'] == {'match_navigator': True}
+
+
+def test_effective_psf_resolves_to_the_configured_wac_sigma() -> None:
+    """coiss_wac resolves to a pure 0.77 Gaussian, not the empirical 0.64."""
+    psf = effective_psf(_floor_scene('coiss_wac'))
+    assert psf is not None
     assert psf['sigma_v'] == 0.77
     assert psf['sigma_u'] == 0.77
     assert psf['w'] == 0.0
 
 
-def test_resolved_psf_has_no_match_navigator_flag() -> None:
-    """The resolved block carries concrete numbers, not the request flag."""
-    scene = validate_sim_params(_floor_scene('coiss_wac'))
-    assert 'match_navigator' not in scene['optics']['psf']
-
-
 def test_resolved_kernel_is_a_pure_gaussian_at_the_configured_sigma() -> None:
     """The floor kernel is the navigator's Gaussian (w = 0, no wing)."""
-    scene = validate_sim_params(_floor_scene('coiss_wac'))
-    psf = scene['optics']['psf']
+    psf = effective_psf(_floor_scene('coiss_wac'))
+    assert psf is not None
     kernel = psf_kernel(
         psf['sigma_v'],
         psf['sigma_u'],
@@ -69,14 +82,16 @@ def test_resolved_kernel_is_a_pure_gaussian_at_the_configured_sigma() -> None:
 
 def test_match_navigator_tracks_the_instrument_config() -> None:
     """The resolved sigma equals the emulated instrument's star_psf_sigma."""
-    scene = validate_sim_params(_floor_scene('coiss_wac'))
+    psf = effective_psf(_floor_scene('coiss_wac'))
+    assert psf is not None
     inst = resolve_sim_inst_config(DEFAULT_CONFIG, 'coiss_wac', None)
-    assert scene['optics']['psf']['sigma_v'] == float(inst['star_psf_sigma'])
+    assert psf['sigma_v'] == float(inst['star_psf_sigma'])
 
 
 def test_floor_psf_must_be_explicit() -> None:
-    """A scene with no optics block plants no PSF at all (the 15.1 property)."""
+    """A scene with no optics block plants no PSF at all (stage activation)."""
     scene = _floor_scene('coiss_wac')
     del scene['optics']
     validated = validate_sim_params(scene)
     assert 'optics' not in validated
+    assert effective_psf(validated) is None

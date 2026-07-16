@@ -34,9 +34,10 @@ from spindoctor.sim.forward.ghosts import apply_ghosts
 from spindoctor.sim.forward.psf import apply_psf, psf_truncation_for_instrument
 from spindoctor.sim.forward.smear import apply_smear
 from spindoctor.sim.forward.stages import SimFrame
+from spindoctor.sim.instruments import navigator_matched_psf
 from spindoctor.support.types import NDArrayFloatType
 
-__all__ = ['apply_optics', 'apply_stray_light', 'instrument_defaults_on']
+__all__ = ['apply_optics', 'apply_stray_light', 'effective_psf', 'instrument_defaults_on']
 
 
 def instrument_defaults_on(params: Mapping[str, Any]) -> bool:
@@ -45,12 +46,14 @@ def instrument_defaults_on(params: Mapping[str, Any]) -> bool:
     return isinstance(artifacts, dict) and bool(artifacts.get('instrument_defaults', False))
 
 
-def _effective_psf(params: Mapping[str, Any]) -> dict[str, Any] | None:
+def effective_psf(params: Mapping[str, Any]) -> dict[str, Any] | None:
     """The PSF block to apply: an explicit optics.psf, else the catalog kernel.
 
-    An explicit ``optics.psf`` block wins; otherwise ``instrument_defaults``
-    supplies the instrument's 15.3 kernel from the catalog.  Absent both, there
-    is no PSF (the stage-activation floor).
+    An explicit ``optics.psf`` block wins; the authored navigator-matched form
+    (``{match_navigator: true}``) resolves here to the navigator's own Gaussian
+    at the emulated instrument's configured ``star_psf_sigma``.  Otherwise
+    ``instrument_defaults`` supplies the instrument's empirical kernel from the
+    catalog.  Absent both, there is no PSF (the stage-activation floor).
 
     Parameters:
         params: The full scene mapping.
@@ -61,6 +64,13 @@ def _effective_psf(params: Mapping[str, Any]) -> dict[str, Any] | None:
     optics = params.get('optics') or {}
     explicit = optics.get('psf')
     if isinstance(explicit, dict):
+        if explicit.get('match_navigator'):
+            # Import at call time keeps the config read out of module import.
+            from spindoctor.config import DEFAULT_CONFIG
+
+            return navigator_matched_psf(
+                DEFAULT_CONFIG, params.get('instrument'), params.get('instrument_config')
+            )
         return explicit
     if instrument_defaults_on(params):
         kernel = PSF_KERNELS.get(str(params.get('instrument')))
@@ -72,9 +82,9 @@ def _effective_psf(params: Mapping[str, Any]) -> dict[str, Any] | None:
 def _effective_distortion(params: Mapping[str, Any]) -> dict[str, Any] | None:
     """The distortion block to apply: explicit optics.distortion, else residual.
 
-    An explicit block wins; otherwise ``instrument_defaults`` supplies the 15.7
-    interim residual, an RMS displacement over the frame mapped to the radial
-    ``k1`` coefficient (with ``k2 = 0``).
+    An explicit block wins; otherwise ``instrument_defaults`` supplies the
+    catalog's interim residual, an RMS displacement over the frame mapped to
+    the radial ``k1`` coefficient (with ``k2 = 0``).
 
     Parameters:
         params: The full scene mapping.
@@ -210,7 +220,7 @@ def apply_optics(
         frame, params=params, oversample=oversample, distortion=_effective_distortion(params)
     )
 
-    psf = _effective_psf(params)
+    psf = effective_psf(params)
     if isinstance(psf, dict):
         sigma_v = float(psf['sigma_v'])
         sigma_u = float(psf.get('sigma_u', sigma_v))
