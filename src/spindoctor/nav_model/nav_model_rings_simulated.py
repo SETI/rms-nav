@@ -26,7 +26,8 @@ from spindoctor.feature.geometry import RingAnnulusGeometry, RingEdgePolyline
 from spindoctor.nav_model.nav_model import NavModel
 from spindoctor.nav_model.nav_model_rings_base import NavModelRingsBase
 from spindoctor.nav_model.rings import RingFeature
-from spindoctor.sim.sim_ring import compute_border_atop_simulated, render_ring
+from spindoctor.sim.ring_geometry import compute_border_atop_simulated
+from spindoctor.sim.sim_ring import render_ring
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
 from spindoctor.support.time import now_dt
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
@@ -212,7 +213,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
             sim_img,
             ring_params_extfov,
             0.0,
-            0.0,
+            offset_u=0.0,
             time=time,
             epoch=epoch,
             shade_solid=True,
@@ -355,7 +356,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
                 data_size_v,
                 data_size_u,
                 center_v,
-                center_u,
+                center_u=center_u,
                 a=base.a,
                 ae=base.ae,
                 long_peri=base.long_peri,
@@ -405,7 +406,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
                 data_size_v,
                 data_size_u,
                 center_v,
-                center_u,
+                center_u=center_u,
                 a=base.a,
                 ae=base.ae,
                 long_peri=base.long_peri,

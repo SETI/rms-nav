@@ -14,8 +14,8 @@ from scipy import ndimage
 from spindoctor.nav_model import build_models_for_obs
 from spindoctor.nav_model.nav_model_body_simulated import NavModelBodySimulated, _nav_params
 from spindoctor.obs.obs_inst_sim import ObsSim
+from spindoctor.sim.mesh_geometry import make_irregular_mesh, render_polyhedral_body
 from spindoctor.sim.render import render_combined_model
-from spindoctor.sim.sim_body_polyhedral import make_irregular_mesh, render_polyhedral_body
 
 
 def _boundary_radial_cv(mask: np.ndarray) -> float:

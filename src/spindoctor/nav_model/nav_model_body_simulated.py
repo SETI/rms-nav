@@ -24,8 +24,8 @@ from spindoctor.nav_model.body_shape import load_body_shape
 from spindoctor.nav_model.nav_model import NavModel
 from spindoctor.nav_model.nav_model_body import LIMB_ARC_MIN_VERTICES
 from spindoctor.nav_model.nav_model_body_base import BODY_BLOB_MIN_DIAMETER_PX, NavModelBodyBase
+from spindoctor.sim.mesh_geometry import mesh_spec_from_params, render_mesh_body_image
 from spindoctor.sim.sim_body import create_simulated_body
-from spindoctor.sim.sim_body_polyhedral import mesh_spec_from_params, render_mesh_body_image
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
 from spindoctor.support.time import now_dt
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType

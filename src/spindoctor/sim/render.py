@@ -10,13 +10,13 @@ from starcat import Star
 
 from spindoctor.config import DEFAULT_CONFIG
 from spindoctor.sim.instruments import resolve_sim_inst_config
-from spindoctor.sim.seeds import derive_effect_seed
-from spindoctor.sim.sim_body import create_simulated_body
-from spindoctor.sim.sim_body_polyhedral import (
+from spindoctor.sim.mesh_geometry import (
     MeshBodySpec,
     mesh_spec_from_params,
     render_mesh_body_image,
 )
+from spindoctor.sim.seeds import derive_effect_seed
+from spindoctor.sim.sim_body import create_simulated_body
 from spindoctor.sim.sim_ring import render_ring
 from spindoctor.support.types import (
     MutableStar,
@@ -890,7 +890,7 @@ def _render_combined_model_cached(
                     ring_img,
                     item_params,
                     offset_v,
-                    offset_u,
+                    offset_u=offset_u,
                     time=time,
                     epoch=epoch,
                     shade_solid=shade_solid,
@@ -908,7 +908,7 @@ def _render_combined_model_cached(
                     temp_bg,
                     item_params,
                     offset_v,
-                    offset_u,
+                    offset_u=offset_u,
                     time=time,
                     epoch=epoch,
                     shade_solid=shade_solid,
