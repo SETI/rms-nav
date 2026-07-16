@@ -1,0 +1,364 @@
+"""Render, display, PSF preview, selection, and image-save panel.
+
+Drives the live preview: it calls the renderer, stretches DN to a grayscale
+pixmap (with an optional saturation overlay and visual aids), applies the zoom
+scaling, hit-tests right-clicks to select and drag scene objects, renders the
+instrument PSF inset, and saves the current preview to PNG.
+"""
+
+from typing import Any
+
+import numpy as np
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
+from PyQt6.QtWidgets import QFileDialog, QFormLayout, QGroupBox, QLabel, QMessageBox, QVBoxLayout
+
+from spindoctor.cli.sim_editor.base import SimEditorBase
+from spindoctor.config import DEFAULT_CONFIG
+from spindoctor.sim.instruments import resolve_sim_inst_config
+from spindoctor.sim.render import render_combined_model
+
+
+def _dn_to_display_uint8(image: Any) -> Any:
+    """Stretch a DN image to 8-bit grayscale for display, scaling by its peak.
+
+    The renderer emits detector counts (DN), whose range depends on the signal
+    full-scale and any cosmic-ray spikes, so a peak-relative stretch keeps the
+    preview legible regardless of absolute DN.
+
+    Parameters:
+        image: The DN image array to stretch.
+
+    Returns:
+        A uint8 array in [0, 255].
+    """
+    arr = np.asarray(image, dtype=np.float64)
+    peak = float(arr.max()) if arr.size else 0.0
+    scale = 255.0 / peak if peak > 0 else 0.0
+    return np.clip(arr * scale, 0.0, 255.0).astype(np.uint8)
+
+
+class RenderDisplayMixin(SimEditorBase):
+    """Builds the preview panel and owns rendering, display, and selection."""
+
+    def _build_psf_preview(self, gen_layout: QFormLayout) -> None:
+        """Add the collapsible PSF-preview inset to the General tab layout.
+
+        Parameters:
+            gen_layout: The General tab's form layout.
+        """
+        # PSF preview (B5): a collapsible inset of the selected instrument's
+        # star PSF, with its sigma / FWHM, updated when the instrument changes.
+        self._psf_group = QGroupBox('PSF preview')
+        self._psf_group.setCheckable(True)
+        self._psf_group.setChecked(False)
+        psf_layout = QVBoxLayout(self._psf_group)
+        self._psf_image_label = QLabel()
+        self._psf_image_label.setVisible(False)
+        self._psf_info_label = QLabel()
+        self._psf_info_label.setVisible(False)
+        psf_layout.addWidget(self._psf_image_label)
+        psf_layout.addWidget(self._psf_info_label)
+        self._psf_group.toggled.connect(self._on_psf_group_toggled)
+        gen_layout.addRow(self._psf_group)
+
+    def _on_psf_group_toggled(self, checked: bool) -> None:
+        """Show/hide the PSF inset and refresh it when expanded."""
+        self._psf_image_label.setVisible(checked)
+        self._psf_info_label.setVisible(checked)
+        if checked:
+            self._update_psf_preview()
+
+    def _update_psf_preview(self) -> None:
+        """Render the selected instrument's star PSF into the preview inset."""
+        if not self._psf_group.isChecked():
+            return
+        inst_config = resolve_sim_inst_config(DEFAULT_CONFIG, self.sim_params.get('instrument'))
+        sigma = float(inst_config.get('star_psf_sigma', 1.0))
+        size = 25
+        coords = np.arange(size) - size // 2
+        vv, uu = np.meshgrid(coords.astype(float), coords.astype(float), indexing='ij')
+        patch = np.exp(-(vv**2 + uu**2) / (2.0 * sigma**2))
+        patch_uint8 = np.ascontiguousarray((patch * 255.0).astype(np.uint8))
+        qimage = QImage(
+            patch_uint8.tobytes(), size, size, size, QImage.Format.Format_Grayscale8
+        ).copy()
+        pixmap = QPixmap.fromImage(qimage).scaled(
+            96,
+            96,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        )
+        self._psf_image_label.setPixmap(pixmap)
+        self._psf_info_label.setText(f'sigma = {sigma:.2f} px    FWHM = {2.3548 * sigma:.2f} px')
+
+    # ---- Rendering ----
+    def _update_image(self) -> None:
+        """Re-render the scene and refresh the display."""
+        try:
+            # Render image (caching is handled in render.py)
+            img, meta = render_combined_model(self.sim_params, ignore_offset=True)
+            self._current_image = img
+            self._last_meta = meta
+            self._display_image()
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to render image:\n{e!s}')
+
+    def _toggle_saturation_overlay(self, checked: bool) -> None:
+        """Toggle the saturation overlay and re-display (no re-render)."""
+        self._show_saturation_overlay = bool(checked)
+        self._display_image()
+
+    def _current_saturation_dn(self) -> float | None:
+        """Saturation DN of the selected instrument, or None if it has none."""
+        inst_config = resolve_sim_inst_config(DEFAULT_CONFIG, self.sim_params.get('instrument'))
+        if str(inst_config.get('data_units', 'raw_dn')) != 'raw_dn':
+            return None
+        noise = inst_config.get('noise') or {}
+        if 'saturation_dn' not in noise:
+            return None
+        return float(noise['saturation_dn'])
+
+    def _display_image(self) -> None:
+        """Compose the preview pixmap from the current DN image and redraw."""
+        if self._current_image is None:
+            return
+        img_uint8 = _dn_to_display_uint8(self._current_image)
+        height, width = img_uint8.shape
+        saturation_dn = self._current_saturation_dn()
+        if self._show_saturation_overlay and saturation_dn is not None:
+            rgb = np.repeat(img_uint8[:, :, np.newaxis], 3, axis=2)
+            sat_mask = self._current_image >= saturation_dn
+            rgb[sat_mask] = (255, 0, 0)
+            rgb = np.ascontiguousarray(rgb, dtype=np.uint8)
+            qimage = QImage(
+                rgb.tobytes(),
+                width,
+                height,
+                3 * width,
+                QImage.Format.Format_RGB888,
+            ).copy()
+            self._saturation_label.setText(f'Saturated: {float(sat_mask.mean()) * 100:.2f}%')
+        else:
+            img_uint8 = np.ascontiguousarray(img_uint8.copy())
+            qimage = QImage(
+                img_uint8.tobytes(),
+                width,
+                height,
+                width,
+                QImage.Format.Format_Grayscale8,
+            ).copy()
+            self._saturation_label.setText('')
+        pixmap = QPixmap(width, height)
+        pixmap.fill(QColor(0, 0, 0))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.drawImage(0, 0, qimage)
+        if self._show_visual_aids:
+            pen = QPen(QColor(255, 0, 0), 2)
+            painter.setPen(pen)
+            # Draw centers for bodies
+            for b in self.sim_params.get('bodies', []):
+                center_x = int(b.get('center_u', 0))
+                center_y = int(b.get('center_v', 0))
+                painter.drawEllipse(center_x - 4, center_y - 4, 8, 8)
+            # Draw stars as small crosses
+            pen = QPen(QColor(255, 255, 0), 1)
+            painter.setPen(pen)
+            for s in self.sim_params.get('stars', []):
+                u = int(s.get('u', 0))
+                v = int(s.get('v', 0))
+                painter.drawLine(u - 4, v, u + 4, v)
+                painter.drawLine(u, v - 4, u, v + 4)
+            # Draw ring centers as small circles
+            pen = QPen(QColor(0, 255, 255), 2)
+            painter.setPen(pen)
+            for r in self.sim_params.get('rings', []):
+                center_u = int(r.get('center_u', 0))
+                center_v = int(r.get('center_v', 0))
+                painter.drawEllipse(center_u - 4, center_v - 4, 8, 8)
+        painter.end()
+        self._base_pixmap = pixmap
+        self._update_display()
+        self._image_label.repaint()
+        viewport = self._scroll_area.viewport()
+        if viewport is not None:
+            viewport.repaint()
+
+    def _update_display(self) -> None:
+        """Rescale the base pixmap to the current zoom and show it."""
+        if self._base_pixmap is None:
+            return
+        scaled_width = int(self._base_pixmap.width() * self._zoom_factor)
+        scaled_height = int(self._base_pixmap.height() * self._zoom_factor)
+        transform_mode = (
+            Qt.TransformationMode.FastTransformation
+            if self._zoom_sharp
+            else Qt.TransformationMode.SmoothTransformation
+        )
+        scaled_pixmap = self._base_pixmap.scaled(
+            scaled_width,
+            scaled_height,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            transform_mode,
+        )
+        self._image_label.setPixmap(scaled_pixmap)
+        self._image_label.resize(scaled_width, scaled_height)
+
+    # ---- Selection / drag-move ----
+    def _select_model_at(self, img_v: float, img_u: float) -> None:
+        """Select the topmost model at the given image coordinates based on range ordering.
+
+        Checks bodies and rings together, sorted by range (near to far), and selects
+        the first match (topmost object).
+        """
+        height = int(self.sim_params['size_v'])
+        width = int(self.sim_params['size_u'])
+        v_i = round(img_v)
+        u_i = round(img_u)
+        if not (0 <= v_i < height and 0 <= u_i < width):
+            self._selected_model_key = None
+            return
+
+        # Collect all objects (bodies and rings) with their ranges and masks
+        objects: list[tuple[float, str, int, Any]] = []  # (range, kind, index, mask)
+
+        # Add bodies
+        body_masks = self._last_meta.get('body_masks', [])
+        bodies = self.sim_params.get('bodies', [])
+        inv = self._last_meta.get('inventory', {})
+        if body_masks and bodies:
+            # body_masks is in the original order of bodies_params, so match by index
+            for idx, body in enumerate(bodies):
+                if idx < len(body_masks):
+                    body_name = body.get('name', '').upper()
+                    range_val = inv.get(body_name, {}).get('range', float('inf'))
+                    objects.append((range_val, 'body', idx, body_masks[idx]))
+
+        # Add rings
+        ring_masks = self._last_meta.get('ring_masks', [])
+        rings = self.sim_params.get('rings', [])
+        if ring_masks and rings:
+            for j, ring_mask in enumerate(ring_masks):
+                if j < len(rings):
+                    range_val = float(rings[j].get('range', 1000.0 + j))
+                    objects.append((range_val, 'ring', j, ring_mask))
+
+        # Sort by range (near to far = ascending range)
+        objects.sort(key=lambda x: x[0])
+
+        # Check objects in order (near to far), select first match
+        for _, kind, idx, mask in objects:
+            if mask is not None and bool(mask[v_i, u_i]):
+                self._selected_model_key = (kind, idx)
+                tab_idx = self._find_tab_by_properties(kind, idx)
+                if tab_idx is not None:
+                    self._tabs.setCurrentIndex(tab_idx)
+                return
+
+        # Stars: evaluate PSF contribution approx via Gaussian envelope
+        # Stars are always behind bodies and rings
+        star_info = self._last_meta.get('star_info', [])
+        if star_info:
+            for j, info in enumerate(star_info):
+                cv = info['center_v']
+                cu = info['center_u']
+                sigma = info['sigma']
+                dv = img_v - cv
+                du = img_u - cu
+                r2 = dv * dv + du * du
+                # Gaussian threshold ~ 3 sigma circle
+                if r2 <= (3.0 * sigma) ** 2:
+                    self._selected_model_key = ('star', j)
+                    # Switch to star tab by finding it by properties
+                    tab_idx = self._find_tab_by_properties('star', j)
+                    if tab_idx is not None:
+                        self._tabs.setCurrentIndex(tab_idx)
+                    return
+
+        self._selected_model_key = None
+
+    def _move_selected_by(self, img_v: float, img_u: float) -> None:
+        """Drag the currently selected object to follow the cursor."""
+        if self._last_drag_img_vu is None or self._selected_model_key is None:
+            self._last_drag_img_vu = (img_v, img_u)
+            return
+        prev_v, prev_u = self._last_drag_img_vu
+        dv = img_v - prev_v
+        du = img_u - prev_u
+        kind, idx = self._selected_model_key
+        if kind == 'body' and 0 <= idx < len(self.sim_params['bodies']):
+            self.sim_params['bodies'][idx]['center_v'] = float(
+                self.sim_params['bodies'][idx].get('center_v', 0.0) + dv
+            )
+            self.sim_params['bodies'][idx]['center_u'] = float(
+                self.sim_params['bodies'][idx].get('center_u', 0.0) + du
+            )
+            # Sync the tab spin boxes for this body
+            tab_idx = self._find_tab_by_properties('body', idx)
+            if tab_idx is not None:
+                tab_w = self._tabs.widget(tab_idx)
+                if tab_w is not None:
+                    cv_spin = tab_w.center_v_spin  # type: ignore[attr-defined]
+                    cu_spin = tab_w.center_u_spin  # type: ignore[attr-defined]
+                    cv_spin.setValue(self.sim_params['bodies'][idx]['center_v'])
+                    cu_spin.setValue(self.sim_params['bodies'][idx]['center_u'])
+            self._updater.immediate_update()
+        elif kind == 'ring' and 0 <= idx < len(self.sim_params['rings']):
+            self.sim_params['rings'][idx]['center_v'] = float(
+                self.sim_params['rings'][idx].get('center_v', 0.0) + dv
+            )
+            self.sim_params['rings'][idx]['center_u'] = float(
+                self.sim_params['rings'][idx].get('center_u', 0.0) + du
+            )
+            # Sync the tab spin boxes for this ring
+            tab_idx = self._find_tab_by_properties('ring', idx)
+            if tab_idx is not None:
+                tab_w = self._tabs.widget(tab_idx)
+                if tab_w is not None:
+                    cv_spin = tab_w.center_v_spin  # type: ignore[attr-defined]
+                    cu_spin = tab_w.center_u_spin  # type: ignore[attr-defined]
+                    cv_spin.setValue(self.sim_params['rings'][idx]['center_v'])
+                    cu_spin.setValue(self.sim_params['rings'][idx]['center_u'])
+            self._updater.immediate_update()
+        elif kind == 'star' and 0 <= idx < len(self.sim_params['stars']):
+            self.sim_params['stars'][idx]['v'] = float(
+                self.sim_params['stars'][idx].get('v', 0.0) + dv
+            )
+            self.sim_params['stars'][idx]['u'] = float(
+                self.sim_params['stars'][idx].get('u', 0.0) + du
+            )
+            # Sync the tab spin boxes for this star
+            tab_idx = self._find_tab_by_properties('star', idx)
+            if tab_idx is not None:
+                tab_w = self._tabs.widget(tab_idx)
+                if tab_w is not None:
+                    v_spin = tab_w.v_spin  # type: ignore[attr-defined]
+                    u_spin = tab_w.u_spin  # type: ignore[attr-defined]
+                    v_spin.setValue(self.sim_params['stars'][idx]['v'])
+                    u_spin.setValue(self.sim_params['stars'][idx]['u'])
+            self._updater.immediate_update()
+        else:
+            raise AssertionError(f'Unknown kind: {kind}')
+        self._last_drag_img_vu = (img_v, img_u)
+
+    # ---- Save image ----
+    def _save_image(self) -> None:
+        """Save the current preview to a PNG file."""
+        if self._current_image is None:
+            QMessageBox.warning(self, 'No Image', 'No image to save.')
+            return
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            'Save Image',
+            'simulated_model.png',
+            'PNG Images (*.png)',
+        )
+        if filename:
+            try:
+                from PIL import Image
+
+                img_uint8 = _dn_to_display_uint8(self._current_image)
+                Image.fromarray(img_uint8, mode='L').save(filename)
+            except Exception as e:
+                QMessageBox.critical(self, 'Error', f'Failed to save image:\n{e!s}')

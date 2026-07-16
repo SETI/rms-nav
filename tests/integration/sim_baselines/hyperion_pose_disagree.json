@@ -1,6 +1,6 @@
 {
   "confidence": 0.99,
-  "offset_du_px": -0.57,
+  "offset_du_px": -0.51,
   "offset_dv_px": 1.3,
   "scene_name": "hyperion_pose_disagree",
   "status": "success"

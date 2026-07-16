@@ -16,7 +16,7 @@ stable when a new effect lands.
 
 import hashlib
 
-# np.random.RandomState requires a seed in [0, 2**32 - 1]; four digest bytes
+# A 32-bit seed keeps derived values in [0, 2**32 - 1]; four digest bytes
 # land exactly in that range.
 _SEED_BYTES = 4
 
@@ -28,7 +28,7 @@ def _digest_to_seed(key: bytes) -> int:
         key: The byte string to hash.
 
     Returns:
-        An integer in [0, 2**32 - 1] suitable for numpy.random.RandomState.
+        An integer in [0, 2**32 - 1] suitable for seeding numpy.random.Generator.
     """
     digest = hashlib.sha256(key).digest()
     return int.from_bytes(digest[:_SEED_BYTES], 'big')
@@ -46,7 +46,7 @@ def derive_effect_seed(scene_seed: int, effect: str) -> int:
         effect: A stable name identifying the effect (e.g. 'noise').
 
     Returns:
-        An integer in [0, 2**32 - 1] suitable for numpy.random.RandomState.
+        An integer in [0, 2**32 - 1] suitable for seeding numpy.random.Generator.
     """
     return _digest_to_seed(f'{int(scene_seed)}:{effect}'.encode())
 
@@ -62,6 +62,6 @@ def stable_param_seed(*values: object) -> int:
             be stable across runs (numbers, strings, and tuples thereof are).
 
     Returns:
-        An integer in [0, 2**32 - 1] suitable for numpy.random.RandomState.
+        An integer in [0, 2**32 - 1] suitable for seeding numpy.random.Generator.
     """
     return _digest_to_seed(repr(tuple(values)).encode())

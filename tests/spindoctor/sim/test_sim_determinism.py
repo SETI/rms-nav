@@ -23,11 +23,8 @@ _SEED_CEILING = 2**32
 
 
 def _clear_render_caches() -> None:
-    """Drop every lru_cache in the render module so RNG paths re-run."""
-    render._render_combined_model_cached.cache_clear()
-    render._render_stars_cached.cache_clear()
-    render._render_body_shape_cached.cache_clear()
-    render._render_background_stars_cached.cache_clear()
+    """Drop every render-path lru_cache so RNG paths re-run."""
+    render.clear_render_caches()
 
 
 def _scene() -> dict[str, Any]:

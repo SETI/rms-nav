@@ -47,7 +47,7 @@ import numpy as np
 from spindoctor.nav_model import build_models_for_obs
 from spindoctor.nav_orchestrator import NavOrchestrator
 from spindoctor.obs.obs_inst_sim import ObsSim
-from spindoctor.sim.sim_body import create_simulated_body
+from spindoctor.sim.forward.body import create_simulated_body
 
 __all__ = [
     'LimbBiasSample',
@@ -183,7 +183,7 @@ def build_body_scene(
     """
     center = size_px / 2.0
     scene: dict[str, Any] = {
-        'schema_version': 1,
+        'schema_version': 2,
         'scene_name': 'limb_bias_probe',
         'instrument': 'coiss_nac',
         'size_v': size_px,

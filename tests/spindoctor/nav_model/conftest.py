@@ -22,7 +22,7 @@ class MockObservation:
     rings subpackage:
     - extdata_shape_vu / make_extfov_zeros / make_extfov_false for image ops
     - midtime for date-range checks
-    - sim_time / sim_epoch for simulated-ring tests
+    - nav_params (time / ring_epoch) for simulated-ring tests
     - extfov_margin_v / extfov_margin_u for annotation coordinate shifts
     - data_shape_v / data_shape_u for center coordinate defaults
     """
@@ -47,8 +47,10 @@ class MockObservation:
         self.extfov_margin_u: int = 0
         self.data_shape_v: int = shape[0]
         self.data_shape_u: int = shape[1]
-        self.sim_time: float = self.midtime
-        self.sim_epoch: float = self.midtime
+        self.nav_params: dict[str, Any] = {
+            'time': self.midtime,
+            'ring_epoch': self.midtime,
+        }
 
     def make_extfov_zeros(self) -> npt.NDArray[np.float64]:
         """Return a zero-filled float64 array of the extended FOV shape."""

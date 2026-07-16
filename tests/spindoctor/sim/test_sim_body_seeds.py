@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 from spindoctor.sim import render
+from spindoctor.sim.forward import body as forward_body
 
 _BODY_GEOMETRY: dict[str, Any] = {
     'axis1': 40.0,
@@ -21,11 +22,8 @@ _BODY_GEOMETRY: dict[str, Any] = {
 
 
 def _clear_render_caches() -> None:
-    """Drop every lru_cache in the render module so RNG paths re-run."""
-    render._render_combined_model_cached.cache_clear()
-    render._render_stars_cached.cache_clear()
-    render._render_body_shape_cached.cache_clear()
-    render._render_background_stars_cached.cache_clear()
+    """Drop every render-path lru_cache so RNG paths re-run."""
+    render.clear_render_caches()
 
 
 def _twin_body_scene() -> dict[str, Any]:
@@ -70,7 +68,7 @@ def test_twin_bodies_occupy_distinct_shape_cache_entries() -> None:
     """The shape cache holds one entry per body rather than colliding on one."""
     _clear_render_caches()
     render.render_combined_model(_twin_body_scene())
-    info = render._render_body_shape_cached.cache_info()
+    info = forward_body._render_body_shape_cached.cache_info()
     assert info.currsize == 2
 
 
@@ -78,5 +76,5 @@ def test_twin_bodies_do_not_share_a_cached_shape_array() -> None:
     """The second body never receives the first body's cached array (no hits)."""
     _clear_render_caches()
     render.render_combined_model(_twin_body_scene())
-    info = render._render_body_shape_cached.cache_info()
+    info = forward_body._render_body_shape_cached.cache_info()
     assert info.hits == 0

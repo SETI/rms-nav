@@ -75,7 +75,7 @@ def test_validator_rejects_unknown_instrument(tmp_path: Path) -> None:
     """An unknown instrument name fails validation."""
     bad = tmp_path / 'bad.yaml'
     bad.write_text(
-        'schema_version: 1\nscene_name: bad\ninstrument: hubble\n'
+        'schema_version: 2\nscene_name: bad\ninstrument: hubble\n'
         'size_v: 64\nsize_u: 64\nrandom_seed: 1\n'
     )
     with pytest.raises(SimSceneValidationError, match='instrument'):
@@ -86,7 +86,7 @@ def test_validator_rejects_name_mismatch(tmp_path: Path) -> None:
     """A scene_name that does not match the filename fails validation."""
     bad = tmp_path / 'actual_name.yaml'
     bad.write_text(
-        'schema_version: 1\nscene_name: other_name\ninstrument: coiss_nac\n'
+        'schema_version: 2\nscene_name: other_name\ninstrument: coiss_nac\n'
         'size_v: 64\nsize_u: 64\nrandom_seed: 1\n'
     )
     with pytest.raises(SimSceneValidationError, match='must match filename stem'):
@@ -95,9 +95,9 @@ def test_validator_rejects_name_mismatch(tmp_path: Path) -> None:
 
 def test_validator_rejects_wrong_schema_version(tmp_path: Path) -> None:
     """A non-current schema_version fails validation."""
-    bad = tmp_path / 'v2.yaml'
+    bad = tmp_path / 'v1.yaml'
     bad.write_text(
-        'schema_version: 2\nscene_name: v2\ninstrument: coiss_nac\n'
+        'schema_version: 1\nscene_name: v1\ninstrument: coiss_nac\n'
         'size_v: 64\nsize_u: 64\nrandom_seed: 1\n'
     )
     with pytest.raises(SimSceneValidationError, match='schema_version'):
@@ -108,7 +108,7 @@ def test_validator_rejects_unknown_key(tmp_path: Path) -> None:
     """An unmodeled top-level key fails validation so typos do not pass silently."""
     bad = tmp_path / 'typo.yaml'
     bad.write_text(
-        'schema_version: 1\nscene_name: typo\ninstrument: coiss_nac\n'
+        'schema_version: 2\nscene_name: typo\ninstrument: coiss_nac\n'
         'size_v: 64\nsize_u: 64\nrandom_seed: 1\nbogus_key: 3\n'
     )
     with pytest.raises(SimSceneValidationError, match='unknown scene keys'):

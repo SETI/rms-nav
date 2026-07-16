@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from spindoctor.sim.png_export import render_scene_png
-from spindoctor.sim.scene import load_sim_scene
+from spindoctor.sim.scene import load_sim_scene, validate_sim_params
 
 _DOCS = Path(__file__).parent.parent.parent / 'docs'
 _GUI_DIR = _DOCS / 'dev_guide' / '_sim_images'
@@ -256,6 +256,7 @@ def generate() -> list[Path]:
     written: list[Path] = []
     _GUI_DIR.mkdir(parents=True, exist_ok=True)
     for name, params, kwargs in _GUI_GALLERY:
+        validate_sim_params(params, source=f'_GUI_GALLERY[{name}]')
         written.append(render_scene_png(params, _GUI_DIR / f'{name}.png', upscale=2, **kwargs))
     (_GUI_DIR / 'NOTES.md').write_text(_GUI_NOTES)
 

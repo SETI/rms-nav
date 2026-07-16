@@ -1,0 +1,137 @@
+"""Detector-noise panel for the General tab.
+
+Poisson shot noise, a Gaussian read-noise floor, cosmic-ray rate, missing-data
+rate, bias pedestal, saturation bloom, signal full-scale fraction, and pixel
+area.  These write the ``sim_params['noise']`` block the renderer consumes;
+physical defaults otherwise come from the selected instrument.
+"""
+
+from typing import Any
+
+from PyQt6.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QSpinBox
+
+from spindoctor.cli.sim_editor.base import SimEditorBase
+
+
+class NoiseMixin(SimEditorBase):
+    """Builds and handles the detector-noise panel."""
+
+    def _build_noise_panel(self, gen_layout: QFormLayout) -> None:
+        """Add the detector-noise rows to the General tab layout.
+
+        Parameters:
+            gen_layout: The General tab's form layout.
+        """
+        self._poisson_check = QCheckBox()
+        self._poisson_check.setChecked(bool(self._noise_value('poisson', True)))
+        self._poisson_check.setToolTip('Signal-dependent Poisson shot noise (usually on).')
+        self._poisson_check.toggled.connect(self._on_poisson)
+        gen_layout.addRow('Poisson shot noise:', self._poisson_check)
+
+        self._read_noise_spin = QDoubleSpinBox()
+        self._read_noise_spin.setRange(0.0, 50.0)
+        self._read_noise_spin.setDecimals(2)
+        self._read_noise_spin.setValue(float(self._noise_value('read_noise_dn', 4.0)))
+        self._read_noise_spin.setToolTip('Gaussian read-noise floor in DN.')
+        self._read_noise_spin.valueChanged.connect(self._on_read_noise)
+        gen_layout.addRow('Read noise (DN):', self._read_noise_spin)
+
+        self._cosmic_ray_spin = QDoubleSpinBox()
+        self._cosmic_ray_spin.setRange(0.0, 0.01)
+        self._cosmic_ray_spin.setDecimals(5)
+        self._cosmic_ray_spin.setSingleStep(0.0001)
+        self._cosmic_ray_spin.setValue(float(self._noise_value('cosmic_ray_rate_per_sec', 0.0)))
+        self._cosmic_ray_spin.setToolTip('Cosmic-ray fluence in events / cm^2 / sec.')
+        self._cosmic_ray_spin.valueChanged.connect(self._on_cosmic_ray)
+        gen_layout.addRow('Cosmic ray rate (/cm2/s):', self._cosmic_ray_spin)
+
+        self._missing_data_spin = QDoubleSpinBox()
+        self._missing_data_spin.setRange(0.0, 0.3)
+        self._missing_data_spin.setDecimals(3)
+        self._missing_data_spin.setSingleStep(0.005)
+        self._missing_data_spin.setValue(float(self._noise_value('missing_data_rate', 0.0)))
+        self._missing_data_spin.setToolTip('Fraction of pixels marked as missing data.')
+        self._missing_data_spin.valueChanged.connect(self._on_missing_data)
+        gen_layout.addRow('Missing data rate:', self._missing_data_spin)
+
+        self._bias_spin = QDoubleSpinBox()
+        self._bias_spin.setRange(0.0, 10000.0)
+        self._bias_spin.setDecimals(2)
+        self._bias_spin.setValue(float(self._noise_value('bias_dn', 20.0)))
+        self._bias_spin.setToolTip('Additive bias pedestal in DN (lifts dark sky off zero).')
+        self._bias_spin.valueChanged.connect(self._on_bias)
+        gen_layout.addRow('Bias (DN):', self._bias_spin)
+
+        self._bloom_spin = QSpinBox()
+        self._bloom_spin.setRange(0, 200)
+        self._bloom_spin.setValue(int(self._noise_value('bloom_length', 0)))
+        self._bloom_spin.setToolTip('Saturation column-bloom half-length in pixels (0 = none).')
+        self._bloom_spin.valueChanged.connect(self._on_bloom)
+        gen_layout.addRow('Bloom length (px):', self._bloom_spin)
+
+        self._signal_frac_spin = QDoubleSpinBox()
+        self._signal_frac_spin.setRange(0.001, 1.0)
+        self._signal_frac_spin.setDecimals(3)
+        self._signal_frac_spin.setSingleStep(0.05)
+        self._signal_frac_spin.setValue(float(self._noise_value('signal_full_scale_frac', 0.5)))
+        self._signal_frac_spin.setToolTip(
+            'Signal of 1.0 maps to this fraction of the camera full well.'
+        )
+        self._signal_frac_spin.valueChanged.connect(self._on_signal_frac)
+        gen_layout.addRow('Signal full-scale frac:', self._signal_frac_spin)
+
+        self._pixel_area_spin = QDoubleSpinBox()
+        self._pixel_area_spin.setRange(0.0, 1000.0)
+        self._pixel_area_spin.setDecimals(4)
+        self._pixel_area_spin.setValue(float(self._noise_value('pixel_area_cm2', 1.0)))
+        self._pixel_area_spin.setToolTip('Detector pixel area (cm^2); scales the cosmic-ray count.')
+        self._pixel_area_spin.valueChanged.connect(self._on_pixel_area)
+        gen_layout.addRow('Pixel area (cm2):', self._pixel_area_spin)
+
+    def _noise_value(self, key: str, default: Any) -> Any:
+        """Read a value from the sim_params noise block, or a default."""
+        noise = self.sim_params.get('noise')
+        if isinstance(noise, dict) and key in noise:
+            return noise[key]
+        return default
+
+    def _set_noise(self, key: str, value: Any) -> None:
+        """Write a value into the sim_params noise block and re-render."""
+        noise = self.sim_params.setdefault('noise', {})
+        if not isinstance(noise, dict):
+            noise = {}
+            self.sim_params['noise'] = noise
+        noise[key] = value
+        self._updater.request_update()
+
+    def _on_poisson(self, checked: bool) -> None:
+        """Toggle Poisson shot noise."""
+        self._set_noise('poisson', bool(checked))
+
+    def _on_read_noise(self, value: float) -> None:
+        """Set the read-noise floor in DN."""
+        self._set_noise('read_noise_dn', float(value))
+
+    def _on_cosmic_ray(self, value: float) -> None:
+        """Set the cosmic-ray fluence."""
+        self._set_noise('cosmic_ray_rate_per_sec', float(value))
+
+    def _on_missing_data(self, value: float) -> None:
+        """Set the missing-data pixel fraction."""
+        self._set_noise('missing_data_rate', float(value))
+
+    def _on_bias(self, value: float) -> None:
+        """Set the additive bias pedestal in DN."""
+        self._set_noise('bias_dn', float(value))
+
+    def _on_bloom(self, value: int) -> None:
+        """Set the saturation column-bloom half-length."""
+        self._set_noise('bloom_length', int(value))
+
+    def _on_signal_frac(self, value: float) -> None:
+        """Set the signal full-scale fraction."""
+        self._set_noise('signal_full_scale_frac', float(value))
+
+    def _on_pixel_area(self, value: float) -> None:
+        """Set the detector pixel area in cm^2."""
+        self._set_noise('pixel_area_cm2', float(value))

@@ -10,7 +10,7 @@ import math
 import numpy as np
 import pytest
 
-from spindoctor.sim.sim_ring import _compute_edge_radii_array, compute_edge_radius_at_angle
+from spindoctor.sim.ring_geometry import compute_edge_radii_array, compute_edge_radius_at_angle
 
 
 def test_scalar_edge_radius_raises_on_impossible_eccentricity() -> None:
@@ -33,7 +33,7 @@ def test_array_edge_radii_raise_on_impossible_eccentricity() -> None:
     """The vectorized edge radii with ae > a raise and name the ae/a values."""
     angles = np.linspace(0.0, 2.0 * np.pi, 8)
     with pytest.raises(ValueError, match=r'ae/a = 150\.0/100\.0 = 1\.5'):
-        _compute_edge_radii_array(
+        compute_edge_radii_array(
             angles, a=100.0, ae=150.0, long_peri=0.0, rate_peri=0.0, epoch=0.0, time=0.0
         )
 
@@ -57,7 +57,7 @@ def test_scalar_edge_radius_accepts_near_limit_eccentricity() -> None:
 def test_array_edge_radii_accept_circular_edge() -> None:
     """A circular edge (ae = 0) computes the constant semi-major radius."""
     angles = np.linspace(0.0, 2.0 * np.pi, 8)
-    radii = _compute_edge_radii_array(
+    radii = compute_edge_radii_array(
         angles, a=100.0, ae=0.0, long_peri=0.0, rate_peri=0.0, epoch=0.0, time=0.0
     )
     assert np.allclose(radii, 100.0)

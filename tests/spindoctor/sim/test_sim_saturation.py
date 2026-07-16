@@ -9,7 +9,8 @@ from typing import Any
 
 import numpy as np
 
-from spindoctor.sim.render import apply_saturation, render_combined_model
+from spindoctor.sim.forward.detector import apply_saturation
+from spindoctor.sim.render import render_combined_model
 from spindoctor.support.image_quality import saturation_mask
 
 _SATURATION = 4095.0

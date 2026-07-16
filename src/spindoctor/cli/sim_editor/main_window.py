@@ -1,0 +1,387 @@
+"""The simulated-image editor's main window.
+
+``CreateSimulatedImageModel`` assembles the per-schema-block mixins into one
+``QMainWindow``.  This module owns only the cross-cutting scaffolding: the data
+model defaults, the top-level layout, the pan / zoom / status-bar interaction,
+and the visual-aid toggles.  Each schema block's widgets, handlers, and (in
+later phases) new control tabs live in their own mixin module.
+"""
+
+import sys
+from typing import Any, cast
+
+import numpy as np
+from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtGui import QMouseEvent, QWheelEvent
+from PyQt6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QStatusBar,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from spindoctor.cli.sim_editor.background_stars import BackgroundStarsMixin
+from spindoctor.cli.sim_editor.base import SimEditorBase
+from spindoctor.cli.sim_editor.body_tab import BodyTabMixin
+from spindoctor.cli.sim_editor.global_fields import GlobalFieldsMixin
+from spindoctor.cli.sim_editor.noise import NoiseMixin
+from spindoctor.cli.sim_editor.render_display import RenderDisplayMixin
+from spindoctor.cli.sim_editor.ring_tab import RingTabMixin
+from spindoctor.cli.sim_editor.scene_io import SceneIoMixin
+from spindoctor.cli.sim_editor.star_tab import StarTabMixin
+from spindoctor.cli.sim_editor.stray_light import StrayLightMixin
+from spindoctor.cli.sim_editor.tabs import TabsMixin
+from spindoctor.cli.sim_editor.widgets import ImageLabel, ParameterUpdater
+from spindoctor.ui.common import ZoomPanController
+
+
+class CreateSimulatedImageModel(
+    GlobalFieldsMixin,
+    NoiseMixin,
+    StrayLightMixin,
+    BackgroundStarsMixin,
+    BodyTabMixin,
+    RingTabMixin,
+    StarTabMixin,
+    TabsMixin,
+    RenderDisplayMixin,
+    SceneIoMixin,
+    SimEditorBase,
+):
+    """Interactive editor for a simulated-image scene with a live preview."""
+
+    def __init__(self) -> None:
+        """Initialize the data model, build the UI, and render the first frame."""
+        super().__init__()
+        self.setWindowTitle('Create Simulated Model')
+        self.setMinimumSize(1300, 850)
+
+        # Data model mirrors JSON schema
+        self.sim_params: dict[str, Any] = {
+            'size_v': 512,
+            'size_u': 512,
+            'offset_v': 0.0,
+            'offset_u': 0.0,
+            'offset_rotation_deg': 0.0,
+            'exposure_sec': 1.0,
+            'random_seed': 42,
+            'instrument': 'generic',
+            'closest_planet': 'SATURN',
+            'time': 0.0,
+            'ring_epoch': 0.0,
+            'noise': {
+                'poisson': True,
+                'read_noise_dn': 4.0,
+                'cosmic_ray_rate_per_sec': 0.0,
+                'missing_data_rate': 0.0,
+            },
+            'background_stars_num': 0,
+            'background_stars_psf_sigma': 0.9,
+            'background_stars_distribution_exponent': 2.5,
+            'shade_solid_rings': False,
+            'stars': [],
+            'bodies': [],
+            'rings': [],
+        }
+
+        # Render cache/meta
+        self._current_image: np.ndarray | None = None
+        self._last_meta: dict[str, Any] = {}
+        self._base_pixmap = None
+
+        # View state
+        self._zoom_factor = 1.0
+        self._right_drag_active = False
+        # ('body'/'star'/'ring', index)
+        self._selected_model_key = None
+        self._last_drag_img_vu = None
+        # Track last valid (non-"+") tab for cancel behavior
+        self._last_valid_tab_index = 0  # Start with General tab
+
+        self._show_visual_aids = True
+        self._show_saturation_overlay = False
+        self._zoom_sharp = True
+
+        self._updater = ParameterUpdater(140)
+        self._updater.update_requested.connect(self._update_image)
+
+        self._setup_ui()
+        self._update_image()
+
+    def _setup_ui(self) -> None:
+        """Build the window layout and wire the General tab and action buttons."""
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QHBoxLayout(central)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+
+        # Left image with zoom/pan
+        left = QVBoxLayout()
+        zoom_row = QHBoxLayout()
+        zoom_row.addStretch()
+        self._zoom_out_btn = QPushButton('Zoom -')
+        self._zoom_out_btn.clicked.connect(self._zoom_out)
+        zoom_row.addWidget(self._zoom_out_btn)
+        self._zoom_in_btn = QPushButton('Zoom +')
+        self._zoom_in_btn.clicked.connect(self._zoom_in)
+        zoom_row.addWidget(self._zoom_in_btn)
+        self._reset_view_btn = QPushButton('Reset View')
+        self._reset_view_btn.clicked.connect(self._reset_view)
+        zoom_row.addWidget(self._reset_view_btn)
+        zoom_row.addStretch()
+        left.addLayout(zoom_row)
+
+        self._scroll_area = QScrollArea()
+        self._scroll_area.setWidgetResizable(False)
+        self._scroll_area.setMinimumSize(700, 700)
+        self._scroll_area.setStyleSheet('background-color: #303000;')
+        self._scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._image_label = ImageLabel(
+            self,
+            self._on_press,
+            self._on_move,
+            self._on_release,
+            self._on_wheel,
+        )
+        self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._image_label.setStyleSheet('background-color: #800000;')
+        self._image_label.setMouseTracking(True)
+        self._scroll_area.setWidget(self._image_label)
+
+        left.addWidget(self._scroll_area)
+        main_layout.addLayout(left, stretch=2)
+
+        # Status bar
+        status_bar = QStatusBar()
+        self._status_label = QLabel('V, U: --------, --------  Value: --')
+        status_bar.addWidget(self._status_label)
+        self._saturation_label = QLabel('')
+        status_bar.addPermanentWidget(self._saturation_label)
+        self._zoom_label = QLabel('Zoom: 1.00x')
+        status_bar.addPermanentWidget(self._zoom_label)
+        self.setStatusBar(status_bar)
+
+        # Right tabs panel
+        right = QVBoxLayout()
+
+        # Warning label for range duplicates
+        self._warning_label = QLabel('')
+        self._warning_label.setStyleSheet('color: orange;')
+        right.addWidget(self._warning_label)
+
+        self._tabs = QTabWidget()
+        self._tabs.setMovable(False)  # Prevent manual reordering
+        # Connect tab bar click to detect clicks on "+" tab
+        self._tabs.tabBarClicked.connect(self._on_tab_bar_clicked)
+        # Track current tab changes to remember last valid tab
+        self._tabs.currentChanged.connect(self._on_tab_changed)
+        right.addWidget(self._tabs, stretch=1)
+
+        # General tab (always first): each schema block contributes its rows.
+        self._general_tab = QWidget()
+        gen_layout = QFormLayout(self._general_tab)
+        self._build_global_fields(gen_layout)
+        self._build_noise_panel(gen_layout)
+        self._build_stray_panel(gen_layout)
+        self._build_psf_preview(gen_layout)
+        self._build_background_stars_panel(gen_layout)
+
+        # Add General tab first
+        self._tabs.addTab(self._general_tab, 'General')
+
+        # Add "+" tab for adding new objects (fake tab - just header, no content, always last)
+        self._add_tab_widget = QWidget()
+        self._tabs.addTab(self._add_tab_widget, '+')
+
+        # Ensure correct tab order
+        self._ensure_tab_order()
+
+        # Buttons row (no Add/Delete buttons - handled by tabs)
+        btns = QHBoxLayout()
+        btns.addStretch()
+
+        self._save_img_btn = QPushButton('Save Image (PNG)')
+        self._save_img_btn.clicked.connect(self._save_image)
+        btns.addWidget(self._save_img_btn)
+
+        self._save_scene_btn = QPushButton('Save Scene (YAML)')
+        self._save_scene_btn.clicked.connect(self._save_scene)
+        btns.addWidget(self._save_scene_btn)
+
+        self._load_scene_btn = QPushButton('Load Scene (YAML)')
+        self._load_scene_btn.clicked.connect(self._load_scene)
+        btns.addWidget(self._load_scene_btn)
+
+        right.addLayout(btns)
+
+        # Visual options with Exit button on same line
+        vis_row = QHBoxLayout()
+        self._visual_aids_check = QCheckBox('Show Visual Aids')
+        self._visual_aids_check.setChecked(self._show_visual_aids)
+        self._visual_aids_check.stateChanged.connect(self._toggle_visual_aids)
+        vis_row.addWidget(self._visual_aids_check)
+        self._zoom_sharp_check = QCheckBox('Sharp zoom')
+        self._zoom_sharp_check.setChecked(self._zoom_sharp)
+        self._zoom_sharp_check.stateChanged.connect(self._toggle_zoom_sharp)
+        vis_row.addWidget(self._zoom_sharp_check)
+        self._shade_solid_rings_check = QCheckBox('Shade solid rings')
+        self._shade_solid_rings_check.setChecked(self.sim_params.get('shade_solid_rings', False))
+        self._shade_solid_rings_check.stateChanged.connect(self._toggle_shade_solid_rings)
+        vis_row.addWidget(self._shade_solid_rings_check)
+        self._saturation_overlay_check = QCheckBox('Saturation overlay')
+        self._saturation_overlay_check.setChecked(self._show_saturation_overlay)
+        self._saturation_overlay_check.setToolTip(
+            'Highlight pixels at or above the instrument saturation DN in red.'
+        )
+        self._saturation_overlay_check.toggled.connect(self._toggle_saturation_overlay)
+        vis_row.addWidget(self._saturation_overlay_check)
+        vis_row.addStretch()
+        exit_btn = QPushButton('Exit')
+        exit_btn.clicked.connect(self.close)
+        vis_row.addWidget(exit_btn)
+        right.addLayout(vis_row)
+
+        main_layout.addLayout(right, stretch=1)
+        # Initialize common zoom/pan controller for left-button pan and wheel zoom
+        self._zoom_ctl = ZoomPanController(
+            label=self._image_label,
+            scroll_area=self._scroll_area,
+            get_zoom=lambda: self._zoom_factor,
+            set_zoom=lambda z: setattr(self, '_zoom_factor', float(z)),
+            update_display=self._update_display,
+            set_zoom_label_text=lambda s: self._zoom_label.setText(s),
+        )
+
+    # ---- Event handlers: pan/zoom ----
+    def _on_press(self, event: QMouseEvent) -> None:
+        """Start a left-button pan or right-button object selection."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._zoom_ctl.on_mouse_press(event)
+            self._image_label.setCursor(Qt.CursorShape.ClosedHandCursor)
+        elif event.button() == Qt.MouseButton.RightButton:
+            # Select model at cursor
+            img_v, img_u = self._label_pos_to_image_vu(event.position().toPoint())
+            self._select_model_at(img_v, img_u)
+            self._right_drag_active = True
+            self._last_drag_img_vu = (img_v, img_u)
+
+    def _on_move(self, event: QMouseEvent) -> None:
+        """Pan or drag the selected object and update the status bar."""
+        self._zoom_ctl.on_mouse_move(event)
+        # status
+        self._update_status_bar(event.position().toPoint())
+
+        # Right-drag to move selected model
+        if self._right_drag_active and self._selected_model_key is not None:
+            img_v, img_u = self._label_pos_to_image_vu(event.position().toPoint())
+            self._move_selected_by(img_v, img_u)
+
+    def _on_release(self, event: QMouseEvent) -> None:
+        """End a left-button pan or right-button drag."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._zoom_ctl.on_mouse_release(event)
+        elif event.button() == Qt.MouseButton.RightButton:
+            self._right_drag_active = False
+            self._last_drag_img_vu = None
+
+    def _on_wheel(self, event: QWheelEvent) -> None:
+        """Zoom the preview on a wheel event."""
+        self._zoom_ctl.on_wheel(event)
+
+    def _zoom_in(self) -> None:
+        """Zoom in about the viewport centre."""
+        # The ZoomPanController's centre-anchored zoom is identical to the
+        # open-coded version (it wraps this window's scroll area + zoom state).
+        if self._base_pixmap is not None:
+            self._zoom_ctl.zoom_in_center()
+
+    def _zoom_out(self) -> None:
+        """Zoom out about the viewport centre."""
+        if self._base_pixmap is not None:
+            self._zoom_ctl.zoom_out_center()
+
+    def _zoom_at_point(
+        self,
+        factor: float,
+        viewport_x: int,
+        viewport_y: int,
+        scaled_x: float,
+        scaled_y: float,
+    ) -> None:
+        """Zoom by ``factor`` anchored at a viewport point."""
+        if self._base_pixmap is None:
+            return
+        # The ZoomPanController owns the zoom clamp + no-op short-circuit, so
+        # delegate directly instead of re-deriving the clamped zoom here.
+        self._zoom_ctl.zoom_at_point(factor, viewport_x, viewport_y, scaled_x, scaled_y)
+
+    def _reset_view(self) -> None:
+        """Reset the zoom to 1x and refresh the display."""
+        self._zoom_factor = 1.0
+        self._zoom_label.setText(f'Zoom: {self._zoom_factor:.2f}x')
+        self._update_display()
+
+    def _label_pos_to_image_vu(self, label_pos: QPoint) -> tuple[float, float]:
+        """Convert a label pixel position to image (v, u) coordinates."""
+        scaled_x = float(label_pos.x())
+        scaled_y = float(label_pos.y())
+        img_u = scaled_x / self._zoom_factor
+        img_v = scaled_y / self._zoom_factor
+        return img_v, img_u
+
+    def _update_status_bar(self, label_pos: QPoint) -> None:
+        """Update the status bar with the cursor's (v, u) and pixel value."""
+        self._zoom_label.setText(f'Zoom: {self._zoom_factor:.2f}x')
+        if self._current_image is None:
+            self._status_label.setText('V, U: --------, --------  Value: --')
+            return
+        img_v, img_u = self._label_pos_to_image_vu(label_pos)
+        height, width = self._current_image.shape
+        if 0 <= img_v < height and 0 <= img_u < width:
+            v0 = int(img_v)
+            u0 = int(img_u)
+            val = self._current_image[v0, u0]
+            self._status_label.setText(f'V, U: {img_v:8.2f}, {img_u:8.2f}  Value: {val:9.6f}')
+        else:
+            self._status_label.setText('V, U: --------, --------  Value: --')
+
+    # ---- Visual toggles ----
+    def _toggle_visual_aids(self, state: Any) -> None:
+        """Toggle the body/star/ring centre overlays."""
+        if isinstance(state, Qt.CheckState):
+            self._show_visual_aids = state is Qt.CheckState.Checked
+        elif isinstance(state, int):
+            self._show_visual_aids = state == cast(int, Qt.CheckState.Checked.value)
+        else:
+            self._show_visual_aids = False
+        if self._current_image is not None:
+            self._base_pixmap = None
+            self._display_image()
+
+    def _toggle_zoom_sharp(self, state: Any) -> None:
+        """Toggle nearest-neighbour (sharp) vs smooth zoom scaling."""
+        self._zoom_sharp = state == int(cast(int, Qt.CheckState.Checked.value))
+        self._update_display()
+
+    def _toggle_shade_solid_rings(self, state: Any) -> None:
+        """Toggle the solid-ring shading render flag."""
+        checked = state == int(cast(int, Qt.CheckState.Checked.value))
+        self.sim_params['shade_solid_rings'] = checked
+        self._updater.request_update()
+
+
+def main() -> None:
+    """Launch the simulated-image editor as a standalone application."""
+    app = QApplication(sys.argv)
+    window = CreateSimulatedImageModel()
+    window.show()
+    sys.exit(app.exec())

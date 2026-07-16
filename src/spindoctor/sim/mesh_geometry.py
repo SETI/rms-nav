@@ -1,11 +1,22 @@
-"""Standalone polyhedral-mesh body renderer for irregular sim bodies.
+"""Shared polyhedral-mesh geometry for irregular sim bodies.
 
-The ellipsoid renderer in :mod:`spindoctor.sim.sim_body` cannot produce the
-non-ellipsoidal silhouette of an irregular body (Hyperion, Phoebe).  Because
-``oops`` will not gain DSK support, the sim carries its own small renderer that
-projects a triangle mesh through a scene-supplied pose and rasterises the
-shaded silhouette.  It is sim-only: the body's orientation is ground truth from
-the scene, not from SPICE.
+The ellipsoid renderers cannot produce the non-ellipsoidal silhouette of an
+irregular body (Hyperion, Phoebe).  Because ``oops`` will not gain DSK
+support, the sim carries its own small renderer that projects a triangle mesh
+through a scene-supplied pose and rasterises the shaded silhouette.  It is
+sim-only: the body's orientation is ground truth from the scene, not from
+SPICE.
+
+This module is deliberately shared between the image-side forward renderer
+(``spindoctor.sim.forward.body_mesh``) and the navigator-side predicted-body
+renderer (``spindoctor.nav_model.nav_model_body_simulated``): the mesh shape,
+pose, and rasterisation conventions are idealized information both sides may
+know, and sharing one implementation guarantees that a scene's planted
+geometry error (via ``nav_override``) is the only difference between the
+rendered and the predicted silhouette.  Every function takes explicit
+geometry arguments; none reads the scene mapping, so no truth-side
+information can cross the boundary here (``mesh_spec_from_params`` parses a
+body parameter mapping, but only its idealized mesh keys).
 
 The output contract matches ``create_simulated_body``: a ``(size_v, size_u)``
 float array in [0, 1], lit by the same Lambertian convention so a mesh body and
@@ -20,7 +31,8 @@ import numpy as np
 
 from spindoctor.support.types import NDArrayFloatType, NDArrayIntType
 
-# Lambertian floor for the visible-but-unlit side, matching sim_body.py.
+# Lambertian floor for the visible-but-unlit side, matching the ellipsoid
+# shading convention in spindoctor.sim.ellipsoid_geometry.
 _DARK_SIDE_ILLUM = 0.01
 
 
@@ -96,10 +108,10 @@ def make_irregular_mesh(
     Returns:
         An outward-wound :class:`Mesh`.
     """
-    rng = np.random.RandomState(seed)
+    rng = np.random.default_rng(seed)
     amps = rng.uniform(-1.0, 1.0, size=n_modes)
-    m_lat = rng.randint(1, 4, size=n_modes)
-    m_lon = rng.randint(1, 4, size=n_modes)
+    m_lat = rng.integers(1, 4, size=n_modes)
+    m_lon = rng.integers(1, 4, size=n_modes)
     phases = rng.uniform(0.0, 2.0 * np.pi, size=n_modes)
 
     def radius(theta: float, phi: float) -> float:
@@ -155,7 +167,8 @@ def make_irregular_mesh(
 def _light_direction(illumination_angle: float, phase_angle: float) -> NDArrayFloatType:
     """Unit light direction in camera (u, v, depth) coordinates.
 
-    Matches the convention in ``sim_body._lambertian_shading``: v increases
+    Matches the convention in
+    ``spindoctor.sim.ellipsoid_geometry.lambert_from_normals``: v increases
     downward, depth is positive toward the observer; phase 0 lights the visible
     face, phase pi back-lights it.
     """

@@ -8,8 +8,9 @@ Overview
 :class:`~spindoctor.nav_model.stars.nav_model_stars_simulated.NavModelStarsSimulated` is
 the simulated-image counterpart of
 :class:`~spindoctor.nav_model.stars.nav_model_stars.NavModelStars`. It is a thin subclass
-of the catalog-driven model: it sources its star list from the simulated renderer's
-output rather than from a catalog reduction, and inherits the parent's
+of the catalog-driven model: it builds its star list from the scene's catalog star
+entries in the filtered idealized view (``obs.nav_params``, see
+:doc:`dev_guide_simulator`) rather than from a catalog reduction, and inherits the parent's
 :data:`~spindoctor.feature.feature_type.NavFeatureType.STAR` feature emission, CRLB
 covariance, reliability gate, and annotations unchanged. A simulated star field is
 therefore navigated by exactly the same
@@ -31,13 +32,14 @@ The simulated path is the calibration regime for the star techniques: a develope
 probe star matching with a field whose true offset, photometry, and (planted) camera
 roll are known by construction.
 
-The renderer (the star stage of
-:func:`~spindoctor.sim.render.render_combined_model`) builds each star at its *unshifted*
-predicted ``(v, u)`` and draws it into the image shifted by the scene's planted offset
-and camera roll. This model adopts that unshifted star list as its prediction, so a
-technique that detects the shifted peak recovers the planted transform -- the same
-prediction / observation split a real navigation has, which is why the recovery
-transfers.
+The image-side renderer (``spindoctor.sim.forward.star``) draws each scene star at its
+catalog ``(v, u)`` shifted by the scene's planted offset and camera roll. This model
+independently builds the *unshifted* catalog positions from the same scene entries --
+via the shared record builder :func:`~spindoctor.sim.star_records.star_record_from_params`,
+so the two sides' defaults are identical while no rendered values cross the information
+boundary -- and adopts them as its prediction. A technique that detects the shifted
+peak therefore recovers the planted transform: the same prediction / observation split
+a real navigation has, which is why the recovery transfers.
 
 Two rendering details make the simulated field faithful to a real one:
 
@@ -77,11 +79,11 @@ rendered detector noise, not a prediction error.
 Configuration
 =============
 
-The model consumes no YAML configuration of its own; it reads the rendered star list
-the observation carries on ``sim_star_list``. The per-star geometry comes from the
-scene's ``stars`` entries (see :doc:`dev_guide_simulator`), and
-the per-image PSF sigma comes from the selected instrument's ``star_psf_sigma`` via the
-renderer.
+The model consumes no YAML configuration of its own; it reads the ``stars`` entries of
+the observation's filtered scene view (``obs.nav_params``). The per-star geometry comes
+from the scene's ``stars`` entries (see :doc:`dev_guide_simulator`); the truth-side
+per-star ``psf_sigma`` override is stripped by the boundary filter, so the model knows
+only the instrument's published PSF.
 
 Implementation
 ==============
@@ -94,12 +96,13 @@ via ``__init_subclass__``.
 Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
 
 - :meth:`~spindoctor.nav_model.stars.nav_model_stars_simulated.NavModelStarsSimulated.instances_for_obs`
-  -- returns one instance for a simulated observation carrying a non-empty
-  ``sim_star_list``; an empty list for a real observation or a simulated one with no
-  rendered stars.
+  -- returns one instance for a simulated observation whose ``nav_params`` lists at
+  least one star; an empty list for a real observation or a simulated one whose scene
+  has no stars.
 - :meth:`~spindoctor.nav_model.stars.nav_model_stars_simulated.NavModelStarsSimulated.create_model`
-  -- adopts ``obs.sim_star_list`` as the star list, sets a zero smear vector, and
-  populates the same metadata fields the parent records.
+  -- builds one catalog record per ``nav_params`` star entry via
+  :func:`~spindoctor.sim.star_records.star_record_from_params`, sets a zero smear
+  vector, and populates the same metadata fields the parent records.
 - ``to_features`` / ``to_annotations`` -- inherited unchanged from
   :class:`~spindoctor.nav_model.stars.nav_model_stars.NavModelStars`.
 

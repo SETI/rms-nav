@@ -84,6 +84,40 @@ package); generated artifacts go under `_work/calibration/` (gitignored).
        --workers 8 --out _work/calibration/library_crosscheck.md
    ```
 
+## Campaign timing baseline
+
+Reference throughput for the collection campaign, measured 2026-07-15 at
+commit 2b7dd8c:
+
+```bash
+source setup.sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1 \
+    python util/calibration/collect.py \
+    --per-family 600 --workers 14 --out _work/calibration/rows.jsonl
+```
+
+Result: 4200 rows, 0 errors, elapsed (real) **7m13.7s** (user 93m08.7s,
+sys 7m39.1s).  Machine: i9-13900K with logical CPUs 10-11 excluded by
+`setup.sh`, under moderate concurrent load (one agent running occasional
+tests).
+
+Notes on reproducing the measurement:
+
+- The shell-level `*_NUM_THREADS=1` exports are **required**: `collect.py`
+  sets the same variables inside each worker, but the workers inherit the
+  parent's already-initialized BLAS thread pools under the fork start
+  method, so the in-worker pinning does not take effect (#287).  Unpinned
+  BLAS threads oversubscribe the 14 workers and distort the timing.
+- Worker CPU affinity on this machine is load-bearing, not cosmetic:
+  always `source setup.sh` first so the excluded cores stay excluded.
+
+This baseline is the renderer-throughput budget: a default-stage
+4200-scene campaign must stay within **2x this elapsed time** as the
+renderer gains fidelity.  Re-measure and update this section whenever the
+campaign command, the machine, or the renderer's default stage set
+changes materially.
+
 ## Structural caps and hard gates
 
 Post-sigmoid caps (BodyBlobNav's 0.4, StarUniqueMatchNav's per-mode

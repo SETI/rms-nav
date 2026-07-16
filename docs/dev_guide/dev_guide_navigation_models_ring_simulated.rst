@@ -34,7 +34,7 @@ The rendered template is the
 :data:`~spindoctor.feature.feature_type.NavFeatureType.RING_ANNULUS` feature payload the
 correlation technique navigates against. The per-edge RING_EDGE polyline extends the
 simulated ring to the edge-fitting technique: each rendered edge mask
-(:func:`~spindoctor.sim.sim_ring.compute_border_atop_simulated`) is sampled into a vertex
+(:func:`~spindoctor.sim.ring_geometry.compute_border_atop_simulated`) is sampled into a vertex
 polyline with outward radial normals and a curvature-based ``is_straight_line`` flag, and
 :class:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav` fits two curved arcs to
 constrain the offset in both axes. The simulated ring's geometry is operator-known by
@@ -62,7 +62,8 @@ Configuration
 =============
 
 The simulated ring model consumes no YAML configuration of its own; every parameter comes
-in via the per-instance ``sim_params`` dict. Expected keys:
+in via the per-ring entry of the observation's filtered scene view
+(``obs.nav_params['rings']``, see :doc:`dev_guide_simulator`). Expected keys:
 
 - ``name`` — ring-system label used in metadata.
 - ``feature_type`` — ``RINGLET`` (bright ring) or ``GAP`` (dark gap).
@@ -90,7 +91,7 @@ this subclass.
 Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
 
 - :meth:`~spindoctor.nav_model.nav_model_rings_simulated.NavModelRingsSimulated.create_model` —
-  invokes :func:`~spindoctor.sim.sim_ring.render_ring` to render the simulated ring stack, then
+  invokes :func:`~spindoctor.nav_model.sim_ring.render_ring` to render the simulated ring stack, then
   computes the bounding box and reliability scalars.
 - :meth:`~spindoctor.nav_model.nav_model_rings_simulated.NavModelRingsSimulated.to_features` —
   emits the RING_ANNULUS plus one RING_EDGE per rendered edge (inner / outer).
@@ -116,11 +117,11 @@ Call path traced through
    per-edge sim parameter lists. The :class:`~spindoctor.nav_model.rings.ring_feature.RingFeature`
    data model is shared with the catalog-driven path so the downstream emission path is
    identical.
-3. Call :func:`~spindoctor.sim.sim_ring.render_ring` with the per-edge data, the operator-supplied
+3. Call :func:`~spindoctor.nav_model.sim_ring.render_ring` with the per-edge data, the operator-supplied
    centre, and the shading parameters. The helper returns the rendered ring-system image
    plus mask.
 4. Compute the per-edge brightness contrast and the per-pixel ``border_atop`` masking via
-   :func:`~spindoctor.sim.sim_ring.compute_border_atop_simulated`.
+   :func:`~spindoctor.sim.ring_geometry.compute_border_atop_simulated`.
 5. Promote the rendered image plus mask from sensor-shaped arrays to extfov-shaped arrays.
 6. Record the predicted centre, the subject range, and the bounding box on the model's
    internal state for downstream feature emission.
@@ -134,7 +135,7 @@ Call path traced through
    mask, the predicted centre, and a
    :class:`~spindoctor.feature.flags.RingAnnulusFlags` with the operator-supplied ring-system name.
 2. For each rendered edge, recompute its 1-pixel edge mask via
-   :func:`~spindoctor.sim.sim_ring.compute_border_atop_simulated`, sample it into a vertex
+   :func:`~spindoctor.sim.ring_geometry.compute_border_atop_simulated`, sample it into a vertex
    polyline with outward radial normals, classify it straight or curved, and append a
    :data:`~spindoctor.feature.feature_type.NavFeatureType.RING_EDGE` carrying a
    :class:`~spindoctor.feature.geometry.RingEdgePolyline`.

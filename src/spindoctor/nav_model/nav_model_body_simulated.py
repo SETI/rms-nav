@@ -24,8 +24,8 @@ from spindoctor.nav_model.body_shape import load_body_shape
 from spindoctor.nav_model.nav_model import NavModel
 from spindoctor.nav_model.nav_model_body import LIMB_ARC_MIN_VERTICES
 from spindoctor.nav_model.nav_model_body_base import BODY_BLOB_MIN_DIAMETER_PX, NavModelBodyBase
-from spindoctor.sim.sim_body import create_simulated_body
-from spindoctor.sim.sim_body_polyhedral import mesh_spec_from_params, render_mesh_body_image
+from spindoctor.nav_model.sim_body import create_simulated_body
+from spindoctor.sim.mesh_geometry import mesh_spec_from_params, render_mesh_body_image
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
 from spindoctor.support.time import now_dt
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
@@ -103,29 +103,6 @@ def _limb_polyline_from_mask(
     return vertices_vu, normals_vu
 
 
-def _nav_params(body_params: dict[str, Any]) -> dict[str, Any]:
-    """Overlay a body's ``nav_override`` onto its params for the predicted body.
-
-    Returns a shallow copy of ``body_params`` with the keys of its
-    ``nav_override`` mapping applied on top and the ``nav_override`` key itself
-    dropped.  Absent an override the params pass through unchanged, so the
-    predicted geometry equals the rendered geometry (the default agreeing case).
-
-    Parameters:
-        body_params: A scene body parameter mapping (the render geometry).
-
-    Returns:
-        The parameter mapping the navigator predicts from (the navigation
-        geometry).
-    """
-    override = body_params.get('nav_override')
-    if not isinstance(override, dict):
-        return dict(body_params)
-    merged = {k: v for k, v in body_params.items() if k != 'nav_override'}
-    merged.update(override)
-    return merged
-
-
 def _silhouette_diameter_px(body_mask: NDArrayBoolType) -> float:
     """Return the longer pixel extent of a rendered body silhouette.
 
@@ -199,7 +176,7 @@ class NavModelBodySimulated(NavModelBodyBase):
 
             - ``name``
             - ``center_v``, ``center_u`` (pixel coordinates of the centre)
-            - ``range`` (km; subject distance, defaults to inf)
+            - ``range_km`` (km; subject distance, defaults to inf)
             - ``axis1``, ``axis2``, ``axis3`` (km; ellipsoid semi-axes)
             - ``rotation_z`` (deg; rotation about the line of sight)
             - ``rotation_tilt`` (deg; tilt of the body)
@@ -236,19 +213,21 @@ class NavModelBodySimulated(NavModelBodyBase):
     def instances_for_obs(cls, obs: Observation, *, config: Config | None = None) -> list[NavModel]:
         """Build one simulated body model per body of a simulated obs.
 
-        Reads the per-body parameters the sim obs stashes on its snapshot
-        (``obs.sim_params['bodies']``).  Returns an empty list for a real obs,
-        so the SPICE-backed ``NavModelBody`` handles those instead.
+        Reads the per-body entries of the filtered idealized view
+        (``obs.nav_params['bodies']``) -- never the full scene, whose truth
+        keys stay behind the information boundary.  Returns an empty list for
+        a real obs, so the SPICE-backed ``NavModelBody`` handles those instead.
 
-        A body may carry an optional ``nav_override`` mapping.  The renderer
-        ignores it (it draws the true shape), but the predicted body is built
-        from the body params with ``nav_override`` overlaid -- the channel that
-        makes the navigation geometry diverge from the render geometry.  A scene
-        renders an irregular mesh at the true pose yet predicts an ellipsoid
-        (shape mismatch, B7 scenario 2), or the same mesh at a different pose
-        (chaotic-rotator pose disagreement, B7 scenario 3), without touching the
-        rendered image.  The override never changes the centre, so the predicted
-        body stays at the unshifted position the planted offset is measured from.
+        A scene body may carry a ``nav_override`` mapping: the renderer draws
+        the true shape, while the boundary filter overlays the override onto
+        the idealized view this model consumes -- the channel that makes the
+        navigation geometry diverge from the render geometry.  A scene renders
+        an irregular mesh at the true pose yet predicts an ellipsoid (shape
+        mismatch, B7 scenario 2), or the same mesh at a different pose
+        (chaotic-rotator pose disagreement, B7 scenario 3), without touching
+        the rendered image.  The override never changes the centre, so the
+        predicted body stays at the unshifted position the planted offset is
+        measured from.
 
         Parameters:
             obs: Observation snapshot.
@@ -260,11 +239,11 @@ class NavModelBodySimulated(NavModelBodyBase):
         """
         if not getattr(obs, 'is_simulated', False):
             return []
-        sim_params = getattr(obs, 'sim_params', None)
-        if not isinstance(sim_params, dict):
+        nav_params = getattr(obs, 'nav_params', None)
+        if not isinstance(nav_params, dict):
             return []
         out: list[NavModel] = []
-        for body_params in sim_params.get('bodies', []) or []:
+        for body_params in nav_params.get('bodies', []) or []:
             if not isinstance(body_params, dict):
                 continue
             body_name = str(body_params.get('name', 'SIM-BODY'))
@@ -273,7 +252,7 @@ class NavModelBodySimulated(NavModelBodyBase):
                     f'body_sim:{body_name}',
                     obs,
                     body_name,
-                    _nav_params(body_params),
+                    dict(body_params),
                     config=config,
                 )
             )
@@ -355,7 +334,7 @@ class NavModelBodySimulated(NavModelBodyBase):
             center_v + ext_margin_v,
             center_u + ext_margin_u,
         )
-        self._subject_range_km = float(p.get('range', float('inf')))
+        self._subject_range_km = float(p.get('range_km', float('inf')))
         # Predicted disc diameter: the longer pixel extent of the rendered
         # silhouette.  Drives the BODY_BLOB emission gate and covariance.
         self._predicted_diameter_px = _silhouette_diameter_px(body_mask)

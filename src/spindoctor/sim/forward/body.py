@@ -1,25 +1,38 @@
-"""Simulation utilities for creating synthetic images for testing and model correlation.
+"""Image-side ellipsoid body renderer (Lambert shading, crater texture).
 
-This module provides functions to create simulated planetary bodies and other
-astronomical objects for testing navigation algorithms without requiring real
-image files and SPICE kernels.
+Bodies render as Lambert-shaded ellipsoids with optional procedural crater
+texture; the topographic renderer (limb-relief field, terminator
+raggedness, photometric laws) is deliberately not implemented.  Shading
+conventions are shared with the
+navigator's predicted-body renderer through
+:mod:`spindoctor.sim.ellipsoid_geometry`, so a scene's planted geometry
+error is the only difference between rendered and predicted silhouettes.
+
+The crater texture lives only on this side of the information boundary: the
+crater knobs are truth keys the navigator never sees (its best model is the
+smooth ellipsoid).
 """
 
-from typing import cast
+from functools import lru_cache
+from typing import Any, cast
 
 import numpy as np
+from scipy import ndimage
 
-from spindoctor.sim.seeds import stable_param_seed
+from spindoctor.sim.ellipsoid_geometry import ellipsoid_image_normals, lambert_from_normals
+from spindoctor.sim.seeds import derive_effect_seed, stable_param_seed
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType
+
+__all__ = ['create_simulated_body', 'render_single_body']
 
 
 def create_simulated_body(
     size: tuple[int, int],
     center: tuple[float, float],
     axis1: float,
+    *,
     axis2: float,
     axis3: float,
-    *,
     rotation_z: float = 0.0,
     rotation_tilt: float = 0.0,
     illumination_angle: float = 0.0,
@@ -40,12 +53,12 @@ def create_simulated_body(
 
     Parameters:
         size: Tuple of (size_v, size_u) giving the image dimensions in pixels.
-        axis1: The full width of axis 1 (a) of the ellipsoid in pixels.
-        axis2: The full width of axis 2 (b) of the ellipsoid in pixels.
-        axis3: The full width of axis 3 (c) of the ellipsoid in pixels (depth).
         center: Tuple of (v, u) giving the center position in floating-point pixels.
             (0.0, 0.0) is the top-left corner of pixel (0,0), (0.5, 0.5) is the
             center of pixel (0,0).
+        axis1: The full width of axis 1 (a) of the ellipsoid in pixels.
+        axis2: The full width of axis 2 (b) of the ellipsoid in pixels.
+        axis3: The full width of axis 3 (c) of the ellipsoid in pixels (depth).
         rotation_z: Rotation angle around the viewing axis (z-axis) in radians (0 to 2pi).
         rotation_tilt: Tilt angle of the ellipsoid in radians (0 to pi/2).
             Controls how much the ellipsoid is tilted toward/away from the viewer.
@@ -152,7 +165,7 @@ def create_simulated_body(
             seed_value = int(seed) & 0x7FFFFFFF
         else:
             seed_value = stable_param_seed(axis1, axis2, axis3, center) & 0x7FFFFFFF
-        rng = np.random.RandomState(seed_value)
+        rng = np.random.default_rng(seed_value)
         # Choose crater centers strictly inside the ellipse (exclude AA rim and exterior)
         ellipse_mask_nz = ellipse_dist_sq < 1.0
         nz = np.argwhere(ellipse_mask_nz)
@@ -161,18 +174,18 @@ def create_simulated_body(
             ellipse_mask_nz,
             v_coords,
             u_coords,
-            nz,  # indices of non-zero ellipse pixels (list/array of (v,u))
-            rng,
-            n_craters,
-            crater_min_radius * semi_major_axis,
-            crater_max_radius * semi_major_axis,
-            crater_power_law_exponent,
-            crater_relief_scale,
-            work_center_v,
-            work_center_u,
-            aa_scale,
-            illumination_angle,  # 0 = from top, pi/2 = from right
-            phase_angle,  # 0 = from front, pi/2 = from side, pi = from back
+            nz=nz,  # indices of non-zero ellipse pixels (list/array of (v,u))
+            rng=rng,
+            n_craters=n_craters,
+            R_min=crater_min_radius * semi_major_axis,
+            R_max=crater_max_radius * semi_major_axis,
+            crater_power_law_exponent=crater_power_law_exponent,
+            crater_relief_scale=crater_relief_scale,
+            work_center_v=work_center_v,
+            work_center_u=work_center_u,
+            aa_scale=aa_scale,
+            lighting_angle=illumination_angle,  # 0 = from top, pi/2 = from right
+            phase_angle=phase_angle,  # 0 = from front, pi/2 = from side, pi = from back
             ellipse_mask=ellipse_mask,
             z_coords=z_coords,
             v_rot=v_rot,
@@ -185,11 +198,11 @@ def create_simulated_body(
         )
 
     else:
-        normal_v, normal_u, normal_z = _ellipsoid_image_normals(
+        normal_v, normal_u, normal_z = ellipsoid_image_normals(
             ellipse_mask,
             v_rot,
             u_rot,
-            z_coords,
+            z_coords=z_coords,
             work_semi_major=work_semi_major,
             work_semi_minor=work_semi_minor,
             work_semi_c=work_semi_c,
@@ -197,7 +210,13 @@ def create_simulated_body(
             sin_rz=sin_rz,
         )
         intensity = (
-            _lambert_from_normals(normal_v, normal_u, normal_z, illumination_angle, phase_angle)
+            lambert_from_normals(
+                normal_v,
+                normal_u,
+                normal_z,
+                illumination_angle=illumination_angle,
+                phase_angle=phase_angle,
+            )
             * ellipse_mask
         )
 
@@ -212,155 +231,13 @@ def create_simulated_body(
     return intensity
 
 
-def _ellipsoid_image_normals(
-    ellipse_mask: NDArrayFloatType,
-    v_rot: NDArrayFloatType,
-    u_rot: NDArrayFloatType,
-    z_coords: NDArrayFloatType,
-    *,
-    work_semi_major: float,
-    work_semi_minor: float,
-    work_semi_c: float,
-    cos_rz: float,
-    sin_rz: float,
-) -> tuple[NDArrayFloatType, NDArrayFloatType, NDArrayFloatType]:
-    """Unit surface normals of the base ellipsoid in image coordinates.
-
-    For a 3D ellipsoid, the surface normal at body-frame point (v, u, z) is
-    (v/a^2, u/b^2, z/c^2) normalized.  The in-plane components are then rotated
-    back from the ellipsoid's rotated frame to image coordinates through the
-    inverse of the rotation_z coordinate transformation; the z component is
-    perpendicular to the image plane and unaffected.  Both the smooth and the
-    cratered shading paths derive their base normals here, so the two paths
-    share a single illumination convention.
-
-    Parameters:
-        ellipse_mask: Ellipse coverage mask; normals are computed where > 0.
-        v_rot: Rotated-frame v coordinate of each pixel.
-        u_rot: Rotated-frame u coordinate of each pixel.
-        z_coords: Depth of the visible ellipsoid surface at each pixel.
-        work_semi_major: Semi-major axis (a) at working resolution.
-        work_semi_minor: Semi-minor axis (b) at working resolution.
-        work_semi_c: Depth semi-axis (c) at working resolution.
-        cos_rz: Cosine of the rotation_z angle.
-        sin_rz: Sine of the rotation_z angle.
-
-    Returns:
-        Tuple of (normal_v, normal_u, normal_z) unit-normal component arrays in
-        image coordinates.
-    """
-    normal_v_local = np.zeros_like(v_rot)
-    normal_u_local = np.zeros_like(u_rot)
-    normal_z_local = np.zeros_like(z_coords)
-
-    # Only compute normals for points inside the ellipsoid
-    inside_mask = ellipse_mask > 0
-    normal_v_local[inside_mask] = v_rot[inside_mask] / (work_semi_major**2)
-    normal_u_local[inside_mask] = u_rot[inside_mask] / (work_semi_minor**2)
-    normal_z_local[inside_mask] = z_coords[inside_mask] / (work_semi_c**2)
-
-    # Normalize the normal vectors
-    normal_mag = np.sqrt(normal_v_local**2 + normal_u_local**2 + normal_z_local**2)
-    normal_mag = np.maximum(normal_mag, 1e-10)  # Avoid division by zero
-    normal_v_local /= normal_mag
-    normal_u_local /= normal_mag
-    normal_z_local /= normal_mag
-
-    # Rotate normal back to image coordinates (only v and u components)
-    # The z component stays in the depth direction
-    # Use inverse rotation (negate sin) to match the coordinate transformation
-    normal_v = normal_v_local * cos_rz + normal_u_local * sin_rz
-    normal_u = -normal_v_local * sin_rz + normal_u_local * cos_rz
-    return normal_v, normal_u, normal_z_local
-
-
-def _lambert_from_normals(
-    normal_v: NDArrayFloatType,
-    normal_u: NDArrayFloatType,
-    normal_z: NDArrayFloatType,
-    illumination_angle: float,
-    phase_angle: float,
-) -> NDArrayFloatType:
-    """Lambertian illumination strength for image-frame unit surface normals.
-
-    The normals must already be unit length (or zero outside the body).  Both
-    the smooth and the cratered shading paths use this single implementation
-    so their illumination conventions cannot diverge.
-
-    Parameters:
-        normal_v: V component of the unit surface normal in image coordinates.
-        normal_u: U component of the unit surface normal in image coordinates.
-        normal_z: Z (toward-observer) component of the unit surface normal.
-        illumination_angle: In-plane light direction in radians; 0 is from the
-            top of the image, pi/2 from the right.
-        phase_angle: Phase angle in radians; 0 is fully lit, pi is backlit.
-
-    Returns:
-        Illumination strength array in [0, 1]; 0 on the far hemisphere.
-    """
-    # Illumination direction in 3D space
-    # illumination_angle: 0 = top, pi/2 = right, pi = bottom, 3pi/2 = left
-    # This is the direction in the image plane
-    illum_v_2d = -np.cos(illumination_angle)  # Negative because v increases downward
-    illum_u_2d = np.sin(illumination_angle)
-
-    # Phase angle: angle between observer-body-sun
-    # phase_angle = 0: full moon (observer and sun on same side, visible face fully lit)
-    # phase_angle = pi/2: quarter moon (observer and sun perpendicular)
-    # phase_angle = pi: new moon (observer and sun opposite, visible face dark/backlit)
-    #
-    # The illumination vector points from body toward sun.
-    # For phase_angle = 0: sun is behind observer, so illumination comes from direction
-    #   that lights the visible face (positive dot product with visible normals).
-    # For phase_angle = pi: sun is behind body, so illumination comes from direction
-    #   that doesn't light the visible face (negative dot product with visible normals).
-    #
-    # The z-component of illumination: when phase_angle = pi, we want backlit (dark),
-    # so z should be negative (illumination away from observer) to make dot product negative.
-    # When phase_angle = 0, we want fully lit, so z should be positive to make dot product positive.
-    # So: z = cos(phase_angle) gives phase_angle=0 -> z=+1, phase_angle=pi -> z=-1
-    illum_z = np.cos(phase_angle)
-
-    # The in-plane component magnitude
-    illum_scale_2d = np.sin(phase_angle)
-    illum_v_3d = illum_v_2d * illum_scale_2d
-    illum_u_3d = illum_u_2d * illum_scale_2d
-
-    # Normalize the 3D illumination direction
-    illum_mag = np.sqrt(illum_v_3d**2 + illum_u_3d**2 + illum_z**2)
-    if illum_mag > 1e-10:
-        illum_v_3d /= illum_mag
-        illum_u_3d /= illum_mag
-        illum_z_norm = illum_z / illum_mag
-    else:
-        illum_z_norm = 1.0  # Directly toward observer
-
-    # Only illuminate points on the visible hemisphere (facing toward observer)
-    # The z-component of the normal should be positive (pointing toward observer)
-    visible_hemisphere = normal_z > 0
-
-    # Compute cosine of incidence angle (Lambertian shading)
-    # cos(incidence) = dot(normal, illumination_direction)
-    cos_incidence = normal_v * illum_v_3d + normal_u * illum_u_3d + normal_z * illum_z_norm
-
-    # Lambertian shading: I = I_0 * max(0, cos(incidence))
-    # Only apply to visible hemisphere and clip to [0, 1] range
-    dark_side_illum_strength = 0.01  # TODO make config parameter
-    light_side_illum_gamma = 1  # TODO make config parameter
-    illum_strength = np.where(
-        visible_hemisphere, np.clip(cos_incidence, dark_side_illum_strength, 1.0), 0.0
-    )
-    illum_strength **= light_side_illum_gamma
-
-    return cast(NDArrayFloatType, illum_strength)
-
-
 def _add_craters_and_shading(
     ellipse_mask_nz: NDArrayBoolType,
     v_coords: NDArrayFloatType,
     u_coords: NDArrayFloatType,
+    *,
     nz: NDArrayIntType,
-    rng: np.random.RandomState,
+    rng: np.random.Generator,
     n_craters: int,
     R_min: float,
     R_max: float,
@@ -371,7 +248,6 @@ def _add_craters_and_shading(
     aa_scale: int,
     lighting_angle: float,
     phase_angle: float,
-    *,
     ellipse_mask: NDArrayFloatType,
     z_coords: NDArrayFloatType,
     v_rot: NDArrayFloatType,
@@ -385,8 +261,8 @@ def _add_craters_and_shading(
     """Carve craters into the ellipsoid surface and apply Lambertian shading.
 
     The base-surface normals and the Lambertian illumination model are shared
-    with the smooth (no-crater) path via ``_ellipsoid_image_normals`` and
-    ``_lambert_from_normals``, so a cratered body and a smooth body with the
+    with the smooth (no-crater) path via ``ellipsoid_image_normals`` and
+    ``lambert_from_normals``, so a cratered body and a smooth body with the
     same pose and illumination shade identically outside the craters.
 
     Parameters:
@@ -428,9 +304,10 @@ def _add_craters_and_shading(
     # 1. Radius distribution: power law in [R_min, R_max]
     # ------------------------------------------------------------------
     def power_law_radius(
-        rng: np.random.RandomState,
+        rng: np.random.Generator,
         R_min: float,
         R_max: float,
+        *,
         alpha: float,
         size: int | None = None,
     ) -> NDArrayFloatType:
@@ -449,11 +326,11 @@ def _add_craters_and_shading(
     # ------------------------------------------------------------------
     for _ in range(n_craters):
         # Random crater center in non-zero ellipse area
-        v_crater, u_crater = nz[rng.randint(len(nz))]
+        v_crater, u_crater = nz[int(rng.integers(len(nz)))]
 
         # Radius from power-law distribution
         crater_radius = power_law_radius(
-            rng, R_min * aa_scale, R_max * aa_scale, crater_power_law_exponent
+            rng, R_min * aa_scale, R_max * aa_scale, alpha=crater_power_law_exponent
         )
 
         # Compute distances from crater center.
@@ -526,21 +403,17 @@ def _add_craters_and_shading(
         # Add crater relief to global heightmap
         height[crater_mask] += local_profile
 
-    # import matplotlib.pyplot as plt
-    # plt.imshow(height)
-    # plt.show()
-
     # ----------------------------------------------------------------------
     # 3. Lambertian shading: base-ellipsoid normals perturbed by crater relief
     # ----------------------------------------------------------------------
     # The base-surface normal comes from the same analytic formula (and the
     # same rotation_z back-rotation to image coordinates) as the smooth,
     # no-crater path, so both shading paths share one illumination convention.
-    normal_v, normal_u, normal_z = _ellipsoid_image_normals(
+    normal_v, normal_u, normal_z = ellipsoid_image_normals(
         ellipse_mask,
         v_rot,
         u_rot,
-        z_coords,
+        z_coords=z_coords,
         work_semi_major=work_semi_major,
         work_semi_minor=work_semi_minor,
         work_semi_c=work_semi_c,
@@ -563,8 +436,12 @@ def _add_craters_and_shading(
     perturbed_u /= perturbed_mag
     perturbed_z = normal_z / perturbed_mag
 
-    lambert = _lambert_from_normals(
-        perturbed_v, perturbed_u, perturbed_z, lighting_angle, phase_angle
+    lambert = lambert_from_normals(
+        perturbed_v,
+        perturbed_u,
+        perturbed_z,
+        illumination_angle=lighting_angle,
+        phase_angle=phase_angle,
     )
 
     # Apply ellipse mask (with AA edge)
@@ -572,3 +449,243 @@ def _add_craters_and_shading(
     # Ensure area strictly outside the ellipse is zeroed, to avoid any bleed with AA
     intensity_out[~ellipse_mask_nz] = 0.0
     return intensity_out
+
+
+@lru_cache(maxsize=30)
+def _render_body_shape_cached(
+    size_v: int,
+    size_u: int,
+    axis1: float,
+    *,
+    axis2: float,
+    axis3: float,
+    rotation_z: float,
+    rotation_tilt: float,
+    illumination_angle: float,
+    phase_angle: float,
+    crater_fill: float,
+    crater_min_radius: float,
+    crater_max_radius: float,
+    crater_power_law_exponent: float,
+    crater_relief_scale: float,
+    anti_aliasing: float,
+    body_seed: int | None,
+) -> NDArrayFloatType:
+    """First layer cache: compute body shape at reference center (image center).
+
+    Caches body shapes based on all parameters except center_v/center_u.
+    Max size 30 allows caching up to 30 different body configurations.
+    """
+    # Use image center as reference - we'll translate when positioning
+    ref_center_v = size_v / 2.0
+    ref_center_u = size_u / 2.0
+
+    sim_body = create_simulated_body(
+        size=(size_v, size_u),
+        center=(ref_center_v, ref_center_u),
+        axis1=axis1,
+        axis2=axis2,
+        axis3=axis3,
+        rotation_z=rotation_z,
+        rotation_tilt=rotation_tilt,
+        illumination_angle=illumination_angle,
+        phase_angle=phase_angle,
+        crater_fill=crater_fill,
+        crater_min_radius=crater_min_radius,
+        crater_max_radius=crater_max_radius,
+        crater_power_law_exponent=crater_power_law_exponent,
+        crater_relief_scale=crater_relief_scale,
+        anti_aliasing=anti_aliasing,
+        seed=body_seed,
+    )
+    return sim_body
+
+
+def render_single_body(
+    img: NDArrayFloatType,
+    body_params: dict[str, Any],
+    offset_v: float,
+    *,
+    offset_u: float,
+    seed: int | None = None,
+    body_index: int = 0,
+    ref_center_v: float,
+    ref_center_u: float,
+) -> tuple[NDArrayBoolType, dict[str, Any]]:
+    """Render a single body into the image.
+
+    Parameters:
+        img: Image array to modify in-place.
+        body_params: Body parameters dictionary.
+        offset_v: V offset to apply.
+        offset_u: U offset to apply.
+        seed: Scene-level crater seed; a per-body sub-seed is derived from it
+            so bodies with identical geometry get independent crater patterns.
+        body_index: Stable index of this body in the scene's body list, mixed
+            into the per-body crater sub-seed alongside the body name.
+        ref_center_v: Reference center V for body shape caching.
+        ref_center_u: Reference center U for body shape caching.
+
+    Returns:
+        Tuple of (body_mask, body_info_dict) where body_info_dict contains
+        name, inventory item, and model params.
+    """
+    size_v, size_u = img.shape
+    # The positional fallback matches the default the radiance stage assigns,
+    # so a direct caller and the pipeline agree on an unnamed body's identity.
+    body_name = str(body_params.get('name', f'SIM-BODY-{body_index + 1}')).upper()
+
+    center_v = float(body_params.get('center_v', size_v / 2.0)) + offset_v
+    center_u = float(body_params.get('center_u', size_u / 2.0)) + offset_u
+
+    axis1 = float(body_params.get('axis1', 0.0))
+    axis2 = float(body_params.get('axis2', 0.0))
+    axis3 = float(body_params.get('axis3', min(axis1, axis2)))
+
+    rotation_z = np.radians(body_params.get('rotation_z', 0.0))
+    rotation_tilt = np.radians(body_params.get('rotation_tilt', 0.0))
+    illumination_angle = np.radians(body_params.get('illumination_angle', 0.0))
+    phase_angle = np.radians(body_params.get('phase_angle', 0.0))
+
+    crater_fill = float(body_params.get('crater_fill', 0.0))
+    crater_min_radius = float(body_params.get('crater_min_radius', 0.05))
+    crater_max_radius = float(body_params.get('crater_max_radius', 0.25))
+    crater_power_law_exponent = float(body_params.get('crater_power_law_exponent', 3.0))
+    crater_relief_scale = float(body_params.get('crater_relief_scale', 0.6))
+    anti_aliasing = float(body_params.get('anti_aliasing', 1.0))
+
+    # Mix a stable per-body identity (scene index and name) into the scene's
+    # crater seed so two bodies with identical geometry draw independent crater
+    # patterns and occupy distinct shape-cache entries.  The derivation is
+    # SHA-256 based (never Python's salted hash), so it is process-stable.  A
+    # body without craters never consumes the seed; None keeps identical
+    # smooth bodies sharing one cached shape.
+    body_seed: int | None
+    if crater_fill <= 0.0:
+        body_seed = None
+    elif seed is not None:
+        body_seed = derive_effect_seed(seed, f'body:{body_index}:{body_name}')
+    else:
+        body_seed = body_params.get('seed')
+
+    # Projected half-extents of the body in the image plane.  The rendered
+    # silhouette is the axis1/axis2 ellipse rotated in-plane by rotation_z
+    # (axis3 is the depth axis and does not project), so the bounding
+    # half-extents along the image axes follow from the rotated ellipse.
+    semi_1 = axis1 / 2.0
+    semi_2 = axis2 / 2.0
+    cos_rz = float(np.cos(rotation_z))
+    sin_rz = float(np.sin(rotation_z))
+    half_extent_v = float(np.hypot(semi_1 * cos_rz, semi_2 * sin_rz))
+    half_extent_u = float(np.hypot(semi_1 * sin_rz, semi_2 * cos_rz))
+
+    # Get cached body shape (at reference center).  An irregular body renders
+    # from a polyhedral mesh at a scene-supplied pose; otherwise an ellipsoid.
+    if str(body_params.get('shape_model', 'ellipsoid')) == 'polyhedral_mesh':
+        # Local import: body_mesh imports this module's finisher, so the mesh
+        # path is resolved lazily to keep the module import graph acyclic.
+        from spindoctor.sim.forward.body_mesh import render_single_mesh_body
+
+        return render_single_mesh_body(
+            img,
+            body_params,
+            body_name,
+            center_v=center_v,
+            center_u=center_u,
+            axis1=axis1,
+            axis2=axis2,
+            axis3=axis3,
+            illumination_angle=float(illumination_angle),
+            phase_angle=float(phase_angle),
+            anti_aliasing=anti_aliasing,
+            ref_center_v=ref_center_v,
+            ref_center_u=ref_center_u,
+        )
+
+    body_shape = _render_body_shape_cached(
+        size_v,
+        size_u,
+        axis1,
+        axis2=axis2,
+        axis3=axis3,
+        rotation_z=rotation_z,
+        rotation_tilt=rotation_tilt,
+        illumination_angle=illumination_angle,
+        phase_angle=phase_angle,
+        crater_fill=crater_fill,
+        crater_min_radius=crater_min_radius,
+        crater_max_radius=crater_max_radius,
+        crater_power_law_exponent=crater_power_law_exponent,
+        crater_relief_scale=crater_relief_scale,
+        anti_aliasing=anti_aliasing,
+        body_seed=body_seed,
+    )
+    return finish_single_body(
+        img,
+        body_shape,
+        body_params,
+        body_name=body_name,
+        center_v=center_v,
+        center_u=center_u,
+        half_extent_v=half_extent_v,
+        half_extent_u=half_extent_u,
+        ref_center_v=ref_center_v,
+        ref_center_u=ref_center_u,
+    )
+
+
+def finish_single_body(
+    img: NDArrayFloatType,
+    body_shape: NDArrayFloatType,
+    body_params: dict[str, Any],
+    *,
+    body_name: str,
+    center_v: float,
+    center_u: float,
+    half_extent_v: float,
+    half_extent_u: float,
+    ref_center_v: float,
+    ref_center_u: float,
+) -> tuple[NDArrayBoolType, dict[str, Any]]:
+    """Translate a reference-centred body shape into place and composite it.
+
+    Parameters:
+        img: Image array to modify in-place.
+        body_shape: Body intensity rendered at the reference center.
+        body_params: Body parameters dictionary.
+        body_name: Upper-cased body name for the inventory keys.
+        center_v: Body center V in the image (offset already applied).
+        center_u: Body center U in the image (offset already applied).
+        half_extent_v: Projected half-extent of the silhouette along v.
+        half_extent_u: Projected half-extent of the silhouette along u.
+        ref_center_v: Reference center V the shape was rendered at.
+        ref_center_u: Reference center U the shape was rendered at.
+
+    Returns:
+        Tuple of (body_mask, body_info_dict) where body_info_dict contains
+        name, inventory item, and model params.
+    """
+    dv = center_v - ref_center_v
+    du = center_u - ref_center_u
+    positioned_body = ndimage.shift(body_shape, (dv, du), order=1, mode='constant', cval=0.0)
+    mask = positioned_body > 0
+    img[mask] = positioned_body[mask]
+
+    inventory_item = {
+        'v_min_unclipped': center_v - half_extent_v,
+        'v_max_unclipped': center_v + half_extent_v,
+        'u_min_unclipped': center_u - half_extent_u,
+        'u_max_unclipped': center_u + half_extent_u,
+        'v_pixel_size': 2 * half_extent_v,
+        'u_pixel_size': 2 * half_extent_u,
+        # The inventory mirrors the oops inventory contract for real frames,
+        # whose distance key is named 'range'; the scene schema key is the
+        # per-body 'range_km'.
+        'range': body_params.get('range_km', 1.0),
+    }
+
+    return mask, {
+        'name': body_name,
+        'inventory': inventory_item,
+        'params': body_params,
+    }

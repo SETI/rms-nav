@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 scene_name: two_moons
 instrument: coiss_nac
 size_v: 128
@@ -15,7 +15,7 @@ bodies:
     axis3: 40.0
     illumination_angle: 20.0
     phase_angle: 30.0
-    range: 500000.0
+    range_km: 500000.0
   - name: DIONE
     shape_model: ellipsoid
     center_v: 86.0
@@ -25,7 +25,7 @@ bodies:
     axis3: 34.0
     illumination_angle: 20.0
     phase_angle: 30.0
-    range: 700000.0
+    range_km: 700000.0
 noise:
   poisson: true
   read_noise_dn: 4.0
