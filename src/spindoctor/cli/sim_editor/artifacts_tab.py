@@ -169,12 +169,17 @@ class ArtifactsTabMixin(SimEditorBase):
             self._detector_quantization_combo.setCurrentIndex(quantization_index)
 
     def _refresh_detector_catalog_defaults(self) -> None:
-        """Refresh the displayed catalog defaults after an instrument change."""
+        """Refresh the displayed catalog defaults after an instrument change.
+
+        Restores the caller's _syncing state on exit, so a refresh nested
+        inside a wider sync never re-enables widget writes early.
+        """
+        was_syncing = self._syncing
         self._syncing = True
         try:
             self._set_detector_widget_values()
         finally:
-            self._syncing = False
+            self._syncing = was_syncing
 
     def _set_detector_key(self, key: str, value: Any) -> None:
         """Write one detector key, preserving every other authored key."""
