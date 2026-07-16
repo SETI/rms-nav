@@ -283,7 +283,7 @@ class TabsMixin(SimEditorBase):
                 'vmag': 3.0,
                 'spectral_class': 'G2',
                 'psf_sigma': 1.0,
-                'psf_size': (11, 11),
+                'psf_size': [11, 11],
             }
         else:
             p = params

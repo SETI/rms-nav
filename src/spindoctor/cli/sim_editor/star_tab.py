@@ -3,6 +3,11 @@
 Builds the per-star editing tab (position, magnitude, spectral class, PSF sigma,
 smear vector, catalog name, and the V / U PSF-window sizes) and owns the
 handlers that write star fields back into the data model.
+
+The PSF-window size is stored as a two-element list, never a tuple: the safe
+YAML dumper is not guaranteed to accept tuples, and a tuple never compares
+equal to the list the value reloads as, so a tuple would break a GUI-authored
+psf_size round trip against its reloaded form.
 """
 
 from typing import Any
@@ -109,7 +114,7 @@ class StarTabMixin(SimEditorBase):
         )
         psf_size_v_slider = QSlider(Qt.Orientation.Horizontal)
         psf_size_v_slider.setRange(0, 11)  # 12 positions for odd values 1-23
-        psf_size_v_default = p.get('psf_size', (11, 11))[0]
+        psf_size_v_default = p.get('psf_size', [11, 11])[0]
         psf_size_v_default = self._ensure_odd_psf_size(psf_size_v_default)
         # Convert odd value to slider position: (value - 1) // 2
         psf_size_v_slider.setValue((psf_size_v_default - 1) // 2)
@@ -149,7 +154,7 @@ class StarTabMixin(SimEditorBase):
         )
         psf_size_u_slider = QSlider(Qt.Orientation.Horizontal)
         psf_size_u_slider.setRange(0, 11)  # 12 positions for odd values 1-23
-        psf_size_u_default = p.get('psf_size', (11, 11))[1]
+        psf_size_u_default = p.get('psf_size', [11, 11])[1]
         psf_size_u_default = self._ensure_odd_psf_size(psf_size_u_default)
         # Convert odd value to slider position: (value - 1) // 2
         psf_size_u_slider.setValue((psf_size_u_default - 1) // 2)
@@ -235,11 +240,11 @@ class StarTabMixin(SimEditorBase):
                     spin.blockSignals(True)
                     spin.setValue(odd_value)
                     spin.blockSignals(False)
-        current_psf_size = self.sim_params['stars'][idx].get('psf_size', (11, 11))
+        current_psf_size = self.sim_params['stars'][idx].get('psf_size', [11, 11])
         if dimension == 0:
-            self.sim_params['stars'][idx]['psf_size'] = (odd_value, current_psf_size[1])
+            self.sim_params['stars'][idx]['psf_size'] = [odd_value, current_psf_size[1]]
         else:
-            self.sim_params['stars'][idx]['psf_size'] = (current_psf_size[0], odd_value)
+            self.sim_params['stars'][idx]['psf_size'] = [current_psf_size[0], odd_value]
         self._updater.request_update()
 
     def _on_star_psf_size_spin(self, idx: int, dimension: int, value: int) -> None:
@@ -273,11 +278,11 @@ class StarTabMixin(SimEditorBase):
                     slider.blockSignals(True)
                     slider.setValue((odd_value - 1) // 2)
                     slider.blockSignals(False)
-        current_psf_size = self.sim_params['stars'][idx].get('psf_size', (11, 11))
+        current_psf_size = self.sim_params['stars'][idx].get('psf_size', [11, 11])
         if dimension == 0:
-            self.sim_params['stars'][idx]['psf_size'] = (odd_value, current_psf_size[1])
+            self.sim_params['stars'][idx]['psf_size'] = [odd_value, current_psf_size[1]]
         else:
-            self.sim_params['stars'][idx]['psf_size'] = (current_psf_size[0], odd_value)
+            self.sim_params['stars'][idx]['psf_size'] = [current_psf_size[0], odd_value]
         self._updater.request_update()
 
     def _on_star_psf_size_v_slider(self, idx: int, value: int) -> None:
