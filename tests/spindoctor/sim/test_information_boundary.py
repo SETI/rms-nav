@@ -47,7 +47,12 @@ _TRUTH_SAMPLES: dict[str, Any] = {
         'exposure_ref_sec': 1.0,
         'quantization': 'exact',
     },
-    'artifacts': {'instrument_defaults': True},
+    'artifacts': {
+        'instrument_defaults': True,
+        'adversarial': True,
+        'missing_lines': {'incidence': 2.0, 'contiguous_run': True},
+        'hot_pixels': {'incidence': 0.001, 'amplitude_e': 40000.0},
+    },
     'spk_error': {'dv_px': 0.8, 'du_px': -0.4, 'reference_range_km': 100000.0},
     'bodies.crater_fill': 0.4,
     'bodies.crater_min_radius': 0.06,
