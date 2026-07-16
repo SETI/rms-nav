@@ -242,11 +242,20 @@ def apply_optics(
 
     stray = optics.get('stray_light')
     if stray:
+        # Scene centre keys are detector coordinates; the signal plane is the
+        # oversampled grid, so scale them like every other pixel-space
+        # parameter (centroid-exact: detector c maps to c*os + (os-1)/2).
+        center_v = stray.get('center_v')
+        center_u = stray.get('center_u')
+        if center_v is not None:
+            center_v = float(center_v) * oversample + (oversample - 1) / 2.0
+        if center_u is not None:
+            center_u = float(center_u) * oversample + (oversample - 1) / 2.0
         apply_stray_light(
             frame.signal,
             amplitude=float(stray.get('amplitude', 0.0)),
             direction_deg=float(stray.get('direction_deg', 0.0)),
             model=str(stray.get('model', 'linear')),
-            center_v=stray.get('center_v'),
-            center_u=stray.get('center_u'),
+            center_v=center_v,
+            center_u=center_u,
         )
