@@ -3,14 +3,16 @@
 Emits STAR ``NavFeature`` instances for a simulated frame exactly the way
 :class:`~spindoctor.nav_model.stars.nav_model_stars.NavModelStars` does for a real
 frame -- same predicted-SNR, covariance, reliability, and annotation
-machinery -- but sources the star list from the sim renderer's output
-(carried on ``obs.sim_star_list``) rather than reducing real catalogs.
+machinery -- but builds its star list from the scene's catalog entries in
+the filtered idealized view (``obs.nav_params``) rather than reducing real
+catalogs.  The renderer's output star records never cross the information
+boundary: the navigator knows the catalog, not what was drawn.
 
-The renderer builds each star at its *unshifted* predicted ``(v, u)`` and
-draws it into the image shifted by the scene's planted offset.  This model
-emits the unshifted prediction, so a star technique that detects the shifted
-peak recovers the planted offset -- the same prediction/observation split a
-real navigation has, which is why the recovery transfers.
+The scene renders each star at its catalog ``(v, u)`` shifted by the planted
+offset; this model predicts the unshifted catalog position, so a star
+technique that detects the shifted peak recovers the planted offset -- the
+same prediction/observation split a real navigation has, which is why the
+recovery transfers.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from spindoctor.nav_model.stars.nav_model_stars import (
     _star_short_info,
     _star_summary,
 )
+from spindoctor.sim.star_records import star_record_from_params
 from spindoctor.support.time import now_dt
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
@@ -35,26 +38,26 @@ __all__ = ['NavModelStarsSimulated']
 
 
 class NavModelStarsSimulated(NavModelStars):
-    """Star NavModel populated from the sim renderer's star list.
+    """Star NavModel populated from the scene's idealized star catalog.
 
     Inherits feature emission (``to_features``), annotations, and the
     extfov-coordinate plumbing from :class:`NavModelStars`; only the model
-    construction differs -- the stars come from the rendered scene rather
-    than from a catalog reduction.
+    construction differs -- the stars come from the scene's ``nav_params``
+    star entries rather than from a catalog reduction.
 
     Parameters:
         name: Model name (typically ``'stars'``).
-        obs: Simulated observation snapshot carrying ``sim_star_list``.
+        obs: Simulated observation snapshot carrying ``nav_params``.
         config: Optional ``Config`` override.
     """
 
     @classmethod
     def instances_for_obs(cls, obs: Observation, *, config: Config | None = None) -> list[NavModel]:
-        """Return one star model for a simulated obs that rendered stars.
+        """Return one star model for a simulated obs whose scene has stars.
 
         Returns an empty list for a real obs (the catalog-driven
-        :class:`NavModelStars` handles those) and for a simulated obs that
-        rendered no stars (so the orchestrator builds no empty star model).
+        :class:`NavModelStars` handles those) and for a simulated obs whose
+        scene lists no stars (so the orchestrator builds no empty star model).
 
         Parameters:
             obs: Observation snapshot.
@@ -63,23 +66,24 @@ class NavModelStarsSimulated(NavModelStars):
 
         Returns:
             ``[NavModelStarsSimulated('stars', obs)]`` for a simulated obs
-            with at least one rendered star, else ``[]``.
+            with at least one scene star, else ``[]``.
         """
         if not getattr(obs, 'is_simulated', False):
             return []
-        if not getattr(obs, 'sim_star_list', None):
+        nav_params = getattr(obs, 'nav_params', None)
+        if not isinstance(nav_params, dict) or not nav_params.get('stars'):
             return []
         return [cls('stars', obs, config=config)]
 
     def create_model(self) -> None:
-        """Populate the star list from the rendered scene.
+        """Build the star list from the scene's idealized catalog entries.
 
-        The sim renderer builds the per-star :class:`MutableStar` objects at
-        their unshifted predicted positions and stashes them on
-        ``obs.sim_star_list``; this model adopts that list directly.  Smear
-        is zero (the sim renders no per-image attitude rate) and there are no
-        body/ring occlusion conflicts to mark -- a simulated star field is
-        clean by construction.
+        Each ``nav_params`` star entry becomes a catalog record at its
+        unshifted position, through the same builder the renderer uses, so
+        prediction and render share one set of defaults while exchanging no
+        rendered values.  Smear is per-entry catalog data (zero by default)
+        and there are no body/ring occlusion conflicts to mark -- a
+        simulated star field is clean by construction.
         """
         start_time = now_dt()
         self._metadata.clear()
@@ -87,12 +91,20 @@ class NavModelStarsSimulated(NavModelStars):
         self._metadata['end_time'] = None
         self._metadata['elapsed_time_sec'] = None
         with self._logger.open('CREATE SIMULATED STARS MODEL'):
-            stars: list[MutableStar] = list(getattr(self.obs, 'sim_star_list', []) or [])
+            nav_params = getattr(self.obs, 'nav_params', None) or {}
+            default_v = float(self.obs.data_shape_v) / 2.0
+            default_u = float(self.obs.data_shape_u) / 2.0
+            stars: list[MutableStar] = [
+                star_record_from_params(
+                    star_params, index=i, default_v=default_v, default_u=default_u
+                )
+                for i, star_params in enumerate(nav_params.get('stars') or [])
+            ]
             self._stars = stars
             self._smear_vu = (0.0, 0.0)
             self._metadata['star_count'] = len(stars)
             self._metadata['stars'] = [_star_summary(star) for star in stars]
-            self._logger.info('Using %d simulated star(s) from the rendered scene', len(stars))
+            self._logger.info('Using %d simulated star(s) from the scene catalog', len(stars))
             for star in stars:
                 self._logger.info('  %s', _star_short_info(star))
             end_time = now_dt()

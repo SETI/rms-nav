@@ -12,10 +12,11 @@ import numpy as np
 from scipy import ndimage
 
 from spindoctor.nav_model import build_models_for_obs
-from spindoctor.nav_model.nav_model_body_simulated import NavModelBodySimulated, _nav_params
+from spindoctor.nav_model.nav_model_body_simulated import NavModelBodySimulated
 from spindoctor.obs.obs_inst_sim import ObsSim
 from spindoctor.sim.mesh_geometry import make_irregular_mesh, render_polyhedral_body
 from spindoctor.sim.render import render_combined_model
+from spindoctor.sim.scene import build_nav_params
 
 
 def _boundary_radial_cv(mask: np.ndarray) -> float:
@@ -139,24 +140,30 @@ def test_combined_render_mesh_is_deterministic() -> None:
 
 def test_nav_params_overlays_override() -> None:
     """nav_override keys win over the body params and the key itself is dropped."""
-    merged = _nav_params(
+    nav = build_nav_params(
         {
-            'mesh_lumpiness': 0.4,
-            'pose_euler_deg': [1.0, 2.0, 3.0],
-            'nav_override': {'mesh_lumpiness': 0.0, 'shape_model': 'ellipsoid'},
+            'bodies': [
+                {
+                    'mesh_lumpiness': 0.4,
+                    'pose_euler_deg': [1.0, 2.0, 3.0],
+                    'nav_override': {'mesh_lumpiness': 0.0, 'shape_model': 'ellipsoid'},
+                }
+            ]
         }
     )
-    assert merged == {
-        'mesh_lumpiness': 0.0,
-        'pose_euler_deg': [1.0, 2.0, 3.0],
-        'shape_model': 'ellipsoid',
-    }
+    assert nav['bodies'] == [
+        {
+            'mesh_lumpiness': 0.0,
+            'pose_euler_deg': [1.0, 2.0, 3.0],
+            'shape_model': 'ellipsoid',
+        }
+    ]
 
 
 def test_nav_params_passthrough_without_override() -> None:
     """Absent an override the predicted params equal the rendered params."""
     body = {'mesh_lumpiness': 0.4, 'mesh_seed': 2}
-    assert _nav_params(body) == body
+    assert build_nav_params({'bodies': [body]})['bodies'] == [body]
 
 
 def _body_sim_model(body: dict[str, Any]) -> NavModelBodySimulated:

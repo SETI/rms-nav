@@ -14,12 +14,12 @@ information boundary and are never handed to the navigator-side models.
 
 import json
 from functools import lru_cache
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 from psfmodel import GaussianPSF
-from starcat import Star
 
+from spindoctor.sim.star_records import star_record_from_params
 from spindoctor.support.types import MutableStar, NDArrayFloatType
 
 __all__ = ['render_background_stars', 'render_stars']
@@ -57,30 +57,11 @@ def _render_stars_cached(
     roll_center_u = size_u / 2.0
 
     for i, star_params in enumerate(stars_params):
-        star = cast(MutableStar, Star())
-        star.unique_number = i + 1
-        star.catalog_name = str(star_params.get('catalog_name', 'SIM'))
-        star.pretty_name = str(star_params.get('name', f'SIM-{i + 1}'))
-        star.name = star.pretty_name
-        star.v = float(star_params.get('v', size_v / 2))
-        star.u = float(star_params.get('u', size_u / 2))
-        star.move_v = float(star_params.get('move_v', 0.0))
-        star.move_u = float(star_params.get('move_u', 0.0))
-        star.vmag = float(star_params.get('vmag', 8.0))
-        star.spectral_class = str(star_params.get('spectral_class', 'G2'))
-        star.temperature = Star.temperature_from_sclass(star.spectral_class)
-        star.temperature_faked = star.temperature is None
-        if star.temperature is None:
-            star.temperature = 5780.0
-        star.johnson_mag_v = star.vmag
-        bmv = Star.bmv_from_sclass(star.spectral_class or 'G2') or 0.63
-        star.johnson_mag_b = star.johnson_mag_v + bmv
-        star.johnson_mag_faked = False
-        star.ra_pm = 0.0
-        star.dec_pm = 0.0
-        star.conflicts = ''
-        star.psf_size = tuple(star_params.get('psf_size', (11, 11)))
-        star.dn = 2.512 ** -(star.vmag - 4.0)
+        # The record itself is built by the builder shared with the
+        # navigator-side star model, so both sides' catalog defaults match.
+        star = star_record_from_params(
+            star_params, index=i, default_v=size_v / 2, default_u=size_u / 2
+        )
         sim_star_list.append(star)
 
         rel_v = star.v - roll_center_v

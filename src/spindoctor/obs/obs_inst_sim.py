@@ -10,7 +10,7 @@ from spindoctor.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
 from spindoctor.obs.obs_snapshot_inst import ObsSnapshotInst
 from spindoctor.sim.instruments import resolve_extfov_margin, resolve_sim_inst_config
 from spindoctor.sim.render import render_combined_model
-from spindoctor.sim.scene import load_sim_scene
+from spindoctor.sim.scene import build_nav_params, load_sim_scene
 from spindoctor.support.types import PathLike
 
 
@@ -85,18 +85,28 @@ class ObsSim(ObsSnapshotInst):
         snapshot.image_url = str(scene_path.absolute())
         snapshot.abspath = abspath
 
+        # The full scene (truth included) stays on the snapshot for the
+        # renderer-side consumers: the test harnesses that score recovery
+        # against planted truth and the backplane writer that consumes the
+        # rendered masks.  The navigator-side models consume ONLY the
+        # filtered idealized view built below.
         snapshot.sim_params = sim_params
         snapshot.sim_offset_v = offset_v
         snapshot.sim_offset_u = offset_u
         snapshot.sim_time = float(sim_params.get('time', 0.0))
-        snapshot.sim_epoch = float(sim_params.get('epoch', 0.0))
+        snapshot.sim_epoch = float(sim_params.get('ring_epoch', 0.0))
+
+        # The information boundary: nav_params is sim_params with every
+        # truth key stripped and per-body nav_override overlaid (the
+        # navigator sees the geometry it believes, never the true values
+        # underneath).  See spindoctor.sim.scene.build_nav_params.
+        snapshot.nav_params = build_nav_params(sim_params)
 
         # Render combined model
         logger.debug('Rendering combined simulated model')
         img_rendered, meta = render_combined_model(sim_params)
         snapshot.insert_subfield('data', img_rendered)
-        # Attach metadata similar to previous attributes
-        snapshot.sim_star_list = meta.get('stars', [])
+        # Renderer output metadata (truth side; never read by NavModels).
         snapshot.sim_body_models = meta.get('bodies', {})
         snapshot.sim_rings = meta.get('rings', [])
         snapshot.sim_inventory = meta.get('inventory', {})

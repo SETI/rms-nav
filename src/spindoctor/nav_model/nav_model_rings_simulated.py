@@ -120,6 +120,12 @@ class NavModelRingsSimulated(NavModelRingsBase):
         super().__init__(name, obs, config=config)
         self._ring_name = ring_name.upper()
         self._sim_params: dict[str, Any] = dict(sim_params)
+        # Scene time and ring epoch are idealized (catalog) values read from
+        # the filtered view; obs stand-ins without nav_params get the same
+        # defaults the renderer uses.
+        nav_params = getattr(obs, 'nav_params', None) or {}
+        self._time: float = float(nav_params.get('time', 0.0))
+        self._epoch: float = float(nav_params.get('ring_epoch', 0.0))
         self._model_img: NDArrayFloatType | None = None
         self._ring_mask: NDArrayBoolType | None = None
         self._ring_feature: RingFeature | None = None
@@ -133,7 +139,8 @@ class NavModelRingsSimulated(NavModelRingsBase):
     ) -> list[NavModel]:
         """Build one simulated ring model per ring of a simulated obs.
 
-        Reads ``obs.sim_params['rings']``; returns an empty list for a real obs
+        Reads the ring entries of the filtered idealized view
+        (``obs.nav_params['rings']``); returns an empty list for a real obs
         so the SPICE-backed ``NavModelRings`` handles those instead.
 
         Parameters:
@@ -146,11 +153,11 @@ class NavModelRingsSimulated(NavModelRingsBase):
         """
         if not getattr(obs, 'is_simulated', False):
             return []
-        sim_params = getattr(obs, 'sim_params', None)
-        if not isinstance(sim_params, dict):
+        nav_params = getattr(obs, 'nav_params', None)
+        if not isinstance(nav_params, dict):
             return []
         out: list[NavModel] = []
-        for ring_params in sim_params.get('rings', []) or []:
+        for ring_params in nav_params.get('rings', []) or []:
             if not isinstance(ring_params, dict):
                 continue
             ring_name = str(ring_params.get('name', 'SIM-RING'))
@@ -180,8 +187,8 @@ class NavModelRingsSimulated(NavModelRingsBase):
         """Generate the simulated ring image and the matching mask."""
         obs = self.obs
         p = self._sim_params
-        time = obs.sim_time
-        epoch = obs.sim_epoch
+        time = self._time
+        epoch = self._epoch
         data_size_v = int(obs.data_shape_v)
         data_size_u = int(obs.data_shape_u)
         ext_margin_v = int(obs.extfov_margin_v)
@@ -342,8 +349,8 @@ class NavModelRingsSimulated(NavModelRingsBase):
         data_size_u = int(obs.data_shape_u)
         center_v = float(self._sim_params.get('center_v', data_size_v / 2.0))
         center_u = float(self._sim_params.get('center_u', data_size_u / 2.0))
-        time = obs.sim_time
-        epoch = obs.sim_epoch
+        time = self._time
+        epoch = self._epoch
         out: list[tuple[str, NDArrayBoolType]] = []
         for edge_data, edge_type in (
             (self._ring_feature.inner_edge, 'inner'),
@@ -388,8 +395,8 @@ class NavModelRingsSimulated(NavModelRingsBase):
         data_size_u = int(obs.data_shape_u)
         center_v = float(self._sim_params.get('center_v', data_size_v / 2.0))
         center_u = float(self._sim_params.get('center_u', data_size_u / 2.0))
-        time = obs.sim_time
-        epoch = obs.sim_epoch
+        time = self._time
+        epoch = self._epoch
         labels = ring_feature.edge_labels
         feature_name = ring_feature.name or 'UNNAMED'
         edge_info_list: list[tuple[NDArrayBoolType, str, str]] = []
