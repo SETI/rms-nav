@@ -72,7 +72,7 @@ def test_navigator_predicts_full_limbs_for_both_bodies() -> None:
         vertices = feature.geometry.vertices_vu  # type: ignore[union-attr]
         dv = vertices[:, 0] - (128.0 + obs.extfov_margin_v)
         du = vertices[:, 1] - (center_u + obs.extfov_margin_u)
-        quadrants = {(bool(a), bool(b)) for a, b in zip(dv >= 0, du >= 0, strict=True) if True}
+        quadrants = {(bool(a), bool(b)) for a, b in zip(dv >= 0, du >= 0, strict=True)}
         assert quadrants == {(False, False), (False, True), (True, False), (True, True)}, (
             f'{body} limb does not surround its center: {sorted(quadrants)}'
         )
