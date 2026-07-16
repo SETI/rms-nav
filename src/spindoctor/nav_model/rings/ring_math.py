@@ -6,7 +6,7 @@ anti-aliasing. Keeping the numerics here separate from orchestration gives:
 1. **Testability**: Pure functions are exercised with numpy arrays without
    backplane-heavy integration tests.
 
-2. **Reuse**: Backplane-based ring rendering and ``spindoctor.sim.sim_ring`` both rely on
+2. **Reuse**: Backplane-based ring rendering and ``spindoctor.nav_model.sim_ring`` both rely on
    the same anti-aliasing and fade logic defined here.
 
 3. **Single responsibility**: ``RingFeature.render()`` chooses what to render and

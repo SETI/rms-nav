@@ -1,8 +1,10 @@
-"""Simulated ring rendering for navigation testing.
+"""The navigator's predicted-ring renderer for simulated scenes.
 
-This module renders a ring feature (ringlet or gap) between mode-1 elliptical
-edges with anti-aliased boundaries and edge-fade shading.  The edge placement
-math is shared with the navigator-side edge prediction through
+Renders the opaque annulus (or gap) template ``NavModelRingsSimulated``
+predicts from a scene's idealized ring geometry: a feature between mode-1
+elliptical edges with anti-aliased boundaries and edge-fade shading.  Edge
+placement math is shared with the image-side twin
+(``spindoctor.sim.forward.ring``) through
 :mod:`spindoctor.sim.ring_geometry`, so a rendered edge and a predicted edge
 land on the same pixels by construction.
 """

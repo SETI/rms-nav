@@ -26,8 +26,8 @@ from spindoctor.feature.geometry import RingAnnulusGeometry, RingEdgePolyline
 from spindoctor.nav_model.nav_model import NavModel
 from spindoctor.nav_model.nav_model_rings_base import NavModelRingsBase
 from spindoctor.nav_model.rings import RingFeature
+from spindoctor.nav_model.sim_ring import render_ring
 from spindoctor.sim.ring_geometry import compute_border_atop_simulated
-from spindoctor.sim.sim_ring import render_ring
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
 from spindoctor.support.time import now_dt
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
