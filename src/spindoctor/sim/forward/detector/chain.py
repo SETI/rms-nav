@@ -9,7 +9,9 @@ therefore emerges from ``full_well_e / gain_e_per_dn`` (below the ADC ceiling fo
 Cassini), not from the ADC clip.
 
 The Voyager vidicon skips the electron conversion and applies its noise directly
-in DN (line-correlated read noise plus a faint coherent component).  A calibrated
+in DN (line-correlated read noise plus a faint coherent component); its point
+sources (stars) are already DN and are added onto the converted signal before
+that DN noise.  A calibrated
 (I/F) scene renders through the full DN chain and then inverts the calibration
 transform, so calibrated products carry propagated shot/read noise and
 quantization texture in I/F units.
@@ -436,7 +438,12 @@ def _apply_vidicon(frame: SimFrame, dp: DetectorParams, rng: np.random.Generator
     records: dict[str, Any] = {}
     signal_dn = np.clip(frame.signal, 0.0, 1.0) * dp.signal_full_scale_frac * dp.full_well_dn
     size_v, size_u = signal_dn.shape
+    # Point sources on the vidicon are already DN (the vidicon has no electron
+    # domain): add them onto the converted signal before the DN-domain noise, so
+    # the read-noise and coherent terms ride on the star cores as they do on the
+    # extended signal.  The optics PSF has already shaped them.
     dn = signal_dn
+    dn += frame.point_e
     # The erase-cycle residual image is a pre-noise ghost of the prior frame.
     if 'residual_image' in modes:
         cfg = modes['residual_image']

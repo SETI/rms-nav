@@ -14,6 +14,7 @@ import pytest
 
 from spindoctor.obs.obs_inst_sim import ObsSim
 from spindoctor.sim.scene import (
+    TOP_LEVEL_TEST_ONLY_KEYS,
     TOP_LEVEL_TRUTH_KEYS,
     TRUTH_KEYS,
     build_nav_params,
@@ -29,9 +30,7 @@ _TRUTH_SAMPLES: dict[str, Any] = {
     'offset_u': -1.5,
     'offset_rotation_deg': 0.4,
     'shade_solid_rings': True,
-    'background_stars_num': 25,
-    'background_stars_psf_sigma': 1.2,
-    'background_stars_distribution_exponent': 2.0,
+    'sky_counts': {'a': -3.1, 'b': 0.34, 'density_factor': 5.0, 'diffuse_e_per_px': 1.0},
     'noise': {'poisson': True, 'read_noise_dn': 4.0, 'bias_dn': 12.0},
     'oversample': 4,
     'optics': {
@@ -54,6 +53,7 @@ _TRUTH_SAMPLES: dict[str, Any] = {
         'hot_pixels': {'incidence': 0.001, 'amplitude_e': 40000.0},
     },
     'spk_error': {'dv_px': 0.8, 'du_px': -0.4, 'reference_range_km': 100000.0},
+    'star_catalog_scatter_px': 3.0,
     'bodies.crater_fill': 0.4,
     'bodies.crater_min_radius': 0.06,
     'bodies.crater_max_radius': 0.2,
@@ -63,6 +63,10 @@ _TRUTH_SAMPLES: dict[str, Any] = {
     'bodies.anti_aliasing': 0.7,
     'bodies.nav_override': {'mesh_lumpiness': 0.0},
     'stars.psf_sigma': 2.5,
+    'stars.catalog_error_v': 1.2,
+    'stars.catalog_error_u': -0.8,
+    'stars.companion': {'sep_px': 2.0, 'delta_mag': 1.5, 'angle_deg': 45.0},
+    'stars.delta_mag': 0.7,
 }
 
 # The true (rendered) values nav_override hides from the navigator.
@@ -112,6 +116,10 @@ def _truth_exercising_scene() -> dict[str, Any]:
                 'u': 70.0,
                 'vmag': 4.0,
                 'psf_sigma': _TRUTH_SAMPLES['stars.psf_sigma'],
+                'catalog_error_v': _TRUTH_SAMPLES['stars.catalog_error_v'],
+                'catalog_error_u': _TRUTH_SAMPLES['stars.catalog_error_u'],
+                'companion': dict(_TRUTH_SAMPLES['stars.companion']),
+                'delta_mag': _TRUTH_SAMPLES['stars.delta_mag'],
             }
         ],
         'rings': [
@@ -214,6 +222,70 @@ def test_star_limit_is_independent_of_scene_noise() -> None:
     obs_quiet = ObsSim.from_file('/tmp/boundary_probe.yaml', sim_params=scene_quiet)
     obs_noisy = ObsSim.from_file('/tmp/boundary_probe.yaml', sim_params=scene_noisy)
     assert obs_noisy.star_max_usable_vmag() == obs_quiet.star_max_usable_vmag()
+
+
+def _star_only_scene(exposure_sec: float) -> dict[str, Any]:
+    """A minimal star-only scene at the given exposure."""
+    return {
+        'instrument': 'coiss_nac',
+        'size_v': 64,
+        'size_u': 64,
+        'random_seed': 5,
+        'exposure_sec': exposure_sec,
+        'stars': [{'name': 'S', 'v': 32.0, 'u': 32.0, 'vmag': 4.0}],
+    }
+
+
+def test_star_limit_scales_with_scene_exposure() -> None:
+    """The star detection limit tracks the scene's idealized exposure.
+
+    ``exposure_sec`` is commanded, navigator-visible information, and the
+    renderer scales every star's deposited flux by it, so the matched-filter
+    limiting magnitude must move with it through the flux formula: a factor of
+    ten in exposure is exactly 2.5 magnitudes of limit, in the same direction.
+    """
+    reference = ObsSim.from_file(
+        '/tmp/exposure_probe.yaml', sim_params=_star_only_scene(1.0)
+    ).star_max_usable_vmag()
+    short = ObsSim.from_file(
+        '/tmp/exposure_probe.yaml', sim_params=_star_only_scene(0.1)
+    ).star_max_usable_vmag()
+    long_exp = ObsSim.from_file(
+        '/tmp/exposure_probe.yaml', sim_params=_star_only_scene(10.0)
+    ).star_max_usable_vmag()
+    assert short == pytest.approx(reference - 2.5, abs=1e-9)
+    assert long_exp == pytest.approx(reference + 2.5, abs=1e-9)
+
+
+def test_test_only_keys_are_stripped_from_nav_params() -> None:
+    """The scene-level ``expected`` block is a third class the navigator never sees.
+
+    ``expected`` is neither idealized nor truth: the assertion machinery reads
+    it, but the boundary filter's default-deny keeps it out of ``nav_params``
+    exactly as it keeps the truth keys out.
+    """
+    scene = _truth_exercising_scene()
+    scene['expected'] = {'status': 'failed', 'confidence_tier': 'failed'}
+    nav = build_nav_params(validate_sim_params(scene, source='boundary_probe'))
+    for key in TOP_LEVEL_TEST_ONLY_KEYS:
+        assert key not in nav
+
+
+def test_non_navigable_star_is_dropped_but_still_a_catalog_star_for_others() -> None:
+    """A non-navigable star renders but is absent from the navigator's catalog.
+
+    The ``navigable`` flag drives the boundary filter: a ``navigable: false``
+    star is dropped from ``nav_params`` entirely (a confounder the navigator has
+    no knowledge of), while navigable stars survive with their catalog values.
+    """
+    scene = _truth_exercising_scene()
+    scene['stars'] = [
+        {'name': 'KNOWN', 'v': 40.0, 'u': 40.0, 'vmag': 4.0, 'navigable': True},
+        {'name': 'CONFOUNDER', 'v': 60.0, 'u': 60.0, 'vmag': 4.2, 'navigable': False},
+    ]
+    nav = build_nav_params(validate_sim_params(scene, source='boundary_probe'))
+    names = {star['name'] for star in nav['stars']}
+    assert names == {'KNOWN'}
 
 
 def test_nav_params_values_are_isolated_copies() -> None:

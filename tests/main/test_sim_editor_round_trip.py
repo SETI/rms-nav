@@ -8,10 +8,11 @@ These prove the editor's data model preserves loss-free scene round-tripping:
   not raw bytes).
 * A scene authored entirely through the GUI (added body / ring / star) is
   idempotent under save -> load -> save -> load.
-* A GUI-added star carries a list-valued ``psf_size`` (never a tuple), so the
-  YAML dumper and the reloaded form agree.
+* Loading a scene syncs every group / checkbox state, and a partial block
+  survives an edit without gaining backfilled keys.
 
-Qt runs headless (offscreen platform).
+The per-tab widget-state tests (absent-key discipline, per-key edits) live in
+``test_sim_editor_tabs``.  Qt runs headless (offscreen platform).
 """
 
 import os
@@ -58,9 +59,13 @@ _FULL_SCENE: dict[str, Any] = {
     'time': 100.0,
     'ring_epoch': 50.0,
     'shade_solid_rings': True,
-    'background_stars_num': 12,
-    'background_stars_psf_sigma': 1.1,
-    'background_stars_distribution_exponent': 2.3,
+    'sky_counts': {'a': -3.0, 'b': 0.35, 'density_factor': 8.0, 'diffuse_e_per_px': 2.5},
+    'star_catalog_scatter_px': 0.4,
+    'expected': {
+        'status': 'success',
+        'confidence_tier': 'high',
+        'status_reason': 'ok',
+    },
     'fit_camera_rotation': True,
     'noise': {
         'poisson': True,
@@ -177,7 +182,22 @@ _FULL_SCENE: dict[str, Any] = {
             'move_u': -2.0,
             'psf_size': [11, 11],
             'psf_sigma': 1.2,
-        }
+        },
+        {
+            # A non-navigable confounder star carrying every truth-side star key:
+            # a planted catalog-position error, an unresolved companion, and a
+            # variable-brightness delta.
+            'name': 'S2',
+            'catalog_name': 'UCAC4',
+            'v': 80.0,
+            'u': 90.0,
+            'vmag': 8.0,
+            'navigable': False,
+            'catalog_error_v': 0.6,
+            'catalog_error_u': -0.4,
+            'delta_mag': 0.5,
+            'companion': {'sep_px': 2.5, 'delta_mag': 1.5, 'angle_deg': 30.0},
+        },
     ],
 }
 
@@ -300,23 +320,6 @@ def test_gui_authored_scene_save_load_idempotent(
     assert _comparable(loaded1) == _comparable(loaded2)
 
 
-def test_gui_added_star_psf_size_is_list(model: Any) -> None:
-    """A GUI-added star stores psf_size as a list, not a tuple."""
-    model._add_star_tab()
-    psf_size = model.sim_params['stars'][0]['psf_size']
-    assert isinstance(psf_size, list)
-    assert psf_size == [11, 11]
-
-
-def test_star_psf_size_edit_stays_a_list(model: Any) -> None:
-    """Editing a star's PSF-window size keeps psf_size a list."""
-    model._add_star_tab()
-    model._on_star_psf_size_v_spin(0, 7)
-    psf_size = model.sim_params['stars'][0]['psf_size']
-    assert isinstance(psf_size, list)
-    assert psf_size[0] == 7
-
-
 def test_gui_added_star_scene_saves_without_error(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
@@ -334,31 +337,6 @@ def test_gui_added_star_scene_saves_without_error(
     model._save_scene()
     loaded = load_sim_scene(out)
     assert loaded['stars'][0]['psf_size'] == [11, 11]
-
-
-def test_default_scene_has_no_optics_block(model: Any) -> None:
-    """A fresh scene carries no optics block (the stage-activation floor)."""
-    assert 'optics' not in model.sim_params
-
-
-def test_psf_enable_inserts_block(model: Any) -> None:
-    """Enabling the PSF group inserts an explicit kernel block."""
-    model._psf_optics_group.setChecked(True)
-    assert 'psf' in model.sim_params['optics']
-
-
-def test_psf_disable_removes_optics_key(model: Any) -> None:
-    """Disabling the only optics sub-block drops the optics key entirely."""
-    model._psf_optics_group.setChecked(True)
-    model._psf_optics_group.setChecked(False)
-    assert 'optics' not in model.sim_params
-
-
-def test_match_navigator_writes_canonical_form(model: Any) -> None:
-    """The match-navigator checkbox writes the exclusive canonical PSF form."""
-    model._psf_optics_group.setChecked(True)
-    model._psf_match_nav_check.setChecked(True)
-    assert model.sim_params['optics']['psf'] == {'match_navigator': True}
 
 
 def test_match_navigator_survives_save_and_load(
@@ -414,25 +392,6 @@ def test_psf_sigma_u_widget_defaults_to_sigma_v(
     assert model._psf_sigma_u_spin.value() == 1.3
 
 
-def test_distortion_center_keys_absent_unless_enabled(model: Any) -> None:
-    """The distortion block omits the optical-centre keys until enabled."""
-    model._distortion_group.setChecked(True)
-    block = model.sim_params['optics']['distortion']
-    assert 'center_v' not in block
-    assert 'center_u' not in block
-
-
-def test_distortion_center_zero_is_authorable(model: Any) -> None:
-    """An explicit 0.0 optical centre survives (no 0.0-to-absent flip)."""
-    model._distortion_group.setChecked(True)
-    model._distortion_center_check.setChecked(True)
-    model._distortion_center_v_spin.setValue(0.0)
-    model._distortion_center_u_spin.setValue(0.0)
-    block = model.sim_params['optics']['distortion']
-    assert block['center_v'] == 0.0
-    assert block['center_u'] == 0.0
-
-
 def test_partial_distortion_edit_leaves_center_u_absent(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
@@ -485,18 +444,6 @@ def test_partial_distortion_center_u_displays_frame_center(
     assert model._distortion_center_u_spin.value() == 32.0
 
 
-def test_distortion_center_uncheck_drops_both_keys(model: Any) -> None:
-    """Unchecking the optical-centre enable removes both centre keys."""
-    model._distortion_group.setChecked(True)
-    model._distortion_center_check.setChecked(True)
-    model._distortion_center_v_spin.setValue(40.0)
-    model._distortion_center_u_spin.setValue(50.0)
-    model._distortion_center_check.setChecked(False)
-    block = model.sim_params['optics']['distortion']
-    assert 'center_v' not in block
-    assert 'center_u' not in block
-
-
 def test_ring_spk_error_scene_authors_and_validates(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
@@ -526,99 +473,6 @@ def test_ring_spk_error_scene_authors_and_validates(
     loaded = load_sim_scene(out)
     assert loaded['rings'][0]['range_km'] == 2.0e6
     assert loaded['spk_error']['reference_range_km'] > 0.0
-
-
-def test_ring_range_km_unchecked_leaves_key_absent(model: Any) -> None:
-    """Disabling the ring physical-range control removes the key."""
-    model._add_ring_tab()
-    tab_idx = model._find_tab_by_properties('ring', 0)
-    assert tab_idx is not None
-    ring_tab = model._tabs.widget(tab_idx)
-    ring_tab.range_km_check.click()
-    assert 'range_km' in model.sim_params['rings'][0]
-    ring_tab.range_km_check.click()
-    assert 'range_km' not in model.sim_params['rings'][0]
-
-
-def test_match_navigator_disables_kernel_spins(model: Any) -> None:
-    """Matching the navigator disables the explicit-kernel spins."""
-    model._psf_optics_group.setChecked(True)
-    model._psf_match_nav_check.setChecked(True)
-    assert model._psf_sigma_v_spin.isEnabled() is False
-
-
-def test_smear_row_edit_updates_params(model: Any) -> None:
-    """Editing a smear row's drift updates the smear list in sim_params."""
-    model._smear_group.setChecked(True)
-    model._on_add_smear_clicked()
-    model._smear_rows[0].dv_spin.setValue(3.0)
-    assert model.sim_params['optics']['smear'][0]['dv_px'] == 3.0
-
-
-def test_ghost_enable_inserts_list(model: Any) -> None:
-    """Enabling the ghost group with a row inserts a ghost list."""
-    model._ghosts_group.setChecked(True)
-    model._on_add_ghost_clicked()
-    assert len(model.sim_params['optics']['ghosts']) == 1
-
-
-def test_distortion_disable_removes_block(model: Any) -> None:
-    """Disabling the distortion group removes its block."""
-    model._distortion_group.setChecked(True)
-    assert 'distortion' in model.sim_params['optics']
-    model._distortion_group.setChecked(False)
-    assert 'optics' not in model.sim_params
-
-
-def test_oversample_checkbox_toggles_key(model: Any) -> None:
-    """The oversample checkbox inserts and removes the top-level key."""
-    model._oversample_check.setChecked(True)
-    model._oversample_spin.setValue(4)
-    assert model.sim_params['oversample'] == 4
-    model._oversample_check.setChecked(False)
-    assert 'oversample' not in model.sim_params
-
-
-def test_spk_error_toggle_inserts_and_removes(model: Any) -> None:
-    """The spk_error group inserts and removes the block with its three keys."""
-    model._spk_error_group.setChecked(True)
-    assert set(model.sim_params['spk_error']) == {'dv_px', 'du_px', 'reference_range_km'}
-    model._spk_error_group.setChecked(False)
-    assert 'spk_error' not in model.sim_params
-
-
-def test_instrument_defaults_toggles_artifacts_key(model: Any) -> None:
-    """The instrument-defaults checkbox inserts and removes the artifacts key."""
-    model._instrument_defaults_check.setChecked(True)
-    assert model.sim_params['artifacts'] == {'instrument_defaults': True}
-    model._instrument_defaults_check.setChecked(False)
-    assert 'artifacts' not in model.sim_params
-
-
-def test_detector_group_toggles_key(model: Any) -> None:
-    """The detector group inserts an empty block and removes it when disabled.
-
-    The block starts empty (per-key discipline): unedited keys stay absent so
-    the instrument's catalog defaults keep applying.
-    """
-    model._detector_group.setChecked(True)
-    assert model.sim_params['detector'] == {}
-    model._detector_group.setChecked(False)
-    assert 'detector' not in model.sim_params
-
-
-def test_detector_edit_writes_only_the_edited_key(model: Any) -> None:
-    """A single spin edit writes its own key and nothing else."""
-    model._detector_group.setChecked(True)
-    model._detector_gain_state_spin.setValue(3)
-    assert model.sim_params['detector'] == {'gain_state': 3}
-
-
-def test_detector_quantization_is_authorable(model: Any) -> None:
-    """The quantization combo writes the detector.quantization key."""
-    model._detector_group.setChecked(True)
-    model._detector_quantization_combo.setCurrentText('sqrt_lut')
-    assert model.sim_params['detector'] == {'quantization': 'sqrt_lut'}
 
 
 def test_partial_detector_scene_edit_preserves_authored_keys(
@@ -719,96 +573,6 @@ def test_load_then_disable_optics_clears_blocks(
     assert 'detector' not in model.sim_params
 
 
-# ---- Registry-driven artifact-mode rows ----
-
-
-def test_every_registry_mode_has_a_row(model: Any) -> None:
-    """The tab generates one row per registered artifact mode."""
-    from spindoctor.sim.forward.artifact_modes import ARTIFACT_MODES
-
-    assert set(model._mode_rows) == set(ARTIFACT_MODES)
-
-
-def test_adversarial_check_toggles_key(model: Any) -> None:
-    """The adversarial checkbox inserts and removes the artifacts.adversarial key."""
-    model._adversarial_check.setChecked(True)
-    assert model.sim_params['artifacts'] == {'adversarial': True}
-    model._adversarial_check.setChecked(False)
-    assert 'artifacts' not in model.sim_params
-
-
-def test_mode_enable_inserts_empty_map(model: Any) -> None:
-    """Enabling a mode row inserts an empty map (absent-key discipline)."""
-    model._mode_rows['missing_lines'].group.setChecked(True)
-    assert model.sim_params['artifacts'] == {'missing_lines': {}}
-
-
-def test_mode_param_edit_writes_only_edited_key(model: Any) -> None:
-    """Editing one mode parameter writes only that key into the mode map."""
-    row = model._mode_rows['missing_lines']
-    row.group.setChecked(True)
-    row._scalar_widgets['incidence'].setValue(3.0)
-    assert model.sim_params['artifacts']['missing_lines'] == {'incidence': 3.0}
-
-
-def test_mode_disable_removes_key_and_prunes_block(model: Any) -> None:
-    """Disabling the only enabled mode removes the artifacts block entirely."""
-    row = model._mode_rows['missing_lines']
-    row.group.setChecked(True)
-    row._scalar_widgets['incidence'].setValue(3.0)
-    row.group.setChecked(False)
-    assert 'artifacts' not in model.sim_params
-
-
-def test_mode_enum_param_writes_native_choice(model: Any) -> None:
-    """An enum row writes the choice in its native type (an int period)."""
-    row = model._mode_rows['alternating_lines']
-    row.group.setChecked(True)
-    row._scalar_widgets['period'].setCurrentText('4')
-    assert model.sim_params['artifacts']['alternating_lines']['period'] == 4
-
-
-def test_mode_int_list_param_absent_until_set(model: Any) -> None:
-    """A rect/window list key stays absent until its enable box is checked."""
-    row = model._mode_rows['cutout_window']
-    row.group.setChecked(True)
-    assert 'rect' not in model.sim_params['artifacts']['cutout_window']
-    row._list_checks['rect'].setChecked(True)
-    for index, spin in enumerate(row._list_spins['rect']):
-        spin.setValue(10 + index)
-    assert model.sim_params['artifacts']['cutout_window']['rect'] == [10, 11, 12, 13]
-
-
-def test_switches_and_modes_coexist_in_block(model: Any) -> None:
-    """Instrument-defaults, adversarial, and a mode share one artifacts block."""
-    model._instrument_defaults_check.setChecked(True)
-    model._adversarial_check.setChecked(True)
-    model._mode_rows['missing_lines'].group.setChecked(True)
-    assert model.sim_params['artifacts'] == {
-        'instrument_defaults': True,
-        'adversarial': True,
-        'missing_lines': {},
-    }
-
-
-def test_mode_availability_disables_unavailable_row(model: Any) -> None:
-    """A mode unavailable on the instrument is disabled with the registry reason."""
-    model.sim_params['instrument'] = 'nhlorri'
-    model._refresh_artifact_mode_availability()
-    row = model._mode_rows['hot_pixels']
-    assert row.group.isEnabled() is False
-    assert 'LORRI' in row.group.toolTip()
-
-
-def test_mode_availability_enables_available_row(model: Any) -> None:
-    """An available mode is enabled and carries its incidence semantics tooltip."""
-    model.sim_params['instrument'] = 'coiss_nac'
-    model._refresh_artifact_mode_availability()
-    row = model._mode_rows['hot_pixels']
-    assert row.group.isEnabled() is True
-    assert 'incidence' in row.group.toolTip()
-
-
 def test_load_full_scene_syncs_mode_rows(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
@@ -849,3 +613,88 @@ def test_gui_authored_mode_scene_validates(
     loaded = load_sim_scene(out)
     assert loaded['artifacts']['missing_lines'] == {'incidence': 2.0}
     assert loaded['artifacts']['adversarial'] is True
+
+
+def test_scene_without_sky_counts_does_not_gain_it(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """An opened and re-saved scene never gains a sky_counts block.
+
+    The whole block follows the absent-key discipline: loading a scene without
+    the key leaves the background-sky group unchecked, and saving writes no
+    default block.
+    """
+    scene = {'instrument': 'coiss_nac', 'size_v': 64, 'size_u': 64, 'random_seed': 1}
+    src = tmp_path / 'no_sky.yaml'
+    save_sim_scene(scene, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    assert model._sky_counts_check.isChecked() is False
+    assert 'sky_counts' not in model.sim_params
+
+    out = tmp_path / 'no_sky_resaved.yaml'
+    monkeypatch.setattr(
+        QFileDialog, 'getSaveFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    model._save_scene()
+    resaved = load_sim_scene(out)
+    assert 'sky_counts' not in resaved
+
+
+def test_load_scene_with_sky_counts_checks_group(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Loading a scene that authors sky_counts checks and populates the group."""
+    src = tmp_path / 'full.yaml'
+    save_sim_scene(_FULL_SCENE, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    assert model._sky_counts_check.isChecked() is True
+    assert model._sky_density_spin.value() == 8.0
+    assert model._sky_diffuse_spin.value() == 2.5
+
+
+def test_load_full_scene_syncs_star_asymmetry_controls(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Loading the full scene populates the scene-level star controls."""
+    src = tmp_path / 'full.yaml'
+    save_sim_scene(_FULL_SCENE, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    assert model._star_scatter_check.isChecked() is True
+    assert model._star_scatter_spin.value() == 0.4
+    assert model._expected_group.isChecked() is True
+    assert model._expected_status_combo.currentText() == 'success'
+    assert model._expected_tier_combo.currentText() == 'high'
+
+
+def test_load_full_scene_syncs_confounder_star_tab(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """The confounder star's tab reflects its planted truth keys after load."""
+    src = tmp_path / 'full.yaml'
+    save_sim_scene(_FULL_SCENE, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    # S2 is the non-navigable confounder; find its tab by name.
+    s2_index = next(i for i, s in enumerate(model.sim_params['stars']) if s['name'] == 'S2')
+    tab_idx = model._find_tab_by_properties('star', s2_index)
+    assert tab_idx is not None
+    tab = model._tabs.widget(tab_idx)
+    assert tab.navigable_check.isChecked() is False
+    assert tab.catalog_error_check.isChecked() is True
+    assert tab.companion_group.isChecked() is True
+    assert tab.delta_mag_check.isChecked() is True

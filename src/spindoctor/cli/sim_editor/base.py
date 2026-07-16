@@ -148,13 +148,21 @@ class SimEditorBase(QMainWindow):
     _psf_image_label: QLabel
     _psf_info_label: QLabel
 
-    # ---- General tab: background stars ----
-    _background_stars_slider: QSlider
-    _background_stars_spin: QSpinBox
-    _background_stars_psf_sigma_slider: QSlider
-    _background_stars_psf_sigma_spin: QDoubleSpinBox
-    _background_stars_dist_exp_slider: QSlider
-    _background_stars_dist_exp_spin: QDoubleSpinBox
+    # ---- General tab: background sky (sky_counts) ----
+    _sky_counts_check: QCheckBox
+    _sky_density_slider: QSlider
+    _sky_density_spin: QDoubleSpinBox
+    _sky_a_spin: QDoubleSpinBox
+    _sky_b_spin: QDoubleSpinBox
+    _sky_diffuse_spin: QDoubleSpinBox
+    _star_scatter_check: QCheckBox
+    _star_scatter_spin: QDoubleSpinBox
+
+    # ---- General tab: expected outcome (test-only) ----
+    _expected_group: QGroupBox
+    _expected_status_combo: QComboBox
+    _expected_tier_combo: QComboBox
+    _expected_reason_edit: QLineEdit
 
     # ---- Action buttons and visual toggles ----
     _save_img_btn: QPushButton
@@ -212,6 +220,10 @@ class SimEditorBase(QMainWindow):
 
     def _build_stray_panel(self, gen_layout: QFormLayout) -> None:
         """Populate a stray-light form (implemented in StrayLightMixin)."""
+        raise NotImplementedError
+
+    def _set_sky_widgets_enabled(self, enabled: bool) -> None:
+        """Enable/disable the sky_counts widgets (BackgroundStarsMixin)."""
         raise NotImplementedError
 
     def _set_stray(self, key: str, value: Any) -> None:

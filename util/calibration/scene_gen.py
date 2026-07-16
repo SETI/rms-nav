@@ -13,9 +13,13 @@ regime, from clean well-resolved frames through the failure cliff:
 - ring        : 1-2 ringlets, curved through near-flat arcs (RingEdgeNav
                 and, via the always-emitted template, RingAnnulusNav)
 - star_field  : 3-15 stars, bright through sub-detection (the star
-                techniques incl. the pass-2 StarRefineNav)
+                techniques incl. the pass-2 StarRefineNav); a controlled
+                fraction plant catalog-position scatter and non-navigable
+                confounders (the astrometric-error and star-clutter regimes)
 - star_unique : 1-2 star scenes with varying brightness margin
-                (StarUniqueMatchNav one- and two-star paths)
+                (StarUniqueMatchNav one- and two-star paths); a controlled
+                fraction plant a per-star catalog error or an unresolved
+                companion (astrometric and photocenter-bias regimes)
 
 Every scene carries a planted (offset_v, offset_u) ground truth. The noise
 level, feature sizes/counts, and the model-error axes (mesh lumpiness vs an
@@ -373,19 +377,33 @@ def gen_ring(rng: random.Random) -> dict[str, Any]:
     return params
 
 
+# Controlled fractions of the star families that exercise the star
+# information-asymmetry regimes.  They are deliberately a minority so the
+# clean-lock label class stays dominant, and they are drawn from the family's
+# own RNG so a campaign stays reproducible.
+_STAR_FIELD_CATALOG_SCATTER_FRAC = 0.3  # scenes planting a small catalog scatter
+_STAR_FIELD_CONFOUNDER_FRAC = 0.25  # scenes marking some field stars non-navigable
+_STAR_UNIQUE_CATALOG_ERROR_FRAC = 0.3  # scenes planting a per-star catalog error
+_STAR_UNIQUE_COMPANION_FRAC = 0.2  # scenes planting an unresolved companion
+
+
 def gen_star_field(rng: random.Random) -> dict[str, Any]:
     """3-15 stars, bright through sub-detection (star-technique regimes)."""
     size = 128
     params = _base(rng, size=size)
-    # The sim limiting magnitude is ~7.5 at read noise 1 and ~6.0 at read
-    # noise 4 (ObsSim.star_max_usable_vmag), so cap the star-scene noise a
-    # little lower than the body/ring families and keep the brightness
-    # regime spanning "well above the limit" to "straddling it".
+    # Stars deposit as flux-normalized point masses; the navigator-matched PSF
+    # gives them the floor-form profile (no 1-pixel spike).
+    params['optics'] = {'psf': {'match_navigator': True}}
+    # The flux-normalized coiss_nac limiting magnitude is ~10.9 at read noise 4
+    # (ObsSim.star_max_usable_vmag), ~5 mag deeper than the prior peak-normalized
+    # model; the magnitude ranges shift with it so the brightness regime still
+    # spans "well above the limit" to "straddling it".  Cap the star-scene noise
+    # a little lower than the body/ring families.
     params['noise']['read_noise_dn'] = _read_noise(rng, hi=16.0)
     n_stars = rng.randint(3, 15)
     # Per-scene brightness regime so whole frames span easy to marginal
     # (a per-star-only draw would almost always leave >= 3 bright stars).
-    mag_lo = rng.uniform(2.5, 7.0)
+    mag_lo = rng.uniform(7.0, 11.5)
     mag_hi = mag_lo + rng.uniform(0.5, 2.5)
     margin = 12.0
     stars = []
@@ -399,13 +417,24 @@ def gen_star_field(rng: random.Random) -> dict[str, Any]:
             }
         )
     params['stars'] = stars
+    # Astrometric-error regime: a small scene-level catalog scatter displaces
+    # every rendered star off its predicted position, sweeping the tolerance the
+    # star fit absorbs before the match degrades.
+    if rng.random() < _STAR_FIELD_CATALOG_SCATTER_FRAC:
+        params['star_catalog_scatter_px'] = rng.uniform(0.2, 1.0)
+    # Star-clutter regime: mark a fraction of the field non-navigable so it
+    # renders as a confounder the navigator has no knowledge of, while keeping at
+    # least three navigable stars (the pattern matcher's minimum).
+    max_confounders = max(0, n_stars - 3)
+    if max_confounders > 0 and rng.random() < _STAR_FIELD_CONFOUNDER_FRAC:
+        n_confounders = rng.randint(1, max_confounders)
+        for star in rng.sample(stars, n_confounders):
+            star['navigable'] = False
     if rng.random() < 0.25:
-        params['optics'] = {
-            'stray_light': {
-                'amplitude': rng.uniform(0.05, 0.5),
-                'direction_deg': rng.uniform(0.0, 360.0),
-                'model': 'linear',
-            }
+        params['optics']['stray_light'] = {
+            'amplitude': rng.uniform(0.05, 0.5),
+            'direction_deg': rng.uniform(0.0, 360.0),
+            'model': 'linear',
         }
     return params
 
@@ -414,17 +443,32 @@ def gen_star_unique(rng: random.Random) -> dict[str, Any]:
     """1-2 star scenes with varying brightness margin (StarUniqueMatchNav)."""
     size = 128
     params = _base(rng, size=size)
+    params['optics'] = {'psf': {'match_navigator': True}}
     params['noise']['read_noise_dn'] = _read_noise(rng, hi=16.0)
     margin = 16.0
-    primary_mag = rng.uniform(2.5, 7.0)
-    stars = [
-        {
-            'name': 'U1',
-            'v': rng.uniform(margin, size - margin),
-            'u': rng.uniform(margin, size - margin),
-            'vmag': primary_mag,
+    primary_mag = rng.uniform(7.0, 11.5)
+    primary = {
+        'name': 'U1',
+        'v': rng.uniform(margin, size - margin),
+        'u': rng.uniform(margin, size - margin),
+        'vmag': primary_mag,
+    }
+    # Physical or planted catalog error on the primary: either an unresolved
+    # companion (a magnitude-weighted photocenter shift) or a small planted
+    # per-star position error.  These are mutually exclusive so the drawn regime
+    # is unambiguous, and the companion is kept faint and close so the biased
+    # centroid stays a sub-pixel model error rather than a resolved second star.
+    roll = rng.random()
+    if roll < _STAR_UNIQUE_COMPANION_FRAC:
+        primary['companion'] = {
+            'sep_px': rng.uniform(1.5, 3.0),
+            'delta_mag': rng.uniform(1.5, 3.0),
+            'angle_deg': rng.uniform(0.0, 360.0),
         }
-    ]
+    elif roll < _STAR_UNIQUE_COMPANION_FRAC + _STAR_UNIQUE_CATALOG_ERROR_FRAC:
+        primary['catalog_error_v'] = rng.uniform(-1.0, 1.0)
+        primary['catalog_error_u'] = rng.uniform(-1.0, 1.0)
+    stars = [primary]
     if rng.random() < 0.55:
         # Two-star scene; the pairwise brightness gap varies the
         # assignment ambiguity the two-star path must resolve.

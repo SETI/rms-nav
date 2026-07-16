@@ -9,6 +9,7 @@ from spindoctor.sim.scene import (
     _ALLOWED_KEYS,
     _OBJECT_BLOCKS,
     TOP_LEVEL_IDEALIZED_KEYS,
+    TOP_LEVEL_TEST_ONLY_KEYS,
     TOP_LEVEL_TRUTH_KEYS,
     TRUTH_KEYS,
     SimSceneValidationError,
@@ -28,7 +29,7 @@ def _sim_params() -> dict[str, Any]:
         'offset_u': -2.0,
         'bodies': [{'name': 'RHEA', 'center_v': 64.0, 'center_u': 64.0, 'axis1': 80.0}],
         'noise': {'poisson': True, 'read_noise_dn': 4.0},
-        'background_stars_num': 12,
+        'sky_counts': {'density_factor': 12.0},
     }
 
 
@@ -52,7 +53,7 @@ def test_loaded_scene_is_the_flat_sim_params(tmp_path: Path) -> None:
     assert scene['offset_v'] == 3.0
     assert scene['offset_u'] == -2.0
     assert scene['bodies'][0]['name'] == 'RHEA'
-    assert scene['background_stars_num'] == 12
+    assert scene['sky_counts']['density_factor'] == 12.0
 
 
 def test_save_then_load_preserves_values(tmp_path: Path) -> None:
@@ -128,6 +129,95 @@ def test_validate_sim_params_rejects_unknown_star_key() -> None:
     params = _sim_params()
     params['stars'] = [{'name': 'S', 'v': 10.0, 'u': 10.0, 'vmag': 5.0, 'colour': 'red'}]
     with pytest.raises(SimSceneValidationError, match=r'stars\[0\].*colour'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_star_information_asymmetry_keys() -> None:
+    """The navigable flag, planted catalog error, companion, and delta_mag validate."""
+    params = _sim_params()
+    params['star_catalog_scatter_px'] = 2.0
+    params['stars'] = [
+        {
+            'name': 'S',
+            'v': 40.0,
+            'u': 40.0,
+            'vmag': 4.0,
+            'navigable': True,
+            'catalog_error_v': 1.0,
+            'catalog_error_u': -0.5,
+            'companion': {'sep_px': 2.0, 'delta_mag': 1.5, 'angle_deg': 30.0},
+            'delta_mag': 0.4,
+        },
+        {'name': 'CONF', 'v': 60.0, 'u': 60.0, 'vmag': 4.1, 'navigable': False},
+    ]
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_unknown_companion_key() -> None:
+    """An unmodeled companion key fails validation."""
+    params = _sim_params()
+    params['stars'] = [
+        {'name': 'S', 'v': 40.0, 'u': 40.0, 'vmag': 4.0, 'companion': {'sep_px': 2.0, 'pa': 3.0}}
+    ]
+    with pytest.raises(SimSceneValidationError, match=r'companion.*pa'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_non_bool_navigable() -> None:
+    """A non-boolean navigable flag fails validation."""
+    params = _sim_params()
+    params['stars'] = [{'name': 'S', 'v': 40.0, 'u': 40.0, 'vmag': 4.0, 'navigable': 'yes'}]
+    with pytest.raises(SimSceneValidationError, match=r'navigable'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_negative_catalog_scatter() -> None:
+    """A negative scene-level catalog scatter sigma fails validation."""
+    params = _sim_params()
+    params['star_catalog_scatter_px'] = -1.0
+    with pytest.raises(SimSceneValidationError, match=r'star_catalog_scatter_px'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_expected_block() -> None:
+    """A well-formed expected outcome block validates."""
+    params = _sim_params()
+    params['expected'] = {
+        'status': 'failed',
+        'confidence_tier': 'failed',
+        'status_reason': 'no_feasible_techniques',
+    }
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_accepts_expected_with_null_tier() -> None:
+    """A success expected block may leave the tier unasserted (null)."""
+    params = _sim_params()
+    params['expected'] = {'status': 'success', 'confidence_tier': None}
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_expected_status() -> None:
+    """An unknown expected status fails validation."""
+    params = _sim_params()
+    params['expected'] = {'status': 'triumphant', 'confidence_tier': None}
+    with pytest.raises(SimSceneValidationError, match=r'expected.status'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_failed_status_with_wrong_tier() -> None:
+    """A failed status pins the failed tier (the sidecar cross-field rule)."""
+    params = _sim_params()
+    params['expected'] = {'status': 'failed', 'confidence_tier': 'low'}
+    with pytest.raises(SimSceneValidationError, match=r'confidence_tier=failed'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_expected_status_reason() -> None:
+    """An out-of-vocabulary expected status_reason fails validation."""
+    params = _sim_params()
+    params['expected'] = {'status': 'failed', 'confidence_tier': 'failed', 'status_reason': 'vibes'}
+    with pytest.raises(SimSceneValidationError, match=r'status_reason'):
         validate_sim_params(params)
 
 
@@ -244,10 +334,17 @@ def test_validate_sim_params_accepts_idealized_nav_override() -> None:
 
 
 def test_every_top_level_key_is_classified() -> None:
-    """Every allowed top-level key has exactly one boundary classification."""
-    classified = TOP_LEVEL_IDEALIZED_KEYS | TOP_LEVEL_TRUTH_KEYS
+    """Every allowed top-level key has exactly one of the three boundary classes."""
+    classified = TOP_LEVEL_IDEALIZED_KEYS | TOP_LEVEL_TRUTH_KEYS | TOP_LEVEL_TEST_ONLY_KEYS
     assert classified == _ALLOWED_KEYS
     assert not TOP_LEVEL_IDEALIZED_KEYS & TOP_LEVEL_TRUTH_KEYS
+    assert not TOP_LEVEL_IDEALIZED_KEYS & TOP_LEVEL_TEST_ONLY_KEYS
+    assert not TOP_LEVEL_TRUTH_KEYS & TOP_LEVEL_TEST_ONLY_KEYS
+
+
+def test_test_only_keys_are_not_truth_keys() -> None:
+    """The test-only class is disjoint from the truth set the boundary iterates."""
+    assert not (TOP_LEVEL_TEST_ONLY_KEYS & TRUTH_KEYS)
 
 
 @pytest.mark.parametrize('block', sorted(_OBJECT_BLOCKS))

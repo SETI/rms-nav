@@ -1,37 +1,98 @@
-"""Image-side star rendering: scene stars and the background star field.
+"""Image-side star rendering: catalog stars and the background sky field.
 
-Stars render in one of two modes, decided by whether the scene has an active
-whole-scene optics PSF:
+Stars are point sources, so they render into the detector-native point-source
+plane (``SimFrame.point_e``) rather than the intensive signal plane: each star's
+*total* flux is deposited as a sub-pixel-positioned point mass (a bilinear
+splat), and the whole-scene optics PSF is the ONLY convolution it receives.
+Pre-spreading a star and then convolving it would widen it by sqrt(2) and desync
+its shape from the limb and ring-edge profiles.
 
-- **No optics PSF** (the plain detector-grid render): each star is drawn
-  peak-normalized (``2.512 ** -(vmag - 4)`` at the PSF peak) and
-  Gaussian-pre-spread directly into the normalized signal plane, exactly as a
-  scene with no optics block has always rendered.
-- **Active optics PSF** (an explicit ``optics.psf`` block, the
-  navigator-matched form, or ``instrument_defaults``): each star's *total*
-  signal is deposited as a sub-pixel-positioned point mass (a bilinear splat
-  into the oversampled signal grid; a per-star smear vector distributes the
-  mass along its track), so the whole-scene PSF convolution is the ONLY PSF
-  a star receives and the rendered star profile equals the scene kernel.
-  Pre-spreading here would convolve the star twice and widen it by sqrt(2).
+The flux is normalized (not peak = f(vmag)): a star of magnitude ``vmag`` at
+``exposure_sec`` deposits ``zero_point * 10**(-0.4 * vmag) * exposure_sec``, and
+the PSF then dictates the peak.  The zero point is in electrons per second for a
+CCD (the mass lands in the electron plane, added before Poisson) and in DN per
+second for the Voyager vidicon (which has no electron domain).  The deposit
+weight carries a factor ``oversample**2`` so the box-mean downsample conserves
+the per-star detector-grid sum exactly.
+
+The background sky field draws its star counts from a cumulative star-count law
+``log10 N(<m) = a + b*m`` per square degree, scaled by the frame's field of
+view, and renders every drawn star through the same flux/point-mass path (no
+separate PSF sigma).
 
 The rendered :class:`~spindoctor.support.types.MutableStar` records and the
 ``star_info`` hit-test entries are renderer *output* metadata (they carry the
-planted offset and rendered DN); they stay on the image side of the
-information boundary and are never handed to the navigator-side models.
+planted offset, the rendered PSF sigma, and the deposited total flux); they stay
+on the image side of the information boundary and are never handed to the
+navigator-side models.
 """
 
+import copy
 import json
 from functools import lru_cache
 from typing import Any
 
 import numpy as np
-from psfmodel import GaussianPSF
 
 from spindoctor.sim.star_records import star_record_from_params
 from spindoctor.support.types import MutableStar, NDArrayFloatType
 
-__all__ = ['render_background_stars', 'render_stars']
+__all__ = [
+    'faint_sky_cutoff_mag',
+    'render_sky_counts',
+    'render_stars',
+    'total_flux_for_vmag',
+]
+
+# The brightest magnitude the sky-count inverse-CDF samples down from.  A star
+# this bright is astronomically rare at the modelled counts (b > 0 weights the
+# distribution toward faint stars), so the exact value only bounds the sampler.
+_SKY_BRIGHT_CUTOFF_MAG = -2.0
+
+
+def total_flux_for_vmag(vmag: float, *, zero_point: float, exposure_sec: float) -> float:
+    """Return a star's deposited total flux for its magnitude and exposure.
+
+    Parameters:
+        vmag: The star's catalog magnitude.
+        zero_point: Flux a magnitude-0 star deposits per second (electrons for a
+            CCD, DN for the vidicon).
+        exposure_sec: The scene exposure in seconds.
+
+    Returns:
+        The total flux to deposit as a point mass (before the ``os**2`` weight).
+    """
+    return float(float(zero_point) * 10.0 ** (-0.4 * float(vmag)) * float(exposure_sec))
+
+
+def faint_sky_cutoff_mag(
+    *, zero_point: float, exposure_sec: float, read_noise: float, psf_sigma: float
+) -> float:
+    """Return the faint magnitude below which a sky star is not worth rendering.
+
+    A star falls below the sky background once its matched-filter signal drops to
+    the read-noise floor integrated over its PSF core: with a Gaussian core of
+    sigma ``psf_sigma`` the effective core area is ``2*pi*sigma**2`` pixels, so
+    the noise over the core is ``read_noise * sqrt(2*pi*sigma**2)`` and the
+    cutoff is where the total flux equals it.  Fainter draws add nothing above
+    the noise, so the count integral is truncated there.
+
+    Parameters:
+        zero_point: Flux a magnitude-0 star deposits per second.
+        exposure_sec: The scene exposure in seconds.
+        read_noise: The camera's nominal per-pixel read noise (electrons for a
+            CCD, DN for the vidicon), in the zero point's unit domain.
+        psf_sigma: The scene PSF core sigma in detector pixels.
+
+    Returns:
+        The faint cutoff magnitude.
+    """
+    sigma = max(float(psf_sigma), 1e-3)
+    noise = max(float(read_noise), 1.0) * float(np.sqrt(2.0 * np.pi * sigma**2))
+    flux_ref = float(zero_point) * max(float(exposure_sec), 1e-9)
+    if flux_ref <= 0.0 or noise <= 0.0:
+        return 0.0
+    return 2.5 * float(np.log10(flux_ref / noise))
 
 
 def _deposit_point_mass(
@@ -43,19 +104,19 @@ def _deposit_point_mass(
     move_v: float = 0.0,
     move_u: float = 0.0,
 ) -> None:
-    """Bilinearly deposit a point source's total signal at a sub-pixel position.
+    """Bilinearly deposit a point source's total flux at a sub-pixel position.
 
     The splat conserves the total and places the deposited centroid exactly at
     ``(v, u)`` (pixel-centre convention: integer index ``i`` is coordinate
     ``i``).  A non-zero motion vector distributes the mass evenly along the
-    centred drift track, the point-mass analogue of the pre-spread renderer's
-    PSF ``movement``.
+    centred drift track (a per-star smear the whole-scene optics stage does not
+    apply).
 
     Parameters:
-        img: The (oversampled) signal plane, modified in place.
+        img: The (oversampled) point-source plane, modified in place.
         v: Centroid v coordinate on the grid of ``img``.
         u: Centroid u coordinate on the grid of ``img``.
-        total: Total signal to deposit.
+        total: Total flux to deposit.
         move_v: Total drift along v over the exposure, in grid pixels.
         move_u: Total drift along u over the exposure, in grid pixels.
     """
@@ -91,19 +152,22 @@ def _render_stars_cached(
     *,
     offset_v: float,
     offset_u: float,
-    default_psf_sigma: float,
+    zero_point: float,
+    exposure_sec: float,
+    rendered_sigma: float,
     rotation_deg: float,
-    point_mass: bool,
     oversample: int,
+    catalog_scatter_px: float,
+    catalog_scatter_seed: int,
 ) -> tuple[Any, ...]:
-    """Internal cached function to compute star rendering."""
+    """Internal cached function to compute star deposition."""
     stars_params = json.loads(stars_params_json)
     img = np.zeros((size_v, size_u), dtype=np.float64)
     sim_star_list: list[MutableStar] = []
     star_info: list[dict[str, Any]] = []
 
     # A camera roll rotates the whole frame about the boresight (image centre).
-    # The rendered star position is therefore the catalog position rotated by
+    # The rendered star position is the catalog position rotated by
     # ``rotation_deg`` about the centre, then translated by the planted offset.
     # The star record keeps its unrotated catalog (v, u) so the NavModel predicts
     # the unshifted geometry and a star technique recovers BOTH the rotation and
@@ -115,10 +179,24 @@ def _render_stars_cached(
     sin_t = float(np.sin(theta))
     roll_center_v = size_v / 2.0
     roll_center_u = size_u / 2.0
+    # A point mass deposited at a detector coordinate scaled by ``os`` lands its
+    # box-downsample centroid half a subsample low; the (os - 1) / 2 shift maps
+    # it back so the deposited star centroids exactly at its catalog position.
+    grid_shift = (oversample - 1) / 2.0
+    # The hit-test half-window records the rendered star extent (a few sigma of
+    # the scene PSF), in oversampled units; the downsample scales it back.
+    psf_half = max(1, int(np.round(3.0 * rendered_sigma)))
+    # A scene-level catalog-scatter sigma draws a per-star position error from a
+    # seeded stream (byte-stable across processes), added to any explicit
+    # per-star catalog_error.  The stream is consumed in star order so a scene's
+    # scatter realization is reproducible; scenes with no scatter draw nothing.
+    scatter_rng = np.random.default_rng(catalog_scatter_seed) if catalog_scatter_px > 0.0 else None
 
     for i, star_params in enumerate(stars_params):
-        # The record itself is built by the builder shared with the
-        # navigator-side star model, so both sides' catalog defaults match.
+        # The record is built by the builder shared with the navigator-side star
+        # model, so both sides' catalog defaults match.  It reads only idealized
+        # keys, so the record carries the catalog (v, u) and vmag -- never the
+        # planted error that displaces the rendered star below.
         star = star_record_from_params(
             star_params, index=i, default_v=size_v / 2, default_u=size_u / 2
         )
@@ -128,105 +206,78 @@ def _render_stars_cached(
         rel_u = star.u - roll_center_u
         rot_v = cos_t * rel_v - sin_t * rel_u
         rot_u = sin_t * rel_v + cos_t * rel_u
-        star_offset_v = roll_center_v + rot_v + offset_v
-        star_offset_u = roll_center_u + rot_u + offset_u
-        v_int = int(star_offset_v)
-        u_int = int(star_offset_u)
-        v_frac = star_offset_v - v_int
-        u_frac = star_offset_u - u_int
+        # The planted per-star catalog error (explicit plus the seeded scene
+        # scatter draw) displaces the RENDERED star off the catalog position the
+        # navigator predicts from; it is unrecoverable astrometric residual.
+        err_v = float(star_params.get('catalog_error_v', 0.0))
+        err_u = float(star_params.get('catalog_error_u', 0.0))
+        if scatter_rng is not None:
+            err_v += float(scatter_rng.normal(0.0, catalog_scatter_px))
+            err_u += float(scatter_rng.normal(0.0, catalog_scatter_px))
+        star_offset_v = roll_center_v + rot_v + offset_v + err_v
+        star_offset_u = roll_center_u + rot_u + offset_u + err_u
 
-        psf_size_half_u = int(star.psf_size[1] + np.round(abs(star.move_u))) // 2
-        psf_size_half_v = int(star.psf_size[0] + np.round(abs(star.move_v))) // 2
-
-        max_move_steps = 1  # TODO configurable
-        move_gran = max(abs(star.move_u) / max_move_steps, abs(star.move_v) / max_move_steps)
-        move_gran = np.clip(move_gran, 0.1, 1.0)
-
-        sigma = star_params.get('psf_sigma', default_psf_sigma)
-        psf = GaussianPSF(sigma=sigma)
-
-        # Stars where any part of the PSF would be off the edge of the image are ignored.
-        # This is because PSF fitting will not work in these cases.
-        if (
-            u_int < psf_size_half_u
-            or u_int >= img.shape[1] - psf_size_half_u
-            or v_int < psf_size_half_v
-            or v_int >= img.shape[0] - psf_size_half_v
-        ):
-            # Still collect info for hit-testing
-            star_info.append(
-                {
-                    'name': star.name,
-                    'center_v': star_offset_v,
-                    'center_u': star_offset_u,
-                    'sigma': sigma,
-                    'psf_half_v': psf_size_half_v,
-                    'psf_half_u': psf_size_half_u,
-                }
-            )
-            continue
-
-        # Evaluate PSF with scale=1.0 first to get unnormalized PSF.
-        #
-        # ``eval_rect`` centres the PSF half a pixel low for ``offset=0`` (its
-        # offset is measured from the pixel's lower edge, so ``offset=0.5`` lands
-        # on the pixel centre).  The navigator's detection centroid and the star
-        # NavModel's predicted position both use the pixel-centre convention
-        # (integer index ``i`` *is* coordinate ``i``).  Adding 0.5 to the eval
-        # offset renders the star centroid at exactly ``star.v + offset_v``, so a
-        # star the model predicts at ``(v, u)`` lands there in the image and a
-        # technique recovers the planted offset without a half-pixel bias.
-        star_psf = psf.eval_rect(
-            (psf_size_half_v * 2 + 1, psf_size_half_u * 2 + 1),
-            offset=(v_frac + 0.5, u_frac + 0.5),
-            scale=1.0,
-            movement=(star.move_v, star.move_u),
-            movement_granularity=move_gran,
+        # A variable star renders at a brightness delta_mag off its catalog vmag
+        # (positive = fainter); the catalog vmag stays what the navigator sees.
+        vmag = star.vmag if star.vmag is not None else 8.0
+        delta_mag = float(star_params.get('delta_mag', 0.0))
+        total = total_flux_for_vmag(
+            float(vmag) + delta_mag, zero_point=zero_point, exposure_sec=exposure_sec
+        )
+        _deposit_point_mass(
+            img,
+            star_offset_v + grid_shift,
+            star_offset_u + grid_shift,
+            total=total * oversample**2,
+            move_v=star.move_v,
+            move_u=star.move_u,
         )
 
-        # Normalize PSF so peak is 1.0, then scale by magnitude
-        psf_max = np.max(star_psf)
-        if psf_max > 0:
-            star_psf = star_psf / psf_max
-        # Scale so that vmag=0 results in peak=1.0
-        # star.dn = 2.512^-(vmag - 4.0), so for vmag=0: star.dn = 2.512^4
-        # We want vmag=0 -> peak=1, so scale by star.dn / (2.512^4)
-        scale_factor = star.dn / (2.512**4.0)
-        star_psf = star_psf * scale_factor
-
-        if point_mass:
-            # An active whole-scene optics PSF is the star's only convolution:
-            # deposit the star's total signal (the flux its pre-spread profile
-            # would have carried) as a sub-pixel point mass; the optics stage
-            # shapes it.  The spike legitimately exceeds 1.0 on the oversampled
-            # grid; the detector conversion clips after the downsample.  The
-            # (os - 1) / 2 term maps a detector-pixel-centre coordinate scaled
-            # by os onto the oversampled sample whose box-downsample centroid
-            # is that detector coordinate, so the deposited star lands exactly
-            # at its catalog position after the downsample.
-            grid_shift = (oversample - 1) / 2.0
+        # An unresolved companion is a second point mass at sep_px / angle_deg,
+        # companion.delta_mag fainter than the (already variable-adjusted)
+        # primary.  Both convolve through the scene PSF, so the blended
+        # photocenter sits off the catalog position by a magnitude-weighted
+        # amount -- a physical catalog error, rendered here, never told to the
+        # navigator.
+        companion = star_params.get('companion')
+        has_companion = isinstance(companion, dict) and float(companion.get('sep_px', 0.0)) > 0.0
+        if has_companion:
+            sep = float(companion.get('sep_px', 0.0))
+            angle = np.radians(float(companion.get('angle_deg', 0.0)))
+            comp_dmag = float(companion.get('delta_mag', 0.0))
+            comp_total = total_flux_for_vmag(
+                float(vmag) + delta_mag + comp_dmag,
+                zero_point=zero_point,
+                exposure_sec=exposure_sec,
+            )
             _deposit_point_mass(
                 img,
-                star_offset_v + grid_shift,
-                star_offset_u + grid_shift,
-                total=float(star_psf.sum()),
+                star_offset_v + grid_shift + sep * float(np.cos(angle)),
+                star_offset_u + grid_shift + sep * float(np.sin(angle)),
+                total=comp_total * oversample**2,
                 move_v=star.move_v,
                 move_u=star.move_u,
             )
-        else:
-            img[
-                v_int - psf_size_half_v : v_int + psf_size_half_v + 1,
-                u_int - psf_size_half_u : u_int + psf_size_half_u + 1,
-            ] += star_psf
 
+        # Truth metadata: the rendered-vs-catalog delta (position error and
+        # magnitude offset), whether a companion was planted, and the realized
+        # navigable flag.  The position keys are oversampled-grid pixels; the
+        # downsample stage divides them back to detector pixels alongside
+        # center_v/center_u.  These stay on the image side of the boundary.
         star_info.append(
             {
                 'name': star.name,
                 'center_v': star_offset_v,
                 'center_u': star_offset_u,
-                'sigma': sigma,
-                'psf_half_v': psf_size_half_v,
-                'psf_half_u': psf_size_half_u,
+                'sigma': rendered_sigma,
+                'psf_half_v': psf_half,
+                'psf_half_u': psf_half,
+                'total_flux': total,
+                'catalog_error_v': err_v,
+                'catalog_error_u': err_u,
+                'delta_mag': delta_mag,
+                'has_companion': has_companion,
+                'navigable': bool(star_params.get('navigable', True)),
             }
         )
 
@@ -234,36 +285,48 @@ def _render_stars_cached(
 
 
 def render_stars(
-    img: NDArrayFloatType,
+    point_plane: NDArrayFloatType,
     stars_params: list[dict[str, Any]],
     offset_v: float,
     *,
     offset_u: float,
-    default_psf_sigma: float = 3.0,
+    zero_point: float,
+    exposure_sec: float,
+    rendered_sigma: float,
     rotation_deg: float = 0.0,
-    point_mass: bool = False,
     oversample: int = 1,
+    catalog_scatter_px: float = 0.0,
+    catalog_scatter_seed: int = 0,
 ) -> tuple[NDArrayFloatType, list[MutableStar], list[dict[str, Any]]]:
-    """Render stars into img. Returns (img, sim_star_list, star_render_info).
+    """Deposit catalog stars into the point-source plane. Returns (plane, list, info).
+
+    Each star's total flux (``zero_point * 10**(-0.4 * vmag) * exposure_sec``) is
+    deposited as a sub-pixel point mass carrying the ``oversample**2`` weight, so
+    the box-mean downsample conserves the per-star sum and the whole-scene optics
+    PSF is the star's only convolution.  A star may render off its catalog
+    position (a per-star ``catalog_error_*`` plus the seeded scene scatter), at a
+    variable brightness (``delta_mag``), and with an unresolved ``companion`` --
+    all image-side truth the navigator is not told (see the star truth keys).
 
     Parameters:
-        img: Image array to render stars into.
+        point_plane: The (oversampled) point-source plane, deposited into in
+            place (electrons for a CCD, DN for the vidicon).
         stars_params: Per-star parameter dictionaries.
-        offset_v: V offset to apply to every star.
-        offset_u: U offset to apply to every star.
-        default_psf_sigma: PSF sigma used for stars that do not specify their
-            own ``psf_sigma`` (the selected instrument's value).
+        offset_v: V offset (oversampled units) applied to every star.
+        offset_u: U offset (oversampled units) applied to every star.
+        zero_point: Flux a magnitude-0 star deposits per second.
+        exposure_sec: The scene exposure in seconds.
+        rendered_sigma: The scene PSF core sigma the stars render at (oversampled
+            units), recorded in the hit-test metadata.
         rotation_deg: Camera-roll angle (degrees) applied about the image centre
             before the translation offset, modelling a pointing rotation the star
             techniques recover.
-        point_mass: Deposit each star's total signal as a sub-pixel point mass
-            instead of pre-spreading it (used when a whole-scene optics PSF is
-            active, so that PSF is the star's only convolution).
-        oversample: The render-grid oversampling factor; point-mass deposits
-            use it to land each star's post-downsample centroid exactly at its
-            catalog position.
+        oversample: The render-grid oversampling factor.
+        catalog_scatter_px: Scene-level per-star position-scatter sigma
+            (oversampled units); 0 disables it.
+        catalog_scatter_seed: Seed for the per-star scatter stream.
     """
-    size_v, size_u = img.shape
+    size_v, size_u = point_plane.shape
     stars_params_json = json.dumps(stars_params, sort_keys=True)
     cached_img, cached_star_list, cached_star_info = _render_stars_cached(
         size_v,
@@ -271,134 +334,126 @@ def render_stars(
         stars_params_json,
         offset_v=offset_v,
         offset_u=offset_u,
-        default_psf_sigma=default_psf_sigma,
+        zero_point=zero_point,
+        exposure_sec=exposure_sec,
+        rendered_sigma=rendered_sigma,
         rotation_deg=rotation_deg,
-        point_mass=point_mass,
         oversample=oversample,
+        catalog_scatter_px=catalog_scatter_px,
+        catalog_scatter_seed=catalog_scatter_seed,
     )
-    if point_mass:
-        # Point deposits legitimately exceed 1.0 on the oversampled grid; the
-        # optics PSF spreads them and the detector conversion clips afterward.
-        img += cached_img
-    else:
-        # Add cached stars to input image (don't overwrite background noise/stars)
-        img[:] = np.clip(img + cached_img, 0.0, 1.0)
-    # The caller (and the downsample stage) rescale the hit-test entries in
-    # place, so hand out fresh copies rather than the cached dicts.
-    return img, cached_star_list, [dict(info) for info in cached_star_info]
+    # Point deposits are added (never clipped) on the oversampled grid; the optics
+    # PSF spreads them and the detector conversion clips after the downsample.
+    point_plane += cached_img
+    # The caller (and the downsample stage) rescale the hit-test entries and the
+    # star records in place, so hand out fresh copies rather than the cached
+    # objects.
+    return (
+        point_plane,
+        [copy.copy(star) for star in cached_star_list],
+        [dict(info) for info in cached_star_info],
+    )
 
 
 @lru_cache(maxsize=1)
-def _render_background_stars_cached(
+def _render_sky_counts_cached(
     size_v: int,
     size_u: int,
-    n_stars: int,
     *,
     seed: int,
-    psf_sigma: float,
-    distribution_exponent: float,
-    point_mass: bool,
+    a: float,
+    b: float,
+    density_factor: float,
+    fov_deg2: float,
+    faint_cutoff_mag: float,
+    zero_point: float,
+    exposure_sec: float,
+    oversample: int,
 ) -> NDArrayFloatType:
-    """Internal cached function to compute background star additions."""
+    """Internal cached function to compute the background-sky star field."""
+    plane = np.zeros((size_v, size_u), dtype=np.float64)
+    # Cumulative count per square degree down to the faint cutoff, scaled to the
+    # frame's field of view and the local-density multiplier.
+    n_expected = 10.0 ** (a + b * faint_cutoff_mag) * density_factor * fov_deg2
+    if n_expected <= 0.0:
+        return plane
     rng = np.random.default_rng(seed)
-    star_additions = np.zeros((size_v, size_u), dtype=np.float64)
-
-    # Power law for intensity: weight toward dimmer stars
-    # intensity = uniform^power where power > 1 makes dimmer stars more common
-    uniform_samples = rng.uniform(0.0, 1.0, size=n_stars)
-    intensities = uniform_samples**distribution_exponent
-
-    # PSF size: at least 11x11, but scale with sigma
-    # Use at least 3*sigma pixels on each side, minimum 6 for 11x11
-    psf_size_half = max(6, int(np.ceil(3.0 * psf_sigma)))
-
-    psf = GaussianPSF(sigma=psf_sigma)
-
-    for i in range(n_stars):
-        # Random position
-        v = rng.uniform(0.0, float(size_v))
-        u = rng.uniform(0.0, float(size_u))
-
-        v_int = int(v)
-        u_int = int(u)
-        v_frac = v - v_int
-        u_frac = u - u_int
-
-        # Skip if too close to edge
-        if (
-            u_int < psf_size_half
-            or u_int >= size_u - psf_size_half
-            or v_int < psf_size_half
-            or v_int >= size_v - psf_size_half
-        ):
-            continue
-
-        # Generate PSF (normalized so peak is 1.0)
-        star_psf = psf.eval_rect(
-            (psf_size_half * 2 + 1, psf_size_half * 2 + 1),
-            offset=(v_frac, u_frac),
-            scale=1.0,  # Use scale=1.0 to get normalized PSF
-            movement=(0.0, 0.0),
-            movement_granularity=1.0,
-        )
-
-        # Normalize PSF to have peak value of 1.0, then scale by intensity
-        # This ensures stars are bright (peak brightness = intensity, not distributed)
-        psf_max = np.max(star_psf)
-        if psf_max > 0:
-            star_psf = star_psf / psf_max * intensities[i]
-        else:
-            star_psf = star_psf * intensities[i]
-
-        if point_mass:
-            # Same rule as catalog stars: with an active whole-scene optics
-            # PSF, deposit the total signal and let that PSF shape the star.
-            _deposit_point_mass(star_additions, v, u, total=float(star_psf.sum()))
-        else:
-            # Add to star additions accumulator
-            star_additions[
-                v_int - psf_size_half : v_int + psf_size_half + 1,
-                u_int - psf_size_half : u_int + psf_size_half + 1,
-            ] += star_psf
-
-    return star_additions
+    n_stars = int(rng.poisson(n_expected))
+    if n_stars <= 0:
+        return plane
+    # Magnitudes from the implied differential distribution dN/dm ~ 10**(b*m)
+    # between the bright bound and the faint cutoff: the inverse of the CDF that
+    # is proportional to 10**(b*m).
+    lo = 10.0 ** (b * _SKY_BRIGHT_CUTOFF_MAG)
+    hi = 10.0 ** (b * faint_cutoff_mag)
+    u_draw = rng.uniform(lo, hi, size=n_stars)
+    mags = np.log10(u_draw) / b if b != 0.0 else np.full(n_stars, faint_cutoff_mag)
+    vs = rng.uniform(0.0, float(size_v), size=n_stars)
+    us = rng.uniform(0.0, float(size_u), size=n_stars)
+    for mag, v, u in zip(mags.tolist(), vs.tolist(), us.tolist(), strict=True):
+        total = total_flux_for_vmag(float(mag), zero_point=zero_point, exposure_sec=exposure_sec)
+        _deposit_point_mass(plane, v, u, total=total * oversample**2)
+    return plane
 
 
-def render_background_stars(
-    img: NDArrayFloatType,
-    n_stars: int,
-    seed: int,
+def render_sky_counts(
+    point_plane: NDArrayFloatType,
     *,
-    psf_sigma: float = 0.9,
-    distribution_exponent: float = 2.5,
-    point_mass: bool = False,
+    seed: int,
+    a: float,
+    b: float,
+    density_factor: float,
+    pixel_scale_arcsec: float,
+    faint_cutoff_mag: float,
+    zero_point: float,
+    exposure_sec: float,
+    diffuse_flux_per_px: float,
+    oversample: int,
 ) -> None:
-    """Add random background stars to the image.
+    """Render the background-sky star field (and optional diffuse floor) in place.
+
+    The star count is drawn from ``log10 N(<m) = a + b*m`` per square degree,
+    scaled by the frame's field of view (the detector pixel count times the
+    angular pixel scale squared) and the ``density_factor`` multiplier, down to
+    the faint cutoff.  Every star renders through the same flux/point-mass path
+    as a catalog star, so the scene PSF shapes it.  A non-zero diffuse floor adds
+    a flat pedestal (the box-mean downsample leaves a constant unchanged, so it
+    is a per-detector-pixel level).
 
     Parameters:
-        img: Image array to modify in-place (stars are added, not overwritten).
-        n_stars: Number of stars to add (0-1000).
-        seed: Random seed for reproducibility.
-        psf_sigma: PSF sigma value for star rendering (default 0.9).
-        distribution_exponent: Power law exponent for intensity distribution (default 2.5).
-            Higher values make dimmer stars more common.
-        point_mass: Deposit each star's total signal as a sub-pixel point mass
-            instead of pre-spreading it (used when a whole-scene optics PSF is
-            active, so that PSF is the star's only convolution).
+        point_plane: The (oversampled) point-source plane, modified in place.
+        seed: The stage sub-seed for the sky realization.
+        a: Cumulative-count law intercept ``log10 N(<m)`` at ``m = 0``.
+        b: Cumulative-count law slope per magnitude.
+        density_factor: Multiplier on the counts (1 is mid galactic latitude).
+        pixel_scale_arcsec: Angular pixel scale (arcsec / detector pixel).
+        faint_cutoff_mag: The faint magnitude the count integral is truncated at.
+        zero_point: Flux a magnitude-0 star deposits per second.
+        exposure_sec: The scene exposure in seconds.
+        diffuse_flux_per_px: A flat diffuse-sky pedestal per detector pixel (0
+            disables it).
+        oversample: The render-grid oversampling factor.
     """
-    if n_stars <= 0:
-        return
-    size_v, size_u = img.shape
-    star_additions = _render_background_stars_cached(
+    size_v, size_u = point_plane.shape
+    det_v = size_v / oversample
+    det_u = size_u / oversample
+    deg_per_px = float(pixel_scale_arcsec) / 3600.0
+    fov_deg2 = det_v * det_u * deg_per_px**2
+    plane = _render_sky_counts_cached(
         size_v,
         size_u,
-        n_stars,
         seed=seed,
-        psf_sigma=psf_sigma,
-        distribution_exponent=distribution_exponent,
-        point_mass=point_mass,
+        a=float(a),
+        b=float(b),
+        density_factor=float(density_factor),
+        fov_deg2=fov_deg2,
+        faint_cutoff_mag=float(faint_cutoff_mag),
+        zero_point=float(zero_point),
+        exposure_sec=float(exposure_sec),
+        oversample=int(oversample),
     )
-    if point_mass:
-        img += star_additions
-    else:
-        img[:] = np.clip(img + star_additions, 0.0, 1.0)
+    point_plane += plane
+    if diffuse_flux_per_px > 0.0:
+        # A flat pedestal survives the box-mean downsample as a constant, so the
+        # commanded per-detector-pixel level is added directly on every subsample.
+        point_plane += float(diffuse_flux_per_px)

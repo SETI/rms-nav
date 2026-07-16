@@ -24,6 +24,17 @@ from spindoctor.sim.forward.artifact_modes import (
     mode_unavailable_message,
 )
 from spindoctor.sim.scene_schema import _BODY_IDEALIZED_KEYS, SimSceneValidationError
+from spindoctor.support.status_reason import NavStatusReason
+
+# The scene-level ``expected`` block's allowed vocabularies.  These mirror the
+# image-library sidecar taxonomy (status / confidence tier / status_reason) but
+# are defined independently here: a sim scene is not a sidecar, so the sim path
+# owns its own copy rather than importing the sidecar module.  ``confidence_tier``
+# admits the five navigation ranks plus null (assert the status only).
+_EXPECTED_KEYS: frozenset[str] = frozenset({'status', 'status_reason', 'confidence_tier'})
+_EXPECTED_STATUSES: frozenset[str] = frozenset({'success', 'failed', 'conflicted'})
+_EXPECTED_TIERS: frozenset[str] = frozenset({'high', 'medium', 'low', 'failed', 'conflicted'})
+_EXPECTED_STATUS_REASONS: frozenset[str] = frozenset(reason.value for reason in NavStatusReason)
 
 
 def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
@@ -106,9 +117,20 @@ def _check_star_object(obj: dict[str, Any], *, index: int, source: str) -> None:
     _check_optional_str(obj.get('name'), f'{label}.name', source=source)
     _check_optional_str(obj.get('catalog_name'), f'{label}.catalog_name', source=source)
     _check_optional_str(obj.get('spectral_class'), f'{label}.spectral_class', source=source)
-    for key in ('v', 'u', 'vmag', 'move_v', 'move_u'):
+    for key in (
+        'v',
+        'u',
+        'vmag',
+        'move_v',
+        'move_u',
+        'catalog_error_v',
+        'catalog_error_u',
+        'delta_mag',
+    ):
         _check_optional_number(obj.get(key), f'{label}.{key}', source=source)
     _check_optional_positive_number(obj.get('psf_sigma'), f'{label}.psf_sigma', source=source)
+    _check_optional_bool(obj.get('navigable'), f'{label}.navigable', source=source)
+    _check_star_companion(obj.get('companion'), label=label, source=source)
     psf_size = obj.get('psf_size')
     if psf_size is not None:
         valid = isinstance(psf_size, (list, tuple)) and len(psf_size) == 2
@@ -116,6 +138,30 @@ def _check_star_object(obj: dict[str, Any], *, index: int, source: str) -> None:
             raise SimSceneValidationError(
                 f'{source}: {label}.psf_size must be a list of 2 integers when present'
             )
+
+
+# An unresolved binary: a second point source at ``sep_px`` from the primary
+# along ``angle_deg``, ``delta_mag`` fainter.  Its photocenter pull off the
+# catalog position is a physical catalog error the navigator cannot know.
+_COMPANION_KEYS: frozenset[str] = frozenset({'sep_px', 'delta_mag', 'angle_deg'})
+
+
+def _check_star_companion(value: Any, *, label: str, source: str) -> None:
+    """Validate one star's ``companion`` map (unresolved-binary parameters)."""
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(f'{source}: {label}.companion must be a mapping when present')
+    unknown = set(value) - _COMPANION_KEYS
+    if unknown:
+        raise SimSceneValidationError(
+            f'{source}: {label}.companion: unknown keys: {sorted(unknown)}'
+        )
+    _check_optional_nonnegative_number(
+        value.get('sep_px'), f'{label}.companion.sep_px', source=source
+    )
+    _check_optional_number(value.get('delta_mag'), f'{label}.companion.delta_mag', source=source)
+    _check_optional_number(value.get('angle_deg'), f'{label}.companion.angle_deg', source=source)
 
 
 # Allowed keys inside the scene-level optics block and its sub-blocks.  Unknown
@@ -534,6 +580,120 @@ def _check_spk_error(value: Any, *, source: str) -> None:
     _check_optional_positive_number(
         value.get('reference_range_km'), 'spk_error.reference_range_km', source=source
     )
+
+
+# The background-sky star-count law: cumulative log10 N(<m) = a + b*m per square
+# degree, a local-density multiplier, and an optional flat diffuse-sky floor.
+# diffuse_e_per_px is detector-native despite the '_e_' in its name: electrons
+# per pixel on a CCD, DN per pixel on the Voyager vidicon (which has no electron
+# domain), matching the unit domain of the point-source plane it adds to.
+_SKY_COUNTS_KEYS: frozenset[str] = frozenset({'a', 'b', 'density_factor', 'diffuse_e_per_px'})
+
+
+def _check_sky_counts(value: Any, *, source: str) -> None:
+    """Validate the scene-level ``sky_counts`` block's field types.
+
+    Parameters:
+        value: The ``sky_counts`` mapping, or None when the block is absent.
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: On any unknown or invalid sky_counts field.
+    """
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(f'{source}: sky_counts must be a mapping when present')
+    unknown = set(value) - _SKY_COUNTS_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{source}: sky_counts: unknown keys: {sorted(unknown)}')
+    _check_optional_number(value.get('a'), 'sky_counts.a', source=source)
+    _check_optional_number(value.get('b'), 'sky_counts.b', source=source)
+    _check_optional_nonnegative_number(
+        value.get('density_factor'), 'sky_counts.density_factor', source=source
+    )
+    _check_optional_nonnegative_number(
+        value.get('diffuse_e_per_px'), 'sky_counts.diffuse_e_per_px', source=source
+    )
+
+
+def _check_star_catalog_scatter(value: Any, *, source: str) -> None:
+    """Validate the scene-level ``star_catalog_scatter_px`` sigma.
+
+    A non-negative per-star position-scatter sigma (detector pixels): every
+    catalog star's RENDERED position is displaced by a seeded Gaussian draw of
+    this sigma, added to any explicit per-star ``catalog_error_*``.
+
+    Parameters:
+        value: The ``star_catalog_scatter_px`` value, or None when absent.
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: If present and not a non-negative number.
+    """
+    _check_optional_nonnegative_number(value, 'star_catalog_scatter_px', source=source)
+
+
+def _check_expected(value: Any, *, source: str) -> None:
+    """Validate the scene-level ``expected`` block (the expected outcome).
+
+    The block declares what the navigator should produce for the scene, read by
+    the sim integration suite's assertion machinery (not by the renderer or the
+    navigator).  ``status`` is required; ``confidence_tier`` is required but may
+    be null (assert the status only); ``status_reason`` is optional.  The
+    cross-field rules mirror the image-library sidecar taxonomy: a ``failed`` or
+    ``conflicted`` status pins the matching tier, and those tiers require the
+    matching status, but only when the tier is asserted (non-null).
+
+    Parameters:
+        value: The ``expected`` mapping, or None when the block is absent.
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: On any unknown or invalid expected field, or a
+            status / confidence_tier inconsistency.
+    """
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(f'{source}: expected must be a mapping when present')
+    unknown = set(value) - _EXPECTED_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{source}: expected: unknown keys: {sorted(unknown)}')
+    status = value.get('status')
+    if status not in _EXPECTED_STATUSES:
+        raise SimSceneValidationError(
+            f'{source}: expected.status must be one of {sorted(_EXPECTED_STATUSES)}; got {status!r}'
+        )
+    tier = value.get('confidence_tier')
+    if tier is not None and tier not in _EXPECTED_TIERS:
+        raise SimSceneValidationError(
+            f'{source}: expected.confidence_tier must be one of {sorted(_EXPECTED_TIERS)} or '
+            f'null; got {tier!r}'
+        )
+    if tier is not None:
+        if status == 'failed' and tier != 'failed':
+            raise SimSceneValidationError(
+                f'{source}: expected.status=failed requires expected.confidence_tier=failed'
+            )
+        if status != 'failed' and tier == 'failed':
+            raise SimSceneValidationError(
+                f'{source}: expected.confidence_tier=failed requires expected.status=failed'
+            )
+        if status == 'conflicted' and tier != 'conflicted':
+            raise SimSceneValidationError(
+                f'{source}: expected.status=conflicted requires expected.confidence_tier=conflicted'
+            )
+        if status != 'conflicted' and tier == 'conflicted':
+            raise SimSceneValidationError(
+                f'{source}: expected.confidence_tier=conflicted requires expected.status=conflicted'
+            )
+    reason = value.get('status_reason')
+    if reason is not None and reason not in _EXPECTED_STATUS_REASONS:
+        raise SimSceneValidationError(
+            f'{source}: expected.status_reason must be one of '
+            f'{sorted(_EXPECTED_STATUS_REASONS)} when present; got {reason!r}'
+        )
 
 
 def _require_ranges_for_spk_error(sim_params: dict[str, Any], *, source: str) -> None:

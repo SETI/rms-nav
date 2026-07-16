@@ -1,4 +1,4 @@
-"""Single-variable parameter-sweep harness for the sim scene catalog (Phase T3).
+"""Single-variable parameter-sweep harness for the sim scene catalog.
 
 A sweep takes one catalog scene as a base, varies a single parameter (or a group
 of parameters that move together, e.g. the three axes of a sphere) across a list
@@ -6,6 +6,12 @@ of values, and navigates each resulting frame.  The per-step row records the
 recovered offset error, confidence, status, and primary technique, so a test can
 assert how a navigation diagnostic *responds* to a controlled change -- the
 verification layer a calibrated confidence formula relies on.
+
+A sweep may also declare ``ensemble_seeds: N``: each point is then replicated
+across N random seeds (the geometry fixed, the noise / confounders redrawn per
+seed), turning one sweep point into a *population* of frames -- the raw material
+an estimator-validation solve needs.  Each seed's outcome is its own row, tagged
+with its seed; the default (1 seed) is an ordinary single-realization sweep.
 
 This module is the importable core (schema, loader, runner); ``sim_sweep_runner``
 is the ``python -m`` entry point and ``test_sim_sweeps`` asserts the per-sweep
@@ -38,7 +44,14 @@ class SimSweepValidationError(ValueError):
 
 @dataclass(frozen=True)
 class SweepSpec:
-    """A validated single-variable sweep specification."""
+    """A validated single-variable sweep specification.
+
+    ``ensemble_seeds`` replicates every sweep point across that many random
+    seeds (the geometry fixed, the noise / confounders redrawn per seed), so a
+    composition family produces a *population* of frames per point -- the raw
+    material a covariance-components estimator validation needs.  The default 1
+    is an ordinary single-realization sweep.
+    """
 
     path: Path
     sweep_name: str
@@ -46,11 +59,12 @@ class SweepSpec:
     parameters: tuple[str, ...]
     values: tuple[float, ...]
     technique: str
+    ensemble_seeds: int = 1
 
 
 @dataclass(frozen=True)
 class SweepRow:
-    """One navigated step of a sweep."""
+    """One navigated step of a sweep (one value at one seed)."""
 
     value: float
     status: str
@@ -58,6 +72,7 @@ class SweepRow:
     rotation_error_deg: float | None
     confidence: float
     primary_technique: str | None
+    seed: int
 
 
 def load_sweep(path: Path) -> SweepSpec:
@@ -107,6 +122,15 @@ def load_sweep(path: Path) -> SweepSpec:
     technique = raw.get('technique', '*')
     if not isinstance(technique, str) or not technique:
         raise SimSweepValidationError(f'{path}: technique must be a non-empty string when present')
+    ensemble_seeds = raw.get('ensemble_seeds', 1)
+    if (
+        isinstance(ensemble_seeds, bool)
+        or not isinstance(ensemble_seeds, int)
+        or ensemble_seeds < 1
+    ):
+        raise SimSweepValidationError(
+            f'{path}: ensemble_seeds must be a positive integer when present'
+        )
     return SweepSpec(
         path=path,
         sweep_name=sweep_name,
@@ -114,6 +138,7 @@ def load_sweep(path: Path) -> SweepSpec:
         parameters=tuple(parameters),
         values=tuple(float(v) for v in values),
         technique=technique,
+        ensemble_seeds=ensemble_seeds,
     )
 
 
@@ -228,11 +253,18 @@ def run_sweep(spec: SweepSpec) -> list[SweepRow]:
     can be characterised even when its clean-field confidence holds the fused
     status below success. With ``'*'`` the fused full-ensemble result is used.
 
+    When ``spec.ensemble_seeds > 1`` each sweep point is navigated once per seed
+    (the seeds derived from the base scene's own seed), with the geometry fixed
+    and the noise / confounders redrawn; each seed's outcome is its own row,
+    tagged with its seed.  The default (1 seed) yields one row per value, at the
+    base scene's seed.
+
     Parameters:
         spec: The sweep specification.
 
     Returns:
-        One :class:`SweepRow` per value, in sweep order.
+        One :class:`SweepRow` per (value, seed) pair, values in sweep order and
+        seeds in ascending order within each value.
     """
     pinned = spec.technique != '*'
     rows: list[SweepRow] = []
@@ -240,33 +272,56 @@ def run_sweep(spec: SweepSpec) -> list[SweepRow]:
         planted_v = float(sim_params.get('offset_v', 0.0))
         planted_u = float(sim_params.get('offset_u', 0.0))
         planted_rot = float(sim_params.get('offset_rotation_deg', 0.0))
-        result = _navigate_params(sim_params, spec.technique)
-        if pinned:
-            pin = _pinned_technique_result(result, spec.technique)
-            recovered_offset = pin.offset_px if pin is not None else None
-            recovered_rot = (
-                math.degrees(pin.rotation_rad)
-                if pin is not None and pin.rotation_rad is not None
-                else None
+        for seed in _ensemble_seeds(sim_params, spec.ensemble_seeds):
+            seeded_params = copy.deepcopy(sim_params)
+            seeded_params['random_seed'] = seed
+            result = _navigate_params(seeded_params, spec.technique)
+            if pinned:
+                pin = _pinned_technique_result(result, spec.technique)
+                recovered_offset = pin.offset_px if pin is not None else None
+                recovered_rot = (
+                    math.degrees(pin.rotation_rad)
+                    if pin is not None and pin.rotation_rad is not None
+                    else None
+                )
+            else:
+                recovered_offset = result.offset_px
+                recovered_rot = _recovered_rotation_deg(result)
+            if recovered_offset is None:
+                offset_error: float | None = None
+            else:
+                offset_error = math.hypot(
+                    recovered_offset[0] - planted_v, recovered_offset[1] - planted_u
+                )
+            rotation_error = None if recovered_rot is None else abs(recovered_rot - planted_rot)
+            rows.append(
+                SweepRow(
+                    value=value,
+                    status=str(result.status),
+                    offset_error_px=offset_error,
+                    rotation_error_deg=rotation_error,
+                    confidence=float(result.confidence),
+                    primary_technique=_primary_technique(result),
+                    seed=seed,
+                )
             )
-        else:
-            recovered_offset = result.offset_px
-            recovered_rot = _recovered_rotation_deg(result)
-        if recovered_offset is None:
-            offset_error: float | None = None
-        else:
-            offset_error = math.hypot(
-                recovered_offset[0] - planted_v, recovered_offset[1] - planted_u
-            )
-        rotation_error = None if recovered_rot is None else abs(recovered_rot - planted_rot)
-        rows.append(
-            SweepRow(
-                value=value,
-                status=str(result.status),
-                offset_error_px=offset_error,
-                rotation_error_deg=rotation_error,
-                confidence=float(result.confidence),
-                primary_technique=_primary_technique(result),
-            )
-        )
     return rows
+
+
+def _ensemble_seeds(sim_params: dict[str, Any], ensemble_seeds: int) -> list[int]:
+    """Return the seed list for a sweep point.
+
+    A single-seed sweep uses the scene's own seed unchanged; an ensemble sweep
+    replicates the point across consecutive seeds starting from the scene's seed,
+    so the population is reproducible and disjoint from other points' draws only
+    through the scene seed (the geometry, not the seed, is what is held fixed).
+
+    Parameters:
+        sim_params: The (post-override) scene mapping for this point.
+        ensemble_seeds: The number of seeds to replicate across.
+
+    Returns:
+        The ascending list of seeds to navigate this point at.
+    """
+    base_seed = int(sim_params.get('random_seed', 42))
+    return [base_seed + offset for offset in range(ensemble_seeds)]

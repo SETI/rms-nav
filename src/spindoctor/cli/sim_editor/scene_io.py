@@ -50,7 +50,6 @@ class SceneIoMixin(SimEditorBase):
 
     def _apply_params_dict(self, params: dict[str, Any]) -> None:
         """Rebuild sim_params from a loaded params dict and sync every widget."""
-        background_stars_val = params.get('background_stars_num', 0)
         self.sim_params = {
             'size_v': int(params.get('size_v', 512)),
             'size_u': int(params.get('size_u', 512)),
@@ -60,11 +59,6 @@ class SceneIoMixin(SimEditorBase):
             'exposure_sec': float(params.get('exposure_sec', 1.0)),
             'random_seed': int(params.get('random_seed', 42)),
             'instrument': str(params.get('instrument', 'generic')),
-            'background_stars_num': int(background_stars_val),
-            'background_stars_psf_sigma': float(params.get('background_stars_psf_sigma', 0.9)),
-            'background_stars_distribution_exponent': float(
-                params.get('background_stars_distribution_exponent', 2.5)
-            ),
             'time': float(params.get('time', 0.0)),
             'ring_epoch': float(params.get('ring_epoch', 0.0)),
             'closest_planet': params.get('closest_planet') or 'SATURN',
@@ -76,6 +70,8 @@ class SceneIoMixin(SimEditorBase):
         # Carry the block-valued schema keys through unchanged; the tab-specific
         # sync methods below then drive their widgets from these blocks (and the
         # instrument-config / midtime / fit-rotation keys the General tab reads).
+        # sky_counts follows the absent-key discipline: a scene without the key
+        # must not gain one, so it passes through rather than being defaulted.
         for passthrough_key in (
             'noise',
             'optics',
@@ -86,6 +82,9 @@ class SceneIoMixin(SimEditorBase):
             'instrument_config',
             'midtime_utc',
             'fit_camera_rotation',
+            'sky_counts',
+            'star_catalog_scatter_px',
+            'expected',
         ):
             if passthrough_key in params:
                 self.sim_params[passthrough_key] = params[passthrough_key]
@@ -163,31 +162,57 @@ class SceneIoMixin(SimEditorBase):
         # (instrument defaults, detector override) sync from their own blocks.
         self._sync_optics_from_params()
         self._sync_artifacts_from_params()
-        # Update background stars controls
-        self._background_stars_slider.blockSignals(True)
-        self._background_stars_slider.setValue(self.sim_params['background_stars_num'])
-        self._background_stars_slider.blockSignals(False)
-        self._background_stars_spin.blockSignals(True)
-        self._background_stars_spin.setValue(self.sim_params['background_stars_num'])
-        self._background_stars_spin.blockSignals(False)
-        # Update background stars PSF sigma controls
-        self._background_stars_psf_sigma_slider.blockSignals(True)
-        psf_sigma_val = int(self.sim_params['background_stars_psf_sigma'] * 100)
-        self._background_stars_psf_sigma_slider.setValue(psf_sigma_val)
-        self._background_stars_psf_sigma_slider.blockSignals(False)
-        self._background_stars_psf_sigma_spin.blockSignals(True)
-        psf_sigma_spin_val = self.sim_params['background_stars_psf_sigma']
-        self._background_stars_psf_sigma_spin.setValue(psf_sigma_spin_val)
-        self._background_stars_psf_sigma_spin.blockSignals(False)
-        # Update background stars distribution exponent controls
-        self._background_stars_dist_exp_slider.blockSignals(True)
-        dist_exp_slider_val = int(self.sim_params['background_stars_distribution_exponent'] * 100)
-        self._background_stars_dist_exp_slider.setValue(dist_exp_slider_val)
-        self._background_stars_dist_exp_slider.blockSignals(False)
-        self._background_stars_dist_exp_spin.blockSignals(True)
-        dist_exp_spin_val = self.sim_params['background_stars_distribution_exponent']
-        self._background_stars_dist_exp_spin.setValue(dist_exp_spin_val)
-        self._background_stars_dist_exp_spin.blockSignals(False)
+        # Update background-sky (sky_counts) controls.  Absent-key discipline:
+        # a scene without the block leaves the enable checkbox unchecked (and
+        # the value widgets disabled, showing the would-be defaults).
+        has_sky = isinstance(self.sim_params.get('sky_counts'), dict)
+        sky = self.sim_params.get('sky_counts') or {}
+        self._sky_counts_check.blockSignals(True)
+        self._sky_counts_check.setChecked(has_sky)
+        self._sky_counts_check.blockSignals(False)
+        for widget, value in (
+            (self._sky_density_spin, float(sky.get('density_factor', 0.0))),
+            (self._sky_a_spin, float(sky.get('a', -3.1))),
+            (self._sky_b_spin, float(sky.get('b', 0.34))),
+            (self._sky_diffuse_spin, float(sky.get('diffuse_e_per_px', 0.0))),
+        ):
+            widget.blockSignals(True)
+            widget.setValue(value)
+            widget.blockSignals(False)
+        self._sky_density_slider.blockSignals(True)
+        self._sky_density_slider.setValue(int(float(sky.get('density_factor', 0.0)) * 10))
+        self._sky_density_slider.blockSignals(False)
+        self._set_sky_widgets_enabled(has_sky)
+        # Sync the scene-level star-catalog-scatter control.
+        has_scatter = self.sim_params.get('star_catalog_scatter_px') is not None
+        self._star_scatter_check.blockSignals(True)
+        self._star_scatter_check.setChecked(has_scatter)
+        self._star_scatter_check.blockSignals(False)
+        self._star_scatter_spin.blockSignals(True)
+        self._star_scatter_spin.setValue(float(self.sim_params.get('star_catalog_scatter_px', 0.0)))
+        self._star_scatter_spin.setEnabled(has_scatter)
+        self._star_scatter_spin.blockSignals(False)
+        # Sync the test-only expected-outcome block.
+        expected = self.sim_params.get('expected')
+        has_expected = isinstance(expected, dict)
+        block: dict[str, Any] = expected if isinstance(expected, dict) else {}
+        self._expected_group.blockSignals(True)
+        self._expected_group.setChecked(has_expected)
+        self._expected_group.blockSignals(False)
+        self._expected_status_combo.blockSignals(True)
+        status_index = self._expected_status_combo.findText(str(block.get('status', 'success')))
+        if status_index >= 0:
+            self._expected_status_combo.setCurrentIndex(status_index)
+        self._expected_status_combo.blockSignals(False)
+        self._expected_tier_combo.blockSignals(True)
+        tier = block.get('confidence_tier')
+        tier_index = self._expected_tier_combo.findText('(none)' if tier is None else str(tier))
+        if tier_index >= 0:
+            self._expected_tier_combo.setCurrentIndex(tier_index)
+        self._expected_tier_combo.blockSignals(False)
+        self._expected_reason_edit.blockSignals(True)
+        self._expected_reason_edit.setText(str(block.get('status_reason') or ''))
+        self._expected_reason_edit.blockSignals(False)
         # Rebuild tabs
         self._rebuild_dynamic_tabs()
         self._update_tab_titles()

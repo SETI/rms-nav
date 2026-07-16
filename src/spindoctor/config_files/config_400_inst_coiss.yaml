@@ -25,6 +25,9 @@ cassini_iss:
       expected_noise_dn: 4.0       # PLACEHOLDER — calibrate in Phase 10
       marker_value: 0              # CISS RAW missing-pixel marker
       read_noise_dn: 4.0           # PLACEHOLDER — calibrate in Phase 10
+      # interim: photometric zero point (DN a vmag-0 star deposits per second),
+      # the electron zero point over the NAC standard gain state.
+      star_flux_dn_per_s_vmag0: 3.33e5
     image_quality_thresholds:
       blank_max_dn: 5.0
       saturation_threshold_dn: 4095
@@ -60,6 +63,9 @@ cassini_iss:
       expected_noise_dn: 4.0       # PLACEHOLDER — calibrate in Phase 10
       marker_value: 0
       read_noise_dn: 4.0           # PLACEHOLDER — calibrate in Phase 10
+      # interim: photometric zero point (DN a vmag-0 star deposits per second),
+      # the electron zero point over the WAC standard gain state.
+      star_flux_dn_per_s_vmag0: 9.29e4
     image_quality_thresholds:
       blank_max_dn: 5.0
       saturation_threshold_dn: 4095

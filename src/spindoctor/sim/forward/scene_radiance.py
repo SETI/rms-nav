@@ -1,18 +1,19 @@
 """Scene-radiance stage: compose the noise-free signal image.
 
-Composes background stars, catalog stars, and the ring/body stack (far to
-near, nearer objects overwriting) into the frame's normalized signal plane,
-applying the scene's planted pointing offset and camera roll.  Feature truth
-(rendered star records, body masks, inventory, z-order maps) is accumulated
-into ``frame.truth`` for the renderer's output metadata.
+Composes the ring/body stack (far to near, nearer objects overwriting) into the
+frame's normalized signal plane and the star field (catalog stars plus the
+background sky) into the frame's point-source plane, applying the scene's
+planted pointing offset and camera roll.  Feature truth (rendered star records,
+body masks, inventory, z-order maps) is accumulated into ``frame.truth`` for the
+renderer's output metadata.
 
-Stars render in signal units in one of two modes: with no active whole-scene
-optics PSF they are Gaussian-pre-spread at the instrument's ``star_psf_sigma``
-(the plain detector-grid render); with one active (an explicit ``optics.psf``
-block, the navigator-matched form, or ``instrument_defaults``) each star's
-total signal is deposited as a sub-pixel point mass so the scene PSF is the
-only convolution a star receives.  Occlusion is mask-overwrite rather than
-transparency compositing.
+Stars are point sources: each deposits its total flux
+(``zero_point * 10**(-0.4 * vmag) * exposure_sec``) as a sub-pixel point mass in
+the detector-native point-source plane (electrons for a CCD, DN for the
+vidicon), so the whole-scene optics PSF is the star's only convolution.  The
+background sky draws its counts from a cumulative star-count law and renders them
+through the same flux/point-mass path.  Body / ring occlusion is mask-overwrite
+rather than transparency compositing.
 """
 
 from collections.abc import Mapping
@@ -21,16 +22,44 @@ from typing import Any
 import numpy as np
 
 from spindoctor.config import DEFAULT_CONFIG
+from spindoctor.sim.forward.artifacts_catalog import (
+    resolve_detector_defaults,
+    resolve_sky_pixel_scale_arcsec,
+    resolve_star_flux_zero_point,
+)
 from spindoctor.sim.forward.body import render_single_body
 from spindoctor.sim.forward.optics import effective_psf
 from spindoctor.sim.forward.ring import composite_ring
 from spindoctor.sim.forward.stages import SimFrame
-from spindoctor.sim.forward.star import render_background_stars, render_stars
+from spindoctor.sim.forward.star import faint_sky_cutoff_mag, render_sky_counts, render_stars
 from spindoctor.sim.instruments import resolve_sim_inst_config
 from spindoctor.sim.seeds import derive_effect_seed
-from spindoctor.support.types import NDArrayBoolType, NDArrayIntType
+from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType
 
 __all__ = ['compose_scene_radiance']
+
+
+def _nominal_read_noise(instrument: str | None, domain: str) -> float:
+    """The camera's nominal per-pixel read noise for the faint-sky cutoff.
+
+    Read from the per-instrument catalog regardless of whether the scene enables
+    read noise -- the cutoff asks whether a star could ever clear the camera's
+    noise floor, a physical property of the detector.
+
+    Parameters:
+        instrument: The sim instrument name.
+        domain: The zero point's unit domain ('electrons' or 'dn').
+
+    Returns:
+        The nominal read noise in the zero point's unit domain.
+    """
+    catalog = resolve_detector_defaults(instrument)
+    if domain == 'dn':
+        vidicon = catalog.get('vidicon') or {}
+        line = float(vidicon.get('read_noise_line_dn', 1.0))
+        pixel = float(vidicon.get('read_noise_pixel_dn', 1.0))
+        return float(np.hypot(line, pixel))
+    return float(catalog.get('read_noise_e', 1.0))
 
 
 def compose_scene_radiance(
@@ -55,6 +84,7 @@ def compose_scene_radiance(
     """
     del rng
     img = frame.signal
+    point_e = frame.point_e
     size_v, size_u = img.shape
     # The signal plane is the oversampled grid (V*os, U*os).  Every pixel-space
     # quantity below (offsets, centres, radii, PSF sigmas, anti-aliasing widths)
@@ -66,6 +96,10 @@ def compose_scene_radiance(
     random_seed = int(params.get('random_seed', 42))
     background_stars_seed = derive_effect_seed(random_seed, 'scene_radiance/background_stars')
     crater_seed = derive_effect_seed(random_seed, 'scene_radiance/craters')
+    catalog_scatter_seed = derive_effect_seed(random_seed, 'scene_radiance/catalog_scatter')
+    # Scene-level per-star position-scatter sigma (detector pixels), scaled to
+    # the oversampled render grid alongside the other star pixel quantities.
+    catalog_scatter_px = float(params.get('star_catalog_scatter_px', 0.0)) * os
 
     offset_v = float(params.get('offset_v', 0.0)) * os
     offset_u = float(params.get('offset_u', 0.0)) * os
@@ -77,67 +111,56 @@ def compose_scene_radiance(
     # parallax (1/range), computed at full precision on the oversampled grid.
     spk_error = params.get('spk_error') or {}
 
-    # Resolve the per-instrument config once; stars use its PSF sigma so their
-    # centroid diagnostics match the navigator's PSF.
+    # Resolve the per-instrument config once; stars record the scene PSF sigma
+    # (or, absent a PSF, the instrument's configured sigma) for their diagnostics.
     inst_config = resolve_sim_inst_config(
         DEFAULT_CONFIG, params.get('instrument'), params.get('instrument_config')
     )
-    star_psf_sigma = float(inst_config['star_psf_sigma']) * os
+    star_psf_sigma = float(inst_config['star_psf_sigma'])
 
-    # With an active whole-scene optics PSF, stars are deposited as sub-pixel
-    # point masses so the optics kernel is the only convolution they receive
-    # (pre-spreading and then convolving would widen every star by sqrt(2)).
-    # Without one, stars pre-spread at their Gaussian sigma exactly as a
-    # detector-grid render always has.
+    # Stars are point sources deposited into the point-source plane; the scene
+    # PSF (an explicit optics.psf block, the navigator-matched form, or the
+    # instrument-defaults kernel) is their only convolution.  With no PSF a star
+    # is a 1-pixel spike (the undersampled limit); the recorded sigma falls back
+    # to the instrument's configured value in that case.
     scene_psf = effective_psf(params)
-    star_point_mass = scene_psf is not None
+    if scene_psf is not None:
+        sigma_v_psf = float(scene_psf['sigma_v'])
+        rendered_sigma_det = max(sigma_v_psf, float(scene_psf.get('sigma_u', sigma_v_psf)))
+    else:
+        rendered_sigma_det = star_psf_sigma
+    rendered_sigma = rendered_sigma_det * os
 
-    # Background stars are part of the sky signal, composed before noise.
-    background_stars_num = int(params.get('background_stars_num', 0))
-    bg_psf_sigma_raw = params.get('background_stars_psf_sigma')
-    background_stars_psf_sigma = (
-        star_psf_sigma if bg_psf_sigma_raw is None else float(bg_psf_sigma_raw) * os
-    )
-    background_stars_distribution_exponent = float(
-        params.get('background_stars_distribution_exponent', 2.5)
-    )
-    render_background_stars(
-        img,
-        background_stars_num,
-        background_stars_seed,
-        psf_sigma=background_stars_psf_sigma,
-        distribution_exponent=background_stars_distribution_exponent,
-        point_mass=star_point_mass,
-    )
+    # The photometric zero point and its unit domain (electrons for a CCD, DN for
+    # the vidicon) drive the flux each star deposits into the point-source plane.
+    zero_point, flux_domain = resolve_star_flux_zero_point(params.get('instrument'))
+    exposure_sec = float(params.get('exposure_sec', 1.0))
 
     stars_params = params.get('stars', []) or []
     bodies_params = params.get('bodies', []) or []
     rings_params = params.get('rings', []) or []
 
-    # Star positions, per-star PSF widths, and smear vectors are pixel-space, so
-    # they scale with the oversampling factor for rendering; at os == 1 the copy
-    # is numerically identical to the scene's stars.
+    # Star positions and smear vectors are pixel-space, so they scale with the
+    # oversampling factor for rendering; at os == 1 the copy is numerically
+    # identical to the scene's stars.
     stars_params_scaled = [_scale_star_params(sp, os) for sp in stars_params]
 
-    img, sim_star_list, star_info = render_stars(
-        img,
+    _render_sky(point_e, params, os=os, seed=background_stars_seed)
+
+    point_e, sim_star_list, star_info = render_stars(
+        point_e,
         stars_params_scaled,
         offset_v,
         offset_u=offset_u,
-        default_psf_sigma=star_psf_sigma,
+        zero_point=zero_point,
+        exposure_sec=exposure_sec,
+        rendered_sigma=rendered_sigma,
         rotation_deg=offset_rotation_deg,
-        point_mass=star_point_mass,
         oversample=os,
+        catalog_scatter_px=catalog_scatter_px,
+        catalog_scatter_seed=catalog_scatter_seed,
     )
-    if scene_psf is not None:
-        # The hit-test entries record the rendered star shape.  A point-mass
-        # star's rendered profile is the scene kernel, so record its core
-        # sigma (the larger axis, as a hit-test radius) instead of the
-        # pre-spread sigma that was never applied.
-        sigma_v_psf = float(scene_psf['sigma_v'])
-        rendered_sigma = max(sigma_v_psf, float(scene_psf.get('sigma_u', sigma_v_psf)))
-        for info in star_info:
-            info['sigma'] = rendered_sigma * os
+    del flux_domain
 
     # The camera roll and the planted spacecraft-ephemeris parallax are both
     # detector-space displacements; geometry is built in detector coordinates
@@ -320,26 +343,28 @@ def compose_scene_radiance(
     # Differential smear blurs each object class by its own motion, so it needs
     # the per-class radiance in isolation.  Capture the star, body, and ring
     # layers only when the scene asks for it, rendered with the same scaled
-    # geometry and z-order as the composite so occlusion is consistent.
+    # geometry and z-order as the composite so occlusion is consistent.  The star
+    # layer lives in the point-source (electron / DN) domain like the composite
+    # ``point_e``; the body and ring layers are intensive-signal layers.
     if _optics_needs_layers(params):
         stars_layer = np.zeros((size_v, size_u), dtype=np.float64)
-        render_background_stars(
-            stars_layer,
-            background_stars_num,
-            background_stars_seed,
-            psf_sigma=background_stars_psf_sigma,
-            distribution_exponent=background_stars_distribution_exponent,
-            point_mass=star_point_mass,
-        )
+        _render_sky(stars_layer, params, os=os, seed=background_stars_seed)
+        # The layer must be pixel-identical to the primary deposit above (same
+        # scatter sigma and seed included): differential smear REPLACES the
+        # point-source plane with this layer, so any argument omitted here
+        # silently undoes the corresponding effect for smeared-star scenes.
         render_stars(
             stars_layer,
             stars_params_scaled,
             offset_v,
             offset_u=offset_u,
-            default_psf_sigma=star_psf_sigma,
+            zero_point=zero_point,
+            exposure_sec=exposure_sec,
+            rendered_sigma=rendered_sigma,
             rotation_deg=offset_rotation_deg,
-            point_mass=star_point_mass,
             oversample=os,
+            catalog_scatter_px=catalog_scatter_px,
+            catalog_scatter_seed=catalog_scatter_seed,
         )
         bodies_layer = np.zeros((size_v, size_u), dtype=np.float64)
         rings_layer = np.zeros((size_v, size_u), dtype=np.float64)
@@ -388,6 +413,62 @@ def compose_scene_radiance(
     )
 
 
+def _render_sky(
+    plane: NDArrayFloatType,
+    params: Mapping[str, Any],
+    *,
+    os: int,
+    seed: int,
+) -> None:
+    """Render the background-sky star field into a point-source plane in place.
+
+    Reads the scene ``sky_counts`` block (absent = no sky).  The faint cutoff is
+    derived from the camera's nominal read noise and the scene PSF core, so the
+    count integral stops where a star drops below the sky background.
+
+    Parameters:
+        plane: The oversampled point-source plane to deposit into.
+        params: The full scene mapping.
+        os: The oversampling factor.
+        seed: The sky realization sub-seed.
+    """
+    sky = params.get('sky_counts')
+    if not isinstance(sky, Mapping):
+        return
+    instrument = params.get('instrument')
+    zero_point, domain = resolve_star_flux_zero_point(instrument)
+    exposure_sec = float(params.get('exposure_sec', 1.0))
+    inst_config = resolve_sim_inst_config(
+        DEFAULT_CONFIG, instrument, params.get('instrument_config')
+    )
+    scene_psf = effective_psf(params)
+    if scene_psf is not None:
+        sigma_v_psf = float(scene_psf['sigma_v'])
+        rendered_sigma_det = max(sigma_v_psf, float(scene_psf.get('sigma_u', sigma_v_psf)))
+    else:
+        rendered_sigma_det = float(inst_config['star_psf_sigma'])
+    read_noise = _nominal_read_noise(instrument, domain)
+    cutoff = faint_sky_cutoff_mag(
+        zero_point=zero_point,
+        exposure_sec=exposure_sec,
+        read_noise=read_noise,
+        psf_sigma=rendered_sigma_det,
+    )
+    render_sky_counts(
+        plane,
+        seed=seed,
+        a=float(sky.get('a', -3.1)),
+        b=float(sky.get('b', 0.34)),
+        density_factor=float(sky.get('density_factor', 1.0)),
+        pixel_scale_arcsec=resolve_sky_pixel_scale_arcsec(instrument),
+        faint_cutoff_mag=cutoff,
+        zero_point=zero_point,
+        exposure_sec=exposure_sec,
+        diffuse_flux_per_px=float(sky.get('diffuse_e_per_px', 0.0)),
+        oversample=os,
+    )
+
+
 def _optics_needs_layers(params: Mapping[str, Any]) -> bool:
     """True when the scene's optics require per-class radiance layers.
 
@@ -410,9 +491,10 @@ def _optics_needs_layers(params: Mapping[str, Any]) -> bool:
 def _scale_star_params(star_params: dict[str, Any], os: int) -> dict[str, Any]:
     """Scale a star's pixel-space fields to the oversampled render grid.
 
-    Catalog position, per-star PSF width, smear vector, and PSF fitting-window
-    size are pixel-space, so they scale with the oversampling factor.  At
-    ``os == 1`` the copy is numerically identical to the input.
+    Catalog position, per-star PSF width, smear vector, PSF fitting-window size,
+    the planted catalog-error displacement, and the companion separation are all
+    pixel-space, so they scale with the oversampling factor.  At ``os == 1`` the
+    copy is numerically identical to the input.
 
     Parameters:
         star_params: One scene star entry.
@@ -422,12 +504,17 @@ def _scale_star_params(star_params: dict[str, Any], os: int) -> dict[str, Any]:
         A scaled copy of the star entry.
     """
     scaled = dict(star_params)
-    for key in ('v', 'u', 'psf_sigma', 'move_v', 'move_u'):
+    for key in ('v', 'u', 'psf_sigma', 'move_v', 'move_u', 'catalog_error_v', 'catalog_error_u'):
         if star_params.get(key) is not None:
             scaled[key] = float(star_params[key]) * os
     psf_size = star_params.get('psf_size')
     if psf_size is not None:
         scaled['psf_size'] = [int(psf_size[0]) * os, int(psf_size[1]) * os]
+    companion = star_params.get('companion')
+    if isinstance(companion, dict) and companion.get('sep_px') is not None:
+        scaled_companion = dict(companion)
+        scaled_companion['sep_px'] = float(companion['sep_px']) * os
+        scaled['companion'] = scaled_companion
     return scaled
 
 

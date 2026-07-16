@@ -8,13 +8,16 @@ own vector -- the fast-flyby regime where a tracked target stays sharp while
 the star field trails, or vice versa.
 
 Differential smear composites the per-class radiance layers the radiance stage
-records.  Cross-class occlusion is resolved before smear (each class is
-smeared in isolation, then the classes are summed), which is a stated
-approximation where two classes overlap; at present fidelity rings sit behind
-bodies and neither overlaps the star field, so the approximation is exact for
-the scenes it serves.  Smear runs first among the optics sub-stages, on the
-un-blurred layers, so the downstream PSF and distortion form the image of the
-time-averaged radiance.
+records.  The body and ring layers are intensive-signal layers (they sum back
+into ``frame.signal``); the star layer is a point-source layer in the electron /
+DN domain (it sums back into ``frame.point_e``), because stars never pass through
+the detector's intensive conversion.  Cross-class occlusion is resolved before
+smear (each class is smeared in isolation, then the classes are summed), which
+is a stated approximation where two classes overlap; at present fidelity rings
+sit behind bodies and neither overlaps the star field, so the approximation is
+exact for the scenes it serves.  Smear runs first among the optics sub-stages,
+on the un-blurred layers, so the downstream PSF and distortion form the image of
+the time-averaged radiance.
 """
 
 from collections.abc import Mapping, Sequence
@@ -28,7 +31,11 @@ from spindoctor.support.types import NDArrayFloatType
 
 __all__ = ['apply_smear', 'smear_kernel']
 
-_LAYER_CLASSES: tuple[str, ...] = ('rings', 'bodies', 'stars')
+# The intensive-signal layers (summed back into frame.signal) and the
+# point-source layer (summed back into frame.point_e), kept separate because the
+# star layer carries electron / DN weights that never enter the signal plane.
+_SIGNAL_LAYER_CLASSES: tuple[str, ...] = ('rings', 'bodies')
+_POINT_LAYER_CLASS: str = 'stars'
 
 
 def smear_kernel(dv_px: float, du_px: float) -> NDArrayFloatType | None:
@@ -126,17 +133,28 @@ def apply_smear(
         kernel = smear_kernel(all_dv * oversample, all_du * oversample)
         if kernel is not None:
             _convolve_in_place(frame.signal, kernel)
+            if float(np.count_nonzero(frame.point_e)) > 0.0:
+                _convolve_in_place(frame.point_e, kernel)
         return
 
-    result = np.zeros_like(frame.signal)
-    for object_class in _LAYER_CLASSES:
+    # Body and ring layers recompose the intensive signal; the star layer
+    # recomposes the point-source plane, each smeared by its own vector.
+    signal_result = np.zeros_like(frame.signal)
+    for object_class in _SIGNAL_LAYER_CLASSES:
         layer = np.asarray(layers[object_class], dtype=np.float64).copy()
         pdv, pdu = per_class.get(object_class, (0.0, 0.0))
         kernel = smear_kernel((all_dv + pdv) * oversample, (all_du + pdu) * oversample)
         if kernel is not None:
             layer = fftconvolve(layer, kernel, mode='same')
-        result += layer
+        signal_result += layer
     # No clip: the signal plane is unclipped through the optics stage on both
     # smear paths (point-mass star deposits legitimately exceed 1.0 before the
     # PSF spreads them); the detector conversion clips after the downsample.
-    frame.signal[:] = result
+    frame.signal[:] = signal_result
+
+    star_layer = np.asarray(layers[_POINT_LAYER_CLASS], dtype=np.float64).copy()
+    sdv, sdu = per_class.get(_POINT_LAYER_CLASS, (0.0, 0.0))
+    kernel = smear_kernel((all_dv + sdv) * oversample, (all_du + sdu) * oversample)
+    if kernel is not None:
+        star_layer = fftconvolve(star_layer, kernel, mode='same')
+    frame.point_e[:] = star_layer

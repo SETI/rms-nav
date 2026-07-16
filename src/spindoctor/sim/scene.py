@@ -43,18 +43,20 @@ from spindoctor.sim.scene_checks import (
     _check_artifacts,
     _check_body_object,
     _check_detector,
+    _check_expected,
     _check_noise,
     _check_optics,
     _check_optional_bool,
     _check_optional_mapping,
     _check_optional_mapping_list,
-    _check_optional_nonnegative_int,
     _check_optional_number,
     _check_optional_positive_int,
     _check_optional_positive_number,
     _check_optional_str,
     _check_ring_object,
+    _check_sky_counts,
     _check_spk_error,
+    _check_star_catalog_scatter,
     _check_star_object,
     _require_int,
     _require_positive_int,
@@ -72,6 +74,7 @@ from spindoctor.sim.scene_schema import (
 )
 from spindoctor.sim.scene_schema import (
     TOP_LEVEL_IDEALIZED_KEYS,
+    TOP_LEVEL_TEST_ONLY_KEYS,
     TOP_LEVEL_TRUTH_KEYS,
     TRUTH_KEYS,
     SimSceneValidationError,
@@ -82,6 +85,7 @@ __all__ = [
     'CURRENT_SCHEMA_VERSION',
     'DECLARED_SIM_SCENE_CLASSES',
     'TOP_LEVEL_IDEALIZED_KEYS',
+    'TOP_LEVEL_TEST_ONLY_KEYS',
     'TOP_LEVEL_TRUTH_KEYS',
     'TRUTH_KEYS',
     'SimSceneValidationError',
@@ -106,6 +110,8 @@ DECLARED_SIM_SCENE_CLASSES: frozenset[str] = frozenset(
         'algorithmic_invariants',
         'regression',
         'artifact_sweep',
+        'star_confounder',
+        'expected_fail',
     }
 )
 
@@ -241,17 +247,6 @@ def validate_sim_params(
     )
     _check_optional_number(sim_params.get('time'), 'time', source=source)
     _check_optional_number(sim_params.get('ring_epoch'), 'ring_epoch', source=source)
-    _check_optional_positive_number(
-        sim_params.get('background_stars_psf_sigma'), 'background_stars_psf_sigma', source=source
-    )
-    _check_optional_number(
-        sim_params.get('background_stars_distribution_exponent'),
-        'background_stars_distribution_exponent',
-        source=source,
-    )
-    _check_optional_nonnegative_int(
-        sim_params.get('background_stars_num'), 'background_stars_num', source=source
-    )
     _check_optional_str(sim_params.get('midtime_utc'), 'midtime_utc', source=source)
     _check_optional_str(sim_params.get('closest_planet'), 'closest_planet', source=source)
     _check_optional_bool(sim_params.get('shade_solid_rings'), 'shade_solid_rings', source=source)
@@ -265,6 +260,9 @@ def validate_sim_params(
     _check_detector(sim_params.get('detector'), instrument=instrument, source=source)
     _check_artifacts(sim_params.get('artifacts'), instrument=instrument, source=source)
     _check_spk_error(sim_params.get('spk_error'), source=source)
+    _check_sky_counts(sim_params.get('sky_counts'), source=source)
+    _check_star_catalog_scatter(sim_params.get('star_catalog_scatter_px'), source=source)
+    _check_expected(sim_params.get('expected'), source=source)
 
     for block in ('bodies', 'rings', 'stars'):
         _check_optional_mapping_list(sim_params.get(block), block, source=source)
@@ -296,10 +294,10 @@ def build_nav_params(sim_params: dict[str, Any]) -> dict[str, Any]:
     classified idealized, with every :data:`TRUTH_KEYS` entry stripped.  For
     bodies, a ``nav_override`` mapping is overlaid first and the key dropped,
     so the navigator sees the geometry it *believes* without learning the
-    true values underneath.  Objects marked non-navigable are dropped
-    entirely (the ``navigable`` flag itself lands with later phases; the
-    mechanism is in place).  All values are deep copies, so navigator-side
-    code cannot mutate the renderer's scene.
+    true values underneath.  An object flagged ``navigable: false`` is dropped
+    entirely, so a surviving object's flag is always true and carries no hidden
+    truth.  All values are deep copies, so navigator-side code cannot mutate the
+    renderer's scene.
 
     Parameters:
         sim_params: The full scene mapping (the renderer's input).

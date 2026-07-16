@@ -1,0 +1,46 @@
+"""Expected-outcome regression for sim scenes carrying an ``expected`` block.
+
+Discovers every catalog scene with a scene-level ``expected`` block, renders and
+navigates it in-process, and asserts the fused outcome matches the declaration
+through the :mod:`tests.integration.sim_expected` machinery.  These are the
+false-positive-characterization scenes: a wrong-catalog or overwhelming-clutter
+frame whose CORRECT outcome is failure / low confidence, asserted here so a
+confident wrong offset is a test failure.
+
+Navigation is heavier than the structural checks (each scene renders and runs
+the full ensemble), so the module is ``@pytest.mark.integration`` -- the same
+deliberate tier as the baselines and sweeps.  It needs no holdings or SPICE.
+"""
+
+from pathlib import Path
+
+import pytest
+
+from spindoctor.sim.scene import load_sim_scene
+from tests.integration.sim_expected import (
+    assert_result_matches_expected,
+    expected_from_scene,
+    iter_expected_scene_paths,
+    navigate_scene,
+)
+
+pytestmark = pytest.mark.integration
+
+_SCENES_ROOT = Path(__file__).parent / 'sim_scenes'
+_EXPECTED_PATHS = iter_expected_scene_paths(_SCENES_ROOT)
+_EXPECTED_IDS = [f'{p.parent.name}/{p.stem}' for p in _EXPECTED_PATHS]
+
+
+def test_expected_scenes_exist() -> None:
+    """At least one catalog scene declares an expected outcome."""
+    assert _EXPECTED_PATHS
+
+
+@pytest.mark.parametrize('path', _EXPECTED_PATHS, ids=_EXPECTED_IDS)
+def test_scene_matches_expected_outcome(path: Path) -> None:
+    """Each scene with an expected block navigates to its declared outcome."""
+    scene = load_sim_scene(path)
+    expected = expected_from_scene(scene)
+    assert expected is not None
+    result = navigate_scene(scene)
+    assert_result_matches_expected(scene_name=scene['scene_name'], expected=expected, result=result)

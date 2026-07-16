@@ -21,13 +21,13 @@ renders at ``oversample`` 1, where the downsample is a no-op.
 
 The ``signal`` plane carries normalized [0, ~1] intensive scene units through
 the optics stage; the detector stage converts it to electrons through the
-exposure and digitizes it to DN in place (the electron unit chain).  Stars
-render into the signal plane: Gaussian-pre-spread when no whole-scene PSF is
-active, or as sub-pixel point masses when one is (so the scene PSF is their
-only convolution).  The ``point_e`` plane is reserved for electron-unit point
-sources -- it is added into the electron image after the signal conversion and
-before Poisson, so anything in it never passes through the intensive scale --
-and stays zeroed until an electron-unit source uses it.
+exposure and digitizes it to DN in place (the electron unit chain).  The
+``point_e`` plane carries the detector-native point sources (stars): electrons
+for a CCD, added into the electron image after the signal conversion and before
+Poisson so they never pass through the intensive scale; DN for the Voyager
+vidicon (which has no electron domain), added onto the converted signal before
+the DN-domain noise.  Both planes share every optical transform (PSF, smear,
+distortion, ghosts), so a star's shape tracks the limb and ring-edge profiles.
 """
 
 from collections.abc import Mapping
@@ -49,11 +49,11 @@ class SimFrame:
         signal: ``(V*os, U*os)`` float64 image of intensive scene signal
             (I/F-like normalized units): bodies, rings, and diffuse
             backgrounds.  The detector stage converts it to DN in place.
-        point_e: ``(V*os, U*os)`` float64 image reserved for electron-unit
-            point sources, kept separate because one array cannot carry two
+        point_e: ``(V*os, U*os)`` float64 image of detector-native point
+            sources (stars), kept separate because one array cannot carry two
             unit systems through the detector stage's signal-to-electron
-            conversion.  Stars deposit in signal units, so this plane stays
-            zeroed (see the module docstring).
+            conversion.  Electrons for a CCD, DN for the vidicon (see the module
+            docstring); zeroed on a scene with no stars.
         oversample: Oversampling factor ``os >= 1``; the detector grid is
             ``(V, U)``.
         truth: Feature truth accumulated by the radiance stage (the rendered
@@ -129,6 +129,8 @@ _STAR_INFO_PIXEL_KEYS: tuple[str, ...] = (
     'sigma',
     'psf_half_v',
     'psf_half_u',
+    'catalog_error_v',
+    'catalog_error_u',
 )
 
 
@@ -212,3 +214,17 @@ def _downsample_truth(truth: dict[str, Any], os: int) -> None:
             for key in _STAR_INFO_PIXEL_KEYS:
                 if key in info:
                     info[key] = info[key] / os
+    # The rendered star records carry the same pixel-space fields the scaled
+    # scene entries did (catalog position, motion vector, PSF window), so they
+    # return to detector units alongside the hit-test entries.  The records are
+    # per-render copies (see render_stars), so the render cache stays on the
+    # oversampled grid.
+    stars = truth.get('stars')
+    if stars is not None:
+        for star in stars:
+            star.v = star.v / os
+            star.u = star.u / os
+            star.move_v = star.move_v / os
+            star.move_u = star.move_u / os
+            # psf_size was scaled by an exact integer multiply, so this is exact.
+            star.psf_size = (star.psf_size[0] // os, star.psf_size[1] // os)

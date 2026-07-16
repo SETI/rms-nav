@@ -149,47 +149,72 @@ class ObsSim(ObsSnapshotInst):
         """Returns the maximum usable magnitude for stars in this observation.
 
         Derived from the emulated instrument's PUBLISHED detector model, never
-        from the scene's truth-side ``noise`` block: the navigator may know
-        only what a real pipeline could know about the camera.  The sim
-        renderer draws a star's PSF peak at ``signal_full_scale_dn *
-        2.512**-vmag`` DN (see ``spindoctor.sim.forward``), so the limiting magnitude is
-        where that peak falls to twice the effective per-pixel noise sigma --
-        the matched-filter detection boundary measured on single-star sim
-        scenes.  A scene that plants noise different from the published values
-        therefore produces an honestly-wrong detection limit, which is desired
-        model error, not a defect.  Keeping this physical matters beyond the
-        faint-star gate: the star NavModel synthesises each STAR feature's
-        predicted SNR (and from it the CRLB position covariance and
-        reliability score) from how far the star sits above this limit, so an
-        arbitrarily permissive placeholder inflates every simulated star's SNR
-        by tens of orders of magnitude and collapses its covariance to zero.
+        from the scene's truth-side ``noise`` block: the navigator may know only
+        what a real pipeline could know about the camera.  The renderer
+        flux-normalizes a star (its total signal is
+        ``star_flux_dn_per_s_vmag0 * 10**(-0.4 * vmag) * exposure``, see
+        ``spindoctor.sim.forward``); a Gaussian core of the published
+        ``star_psf_sigma`` then puts a fraction ``1 / (2*pi*sigma**2)`` of that
+        total in the peak pixel.  The limiting magnitude is where that peak falls
+        to twice the effective per-pixel noise sigma -- the matched-filter
+        detection boundary.  The published DN zero point is the camera's
+        electron zero point over its standard gain state, so a real navigator
+        could know it; the scene's truth-side noise block is deliberately not
+        consulted, so a scene that plants noise different from the published
+        values produces an honestly-wrong detection limit, which is desired model
+        error, not a defect.  Keeping this physical matters beyond the faint-star
+        gate: the star NavModel synthesises each STAR feature's predicted SNR
+        (and from it the CRLB position covariance and reliability score) from how
+        far the star sits above this limit, so an arbitrarily permissive
+        placeholder inflates every simulated star's SNR by tens of orders of
+        magnitude and collapses its covariance to zero.
+
+        The exposure the flux formula scales by is the scene's idealized
+        ``exposure_sec``, read from the navigator-visible ``nav_params`` view:
+        exposure is commanded, published information a real pipeline always
+        has, and the renderer multiplies every star's deposited flux by it, so
+        the detection limit must move by ``2.5 * log10(exposure)`` alongside
+        the flux or a long exposure's faint stars are gated out (and a short
+        exposure's noise floor is overstated).  The dummy Snapshot's ``texp``
+        deliberately stays at the 1-second reference: ``texp`` feeds the
+        observation's timing (``midtime = tstart + texp / 2`` anchors every
+        time-dependent oops computation and the reported exposure metadata),
+        and repurposing it would move the sim epoch as a side effect of a
+        photometric knob, so the limit reads the exposure directly instead.
 
         Returns:
             The maximum usable magnitude for stars in this observation.  For
-            calibrated-unit sim instruments the published block carries no
-            DN full-well to anchor a matched-filter limit, so the navigator
-            uses a generous constant.
+            calibrated-unit sim instruments the published block carries no DN
+            zero point to anchor a matched-filter limit, so the navigator uses a
+            generous constant.
         """
         inst_config = self._inst_config or {}
         inst_noise = inst_config.get('noise') or {}
         if inst_config.get('data_units', 'raw_dn') != 'raw_dn':
-            # calibrated_if: no published DN full-well to anchor the limit, so
+            # calibrated_if: no published DN zero point to anchor the limit, so
             # the navigator-side detection limit is a generous constant.
             return 30.0
-        # Published values only: the resolved per-instrument block (which
-        # already carries any idealized instrument_config overrides), with the
-        # generic sim block supplying the sim-only full-scale fraction.  The
+        # Published values only: the resolved per-instrument block (which already
+        # carries any idealized instrument_config overrides), with the generic
+        # sim block supplying any key the instrument block leaves unset.  The
         # scene's truth-side noise block is deliberately not consulted.
         sim_noise = self.config.category('sim')['noise']
-        full_scale_frac = float(
-            inst_noise.get('signal_full_scale_frac', sim_noise['signal_full_scale_frac'])
+        zero_point_dn = float(
+            inst_noise.get('star_flux_dn_per_s_vmag0', sim_noise['star_flux_dn_per_s_vmag0'])
         )
-        signal_full_scale_dn = full_scale_frac * float(inst_noise['full_well_dn'])
+        star_psf_sigma = float(
+            inst_config.get('star_psf_sigma', self.config.category('sim')['star_psf_sigma'])
+        )
         read_noise_dn = float(inst_noise['read_noise_dn'])
-        # Poisson shot noise on the star's own counts keeps the effective
-        # sigma above ~1 DN even on a read-noise-free frame.
+        # The scene's idealized exposure (navigator-visible; see the docstring
+        # for why the Snapshot's reference texp is not consulted here).
+        exposure = float(self.nav_params.get('exposure_sec', 1.0))
+        # Peak DN of a magnitude-0 star: its total over the Gaussian PSF core.
+        peak0_dn = zero_point_dn * exposure / (2.0 * math.pi * star_psf_sigma**2)
+        # Poisson shot noise on the star's own counts keeps the effective sigma
+        # above ~1 DN even on a read-noise-free frame.
         sigma_eff = max(read_noise_dn, 1.0)
-        return 2.5 * math.log10(signal_full_scale_dn / (2.0 * sigma_eff))
+        return 2.5 * math.log10(peak0_dn / (2.0 * sigma_eff))
 
     def get_public_metadata(self) -> dict[str, Any]:
         return {

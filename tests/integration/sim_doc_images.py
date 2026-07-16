@@ -26,6 +26,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from spindoctor.sim.png_export import render_scene_png
 from spindoctor.sim.scene import load_sim_scene, validate_sim_params
 
@@ -82,6 +84,47 @@ def _mesh(**over: Any) -> dict[str, Any]:
     return body
 
 
+def _scatter_stars(
+    count: int,
+    seed: int,
+    *,
+    size: int = 220,
+    vmag_lo: float = 3.0,
+    vmag_hi: float = 6.0,
+    margin: float = 8.0,
+) -> list[dict[str, Any]]:
+    """Return a deterministic spread of explicit bright catalog stars.
+
+    Under the flux-normalized star model a faint sky-count field sits at the
+    read-noise floor, so a legible star-field panel is built from explicit
+    bright stars (a few hundred DN each) scattered across the frame rather than
+    a dense faint sky.  The draw is seeded, so the panel is reproducible.
+
+    Parameters:
+        count: Number of stars to scatter.
+        seed: Seed for the reproducible position / magnitude draw.
+        size: Frame edge length in pixels (stars land inside a margin of it).
+        vmag_lo: Bright end of the magnitude draw.
+        vmag_hi: Faint end of the magnitude draw.
+        margin: Keep-out border in pixels so no star clips the frame edge.
+
+    Returns:
+        A list of ``{name, v, u, vmag}`` star dicts.
+    """
+    rng = np.random.default_rng(seed)
+    stars: list[dict[str, Any]] = []
+    for i in range(count):
+        stars.append(
+            {
+                'name': f'S{i}',
+                'v': round(float(rng.uniform(margin, size - margin)), 1),
+                'u': round(float(rng.uniform(margin, size - margin)), 1),
+                'vmag': round(float(rng.uniform(vmag_lo, vmag_hi)), 2),
+            }
+        )
+    return stars
+
+
 # (filename, sim_params, render kwargs) for the developer-guide gallery.
 _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
     ('ellipsoid_body', _scene([_ellipsoid()]), {'gamma': 1.1}),
@@ -123,12 +166,24 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
     ),
     (
         'star_field',
-        _scene([], background_stars_num=70, background_stars_psf_sigma=1.0),
-        {'gamma': 1.9, 'high_percentile': 99.9},
+        _scene(
+            [],
+            optics={'psf': {'match_navigator': True}},
+            stars=_scatter_stars(45, 11, vmag_hi=6.5),
+            sky_counts={'a': -1.5, 'b': 0.34, 'density_factor': 1.0},
+            noise={'poisson': True, 'read_noise_dn': 1.5},
+        ),
+        {'gamma': 1.6, 'high_percentile': 99.9},
     ),
     (
         'body_and_stars',
-        _scene([_ellipsoid(axis1=120.0, axis2=95.0, axis3=85.0)], background_stars_num=60),
+        _scene(
+            [_ellipsoid(axis1=120.0, axis2=95.0, axis3=85.0)],
+            optics={'psf': {'match_navigator': True}},
+            stars=_scatter_stars(28, 5),
+            sky_counts={'a': -1.8, 'b': 0.34, 'density_factor': 1.0},
+            noise={'poisson': True, 'read_noise_dn': 2.0},
+        ),
         {'gamma': 1.6, 'high_percentile': 99.9},
     ),
     (
@@ -172,7 +227,9 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
         'composite_scene',
         _scene(
             [_mesh(name='MOON', center_v=140.0, center_u=95.0, axis1=90.0, axis2=72.0, axis3=66.0)],
-            background_stars_num=40,
+            optics={'psf': {'match_navigator': True}},
+            stars=_scatter_stars(22, 3),
+            sky_counts={'a': -1.8, 'b': 0.34, 'density_factor': 1.0},
             rings=[
                 {
                     'name': 'RINGLET',

@@ -21,8 +21,13 @@ __all__ = [
     'DISTORTION_RESIDUAL_RMS_PX',
     'MODE_KEYS',
     'PSF_KERNELS',
+    'SKY_PIXEL_SCALE_ARCSEC',
+    'STAR_FLUX_DN_PER_S_VMAG0',
+    'STAR_FLUX_E_PER_S_VMAG0',
     'resolve_detector_defaults',
     'resolve_mode_with_catalog',
+    'resolve_sky_pixel_scale_arcsec',
+    'resolve_star_flux_zero_point',
 ]
 
 # The artifact-mode registry (:mod:`spindoctor.sim.forward.artifact_modes`) is the
@@ -72,6 +77,57 @@ DISTORTION_RESIDUAL_RMS_PX: dict[str, float] = {
 }
 
 
+# Photometric zero point: the flux a magnitude-0 star deposits per second of
+# exposure, so a star's total signal is
+# ``zero_point * 10**(-0.4 * vmag) * exposure_sec`` -- flux normalization, not a
+# peak-normalized profile (the optics PSF then dictates the shape and the peak).
+# The CCD table is in electrons per second (deposited into the detector's
+# electron plane before Poisson); the vidicon table is in DN per second (the
+# vidicon has no electron domain, so its point sources are DN).  All values are
+# interim and provenance-tagged:
+# - The Cassini / LORRI / Galileo electron zero points are sized from each
+#   camera's Section 5 limiting magnitude at SNR ~5 (a magnitude-0 star of a
+#   given zero point lands its limiting magnitude near the matched-filter
+#   detection boundary at that camera's read noise and PSF core).
+# - The Voyager DN zero point is sized so the 5.3 vidicon limiting magnitudes
+#   land at the matched-filter boundary in the DN chain.
+# - The generic zero point is DERIVED, not measured: it reproduces the prior
+#   peak-normalized brightness of a magnitude-4 star at the generic detector
+#   (signal_full_scale_frac 0.5, full_well 4095 e-, star_psf_sigma 1.0), whose
+#   integrated signal was ``(1 / 2.512**4) * 2*pi * 1.0**2 * 0.5 * 4095`` ~ 324
+#   electrons; ``1.3e4 * 10**(-0.4 * 4)`` ~ 326 matches it, so a generic scene's
+#   stars keep their sane DN range and the unit-test workhorse is undisturbed.
+STAR_FLUX_E_PER_S_VMAG0: dict[str, float] = {
+    'coiss_nac': 1.0e7,
+    'coiss_wac': 2.6e6,
+    'gossi': 4.0e6,
+    'nhlorri': 7.0e7,
+    'generic': 1.3e4,
+}
+
+# Vidicon photometric zero point in DN per second (Voyager: no electron domain).
+STAR_FLUX_DN_PER_S_VMAG0: dict[str, float] = {
+    'vgiss': 3.0e3,
+}
+
+# Angular pixel scale (arcsec / detector pixel) used to convert a scene's
+# pixel-area field of view into square degrees for the background-sky star
+# count.  A camera constant, kept here beside the other interim sim per-instrument
+# radiometry tables rather than in the shared real-pipeline config blocks.  All
+# values interim, provenance-tagged from the published plate scales (Section 12):
+# COISS NAC ~6 urad/px, WAC ~60 urad/px, Galileo SSI ~10.2 urad/px, LORRI ~5
+# urad/px (1x1), Voyager ISS ~9.3 urad/px; the generic block is a nominal 1
+# arcsec/px.
+SKY_PIXEL_SCALE_ARCSEC: dict[str, float] = {
+    'coiss_nac': 1.237,
+    'coiss_wac': 12.37,
+    'gossi': 2.095,
+    'nhlorri': 1.023,
+    'vgiss': 1.910,
+    'generic': 1.0,
+}
+
+
 def _coiss_alias(table: dict[str, Any]) -> None:
     """Point the calibrated Cassini instrument names at their raw entries."""
     for calib, raw in (('coiss_calib_nac', 'coiss_nac'), ('coiss_calib_wac', 'coiss_wac')):
@@ -81,6 +137,45 @@ def _coiss_alias(table: dict[str, Any]) -> None:
 
 _coiss_alias(PSF_KERNELS)
 _coiss_alias(DISTORTION_RESIDUAL_RMS_PX)
+_coiss_alias(STAR_FLUX_E_PER_S_VMAG0)
+_coiss_alias(SKY_PIXEL_SCALE_ARCSEC)
+
+
+def _catalog_key(instrument: str | None) -> str:
+    """The catalog key for a sim instrument name (generic aliases fold to one)."""
+    if instrument is None or instrument in ('generic', 'sim'):
+        return 'generic'
+    return instrument
+
+
+def resolve_star_flux_zero_point(instrument: str | None) -> tuple[float, str]:
+    """Return the star photometric zero point and its unit domain.
+
+    Parameters:
+        instrument: The sim instrument name, a generic alias, or ``None``.
+
+    Returns:
+        A ``(zero_point, domain)`` pair.  ``domain`` is ``'dn'`` for the vidicon
+        (its point sources are DN) and ``'electrons'`` for every CCD camera and
+        the generic detector.  ``zero_point`` is the flux a magnitude-0 star
+        deposits per second of exposure in that domain.
+    """
+    key = _catalog_key(instrument)
+    if key in STAR_FLUX_DN_PER_S_VMAG0:
+        return STAR_FLUX_DN_PER_S_VMAG0[key], 'dn'
+    return STAR_FLUX_E_PER_S_VMAG0.get(key, STAR_FLUX_E_PER_S_VMAG0['generic']), 'electrons'
+
+
+def resolve_sky_pixel_scale_arcsec(instrument: str | None) -> float:
+    """Return the angular pixel scale (arcsec / pixel) for the sky-count FOV area.
+
+    Parameters:
+        instrument: The sim instrument name, a generic alias, or ``None``.
+
+    Returns:
+        The interim plate scale in arcsec per detector pixel.
+    """
+    return SKY_PIXEL_SCALE_ARCSEC.get(_catalog_key(instrument), SKY_PIXEL_SCALE_ARCSEC['generic'])
 
 
 # Per-instrument detector electron-chain and noise-model parameters.  Every

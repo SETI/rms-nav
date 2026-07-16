@@ -31,6 +31,7 @@ from spindoctor.cli.sim_editor.artifacts_tab import ArtifactsTabMixin
 from spindoctor.cli.sim_editor.background_stars import BackgroundStarsMixin
 from spindoctor.cli.sim_editor.base import SimEditorBase
 from spindoctor.cli.sim_editor.body_tab import BodyTabMixin
+from spindoctor.cli.sim_editor.expected_outcome import ExpectedOutcomeMixin
 from spindoctor.cli.sim_editor.global_fields import GlobalFieldsMixin
 from spindoctor.cli.sim_editor.noise import NoiseMixin
 from spindoctor.cli.sim_editor.optics_tab import OpticsTabMixin
@@ -51,6 +52,7 @@ class CreateSimulatedImageModel(
     OpticsTabMixin,
     ArtifactsTabMixin,
     BackgroundStarsMixin,
+    ExpectedOutcomeMixin,
     BodyTabMixin,
     RingTabMixin,
     StarTabMixin,
@@ -86,9 +88,6 @@ class CreateSimulatedImageModel(
                 'cosmic_ray_rate_per_sec': 0.0,
                 'missing_data_rate': 0.0,
             },
-            'background_stars_num': 0,
-            'background_stars_psf_sigma': 0.9,
-            'background_stars_distribution_exponent': 2.5,
             'shade_solid_rings': False,
             'stars': [],
             'bodies': [],
@@ -198,6 +197,7 @@ class CreateSimulatedImageModel(
         self._build_noise_panel(gen_layout)
         self._build_psf_preview(gen_layout)
         self._build_background_stars_panel(gen_layout)
+        self._build_expected_panel(gen_layout)
 
         # Add General tab first, then the fixed Optics and Artifacts tabs.
         self._tabs.addTab(self._general_tab, 'General')
