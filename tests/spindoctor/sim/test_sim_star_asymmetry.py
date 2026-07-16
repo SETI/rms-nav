@@ -105,6 +105,46 @@ def test_scene_scatter_is_deterministic() -> None:
     assert np.array_equal(first, second)
 
 
+def test_scene_scatter_survives_differential_star_smear() -> None:
+    """A stars-class smear keeps the scattered star displacement.
+
+    Differential smear replaces the point-source plane with the per-class star
+    layer, so the layer must carry the same seeded scatter draw as the primary
+    deposit: the smeared render's star centroid stays at the scattered position
+    (catalog plus the realized draw), never snapping back to the catalog one.
+    """
+    base = _scene(
+        [{'name': 'A', 'v': 64.0, 'u': 64.0, 'vmag': 4.0}],
+        star_catalog_scatter_px=5.0,
+    )
+    smeared = _scene(
+        [{'name': 'A', 'v': 64.0, 'u': 64.0, 'vmag': 4.0}],
+        star_catalog_scatter_px=5.0,
+    )
+    smeared['optics'] = {
+        'psf': {'match_navigator': True},
+        'smear': [{'dv_px': 0.0, 'du_px': 4.0, 'object_class': 'stars'}],
+    }
+    img_plain, meta_plain = render_combined_model(base)
+    img_smeared, meta_smeared = render_combined_model(smeared)
+    # Both renders realize the same seeded draw; it is large enough to detect.
+    err_v = float(meta_plain['star_info'][0]['catalog_error_v'])
+    err_u = float(meta_plain['star_info'][0]['catalog_error_u'])
+    assert meta_smeared['star_info'][0]['catalog_error_v'] == err_v
+    assert (err_v**2 + err_u**2) ** 0.5 > 0.5
+    center_v = round(64.0 + err_v)
+    center_u = round(64.0 + err_u)
+    cv_plain, cu_plain = _centroid(img_plain, center_v, center_u, 10)
+    cv_smeared, cu_smeared = _centroid(img_smeared, center_v, center_u, 10)
+    # The unsmeared render sits at the scattered position...
+    assert abs(cv_plain - (64.0 + err_v)) < 0.1
+    assert abs(cu_plain - (64.0 + err_u)) < 0.1
+    # ...and the centred smear kernel preserves that centroid, so the smeared
+    # render differs from the catalog position by the same realized draw.
+    assert abs(cv_smeared - cv_plain) < 0.1
+    assert abs(cu_smeared - cu_plain) < 0.1
+
+
 def test_variable_star_renders_fainter() -> None:
     """A positive delta_mag renders the star fainter than its catalog vmag."""
     catalog = _scene([{'name': 'A', 'v': 64.0, 'u': 64.0, 'vmag': 4.0}])

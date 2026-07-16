@@ -349,6 +349,10 @@ def compose_scene_radiance(
     if _optics_needs_layers(params):
         stars_layer = np.zeros((size_v, size_u), dtype=np.float64)
         _render_sky(stars_layer, params, os=os, seed=background_stars_seed)
+        # The layer must be pixel-identical to the primary deposit above (same
+        # scatter sigma and seed included): differential smear REPLACES the
+        # point-source plane with this layer, so any argument omitted here
+        # silently undoes the corresponding effect for smeared-star scenes.
         render_stars(
             stars_layer,
             stars_params_scaled,
@@ -359,6 +363,8 @@ def compose_scene_radiance(
             rendered_sigma=rendered_sigma,
             rotation_deg=offset_rotation_deg,
             oversample=os,
+            catalog_scatter_px=catalog_scatter_px,
+            catalog_scatter_seed=catalog_scatter_seed,
         )
         bodies_layer = np.zeros((size_v, size_u), dtype=np.float64)
         rings_layer = np.zeros((size_v, size_u), dtype=np.float64)
