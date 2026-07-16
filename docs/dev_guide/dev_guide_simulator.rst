@@ -106,17 +106,22 @@ builds its catalog star records directly.
 The information boundary
 ------------------------
 
-Every key in the scene schema is classified as either **idealized** --
-information the production pipeline could know from catalogs, SPICE, labels, or
-configuration: instrument identity, image size, exposure, body ellipsoid/mesh
-geometry and pose, ring orbits and epochs, star catalog positions and
-magnitudes -- or **truth** -- nature's values and the test's contaminants: the
-planted pointing offset and roll, the RNG realization, the noise and
-stray-light blocks, crater terrain, per-star PSF anomalies, and the
-``nav_override`` channel. :data:`spindoctor.sim.scene.TRUTH_KEYS` is the
-machine-readable truth inventory; an import-time assertion in
-:mod:`spindoctor.sim.scene` fails if any schema key is left unclassified, so a
-schema change cannot dodge the classification.
+Every key in the scene schema is classified into one of three disjoint classes.
+**Idealized** keys are information the production pipeline could know from
+catalogs, SPICE, labels, or configuration: instrument identity, image size,
+exposure, body ellipsoid/mesh geometry and pose, ring orbits and epochs, star
+catalog positions and magnitudes, and the per-star ``navigable`` flag.
+**Truth** keys are nature's values and the test's contaminants: the planted
+pointing offset and roll, the RNG realization, the noise and stray-light blocks,
+crater terrain, the per-star PSF anomaly and planted catalog error, the
+background sky, and the ``nav_override`` channel. **Test-only** keys are the
+scene's declared navigation outcome (the ``expected`` block): read only by the
+integration suite's assertion machinery, and by neither the renderer nor the
+navigator. :data:`spindoctor.sim.scene.TRUTH_KEYS` is the machine-readable truth
+inventory; an import-time assertion in :mod:`spindoctor.sim.scene` fails if any
+schema key is left unclassified or lands in two classes, so a schema change
+cannot dodge the classification. The boundary filter is default-deny, so the
+test-only keys are stripped from the navigator's view alongside the truth keys.
 
 The boundary is enforced structurally, not by convention:
 
@@ -741,6 +746,59 @@ tolerance -- the level at which realism does not break navigation. The companion
 other end: it raises the missing-line incidence from a clean frame past the
 navigability cliff and records the navigation-quality-versus-incidence curve.
 
+.. _sim-star-confounder:
+
+Star confounders and the breakdown curve
+----------------------------------------
+
+The ``star_confounder`` scene class (``tests/integration/sim_scenes/star_confounder/``)
+is the star-field analog of the artifact sweep's survivable end: one, two, or
+three navigable stars planted in a field of non-navigable confounders (the
+1/2/3-star lock regimes), plus a saturated-star and a double-star scene. The
+navigator must recover the planted offset within a tolerance wide enough to
+absorb any centroid bias the confounders and planted catalog error induce. The
+confounders are ``navigable: false`` catalog stars and the raised-brightness
+``sky_counts`` field: both render, neither reaches the navigator, so the star
+technique has to lock on the true subset while comparable-brightness clutter
+crowds its search window.
+
+The companion ``star_confounder_density`` sweep (``tests/integration/sim_sweeps/``)
+drives the breakdown: it walks the confounder field's ``density_factor`` from a
+clean frame up past the cliff on the one-star lock geometry, so the recovery goes
+from a confident sub-pixel lock to a failed / low-confidence result. The measured
+transition point is the deliverable -- as comparable-brightness confounders crowd
+the window the brightness-uniqueness gate trips and the technique returns
+spurious, never a confident wrong offset. The sweep's ``ensemble_seeds`` mode
+replicates each density across several seeds (the geometry fixed, the confounder
+field redrawn per seed), so each sweep point is a small *population* rather than a
+single realization. Near the cliff the population splits between recovery and
+failure -- exactly the raw material an estimator-validation study needs, and the
+reason the mode exists.
+
+.. _sim-expected:
+
+The expected-outcome block
+--------------------------
+
+A scene may carry a scene-level ``expected`` block declaring the outcome the
+navigator should produce: a required ``status`` (``success`` / ``failed`` /
+``conflicted``), a ``confidence_tier`` (one of the five navigation ranks, or
+null to assert the status only), and an optional ``status_reason`` token. It is
+a **test-only** key -- read by the assertion machinery in
+``tests/integration/sim_expected.py``, fed to neither the renderer nor the
+navigator, and stripped from ``nav_params`` by the information boundary along
+with the truth keys. The block is modeled on the image-library sidecar's
+expected-outcome taxonomy (the same status / tier / reason cross-field rules: a
+``failed`` or ``conflicted`` status pins the matching tier) but is validated
+independently -- a sim scene is not a sidecar.
+
+The ``expected_fail`` scene class (``tests/integration/sim_scenes/expected_fail/``)
+is why the block exists. When a scene scatters every star off its catalog
+position, or drowns a lone star in an overwhelming confounder field, the
+*correct* navigation outcome is a failed or low-confidence result -- never a
+confident wrong offset. Each such scene carries an ``expected`` block, and the
+machinery turns "must not be confidently wrong here" into a passing assertion.
+
 .. _sim-floor:
 
 The self-consistency floor
@@ -825,7 +883,7 @@ The panels below are rendered by ``python -m tests.integration.sim_doc_images``
    :width: 45%
    :align: center
 
-   A random background star field.
+   A star field of flux-normalized point sources spread across the frame.
 
 .. figure:: _sim_images/multi_body.png
    :width: 45%
@@ -838,7 +896,7 @@ The panels below are rendered by ``python -m tests.integration.sim_doc_images``
    :width: 45%
    :align: center
 
-   A body against a background star field.
+   A body against a scattered star field.
 
 .. figure:: _sim_images/detector_noise.png
    :width: 45%
@@ -886,8 +944,9 @@ default scene.
 
 The scene classes (for example ``algorithmic_invariants``,
 ``phase_sweep_regular_body``, ``phase_sweep_irregular_body``, ``range_sweep``,
-``noise_sweep``, ``multi_body_geometry``, ``regression``) scope what each scene
-is testing and are enforced by the structural test. The scene README at
+``noise_sweep``, ``multi_body_geometry``, ``regression``, ``artifact_sweep``,
+``star_confounder``, ``expected_fail``) scope what each scene is testing and are
+enforced by the structural test. The scene README at
 ``tests/integration/sim_scenes/README.txt`` documents the schema alongside the
 code.
 
@@ -1030,8 +1089,9 @@ Top-level fields
      - list
      - ``[]``
      - idealized
-     - Explicit star dicts (see :ref:`sim-star-params`); ``psf_sigma`` is
-       truth-side.
+     - Explicit star dicts (see :ref:`sim-star-params`); the ``psf_sigma``,
+       ``catalog_error_v`` / ``catalog_error_u``, ``companion``, and
+       ``delta_mag`` per-star keys are truth-side.
    * - ``sky_counts``
      - map
      - none
@@ -1042,6 +1102,14 @@ Top-level fields
        optional flat diffuse-sky floor. The sky stars are contaminants: the
        navigator receives no catalog for them, and they render through the same
        flux/point-mass path as catalog stars.
+   * - ``star_catalog_scatter_px``
+     - float
+     - none
+     - truth
+     - Scene-level per-star position-scatter sigma (px): every rendered star is
+       displaced off its catalog position by a seeded Gaussian draw of this
+       sigma, added to any explicit per-star ``catalog_error_*`` (see
+       :ref:`sim-star-params`).
    * - ``noise``
      - dict
      - off
@@ -1086,6 +1154,14 @@ Top-level fields
      - none
      - idealized
      - Per-instrument config overrides (see :ref:`sim-instrument-config`).
+   * - ``expected``
+     - map
+     - none
+     - test-only
+     - The scene's declared navigation outcome (``status``,
+       ``confidence_tier``, ``status_reason``), asserted by the integration
+       suite and read by neither the renderer nor the navigator (see
+       :ref:`sim-expected`).
 
 .. _sim-body-params:
 
@@ -1231,18 +1307,55 @@ Star parameters
 Each entry of ``stars`` is a dict with ``name`` and an optional
 ``catalog_name``, a ``v`` / ``u`` position, a ``vmag`` (visual magnitude; lower
 is brighter), an optional ``spectral_class``, an optional per-star smear vector
-``move_v`` / ``move_u``, and an optional PSF fitting-window size ``psf_size``
-(a two-integer list). All of those are idealized -- they are the catalog and
-instrument knowledge a real pipeline has. The one truth-side star key is
-``psf_sigma``: a per-star PSF width override is an anomaly of the rendered
-image, and the navigator knows only the instrument's published PSF.
+``move_v`` / ``move_u``, an optional PSF fitting-window size ``psf_size`` (a
+two-integer list), and an optional ``navigable`` flag. All of those are
+idealized -- they are the catalog and instrument knowledge a real pipeline has.
+``navigable`` defaults to true when absent; setting it to ``false`` renders the
+star but drops it from the navigator's filtered view entirely, so a *surviving*
+star's flag is always true and carries no hidden truth (which is why it is
+idealized, not truth).
+
+The truth-side star keys never reach the navigator:
+
+.. list-table::
+   :widths: 26 74
+   :header-rows: 1
+
+   * - Field (truth)
+     - Meaning
+   * - ``psf_sigma``
+     - A per-star PSF width override -- an anomaly of the rendered image. The
+       navigator knows only the instrument's published PSF.
+   * - ``catalog_error_v``, ``catalog_error_u``
+     - Displace the RENDERED star (px) off the catalog position the navigator
+       predicts from -- unrecoverable astrometric residual, added on top of the
+       scene-level ``star_catalog_scatter_px`` draw.
+   * - ``companion``
+     - An unresolved binary: a second point source at ``sep_px`` along
+       ``angle_deg``, ``delta_mag`` fainter. The blended photocenter sits off
+       the catalog position by a magnitude-weighted amount -- a physical catalog
+       error the navigator cannot know.
+   * - ``delta_mag``
+     - Renders a variable star at a brightness other than its cataloged
+       ``vmag`` (positive is fainter); the catalog ``vmag`` stays what the
+       navigator sees.
+
+**Information asymmetry.** The navigator predicts each surviving star from its
+idealized catalog ``v`` / ``u`` and ``vmag``; the renderer draws it at those
+values *plus* whatever truth keys the scene planted -- a position error, a
+photocenter-pulling companion, a brightness delta -- and never tells the
+navigator. A star technique must lock the pointing from the navigable subset
+despite that residual, and the ``star_confounder`` and ``expected_fail`` scene
+classes (see :ref:`sim-star-confounder`) push the residual and the clutter past
+where it can.
 
 A background-sky star field is added by the truth-side top-level ``sky_counts``
 map: star counts are drawn from the cumulative law ``log10 N(<m) = a + b*m`` per
 square degree (interim mid-galactic-latitude values ``a = -3.1``, ``b = 0.34``),
 scaled by the frame's field of view and the ``density_factor`` multiplier, down
 to a faint cutoff, and rendered through the same flux/point-mass path as catalog
-stars. An optional ``diffuse_e_per_px`` adds a flat diffuse-sky floor.
+stars. An optional ``diffuse_e_per_px`` adds a flat diffuse-sky floor. The sky
+stars carry no catalog, so to the navigator they are pure confounders.
 
 Every star -- catalog or sky -- is a flux-normalized point source: its total
 signal is ``zero_point * 10**(-0.4 * vmag) * exposure_sec`` (the per-instrument
@@ -1255,6 +1368,15 @@ sqrt(2). Sky stars follow the same rule, and the star hit-test metadata records
 the scene kernel's core sigma. A scene with no PSF renders each star as a
 one-pixel spike (the undersampled limit), so the converted floor scenes carry an
 explicit ``optics.psf`` block.
+
+The faint sky-count integral is truncated at the magnitude where a star's
+matched-filter signal drops to the read-noise floor over its PSF core
+(:func:`spindoctor.sim.forward.star.faint_sky_cutoff_mag`): fainter draws add
+nothing above the noise. That cutoff is an image-side rendering economy and is
+distinct from the navigator's own published-config detection limit
+(:meth:`~spindoctor.obs.obs_inst_sim.ObsSim.star_max_usable_vmag`), which is
+derived from the emulated instrument's configuration and bounds which stars the
+navigator will *use*, never from the scene's truth-side blocks.
 
 .. _sim-noise:
 
@@ -1629,12 +1751,17 @@ realism addition needs -- live in their own module:
      - Stray-light amplitude, direction, model, radial center (its panel is
        hosted in the Optics tab's stray-light group).
    * - ``background_stars.py``
-     - Background-sky ``sky_counts`` controls: density factor, count-law a and
-       b, diffuse floor.
+     - Background-sky ``sky_counts`` controls (density factor, count-law a and
+       b, diffuse floor) plus the scene-level ``star_catalog_scatter_px`` control.
+   * - ``expected_outcome.py``
+     - The test-only ``expected`` block: a checkable Expected-outcome group on
+       the General tab (status, confidence tier, status reason).
    * - ``body_tab.py`` / ``ring_tab.py`` / ``star_tab.py``
      - The per-object tabs (geometry, shape model and mesh controls, crater
        controls, navigation-override group; ring edges and shading; star
-       position, magnitude, PSF, smear, catalog label).
+       position, magnitude, PSF, smear, catalog label, and the per-star
+       information-asymmetry controls -- navigable flag, catalog error,
+       companion, variable-brightness delta).
    * - ``tabs.py``
      - Object-tab lifecycle (the ``+`` tab, ordering, rebuild).
    * - ``scene_io.py``
