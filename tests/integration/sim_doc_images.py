@@ -225,26 +225,31 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
         'rings',
         _scene(
             [],
-            rings=[
-                {
-                    'name': 'RINGLET_INNER',
-                    'feature_type': 'RINGLET',
+            ring_system={
+                'geometry': {
                     'center_v': 110.0,
                     'center_u': 110.0,
-                    'inner_data': [{'mode': 1, 'a': 56.0}],
-                    'outer_data': [{'mode': 1, 'a': 66.0}],
-                    'shading_distance': 10.0,
+                    'opening_deg_obs': 90.0,
+                    'opening_deg_sun': 90.0,
+                    'node_deg': 0.0,
                 },
-                {
-                    'name': 'RINGLET_OUTER',
-                    'feature_type': 'RINGLET',
-                    'center_v': 110.0,
-                    'center_u': 110.0,
-                    'inner_data': [{'mode': 1, 'a': 90.0, 'ae': 6.0}],
-                    'outer_data': [{'mode': 1, 'a': 98.0, 'ae': 6.0}],
-                    'shading_distance': 10.0,
-                },
-            ],
+                'features': [
+                    {
+                        'name': 'RINGLET_INNER',
+                        'kind': 'ringlet',
+                        'tau': 2.0,
+                        'width': 10.0,
+                        'orbit': {'a': 56.0},
+                    },
+                    {
+                        'name': 'RINGLET_OUTER',
+                        'kind': 'ringlet',
+                        'tau': 0.7,
+                        'width': 8.0,
+                        'orbit': {'a': 90.0, 'ae': 6.0},
+                    },
+                ],
+            },
         ),
         {'gamma': 1.2},
     ),
@@ -343,19 +348,27 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
             optics={'psf': {'match_navigator': True}},
             stars=_scatter_stars(22, 3),
             sky_counts={'a': -1.8, 'b': 0.34, 'density_factor': 1.0},
-            rings=[
-                {
-                    'name': 'RINGLET',
-                    'feature_type': 'RINGLET',
+            ring_system={
+                'geometry': {
                     'center_v': 110.0,
                     'center_u': 110.0,
-                    'inner_data': [{'mode': 1, 'a': 150.0, 'ae': 8.0}],
-                    'outer_data': [{'mode': 1, 'a': 170.0, 'ae': 8.0}],
-                    'shading_distance': 6.0,
-                    # The moon sits in front of the ring (physical depths).
-                    'range_km': 1000000.0,
+                    'opening_deg_obs': 90.0,
+                    'opening_deg_sun': 90.0,
+                    'node_deg': 0.0,
                 },
-            ],
+                # The moon sits in front of the ring (physical depths).
+                'range_km': 1000000.0,
+                'km_per_pixel': 1000.0,
+                'features': [
+                    {
+                        'name': 'RINGLET',
+                        'kind': 'ringlet',
+                        'tau': 1.2,
+                        'width': 20.0,
+                        'orbit': {'a': 150.0, 'ae': 8.0},
+                    },
+                ],
+            },
             noise={'poisson': True, 'read_noise_dn': 4.0},
         ),
         {'gamma': 1.5, 'high_percentile': 99.9},
