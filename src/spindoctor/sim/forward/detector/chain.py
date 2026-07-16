@@ -261,7 +261,7 @@ def _apply_ccd(frame: SimFrame, dp: DetectorParams, rng: np.random.Generator) ->
         records['bright_dark_pairs'] = _apply_bright_dark_pairs(
             electrons, modes['bright_dark_pairs'], frame, dp
         )
-    add_hot_pixels(
+    hot_record = add_hot_pixels(
         electrons,
         fraction=dp.hot_pixel_fraction,
         amplitude_e=dp.hot_pixel_amplitude_e,
@@ -269,6 +269,11 @@ def _apply_ccd(frame: SimFrame, dp: DetectorParams, rng: np.random.Generator) ->
         rng=_stage_rng(dp.random_seed, 'hot_pixels'),
         candidate_pool=_hot_pixel_pool(frame, dp),
     )
+    # The hot_pixels artifact mode is routed through the resolver's flat knobs,
+    # so the chain records its realized population here; the generic noise-block
+    # stress path stays unrecorded like the other generic knobs.
+    if dp.hot_pixel_mode_active:
+        records['hot_pixels'] = hot_record
     if 'radiation_transients' in modes:
         records['radiation_transients'] = _apply_radiation_transients(
             electrons, modes['radiation_transients'], dp

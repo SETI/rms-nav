@@ -197,6 +197,25 @@ def test_lorri_floor_does_not_inject_frame_transfer_smear() -> None:
     assert 'frame_transfer_smear' not in dp.detector_modes
 
 
+def test_generic_instrument_defaults_injects_no_frame_transfer_smear() -> None:
+    """The injection is LORRI-only: a generic instrument_defaults scene gets none."""
+    dp = resolve_detector_params(
+        {
+            'instrument': 'generic',
+            'random_seed': 1,
+            'exposure_sec': 0.1,
+            'artifacts': {'instrument_defaults': True},
+        }
+    )
+    assert 'frame_transfer_smear' not in dp.detector_modes
+
+
+def test_generic_instrument_defaults_records_no_smear_truth() -> None:
+    """A generic instrument_defaults render writes no frame_transfer_smear record."""
+    _img, truth = render_combined_model(_disc('generic', artifacts={'instrument_defaults': True}))
+    assert 'frame_transfer_smear' not in truth.get('artifacts', {})
+
+
 # --- serial_tail ------------------------------------------------------------
 
 
@@ -231,6 +250,23 @@ def test_serial_tail_disabled_without_saturation() -> None:
     )
     assert record['sources'] == 0
     assert np.array_equal(dn, before)
+
+
+def test_serial_tail_length_one_renders() -> None:
+    """A 1-px tail renders without error; there is nothing past the source to write."""
+    dn = np.zeros((_SIZE, _SIZE), dtype=np.float64)
+    dn[32, 20] = 4095.0
+    record = add_serial_tail(
+        dn,
+        saturation_dn=4095.0,
+        saturation_frac=0.99,
+        amplitude_dn=12.0,
+        length_px=1,
+        direction='right',
+    )
+    assert record['active'] is True
+    assert record['sources'] == 1
+    assert float(dn[32, 21]) == pytest.approx(0.0)
 
 
 # --- beam_bend --------------------------------------------------------------
@@ -403,6 +439,39 @@ def test_quantization_ls8b_mode_routes_to_the_ls8b_submode() -> None:
     assert dp.quantization == 'ls8b'
 
 
+def test_quantization_lut_mode_routes_to_the_sqrt_lut_submode() -> None:
+    """The quantization_lut mode selects the sqrt-companding ADC sub-mode."""
+    dp = resolve_detector_params(
+        _disc('coiss_nac', artifacts={'quantization_lut': {'incidence': 1.0}})
+    )
+    assert dp.quantization == 'sqrt_lut'
+
+
+def test_bias_structure_mode_overrides_the_generic_knob() -> None:
+    """An active bias_structure mode's parameters win over the noise-block knob."""
+    dp = resolve_detector_params(
+        _disc(
+            'coiss_nac',
+            noise={'bias_pedestal_sigma_dn': 5.0},
+            artifacts={'bias_structure': {'incidence': 1.0, 'pedestal_sigma_dn': 2.0}},
+        )
+    )
+    assert dp.bias_pedestal_sigma_dn == 2.0
+
+
+def test_bias_structure_mode_gates_on_its_incidence() -> None:
+    """An inactive bias_structure mode leaves the generic noise-block knob in force."""
+    dp = resolve_detector_params(
+        _disc(
+            'coiss_nac',
+            noise={'bias_pedestal_sigma_dn': 5.0},
+            artifacts={'bias_structure': {'incidence': 0.0, 'pedestal_sigma_dn': 2.0}},
+        )
+    )
+    assert 'bias_structure' not in dp.detector_modes
+    assert dp.bias_pedestal_sigma_dn == 5.0
+
+
 def test_banding_mode_silences_the_generic_banding() -> None:
     """banding_coherent yields the generic banding to the explicit mode."""
     dp = resolve_detector_params(
@@ -422,6 +491,143 @@ def test_detector_mode_records_truth() -> None:
     )
     artifacts = truth.get('artifacts', {})
     assert artifacts.get('fixed_pattern', {}).get('active') is True
+
+
+# --- radiation_transients ----------------------------------------------------
+
+
+def test_radiation_transients_expected_count_scales() -> None:
+    """The expected count scales with environment factor and (t_exp + dwell) / t_exp."""
+    from spindoctor.sim.forward.detector.chain import _apply_radiation_transients
+
+    dp = resolve_detector_params({'instrument': 'coiss_nac', 'random_seed': 5, 'exposure_sec': 2.0})
+    cfg: dict[str, Any] = {
+        'incidence': 10.0,
+        'environment_factor': 3.0,
+        'readout_dwell_sec': 4.0,
+        'amplitude_e': 1000.0,
+    }
+    electrons = np.zeros((_SIZE, _SIZE), dtype=np.float64)
+    record = _apply_radiation_transients(electrons, cfg, dp)
+    assert record['expected'] == pytest.approx(10.0 * 3.0 * (2.0 + 4.0) / 2.0)
+
+
+def test_radiation_transients_baseline_expected_is_the_incidence() -> None:
+    """With unit environment and no dwell the expected count is the incidence."""
+    from spindoctor.sim.forward.detector.chain import _apply_radiation_transients
+
+    dp = resolve_detector_params({'instrument': 'coiss_nac', 'random_seed': 5, 'exposure_sec': 2.0})
+    cfg: dict[str, Any] = {
+        'incidence': 10.0,
+        'environment_factor': 1.0,
+        'readout_dwell_sec': 0.0,
+        'amplitude_e': 1000.0,
+    }
+    electrons = np.zeros((_SIZE, _SIZE), dtype=np.float64)
+    record = _apply_radiation_transients(electrons, cfg, dp)
+    assert record['expected'] == pytest.approx(10.0)
+
+
+def test_radiation_amplitudes_fall_steeply() -> None:
+    """The radiation regime's exponential amplitudes fall steeply below the scale."""
+    from spindoctor.sim.forward.detector.noise_stages import deposit_morphological_events
+
+    electrons = np.zeros((256, 256), dtype=np.float64)
+    deposit_morphological_events(
+        electrons, n_events=300, amplitude_e=1000.0, rng=_rng(7), amplitude_dist='exponential'
+    )
+    deposits = electrons[electrons > 0.0]
+    assert deposits.size > 0
+    assert float(np.median(deposits)) < 500.0
+
+
+def test_cosmic_amplitudes_sit_above_the_scale() -> None:
+    """The cosmic-ray lognormal amplitudes sit at or above the deposit scale."""
+    from spindoctor.sim.forward.detector.noise_stages import deposit_morphological_events
+
+    electrons = np.zeros((256, 256), dtype=np.float64)
+    deposit_morphological_events(
+        electrons, n_events=300, amplitude_e=1000.0, rng=_rng(7), amplitude_dist='lognormal'
+    )
+    deposits = electrons[electrons > 0.0]
+    assert deposits.size > 0
+    assert float(np.median(deposits)) > 1000.0
+
+
+def test_radiation_morphology_mix_present() -> None:
+    """The event mix carries single-pixel hits plus multi-pixel streaks / splatters."""
+    from scipy import ndimage
+
+    from spindoctor.sim.forward.detector.noise_stages import deposit_morphological_events
+
+    electrons = np.zeros((256, 256), dtype=np.float64)
+    deposit_morphological_events(
+        electrons, n_events=300, amplitude_e=1000.0, rng=_rng(7), amplitude_dist='exponential'
+    )
+    labels, count = ndimage.label(electrons > 0.0)
+    sizes = ndimage.sum_labels(np.ones_like(electrons), labels, index=range(1, count + 1))
+    assert int((sizes == 1).sum()) > 0
+    assert int((sizes >= 3).sum()) > 0
+
+
+# --- ADC quantization sub-modes ----------------------------------------------
+
+
+def test_quantize_ls8b_wraps_modulo_256() -> None:
+    """LS8B keeps the low 8 bits: 256 -> 0, 300 -> 44, 4095 -> 255."""
+    from spindoctor.sim.forward.detector.chain import quantize_dn
+
+    out = quantize_dn(np.array([256.0, 300.0, 4095.0]), mode='ls8b', saturation_dn=4095.0)
+    assert out.tolist() == [0.0, 44.0, 255.0]
+
+
+def test_quantize_contour_8bit_posterizes_to_step_multiples() -> None:
+    """contour_8bit posterizes the 8-bit word to DN multiples of the step."""
+    from spindoctor.sim.forward.detector.chain import quantize_dn
+
+    dn = np.arange(0, 256, dtype=np.float64)
+    out = quantize_dn(dn, mode='contour_8bit', saturation_dn=255.0, contour_step=8)
+    levels = set(out.tolist())
+    for level in levels:
+        assert level % 8 == 0 or level == 255.0
+    assert 8.0 in levels
+    assert 248.0 in levels
+
+
+# --- hot_pixels truth recording ----------------------------------------------
+
+
+def test_hot_pixels_record_matches_planted_pixels() -> None:
+    """The record's coordinates carry the record's charge on the electron plane."""
+    from spindoctor.sim.forward.detector.noise_stages import add_hot_pixels
+
+    electrons = np.zeros((_SIZE, _SIZE), dtype=np.float64)
+    record = add_hot_pixels(
+        electrons, fraction=0.01, amplitude_e=1.0e4, column_factor=0.0, rng=_rng(4)
+    )
+    assert record['pixels']
+    for (v, u), amp in zip(record['pixels'], record['amplitudes_e'], strict=True):
+        assert float(electrons[v, u]) == pytest.approx(amp)
+
+
+def test_hot_pixels_mode_records_truth_end_to_end() -> None:
+    """The hot_pixels mode writes its planted population into the frame truth."""
+    scene = _disc('coiss_nac', artifacts={'hot_pixels': {'incidence': 0.002, 'amplitude_e': 4.0e4}})
+    scene['bodies'] = []
+    img, truth = render_combined_model(scene)
+    record = truth['artifacts']['hot_pixels']
+    assert record['pixels']
+    assert len(record['amplitudes_e']) == len(record['pixels'])
+    # The strongest planted pixel stands above the frame's background level.
+    idx = int(np.argmax(record['amplitudes_e']))
+    v, u = record['pixels'][idx]
+    assert float(img[v, u]) > float(np.median(img))
+
+
+def test_generic_hot_pixel_knob_records_no_truth() -> None:
+    """The instrument_defaults hot-pixel path stays unrecorded (not an explicit mode)."""
+    _img, truth = render_combined_model(_disc('coiss_nac', artifacts={'instrument_defaults': True}))
+    assert 'hot_pixels' not in truth.get('artifacts', {})
 
 
 def test_floor_scene_records_no_detector_artifacts() -> None:

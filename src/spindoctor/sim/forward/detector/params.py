@@ -34,6 +34,7 @@ from spindoctor.config import DEFAULT_CONFIG
 from spindoctor.sim.forward.artifact_modes import (
     DETECTOR_MODE_ORDER,
     mode_available,
+    normalize_instrument,
     resolve_mode_config,
 )
 from spindoctor.sim.forward.artifacts_catalog import (
@@ -89,6 +90,10 @@ class DetectorParams:
         hot_pixel_adversarial: Whether the hot-pixel population is placed
             adversarially (biased onto the navigation features) rather than
             uniformly.
+        hot_pixel_mode_active: Whether the ``hot_pixels`` artifact mode drove
+            the hot-pixel knobs (in which case the chain records the realized
+            population in the frame truth), as opposed to the generic
+            noise-block / instrument_defaults path.
         quantization_contour_step: The DN posterization step for the
             ``contour_8bit`` quantization sub-mode.
         artifacts_adversarial: Whether stochastic detector artifact modes place
@@ -131,6 +136,7 @@ class DetectorParams:
     random_seed: int = 42
     instrument_defaults: bool = False
     hot_pixel_adversarial: bool = False
+    hot_pixel_mode_active: bool = False
     quantization_contour_step: int = 8
     artifacts_adversarial: bool = False
     detector_modes: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -218,8 +224,10 @@ def _resolve_detector_modes(
     Each present, available, and active mode is resolved (scene value over
     catalog default over registry default) and returned keyed by name.  LORRI's
     ``frame_transfer_smear`` is the one physical-signal-chain member turned on
-    under ``instrument_defaults``: when the scene has not set it, it is injected
-    at incidence 1 with the catalog's nominal scrub/transfer times.
+    under ``instrument_defaults``: when a LORRI scene has not set it, it is
+    injected at incidence 1 with the catalog's nominal scrub/transfer times.
+    The injection is LORRI-only; the instrument-agnostic generic block accepts
+    every mode but emulates no frame-transfer camera, so it gets no injection.
     """
     modes: dict[str, dict[str, Any]] = {}
     for name in DETECTOR_MODE_ORDER:
@@ -228,7 +236,7 @@ def _resolve_detector_modes(
             if (
                 name == 'frame_transfer_smear'
                 and instrument_defaults
-                and mode_available(name, instrument)
+                and normalize_instrument(instrument) == 'nhlorri'
             ):
                 raw = {'incidence': 1.0}
             else:
@@ -358,8 +366,10 @@ def resolve_detector_params(params: Mapping[str, Any]) -> DetectorParams:
     # catalog when the mode leaves them unset.  The mode is honored only where
     # it is available (validation already rejects it elsewhere, e.g. LORRI).
     hot_pixel_adversarial = False
+    hot_pixel_mode_active = False
     hot_cfg = artifacts.get('hot_pixels') if isinstance(artifacts, Mapping) else None
     if isinstance(hot_cfg, Mapping) and mode_available('hot_pixels', instrument):
+        hot_pixel_mode_active = True
         resolved = resolve_mode_config('hot_pixels', hot_cfg)
         hot_pixel_fraction = float(resolved['incidence'])
         mode_amplitude = resolved.get('amplitude_e')
@@ -466,6 +476,7 @@ def resolve_detector_params(params: Mapping[str, Any]) -> DetectorParams:
         random_seed=int(params.get('random_seed', 42)),
         instrument_defaults=instrument_defaults,
         hot_pixel_adversarial=hot_pixel_adversarial,
+        hot_pixel_mode_active=hot_pixel_mode_active,
         quantization_contour_step=contour_step,
         artifacts_adversarial=artifacts_adversarial,
         detector_modes=detector_modes,

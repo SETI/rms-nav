@@ -192,10 +192,12 @@ def apply_frame_transfer_smear(
     A shutterless frame-transfer CCD keeps integrating while the image shifts
     through the bright rows during the pre-exposure scrub and the post-exposure
     transfer, so every column carries a pedestal proportional to its signal
-    integral times ``(t_scrub + t_transfer) / t_exp``.  The pedestal differs
-    above versus below the column's bright rows: rows above the flux centroid
-    take the scrub share, rows below take the transfer share.  A zero transfer
-    time or exposure is a no-op.
+    integral times ``(t_scrub + t_transfer) / t_exp``.  The pedestal differs on
+    the two sides of the column's flux centroid: rows below the centroid in
+    image coordinates (larger line numbers) receive the scrub share, rows above
+    it receive the transfer share.  The scrub and transfer times are
+    independent knobs, so swapping their values swaps the side assignment.  A
+    zero transfer time or exposure is a no-op.
 
     The desmear-residual behavior (the ground pipeline's desmear failing through
     saturated columns and leaving residual banding) is not modeled here; the
@@ -221,8 +223,8 @@ def apply_frame_transfer_smear(
     total = weights.sum(axis=0)
     safe = np.where(total > 0.0, total, 1.0)
     centroid = (rows * weights).sum(axis=0) / safe
-    above = rows > centroid[None, :]
-    electrons += np.where(above, ped_scrub[None, :], ped_transfer[None, :])
+    below_centroid = rows > centroid[None, :]
+    electrons += np.where(below_centroid, ped_scrub[None, :], ped_transfer[None, :])
     return {
         'active': True,
         'mean_pedestal_e': float((ped_scrub + ped_transfer).mean() * 0.5),
@@ -267,8 +269,10 @@ def add_serial_tail(
     size_u = dn.shape[1]
     step = 1 if direction == 'right' else -1
     # The pixel just past the source shows a bright overshoot; the pixels beyond
-    # it show a dark undershoot decaying back to zero over the tail length.
-    profile = np.zeros(length_px, dtype=np.float64)
+    # it show a dark undershoot decaying back to zero over the tail length.  The
+    # profile is sized at least 2 so a 1-px tail (whose loop writes nothing past
+    # the source) still builds without indexing past the array.
+    profile = np.zeros(max(length_px, 2), dtype=np.float64)
     profile[1] = amplitude_dn
     if length_px > 2:
         decay = np.linspace(1.0, 0.0, length_px - 2, endpoint=False)

@@ -16,6 +16,8 @@ parameterizations come with the catalog defaults; these are the generic shapes.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from spindoctor.support.types import NDArrayFloatType, NDArrayIntType
@@ -61,7 +63,7 @@ def add_hot_pixels(
     column_factor: float,
     rng: np.random.Generator,
     candidate_pool: tuple[NDArrayIntType, NDArrayIntType] | None = None,
-) -> None:
+) -> dict[str, Any]:
     """Add a fixed per-seed hot-pixel population (electrons) in place.
 
     A hot pixel holds a large fixed charge; on CCDs read through it, a fraction
@@ -82,13 +84,17 @@ def add_hot_pixels(
         candidate_pool: Optional ``(v, u)`` coordinate pool the population is
             drawn from (adversarial placement onto the navigation features).
             When None or empty, the placement is uniform over the frame.
+
+    Returns:
+        The realized population for the truth record: the planted ``pixels``
+        as ``[v, u]`` pairs and their ``amplitudes_e``, empty on a no-op.
     """
     if fraction <= 0.0 or amplitude_e <= 0.0:
-        return
+        return {'pixels': [], 'amplitudes_e': []}
     size_v, size_u = electrons.shape
     n_hot = round(fraction * size_v * size_u)
     if n_hot <= 0:
-        return
+        return {'pixels': [], 'amplitudes_e': []}
     if candidate_pool is not None and candidate_pool[0].size > 0:
         pool_v, pool_u = candidate_pool
         pick = rng.integers(0, pool_v.size, size=n_hot)
@@ -99,8 +105,12 @@ def add_hot_pixels(
         hot_u = rng.integers(0, size_u, size=n_hot)
     amps = amplitude_e * rng.exponential(1.0, size=n_hot)
     np.add.at(electrons, (hot_v, hot_u), amps)
+    record = {
+        'pixels': [[int(v), int(u)] for v, u in zip(hot_v.tolist(), hot_u.tolist(), strict=True)],
+        'amplitudes_e': [float(a) for a in amps.tolist()],
+    }
     if column_factor <= 0.0:
-        return
+        return record
     # Warm column: each hot pixel bleeds charge onto the pixels above it
     # (decreasing toward the read register), a CCD readout scar.  The linear
     # ramp is normalized so its INTEGRAL is column_factor * amp: the column
@@ -112,6 +122,7 @@ def add_hot_pixels(
         weights = np.linspace(1.0, 0.0, v, endpoint=False)
         weights /= weights.sum()
         electrons[:v, u] += column_factor * amp * weights
+    return record
 
 
 def add_banding(
