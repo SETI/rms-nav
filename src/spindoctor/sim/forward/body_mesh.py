@@ -1,8 +1,8 @@
 """Image-side polyhedral-mesh body rendering.
 
-Phase-A port at present fidelity (flat per-face shading, polygon
-silhouette); phase E replaces it with smooth shading and higher-frequency
-relief.  The mesh primitives themselves live in the shared
+Meshes render with flat per-face shading and a polygon silhouette; smooth
+shading and higher-frequency relief are deliberately not implemented.  The
+mesh primitives themselves live in the shared
 :mod:`spindoctor.sim.mesh_geometry` module so the rendered mesh and the
 navigator's predicted mesh are the same shape by construction.
 """

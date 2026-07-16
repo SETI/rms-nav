@@ -1,10 +1,11 @@
 """Image-side star rendering: scene stars and the background star field.
 
-Phase-A port of the star renderer at present fidelity: each star is drawn
-peak-normalized (`2.512 ** -(vmag - 4)` at the PSF peak) and PSF-spread
-directly into the normalized signal plane.  The flux-normalized point-mass
-deposition into ``SimFrame.point_e`` (with the whole-scene optics PSF as the
-only PSF application) is phase B/D scope and replaces this module's spread.
+Each star is drawn peak-normalized (`2.512 ** -(vmag - 4)` at the PSF peak)
+and PSF-spread directly into the normalized signal plane.  The electron
+unit chain is not implemented: flux-normalized point-mass deposition into
+``SimFrame.point_e`` (with the whole-scene optics PSF as the only PSF
+application) is deliberately absent, and stars are deposited PSF-spread in
+signal units instead.
 
 The rendered :class:`~spindoctor.support.types.MutableStar` records and the
 ``star_info`` hit-test entries are renderer *output* metadata (they carry the

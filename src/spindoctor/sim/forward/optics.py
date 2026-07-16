@@ -2,9 +2,9 @@
 
 At present fidelity this stage carries only the smooth stray-light field
 (the scene-level scattered-light ramp/bump the navigator's BANDPASS_DOG
-filter is meant to remove).  Phase B adds the whole-scene PSF convolution,
-pointing smear, geometric distortion, and ghosts; the structured stray-light
-modes move under the schema's ``optics`` block at the same time.
+filter is meant to remove).  The whole-scene PSF convolution, pointing
+smear, geometric distortion, ghosts, and structured stray-light modes are
+deliberately not implemented.
 """
 
 from collections.abc import Mapping
@@ -84,8 +84,9 @@ def apply_optics(
 
     Present fidelity: only the smooth stray-light field, enabled by the
     scene's ``stray_light`` block (absent block = stage contributes
-    nothing).  Deterministic, so the stage generator is unused until the
-    phase-B seeded effects (distortion wander, ghost placement) land.
+    nothing).  The stage is deterministic, so the stage generator is unused;
+    seeded optical effects (distortion wander, ghost placement) are
+    deliberately not implemented.
 
     Parameters:
         frame: The frame whose signal plane is modified in place.

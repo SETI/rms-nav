@@ -10,7 +10,7 @@ Present-fidelity placeholders: composition happens directly on the detector
 grid (``oversample == 1``) with per-element anti-aliasing instead of an
 oversampled radiance image, stars are PSF-spread in signal units rather than
 deposited into ``point_e`` as electrons, and occlusion is mask-overwrite
-rather than transparency compositing (phases B, D, and F).
+rather than transparency compositing.
 """
 
 from collections.abc import Mapping

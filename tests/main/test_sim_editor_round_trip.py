@@ -1,6 +1,6 @@
 """Round-trip acceptance tests for the ``sd_create_simulated_image`` editor.
 
-These prove the phase-A package split preserves loss-free scene round-tripping:
+These prove the editor's data model preserves loss-free scene round-tripping:
 
 * A v2 scene exercising the full current key inventory loads into the editor,
   survives a single edit through the editor's data model, and re-saves with

@@ -13,7 +13,7 @@ realization is independent of which other stages are enabled.  A stage name
 is therefore part of its scenes' noise realization: renaming a stage reseeds
 it and regenerates the affected baselines.
 
-Placeholders at present fidelity (phase B and D fill these in):
+Placeholders at present fidelity (deliberately not implemented):
 
 - ``oversample`` is always 1: the radiance stage composes directly on the
   detector grid and :func:`downsample_to_detector` is a no-op.
@@ -113,8 +113,8 @@ def downsample_to_detector(
     The box filter is a mean over the ``os**2`` subsamples, so the intensive
     ``signal`` passes through unchanged in level.  At present fidelity the
     pipeline runs at ``oversample == 1`` and this stage is a no-op; it holds
-    the pipeline slot so the phase-B oversampled optics stage can land
-    without reordering.
+    the pipeline slot so an oversampled optics stage can slot in without
+    reordering.
 
     Parameters:
         frame: The frame to downsample in place.

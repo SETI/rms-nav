@@ -1,9 +1,9 @@
 """Image-side ring rendering: annulus/gap features between mode-1 edges.
 
-Phase-A port at present fidelity: a ring feature is a solid annulus (or a
-gap) between mode-1 eccentric precessing edges with edge-fade shading;
-phase F replaces this with the optical-depth ring-system renderer
-(projection, tau photometry, transparency compositing).  Edge placement math
+A ring feature is a solid annulus (or a gap) between mode-1 eccentric
+precessing edges with edge-fade shading; the optical-depth ring-system
+renderer (projection, tau photometry, transparency compositing) is
+deliberately not implemented.  Edge placement math
 is shared with the navigator's predicted edges through
 :mod:`spindoctor.sim.ring_geometry`.
 """

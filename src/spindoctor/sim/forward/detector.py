@@ -1,12 +1,11 @@
 """Image-side detector stage: normalized signal to noisy detector counts.
 
-Phase-A port at present fidelity: the composed [0, 1] signal maps straight
-to DN (Poisson on DN, Gaussian read noise, flat bias, cosmic-ray spikes,
-column bloom, full-well clip).  Phase B replaces the unit chain with the
-exposure-referenced electron conversion (gain states, dark current, hot
-pixels, banding, quantization, electron-domain bloom) and gives the
-calibrated (I/F) path propagated noise; until then ``calibrated_if`` scenes
-render noise-free.
+The composed [0, 1] signal maps straight to DN (Poisson on DN, Gaussian
+read noise, flat bias, cosmic-ray spikes, column bloom, full-well clip).
+The exposure-referenced electron unit chain (gain states, dark current, hot
+pixels, banding, quantization, electron-domain bloom) is deliberately not
+implemented, and the calibrated (I/F) path carries no propagated noise:
+``calibrated_if`` scenes render noise-free.
 
 Physical noise parameters delegate to the emulated instrument's config
 block; sim-only knobs (signal full-scale fraction, cosmic-ray rate) come

@@ -1,8 +1,9 @@
 """Image-side ellipsoid body renderer (Lambert shading, crater texture).
 
-Phase-A port of the ellipsoid render path at present fidelity; phase E
-replaces it with the topographic renderer (limb-relief field, terminator
-raggedness, photometric laws).  Shading conventions are shared with the
+Bodies render as Lambert-shaded ellipsoids with optional procedural crater
+texture; the topographic renderer (limb-relief field, terminator
+raggedness, photometric laws) is deliberately not implemented.  Shading
+conventions are shared with the
 navigator's predicted-body renderer through
 :mod:`spindoctor.sim.ellipsoid_geometry`, so a scene's planted geometry
 error is the only difference between rendered and predicted silhouettes.

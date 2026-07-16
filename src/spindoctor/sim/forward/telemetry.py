@@ -2,9 +2,9 @@
 
 Present fidelity carries only the per-pixel missing-data markers (a
 placeholder loss geometry: real cameras lose whole lines, partial lines,
-alternating lines, truncated frame bottoms, or compression blocks).  Phase C
-replaces the geometry with the structured loss modes and the per-instrument
-artifact catalog defaults.
+alternating lines, truncated frame bottoms, or compression blocks).  The
+structured loss modes and the per-instrument artifact catalog defaults are
+deliberately not implemented.
 """
 
 from collections.abc import Mapping
