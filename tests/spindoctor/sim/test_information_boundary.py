@@ -34,6 +34,14 @@ _TRUTH_SAMPLES: dict[str, Any] = {
     'background_stars_distribution_exponent': 2.0,
     'noise': {'poisson': True, 'read_noise_dn': 4.0, 'bias_dn': 12.0},
     'stray_light': {'amplitude': 0.2, 'direction_deg': 30.0, 'model': 'linear'},
+    'oversample': 4,
+    'optics': {
+        'psf': {'sigma_v': 0.6, 'sigma_u': 0.6, 'w': 0.02, 'r0': 2.0, 'n': 3.0},
+        'smear': [{'dv_px': 1.5, 'du_px': 0.0, 'object_class': 'all'}],
+        'distortion': {'k1': 0.01, 'k2': 0.0, 'center_v': 48.0, 'center_u': 48.0},
+        'ghosts': [{'dv_px': 5.0, 'du_px': -3.0, 'amplitude': 0.05, 'defocus_sigma': 2.0}],
+    },
+    'spk_error': {'dv_px': 0.8, 'du_px': -0.4, 'reference_range_km': 100000.0},
     'bodies.crater_fill': 0.4,
     'bodies.crater_min_radius': 0.06,
     'bodies.crater_max_radius': 0.2,
@@ -100,6 +108,7 @@ def _truth_exercising_scene() -> dict[str, Any]:
                 'feature_type': 'RINGLET',
                 'center_v': 48.0,
                 'center_u': 48.0,
+                'range_km': 200000.0,
                 'inner_data': [{'mode': 1, 'a': 30.0}],
                 'outer_data': [{'mode': 1, 'a': 38.0}],
             }

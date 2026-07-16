@@ -87,6 +87,9 @@ _ALLOWED_KEYS: frozenset[str] = frozenset(
         'time',
         'ring_epoch',
         'shade_solid_rings',
+        'oversample',
+        'optics',
+        'spk_error',
         'bodies',
         'rings',
         'stars',
@@ -135,6 +138,9 @@ TOP_LEVEL_TRUTH_KEYS: frozenset[str] = frozenset(
         'offset_u',
         'offset_rotation_deg',
         'shade_solid_rings',
+        'oversample',
+        'optics',
+        'spk_error',
         'background_stars_num',
         'background_stars_psf_sigma',
         'background_stars_distribution_exponent',
@@ -229,6 +235,7 @@ _RING_IDEALIZED_KEYS: frozenset[str] = frozenset(
         'inner_data',
         'outer_data',
         'range',
+        'range_km',
     }
 )
 
@@ -416,6 +423,9 @@ def validate_sim_params(
     _check_optional_mapping(sim_params.get('noise'), 'noise', source=source)
     _check_optional_mapping(sim_params.get('stray_light'), 'stray_light', source=source)
     _check_optional_mapping(sim_params.get('instrument_config'), 'instrument_config', source=source)
+    _check_optional_positive_int(sim_params.get('oversample'), 'oversample', source=source)
+    _check_optics(sim_params.get('optics'), source=source)
+    _check_spk_error(sim_params.get('spk_error'), source=source)
 
     for block in ('bodies', 'rings', 'stars'):
         _check_optional_mapping_list(sim_params.get(block), block, source=source)
@@ -432,6 +442,10 @@ def validate_sim_params(
                 _check_ring_object(obj, index=index, source=source)
             else:
                 _check_star_object(obj, index=index, source=source)
+
+    if sim_params.get('spk_error') is not None:
+        _require_ranges_for_spk_error(sim_params, source=source)
+    _resolve_match_navigator_psf(sim_params)
 
     return sim_params
 
@@ -552,7 +566,7 @@ def _check_ring_object(obj: dict[str, Any], *, index: int, source: str) -> None:
             f"{source}: {label}.feature_type must be 'RINGLET' or 'GAP' when present; "
             f'got {feature_type!r}'
         )
-    for key in ('center_v', 'center_u', 'shading_distance', 'range'):
+    for key in ('center_v', 'center_u', 'shading_distance', 'range', 'range_km'):
         _check_optional_number(obj.get(key), f'{label}.{key}', source=source)
     for key in ('inner_data', 'outer_data'):
         _check_optional_mapping_list(obj.get(key), f'{label}.{key}', source=source)
@@ -574,6 +588,232 @@ def _check_star_object(obj: dict[str, Any], *, index: int, source: str) -> None:
             raise SimSceneValidationError(
                 f'{source}: {label}.psf_size must be a list of 2 integers when present'
             )
+
+
+# Allowed keys inside the scene-level optics block and its sub-blocks.  Unknown
+# keys fail, so a typo does not silently render an un-blurred frame.
+_OPTICS_KEYS: frozenset[str] = frozenset({'psf', 'smear', 'distortion', 'ghosts', 'stray_light'})
+_PSF_KEYS: frozenset[str] = frozenset({'match_navigator', 'sigma_v', 'sigma_u', 'w', 'r0', 'n'})
+_SMEAR_ENTRY_KEYS: frozenset[str] = frozenset({'dv_px', 'du_px', 'object_class'})
+_SMEAR_OBJECT_CLASSES: frozenset[str] = frozenset({'all', 'stars', 'bodies', 'rings'})
+_DISTORTION_KEYS: frozenset[str] = frozenset(
+    {'k1', 'k2', 'center_v', 'center_u', 'nonradial_rms_px'}
+)
+_GHOST_KEYS: frozenset[str] = frozenset({'dv_px', 'du_px', 'amplitude', 'defocus_sigma'})
+_SPK_ERROR_KEYS: frozenset[str] = frozenset({'dv_px', 'du_px', 'reference_range_km'})
+_STRAY_LIGHT_KEYS: frozenset[str] = frozenset(
+    {'amplitude', 'direction_deg', 'model', 'center_v', 'center_u'}
+)
+
+
+def _check_optics(value: Any, *, source: str) -> None:
+    """Validate the scene-level ``optics`` block and every sub-block.
+
+    Parameters:
+        value: The ``optics`` mapping, or None when the block is absent.
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: On any unknown or invalid optics field.
+    """
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(f'{source}: optics must be a mapping when present')
+    unknown = set(value) - _OPTICS_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{source}: optics: unknown keys: {sorted(unknown)}')
+    _check_psf_block(value.get('psf'), source=source)
+    _check_smear_list(value.get('smear'), source=source)
+    _check_distortion_block(value.get('distortion'), source=source)
+    _check_ghosts_list(value.get('ghosts'), source=source)
+    _check_stray_light_block(value.get('stray_light'), source=source)
+
+
+def _check_psf_block(value: Any, *, source: str) -> None:
+    """Validate ``optics.psf`` (either match-navigator form or explicit params)."""
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(f'{source}: optics.psf must be a mapping when present')
+    unknown = set(value) - _PSF_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{source}: optics.psf: unknown keys: {sorted(unknown)}')
+    if 'match_navigator' in value:
+        _check_optional_bool(
+            value.get('match_navigator'), 'optics.psf.match_navigator', source=source
+        )
+        extra = set(value) - {'match_navigator'}
+        if extra:
+            raise SimSceneValidationError(
+                f'{source}: optics.psf.match_navigator is exclusive; drop {sorted(extra)}'
+            )
+        return
+    for key in ('sigma_v', 'sigma_u', 'r0'):
+        _check_optional_positive_number(value.get(key), f'optics.psf.{key}', source=source)
+    _check_optional_number(value.get('w'), 'optics.psf.w', source=source)
+    _check_optional_number(value.get('n'), 'optics.psf.n', source=source)
+    w = value.get('w')
+    if w is not None and not 0.0 <= float(w) <= 1.0:
+        raise SimSceneValidationError(f'{source}: optics.psf.w must lie in [0, 1]; got {w!r}')
+
+
+def _check_smear_list(value: Any, *, source: str) -> None:
+    """Validate ``optics.smear`` (a list of per-object-class motion entries)."""
+    if value is None:
+        return
+    if not isinstance(value, list):
+        raise SimSceneValidationError(f'{source}: optics.smear must be a list when present')
+    for index, entry in enumerate(value):
+        label = f'optics.smear[{index}]'
+        if not isinstance(entry, dict):
+            raise SimSceneValidationError(f'{source}: {label} must be a mapping')
+        unknown = set(entry) - _SMEAR_ENTRY_KEYS
+        if unknown:
+            raise SimSceneValidationError(f'{source}: {label}: unknown keys: {sorted(unknown)}')
+        _check_optional_number(entry.get('dv_px'), f'{label}.dv_px', source=source)
+        _check_optional_number(entry.get('du_px'), f'{label}.du_px', source=source)
+        object_class = entry.get('object_class', 'all')
+        if object_class not in _SMEAR_OBJECT_CLASSES:
+            raise SimSceneValidationError(
+                f'{source}: {label}.object_class must be one of '
+                f'{sorted(_SMEAR_OBJECT_CLASSES)}; got {object_class!r}'
+            )
+
+
+def _check_distortion_block(value: Any, *, source: str) -> None:
+    """Validate ``optics.distortion`` (radial polynomial plus non-radial field)."""
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(f'{source}: optics.distortion must be a mapping when present')
+    unknown = set(value) - _DISTORTION_KEYS
+    if unknown:
+        raise SimSceneValidationError(
+            f'{source}: optics.distortion: unknown keys: {sorted(unknown)}'
+        )
+    for key in ('k1', 'k2', 'center_v', 'center_u'):
+        _check_optional_number(value.get(key), f'optics.distortion.{key}', source=source)
+    _check_optional_nonnegative_number(
+        value.get('nonradial_rms_px'), 'optics.distortion.nonradial_rms_px', source=source
+    )
+
+
+def _check_ghosts_list(value: Any, *, source: str) -> None:
+    """Validate ``optics.ghosts`` (a list of displaced defocused copies)."""
+    if value is None:
+        return
+    if not isinstance(value, list):
+        raise SimSceneValidationError(f'{source}: optics.ghosts must be a list when present')
+    for index, entry in enumerate(value):
+        label = f'optics.ghosts[{index}]'
+        if not isinstance(entry, dict):
+            raise SimSceneValidationError(f'{source}: {label} must be a mapping')
+        unknown = set(entry) - _GHOST_KEYS
+        if unknown:
+            raise SimSceneValidationError(f'{source}: {label}: unknown keys: {sorted(unknown)}')
+        _check_optional_number(entry.get('dv_px'), f'{label}.dv_px', source=source)
+        _check_optional_number(entry.get('du_px'), f'{label}.du_px', source=source)
+        _check_optional_number(entry.get('amplitude'), f'{label}.amplitude', source=source)
+        _check_optional_nonnegative_number(
+            entry.get('defocus_sigma'), f'{label}.defocus_sigma', source=source
+        )
+
+
+def _check_stray_light_block(value: Any, *, source: str) -> None:
+    """Validate ``optics.stray_light`` (the smooth scattered-light ramp/bump)."""
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(
+            f'{source}: optics.stray_light must be a mapping when present'
+        )
+    unknown = set(value) - _STRAY_LIGHT_KEYS
+    if unknown:
+        raise SimSceneValidationError(
+            f'{source}: optics.stray_light: unknown keys: {sorted(unknown)}'
+        )
+    _check_optional_number(value.get('amplitude'), 'optics.stray_light.amplitude', source=source)
+    _check_optional_number(
+        value.get('direction_deg'), 'optics.stray_light.direction_deg', source=source
+    )
+    _check_optional_number(value.get('center_v'), 'optics.stray_light.center_v', source=source)
+    _check_optional_number(value.get('center_u'), 'optics.stray_light.center_u', source=source)
+    model = value.get('model')
+    if model is not None and model not in ('linear', 'radial'):
+        raise SimSceneValidationError(
+            f"{source}: optics.stray_light.model must be 'linear' or 'radial'; got {model!r}"
+        )
+
+
+def _check_spk_error(value: Any, *, source: str) -> None:
+    """Validate the scene-level ``spk_error`` block's field types."""
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(f'{source}: spk_error must be a mapping when present')
+    unknown = set(value) - _SPK_ERROR_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{source}: spk_error: unknown keys: {sorted(unknown)}')
+    _check_optional_number(value.get('dv_px'), 'spk_error.dv_px', source=source)
+    _check_optional_number(value.get('du_px'), 'spk_error.du_px', source=source)
+    _check_optional_positive_number(
+        value.get('reference_range_km'), 'spk_error.reference_range_km', source=source
+    )
+
+
+def _require_ranges_for_spk_error(sim_params: dict[str, Any], *, source: str) -> None:
+    """Every body and ring feature needs a physical ``range_km`` under spk_error.
+
+    The parallax displacement scales as ``reference_range_km / range_km``, so a
+    scene that plants spacecraft-ephemeris error must give the renderer a
+    physical range for each object it displaces.
+
+    Parameters:
+        sim_params: The scene mapping (already type-checked).
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: If any body or ring lacks ``range_km``.
+    """
+    for block in ('bodies', 'rings'):
+        for index, obj in enumerate(sim_params.get(block) or []):
+            if obj.get('range_km') is None:
+                raise SimSceneValidationError(
+                    f'{source}: {block}[{index}] needs range_km when spk_error is present'
+                )
+
+
+def _resolve_match_navigator_psf(sim_params: dict[str, Any]) -> None:
+    """Resolve ``optics.psf.match_navigator`` into a concrete Gaussian in place.
+
+    The floor configuration (the self-consistency baseline of the sweeps) sets
+    the image-side PSF equal to the navigator's own model: a pure Gaussian at
+    the emulated instrument's configured ``star_psf_sigma``, with no Moffat
+    wing and no field variation.  Resolving it to concrete numbers at
+    validation time keeps the render cache key stable and makes the resolved
+    kernel inspectable.
+
+    Parameters:
+        sim_params: The validated scene mapping; its ``optics.psf`` block is
+            rewritten when it requests navigator matching.
+    """
+    optics = sim_params.get('optics')
+    if not isinstance(optics, dict):
+        return
+    psf = optics.get('psf')
+    if not isinstance(psf, dict) or not psf.get('match_navigator'):
+        return
+    # Import here to avoid a module-load cycle: the resolver needs the live
+    # config only when a scene actually asks for navigator matching.
+    from spindoctor.config import DEFAULT_CONFIG
+    from spindoctor.sim.instruments import resolve_sim_inst_config
+
+    inst_config = resolve_sim_inst_config(
+        DEFAULT_CONFIG, sim_params.get('instrument'), sim_params.get('instrument_config')
+    )
+    sigma = float(inst_config['star_psf_sigma'])
+    optics['psf'] = {'sigma_v': sigma, 'sigma_u': sigma, 'w': 0.0, 'r0': 2.0, 'n': 3.0}
 
 
 def _require_str(raw: dict[str, Any], key: str, *, source: str) -> str:
@@ -620,6 +860,20 @@ def _check_optional_nonnegative_int(value: Any, key: str, *, source: str) -> Non
         raise SimSceneValidationError(
             f'{source}: {key} must be a non-negative integer when present'
         )
+
+
+def _check_optional_positive_int(value: Any, key: str, *, source: str) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise SimSceneValidationError(f'{source}: {key} must be a positive integer when present')
+
+
+def _check_optional_nonnegative_number(value: Any, key: str, *, source: str) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        raise SimSceneValidationError(f'{source}: {key} must be a non-negative number when present')
 
 
 def _check_optional_str(value: Any, key: str, *, source: str) -> None:
