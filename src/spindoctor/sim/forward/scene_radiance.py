@@ -34,6 +34,7 @@ from spindoctor.sim.forward.stages import SimFrame
 from spindoctor.sim.forward.star import faint_sky_cutoff_mag, render_sky_counts, render_stars
 from spindoctor.sim.instruments import resolve_sim_inst_config
 from spindoctor.sim.seeds import derive_effect_seed
+from spindoctor.sim.star_records import DEFAULT_PSF_SIZE
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType
 
 __all__ = ['compose_scene_radiance']
@@ -493,10 +494,11 @@ def _optics_needs_layers(params: Mapping[str, Any]) -> bool:
 def _scale_star_params(star_params: dict[str, Any], os: int) -> dict[str, Any]:
     """Scale a star's pixel-space fields to the oversampled render grid.
 
-    Catalog position, per-star PSF width, smear vector, PSF fitting-window size,
-    the planted catalog-error displacement, and the companion separation are all
-    pixel-space, so they scale with the oversampling factor.  At ``os == 1`` the
-    copy is numerically identical to the input.
+    Catalog position, per-star PSF width, smear vector, PSF fitting-window size
+    (the record builder's default is materialized so it scales like an explicit
+    entry), the planted catalog-error displacement, and the companion separation
+    are all pixel-space, so they scale with the oversampling factor.  At
+    ``os == 1`` every scaled value equals its input value.
 
     Parameters:
         star_params: One scene star entry.
@@ -509,9 +511,12 @@ def _scale_star_params(star_params: dict[str, Any], os: int) -> dict[str, Any]:
     for key in ('v', 'u', 'psf_sigma', 'move_v', 'move_u', 'catalog_error_v', 'catalog_error_u'):
         if star_params.get(key) is not None:
             scaled[key] = float(star_params[key]) * os
-    psf_size = star_params.get('psf_size')
-    if psf_size is not None:
-        scaled['psf_size'] = [int(psf_size[0]) * os, int(psf_size[1]) * os]
+    # The record builder's default window is materialized here so a defaulted
+    # entry scales exactly like an explicit one: the downsample stage divides
+    # every record's psf_size by os, which would otherwise shrink a defaulted
+    # window to (11 // os, 11 // os) detector pixels.
+    psf_size = star_params.get('psf_size', DEFAULT_PSF_SIZE)
+    scaled['psf_size'] = [int(psf_size[0]) * os, int(psf_size[1]) * os]
     companion = star_params.get('companion')
     if isinstance(companion, dict) and companion.get('sep_px') is not None:
         scaled_companion = dict(companion)
