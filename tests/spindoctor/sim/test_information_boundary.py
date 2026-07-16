@@ -59,6 +59,11 @@ _TRUTH_SAMPLES: dict[str, Any] = {
     'bodies.crater_max_radius': 0.2,
     'bodies.crater_power_law_exponent': 2.5,
     'bodies.crater_relief_scale': 0.5,
+    'bodies.limb_relief_rms': 0.02,
+    'bodies.limb_relief_corr_deg': 12.0,
+    'bodies.photometric_law': 'lommel_seeliger',
+    'bodies.minnaert_k': 0.6,
+    'bodies.opposition_surge': {'amplitude': 0.5, 'width_deg': 5.0},
     'bodies.seed': 11,
     'bodies.anti_aliasing': 0.7,
     'bodies.nav_override': {'mesh_lumpiness': 0.0},
@@ -107,7 +112,26 @@ def _truth_exercising_scene() -> dict[str, Any]:
                 'seed': _TRUTH_SAMPLES['bodies.seed'],
                 'anti_aliasing': _TRUTH_SAMPLES['bodies.anti_aliasing'],
                 'nav_override': dict(_TRUTH_SAMPLES['bodies.nav_override']),
-            }
+            },
+            {
+                # An ellipsoid body carrying the topographic truth keys
+                # (relief field, photometric law, opposition surge), which
+                # the mesh body above does not consume.
+                'name': 'ROUND',
+                'center_v': 70.0,
+                'center_u': 24.0,
+                'axis1': 20.0,
+                'axis2': 18.0,
+                'axis3': 18.0,
+                'illumination_angle': 40.0,
+                'phase_angle': 60.0,
+                'range_km': 800000.0,
+                'limb_relief_rms': _TRUTH_SAMPLES['bodies.limb_relief_rms'],
+                'limb_relief_corr_deg': _TRUTH_SAMPLES['bodies.limb_relief_corr_deg'],
+                'photometric_law': _TRUTH_SAMPLES['bodies.photometric_law'],
+                'minnaert_k': _TRUTH_SAMPLES['bodies.minnaert_k'],
+                'opposition_surge': dict(_TRUTH_SAMPLES['bodies.opposition_surge']),
+            },
         ],
         'stars': [
             {

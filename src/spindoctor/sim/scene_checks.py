@@ -23,6 +23,7 @@ from spindoctor.sim.forward.artifact_modes import (
     mode_available,
     mode_unavailable_message,
 )
+from spindoctor.sim.forward.photometry import PHOTOMETRIC_LAWS
 from spindoctor.sim.scene_schema import _BODY_IDEALIZED_KEYS, SimSceneValidationError
 from spindoctor.support.status_reason import NavStatusReason
 
@@ -71,6 +72,7 @@ def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
     for key in ('mesh_n_lat', 'mesh_n_lon', 'mesh_seed', 'seed'):
         if obj.get(key) is not None:
             _require_int(obj, key, source=f'{source}: {label}')
+    _check_body_relief_and_photometry(obj, label=label, source=source)
     pose = obj.get('pose_euler_deg')
     if pose is not None:
         if not isinstance(pose, (list, tuple)) or len(pose) != 3:
@@ -93,6 +95,47 @@ def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
                 f'{source}: {label}.nav_override may only override idealized body '
                 f'keys; got {sorted(bad)}'
             )
+
+
+# The opposition-surge map's key inventory (a simple normalized exponential
+# surge: amplitude plus angular e-folding width in degrees of phase).  The
+# photometric-law vocabulary is the renderer's own PHOTOMETRIC_LAWS.
+_OPPOSITION_SURGE_KEYS: frozenset[str] = frozenset({'amplitude', 'width_deg'})
+
+
+def _check_body_relief_and_photometry(obj: dict[str, Any], *, label: str, source: str) -> None:
+    """Validate one body's limb-relief and photometric truth keys."""
+    _check_optional_nonnegative_number(
+        obj.get('limb_relief_rms'), f'{label}.limb_relief_rms', source=source
+    )
+    _check_optional_positive_number(
+        obj.get('limb_relief_corr_deg'), f'{label}.limb_relief_corr_deg', source=source
+    )
+    law = obj.get('photometric_law')
+    if law is not None and law not in PHOTOMETRIC_LAWS:
+        raise SimSceneValidationError(
+            f'{source}: {label}.photometric_law must be one of '
+            f'{sorted(PHOTOMETRIC_LAWS)}; got {law!r}'
+        )
+    _check_optional_positive_number(obj.get('minnaert_k'), f'{label}.minnaert_k', source=source)
+    surge = obj.get('opposition_surge')
+    if surge is None:
+        return
+    if not isinstance(surge, dict):
+        raise SimSceneValidationError(
+            f'{source}: {label}.opposition_surge must be a mapping when present'
+        )
+    unknown = set(surge) - _OPPOSITION_SURGE_KEYS
+    if unknown:
+        raise SimSceneValidationError(
+            f'{source}: {label}.opposition_surge: unknown keys: {sorted(unknown)}'
+        )
+    _check_optional_nonnegative_number(
+        surge.get('amplitude'), f'{label}.opposition_surge.amplitude', source=source
+    )
+    _check_optional_positive_number(
+        surge.get('width_deg'), f'{label}.opposition_surge.width_deg', source=source
+    )
 
 
 def _check_ring_object(obj: dict[str, Any], *, index: int, source: str) -> None:

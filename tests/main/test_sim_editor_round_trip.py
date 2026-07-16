@@ -144,6 +144,11 @@ _FULL_SCENE: dict[str, Any] = {
             'crater_max_radius': 0.2,
             'crater_power_law_exponent': 3.0,
             'crater_relief_scale': 0.6,
+            'limb_relief_rms': 0.015,
+            'limb_relief_corr_deg': 12.0,
+            'photometric_law': 'lommel_seeliger',
+            'minnaert_k': 0.6,
+            'opposition_surge': {'amplitude': 0.4, 'width_deg': 5.0},
             'seed': 11,
             'anti_aliasing': 0.5,
             'nav_override': {
