@@ -1,8 +1,8 @@
 """Ring tab builder and change handlers.
 
-Builds the per-ring editing tab (feature type, centre, range, shading, and the
-inner / outer mode-1 edge parameters with enable checkboxes) and owns the
-handlers that write ring fields back into the data model.
+Builds the per-ring editing tab (feature type, centre, physical range,
+shading, and the inner / outer mode-1 edge parameters with enable checkboxes)
+and owns the handlers that write ring fields back into the data model.
 """
 
 from typing import Any
@@ -65,19 +65,10 @@ class RingTabMixin(SimEditorBase):
         w.center_v_spin = center_v  # type: ignore[attr-defined]
         w.center_u_spin = center_u  # type: ignore[attr-defined]
 
-        # Range field (for layering/ordering)
-        rng = QDoubleSpinBox()
-        rng.setRange(-1e9, 1e9)
-        rng.setDecimals(3)
-        # Default range: start after bodies (assuming bodies use 1, 2, 3, ...)
-        default_range = len(self.sim_params['rings']) + len(self.sim_params['bodies']) + 1
-        rng.setValue(p.get('range', default_range))
-        rng.valueChanged.connect(lambda v, i=idx: self._on_ring_field(i, 'range', v))
-        fl.addRow('Range:', rng)
-
         # Physical range (km): optional-key discipline -- absent unless set.
-        # Required on every ring of an spk_error scene; when present it also
-        # depth-orders the ring physically against body range_km values.
+        # Required on every ring of an spk_error scene; range_km is the only
+        # depth-ordering key (a ring without one is drawn behind everything,
+        # and overlapping a ranged object without one is a render error).
         has_range_km = p.get('range_km') is not None
         range_km_check = QCheckBox('Set physical range (km)')
         range_km_check.setChecked(has_range_km)

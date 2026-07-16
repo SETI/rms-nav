@@ -236,7 +236,6 @@ class TabsMixin(SimEditorBase):
                 'feature_type': 'RINGLET',
                 'center_v': self.sim_params['size_v'] // 2 + 0.5,
                 'center_u': self.sim_params['size_u'] // 2 + 0.5,
-                'range': self._find_unique_range(),
                 'shading_distance': 20.0,
                 'inner_data': [
                     {
@@ -518,7 +517,7 @@ class TabsMixin(SimEditorBase):
             if range_val is not None:
                 existing_ranges.add(float(range_val))
         for ring in self.sim_params.get('rings', []):
-            range_val = ring.get('range')
+            range_val = ring.get('range_km')
             if range_val is not None:
                 existing_ranges.add(float(range_val))
 

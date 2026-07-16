@@ -49,7 +49,7 @@ def _check_ring_object(obj: dict[str, Any], *, index: int, source: str) -> None:
             f"{source}: {label}.feature_type must be 'RINGLET' or 'GAP' when present; "
             f'got {feature_type!r}'
         )
-    for key in ('center_v', 'center_u', 'shading_distance', 'range', 'range_km'):
+    for key in ('center_v', 'center_u', 'shading_distance', 'range_km'):
         _check_optional_number(obj.get(key), f'{label}.{key}', source=source)
     for key in ('inner_data', 'outer_data'):
         _check_optional_mapping_list(obj.get(key), f'{label}.{key}', source=source)

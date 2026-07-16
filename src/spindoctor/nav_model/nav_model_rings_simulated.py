@@ -101,7 +101,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
 
             - ``name``, ``feature_type``
             - ``center_v``, ``center_u``
-            - ``range``
+            - ``range_km``
             - ``shading_distance``
             - ``inner_data``, ``outer_data`` — lists of dicts with ``mode``,
               ``a``, ``rms``, ``ae``, ``long_peri``, ``rate_peri`` keys.
@@ -234,7 +234,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
         self._model_img = sim_img
         self._ring_mask = ring_mask
         self._predicted_center_vu = (center_v_extfov, center_u_extfov)
-        self._subject_range_km = float(p.get('range', float('inf')))
+        self._subject_range_km = float(p.get('range_km', float('inf')))
         self._bbox_extfov_vu = (
             int(ext_margin_v),
             int(ext_margin_u),

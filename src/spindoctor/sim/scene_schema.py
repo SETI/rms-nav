@@ -232,9 +232,10 @@ _STAR_TRUTH_KEYS: frozenset[str] = frozenset(
 _STAR_KEYS: frozenset[str] = _STAR_IDEALIZED_KEYS | _STAR_TRUTH_KEYS
 
 # Per-ring keys, all idealized at present fidelity: the mode-1 orbits ARE the
-# catalog orbits, with no planted per-feature error.  'range' is the
-# z-order/depth hint of the rings list; the list and its keys remain valid
-# until a ring-system block with plantable per-feature error replaces them.
+# catalog orbits, with no planted per-feature error.  'range_km' is the
+# physical compositing depth (the only ordering key; the old hint-unit
+# 'range' is gone); the list and its keys remain valid until the
+# ring_system block's conversion retires them.
 _RING_IDEALIZED_KEYS: frozenset[str] = frozenset(
     {
         'name',
@@ -244,7 +245,6 @@ _RING_IDEALIZED_KEYS: frozenset[str] = frozenset(
         'shading_distance',
         'inner_data',
         'outer_data',
-        'range',
         'range_km',
     }
 )

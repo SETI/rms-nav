@@ -234,7 +234,6 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
                     'inner_data': [{'mode': 1, 'a': 56.0}],
                     'outer_data': [{'mode': 1, 'a': 66.0}],
                     'shading_distance': 10.0,
-                    'range': 1000.0,
                 },
                 {
                     'name': 'RINGLET_OUTER',
@@ -244,7 +243,6 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
                     'inner_data': [{'mode': 1, 'a': 90.0, 'ae': 6.0}],
                     'outer_data': [{'mode': 1, 'a': 98.0, 'ae': 6.0}],
                     'shading_distance': 10.0,
-                    'range': 1000.0,
                 },
             ],
         ),
@@ -331,7 +329,17 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
     (
         'composite_scene',
         _scene(
-            [_mesh(name='MOON', center_v=140.0, center_u=95.0, axis1=90.0, axis2=72.0, axis3=66.0)],
+            [
+                _mesh(
+                    name='MOON',
+                    center_v=140.0,
+                    center_u=95.0,
+                    axis1=90.0,
+                    axis2=72.0,
+                    axis3=66.0,
+                    range_km=500000.0,
+                )
+            ],
             optics={'psf': {'match_navigator': True}},
             stars=_scatter_stars(22, 3),
             sky_counts={'a': -1.8, 'b': 0.34, 'density_factor': 1.0},
@@ -344,7 +352,8 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
                     'inner_data': [{'mode': 1, 'a': 150.0, 'ae': 8.0}],
                     'outer_data': [{'mode': 1, 'a': 170.0, 'ae': 8.0}],
                     'shading_distance': 6.0,
-                    'range': 5000.0,
+                    # The moon sits in front of the ring (physical depths).
+                    'range_km': 1000000.0,
                 },
             ],
             noise={'poisson': True, 'read_noise_dn': 4.0},

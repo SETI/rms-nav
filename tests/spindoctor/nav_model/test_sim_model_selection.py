@@ -36,6 +36,10 @@ def _body(name: str, center: float) -> dict[str, Any]:
         'axis3': 50.0,
         'illumination_angle': 20.0,
         'phase_angle': 30.0,
+        # The soft anti-aliased rims of the two-body fixture overlap by a
+        # fraction of a pixel, and overlapping bodies must carry explicit
+        # compositing depths.
+        'range_km': 500000.0 + center,
     }
 
 

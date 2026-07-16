@@ -189,7 +189,6 @@ _FULL_SCENE: dict[str, Any] = {
             'center_v': 64.0,
             'center_u': 64.0,
             'shading_distance': 20.0,
-            'range': 5.0,
             'range_km': 2000.0,
             'inner_data': [
                 {'mode': 1, 'a': 100.0, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}

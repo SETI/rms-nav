@@ -235,13 +235,14 @@ class RenderDisplayMixin(SimEditorBase):
                     range_val = inv.get(body_name, {}).get('range', float('inf'))
                     objects.append((range_val, 'body', idx, body_masks[idx]))
 
-        # Add rings
+        # Add rings.  range_km is the only depth key; a ring without one is
+        # drawn behind everything, so it hit-tests as farthest here too.
         ring_masks = self._last_meta.get('ring_masks', [])
         rings = self.sim_params.get('rings', [])
         if ring_masks and rings:
             for j, ring_mask in enumerate(ring_masks):
                 if j < len(rings):
-                    range_val = float(rings[j].get('range', 1000.0 + j))
+                    range_val = float(rings[j].get('range_km', float('inf')))
                     objects.append((range_val, 'ring', j, ring_mask))
 
         # Sort by range (near to far = ascending range)
