@@ -825,15 +825,15 @@ the one the scene plants elsewhere.
 The render performance budget
 =============================
 
-A 512x512 star-field scene with a whole-scene PSF plus the full detector stack
-at oversample 4 must render in under 2 s single-core, and a 1024x1024
-Cassini-class star-field scene in under 8 s
-(``tests/integration/test_sim_perf.py``). The budgets bound the optics +
-detector stack -- the PSF convolution on the oversampled grid and the electron
-chain -- which is what the harness scenes exercise. A scene with a large lit
-body at oversample 4 currently exceeds them, because the body renderer's
-per-subsample shading dominates the render; that cost is outside these budgets
-pending the body-renderer replacement. The budget is a *cold-render* budget:
+A 512x512 scene with a whole-scene PSF plus the full detector stack at
+oversample 4 must render in under 2 s single-core, and a 1024x1024
+Cassini-class scene in under 8 s (``tests/integration/test_sim_perf.py``).
+The harness holds two scene families to those budgets: a star field (the PSF
+convolution on the oversampled grid and the electron chain) and a frame
+dominated by a large lit body with limb relief (the topographic body
+renderer's split-resolution path -- detector-grid shading upsampled under an
+oversampled silhouette -- plus the capped terminator shadow march). The
+budget is a *cold-render* budget:
 the render caches are cleared so the timed render pays the kernel-build and
 compile costs a first render pays. The harness pins itself: it sets the
 process CPU affinity to one core and caps the BLAS/OpenMP thread-count
