@@ -1,4 +1,4 @@
-"""Single-variable parameter-sweep harness for the sim scene catalog (Phase T3).
+"""Single-variable parameter-sweep harness for the sim scene catalog.
 
 A sweep takes one catalog scene as a base, varies a single parameter (or a group
 of parameters that move together, e.g. the three axes of a sphere) across a list

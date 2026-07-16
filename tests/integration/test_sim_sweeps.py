@@ -1,4 +1,4 @@
-"""Single-variable sweep invariants (Phase T3).
+"""Single-variable sweep invariants.
 
 Each sweep drives one catalog scene by varying a single parameter and navigates
 every step.  These tests assert how a navigation diagnostic *responds* to the

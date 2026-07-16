@@ -1,4 +1,4 @@
-"""Star-confounder lock regimes: recovery of the planted offset (Phase D).
+"""Star-confounder lock regimes: recovery of the planted offset.
 
 The one/two/three-star lock scenes plant a single navigable star, a navigable
 pair, and a navigable triangle in fields of non-navigable confounders the
@@ -17,6 +17,7 @@ Everything renders and navigates in-process (no holdings or SPICE), but the full
 ensemble runs per scene, so the module is ``@pytest.mark.integration``.
 """
 
+import math
 from pathlib import Path
 
 import pytest
@@ -37,7 +38,7 @@ def _offset_error(scene_name: str) -> float:
     assert result.offset_px is not None
     dv = result.offset_px[0] - float(scene['offset_v'])
     du = result.offset_px[1] - float(scene['offset_u'])
-    return (dv * dv + du * du) ** 0.5
+    return math.hypot(dv, du)
 
 
 # The clean lock regimes recover the planted offset to a small fraction of a
