@@ -135,10 +135,13 @@ class SimEditorBase(QMainWindow):
     # ---- Artifacts tab: fixed tab and its groups ----
     _artifacts_tab: QWidget
     _instrument_defaults_check: QCheckBox
+    _adversarial_check: QCheckBox
     _detector_group: QGroupBox
     _detector_gain_state_spin: QSpinBox
     _detector_model_combo: QComboBox
     _detector_exposure_ref_spin: QDoubleSpinBox
+    _detector_quantization_combo: QComboBox
+    _mode_rows: dict[str, Any]
 
     # ---- General tab: PSF preview ----
     _psf_group: QGroupBox
@@ -237,4 +240,8 @@ class SimEditorBase(QMainWindow):
 
     def _refresh_detector_catalog_defaults(self) -> None:
         """Refresh displayed detector catalog defaults (ArtifactsTabMixin)."""
+        raise NotImplementedError
+
+    def _refresh_artifact_mode_availability(self) -> None:
+        """Refresh per-instrument mode-row availability (ArtifactsTabMixin)."""
         raise NotImplementedError

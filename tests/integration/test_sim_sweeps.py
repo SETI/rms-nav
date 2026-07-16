@@ -209,6 +209,34 @@ def test_pose_disagreement_limb_is_confidently_wrong() -> None:
     assert rows[-1].offset_error_px > 2.0
 
 
+def test_artifact_sweep_starts_clean() -> None:
+    """At zero missing-line incidence the frame recovers the planted offset."""
+    rows = _rows('artifact_missing_lines')
+    assert rows[0].status == 'success'
+    assert rows[0].offset_error_px is not None
+    assert rows[0].offset_error_px < _RECOVERY_TOLERANCE_PX
+
+
+def test_artifact_sweep_confidence_degrades() -> None:
+    """Structured loss drops the fused confidence below the clean baseline.
+
+    The deliverable curve is navigation quality versus artifact incidence: as
+    more lines are lost the fused confidence falls below its clean (rows[0])
+    value.  The assertion is on the confidence dip (the render-robust signal that
+    loss degrades the navigation), not a monotone step-by-step drop, because the
+    recovered offset near the cliff jitters across processes.
+    """
+    rows = _rows('artifact_missing_lines')
+    degraded_min = min(row.confidence for row in rows[1:])
+    assert degraded_min < rows[0].confidence
+
+
+def test_artifact_sweep_degrades_to_failure() -> None:
+    """At the highest incidence half the frame is gone and navigation fails."""
+    rows = _rows('artifact_missing_lines')
+    assert rows[-1].status == 'failed'
+
+
 # The per-technique dense and wide offset sweeps (``*_offset_fine`` /
 # ``*_offset_wide``) are characterization runs, not assertions: they are executed
 # by ``sim_sweep_runner`` to produce the report's figures, and the specific defect

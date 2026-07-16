@@ -29,17 +29,31 @@ from typing import Any
 import numpy as np
 from scipy import ndimage
 
+from spindoctor.sim.forward.detector.electronics_stages import (
+    add_bright_dark_pairs,
+    add_coherent_banding,
+    add_dark_ramp,
+    add_fixed_pattern_dn,
+    add_fixed_pattern_response,
+    add_residual_image,
+    add_serial_tail,
+    apply_beam_bend,
+    apply_exposure_shading,
+    apply_frame_transfer_smear,
+)
 from spindoctor.sim.forward.detector.noise_stages import (
     add_banding,
     add_bias_structure,
     add_cosmic_rays,
     add_dark_current,
     add_hot_pixels,
+    deposit_morphological_events,
 )
 from spindoctor.sim.forward.detector.params import DetectorParams, resolve_detector_params
+from spindoctor.sim.forward.feature_loci import dilated_pixels, extract_feature_loci
 from spindoctor.sim.forward.stages import SimFrame
 from spindoctor.sim.seeds import derive_effect_seed
-from spindoctor.support.types import NDArrayFloatType
+from spindoctor.support.types import NDArrayFloatType, NDArrayIntType
 
 __all__ = ['apply_detector', 'apply_saturation', 'quantize_dn']
 
@@ -47,6 +61,49 @@ __all__ = ['apply_detector', 'apply_saturation', 'quantize_dn']
 def _stage_rng(seed: int, effect: str) -> np.random.Generator:
     """A generator for one detector sub-effect, seeded independently by name."""
     return np.random.default_rng(derive_effect_seed(seed, f'detector/{effect}'))
+
+
+def _feature_pool(frame: SimFrame) -> tuple[NDArrayIntType, NDArrayIntType]:
+    """The dilated navigation-feature pixel pool for adversarial placement."""
+    loci = extract_feature_loci(frame.truth, frame.signal.shape)
+    return dilated_pixels(loci, radius=3, shape=frame.signal.shape)
+
+
+def _hot_pixel_pool(
+    frame: SimFrame, dp: DetectorParams
+) -> tuple[NDArrayIntType, NDArrayIntType] | None:
+    """The adversarial hot-pixel placement pool, or None for uniform placement.
+
+    When the hot_pixels artifact mode requests adversarial placement, the
+    population is biased onto the pixels on and beside the navigation features
+    (limb / ring-edge arcs and star positions, dilated by a few pixels).
+    """
+    if not dp.hot_pixel_adversarial:
+        return None
+    return _feature_pool(frame)
+
+
+def _mode_seed(dp: DetectorParams, mode_name: str) -> np.random.Generator:
+    """A generator seeded independently for one detector artifact mode."""
+    return _stage_rng(dp.random_seed, mode_name)
+
+
+def _record_routed_modes(dp: DetectorParams, records: dict[str, Any]) -> None:
+    """Record the routed-only detector modes (bias, bloom, quantization) as active.
+
+    These fold their override into a flat DetectorParams field in the resolver,
+    so the chain applies them through the generic mechanic; their truth record
+    is the resolved config, marked active.
+    """
+    for name in (
+        'bias_structure',
+        'bloom',
+        'quantization_lut',
+        'quantization_ls8b',
+        'contouring_8bit',
+    ):
+        if name in dp.detector_modes and name not in records:
+            records[name] = {'active': True, **dp.detector_modes[name]}
 
 
 def apply_saturation(
@@ -79,17 +136,27 @@ def apply_saturation(
     np.minimum(electrons, full_well_e, out=electrons)
 
 
-def quantize_dn(dn: NDArrayFloatType, *, mode: str, saturation_dn: float) -> NDArrayFloatType:
+def quantize_dn(
+    dn: NDArrayFloatType,
+    *,
+    mode: str,
+    saturation_dn: float,
+    contour_step: int = 8,
+) -> NDArrayFloatType:
     """Quantize a DN image by the selected ADC sub-mode.
 
     Parameters:
         dn: The DN image (float).
         mode: 'exact' (round to integer, uniform bins), '8bit' (integer bins
             with a hard 255 code ceiling), 'uneven_12bit' (integer bins with
-            histogram spikes at the power-of-two bit boundaries), or
-            'sqrt_lut' (square-root companding to 8 bits and back, leaving a
-            signal-dependent residual).
+            histogram spikes at the power-of-two bit boundaries), 'sqrt_lut'
+            (square-root companding to 8 bits and back, leaving a
+            signal-dependent residual), 'ls8b' (low 8 bits kept: values above
+            255 wrap modulo 256, the banded wraparound on bright targets), or
+            'contour_8bit' (8-bit output posterized to multiples of
+            ``contour_step``, the uneven-bin contouring of a coarse ADC).
         saturation_dn: The ADC ceiling, used to scale the companding LUT.
+        contour_step: The DN posterization step for the 'contour_8bit' mode.
 
     Returns:
         The quantized DN image.
@@ -99,6 +166,17 @@ def quantize_dn(dn: NDArrayFloatType, *, mode: str, saturation_dn: float) -> NDA
     """
     if mode == 'exact':
         return np.rint(dn)
+    if mode == 'ls8b':
+        # LS8B telemetry mode: only the low 8 bits are kept, so a value above
+        # 255 wraps modulo 256 -- the banded wraparound a bright target shows.
+        return np.mod(np.rint(dn), 256.0)
+    if mode == 'contour_8bit':
+        # A coarse ADC with uneven bins is worst at DN multiples of the step:
+        # posterizing an 8-bit word to multiples of contour_step reproduces the
+        # visible contouring of a smooth low-contrast scene.
+        step = max(int(contour_step), 1)
+        clipped = np.clip(np.rint(dn), 0.0, 255.0)
+        return np.clip(np.round(clipped / step) * step, 0.0, 255.0)
     if mode == '8bit':
         # An 8-bit output word: integer DN clipped at the 255 code ceiling.
         # The ceiling is the word width, not the scene's saturation_dn, so an
@@ -137,25 +215,69 @@ def _convert_to_electrons(signal: NDArrayFloatType, dp: DetectorParams) -> NDArr
 
 
 def _apply_ccd(frame: SimFrame, dp: DetectorParams, rng: np.random.Generator) -> None:
-    """Run the CCD electron unit chain, overwriting the signal plane with DN."""
+    """Run the CCD electron unit chain, overwriting the signal plane with DN.
+
+    The registry's detector artifact modes render at their physical point in the
+    chain: the fixed-pattern response and the dark ramp are per-pixel / dark
+    structure before Poisson; the frame-transfer smear is integrated charge
+    before Poisson; the anti-blooming pairs, radiation transients, and column
+    bloom follow the shot term; coherent banding is added in electrons before the
+    gain divide; and the additive fixed pattern and the saturation serial tail
+    ride on the digitized DN before quantization.
+    """
+    modes = dp.detector_modes
+    records: dict[str, Any] = {}
     electrons = _convert_to_electrons(frame.signal, dp)
     # Point sources are already electrons; add them AFTER the intensive
     # conversion and BEFORE Poisson so stars never pass through the signal scale.
     electrons += frame.point_e
+    if 'fixed_pattern' in modes:
+        cfg = modes['fixed_pattern']
+        records['fixed_pattern'] = add_fixed_pattern_response(
+            electrons,
+            prnu_rms=float(cfg.get('prnu_rms') or 0.0),
+            vignetting_frac=float(cfg.get('vignetting_frac') or 0.0),
+            dust_donut_count=int(cfg.get('dust_donut_count') or 0),
+            rng=_mode_seed(dp, 'fixed_pattern'),
+        )
     add_dark_current(
         electrons,
         rate_e_per_sec=dp.dark_current_e_per_sec,
         exposure_sec=dp.exposure_sec,
     )
+    if 'dark_ramp' in modes:
+        records['dark_ramp'] = _apply_dark_ramp(electrons, modes['dark_ramp'], dp)
+    if 'frame_transfer_smear' in modes:
+        cfg = modes['frame_transfer_smear']
+        records['frame_transfer_smear'] = apply_frame_transfer_smear(
+            electrons,
+            t_scrub_sec=float(cfg.get('t_scrub_sec') or 0.0),
+            t_transfer_sec=float(cfg.get('t_transfer_sec') or 0.0),
+            exposure_sec=dp.exposure_sec,
+        )
     if dp.poisson:
         electrons = rng.poisson(np.maximum(electrons, 0.0)).astype(np.float64)
-    add_hot_pixels(
+    if 'bright_dark_pairs' in modes:
+        records['bright_dark_pairs'] = _apply_bright_dark_pairs(
+            electrons, modes['bright_dark_pairs'], frame, dp
+        )
+    hot_record = add_hot_pixels(
         electrons,
         fraction=dp.hot_pixel_fraction,
         amplitude_e=dp.hot_pixel_amplitude_e,
         column_factor=dp.hot_pixel_column_factor,
         rng=_stage_rng(dp.random_seed, 'hot_pixels'),
+        candidate_pool=_hot_pixel_pool(frame, dp),
     )
+    # The hot_pixels artifact mode is routed through the resolver's flat knobs,
+    # so the chain records its realized population here; the generic noise-block
+    # stress path stays unrecorded like the other generic knobs.
+    if dp.hot_pixel_mode_active:
+        records['hot_pixels'] = hot_record
+    if 'radiation_transients' in modes:
+        records['radiation_transients'] = _apply_radiation_transients(
+            electrons, modes['radiation_transients'], dp
+        )
     apply_saturation(electrons, full_well_e=dp.full_well_e, bloom_length=dp.bloom_length)
     # Cosmic rays deposit well above the full well AFTER the bloom cap, so they
     # reach the ADC ceiling and land on the orchestrator's masks.
@@ -169,12 +291,25 @@ def _apply_ccd(frame: SimFrame, dp: DetectorParams, rng: np.random.Generator) ->
     )
     if dp.read_noise_e > 0.0:
         electrons += rng.normal(0.0, dp.read_noise_e, size=electrons.shape)
-    add_banding(
-        electrons,
-        amplitude_e=dp.banding_amplitude_e,
-        period_px=dp.banding_period_px,
-        rng=_stage_rng(dp.random_seed, 'banding'),
-    )
+    if 'banding_coherent' in modes:
+        cfg = modes['banding_coherent']
+        records['banding_coherent'] = add_coherent_banding(
+            electrons,
+            amplitude_e=float(cfg.get('amplitude_e') or 0.0),
+            period_px=float(cfg.get('period_px') or 0.0),
+            orientation=str(cfg.get('orientation', 'horizontal')),
+            freq_step_factor=float(cfg.get('freq_step_factor', 1.0)),
+            dark_step_dn=float(cfg.get('dark_step_dn', 0.0)),
+            gain_e_per_dn=dp.gain_e_per_dn,
+            rng=_mode_seed(dp, 'banding_coherent'),
+        )
+    else:
+        add_banding(
+            electrons,
+            amplitude_e=dp.banding_amplitude_e,
+            period_px=dp.banding_period_px,
+            rng=_stage_rng(dp.random_seed, 'banding'),
+        )
     dn = electrons / dp.gain_e_per_dn + dp.bias_dn
     add_bias_structure(
         dn,
@@ -183,9 +318,110 @@ def _apply_ccd(frame: SimFrame, dp: DetectorParams, rng: np.random.Generator) ->
         col_gradient_dn=dp.bias_col_gradient_dn,
         rng=_stage_rng(dp.random_seed, 'bias_structure'),
     )
-    dn = quantize_dn(dn, mode=dp.quantization, saturation_dn=dp.saturation_dn)
+    if 'fixed_pattern' in modes:
+        cfg = modes['fixed_pattern']
+        dn_record = add_fixed_pattern_dn(
+            dn,
+            stitch_period_px=int(cfg.get('stitch_period_px') or 0),
+            stitch_amplitude_dn=float(cfg.get('stitch_amplitude_dn') or 0.0),
+            jail_bar_dn=float(cfg.get('jail_bar_dn') or 0.0),
+            rng=_mode_seed(dp, 'fixed_pattern_dn'),
+        )
+        records['fixed_pattern'] = {**records.get('fixed_pattern', {}), **dn_record, 'active': True}
+    if 'serial_tail' in modes:
+        cfg = modes['serial_tail']
+        records['serial_tail'] = add_serial_tail(
+            dn,
+            saturation_dn=dp.saturation_dn,
+            saturation_frac=float(cfg.get('saturation_frac', 0.99)),
+            amplitude_dn=float(cfg.get('amplitude_dn') or 0.0),
+            length_px=int(cfg.get('length_px') or 0),
+            direction=str(cfg.get('direction', 'right')),
+        )
+    dn = quantize_dn(
+        dn,
+        mode=dp.quantization,
+        saturation_dn=dp.saturation_dn,
+        contour_step=dp.quantization_contour_step,
+    )
     np.clip(dn, 0.0, dp.saturation_dn, out=dn)
     frame.signal[:] = dn
+    _record_routed_modes(dp, records)
+    if records:
+        frame.truth.setdefault('artifacts', {}).update(records)
+
+
+def _apply_dark_ramp(
+    electrons: NDArrayFloatType, cfg: dict[str, Any], dp: DetectorParams
+) -> dict[str, Any]:
+    """Apply the dark_ramp mode: an additive dark gradient or a shutter shading."""
+    if str(cfg.get('kind', 'dark_gradient')) == 'exposure_shading':
+        return apply_exposure_shading(
+            electrons,
+            top_factor=float(cfg.get('top_factor') or 0.0),
+            bottom_factor=float(cfg.get('bottom_factor') or 0.0),
+        )
+    rbi = float(cfg.get('rbi_column_factor') or 0.0)
+    hot_columns = None
+    if rbi > 0.0:
+        # The RBI flavor enhances the columns read out above hot pixels; a seeded
+        # set of columns stands in for that population so the flavor is stable
+        # per seed and independent of the hot-pixel realization.
+        col_rng = _mode_seed(dp, 'dark_ramp_columns')
+        n_cols = max(1, electrons.shape[1] // 32)
+        hot_columns = col_rng.integers(0, electrons.shape[1], size=n_cols)
+    return add_dark_ramp(
+        electrons,
+        amplitude_e=float(cfg.get('amplitude_e') or 0.0),
+        nonlinear=float(cfg.get('nonlinear', 1.0)),
+        rbi_column_factor=rbi,
+        hot_columns=hot_columns,
+    )
+
+
+def _apply_bright_dark_pairs(
+    electrons: NDArrayFloatType, cfg: dict[str, Any], frame: SimFrame, dp: DetectorParams
+) -> dict[str, Any]:
+    """Apply the bright_dark_pairs mode with exposure scaling and placement pool."""
+    rng = _mode_seed(dp, 'bright_dark_pairs')
+    expected = float(cfg['incidence']) * dp.exposure_sec
+    count = int(rng.poisson(expected)) if expected > 0.0 else 0
+    pool = _feature_pool(frame) if dp.artifacts_adversarial else None
+    return add_bright_dark_pairs(
+        electrons,
+        count=count,
+        amplitude_e=float(cfg.get('amplitude_e') or 0.0),
+        rng=rng,
+        candidate_pool=pool,
+    )
+
+
+def _apply_radiation_transients(
+    electrons: NDArrayFloatType, cfg: dict[str, Any], dp: DetectorParams
+) -> dict[str, Any]:
+    """Apply radiation_transients: cosmic morphology in the Galileo-scaled regime.
+
+    The expected spike count scales the incidence by the environment factor and
+    by ``(exposure + readout dwell) / exposure`` -- the dwell adds transients
+    proportionally, the regime that forced Galileo's faster summation readout.
+    """
+    incidence = float(cfg['incidence'])
+    environment = float(cfg.get('environment_factor', 1.0))
+    dwell = float(cfg.get('readout_dwell_sec', 0.0))
+    exposure = dp.exposure_sec if dp.exposure_sec > 0.0 else 1.0
+    expected = incidence * environment * (exposure + dwell) / exposure
+    amplitude = cfg.get('amplitude_e')
+    amplitude_e = float(amplitude) if amplitude is not None else dp.full_well_e
+    rng = _mode_seed(dp, 'radiation_transients')
+    n_events = int(rng.poisson(expected)) if expected > 0.0 else 0
+    deposit_morphological_events(
+        electrons,
+        n_events=n_events,
+        amplitude_e=amplitude_e,
+        rng=rng,
+        amplitude_dist='exponential',
+    )
+    return {'active': n_events > 0, 'expected': expected, 'events': n_events}
 
 
 def _apply_vidicon(frame: SimFrame, dp: DetectorParams, rng: np.random.Generator) -> None:
@@ -196,12 +432,25 @@ def _apply_vidicon(frame: SimFrame, dp: DetectorParams, rng: np.random.Generator
     read-noise term (a per-line offset plus a within-line white component) and a
     faint vertical coherent periodic component, then 8-bit quantization.
     """
+    modes = dp.detector_modes
+    records: dict[str, Any] = {}
     signal_dn = np.clip(frame.signal, 0.0, 1.0) * dp.signal_full_scale_frac * dp.full_well_dn
     size_v, size_u = signal_dn.shape
+    dn = signal_dn
+    # The erase-cycle residual image is a pre-noise ghost of the prior frame.
+    if 'residual_image' in modes:
+        cfg = modes['residual_image']
+        offset = cfg.get('offset_px') or [5, 5]
+        records['residual_image'] = add_residual_image(
+            dn,
+            amplitude=float(cfg.get('amplitude') or 0.0),
+            prior=str(cfg.get('prior', 'self_offset')),
+            offset_v=int(offset[0]),
+            offset_u=int(offset[1]),
+        )
     vidicon = dp.vidicon
     line_sigma = float(vidicon.get('read_noise_line_dn', 0.0))
     pixel_sigma = float(vidicon.get('read_noise_pixel_dn', 0.0))
-    dn = signal_dn
     if line_sigma > 0.0:
         dn = dn + rng.normal(0.0, line_sigma, size=(size_v,))[:, None]
     if pixel_sigma > 0.0:
@@ -213,10 +462,47 @@ def _apply_vidicon(frame: SimFrame, dp: DetectorParams, rng: np.random.Generator
         cols = np.arange(size_u, dtype=np.float64)
         coherent = coherent_amp * np.sin(2.0 * np.pi * cols / coherent_period + phase)
         dn = dn + coherent[None, :]
+    # The readout dark-current line ramp accumulates down the frame (DN domain).
+    if 'dark_ramp' in modes:
+        records['dark_ramp'] = _apply_dark_ramp(dn, modes['dark_ramp'], dp)
+    # Explicit coherent banding rides on the DN signal (gain 1 in the DN domain).
+    if 'banding_coherent' in modes:
+        cfg = modes['banding_coherent']
+        records['banding_coherent'] = add_coherent_banding(
+            dn,
+            amplitude_e=float(cfg.get('amplitude_e') or 0.0),
+            period_px=float(cfg.get('period_px') or 0.0),
+            orientation=str(cfg.get('orientation', 'horizontal')),
+            freq_step_factor=float(cfg.get('freq_step_factor', 1.0)),
+            dark_step_dn=float(cfg.get('dark_step_dn', 0.0)),
+            gain_e_per_dn=1.0,
+            rng=_mode_seed(dp, 'banding_coherent'),
+        )
+    if 'bias_structure' in modes:
+        add_bias_structure(
+            dn,
+            pedestal_sigma_dn=dp.bias_pedestal_sigma_dn,
+            row_gradient_dn=dp.bias_row_gradient_dn,
+            col_gradient_dn=dp.bias_col_gradient_dn,
+            rng=_stage_rng(dp.random_seed, 'bias_structure'),
+        )
+    # The brightness-dependent beam bend warps the formed image before digitizing.
+    if 'beam_bend' in modes:
+        records['beam_bend'] = apply_beam_bend(
+            dn, amplitude_px=float(modes['beam_bend'].get('amplitude_px') or 0.0)
+        )
     dn = dn + dp.bias_dn
-    dn = quantize_dn(dn, mode=dp.quantization, saturation_dn=dp.saturation_dn)
+    dn = quantize_dn(
+        dn,
+        mode=dp.quantization,
+        saturation_dn=dp.saturation_dn,
+        contour_step=dp.quantization_contour_step,
+    )
     np.clip(dn, 0.0, dp.saturation_dn, out=dn)
     frame.signal[:] = dn
+    _record_routed_modes(dp, records)
+    if records:
+        frame.truth.setdefault('artifacts', {}).update(records)
 
 
 def _apply_calibration_inverse(frame: SimFrame, dp: DetectorParams) -> None:

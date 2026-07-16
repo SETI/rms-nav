@@ -16,9 +16,11 @@ parameterizations come with the catalog defaults; these are the generic shapes.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
-from spindoctor.support.types import NDArrayFloatType
+from spindoctor.support.types import NDArrayFloatType, NDArrayIntType
 
 __all__ = [
     'add_banding',
@@ -26,6 +28,7 @@ __all__ = [
     'add_cosmic_rays',
     'add_dark_current',
     'add_hot_pixels',
+    'deposit_morphological_events',
 ]
 
 
@@ -59,7 +62,8 @@ def add_hot_pixels(
     amplitude_e: float,
     column_factor: float,
     rng: np.random.Generator,
-) -> None:
+    candidate_pool: tuple[NDArrayIntType, NDArrayIntType] | None = None,
+) -> dict[str, Any]:
     """Add a fixed per-seed hot-pixel population (electrons) in place.
 
     A hot pixel holds a large fixed charge; on CCDs read through it, a fraction
@@ -77,19 +81,36 @@ def add_hot_pixels(
             column: the warm streak's integral is ``column_factor`` times the
             hot pixel's charge, independent of the frame height.
         rng: The stage's seeded generator.
+        candidate_pool: Optional ``(v, u)`` coordinate pool the population is
+            drawn from (adversarial placement onto the navigation features).
+            When None or empty, the placement is uniform over the frame.
+
+    Returns:
+        The realized population for the truth record: the planted ``pixels``
+        as ``[v, u]`` pairs and their ``amplitudes_e``, empty on a no-op.
     """
     if fraction <= 0.0 or amplitude_e <= 0.0:
-        return
+        return {'pixels': [], 'amplitudes_e': []}
     size_v, size_u = electrons.shape
     n_hot = round(fraction * size_v * size_u)
     if n_hot <= 0:
-        return
-    hot_v = rng.integers(0, size_v, size=n_hot)
-    hot_u = rng.integers(0, size_u, size=n_hot)
+        return {'pixels': [], 'amplitudes_e': []}
+    if candidate_pool is not None and candidate_pool[0].size > 0:
+        pool_v, pool_u = candidate_pool
+        pick = rng.integers(0, pool_v.size, size=n_hot)
+        hot_v = pool_v[pick]
+        hot_u = pool_u[pick]
+    else:
+        hot_v = rng.integers(0, size_v, size=n_hot)
+        hot_u = rng.integers(0, size_u, size=n_hot)
     amps = amplitude_e * rng.exponential(1.0, size=n_hot)
     np.add.at(electrons, (hot_v, hot_u), amps)
+    record = {
+        'pixels': [[int(v), int(u)] for v, u in zip(hot_v.tolist(), hot_u.tolist(), strict=True)],
+        'amplitudes_e': [float(a) for a in amps.tolist()],
+    }
     if column_factor <= 0.0:
-        return
+        return record
     # Warm column: each hot pixel bleeds charge onto the pixels above it
     # (decreasing toward the read register), a CCD readout scar.  The linear
     # ramp is normalized so its INTEGRAL is column_factor * amp: the column
@@ -101,6 +122,7 @@ def add_hot_pixels(
         weights = np.linspace(1.0, 0.0, v, endpoint=False)
         weights /= weights.sum()
         electrons[:v, u] += column_factor * amp * weights
+    return record
 
 
 def add_banding(
@@ -213,14 +235,47 @@ def add_cosmic_rays(
     if expected <= 0.0:
         return
     n_events = int(rng.poisson(expected))
-    if n_events <= 0:
+    deposit_morphological_events(
+        electrons, n_events=n_events, amplitude_e=amplitude_e, rng=rng, amplitude_dist='lognormal'
+    )
+
+
+def deposit_morphological_events(
+    electrons: NDArrayFloatType,
+    *,
+    n_events: int,
+    amplitude_e: float,
+    rng: np.random.Generator,
+    amplitude_dist: str = 'lognormal',
+) -> None:
+    """Deposit a fixed count of morphological charge events (electrons) in place.
+
+    The event-type mix is the same for cosmic rays and for the Galileo radiation
+    regime -- mostly single-pixel point hits, some grazing streaks, a few
+    multi-pixel splatters -- but the amplitude distribution differs: cosmic-ray
+    events are lognormal about the deposit scale, while the radiation regime's
+    amplitudes fall steeply from a few DN (an exponential draw).  A zero count or
+    amplitude is a no-op.
+
+    Parameters:
+        electrons: The electron image, modified in place.
+        n_events: The number of events to deposit.
+        amplitude_e: The charge-deposit scale in electrons.
+        rng: The stage's seeded generator.
+        amplitude_dist: 'lognormal' (cosmic rays) or 'exponential' (radiation,
+            steeply-falling amplitudes).
+    """
+    if n_events <= 0 or amplitude_e <= 0.0:
         return
-    # Event-type mix: mostly point hits, some streaks, few splatters.
+    size_v, size_u = electrons.shape
     kinds = rng.choice(3, size=n_events, p=[0.80, 0.15, 0.05])
     for kind in kinds.tolist():
         v0 = int(rng.integers(0, size_v))
         u0 = int(rng.integers(0, size_u))
-        charge = amplitude_e * (1.0 + float(rng.lognormal(0.0, 1.0)))
+        if amplitude_dist == 'exponential':
+            charge = amplitude_e * float(rng.exponential(0.25))
+        else:
+            charge = amplitude_e * (1.0 + float(rng.lognormal(0.0, 1.0)))
         if kind == 0:
             electrons[v0, u0] += charge
         elif kind == 1:

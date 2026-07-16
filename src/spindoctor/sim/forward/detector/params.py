@@ -25,12 +25,24 @@ DN well is derived (``full_well_e / gain_e_per_dn``) and the navigator-side
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
+
 from spindoctor.config import DEFAULT_CONFIG
-from spindoctor.sim.forward.artifacts_catalog import resolve_detector_defaults
+from spindoctor.sim.forward.artifact_modes import (
+    DETECTOR_MODE_ORDER,
+    mode_available,
+    normalize_instrument,
+    resolve_mode_config,
+)
+from spindoctor.sim.forward.artifacts_catalog import (
+    resolve_detector_defaults,
+    resolve_mode_with_catalog,
+)
 from spindoctor.sim.instruments import resolve_sim_inst_config
+from spindoctor.sim.seeds import derive_effect_seed
 
 __all__ = ['DetectorParams', 'resolve_detector_params']
 
@@ -75,6 +87,22 @@ class DetectorParams:
         dark_dn: Dark pedestal in DN subtracted before the I/F divide.
         random_seed: The scene seed for the per-effect sub-streams.
         instrument_defaults: Whether the physical-chain opt-in is on.
+        hot_pixel_adversarial: Whether the hot-pixel population is placed
+            adversarially (biased onto the navigation features) rather than
+            uniformly.
+        hot_pixel_mode_active: Whether the ``hot_pixels`` artifact mode drove
+            the hot-pixel knobs (in which case the chain records the realized
+            population in the frame truth), as opposed to the generic
+            noise-block / instrument_defaults path.
+        quantization_contour_step: The DN posterization step for the
+            ``contour_8bit`` quantization sub-mode.
+        artifacts_adversarial: Whether stochastic detector artifact modes place
+            their events adversarially onto the navigation features.
+        detector_modes: The resolved config of every active detector-stage
+            artifact mode (registry defaults filled from the catalog), keyed by
+            mode name; the chain applies each at its physical point and records
+            it.  Routed modes (bias, bloom, quantization) also appear here for
+            the truth record, their override already folded into the flat fields.
     """
 
     detector_model: str
@@ -107,6 +135,11 @@ class DetectorParams:
     dark_dn: float
     random_seed: int = 42
     instrument_defaults: bool = False
+    hot_pixel_adversarial: bool = False
+    hot_pixel_mode_active: bool = False
+    quantization_contour_step: int = 8
+    artifacts_adversarial: bool = False
+    detector_modes: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def _default_or_zero(
@@ -151,6 +184,70 @@ def _resolve_gain(
             f'available states: {sorted(table)}'
         )
     return float(table[state])
+
+
+# Detector modes routed to an existing generic mechanic by overriding a flat
+# DetectorParams field rather than by a dedicated chain call.
+_ROUTED_ONLY_MODES: frozenset[str] = frozenset(
+    {'bias_structure', 'bloom', 'quantization_lut', 'quantization_ls8b', 'contouring_8bit'}
+)
+# Detector modes whose incidence is an expected event count (drawn Poisson in
+# the mechanic), not a per-frame activation probability.
+_COUNT_DETECTOR_MODES: frozenset[str] = frozenset({'radiation_transients', 'bright_dark_pairs'})
+
+
+def _mode_active(mode_name: str, incidence: float, random_seed: int) -> bool:
+    """Whether a detector artifact mode is active this frame.
+
+    Count modes are active whenever their incidence is positive (the mechanic
+    draws the event count); the deterministic-shape modes activate with
+    probability ``incidence``, drawn from the mode's own seeded stream so
+    toggling one never perturbs another.
+    """
+    if incidence <= 0.0:
+        return False
+    if mode_name in _COUNT_DETECTOR_MODES:
+        return True
+    rng = np.random.default_rng(derive_effect_seed(random_seed, f'detector/{mode_name}/activate'))
+    return bool(rng.random() < incidence)
+
+
+def _resolve_detector_modes(
+    artifacts: Mapping[str, Any],
+    instrument: str | None,
+    random_seed: int,
+    *,
+    instrument_defaults: bool,
+) -> dict[str, dict[str, Any]]:
+    """Resolve the active detector-stage artifact modes for a render.
+
+    Each present, available, and active mode is resolved (scene value over
+    catalog default over registry default) and returned keyed by name.  LORRI's
+    ``frame_transfer_smear`` is the one physical-signal-chain member turned on
+    under ``instrument_defaults``: when a LORRI scene has not set it, it is
+    injected at incidence 1 with the catalog's nominal scrub/transfer times.
+    The injection is LORRI-only; the instrument-agnostic generic block accepts
+    every mode but emulates no frame-transfer camera, so it gets no injection.
+    """
+    modes: dict[str, dict[str, Any]] = {}
+    for name in DETECTOR_MODE_ORDER:
+        raw = artifacts.get(name)
+        if raw is None:
+            if (
+                name == 'frame_transfer_smear'
+                and instrument_defaults
+                and normalize_instrument(instrument) == 'nhlorri'
+            ):
+                raw = {'incidence': 1.0}
+            else:
+                continue
+        if not isinstance(raw, Mapping) or not mode_available(name, instrument):
+            continue
+        cfg = resolve_mode_with_catalog(name, raw, instrument)
+        if not _mode_active(name, float(cfg.get('incidence', 0.0)), random_seed):
+            continue
+        modes[name] = cfg
+    return modes
 
 
 def resolve_detector_params(params: Mapping[str, Any]) -> DetectorParams:
@@ -262,6 +359,31 @@ def resolve_detector_params(params: Mapping[str, Any]) -> DetectorParams:
         scene_noise.get('banding_period_px', catalog.get('banding_period_px', 64.0))
     )
 
+    # The hot_pixels artifact mode (routed here from the registry) wins over the
+    # noise-block / instrument_defaults hot-pixel knobs: an explicit mode is a
+    # deliberate placement, so it overrides the generic stress path.  incidence
+    # is the hot-pixel fraction; amplitude and column factor fall back to the
+    # catalog when the mode leaves them unset.  The mode is honored only where
+    # it is available (validation already rejects it elsewhere, e.g. LORRI).
+    hot_pixel_adversarial = False
+    hot_pixel_mode_active = False
+    hot_cfg = artifacts.get('hot_pixels') if isinstance(artifacts, Mapping) else None
+    if isinstance(hot_cfg, Mapping) and mode_available('hot_pixels', instrument):
+        hot_pixel_mode_active = True
+        resolved = resolve_mode_config('hot_pixels', hot_cfg)
+        hot_pixel_fraction = float(resolved['incidence'])
+        mode_amplitude = resolved.get('amplitude_e')
+        if mode_amplitude is not None:
+            hot_pixel_amplitude = float(mode_amplitude)
+        elif hot_pixel_amplitude <= 0.0:
+            hot_pixel_amplitude = float(catalog.get('hot_pixel_amplitude_e', 0.0))
+        mode_column_factor = resolved.get('column_factor')
+        if mode_column_factor is not None:
+            hot_pixel_column_factor = float(mode_column_factor)
+        elif hot_pixel_column_factor <= 0.0:
+            hot_pixel_column_factor = float(catalog.get('hot_pixel_column_factor', 0.0))
+        hot_pixel_adversarial = bool(artifacts.get('adversarial', False))
+
     # The vidicon DN-noise sub-parameters activate on the vidicon path only, and
     # like every physical-chain artifact stay disabled until instrument_defaults
     # is on or the scene sets them explicitly (the stage-activation floor).
@@ -286,6 +408,41 @@ def resolve_detector_params(params: Mapping[str, Any]) -> DetectorParams:
             image_well_dn / exposure_ref_sec if exposure_ref_sec > 0.0 else image_well_dn
         )
     dark_dn = 0.0 if detector_model == 'vidicon' else dark_current * exposure_sec / gain_e_per_dn
+
+    # Detector-stage artifact modes.  An explicit mode wins over the generic
+    # noise-block / instrument_defaults knob for the same mechanic (the
+    # precedence hot_pixels already uses): the routed modes fold their override
+    # into the flat field here, and banding_coherent silences the generic
+    # banding so only the explicit family renders.
+    artifacts_adversarial = bool(artifacts.get('adversarial', False))
+    detector_modes = _resolve_detector_modes(
+        artifacts,
+        instrument,
+        int(params.get('random_seed', 42)),
+        instrument_defaults=instrument_defaults,
+    )
+    contour_step = 8
+    if 'banding_coherent' in detector_modes:
+        banding_amplitude = 0.0
+    if 'bias_structure' in detector_modes:
+        bias_mode = detector_modes['bias_structure']
+        if bias_mode.get('pedestal_sigma_dn') is not None:
+            bias_pedestal_sigma = float(bias_mode['pedestal_sigma_dn'])
+        if bias_mode.get('row_gradient_dn') is not None:
+            bias_row_gradient = float(bias_mode['row_gradient_dn'])
+        if bias_mode.get('col_gradient_dn') is not None:
+            bias_col_gradient = float(bias_mode['col_gradient_dn'])
+    if 'bloom' in detector_modes:
+        bloom_override = detector_modes['bloom'].get('bloom_length')
+        if bloom_override is not None:
+            bloom_length = int(bloom_override)
+    if 'quantization_lut' in detector_modes:
+        quantization = 'sqrt_lut'
+    if 'quantization_ls8b' in detector_modes:
+        quantization = 'ls8b'
+    if 'contouring_8bit' in detector_modes:
+        quantization = 'contour_8bit'
+        contour_step = int(detector_modes['contouring_8bit'].get('step', 8))
 
     return DetectorParams(
         detector_model=detector_model,
@@ -318,4 +475,9 @@ def resolve_detector_params(params: Mapping[str, Any]) -> DetectorParams:
         dark_dn=dark_dn,
         random_seed=int(params.get('random_seed', 42)),
         instrument_defaults=instrument_defaults,
+        hot_pixel_adversarial=hot_pixel_adversarial,
+        hot_pixel_mode_active=hot_pixel_mode_active,
+        quantization_contour_step=contour_step,
+        artifacts_adversarial=artifacts_adversarial,
+        detector_modes=detector_modes,
     )

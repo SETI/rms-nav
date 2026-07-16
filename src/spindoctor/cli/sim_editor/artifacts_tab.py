@@ -1,20 +1,26 @@
 """Artifacts tab for the simulated-image editor.
 
-Authors the scene-level ``artifacts`` switch and the ``detector`` override
-block.  ``instrument_defaults`` opts the whole scene into the emulated camera's
-physical signal chain (its catalog PSF, distortion residual, shot noise, and
-the dark / hot / bloom / banding / bias-structure noise); leaving it unchecked
-keeps those keys absent so the scene renders the self-consistency floor.
+Authors the scene-level ``artifacts`` block: the ``instrument_defaults`` switch,
+the ``adversarial`` switch, the ``detector`` override, and one generated row per
+artifact mode in the registry.  ``instrument_defaults`` opts the whole scene into
+the emulated camera's physical signal chain at catalog values (PSF, distortion
+residual, shot noise, dark / hot / bloom / banding / bias); ``adversarial`` biases
+each enabled mode's stochastic placement onto the navigation features.
 
-The detector group is a checkable override for the electron-chain gain state,
-the detector model, the exposure the well fraction references, and the ADC
-quantization sub-mode, under a per-key discipline: enabling the group inserts
-an empty ``detector`` block, each widget edit writes only its own key, and
-keys the operator never touched stay absent so the per-instrument catalog
-defaults keep applying (a vgiss scene stays vidicon without ever writing
-``detector_model``).  The widgets display the selected instrument's catalog
-defaults until a scene value overrides them.  Unchecking the group removes the
-``detector`` key entirely.
+The mode rows are not hand-coded: each is generated from an
+:class:`~spindoctor.sim.forward.artifact_modes.ArtifactMode` (see
+:mod:`spindoctor.cli.sim_editor.artifact_mode_rows`), so a registered mode gains
+an editor row with no change here.  The whole tab keeps one discipline: an
+unchecked switch or mode leaves its key absent, an enabled mode starts as an
+empty map, and every parameter key -- including the detector override's -- appears
+only once its widget is edited, so keys the operator never touched track the
+per-instrument catalog defaults.  A mode unavailable on the scene's instrument is
+disabled with the registry's reason as its tooltip.
+
+The detector group is a checkable override for the electron-chain gain state, the
+detector model, the exposure the well fraction references, and the ADC
+quantization sub-mode, under the same per-key discipline (a vgiss scene stays
+vidicon without ever writing ``detector_model``).
 """
 
 from typing import Any
@@ -31,11 +37,26 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from spindoctor.cli.sim_editor.artifact_mode_rows import ModeRow
 from spindoctor.cli.sim_editor.base import SimEditorBase
+from spindoctor.sim.forward.artifact_modes import ARTIFACT_MODES
 from spindoctor.sim.forward.artifacts_catalog import resolve_detector_defaults
 
 _DETECTOR_MODELS: list[str] = ['ccd', 'vidicon']
-_QUANTIZATION_MODES: list[str] = ['exact', '8bit', 'uneven_12bit', 'sqrt_lut']
+_QUANTIZATION_MODES: list[str] = [
+    'exact',
+    '8bit',
+    'uneven_12bit',
+    'sqrt_lut',
+    'ls8b',
+    'contour_8bit',
+]
+
+# The rendering stages the mode rows are grouped under, in tab order.
+_STAGE_TITLES: tuple[tuple[str, str], ...] = (
+    ('telemetry', 'Telemetry-stage modes'),
+    ('detector', 'Detector-stage modes'),
+)
 
 
 class ArtifactsTabMixin(SimEditorBase):
@@ -47,6 +68,10 @@ class ArtifactsTabMixin(SimEditorBase):
         layout = QVBoxLayout(content)
         layout.addWidget(self._build_artifacts_switch_group())
         layout.addWidget(self._build_detector_group())
+        self._mode_rows = {}
+        for stage, title in _STAGE_TITLES:
+            layout.addWidget(self._build_mode_stage_group(stage, title))
+        self._refresh_artifact_mode_availability()
         layout.addStretch()
 
         scroll = QScrollArea()
@@ -55,11 +80,11 @@ class ArtifactsTabMixin(SimEditorBase):
         self._artifacts_tab = scroll
         return scroll
 
-    # ---- Instrument-defaults switch ----
+    # ---- Instrument-defaults and adversarial switches ----
 
     def _build_artifacts_switch_group(self) -> QGroupBox:
-        """Build the physical-signal-chain opt-in group."""
-        group = QGroupBox('Instrument physical chain')
+        """Build the physical-signal-chain opt-in and adversarial-placement group."""
+        group = QGroupBox('Artifacts')
         form = QFormLayout(group)
         self._instrument_defaults_check = QCheckBox()
         self._instrument_defaults_check.setToolTip(
@@ -70,6 +95,15 @@ class ArtifactsTabMixin(SimEditorBase):
         self._instrument_defaults_check.setChecked(self._instrument_defaults_on())
         form.addRow('Instrument defaults:', self._instrument_defaults_check)
         self._instrument_defaults_check.toggled.connect(self._on_instrument_defaults)
+
+        self._adversarial_check = QCheckBox()
+        self._adversarial_check.setToolTip(
+            "Bias every enabled mode's stochastic placement onto the navigation "
+            'features (worst-case placement); uniform when off.'
+        )
+        self._adversarial_check.setChecked(self._adversarial_on())
+        form.addRow('Adversarial placement:', self._adversarial_check)
+        self._adversarial_check.toggled.connect(self._on_adversarial)
         return group
 
     def _instrument_defaults_on(self) -> bool:
@@ -77,15 +111,111 @@ class ArtifactsTabMixin(SimEditorBase):
         artifacts = self.sim_params.get('artifacts')
         return isinstance(artifacts, dict) and bool(artifacts.get('instrument_defaults', False))
 
+    def _adversarial_on(self) -> bool:
+        """Whether the scene requests adversarial artifact placement."""
+        artifacts = self.sim_params.get('artifacts')
+        return isinstance(artifacts, dict) and bool(artifacts.get('adversarial', False))
+
     def _on_instrument_defaults(self, checked: bool) -> None:
-        """Insert or remove the artifacts block."""
+        """Set or clear the instrument-defaults switch, keeping other keys."""
+        self._set_artifacts_switch('instrument_defaults', checked)
+
+    def _on_adversarial(self, checked: bool) -> None:
+        """Set or clear the adversarial switch, keeping other keys."""
+        self._set_artifacts_switch('adversarial', checked)
+
+    # ---- artifacts-block helpers (the absent-key discipline) ----
+
+    def _artifacts_block(self) -> dict[str, Any]:
+        """Return the artifacts block, inserting an empty one if absent."""
+        block = self.sim_params.get('artifacts')
+        if not isinstance(block, dict):
+            block = {}
+            self.sim_params['artifacts'] = block
+        return block
+
+    def _prune_artifacts(self) -> None:
+        """Drop the artifacts block entirely once it holds no keys."""
+        block = self.sim_params.get('artifacts')
+        if isinstance(block, dict) and not block:
+            self.sim_params.pop('artifacts', None)
+
+    def _set_artifacts_switch(self, key: str, on: bool) -> None:
+        """Write a boolean switch key, or remove it (unchecked = absent)."""
         if self._syncing:
             return
-        if checked:
-            self.sim_params['artifacts'] = {'instrument_defaults': True}
+        if on:
+            self._artifacts_block()[key] = True
         else:
-            self.sim_params.pop('artifacts', None)
+            block = self.sim_params.get('artifacts')
+            if isinstance(block, dict):
+                block.pop(key, None)
+            self._prune_artifacts()
         self._updater.request_update()
+
+    def _mode_map(self, mode_name: str) -> dict[str, Any] | None:
+        """Return a mode's scene map, or None when its key is absent."""
+        block = self.sim_params.get('artifacts')
+        if isinstance(block, dict):
+            mode_map = block.get(mode_name)
+            if isinstance(mode_map, dict):
+                return mode_map
+        return None
+
+    def _set_mode_enabled(self, mode_name: str, on: bool) -> None:
+        """Insert an empty mode map, or remove the mode key entirely."""
+        if self._syncing:
+            return
+        if on:
+            block = self._artifacts_block()
+            if not isinstance(block.get(mode_name), dict):
+                block[mode_name] = {}
+        else:
+            existing = self.sim_params.get('artifacts')
+            if isinstance(existing, dict):
+                existing.pop(mode_name, None)
+            self._prune_artifacts()
+        self._updater.request_update()
+
+    def _set_mode_param(self, mode_name: str, param_name: str, value: Any) -> None:
+        """Write one parameter key into an enabled mode's map."""
+        if self._syncing:
+            return
+        mode_map = self._mode_map(mode_name)
+        if mode_map is None:
+            return
+        mode_map[param_name] = value
+        self._updater.request_update()
+
+    def _remove_mode_param(self, mode_name: str, param_name: str) -> None:
+        """Remove one parameter key from an enabled mode's map."""
+        if self._syncing:
+            return
+        mode_map = self._mode_map(mode_name)
+        if mode_map is None:
+            return
+        mode_map.pop(param_name, None)
+        self._updater.request_update()
+
+    # ---- Mode rows ----
+
+    def _build_mode_stage_group(self, stage: str, title: str) -> QGroupBox:
+        """Build the group of generated mode rows for one rendering stage."""
+        group = QGroupBox(title)
+        layout = QVBoxLayout(group)
+        for mode in ARTIFACT_MODES.values():
+            if mode.stage != stage:
+                continue
+            row = ModeRow(mode, self)
+            self._mode_rows[mode.name] = row
+            layout.addWidget(row.group)
+        return group
+
+    def _refresh_artifact_mode_availability(self) -> None:
+        """Enable or disable each mode row for the scene's instrument."""
+        instrument = self.sim_params.get('instrument')
+        for row in self._mode_rows.values():
+            row.apply_availability(instrument)
 
     # ---- Detector override group ----
 
@@ -230,7 +360,11 @@ class ArtifactsTabMixin(SimEditorBase):
         self._syncing = True
         try:
             self._instrument_defaults_check.setChecked(self._instrument_defaults_on())
+            self._adversarial_check.setChecked(self._adversarial_on())
             self._set_detector_widget_values()
             self._detector_group.setChecked(isinstance(self.sim_params.get('detector'), dict))
+            for row in self._mode_rows.values():
+                row.sync()
         finally:
             self._syncing = False
+        self._refresh_artifact_mode_availability()

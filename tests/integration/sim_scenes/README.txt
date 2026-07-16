@@ -30,6 +30,10 @@ Scene classes
   multi_body_geometry         - controlled multi-body arrangements
   algorithmic_invariants      - clean planted-offset scenes for unit recovery
   regression                  - pinned scenes reproducing fixed defects
+  artifact_sweep              - planted-offset scenes under modest structured
+                                telemetry loss (missing / truncated lines), in
+                                uniform and adversarial placement variants; the
+                                navigator must still recover the offset
 
 Fields
 ------
