@@ -75,6 +75,8 @@ class StrayLightMixin(SimEditorBase):
 
     def _set_stray(self, key: str, value: Any) -> None:
         """Write a value into the optics.stray_light block and re-render."""
+        if self._syncing:
+            return
         optics = self.sim_params.setdefault('optics', {})
         if not isinstance(optics, dict):
             optics = {}
@@ -100,6 +102,8 @@ class StrayLightMixin(SimEditorBase):
 
     def _on_stray_center(self, key: str, value: float) -> None:
         """Set or omit a radial-model bump centre coordinate."""
+        if self._syncing:
+            return
         # 0 means "use the frame centre": omit the key so the renderer defaults it.
         if value == 0.0:
             optics = self.sim_params.get('optics')

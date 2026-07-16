@@ -389,7 +389,7 @@ class TabsMixin(SimEditorBase):
         target_tab_name = None
         if current_idx >= 0 and current_idx < self._tabs.count():
             current_text = self._tabs.tabText(current_idx)
-            if current_text not in ('General', '+'):
+            if current_text not in ('General', 'Optics', 'Artifacts', '+'):
                 # Try to identify which body/star this was
                 widget = self._tabs.widget(current_idx)
                 if widget is not None:
@@ -423,10 +423,13 @@ class TabsMixin(SimEditorBase):
         while self._tabs.count() > 0:
             self._tabs.removeTab(0)
 
-        # Re-add in correct order: General first, then bodies (sorted by range),
-        # then rings (sorted by name), then stars (sorted by name), then "+"
+        # Re-add in correct order: General first, then the fixed Optics and
+        # Artifacts tabs, then bodies (sorted by range), then rings (sorted by
+        # name), then stars (sorted by name), then "+"
         if general_widget is not None:
             self._tabs.addTab(general_widget, 'General')
+        self._tabs.addTab(self._optics_tab, 'Optics')
+        self._tabs.addTab(self._artifacts_tab, 'Artifacts')
 
         # Add body tabs (sorted by range)
         body_indices = list(range(len(self.sim_params['bodies'])))
