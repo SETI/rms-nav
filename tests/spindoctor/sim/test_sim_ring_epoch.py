@@ -2,10 +2,10 @@
 
 A mode-1 eccentric edge with nonzero ``rate_peri`` precesses by
 ``rate_peri * (time - ring_epoch)``.  These tests render a precessing
-ringlet through ``ObsSim`` and check end to end that (a) the navigator-side
-predicted edges (``NavModelRingsSimulated``, which reads ``time`` and
-``ring_epoch`` from the filtered ``obs.nav_params`` and places edges via
-``compute_border_atop_simulated``) land on the rendered annulus boundary
+ring_system ringlet through ``ObsSim`` and check end to end that (a) the
+navigator-side predicted edges (``NavModelRingsSimulated``, which reads
+``time`` and ``ring_epoch`` from the filtered ``obs.nav_params`` and places
+edges through the shared orbit model) land on the rendered annulus boundary
 for a nonzero epoch -- both sides precess together -- and (b) changing
 ``ring_epoch`` alone moves both the prediction and the render, so the
 epoch is not silently defaulted away on either side.
@@ -29,19 +29,6 @@ _EPOCH = 345600.0  # 4 days in seconds; 6 days of precession vs 10 at epoch 0
 _RATE_PERI = 15.0  # deg/day: epochs 0 and _EPOCH differ by 60 deg of pericenter
 
 
-def _edge(a: float) -> list[dict[str, Any]]:
-    """One eccentric precessing mode-1 edge at semi-major axis ``a`` px."""
-    return [
-        {
-            'mode': 1,
-            'a': a,
-            'ae': 8.0,
-            'long_peri': 20.0,
-            'rate_peri': _RATE_PERI,
-        }
-    ]
-
-
 def _scene(ring_epoch: float) -> dict[str, Any]:
     """A noise-free (calibrated) scene with one precessing eccentric ringlet."""
     scene: dict[str, Any] = {
@@ -53,16 +40,30 @@ def _scene(ring_epoch: float) -> dict[str, Any]:
         'random_seed': 5,
         'time': _TIME,
         'ring_epoch': ring_epoch,
-        'rings': [
-            {
-                'name': 'PRECESSING',
-                'feature_type': 'RINGLET',
+        'ring_system': {
+            'geometry': {
                 'center_v': _CENTER,
                 'center_u': _CENTER,
-                'inner_data': _edge(40.0),
-                'outer_data': _edge(55.0),
-            }
-        ],
+                'opening_deg_obs': 90.0,
+                'opening_deg_sun': 90.0,
+                'node_deg': 0.0,
+            },
+            'features': [
+                {
+                    'name': 'PRECESSING',
+                    'kind': 'ringlet',
+                    'tau': 2.0,
+                    'width': 15.0,
+                    'navigable': True,
+                    'orbit': {
+                        'a': 40.0,
+                        'ae': 8.0,
+                        'long_peri': 20.0,
+                        'rate_peri': _RATE_PERI,
+                    },
+                }
+            ],
+        },
     }
     return validate_sim_params(scene, source='ring_epoch_probe')
 
