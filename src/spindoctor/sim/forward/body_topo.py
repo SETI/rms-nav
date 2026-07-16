@@ -65,7 +65,7 @@ _BAND_MARGIN_FACTOR = 1.5
 _BAND_MARGIN_PAD_PX = 4.0
 # The march samples the terrain at its own resolution: this many samples
 # per relief-field grid cell (the field is band-limited well above the
-# cell scale, so finer sampling changes no shadow decision), never coarser
+# cell scale, so finer sampling changes no shadow decision), never finer
 # than the exact one-render-pixel step.
 _MARCH_SAMPLES_PER_CELL = 4.0
 
@@ -569,7 +569,7 @@ def _apply_terminator_shadows(
     and refined per-pixel with exact incidence.  The relief and arc maps
     are built only over the band dilated by the cap's reach, and the march
     itself is :func:`spindoctor.sim.forward.relief.march_shadows`, stepping
-    at the relief field's own grid resolution (never coarser than one
+    at the relief field's own grid resolution (never finer than one
     render pixel of surface arc).
 
     Parameters:
@@ -687,7 +687,7 @@ def _apply_terminator_shadows(
     r_local_c = radius_local[cand_in_region]
     h_frac_c = h_frac[cand_in_region]
     # The march samples the terrain at the field's own resolution (the field
-    # is band-limited well above its grid-cell scale), never coarser than
+    # is band-limited well above its grid-cell scale), never finer than
     # the exact one-render-pixel step used for small bodies.
     cell_arc_px = 2.0 * np.pi / field.grid.shape[0] * radius_max
     step_arc = max(1.0, cell_arc_px / _MARCH_SAMPLES_PER_CELL)

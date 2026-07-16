@@ -883,7 +883,7 @@ the terrain can cast, and the horizon limit that bounds the tangent's
 divergence at the terminator -- so raggedness grows toward the terminator while
 the cost stays bounded. The march steps at ``max(1.0, field_cell_arc / 4)``
 pixels of surface arc -- about 16 samples per shortest terrain wavelength,
-never coarser than one render pixel -- which is why it is both accurate and
+never finer than one render pixel -- which is why it is both accurate and
 cheap.
 
 Split-resolution performance
