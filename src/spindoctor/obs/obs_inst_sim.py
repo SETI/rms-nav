@@ -169,6 +169,19 @@ class ObsSim(ObsSnapshotInst):
         placeholder inflates every simulated star's SNR by tens of orders of
         magnitude and collapses its covariance to zero.
 
+        The exposure the flux formula scales by is the scene's idealized
+        ``exposure_sec``, read from the navigator-visible ``nav_params`` view:
+        exposure is commanded, published information a real pipeline always
+        has, and the renderer multiplies every star's deposited flux by it, so
+        the detection limit must move by ``2.5 * log10(exposure)`` alongside
+        the flux or a long exposure's faint stars are gated out (and a short
+        exposure's noise floor is overstated).  The dummy Snapshot's ``texp``
+        deliberately stays at the 1-second reference: ``texp`` feeds the
+        observation's timing (``midtime = tstart + texp / 2`` anchors every
+        time-dependent oops computation and the reported exposure metadata),
+        and repurposing it would move the sim epoch as a side effect of a
+        photometric knob, so the limit reads the exposure directly instead.
+
         Returns:
             The maximum usable magnitude for stars in this observation.  For
             calibrated-unit sim instruments the published block carries no DN
@@ -193,8 +206,9 @@ class ObsSim(ObsSnapshotInst):
             inst_config.get('star_psf_sigma', self.config.category('sim')['star_psf_sigma'])
         )
         read_noise_dn = float(inst_noise['read_noise_dn'])
-        # The sim observation renders at a fixed reference exposure (texp).
-        exposure = float(self.texp)
+        # The scene's idealized exposure (navigator-visible; see the docstring
+        # for why the Snapshot's reference texp is not consulted here).
+        exposure = float(self.nav_params.get('exposure_sec', 1.0))
         # Peak DN of a magnitude-0 star: its total over the Gaussian PSF core.
         peak0_dn = zero_point_dn * exposure / (2.0 * math.pi * star_psf_sigma**2)
         # Poisson shot noise on the star's own counts keeps the effective sigma

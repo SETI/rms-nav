@@ -224,6 +224,39 @@ def test_star_limit_is_independent_of_scene_noise() -> None:
     assert obs_noisy.star_max_usable_vmag() == obs_quiet.star_max_usable_vmag()
 
 
+def _star_only_scene(exposure_sec: float) -> dict[str, Any]:
+    """A minimal star-only scene at the given exposure."""
+    return {
+        'instrument': 'coiss_nac',
+        'size_v': 64,
+        'size_u': 64,
+        'random_seed': 5,
+        'exposure_sec': exposure_sec,
+        'stars': [{'name': 'S', 'v': 32.0, 'u': 32.0, 'vmag': 4.0}],
+    }
+
+
+def test_star_limit_scales_with_scene_exposure() -> None:
+    """The star detection limit tracks the scene's idealized exposure.
+
+    ``exposure_sec`` is commanded, navigator-visible information, and the
+    renderer scales every star's deposited flux by it, so the matched-filter
+    limiting magnitude must move with it through the flux formula: a factor of
+    ten in exposure is exactly 2.5 magnitudes of limit, in the same direction.
+    """
+    reference = ObsSim.from_file(
+        '/tmp/exposure_probe.yaml', sim_params=_star_only_scene(1.0)
+    ).star_max_usable_vmag()
+    short = ObsSim.from_file(
+        '/tmp/exposure_probe.yaml', sim_params=_star_only_scene(0.1)
+    ).star_max_usable_vmag()
+    long_exp = ObsSim.from_file(
+        '/tmp/exposure_probe.yaml', sim_params=_star_only_scene(10.0)
+    ).star_max_usable_vmag()
+    assert short == pytest.approx(reference - 2.5, abs=1e-9)
+    assert long_exp == pytest.approx(reference + 2.5, abs=1e-9)
+
+
 def test_test_only_keys_are_stripped_from_nav_params() -> None:
     """The scene-level ``expected`` block is a third class the navigator never sees.
 
