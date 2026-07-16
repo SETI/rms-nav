@@ -55,6 +55,129 @@ def _check_ring_object(obj: dict[str, Any], *, index: int, source: str) -> None:
         _check_optional_mapping_list(obj.get(key), f'{label}.{key}', source=source)
 
 
+# The ring_system block: shared projection geometry plus a list of radial
+# optical-depth features.  Key inventories mirror the boundary classification
+# in scene_schema (which asserts completeness over them at import).
+_RING_SYSTEM_BLOCK_KEYS: frozenset[str] = frozenset(
+    {'geometry', 'features', 'range_km', 'km_per_pixel', 'phase_deg'}
+)
+_RING_SYSTEM_GEOMETRY_KEYS: frozenset[str] = frozenset(
+    {'center_v', 'center_u', 'opening_deg_obs', 'opening_deg_sun', 'node_deg'}
+)
+_RING_FEATURE_KEYS: frozenset[str] = frozenset(
+    {'name', 'kind', 'width', 'tau', 'orbit', 'albedo', 'phase_g'}
+)
+# The full kind vocabulary; the profile kinds not yet implemented fail
+# validation as such (the artifact-mode pattern), so a scene cannot silently
+# render nothing for a kind the renderer does not draw yet.
+_RING_FEATURE_KINDS: frozenset[str] = frozenset({'ringlet', 'gap', 'edge', 'ramp', 'wave'})
+_RING_FEATURE_KINDS_IMPLEMENTED: frozenset[str] = frozenset({'ringlet', 'gap'})
+_RING_FEATURE_ORBIT_KEYS: frozenset[str] = frozenset({'a', 'ae', 'long_peri', 'rate_peri'})
+
+
+def _check_ring_system(value: Any, *, source: str) -> None:
+    """Validate the scene-level ``ring_system`` block.
+
+    The block carries the shared projection geometry (opening angles, node,
+    center), the system's physical range and pixel scale, the phase angle,
+    and the list of radial optical-depth features.  The geometry block and
+    both opening angles are required: an unstated opening angle has no
+    sensible default (0 renders nothing and 90 silently degenerates to
+    sky-plane circles).
+
+    Parameters:
+        value: The ``ring_system`` mapping, or None when the block is absent.
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: On any unknown, missing, or invalid field.
+    """
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(f'{source}: ring_system must be a mapping when present')
+    unknown = set(value) - _RING_SYSTEM_BLOCK_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{source}: ring_system: unknown keys: {sorted(unknown)}')
+    geometry = value.get('geometry')
+    if not isinstance(geometry, dict):
+        raise SimSceneValidationError(f'{source}: ring_system.geometry is required (a mapping)')
+    unknown = set(geometry) - _RING_SYSTEM_GEOMETRY_KEYS
+    if unknown:
+        raise SimSceneValidationError(
+            f'{source}: ring_system.geometry: unknown keys: {sorted(unknown)}'
+        )
+    for key in ('center_v', 'center_u', 'node_deg'):
+        _check_optional_number(geometry.get(key), f'ring_system.geometry.{key}', source=source)
+    for key in ('opening_deg_obs', 'opening_deg_sun'):
+        opening = geometry.get(key)
+        label = f'ring_system.geometry.{key}'
+        if opening is None:
+            raise SimSceneValidationError(f'{source}: {label} is required')
+        _check_optional_number(opening, label, source=source)
+        if not -90.0 < float(opening) <= 90.0:
+            raise SimSceneValidationError(
+                f'{source}: {label} must lie in (-90, 90]; got {opening!r}'
+            )
+    _check_optional_positive_number(value.get('range_km'), 'ring_system.range_km', source=source)
+    _check_optional_positive_number(
+        value.get('km_per_pixel'), 'ring_system.km_per_pixel', source=source
+    )
+    phase = value.get('phase_deg')
+    _check_optional_number(phase, 'ring_system.phase_deg', source=source)
+    if phase is not None and not 0.0 <= float(phase) <= 180.0:
+        raise SimSceneValidationError(
+            f'{source}: ring_system.phase_deg must lie in [0, 180]; got {phase!r}'
+        )
+    features = value.get('features')
+    _check_optional_mapping_list(features, 'ring_system.features', source=source)
+    for index, feature in enumerate(features or []):
+        _check_ring_feature(feature, index=index, source=source)
+
+
+def _check_ring_feature(obj: dict[str, Any], *, index: int, source: str) -> None:
+    """Validate one ``ring_system.features`` entry."""
+    label = f'ring_system.features[{index}]'
+    unknown = set(obj) - _RING_FEATURE_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{source}: {label}: unknown keys: {sorted(unknown)}')
+    _check_optional_str(obj.get('name'), f'{label}.name', source=source)
+    kind = obj.get('kind')
+    if kind not in _RING_FEATURE_KINDS:
+        raise SimSceneValidationError(
+            f'{source}: {label}.kind must be one of {sorted(_RING_FEATURE_KINDS)}; got {kind!r}'
+        )
+    if kind not in _RING_FEATURE_KINDS_IMPLEMENTED:
+        raise SimSceneValidationError(f'{source}: {label}.kind {kind!r} is not yet implemented')
+    tau = obj.get('tau')
+    if tau is None:
+        raise SimSceneValidationError(f'{source}: {label}.tau is required')
+    _check_optional_nonnegative_number(tau, f'{label}.tau', source=source)
+    width = obj.get('width')
+    if width is None:
+        raise SimSceneValidationError(f'{source}: {label}.width is required')
+    _check_optional_positive_number(width, f'{label}.width', source=source)
+    orbit = obj.get('orbit')
+    if not isinstance(orbit, dict):
+        raise SimSceneValidationError(f'{source}: {label}.orbit is required (a mapping)')
+    unknown = set(orbit) - _RING_FEATURE_ORBIT_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{source}: {label}.orbit: unknown keys: {sorted(unknown)}')
+    if orbit.get('a') is None:
+        raise SimSceneValidationError(f'{source}: {label}.orbit.a is required')
+    _check_optional_positive_number(orbit.get('a'), f'{label}.orbit.a', source=source)
+    _check_optional_nonnegative_number(orbit.get('ae'), f'{label}.orbit.ae', source=source)
+    _check_optional_number(orbit.get('long_peri'), f'{label}.orbit.long_peri', source=source)
+    _check_optional_number(orbit.get('rate_peri'), f'{label}.orbit.rate_peri', source=source)
+    _check_optional_nonnegative_number(obj.get('albedo'), f'{label}.albedo', source=source)
+    phase_g = obj.get('phase_g')
+    _check_optional_number(phase_g, f'{label}.phase_g', source=source)
+    if phase_g is not None and not -1.0 < float(phase_g) < 1.0:
+        raise SimSceneValidationError(
+            f'{source}: {label}.phase_g must lie in (-1, 1); got {phase_g!r}'
+        )
+
+
 def _check_star_object(obj: dict[str, Any], *, index: int, source: str) -> None:
     """Validate one ``stars`` entry's field types."""
     label = f'stars[{index}]'
@@ -660,6 +783,11 @@ def _require_ranges_for_spk_error(sim_params: dict[str, Any], *, source: str) ->
                 raise SimSceneValidationError(
                     f'{source}: {block}[{index}] needs range_km when spk_error is present'
                 )
+    ring_system = sim_params.get('ring_system')
+    if isinstance(ring_system, dict) and ring_system.get('range_km') is None:
+        raise SimSceneValidationError(
+            f'{source}: ring_system needs range_km when spk_error is present'
+        )
 
 
 def _require_str(raw: dict[str, Any], key: str, *, source: str) -> str:

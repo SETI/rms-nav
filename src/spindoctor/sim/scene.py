@@ -54,6 +54,7 @@ from spindoctor.sim.scene_checks import (
     _check_optional_positive_number,
     _check_optional_str,
     _check_ring_object,
+    _check_ring_system,
     _check_sky_counts,
     _check_spk_error,
     _check_star_catalog_scatter,
@@ -74,6 +75,8 @@ from spindoctor.sim.scene_schema import (
     _OBJECT_BLOCKS as _OBJECT_BLOCKS,
 )
 from spindoctor.sim.scene_schema import (
+    _RING_FEATURE_IDEALIZED_KEYS,
+    _RING_SYSTEM_IDEALIZED_KEYS,
     TOP_LEVEL_IDEALIZED_KEYS,
     TOP_LEVEL_TEST_ONLY_KEYS,
     TOP_LEVEL_TRUTH_KEYS,
@@ -258,6 +261,7 @@ def validate_sim_params(
     _check_noise(sim_params.get('noise'), source=source)
     _check_optional_mapping(sim_params.get('instrument_config'), 'instrument_config', source=source)
     _check_optional_positive_int(sim_params.get('oversample'), 'oversample', source=source)
+    _check_ring_system(sim_params.get('ring_system'), source=source)
     _check_optics(sim_params.get('optics'), source=source)
     _check_detector(sim_params.get('detector'), instrument=instrument, source=source)
     _check_artifacts(sim_params.get('artifacts'), instrument=instrument, source=source)
@@ -309,12 +313,15 @@ def build_nav_params(sim_params: dict[str, Any]) -> dict[str, Any]:
     """
     nav: dict[str, Any] = {}
     for key, value in sim_params.items():
-        if key in _OBJECT_BLOCKS:
+        if key in _OBJECT_BLOCKS or key == 'ring_system':
             continue  # handled below
         if key in TOP_LEVEL_IDEALIZED_KEYS:
             nav[key] = copy.deepcopy(value)
         # Anything else (truth keys, unknown keys) stays behind the boundary:
         # the filter is default-deny.
+    ring_system = sim_params.get('ring_system')
+    if isinstance(ring_system, dict):
+        nav['ring_system'] = _filter_ring_system(ring_system)
     for block, (_allowed, idealized, _truth) in _OBJECT_BLOCKS.items():
         if block not in sim_params:
             continue
@@ -334,3 +341,37 @@ def build_nav_params(sim_params: dict[str, Any]) -> dict[str, Any]:
             )
         nav[block] = filtered_objects
     return nav
+
+
+def _filter_ring_system(ring_system: dict[str, Any]) -> dict[str, Any]:
+    """The navigator's view of the ``ring_system`` block.
+
+    Block-level idealized keys (the shared projection geometry, range, pixel
+    scale, phase angle) pass through as deep copies.  Features cross only
+    when flagged ``navigable: true`` -- and the navigable-subset key is a
+    later phase, so today NO feature crosses: the rendered system is full of
+    structure the navigator was never told about, which is the distractor
+    regime the ring system exists to produce.  When the flag lands, a
+    crossing feature exposes only its idealized keys (kind, orbit, width,
+    tau), never the photometric truth (albedo, phase_g).
+
+    Parameters:
+        ring_system: The full ``ring_system`` mapping (renderer input).
+
+    Returns:
+        The filtered mapping exposed under ``nav_params['ring_system']``.
+    """
+    filtered: dict[str, Any] = {
+        key: copy.deepcopy(value)
+        for key, value in ring_system.items()
+        if key in _RING_SYSTEM_IDEALIZED_KEYS and key != 'features'
+    }
+    features: list[dict[str, Any]] = []
+    for feature in ring_system.get('features') or []:
+        if not isinstance(feature, dict) or feature.get('navigable') is not True:
+            continue
+        features.append(
+            {k: copy.deepcopy(v) for k, v in feature.items() if k in _RING_FEATURE_IDEALIZED_KEYS}
+        )
+    filtered['features'] = features
+    return filtered

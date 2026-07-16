@@ -388,6 +388,146 @@ def test_validate_sim_params_accepts_idealized_nav_override() -> None:
     assert validate_sim_params(params) is params
 
 
+def _ring_system_params() -> dict[str, Any]:
+    """A scene with a minimal valid ring_system block."""
+    params = _sim_params()
+    del params['bodies']
+    params['ring_system'] = {
+        'geometry': {
+            'center_v': 64.0,
+            'center_u': 64.0,
+            'opening_deg_obs': 30.0,
+            'opening_deg_sun': 20.0,
+            'node_deg': 0.0,
+        },
+        'features': [
+            {
+                'name': 'F1',
+                'kind': 'ringlet',
+                'tau': 1.0,
+                'width': 10.0,
+                'orbit': {'a': 40.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0},
+                'albedo': 0.5,
+                'phase_g': -0.3,
+            }
+        ],
+    }
+    return params
+
+
+def test_validate_sim_params_accepts_ring_system() -> None:
+    """The minimal ring_system block validates."""
+    params = _ring_system_params()
+    assert validate_sim_params(params) is params
+
+
+def test_ring_system_round_trips_through_yaml(tmp_path: Path) -> None:
+    """A ring_system scene saves and reloads verbatim."""
+    path = tmp_path / 'rs.yaml'
+    params = _ring_system_params()
+    save_sim_scene(params, path)
+    scene = load_sim_scene(path)
+    assert scene['ring_system'] == params['ring_system']
+
+
+def test_validate_sim_params_rejects_unknown_ring_system_key() -> None:
+    """An unmodeled ring_system key fails validation."""
+    params = _ring_system_params()
+    params['ring_system']['spokes'] = {}
+    with pytest.raises(SimSceneValidationError, match=r'ring_system.*spokes'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_requires_ring_system_geometry() -> None:
+    """A ring_system without its shared geometry block fails."""
+    params = _ring_system_params()
+    del params['ring_system']['geometry']
+    with pytest.raises(SimSceneValidationError, match='geometry is required'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_unknown_ring_system_geometry_key() -> None:
+    """An unmodeled geometry key fails validation."""
+    params = _ring_system_params()
+    params['ring_system']['geometry']['tilt_deg'] = 5.0
+    with pytest.raises(SimSceneValidationError, match=r'geometry.*tilt_deg'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_requires_both_opening_angles() -> None:
+    """Both opening angles are required (no silent face-on default)."""
+    params = _ring_system_params()
+    del params['ring_system']['geometry']['opening_deg_sun']
+    with pytest.raises(SimSceneValidationError, match='opening_deg_sun is required'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_out_of_range_opening() -> None:
+    """Opening angles live in (-90, 90]."""
+    params = _ring_system_params()
+    params['ring_system']['geometry']['opening_deg_obs'] = -90.0
+    with pytest.raises(SimSceneValidationError, match=r'opening_deg_obs must lie in \(-90, 90\]'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_unknown_ring_feature_key() -> None:
+    """An unmodeled feature key fails validation."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['wavelength'] = 5.0
+    with pytest.raises(SimSceneValidationError, match=r'features\[0\].*wavelength'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_unknown_ring_feature_kind() -> None:
+    """A kind outside the vocabulary fails with the choices listed."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['kind'] = 'sheet'
+    with pytest.raises(SimSceneValidationError, match=r'kind must be one of.*sheet'):
+        validate_sim_params(params)
+
+
+@pytest.mark.parametrize('kind', ['edge', 'ramp', 'wave'])
+def test_validate_sim_params_rejects_unimplemented_ring_feature_kind(kind: str) -> None:
+    """The vocabulary kinds the renderer does not draw yet fail as such."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['kind'] = kind
+    with pytest.raises(SimSceneValidationError, match='not yet implemented'):
+        validate_sim_params(params)
+
+
+@pytest.mark.parametrize('key', ['tau', 'width'])
+def test_validate_sim_params_requires_ring_feature_scalars(key: str) -> None:
+    """tau and width are required on every feature."""
+    params = _ring_system_params()
+    del params['ring_system']['features'][0][key]
+    with pytest.raises(SimSceneValidationError, match=f'{key} is required'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_requires_ring_feature_orbit() -> None:
+    """The catalog orbit map (with a) is required on every feature."""
+    params = _ring_system_params()
+    del params['ring_system']['features'][0]['orbit']
+    with pytest.raises(SimSceneValidationError, match='orbit is required'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_out_of_range_phase_g() -> None:
+    """The Henyey-Greenstein asymmetry parameter lives strictly inside (-1, 1)."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['phase_g'] = 1.0
+    with pytest.raises(SimSceneValidationError, match=r'phase_g must lie in \(-1, 1\)'):
+        validate_sim_params(params)
+
+
+def test_spk_error_requires_ring_system_range_km() -> None:
+    """A scene planting spacecraft-ephemeris error must range its ring system."""
+    params = _ring_system_params()
+    params['spk_error'] = {'dv_px': 1.0, 'du_px': 0.0, 'reference_range_km': 1.0e5}
+    with pytest.raises(SimSceneValidationError, match='ring_system needs range_km'):
+        validate_sim_params(params)
+
+
 def test_every_top_level_key_is_classified() -> None:
     """Every allowed top-level key has exactly one of the three boundary classes."""
     classified = TOP_LEVEL_IDEALIZED_KEYS | TOP_LEVEL_TRUTH_KEYS | TOP_LEVEL_TEST_ONLY_KEYS
