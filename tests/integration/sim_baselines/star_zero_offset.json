@@ -1,7 +1,7 @@
 {
-  "confidence": 0.81,
-  "offset_du_px": 0.19,
-  "offset_dv_px": 0.03,
+  "confidence": 0.99,
+  "offset_du_px": -0.1,
+  "offset_dv_px": 0.06,
   "scene_name": "star_zero_offset",
   "status": "success"
 }

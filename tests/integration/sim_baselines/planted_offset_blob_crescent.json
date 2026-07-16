@@ -1,7 +1,7 @@
 {
   "confidence": 0.4,
-  "offset_du_px": -0.62,
-  "offset_dv_px": 1.29,
+  "offset_du_px": -0.53,
+  "offset_dv_px": 1.21,
   "scene_name": "planted_offset_blob_crescent",
   "status": "success"
 }

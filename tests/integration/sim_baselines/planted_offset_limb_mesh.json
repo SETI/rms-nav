@@ -1,7 +1,7 @@
 {
   "confidence": 0.99,
-  "offset_du_px": -0.54,
-  "offset_dv_px": 1.28,
+  "offset_du_px": -0.53,
+  "offset_dv_px": 1.29,
   "scene_name": "planted_offset_limb_mesh",
   "status": "success"
 }
