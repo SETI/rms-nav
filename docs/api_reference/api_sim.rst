@@ -38,7 +38,17 @@ spindoctor.sim
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.sim.forward.body_topo
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.sim.forward.relief
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.sim.forward.photometry
    :members:
    :undoc-members:
    :show-inheritance:

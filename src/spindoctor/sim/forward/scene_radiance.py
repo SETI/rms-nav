@@ -312,6 +312,7 @@ def compose_scene_radiance(
                 body_index=orig_idx,
                 ref_center_v=ref_center_v,
                 ref_center_u=ref_center_u,
+                oversample=os,
             )
             # Store mask by original index for proper ordering
             body_mask_map_by_idx[orig_idx] = body_mask
@@ -390,6 +391,7 @@ def compose_scene_radiance(
                     body_index=orig_idx,
                     ref_center_v=ref_center_v,
                     ref_center_u=ref_center_u,
+                    oversample=os,
                 )
         frame.truth['radiance_layers'] = {
             'stars': stars_layer,

@@ -30,13 +30,15 @@ def clear_render_caches() -> None:
     stale in production, but determinism tests must re-execute the cached
     paths to prove reproducibility.
     """
-    from spindoctor.sim.forward import body, body_mesh, psf, star
+    from spindoctor.sim.forward import body, body_mesh, psf, relief, star
 
     _render_combined_model_cached.cache_clear()
     star._render_stars_cached.cache_clear()
     star._render_sky_counts_cached.cache_clear()
     body._render_body_shape_cached.cache_clear()
+    body._render_topo_shape_cached.cache_clear()
     body_mesh._render_mesh_shape_cached.cache_clear()
+    relief._unit_relief_grid.cache_clear()
     psf.psf_kernel.cache_clear()
 
 

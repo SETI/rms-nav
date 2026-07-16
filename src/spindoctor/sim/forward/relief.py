@@ -228,17 +228,19 @@ def march_shadows(
     h_min: float,
     sun_v: float,
     sun_u: float,
+    step_arc_px: float = 1.0,
 ) -> tuple[NDArrayBoolType, MarchStats]:
     """March candidate points toward the sun and flag the shadowed ones.
 
-    Each candidate steps toward the sun in units of one pixel of *surface*
-    arc (the image-plane step is ``1 / arc_per_px`` at the current sample,
-    so foreshortening near the limb is corrected: an image pixel there spans
-    a large surface step).  A candidate is shadowed iff an upstream sample
-    at surface distance ``d`` satisfies ``H_up - H_pt > d / tan(i_pt)``.
-    The per-point cap ``d_max = min((H_max - H_min) * tan(i_pt),
-    sqrt(2 * R * H_max))`` bounds the work; ``H_max``/``H_min`` are the
-    field's global extremes at the point's local radius.
+    Each candidate steps toward the sun in units of ``step_arc_px`` pixels
+    of *surface* arc (the image-plane step is ``step / arc_per_px`` at the
+    current sample, so foreshortening near the limb is corrected: an image
+    pixel there spans a large surface step).  A candidate is shadowed iff
+    an upstream sample at surface distance ``d`` satisfies
+    ``H_up - H_pt > d / tan(i_pt)``.  The per-point cap
+    ``d_max = min((H_max - H_min) * tan(i_pt), sqrt(2 * R * H_max))``
+    bounds the work; ``H_max``/``H_min`` are the field's global extremes at
+    the point's local radius.
 
     Parameters:
         start_v: Candidate image-row positions (work-grid pixels, float).
@@ -257,6 +259,12 @@ def march_shadows(
         h_min: Global field minimum (fractional).
         sun_v: Image-plane unit direction toward the sun, row component.
         sun_u: Image-plane unit direction toward the sun, column component.
+        step_arc_px: Surface arc per step, in work pixels.  1 (the default)
+            samples the terrain at the render grid itself; a caller whose
+            terrain is band-limited far above the render grid's scale may
+            step at the terrain's own resolution instead (see the
+            topographic renderer), which changes no decision the sampled
+            terrain can express.
 
     Returns:
         Tuple of (shadow flags per candidate, :class:`MarchStats`).
@@ -267,6 +275,7 @@ def march_shadows(
         return shadow, MarchStats(candidate_count=n, steps_executed=0, max_steps=0)
 
     size_v, size_u = height_map.shape
+    step_arc = max(float(step_arc_px), 1e-6)
     tan_i = np.maximum(np.asarray(tan_incidence, dtype=np.float64), 1e-12)
     radius = np.asarray(radius_px, dtype=np.float64)
     height_pt = np.asarray(h_point, dtype=np.float64) * radius
@@ -274,7 +283,7 @@ def march_shadows(
         (h_max - h_min) * radius * tan_i,
         radius * math.sqrt(max(2.0 * h_max, 0.0)),
     )
-    max_steps = math.ceil(float(d_max.max())) if d_max.size else 0
+    max_steps = math.ceil(float(d_max.max()) / step_arc) if d_max.size else 0
 
     # Live-set arrays, compressed as candidates resolve.
     index = np.arange(n)
@@ -287,13 +296,13 @@ def march_shadows(
     steps = 0
     while index.size and steps < max_steps:
         steps += 1
-        # One pixel of surface arc; the image step shrinks where an image
+        # One step of surface arc; the image step shrinks where an image
         # pixel spans more surface (foreshortening near the limb).
         arc = np.maximum(arc_per_px_map[cur_v, cur_u], 0.1)
-        step_px = 1.0 / arc
+        step_px = step_arc / arc
         pos_v = pos_v + sun_v * step_px
         pos_u = pos_u + sun_u * step_px
-        distance = distance + 1.0
+        distance = distance + step_arc
 
         cur_v = np.floor(pos_v).astype(np.intp)
         cur_u = np.floor(pos_u).astype(np.intp)

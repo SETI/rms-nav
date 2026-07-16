@@ -1,16 +1,18 @@
-"""Image-side ellipsoid body renderer (Lambert shading, crater texture).
+"""Image-side ellipsoid body renderer and its render-path dispatch.
 
-Bodies render as Lambert-shaded ellipsoids with optional procedural crater
-texture; the topographic renderer (limb-relief field, terminator
-raggedness, photometric laws) is deliberately not implemented.  Shading
-conventions are shared with the
-navigator's predicted-body renderer through
+A smooth Lambert ellipsoid at oversample 1 renders through the classic
+path here (:func:`create_simulated_body`, optionally with procedural
+crater texture).  A body that needs more -- a limb-relief field, a
+non-Lambert photometric law, an opposition surge, or an oversampled
+radiance grid -- dispatches to the topographic renderer
+(:mod:`spindoctor.sim.forward.body_topo`), which shares this module's
+crater carving and the ellipsoid shading conventions of
 :mod:`spindoctor.sim.ellipsoid_geometry`, so a scene's planted geometry
 error is the only difference between rendered and predicted silhouettes.
 
-The crater texture lives only on this side of the information boundary: the
-crater knobs are truth keys the navigator never sees (its best model is the
-smooth ellipsoid).
+The crater and relief knobs live only on this side of the information
+boundary: they are truth keys the navigator never sees (its best model is
+the smooth Lambert ellipsoid).
 """
 
 from functools import lru_cache
@@ -20,6 +22,7 @@ import numpy as np
 from scipy import ndimage
 
 from spindoctor.sim.ellipsoid_geometry import ellipsoid_image_normals, lambert_from_normals
+from spindoctor.sim.forward.body_topo import TopoBodySpec, create_topographic_body
 from spindoctor.sim.seeds import derive_effect_seed, stable_param_seed
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType
 
@@ -294,11 +297,105 @@ def _add_craters_and_shading(
     Returns:
         New intensity array with craters and lighting applied.
     """
+    height = carve_crater_heights(
+        ellipse_mask_nz,
+        v_coords,
+        u_coords,
+        nz=nz,
+        rng=rng,
+        n_craters=n_craters,
+        R_min=R_min,
+        R_max=R_max,
+        crater_power_law_exponent=crater_power_law_exponent,
+        crater_relief_scale=crater_relief_scale,
+        work_center_v=work_center_v,
+        work_center_u=work_center_u,
+        aa_scale=aa_scale,
+    )
+
+    # ----------------------------------------------------------------------
+    # Lambertian shading: base-ellipsoid normals perturbed by crater relief
+    # ----------------------------------------------------------------------
+    # The base-surface normal comes from the same analytic formula (and the
+    # same rotation_z back-rotation to image coordinates) as the smooth,
+    # no-crater path, so both shading paths share one illumination convention.
+    normal_v, normal_u, normal_z = ellipsoid_image_normals(
+        ellipse_mask,
+        v_rot,
+        u_rot,
+        z_coords=z_coords,
+        work_semi_major=work_semi_major,
+        work_semi_minor=work_semi_minor,
+        work_semi_c=work_semi_c,
+        cos_rz=cos_rz,
+        sin_rz=sin_rz,
+    )
+    perturbed_v, perturbed_u, perturbed_z = perturb_normals_by_height(
+        normal_v, normal_u, normal_z, height
+    )
+
+    lambert = lambert_from_normals(
+        perturbed_v,
+        perturbed_u,
+        perturbed_z,
+        illumination_angle=lighting_angle,
+        phase_angle=phase_angle,
+    )
+
+    # Apply ellipse mask (with AA edge)
+    intensity_out = lambert * ellipse_mask
+    # Ensure area strictly outside the ellipse is zeroed, to avoid any bleed with AA
+    intensity_out[~ellipse_mask_nz] = 0.0
+    return intensity_out
+
+
+def carve_crater_heights(
+    ellipse_mask_nz: NDArrayBoolType,
+    v_coords: NDArrayFloatType,
+    u_coords: NDArrayFloatType,
+    *,
+    nz: NDArrayIntType,
+    rng: np.random.Generator,
+    n_craters: int,
+    R_min: float,
+    R_max: float,
+    crater_power_law_exponent: float,
+    crater_relief_scale: float,
+    work_center_v: float,
+    work_center_u: float,
+    aa_scale: int,
+) -> NDArrayFloatType:
+    """Carve the crater height field (bowl + walls + raised rim per crater).
+
+    Shared by both body render paths: the classic Lambert path shades the
+    working grid with these heights directly, and the topographic path
+    carves them on its shading grid.  The rng consumption order (center,
+    radius, depth noise per crater) is the paths' shared determinism
+    contract for a given seed and grid.
+
+    Parameters:
+        ellipse_mask_nz: Boolean mask of pixels strictly inside the ellipse.
+        v_coords: Centered v pixel coordinates at working resolution.
+        u_coords: Centered u pixel coordinates at working resolution.
+        nz: Array of (v, u) indices of pixels inside the ellipse.
+        rng: Seeded random stream for crater placement and sizes.
+        n_craters: Number of craters to place.
+        R_min: Minimum crater radius in pixels (before aa scaling).
+        R_max: Maximum crater radius in pixels (before aa scaling).
+        crater_power_law_exponent: Power law exponent for crater radii.
+        crater_relief_scale: Scale factor for crater depth.
+        work_center_v: Body center v at working resolution.
+        work_center_u: Body center u at working resolution.
+        aa_scale: Anti-aliasing supersampling factor of the working grid.
+
+    Returns:
+        The crater height field over the working grid.
+    """
 
     # ------------------------------------------------------------------
     # 0. Heightmap we will add craters to
     # ------------------------------------------------------------------
-    height = np.zeros_like(ellipse_mask, dtype=float)
+    height = np.zeros_like(ellipse_mask_nz, dtype=float)
 
     # ------------------------------------------------------------------
     # 1. Radius distribution: power law in [R_min, R_max]
@@ -403,30 +500,33 @@ def _add_craters_and_shading(
         # Add crater relief to global heightmap
         height[crater_mask] += local_profile
 
-    # ----------------------------------------------------------------------
-    # 3. Lambertian shading: base-ellipsoid normals perturbed by crater relief
-    # ----------------------------------------------------------------------
-    # The base-surface normal comes from the same analytic formula (and the
-    # same rotation_z back-rotation to image coordinates) as the smooth,
-    # no-crater path, so both shading paths share one illumination convention.
-    normal_v, normal_u, normal_z = ellipsoid_image_normals(
-        ellipse_mask,
-        v_rot,
-        u_rot,
-        z_coords=z_coords,
-        work_semi_major=work_semi_major,
-        work_semi_minor=work_semi_minor,
-        work_semi_c=work_semi_c,
-        cos_rz=cos_rz,
-        sin_rz=sin_rz,
-    )
+    return height
 
-    # The crater height field is carved along the viewing axis, so the exact
-    # normal of the combined surface (base + height) is proportional to
-    # (-d(z + height)/dv, -d(z + height)/du, 1).  Scaling that vector by the
-    # base normal's z component rewrites it as the base normal plus a
-    # height-gradient term, which stays finite at the limb where the base
-    # surface gradient diverges.
+
+def perturb_normals_by_height(
+    normal_v: NDArrayFloatType,
+    normal_u: NDArrayFloatType,
+    normal_z: NDArrayFloatType,
+    height: NDArrayFloatType,
+) -> tuple[NDArrayFloatType, NDArrayFloatType, NDArrayFloatType]:
+    """Perturb base-surface unit normals by a height field carved along z.
+
+    The height field is carved along the viewing axis, so the exact normal
+    of the combined surface (base + height) is proportional to
+    ``(-d(z + height)/dv, -d(z + height)/du, 1)``.  Scaling that vector by
+    the base normal's z component rewrites it as the base normal plus a
+    height-gradient term, which stays finite at the limb where the base
+    surface gradient diverges.
+
+    Parameters:
+        normal_v: V component of the base unit surface normal.
+        normal_u: U component of the base unit surface normal.
+        normal_z: Z (toward-observer) component of the base unit normal.
+        height: The height field on the same grid.
+
+    Returns:
+        Tuple of (v, u, z) perturbed unit-normal component arrays.
+    """
     dheight_dv, dheight_du = np.gradient(height)
     perturbed_v = normal_v - normal_z * dheight_dv
     perturbed_u = normal_u - normal_z * dheight_du
@@ -435,20 +535,7 @@ def _add_craters_and_shading(
     perturbed_v /= perturbed_mag
     perturbed_u /= perturbed_mag
     perturbed_z = normal_z / perturbed_mag
-
-    lambert = lambert_from_normals(
-        perturbed_v,
-        perturbed_u,
-        perturbed_z,
-        illumination_angle=lighting_angle,
-        phase_angle=phase_angle,
-    )
-
-    # Apply ellipse mask (with AA edge)
-    intensity_out = lambert * ellipse_mask
-    # Ensure area strictly outside the ellipse is zeroed, to avoid any bleed with AA
-    intensity_out[~ellipse_mask_nz] = 0.0
-    return intensity_out
+    return perturbed_v, perturbed_u, perturbed_z
 
 
 @lru_cache(maxsize=30)
@@ -501,6 +588,17 @@ def _render_body_shape_cached(
     return sim_body
 
 
+@lru_cache(maxsize=30)
+def _render_topo_shape_cached(size_v: int, size_u: int, spec: TopoBodySpec) -> NDArrayFloatType:
+    """Cache topographic body shapes at the reference center (image center).
+
+    The frozen spec is the cache key, so bodies differing in any geometry,
+    texture, relief, or photometry knob occupy distinct entries; the caller
+    translates the shape into place exactly as the classic path does.
+    """
+    return create_topographic_body((size_v, size_u), (size_v / 2.0, size_u / 2.0), spec)
+
+
 def render_single_body(
     img: NDArrayFloatType,
     body_params: dict[str, Any],
@@ -511,6 +609,7 @@ def render_single_body(
     body_index: int = 0,
     ref_center_v: float,
     ref_center_u: float,
+    oversample: int = 1,
 ) -> tuple[NDArrayBoolType, dict[str, Any]]:
     """Render a single body into the image.
 
@@ -520,11 +619,16 @@ def render_single_body(
         offset_v: V offset to apply.
         offset_u: U offset to apply.
         seed: Scene-level crater seed; a per-body sub-seed is derived from it
-            so bodies with identical geometry get independent crater patterns.
+            so bodies with identical geometry get independent crater patterns
+            (and, further derived, independent relief terrains).
         body_index: Stable index of this body in the scene's body list, mixed
             into the per-body crater sub-seed alongside the body name.
         ref_center_v: Reference center V for body shape caching.
         ref_center_u: Reference center U for body shape caching.
+        oversample: The render grid's oversampling factor.  The body's
+            pixel-space parameters must already be scaled to this grid; the
+            factor selects the topographic renderer's split-resolution path,
+            which shades at the detector grid.
 
     Returns:
         Tuple of (body_mask, body_info_dict) where body_info_dict contains
@@ -553,6 +657,14 @@ def render_single_body(
     crater_power_law_exponent = float(body_params.get('crater_power_law_exponent', 3.0))
     crater_relief_scale = float(body_params.get('crater_relief_scale', 0.6))
     anti_aliasing = float(body_params.get('anti_aliasing', 1.0))
+
+    limb_relief_rms = float(body_params.get('limb_relief_rms', 0.0))
+    limb_relief_corr_deg = float(body_params.get('limb_relief_corr_deg', 15.0))
+    photometric_law = str(body_params.get('photometric_law', 'lambert'))
+    minnaert_k = float(body_params.get('minnaert_k', 0.5))
+    surge = body_params.get('opposition_surge') or {}
+    surge_amplitude = float(surge.get('amplitude', 0.0))
+    surge_width_deg = float(surge.get('width_deg', 6.0))
 
     # Mix a stable per-body identity (scene index and name) into the scene's
     # crater seed so two bodies with identical geometry draw independent crater
@@ -602,24 +714,73 @@ def render_single_body(
             ref_center_u=ref_center_u,
         )
 
-    body_shape = _render_body_shape_cached(
-        size_v,
-        size_u,
-        axis1,
-        axis2=axis2,
-        axis3=axis3,
-        rotation_z=rotation_z,
-        rotation_tilt=rotation_tilt,
-        illumination_angle=illumination_angle,
-        phase_angle=phase_angle,
-        crater_fill=crater_fill,
-        crater_min_radius=crater_min_radius,
-        crater_max_radius=crater_max_radius,
-        crater_power_law_exponent=crater_power_law_exponent,
-        crater_relief_scale=crater_relief_scale,
-        anti_aliasing=anti_aliasing,
-        body_seed=body_seed,
+    # The classic smooth-Lambert path stays byte-for-byte for the scenes it
+    # has always rendered; anything more (relief, a non-Lambert law, a surge,
+    # or an oversampled grid, where the split-resolution shading is also the
+    # render-time fast path) goes to the topographic renderer.
+    use_topo = (
+        oversample > 1
+        or limb_relief_rms > 0.0
+        or photometric_law != 'lambert'
+        or surge_amplitude > 0.0
     )
+    if use_topo:
+        # The relief terrain draws from its own named stream of the per-body
+        # identity seed, so it is independent of the crater draws and stable
+        # when craters are toggled.
+        relief_seed = 0
+        if limb_relief_rms > 0.0:
+            if seed is not None:
+                identity_seed = derive_effect_seed(seed, f'body:{body_index}:{body_name}')
+            elif body_params.get('seed') is not None:
+                identity_seed = int(body_params['seed']) & 0x7FFFFFFF
+            else:
+                identity_seed = stable_param_seed(axis1, axis2, axis3, body_index, body_name)
+            relief_seed = derive_effect_seed(identity_seed, 'relief')
+        spec = TopoBodySpec(
+            axis1=axis1,
+            axis2=axis2,
+            axis3=axis3,
+            rotation_z=float(rotation_z),
+            rotation_tilt=float(rotation_tilt),
+            illumination_angle=float(illumination_angle),
+            phase_angle=float(phase_angle),
+            crater_fill=crater_fill,
+            crater_min_radius=crater_min_radius,
+            crater_max_radius=crater_max_radius,
+            crater_power_law_exponent=crater_power_law_exponent,
+            crater_relief_scale=crater_relief_scale,
+            anti_aliasing=anti_aliasing,
+            crater_seed=body_seed,
+            oversample=int(oversample),
+            limb_relief_rms=limb_relief_rms,
+            limb_relief_corr_deg=limb_relief_corr_deg,
+            relief_seed=relief_seed,
+            photometric_law=photometric_law,
+            minnaert_k=minnaert_k,
+            surge_amplitude=surge_amplitude,
+            surge_width_deg=surge_width_deg,
+        )
+        body_shape = _render_topo_shape_cached(size_v, size_u, spec)
+    else:
+        body_shape = _render_body_shape_cached(
+            size_v,
+            size_u,
+            axis1,
+            axis2=axis2,
+            axis3=axis3,
+            rotation_z=rotation_z,
+            rotation_tilt=rotation_tilt,
+            illumination_angle=illumination_angle,
+            phase_angle=phase_angle,
+            crater_fill=crater_fill,
+            crater_min_radius=crater_min_radius,
+            crater_max_radius=crater_max_radius,
+            crater_power_law_exponent=crater_power_law_exponent,
+            crater_relief_scale=crater_relief_scale,
+            anti_aliasing=anti_aliasing,
+            body_seed=body_seed,
+        )
     return finish_single_body(
         img,
         body_shape,

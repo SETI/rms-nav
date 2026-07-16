@@ -14,7 +14,8 @@ All laws are normalized to 1 at disc center under head-on illumination
 surface normal's z component.  Forms:
 
 - ``lambert``: ``I = mu0``.
-- ``lommel_seeliger``: ``I = 2 * mu0 / (mu0 + mu)``.
+- ``lommel_seeliger``: ``I = 2 * mu0 / (mu0 + mu)`` (reaches 2 toward the
+  limb; the [dark floor, 1] clip below caps it at the signal ceiling).
 - ``minnaert``: ``I = mu0**k * mu**(k - 1)``; k = 1 is Lambert, k = 0.5
   is the classic limb-brightened lunar value.  The disc-center
   normalization holds; near the limb the law diverges and is capped by the
