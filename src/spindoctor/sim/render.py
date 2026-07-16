@@ -80,11 +80,16 @@ def render_combined_model(
         ``star_info``, ``body_masks``, ``ring_masks``, ``order_near_to_far``,
         ``body_index_map``, and ``body_mask_map``.
     """
-    # Create cache key from parameters (exclude offset if ignore_offset is True)
+    # Create cache key from parameters.  When ignore_offset is True the cached
+    # function zeroes the planted offset AND roll, so all three keys are
+    # excluded from the cache key (previews differing only in planted pointing
+    # share one render).
     params_for_hash = dict(sim_params)
     if ignore_offset:
         params_for_hash = {
-            k: v for k, v in params_for_hash.items() if k not in ('offset_v', 'offset_u')
+            k: v
+            for k, v in params_for_hash.items()
+            if k not in ('offset_v', 'offset_u', 'offset_rotation_deg')
         }
     sim_params_json = json.dumps(params_for_hash, sort_keys=True)
     cached_img, cached_meta = _render_combined_model_cached(
