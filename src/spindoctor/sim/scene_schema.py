@@ -177,6 +177,8 @@ _BODY_TRUTH_KEYS: frozenset[str] = frozenset(
         'minnaert_k',
         'opposition_surge',
         'albedo_texture',
+        'disc_texture',
+        'transits',
         'seed',
         'anti_aliasing',
         'nav_override',

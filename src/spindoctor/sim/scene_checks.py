@@ -74,6 +74,8 @@ def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
             _require_int(obj, key, source=f'{source}: {label}')
     _check_body_relief_and_photometry(obj, label=label, source=source)
     _check_albedo_texture(obj.get('albedo_texture'), label=label, source=source)
+    _check_disc_texture(obj.get('disc_texture'), label=label, source=source)
+    _check_transits(obj.get('transits'), label=label, source=source)
     pose = obj.get('pose_euler_deg')
     if pose is not None:
         if not isinstance(pose, (list, tuple)) or len(pose) != 3:
@@ -189,6 +191,96 @@ def _check_albedo_texture(value: Any, *, label: str, source: str) -> None:
         value.get('corr_px'), f'{label}.albedo_texture.corr_px', source=source
     )
     _check_surface_spot_list(value.get('spots'), key=f'{label}.albedo_texture.spots', source=source)
+
+
+# The giant-planet disc texture: a low-frequency latitude-banded
+# multiplicative pattern (cosine in body-polar latitude) plus discrete
+# storm ovals in the body-polar frame (the pole is the body's axis1
+# direction, so bands rotate with the rotation_z pose).
+_DISC_TEXTURE_KEYS: frozenset[str] = frozenset(
+    {'band_amplitude', 'band_wavenumber', 'band_phase_deg', 'storms'}
+)
+# One transits entry: a transiting moon disc and/or its cast shadow disc,
+# both texture on the rendered parent disc (offsets from the body center
+# and radii in detector pixels).
+_TRANSIT_ENTRY_KEYS: frozenset[str] = frozenset({'moon', 'shadow'})
+_TRANSIT_MOON_KEYS: frozenset[str] = frozenset({'dv_px', 'du_px', 'radius_px', 'albedo_factor'})
+_TRANSIT_SHADOW_KEYS: frozenset[str] = frozenset({'dv_px', 'du_px', 'radius_px', 'darkness'})
+
+
+def _check_disc_texture(value: Any, *, label: str, source: str) -> None:
+    """Validate one body's ``disc_texture`` map (bands + storm ovals)."""
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(
+            f'{source}: {label}.disc_texture must be a mapping when present'
+        )
+    unknown = set(value) - _DISC_TEXTURE_KEYS
+    if unknown:
+        raise SimSceneValidationError(
+            f'{source}: {label}.disc_texture: unknown keys: {sorted(unknown)}'
+        )
+    _check_optional_nonnegative_number(
+        value.get('band_amplitude'), f'{label}.disc_texture.band_amplitude', source=source
+    )
+    _check_optional_nonnegative_number(
+        value.get('band_wavenumber'), f'{label}.disc_texture.band_wavenumber', source=source
+    )
+    _check_optional_number(
+        value.get('band_phase_deg'), f'{label}.disc_texture.band_phase_deg', source=source
+    )
+    _check_surface_spot_list(value.get('storms'), key=f'{label}.disc_texture.storms', source=source)
+
+
+def _check_transit_disc(value: Any, allowed: frozenset[str], *, label: str, source: str) -> None:
+    """Validate one transit sub-map (the moon disc or the shadow disc)."""
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(f'{source}: {label} must be a mapping when present')
+    unknown = set(value) - allowed
+    if unknown:
+        raise SimSceneValidationError(f'{source}: {label}: unknown keys: {sorted(unknown)}')
+    _check_optional_number(value.get('dv_px'), f'{label}.dv_px', source=source)
+    _check_optional_number(value.get('du_px'), f'{label}.du_px', source=source)
+    _check_optional_positive_number(value.get('radius_px'), f'{label}.radius_px', source=source)
+    _check_optional_nonnegative_number(
+        value.get('albedo_factor'), f'{label}.albedo_factor', source=source
+    )
+    darkness = value.get('darkness')
+    _check_optional_nonnegative_number(darkness, f'{label}.darkness', source=source)
+    if darkness is not None and float(darkness) > 1.0:
+        raise SimSceneValidationError(
+            f'{source}: {label}.darkness must lie in [0, 1]; got {darkness!r}'
+        )
+
+
+def _check_transits(value: Any, *, label: str, source: str) -> None:
+    """Validate one body's ``transits`` list (moon and/or shadow discs)."""
+    if value is None:
+        return
+    _check_optional_mapping_list(value, f'{label}.transits', source=source)
+    for index, entry in enumerate(value):
+        entry_label = f'{label}.transits[{index}]'
+        unknown = set(entry) - _TRANSIT_ENTRY_KEYS
+        if unknown:
+            raise SimSceneValidationError(
+                f'{source}: {entry_label}: unknown keys: {sorted(unknown)}'
+            )
+        if entry.get('moon') is None and entry.get('shadow') is None:
+            raise SimSceneValidationError(
+                f'{source}: {entry_label} needs a moon and/or a shadow map'
+            )
+        _check_transit_disc(
+            entry.get('moon'), _TRANSIT_MOON_KEYS, label=f'{entry_label}.moon', source=source
+        )
+        _check_transit_disc(
+            entry.get('shadow'),
+            _TRANSIT_SHADOW_KEYS,
+            label=f'{entry_label}.shadow',
+            source=source,
+        )
 
 
 def _check_ring_object(obj: dict[str, Any], *, index: int, source: str) -> None:

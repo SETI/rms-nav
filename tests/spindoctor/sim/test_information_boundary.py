@@ -69,6 +69,18 @@ _TRUTH_SAMPLES: dict[str, Any] = {
         'corr_px': 12.0,
         'spots': [{'lat_deg': 45.0, 'lon_deg': 20.0, 'radius_deg': 8.0, 'albedo_factor': 0.6}],
     },
+    'bodies.disc_texture': {
+        'band_amplitude': 0.2,
+        'band_wavenumber': 8.0,
+        'band_phase_deg': 15.0,
+        'storms': [{'lat_deg': -20.0, 'lon_deg': 90.0, 'radius_deg': 6.0, 'albedo_factor': 1.4}],
+    },
+    'bodies.transits': [
+        {
+            'moon': {'dv_px': -3.0, 'du_px': 2.0, 'radius_px': 3.0, 'albedo_factor': 1.5},
+            'shadow': {'dv_px': 1.0, 'du_px': 4.0, 'radius_px': 3.0, 'darkness': 0.8},
+        }
+    ],
     'bodies.seed': 11,
     'bodies.anti_aliasing': 0.7,
     'bodies.nav_override': {'mesh_lumpiness': 0.0},
@@ -137,6 +149,8 @@ def _truth_exercising_scene() -> dict[str, Any]:
                 'minnaert_k': _TRUTH_SAMPLES['bodies.minnaert_k'],
                 'opposition_surge': dict(_TRUTH_SAMPLES['bodies.opposition_surge']),
                 'albedo_texture': dict(_TRUTH_SAMPLES['bodies.albedo_texture']),
+                'disc_texture': dict(_TRUTH_SAMPLES['bodies.disc_texture']),
+                'transits': list(_TRUTH_SAMPLES['bodies.transits']),
             },
         ],
         'stars': [
