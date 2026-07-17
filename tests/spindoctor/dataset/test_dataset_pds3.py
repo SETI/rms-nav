@@ -1,3 +1,6 @@
+import argparse
+import json
+import random
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -141,6 +144,285 @@ def test_img_name_list_range_clamp_still_stops_scan(
 
     assert _yielded_names(groups) == ['N1000000101']
     assert volumes_read == ['COISS_2001', 'COISS_2002']
+
+
+# --- Results-based filters (--has-offset-file and friends) ---
+
+
+_FILTER_NUMS = [1000000100, 1000000101, 1000000102]
+
+
+def _install_two_camera_index(ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Install a COISS_2001 index with three NAC and three WAC frames."""
+    _install_fake_index(
+        ds,
+        monkeypatch,
+        {'COISS_2001': _coiss_filespecs('N', _FILTER_NUMS) + _coiss_filespecs('W', _FILTER_NUMS)},
+    )
+
+
+def _write_result_file(
+    results_root: Path,
+    volume: str,
+    numbers: list[int],
+    camera: str,
+    num: int,
+    suffix: str,
+    content: str = 'x',
+) -> None:
+    """Write one synthetic result file where the pipeline would put it.
+
+    The Cassini results path stub comes from the label filespec, so the
+    filename carries the ``_CALIB`` label suffix.
+    """
+    range_dir = f'{numbers[0]:010d}_{numbers[-1]:010d}'
+    path = results_root / volume / 'data' / range_dir / f'{camera}{num:010d}_1_CALIB{suffix}'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+
+
+def test_has_offset_file_keeps_only_navigated_in_order(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Only the frames with an existing metadata file are yielded, in normal
+    # enumeration order (NAC rows before WAC rows within the volume). A summary
+    # PNG alone must not satisfy the offset-file filter.
+    _install_two_camera_index(ds, monkeypatch)
+    _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000101, '_metadata.json')
+    _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'W', 1000000100, '_metadata.json')
+    _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000100, '_summary.png')
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'], has_offset_file=True, nav_results_root=str(tmp_path)
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000101', 'W1000000100']
+
+
+def test_has_no_offset_file_excludes_navigated(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_two_camera_index(ds, monkeypatch)
+    _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000101, '_metadata.json')
+    _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'W', 1000000100, '_metadata.json')
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'], has_no_offset_file=True, nav_results_root=str(tmp_path)
+        )
+    )
+
+    assert _yielded_names(groups) == [
+        'N1000000100',
+        'N1000000102',
+        'W1000000101',
+        'W1000000102',
+    ]
+
+
+def test_has_png_file_ands_with_has_no_offset_file(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The flags AND together: PNG must exist and the metadata file must not.
+    _install_two_camera_index(ds, monkeypatch)
+    _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000100, '_summary.png')
+    _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000101, '_summary.png')
+    _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000101, '_metadata.json')
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_png_file=True,
+            has_no_offset_file=True,
+            nav_results_root=str(tmp_path),
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000100']
+
+
+def _write_error_metadata(tmp_path: Path) -> None:
+    """Write metadata files: one success, one SPICE error, one non-SPICE error."""
+    contents = {
+        1000000100: {'status': 'success'},
+        1000000101: {'status': 'error', 'status_error': 'missing_spice_data'},
+        1000000102: {'status': 'error', 'status_error': 'image_read_error'},
+    }
+    for num, metadata in contents.items():
+        _write_result_file(
+            tmp_path,
+            'COISS_2001',
+            _FILTER_NUMS,
+            'N',
+            num,
+            '_metadata.json',
+            json.dumps(metadata),
+        )
+
+
+def test_has_offset_error_matches_any_fatal_error(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # WAC frames have no metadata file at all and are excluded by the implied
+    # presence filter; the success metadata is excluded by its status.
+    _install_two_camera_index(ds, monkeypatch)
+    _write_error_metadata(tmp_path)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'], has_offset_error=True, nav_results_root=str(tmp_path)
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000101', 'N1000000102']
+
+
+def test_has_offset_spice_error_matches_only_spice(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_two_camera_index(ds, monkeypatch)
+    _write_error_metadata(tmp_path)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'], has_offset_spice_error=True, nav_results_root=str(tmp_path)
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000101']
+
+
+def test_has_offset_nonspice_error_matches_only_nonspice(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_two_camera_index(ds, monkeypatch)
+    _write_error_metadata(tmp_path)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_offset_nonspice_error=True,
+            nav_results_root=str(tmp_path),
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000102']
+
+
+@pytest.mark.parametrize(
+    'flags',
+    [
+        {'has_offset_file': True, 'has_no_offset_file': True},
+        {'has_png_file': True, 'has_no_png_file': True},
+        {'has_offset_spice_error': True, 'has_offset_nonspice_error': True},
+        {'has_offset_error': True, 'has_no_offset_file': True},
+    ],
+)
+def test_contradictory_results_flags_raise(
+    ds: DataSetPDS3CassiniISS,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    flags: dict[str, bool],
+) -> None:
+    _install_two_camera_index(ds, monkeypatch)
+
+    with pytest.raises(ValueError, match=r'mutually exclusive|contradicts'):
+        list(
+            ds.yield_image_files_index(
+                volumes=['COISS_2001'], nav_results_root=str(tmp_path), **flags
+            )
+        )
+
+
+# --- Uniform random sampling (--choose-random-images) ---
+
+
+def test_choose_random_images_pool_spans_all_volumes(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The pool is built from every selected volume before sampling. With
+    # shuffle replaced by reverse, the yields are deterministic and cross the
+    # volume boundary, in shuffled (not enumeration) order.
+    nums1 = [1000000100, 1000000101, 1000000102]
+    nums2 = [1000000200, 1000000201, 1000000202]
+    volumes_read = _install_fake_index(
+        ds,
+        monkeypatch,
+        {
+            'COISS_2001': _coiss_filespecs('N', nums1),
+            'COISS_2002': _coiss_filespecs('N', nums2),
+        },
+    )
+    monkeypatch.setattr(random, 'shuffle', lambda pool: pool.reverse())
+
+    groups = list(
+        ds.yield_image_files_index(volumes=['COISS_2001', 'COISS_2002'], choose_random_images=4)
+    )
+
+    assert _yielded_names(groups) == [
+        'N1000000202',
+        'N1000000201',
+        'N1000000200',
+        'N1000000102',
+    ]
+    assert volumes_read == ['COISS_2001', 'COISS_2002']
+
+
+def test_choose_random_images_returns_requested_count(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_two_camera_index(ds, monkeypatch)
+
+    groups = list(ds.yield_image_files_index(volumes=['COISS_2001'], choose_random_images=2))
+
+    names = _yielded_names(groups)
+    assert len(names) == 2
+    assert len(set(names)) == 2
+    all_names = {f'{camera}{num}' for camera in 'NW' for num in _FILTER_NUMS}
+    assert set(names) <= all_names
+
+
+def test_choose_random_images_with_offset_filter(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Random sampling combined with a results filter: only navigated images are
+    # candidates, and asking for more than exist returns exactly the candidates.
+    nums1 = [1000000100, 1000000101, 1000000102]
+    nums2 = [1000000200, 1000000201, 1000000202]
+    _install_fake_index(
+        ds,
+        monkeypatch,
+        {
+            'COISS_2001': _coiss_filespecs('N', nums1),
+            'COISS_2002': _coiss_filespecs('N', nums2),
+        },
+    )
+    _write_result_file(tmp_path, 'COISS_2001', nums1, 'N', 1000000101, '_metadata.json')
+    _write_result_file(tmp_path, 'COISS_2002', nums2, 'N', 1000000201, '_metadata.json')
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001', 'COISS_2002'],
+            choose_random_images=10,
+            has_offset_file=True,
+            nav_results_root=str(tmp_path),
+        )
+    )
+
+    assert sorted(_yielded_names(groups)) == ['N1000000101', 'N1000000201']
+
+
+def test_selection_arguments_include_results_filters() -> None:
+    parser = argparse.ArgumentParser()
+    DataSetPDS3CassiniISS.add_selection_arguments(parser)
+
+    arguments = parser.parse_args(['--has-offset-file', '--has-no-png-file'])
+
+    assert arguments.has_offset_file is True
+    assert arguments.has_no_png_file is True
+    assert arguments.has_offset_spice_error is False
 
 
 def test_yielded_imagefile_carries_label_resolver(
