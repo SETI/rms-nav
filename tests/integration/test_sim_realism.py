@@ -98,6 +98,28 @@ def test_sim_side_extraction_is_deterministic() -> None:
         assert np.array_equal(np.asarray(values), np.asarray(second.samples[kind])), kind
 
 
+def test_flat_top_guard_rejects_clipped_core() -> None:
+    """A plateau of core pixels at the cutout max marks a clipped star."""
+    from tests.integration.sim_realism_support import _has_flat_top
+
+    image = np.zeros((33, 33))
+    image[15:18, 15:18] = 50.0
+    image[16, 16] = 100.0
+    assert _has_flat_top(image, 16, 16) is False
+    image[16, 15:18] = 100.0  # three-pixel flat top
+    assert _has_flat_top(image, 16, 16) is True
+
+
+def test_flat_top_guard_survives_calibration_rescale() -> None:
+    """The plateau test is invariant under a multiplicative unit change."""
+    from tests.integration.sim_realism_support import _has_flat_top
+
+    image = np.zeros((33, 33))
+    image[15:18, 15:18] = 50.0
+    image[16, 15:18] = 100.0
+    assert _has_flat_top(image * 1.7e-4, 16, 16) is True
+
+
 def test_pooled_limb_statistic_uses_copopulated_bins_only() -> None:
     """FOM 3 pooling excludes strata that only one side populates."""
     from tests.integration.sim_realism import InstrumentComparison, _aggregate

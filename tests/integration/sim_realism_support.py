@@ -79,6 +79,18 @@ _MAX_STARS_PER_FRAME = 8
 # pooled distribution; vertices are decimated evenly to this count.
 _MAX_PROFILES_PER_FEATURE = 200
 
+# Flat-top (clipped-core) star guard: reject a cutout when at least this
+# many pixels of the central 3x3 sit within a relative epsilon of the
+# cutout maximum.  A clipped core shares one value after the ADC ceiling,
+# and a calibration that rescales the frame preserves that equality -- so
+# the plateau test works on cohorts whose calibrated units define no fixed
+# saturation level (CALIB / GEOMED I/F), where the explicit level test
+# cannot run.  An unsaturated PSF core peaks on one pixel (its neighbors
+# sit well below for every catalog kernel), so three-at-max is a clip
+# signature, not a brightness cut.
+_FLAT_TOP_MIN_PIXELS = 3
+_FLAT_TOP_REL_EPS = 1e-6
+
 
 @dataclass
 class FrameSamples:
@@ -272,6 +284,36 @@ def _decimate(
     return vertices[idx], normals[idx]
 
 
+def _has_flat_top(image: NDArrayFloatType, cv: int, cu: int) -> bool:
+    """True when the star cutout at ``(cv, cu)`` has a clipped (flat) core.
+
+    The cutout maximum is taken over the FOM 2 profile window; the test
+    trips when at least ``_FLAT_TOP_MIN_PIXELS`` pixels of the central 3x3
+    sit within ``_FLAT_TOP_REL_EPS`` (relative) of it.  Saturation-level
+    independent, so it guards the calibrated cohorts too.
+
+    Parameters:
+        image: Sensor-area image in native units.
+        cv: Rounded row of the star center (inside the image).
+        cu: Rounded column of the star center (inside the image).
+
+    Returns:
+        Whether the core is a plateau.
+    """
+    half = int(np.ceil(_STAR_R_MAX_PX))
+    cutout = image[max(0, cv - half) : cv + half + 1, max(0, cu - half) : cu + half + 1]
+    finite = cutout[np.isfinite(cutout)]
+    if finite.size == 0:
+        return False
+    cutout_max = float(finite.max())
+    if cutout_max <= 0.0:
+        return False
+    core = image[max(0, cv - 1) : cv + 2, max(0, cu - 1) : cu + 2]
+    threshold = cutout_max - _FLAT_TOP_REL_EPS * abs(cutout_max)
+    n_at_max = int(np.count_nonzero(core >= threshold))
+    return n_at_max >= _FLAT_TOP_MIN_PIXELS
+
+
 def extract_feature_samples(
     image: NDArrayFloatType,
     features: list[NavFeature],
@@ -299,8 +341,10 @@ def extract_feature_samples(
         extfov_margin_vu: The obs's extended-FOV margins, subtracted to
             translate feature coordinates onto ``image``.
         saturation_level: Full-scale value for the star saturation filter;
-            NaN disables it (calibrated cohorts, where CALIB saturation is
-            not represented by a fixed level).
+            NaN disables the explicit-level test (calibrated cohorts, where
+            CALIB saturation is not represented by a fixed level).  The
+            flat-top plateau guard runs regardless, so clipped cores are
+            rejected on every cohort.
 
     Returns:
         The frame's feature samples.
@@ -356,6 +400,8 @@ def extract_feature_samples(
                     ].max()
                 )
                 if np.isfinite(saturation_level) and raw_peak >= saturation_level:
+                    continue
+                if _has_flat_top(image, cv, cu):
                     continue
             star_candidates.append((peak, radius, intensity))
             star_radius = radius
