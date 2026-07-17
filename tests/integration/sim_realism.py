@@ -21,8 +21,10 @@ Every real frame gets one matched sim frame (same instrument chain, same
 exposure, same content class; see :mod:`tests.integration.sim_realism_scenes`),
 and both sides run identical extraction (:mod:`tests.integration.sim_realism_support`).
 The scalar divergence per figure of merit is the 15.10-H W1 (quantile-clipped,
-real-IQR-normalized).  Where a cohort cannot support a statistic, the summary
-labels it rather than reporting a fake distribution.
+real-IQR-normalized); curve kinds (sky PSD, star / limb / ring profiles) get
+the density-W1 between the frame-averaged curves.  Where a cohort cannot
+support a statistic, the summary labels it rather than reporting a fake
+distribution.
 
 Run standalone (not under pytest)::
 
@@ -42,6 +44,7 @@ import argparse
 import dataclasses
 import os
 import time
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -55,8 +58,14 @@ from spindoctor.sim.realism.artifact_incidence import (
     ArtifactIncidence,
     split_stationary_spikes,
 )
-from spindoctor.sim.realism.divergence import W1Result, cohort_support, w1_divergence
+from spindoctor.sim.realism.divergence import (
+    W1Result,
+    cohort_support,
+    w1_between_densities,
+    w1_divergence,
+)
 from spindoctor.sim.realism.dynamic_range import stratify_by_exposure
+from spindoctor.support.types import NDArrayFloatType
 from tests.integration.sidecar import LibraryRoot, Sidecar, load_sidecar
 from tests.integration.sim_realism_scenes import matched_scene
 from tests.integration.sim_realism_support import (
@@ -174,6 +183,9 @@ class InstrumentComparison:
         real: Pooled real-side samples and curves.
         sim: Pooled sim-side samples and curves.
         divergences: Per-sample-kind W1 results.
+        curve_divergences: Per-curve-kind density-W1 results between the
+            frame-averaged real and sim curves (sky PSD, star profile,
+            limb / ring profiles).
         limb_bins_real_only: FOM 3 strata populated only on the real side
             (no sim counterpart; excluded from the pooled statistic and
             disclosed in the report).
@@ -189,6 +201,7 @@ class InstrumentComparison:
     real: FrameSamples = field(default_factory=FrameSamples)
     sim: FrameSamples = field(default_factory=FrameSamples)
     divergences: dict[str, W1Result] = field(default_factory=dict)
+    curve_divergences: dict[str, W1Result] = field(default_factory=dict)
     limb_bins_real_only: list[str] = field(default_factory=list)
     limb_bins_sim_only: list[str] = field(default_factory=list)
     fom_frames: dict[str, int] = field(default_factory=dict)
@@ -406,6 +419,23 @@ def _fom_for_kind(kind: str) -> str | None:
     return None
 
 
+def _mean_curve_density(
+    curves: list[tuple[NDArrayFloatType, NDArrayFloatType]],
+) -> NDArrayFloatType:
+    """Frame-averaged curve as a nonnegative density over its axis.
+
+    Bins that are NaN in every frame drop to zero mass, and negative
+    excursions (background over-subtraction, normalized gap edges) are
+    clipped: a density-W1 comparison needs nonnegative mass.
+    """
+    stack = np.stack([y for _x, y in curves])
+    with warnings.catch_warnings():
+        # A bin empty in every frame is legitimately all-NaN.
+        warnings.simplefilter('ignore', category=RuntimeWarning)
+        mean = np.nanmean(stack, axis=0)
+    return np.asarray(np.clip(np.nan_to_num(mean, nan=0.0), 0.0, None), dtype=np.float64)
+
+
 def _pool_copopulated_limb_bins(comparison: InstrumentComparison) -> None:
     """Build the FOM 3 pooled sample from strata populated on both sides.
 
@@ -446,6 +476,20 @@ def _aggregate(comparison: InstrumentComparison) -> None:
         sim_values = comparison.sim.samples.get(kind, [])
         comparison.divergences[kind] = w1_divergence(
             np.asarray(real_values), np.asarray(sim_values)
+        )
+    # Curve kinds get the density-W1: the frame-averaged curve on each side
+    # is treated as a density over its axis (frequency or distance), and the
+    # 15.10-H scalar is how far mass must move along that axis to turn one
+    # shape into the other, normalized by the real density's IQR.
+    for kind in sorted(set(comparison.real.curves) | set(comparison.sim.curves)):
+        real_curves = comparison.real.curves.get(kind, [])
+        sim_curves = comparison.sim.curves.get(kind, [])
+        if not real_curves or not sim_curves:
+            continue
+        comparison.curve_divergences[kind] = w1_between_densities(
+            real_curves[0][0],
+            _mean_curve_density(real_curves),
+            _mean_curve_density(sim_curves),
         )
     for fom in FOM_KIND_PREFIXES:
         n = comparison.fom_frames.get(fom, 0)

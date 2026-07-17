@@ -4,9 +4,10 @@ Writes one figure per figure of merit per instrument (real/sim histogram
 overlays plus the curve overlays) into ``docs/simulator_report/_figures/``
 as ``realism_<instrument>_<fom>.png``, and a deterministic JSON summary
 into ``tests/integration/realism_results/realism_summary.json`` that backs
-the report's tables (per-kind W1 divergences, support labels, the FOM 3
-one-sided-stratum disclosure, the FOM 7 diagnostic rows, and the
-artifact-incidence comparison against the catalog defaults).
+the report's tables (per-kind W1 divergences, per-curve density-W1
+divergences, support labels, the FOM 3 one-sided-stratum disclosure, the
+FOM 7 diagnostic rows, and the artifact-incidence comparison against the
+catalog defaults).
 
 Two fixed series colors carry sides everywhere: real cohort in blue,
 simulated frames in orange -- a colorblind-safe pair, never cycled.
@@ -423,12 +424,22 @@ def _summary_dict(results: RealismResults) -> dict[str, Any]:
                 'real_median': _round(float(np.median(real_values))) if real_values.size else None,
                 'sim_median': _round(float(np.median(sim_values))) if sim_values.size else None,
             }
+        curve_kinds: dict[str, Any] = {}
+        for kind, div in sorted(comparison.curve_divergences.items()):
+            curve_kinds[kind] = {
+                'w1': _round(div.w1),
+                'w1_normalized': _round(div.w1_normalized),
+                'real_iqr': _round(div.real_iqr),
+                'n_real_curves': len(comparison.real.curves.get(kind, [])),
+                'n_sim_curves': len(comparison.sim.curves.get(kind, [])),
+            }
         out['instruments'][instrument] = {
             'n_frames': len(comparison.records),
             'frames': [r.image_id for r in comparison.records],
             'fom_support': dict(sorted(comparison.fom_support.items())),
             'fom_frames': dict(sorted(comparison.fom_frames.items())),
             'divergences': kinds,
+            'curve_divergences': curve_kinds,
             'limb_bins_real_only': list(comparison.limb_bins_real_only),
             'limb_bins_sim_only': list(comparison.limb_bins_sim_only),
             'spike_split_real': [

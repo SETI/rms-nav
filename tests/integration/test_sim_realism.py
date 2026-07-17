@@ -136,6 +136,24 @@ def test_pooled_limb_statistic_uses_copopulated_bins_only() -> None:
     assert comparison.limb_bins_sim_only == ['limb_width_p2_r2']
 
 
+def test_aggregate_emits_density_w1_for_curve_kinds() -> None:
+    """Curve kinds present on both sides get a density-W1 scalar."""
+    from tests.integration.sim_realism import InstrumentComparison, _aggregate
+
+    comparison = InstrumentComparison(instrument='coiss_calib_nac')
+    x = np.linspace(0.0, 8.0, 17)
+    real_y = np.exp(-0.5 * (x / 1.0) ** 2)
+    sim_y = np.exp(-0.5 * (x / 1.5) ** 2)
+    comparison.real.curves['star_profile'] = [(x, real_y)]
+    comparison.sim.curves['star_profile'] = [(x, sim_y)]
+    comparison.real.curves['sky_psd'] = [(x, real_y)]  # real-only: no scalar
+    _aggregate(comparison)
+    assert set(comparison.curve_divergences) == {'star_profile'}
+    result = comparison.curve_divergences['star_profile']
+    assert result.w1 > 0.0
+    assert np.isfinite(result.w1_normalized)
+
+
 def test_cohort_discovery_covers_known_instruments() -> None:
     """The committed library maps onto the expected sim instruments."""
     cohort = discover_cohort()
