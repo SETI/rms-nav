@@ -150,6 +150,15 @@ class AtmosphereSpec:
     composited on (the oversampled grid when the scene oversamples), matching
     the body's already-scaled semi-axes.
 
+    The detached shell's tau bump peaks at a fixed multiple of ``tau_ref``,
+    not of the smooth column depth at ``detached_px``, so the same smooth
+    atmosphere re-expressed at a different ``ref_altitude_px`` (with
+    ``tau_ref`` rescaled accordingly) carries a correspondingly rescaled
+    shell.  The reference-altitude invariance of the smooth column is
+    therefore a parameterization choice that deliberately excludes the
+    shell: a spec with ``detached_px`` set is tied to its stated reference
+    altitude.
+
     Parameters:
         scale_height_px: Haze e-folding scale height in pixels (> 0).
         tau_ref: Tangent optical depth at ``ref_altitude_px`` (> 0).
