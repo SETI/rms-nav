@@ -26,34 +26,22 @@ from spindoctor.sim.scene_checks import (
     _check_optional_positive_number,
     _check_optional_str,
 )
-from spindoctor.sim.scene_schema import SimSceneValidationError
+from spindoctor.sim.scene_schema import (
+    _RING_FEATURE_KEYS,
+    _RING_SYSTEM_GEOMETRY_KEYS,
+    _RING_SYSTEM_KEYS,
+    SimSceneValidationError,
+)
 
-# The ring_system block: shared projection geometry plus a list of radial
-# optical-depth features.  Key inventories mirror the boundary classification
-# in scene_schema (which asserts completeness over them at import).
-_RING_SYSTEM_BLOCK_KEYS: frozenset[str] = frozenset(
-    {'geometry', 'features', 'range_km', 'km_per_pixel', 'phase_deg', 'azimuthal', 'moonlets'}
-)
-_RING_SYSTEM_GEOMETRY_KEYS: frozenset[str] = frozenset(
-    {'center_v', 'center_u', 'opening_deg_obs', 'opening_deg_sun', 'node_deg'}
-)
-_RING_FEATURE_KEYS: frozenset[str] = frozenset(
-    {
-        'name',
-        'kind',
-        'width',
-        'tau',
-        'orbit',
-        'side',
-        'wavelength',
-        'damping',
-        'navigable',
-        'declared_orbit_sigma',
-        'orbit_error',
-        'albedo',
-        'phase_g',
-    }
-)
+# The block, geometry, and feature key inventories are single-sourced from
+# the boundary classification in scene_schema (the idealized | truth unions
+# imported above), the same way the bodies / stars inventories are: a key
+# added to the schema is accepted by the validator with no hand-mirrored copy
+# to drift, and the editor coverage test (which builds its expected key set
+# from these same names) fails loudly until the editor can author it.  The
+# sub-block inventories below have no schema counterpart (the boundary
+# classifies whole sub-mappings such as 'orbit' as single keys), so they are
+# owned here.
 _RING_FEATURE_KINDS: frozenset[str] = frozenset({'ringlet', 'gap', 'edge', 'ramp', 'wave'})
 _RING_FEATURE_ORBIT_KEYS: frozenset[str] = frozenset(
     {'a', 'ae', 'long_peri', 'rate_peri', 'modes', 'edge_wave'}
@@ -108,7 +96,7 @@ def _check_ring_system(value: Any, *, source: str) -> None:
         return
     if not isinstance(value, dict):
         raise SimSceneValidationError(f'{source}: ring_system must be a mapping when present')
-    unknown = set(value) - _RING_SYSTEM_BLOCK_KEYS
+    unknown = set(value) - _RING_SYSTEM_KEYS
     if unknown:
         raise SimSceneValidationError(f'{source}: ring_system: unknown keys: {sorted(unknown)}')
     geometry = value.get('geometry')

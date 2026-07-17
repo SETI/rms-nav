@@ -830,10 +830,12 @@ def test_gui_authored_ring_system_reaches_every_schema_key(
     asserts the loaded scene's dotted key paths cover the schema's full
     ring_system inventory.
     """
+    # The block / geometry / feature inventories come from the schema's
+    # boundary classification (scene_checks_ring re-uses the same sets), so
+    # a key added to the schema alone reaches this coverage assertion.
     from spindoctor.sim.scene_checks_ring import (
         _RING_AZIMUTHAL_KEYS,
         _RING_EDGE_WAVE_KEYS,
-        _RING_FEATURE_KEYS,
         _RING_FEATURE_ORBIT_KEYS,
         _RING_MODULATION_KEYS,
         _RING_MOONLET_KEYS,
@@ -843,8 +845,11 @@ def test_gui_authored_ring_system_reaches_every_schema_key(
         _RING_PROPELLER_KEYS,
         _RING_SHADOW_KEYS,
         _RING_SPOKES_KEYS,
-        _RING_SYSTEM_BLOCK_KEYS,
+    )
+    from spindoctor.sim.scene_schema import (
+        _RING_FEATURE_KEYS,
         _RING_SYSTEM_GEOMETRY_KEYS,
+        _RING_SYSTEM_KEYS,
     )
 
     model.sim_params['instrument'] = 'coiss_nac'
@@ -888,7 +893,7 @@ def test_gui_authored_ring_system_reaches_every_schema_key(
     loaded = load_sim_scene(out)
 
     authored = _key_paths(loaded['ring_system'])
-    expected: set[str] = set(_RING_SYSTEM_BLOCK_KEYS)
+    expected: set[str] = set(_RING_SYSTEM_KEYS)
     expected |= {f'geometry.{key}' for key in _RING_SYSTEM_GEOMETRY_KEYS}
     expected |= {f'features.{key}' for key in _RING_FEATURE_KEYS}
     expected |= {f'features.orbit.{key}' for key in _RING_FEATURE_ORBIT_KEYS}
