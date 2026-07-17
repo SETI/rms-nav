@@ -40,22 +40,39 @@ __all__ = [
 # configure them explicitly.
 
 # Whole-scene PSF kernel parameters per instrument, all radii in detector
-# pixels.  The core sigma comes from each camera's measured FWHM (sigma =
-# FWHM / 2.355); the wing parameters (w, r0, n) are interim, expressed as wing
-# energy fractions so the delivered kernels conserve flux.
+# pixels.  Wing parameters (w, r0, n) are expressed as wing energy fractions
+# so the delivered kernels conserve flux.
 #
-# Provenance (all interim):
-# - coiss_nac/coiss_wac sigma from the Cassini ISS measured FWHMs; the
-#   core-to-wing dynamic range beyond the truncation window is stray-light
-#   scope, so the shipped wing fraction is small.
-# - vgiss sigma is an interim estimate: the Voyager references publish no FWHM,
-#   and GEOMED resampling broadens whatever the vidicon delivered.
-# - gossi sigma is a directly published value, not FWHM / 2.355.
-# - nhlorri is elliptical (sigma_v != sigma_u) per the LORRI PSF references.
-# The wing parameters are the first quantities the realism-match pass tunes.
+# Provenance:
+# - coiss_nac: TUNED 2026-07-17 by the realism match against the Cassini
+#   CALIB image-library cohort (24 unsaturated stars over 6 NAC star
+#   frames): cohort encircled-energy radii EE50 = 0.94 px, EE80 = 1.83 px;
+#   these parameters reproduce EE50/EE80 = 0.93/1.75 px through the same
+#   estimator.  The EE80/EE50 ratio (1.94 vs 1.52 for a pure Gaussian)
+#   requires substantial mid-range wing energy, so this is an *effective*
+#   in-window kernel: the fitted w = 0.20 carries the measured 1-8 px halo
+#   energy that the interim FWHM-derived core (sigma 0.55, w 0.025) put
+#   nowhere; the far halo beyond the truncation window remains stray-light
+#   scope.  Replaces the interim FWHM/2.355 value.
+# - coiss_wac: TUNED 2026-07-17 from the cohort's single WAC star frame
+#   (89 stars): cohort EE50/EE80 = 1.12/1.95 px, reproduced at 1.09/1.96.
+#   Single-frame evidence -- treat as cohort-limited, revisit when more WAC
+#   star frames land.  Replaces the interim FWHM/2.355 value.
+# - vgiss: RETAINED interim estimate: the cohort's one star frame (9 stars,
+#   EE50 1.23 px) is consistent with sigma 0.85 through GEOMED resampling
+#   but cannot constrain the wing shape; the Voyager references publish no
+#   FWHM.
+# - gossi: RETAINED interim published sigma: the Galileo cohort holds no
+#   star frames (negative cases only), so there is no independent PSF
+#   evidence; gossi sim accuracy is bounded by unverified PSF fidelity
+#   until the star-calibration frames land.
+# - nhlorri: RETAINED interim elliptical values (LORRI PSF references,
+#   1x1 mode).  The cohort's two star frames are 4x4-binned (measured
+#   binned-pixel EE50 0.59 px) and cannot constrain the 1x1 kernel; a
+#   per-readout-mode kernel is future work.
 PSF_KERNELS: dict[str, dict[str, float]] = {
-    'coiss_nac': {'sigma_v': 0.55, 'sigma_u': 0.55, 'w': 2.5e-2, 'r0': 2.0, 'n': 3.0},
-    'coiss_wac': {'sigma_v': 0.64, 'sigma_u': 0.64, 'w': 2.5e-2, 'r0': 2.0, 'n': 3.0},
+    'coiss_nac': {'sigma_v': 0.75, 'sigma_u': 0.75, 'w': 0.20, 'r0': 3.0, 'n': 4.0},
+    'coiss_wac': {'sigma_v': 0.95, 'sigma_u': 0.95, 'w': 0.20, 'r0': 3.0, 'n': 4.0},
     'vgiss': {'sigma_v': 0.85, 'sigma_u': 0.85, 'w': 1.2e-2, 'r0': 2.0, 'n': 3.0},
     'gossi': {'sigma_v': 0.80, 'sigma_u': 0.80, 'w': 1.2e-2, 'r0': 2.0, 'n': 3.0},
     'nhlorri': {'sigma_v': 1.13, 'sigma_u': 0.87, 'w': 1.2e-2, 'r0': 2.0, 'n': 3.0},
@@ -311,7 +328,12 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'read_noise_e': 31.0,  # 5.4 (full-res; 44 e- in summation mode)
         'bias_dn': 20.0,
         'dark_current_e_per_sec': 10.0,  # 5.4 interim (RTG-driven dark spikes)
-        'hot_pixel_fraction': 3.0e-3,
+        # TUNED 2026-07-17 by the realism match: the 8-frame Galileo REDR
+        # cohort's median measured spike fraction is 1.2e-4 with a
+        # stationary component of only 1e-6 -- the REDR blemish correction
+        # removes most hot pixels -- so the interim 3e-3 overstated the
+        # products the navigator actually sees by ~25x.
+        'hot_pixel_fraction': 1.0e-4,
         'hot_pixel_amplitude_e': 4.0e4,
         # 5.4 interim (early-blooming columns; total-charge fraction).
         'hot_pixel_column_factor': 0.5,
@@ -408,11 +430,21 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'bias_dn': 20.0,
         'quantization': '8bit',
         'vidicon': {
-            # 5.3 interim: readout-chain noise ~0.3-0.75 DN low gain / 2.2-2.6 DN
-            # high gain; a per-line-correlated offset plus a within-line white
-            # component (the two summing in quadrature to the quoted RMS).
-            'read_noise_line_dn': 1.8,
-            'read_noise_pixel_dn': 1.8,
+            # TUNED 2026-07-17 by the realism match: the 3-frame GEOMED
+            # cohort's paired-difference sky sigma is ~0.22 DN equivalent
+            # (median 1.75e-3 I/F), placing the products in the low-gain
+            # regime of the published 0.3-0.75 DN range after GEOMED
+            # resampling smoothing.  The interim 1.8 DN values (the
+            # high-gain end) overstated the cohort noise ~9x and buried
+            # every simulated star below the detection floor.  0.25 DN per
+            # component (quadrature sum ~0.35 DN, the low end of the
+            # published range): the sim's 8-bit quantization floors any
+            # sub-LSB value, so the choice is anchored to the published
+            # low-gain range rather than to the (unreachable) 0.22 DN
+            # cohort estimate -- see the realism report's known-gaps list.
+            # 3 frames is limited evidence; revisit as VGISS frames land.
+            'read_noise_line_dn': 0.25,
+            'read_noise_pixel_dn': 0.25,
             # 5.3: faint coherent periodic component (2.4 kHz vertical, ~0.5 DN
             # peak-to-peak).
             'coherent_amplitude_dn': 0.25,
@@ -461,6 +493,39 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'bloom_length': 0,
         'quantization': 'exact',
     },
+}
+
+# Calibrated Cassini products (CALIB, what the navigator's cassini_iss_calib
+# path consumes) run the same cameras through CISSCAL, whose bias/dark
+# subtraction, flat-fielding, and 2-Hz noise removal strip most of the raw
+# chain's structure -- so the calibrated instruments get their own detector
+# entries instead of the raw alias.  TUNED 2026-07-17 by the realism match
+# against the 62-frame CALIB image-library cohort; every key not overridden
+# is inherited from the matching raw entry:
+# - hot_pixel_fraction: measured stationary spike fraction 1.6e-5
+#   (single-pixel spikes recurring at fixed positions across the 58-frame
+#   NAC cohort; the interim raw-chain 2e-3 overstated the calibrated
+#   products by ~100x and dominated their p99 signal percentile).
+# - banding_amplitude_e 0: CISSCAL's 2-Hz noise removal strips the coherent
+#   banding, and the cohort sky floor sits below the level at which the raw
+#   chain's 30 e- banding would register.
+# - bias_pedestal_sigma_dn / bias_row_gradient_dn / bias_col_gradient_dn 0:
+#   CISSCAL subtracts the full 2-D bias structure, not just the constant
+#   pedestal the calibration inverse already removes.
+_COISS_CALIB_OVERRIDES: dict[str, Any] = {
+    'hot_pixel_fraction': 1.6e-5,
+    'banding_amplitude_e': 0.0,
+    'bias_pedestal_sigma_dn': 0.0,
+    'bias_row_gradient_dn': 0.0,
+    'bias_col_gradient_dn': 0.0,
+}
+DETECTOR_DEFAULTS['coiss_calib_nac'] = {
+    **copy.deepcopy(DETECTOR_DEFAULTS['coiss_nac']),
+    **_COISS_CALIB_OVERRIDES,
+}
+DETECTOR_DEFAULTS['coiss_calib_wac'] = {
+    **copy.deepcopy(DETECTOR_DEFAULTS['coiss_wac']),
+    **_COISS_CALIB_OVERRIDES,
 }
 
 _coiss_alias(DETECTOR_DEFAULTS)

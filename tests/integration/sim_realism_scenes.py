@@ -166,6 +166,12 @@ def limb_scene(
             'axis3': axis,
             'illumination_angle': 0.0,
             'phase_angle': float(min(max(phase_angle_deg, 0.0), 179.0)),
+            # Content matching, not tuning: the cohort's limb frames are
+            # airless icy satellites, whose disks follow a Lommel-Seeliger
+            # law (flat toward the limb) far better than Lambert.  Under
+            # Lambert the FOM 3 rise width would measure the shading ramp,
+            # not the limb.
+            'photometric_law': 'lommel_seeliger',
         }
     ]
     scene['stars'] = _star_list(seed, 5, vmag_bright=9.0, vmag_step=0.5)
