@@ -598,6 +598,64 @@ def test_body_surge_toggle_inserts_and_removes(model: Any) -> None:
     assert 'opposition_surge' not in _body(model)
 
 
+def test_body_atmosphere_toggle_inserts_and_removes(model: Any) -> None:
+    """The atmosphere group inserts the four core keys and removes the map."""
+    tab = _body_tab(model)
+    tab.atmosphere_group.setChecked(True)
+    assert set(_body(model)['atmosphere']) == {'scale_height_px', 'tau_ref', 'ref_altitude_px', 'g'}
+    tab.atmosphere_group.setChecked(False)
+    assert 'atmosphere' not in _body(model)
+
+
+def test_body_atmosphere_value_edit_writes_key(model: Any) -> None:
+    """A tau-ref spin edit writes its own key once the group is enabled."""
+    tab = _body_tab(model)
+    tab.atmosphere_group.setChecked(True)
+    tab.atmosphere_tau_ref_spin.setValue(2.5)
+    assert _body(model)['atmosphere']['tau_ref'] == 2.5
+
+
+def test_body_atmosphere_scale_height_spin_writes_key(model: Any) -> None:
+    """A scale-height spin edit writes its own key once the group is enabled."""
+    tab = _body_tab(model)
+    tab.atmosphere_group.setChecked(True)
+    tab.atmosphere_scale_height_spin.setValue(9.0)
+    assert _body(model)['atmosphere']['scale_height_px'] == 9.0
+
+
+def test_body_atmosphere_g_spin_writes_key(model: Any) -> None:
+    """An asymmetry spin edit writes the g key once the group is enabled."""
+    tab = _body_tab(model)
+    tab.atmosphere_group.setChecked(True)
+    tab.atmosphere_g_spin.setValue(0.55)
+    assert _body(model)['atmosphere']['g'] == 0.55
+
+
+def test_body_atmosphere_ref_altitude_spin_writes_key(model: Any) -> None:
+    """A reference-altitude spin edit writes its own key once enabled."""
+    tab = _body_tab(model)
+    tab.atmosphere_group.setChecked(True)
+    tab.atmosphere_ref_altitude_spin.setValue(3.0)
+    assert _body(model)['atmosphere']['ref_altitude_px'] == 3.0
+
+
+def test_body_atmosphere_shell_gates_detached_key(model: Any) -> None:
+    """The shell checkbox inserts detached_px; unchecking it drops the key."""
+    tab = _body_tab(model)
+    tab.atmosphere_group.setChecked(True)
+    tab.atmosphere_shell_check.setChecked(True)
+    assert 'detached_px' in _body(model)['atmosphere']
+    tab.atmosphere_shell_check.setChecked(False)
+    assert 'detached_px' not in _body(model)['atmosphere']
+
+
+def test_body_atmosphere_detached_spin_disabled_without_shell(model: Any) -> None:
+    """The detached-altitude spin is enabled only when the shell is on."""
+    tab = _body_tab(model)
+    tab.atmosphere_group.setChecked(True)
+    assert tab.atmosphere_detached_spin.isEnabled() is False
+
+
 def test_body_albedo_toggle_inserts_and_removes(model: Any) -> None:
     """The albedo-texture group inserts the map with a spots list and removes it."""
     tab = _body_tab(model)
