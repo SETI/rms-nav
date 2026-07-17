@@ -1,11 +1,20 @@
 """Image-side atmosphere rendering for haze-limb (Titan-class) bodies.
 
 A body carrying an ``atmosphere`` block gains an exponential haze layer above
-its surface, composited onto the body radiance by :func:`apply_atmosphere`
-after the disc is shaded.  The haze is a truth key the navigator never sees:
-its predicted-body model keeps a hard limb at the reference radius, so the
-soft rendered limb is a designed mismatch (the substrate for the Titan
-altitude-versus-phase problem).
+its surface, evaluated by :func:`apply_atmosphere` after the disc is shaded.
+The haze splits into two compositing components (:class:`AtmosphereLayers`):
+the on-disc haze joins the body's opaque paint (the disc is opaque anyway,
+so the painted silhouette stays exactly the no-atmosphere silhouette), while
+the above-limb glow is a translucent :class:`HaloScreen` -- an emission map
+plus a per-pixel transmission ``exp(-tau)`` -- that the radiance stage
+composites over the background exactly as the ring system's transmission
+screen: ``img = glow + exp(-tau) * img_behind``, with point sources
+attenuated by the same factor.  A star behind the halo therefore dims by the
+tangent transmission instead of vanishing, and the body's mask / depth /
+occlusion truth sees only the solid silhouette, never the halo.  The haze is
+a truth key the navigator never sees: its predicted-body model keeps a hard
+limb at the reference radius, so the soft rendered limb is a designed
+mismatch (the substrate for the Titan altitude-versus-phase problem).
 
 **Tangent optical depth.**  A line of sight grazing the body at tangent
 altitude ``h`` (pixels above the reference radius) accumulates a slant
@@ -43,7 +52,14 @@ import numpy as np
 from spindoctor.sim.ellipsoid_geometry import illumination_vector
 from spindoctor.support.types import NDArrayFloatType
 
-__all__ = ['AtmosphereSpec', 'apply_atmosphere', 'atmosphere_spec_from_params', 'hg_phase_factor']
+__all__ = [
+    'AtmosphereLayers',
+    'AtmosphereSpec',
+    'HaloScreen',
+    'apply_atmosphere',
+    'atmosphere_spec_from_params',
+    'hg_phase_factor',
+]
 
 # Single-scattering brightness scale of a fully lit, optically thick grazing
 # haze column (before the phase factor and illumination weight).  The haze
@@ -63,6 +79,44 @@ _TAU_EPS = 1e-3
 # Floor on cos(emission) for the on-disc slant path, so the limb (where the
 # emergent-cosine vanishes) saturates smoothly instead of dividing by zero.
 _MU_FLOOR = 1e-3
+
+
+@dataclass(frozen=True)
+class HaloScreen:
+    """The translucent above-limb haze layer of one atmospheric body.
+
+    A transmission screen in the ring system's sense: the radiance stage
+    composites ``img = emission + transmission * img_behind`` over the
+    screen's pixels, and point sources (which sit at infinity, behind every
+    halo) multiply by ``transmission``.
+
+    Parameters:
+        emission: Per-pixel tangent glow of the halo, in [0, 1]; 0 where the
+            halo carries no light.
+        transmission: Per-pixel ``exp(-tau)`` along the grazing line of
+            sight: the fraction of background light that passes through;
+            1 outside the halo.
+    """
+
+    emission: NDArrayFloatType
+    transmission: NDArrayFloatType
+
+
+@dataclass(frozen=True)
+class AtmosphereLayers:
+    """One atmospheric body's haze, split by compositing role.
+
+    Parameters:
+        disc: The body radiance with the on-disc haze composited, in [0, 1].
+            Zero exactly where the haze-free render was zero outside the
+            silhouette, so it paints (opaquely) the same pixels a
+            no-atmosphere body would.
+        halo: The translucent above-limb screen, covering every band pixel
+            the opaque paint does not own.
+    """
+
+    disc: NDArrayFloatType
+    halo: HaloScreen
 
 
 @dataclass(frozen=True)
@@ -195,13 +249,15 @@ def apply_atmosphere(
     rotation_tilt: float,
     illumination_angle: float,
     phase_angle: float,
-) -> NDArrayFloatType:
-    """Composite the haze layer onto a reference-centred body radiance.
+) -> AtmosphereLayers:
+    """Evaluate the haze layer over a reference-centred body radiance.
 
-    The haze is added to the disc radiance over a limb band a few scale
-    heights deep, so a large frame costs no more than the body's own
-    footprint.  The returned array is a new array; the input is never mutated
-    (it may be a shared render cache entry).
+    The haze is evaluated over a limb band a few scale heights deep and split
+    by compositing role: the on-disc haze (every band pixel the disc render
+    painted, including its anti-aliased rim) is added to the opaque disc
+    radiance, and the above-limb glow outside the painted silhouette becomes
+    the translucent :class:`HaloScreen`.  The returned arrays are new arrays;
+    the input is never mutated (it may be a shared render cache entry).
 
     Parameters:
         body_shape: The shaded body radiance at the reference centre, in
@@ -218,9 +274,12 @@ def apply_atmosphere(
         phase_angle: Phase angle in radians (0 fully lit, pi backlit).
 
     Returns:
-        The body radiance with the haze composited, clipped to [0, 1].
+        The :class:`AtmosphereLayers`: the opaque disc radiance (clipped to
+        [0, 1]) and the translucent halo screen.
     """
     out = np.array(body_shape, dtype=np.float64, copy=True)
+    emission = np.zeros_like(out)
+    transmission = np.ones_like(out)
     semi_a = max(semi_a, 1e-6)
     semi_b = max(semi_b, 1e-6)
     r_mean = 0.5 * (semi_a + semi_b)
@@ -252,7 +311,9 @@ def apply_atmosphere(
     e_inner2 = max(0.0, 1.0 - mu_cut * mu_cut)
     band = (e2 <= e_outer * e_outer) & (e2 >= e_inner2)
     if not band.any():
-        return out
+        return AtmosphereLayers(
+            disc=out, halo=HaloScreen(emission=emission, transmission=transmission)
+        )
 
     e2_b = e2[band]
     e_b = np.sqrt(e2_b)
@@ -315,8 +376,28 @@ def apply_atmosphere(
         opacity[inside] = 1.0 - np.exp(-excess)
 
     haze = source * opacity
-    out[band] = np.clip(out[band] + haze, 0.0, 1.0)
-    return out
+
+    # Compositing split: every band pixel the disc render painted (the
+    # geometric silhouette plus its anti-aliased rim) stays opaque paint and
+    # takes its haze additively, so the painted silhouette is exactly the
+    # no-atmosphere one; every other band pixel is the translucent halo,
+    # whose glow and grazing transmission the radiance stage composites as a
+    # screen over whatever lies behind.
+    shape_band = out[band]
+    solid = inside | (shape_band > 0.0)
+    halo = ~solid
+    shape_band[solid] = np.clip(shape_band[solid] + haze[solid], 0.0, 1.0)
+    out[band] = shape_band
+    emission_band = np.zeros_like(haze)
+    emission_band[halo] = np.clip(haze[halo], 0.0, 1.0)
+    emission[band] = emission_band
+    # Halo pixels lie outside the silhouette, where the opacity is
+    # 1 - exp(-tau) of the tangent column, so the screen transmission is its
+    # complement.
+    transmission_band = np.ones_like(haze)
+    transmission_band[halo] = 1.0 - opacity[halo]
+    transmission[band] = transmission_band
+    return AtmosphereLayers(disc=out, halo=HaloScreen(emission=emission, transmission=transmission))
 
 
 def _disc_incidence(
