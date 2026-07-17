@@ -16,8 +16,9 @@ programmatic scene authors.  The validator is hand-rolled (no pydantic
 dependency): the key inventory and boundary classification live in
 :mod:`spindoctor.sim.scene_schema` and the per-field type checks in
 :mod:`spindoctor.sim.scene_checks` (body entries:
-:mod:`spindoctor.sim.scene_checks_body`); this module is the public entry point and
-re-exports the boundary names.
+:mod:`spindoctor.sim.scene_checks_body`; the ring_system block:
+:mod:`spindoctor.sim.scene_checks_ring`); this module is the public entry point
+and re-exports the boundary names.
 
 **The information boundary.**  Every key in the schema is classified as either
 idealized (information the production pipeline could know from catalogs,
@@ -53,7 +54,6 @@ from spindoctor.sim.scene_checks import (
     _check_optional_positive_int,
     _check_optional_positive_number,
     _check_optional_str,
-    _check_ring_system,
     _check_sky_counts,
     _check_spk_error,
     _check_star_catalog_scatter,
@@ -64,6 +64,7 @@ from spindoctor.sim.scene_checks import (
     _require_str,
 )
 from spindoctor.sim.scene_checks_body import _check_body_object
+from spindoctor.sim.scene_checks_ring import _check_ring_system
 
 # The two private inventories keep their redundant aliases: they are explicit
 # re-exports (the schema tests exercise them through this module).

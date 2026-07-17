@@ -830,7 +830,7 @@ def test_gui_authored_ring_system_reaches_every_schema_key(
     asserts the loaded scene's dotted key paths cover the schema's full
     ring_system inventory.
     """
-    from spindoctor.sim.scene_checks import (
+    from spindoctor.sim.scene_checks_ring import (
         _RING_AZIMUTHAL_KEYS,
         _RING_EDGE_WAVE_KEYS,
         _RING_FEATURE_KEYS,
