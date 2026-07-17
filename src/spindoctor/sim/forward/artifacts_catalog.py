@@ -34,10 +34,13 @@ __all__ = [
 # single source of truth for the ``artifacts`` block's per-mode keys, their
 # rendering stage, per-instrument availability, and parameter schemas.  It is
 # re-exported here so the detector catalog and the mode registry share one
-# import point.  Every *loss-mode* incidence defaults to 0 even under
+# import point.  The *missing-data* loss modes default to 0 even under
 # ``instrument_defaults`` -- naming an instrument selects a signal chain, not a
-# set of transmission defects -- so loss modes are planted only by scenes that
-# configure them explicitly.
+# set of transmission defects -- so they are planted only by scenes that
+# configure them explicitly.  Cosmic rays are different: radiation on the
+# detector is environment physics, so each instrument entry carries a
+# ``cosmic_ray_rate_per_sec`` that is either cohort-measured or an explicit
+# retained zero with its reason (see the per-entry comments).
 
 # Whole-scene PSF kernel parameters per instrument, all radii in detector
 # pixels.  Wing parameters (w, r0, n) are expressed as wing energy fractions
@@ -220,9 +223,19 @@ def resolve_sky_pixel_scale_arcsec(instrument: str | None) -> float:
 # bias_col_gradient_dn, bloom_length, quantization) are interim placeholders
 # sized from the 5.2-5.6 descriptions; per-scene overrides ride in the
 # truth-side noise block.  instrument_defaults also turns on Poisson shot
-# noise (a property of the electron chain itself, not a per-camera number);
-# the loss modes (cosmic rays, missing data) are artifact incidences and stay
-# at zero.
+# noise (a property of the electron chain itself, not a per-camera number)
+# and the entry's cosmic_ray_rate_per_sec; the missing-data loss modes are
+# artifact incidences and stay at zero.
+#
+# cosmic_ray_rate_per_sec is in events per pixel per second: the chain
+# multiplies it by exposure_sec, pixel_area_cm2 (default 1.0), and the pixel
+# count, so at the default unit pixel area the fluence reads per pixel.
+# Rates come from the realism match's FOM 6 transient split (single-pixel
+# spikes that do NOT recur at fixed detector positions across the cohort),
+# converted per second as the median over frames of (per-frame transient
+# fraction / exposure).  The conversion assumes incidence scales with
+# exposure; hits collected during readout are folded into the effective
+# rate at each cohort's exposure range.
 #
 # The vidicon (Voyager) path skips the electron conversion; its noise is applied
 # directly in DN (5.3): line-correlated read noise (per-line offset +
@@ -249,6 +262,17 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         # 5.2 interim: total-charge fraction bled into the warm column above a
         # hot pixel (the streak integral, not a per-pixel amplitude).
         'hot_pixel_column_factor': 0.3,
+        # MEASURED 2026-07-17 by the realism match (58-frame CALIB NAC
+        # cohort): the FOM 6 cross-frame split gives a mean transient
+        # single-pixel spike fraction of 2.75e-4 per frame (stationary hot
+        # pixels excluded), and the star-bearing frames match the body/ring
+        # frames (mean 2.60e-4 vs 2.79e-4), so scene point sources are not
+        # the driver.  The median over frames of (transient fraction /
+        # exposure) -- exposures 0.005-22 s, median 0.51 s -- gives 1.5e-4
+        # events/px/s.  Cosmic rays precede calibration and CISSCAL passes
+        # them through, so the CALIB-measured rate applies to the raw chain
+        # too.  Replaces the interim zero.
+        'cosmic_ray_rate_per_sec': 1.5e-4,
         'banding_amplitude_e': 30.0,  # 5.2 interim (~30 e- NAC 2 Hz)
         'banding_period_px': 64.0,  # 5.2 interim (line-readout-rate period)
         'bias_pedestal_sigma_dn': 2.0,  # 5.2 interim (per-image pedestal jitter)
@@ -297,6 +321,14 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'hot_pixel_fraction': 2.0e-3,
         'hot_pixel_amplitude_e': 3.5e4,
         'hot_pixel_column_factor': 0.3,
+        # ADOPTED 2026-07-17 from the co-mounted NAC's measured rate: the
+        # 4-frame CALIB WAC cohort's own transient fraction (4.89e-4 per
+        # frame) is star-contaminated -- its transients appear only on the
+        # three star-bearing frames while the one body frame measures zero
+        # -- so it cannot stand alone, and the two cameras share the
+        # spacecraft radiation environment.  Replaces the interim zero;
+        # revisit when non-star WAC frames land.
+        'cosmic_ray_rate_per_sec': 1.5e-4,
         'banding_amplitude_e': 6.0,  # 5.2 interim (~6 e- WAC 4 Hz)
         'banding_period_px': 64.0,
         'bias_pedestal_sigma_dn': 2.0,
@@ -342,6 +374,14 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'hot_pixel_amplitude_e': 4.0e4,
         # 5.4 interim (early-blooming columns; total-charge fraction).
         'hot_pixel_column_factor': 0.5,
+        # MEASURED 2026-07-17 by the realism match (8-frame REDR cohort;
+        # every frame is a negative case, so no scene point sources
+        # contaminate the transient split): mean transient spike fraction
+        # 1.17e-4 per frame; the median over frames of (transient fraction
+        # / exposure) -- exposures 0.004-0.1 s -- gives 1.6e-3 events/px/s,
+        # the Jupiter-system radiation regime rather than bare GCR flux.
+        # Replaces the interim zero.
+        'cosmic_ray_rate_per_sec': 1.6e-3,
         'banding_amplitude_e': 65.0,  # 5.4 interim (~0.35 DN at gain 2 -> ~65 e-)
         'banding_period_px': 42.0,  # 5.4 (2400 Hz supply-noise comb every 42 px)
         'bias_pedestal_sigma_dn': 1.0,
@@ -394,6 +434,15 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'hot_pixel_fraction': 0.0,
         'hot_pixel_amplitude_e': 0.0,
         'hot_pixel_column_factor': 0.0,
+        # RETAINED zero 2026-07-17: the realism match measured a 3.36e-4
+        # per-frame transient spike fraction (two 5 s frames), but both
+        # cohort frames are 4x4-binned star fields and a binned faint star
+        # is indistinguishable from a transient to the single-pixel spike
+        # detector -- the cohort has no star-free frame to bound that
+        # contamination, so the measured rate is not adoptable.  Unblocked
+        # by any non-star LORRI frame entering the library; scenes can
+        # still plant the radiation_transients mode explicitly.
+        'cosmic_ray_rate_per_sec': 0.0,
         'banding_amplitude_e': 17.0,  # 5.5 interim (~0.8 DN vertical banding)
         'banding_period_px': 128.0,  # 5.5 interim
         'bias_pedestal_sigma_dn': 1.0,
@@ -434,6 +483,12 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'exposure_ref_sec': 1.0,
         'bias_dn': 20.0,
         'quantization': '8bit',
+        # Cosmic rays RETAINED at zero 2026-07-17 (no key: the vidicon DN
+        # path carries no cosmic-ray stage, so a rate here would be inert).
+        # The realism match measured a 3.5e-5 transient spike fraction over
+        # the 3-frame GEOMED cohort -- GEOMED's reseau-anchored resampling
+        # interpolates most single-pixel transients away.  Unblocked by a
+        # DN-domain transient stage plus more Voyager frames.
         'vidicon': {
             # TUNED 2026-07-17 by the realism match: the 3-frame GEOMED
             # cohort's paired-difference sky sigma is ~0.22 DN equivalent
@@ -490,6 +545,9 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'hot_pixel_fraction': 0.0,
         'hot_pixel_amplitude_e': 0.0,
         'hot_pixel_column_factor': 0.0,
+        # The generic block is an ideal detector with no environment, so
+        # there is no cosmic-ray flux to measure; explicitly zero.
+        'cosmic_ray_rate_per_sec': 0.0,
         'banding_amplitude_e': 0.0,
         'banding_period_px': 64.0,
         'bias_pedestal_sigma_dn': 0.0,

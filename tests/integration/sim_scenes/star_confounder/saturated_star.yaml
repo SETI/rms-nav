@@ -28,6 +28,13 @@ stars:
 noise:
   poisson: true
   read_noise_dn: 4.0
+  # Cosmic rays pinned off: instrument_defaults now carries the coiss_nac
+  # cohort-measured transient rate, and at this frame size that plants a
+  # handful of full-well spikes -- bright enough that the unique-match star
+  # technique can lock onto one and drag the ensemble into conflict.  This
+  # scene tests saturation handling of a real star's clipped core, so the
+  # confounder it plants is the bright star, not radiation.
+  cosmic_ray_rate_per_sec: 0.0
 offset_v: 1.43
 offset_u: -0.61
 offset_rotation_deg: 0.0
