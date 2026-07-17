@@ -1978,8 +1978,12 @@ or **[T]** (truth: renderer-only, stripped by the boundary filter, 3.2).
   `declared_orbit_sigma` map [I] (the uncertainty the navigator is
   entitled to know; the drawn `orbit_error` values are truth),
   `phase_g` float [T], `albedo` float (0.5) [T];
-  `ring_system.geometry` per 15.4 [I]; `ring_system.azimuthal` map
-  (modulation/spokes/shadow wedge) [T]; `ring_system.moonlets` list [T].
+  `ring_system.geometry` per 15.4 [I]; `ring_system.phase_deg` float [I]
+  (the phase angle the ring photometry evaluates at) and
+  `ring_system.km_per_pixel` float [I] (physical pixel scale for the
+  per-pixel depth conversion) — both SPICE knowledge, like the geometry
+  block; `ring_system.azimuthal` map (modulation/spokes/shadow wedge)
+  [T]; `ring_system.moonlets` list [T].
 
 **v1 key dispositions** (all 25 v1 top-level keys of `_ALLOWED_KEYS` —
 this is what makes the inventory complete rather than additive):
