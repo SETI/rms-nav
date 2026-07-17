@@ -238,11 +238,19 @@ def apply_atmosphere(
     u_rot = v_ctr * sin_rz + u_ctr * cos_rz
     e2 = (v_rot / semi_a) ** 2 + (u_rot / semi_b) ** 2
 
-    # Restrict all heavy work to the limb band: the disc plus a halo out to
-    # where the tangent glow vanishes.  This bounds the cost to the body's
-    # footprint rather than the frame.
+    # Restrict all heavy work to a limb band: a halo out to where the tangent
+    # glow vanishes, and, on the disc, an annulus in from the limb to where the
+    # grazing-excess column vanishes.  Deep disc interior carries no haze (the
+    # on-disc opacity is the excess of the slant path over the nadir path, zero
+    # at disc centre), so the cost scales with the limb band, not the frame.
+    geom = math.sqrt(2.0 * math.pi * r_mean / scale_height)
+    tau_vert = spec.tau_ref / max(geom, 1e-6)
     e_outer = 1.0 + _outer_altitude(spec) / r_mean
-    band = e2 <= e_outer * e_outer
+    # Inside, the excess column tau_vert * (1 / mu - 1) drops below _TAU_EPS
+    # once cos(emission) exceeds mu_cut; that sets the inner edge of the band.
+    mu_cut = 1.0 / (1.0 + _TAU_EPS / max(tau_vert, 1e-12))
+    e_inner2 = max(0.0, 1.0 - mu_cut * mu_cut)
+    band = (e2 <= e_outer * e_outer) & (e2 >= e_inner2)
     if not band.any():
         return out
 
@@ -298,13 +306,13 @@ def apply_atmosphere(
         opacity[outside] = 1.0 - np.exp(-tau_out)
     if inside.any():
         mu_emit = np.sqrt(np.maximum(1.0 - e2_b[inside], 0.0))
-        # The tangent optical depth at ref altitude is deeper than the
-        # vertical column by the usual grazing factor sqrt(2 pi R / H); invert
-        # it so the on-disc column is the physical vertical depth.
-        geom = math.sqrt(2.0 * math.pi * r_mean / scale_height)
-        tau_vert = spec.tau_ref / max(geom, 1e-6)
-        tau_slant = tau_vert / np.maximum(mu_emit, _MU_FLOOR)
-        opacity[inside] = 1.0 - np.exp(-tau_slant)
+        # The on-disc haze is the grazing EXCESS over the nadir column:
+        # tau_vert * (1 / mu - 1), zero at disc centre and diverging toward the
+        # limb, so the haze concentrates in a limb band.  tau_vert is the
+        # physical vertical depth, the tangent tau_ref divided out by the usual
+        # grazing factor sqrt(2 pi R / H) (computed once for the band above).
+        excess = tau_vert * (1.0 / np.maximum(mu_emit, _MU_FLOOR) - 1.0)
+        opacity[inside] = 1.0 - np.exp(-excess)
 
     haze = source * opacity
     out[band] = np.clip(out[band] + haze, 0.0, 1.0)

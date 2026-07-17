@@ -132,6 +132,30 @@ def _body_psf_detector_scene(size: int) -> dict[str, Any]:
     return scene
 
 
+def _haze_body_psf_detector_scene(size: int) -> dict[str, Any]:
+    """A body-dominated frame whose body also carries an atmospheric haze layer.
+
+    The same large lit body as the relief budget scene, plus an ``atmosphere``
+    block with a detached shell at oversample 4: the haze compositor runs over
+    a limb band a few scale heights deep on top of the topographic render, the
+    PSF convolution, and the detector stack.  Because the haze cost scales with
+    the limb band and not the frame, this holds the same 2 s (512) and 8 s
+    (1024) single-core budgets as the plain body scene.
+    """
+    scene = _body_psf_detector_scene(size)
+    # A realistically thin haze (scale height a few pixels) relative to the
+    # large body, so the limb band the haze touches is a thin annulus: this is
+    # exactly the geometry the limb-band cost claim rests on.
+    scene['bodies'][0]['atmosphere'] = {
+        'scale_height_px': 4.0,
+        'tau_ref': 3.0,
+        'ref_altitude_px': 0.0,
+        'g': 0.6,
+        'detached_px': 12.0,
+    }
+    return scene
+
+
 def _ring_psf_detector_scene(size: int) -> dict[str, Any]:
     """A size x size ring-system frame with a PSF and the full detector stack.
 
@@ -281,6 +305,16 @@ def test_512_body_render_under_2s() -> None:
 def test_1024_body_render_under_8s() -> None:
     """A 1024x1024 lit-body scene with relief renders in under 8 s single-core."""
     _assert_cold_render_budget(_body_psf_detector_scene(1024), 8.0, '1024x1024 body')
+
+
+def test_512_haze_body_render_under_2s() -> None:
+    """A 512x512 haze-body scene renders in under 2 s single-core (cold)."""
+    _assert_cold_render_budget(_haze_body_psf_detector_scene(512), 2.0, '512x512 haze body')
+
+
+def test_1024_haze_body_render_under_8s() -> None:
+    """A 1024x1024 haze-body scene renders in under 8 s single-core (cold)."""
+    _assert_cold_render_budget(_haze_body_psf_detector_scene(1024), 8.0, '1024x1024 haze body')
 
 
 def test_1024_ring_system_render_under_8s() -> None:
