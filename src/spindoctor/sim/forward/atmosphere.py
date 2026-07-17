@@ -57,7 +57,7 @@ from typing import cast
 import numpy as np
 
 from spindoctor.sim.ellipsoid_geometry import illumination_vector
-from spindoctor.support.types import NDArrayFloatType
+from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 __all__ = [
     'AtmosphereLayers',
@@ -79,8 +79,9 @@ _HAZE_ALBEDO = 0.6
 _SHELL_AMPLITUDE = 1.0
 
 # The tangent optical depth below which the above-limb glow is treated as
-# black: it bounds the rendered halo (and therefore the cost) to a limb band
-# a few scale heights deep rather than the whole frame.
+# black: it bounds the rendered halo to a limb band a few scale heights deep
+# (and, with the on-disc annulus, sets the bounding box the haze cost scales
+# with) rather than the whole frame.
 _TAU_EPS = 1e-3
 
 # Floor on cos(emission) for the on-disc slant path, so the limb (where the
@@ -103,10 +104,19 @@ class HaloScreen:
         transmission: Per-pixel ``exp(-tau)`` along the grazing line of
             sight: the fraction of background light that passes through;
             1 outside the halo.
+        box_v: Grid rows outside which the screen is exactly identity
+            (emission 0, transmission 1), so consumers may restrict their
+            compositing to the box without changing any value.
+        box_u: Grid columns of the same bounding box.
+        mask: Box-sized mask of the pixels where the screen differs from
+            identity, so consumers need not re-derive it from the maps.
     """
 
     emission: NDArrayFloatType
     transmission: NDArrayFloatType
+    box_v: slice
+    box_u: slice
+    mask: NDArrayBoolType
 
 
 @dataclass(frozen=True)
@@ -243,6 +253,51 @@ def _outer_altitude(spec: AtmosphereSpec) -> float:
     return max(reach, scale_height)
 
 
+def _band_bbox(
+    shape: tuple[int, int],
+    *,
+    center_v: float,
+    center_u: float,
+    reach_a: float,
+    reach_b: float,
+    cos_rz: float,
+    sin_rz: float,
+) -> tuple[slice, slice] | None:
+    """Grid slices bounding the outer band ellipse of the haze.
+
+    The band's outer boundary in centred pixel coordinates satisfies
+    ``|v*cos_rz - u*sin_rz| <= reach_a`` and ``|v*sin_rz + u*cos_rz| <=
+    reach_b`` (the rotated-frame extents of the ellipse, with the tilt's
+    foreshortening already divided out of ``reach_a``), so its axis-aligned
+    bounding box follows by rotating those extents back.  One pixel of slack
+    absorbs the pixel-centre convention; every pixel outside the returned
+    slices lies strictly outside the band.
+
+    Parameters:
+        shape: The render-grid shape ``(V, U)``.
+        center_v: Body centre v in grid pixels.
+        center_u: Body centre u in grid pixels.
+        reach_a: Rotated-frame half-extent along semi-axis a, in pixels.
+        reach_b: Rotated-frame half-extent along semi-axis b, in pixels.
+        cos_rz: Cosine of the in-plane rotation.
+        sin_rz: Sine of the in-plane rotation.
+
+    Returns:
+        ``(v_slice, u_slice)`` into the grid, or None when the box misses
+        the grid entirely (the haze contributes nothing).
+    """
+    size_v, size_u = shape
+    reach_v = reach_a * abs(cos_rz) + reach_b * abs(sin_rz)
+    reach_u = reach_a * abs(sin_rz) + reach_b * abs(cos_rz)
+    v0 = max(math.floor(center_v - reach_v) - 1, 0)
+    v1 = min(math.ceil(center_v + reach_v) + 1, size_v)
+    u0 = max(math.floor(center_u - reach_u) - 1, 0)
+    u1 = min(math.ceil(center_u + reach_u) + 1, size_u)
+    if v0 >= v1 or u0 >= u1:
+        return None
+    return slice(v0, v1), slice(u0, u1)
+
+
 def apply_atmosphere(
     body_shape: NDArrayFloatType,
     spec: AtmosphereSpec,
@@ -263,8 +318,11 @@ def apply_atmosphere(
     by compositing role: the on-disc haze (every band pixel the disc render
     painted, including its anti-aliased rim) is added to the opaque disc
     radiance, and the above-limb glow outside the painted silhouette becomes
-    the translucent :class:`HaloScreen`.  The returned arrays are new arrays;
-    the input is never mutated (it may be a shared render cache entry).
+    the translucent :class:`HaloScreen`.  All per-pixel work (coordinate
+    grids included) is restricted to the bounding box of the body plus its
+    halo out to the detached shell's reach, so the haze cost scales with
+    that box, not the frame.  The returned arrays are new arrays; the input
+    is never mutated (it may be a shared render cache entry).
 
     Parameters:
         body_shape: The shaded body radiance at the reference centre, in
@@ -287,28 +345,32 @@ def apply_atmosphere(
     out = np.array(body_shape, dtype=np.float64, copy=True)
     emission = np.zeros_like(out)
     transmission = np.ones_like(out)
+    empty = AtmosphereLayers(
+        disc=out,
+        halo=HaloScreen(
+            emission=emission,
+            transmission=transmission,
+            box_v=slice(0, 0),
+            box_u=slice(0, 0),
+            mask=np.zeros((0, 0), dtype=np.bool_),
+        ),
+    )
     semi_a = max(semi_a, 1e-6)
     semi_b = max(semi_b, 1e-6)
     r_mean = 0.5 * (semi_a + semi_b)
     scale_height = max(spec.scale_height_px, 1e-6)
 
-    size_v, size_u = out.shape
-    v_ctr, u_ctr = np.mgrid[0:size_v, 0:size_u].astype(np.float64)
-    v_ctr += 0.5 - center_v
-    u_ctr += 0.5 - center_u
-
     cos_rz = math.cos(rotation_z)
     sin_rz = math.sin(rotation_z)
     cos_rt = math.cos(rotation_tilt)
-    v_rot = (v_ctr * cos_rz - u_ctr * sin_rz) * cos_rt
-    u_rot = v_ctr * sin_rz + u_ctr * cos_rz
-    e2 = (v_rot / semi_a) ** 2 + (u_rot / semi_b) ** 2
 
     # Restrict all heavy work to a limb band: a halo out to where the tangent
     # glow vanishes, and, on the disc, an annulus in from the limb to where the
-    # grazing-excess column vanishes.  Deep disc interior carries no haze (the
-    # on-disc opacity is the excess of the slant path over the nadir path, zero
-    # at disc centre), so the cost scales with the limb band, not the frame.
+    # grazing-excess column drops below _TAU_EPS.  Deep disc interior carries
+    # no haze (the on-disc opacity is the excess of the slant path over the
+    # nadir path, zero at disc centre), though for a thick haze the annulus
+    # can span most of the disc; the guaranteed cost bound is the bounding
+    # box computed below.
     #
     # tau_vert is the physical vertical column depth that the on-disc slant
     # paths scale from: the SURFACE tangent depth divided by the grazing
@@ -324,35 +386,66 @@ def apply_atmosphere(
     # once cos(emission) exceeds mu_cut; that sets the inner edge of the band.
     mu_cut = 1.0 / (1.0 + _TAU_EPS / max(tau_vert, 1e-12))
     e_inner2 = max(0.0, 1.0 - mu_cut * mu_cut)
-    band = (e2 <= e_outer * e_outer) & (e2 >= e_inner2)
-    if not band.any():
-        return AtmosphereLayers(
-            disc=out, halo=HaloScreen(emission=emission, transmission=transmission)
-        )
 
-    e2_b = e2[band]
-    e_b = np.sqrt(e2_b)
-    h_b = (e_b - 1.0) * r_mean
-    v_rot_b = v_rot[band]
-    u_rot_b = u_rot[band]
-    v_ctr_b = v_ctr[band]
-    u_ctr_b = u_ctr[band]
-    inside = e2_b < 1.0
+    # Coordinate grids and every per-pixel term below are built only inside
+    # the axis-aligned bounding box of the outer band ellipse (e2 <=
+    # e_outer**2, the body plus its halo out to the detached shell's reach),
+    # so the grid-build cost scales with that box, not the frame.  The box is
+    # conservative -- every pixel outside it has e2 > e_outer**2 -- so
+    # restricting the band mask to it is exact.
+    size_v, size_u = out.shape
+    box = _band_bbox(
+        (size_v, size_u),
+        center_v=center_v,
+        center_u=center_u,
+        reach_a=e_outer * semi_a / max(abs(cos_rt), 1e-6),
+        reach_b=e_outer * semi_b,
+        cos_rz=cos_rz,
+        sin_rz=sin_rz,
+    )
+    if box is None:
+        return empty
+    box_v, box_u = box
+    v_ctr = (np.arange(box_v.start, box_v.stop, dtype=np.float64) + (0.5 - center_v))[:, None]
+    u_ctr = (np.arange(box_u.start, box_u.stop, dtype=np.float64) + (0.5 - center_u))[None, :]
+
+    v_rot = (v_ctr * cos_rz - u_ctr * sin_rz) * cos_rt
+    u_rot = v_ctr * sin_rz + u_ctr * cos_rz
+    e2 = (v_rot / semi_a) ** 2 + (u_rot / semi_b) ** 2
+
+    # The band splits at the silhouette: the on-disc annulus (added to the
+    # opaque paint) and the above-limb halo band, each evaluated on its own
+    # gathered pixels.
+    band_in = (e2 >= e_inner2) & (e2 < 1.0)
+    band_out = (e2 >= 1.0) & (e2 <= e_outer * e_outer)
+    if not band_in.any() and not band_out.any():
+        return empty
 
     illum_v, illum_u, illum_z = illumination_vector(
         illumination_angle=illumination_angle, phase_angle=phase_angle
     )
+    hg = hg_phase_factor(spec.g, phase_angle)
+    delta_wrap = max(math.sqrt(2.0 * scale_height / r_mean), 0.05)
 
-    # Solar elevation (radians) driving the wrapped illumination weight: from
-    # the surface incidence on the disc, and from the limb-azimuth incidence
-    # in the halo (where there is no surface, only the atmospheric column
-    # standing above the limb at that azimuth).
-    mu0 = np.zeros_like(e_b)
-    if inside.any():
-        mu0[inside] = _disc_incidence(
-            v_rot_b[inside],
-            u_rot_b[inside],
-            e2_b[inside],
+    def _source(mu0: NDArrayFloatType) -> NDArrayFloatType:
+        """The single-scattering source from the solar elevation weight."""
+        elevation = np.arcsin(np.clip(mu0, -1.0, 1.0))
+        illum_weight = 0.5 * (1.0 + np.tanh(elevation / delta_wrap))
+        return cast(NDArrayFloatType, _HAZE_ALBEDO * hg * illum_weight)
+
+    out_box = out[box_v, box_u]
+
+    # On-disc annulus: the solar elevation comes from the surface incidence,
+    # and the opacity is the grazing EXCESS over the nadir column:
+    # tau_vert * (1 / mu - 1), zero at disc centre and diverging toward the
+    # limb, so the haze concentrates in a limb band.  The haze joins the
+    # opaque paint (the disc is opaque anyway).
+    if band_in.any():
+        e2_in = e2[band_in]
+        mu0_in = _disc_incidence(
+            v_rot[band_in],
+            u_rot[band_in],
+            e2_in,
             semi_a=semi_a,
             semi_b=semi_b,
             semi_c=semi_c,
@@ -362,59 +455,55 @@ def apply_atmosphere(
             illum_u=illum_u,
             illum_z=illum_z,
         )
-    outside = ~inside
-    if outside.any():
-        rho = np.hypot(v_ctr_b[outside], u_ctr_b[outside])
-        rho = np.maximum(rho, 1e-9)
-        mu0[outside] = (v_ctr_b[outside] * illum_v + u_ctr_b[outside] * illum_u) / rho
-
-    delta_wrap = max(math.sqrt(2.0 * scale_height / r_mean), 0.05)
-    elevation = np.arcsin(np.clip(mu0, -1.0, 1.0))
-    illum_weight = 0.5 * (1.0 + np.tanh(elevation / delta_wrap))
-
-    source = _HAZE_ALBEDO * hg_phase_factor(spec.g, phase_angle) * illum_weight
-
-    # Opacity: the tangent glow above the limb, and the slant column on the
-    # disc (concentrated at the limb as 1 / cos(emission)).
-    opacity = np.zeros_like(e_b)
-    if outside.any():
-        tau_out = tangent_optical_depth(h_b[outside], spec)
-        opacity[outside] = 1.0 - np.exp(-tau_out)
-    if inside.any():
-        mu_emit = np.sqrt(np.maximum(1.0 - e2_b[inside], 0.0))
-        # The on-disc haze is the grazing EXCESS over the nadir column:
-        # tau_vert * (1 / mu - 1), zero at disc centre and diverging toward the
-        # limb, so the haze concentrates in a limb band.  tau_vert is the
-        # physical vertical depth, the surface tangent depth divided out by
-        # the grazing factor sqrt(2 pi R / H) (computed once for the band
-        # above), which keeps the disc side consistent with the limb side at
-        # any ref_altitude_px.
+        mu_emit = np.sqrt(np.maximum(1.0 - e2_in, 0.0))
         excess = tau_vert * (1.0 / np.maximum(mu_emit, _MU_FLOOR) - 1.0)
-        opacity[inside] = 1.0 - np.exp(-excess)
+        haze_in = _source(mu0_in) * (1.0 - np.exp(-excess))
+        out_box[band_in] = np.clip(out_box[band_in] + haze_in, 0.0, 1.0)
 
-    haze = source * opacity
+    # Above-limb band: the solar elevation comes from the limb-azimuth
+    # incidence (there is no surface, only the atmospheric column standing
+    # above the limb at that azimuth) and the opacity from the tangent
+    # column.  Band pixels the disc render painted (its anti-aliased rim)
+    # stay opaque paint and take their haze additively, so the painted
+    # silhouette is exactly the no-atmosphere one; the rest become the
+    # translucent halo screen the radiance stage composites over whatever
+    # lies behind.
+    halo_mask = np.zeros_like(band_out)
+    if band_out.any():
+        v_out = np.broadcast_to(v_ctr, e2.shape)[band_out]
+        u_out = np.broadcast_to(u_ctr, e2.shape)[band_out]
+        rho = np.hypot(v_out, u_out)
+        rho = np.maximum(rho, 1e-9)
+        mu0_out = (v_out * illum_v + u_out * illum_u) / rho
+        h_out = (np.sqrt(e2[band_out]) - 1.0) * r_mean
+        opacity_out = 1.0 - np.exp(-tangent_optical_depth(h_out, spec))
+        haze_out = _source(mu0_out) * opacity_out
 
-    # Compositing split: every band pixel the disc render painted (the
-    # geometric silhouette plus its anti-aliased rim) stays opaque paint and
-    # takes its haze additively, so the painted silhouette is exactly the
-    # no-atmosphere one; every other band pixel is the translucent halo,
-    # whose glow and grazing transmission the radiance stage composites as a
-    # screen over whatever lies behind.
-    shape_band = out[band]
-    solid = inside | (shape_band > 0.0)
-    halo = ~solid
-    shape_band[solid] = np.clip(shape_band[solid] + haze[solid], 0.0, 1.0)
-    out[band] = shape_band
-    emission_band = np.zeros_like(haze)
-    emission_band[halo] = np.clip(haze[halo], 0.0, 1.0)
-    emission[band] = emission_band
-    # Halo pixels lie outside the silhouette, where the opacity is
-    # 1 - exp(-tau) of the tangent column, so the screen transmission is its
-    # complement.
-    transmission_band = np.ones_like(haze)
-    transmission_band[halo] = 1.0 - opacity[halo]
-    transmission[band] = transmission_band
-    return AtmosphereLayers(disc=out, halo=HaloScreen(emission=emission, transmission=transmission))
+        shape_out = out_box[band_out]
+        solid = shape_out > 0.0
+        halo = ~solid
+        shape_out[solid] = np.clip(shape_out[solid] + haze_out[solid], 0.0, 1.0)
+        out_box[band_out] = shape_out
+        emission_vals = np.zeros_like(haze_out)
+        emission_vals[halo] = np.clip(haze_out[halo], 0.0, 1.0)
+        emission[box_v, box_u][band_out] = emission_vals
+        # Halo pixels lie outside the silhouette, where the opacity is
+        # 1 - exp(-tau) of the tangent column, so the screen transmission is
+        # its complement.
+        transmission_vals = np.ones_like(haze_out)
+        transmission_vals[halo] = 1.0 - opacity_out[halo]
+        transmission[box_v, box_u][band_out] = transmission_vals
+        halo_mask[band_out] = halo
+    return AtmosphereLayers(
+        disc=out,
+        halo=HaloScreen(
+            emission=emission,
+            transmission=transmission,
+            box_v=box_v,
+            box_u=box_u,
+            mask=halo_mask,
+        ),
+    )
 
 
 def _disc_incidence(

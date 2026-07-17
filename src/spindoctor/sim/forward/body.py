@@ -15,6 +15,7 @@ boundary: they are truth keys the navigator never sees (its best model is
 the smooth Lambert ellipsoid).
 """
 
+import math
 from functools import lru_cache
 from typing import Any, cast
 
@@ -849,6 +850,28 @@ def render_single_body(
     )
 
 
+def _shifted_box(box: slice, delta: float, size: int) -> slice:
+    """The frame slice conservatively covering a box translated by ``delta``.
+
+    The order-1 interpolation reads one source pixel to each side, so the
+    translated content lies within the source span shifted by ``delta`` and
+    widened by one pixel each way, clipped to the frame.
+
+    Parameters:
+        box: The source slice.
+        delta: The translation along this axis, in pixels.
+        size: The frame extent along this axis.
+
+    Returns:
+        The translated, widened, clipped slice.
+    """
+    start = max(math.floor(box.start + delta) - 1, 0)
+    stop = min(math.ceil(box.stop + delta) + 1, size)
+    if start >= stop:
+        return slice(0, 0)
+    return slice(start, stop)
+
+
 def finish_single_body(
     img: NDArrayFloatType,
     body_shape: NDArrayFloatType,
@@ -892,21 +915,46 @@ def finish_single_body(
     """
     dv = center_v - ref_center_v
     du = center_u - ref_center_u
-    positioned_body = ndimage.shift(body_shape, (dv, du), order=1, mode='constant', cval=0.0)
+    # An exactly zero translation is the bitwise identity for the order-1
+    # spline, so a body already at the reference centre skips the full-frame
+    # interpolation (the shape is only read, never written).
+    if dv == 0.0 and du == 0.0:
+        positioned_body = body_shape
+    else:
+        positioned_body = ndimage.shift(body_shape, (dv, du), order=1, mode='constant', cval=0.0)
     mask = positioned_body > 0
     img[mask] = positioned_body[mask]
 
     positioned_halo: HaloScreen | None = None
     if halo is not None:
-        emission = ndimage.shift(halo.emission, (dv, du), order=1, mode='constant', cval=0.0)
-        transmission = ndimage.shift(
-            halo.transmission, (dv, du), order=1, mode='constant', cval=1.0
-        )
-        # The translation's linear interpolation bleeds the halo one pixel
-        # into the painted rim; a screen never overlaps its own opaque paint.
-        emission[mask] = 0.0
-        transmission[mask] = 1.0
-        positioned_halo = HaloScreen(emission=emission, transmission=transmission)
+        if dv == 0.0 and du == 0.0:
+            # The screen already excludes every pixel the (unshifted) disc
+            # painted, so it is positioned as-is.
+            positioned_halo = halo
+        else:
+            size_v, size_u = img.shape
+            emission = ndimage.shift(halo.emission, (dv, du), order=1, mode='constant', cval=0.0)
+            transmission = ndimage.shift(
+                halo.transmission, (dv, du), order=1, mode='constant', cval=1.0
+            )
+            box_v = _shifted_box(halo.box_v, dv, size_v)
+            box_u = _shifted_box(halo.box_u, du, size_u)
+            # The translation's linear interpolation bleeds the halo one pixel
+            # into the painted rim; a screen never overlaps its own opaque
+            # paint.  Outside the box the screen is identity already.
+            mask_box = mask[box_v, box_u]
+            emission_view = emission[box_v, box_u]
+            emission_view[mask_box] = 0.0
+            transmission_view = transmission[box_v, box_u]
+            transmission_view[mask_box] = 1.0
+            halo_mask = (emission_view > 0.0) | (transmission_view < 1.0)
+            positioned_halo = HaloScreen(
+                emission=emission,
+                transmission=transmission,
+                box_v=box_v,
+                box_u=box_u,
+                mask=halo_mask,
+            )
 
     inventory_item = {
         'v_min_unclipped': center_v - half_extent_v,

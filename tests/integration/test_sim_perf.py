@@ -136,16 +136,21 @@ def _haze_body_psf_detector_scene(size: int) -> dict[str, Any]:
     """A body-dominated frame whose body also carries an atmospheric haze layer.
 
     The same large lit body as the relief budget scene, plus an ``atmosphere``
-    block with a detached shell at oversample 4: the haze compositor runs over
-    a limb band a few scale heights deep on top of the topographic render, the
-    PSF convolution, and the detector stack.  Because the haze cost scales with
-    the limb band and not the frame, this holds the same 2 s (512) and 8 s
-    (1024) single-core budgets as the plain body scene.
+    block with a detached shell at oversample 4: the haze evaluation and its
+    halo transmission screen run on top of the topographic render, the PSF
+    convolution, and the detector stack.  The haze cost scales with the
+    bounding box of the body plus its halo (all coordinate grids and
+    per-pixel terms are built only inside that box), not with the frame, so
+    this holds the same 2 s (512) and 8 s (1024) single-core budgets as the
+    plain body scene.
     """
     scene = _body_psf_detector_scene(size)
     # A realistically thin haze (scale height a few pixels) relative to the
-    # large body, so the limb band the haze touches is a thin annulus: this is
-    # exactly the geometry the limb-band cost claim rests on.
+    # large body, so the halo adds only a narrow margin to the body's own
+    # bounding box.  A thick variant (scale_height_px 20, detached_px 60)
+    # measures within the 1024 budget too, but with under 5% headroom --
+    # not enough margin for a loaded host -- so the committed budget scene
+    # keeps the thin geometry.
     scene['bodies'][0]['atmosphere'] = {
         'scale_height_px': 4.0,
         'tau_ref': 3.0,

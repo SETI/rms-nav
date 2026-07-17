@@ -387,7 +387,8 @@ def compose_scene_radiance(
         halo_screens, ring_maps=ring_maps, ring_apply=ring_apply, body_depth_map=body_depth_map
     )
     for op in screen_ops:
-        img[op.mask] = op.intensity[op.mask] + op.transmission[op.mask] * img[op.mask]
+        view = img[op.box_v, op.box_u]
+        view[op.mask] = op.intensity[op.mask] + op.transmission[op.mask] * view[op.mask]
 
     # Point sources sit at infinity: every translucent screen attenuates them
     # wherever it carries optical depth (a body in front of the ring zeroes
@@ -402,7 +403,8 @@ def compose_scene_radiance(
     if ring_maps is not None and ring_maps.mask.any():
         point_e *= ring_maps.transmission
     for _halo_range, halo_screen in halo_screens:
-        point_e *= halo_screen.transmission
+        box = (halo_screen.box_v, halo_screen.box_u)
+        point_e[box] *= halo_screen.transmission[box]
     if body_occlusion_mask is not None:
         point_e[body_occlusion_mask] = 0.0
 
@@ -438,7 +440,8 @@ def compose_scene_radiance(
         if ring_maps is not None and ring_maps.mask.any():
             stars_layer *= ring_maps.transmission
         for _halo_range, halo_screen in halo_screens:
-            stars_layer *= halo_screen.transmission
+            box = (halo_screen.box_v, halo_screen.box_u)
+            stars_layer[box] *= halo_screen.transmission[box]
         if body_occlusion_mask is not None:
             stars_layer[body_occlusion_mask] = 0.0
         bodies_layer = np.zeros((size_v, size_u), dtype=np.float64)
@@ -460,16 +463,18 @@ def compose_scene_radiance(
         # transmission dims BOTH layers behind it, so the per-class sum
         # reproduces the composite exactly.
         for op in screen_ops:
+            bodies_view = bodies_layer[op.box_v, op.box_u]
+            rings_view = rings_layer[op.box_v, op.box_u]
             if op.is_ring:
-                bodies_layer[op.mask] *= op.transmission[op.mask]
-                rings_layer[op.mask] = (
-                    op.intensity[op.mask] + op.transmission[op.mask] * rings_layer[op.mask]
+                bodies_view[op.mask] *= op.transmission[op.mask]
+                rings_view[op.mask] = (
+                    op.intensity[op.mask] + op.transmission[op.mask] * rings_view[op.mask]
                 )
             else:
-                bodies_layer[op.mask] = (
-                    op.intensity[op.mask] + op.transmission[op.mask] * bodies_layer[op.mask]
+                bodies_view[op.mask] = (
+                    op.intensity[op.mask] + op.transmission[op.mask] * bodies_view[op.mask]
                 )
-                rings_layer[op.mask] *= op.transmission[op.mask]
+                rings_view[op.mask] *= op.transmission[op.mask]
         frame.truth['radiance_layers'] = {
             'stars': stars_layer,
             'bodies': bodies_layer,
@@ -520,18 +525,23 @@ def compose_scene_radiance(
 class _ScreenOp:
     """One translucent-screen application over the composed image.
 
-    Applied as ``img[mask] = intensity[mask] + transmission[mask] *
-    img[mask]``; ``is_ring`` routes the emission to the rings class when the
-    differential-smear layers replay the ops per class.
+    Applied to the ``(box_v, box_u)`` view of the frame as ``view[mask] =
+    intensity[mask] + transmission[mask] * view[mask]`` (the screen is
+    identity outside its box); ``is_ring`` routes the emission to the rings
+    class when the differential-smear layers replay the ops per class.
 
     Parameters:
-        mask: Pixels the screen composites over.
-        intensity: The screen's emission map.
-        transmission: The screen's per-pixel background transmission.
+        box_v: Frame rows the op is restricted to.
+        box_u: Frame columns the op is restricted to.
+        mask: Box-sized mask of the pixels the screen composites over.
+        intensity: Box-sized emission map.
+        transmission: Box-sized per-pixel background transmission.
         is_ring: Whether the emission belongs to the rings class (else the
             bodies class -- a body halo).
     """
 
+    box_v: slice
+    box_u: slice
     mask: NDArrayBoolType
     intensity: NDArrayFloatType
     transmission: NDArrayFloatType
@@ -566,6 +576,7 @@ def _translucent_screen_ops(
     Returns:
         The screen applications, in application (far-to-near) order.
     """
+    full = slice(None)
     ops: list[_ScreenOp] = []
     remaining_ring: NDArrayBoolType | None = None
     if ring_maps is not None and ring_apply is not None:
@@ -576,6 +587,8 @@ def _translucent_screen_ops(
             if behind.any():
                 ops.append(
                     _ScreenOp(
+                        box_v=full,
+                        box_u=full,
                         mask=behind,
                         intensity=ring_maps.intensity,
                         transmission=ring_maps.transmission,
@@ -584,21 +597,28 @@ def _translucent_screen_ops(
                 )
                 remaining_ring = remaining_ring & ~behind
         assert body_depth_map is not None
-        visible = ((screen.emission > 0.0) | (screen.transmission < 1.0)) & (
-            body_depth_map > halo_range
-        )
+        # The screen is identity outside its bounding box, so the op (and
+        # every consumer's work) is restricted to the box exactly.
+        box_v, box_u = screen.box_v, screen.box_u
+        emission = screen.emission[box_v, box_u]
+        transmission = screen.transmission[box_v, box_u]
+        visible = screen.mask & (body_depth_map[box_v, box_u] > halo_range)
         if visible.any():
             ops.append(
                 _ScreenOp(
+                    box_v=box_v,
+                    box_u=box_u,
                     mask=visible,
-                    intensity=screen.emission,
-                    transmission=screen.transmission,
+                    intensity=emission,
+                    transmission=transmission,
                     is_ring=False,
                 )
             )
     if remaining_ring is not None and ring_maps is not None and remaining_ring.any():
         ops.append(
             _ScreenOp(
+                box_v=full,
+                box_u=full,
                 mask=remaining_ring,
                 intensity=ring_maps.intensity,
                 transmission=ring_maps.transmission,

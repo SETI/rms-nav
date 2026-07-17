@@ -1074,10 +1074,10 @@ recovers a small radius-dependent offset toward the sunlit limb -- the
 low-phase ``titan_haze_limb`` scene records a sub-pixel sunward offset at
 medium confidence; the high-phase ``titan_crescent_horns`` scene records the
 low-confidence outcome that follows when the ring of light defeats disc
-correlation). The cost is bounded to a limb band a few scale heights deep, so a
-haze body is no more expensive than a plain one of the same size, and a body
-without an ``atmosphere`` block renders hard-limbed and byte-for-byte
-unchanged.
+correlation). The haze evaluation is restricted to the bounding box of the
+body plus its halo (out to a detached shell's reach), so its cost scales with
+that box rather than the frame, and a body without an ``atmosphere`` block
+renders hard-limbed and byte-for-byte unchanged.
 
 .. _sim-ring-renderer:
 
