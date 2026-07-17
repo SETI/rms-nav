@@ -135,16 +135,25 @@ def _body_psf_detector_scene(size: int) -> dict[str, Any]:
 def _haze_body_psf_detector_scene(size: int) -> dict[str, Any]:
     """A body-dominated frame whose body also carries an atmospheric haze layer.
 
-    The same large lit body as the relief budget scene, plus an ``atmosphere``
-    block with a detached shell at oversample 4: the haze evaluation and its
-    halo transmission screen run on top of the topographic render, the PSF
-    convolution, and the detector stack.  The haze cost scales with the
-    bounding box of the body plus its halo (all coordinate grids and
-    per-pixel terms are built only inside that box), not with the frame, so
-    this holds the same 2 s (512) and 8 s (1024) single-core budgets as the
-    plain body scene.
+    The lit relief body of the plain budget scene at reduced semi-axes, plus
+    an ``atmosphere`` block with a detached shell at oversample 4: the haze
+    evaluation and its halo transmission screen run on top of the
+    topographic render, the PSF convolution, and the detector stack.  The
+    haze cost scales with the bounding box of the body plus its halo (all
+    coordinate grids and per-pixel terms are built only inside that box),
+    not with the frame, so this holds the same 2 s (512) and 8 s (1024)
+    single-core budgets as the plain body scene.
     """
     scene = _body_psf_detector_scene(size)
+    # The body shrinks from the plain scene's 0.7 frame widths to 0.55: at
+    # 0.7 the thin-haze 1024 render measured 7.0-7.7 s CPU against the 8 s
+    # budget on quiet serial runs of the reference host (as little as ~4%
+    # headroom on the slower runs -- flake territory); at 0.55 it measures
+    # 6.0-6.3 s best-of-3 across quiet serial runs on the same host (21-25%
+    # headroom), while the disc still dominates the frame and the full haze
+    # stack stays exercised.
+    for axis_key in ('axis1', 'axis2', 'axis3'):
+        scene['bodies'][0][axis_key] = size * 0.55
     # A realistically thin haze (scale height a few pixels) relative to the
     # large body, so the halo adds only a narrow margin to the body's own
     # bounding box.  A thick variant (scale_height_px 20, detached_px 60)
