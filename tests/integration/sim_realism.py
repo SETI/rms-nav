@@ -174,6 +174,10 @@ class InstrumentComparison:
         real: Pooled real-side samples and curves.
         sim: Pooled sim-side samples and curves.
         divergences: Per-sample-kind W1 results.
+        limb_bins_real_only: FOM 3 strata populated only on the real side
+            (no sim counterpart; excluded from the pooled statistic and
+            disclosed in the report).
+        limb_bins_sim_only: FOM 3 strata populated only on the sim side.
         fom_frames: Contributing real-frame count per figure of merit.
         fom_support: Cohort-support label per figure of merit.
         fom7_rows: Read-only technique-diagnostic rows from the matched
@@ -185,6 +189,8 @@ class InstrumentComparison:
     real: FrameSamples = field(default_factory=FrameSamples)
     sim: FrameSamples = field(default_factory=FrameSamples)
     divergences: dict[str, W1Result] = field(default_factory=dict)
+    limb_bins_real_only: list[str] = field(default_factory=list)
+    limb_bins_sim_only: list[str] = field(default_factory=list)
     fom_frames: dict[str, int] = field(default_factory=dict)
     fom_support: dict[str, str] = field(default_factory=dict)
     fom7_rows: list[dict[str, Any]] = field(default_factory=list)
@@ -400,8 +406,42 @@ def _fom_for_kind(kind: str) -> str | None:
     return None
 
 
+def _pool_copopulated_limb_bins(comparison: InstrumentComparison) -> None:
+    """Build the FOM 3 pooled sample from strata populated on both sides.
+
+    A raw pool over every stratum compares different scene mixtures
+    whenever a stratum is empty on one side (the cohort or the sim
+    emission path may leave one empty), and the pooled W1 then measures
+    the mixture difference rather than the width difference.  Only
+    co-populated strata pool into ``limb_width_copop``; one-sided strata
+    are recorded on the comparison for disclosure.
+    """
+    bin_kinds = sorted(
+        k
+        for k in set(comparison.real.samples) | set(comparison.sim.samples)
+        if k.startswith('limb_width_p')
+    )
+    copopulated = [
+        k for k in bin_kinds if comparison.real.samples.get(k) and comparison.sim.samples.get(k)
+    ]
+    comparison.limb_bins_real_only = [
+        k for k in bin_kinds if comparison.real.samples.get(k) and not comparison.sim.samples.get(k)
+    ]
+    comparison.limb_bins_sim_only = [
+        k for k in bin_kinds if comparison.sim.samples.get(k) and not comparison.real.samples.get(k)
+    ]
+    if copopulated:
+        comparison.real.samples['limb_width_copop'] = [
+            x for k in copopulated for x in comparison.real.samples[k]
+        ]
+        comparison.sim.samples['limb_width_copop'] = [
+            x for k in copopulated for x in comparison.sim.samples[k]
+        ]
+
+
 def _aggregate(comparison: InstrumentComparison) -> None:
     """Compute divergences and support labels from the pooled samples."""
+    _pool_copopulated_limb_bins(comparison)
     for kind, real_values in sorted(comparison.real.samples.items()):
         sim_values = comparison.sim.samples.get(kind, [])
         comparison.divergences[kind] = w1_divergence(

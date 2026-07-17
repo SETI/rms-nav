@@ -4,9 +4,9 @@ Writes one figure per figure of merit per instrument (real/sim histogram
 overlays plus the curve overlays) into ``docs/simulator_report/_figures/``
 as ``realism_<instrument>_<fom>.png``, and a deterministic JSON summary
 into ``tests/integration/realism_results/realism_summary.json`` that backs
-the report's tables (per-kind W1 divergences, support labels, the FOM 7
-diagnostic rows, and the artifact-incidence comparison against the catalog
-defaults).
+the report's tables (per-kind W1 divergences, support labels, the FOM 3
+one-sided-stratum disclosure, the FOM 7 diagnostic rows, and the
+artifact-incidence comparison against the catalog defaults).
 
 Two fixed series colors carry sides everywhere: real cohort in blue,
 simulated frames in orange -- a colorblind-safe pair, never cycled.
@@ -429,6 +429,8 @@ def _summary_dict(results: RealismResults) -> dict[str, Any]:
             'fom_support': dict(sorted(comparison.fom_support.items())),
             'fom_frames': dict(sorted(comparison.fom_frames.items())),
             'divergences': kinds,
+            'limb_bins_real_only': list(comparison.limb_bins_real_only),
+            'limb_bins_sim_only': list(comparison.limb_bins_sim_only),
             'spike_split_real': [
                 _round(comparison.spike_split_real[0]),
                 _round(comparison.spike_split_real[1]),

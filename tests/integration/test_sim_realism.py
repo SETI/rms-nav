@@ -98,6 +98,22 @@ def test_sim_side_extraction_is_deterministic() -> None:
         assert np.array_equal(np.asarray(values), np.asarray(second.samples[kind])), kind
 
 
+def test_pooled_limb_statistic_uses_copopulated_bins_only() -> None:
+    """FOM 3 pooling excludes strata that only one side populates."""
+    from tests.integration.sim_realism import InstrumentComparison, _aggregate
+
+    comparison = InstrumentComparison(instrument='coiss_calib_nac')
+    comparison.real.samples['limb_width_p0_r1'] = [2.0] * 10
+    comparison.sim.samples['limb_width_p0_r1'] = [2.5] * 10
+    comparison.real.samples['limb_width_p1_r0'] = [9.0] * 10  # real-only stratum
+    comparison.sim.samples['limb_width_p2_r2'] = [1.0] * 10  # sim-only stratum
+    _aggregate(comparison)
+    assert comparison.real.samples['limb_width_copop'] == [2.0] * 10
+    assert comparison.sim.samples['limb_width_copop'] == [2.5] * 10
+    assert comparison.limb_bins_real_only == ['limb_width_p1_r0']
+    assert comparison.limb_bins_sim_only == ['limb_width_p2_r2']
+
+
 def test_cohort_discovery_covers_known_instruments() -> None:
     """The committed library maps onto the expected sim instruments."""
     cohort = discover_cohort()

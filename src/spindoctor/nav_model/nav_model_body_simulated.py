@@ -167,6 +167,18 @@ def _tight_bbox_extfov(
 class NavModelBodySimulated(NavModelBodyBase):
     """Body NavModel rendered from operator-supplied simulation parameters.
 
+    Attributes:
+        apply_limb_emission_gates: When ``True`` (the default) the LIMB_ARC
+            is emitted only for a well-resolved, low-phase body (the
+            navigation-policy gates below).  Measurement callers (the
+            realism match) set this to ``False``: the silhouette geometry
+            exists regardless of whether a limb fit would be reliable, and
+            the gates-off path emits the *lit geometric limb* -- the
+            phase-0 silhouette boundary restricted to lit vertices --
+            matching the real body model's LIMB_ARC definition instead of
+            the lit-region boundary (which mixes limb and terminator at
+            nonzero phase).
+
     Parameters:
         name: Name of this model instance.
         obs: Observation containing image geometry (used for output shapes
@@ -198,6 +210,7 @@ class NavModelBodySimulated(NavModelBodyBase):
         config: Config | None = None,
     ) -> None:
         super().__init__(name, obs, config=config)
+        self.apply_limb_emission_gates: bool = True
         self._body_name = body_name.upper()
         self._sim_params: dict[str, Any] = dict(sim_params)
         self._model_img: NDArrayFloatType | None = None
@@ -274,28 +287,35 @@ class NavModelBodySimulated(NavModelBodyBase):
         self._metadata['end_time'] = end_time.isoformat()
         self._metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
 
-    def _render(self) -> None:
-        """Generate the simulated image and the matching masks."""
+    def _render_body_image(self, phase_angle_rad: float) -> NDArrayFloatType:
+        """Render the body's data-coordinate image at the given phase angle.
+
+        The predicted shape is read from this model's own params, which need
+        not match what was rendered into the image: an irregular body can be
+        predicted as a mesh (matching pose), as an ellipsoid (shape mismatch),
+        or at a deliberately different pose (chaotic-rotator fixture).
+
+        Parameters:
+            phase_angle_rad: Phase angle of the render in radians.  The
+                model's own phase for the navigation prediction; 0 for the
+                full-silhouette render of the measurement limb path.
+
+        Returns:
+            The rendered data-shape image.
+        """
         p = self._sim_params
         data_size_v = int(self.obs.data_shape_v)
         data_size_u = int(self.obs.data_shape_u)
-        ext_margin_v = int(self.obs.extfov_margin_v)
-        ext_margin_u = int(self.obs.extfov_margin_u)
         rotation_z_rad = float(np.radians(p.get('rotation_z', 0.0)))
         rotation_tilt_rad = float(np.radians(p.get('rotation_tilt', 0.0)))
         illumination_angle_rad = float(np.radians(p.get('illumination_angle', 0.0)))
-        phase_angle_rad = float(np.radians(p.get('phase_angle', 0.0)))
         center_v = float(p.get('center_v', data_size_v / 2.0))
         center_u = float(p.get('center_u', data_size_u / 2.0))
         axis1 = float(p.get('axis1', 0.0))
         axis2 = float(p.get('axis2', 0.0))
         axis3 = float(p.get('axis3', min(axis1, axis2)))
-        # The predicted shape is read from this model's own params, which need
-        # not match what was rendered into the image: an irregular body can be
-        # predicted as a mesh (matching pose), as an ellipsoid (shape mismatch),
-        # or at a deliberately different pose (chaotic-rotator fixture).
         if str(p.get('shape_model', 'ellipsoid')) == 'polyhedral_mesh':
-            sim_img = render_mesh_body_image(
+            return render_mesh_body_image(
                 size=(data_size_v, data_size_u),
                 center=(center_v, center_u),
                 semi_axes_px=(axis1 / 2.0, axis2 / 2.0, axis3 / 2.0),
@@ -304,19 +324,30 @@ class NavModelBodySimulated(NavModelBodyBase):
                 phase_angle=phase_angle_rad,
                 anti_aliasing=1.0,
             )
-        else:
-            sim_img = create_simulated_body(
-                size=(data_size_v, data_size_u),
-                center=(center_v, center_u),
-                axis1=axis1,
-                axis2=axis2,
-                axis3=axis3,
-                rotation_z=rotation_z_rad,
-                rotation_tilt=rotation_tilt_rad,
-                illumination_angle=illumination_angle_rad,
-                phase_angle=phase_angle_rad,
-                anti_aliasing=1,
-            )
+        return create_simulated_body(
+            size=(data_size_v, data_size_u),
+            center=(center_v, center_u),
+            axis1=axis1,
+            axis2=axis2,
+            axis3=axis3,
+            rotation_z=rotation_z_rad,
+            rotation_tilt=rotation_tilt_rad,
+            illumination_angle=illumination_angle_rad,
+            phase_angle=phase_angle_rad,
+            anti_aliasing=1,
+        )
+
+    def _render(self) -> None:
+        """Generate the simulated image and the matching masks."""
+        p = self._sim_params
+        data_size_v = int(self.obs.data_shape_v)
+        data_size_u = int(self.obs.data_shape_u)
+        ext_margin_v = int(self.obs.extfov_margin_v)
+        ext_margin_u = int(self.obs.extfov_margin_u)
+        phase_angle_rad = float(np.radians(p.get('phase_angle', 0.0)))
+        center_v = float(p.get('center_v', data_size_v / 2.0))
+        center_u = float(p.get('center_u', data_size_u / 2.0))
+        sim_img = self._render_body_image(phase_angle_rad)
         body_mask = sim_img > 0.0
         limb_mask = self._compute_limb_mask_from_body_mask(body_mask)
         model_img_full = self.obs.make_extfov_zeros()
@@ -357,6 +388,7 @@ class NavModelBodySimulated(NavModelBodyBase):
         # phase-irregularity factor collapse to 0 (the regular-body case).
         self._km_per_pixel_at_limb = float(p.get('km_per_pixel', 0.0))
         self._metadata['phase_angle_deg'] = float(p.get('phase_angle', 0.0))
+        self._metadata['predicted_diameter_px'] = float(self._predicted_diameter_px)
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
         """Emit the body's NavFeatures.
@@ -405,6 +437,40 @@ class NavModelBodySimulated(NavModelBodyBase):
             features.append(limb_feature)
         return features
 
+    def _lit_geometric_limb_polyline(self) -> tuple[NDArrayFloatType, NDArrayFloatType]:
+        """Lit geometric-limb polyline for the gates-off measurement path.
+
+        The navigation polyline is the boundary of the rendered *lit* region,
+        which at nonzero phase mixes the sharp geometric limb with the soft
+        terminator (the mask edge sits where the shading ramp crosses zero).
+        The realism measurement compares against the real body model's
+        LIMB_ARC, which carries only the lit part of the geometric silhouette
+        boundary and emits the terminator as a separate feature -- so this
+        path reproduces that definition: the silhouette boundary of a phase-0
+        render of the same body, restricted to vertices lit in the true-phase
+        image, with outward normals taken from the full silhouette.
+
+        Returns:
+            ``(vertices_vu, normals_vu)`` in extfov coordinates; empty when
+            the body renders no lit silhouette-boundary pixels.
+        """
+        empty: NDArrayFloatType = np.empty((0, 2), dtype=np.float64)
+        if self._body_mask is None:
+            return empty, empty
+        full_img = self._render_body_image(0.0)
+        full_mask = full_img > 0.0
+        boundary = self._compute_limb_mask_from_body_mask(full_mask)
+        ext_margin_v = int(self.obs.extfov_margin_v)
+        ext_margin_u = int(self.obs.extfov_margin_u)
+        slice_v = slice(ext_margin_v, ext_margin_v + int(self.obs.data_shape_v))
+        slice_u = slice(ext_margin_u, ext_margin_u + int(self.obs.data_shape_u))
+        lit = np.asarray(self._body_mask[slice_v, slice_u], dtype=bool)
+        full_mask_ext = self.obs.make_extfov_false()
+        lit_boundary_ext = self.obs.make_extfov_false()
+        full_mask_ext[slice_v, slice_u] = full_mask
+        lit_boundary_ext[slice_v, slice_u] = boundary & lit
+        return _limb_polyline_from_mask(lit_boundary_ext, full_mask_ext)
+
     def _build_limb_arc_feature(self) -> NavFeature | None:
         """Emit a LIMB_ARC from the rendered silhouette boundary, or ``None``.
 
@@ -416,17 +482,27 @@ class NavModelBodySimulated(NavModelBodyBase):
         arc).  The shadow-side vertices of a higher-phase body carry no sharp
         image edge and are down-weighted by the technique's robust fit rather
         than excluded here.
+
+        With ``apply_limb_emission_gates`` off (the measurement path) the
+        resolution, phase, and arc-length gates are skipped and the polyline
+        is the lit geometric limb instead of the lit-region boundary; see
+        :meth:`_lit_geometric_limb_polyline`.
         """
         if self._limb_mask is None or self._body_mask is None:
             return None
-        if self._predicted_diameter_px < _MIN_LIMB_DIAMETER_PX:
-            return None
-        if float(self._metadata.get('phase_angle_deg', 0.0)) > _LIMB_MAX_PHASE_DEG:
-            return None
-        vertices_vu, normals_vu = _limb_polyline_from_mask(self._limb_mask, self._body_mask)
+        if self.apply_limb_emission_gates:
+            if self._predicted_diameter_px < _MIN_LIMB_DIAMETER_PX:
+                return None
+            if float(self._metadata.get('phase_angle_deg', 0.0)) > _LIMB_MAX_PHASE_DEG:
+                return None
+            vertices_vu, normals_vu = _limb_polyline_from_mask(self._limb_mask, self._body_mask)
+            if vertices_vu.shape[0] < _MIN_LIMB_ARC_VERTICES:
+                return None
+        else:
+            vertices_vu, normals_vu = self._lit_geometric_limb_polyline()
+            if vertices_vu.shape[0] == 0:
+                return None
         n = vertices_vu.shape[0]
-        if n < _MIN_LIMB_ARC_VERTICES:
-            return None
         sigma_normal = np.full(n, _LIMB_SIGMA_NORMAL_PX, dtype=np.float64)
         sigma_tangent = np.full(n, _LIMB_SIGMA_TANGENT_PX, dtype=np.float64)
         return NavFeature(

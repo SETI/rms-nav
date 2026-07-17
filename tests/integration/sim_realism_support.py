@@ -27,6 +27,7 @@ from spindoctor.feature import NavFeatureType
 from spindoctor.feature.feature import NavFeature
 from spindoctor.feature.geometry import LimbPolyline, RingEdgePolyline, StarGeometry
 from spindoctor.nav_model import build_models_for_obs
+from spindoctor.nav_model.nav_model_body_simulated import NavModelBodySimulated
 from spindoctor.nav_orchestrator import NavOrchestrator
 from spindoctor.obs.obs_snapshot import ObsSnapshot
 from spindoctor.sim.realism.artifact_incidence import (
@@ -216,7 +217,19 @@ def prepare_frame_features(
         native units, the extracted features with polyline/star geometry
         translated into sensor pixel coordinates, and per-model metadata.
     """
-    orchestrator = NavOrchestrator(build_models_for_obs(obs), only_models=only_models)
+    models = build_models_for_obs(obs)
+    # Measurement, not navigation: the simulated body model's LIMB_ARC
+    # emission gates (minimum resolved diameter, maximum phase) are
+    # navigation policy, and applying them here would leave the matched
+    # high-phase and small-body scenes with no sim-side limb geometry --
+    # their FOM 3 strata would silently compare different scene mixtures.
+    # Gates off, the model emits the lit geometric limb (the real body
+    # model's LIMB_ARC definition).  A real obs builds no simulated
+    # models, so this changes only the sim side.
+    for model in models:
+        if isinstance(model, NavModelBodySimulated):
+            model.apply_limb_emission_gates = False
+    orchestrator = NavOrchestrator(models, only_models=only_models)
     prep = orchestrator.prepare(obs, apply_gate=False)
     margin_v, margin_u = obs.extfov_margin_vu
     shape_v, shape_u = obs.data_shape_vu
@@ -364,14 +377,16 @@ def extract_feature_samples(
             phase = float(meta.get('phase_angle_deg') or float('nan'))
             diameter = float(meta.get('predicted_diameter_px') or float('nan'))
             if not np.isfinite(diameter):
-                # The simulated body model records no diameter metadata; the
+                # Fallback for a model without diameter metadata: the
                 # polyline's bbox extent is exact for a fully framed matched
                 # body (and a fair lower bound otherwise).
                 bbox = geometry.bbox_extfov_vu
                 diameter = float(max(bbox[2] - bbox[0], bbox[3] - bbox[1]))
             if np.isfinite(phase) and np.isfinite(diameter):
+                # Only binned widths are emitted; the runner builds the
+                # pooled FOM 3 statistic from strata populated on both
+                # sides, so a raw cross-strata pool never appears.
                 out.add(f'limb_width_{_limb_bin_label(phase, diameter)}', widths)
-            out.add('limb_width_all', widths)
             mean_profile = _normalized_mean_profile(profiles)
             if mean_profile is not None:
                 taps = np.linspace(-_EDGE_HALF_LENGTH_PX, _EDGE_HALF_LENGTH_PX, _EDGE_N_SAMPLES)
