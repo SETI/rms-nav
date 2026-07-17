@@ -1066,7 +1066,10 @@ an opacity ``1 - exp(-tau)``. Three consequences follow:
   crescent horns extend past the geometric terminator into a near-complete
   ring -- Titan's ring of light, which falls out of the same layer rather than
   being special-cased. An optional ``detached_px`` shell adds a second haze
-  band at that altitude.
+  band at that altitude. The shell exists only above the limb: the on-disc
+  haze column is shell-blind (a geometrically thin shell projected against
+  the disc adds negligible slant contrast), so the shell appears solely in
+  the tangent glow.
 
 The layer is a truth key: the navigator's predicted body (see
 :doc:`dev_guide_navigation_models_body_simulated`) keeps a hard limb at the

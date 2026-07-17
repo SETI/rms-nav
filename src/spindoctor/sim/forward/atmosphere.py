@@ -24,7 +24,10 @@ optical depth
 
 so ``tau_ref`` is the tangent optical depth at ``ref_altitude_px``.  An
 optional detached haze shell adds a Gaussian bump in ``tau`` centred at
-``detached_px`` above the surface.
+``detached_px`` above the surface.  The shell exists only in this above-limb
+tangent depth: the on-disc excess column is shell-blind (a geometrically
+thin shell projected against the disc adds negligible slant contrast), so
+the shell renders solely as a second band in the tangent glow.
 
 **Single scattering.**  The emergent haze brightness is a source term times
 an opacity term.  The source is a single-scattering albedo scaled by a
