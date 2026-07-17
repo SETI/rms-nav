@@ -45,19 +45,24 @@ __all__ = [
 #
 # Provenance:
 # - coiss_nac: TUNED 2026-07-17 by the realism match against the Cassini
-#   CALIB image-library cohort (24 unsaturated stars over 6 NAC star
-#   frames): cohort encircled-energy radii EE50 = 0.94 px, EE80 = 1.83 px;
-#   these parameters reproduce EE50/EE80 = 0.93/1.75 px through the same
-#   estimator.  The EE80/EE50 ratio (1.94 vs 1.52 for a pure Gaussian)
-#   requires substantial mid-range wing energy, so this is an *effective*
-#   in-window kernel: the fitted w = 0.20 carries the measured 1-8 px halo
-#   energy that the interim FWHM-derived core (sigma 0.55, w 0.025) put
-#   nowhere; the far halo beyond the truncation window remains stray-light
-#   scope.  Replaces the interim FWHM/2.355 value.
-# - coiss_wac: TUNED 2026-07-17 from the cohort's single WAC star frame
-#   (89 stars): cohort EE50/EE80 = 1.12/1.95 px, reproduced at 1.09/1.96.
-#   Single-frame evidence -- treat as cohort-limited, revisit when more WAC
-#   star frames land.  Replaces the interim FWHM/2.355 value.
+#   CALIB image-library cohort (brightest unsaturated stars over 6 NAC
+#   star frames): cohort encircled-energy radii EE50 = 0.91 px,
+#   EE80 = 1.79 px; these parameters reproduce EE50/EE80 = 0.90/1.72 px
+#   through the same estimator.  The EE80/EE50 ratio (1.97 vs 1.52 for a
+#   pure Gaussian) requires substantial mid-range wing energy, so this is
+#   an *effective* in-window kernel: the fitted w = 0.12 carries the
+#   measured 1-8 px halo energy that the interim FWHM-derived core
+#   (sigma 0.55, w 0.025) put nowhere.  A first fit at w = 0.20 matched
+#   the encircled energy but measurably over-lifted the wide-field halo
+#   (sky-patch means and mid-size-body limb widths); w = 0.12 with the
+#   softer core matches the stars without that excess.  The far halo
+#   beyond the truncation window remains stray-light scope.  Replaces the
+#   interim FWHM/2.355 value.
+# - coiss_wac: TUNED 2026-07-17 from the cohort's single WAC star frame:
+#   cohort EE50/EE80 = 1.33/2.16 px through the final estimator; sigma
+#   follows the measured EE50 with the NAC wing shape.  Single-frame
+#   evidence -- treat as cohort-limited, revisit when more WAC star
+#   frames land.  Replaces the interim FWHM/2.355 value.
 # - vgiss: RETAINED interim estimate: the cohort's one star frame (9 stars,
 #   EE50 1.23 px) is consistent with sigma 0.85 through GEOMED resampling
 #   but cannot constrain the wing shape; the Voyager references publish no
@@ -71,8 +76,8 @@ __all__ = [
 #   binned-pixel EE50 0.59 px) and cannot constrain the 1x1 kernel; a
 #   per-readout-mode kernel is future work.
 PSF_KERNELS: dict[str, dict[str, float]] = {
-    'coiss_nac': {'sigma_v': 0.75, 'sigma_u': 0.75, 'w': 0.20, 'r0': 3.0, 'n': 4.0},
-    'coiss_wac': {'sigma_v': 0.95, 'sigma_u': 0.95, 'w': 0.20, 'r0': 3.0, 'n': 4.0},
+    'coiss_nac': {'sigma_v': 0.70, 'sigma_u': 0.70, 'w': 0.12, 'r0': 3.0, 'n': 4.0},
+    'coiss_wac': {'sigma_v': 1.05, 'sigma_u': 1.05, 'w': 0.12, 'r0': 3.0, 'n': 4.0},
     'vgiss': {'sigma_v': 0.85, 'sigma_u': 0.85, 'w': 1.2e-2, 'r0': 2.0, 'n': 3.0},
     'gossi': {'sigma_v': 0.80, 'sigma_u': 0.80, 'w': 1.2e-2, 'r0': 2.0, 'n': 3.0},
     'nhlorri': {'sigma_v': 1.13, 'sigma_u': 0.87, 'w': 1.2e-2, 'r0': 2.0, 'n': 3.0},
