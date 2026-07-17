@@ -6,9 +6,9 @@ Cassini-class scene in under 8 s -- for a star-field frame (the optics +
 detector stack), for a frame dominated by a large lit body with limb
 relief (the topographic body renderer's split-resolution path plus the
 terminator shadow march), and for a twelve-feature ring system (the
-annulus-bounded ring stage's scaling with feature count).  The budget is a *cold-render* budget:
-the render caches are cleared so the timed render pays the kernel-build
-and compile costs a first render pays.  One-time costs that are not render
+annulus-bounded ring stage's scaling with feature count).  The budget is a
+*cold-render* budget: the render caches are cleared so the timed render pays
+the kernel-build and compile costs a first render pays.  One-time costs that are not render
 cost -- the lazy YAML config load, module imports -- are paid by an untimed
 warm-up render (whose caches are cleared again) before the timers start.
 
