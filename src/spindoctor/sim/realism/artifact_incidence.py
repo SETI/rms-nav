@@ -30,9 +30,6 @@ __all__ = [
     'split_stationary_spikes',
 ]
 
-# MAD to sigma conversion for a normal distribution.
-_MAD_TO_SIGMA = 1.4826
-
 
 @dataclass(frozen=True)
 class ArtifactIncidence:
@@ -62,7 +59,7 @@ def _row_is_lost(row: NDArrayFloatType, above: NDArrayFloatType, below: NDArrayF
 
 
 def measure_artifact_incidence(
-    image: NDArrayFloatType, *, spike_nsigma: float = 8.0
+    image: NDArrayFloatType, *, spike_q99_factor: float = 10.0
 ) -> ArtifactIncidence:
     """Measure line loss and single-pixel spikes on one frame.
 
@@ -72,14 +69,21 @@ def measure_artifact_incidence(
     in an all-constant frame (a blank frame) are not counted.
 
     Spikes: a pixel counts as a spike when it exceeds its 3x3
-    median-filtered surrounding by ``spike_nsigma`` times the frame's
-    robust noise sigma.  This catches hot pixels and cosmic rays; scene
-    point sources brighter than the threshold are also caught, which is
-    why the comparison runs the same detector on both cohorts.
+    median-filtered surrounding by ``spike_q99_factor`` times the 99th
+    percentile of the frame's absolute residuals.  Anchoring the threshold
+    to a high quantile of the residual distribution itself -- rather than a
+    MAD-based sigma -- keeps the detector meaningful on real calibrated
+    frames, whose residual texture is strongly non-Gaussian (quantization
+    floors compress the MAD while banding and compression texture fatten
+    the tails); an artifact spike (hot pixel near full well, cosmic ray)
+    sits orders of magnitude above either.  Scene point sources brighter
+    than the threshold are also caught, which is why the comparison runs
+    the same detector on both cohorts.
 
     Parameters:
         image: 2-D frame in its native units.
-        spike_nsigma: Spike detection threshold in robust sigmas.
+        spike_q99_factor: Spike threshold as a multiple of the residual
+            distribution's 99th absolute percentile.
 
     Returns:
         The per-frame measurements.
@@ -104,12 +108,11 @@ def measure_artifact_incidence(
     local_median = scipy.ndimage.median_filter(arr, size=3, mode='nearest')
     residual = arr - local_median
     finite = residual[np.isfinite(residual)]
-    mad = float(np.median(np.abs(finite - np.median(finite)))) if finite.size else 0.0
-    sigma = mad * _MAD_TO_SIGMA
-    if sigma <= 0.0:
+    q99 = float(np.percentile(np.abs(finite), 99.0)) if finite.size else 0.0
+    if q99 <= 0.0:
         spikes = np.zeros(arr.shape, dtype=bool)
     else:
-        spikes = residual > spike_nsigma * sigma
+        spikes = residual > spike_q99_factor * q99
     positions = np.argwhere(spikes).astype(np.float64)
     spike_fraction = float(np.count_nonzero(spikes)) / arr.size
     return ArtifactIncidence(
