@@ -77,6 +77,7 @@ def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
     _check_albedo_texture(obj.get('albedo_texture'), label=label, source=source)
     _check_disc_texture(obj.get('disc_texture'), label=label, source=source)
     _check_transits(obj.get('transits'), label=label, source=source)
+    _check_atmosphere(obj.get('atmosphere'), label=label, source=source)
     pose = obj.get('pose_euler_deg')
     if pose is not None:
         if not isinstance(pose, (list, tuple)) or len(pose) != 3:
@@ -163,6 +164,51 @@ def _check_body_relief_and_photometry(obj: dict[str, Any], *, label: str, source
     _check_optional_positive_number(
         surge.get('width_deg'), f'{label}.opposition_surge.width_deg', source=source
     )
+
+
+# The exponential haze layer: scale height and reference-altitude tangent
+# optical depth (both required and positive) define the column; the
+# reference altitude, the Henyey-Greenstein asymmetry (forward-scattering
+# when positive), and an optional detached-shell altitude are optional.
+_ATMOSPHERE_KEYS: frozenset[str] = frozenset(
+    {'scale_height_px', 'tau_ref', 'ref_altitude_px', 'g', 'detached_px'}
+)
+
+
+def _check_atmosphere(value: Any, *, label: str, source: str) -> None:
+    """Validate one body's ``atmosphere`` map (exponential haze layer)."""
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise SimSceneValidationError(
+            f'{source}: {label}.atmosphere must be a mapping when present'
+        )
+    unknown = set(value) - _ATMOSPHERE_KEYS
+    if unknown:
+        raise SimSceneValidationError(
+            f'{source}: {label}.atmosphere: unknown keys: {sorted(unknown)}'
+        )
+    for required in ('scale_height_px', 'tau_ref'):
+        if value.get(required) is None:
+            raise SimSceneValidationError(f'{source}: {label}.atmosphere.{required} is required')
+    _check_optional_positive_number(
+        value.get('scale_height_px'), f'{label}.atmosphere.scale_height_px', source=source
+    )
+    _check_optional_positive_number(
+        value.get('tau_ref'), f'{label}.atmosphere.tau_ref', source=source
+    )
+    _check_optional_nonnegative_number(
+        value.get('ref_altitude_px'), f'{label}.atmosphere.ref_altitude_px', source=source
+    )
+    _check_optional_positive_number(
+        value.get('detached_px'), f'{label}.atmosphere.detached_px', source=source
+    )
+    g = value.get('g')
+    _check_optional_number(g, f'{label}.atmosphere.g', source=source)
+    if g is not None and not -1.0 < float(g) < 1.0:
+        raise SimSceneValidationError(
+            f'{source}: {label}.atmosphere.g must lie in (-1, 1); got {g!r}'
+        )
 
 
 # The multiplicative albedo texture: a band-limited noise field (rms +

@@ -170,6 +170,13 @@ _FULL_SCENE: dict[str, Any] = {
                     'shadow': {'dv_px': 12.0, 'du_px': -4.0, 'radius_px': 6.0, 'darkness': 0.8},
                 }
             ],
+            'atmosphere': {
+                'scale_height_px': 4.0,
+                'tau_ref': 1.5,
+                'ref_altitude_px': 1.0,
+                'g': 0.6,
+                'detached_px': 8.0,
+            },
             'shading': 'gouraud',
             'pose_scatter': {'sigma_deg': 1.5},
             'seed': 11,

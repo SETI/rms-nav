@@ -1,0 +1,31 @@
+schema_version: 2
+scene_name: titan_crescent_horns
+instrument: coiss_nac
+size_v: 260
+size_u: 260
+random_seed: 7
+exposure_sec: 1.0
+bodies:
+  - name: TITAN
+    shape_model: ellipsoid
+    center_v: 130.0
+    center_u: 130.0
+    axis1: 170.0
+    axis2: 170.0
+    axis3: 170.0
+    illumination_angle: 90.0
+    phase_angle: 155.0
+    atmosphere:
+      scale_height_px: 10.0
+      tau_ref: 3.0
+      ref_altitude_px: 0.0
+      g: 0.75
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.2
+offset_u: -0.8
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: low

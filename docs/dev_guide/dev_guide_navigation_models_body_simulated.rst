@@ -55,10 +55,19 @@ Restrictions and assumptions
   radius, negative axes) are rejected by
   :func:`~spindoctor.nav_model.sim_body.create_simulated_body`.
 - The body appearance keys -- crater terrain, the limb-relief field, the photometric
-  law and opposition surge, the albedo and disc textures and transits, the mesh
-  shading mode and pose scatter, and anti-aliasing -- are truth keys the boundary
-  filter strips, so this model never sees them; the predicted template always
-  renders as a smooth Lambert body at maximum anti-aliasing and zero surface relief.
+  law and opposition surge, the albedo and disc textures and transits, the atmospheric
+  haze layer, the mesh shading mode and pose scatter, and anti-aliasing -- are truth
+  keys the boundary filter strips, so this model never sees them; the predicted
+  template always renders as a smooth Lambert body at maximum anti-aliasing and zero
+  surface relief.
+- The atmosphere key deserves its own note, because its mismatch is deliberate rather
+  than incidental. When the image side renders a haze layer, the limb becomes a soft
+  ramp whose apparent radius sits outside the reference radius and shifts with phase
+  (see :ref:`sim-atmosphere`), while this model still predicts a hard limb at the
+  reference radius. That gap is the substrate for the Titan altitude-versus-phase
+  problem: a limb fit against the haze recovers a small offset toward the sunlit limb
+  whose size tracks the phase-dependent apparent limb radius (and the haze
+  parameters), and the ``atmosphere`` catalog scenes pin that measured bias.
 - The simulated body is rendered onto a fixed extfov image without per-instrument noise
   or PSF smearing; the operator's downstream noise-injection pipeline supplies those.
 

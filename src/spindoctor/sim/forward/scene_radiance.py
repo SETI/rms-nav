@@ -15,16 +15,27 @@ background sky draws its counts from a cumulative star-count law and renders the
 through the same flux/point-mass path.
 
 Occlusion: bodies paint far to near by ``range_km`` (overlaps without
-explicit ranges are a scene error).  The optical-depth ``ring_system``
-composites over that stack as a transmission screen, per pixel and
-depth-ordered against the bodies (``img = I_ring + exp(-tau/mu) *
-img_behind``).  Point sources sit at infinity: the ring screen attenuates
-them and an opaque body's silhouette extinguishes them (the painted, lit
-silhouette -- a fully dark night side does not occult, a stated
-approximation of the mask-based body renderers).
+explicit ranges are a scene error).  Only the solid silhouette paints
+opaquely: an atmospheric body's above-limb halo is a translucent screen
+(emission plus ``exp(-tau)`` transmission) composited like the ring system's,
+so it neither erases the background nor enters the body masks or the depth
+map.  The halo does enter the overlap checks: its compositing order against
+whatever it covers is set by ``range_km``, so a halo that reaches another
+body's silhouette, another halo, or the ring system requires explicit
+ranges on both participants exactly as opaque overlaps do.  The
+optical-depth ``ring_system`` composites
+over the painted stack as a transmission screen, per pixel and depth-ordered
+against the bodies (``img = I_ring + exp(-tau/mu) * img_behind``); the halo
+screens composite in the same far-to-near depth order, interleaved with the
+ring by each halo's body range.  Point sources sit at infinity: every
+translucent screen (ring, halo) attenuates them and an opaque body's
+silhouette extinguishes them (the painted, lit silhouette -- a fully dark
+night side does not occult, a stated approximation of the mask-based body
+renderers).
 """
 
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -36,6 +47,7 @@ from spindoctor.sim.forward.artifacts_catalog import (
     resolve_sky_pixel_scale_arcsec,
     resolve_star_flux_zero_point,
 )
+from spindoctor.sim.forward.atmosphere import HaloScreen
 from spindoctor.sim.forward.body import render_single_body
 from spindoctor.sim.forward.optics import effective_psf
 from spindoctor.sim.forward.ring_system import RingSystemMaps, render_ring_system
@@ -278,15 +290,28 @@ def compose_scene_radiance(
 
     # Painted-so-far tracking for the depth-ambiguity check: overlapping
     # bodies must ALL carry an explicit scene range_km, or their stacking
-    # would be a silent guess.
+    # would be a silent guess.  Halos take the same treatment after the
+    # paint loop: a halo composites against its neighbors by range_km, so
+    # a halo that reaches another body, another halo, or the ring system
+    # without explicit ranges on both sides is the same silent guess.
     painted_items: list[tuple[str, NDArrayBoolType, bool]] = []
-    # Per-pixel observer distance of the nearest painted body, for the ring
-    # system's per-pixel compositing; built only when the scene has one.
+    # Per-pixel observer distance of the nearest painted body, for the
+    # per-pixel compositing of the translucent screens (ring system, body
+    # halos); built only when the scene has at least one such screen.
     ring_system_params = params.get('ring_system')
     has_ring_system = isinstance(ring_system_params, Mapping)
+    has_atmosphere = any(isinstance(bp.get('atmosphere'), Mapping) for bp in bodies_params)
     body_depth_map: NDArrayFloatType | None = (
-        np.full((size_v, size_u), np.inf, dtype=np.float64) if has_ring_system else None
+        np.full((size_v, size_u), np.inf, dtype=np.float64)
+        if has_ring_system or has_atmosphere
+        else None
     )
+    # Atmospheric bodies' halo screens with their body ranges, collected in
+    # render (far-to-near) order for the screen compositing below; the
+    # parallel check list carries each halo's body name and whether that
+    # body's range_km is explicit, for the halo-ambiguity checks.
+    halo_screens: list[tuple[float, HaloScreen]] = []
+    halo_check_items: list[tuple[str, bool, HaloScreen]] = []
 
     for sort_key, item_params, orig_idx, explicit_depth in render_items:
         body_mask, body_info = render_single_body(
@@ -313,8 +338,17 @@ def compose_scene_radiance(
             # Painting runs far to near, so the last writer per pixel is
             # the nearest body.
             body_depth_map[body_mask] = sort_key[0]
+        halo = body_info.get('halo')
+        if halo is not None:
+            halo_screens.append((sort_key[0], halo))
+            halo_check_items.append((body_info['name'], explicit_depth, halo))
         _check_depth_ambiguity(painted_items, body_info['name'], body_mask, explicit_depth)
         painted_items.append((body_info['name'], body_mask, explicit_depth))
+
+    # Halo-ambiguity check over the completed paint: a halo composites
+    # against everything it covers by range_km, so its overlaps demand the
+    # same explicit depths the opaque overlaps do.
+    _check_halo_ambiguity(painted_items, halo_check_items)
 
     # Build body_masks in original order (matching bodies_params)
     body_masks: list[NDArrayBoolType] = []
@@ -350,6 +384,7 @@ def compose_scene_radiance(
         )
         _check_ring_system_ambiguity(
             painted_items,
+            halo_check_items,
             ring_maps.mask,
             ring_explicit=ring_system_params.get('range_km') is not None,
         )
@@ -359,13 +394,20 @@ def compose_scene_radiance(
             ring_apply = ring_maps.mask
         else:
             ring_apply = ring_maps.mask & (ring_maps.depth_km < body_depth_map)
-        img[ring_apply] = (
-            ring_maps.intensity[ring_apply] + ring_maps.transmission[ring_apply] * img[ring_apply]
-        )
 
-    # Point sources sit at infinity: the ring screen attenuates them wherever
-    # it carries optical depth (a body in front of the ring zeroes them below
-    # anyway), and an opaque body extinguishes them entirely.
+    # The translucent screens (ring system and body halos) composite over the
+    # painted opaque stack far to near, each as img = I + T * img_behind; the
+    # ring's per-pixel depth interleaves with the halos' body ranges.
+    screen_ops = _translucent_screen_ops(
+        halo_screens, ring_maps=ring_maps, ring_apply=ring_apply, body_depth_map=body_depth_map
+    )
+    for op in screen_ops:
+        view = img[op.box_v, op.box_u]
+        view[op.mask] = op.intensity[op.mask] + op.transmission[op.mask] * view[op.mask]
+
+    # Point sources sit at infinity: every translucent screen attenuates them
+    # wherever it carries optical depth (a body in front of the ring zeroes
+    # them below anyway), and an opaque body extinguishes them entirely.
     body_occlusion_mask: NDArrayBoolType | None = None
     if body_masks and bool(np.any(point_e)):
         body_occlusion_mask = np.zeros((size_v, size_u), dtype=np.bool_)
@@ -375,6 +417,9 @@ def compose_scene_radiance(
             body_occlusion_mask = None
     if ring_maps is not None and ring_maps.mask.any():
         point_e *= ring_maps.transmission
+    for _halo_range, halo_screen in halo_screens:
+        box = (halo_screen.box_v, halo_screen.box_u)
+        point_e[box] *= halo_screen.transmission[box]
     if body_occlusion_mask is not None:
         point_e[body_occlusion_mask] = 0.0
 
@@ -405,9 +450,13 @@ def compose_scene_radiance(
             catalog_scatter_seed=catalog_scatter_seed,
         )
         # The star layer carries the same occlusion the primary point-source
-        # plane received (ring transmission, then opaque-body extinction).
+        # plane received (ring and halo transmission, then opaque-body
+        # extinction).
         if ring_maps is not None and ring_maps.mask.any():
             stars_layer *= ring_maps.transmission
+        for _halo_range, halo_screen in halo_screens:
+            box = (halo_screen.box_v, halo_screen.box_u)
+            stars_layer[box] *= halo_screen.transmission[box]
         if body_occlusion_mask is not None:
             stars_layer[body_occlusion_mask] = 0.0
         bodies_layer = np.zeros((size_v, size_u), dtype=np.float64)
@@ -424,12 +473,23 @@ def compose_scene_radiance(
                 ref_center_u=ref_center_u,
                 oversample=os,
             )
-        # The ring system's emission belongs to the rings class and its screen
-        # dims the bodies behind it, so the per-class sum reproduces the
-        # composite exactly.
-        if ring_maps is not None and ring_apply is not None:
-            bodies_layer[ring_apply] *= ring_maps.transmission[ring_apply]
-            rings_layer[ring_apply] += ring_maps.intensity[ring_apply]
+        # The screens replay class by class: ring emission belongs to the
+        # rings layer and halo glow to the bodies layer, while each screen's
+        # transmission dims BOTH layers behind it, so the per-class sum
+        # reproduces the composite exactly.
+        for op in screen_ops:
+            bodies_view = bodies_layer[op.box_v, op.box_u]
+            rings_view = rings_layer[op.box_v, op.box_u]
+            if op.is_ring:
+                bodies_view[op.mask] *= op.transmission[op.mask]
+                rings_view[op.mask] = (
+                    op.intensity[op.mask] + op.transmission[op.mask] * rings_view[op.mask]
+                )
+            else:
+                bodies_view[op.mask] = (
+                    op.intensity[op.mask] + op.transmission[op.mask] * bodies_view[op.mask]
+                )
+                rings_view[op.mask] *= op.transmission[op.mask]
         frame.truth['radiance_layers'] = {
             'stars': stars_layer,
             'bodies': bodies_layer,
@@ -476,6 +536,113 @@ def compose_scene_radiance(
     )
 
 
+@dataclass(frozen=True)
+class _ScreenOp:
+    """One translucent-screen application over the composed image.
+
+    Applied to the ``(box_v, box_u)`` view of the frame as ``view[mask] =
+    intensity[mask] + transmission[mask] * view[mask]`` (the screen is
+    identity outside its box); ``is_ring`` routes the emission to the rings
+    class when the differential-smear layers replay the ops per class.
+
+    Parameters:
+        box_v: Frame rows the op is restricted to.
+        box_u: Frame columns the op is restricted to.
+        mask: Box-sized mask of the pixels the screen composites over.
+        intensity: Box-sized emission map.
+        transmission: Box-sized per-pixel background transmission.
+        is_ring: Whether the emission belongs to the rings class (else the
+            bodies class -- a body halo).
+    """
+
+    box_v: slice
+    box_u: slice
+    mask: NDArrayBoolType
+    intensity: NDArrayFloatType
+    transmission: NDArrayFloatType
+    is_ring: bool
+
+
+def _translucent_screen_ops(
+    halo_screens: list[tuple[float, HaloScreen]],
+    *,
+    ring_maps: RingSystemMaps | None,
+    ring_apply: NDArrayBoolType | None,
+    body_depth_map: NDArrayFloatType | None,
+) -> list[_ScreenOp]:
+    """Order the scene's translucent screens far to near for compositing.
+
+    Halo screens arrive in far-to-near body order.  The ring system's
+    per-pixel depth interleaves with the halos' scalar body ranges: the ring
+    pixels at or beyond a halo's body range apply before that halo (the ring
+    shows through the glow, attenuated), and the pixels nearer than every
+    halo apply last (the ring screens the glow).  A ring system without a
+    ``range_km`` has no depth relation, so it applies last in full.  Each
+    halo composites only where no nearer opaque body covers it.
+
+    Parameters:
+        halo_screens: ``(body range_km, halo screen)`` per atmospheric body,
+            far to near.
+        ring_maps: The rendered ring-system maps, or None.
+        ring_apply: Ring pixels that survive the body depth test, or None.
+        body_depth_map: Per-pixel depth of the nearest painted body; present
+            whenever any screen exists.
+
+    Returns:
+        The screen applications, in application (far-to-near) order.
+    """
+    full = slice(None)
+    ops: list[_ScreenOp] = []
+    remaining_ring: NDArrayBoolType | None = None
+    if ring_maps is not None and ring_apply is not None:
+        remaining_ring = ring_apply.copy() if halo_screens else ring_apply
+    for halo_range, screen in halo_screens:
+        if remaining_ring is not None and ring_maps is not None and ring_maps.depth_km is not None:
+            behind = remaining_ring & (ring_maps.depth_km >= halo_range)
+            if behind.any():
+                ops.append(
+                    _ScreenOp(
+                        box_v=full,
+                        box_u=full,
+                        mask=behind,
+                        intensity=ring_maps.intensity,
+                        transmission=ring_maps.transmission,
+                        is_ring=True,
+                    )
+                )
+                remaining_ring = remaining_ring & ~behind
+        assert body_depth_map is not None
+        # The screen is identity outside its bounding box, so the op (and
+        # every consumer's work) is restricted to the box exactly.
+        box_v, box_u = screen.box_v, screen.box_u
+        emission = screen.emission[box_v, box_u]
+        transmission = screen.transmission[box_v, box_u]
+        visible = screen.mask & (body_depth_map[box_v, box_u] > halo_range)
+        if visible.any():
+            ops.append(
+                _ScreenOp(
+                    box_v=box_v,
+                    box_u=box_u,
+                    mask=visible,
+                    intensity=emission,
+                    transmission=transmission,
+                    is_ring=False,
+                )
+            )
+    if remaining_ring is not None and ring_maps is not None and remaining_ring.any():
+        ops.append(
+            _ScreenOp(
+                box_v=full,
+                box_u=full,
+                mask=remaining_ring,
+                intensity=ring_maps.intensity,
+                transmission=ring_maps.transmission,
+                is_ring=True,
+            )
+        )
+    return ops
+
+
 def _check_depth_ambiguity(
     painted_items: list[tuple[str, NDArrayBoolType, bool]],
     item_label: str,
@@ -513,20 +680,106 @@ def _check_depth_ambiguity(
             )
 
 
-def _check_ring_system_ambiguity(
-    painted_items: list[tuple[str, NDArrayBoolType, bool]],
-    ring_mask: NDArrayBoolType,
-    *,
-    ring_explicit: bool,
-) -> None:
-    """Fail when the ring system overlaps painted bodies without depths.
+def _halo_screens_overlap(screen_a: HaloScreen, screen_b: HaloScreen) -> bool:
+    """Whether two halo screens carry haze on any common pixel.
 
-    Per-pixel depth ordering against a body needs an explicit ``range_km`` on
-    both the ring system and the body.
+    Each screen's mask is box-sized, so the test intersects the two bounding
+    boxes and compares the corresponding mask windows.
+
+    Parameters:
+        screen_a: One halo screen.
+        screen_b: The other halo screen.
+
+    Returns:
+        True when the screens' masked pixels intersect.
+    """
+    v_lo = max(screen_a.box_v.start, screen_b.box_v.start)
+    v_hi = min(screen_a.box_v.stop, screen_b.box_v.stop)
+    u_lo = max(screen_a.box_u.start, screen_b.box_u.start)
+    u_hi = min(screen_a.box_u.stop, screen_b.box_u.stop)
+    if v_lo >= v_hi or u_lo >= u_hi:
+        return False
+    window_a = screen_a.mask[
+        v_lo - screen_a.box_v.start : v_hi - screen_a.box_v.start,
+        u_lo - screen_a.box_u.start : u_hi - screen_a.box_u.start,
+    ]
+    window_b = screen_b.mask[
+        v_lo - screen_b.box_v.start : v_hi - screen_b.box_v.start,
+        u_lo - screen_b.box_u.start : u_hi - screen_b.box_u.start,
+    ]
+    return bool(np.any(window_a & window_b))
+
+
+def _check_halo_ambiguity(
+    painted_items: list[tuple[str, NDArrayBoolType, bool]],
+    halo_check_items: list[tuple[str, bool, HaloScreen]],
+) -> None:
+    """Fail when a halo overlaps another body or halo without explicit depths.
+
+    A halo composites against everything it covers by its body's
+    ``range_km``, so an overlap ordered only by the positional default
+    ranges would be a silent guess exactly like an opaque overlap: a halo
+    that reaches another body's painted silhouette, or another body's halo,
+    requires an explicit scene ``range_km`` on both bodies.  A halo over
+    only the empty sky needs no range: its order is unobservable.
 
     Parameters:
         painted_items: ``(label, painted mask, explicit range_km?)`` for
             every painted body.
+        halo_check_items: ``(body label, explicit range_km?, halo screen)``
+            for every atmospheric body, in render order.
+
+    Raises:
+        SimSceneValidationError: If a halo overlaps another body's paint or
+            halo and either body lacks an explicit ``range_km``.
+    """
+    for halo_label, halo_explicit, screen in halo_check_items:
+        if not screen.mask.any():
+            continue
+        box = (screen.box_v, screen.box_u)
+        for other_label, other_mask, other_explicit in painted_items:
+            if other_label == halo_label:
+                continue
+            if halo_explicit and other_explicit:
+                continue
+            if np.any(other_mask[box] & screen.mask):
+                raise SimSceneValidationError(
+                    f'the halo of body {halo_label!r} overlaps body {other_label!r} '
+                    f'but they do not both carry an explicit range_km; set range_km '
+                    f'on both to order them'
+                )
+    for index, (label_a, explicit_a, screen_a) in enumerate(halo_check_items):
+        for label_b, explicit_b, screen_b in halo_check_items[index + 1 :]:
+            if explicit_a and explicit_b:
+                continue
+            if _halo_screens_overlap(screen_a, screen_b):
+                raise SimSceneValidationError(
+                    f'the halos of bodies {label_a!r} and {label_b!r} overlap but '
+                    f'they do not both carry an explicit range_km; set range_km on '
+                    f'both to order them'
+                )
+
+
+def _check_ring_system_ambiguity(
+    painted_items: list[tuple[str, NDArrayBoolType, bool]],
+    halo_check_items: list[tuple[str, bool, HaloScreen]],
+    ring_mask: NDArrayBoolType,
+    *,
+    ring_explicit: bool,
+) -> None:
+    """Fail when the ring system overlaps bodies or halos without depths.
+
+    Per-pixel depth ordering against a body needs an explicit ``range_km`` on
+    both the ring system and the body.  A body's translucent halo takes the
+    same rule: the ring interleaves with a halo by the two ranges, so a ring
+    over a halo ordered only by positional defaults (or a depth-less ring
+    that would silently screen the halo) is the same ambiguity.
+
+    Parameters:
+        painted_items: ``(label, painted mask, explicit range_km?)`` for
+            every painted body.
+        halo_check_items: ``(body label, explicit range_km?, halo screen)``
+            for every atmospheric body, in render order.
         ring_mask: Pixels where the ring system carries optical depth.
         ring_explicit: Whether the ring system carries an explicit
             ``range_km``.
@@ -544,6 +797,17 @@ def _check_ring_system_ambiguity(
             raise SimSceneValidationError(
                 f'ring_system and body {label!r} overlap but do not both carry an '
                 f'explicit range_km; set range_km on both to order them'
+            )
+    for halo_label, halo_explicit, screen in halo_check_items:
+        if ring_explicit and halo_explicit:
+            continue
+        if not screen.mask.any():
+            continue
+        if np.any(ring_mask[screen.box_v, screen.box_u] & screen.mask):
+            raise SimSceneValidationError(
+                f'ring_system and the halo of body {halo_label!r} overlap but do '
+                f'not both carry an explicit range_km; set range_km on both to '
+                f'order them'
             )
 
 

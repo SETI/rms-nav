@@ -209,6 +209,18 @@ class SimEditorBase(QMainWindow):
         """Gate the mesh-extras group by shape (BodyAppearanceMixin)."""
         raise NotImplementedError
 
+    def _body(self, idx: int) -> dict[str, Any] | None:
+        """The body dict at ``idx``, or None (BodyAppearanceMixin)."""
+        raise NotImplementedError
+
+    def _body_tab_widget(self, idx: int) -> QWidget | None:
+        """The built body tab widget at ``idx``, or None (BodyAppearanceMixin)."""
+        raise NotImplementedError
+
+    def _build_atmosphere_group(self, w: QWidget, idx: int, p: dict[str, Any]) -> QGroupBox:
+        """Build the body atmosphere group (BodyAtmosphereMixin)."""
+        raise NotImplementedError
+
     def _build_ring_tab(self, idx: int) -> QWidget:
         """Build a ring tab widget (implemented in RingTabMixin)."""
         raise NotImplementedError

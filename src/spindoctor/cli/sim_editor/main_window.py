@@ -31,6 +31,7 @@ from spindoctor.cli.sim_editor.artifacts_tab import ArtifactsTabMixin
 from spindoctor.cli.sim_editor.background_stars import BackgroundStarsMixin
 from spindoctor.cli.sim_editor.base import SimEditorBase
 from spindoctor.cli.sim_editor.body_appearance import BodyAppearanceMixin
+from spindoctor.cli.sim_editor.body_atmosphere import BodyAtmosphereMixin
 from spindoctor.cli.sim_editor.body_tab import BodyTabMixin
 from spindoctor.cli.sim_editor.expected_outcome import ExpectedOutcomeMixin
 from spindoctor.cli.sim_editor.global_fields import GlobalFieldsMixin
@@ -56,6 +57,7 @@ class CreateSimulatedImageModel(
     BackgroundStarsMixin,
     ExpectedOutcomeMixin,
     BodyAppearanceMixin,
+    BodyAtmosphereMixin,
     BodyTabMixin,
     RingAdvancedMixin,
     RingTabMixin,

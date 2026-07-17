@@ -132,6 +132,44 @@ def _body_psf_detector_scene(size: int) -> dict[str, Any]:
     return scene
 
 
+def _haze_body_psf_detector_scene(size: int) -> dict[str, Any]:
+    """A body-dominated frame whose body also carries an atmospheric haze layer.
+
+    The lit relief body of the plain budget scene at reduced semi-axes, plus
+    an ``atmosphere`` block with a detached shell at oversample 4: the haze
+    evaluation and its halo transmission screen run on top of the
+    topographic render, the PSF convolution, and the detector stack.  The
+    haze cost scales with the bounding box of the body plus its halo (all
+    coordinate grids and per-pixel terms are built only inside that box),
+    not with the frame, so this holds the same 2 s (512) and 8 s (1024)
+    single-core budgets as the plain body scene.
+    """
+    scene = _body_psf_detector_scene(size)
+    # The body shrinks from the plain scene's 0.7 frame widths to 0.55: at
+    # 0.7 the thin-haze 1024 render measured 7.0-7.7 s CPU against the 8 s
+    # budget on quiet serial runs of the reference host (as little as ~4%
+    # headroom on the slower runs -- flake territory); at 0.55 it measures
+    # 6.0-6.3 s best-of-3 across quiet serial runs on the same host (21-25%
+    # headroom), while the disc still dominates the frame and the full haze
+    # stack stays exercised.
+    for axis_key in ('axis1', 'axis2', 'axis3'):
+        scene['bodies'][0][axis_key] = size * 0.55
+    # A realistically thin haze (scale height a few pixels) relative to the
+    # large body, so the halo adds only a narrow margin to the body's own
+    # bounding box.  A thick variant (scale_height_px 20, detached_px 60)
+    # measures within the 1024 budget too, but with under 5% headroom --
+    # not enough margin for a loaded host -- so the committed budget scene
+    # keeps the thin geometry.
+    scene['bodies'][0]['atmosphere'] = {
+        'scale_height_px': 4.0,
+        'tau_ref': 3.0,
+        'ref_altitude_px': 0.0,
+        'g': 0.6,
+        'detached_px': 12.0,
+    }
+    return scene
+
+
 def _ring_psf_detector_scene(size: int) -> dict[str, Any]:
     """A size x size ring-system frame with a PSF and the full detector stack.
 
@@ -281,6 +319,16 @@ def test_512_body_render_under_2s() -> None:
 def test_1024_body_render_under_8s() -> None:
     """A 1024x1024 lit-body scene with relief renders in under 8 s single-core."""
     _assert_cold_render_budget(_body_psf_detector_scene(1024), 8.0, '1024x1024 body')
+
+
+def test_512_haze_body_render_under_2s() -> None:
+    """A 512x512 haze-body scene renders in under 2 s single-core (cold)."""
+    _assert_cold_render_budget(_haze_body_psf_detector_scene(512), 2.0, '512x512 haze body')
+
+
+def test_1024_haze_body_render_under_8s() -> None:
+    """A 1024x1024 haze-body scene renders in under 8 s single-core (cold)."""
+    _assert_cold_render_budget(_haze_body_psf_detector_scene(1024), 8.0, '1024x1024 haze body')
 
 
 def test_1024_ring_system_render_under_8s() -> None:

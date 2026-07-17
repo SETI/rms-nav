@@ -8,7 +8,10 @@ widget writes only its own key.  The groups cover the topographic renderer's
 truth keys -- the limb-relief field, the photometric law and opposition surge,
 the multiplicative albedo texture and giant-planet disc texture, transiting
 moons and their shadows -- and the mesh-only shading / detail / pose-scatter
-extras, which are enabled only for a polyhedral-mesh body.
+extras, which are enabled only for a polyhedral-mesh body.  The atmosphere
+(haze) group lives in its own sibling module
+(:mod:`spindoctor.cli.sim_editor.body_atmosphere`); this module's group
+builder list places it among the others.
 
 Every widget reference the round-trip and per-widget tests reach for is stored
 on the tab widget ``w`` (``w.relief_group``, ``w.spot_rows``, and so on), so a
@@ -108,6 +111,7 @@ class BodyAppearanceMixin(SimEditorBase):
         layout.addWidget(self._build_albedo_texture_group(w, idx, p))
         layout.addWidget(self._build_disc_texture_group(w, idx, p))
         layout.addWidget(self._build_transits_group(w, idx, p))
+        layout.addWidget(self._build_atmosphere_group(w, idx, p))
         mesh_group = self._build_mesh_extras_group(w, idx, p)
         layout.addWidget(mesh_group)
         w.mesh_extras_group = mesh_group  # type: ignore[attr-defined]

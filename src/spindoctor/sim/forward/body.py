@@ -15,6 +15,7 @@ boundary: they are truth keys the navigator never sees (its best model is
 the smooth Lambert ellipsoid).
 """
 
+import math
 from functools import lru_cache
 from typing import Any, cast
 
@@ -22,6 +23,11 @@ import numpy as np
 from scipy import ndimage
 
 from spindoctor.sim.ellipsoid_geometry import ellipsoid_image_normals, lambert_from_normals
+from spindoctor.sim.forward.atmosphere import (
+    HaloScreen,
+    apply_atmosphere,
+    atmosphere_spec_from_params,
+)
 from spindoctor.sim.forward.body_texture import (
     albedo_spec_from_params,
     disc_texture_spec_from_params,
@@ -802,6 +808,33 @@ def render_single_body(
             anti_aliasing=anti_aliasing,
             body_seed=body_seed,
         )
+
+    # The exponential haze layer evaluates over the reference-centred disc
+    # after shading, so the same call serves both render paths; a body with no
+    # 'atmosphere' block never enters the haze code and renders hard-limbed.
+    # The on-disc haze joins the opaque disc paint; the above-limb glow rides
+    # along as a translucent halo screen the radiance stage composites.
+    # apply_atmosphere returns fresh arrays, so the shared render cache the
+    # shape may come from is never mutated.
+    halo: HaloScreen | None = None
+    atmosphere_spec = atmosphere_spec_from_params(body_params, oversample=int(oversample))
+    if atmosphere_spec is not None:
+        layers = apply_atmosphere(
+            body_shape,
+            atmosphere_spec,
+            center_v=ref_center_v,
+            center_u=ref_center_u,
+            semi_a=axis1 / 2.0,
+            semi_b=axis2 / 2.0,
+            semi_c=axis3 / 2.0,
+            rotation_z=float(rotation_z),
+            rotation_tilt=float(rotation_tilt),
+            illumination_angle=float(illumination_angle),
+            phase_angle=float(phase_angle),
+        )
+        body_shape = layers.disc
+        halo = layers.halo
+
     return finish_single_body(
         img,
         body_shape,
@@ -813,7 +846,30 @@ def render_single_body(
         half_extent_u=half_extent_u,
         ref_center_v=ref_center_v,
         ref_center_u=ref_center_u,
+        halo=halo,
     )
+
+
+def _shifted_box(box: slice, delta: float, size: int) -> slice:
+    """The frame slice conservatively covering a box translated by ``delta``.
+
+    The order-1 interpolation reads one source pixel to each side, so the
+    translated content lies within the source span shifted by ``delta`` and
+    widened by one pixel each way, clipped to the frame.
+
+    Parameters:
+        box: The source slice.
+        delta: The translation along this axis, in pixels.
+        size: The frame extent along this axis.
+
+    Returns:
+        The translated, widened, clipped slice.
+    """
+    start = max(math.floor(box.start + delta) - 1, 0)
+    stop = min(math.ceil(box.stop + delta) + 1, size)
+    if start >= stop:
+        return slice(0, 0)
+    return slice(start, stop)
 
 
 def finish_single_body(
@@ -828,8 +884,15 @@ def finish_single_body(
     half_extent_u: float,
     ref_center_v: float,
     ref_center_u: float,
+    halo: HaloScreen | None = None,
 ) -> tuple[NDArrayBoolType, dict[str, Any]]:
     """Translate a reference-centred body shape into place and composite it.
+
+    Only the opaque body paints here (last writer wins); an atmospheric
+    body's translucent halo is translated alongside it and returned on the
+    info dict (key ``'halo'``) for the radiance stage to composite as a
+    transmission screen, so the returned mask and the painted pixels are the
+    solid silhouette only.
 
     Parameters:
         img: Image array to modify in-place.
@@ -842,16 +905,56 @@ def finish_single_body(
         half_extent_u: Projected half-extent of the silhouette along u.
         ref_center_v: Reference center V the shape was rendered at.
         ref_center_u: Reference center U the shape was rendered at.
+        halo: The body's translucent halo screen at the reference centre, or
+            None for a body without an atmosphere.
 
     Returns:
         Tuple of (body_mask, body_info_dict) where body_info_dict contains
-        name, inventory item, and model params.
+        name, inventory item, and model params (plus the positioned halo
+        screen under ``'halo'`` when the body carries one).
     """
     dv = center_v - ref_center_v
     du = center_u - ref_center_u
-    positioned_body = ndimage.shift(body_shape, (dv, du), order=1, mode='constant', cval=0.0)
+    # An exactly zero translation is the bitwise identity for the order-1
+    # spline, so a body already at the reference centre skips the full-frame
+    # interpolation (the shape is only read, never written).
+    if dv == 0.0 and du == 0.0:
+        positioned_body = body_shape
+    else:
+        positioned_body = ndimage.shift(body_shape, (dv, du), order=1, mode='constant', cval=0.0)
     mask = positioned_body > 0
     img[mask] = positioned_body[mask]
+
+    positioned_halo: HaloScreen | None = None
+    if halo is not None:
+        if dv == 0.0 and du == 0.0:
+            # The screen already excludes every pixel the (unshifted) disc
+            # painted, so it is positioned as-is.
+            positioned_halo = halo
+        else:
+            size_v, size_u = img.shape
+            emission = ndimage.shift(halo.emission, (dv, du), order=1, mode='constant', cval=0.0)
+            transmission = ndimage.shift(
+                halo.transmission, (dv, du), order=1, mode='constant', cval=1.0
+            )
+            box_v = _shifted_box(halo.box_v, dv, size_v)
+            box_u = _shifted_box(halo.box_u, du, size_u)
+            # The translation's linear interpolation bleeds the halo one pixel
+            # into the painted rim; a screen never overlaps its own opaque
+            # paint.  Outside the box the screen is identity already.
+            mask_box = mask[box_v, box_u]
+            emission_view = emission[box_v, box_u]
+            emission_view[mask_box] = 0.0
+            transmission_view = transmission[box_v, box_u]
+            transmission_view[mask_box] = 1.0
+            halo_mask = (emission_view > 0.0) | (transmission_view < 1.0)
+            positioned_halo = HaloScreen(
+                emission=emission,
+                transmission=transmission,
+                box_v=box_v,
+                box_u=box_u,
+                mask=halo_mask,
+            )
 
     inventory_item = {
         'v_min_unclipped': center_v - half_extent_v,
@@ -866,8 +969,11 @@ def finish_single_body(
         'range': body_params.get('range_km', 1.0),
     }
 
-    return mask, {
+    body_info: dict[str, Any] = {
         'name': body_name,
         'inventory': inventory_item,
         'params': body_params,
     }
+    if positioned_halo is not None:
+        body_info['halo'] = positioned_halo
+    return mask, body_info
