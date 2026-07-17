@@ -1029,6 +1029,149 @@ succeeds because the robust loss discards the hidden arc, not because the model
 masks it -- the confidence a hidden-arc limb feature reports is optimistic, and
 a future change that made the fit trust that arc would move the answer.
 
+.. _sim-ring-renderer:
+
+The ring renderer
+=================
+
+The whole ring system of a scene is one ``ring_system`` block drawn by one
+renderer (``ring_system.py``): a list of radial optical-depth features
+composed into a single tau map in ring-plane coordinates, projected through
+the shared opening-angle geometry, lit by the single-scattering closed forms,
+and composited over the body stack as a per-pixel transmission screen. The
+navigator's predicted counterpart is geometric, not photometric -- it
+rasterizes coverage templates and boundary polylines from the catalog orbits
+of the features it is told about, through the same projection helpers, and
+never sees a brightness. The key-by-key inventory lives in
+:ref:`sim-ring-system`; this section describes the machinery behind it and
+the measured navigation behavior the ``ring_system`` catalog scenes pin.
+
+Feature kinds and the radial tau profile
+----------------------------------------
+
+Every feature contributes a radial tau profile anchored at its orbit radius
+``r_e(lam)`` (which varies with longitude once the orbit is perturbed) and
+the profiles compose by addition, clipped at zero:
+
+- A ``ringlet`` carries its ``tau`` across a band of radial ``width``
+  outward of the orbit radius; a ``gap`` is the same band as a suppression,
+  carving tau out of whatever it overlaps -- so a gap is authored *into* a
+  sheet, and its edges are the sheet's material ending, not a painted dark
+  band.
+- An ``edge`` is a one-sided step: a semi-infinite sheet bounded by its
+  outer edge (``side: 'in'``, the B-ring-edge case) or its inner edge
+  (``side: 'out'``). It is the cheapest way to author "the rest of the ring"
+  behind a navigable boundary.
+- A ``ramp`` is a linear tau transition across its band: one end sharp, one
+  end fading to nothing. Only the sharp end is a fittable boundary; the
+  faded end has no gradient to fit, and the navigator-side model emits no
+  edge for it.
+- A ``wave`` is a damped radial sinusoid launched at the orbit radius --
+  a density-wave train riding on a sheet, alternating positive and negative
+  tau lobes that shrink with distance. The profile exists only *outward* of
+  the launch radius and is exactly zero inside it. That clamp is
+  load-bearing, not cosmetic: the damping envelope is an exponential decay
+  *downstream* of the launch radius, and evaluated on the wrong side it
+  would grow without bound -- a formula for an infinitely bright artifact,
+  not a wave. Physically the wave propagates away from the resonance that
+  launches it; there is nothing upstream to draw.
+
+Kind-specific shape keys are validated strictly (a ``width`` on an ``edge``
+fails loudly) because a stray shape key would silently author a different
+feature than intended.
+
+The catalog orbit: m-modes and edge waves
+-----------------------------------------
+
+A feature's ``orbit`` is catalog knowledge -- the navigator predicts from
+exactly what the renderer draws, unless a planted error (below) says
+otherwise. The base is the mode-1 precessing ellipse (``a``, ``ae``,
+``long_peri``, ``rate_peri`` applied across ``time - ring_epoch``). Two
+perturbation families ride on it:
+
+- ``modes`` (m >= 2): resonantly forced radial modes,
+  ``r = a - amp cos(m (lam - peri))``. An ``m = 2`` mode is the classic
+  two-lobed outer-B-ring edge shape; higher m gives the scalloped
+  multi-lobed edges of resonantly confined ringlets. The mode longitudes
+  live in the ring-plane frame (measured from the ascending node), so the
+  lobes foreshorten correctly under an inclined view.
+- ``edge_wave``: a satellite edge wave -- the Daphnis/Pan signature -- a
+  radial sinusoid whose azimuthal wavelength is an arc length and whose
+  amplitude decays exponentially *downstream* of the perturbing moon's
+  longitude ``lam0``. The same upstream clamp as the radial wave applies,
+  for the same reason: the decay envelope written as an exponential in
+  downstream longitude grows without bound if evaluated upstream of the
+  moon, so the longitude difference is wrapped into one forward turn.
+  Immediately upstream of the moon the wave has then wrapped nearly a full
+  orbit and carries a factor ``exp(-2 pi / damp)`` of its launch amplitude
+  -- negligible for any physical damping -- which is the periodic statement
+  of "the wave trails the moon, it does not lead it".
+
+Both families are idealized: the navigator predicts the same scalloped,
+wave-perturbed boundaries the renderer draws, and the catalog scenes
+``mmode_ringlet`` and ``edge_wave_gap`` pin that the planted pointing offset
+is recovered through m-modes and edge waves under inclined projection.
+
+Planted orbit error and the navigable subset
+--------------------------------------------
+
+A feature's truth-side ``orbit_error`` (``delta_a_px``, ``delta_ae_px``,
+``delta_long_peri_deg``) displaces the *rendered* feature off the catalog
+orbit the navigator predicts from -- planted radial model error, the ring
+analog of the body ephemeris-error axis. Real ring features are misplaced
+relative to their published orbit solutions in exactly this way. The
+idealized ``declared_orbit_sigma`` is the uncertainty the navigator is
+*entitled* to know -- the error bars, never the drawn values -- and it widens
+the predicted edges' radial sigma.
+
+The measured behavior on this axis is deliberately uncomfortable, and the
+``orbit_error_ringlet`` scene pins it: a navigable ringlet rendered 2.5 px
+outward of its catalog orbit navigates to a *confident, high-rank* success
+about 3 px wrong. A uniform radial misplacement has no exact translational
+equivalent, so the robust edge fit down-weights one arc, locks onto one side
+of the annulus, and absorbs the ephemeris error into the recovered offset
+instead of leaving it in the residuals. That confidently-biased recovery is
+the honest measurement of what a planted radial catalog error does to the
+current techniques -- the scene exists to keep the number in view, and the
+declared sigma is the input a future error budget has to feed it into.
+
+``navigable`` (default **false**) is the information boundary in miniature:
+the filter drops non-navigable features from ``nav_params`` entirely, so the
+rendered frame is full of ring structure -- sheets, gaps, wave trains -- the
+navigator was never told exists, while the navigator's world contains only
+the features flagged true. A surviving feature's flag is always true and
+carries no hidden information. This is what makes a ring scene a false-lock
+stress: the strongest edge in the image is frequently one the model does not
+predict.
+
+Azimuthal clutter, spokes, and moonlets
+---------------------------------------
+
+Two system-level truth blocks add non-navigable structure *crossing* the
+features:
+
+- ``azimuthal`` scales the emitted intensity only -- never tau, never the
+  transmission screen -- because all three of its members are
+  albedo/illumination phenomena, not material density: ``modulation`` (a
+  low-frequency brightness asymmetry, the self-gravity-wake signature),
+  ``shadow`` (a planet-shadow wedge -- a strong, sharp, non-radial edge
+  crossing every feature it spans), and ``spokes`` (a seeded field of
+  azimuthally sharp, radially broad wedges drawn from the
+  ``scene_radiance/ring_system/spokes`` stream; negative contrast gives the
+  dark low-phase appearance). Stars behind a spoke are therefore *not*
+  extra-attenuated: the material is unchanged, only its brightness is.
+- ``moonlets`` embeds opaque discs at the ring's depth, each optionally
+  carving a stylized ``propeller`` -- two partial-gap tau lobes straddling
+  the moonlet radially and azimuthally. A moonlet is a blob/star confounder
+  sitting exactly on the navigable features; the propeller adds the paired
+  edge disturbance around it.
+
+The catalog scenes pin the intended outcome: ``spoked_sheet`` (six dark
+spokes crossing a navigable band) and ``moonlet_propeller`` (an Encke-style
+non-navigable gap plus a bright propeller moonlet at its center) both
+recover the planted offset from the catalog edges alone, with the clutter
+present and unmodeled.
+
 .. _sim-perf-budget:
 
 The render performance budget
@@ -1581,7 +1724,9 @@ The ring system
 ``ring_system`` is a single mapping describing an optical-depth ring system:
 a shared projection geometry, a list of radial tau features, and truth-side
 azimuthal / moonlet clutter. The renderer draws the whole system; the
-navigator is told only about the features flagged ``navigable``.
+navigator is told only about the features flagged ``navigable``. This is the
+key-by-key reference; :ref:`sim-ring-renderer` describes the renderer's
+mechanics and the measured navigation behavior.
 
 **Geometry and projection.** The required ``geometry`` block carries
 ``center_v`` / ``center_u`` (the projected ring center), ``opening_deg_obs``
@@ -2126,15 +2271,23 @@ realism addition needs -- live in their own module:
      - The test-only ``expected`` block: a checkable Expected-outcome group on
        the General tab (status, confidence tier, status reason).
    * - ``body_tab.py`` / ``body_appearance.py`` / ``ring_tab.py`` /
-       ``star_tab.py``
+       ``ring_advanced.py`` / ``star_tab.py``
      - The per-object tabs. The body tab carries geometry, shape model and mesh
        controls, crater controls, and the navigation-override group
        (``body_tab.py``); the truth-side appearance groups -- limb relief,
        photometric law and opposition surge, albedo texture and its spots, disc
        texture and its storms, transits, and the mesh-only shading / detail /
        pose-scatter extras (enabled only for a mesh body) -- live in
-       ``body_appearance.py``, each under absent-key discipline. Ring tabs carry
-       edges and shading; star tabs carry position, magnitude, PSF, smear,
+       ``body_appearance.py``, each under absent-key discipline. Ring tabs (one
+       per ``ring_system`` feature) carry the feature's kind and kind-specific
+       shape keys, navigability, optical depth, mode-1 catalog orbit, and
+       photometric truth scalars, with the shared projection geometry, phase
+       angle, and physical range on the first feature's tab (``ring_tab.py``);
+       the orbit's m-mode rows and satellite edge-wave group, the planted
+       orbit-error and declared-sigma groups, and the system-level azimuthal
+       (modulation / shadow / spokes) and moonlet-list (with propeller) truth
+       blocks live in ``ring_advanced.py``, under the same absent-key and
+       list-row disciplines. Star tabs carry position, magnitude, PSF, smear,
        catalog label, and the per-star information-asymmetry controls (navigable
        flag, catalog error, companion, variable-brightness delta).
    * - ``tabs.py``
@@ -2147,9 +2300,9 @@ realism addition needs -- live in their own module:
      - Shared widget helpers and the mixin-facing protocol.
 
 The GUI exposes the full scene parameter surface, so any scene that can be
-written by hand in YAML can also be built in the GUI. The parameters the GUI
-does not edit are the nested ``instrument_config`` overrides and multi-mode
-ring edges (the renderer reads only mode 1). Scenes
+written by hand in YAML can also be built in the GUI. The one exception is
+the nested ``instrument_config`` override mapping, which the GUI carries
+through unedited. Scenes
 round-trip through the **Load / Save Scene (YAML)** buttons, so a scene rendered
 in the GUI can be saved as a catalog artifact and a catalog scene can be loaded
 back to edit; ``tests/main/test_sim_editor_round_trip.py`` asserts the
