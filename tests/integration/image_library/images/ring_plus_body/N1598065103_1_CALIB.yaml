@@ -20,10 +20,11 @@ ground_truth:
     Selection: ENCELADUS | <30 | -0.0; {"apparent_diameter_px": 90.3, "center_phase_deg": 17.211, "filter": "CL1", "ring_edges_in_frame": ["huygens_gap.inner", "huygens_gap.outer", "huygens_ringlet.inner", "huygens_ringlet.outer", "strange_ringlet.inner", "strange_ringlet.outer"], "ring_opening_deg": -2.091, "target": "ENCELADUS", "year": "2008"}.
     Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
     Pipeline: status=success, confidence=0.388, rank=low, techniques=['BodyDiscCorrelateNav', 'BodyLimbNav', 'RingEdgeNav'], per-technique offsets={"BodyDiscCorrelateNav": [6.5703, 17.1875], "BodyLimbNav": [6.7784, 17.1911], "RingEdgeNav": [42.9999, 16.047]}.
+    Primary ratchet 2026-07-16: RingEdgeNav is the highest-confidence technique and the ring edge is the legitimate primary for this ring_plus_body scene; applies the 2026-07-13 D6 reconciliation decision, which was documented at the time but never committed. Ratcheted BodyDiscCorrelateNav -> RingEdgeNav.
 expected:
   status: success
   confidence_tier: medium
-  primary_technique: BodyDiscCorrelateNav
+  primary_technique: RingEdgeNav
   techniques_must_run:
   - BodyLimbNav
   techniques_must_skip: []
