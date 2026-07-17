@@ -1,0 +1,346 @@
+"""Acceptance and unit tests for the haze-limb atmosphere layer.
+
+The acceptance contract (plan Section 15.10-G): the rendered tangent
+optical-depth profile falls exponentially with the commanded scale height
+(asserted on the optically thin portion, above the tau ~ 1 saturation
+altitude), and the terminator brightens past 90 deg incidence instead of
+cutting off.  The unit tests cover the Henyey-Greenstein phase dependence
+(a forward-scattering limb brightens at high phase), the detached haze
+shell, and the phase-dependent apparent limb radius (the Titan
+altitude-versus-phase substrate), plus the module's pure helpers.
+"""
+
+import math
+
+import numpy as np
+import pytest
+
+from spindoctor.sim.ellipsoid_geometry import illumination_vector
+from spindoctor.sim.forward.atmosphere import (
+    AtmosphereSpec,
+    apply_atmosphere,
+    atmosphere_spec_from_params,
+    hg_phase_factor,
+    tangent_optical_depth,
+)
+from spindoctor.sim.forward.body import render_single_body
+from spindoctor.support.types import NDArrayFloatType
+
+_SIZE = 256
+_CENTER = 128.0
+_RADIUS = 60.0
+
+
+def _render_haze_body(
+    atmosphere: dict[str, float] | None,
+    *,
+    phase_deg: float = 30.0,
+    illumination_deg: float = 90.0,
+) -> NDArrayFloatType:
+    """Render a centred spherical body, optionally with a haze layer.
+
+    Parameters:
+        atmosphere: The ``atmosphere`` block, or None for a hard-limbed body.
+        phase_deg: Phase angle in degrees.
+        illumination_deg: In-plane light direction in degrees.
+
+    Returns:
+        The rendered signal image.
+    """
+    img = np.zeros((_SIZE, _SIZE), dtype=np.float64)
+    body_params: dict[str, object] = {
+        'name': 'HAZE',
+        'center_v': _CENTER,
+        'center_u': _CENTER,
+        'axis1': 2.0 * _RADIUS,
+        'axis2': 2.0 * _RADIUS,
+        'axis3': 2.0 * _RADIUS,
+        'illumination_angle': illumination_deg,
+        'phase_angle': phase_deg,
+        'anti_aliasing': 1.0,
+    }
+    if atmosphere is not None:
+        body_params['atmosphere'] = atmosphere
+    render_single_body(
+        img,
+        body_params,
+        0.0,
+        offset_u=0.0,
+        ref_center_v=_SIZE / 2.0,
+        ref_center_u=_SIZE / 2.0,
+    )
+    return img
+
+
+def _sunward_radial_profile(img: NDArrayFloatType) -> tuple[NDArrayFloatType, NDArrayFloatType]:
+    """The intensity along the +u radial from the centre (the sunward limb).
+
+    Parameters:
+        img: A rendered image with the body centred at ``_CENTER``.
+
+    Returns:
+        ``(altitude_px, intensity)``: tangent altitude above the reference
+        radius and intensity along the sunward radial cut.
+    """
+    row = img[int(_CENTER), int(_CENTER) :]
+    radius = np.arange(row.shape[0], dtype=np.float64) + 0.5
+    return radius - _RADIUS, row
+
+
+def _incidence_deg_map() -> NDArrayFloatType:
+    """The surface incidence angle in degrees over the disc (phase 90, +u sun)."""
+    v_ctr, u_ctr = np.mgrid[0:_SIZE, 0:_SIZE].astype(np.float64)
+    v_rel = v_ctr + 0.5 - _CENTER
+    u_rel = u_ctr + 0.5 - _CENTER
+    rho2 = v_rel**2 + u_rel**2
+    z = np.sqrt(np.maximum(_RADIUS**2 - rho2, 0.0))
+    illum_v, illum_u, illum_z = illumination_vector(
+        illumination_angle=math.radians(90.0), phase_angle=math.radians(90.0)
+    )
+    mu0 = (v_rel * illum_v + u_rel * illum_u + z * illum_z) / _RADIUS
+    return np.degrees(np.arccos(np.clip(mu0, -1.0, 1.0)))
+
+
+# ---------------------------------------------------------------------------
+# Acceptance (a): tangent optical depth falls exponentially with scale height.
+# ---------------------------------------------------------------------------
+
+
+def _recovered_scale_height(scale_height_px: float) -> float:
+    """Fit the scale height from the optically thin part of the limb ramp.
+
+    In the thin regime the emergent intensity is proportional to the tangent
+    optical depth, so ``log(I)`` is linear in altitude with slope
+    ``-1 / scale_height``.
+
+    Parameters:
+        scale_height_px: The commanded scale height.
+
+    Returns:
+        The scale height recovered from the rendered radial profile.
+    """
+    atmosphere = {'scale_height_px': scale_height_px, 'tau_ref': 1.5, 'g': 0.6}
+    altitude, intensity = _sunward_radial_profile(_render_haze_body(atmosphere))
+    # Optically thin band: two to four-and-a-half scale heights above the
+    # reference radius (tau ~ 0.2 down to ~0.02, well under the tau ~ 1
+    # saturation), where intensity tracks tau exponentially.
+    thin = (
+        (altitude >= 2.0 * scale_height_px)
+        & (altitude <= 4.5 * scale_height_px)
+        & (intensity > 1e-5)
+    )
+    slope = np.polyfit(altitude[thin], np.log(intensity[thin]), 1)[0]
+    return float(-1.0 / slope)
+
+
+def test_tangent_optical_depth_recovers_small_scale_height() -> None:
+    """A 6 px scale height is recovered from the thin part of the ramp."""
+    assert _recovered_scale_height(6.0) == pytest.approx(6.0, rel=0.15)
+
+
+def test_tangent_optical_depth_recovers_large_scale_height() -> None:
+    """A 12 px scale height is recovered from the thin part of the ramp."""
+    assert _recovered_scale_height(12.0) == pytest.approx(12.0, rel=0.15)
+
+
+def test_tangent_optical_depth_tracks_commanded_scale_height() -> None:
+    """Doubling the commanded scale height roughly doubles the recovered one."""
+    assert _recovered_scale_height(12.0) > 1.5 * _recovered_scale_height(6.0)
+
+
+# ---------------------------------------------------------------------------
+# Acceptance (b): the terminator brightens past 90 deg incidence.
+# ---------------------------------------------------------------------------
+
+
+def test_terminator_brightens_past_ninety_degrees() -> None:
+    """Past-terminator disc pixels are brighter with the haze than without."""
+    atmosphere = {'scale_height_px': 8.0, 'tau_ref': 1.5, 'g': 0.6}
+    without = _render_haze_body(None, phase_deg=90.0)
+    with_haze = _render_haze_body(atmosphere, phase_deg=90.0)
+    incidence = _incidence_deg_map()
+    # The night side just past the terminator, excluding the deep night far
+    # from it: incidence in (90, 130) degrees on the disc.
+    past = (incidence > 90.0) & (incidence < 130.0)
+    assert with_haze[past].mean() > without[past].mean()
+
+
+def test_lit_disc_beyond_terminator_stays_at_floor_without_atmosphere() -> None:
+    """Without a haze layer the past-terminator disc renders at the dark floor."""
+    without = _render_haze_body(None, phase_deg=90.0)
+    incidence = _incidence_deg_map()
+    past = (incidence > 100.0) & (incidence < 130.0)
+    assert without[past].max() < 0.02
+
+
+# ---------------------------------------------------------------------------
+# Henyey-Greenstein phase dependence: a forward-scattering limb at high phase.
+# ---------------------------------------------------------------------------
+
+
+def _limb_halo_mean(img: NDArrayFloatType) -> float:
+    """Mean intensity of the annulus just outside the geometric limb."""
+    v_ctr, u_ctr = np.mgrid[0:_SIZE, 0:_SIZE].astype(np.float64)
+    rho = np.hypot(v_ctr + 0.5 - _CENTER, u_ctr + 0.5 - _CENTER)
+    halo = (rho > _RADIUS) & (rho < _RADIUS + 18.0)
+    return float(img[halo].mean())
+
+
+def test_forward_scattering_brightens_the_high_phase_limb() -> None:
+    """A forward-scattering haze (g > 0) brightens the limb halo at high phase."""
+    base = {'scale_height_px': 8.0, 'tau_ref': 1.5}
+    isotropic = _limb_halo_mean(_render_haze_body({**base, 'g': 0.0}, phase_deg=150.0))
+    forward = _limb_halo_mean(_render_haze_body({**base, 'g': 0.6}, phase_deg=150.0))
+    assert forward > isotropic
+
+
+# ---------------------------------------------------------------------------
+# The detached haze shell.
+# ---------------------------------------------------------------------------
+
+
+def test_detached_shell_adds_a_bump_above_the_surface() -> None:
+    """A detached shell brightens the radial profile at its altitude."""
+    base = {'scale_height_px': 6.0, 'tau_ref': 0.8, 'g': 0.3}
+    without = _render_haze_body(base)
+    with_shell = _render_haze_body({**base, 'detached_px': 25.0})
+    altitude, intensity_without = _sunward_radial_profile(without)
+    _altitude, intensity_with = _sunward_radial_profile(with_shell)
+    near = (altitude > 20.0) & (altitude < 30.0)
+    assert intensity_with[near].mean() > intensity_without[near].mean() + 0.02
+
+
+# ---------------------------------------------------------------------------
+# Phase-dependent apparent limb radius (the Titan altitude-vs-phase substrate).
+# ---------------------------------------------------------------------------
+
+
+def _half_light_radius(img: NDArrayFloatType, *, threshold: float = 0.05) -> float:
+    """The outermost sunward radius whose intensity clears a fixed threshold.
+
+    Parameters:
+        img: A rendered image with the body centred at ``_CENTER``.
+        threshold: The fixed absolute intensity level the apparent limb is
+            measured at.
+
+    Returns:
+        The apparent limb radius in pixels.
+    """
+    altitude, intensity = _sunward_radial_profile(img)
+    lit = np.nonzero(intensity > threshold)[0]
+    return float(altitude[lit.max()] + _RADIUS) if lit.size else 0.0
+
+
+def test_apparent_limb_radius_grows_with_phase() -> None:
+    """The forward-scattering haze pushes the apparent limb out at high phase."""
+    atmosphere = {'scale_height_px': 8.0, 'tau_ref': 1.5, 'g': 0.6}
+    low_phase = _half_light_radius(_render_haze_body(atmosphere, phase_deg=30.0))
+    high_phase = _half_light_radius(_render_haze_body(atmosphere, phase_deg=150.0))
+    assert high_phase > low_phase
+
+
+def test_apparent_limb_radius_exceeds_the_geometric_radius() -> None:
+    """The soft ramp places the apparent limb outside the hard geometric limb."""
+    atmosphere = {'scale_height_px': 8.0, 'tau_ref': 1.5, 'g': 0.6}
+    assert _half_light_radius(_render_haze_body(atmosphere)) > _RADIUS
+
+
+# ---------------------------------------------------------------------------
+# The pure helpers.
+# ---------------------------------------------------------------------------
+
+
+def test_hg_phase_factor_is_unity_when_isotropic() -> None:
+    """The Henyey-Greenstein factor is 1 at every phase when g = 0."""
+    assert hg_phase_factor(0.0, math.radians(75.0)) == pytest.approx(1.0)
+
+
+def test_hg_phase_factor_peaks_forward_at_high_phase() -> None:
+    """Forward scattering peaks at high phase (small scattering angle)."""
+    assert hg_phase_factor(0.6, math.radians(170.0)) > hg_phase_factor(0.6, math.radians(10.0))
+
+
+def test_tangent_optical_depth_is_exponential() -> None:
+    """The column falls by exp over one scale height."""
+    spec = AtmosphereSpec(scale_height_px=5.0, tau_ref=2.0, ref_altitude_px=0.0)
+    tau = tangent_optical_depth(np.array([0.0, 5.0]), spec)
+    assert tau[1] / tau[0] == pytest.approx(math.exp(-1.0), rel=1e-6)
+
+
+def test_tangent_optical_depth_hits_tau_ref_at_reference_altitude() -> None:
+    """tau_ref is the tangent optical depth at the reference altitude."""
+    spec = AtmosphereSpec(scale_height_px=5.0, tau_ref=2.0, ref_altitude_px=3.0)
+    tau = tangent_optical_depth(np.array([3.0]), spec)
+    assert tau[0] == pytest.approx(2.0, rel=1e-9)
+
+
+def test_tangent_optical_depth_shell_adds_a_bump() -> None:
+    """A detached shell raises the tangent optical depth at its altitude."""
+    base = AtmosphereSpec(scale_height_px=5.0, tau_ref=1.0)
+    shell = AtmosphereSpec(scale_height_px=5.0, tau_ref=1.0, detached_px=20.0)
+    altitude = np.array([20.0])
+    assert tangent_optical_depth(altitude, shell)[0] > tangent_optical_depth(altitude, base)[0]
+
+
+def test_atmosphere_spec_absent_returns_none() -> None:
+    """A body without an atmosphere block yields no spec."""
+    assert atmosphere_spec_from_params({'name': 'X'}, oversample=1) is None
+
+
+def test_atmosphere_spec_scales_pixel_lengths_by_oversample() -> None:
+    """Pixel lengths scale with the oversampling factor; dimensionless ones do not."""
+    block = {'scale_height_px': 4.0, 'tau_ref': 1.2, 'ref_altitude_px': 2.0, 'detached_px': 6.0}
+    spec = atmosphere_spec_from_params({'atmosphere': block}, oversample=4)
+    assert spec is not None
+    assert spec.scale_height_px == pytest.approx(16.0)
+
+
+def test_atmosphere_spec_keeps_tau_ref_dimensionless() -> None:
+    """The optical depth is dimensionless and is not scaled by oversample."""
+    block = {'scale_height_px': 4.0, 'tau_ref': 1.2}
+    spec = atmosphere_spec_from_params({'atmosphere': block}, oversample=4)
+    assert spec is not None
+    assert spec.tau_ref == pytest.approx(1.2)
+
+
+def test_apply_atmosphere_does_not_mutate_input() -> None:
+    """The haze compositor returns a fresh array, leaving the cache entry intact."""
+    body = np.zeros((_SIZE, _SIZE), dtype=np.float64)
+    body[100:150, 100:150] = 0.5
+    original = body.copy()
+    spec = AtmosphereSpec(scale_height_px=8.0, tau_ref=1.5, g=0.6)
+    apply_atmosphere(
+        body,
+        spec,
+        center_v=_CENTER,
+        center_u=_CENTER,
+        semi_a=_RADIUS,
+        semi_b=_RADIUS,
+        semi_c=_RADIUS,
+        rotation_z=0.0,
+        rotation_tilt=0.0,
+        illumination_angle=math.radians(90.0),
+        phase_angle=math.radians(30.0),
+    )
+    assert np.array_equal(body, original)
+
+
+def test_apply_atmosphere_adds_glow_above_the_limb() -> None:
+    """The haze deposits a soft glow just outside the geometric limb."""
+    body = np.zeros((_SIZE, _SIZE), dtype=np.float64)
+    spec = AtmosphereSpec(scale_height_px=8.0, tau_ref=1.5, g=0.6)
+    out = apply_atmosphere(
+        body,
+        spec,
+        center_v=_CENTER,
+        center_u=_CENTER,
+        semi_a=_RADIUS,
+        semi_b=_RADIUS,
+        semi_c=_RADIUS,
+        rotation_z=0.0,
+        rotation_tilt=0.0,
+        illumination_angle=math.radians(90.0),
+        phase_angle=math.radians(30.0),
+    )
+    # Just outside the sunward limb (+u from centre).
+    assert out[int(_CENTER), int(_CENTER + _RADIUS + 3)] > 0.0

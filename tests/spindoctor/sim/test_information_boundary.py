@@ -81,6 +81,13 @@ _TRUTH_SAMPLES: dict[str, Any] = {
             'shadow': {'dv_px': 1.0, 'du_px': 4.0, 'radius_px': 3.0, 'darkness': 0.8},
         }
     ],
+    'bodies.atmosphere': {
+        'scale_height_px': 2.0,
+        'tau_ref': 1.5,
+        'ref_altitude_px': 1.0,
+        'g': 0.6,
+        'detached_px': 5.0,
+    },
     'bodies.shading': 'gouraud',
     'bodies.pose_scatter': {'sigma_deg': 2.0},
     'bodies.seed': 11,
@@ -176,6 +183,7 @@ def _truth_exercising_scene() -> dict[str, Any]:
                 'albedo_texture': dict(_TRUTH_SAMPLES['bodies.albedo_texture']),
                 'disc_texture': dict(_TRUTH_SAMPLES['bodies.disc_texture']),
                 'transits': list(_TRUTH_SAMPLES['bodies.transits']),
+                'atmosphere': dict(_TRUTH_SAMPLES['bodies.atmosphere']),
             },
         ],
         'stars': [

@@ -157,15 +157,18 @@ _BODY_IDEALIZED_KEYS: frozenset[str] = frozenset(
 # and the limb-relief field are nature's terrain, 'seed' is its
 # realization, the photometric law and opposition surge are nature's
 # scattering behavior (the navigator's template always shades Lambert),
-# 'shading' is the rendered mesh's smooth-shading mode (the shared
-# rasterizer gains the capability; the navigator's predicted mesh keeps
-# flat shading because this key never crosses), 'pose_scatter' is a
-# per-frame unmodelable rotation-state error (the navigator predicts the
-# catalog pose), and 'anti_aliasing' is an image-side rendering-fidelity
-# knob (the navigator's template always renders at full anti-aliasing).
-# 'nav_override' is special: its VALUES are what the navigator believes
-# (idealized), so build_nav_params overlays them onto the body and drops
-# the key; the underlying overridden true values never cross.
+# 'atmosphere' is the exponential haze layer above the surface (the
+# navigator's template keeps a hard limb at the reference radius, so the
+# soft rendered limb is a designed mismatch), 'shading' is the rendered
+# mesh's smooth-shading mode (the shared rasterizer gains the capability;
+# the navigator's predicted mesh keeps flat shading because this key never
+# crosses), 'pose_scatter' is a per-frame unmodelable rotation-state error
+# (the navigator predicts the catalog pose), and 'anti_aliasing' is an
+# image-side rendering-fidelity knob (the navigator's template always
+# renders at full anti-aliasing).  'nav_override' is special: its VALUES
+# are what the navigator believes (idealized), so build_nav_params overlays
+# them onto the body and drops the key; the underlying overridden true
+# values never cross.
 _BODY_TRUTH_KEYS: frozenset[str] = frozenset(
     {
         'crater_fill',
@@ -181,6 +184,7 @@ _BODY_TRUTH_KEYS: frozenset[str] = frozenset(
         'albedo_texture',
         'disc_texture',
         'transits',
+        'atmosphere',
         'shading',
         'pose_scatter',
         'seed',

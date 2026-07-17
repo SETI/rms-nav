@@ -22,6 +22,7 @@ import numpy as np
 from scipy import ndimage
 
 from spindoctor.sim.ellipsoid_geometry import ellipsoid_image_normals, lambert_from_normals
+from spindoctor.sim.forward.atmosphere import apply_atmosphere, atmosphere_spec_from_params
 from spindoctor.sim.forward.body_texture import (
     albedo_spec_from_params,
     disc_texture_spec_from_params,
@@ -802,6 +803,28 @@ def render_single_body(
             anti_aliasing=anti_aliasing,
             body_seed=body_seed,
         )
+
+    # The exponential haze layer composites onto the reference-centred disc
+    # after shading, so the same call serves both render paths; a body with no
+    # 'atmosphere' block never enters the haze code and renders hard-limbed.
+    # apply_atmosphere returns a fresh array, so the shared render cache the
+    # shape may come from is never mutated.
+    atmosphere_spec = atmosphere_spec_from_params(body_params, oversample=int(oversample))
+    if atmosphere_spec is not None:
+        body_shape = apply_atmosphere(
+            body_shape,
+            atmosphere_spec,
+            center_v=ref_center_v,
+            center_u=ref_center_u,
+            semi_a=axis1 / 2.0,
+            semi_b=axis2 / 2.0,
+            semi_c=axis3 / 2.0,
+            rotation_z=float(rotation_z),
+            rotation_tilt=float(rotation_tilt),
+            illumination_angle=float(illumination_angle),
+            phase_angle=float(phase_angle),
+        )
+
     return finish_single_body(
         img,
         body_shape,
