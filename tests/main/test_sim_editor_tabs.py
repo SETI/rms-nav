@@ -126,15 +126,86 @@ def test_distortion_center_uncheck_drops_both_keys(model: Any) -> None:
 
 
 def test_ring_range_km_unchecked_leaves_key_absent(model: Any) -> None:
-    """Disabling the ring physical-range control removes the key."""
+    """Disabling the ring-system physical-range control removes the key."""
     model._add_ring_tab()
     tab_idx = model._find_tab_by_properties('ring', 0)
     assert tab_idx is not None
     ring_tab = model._tabs.widget(tab_idx)
     ring_tab.range_km_check.click()
-    assert 'range_km' in model.sim_params['rings'][0]
+    assert 'range_km' in model.sim_params['ring_system']
     ring_tab.range_km_check.click()
-    assert 'range_km' not in model.sim_params['rings'][0]
+    assert 'range_km' not in model.sim_params['ring_system']
+
+
+def test_ring_kind_switch_rewrites_shape_keys(model: Any) -> None:
+    """Switching a feature's kind swaps in exactly the kind's shape keys."""
+    model._add_ring_tab()
+    feature = model.sim_params['ring_system']['features'][0]
+    assert 'width' in feature
+    tab_idx = model._find_tab_by_properties('ring', 0)
+    assert tab_idx is not None
+    model._on_ring_kind(0, 'wave')
+    assert 'width' not in feature
+    assert feature['wavelength'] > 0.0
+    assert feature['damping'] > 0.0
+    model._on_ring_kind(0, 'ringlet')
+    assert 'wavelength' not in feature
+    assert 'damping' not in feature
+    assert feature['width'] > 0.0
+
+
+def test_deleting_the_last_ring_feature_retires_the_block(model: Any) -> None:
+    """Removing the only feature drops the whole ring_system key."""
+    model._add_ring_tab()
+    assert 'ring_system' in model.sim_params
+    model._delete_tab_by_index('ring', 0)
+    assert 'ring_system' not in model.sim_params
+
+
+def test_deleting_the_last_ring_feature_blocked_while_system_blocks_exist(model: Any) -> None:
+    """The last feature tab refuses deletion while moonlets are authored.
+
+    The system-level azimuthal / moonlets widgets live on the first
+    feature's tab, so deleting the last feature would leave those blocks
+    with no widget to reach them; the deletion is refused (with a status-bar
+    explanation) until the blocks are disabled.
+    """
+    model._add_ring_tab()
+    tab_idx = model._find_tab_by_properties('ring', 0)
+    assert tab_idx is not None
+    tab = model._tabs.widget(tab_idx)
+    tab.moonlets_group.setChecked(True)
+    model._on_ring_add_moonlet()
+    model._delete_tab_by_index('ring', 0)
+    assert len(model.sim_params['ring_system']['features']) == 1
+    assert len(model.sim_params['ring_system']['moonlets']) == 1
+    assert 'ring feature' in model.statusBar().currentMessage()
+
+
+def test_deleting_the_last_ring_feature_allowed_after_blocks_removed(model: Any) -> None:
+    """Disabling the system blocks unblocks the last feature's deletion."""
+    model._add_ring_tab()
+    tab_idx = model._find_tab_by_properties('ring', 0)
+    assert tab_idx is not None
+    tab = model._tabs.widget(tab_idx)
+    tab.azimuthal_modulation_group.setChecked(True)
+    model._delete_tab_by_index('ring', 0)
+    assert 'ring_system' in model.sim_params
+    tab.azimuthal_modulation_group.setChecked(False)
+    model._delete_tab_by_index('ring', 0)
+    assert 'ring_system' not in model.sim_params
+
+
+def test_ring_opening_angle_spins_match_the_validator_range(model: Any) -> None:
+    """The opening-angle spins mirror the validator's (-90, 90] range."""
+    model._add_ring_tab()
+    tab_idx = model._find_tab_by_properties('ring', 0)
+    assert tab_idx is not None
+    tab = model._tabs.widget(tab_idx)
+    for key in ('opening_deg_obs', 'opening_deg_sun'):
+        spin = getattr(tab, f'{key}_spin')
+        assert spin.minimum() == -89.9
+        assert spin.maximum() == 90.0
 
 
 def test_match_navigator_disables_kernel_spins(model: Any) -> None:
@@ -628,3 +699,190 @@ def test_body_mesh_extras_gated_by_shape(model: Any) -> None:
     assert tab.mesh_extras_group.isEnabled() is False
     model._on_body_shape_model(0, 'polyhedral_mesh')
     assert tab.mesh_extras_group.isEnabled() is True
+
+
+# ---- Ring advanced groups (orbit perturbations, planted errors, truth clutter) ----
+
+
+def _ring_tab(model: Any) -> Any:
+    """Add a ring feature and return its built tab widget."""
+    model._add_ring_tab()
+    tab_idx = model._find_tab_by_properties('ring', 0)
+    assert tab_idx is not None
+    return model._tabs.widget(tab_idx)
+
+
+def _ring(model: Any) -> Any:
+    """Return the first ring_system feature dict."""
+    return model.sim_params['ring_system']['features'][0]
+
+
+def test_ring_mode_add_and_remove_row(model: Any) -> None:
+    """Adding an m-mode row writes the modes list; removing the last drops the key."""
+    tab = _ring_tab(model)
+    model._on_ring_add_mode(0)
+    modes = _ring(model)['orbit']['modes']
+    assert set(modes[0]) == {'m', 'amp', 'peri'}
+    model._remove_ring_mode_row(0, tab.mode_rows[0])
+    assert 'modes' not in _ring(model)['orbit']
+
+
+def test_ring_mode_row_edit_writes_value(model: Any) -> None:
+    """Editing an m-mode row's m spin rewrites the modes list."""
+    tab = _ring_tab(model)
+    model._on_ring_add_mode(0)
+    tab.mode_rows[0].m_spin.setValue(3)
+    assert _ring(model)['orbit']['modes'][0]['m'] == 3
+
+
+def test_ring_edge_wave_toggle_inserts_and_removes(model: Any) -> None:
+    """The edge-wave group inserts the full map and removes it when disabled."""
+    tab = _ring_tab(model)
+    tab.edge_wave_group.setChecked(True)
+    assert set(_ring(model)['orbit']['edge_wave']) == {'amp', 'wavelength', 'damp', 'lam0'}
+    tab.edge_wave_group.setChecked(False)
+    assert 'edge_wave' not in _ring(model)['orbit']
+
+
+def test_ring_edge_wave_spin_writes_sub_key(model: Any) -> None:
+    """An edge-wave amplitude edit writes its own key once enabled."""
+    tab = _ring_tab(model)
+    tab.edge_wave_group.setChecked(True)
+    tab.edge_wave_amp_spin.setValue(2.5)
+    assert _ring(model)['orbit']['edge_wave']['amp'] == 2.5
+
+
+def test_ring_orbit_error_toggle_inserts_and_removes(model: Any) -> None:
+    """The planted orbit-error group inserts all three keys and removes the map."""
+    tab = _ring_tab(model)
+    tab.orbit_error_group.setChecked(True)
+    assert set(_ring(model)['orbit_error']) == {
+        'delta_a_px',
+        'delta_ae_px',
+        'delta_long_peri_deg',
+    }
+    tab.orbit_error_group.setChecked(False)
+    assert 'orbit_error' not in _ring(model)
+
+
+def test_ring_orbit_error_spin_writes_own_key(model: Any) -> None:
+    """An orbit-error delta_a edit writes its own key once enabled."""
+    tab = _ring_tab(model)
+    tab.orbit_error_group.setChecked(True)
+    tab.orbit_error_a_spin.setValue(2.5)
+    assert _ring(model)['orbit_error']['delta_a_px'] == 2.5
+
+
+def test_ring_sigma_toggle_inserts_and_removes(model: Any) -> None:
+    """The declared-sigma group inserts all three keys and removes the map."""
+    tab = _ring_tab(model)
+    tab.orbit_sigma_group.setChecked(True)
+    assert set(_ring(model)['declared_orbit_sigma']) == {
+        'sigma_a_px',
+        'sigma_ae_px',
+        'sigma_long_peri_deg',
+    }
+    tab.orbit_sigma_group.setChecked(False)
+    assert 'declared_orbit_sigma' not in _ring(model)
+
+
+def test_ring_sigma_spin_writes_own_key(model: Any) -> None:
+    """A declared-sigma sigma_a edit writes its own key once enabled."""
+    tab = _ring_tab(model)
+    tab.orbit_sigma_group.setChecked(True)
+    tab.orbit_sigma_a_spin.setValue(1.5)
+    assert _ring(model)['declared_orbit_sigma']['sigma_a_px'] == 1.5
+
+
+def test_ring_modulation_toggle_creates_and_prunes_azimuthal(model: Any) -> None:
+    """The modulation sub-group creates the azimuthal block and prunes it empty."""
+    tab = _ring_tab(model)
+    tab.azimuthal_modulation_group.setChecked(True)
+    modulation = model.sim_params['ring_system']['azimuthal']['modulation']
+    assert set(modulation) == {'amplitude', 'm', 'phase_deg'}
+    tab.azimuthal_modulation_group.setChecked(False)
+    assert 'azimuthal' not in model.sim_params['ring_system']
+
+
+def test_ring_shadow_toggle_inserts_sub_map(model: Any) -> None:
+    """The planet-shadow sub-group writes its full sub-map."""
+    tab = _ring_tab(model)
+    tab.azimuthal_shadow_group.setChecked(True)
+    shadow = model.sim_params['ring_system']['azimuthal']['shadow']
+    assert set(shadow) == {'start_deg', 'extent_deg', 'darkness'}
+
+
+def test_ring_spokes_toggle_inserts_sub_map(model: Any) -> None:
+    """The spokes sub-group writes its full sub-map."""
+    tab = _ring_tab(model)
+    tab.azimuthal_spokes_group.setChecked(True)
+    spokes = model.sim_params['ring_system']['azimuthal']['spokes']
+    assert set(spokes) == {'count', 'r_inner', 'r_outer', 'width_deg', 'contrast'}
+
+
+def test_ring_spokes_value_edit_writes_own_key(model: Any) -> None:
+    """A spokes contrast edit writes only its own sub-key."""
+    tab = _ring_tab(model)
+    tab.azimuthal_spokes_group.setChecked(True)
+    tab.spokes_contrast_spin.setValue(-0.4)
+    assert model.sim_params['ring_system']['azimuthal']['spokes']['contrast'] == -0.4
+
+
+def test_ring_disabling_one_azimuthal_sub_keeps_others(model: Any) -> None:
+    """Removing one azimuthal sub-map leaves the block while another is enabled."""
+    tab = _ring_tab(model)
+    tab.azimuthal_modulation_group.setChecked(True)
+    tab.azimuthal_spokes_group.setChecked(True)
+    tab.azimuthal_modulation_group.setChecked(False)
+    azimuthal = model.sim_params['ring_system']['azimuthal']
+    assert 'modulation' not in azimuthal
+    assert 'spokes' in azimuthal
+
+
+def test_ring_moonlets_toggle_and_add(model: Any) -> None:
+    """Enabling moonlets inserts an empty list; adding one seeds a disc entry."""
+    tab = _ring_tab(model)
+    tab.moonlets_group.setChecked(True)
+    assert model.sim_params['ring_system']['moonlets'] == []
+    model._on_ring_add_moonlet()
+    moonlet = model.sim_params['ring_system']['moonlets'][0]
+    assert set(moonlet) == {'a', 'lam_deg', 'radius_px', 'amplitude'}
+
+
+def test_ring_moonlet_propeller_sub_group_writes_propeller(model: Any) -> None:
+    """Checking a moonlet's propeller sub-group adds the propeller map."""
+    tab = _ring_tab(model)
+    tab.moonlets_group.setChecked(True)
+    model._on_ring_add_moonlet()
+    tab.moonlet_rows[0].propeller_group.setChecked(True)
+    propeller = model.sim_params['ring_system']['moonlets'][0]['propeller']
+    assert set(propeller) == {'length_deg', 'width_px', 'contrast'}
+
+
+def test_ring_moonlets_toggle_off_removes_key(model: Any) -> None:
+    """Disabling the moonlets group removes the key entirely."""
+    tab = _ring_tab(model)
+    tab.moonlets_group.setChecked(True)
+    model._on_ring_add_moonlet()
+    tab.moonlets_group.setChecked(False)
+    assert 'moonlets' not in model.sim_params['ring_system']
+
+
+def test_ring_moonlet_remove_row_empties_list(model: Any) -> None:
+    """Removing the only moonlet row leaves an enabled empty list."""
+    tab = _ring_tab(model)
+    tab.moonlets_group.setChecked(True)
+    model._on_ring_add_moonlet()
+    model._remove_ring_moonlet_row(tab.moonlet_rows[0])
+    assert model.sim_params['ring_system']['moonlets'] == []
+
+
+def test_ring_advanced_groups_only_on_first_feature_tab(model: Any) -> None:
+    """System-level truth groups appear on the first feature's tab only."""
+    _ring_tab(model)
+    model._add_ring_tab()
+    tab_idx = model._find_tab_by_properties('ring', 1)
+    assert tab_idx is not None
+    second = model._tabs.widget(tab_idx)
+    assert hasattr(second, 'edge_wave_group') is True
+    assert hasattr(second, 'moonlets_group') is False

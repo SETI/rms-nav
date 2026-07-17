@@ -170,12 +170,14 @@ class RenderDisplayMixin(SimEditorBase):
                 v = int(s.get('v', 0))
                 painter.drawLine(u - 4, v, u + 4, v)
                 painter.drawLine(u, v - 4, u, v + 4)
-            # Draw ring centers as small circles
-            pen = QPen(QColor(0, 255, 255), 2)
-            painter.setPen(pen)
-            for r in self.sim_params.get('rings', []):
-                center_u = int(r.get('center_u', 0))
-                center_v = int(r.get('center_v', 0))
+            # Draw the ring system's shared center as a small circle
+            ring_system = self.sim_params.get('ring_system')
+            if isinstance(ring_system, dict):
+                pen = QPen(QColor(0, 255, 255), 2)
+                painter.setPen(pen)
+                geometry = ring_system.get('geometry') or {}
+                center_u = int(geometry.get('center_u', 0))
+                center_v = int(geometry.get('center_v', 0))
                 painter.drawEllipse(center_u - 4, center_v - 4, 8, 8)
         painter.end()
         self._base_pixmap = pixmap
@@ -235,14 +237,15 @@ class RenderDisplayMixin(SimEditorBase):
                     range_val = inv.get(body_name, {}).get('range', float('inf'))
                     objects.append((range_val, 'body', idx, body_masks[idx]))
 
-        # Add rings
+        # Add the ring system.  range_km is the only depth key; a system
+        # without one has no depth relation to bodies, so it hit-tests as
+        # farthest here.  A hit selects the first feature's tab (the one
+        # carrying the shared system controls).
         ring_masks = self._last_meta.get('ring_masks', [])
-        rings = self.sim_params.get('rings', [])
-        if ring_masks and rings:
-            for j, ring_mask in enumerate(ring_masks):
-                if j < len(rings):
-                    range_val = float(rings[j].get('range', 1000.0 + j))
-                    objects.append((range_val, 'ring', j, ring_mask))
+        ring_system = self.sim_params.get('ring_system')
+        if ring_masks and isinstance(ring_system, dict) and self._ring_features():
+            range_val = float(ring_system.get('range_km') or float('inf'))
+            objects.append((range_val, 'ring', 0, ring_masks[0]))
 
         # Sort by range (near to far = ascending range)
         objects.sort(key=lambda x: x[0])
@@ -304,22 +307,21 @@ class RenderDisplayMixin(SimEditorBase):
                     cv_spin.setValue(self.sim_params['bodies'][idx]['center_v'])
                     cu_spin.setValue(self.sim_params['bodies'][idx]['center_u'])
             self._updater.immediate_update()
-        elif kind == 'ring' and 0 <= idx < len(self.sim_params['rings']):
-            self.sim_params['rings'][idx]['center_v'] = float(
-                self.sim_params['rings'][idx].get('center_v', 0.0) + dv
-            )
-            self.sim_params['rings'][idx]['center_u'] = float(
-                self.sim_params['rings'][idx].get('center_u', 0.0) + du
-            )
-            # Sync the tab spin boxes for this ring
-            tab_idx = self._find_tab_by_properties('ring', idx)
+        elif kind == 'ring' and isinstance(self.sim_params.get('ring_system'), dict):
+            # Dragging any ring feature moves the whole system's shared center.
+            geometry = self.sim_params['ring_system'].setdefault('geometry', {})
+            geometry['center_v'] = float(geometry.get('center_v', 0.0) + dv)
+            geometry['center_u'] = float(geometry.get('center_u', 0.0) + du)
+            # Sync the shared center spin boxes (they live on the first
+            # feature's tab).
+            tab_idx = self._find_tab_by_properties('ring', 0)
             if tab_idx is not None:
                 tab_w = self._tabs.widget(tab_idx)
                 if tab_w is not None:
                     cv_spin = tab_w.center_v_spin  # type: ignore[attr-defined]
                     cu_spin = tab_w.center_u_spin  # type: ignore[attr-defined]
-                    cv_spin.setValue(self.sim_params['rings'][idx]['center_v'])
-                    cu_spin.setValue(self.sim_params['rings'][idx]['center_u'])
+                    cv_spin.setValue(geometry['center_v'])
+                    cu_spin.setValue(geometry['center_u'])
             self._updater.immediate_update()
         elif kind == 'star' and 0 <= idx < len(self.sim_params['stars']):
             self.sim_params['stars'][idx]['v'] = float(

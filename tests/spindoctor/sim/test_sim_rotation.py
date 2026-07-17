@@ -3,7 +3,8 @@
 A planted camera roll rotates the rendered scene about the boresight before the
 translation offset; the simulated star NavModel predicts the unrolled geometry,
 so a star technique recovers the roll.  These tests cover the renderer geometry
-(a star lands at its analytically rotated position) and the scene-level
+(a star lands at its analytically rotated position; a ring system's center and
+node angle roll together, consistently with bodies and stars) and the scene-level
 ``fit_camera_rotation`` override that lets a scene exercise the 3-DoF path on any
 emulated camera, independent of that camera's real rotation-fitting flag.
 """
@@ -29,7 +30,6 @@ def _noiseless_params(**overrides: object) -> dict[str, object]:
         'offset_v': 0.0,
         'offset_u': 0.0,
         'bodies': [],
-        'rings': [],
         'noise': {'poisson': False, 'read_noise_dn': 0.0, 'bias_dn': 0.0},
     }
     params.update(overrides)
@@ -87,6 +87,61 @@ def test_star_record_keeps_unrolled_position() -> None:
     star = meta['stars'][0]
     assert star.v == 40.0
     assert star.u == 90.0
+
+
+def test_roll_rotates_ring_center_and_node_together() -> None:
+    """A camera roll rotates the ring center about the boresight and adds to the node.
+
+    Rendering an off-center inclined ring system under a +30 deg roll must
+    equal rendering the same system with no roll but the roll pre-applied by
+    hand -- the center rotated about the frame center by the same rotation
+    matrix the body and star paths use, and the roll added to the node angle.
+    The comparison is bitwise: both paths must feed identical placement into
+    the shared projection.
+    """
+    roll_deg = 30.0
+    center_v, center_u = 44.0, 76.0
+    node_deg = 20.0
+    geometry: dict[str, float] = {
+        'center_v': center_v,
+        'center_u': center_u,
+        'opening_deg_obs': 35.0,
+        'opening_deg_sun': 35.0,
+        'node_deg': node_deg,
+    }
+    features: list[dict[str, object]] = [
+        {
+            'kind': 'ringlet',
+            'tau': 1.0,
+            'width': 6.0,
+            'orbit': {'a': 25.0, 'ae': 1.0, 'long_peri': 15.0, 'rate_peri': 0.0},
+        }
+    ]
+    rolled_params = _noiseless_params(
+        offset_rotation_deg=roll_deg,
+        ring_system={'geometry': geometry, 'features': features},
+    )
+    rolled, _meta = render_combined_model(rolled_params)
+
+    # Pre-apply the roll by hand, with the same float operations the renderer
+    # uses for bodies and stars: rotate the center about the boresight and
+    # add the roll to the node angle.
+    roll_cos = float(np.cos(np.radians(roll_deg)))
+    roll_sin = float(np.sin(np.radians(roll_deg)))
+    rel_v = center_v - _CENTER
+    rel_u = center_u - _CENTER
+    pre_rolled_geometry: dict[str, float] = {
+        **geometry,
+        'center_v': _CENTER + roll_cos * rel_v - roll_sin * rel_u,
+        'center_u': _CENTER + roll_sin * rel_v + roll_cos * rel_u,
+        'node_deg': node_deg + roll_deg,
+    }
+    unrolled_params = _noiseless_params(
+        offset_rotation_deg=0.0,
+        ring_system={'geometry': pre_rolled_geometry, 'features': features},
+    )
+    unrolled, _meta2 = render_combined_model(unrolled_params)
+    np.testing.assert_array_equal(rolled, unrolled)
 
 
 def test_fit_camera_rotation_override_enables_3dof() -> None:

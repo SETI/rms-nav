@@ -225,28 +225,182 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
         'rings',
         _scene(
             [],
-            rings=[
-                {
-                    'name': 'RINGLET_INNER',
-                    'feature_type': 'RINGLET',
+            ring_system={
+                'geometry': {
                     'center_v': 110.0,
                     'center_u': 110.0,
-                    'inner_data': [{'mode': 1, 'a': 56.0}],
-                    'outer_data': [{'mode': 1, 'a': 66.0}],
-                    'shading_distance': 10.0,
-                    'range': 1000.0,
+                    'opening_deg_obs': 90.0,
+                    'opening_deg_sun': 90.0,
+                    'node_deg': 0.0,
                 },
-                {
-                    'name': 'RINGLET_OUTER',
-                    'feature_type': 'RINGLET',
+                'features': [
+                    {
+                        'name': 'RINGLET_INNER',
+                        'kind': 'ringlet',
+                        'tau': 2.0,
+                        'width': 10.0,
+                        'orbit': {'a': 56.0},
+                    },
+                    {
+                        'name': 'RINGLET_OUTER',
+                        'kind': 'ringlet',
+                        'tau': 0.7,
+                        'width': 8.0,
+                        'orbit': {'a': 90.0, 'ae': 6.0},
+                    },
+                ],
+            },
+        ),
+        {'gamma': 1.2},
+    ),
+    # The four panels below mirror the ring_system catalog scenes of the same
+    # names (tests/integration/sim_scenes/ring_system/), minus the planted
+    # offsets and expected blocks the gallery does not exercise.
+    (
+        'ring_edge_wave_gap',
+        _scene(
+            [],
+            random_seed=11,
+            ring_system={
+                'geometry': {
                     'center_v': 110.0,
                     'center_u': 110.0,
-                    'inner_data': [{'mode': 1, 'a': 90.0, 'ae': 6.0}],
-                    'outer_data': [{'mode': 1, 'a': 98.0, 'ae': 6.0}],
-                    'shading_distance': 10.0,
-                    'range': 1000.0,
+                    'opening_deg_obs': 50.0,
+                    'opening_deg_sun': 50.0,
+                    'node_deg': 30.0,
                 },
-            ],
+                'features': [
+                    {
+                        'name': 'SHEET',
+                        'kind': 'edge',
+                        'side': 'in',
+                        'tau': 1.2,
+                        'orbit': {'a': 95.0},
+                    },
+                    {
+                        'name': 'WAVYGAP',
+                        'kind': 'gap',
+                        'tau': 1.2,
+                        'width': 6.0,
+                        'navigable': True,
+                        'orbit': {
+                            'a': 60.0,
+                            'edge_wave': {
+                                'amp': 2.0,
+                                'wavelength': 10.0,
+                                'damp': 0.6,
+                                'lam0': 45.0,
+                            },
+                        },
+                    },
+                ],
+            },
+        ),
+        {'gamma': 1.2},
+    ),
+    (
+        'ring_mmode',
+        _scene(
+            [],
+            random_seed=12,
+            ring_system={
+                'geometry': {
+                    'center_v': 110.0,
+                    'center_u': 110.0,
+                    'opening_deg_obs': 65.0,
+                    'opening_deg_sun': 65.0,
+                    'node_deg': 15.0,
+                },
+                'features': [
+                    {
+                        'name': 'BRINGEDGE',
+                        'kind': 'ringlet',
+                        'tau': 2.0,
+                        'width': 12.0,
+                        'navigable': True,
+                        'orbit': {'a': 70.0, 'modes': [{'m': 2, 'amp': 5.0, 'peri': 40.0}]},
+                    },
+                ],
+            },
+        ),
+        {'gamma': 1.2},
+    ),
+    (
+        'ring_spokes',
+        _scene(
+            [],
+            random_seed=13,
+            ring_system={
+                'geometry': {
+                    'center_v': 110.0,
+                    'center_u': 110.0,
+                    'opening_deg_obs': 90.0,
+                    'opening_deg_sun': 90.0,
+                    'node_deg': 0.0,
+                },
+                'features': [
+                    {
+                        'name': 'BSHEET',
+                        'kind': 'ringlet',
+                        'tau': 1.5,
+                        'width': 40.0,
+                        'navigable': True,
+                        'orbit': {'a': 45.0},
+                    },
+                ],
+                'azimuthal': {
+                    'spokes': {
+                        'count': 6,
+                        'r_inner': 50.0,
+                        'r_outer': 80.0,
+                        'contrast': -0.5,
+                        'width_deg': 14.0,
+                    },
+                },
+            },
+        ),
+        {'gamma': 1.2},
+    ),
+    (
+        'ring_moonlet_propeller',
+        _scene(
+            [],
+            random_seed=14,
+            ring_system={
+                'geometry': {
+                    'center_v': 110.0,
+                    'center_u': 110.0,
+                    'opening_deg_obs': 90.0,
+                    'opening_deg_sun': 90.0,
+                    'node_deg': 0.0,
+                },
+                'features': [
+                    {
+                        'name': 'ASHEET',
+                        'kind': 'ringlet',
+                        'tau': 1.8,
+                        'width': 45.0,
+                        'navigable': True,
+                        'orbit': {'a': 40.0},
+                    },
+                    {
+                        'name': 'ENCKE',
+                        'kind': 'gap',
+                        'tau': 1.8,
+                        'width': 8.0,
+                        'orbit': {'a': 58.0},
+                    },
+                ],
+                'moonlets': [
+                    {
+                        'a': 62.0,
+                        'lam_deg': 130.0,
+                        'radius_px': 1.5,
+                        'amplitude': 0.5,
+                        'propeller': {'length_deg': 25.0, 'width_px': 3.0, 'contrast': -0.7},
+                    },
+                ],
+            },
         ),
         {'gamma': 1.2},
     ),
@@ -331,22 +485,41 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
     (
         'composite_scene',
         _scene(
-            [_mesh(name='MOON', center_v=140.0, center_u=95.0, axis1=90.0, axis2=72.0, axis3=66.0)],
+            [
+                _mesh(
+                    name='MOON',
+                    center_v=140.0,
+                    center_u=95.0,
+                    axis1=90.0,
+                    axis2=72.0,
+                    axis3=66.0,
+                    range_km=500000.0,
+                )
+            ],
             optics={'psf': {'match_navigator': True}},
             stars=_scatter_stars(22, 3),
             sky_counts={'a': -1.8, 'b': 0.34, 'density_factor': 1.0},
-            rings=[
-                {
-                    'name': 'RINGLET',
-                    'feature_type': 'RINGLET',
+            ring_system={
+                'geometry': {
                     'center_v': 110.0,
                     'center_u': 110.0,
-                    'inner_data': [{'mode': 1, 'a': 150.0, 'ae': 8.0}],
-                    'outer_data': [{'mode': 1, 'a': 170.0, 'ae': 8.0}],
-                    'shading_distance': 6.0,
-                    'range': 5000.0,
+                    'opening_deg_obs': 90.0,
+                    'opening_deg_sun': 90.0,
+                    'node_deg': 0.0,
                 },
-            ],
+                # The moon sits in front of the ring (physical depths).
+                'range_km': 1000000.0,
+                'km_per_pixel': 1000.0,
+                'features': [
+                    {
+                        'name': 'RINGLET',
+                        'kind': 'ringlet',
+                        'tau': 1.2,
+                        'width': 20.0,
+                        'orbit': {'a': 150.0, 'ae': 8.0},
+                    },
+                ],
+            },
             noise={'poisson': True, 'read_noise_dn': 4.0},
         ),
         {'gamma': 1.5, 'high_percentile': 99.9},

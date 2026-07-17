@@ -1,13 +1,15 @@
 """Field-type validators for the sim-scene schema.
 
 The ``_check_*`` / ``_require_*`` helpers here enforce the per-field types of
-every scene block: the per-object rings / stars entries, the optics
-sub-blocks (PSF, smear, distortion, ghosts, stray light), the noise, detector,
-artifacts, and spk_error blocks, plus the primitive scalar checks they all
-share.  Each block's key inventory lives beside its checker (unknown keys fail
-validation, so a typo cannot silently render an un-blurred or clean frame).
-The ``bodies``-entry checkers, the schema's largest block, live in the sibling
-:mod:`spindoctor.sim.scene_checks_body` and build on the same primitives.
+every scene block: the per-object stars entries, the optics sub-blocks (PSF,
+smear, distortion, ghosts, stray light), the noise, detector, artifacts, and
+spk_error blocks, plus the primitive scalar checks they all share.  Each
+block's key inventory lives beside its checker (unknown keys fail validation,
+so a typo cannot silently render an un-blurred or clean frame).  The
+``bodies``-entry checkers, the schema's largest block, live in the sibling
+:mod:`spindoctor.sim.scene_checks_body`, and the ``ring_system`` block's
+checkers in :mod:`spindoctor.sim.scene_checks_ring`; both build on the same
+primitives.
 
 :func:`spindoctor.sim.scene.validate_sim_params` drives these helpers; every
 violation raises :class:`spindoctor.sim.scene_schema.SimSceneValidationError`.
@@ -37,22 +39,6 @@ _EXPECTED_KEYS: frozenset[str] = frozenset({'status', 'status_reason', 'confiden
 _EXPECTED_STATUSES: frozenset[str] = frozenset({'success', 'failed', 'conflicted'})
 _EXPECTED_TIERS: frozenset[str] = frozenset({'high', 'medium', 'low', 'failed', 'conflicted'})
 _EXPECTED_STATUS_REASONS: frozenset[str] = frozenset(reason.value for reason in NavStatusReason)
-
-
-def _check_ring_object(obj: dict[str, Any], *, index: int, source: str) -> None:
-    """Validate one ``rings`` entry's field types."""
-    label = f'rings[{index}]'
-    _check_optional_str(obj.get('name'), f'{label}.name', source=source)
-    feature_type = obj.get('feature_type')
-    if feature_type is not None and feature_type not in ('RINGLET', 'GAP'):
-        raise SimSceneValidationError(
-            f"{source}: {label}.feature_type must be 'RINGLET' or 'GAP' when present; "
-            f'got {feature_type!r}'
-        )
-    for key in ('center_v', 'center_u', 'shading_distance', 'range', 'range_km'):
-        _check_optional_number(obj.get(key), f'{label}.{key}', source=source)
-    for key in ('inner_data', 'outer_data'):
-        _check_optional_mapping_list(obj.get(key), f'{label}.{key}', source=source)
 
 
 def _check_star_object(obj: dict[str, Any], *, index: int, source: str) -> None:
@@ -641,7 +627,7 @@ def _check_expected(value: Any, *, source: str) -> None:
 
 
 def _require_ranges_for_spk_error(sim_params: dict[str, Any], *, source: str) -> None:
-    """Every body and ring feature needs a physical ``range_km`` under spk_error.
+    """Every body and the ring system need a physical ``range_km`` under spk_error.
 
     The parallax displacement scales as ``reference_range_km / range_km``, so a
     scene that plants spacecraft-ephemeris error must give the renderer a
@@ -652,14 +638,18 @@ def _require_ranges_for_spk_error(sim_params: dict[str, Any], *, source: str) ->
         source: Label used in error messages.
 
     Raises:
-        SimSceneValidationError: If any body or ring lacks ``range_km``.
+        SimSceneValidationError: If any body or the ring system lacks ``range_km``.
     """
-    for block in ('bodies', 'rings'):
-        for index, obj in enumerate(sim_params.get(block) or []):
-            if obj.get('range_km') is None:
-                raise SimSceneValidationError(
-                    f'{source}: {block}[{index}] needs range_km when spk_error is present'
-                )
+    for index, obj in enumerate(sim_params.get('bodies') or []):
+        if obj.get('range_km') is None:
+            raise SimSceneValidationError(
+                f'{source}: bodies[{index}] needs range_km when spk_error is present'
+            )
+    ring_system = sim_params.get('ring_system')
+    if isinstance(ring_system, dict) and ring_system.get('range_km') is None:
+        raise SimSceneValidationError(
+            f'{source}: ring_system needs range_km when spk_error is present'
+        )
 
 
 def _require_str(raw: dict[str, Any], key: str, *, source: str) -> str:

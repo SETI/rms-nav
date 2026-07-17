@@ -170,7 +170,6 @@ class SimEditorBase(QMainWindow):
     _load_scene_btn: QPushButton
     _visual_aids_check: QCheckBox
     _zoom_sharp_check: QCheckBox
-    _shade_solid_rings_check: QCheckBox
     _saturation_overlay_check: QCheckBox
 
     # ---- Cross-mixin seams (each owning mixin overrides its own) ----
@@ -212,6 +211,14 @@ class SimEditorBase(QMainWindow):
 
     def _build_ring_tab(self, idx: int) -> QWidget:
         """Build a ring tab widget (implemented in RingTabMixin)."""
+        raise NotImplementedError
+
+    def _build_ring_advanced_groups(self, w: QWidget, idx: int, layout: QVBoxLayout) -> None:
+        """Add the advanced ring groups to a ring tab (RingAdvancedMixin)."""
+        raise NotImplementedError
+
+    def _ring_features(self) -> list[dict[str, Any]]:
+        """The live ring_system feature list (implemented in RingTabMixin)."""
         raise NotImplementedError
 
     def _build_star_tab(self, idx: int) -> QWidget:

@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from spindoctor.obs.obs_inst_sim import ObsSim
+from spindoctor.sim.render import render_combined_model
 from spindoctor.sim.scene import (
     TOP_LEVEL_TEST_ONLY_KEYS,
     TOP_LEVEL_TRUTH_KEYS,
@@ -29,7 +30,6 @@ _TRUTH_SAMPLES: dict[str, Any] = {
     'offset_v': 2.5,
     'offset_u': -1.5,
     'offset_rotation_deg': 0.4,
-    'shade_solid_rings': True,
     'sky_counts': {'a': -3.1, 'b': 0.34, 'density_factor': 5.0, 'diffuse_e_per_px': 1.0},
     'noise': {'poisson': True, 'read_noise_dn': 4.0, 'bias_dn': 12.0},
     'oversample': 4,
@@ -91,6 +91,27 @@ _TRUTH_SAMPLES: dict[str, Any] = {
     'stars.catalog_error_u': -0.8,
     'stars.companion': {'sep_px': 2.0, 'delta_mag': 1.5, 'angle_deg': 45.0},
     'stars.delta_mag': 0.7,
+    'ring_system.features.albedo': 0.7,
+    'ring_system.features.phase_g': 0.4,
+    'ring_system.features.orbit_error': {
+        'delta_a_px': 1.5,
+        'delta_ae_px': 0.4,
+        'delta_long_peri_deg': 10.0,
+    },
+    'ring_system.azimuthal': {
+        'modulation': {'amplitude': 0.2, 'm': 2, 'phase_deg': 30.0},
+        'shadow': {'start_deg': 100.0, 'extent_deg': 40.0, 'darkness': 0.9},
+        'spokes': {'count': 3, 'r_inner': 3.0, 'r_outer': 6.0, 'contrast': -0.4, 'width_deg': 12.0},
+    },
+    'ring_system.moonlets': [
+        {
+            'a': 6.0,
+            'lam_deg': 45.0,
+            'radius_px': 1.0,
+            'amplitude': 0.4,
+            'propeller': {'length_deg': 20.0, 'width_px': 1.0, 'contrast': -0.6},
+        }
+    ],
 }
 
 # The true (rendered) values nav_override hides from the navigator.
@@ -170,21 +191,66 @@ def _truth_exercising_scene() -> dict[str, Any]:
                 'delta_mag': _TRUTH_SAMPLES['stars.delta_mag'],
             }
         ],
-        'rings': [
-            {
-                'name': 'R1',
-                'feature_type': 'RINGLET',
-                'center_v': 48.0,
-                'center_u': 48.0,
-                'range_km': 200000.0,
-                'inner_data': [{'mode': 1, 'a': 30.0}],
-                'outer_data': [{'mode': 1, 'a': 38.0}],
-            }
-        ],
+        # A small inclined ring system in the frame corner, clear of the
+        # bodies (overlap without explicit depth is a render error),
+        # carrying the per-feature photometric truth keys.
+        'ring_system': {
+            'geometry': {
+                'center_v': 12.0,
+                'center_u': 12.0,
+                'opening_deg_obs': 30.0,
+                'opening_deg_sun': 20.0,
+                'node_deg': 25.0,
+            },
+            'range_km': 300000.0,
+            'km_per_pixel': 500.0,
+            'phase_deg': 40.0,
+            'features': [
+                {
+                    'name': 'F1',
+                    'kind': 'ringlet',
+                    'tau': 1.2,
+                    'width': 3.0,
+                    'navigable': True,
+                    'orbit': {'a': 4.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0},
+                    'declared_orbit_sigma': {'sigma_a_px': 0.5},
+                    'albedo': _TRUTH_SAMPLES['ring_system.features.albedo'],
+                    'phase_g': _TRUTH_SAMPLES['ring_system.features.phase_g'],
+                    'orbit_error': dict(_TRUTH_SAMPLES['ring_system.features.orbit_error']),
+                }
+            ],
+            'azimuthal': dict(_TRUTH_SAMPLES['ring_system.azimuthal']),
+            'moonlets': list(_TRUTH_SAMPLES['ring_system.moonlets']),
+        },
     }
     for key in TOP_LEVEL_TRUTH_KEYS:
         scene[key] = _TRUTH_SAMPLES[key]
     return validate_sim_params(scene, source='boundary_probe')
+
+
+def _addressed_objects(view: dict[str, Any], truth_key: str) -> tuple[list[dict[str, Any]], str]:
+    """The object mappings a dotted truth key addresses in a scene-shaped view.
+
+    ``<block>.<key>`` addresses every entry of an object-block list;
+    ``ring_system.<key>`` addresses the ring_system mapping itself; and
+    ``ring_system.features.<key>`` addresses every feature entry.
+
+    Parameters:
+        view: A full scene or a filtered ``nav_params`` mapping.
+        truth_key: A dotted TRUTH_KEYS entry.
+
+    Returns:
+        ``(objects, leaf_key)``: the mappings to probe and the key to probe
+        them for.
+    """
+    if truth_key.startswith('ring_system.features.'):
+        leaf = truth_key.rsplit('.', 1)[1]
+        ring_system = view.get('ring_system') or {}
+        return list(ring_system.get('features') or []), leaf
+    if truth_key.startswith('ring_system.'):
+        return [view.get('ring_system') or {}], truth_key.split('.', 1)[1]
+    block, leaf = truth_key.split('.', 1)
+    return list(view.get(block) or []), leaf
 
 
 def test_every_truth_key_has_an_exercising_sample() -> None:
@@ -197,9 +263,9 @@ def test_truth_key_unreachable_through_nav_params(truth_key: str) -> None:
     """No TRUTH_KEYS entry is reachable through the filtered view."""
     nav = build_nav_params(_truth_exercising_scene())
     if '.' in truth_key:
-        block, key = truth_key.split('.', 1)
-        for obj in nav.get(block, []):
-            assert key not in obj
+        objects, leaf = _addressed_objects(nav, truth_key)
+        for obj in objects:
+            assert leaf not in obj
     else:
         assert truth_key not in nav
 
@@ -209,8 +275,8 @@ def test_probe_scene_actually_carries_every_truth_key() -> None:
     scene = _truth_exercising_scene()
     for truth_key in TRUTH_KEYS:
         if '.' in truth_key:
-            block, key = truth_key.split('.', 1)
-            assert any(key in obj for obj in scene[block])
+            objects, leaf = _addressed_objects(scene, truth_key)
+            assert any(leaf in obj for obj in objects)
         else:
             assert truth_key in scene
 
@@ -231,7 +297,64 @@ def test_idealized_keys_survive_the_filter() -> None:
     assert nav['bodies'][0]['range_km'] == 500000.0
     star = nav['stars'][0]
     assert star['vmag'] == 4.0
-    assert nav['rings'][0]['inner_data'] == [{'mode': 1, 'a': 30.0}]
+    assert nav['ring_system']['features'][0]['orbit']['a'] == 4.0
+
+
+def test_ring_system_geometry_crosses_with_the_navigable_feature() -> None:
+    """The shared geometry and the navigable feature's catalog view cross.
+
+    Both sides project through the geometry block by design, so it crosses
+    with the block-level scale keys.  The probe feature is navigable, so it
+    crosses too -- carrying its idealized keys (kind, shape, catalog orbit,
+    declared orbit uncertainty) and none of its truth (the parametrized
+    boundary test covers albedo / phase_g / orbit_error explicitly).
+    """
+    nav = build_nav_params(_truth_exercising_scene())
+    ring_system = nav['ring_system']
+    assert ring_system['geometry']['opening_deg_obs'] == 30.0
+    assert ring_system['geometry']['node_deg'] == 25.0
+    assert ring_system['range_km'] == 300000.0
+    assert ring_system['km_per_pixel'] == 500.0
+    assert ring_system['phase_deg'] == 40.0
+    features = ring_system['features']
+    assert len(features) == 1
+    assert features[0]['name'] == 'F1'
+    assert features[0]['kind'] == 'ringlet'
+    assert features[0]['orbit'] == {'a': 4.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
+    assert features[0]['declared_orbit_sigma'] == {'sigma_a_px': 0.5}
+    assert features[0]['navigable'] is True
+
+
+def test_non_navigable_ring_feature_is_dropped_but_still_renders() -> None:
+    """A non-navigable feature is invisible to the navigator yet on the frame.
+
+    The default ``navigable: false`` drops the feature from ``nav_params``
+    entirely, while the renderer draws it regardless -- the false-lock /
+    distractor regime.  The rendered frame must change when the confounder
+    is added; the navigator's view must not.
+    """
+    scene = _truth_exercising_scene()
+    confounder = {
+        'name': 'CONFOUNDER',
+        'kind': 'ringlet',
+        'tau': 2.0,
+        'width': 2.0,
+        'orbit': {'a': 8.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0},
+    }
+    with_confounder = _truth_exercising_scene()
+    with_confounder['ring_system']['features'] = [
+        *with_confounder['ring_system']['features'],
+        confounder,
+    ]
+    validate_sim_params(with_confounder, source='boundary_probe')
+
+    nav_without = build_nav_params(scene)
+    nav_with = build_nav_params(with_confounder)
+    assert nav_with['ring_system'] == nav_without['ring_system']
+
+    img_without, _meta0 = render_combined_model(scene)
+    img_with, _meta1 = render_combined_model(with_confounder)
+    assert bool((img_with != img_without).any())
 
 
 def test_obs_sim_exposes_only_the_filtered_view() -> None:
@@ -239,9 +362,9 @@ def test_obs_sim_exposes_only_the_filtered_view() -> None:
     obs = ObsSim.from_file('/tmp/boundary_probe.yaml', sim_params=_truth_exercising_scene())
     for truth_key in TRUTH_KEYS:
         if '.' in truth_key:
-            block, key = truth_key.split('.', 1)
-            for obj in obs.nav_params.get(block, []):
-                assert key not in obj
+            objects, leaf = _addressed_objects(obs.nav_params, truth_key)
+            for obj in objects:
+                assert leaf not in obj
         else:
             assert truth_key not in obs.nav_params
     # The star-list replumb: the renderer's output star records no longer
@@ -341,6 +464,6 @@ def test_nav_params_values_are_isolated_copies() -> None:
     scene = _truth_exercising_scene()
     nav = build_nav_params(scene)
     nav['bodies'][0]['axis1'] = 999.0
-    nav['rings'][0]['inner_data'][0]['a'] = 999.0
+    nav['ring_system']['features'][0]['orbit']['a'] = 999.0
     assert scene['bodies'][0]['axis1'] == 30.0
-    assert scene['rings'][0]['inner_data'][0]['a'] == 30.0
+    assert scene['ring_system']['features'][0]['orbit']['a'] == 4.0

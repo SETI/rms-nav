@@ -58,7 +58,6 @@ _FULL_SCENE: dict[str, Any] = {
     'closest_planet': 'SATURN',
     'time': 100.0,
     'ring_epoch': 50.0,
-    'shade_solid_rings': True,
     'sky_counts': {'a': -3.0, 'b': 0.35, 'density_factor': 8.0, 'diffuse_e_per_px': 2.5},
     'star_catalog_scatter_px': 0.4,
     'expected': {
@@ -182,23 +181,67 @@ _FULL_SCENE: dict[str, Any] = {
             },
         }
     ],
-    'rings': [
-        {
-            'name': 'RingA',
-            'feature_type': 'RINGLET',
+    'ring_system': {
+        'geometry': {
             'center_v': 64.0,
             'center_u': 64.0,
-            'shading_distance': 20.0,
-            'range': 5.0,
-            'range_km': 2000.0,
-            'inner_data': [
-                {'mode': 1, 'a': 100.0, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
-            ],
-            'outer_data': [
-                {'mode': 1, 'a': 120.0, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
-            ],
-        }
-    ],
+            'opening_deg_obs': 35.0,
+            'opening_deg_sun': 25.0,
+            'node_deg': 20.0,
+        },
+        'range_km': 2000.0,
+        'km_per_pixel': 100.0,
+        'phase_deg': 40.0,
+        'features': [
+            {
+                'name': 'RingA',
+                'kind': 'ringlet',
+                'tau': 1.2,
+                'width': 20.0,
+                'navigable': True,
+                'orbit': {
+                    'a': 100.0,
+                    'ae': 2.0,
+                    'long_peri': 10.0,
+                    'rate_peri': 0.5,
+                    'modes': [{'m': 2, 'amp': 1.5, 'peri': 70.0}],
+                    'edge_wave': {'amp': 1.0, 'wavelength': 8.0, 'damp': 0.5, 'lam0': 90.0},
+                },
+                'declared_orbit_sigma': {'sigma_a_px': 0.5, 'sigma_ae_px': 0.2},
+                'orbit_error': {'delta_a_px': 1.0, 'delta_long_peri_deg': 5.0},
+                'albedo': 0.6,
+                'phase_g': -0.2,
+            },
+            {
+                'name': 'WaveTrain',
+                'kind': 'wave',
+                'tau': 0.4,
+                'wavelength': 6.0,
+                'damping': 12.0,
+                'orbit': {'a': 130.0},
+            },
+        ],
+        'azimuthal': {
+            'modulation': {'amplitude': 0.2, 'm': 2, 'phase_deg': 30.0},
+            'shadow': {'start_deg': 100.0, 'extent_deg': 40.0, 'darkness': 0.9},
+            'spokes': {
+                'count': 3,
+                'r_inner': 90.0,
+                'r_outer': 120.0,
+                'contrast': -0.4,
+                'width_deg': 12.0,
+            },
+        },
+        'moonlets': [
+            {
+                'a': 110.0,
+                'lam_deg': 45.0,
+                'radius_px': 1.5,
+                'amplitude': 0.4,
+                'propeller': {'length_deg': 20.0, 'width_px': 2.0, 'contrast': -0.6},
+            }
+        ],
+    },
     'stars': [
         {
             'name': 'S1',
@@ -314,7 +357,7 @@ def test_full_inventory_edit_is_the_only_change(
     resaved = load_sim_scene(out)
 
     assert resaved['bodies'] == original['bodies']
-    assert resaved['rings'] == original['rings']
+    assert resaved['ring_system'] == original['ring_system']
     assert resaved['stars'] == original['stars']
 
 
@@ -478,8 +521,8 @@ def test_ring_spk_error_scene_authors_and_validates(
 ) -> None:
     """A ring + spk_error scene authored through the editor saves cleanly.
 
-    spk_error requires range_km on every ring; the ring tab's physical-range
-    control makes the key authorable (absent unless set).
+    spk_error requires range_km on the ring system; the first feature tab's
+    physical-range control makes the key authorable (absent unless set).
     """
     model.sim_params['instrument'] = 'coiss_nac'
     model.sim_params['size_v'] = 128
@@ -490,7 +533,7 @@ def test_ring_spk_error_scene_authors_and_validates(
     ring_tab = model._tabs.widget(tab_idx)
     ring_tab.range_km_check.click()
     ring_tab.range_km_spin.setValue(2.0e6)
-    assert model.sim_params['rings'][0]['range_km'] == 2.0e6
+    assert model.sim_params['ring_system']['range_km'] == 2.0e6
     model._spk_error_group.setChecked(True)
 
     out = tmp_path / 'ring_spk.yaml'
@@ -500,7 +543,7 @@ def test_ring_spk_error_scene_authors_and_validates(
     _no_critical(monkeypatch)
     model._save_scene()
     loaded = load_sim_scene(out)
-    assert loaded['rings'][0]['range_km'] == 2.0e6
+    assert loaded['ring_system']['range_km'] == 2.0e6
     assert loaded['spk_error']['reference_range_km'] > 0.0
 
 
@@ -727,3 +770,142 @@ def test_load_full_scene_syncs_confounder_star_tab(
     assert tab.catalog_error_check.isChecked() is True
     assert tab.companion_group.isChecked() is True
     assert tab.delta_mag_check.isChecked() is True
+
+
+def test_load_full_scene_syncs_ring_advanced_groups(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """The first ring tab reflects the orbit-perturbation and truth blocks after load."""
+    src = tmp_path / 'full.yaml'
+    save_sim_scene(_FULL_SCENE, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    tab_idx = model._find_tab_by_properties('ring', 0)
+    assert tab_idx is not None
+    tab = model._tabs.widget(tab_idx)
+    assert len(tab.mode_rows) == 1
+    assert tab.mode_rows[0].m_spin.value() == 2
+    assert tab.edge_wave_group.isChecked() is True
+    assert tab.edge_wave_damp_spin.value() == 0.5
+    assert tab.orbit_error_group.isChecked() is True
+    assert tab.orbit_error_a_spin.value() == 1.0
+    assert tab.orbit_sigma_group.isChecked() is True
+    assert tab.azimuthal_modulation_group.isChecked() is True
+    assert tab.azimuthal_shadow_group.isChecked() is True
+    assert tab.azimuthal_spokes_group.isChecked() is True
+    assert tab.moonlets_group.isChecked() is True
+    assert len(tab.moonlet_rows) == 1
+    assert tab.moonlet_rows[0].propeller_group.isChecked() is True
+
+
+def _key_paths(value: Any, prefix: str = '') -> set[str]:
+    """Collect every nested mapping key of ``value`` as a dotted path.
+
+    List entries contribute their element keys without an index component, so
+    two features' key sets union into one path namespace.
+    """
+    paths: set[str] = set()
+    if isinstance(value, dict):
+        for key, sub in value.items():
+            path = f'{prefix}.{key}' if prefix else str(key)
+            paths.add(path)
+            paths |= _key_paths(sub, path)
+    elif isinstance(value, list):
+        for entry in value:
+            paths |= _key_paths(entry, prefix)
+    return paths
+
+
+def test_gui_authored_ring_system_reaches_every_schema_key(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Every ring_system schema key is authorable through the editor's widgets.
+
+    Authors a three-feature ring system purely through widget handlers (a
+    ringlet carrying every orbit perturbation and error block, a wave train,
+    and an in-side ramp, plus every system-level truth block), saves it, and
+    asserts the loaded scene's dotted key paths cover the schema's full
+    ring_system inventory.
+    """
+    # The block / geometry / feature inventories come from the schema's
+    # boundary classification (scene_checks_ring re-uses the same sets), so
+    # a key added to the schema alone reaches this coverage assertion.
+    from spindoctor.sim.scene_checks_ring import (
+        _RING_AZIMUTHAL_KEYS,
+        _RING_EDGE_WAVE_KEYS,
+        _RING_FEATURE_ORBIT_KEYS,
+        _RING_MODULATION_KEYS,
+        _RING_MOONLET_KEYS,
+        _RING_ORBIT_ERROR_KEYS,
+        _RING_ORBIT_MODE_KEYS,
+        _RING_ORBIT_SIGMA_KEYS,
+        _RING_PROPELLER_KEYS,
+        _RING_SHADOW_KEYS,
+        _RING_SPOKES_KEYS,
+    )
+    from spindoctor.sim.scene_schema import (
+        _RING_FEATURE_KEYS,
+        _RING_SYSTEM_GEOMETRY_KEYS,
+        _RING_SYSTEM_KEYS,
+    )
+
+    model.sim_params['instrument'] = 'coiss_nac'
+    model.sim_params['size_v'] = 128
+    model.sim_params['size_u'] = 128
+    model._add_ring_tab()
+    tab = model._tabs.widget(model._find_tab_by_properties('ring', 0))
+    # Feature 0 (ringlet): every per-feature block.
+    tab.edge_wave_group.setChecked(True)
+    tab.orbit_error_group.setChecked(True)
+    tab.orbit_sigma_group.setChecked(True)
+    model._on_ring_add_mode(0)
+    # Photometric truth scalars and the system scalars write on change, so
+    # drive their handlers off the widget defaults.
+    model._on_ring_field(0, 'albedo', 0.6)
+    model._on_ring_field(0, 'phase_g', -0.2)
+    model._on_ring_system_field('phase_deg', 40.0)
+    model._on_ring_system_field('km_per_pixel', 100.0)
+    # System-level: range, truth clutter, and a moonlet with a propeller.
+    tab.range_km_check.click()
+    tab.azimuthal_modulation_group.setChecked(True)
+    tab.azimuthal_shadow_group.setChecked(True)
+    tab.azimuthal_spokes_group.setChecked(True)
+    tab.moonlets_group.setChecked(True)
+    model._on_ring_add_moonlet()
+    tab.moonlet_rows[0].propeller_group.setChecked(True)
+    # Features 1 and 2 cover the remaining kind-specific shape keys.
+    model._add_ring_tab()
+    model._on_ring_kind(1, 'wave')
+    model._add_ring_tab()
+    model._on_ring_kind(2, 'ramp')
+    ramp_tab = model._tabs.widget(model._find_tab_by_properties('ring', 2))
+    ramp_tab.side_combo.setCurrentText('in')
+
+    out = tmp_path / 'ring_full.yaml'
+    monkeypatch.setattr(
+        QFileDialog, 'getSaveFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._save_scene()
+    loaded = load_sim_scene(out)
+
+    authored = _key_paths(loaded['ring_system'])
+    expected: set[str] = set(_RING_SYSTEM_KEYS)
+    expected |= {f'geometry.{key}' for key in _RING_SYSTEM_GEOMETRY_KEYS}
+    expected |= {f'features.{key}' for key in _RING_FEATURE_KEYS}
+    expected |= {f'features.orbit.{key}' for key in _RING_FEATURE_ORBIT_KEYS}
+    expected |= {f'features.orbit.modes.{key}' for key in _RING_ORBIT_MODE_KEYS}
+    expected |= {f'features.orbit.edge_wave.{key}' for key in _RING_EDGE_WAVE_KEYS}
+    expected |= {f'features.orbit_error.{key}' for key in _RING_ORBIT_ERROR_KEYS}
+    expected |= {f'features.declared_orbit_sigma.{key}' for key in _RING_ORBIT_SIGMA_KEYS}
+    expected |= {f'azimuthal.{key}' for key in _RING_AZIMUTHAL_KEYS}
+    expected |= {f'azimuthal.modulation.{key}' for key in _RING_MODULATION_KEYS}
+    expected |= {f'azimuthal.shadow.{key}' for key in _RING_SHADOW_KEYS}
+    expected |= {f'azimuthal.spokes.{key}' for key in _RING_SPOKES_KEYS}
+    expected |= {f'moonlets.{key}' for key in _RING_MOONLET_KEYS}
+    expected |= {f'moonlets.propeller.{key}' for key in _RING_PROPELLER_KEYS}
+    missing = expected - authored
+    assert not missing, f'ring_system keys not reachable from the editor: {sorted(missing)}'

@@ -47,7 +47,6 @@ _BASE_SCENE: dict[str, Any] = {
             'phase_angle': 30.0,
         }
     ],
-    'rings': [],
     'noise': {'poisson': True, 'read_noise_dn': 4.0, 'bias_dn': 20.0},
 }
 

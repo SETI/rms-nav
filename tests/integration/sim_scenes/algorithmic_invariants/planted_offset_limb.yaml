@@ -23,7 +23,6 @@ bodies:
     axis3: 130.0
     illumination_angle: 25.0
     phase_angle: 30.0
-rings: []
 noise:
   poisson: true
   read_noise_dn: 4.0

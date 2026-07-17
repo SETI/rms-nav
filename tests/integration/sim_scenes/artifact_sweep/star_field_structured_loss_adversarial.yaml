@@ -16,7 +16,6 @@ optics:
   psf:
     match_navigator: true
 bodies: []
-rings: []
 stars:
   - {name: F1, v: 30.0, u: 40.0, vmag: 3.0}
   - {name: F2, v: 80.0, u: 35.0, vmag: 3.6}

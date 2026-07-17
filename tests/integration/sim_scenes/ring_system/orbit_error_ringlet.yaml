@@ -1,0 +1,46 @@
+schema_version: 2
+scene_name: orbit_error_ringlet
+instrument: coiss_nac
+size_v: 220
+size_u: 220
+random_seed: 15
+exposure_sec: 1.0
+# The planted-ephemeris-error axis: a centred navigable ringlet whose
+# rendered orbit is displaced 2.5 px outward of the catalog orbit the
+# navigator predicts from (delta_a_px, a truth key).  Measured outcome
+# (2026-07-16): the fused result is a CONFIDENT success (conf 0.92, rank
+# high) at (-1.89, -2.35) px against the planted (1.0, -1.5) -- a ~3 px
+# wrong offset.  A uniform radial misplacement has no exact translational
+# equivalent, but the robust edge fit down-weights the far arc and locks
+# onto one side of the annulus, absorbing the ephemeris error into the
+# recovered offset instead of the residuals.  That confidently-biased
+# recovery is this scene's pinned behavior: it is the honest measurement
+# of what a planted ring-radial error does to today's techniques, and the
+# calibration axis the declared sigma_a_px (the error bar the navigator is
+# entitled to know) exists to feed.
+expected:
+  status: success
+  confidence_tier: high
+bodies: []
+ring_system:
+  geometry:
+    center_v: 110.0
+    center_u: 110.0
+    opening_deg_obs: 90.0
+    opening_deg_sun: 90.0
+    node_deg: 0.0
+  features:
+    - name: MISPLACED
+      kind: ringlet
+      tau: 2.0
+      width: 20.0
+      navigable: true
+      orbit: {a: 60.0, ae: 0.0, long_peri: 0.0, rate_peri: 0.0}
+      orbit_error: {delta_a_px: 2.5}
+      declared_orbit_sigma: {sigma_a_px: 2.5}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.0
+offset_u: -1.5
+offset_rotation_deg: 0.0

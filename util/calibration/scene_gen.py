@@ -115,7 +115,6 @@ def _base(rng: random.Random, *, size: int) -> dict[str, Any]:
         'random_seed': rng.randrange(2**31),
         'exposure_sec': 1.0,
         'bodies': [],
-        'rings': [],
         'noise': {'poisson': True, 'read_noise_dn': _read_noise(rng)},
         'offset_v': dv,
         'offset_u': du,
@@ -325,21 +324,21 @@ def gen_blob(rng: random.Random) -> dict[str, Any]:
     return params
 
 
-def _ringlet(
-    rng: random.Random, *, center_v: float, center_u: float, a_inner: float, a_outer: float
-) -> dict[str, Any]:
-    """One circular RINGLET entry in renderer form."""
+def _ring_feature(rng: random.Random, *, name: str, a: float, width: float) -> dict[str, Any]:
+    """One circular navigable ringlet feature with a log-uniform tau draw.
+
+    tau spans faint (~0.2, a low-contrast band over the noise) through
+    optically thick (~4, the saturated closed-form brightness), so the
+    ring family's contrast regime spans healthy to marginal.
+    """
+    tau = math.exp(rng.uniform(math.log(0.2), math.log(4.0)))
     return {
-        'name': 'SATURN',
-        'feature_type': 'RINGLET',
-        'center_v': center_v,
-        'center_u': center_u,
-        'inner_data': [
-            {'mode': 1, 'a': a_inner, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
-        ],
-        'outer_data': [
-            {'mode': 1, 'a': a_outer, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
-        ],
+        'name': name,
+        'kind': 'ringlet',
+        'tau': tau,
+        'width': width,
+        'navigable': True,
+        'orbit': {'a': a, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0},
     }
 
 
@@ -349,11 +348,14 @@ def gen_ring(rng: random.Random) -> dict[str, Any]:
     Curvature is controlled by pushing the ring center off-frame: an arc from
     a ring of radius R passing through a frame R away from its center is
     nearly straight (the rank-1 regime), while an in-frame center gives
-    fully-curved closed edges.
+    fully-curved closed edges.  The system renders face-on (B = 90, the
+    sky-plane-circle identity) so the drawn radii are exact image radii and
+    the family's curvature regimes are unchanged by projection; brightness
+    follows each feature's tau through the single-scattering photometry.
     """
     size = 220
     params = _base(rng, size=size)
-    rings: list[dict[str, Any]] = []
+    features: list[dict[str, Any]] = []
     n_ringlets = 1 if rng.random() < 0.7 else 2
     flat = rng.random() < 0.3
     if flat:
@@ -367,19 +369,20 @@ def gen_ring(rng: random.Random) -> dict[str, Any]:
         center_v = size / 2 + rng.uniform(-40.0, 40.0)
         center_u = size / 2 + rng.uniform(-40.0, 40.0)
         base_a = rng.uniform(40.0, 80.0)
-    for _ in range(n_ringlets):
+    for index in range(n_ringlets):
         width = rng.uniform(2.0, 35.0)
-        rings.append(
-            _ringlet(
-                rng,
-                center_v=center_v,
-                center_u=center_u,
-                a_inner=base_a,
-                a_outer=base_a + width,
-            )
-        )
+        features.append(_ring_feature(rng, name=f'SATURN-{index + 1}', a=base_a, width=width))
         base_a += width + rng.uniform(10.0, 30.0)
-    params['rings'] = rings
+    params['ring_system'] = {
+        'geometry': {
+            'center_v': center_v,
+            'center_u': center_u,
+            'opening_deg_obs': 90.0,
+            'opening_deg_sun': 90.0,
+            'node_deg': 0.0,
+        },
+        'features': features,
+    }
     return params
 
 

@@ -16,8 +16,9 @@ programmatic scene authors.  The validator is hand-rolled (no pydantic
 dependency): the key inventory and boundary classification live in
 :mod:`spindoctor.sim.scene_schema` and the per-field type checks in
 :mod:`spindoctor.sim.scene_checks` (body entries:
-:mod:`spindoctor.sim.scene_checks_body`); this module is the public entry point and
-re-exports the boundary names.
+:mod:`spindoctor.sim.scene_checks_body`; the ring_system block:
+:mod:`spindoctor.sim.scene_checks_ring`); this module is the public entry point
+and re-exports the boundary names.
 
 **The information boundary.**  Every key in the schema is classified as either
 idealized (information the production pipeline could know from catalogs,
@@ -53,7 +54,6 @@ from spindoctor.sim.scene_checks import (
     _check_optional_positive_int,
     _check_optional_positive_number,
     _check_optional_str,
-    _check_ring_object,
     _check_sky_counts,
     _check_spk_error,
     _check_star_catalog_scatter,
@@ -64,6 +64,7 @@ from spindoctor.sim.scene_checks import (
     _require_str,
 )
 from spindoctor.sim.scene_checks_body import _check_body_object
+from spindoctor.sim.scene_checks_ring import _check_ring_system
 
 # The two private inventories keep their redundant aliases: they are explicit
 # re-exports (the schema tests exercise them through this module).
@@ -74,6 +75,8 @@ from spindoctor.sim.scene_schema import (
     _OBJECT_BLOCKS as _OBJECT_BLOCKS,
 )
 from spindoctor.sim.scene_schema import (
+    _RING_FEATURE_IDEALIZED_KEYS,
+    _RING_SYSTEM_IDEALIZED_KEYS,
     TOP_LEVEL_IDEALIZED_KEYS,
     TOP_LEVEL_TEST_ONLY_KEYS,
     TOP_LEVEL_TRUTH_KEYS,
@@ -113,6 +116,7 @@ DECLARED_SIM_SCENE_CLASSES: frozenset[str] = frozenset(
         'regression',
         'artifact_sweep',
         'star_confounder',
+        'ring_system',
         'expected_fail',
     }
 )
@@ -251,13 +255,13 @@ def validate_sim_params(
     _check_optional_number(sim_params.get('ring_epoch'), 'ring_epoch', source=source)
     _check_optional_str(sim_params.get('midtime_utc'), 'midtime_utc', source=source)
     _check_optional_str(sim_params.get('closest_planet'), 'closest_planet', source=source)
-    _check_optional_bool(sim_params.get('shade_solid_rings'), 'shade_solid_rings', source=source)
     _check_optional_bool(
         sim_params.get('fit_camera_rotation'), 'fit_camera_rotation', source=source
     )
     _check_noise(sim_params.get('noise'), source=source)
     _check_optional_mapping(sim_params.get('instrument_config'), 'instrument_config', source=source)
     _check_optional_positive_int(sim_params.get('oversample'), 'oversample', source=source)
+    _check_ring_system(sim_params.get('ring_system'), source=source)
     _check_optics(sim_params.get('optics'), source=source)
     _check_detector(sim_params.get('detector'), instrument=instrument, source=source)
     _check_artifacts(sim_params.get('artifacts'), instrument=instrument, source=source)
@@ -266,7 +270,7 @@ def validate_sim_params(
     _check_star_catalog_scatter(sim_params.get('star_catalog_scatter_px'), source=source)
     _check_expected(sim_params.get('expected'), source=source)
 
-    for block in ('bodies', 'rings', 'stars'):
+    for block in ('bodies', 'stars'):
         _check_optional_mapping_list(sim_params.get(block), block, source=source)
         allowed = _OBJECT_BLOCKS[block][0]
         for index, obj in enumerate(sim_params.get(block) or []):
@@ -277,8 +281,6 @@ def validate_sim_params(
                 )
             if block == 'bodies':
                 _check_body_object(obj, index=index, source=source)
-            elif block == 'rings':
-                _check_ring_object(obj, index=index, source=source)
             else:
                 _check_star_object(obj, index=index, source=source)
 
@@ -309,12 +311,15 @@ def build_nav_params(sim_params: dict[str, Any]) -> dict[str, Any]:
     """
     nav: dict[str, Any] = {}
     for key, value in sim_params.items():
-        if key in _OBJECT_BLOCKS:
+        if key in _OBJECT_BLOCKS or key == 'ring_system':
             continue  # handled below
         if key in TOP_LEVEL_IDEALIZED_KEYS:
             nav[key] = copy.deepcopy(value)
         # Anything else (truth keys, unknown keys) stays behind the boundary:
         # the filter is default-deny.
+    ring_system = sim_params.get('ring_system')
+    if isinstance(ring_system, dict):
+        nav['ring_system'] = _filter_ring_system(ring_system)
     for block, (_allowed, idealized, _truth) in _OBJECT_BLOCKS.items():
         if block not in sim_params:
             continue
@@ -334,3 +339,38 @@ def build_nav_params(sim_params: dict[str, Any]) -> dict[str, Any]:
             )
         nav[block] = filtered_objects
     return nav
+
+
+def _filter_ring_system(ring_system: dict[str, Any]) -> dict[str, Any]:
+    """The navigator's view of the ``ring_system`` block.
+
+    Block-level idealized keys (the shared projection geometry, range, pixel
+    scale, phase angle) pass through as deep copies.  Features cross only
+    when flagged ``navigable: true`` (the default is false), so the rendered
+    system is full of structure the navigator was never told about -- the
+    distractor regime the ring system exists to produce.  A crossing feature
+    exposes only its idealized keys (kind, shape, catalog orbit, tau, and
+    the declared orbit uncertainty), never the photometric truth (albedo,
+    phase_g) or the planted ``orbit_error`` -- the navigator knows the error
+    bars, never the drawn error values.
+
+    Parameters:
+        ring_system: The full ``ring_system`` mapping (renderer input).
+
+    Returns:
+        The filtered mapping exposed under ``nav_params['ring_system']``.
+    """
+    filtered: dict[str, Any] = {
+        key: copy.deepcopy(value)
+        for key, value in ring_system.items()
+        if key in _RING_SYSTEM_IDEALIZED_KEYS and key != 'features'
+    }
+    features: list[dict[str, Any]] = []
+    for feature in ring_system.get('features') or []:
+        if not isinstance(feature, dict) or feature.get('navigable') is not True:
+            continue
+        features.append(
+            {k: copy.deepcopy(v) for k, v in feature.items() if k in _RING_FEATURE_IDEALIZED_KEYS}
+        )
+    filtered['features'] = features
+    return filtered

@@ -55,7 +55,6 @@ _ALLOWED_KEYS: frozenset[str] = frozenset(
         'closest_planet',
         'time',
         'ring_epoch',
-        'shade_solid_rings',
         'oversample',
         'optics',
         'detector',
@@ -65,7 +64,7 @@ _ALLOWED_KEYS: frozenset[str] = frozenset(
         'star_catalog_scatter_px',
         'expected',
         'bodies',
-        'rings',
+        'ring_system',
         'stars',
         'noise',
         'instrument_config',
@@ -90,7 +89,7 @@ TOP_LEVEL_IDEALIZED_KEYS: frozenset[str] = frozenset(
         'time',
         'ring_epoch',
         'bodies',
-        'rings',
+        'ring_system',
         'stars',
         'instrument_config',
         'fit_camera_rotation',
@@ -98,16 +97,13 @@ TOP_LEVEL_IDEALIZED_KEYS: frozenset[str] = frozenset(
 )
 
 # Top-level truth keys: the planted pointing error the navigator must recover,
-# the RNG realization, and the contaminant / noise fields.  The renderer's
-# appearance knob 'shade_solid_rings' is image-side only (the navigator's
-# ring template is always solid-shaded by its own convention).
+# the RNG realization, and the contaminant / noise fields.
 TOP_LEVEL_TRUTH_KEYS: frozenset[str] = frozenset(
     {
         'random_seed',
         'offset_v',
         'offset_u',
         'offset_rotation_deg',
-        'shade_solid_rings',
         'oversample',
         'optics',
         'detector',
@@ -229,42 +225,91 @@ _STAR_TRUTH_KEYS: frozenset[str] = frozenset(
 
 _STAR_KEYS: frozenset[str] = _STAR_IDEALIZED_KEYS | _STAR_TRUTH_KEYS
 
-# Per-ring keys, all idealized at present fidelity: the mode-1 orbits ARE the
-# catalog orbits, with no planted per-feature error.  'range' is the
-# z-order/depth hint of the rings list; the list and its keys remain valid
-# until a ring-system block with plantable per-feature error replaces them.
-_RING_IDEALIZED_KEYS: frozenset[str] = frozenset(
-    {
-        'name',
-        'feature_type',
-        'center_v',
-        'center_u',
-        'shading_distance',
-        'inner_data',
-        'outer_data',
-        'range',
-        'range_km',
-    }
-)
-
-_RING_TRUTH_KEYS: frozenset[str] = frozenset()
-
-_RING_KEYS: frozenset[str] = _RING_IDEALIZED_KEYS | _RING_TRUTH_KEYS
-
 # The object blocks of the schema: block name -> (allowed, idealized, truth).
+# Rings are not an object block: the optical-depth ring system is a single
+# mapping (shared projection geometry plus a feature list) with its own
+# two-level classification below.
 _OBJECT_BLOCKS: dict[str, tuple[frozenset[str], frozenset[str], frozenset[str]]] = {
     'bodies': (_BODY_KEYS, _BODY_IDEALIZED_KEYS, _BODY_TRUTH_KEYS),
     'stars': (_STAR_KEYS, _STAR_IDEALIZED_KEYS, _STAR_TRUTH_KEYS),
-    'rings': (_RING_KEYS, _RING_IDEALIZED_KEYS, _RING_TRUTH_KEYS),
 }
+
+# ---------------------------------------------------------------------------
+# The ring_system block: the optical-depth ring system.  Unlike the object
+# blocks above it is a mapping (shared projection geometry plus a feature
+# list), so it carries its own two-level classification here and is
+# special-cased by the validator and the boundary filter.
+# ---------------------------------------------------------------------------
+
+# Block-level idealized keys: the shared projection geometry (opening angles
+# and node are SPICE knowledge), the physical range and pixel scale (SPICE),
+# and the phase angle the photometry evaluates at.  'features' is the feature
+# list itself; its entries carry the two-level classification below.
+_RING_SYSTEM_IDEALIZED_KEYS: frozenset[str] = frozenset(
+    {'geometry', 'features', 'range_km', 'km_per_pixel', 'phase_deg'}
+)
+
+# Block-level truth keys: 'azimuthal' (brightness modulation, seeded spokes,
+# planet-shadow wedge) is non-navigable clutter crossing the navigable
+# edges, and 'moonlets' are embedded confounders sitting on the features --
+# neither is catalog knowledge, so neither reaches the navigator.
+_RING_SYSTEM_TRUTH_KEYS: frozenset[str] = frozenset({'azimuthal', 'moonlets'})
+
+_RING_SYSTEM_KEYS: frozenset[str] = _RING_SYSTEM_IDEALIZED_KEYS | _RING_SYSTEM_TRUTH_KEYS
+
+# The shared geometry sub-block (all idealized: both sides project through
+# it, per the plan's shared-helper rule).
+_RING_SYSTEM_GEOMETRY_KEYS: frozenset[str] = frozenset(
+    {'center_v', 'center_u', 'opening_deg_obs', 'opening_deg_sun', 'node_deg'}
+)
+
+# Per-feature idealized keys: the feature kind, its catalog orbit (mode-1
+# ellipse plus m-modes and edge wave), its radial shape (width / side /
+# wave train), its declared optical depth, and the orbit uncertainty the
+# navigator is entitled to know ('declared_orbit_sigma' -- the error BARS,
+# never the drawn error values) are catalog knowledge.  'navigable'
+# (default false) drives the boundary filter: a non-navigable feature is
+# dropped from nav_params entirely, so the rendered system is full of
+# structure the navigator was never told about, and a surviving feature's
+# flag is always true and carries no hidden truth.
+_RING_FEATURE_IDEALIZED_KEYS: frozenset[str] = frozenset(
+    {
+        'name',
+        'kind',
+        'width',
+        'tau',
+        'orbit',
+        'side',
+        'wavelength',
+        'damping',
+        'navigable',
+        'declared_orbit_sigma',
+    }
+)
+
+# Per-feature truth keys: the single-scattering albedo and the
+# Henyey-Greenstein asymmetry parameter are nature's scattering behavior
+# (the navigator's ring template is geometric, never photometric), and
+# 'orbit_error' is the planted ephemeris error applied on the render side
+# only -- the navigator predicts from the catalog orbit and must absorb the
+# misplacement honestly (the ring analog of the body ephemeris-error axis).
+_RING_FEATURE_TRUTH_KEYS: frozenset[str] = frozenset({'albedo', 'phase_g', 'orbit_error'})
+
+_RING_FEATURE_KEYS: frozenset[str] = _RING_FEATURE_IDEALIZED_KEYS | _RING_FEATURE_TRUTH_KEYS
 
 # The machine-readable truth-key set the ObsSim boundary filter strips and
 # the structural boundary test iterates.  Per-object-block entries use dotted
-# '<block>.<key>' paths; top-level entries are bare key names.
-TRUTH_KEYS: frozenset[str] = frozenset(TOP_LEVEL_TRUTH_KEYS) | frozenset(
-    f'{block}.{key}'
-    for block, (_allowed, _idealized, truth) in _OBJECT_BLOCKS.items()
-    for key in truth
+# '<block>.<key>' paths ('ring_system.features.<key>' for the two-level
+# feature entries); top-level entries are bare key names.
+TRUTH_KEYS: frozenset[str] = (
+    frozenset(TOP_LEVEL_TRUTH_KEYS)
+    | frozenset(
+        f'{block}.{key}'
+        for block, (_allowed, _idealized, truth) in _OBJECT_BLOCKS.items()
+        for key in truth
+    )
+    | frozenset(f'ring_system.{key}' for key in _RING_SYSTEM_TRUTH_KEYS)
+    | frozenset(f'ring_system.features.{key}' for key in _RING_FEATURE_TRUTH_KEYS)
 )
 
 
@@ -295,7 +340,16 @@ def _assert_boundary_classification_complete() -> None:
     assert not unclassified, f'top-level keys with no boundary class: {sorted(unclassified)}'
     unknown = classified - _ALLOWED_KEYS
     assert not unknown, f'classified top-level keys not in the inventory: {sorted(unknown)}'
-    for block, (allowed, idealized, truth) in _OBJECT_BLOCKS.items():
+    blocks: dict[str, tuple[frozenset[str], frozenset[str], frozenset[str]]] = {
+        **_OBJECT_BLOCKS,
+        'ring_system': (_RING_SYSTEM_KEYS, _RING_SYSTEM_IDEALIZED_KEYS, _RING_SYSTEM_TRUTH_KEYS),
+        'ring_system.features': (
+            _RING_FEATURE_KEYS,
+            _RING_FEATURE_IDEALIZED_KEYS,
+            _RING_FEATURE_TRUTH_KEYS,
+        ),
+    }
+    for block, (allowed, idealized, truth) in blocks.items():
         overlap = idealized & truth
         assert not overlap, f'{block} keys classified both idealized and truth: {sorted(overlap)}'
         unclassified = allowed - (idealized | truth)

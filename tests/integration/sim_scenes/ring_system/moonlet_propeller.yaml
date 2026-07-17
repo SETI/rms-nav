@@ -1,0 +1,49 @@
+schema_version: 2
+scene_name: moonlet_propeller
+instrument: coiss_nac
+size_v: 220
+size_u: 220
+random_seed: 14
+exposure_sec: 1.0
+# An Encke-style arrangement: a broad navigable sheet with a NON-navigable
+# gap (radii 58-66 px) carved through it -- two strong distractor edges the
+# navigator was never told about -- and a bright embedded moonlet at the
+# gap center carrying a propeller tau disturbance (two partial-gap lobes
+# straddling it).  The moonlet is a blob/star confounder sitting exactly
+# on the ring; the planted offset must be recovered from the sheet's outer
+# and inner catalog edges alone.
+bodies: []
+ring_system:
+  geometry:
+    center_v: 110.0
+    center_u: 110.0
+    opening_deg_obs: 90.0
+    opening_deg_sun: 90.0
+    node_deg: 0.0
+  features:
+    - name: ASHEET
+      kind: ringlet
+      tau: 1.8
+      width: 45.0
+      navigable: true
+      orbit: {a: 40.0, ae: 0.0, long_peri: 0.0, rate_peri: 0.0}
+    - name: ENCKE
+      kind: gap
+      tau: 1.8
+      width: 8.0
+      orbit: {a: 58.0, ae: 0.0, long_peri: 0.0, rate_peri: 0.0}
+  moonlets:
+    - a: 62.0
+      lam_deg: 130.0
+      radius_px: 1.5
+      amplitude: 0.5
+      propeller: {length_deg: 25.0, width_px: 3.0, contrast: -0.7}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: -0.8
+offset_u: -1.1
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: high

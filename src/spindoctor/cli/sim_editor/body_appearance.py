@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import (
 )
 
 from spindoctor.cli.sim_editor.base import SimEditorBase
+from spindoctor.cli.sim_editor.widgets import make_dspin as _dspin
 from spindoctor.sim.forward.photometry import PHOTOMETRIC_LAWS
 
 # The photometric-law vocabulary, Lambert first so the combo opens on the
@@ -48,26 +49,6 @@ def _as_map(value: Any) -> dict[str, Any]:
 def _as_list(value: Any) -> list[Any]:
     """Return ``value`` when it is a list, else an empty list."""
     return value if isinstance(value, list) else []
-
-
-def _dspin(
-    *,
-    minimum: float,
-    maximum: float,
-    decimals: int,
-    step: float,
-    value: float,
-    tooltip: str = '',
-) -> QDoubleSpinBox:
-    """Build a configured ``QDoubleSpinBox`` with its value set before wiring."""
-    spin = QDoubleSpinBox()
-    spin.setRange(minimum, maximum)
-    spin.setDecimals(decimals)
-    spin.setSingleStep(step)
-    spin.setValue(value)
-    if tooltip:
-        spin.setToolTip(tooltip)
-    return spin
 
 
 @dataclass

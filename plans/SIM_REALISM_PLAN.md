@@ -1831,12 +1831,17 @@ it once and both sides call it.
   - A (single-scattering albedo x normalization) defaults to 0.5.
 - Compositing, far-to-near: `img = I_ring + exp(-tau/mu) * img_behind`.
 - Edge waves: radial perturbation
-  `dr(lam) = amp * exp(-(lam - lam0)/damp) * sin(2*pi*(lam - lam0)*a/wavelength)`
-  applied ONLY for lam > lam0 (dr = 0 upstream — the exponential grows
-  without bound if evaluated for lam < lam0, so the clamp is load-bearing,
-  not cosmetic), with `damp` in radians and `a` the feature's semimajor
-  axis (so the sine argument is arc length over wavelength,
-  dimensionless);
+  `dr(lam) = amp * exp(-dlam/damp) * sin(2*pi*dlam*a/wavelength)` with
+  `dlam = (lam - lam0) mod 2*pi` in [0, 2*pi), so the wave exists only
+  downstream of lam0 (the exponential grows without bound if evaluated
+  for lam < lam0, so the clamp is load-bearing, not cosmetic). The
+  modular form is the clamp's periodic implementation — rings are
+  periodic and the wave physically wraps the full turn — and leaves an
+  upstream residual of `amp * exp(-2*pi/damp)` just before lam0; the
+  validator caps `damp <= 2` radians, bounding that wrap-seam residual
+  at `exp(-pi)` (~4.3% of amp). `damp` is in radians and `a` the
+  feature's semimajor axis (so the sine argument is arc length over
+  wavelength, dimensionless);
   m-modes: `r(lam) = a - amp_m*cos(m*(lam - peri))` with `amp_m` = a*e in
   the same radial units as `a` and `peri` in the longitude frame above.
 
@@ -1973,8 +1978,12 @@ or **[T]** (truth: renderer-only, stripped by the boundary filter, 3.2).
   `declared_orbit_sigma` map [I] (the uncertainty the navigator is
   entitled to know; the drawn `orbit_error` values are truth),
   `phase_g` float [T], `albedo` float (0.5) [T];
-  `ring_system.geometry` per 15.4 [I]; `ring_system.azimuthal` map
-  (modulation/spokes/shadow wedge) [T]; `ring_system.moonlets` list [T].
+  `ring_system.geometry` per 15.4 [I]; `ring_system.phase_deg` float [I]
+  (the phase angle the ring photometry evaluates at) and
+  `ring_system.km_per_pixel` float [I] (physical pixel scale for the
+  per-pixel depth conversion) — both SPICE knowledge, like the geometry
+  block; `ring_system.azimuthal` map (modulation/spokes/shadow wedge)
+  [T]; `ring_system.moonlets` list [T].
 
 **v1 key dispositions** (all 25 v1 top-level keys of `_ALLOWED_KEYS` —
 this is what makes the inventory complete rather than additive):

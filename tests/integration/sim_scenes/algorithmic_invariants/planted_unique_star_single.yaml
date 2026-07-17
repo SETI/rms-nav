@@ -21,7 +21,6 @@ optics:
   psf:
     match_navigator: true
 bodies: []
-rings: []
 stars:
   - {name: S1, v: 64.0, u: 70.0, vmag: 3.0}
 noise:

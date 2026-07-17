@@ -2,12 +2,13 @@
 
 A 512x512 scene with a whole-scene PSF plus the full detector stack at
 oversample 4 must render in under 2 s single-core, and a 1024x1024
-Cassini-class scene in under 8 s -- both for a star-field frame (the
-optics + detector stack) and for a frame dominated by a large lit body
-with limb relief (the topographic body renderer's split-resolution path
-plus the terminator shadow march).  The budget is a *cold-render* budget:
-the render caches are cleared so the timed render pays the kernel-build
-and compile costs a first render pays.  One-time costs that are not render
+Cassini-class scene in under 8 s -- for a star-field frame (the optics +
+detector stack), for a frame dominated by a large lit body with limb
+relief (the topographic body renderer's split-resolution path plus the
+terminator shadow march), and for a twelve-feature ring system (the
+annulus-bounded ring stage's scaling with feature count).  The budget is a
+*cold-render* budget: the render caches are cleared so the timed render pays
+the kernel-build and compile costs a first render pays.  One-time costs that are not render
 cost -- the lazy YAML config load, module imports -- are paid by an untimed
 warm-up render (whose caches are cleared again) before the timers start.
 
@@ -131,6 +132,70 @@ def _body_psf_detector_scene(size: int) -> dict[str, Any]:
     return scene
 
 
+def _ring_psf_detector_scene(size: int) -> dict[str, Any]:
+    """A size x size ring-system frame with a PSF and the full detector stack.
+
+    Twelve radial features spanning the frame -- interior sheets (one-sided
+    edges), ringlets, gaps, and a density-wave train, every one on an
+    eccentric orbit carrying an m-mode -- exercise the per-feature
+    annulus-bounded ring stage at oversample 4 under the same budget as the
+    star-field and body frames.  Realism scenes compose tens of features,
+    so the ring stage's scaling with feature count is what this budget
+    holds.
+    """
+    scene = _psf_detector_scene(size)
+    del scene['sky_counts']
+    scale = size / 1024.0
+    specs: list[tuple[str, float, float]] = [
+        ('edge', 90.0, 0.0),
+        ('ringlet', 140.0, 18.0),
+        ('gap', 150.0, 6.0),
+        ('ringlet', 200.0, 30.0),
+        ('edge', 260.0, 0.0),
+        ('ringlet', 300.0, 12.0),
+        ('gap', 305.0, 4.0),
+        ('ringlet', 360.0, 25.0),
+        ('wave', 400.0, 0.0),
+        ('ringlet', 430.0, 15.0),
+        ('gap', 460.0, 8.0),
+        ('ringlet', 500.0, 20.0),
+    ]
+    features: list[dict[str, Any]] = []
+    for index, (kind, a, width) in enumerate(specs):
+        feature: dict[str, Any] = {
+            'name': f'BUDGET-RING-{index}',
+            'kind': kind,
+            'tau': 0.8,
+            'orbit': {
+                'a': a * scale,
+                'ae': 1.0 * scale,
+                'long_peri': 10.0 * index,
+                'rate_peri': 0.0,
+                'modes': [{'m': 3, 'amp': 1.5 * scale, 'peri': 20.0}],
+            },
+        }
+        if kind in ('ringlet', 'gap'):
+            feature['width'] = width * scale
+        if kind == 'edge':
+            feature['side'] = 'in'
+        if kind == 'wave':
+            feature['wavelength'] = 12.0 * scale
+            feature['damping'] = 30.0 * scale
+        features.append(feature)
+    scene['ring_system'] = {
+        'geometry': {
+            'center_v': size / 2.0,
+            'center_u': size / 2.0,
+            'opening_deg_obs': 40.0,
+            'opening_deg_sun': 30.0,
+            'node_deg': 30.0,
+        },
+        'phase_deg': 60.0,
+        'features': features,
+    }
+    return scene
+
+
 def _warm_non_render_costs() -> None:
     """Pay every one-time non-render cost before the timers start.
 
@@ -216,3 +281,8 @@ def test_512_body_render_under_2s() -> None:
 def test_1024_body_render_under_8s() -> None:
     """A 1024x1024 lit-body scene with relief renders in under 8 s single-core."""
     _assert_cold_render_budget(_body_psf_detector_scene(1024), 8.0, '1024x1024 body')
+
+
+def test_1024_ring_system_render_under_8s() -> None:
+    """A 1024x1024 twelve-feature ring scene renders in under 8 s single-core."""
+    _assert_cold_render_budget(_ring_psf_detector_scene(1024), 8.0, '1024x1024 ring')

@@ -1,198 +1,216 @@
 """The navigator's predicted-ring renderer for simulated scenes.
 
-Renders the opaque annulus (or gap) template ``NavModelRingsSimulated``
-predicts from a scene's idealized ring geometry: a feature between mode-1
-elliptical edges with anti-aliased boundaries and edge-fade shading.  Edge
-placement math is shared with the image-side twin
-(``spindoctor.sim.forward.ring``) through
-:mod:`spindoctor.sim.ring_geometry`, so a rendered edge and a predicted edge
-land on the same pixels by construction.
+Predicts a ``ring_system`` feature's appearance from its idealized catalog
+view (the ``obs.nav_params['ring_system']`` block): the shared projection
+geometry, the feature's kind/shape keys, and its catalog orbit -- never the
+planted ``orbit_error`` or the photometric truth, which the boundary filter
+strips before this code can see them.  Projection and orbit math are shared
+with the image-side renderer through :mod:`spindoctor.sim.ring_geometry`, so
+a predicted edge lands where the rendered edge would land if the scene
+planted no error: the planted pointing offset and the planted orbit error
+are the only discrepancies, by construction.
+
+The prediction is geometric, not photometric: a banded feature yields a
+solid anti-aliased coverage template (the navigator's opaque-annulus
+convention; the tau photometry is truth) plus one border polyline per
+catalog edge with outward radial normals for the distance-transform fit.
 """
 
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
 
 from spindoctor.sim.ring_geometry import (
     compute_antialiasing_shade,
-    compute_edge_radii_array,
-    compute_fade_factor,
+    compute_orbit_radii,
+    ring_orbit_from_mapping,
+    ring_plane_from_sky,
+    ring_radial_scale,
 )
-from spindoctor.support.types import NDArrayFloatType
+from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
+
+__all__ = [
+    'PredictedRingEdge',
+    'PredictedRingFeature',
+    'predict_ring_feature',
+]
 
 
-def render_ring(
-    img: NDArrayFloatType,
-    ring_params: dict[str, Any],
-    offset_v: float,
-    *,
-    offset_u: float,
-    time: float = 0.0,
-    epoch: float = 0.0,
-    shade_solid: bool = False,
-) -> None:
-    """Render a single ring or gap into the image.
+@dataclass(frozen=True)
+class PredictedRingEdge:
+    """One predicted catalog edge of a ring feature.
 
     Parameters:
-        img: Image array to modify in-place.
-        ring_params: Dictionary containing ring parameters:
-            - name: str, ring name
-            - feature_type: str, 'RINGLET' or 'GAP'
-            - center_v: float, V coordinate of ring center
-            - center_u: float, U coordinate of ring center
-            - shading_distance: float, distance in pixels for edge fading
-            - inner_data: list[dict], mode data for inner edge (mode 1 required)
-            - outer_data: list[dict], mode data for outer edge (mode 1 required)
-        offset_v: V offset to apply.
-        offset_u: U offset to apply.
-        time: Current time in TDB seconds (default 0.0).
-        epoch: Epoch time in TDB seconds (default 0.0).
-        shade_solid: If True, solid rings (with both edges) are shaded on both sides
-            as if they were two rings (one with inner edge only, one with outer edge only).
-
-    Raises:
-        ValueError: If neither an inner nor an outer edge is specified.
+        edge_type: 'inner' or 'outer' (the banded kinds), or 'edge' (the
+            single-boundary kinds).
+        mask: Boolean border mask on the prediction grid (1-pixel polyline).
+        vertices_vu: ``(N, 2)`` border-pixel positions.
+        normals_vu: ``(N, 2)`` unit normals pointing radially outward in the
+            ring plane (the direction of increasing ring radius on the sky).
     """
-    size_v, size_u = img.shape
-    feature_type = ring_params.get('feature_type', 'RINGLET')
-    center_v = float(ring_params.get('center_v', size_v / 2.0)) + offset_v
-    center_u = float(ring_params.get('center_u', size_u / 2.0)) + offset_u
 
-    # Extract mode 1 data for inner and outer edges
-    inner_data = ring_params.get('inner_data', [])
-    outer_data = ring_params.get('outer_data', [])
+    edge_type: str
+    mask: NDArrayBoolType
+    vertices_vu: NDArrayFloatType
+    normals_vu: NDArrayFloatType
 
-    inner_mode1 = next((m for m in inner_data if m.get('mode') == 1), None)
-    outer_mode1 = next((m for m in outer_data if m.get('mode') == 1), None)
 
-    # At least one edge must be specified
-    if inner_mode1 is None and outer_mode1 is None:
-        raise ValueError('At least one edge (inner or outer) must be specified')
+@dataclass(frozen=True)
+class PredictedRingFeature:
+    """The navigator's rendered prediction of one ring feature.
 
-    # Extract mode 1 parameters (use defaults if not present)
-    inner_a = float(inner_mode1.get('a', 0.0)) if inner_mode1 is not None else 0.0
-    inner_ae = float(inner_mode1.get('ae', 0.0)) if inner_mode1 is not None else 0.0
-    inner_long_peri = float(inner_mode1.get('long_peri', 0.0)) if inner_mode1 is not None else 0.0
-    inner_rate_peri = float(inner_mode1.get('rate_peri', 0.0)) if inner_mode1 is not None else 0.0
+    Parameters:
+        template: Solid anti-aliased coverage in [0, 1] for the correlation
+            path, or None for kinds with no bounded band (edge / ramp /
+            wave, and gaps, which reveal rather than emit).
+        mask: Pixels the feature's band covers (or its border for the
+            single-boundary kinds); the annotation avoid mask.
+        edges: The predicted catalog edges.
+    """
 
-    outer_a = float(outer_mode1.get('a', 0.0)) if outer_mode1 is not None else 0.0
-    outer_ae = float(outer_mode1.get('ae', 0.0)) if outer_mode1 is not None else 0.0
-    outer_long_peri = float(outer_mode1.get('long_peri', 0.0)) if outer_mode1 is not None else 0.0
-    outer_rate_peri = float(outer_mode1.get('rate_peri', 0.0)) if outer_mode1 is not None else 0.0
+    template: NDArrayFloatType | None
+    mask: NDArrayBoolType
+    edges: list[PredictedRingEdge]
 
-    # Create coordinate grids at pixel centers (0.5 offset from integer coordinates)
+
+def _border_from_signed_distance(diff: NDArrayFloatType) -> NDArrayBoolType:
+    """The 1-pixel border where a signed distance field changes sign.
+
+    A pixel joins the border when its sign differs from a 4-neighbor's and
+    it is at least as close to the zero crossing (mirroring the historical
+    border-atop rasterisation, so predicted edges keep their established
+    1-pixel sampling).
+
+    Parameters:
+        diff: Per-pixel signed distance to the edge (any consistent units).
+
+    Returns:
+        The border mask.
+    """
+    sign = np.sign(diff)
+    abs_diff = np.abs(diff)
+    border: NDArrayBoolType = abs_diff == 0.0
+    border[:-1, :] |= (sign[:-1, :] == -sign[1:, :]) & (abs_diff[:-1, :] <= abs_diff[1:, :])
+    border[1:, :] |= (sign[1:, :] == -sign[:-1, :]) & (abs_diff[1:, :] <= abs_diff[:-1, :])
+    border[:, :-1] |= (sign[:, :-1] == -sign[:, 1:]) & (abs_diff[:, :-1] <= abs_diff[:, 1:])
+    border[:, 1:] |= (sign[:, 1:] == -sign[:, :-1]) & (abs_diff[:, 1:] <= abs_diff[:, :-1])
+    return border
+
+
+def _edge_from_diff(diff: NDArrayFloatType, edge_type: str) -> PredictedRingEdge:
+    """Build a predicted edge (border mask, vertices, outward normals).
+
+    The normal at each border pixel is the normalized gradient of the
+    signed radial distance field: the sky-plane direction of increasing
+    ring-plane radius, which is the outward radial direction however the
+    projection foreshortens the edge.
+
+    Parameters:
+        diff: Per-pixel ``r - r_edge(lam)`` signed distance field.
+        edge_type: The edge label ('inner' / 'outer' / 'edge').
+
+    Returns:
+        The predicted edge.
+    """
+    mask = _border_from_signed_distance(diff)
+    if not mask.any():
+        empty: NDArrayFloatType = np.empty((0, 2), dtype=np.float64)
+        return PredictedRingEdge(
+            edge_type=edge_type, mask=mask, vertices_vu=empty, normals_vu=empty
+        )
+    grads = np.gradient(diff)
+    grad_v = cast(NDArrayFloatType, grads[0])
+    grad_u = cast(NDArrayFloatType, grads[1])
+    vs, us = np.where(mask)
+    vertices_vu = np.stack([vs.astype(np.float64), us.astype(np.float64)], axis=1)
+    normals = np.stack([grad_v[vs, us], grad_u[vs, us]], axis=1)
+    norms = np.hypot(normals[:, 0], normals[:, 1])
+    norms[norms == 0.0] = 1.0
+    normals_vu = normals / norms[:, None]
+    return PredictedRingEdge(
+        edge_type=edge_type, mask=mask, vertices_vu=vertices_vu, normals_vu=normals_vu
+    )
+
+
+def predict_ring_feature(
+    shape: tuple[int, int],
+    feature: dict[str, Any],
+    *,
+    center_v: float,
+    center_u: float,
+    opening_deg_obs: float,
+    node_deg: float,
+    time: float = 0.0,
+    epoch: float = 0.0,
+) -> PredictedRingFeature:
+    """Predict one ring_system feature on the given (extfov) grid.
+
+    Parameters:
+        shape: The prediction-grid shape (detector resolution).
+        feature: The feature's idealized mapping from ``nav_params``.
+        center_v: Projected ring center v on the prediction grid.
+        center_u: Projected ring center u on the prediction grid.
+        opening_deg_obs: Observer ring opening angle B in degrees.
+        node_deg: Sky position angle of the ascending node in degrees.
+        time: Scene time in TDB seconds.
+        epoch: Ring epoch in TDB seconds.
+
+    Returns:
+        The rendered :class:`PredictedRingFeature`.  Empty (no edges, no
+        coverage) for an exactly edge-on geometry, which renders nothing.
+    """
+    size_v, size_u = shape
+    empty_mask: NDArrayBoolType = np.zeros(shape, dtype=np.bool_)
+    if math.sin(math.radians(opening_deg_obs)) == 0.0:
+        return PredictedRingFeature(template=None, mask=empty_mask, edges=[])
+
     v_coords = np.arange(size_v, dtype=np.float64) + 0.5
     u_coords = np.arange(size_u, dtype=np.float64) + 0.5
     v_grid, u_grid = np.meshgrid(v_coords, u_coords, indexing='ij')
+    r, lam, x, y = ring_plane_from_sky(
+        v_grid - center_v, u_grid - center_u, opening_deg_obs=opening_deg_obs, node_deg=node_deg
+    )
+    radial_scale = ring_radial_scale(r, x, y, opening_deg_obs=opening_deg_obs)
 
-    # Compute distances from center at pixel centers
-    dv = v_grid - center_v
-    du = u_grid - center_u
-    distances = np.sqrt(dv * dv + du * du)
+    kind = str(feature.get('kind'))
+    orbit = ring_orbit_from_mapping(feature.get('orbit') or {})
+    r_edge = compute_orbit_radii(lam, orbit, epoch=epoch, time=time)
 
-    # Compute angles
-    angles = np.arctan2(dv, du)
+    if kind in ('ringlet', 'gap'):
+        width = float(feature.get('width', 0.0))
+        r_outer = compute_orbit_radii(lam, orbit.widened(width), epoch=epoch, time=time)
+        inner_shade = compute_antialiasing_shade((r - r_edge) / radial_scale, 1.0)
+        outer_shade = compute_antialiasing_shade((r_outer - r) / radial_scale, 1.0)
+        coverage = cast(NDArrayFloatType, np.minimum(inner_shade, outer_shade))
+        band_mask: NDArrayBoolType = coverage > 0.0
+        edges = [
+            _edge_from_diff(cast(NDArrayFloatType, r - r_edge), 'inner'),
+            _edge_from_diff(cast(NDArrayFloatType, r - r_outer), 'outer'),
+        ]
+        # A gap reveals the background rather than emitting, so it carries
+        # no correlation template; its edges are still fittable boundaries.
+        template = coverage if kind == 'ringlet' else None
+        return PredictedRingFeature(template=template, mask=band_mask, edges=edges)
 
-    # Compute edge radii at each angle
-    resolution = 1.0  # Pixel resolution for anti-aliasing
+    if kind == 'ramp':
+        # Only the ramp's sharp end is a fittable boundary; the linear end
+        # fades into the background with no gradient to fit.
+        width = float(feature.get('width', 0.0))
+        side = str(feature.get('side', 'out'))
+        if side == 'out':
+            r_sharp = compute_orbit_radii(lam, orbit.widened(width), epoch=epoch, time=time)
+            edge_type = 'outer'
+        else:
+            r_sharp = r_edge
+            edge_type = 'inner'
+        edge = _edge_from_diff(cast(NDArrayFloatType, r - r_sharp), edge_type)
+        return PredictedRingFeature(template=None, mask=edge.mask, edges=[edge])
 
-    # Get shading distance parameter (default 20.0 pixels)
-    shading_distance = float(ring_params.get('shading_distance', 20.0))
-
-    # Initialize model array for this ring
-    ring_model = np.zeros((size_v, size_u), dtype=np.float64)
-
-    # Compute inner edge radii if inner edge is specified
-    if inner_mode1 is not None:
-        inner_radii = compute_edge_radii_array(
-            angles,
-            a=inner_a,
-            ae=inner_ae,
-            long_peri=inner_long_peri,
-            rate_peri=inner_rate_peri,
-            epoch=epoch,
-            time=time,
-        )
-    else:
-        inner_radii = None
-
-    # Compute outer edge radii if outer edge is specified
-    if outer_mode1 is not None:
-        outer_radii = compute_edge_radii_array(
-            angles,
-            a=outer_a,
-            ae=outer_ae,
-            long_peri=outer_long_peri,
-            rate_peri=outer_rate_peri,
-            epoch=epoch,
-            time=time,
-        )
-    else:
-        outer_radii = None
-
-    # Apply anti-aliasing and shading based on edge configuration and feature type
-    # Anti-aliasing formula matches base class:
-    #   shade = 0.5 + sign * (edge_radius - radii) / resolution
-    # When pixel center is at edge (radii == edge_radius), shade = 0.5
-    if feature_type == 'RINGLET':
-        # For ringlets: fill region between edges (if both), or shade from single edge
-        if inner_radii is not None and outer_radii is not None:
-            if shade_solid:
-                # Both edges with shade_solid: shade on both sides as if two rings
-                inner_edge_dist = distances - inner_radii
-                inner_shade = compute_antialiasing_shade(inner_edge_dist, resolution)
-                inner_fade = compute_fade_factor(inner_edge_dist, shading_distance)
-
-                outer_edge_dist = outer_radii - distances
-                outer_shade = compute_antialiasing_shade(outer_edge_dist, resolution)
-                outer_fade = compute_fade_factor(outer_edge_dist, shading_distance)
-                ring_model = np.maximum(inner_shade * inner_fade, outer_shade * outer_fade)
-            else:
-                # Both edges: no shading, just fill the entire region with anti-aliasing
-                inner_edge_dist = distances - inner_radii
-                inner_shade = compute_antialiasing_shade(inner_edge_dist, resolution)
-                outer_edge_dist = outer_radii - distances
-                outer_shade = compute_antialiasing_shade(outer_edge_dist, resolution)
-                # Coverage is minimum (must be inside both edges)
-                ring_model = np.minimum(inner_shade, outer_shade)
-        elif inner_radii is not None:
-            # Only inner edge: shade outward from inner edge
-            inner_edge_dist = distances - inner_radii
-            inner_shade = compute_antialiasing_shade(inner_edge_dist, resolution)
-            inner_fade = compute_fade_factor(inner_edge_dist, shading_distance)
-            ring_model = inner_shade * inner_fade
-        else:  # outer_radii is not None
-            # Only outer edge: shade inward from outer edge
-            outer_edge_dist = outer_radii - distances
-            outer_shade = compute_antialiasing_shade(outer_edge_dist, resolution)
-            outer_fade = compute_fade_factor(outer_edge_dist, shading_distance)
-            ring_model = outer_shade * outer_fade
-        # Apply ringlet: add brightness where ring exists
-        img[:] = np.clip(img + ring_model, 0.0, 1.0)
-    else:  # GAP
-        # For gaps: shading extends beyond the defined ring area
-        gap_model = cast(NDArrayFloatType, np.zeros((size_v, size_u), dtype=np.float64))
-        if inner_radii is not None and outer_radii is not None:
-            # Both edges: shade inward from inner edge AND outward from outer edge
-            inner_edge_dist = inner_radii - distances
-            inner_shade = compute_antialiasing_shade(inner_edge_dist, resolution)
-            inner_fade = 1 - compute_fade_factor(inner_edge_dist, shading_distance)
-
-            outer_edge_dist = distances - outer_radii
-            outer_shade = compute_antialiasing_shade(outer_edge_dist, resolution)
-            outer_fade = 1 - compute_fade_factor(outer_edge_dist, shading_distance)
-            gap_model = np.maximum(inner_shade * inner_fade, outer_shade * outer_fade)
-        elif inner_radii is not None:
-            # Only inner edge: shade inward from inner edge (beyond the edge)
-            inner_edge_dist = inner_radii - distances
-            inner_shade = compute_antialiasing_shade(inner_edge_dist, resolution)
-            inner_fade = 1 - compute_fade_factor(inner_edge_dist, shading_distance)
-            gap_model = inner_shade * inner_fade
-        else:  # outer_radii is not None
-            # Only outer edge: shade outward from outer edge (beyond the edge)
-            outer_edge_dist = distances - outer_radii
-            outer_shade = compute_antialiasing_shade(outer_edge_dist, resolution)
-            outer_fade = 1 - compute_fade_factor(outer_edge_dist, shading_distance)
-            gap_model = outer_shade * outer_fade
-        # Apply gap: subtract brightness where gap shading exists
-        img[:] = np.clip(img - gap_model, 0.0, 1.0)
+    # 'edge' (a one-sided step) and 'wave' (a train launched at the orbit
+    # radius) each predict the single catalog boundary.
+    edge = _edge_from_diff(cast(NDArrayFloatType, r - r_edge), 'edge')
+    return PredictedRingFeature(template=None, mask=edge.mask, edges=[edge])
