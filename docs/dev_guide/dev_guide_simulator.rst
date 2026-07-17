@@ -1038,7 +1038,12 @@ Atmospheres (haze limb)
 -----------------------
 
 A body carrying an ``atmosphere`` block gains an exponential haze layer above
-its surface (``atmosphere.py``), composited onto the disc after shading. A
+its surface (``atmosphere.py``), evaluated after the disc is shaded: the
+on-disc haze joins the body's opaque paint, while the above-limb glow is a
+translucent halo screen composited like the ring system's -- background,
+rings, and stars behind it show through scaled by ``exp(-tau)`` with the glow
+added, and the body's mask / depth / occlusion truth sees only the solid
+silhouette. A
 line of sight grazing the body at tangent altitude ``h`` (pixels above the
 reference radius) accumulates a tangent optical depth
 ``tau(h) = tau_ref * exp(-(h - ref_altitude_px) / scale_height_px)``, so
@@ -1075,12 +1080,15 @@ The layer is a truth key: the navigator's predicted body (see
 :doc:`dev_guide_navigation_models_body_simulated`) keeps a hard limb at the
 reference radius and never learns the haze exists, so the soft rendered limb is
 a deliberate model mismatch. A navigator that fits the bright sunward haze ramp
-recovers a small radius-dependent offset toward the sunlit limb -- the
+recovers a small offset toward the sunlit limb whose size tracks the
+phase-dependent apparent limb radius (and the haze parameters) -- the
 ``atmosphere`` catalog scenes measure and pin that bias honestly (the
 low-phase ``titan_haze_limb`` scene records a sub-pixel sunward offset at
 medium confidence; the high-phase ``titan_crescent_horns`` scene records the
 low-confidence outcome that follows when the ring of light defeats disc
-correlation). The haze evaluation is restricted to the bounding box of the
+correlation -- and that fused answer is far from the truth, roughly 30 px off
+in ``du`` at confidence 0.4, which is exactly why the scene pins the tier
+rather than the offset). The haze evaluation is restricted to the bounding box of the
 body plus its halo (out to a detached shell's reach), so its cost scales with
 that box rather than the frame, and a body without an ``atmosphere`` block
 renders hard-limbed and byte-for-byte unchanged.

@@ -65,8 +65,9 @@ Restrictions and assumptions
   ramp whose apparent radius sits outside the reference radius and shifts with phase
   (see :ref:`sim-atmosphere`), while this model still predicts a hard limb at the
   reference radius. That gap is the substrate for the Titan altitude-versus-phase
-  problem: a limb fit against the haze recovers a small radius-dependent offset toward
-  the sunlit limb, and the ``atmosphere`` catalog scenes pin that measured bias.
+  problem: a limb fit against the haze recovers a small offset toward the sunlit limb
+  whose size tracks the phase-dependent apparent limb radius (and the haze
+  parameters), and the ``atmosphere`` catalog scenes pin that measured bias.
 - The simulated body is rendered onto a fixed extfov image without per-instrument noise
   or PSF smearing; the operator's downstream noise-injection pipeline supplies those.
 
