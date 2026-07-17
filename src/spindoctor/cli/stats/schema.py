@@ -13,6 +13,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS images (
     image_name TEXT PRIMARY KEY,
     instrument TEXT NOT NULL,
+    camera TEXT,
     image_path TEXT,
     image_et REAL,
     image_date TEXT,
@@ -70,6 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_sources_image ON feature_sources(image_name);
 IMAGE_COLUMNS: tuple[str, ...] = (
     'image_name',
     'instrument',
+    'camera',
     'image_path',
     'image_et',
     'image_date',

@@ -176,6 +176,8 @@ def navigate_image_files(
                     exc,
                     logger=logger,
                     instrument=instrument,
+                    image_et=image_file.image_et,
+                    camera=image_file.camera,
                     timing=build_timing_section(run_start, datetime.now(UTC)),
                 )
                 if write_output_files:
@@ -195,6 +197,7 @@ def navigate_image_files(
                 image_path,
                 image_name,
                 instrument=instrument,
+                camera=snapshot_inst.camera,
                 image_shape=(int(data_shape[0]), int(data_shape[1])),
                 timing=build_timing_section(run_start, datetime.now(UTC)),
             )
@@ -216,11 +219,16 @@ def _metadata_for_load_error(
     *,
     logger: Any,
     instrument: str,
+    image_et: float | None,
+    camera: str | None,
     timing: dict[str, Any],
 ) -> dict[str, Any]:
     """Build a metadata dict for an image-load or kernel-coverage failure.
 
     No image shape is recorded because the load never produced pixel data.
+    The epoch and camera are recorded when the caller could read them from
+    the index, so an image that failed for want of a SPICE kernel is still
+    placed in time and attributed to its camera.
     """
     message = str(exc)
     if any(hint in message for hint in _SPICE_DATA_HINTS):
@@ -229,15 +237,20 @@ def _metadata_for_load_error(
     else:
         logger.exception('Error reading image "%s": %s', image_path, message)
         status_error = 'image_read_error'
+    observation: dict[str, Any] = {
+        'image_path': str(image_path),
+        'image_name': image_name,
+        'instrument': instrument,
+    }
+    if image_et is not None:
+        observation['image_et'] = image_et
+    if camera is not None:
+        observation['camera'] = camera
     return {
         'status': 'error',
         'status_error': status_error,
         'status_exception': message,
-        'observation': {
-            'image_path': str(image_path),
-            'image_name': image_name,
-            'instrument': instrument,
-        },
+        'observation': observation,
         'timing': timing,
     }
 
@@ -248,6 +261,7 @@ def build_metadata_from_result(
     image_name: str,
     *,
     instrument: str,
+    camera: str | None = None,
     image_shape: tuple[int, int] | None = None,
     timing: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -265,6 +279,9 @@ def build_metadata_from_result(
         instrument: Registered instrument name for the observation class
             (see :func:`spindoctor.obs.obs_class_to_inst_name`); written to
             the ``observation.instrument`` field.
+        camera: The camera that took the image (``ObsInst.camera``, e.g.
+            ``'NAC'``); written to the ``observation.camera`` field.  None
+            omits the field.
         image_shape: ``(v, u)`` pixel dimensions of the loaded image data;
             written to the ``observation.image_shape`` field.  None omits
             the field.
@@ -277,6 +294,8 @@ def build_metadata_from_result(
         'image_name': image_name,
         'instrument': instrument,
     }
+    if camera is not None:
+        observation['camera'] = camera
     if image_shape is not None:
         observation['image_shape'] = [int(image_shape[0]), int(image_shape[1])]
     metadata: dict[str, Any] = {

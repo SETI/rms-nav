@@ -53,6 +53,8 @@ class _FakeSnapshot:
         self.extdata = self.data
         self._sensor_mask = np.ones(self.data.shape, bool)
         self.midtime = midtime
+        # Stands in for ObsInst.camera, written to observation.camera.
+        self.camera = 'NAC'
 
     def extfov_data_sensor_mask(self) -> np.ndarray:
         return self._sensor_mask
@@ -82,7 +84,9 @@ def _make_fake_obs_class(
     return _FakeObsClass
 
 
-def _make_image_files(tmp_path: Path) -> ImageFiles:
+def _make_image_files(
+    tmp_path: Path, *, image_et: float | None = None, camera: str | None = None
+) -> ImageFiles:
     """Build an ImageFiles batch with a single placeholder image."""
     img_path = tmp_path / 'fake_image.IMG'
     img_path.write_bytes(b'\x00')
@@ -94,6 +98,8 @@ def _make_image_files(tmp_path: Path) -> ImageFiles:
                 image_file_url=FCPath(str(img_path)),
                 label_file_url=FCPath(str(label_path)),
                 results_path_stub='fake_image',
+                image_et=image_et,
+                camera=camera,
             )
         ]
     )
@@ -147,6 +153,64 @@ def test_navigate_image_files_writes_metadata(tmp_path: Path) -> None:
     metadata_path = results_root / 'fake_image_metadata.json'
     assert metadata_path.exists()
     assert success is False  # no real-scene models registered
+
+
+def test_navigate_image_files_records_camera(tmp_path: Path) -> None:
+    """The observation's camera is written to observation.camera."""
+    obs_class = _make_fake_obs_class()
+    image_files = _make_image_files(tmp_path)
+    _success, metadata = navigate_image_files(
+        obs_class,
+        image_files,
+        FCPath(str(tmp_path / 'results')),
+        write_output_files=False,
+    )
+    assert metadata['observation']['camera'] == 'NAC'
+
+
+def test_navigate_image_files_load_error_records_index_epoch_and_camera(tmp_path: Path) -> None:
+    """A SPICE-kernel failure keeps the epoch and camera the index supplied."""
+    obs_class = _make_fake_obs_class(
+        raise_on_load=RuntimeError('SPICE(NOFRAMECONNECT) -- insufficient information')
+    )
+    image_files = _make_image_files(tmp_path, image_et=-11784634.984, camera='WAC')
+    _success, metadata = navigate_image_files(
+        obs_class,
+        image_files,
+        FCPath(str(tmp_path / 'results')),
+        write_output_files=False,
+    )
+    assert metadata['status_error'] == 'missing_spice_data'
+    assert metadata['observation']['image_et'] == -11784634.984
+    assert metadata['observation']['camera'] == 'WAC'
+
+
+def test_navigate_image_files_load_error_without_index_details(tmp_path: Path) -> None:
+    """An image with no index row records neither epoch nor camera."""
+    obs_class = _make_fake_obs_class(raise_on_load=OSError('boom'))
+    image_files = _make_image_files(tmp_path, image_et=None, camera=None)
+    _success, metadata = navigate_image_files(
+        obs_class,
+        image_files,
+        FCPath(str(tmp_path / 'results')),
+        write_output_files=False,
+    )
+    assert 'image_et' not in metadata['observation']
+    assert 'camera' not in metadata['observation']
+
+
+def test_navigate_image_files_prefers_observation_camera(tmp_path: Path) -> None:
+    """On a successful load the observation's own camera wins over the index."""
+    obs_class = _make_fake_obs_class()
+    image_files = _make_image_files(tmp_path, camera='WAC')
+    _success, metadata = navigate_image_files(
+        obs_class,
+        image_files,
+        FCPath(str(tmp_path / 'results')),
+        write_output_files=False,
+    )
+    # The fake snapshot reports NAC; the index row here says WAC.
+    assert metadata['observation']['camera'] == 'NAC'
 
 
 def test_navigate_image_files_blank_image_yields_no_signal(tmp_path: Path) -> None:

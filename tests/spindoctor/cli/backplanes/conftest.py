@@ -80,6 +80,11 @@ class HermeticObs(ObsSnapshotInst):
         """
         raise NotImplementedError('HermeticObs is constructed directly in tests')
 
+    @property
+    def camera(self) -> str:
+        """Return a fixed camera name (unused by backplanes)."""
+        return 'HERMETIC'
+
     def star_min_usable_vmag(self) -> float:
         """Return a fixed lower star magnitude bound (unused by backplanes)."""
         return 0.0

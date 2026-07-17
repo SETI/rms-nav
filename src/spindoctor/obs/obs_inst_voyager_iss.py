@@ -182,6 +182,15 @@ class ObsVoyagerISS(ObsSnapshotInst):
             return anchor
         return cast(float, anchor + np.log(self.texp) / np.log(2.512))
 
+    @property
+    def camera(self) -> str:
+        """The camera that took this observation.
+
+        Returns:
+            The oops detector name: ``'NAC'`` or ``'WAC'``.
+        """
+        return str(self.detector)
+
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for Voyager ISS.
 
@@ -221,7 +230,7 @@ class ObsVoyagerISS(ObsSnapshotInst):
             # 'midtime_scet': (scet_start + scet_end) / 2,
             # 'end_time_scet': scet_end,
             'image_shape_xy': self.data_shape_uv,
-            'camera': self.detector,
+            'camera': self.camera,
             'exposure_time': self.texp,
             'filters': [self.filter],
         }

@@ -182,6 +182,15 @@ class ObsSim(ObsSnapshotInst):
         sigma_eff = max(read_noise_dn, 1.0)
         return 2.5 * math.log10(signal_full_scale_dn / (2.0 * sigma_eff))
 
+    @property
+    def camera(self) -> str:
+        """The camera that took this observation.
+
+        Returns:
+            Always ``'SIM'``; a simulated scene has one synthetic camera.
+        """
+        return 'SIM'
+
     def get_public_metadata(self) -> dict[str, Any]:
         return {
             'image_path': self.image_url,
@@ -189,5 +198,6 @@ class ObsSim(ObsSnapshotInst):
             'instrument_host_lid': 'sim',
             'instrument_lid': 'sim',
             'image_shape_xy': self.data_shape_uv,
+            'camera': self.camera,
             'description': 'Simulated observation from YAML scene',
         }

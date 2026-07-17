@@ -8,8 +8,13 @@ from typing import Any
 import pytest
 from filecache import FCPath
 
+from spindoctor.cli.stats.classify import datetime_from_image_et
 from spindoctor.dataset.dataset import ImageFile
+from spindoctor.dataset.dataset_pds3 import DataSetPDS3
 from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
+from spindoctor.dataset.dataset_pds3_galileo_ssi import DataSetPDS3GalileoSSI
+from spindoctor.dataset.dataset_pds3_newhorizons_lorri import DataSetPDS3NewHorizonsLORRI
+from spindoctor.dataset.dataset_pds3_voyager_iss import DataSetPDS3VoyagerISS
 
 
 @pytest.fixture
@@ -592,3 +597,109 @@ def test_resolve_image_url_falls_back_when_resolver_raises(
     assert len(calls) == 1
     captured = capsys.readouterr()
     assert 'Image URL resolution from label' in captured.out + captured.err
+
+
+# --- observation epoch from the index row ---
+
+
+@pytest.mark.parametrize(
+    ('dataset_class', 'row', 'expected_iso'),
+    [
+        # Cassini ISS index times are day-of-year; IMAGE_MID_TIME wins.
+        (
+            DataSetPDS3CassiniISS,
+            {'IMAGE_MID_TIME': '1999-230T02:28:20.833', 'IMAGE_TIME': '1999-230T02:28:22.835'},
+            '1999-08-18T02:28:21',
+        ),
+        # Voyager ISS index times are plain ISO.
+        (DataSetPDS3VoyagerISS, {'IMAGE_TIME': '1978-12-11T00:29:23'}, '1978-12-11T00:29:23'),
+        # Galileo SSI index times carry a trailing Z.
+        (DataSetPDS3GalileoSSI, {'IMAGE_TIME': '1996-06-03T17:05:38.015Z'}, '1996-06-03T17:05:38'),
+        # New Horizons LORRI has no IMAGE_TIME; START_TIME is the epoch.
+        (
+            DataSetPDS3NewHorizonsLORRI,
+            {'START_TIME': '2006-02-24T16:12:48.306'},
+            '2006-02-24T16:12:48',
+        ),
+    ],
+)
+def test_image_et_from_index_row_parses_each_instrument_format(
+    dataset_class: type[DataSetPDS3], row: dict[str, Any], expected_iso: str
+) -> None:
+    """Every instrument's index time format is read without SPICE."""
+    image_et = dataset_class.image_et_from_index_row(row)
+    assert image_et is not None
+    assert datetime_from_image_et(image_et) == expected_iso
+
+
+def test_image_et_from_index_row_prefers_first_available_column() -> None:
+    """A missing preferred column falls through to the next one."""
+    row = {'IMAGE_TIME': '1999-230T02:28:20.833'}
+    image_et = DataSetPDS3CassiniISS.image_et_from_index_row(row)
+    assert image_et is not None
+    assert datetime_from_image_et(image_et) == '1999-08-18T02:28:21'
+
+
+def test_image_et_from_index_row_skips_masked_value() -> None:
+    """A null cell (flagged by PdsTable's companion mask) is skipped."""
+    row = {
+        'IMAGE_MID_TIME': 'UNK',
+        'IMAGE_MID_TIME_mask': True,
+        'IMAGE_TIME': '1999-230T02:28:20.833',
+    }
+    image_et = DataSetPDS3CassiniISS.image_et_from_index_row(row)
+    assert image_et is not None
+    assert datetime_from_image_et(image_et) == '1999-08-18T02:28:21'
+
+
+def test_image_et_from_index_row_unparsable_value() -> None:
+    """An unreadable time yields None rather than raising."""
+    assert DataSetPDS3CassiniISS.image_et_from_index_row({'IMAGE_MID_TIME': 'UNK'}) is None
+
+
+def test_image_et_from_index_row_without_index() -> None:
+    """An image not enumerated from an index has no epoch."""
+    assert DataSetPDS3CassiniISS.image_et_from_index_row({}) is None
+
+
+# --- camera from the index row ---
+
+
+@pytest.mark.parametrize(
+    ('dataset_class', 'row', 'expected'),
+    [
+        (DataSetPDS3CassiniISS, {'INSTRUMENT_ID': 'ISSNA'}, 'NAC'),
+        (DataSetPDS3CassiniISS, {'INSTRUMENT_ID': 'ISSWA'}, 'WAC'),
+        # Voyager indexes name the camera instead of carrying an id.
+        (DataSetPDS3VoyagerISS, {'INSTRUMENT_NAME': 'NARROW ANGLE CAMERA'}, 'NAC'),
+        (DataSetPDS3VoyagerISS, {'INSTRUMENT_NAME': 'WIDE ANGLE CAMERA'}, 'WAC'),
+        (DataSetPDS3GalileoSSI, {'INSTRUMENT_ID': 'SSI'}, 'SSI'),
+        (DataSetPDS3NewHorizonsLORRI, {'INSTRUMENT_ID': 'LORRI'}, 'LORRI'),
+    ],
+)
+def test_camera_from_index_row_maps_each_instrument(
+    dataset_class: type[DataSetPDS3], row: dict[str, Any], expected: str
+) -> None:
+    """Every instrument's index names its camera, without SPICE."""
+    assert dataset_class.camera_from_index_row(row) == expected
+
+
+def test_camera_from_index_row_tolerates_padding_and_case() -> None:
+    """Index values are matched stripped and upper-cased."""
+    assert DataSetPDS3CassiniISS.camera_from_index_row({'INSTRUMENT_ID': ' issna '}) == 'NAC'
+
+
+def test_camera_from_index_row_unrecognized_value() -> None:
+    """An unknown camera yields None rather than a name nothing else knows."""
+    assert DataSetPDS3CassiniISS.camera_from_index_row({'INSTRUMENT_ID': 'ISSXX'}) is None
+
+
+def test_camera_from_index_row_skips_masked_value() -> None:
+    """A null cell is skipped rather than read."""
+    row = {'INSTRUMENT_ID': 'ISSNA', 'INSTRUMENT_ID_mask': True}
+    assert DataSetPDS3CassiniISS.camera_from_index_row(row) is None
+
+
+def test_camera_from_index_row_without_index() -> None:
+    """An image not enumerated from an index has no camera."""
+    assert DataSetPDS3CassiniISS.camera_from_index_row({}) is None

@@ -13,15 +13,21 @@ from filecache import FCPath
 from spindoctor.cli.stats.classify import date_from_image_et
 from spindoctor.cli.stats.ingest import ingest_metadata_files, main_ingest, rows_from_metadata
 from spindoctor.cli.stats.report import build_report, main_report
-from spindoctor.cli.stats.report_common import image_number_from_name
+from spindoctor.cli.stats.report_common import (
+    count_pct,
+    image_name_from_filename,
+    image_number_from_name,
+)
 from spindoctor.cli.stats.report_sections import resolve_offset_limit
 from spindoctor.cli.stats.schema import open_stats_db, upsert_image
+from spindoctor.dataset import DataSetPDS3CassiniISS, DataSetPDS3VoyagerISS
 
 
 def _metadata(
     *,
     image_name: str = 'N1454725799_1_CALIB.IMG',
     instrument: str | None = 'coiss',
+    camera: str | None = 'NAC',
     status: str = 'success',
     status_reason: str = 'ok',
     offset: list[float] | None = None,
@@ -29,15 +35,16 @@ def _metadata(
     confidence_rank: str = 'high',
     per_technique: list[dict[str, Any]] | None = None,
     excluded: list[str] | None = None,
-    image_et: float = 0.0,
+    image_et: float | None = 0.0,
     image_shape: list[int] | None = None,
     elapsed_s: float | None = 3.25,
 ) -> dict[str, Any]:
     """Build a minimal metadata document in the navigate_image_files shape.
 
     ``instrument=None`` omits the ``observation.instrument`` field to model
-    a malformed document.  ``elapsed_s=None`` omits the ``timing`` section;
-    ``image_shape=None`` omits ``observation.image_shape``.
+    a malformed document.  ``camera=None`` omits ``observation.camera``, as
+    happens for an image that never loaded.  ``elapsed_s=None`` omits the
+    ``timing`` section; ``image_shape=None`` omits ``observation.image_shape``.
     """
     if offset is None and status == 'success':
         offset = [1.5, -2.5]
@@ -47,6 +54,8 @@ def _metadata(
     }
     if instrument is not None:
         observation['instrument'] = instrument
+    if camera is not None:
+        observation['camera'] = camera
     if image_shape is not None:
         observation['image_shape'] = image_shape
     doc: dict[str, Any] = {
@@ -154,6 +163,36 @@ def test_image_number_from_name(image_name: str | None, expected: int | None) ->
     assert image_number_from_name(image_name) == expected
 
 
+@pytest.mark.parametrize(
+    ('instrument', 'filename', 'expected'),
+    [
+        ('coiss', 'N1454725799_1_CALIB.IMG', 'N1454725799'),
+        ('coiss', '/holdings/data/W1728613298_8.IMG', 'W1728613298'),
+        ('vgiss', 'C3250013_GEOMED.IMG', 'C3250013'),
+        ('gossi', 'C0349632000R.IMG', 'C0349632000R'),
+        ('nhlorri', 'lor_0003103486_0x630_sci.fit', 'lor_0003103486'),
+        # An unregistered instrument only loses its extension.
+        ('mystery', 'X9999999.IMG', 'X9999999'),
+    ],
+)
+def test_image_name_from_filename(instrument: str, filename: str, expected: str) -> None:
+    assert image_name_from_filename(instrument, filename) == expected
+
+
+def test_image_name_from_filename_is_idempotent() -> None:
+    """Re-deriving a name that is already an image name changes nothing."""
+    assert image_name_from_filename('coiss', 'N1454725799') == 'N1454725799'
+
+
+def test_count_pct_formats_share() -> None:
+    assert count_pct(5, 158) == '5 (3.2%)'
+
+
+def test_count_pct_zero_total() -> None:
+    """An empty denominator renders 0.0% rather than dividing by zero."""
+    assert count_pct(0, 0) == '0 (0.0%)'
+
+
 # --- flattening ---
 
 
@@ -180,6 +219,39 @@ def test_rows_from_metadata_success_document() -> None:
     star_row = next(r for r in source_rows if r['source_model'] == 'stars')
     assert star_row['n_features'] == 1
     assert star_row['n_gated'] == 1
+
+
+def test_rows_from_metadata_records_camera() -> None:
+    """The recorded observation.camera lands in the image row."""
+    image_row, _, _ = rows_from_metadata(_metadata(camera='WAC'), source_file='x.json')
+    assert image_row['camera'] == 'WAC'
+
+
+def test_rows_from_metadata_tolerates_missing_camera() -> None:
+    """The camera is only ever the recorded one; it is never inferred."""
+    doc = _metadata(image_name='N1454725799_1_CALIB.IMG', camera=None)
+    image_row, _, _ = rows_from_metadata(doc, source_file='x.json')
+    assert image_row['camera'] is None
+
+
+def test_rows_from_metadata_falls_back_to_observation_image_et() -> None:
+    """An image that never loaded is dated from observation.image_et."""
+    doc = _metadata(status='error', status_reason='missing_spice_data', offset=None, image_et=None)
+    # No navigation provenance exists for a load failure; the navigator
+    # records the epoch it read from the index on the observation instead.
+    del doc['navigation_result']['provenance']
+    doc['observation']['image_et'] = 0.0
+    image_row, _, _ = rows_from_metadata(doc, source_file='x.json')
+    assert image_row['image_et'] == pytest.approx(0.0)
+    assert image_row['image_date'] == '2000-01-01'
+
+
+def test_rows_from_metadata_provenance_image_et_wins() -> None:
+    """A navigated image is dated from its observation, not the index echo."""
+    doc = _metadata(image_et=100.0)
+    doc['observation']['image_et'] = 999.0
+    image_row, _, _ = rows_from_metadata(doc, source_file='x.json')
+    assert image_row['image_et'] == pytest.approx(100.0)
 
 
 def test_rows_from_metadata_requires_image_name() -> None:
@@ -409,8 +481,11 @@ def test_build_report_writes_markdown_and_charts(tmp_path: Path) -> None:
     report_path = build_report(conn, out)
     conn.close()
     text = report_path.read_text(encoding='utf-8')
-    assert '| success | 2 |' in text
-    assert '| failed | 1 |' in text
+    # One column per instrument, then a total column; every count carries a
+    # percentage of that column's image total.
+    assert '| status | coiss | vgiss | total |' in text
+    assert '| success | 2 (100.0%) | 0 (0.0%) | 2 (66.7%) |' in text
+    assert '| failed | 0 (0.0%) | 1 (100.0%) | 1 (33.3%) |' in text
     assert 'no_features_extracted' in text
     assert 'BodyDiscCorrelateNav' in text
     assert 'IAPETUS' in text
@@ -418,7 +493,106 @@ def test_build_report_writes_markdown_and_charts(tmp_path: Path) -> None:
     assert 'BodyBlobNav' in text  # ensemble exclusion section
     assert (out / 'status_counts.png').exists()
     assert (out / 'technique_usage.png').exists()
-    assert (out / 'offsets_hist.png').exists()
+    # One offset histogram per camera, never pooled.  Only the Cassini
+    # frames navigated successfully, so only the NAC has a distribution.
+    assert (out / 'offsets_hist_coiss_NAC.png').exists()
+
+
+def test_build_report_selection_section(tmp_path: Path) -> None:
+    """The report opens with per-instrument counts and image/date bounds."""
+    conn = _populated_db(tmp_path)
+    out = tmp_path / 'report'
+    report_path = build_report(conn, out)
+    conn.close()
+    text = report_path.read_text(encoding='utf-8')
+    assert '## Images selected' in text
+    assert (
+        '| coiss | 2 (66.7%) | N1000000001 | N1000000002 '
+        '| 2000-01-01T11:58:56 | 2000-01-01T11:58:56 |' in text
+    )
+    assert (
+        '| vgiss | 1 (33.3%) | C3250013 | C3250013 '
+        '| 1980-12-27T01:19:09 | 1980-12-27T01:19:09 |' in text
+    )
+    assert 'Total images: 3' in text
+
+
+def test_build_report_dates_ignore_dateless_extreme_image(tmp_path: Path) -> None:
+    """A dateless image at the number range's edge does not hide the time span."""
+    conn = _populated_db(tmp_path)
+    # Lowest-numbered Cassini frame, and it has no epoch at all.
+    _upsert(
+        conn,
+        _metadata(
+            image_name='N0000000001_1_CALIB.IMG',
+            status='error',
+            status_reason='missing_spice_data',
+            offset=None,
+            image_et=None,
+        ),
+    )
+    out = tmp_path / 'report'
+    report_path = build_report(conn, out)
+    conn.close()
+    text = report_path.read_text(encoding='utf-8')
+    # It takes the "first image" slot, but the dates come from the frames
+    # that actually have an epoch rather than collapsing to '-'.
+    assert (
+        '| coiss | 3 (75.0%) | N0000000001 | N1000000002 '
+        '| 2000-01-01T11:58:56 | 2000-01-01T11:58:56 |' in text
+    )
+
+
+def test_build_report_offsets_separate_nac_from_wac(tmp_path: Path) -> None:
+    """Two cameras of one instrument get their own rows and histograms."""
+    conn = _populated_db(tmp_path)
+    _upsert(
+        conn,
+        _metadata(
+            image_name='W1000000004_1_CALIB.IMG',
+            camera='WAC',
+            image_shape=[512, 512],
+            offset=[0.4, 0.6],
+        ),
+    )
+    out = tmp_path / 'report'
+    report_path = build_report(conn, out)
+    conn.close()
+    text = report_path.read_text(encoding='utf-8')
+    assert '| coiss | NAC | dV | 2 (66.7%) |' in text
+    assert '| coiss | WAC | dV | 1 (33.3%) |' in text
+    assert (out / 'offsets_hist_coiss_NAC.png').exists()
+    assert (out / 'offsets_hist_coiss_WAC.png').exists()
+
+
+def test_build_report_confidence_tiers_always_listed(tmp_path: Path) -> None:
+    """Every standard tier appears, including tiers with no images."""
+    conn = _populated_db(tmp_path)
+    out = tmp_path / 'report'
+    report_path = build_report(conn, out)
+    conn.close()
+    section = report_path.read_text(encoding='utf-8').split('## Confidence calibration')[1]
+    # The fixture has only high / medium / failed images; low and conflicted
+    # must still be reported, as explicit zeros.
+    assert '| high | 1 (50.0%) | 0 (0.0%) | 1 (33.3%) |' in section
+    assert '| low | 0 (0.0%) | 0 (0.0%) | 0 (0.0%) |' in section
+    assert '| conflicted | 0 (0.0%) | 0 (0.0%) | 0 (0.0%) |' in section
+    # Tier order is high, medium, low, failed, conflicted.
+    tiers = [line.split('|')[1].strip() for line in section.splitlines() if line.startswith('| ')]
+    assert tiers[:6] == ['tier', 'high', 'medium', 'low', 'failed', 'conflicted']
+
+
+def test_build_report_offsets_are_per_camera(tmp_path: Path) -> None:
+    """Offset statistics group by camera and are not pooled."""
+    conn = _populated_db(tmp_path)
+    out = tmp_path / 'report'
+    report_path = build_report(conn, out)
+    conn.close()
+    text = report_path.read_text(encoding='utf-8')
+    assert '| instrument | camera | axis | images | mean | median | stdev | min | max |' in text
+    assert '| coiss | NAC | dV | 2 (100.0%) |' in text
+    # The Voyager frame failed, so its camera contributes no offset group.
+    assert '| vgiss |' not in text.split('## Offset statistics')[1].split('##')[0]
 
 
 def test_build_report_accepts_fcpath_output_dir(tmp_path: Path) -> None:
@@ -440,8 +614,13 @@ def test_build_report_instrument_filter(tmp_path: Path) -> None:
     report_path = build_report(conn, out, instrument='vgiss')
     conn.close()
     text = report_path.read_text(encoding='utf-8')
-    assert '| failed | 1 |' in text
-    assert 'success' not in text.split('## Failure taxonomy')[0].split('## Success')[1]
+    assert '| status | vgiss | total |' in text
+    assert '| failed | 1 (100.0%) | 1 (100.0%) |' in text
+    # The Cassini frames are filtered out entirely: no coiss column, and no
+    # success row in the status table.
+    assert 'coiss' not in text
+    status_table = text.split('## Success / failure')[1].split('![status]')[0]
+    assert '| success |' not in status_table
 
 
 def test_build_report_date_filter_excludes_out_of_range(tmp_path: Path) -> None:
@@ -474,7 +653,7 @@ def test_build_report_max_image_filter(tmp_path: Path) -> None:
     text = report_path.read_text(encoding='utf-8')
     # Only the Voyager frame (3250013) falls at or below 5000000.
     assert 'Total images: 1' in text
-    assert '| failed | 1 |' in text
+    assert '| failed | 1 (100.0%) | 1 (100.0%) |' in text
 
 
 def test_build_report_rejects_digitless_image_bound(tmp_path: Path) -> None:
@@ -493,10 +672,13 @@ def test_report_failure_taxonomy_section(tmp_path: Path) -> None:
     text = report_path.read_text(encoding='utf-8')
     assert '## Failure taxonomy by image content' in text
     # The failed Voyager frame recorded one body (IAPETUS) and stars.
-    assert '| single-body | 1 |' in text
-    assert '| single-body | no_features_extracted | 1 |' in text
+    assert '| single-body | 0 (0.0%) | 1 (100.0%) | 1 (33.3%) |' in text
+    assert '| single-body | no_features_extracted | 0 (0.0%) | 1 (100.0%) | 1 (33.3%) |' in text
     assert '### Per-body failure shares' in text
-    assert '| IAPETUS | 1 | 2 | 0.333 |' in text
+    # Failure shares are per (body, instrument): IAPETUS failed on the one
+    # Voyager frame and succeeded on both Cassini frames.
+    assert '| IAPETUS | vgiss | 1 (100.0%) | 0 (0.0%) | 1.000 |' in text
+    assert '| IAPETUS | coiss | 0 (0.0%) | 2 (100.0%) | 0.000 |' in text
 
 
 def test_report_offset_by_group_section(tmp_path: Path) -> None:
@@ -506,8 +688,8 @@ def test_report_offset_by_group_section(tmp_path: Path) -> None:
     report_path = build_report(conn, out)
     conn.close()
     text = report_path.read_text(encoding='utf-8')
-    assert '### By instrument and image size' in text
-    assert '| coiss | 1024x1024 | 2 ' in text
+    assert '### By instrument, camera, and image size' in text
+    assert '| coiss | NAC | 1024x1024 | 2 (100.0%) ' in text
 
 
 def test_report_suspect_offset_section(tmp_path: Path) -> None:
@@ -527,8 +709,8 @@ def test_report_suspect_offset_section(tmp_path: Path) -> None:
     conn.close()
     text = report_path.read_text(encoding='utf-8')
     assert '## Suspect offsets (near the search limit)' in text
-    assert 'Suspect images: 1 of 3 screened.' in text
-    assert '| N1000000003_1_CALIB.IMG | coiss | 49.000 | 10.000 |' in text
+    assert 'Suspect images: 1 (25.0%) of 3 screened.' in text
+    assert '| N1000000003 | coiss | 49.000 | 10.000 |' in text
     assert '(50.0, 140.0)' in text
 
 
@@ -590,11 +772,8 @@ def test_report_botsim_section(tmp_path: Path) -> None:
     # Residuals are 0.0 (consistent pair) and 2.0 (12 - 10*1), median 1.0.
     assert '| median residual (px) | 1.000 |' in text
     assert '| p95 residual (px) | 2.000 |' in text
-    # Worst-pairs table leads with the 2 px pair.
-    assert (
-        '| 1454725900 | N1454725900_1_CALIB.IMG | W1454725900_1_CALIB.IMG '
-        '| 2.000 | 0.000 | 2.000 |' in text
-    )
+    # Worst-pairs table leads with the 2 px pair, named by image name.
+    assert '| 1454725900 | N1454725900 | W1454725900 | 2.000 | 0.000 | 2.000 |' in text
 
 
 def test_report_runtime_section(tmp_path: Path) -> None:
@@ -604,9 +783,10 @@ def test_report_runtime_section(tmp_path: Path) -> None:
     conn.close()
     text = report_path.read_text(encoding='utf-8')
     assert '## Run-time statistics' in text
-    assert '| images with timing | 3 |' in text
-    assert '| total (s) | 9.750 |' in text
-    assert '| median (s) | 3.250 |' in text
+    # Per-instrument rows plus a pooled row; every image now has timing, so
+    # the count is stated as a share rather than "images with timing".
+    assert '| coiss | 2 (100.0%) | 6.500 | 3.250 | 3.250 | 3.250 | 3.250 | 0.000 |' in text
+    assert '| (all) | 3 (100.0%) | 9.750 | 3.250 | 3.250 | 3.250 | 3.250 | 0.000 |' in text
     assert 'Slowest 2 image(s):' in text
     assert (out / 'runtime_hist.png').exists()
 
@@ -630,25 +810,50 @@ def test_report_top_n_lists_examples(tmp_path: Path) -> None:
     report_path = build_report(conn, out, top_n=5)
     conn.close()
     text = report_path.read_text(encoding='utf-8')
-    assert 'Examples (up to 5 per reason):' in text
-    assert '- no_features_extracted: C3250013_GEOMED.IMG' in text
-    assert '- BodyBlobNav: N1000000002_1_CALIB.IMG' in text
+    # Examples are grouped by instrument and use image names, not filenames.
+    assert 'Examples (up to 5 per reason and instrument):' in text
+    assert '- no_features_extracted / vgiss: C3250013' in text
+    assert '- BodyBlobNav / coiss: N1000000002' in text
 
 
 def test_report_filelists_written(tmp_path: Path) -> None:
-    """filelists writes one full image-name list per category."""
+    """filelists writes one full image-name list per category and instrument."""
     conn = _populated_db(tmp_path)
     out = tmp_path / 'report'
     report_path = build_report(conn, out, filelists=True)
     conn.close()
     text = report_path.read_text(encoding='utf-8')
-    reason_list = out / 'filelists' / 'failure_reason_no_features_extracted.txt'
+    reason_list = out / 'filelists' / 'failure_reason_no_features_extracted_vgiss.txt'
     assert reason_list.exists()
-    assert reason_list.read_text(encoding='utf-8') == 'C3250013_GEOMED.IMG\n'
-    excluded_list = out / 'filelists' / 'excluded_BodyBlobNav.txt'
+    assert reason_list.read_text(encoding='utf-8') == (
+        '# failure_reason_no_features_extracted_vgiss (1 image(s))\nC3250013\n'
+    )
+    excluded_list = out / 'filelists' / 'excluded_BodyBlobNav_coiss.txt'
     assert excluded_list.exists()
-    assert excluded_list.read_text(encoding='utf-8') == 'N1000000002_1_CALIB.IMG\n'
-    assert 'filelists/failure_reason_no_features_extracted.txt' in text
+    assert excluded_list.read_text(encoding='utf-8') == (
+        '# excluded_BodyBlobNav_coiss (1 image(s))\nN1000000002\n'
+    )
+    assert 'filelists/failure_reason_no_features_extracted_vgiss.txt' in text
+
+
+def test_report_filelists_are_image_filelist_readable(tmp_path: Path) -> None:
+    """Every filelist line is a comment or a name the dataset layer accepts."""
+    conn = _populated_db(tmp_path)
+    out = tmp_path / 'report'
+    build_report(conn, out, filelists=True)
+    conn.close()
+    validators = {
+        'coiss': DataSetPDS3CassiniISS._img_name_valid,
+        'vgiss': DataSetPDS3VoyagerISS._img_name_valid,
+    }
+    written = sorted((out / 'filelists').glob('*.txt'))
+    assert len(written) > 0
+    for path in written:
+        instrument = path.stem.rsplit('_', 1)[-1]
+        for line in path.read_text(encoding='utf-8').splitlines():
+            if line.startswith('#'):
+                continue
+            assert validators[instrument](line), f'{path.name}: {line!r}'
 
 
 def test_report_csv_export(tmp_path: Path) -> None:

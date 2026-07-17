@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from filecache import FCPath, FileCache
 
@@ -40,6 +40,13 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
         + list(range(_MIN_8xxx_VOL2, _MAX_8xxx_VOL2 + 1))
     )
     _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
+    _INDEX_TIME_COLUMNS = ('IMAGE_TIME',)
+    # Voyager indexes carry no INSTRUMENT_ID; the name spells the camera out.
+    _INDEX_CAMERA_COLUMNS = ('INSTRUMENT_NAME',)
+    _INDEX_CAMERA_MAP: ClassVar[dict[str, str]] = {
+        'NARROW ANGLE CAMERA': 'NAC',
+        'WIDE ANGLE CAMERA': 'WAC',
+    }
     _VOLUMES_DIR_NAME = 'volumes'
     # FDS counts restart per spacecraft/encounter (the volume order interleaves VG1
     # and VG2, and VG2's Neptune counts roll over below VG1's Jupiter counts), so an
