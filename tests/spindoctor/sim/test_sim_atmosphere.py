@@ -11,6 +11,7 @@ altitude-versus-phase substrate), plus the module's pure helpers.
 """
 
 import math
+from typing import cast
 
 import numpy as np
 import pytest
@@ -98,7 +99,7 @@ def _incidence_deg_map() -> NDArrayFloatType:
         illumination_angle=math.radians(90.0), phase_angle=math.radians(90.0)
     )
     mu0 = (v_rel * illum_v + u_rel * illum_u + z * illum_z) / _RADIUS
-    return np.degrees(np.arccos(np.clip(mu0, -1.0, 1.0)))
+    return cast(NDArrayFloatType, np.degrees(np.arccos(np.clip(mu0, -1.0, 1.0))))
 
 
 # ---------------------------------------------------------------------------
