@@ -245,11 +245,14 @@ class RingAdvancedMixin(SimEditorBase):
         )
         damp = _dspin(
             minimum=0.01,
-            maximum=100.0,
+            maximum=2.0,
             decimals=3,
             step=0.1,
             value=float(wave.get('damp', 0.5)),
-            tooltip='Azimuthal damping constant in RADIANS of downstream longitude.',
+            tooltip=(
+                'Azimuthal damping constant in RADIANS of downstream longitude '
+                '(the validator caps it at 2 to keep the modular wrap seam small).'
+            ),
         )
         lam0 = _dspin(
             minimum=-360.0,

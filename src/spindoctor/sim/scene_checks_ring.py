@@ -48,6 +48,11 @@ _RING_FEATURE_ORBIT_KEYS: frozenset[str] = frozenset(
 )
 _RING_ORBIT_MODE_KEYS: frozenset[str] = frozenset({'m', 'amp', 'peri'})
 _RING_EDGE_WAVE_KEYS: frozenset[str] = frozenset({'amp', 'wavelength', 'damp', 'lam0'})
+# The edge-wave longitude difference is taken modulo 2*pi, so just upstream
+# of the launch longitude the wave carries a wrap-seam residual of
+# amp * exp(-2*pi/damp).  Capping damp at 2.0 radians bounds that residual
+# at exp(-pi), about 4.3% of amp, keeping the seam visually negligible.
+_RING_EDGE_WAVE_DAMP_MAX: float = 2.0
 # The planted per-feature ephemeris error (truth: render side only) and the
 # uncertainty the navigator is entitled to know (idealized error bars).
 _RING_ORBIT_ERROR_KEYS: frozenset[str] = frozenset(
@@ -438,4 +443,11 @@ def _check_ring_feature_orbit(orbit: Any, *, label: str, source: str) -> None:
             if value is None:
                 raise SimSceneValidationError(f'{source}: {wave_label}.{key} is required')
             _check_optional_positive_number(value, f'{wave_label}.{key}', source=source)
+        if float(wave['damp']) > _RING_EDGE_WAVE_DAMP_MAX:
+            raise SimSceneValidationError(
+                f'{source}: {wave_label}.damp must be <= {_RING_EDGE_WAVE_DAMP_MAX} radians '
+                f'(the modular longitude wrap leaves an upstream residual of '
+                f'amp * exp(-2*pi/damp); the cap bounds it at exp(-pi), about 4.3% of amp); '
+                f'got {wave["damp"]!r}'
+            )
         _check_optional_number(wave.get('lam0'), f'{wave_label}.lam0', source=source)

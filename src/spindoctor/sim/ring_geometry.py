@@ -204,9 +204,11 @@ class RingEdgeWave:
     modulo 2*pi into [0, 2*pi), so the exponential argument is never
     negative.  The clamp is load-bearing, not cosmetic -- the exponential
     grows without bound if evaluated for ``lam < lam0`` -- and the modular
-    form is its periodic implementation: immediately upstream of ``lam0``
-    the wave has wrapped nearly a full turn and carries ``exp(-2*pi/damp)``
-    of its launch amplitude (negligible for any physical damping).
+    form is chosen because rings are periodic and the wave physically wraps
+    the full turn: immediately upstream of ``lam0`` it carries a wrap-seam
+    residual of ``amp * exp(-2*pi/damp)`` of its launch amplitude.  The
+    scene validator caps ``damp`` at 2.0 radians, bounding that residual at
+    ``exp(-pi)``, about 4.3% of ``amp``.
 
     Parameters:
         amp: Radial amplitude in the orbit's radial units.
@@ -392,9 +394,11 @@ def compute_edge_wave_dr(
     with ``dlam = (lam - lam0) mod 2*pi`` in [0, 2*pi): the wave exists only
     DOWNSTREAM of the launch longitude, so the exponential argument is never
     negative (evaluating the raw form for ``lam < lam0`` would grow without
-    bound -- the clamp is load-bearing).  ``a`` is the feature's semimajor
-    axis, making the sine argument arc length over wavelength
-    (dimensionless).
+    bound -- the clamp is load-bearing).  The wrapped wave carries an
+    upstream residual of ``amp * exp(-2*pi/damp)`` just before ``lam0``;
+    the validator's cap of ``damp <= 2.0`` radians bounds it at ``exp(-pi)``,
+    about 4.3% of ``amp``.  ``a`` is the feature's semimajor axis, making
+    the sine argument arc length over wavelength (dimensionless).
 
     Parameters:
         lam: Ring-plane longitudes from the ascending node, in radians.

@@ -625,6 +625,31 @@ def test_validate_sim_params_requires_edge_wave_scales(key: str) -> None:
         validate_sim_params(params)
 
 
+def test_validate_sim_params_accepts_edge_wave_damp_at_the_cap() -> None:
+    """An edge-wave damp of exactly 2.0 radians (the cap) validates."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit']['edge_wave'] = {
+        'amp': 1.0,
+        'wavelength': 8.0,
+        'damp': 2.0,
+        'lam0': 90.0,
+    }
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_edge_wave_damp_above_the_cap() -> None:
+    """damp > 2.0 radians fails: the modular wrap seam would exceed exp(-pi)."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit']['edge_wave'] = {
+        'amp': 1.0,
+        'wavelength': 8.0,
+        'damp': 2.5,
+        'lam0': 90.0,
+    }
+    with pytest.raises(SimSceneValidationError, match=r'damp must be <= 2\.0 radians'):
+        validate_sim_params(params)
+
+
 def test_validate_sim_params_rejects_unknown_edge_wave_key() -> None:
     """An unmodeled edge-wave key fails validation."""
     params = _ring_system_params()

@@ -1104,8 +1104,10 @@ perturbation families ride on it:
   moon, so the longitude difference is wrapped into one forward turn.
   Immediately upstream of the moon the wave has then wrapped nearly a full
   orbit and carries a factor ``exp(-2 pi / damp)`` of its launch amplitude
-  -- negligible for any physical damping -- which is the periodic statement
-  of "the wave trails the moon, it does not lead it".
+  -- the validator caps ``damp`` at 2 radians, bounding that wrap-seam
+  residual at ``exp(-pi)``, about 4.3% of the launch amplitude -- which is
+  the periodic statement of "the wave trails the moon, it does not lead
+  it".
 
 Both families are idealized: the navigator predicts the same scalloped,
 wave-perturbed boundaries the renderer draws, and the catalog scenes

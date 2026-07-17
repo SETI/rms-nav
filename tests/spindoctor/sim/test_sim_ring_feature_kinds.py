@@ -145,6 +145,27 @@ def test_edge_wave_upstream_clamp_is_load_bearing() -> None:
     assert abs(dr[0]) < 1e-4 * amp
 
 
+def test_edge_wave_wrap_seam_residual_at_the_damp_cap() -> None:
+    """At damp = 2.0 (the validator cap) the wrap-seam residual is exp(-pi)-small.
+
+    The modular longitude wrap means the wave re-approaches its launch
+    longitude from upstream carrying amp * exp(-2*pi/damp) of its launch
+    amplitude.  At the validator's damp cap of 2.0 radians that residual
+    envelope is amp * exp(-pi), about 4.3% of amp -- the largest wrap seam
+    a valid scene can author.
+    """
+    a, amp, wavelength, damp, lam0_deg = 40.0, 1.0, 8.0, 2.0, 90.0
+    wave = RingEdgeWave(amp=amp, wavelength=wavelength, damp=damp, lam0=lam0_deg)
+    probe = 0.05
+    lam = math.radians(lam0_deg) - np.linspace(1e-6, probe, 512)
+    dr = compute_edge_wave_dr(lam, wave, a=a)
+    # The residual envelope grows moving upstream; over the probed window it
+    # is bounded by its value at the window's upstream end.
+    seam_bound = amp * math.exp(-(2.0 * math.pi - probe) / damp)
+    assert float(np.max(np.abs(dr))) <= seam_bound
+    assert seam_bound == pytest.approx(amp * math.exp(-math.pi), rel=0.03)
+
+
 def test_edge_wave_decays_downstream() -> None:
     """Crest amplitudes fall by exp(-d/damp) between successive probes."""
     a, amp, wavelength, damp = 40.0, 1.2, 8.0, 0.5
