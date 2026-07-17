@@ -1086,9 +1086,14 @@ phase-dependent apparent limb radius (and the haze parameters) -- the
 low-phase ``titan_haze_limb`` scene records a sub-pixel sunward offset at
 medium confidence; the high-phase ``titan_crescent_horns`` scene records the
 low-confidence outcome that follows when the ring of light defeats disc
-correlation -- and that fused answer is far from the truth, roughly 30 px off
-in ``du`` at confidence 0.4, which is exactly why the scene pins the tier
-rather than the offset). The haze evaluation is restricted to the bounding box of the
+correlation -- and that fused answer lands tens of pixels from the truth,
+the exact value a noise-realization artifact, which is exactly why the
+scene pins the tier rather than the offset. Its noiseless sibling
+``titan_crescent_horns_noiseless`` -- Poisson and read noise off, the same
+haze and phase geometry -- pins the systematic failure itself
+deterministically: the fused offset lands about 30 px off in ``du``
+(planted -0.8, recovered 29.17) at the same low tier, so the ring of light
+alone, not the noise, carries the answer that far). The haze evaluation is restricted to the bounding box of the
 body plus its halo (out to a detached shell's reach), so its cost scales with
 that box rather than the frame, and a body without an ``atmosphere`` block
 renders hard-limbed and byte-for-byte unchanged.
