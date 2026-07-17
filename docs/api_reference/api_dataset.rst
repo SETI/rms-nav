@@ -14,6 +14,11 @@ spindoctor.dataset
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.dataset.results_filter
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.dataset.dataset_pds4
    :members:
    :undoc-members:

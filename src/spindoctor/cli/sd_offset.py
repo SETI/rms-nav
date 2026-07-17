@@ -407,6 +407,7 @@ def main() -> None:
         sys.exit(0)
 
     if arguments.output_cloud_tasks_file:
+        MAIN_LOGGER.info('Writing cloud_tasks file to %s', arguments.output_cloud_tasks_file)
         task_arguments = {
             'nav_models': nav_models,
             'nav_techniques': nav_techniques,
@@ -440,6 +441,7 @@ def main() -> None:
         with cloud_tasks_path.open('w') as f:
             json_string = json_as_string(tasks_json)
             f.write(json_string)
+        MAIN_LOGGER.info('Wrote cloud_tasks file to %s', arguments.output_cloud_tasks_file)
         sys.exit(0)
 
     for imagefiles in DATASET.yield_image_files_from_arguments(arguments):

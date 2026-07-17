@@ -562,6 +562,7 @@ def main() -> None:
     log_run_environment(MAIN_LOGGER, sys.argv[1:])
 
     if args.output_cloud_tasks_file:
+        MAIN_LOGGER.info('Writing cloud_tasks file to %s', args.output_cloud_tasks_file)
         _write_cloud_tasks_file(mode, args)
         MAIN_LOGGER.info('Wrote cloud_tasks file to %s', args.output_cloud_tasks_file)
         if args.profile:

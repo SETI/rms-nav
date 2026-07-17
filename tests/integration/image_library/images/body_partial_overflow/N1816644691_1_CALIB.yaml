@@ -20,10 +20,11 @@ ground_truth:
     Selection: DIONE | 60-90; {"apparent_diameter_px": 1264.2, "center_phase_deg": 88.576, "filter": "CL1", "lat_coverage_deg": 58.2, "target": "DIONE", "year": "2015"}.
     Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
     Pipeline: status=success, confidence=0.375, rank=low, techniques=['BodyDiscCorrelateNav', 'BodyLimbNav'], per-technique offsets={"BodyDiscCorrelateNav": [4.5, 11.5], "BodyLimbNav": [3.9629, 11.7921]}.
+    Primary ratchet 2026-07-16: after the 2026-07-14 NCC-covariance rederivation BodyLimbNav is the highest-confidence technique; disc and limb still agree at the operator-verified offset and the navigation is unchanged. Ratcheted BodyDiscCorrelateNav -> BodyLimbNav.
 expected:
   status: success
   confidence_tier: medium
-  primary_technique: BodyDiscCorrelateNav
+  primary_technique: BodyLimbNav
   techniques_must_run:
   - BodyDiscCorrelateNav
   techniques_must_skip: []

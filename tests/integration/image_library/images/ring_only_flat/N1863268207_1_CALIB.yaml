@@ -39,9 +39,10 @@ ground_truth:
     confidence=0.952, rank=high, status_reason=rank_1_only; RingEdgeNav
     raw fit (-46.4616, -20.4941) projects to -20.4941 px along the normal,
     identical to the voted representative point.
+    Tier ratchet 2026-07-16: the 2026-07-14 rank-aware ensemble policy caps a fused result with rank-deficient covariance at medium (the unobservable along-edge axis is an assumption, not a measurement); the RingEdgeNav fit and its projection onto the operator-verified normal are unchanged. Ratcheted high -> medium.
 expected:
   status: success
-  confidence_tier: high
+  confidence_tier: medium
   status_reason: rank_1_only
   primary_technique: RingEdgeNav
   techniques_must_run:

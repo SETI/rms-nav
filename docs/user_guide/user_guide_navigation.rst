@@ -160,7 +160,24 @@ For PDS3 datasets (``coiss``, ``coiss_pds3``, ``coiss_cruise``, ``coiss_cruise_p
 * ``--last-volume NAME``: ending PDS3 volume; only that volume and chronologically earlier ones are processed.
 * ``--image-filespec-csv FILE`` (repeatable): CSV file(s) containing PDS3 file specifications; files must include a header column named ``Primary File Spec`` or ``primaryfilespec``.
 * ``--image-file-list FILE`` (repeatable): file(s) containing file specifications or names, one per line; lines beginning with ``#`` are ignored.
-* ``--choose-random-images N``: choose a random subset of N images that meet the other criteria.
+* ``--choose-random-images N``: choose a random subset of N images, uniformly
+  distributed across all images (in every selected volume) that meet the other
+  criteria; the selected images are yielded in random order.
+* ``--has-offset-file`` / ``--has-no-offset-file``: only images whose offset
+  metadata file (``*_metadata.json`` under the navigation results root) already
+  exists / does not exist.
+* ``--has-png-file`` / ``--has-no-png-file``: only images whose summary PNG file
+  (``*_summary.png`` under the navigation results root) already exists / does
+  not exist.
+* ``--has-offset-error``: only images whose offset metadata file exists and
+  records a fatal error (``status`` of ``error``).
+* ``--has-offset-spice-error`` / ``--has-offset-nonspice-error``: like
+  ``--has-offset-error``, but restricted to fatal errors caused by / not caused
+  by missing SPICE data.
+
+The results-file filters answer "file exists" questions by walking the results
+tree once per selected volume, and read metadata contents in batches, so they
+are efficient even when the results root is a cloud location.
 
 Miscellaneous
 ^^^^^^^^^^^^^
