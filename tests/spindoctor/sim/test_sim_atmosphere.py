@@ -11,7 +11,9 @@ altitude-versus-phase substrate), plus the module's pure helpers.  The
 compositing tests pin the halo's transmission-screen behavior: the body
 mask and depth truth see only the solid silhouette, a star behind the halo
 attenuates by exp(-tau) instead of vanishing, a star behind the solid disc
-vanishes, and the ring system interleaves with the halo by depth.
+vanishes, the ring system interleaves with the halo by depth, and a halo
+that overlaps another body, another halo, or the ring system demands
+explicit range_km on both participants.
 """
 
 import math
@@ -32,6 +34,7 @@ from spindoctor.sim.forward.body import render_single_body
 from spindoctor.sim.forward.scene_radiance import compose_scene_radiance
 from spindoctor.sim.forward.stages import new_sim_frame
 from spindoctor.sim.scene import validate_sim_params
+from spindoctor.sim.scene_schema import SimSceneValidationError
 from spindoctor.support.types import NDArrayFloatType
 
 _SIZE = 256
@@ -547,26 +550,71 @@ def test_star_behind_the_solid_disc_vanishes() -> None:
     assert float(with_body[_DISC_PIXEL]) == 0.0
 
 
-def test_halo_only_overlap_needs_no_ranges() -> None:
-    """A halo over another body is screen compositing, not an ambiguous stack.
+def test_halo_overlap_without_ranges_is_ambiguous() -> None:
+    """A halo reaching another body's disc without ranges fails validation.
 
-    Neither body carries a range_km; their solid discs are disjoint and only
-    the halo reaches the second body, so composition succeeds and the far
-    disc shows through the glow attenuated.
+    Neither body carries a range_km; their solid discs are disjoint but the
+    halo reaches the second body's silhouette, so which side of it the halo
+    composites on would be a silent guess ordered by the positional default
+    ranges.  The scene fails loudly instead, naming the halo.
     """
     haze_body = _compose_body(center_u=30.0)
     plain = _compose_body(
         atmosphere=False, name='PLAIN', center_u=78.0, axis1=16.0, axis2=16.0, axis3=16.0
     )
+    expected = r"halo of body 'TITAN' overlaps body 'PLAIN'"
+    with pytest.raises(SimSceneValidationError, match=expected):
+        _compose_scene(bodies=[haze_body, plain])
+
+
+def test_halo_overlap_orders_by_explicit_ranges() -> None:
+    """With explicit ranges a halo composites by depth, in both directions.
+
+    The same halo-over-disc geometry as the ambiguity test, with ranges: a
+    nearer haze body screens the far plain disc through its glow, while a
+    farther haze body's halo is hidden behind the nearer plain disc, so the
+    two orderings render differently and each matches its closed form.
+    """
+    plain = _compose_body(
+        atmosphere=False,
+        name='PLAIN',
+        center_u=78.0,
+        axis1=16.0,
+        axis2=16.0,
+        axis3=16.0,
+        range_km=2.0e6,
+    )
     probe = (48, 72)
-    both = _compose_scene(bodies=[haze_body, plain]).signal
     plain_only = _compose_scene(bodies=[plain]).signal
-    haze_only = _compose_scene(bodies=[haze_body]).signal
+    haze_near = _compose_body(center_u=30.0, range_km=1.0e6)
+    haze_only = _compose_scene(bodies=[haze_near]).signal
+    near_scene = _compose_scene(bodies=[haze_near, plain]).signal
     altitude = math.hypot(probe[0] + 0.5 - 48.0, probe[1] + 0.5 - 30.0) - _C_RADIUS
     tau = float(tangent_optical_depth(np.array([altitude]), _C_SPEC)[0])
-    expected = haze_only[probe] + math.exp(-tau) * plain_only[probe]
+    expected_near = haze_only[probe] + math.exp(-tau) * plain_only[probe]
     assert float(plain_only[probe]) > 0.0
-    assert float(both[probe]) == pytest.approx(float(expected), rel=1e-9)
+    assert float(near_scene[probe]) == pytest.approx(float(expected_near), rel=1e-9)
+    # Haze body farther than the plain disc: its halo hides behind the disc.
+    haze_far = _compose_body(center_u=30.0, range_km=4.0e6)
+    far_scene = _compose_scene(bodies=[haze_far, plain]).signal
+    assert float(far_scene[probe]) == pytest.approx(float(plain_only[probe]), rel=1e-9)
+    assert float(near_scene[probe]) != pytest.approx(float(far_scene[probe]), rel=1e-9)
+
+
+def test_overlapping_halos_without_ranges_are_ambiguous() -> None:
+    """Two halos that overlap only each other still demand explicit ranges.
+
+    The discs are far enough apart that neither halo reaches the other's
+    silhouette, so only the halo-versus-halo glow overlaps -- and the two
+    screens' compositing order (each attenuates the other) would still be
+    ordered by the positional defaults.
+    """
+    left = _compose_body(center_u=5.0)
+    right = _compose_body(name='TITAN2', center_u=91.0)
+    # The message names the bodies in render (far-to-near) order: the second
+    # body's positional default range is larger, so it renders first.
+    with pytest.raises(SimSceneValidationError, match="halos of bodies 'TITAN2' and 'TITAN'"):
+        _compose_scene(bodies=[left, right])
 
 
 def _compose_ring_system(range_km: float | None) -> dict[str, Any]:
@@ -619,3 +667,17 @@ def test_ring_in_front_screens_the_halo() -> None:
     transmission = math.exp(-1.0 / math.sin(math.radians(30.0)))
     expected = ring_only[_RING_PIXEL] + transmission * body_only[_RING_PIXEL]
     assert float(both[_RING_PIXEL]) == pytest.approx(float(expected), rel=1e-9)
+
+
+def test_ring_over_only_the_halo_still_needs_ranges() -> None:
+    """A depth-less ring overlapping only the halo fails validation.
+
+    A face-on ring annulus clears the solid disc entirely, so only the halo
+    glow overlaps it -- and without ranges the ring would silently screen
+    the halo (a depth-less ring applies last).  The scene fails loudly,
+    naming the halo.
+    """
+    ring: dict[str, Any] = _compose_ring_system(None)
+    ring['geometry'] = {'opening_deg_obs': 90.0, 'opening_deg_sun': 90.0}
+    with pytest.raises(SimSceneValidationError, match="ring_system and the halo of body 'TITAN'"):
+        _compose_scene(bodies=[_compose_body()], ring_system=ring)
