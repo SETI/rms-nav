@@ -211,18 +211,21 @@ class RingTabMixin(SimEditorBase):
         w.center_v_spin = center_v  # type: ignore[attr-defined]
         w.center_u_spin = center_u  # type: ignore[attr-defined]
 
-        for key, label, low, default in (
-            ('opening_deg_obs', 'Opening B (observer):', -89.9, 90.0),
-            ('opening_deg_sun', 'Opening B (sun):', -89.9, 90.0),
-            ('node_deg', 'Node angle:', -360.0, 0.0),
+        # The opening-angle spin ranges mirror the validator's (-90, 90].
+        for key, label, low, high, default in (
+            ('opening_deg_obs', 'Opening B (observer):', -89.9, 90.0, 90.0),
+            ('opening_deg_sun', 'Opening B (sun):', -89.9, 90.0, 90.0),
+            ('node_deg', 'Node angle:', -360.0, 360.0, 0.0),
         ):
             spin = QDoubleSpinBox()
-            spin.setRange(low, 360.0)
+            spin.setRange(low, high)
             spin.setDecimals(1)
             spin.setSuffix(' deg')
             spin.setValue(float(geometry.get(key, default)))
             spin.valueChanged.connect(lambda v, k=key: self._on_ring_geometry(k, v))
             fl.addRow(label, spin)
+            # Keep references so tests can assert the validator-matched ranges.
+            setattr(w, f'{key}_spin', spin)
 
         phase_spin = QDoubleSpinBox()
         phase_spin.setRange(0.0, 180.0)

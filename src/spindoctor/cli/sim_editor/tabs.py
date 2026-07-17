@@ -349,11 +349,26 @@ class TabsMixin(SimEditorBase):
                 del self.sim_params['bodies'][data_index]
         elif kind == 'ring':
             features = self._ring_features()
+            ring_system = self.sim_params.get('ring_system', {})
+            # The system-level azimuthal / moonlets widgets live on the first
+            # feature's tab, so deleting the last feature would strand those
+            # authored blocks with no widget to reach them: refuse the
+            # deletion and say why until the blocks are removed first.
+            if len(features) == 1 and (ring_system.get('azimuthal') or ring_system.get('moonlets')):
+                status_bar = self.statusBar()
+                if status_bar is not None:
+                    status_bar.showMessage(
+                        'Cannot delete the last ring feature while system-level '
+                        'azimuthal / moonlets blocks exist; disable those blocks first.',
+                        8000,
+                    )
+                return
             if 0 <= data_index < len(features):
                 del features[data_index]
             # Deleting the last feature retires the whole block: an empty
             # ring_system renders nothing and only clutters the saved scene.
-            if not features and not self.sim_params.get('ring_system', {}).get('moonlets'):
+            # (The guard above means no system-level blocks remain here.)
+            if not features:
                 self.sim_params.pop('ring_system', None)
         elif kind == 'star':
             if 0 <= data_index < len(self.sim_params['stars']):

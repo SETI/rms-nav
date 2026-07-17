@@ -162,6 +162,52 @@ def test_deleting_the_last_ring_feature_retires_the_block(model: Any) -> None:
     assert 'ring_system' not in model.sim_params
 
 
+def test_deleting_the_last_ring_feature_blocked_while_system_blocks_exist(model: Any) -> None:
+    """The last feature tab refuses deletion while moonlets are authored.
+
+    The system-level azimuthal / moonlets widgets live on the first
+    feature's tab, so deleting the last feature would leave those blocks
+    with no widget to reach them; the deletion is refused (with a status-bar
+    explanation) until the blocks are disabled.
+    """
+    model._add_ring_tab()
+    tab_idx = model._find_tab_by_properties('ring', 0)
+    assert tab_idx is not None
+    tab = model._tabs.widget(tab_idx)
+    tab.moonlets_group.setChecked(True)
+    model._on_ring_add_moonlet()
+    model._delete_tab_by_index('ring', 0)
+    assert len(model.sim_params['ring_system']['features']) == 1
+    assert len(model.sim_params['ring_system']['moonlets']) == 1
+    assert 'ring feature' in model.statusBar().currentMessage()
+
+
+def test_deleting_the_last_ring_feature_allowed_after_blocks_removed(model: Any) -> None:
+    """Disabling the system blocks unblocks the last feature's deletion."""
+    model._add_ring_tab()
+    tab_idx = model._find_tab_by_properties('ring', 0)
+    assert tab_idx is not None
+    tab = model._tabs.widget(tab_idx)
+    tab.azimuthal_modulation_group.setChecked(True)
+    model._delete_tab_by_index('ring', 0)
+    assert 'ring_system' in model.sim_params
+    tab.azimuthal_modulation_group.setChecked(False)
+    model._delete_tab_by_index('ring', 0)
+    assert 'ring_system' not in model.sim_params
+
+
+def test_ring_opening_angle_spins_match_the_validator_range(model: Any) -> None:
+    """The opening-angle spins mirror the validator's (-90, 90] range."""
+    model._add_ring_tab()
+    tab_idx = model._find_tab_by_properties('ring', 0)
+    assert tab_idx is not None
+    tab = model._tabs.widget(tab_idx)
+    for key in ('opening_deg_obs', 'opening_deg_sun'):
+        spin = getattr(tab, f'{key}_spin')
+        assert spin.minimum() == -89.9
+        assert spin.maximum() == 90.0
+
+
 def test_match_navigator_disables_kernel_spins(model: Any) -> None:
     """Matching the navigator disables the explicit-kernel spins."""
     model._psf_optics_group.setChecked(True)
