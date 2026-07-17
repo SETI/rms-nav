@@ -32,9 +32,9 @@ __all__ = [
     'star_field_scene',
 ]
 
-# Matched-frame size: large enough for 16x16 sky patches of 32 px and for
-# the PSD's 64-px tiles, small enough to keep 69 renders in minutes.
-_SCENE_SIZE = 512
+# Fallback matched-frame size when the caller supplies no real frame shape:
+# large enough for 32-px sky patches and the PSD's 64-px tiles.
+_DEFAULT_SCENE_SIZE = 512
 
 # Star classes place this many stars; magnitudes ladder from bright to the
 # detection edge so the FOM 2 sample spans the usable brightness range.
@@ -63,14 +63,16 @@ def _seed_for(image_id: str) -> int:
     return int(zlib.crc32(image_id.encode('utf-8')) & 0x7FFFFFFF)
 
 
-def _base_scene(scene_name: str, instrument: str, exposure_sec: float, seed: int) -> dict[str, Any]:
+def _base_scene(
+    scene_name: str, instrument: str, exposure_sec: float, seed: int, size_vu: tuple[int, int]
+) -> dict[str, Any]:
     """The shared scene skeleton: instrument chain on, zero offset."""
     return {
         'schema_version': 2,
         'scene_name': scene_name,
         'instrument': instrument,
-        'size_v': _SCENE_SIZE,
-        'size_u': _SCENE_SIZE,
+        'size_v': int(size_vu[0]),
+        'size_u': int(size_vu[1]),
         'random_seed': seed,
         'exposure_sec': float(exposure_sec),
         'offset_v': 0.0,
@@ -81,7 +83,7 @@ def _base_scene(scene_name: str, instrument: str, exposure_sec: float, seed: int
 
 
 def _star_list(
-    seed: int, count: int, *, vmag_bright: float, vmag_step: float
+    seed: int, count: int, size_vu: tuple[int, int], *, vmag_bright: float, vmag_step: float
 ) -> list[dict[str, Any]]:
     """A deterministic scattered star field with a magnitude ladder."""
     # A small linear-congruential walk keeps this independent of numpy so
@@ -89,7 +91,7 @@ def _star_list(
     state = seed or 1
     stars: list[dict[str, Any]] = []
     margin = 24.0
-    span = _SCENE_SIZE - 2 * margin
+    span = min(size_vu) - 2 * margin
     for i in range(count):
         state = (1103515245 * state + 12345) % (1 << 31)
         v = margin + span * (state / float(1 << 31))
@@ -106,26 +108,33 @@ def _star_list(
     return stars
 
 
-def sky_scene(image_id: str, instrument: str, exposure_sec: float) -> dict[str, Any]:
+def sky_scene(
+    image_id: str, instrument: str, exposure_sec: float, size_vu: tuple[int, int]
+) -> dict[str, Any]:
     """A matched frame for negative / scattered-light / offscreen classes.
 
     A sparse dim star field keeps the frame from being pathologically
     empty while leaving nearly every patch pure detector output.
     """
     seed = _seed_for(image_id)
-    scene = _base_scene(f'realism_sky_{image_id}', instrument, exposure_sec, seed)
-    scene['stars'] = _star_list(seed, 5, vmag_bright=10.0, vmag_step=0.5)
+    scene = _base_scene(f'realism_sky_{image_id}', instrument, exposure_sec, seed, size_vu)
+    scene['stars'] = _star_list(seed, 5, size_vu, vmag_bright=10.0, vmag_step=0.5)
     return scene
 
 
 def star_field_scene(
-    image_id: str, instrument: str, exposure_sec: float, *, count: int = _STAR_COUNT
+    image_id: str,
+    instrument: str,
+    exposure_sec: float,
+    size_vu: tuple[int, int],
+    *,
+    count: int = _STAR_COUNT,
 ) -> dict[str, Any]:
     """A matched star-field frame for the star scene classes."""
     seed = _seed_for(image_id)
-    scene = _base_scene(f'realism_stars_{image_id}', instrument, exposure_sec, seed)
+    scene = _base_scene(f'realism_stars_{image_id}', instrument, exposure_sec, seed, size_vu)
     scene['stars'] = _star_list(
-        seed, count, vmag_bright=_STAR_VMAG_BRIGHT, vmag_step=_STAR_VMAG_STEP
+        seed, count, size_vu, vmag_bright=_STAR_VMAG_BRIGHT, vmag_step=_STAR_VMAG_STEP
     )
     return scene
 
@@ -134,28 +143,33 @@ def limb_scene(
     image_id: str,
     instrument: str,
     exposure_sec: float,
+    size_vu: tuple[int, int],
     *,
     diameter_px: float,
     phase_angle_deg: float,
 ) -> dict[str, Any]:
     """A matched limb frame: one ellipsoid at the real body's scale and phase.
 
+    The frame renders at the real frame's size with the real body's
+    apparent diameter, so a frame-filling real body is matched by a
+    frame-filling simulated one -- clamping the body into a smaller frame
+    would leave sky corners the real frame does not have, and the FOM 1/5
+    floor statistics would compare different scene contents.
+
     Parameters:
         image_id: The matched real frame's image_id (drives the seed).
         instrument: Sim instrument name.
         exposure_sec: The real frame's exposure.
-        diameter_px: The real body's predicted apparent diameter; clamped
-            so the rendered disc always presents a limb inside the frame.
+        size_vu: The real frame's (v, u) shape.
+        diameter_px: The real body's predicted apparent diameter.
         phase_angle_deg: The real frame's phase angle.
     """
     seed = _seed_for(image_id)
-    scene = _base_scene(f'realism_limb_{image_id}', instrument, exposure_sec, seed)
+    scene = _base_scene(f'realism_limb_{image_id}', instrument, exposure_sec, seed, size_vu)
     # The scene 'axis' values are apparent extents in pixels (a body with
-    # axis1 = D renders a D-px-diameter silhouette); clamp so a
-    # frame-filling real body still presents its limb inside the matched
-    # frame while staying in the same FOM 3 resolution bin.
-    axis = max(40.0, min(float(diameter_px), 0.85 * _SCENE_SIZE))
-    center = _SCENE_SIZE / 2.0
+    # axis1 = D renders a D-px-diameter silhouette).
+    axis = max(40.0, float(diameter_px))
+    center = min(size_vu) / 2.0
     scene['bodies'] = [
         {
             'name': 'REALISM_BODY',
@@ -174,7 +188,7 @@ def limb_scene(
             'photometric_law': 'lommel_seeliger',
         }
     ]
-    scene['stars'] = _star_list(seed, 5, vmag_bright=9.0, vmag_step=0.5)
+    scene['stars'] = _star_list(seed, 5, size_vu, vmag_bright=9.0, vmag_step=0.5)
     return scene
 
 
@@ -182,6 +196,7 @@ def ring_scene(
     image_id: str,
     instrument: str,
     exposure_sec: float,
+    size_vu: tuple[int, int],
     *,
     curved: bool,
     with_body: bool,
@@ -197,13 +212,17 @@ def ring_scene(
         with_body: Add a central body (the ring_plus_body class).
     """
     seed = _seed_for(image_id)
-    scene = _base_scene(f'realism_ring_{image_id}', instrument, exposure_sec, seed)
+    scene = _base_scene(f'realism_ring_{image_id}', instrument, exposure_sec, seed, size_vu)
     opening = 65.0 if curved else 12.0
-    center_v = _SCENE_SIZE / 2.0
+    # Ring radii and widths scale with the frame so edge coverage matches
+    # the real frame's, keeping per-frame profile counts comparable.
+    scale = min(size_vu) / _DEFAULT_SCENE_SIZE
+    center_v = size_vu[0] / 2.0
+    center_u = size_vu[1] / 2.0
     scene['ring_system'] = {
         'geometry': {
             'center_v': center_v,
-            'center_u': _SCENE_SIZE / 2.0,
+            'center_u': center_u,
             'opening_deg_obs': opening,
             'opening_deg_sun': opening,
             'node_deg': 0.0,
@@ -213,25 +232,40 @@ def ring_scene(
                 'name': 'REALISM_RING_A',
                 'kind': 'ringlet',
                 'tau': 2.0,
-                'width': 30.0,
+                'width': round(30.0 * scale, 1),
                 'navigable': True,
-                'orbit': {'a': 150.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0},
+                'orbit': {
+                    'a': round(150.0 * scale, 1),
+                    'ae': 0.0,
+                    'long_peri': 0.0,
+                    'rate_peri': 0.0,
+                },
             },
             {
                 'name': 'REALISM_RING_B',
                 'kind': 'ringlet',
                 'tau': 0.8,
-                'width': 18.0,
+                'width': round(18.0 * scale, 1),
                 'navigable': True,
-                'orbit': {'a': 205.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0},
+                'orbit': {
+                    'a': round(205.0 * scale, 1),
+                    'ae': 0.0,
+                    'long_peri': 0.0,
+                    'rate_peri': 0.0,
+                },
             },
             {
                 'name': 'REALISM_GAP',
                 'kind': 'gap',
                 'tau': 0.05,
-                'width': 12.0,
+                'width': round(12.0 * scale, 1),
                 'navigable': True,
-                'orbit': {'a': 160.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0},
+                'orbit': {
+                    'a': round(160.0 * scale, 1),
+                    'ae': 0.0,
+                    'long_peri': 0.0,
+                    'rate_peri': 0.0,
+                },
             },
         ],
     }
@@ -240,15 +274,19 @@ def ring_scene(
             {
                 'name': 'REALISM_PLANET',
                 'center_v': center_v,
-                'center_u': _SCENE_SIZE / 2.0,
-                'axis1': 90.0,
-                'axis2': 90.0,
-                'axis3': 90.0,
+                'center_u': center_u,
+                'axis1': round(90.0 * scale, 1),
+                'axis2': round(90.0 * scale, 1),
+                'axis3': round(90.0 * scale, 1),
                 'illumination_angle': 0.0,
                 'phase_angle': 30.0,
+                # Same content-matching choice as the limb scenes: airless
+                # bodies shade Lommel-Seeliger, and a Lambert ramp would
+                # masquerade as limb softness in the FOM 3 widths.
+                'photometric_law': 'lommel_seeliger',
             }
         ]
-    scene['stars'] = _star_list(seed, 5, vmag_bright=9.5, vmag_step=0.5)
+    scene['stars'] = _star_list(seed, 5, size_vu, vmag_bright=9.5, vmag_step=0.5)
     return scene
 
 
@@ -258,6 +296,7 @@ def matched_scene(
     instrument: str,
     exposure_sec: float,
     *,
+    size_vu: tuple[int, int] = (_DEFAULT_SCENE_SIZE, _DEFAULT_SCENE_SIZE),
     diameter_px: float = 150.0,
     phase_angle_deg: float = 45.0,
 ) -> dict[str, Any]:
@@ -269,6 +308,9 @@ def matched_scene(
         instrument: Sim instrument name matching the cohort's signal chain
             and units (e.g. ``coiss_calib_nac`` for the CALIB cohort).
         exposure_sec: The real frame's exposure (seconds).
+        size_vu: The real frame's (v, u) shape; the matched frame renders
+            at the same size so floor and coverage statistics compare the
+            same scene geometry.
         diameter_px: Real body's apparent diameter for limb classes (from
             the navigator's model metadata; the default covers frames
             where no body model could be built).
@@ -282,12 +324,13 @@ def matched_scene(
             'one_bright_star_no_body': 1,
             'two_bright_stars_no_body': 2,
         }.get(scene_class, _STAR_COUNT)
-        scene = star_field_scene(image_id, instrument, exposure_sec, count=count)
+        scene = star_field_scene(image_id, instrument, exposure_sec, size_vu, count=count)
     elif scene_class in _LIMB_CLASSES:
         scene = limb_scene(
             image_id,
             instrument,
             exposure_sec,
+            size_vu,
             diameter_px=diameter_px,
             phase_angle_deg=phase_angle_deg,
         )
@@ -296,10 +339,11 @@ def matched_scene(
             image_id,
             instrument,
             exposure_sec,
+            size_vu,
             curved=scene_class != 'ring_only_flat',
             with_body=scene_class == 'ring_plus_body',
         )
     else:
-        scene = sky_scene(image_id, instrument, exposure_sec)
+        scene = sky_scene(image_id, instrument, exposure_sec, size_vu)
     validate_sim_params(scene)
     return scene

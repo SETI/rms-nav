@@ -161,6 +161,7 @@ class FrameRecord:
     offset_vu: tuple[float, float]
     diameter_px: float = 150.0
     phase_angle_deg: float = 45.0
+    frame_shape_vu: tuple[int, int] = (512, 512)
 
 
 @dataclass
@@ -261,6 +262,7 @@ def _frame_samples_real(
         exposure_sec=float(exposure),
         stratum=stratum,
         offset_vu=offset,
+        frame_shape_vu=(int(obs.data_shape_vu[0]), int(obs.data_shape_vu[1])),
     )
     saturation = SATURATION_LEVEL[instrument]
     samples, incidence = extract_pixel_samples(
@@ -314,6 +316,7 @@ def _sim_obs_for_record(record: FrameRecord) -> tuple[ObsSim, dict[str, Any]]:
         record.scene_class,
         record.instrument,
         record.exposure_sec,
+        size_vu=record.frame_shape_vu,
         diameter_px=record.diameter_px,
         phase_angle_deg=record.phase_angle_deg,
     )

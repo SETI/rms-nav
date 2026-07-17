@@ -68,7 +68,11 @@ _EDGE_SPACING_PX = 2.0 * _EDGE_HALF_LENGTH_PX / (_EDGE_N_SAMPLES - 1)
 _STAR_R_MAX_PX = 8.0
 _STAR_N_BINS = 16
 # Minimum star peak over local sky sigma for a usable FOM 2 cutout.
-_STAR_MIN_PEAK_SNR = 10.0
+_STAR_MIN_PEAK_SNR = 20.0
+# At most this many stars per frame contribute FOM 2 samples (the
+# brightest qualifying ones), so both sides sample the same well-measured
+# brightness regime regardless of their noise floors.
+_MAX_STARS_PER_FRAME = 8
 
 # Cap on per-frame profile vertices so one long limb cannot dominate the
 # pooled distribution; vertices are decimated evenly to this count.
@@ -297,7 +301,14 @@ def extract_feature_samples(
     patches = find_uniform_patches(image, patch_size=32)
     sky_sigma = float(np.median([p.sigma for p in patches])) if patches else 0.0
 
-    star_profiles: list[NDArrayFloatType] = []
+    # Qualifying star cutouts collect first; only the brightest few per
+    # frame contribute samples.  A per-side SNR threshold alone would admit
+    # different brightness mixes on the two sides (whichever side is
+    # noisier admits fewer faint stars), and faint noise-dominated cutouts
+    # inflate the encircled-energy tail; ranking by peak and capping the
+    # count is symmetric and keeps both samples in the well-measured
+    # regime.
+    star_candidates: list[tuple[float, NDArrayFloatType, NDArrayFloatType]] = []
     star_radius: NDArrayFloatType | None = None
     for feature in features:
         geometry = feature.geometry
@@ -312,7 +323,7 @@ def extract_feature_samples(
             if not np.any(np.isfinite(intensity)):
                 continue
             peak = float(np.nanmax(intensity))
-            if sky_sigma > 0.0 and peak < _STAR_MIN_PEAK_SNR * sky_sigma:
+            if peak <= 0.0 or (sky_sigma > 0.0 and peak < _STAR_MIN_PEAK_SNR * sky_sigma):
                 continue
             # Contaminant guard: the profile must peak in its core, and the
             # far tail must stay well below the peak.  A hot pixel or cosmic
@@ -333,14 +344,8 @@ def extract_feature_samples(
                 )
                 if np.isfinite(saturation_level) and raw_peak >= saturation_level:
                     continue
-            r_ee, ee = encircled_energy(radius, intensity)
-            ee50 = ee_radius(r_ee, ee, 0.5)
-            ee80 = ee_radius(r_ee, ee, 0.8)
-            out.add('star_ee50', [ee50])
-            out.add('star_ee80', [ee80])
-            if peak > 0.0:
-                star_profiles.append(np.asarray(intensity, dtype=np.float64) / peak)
-                star_radius = radius
+            star_candidates.append((peak, radius, intensity))
+            star_radius = radius
         elif isinstance(geometry, LimbPolyline):
             vertices, normals = _decimate(
                 np.asarray(geometry.vertices_vu, dtype=np.float64) + shift,
@@ -396,7 +401,14 @@ def extract_feature_samples(
             # Terminator realism is a separate verdict (plan Section 8);
             # excluded from the FOM 3 limb distribution.
             continue
-    if star_profiles and star_radius is not None:
+    if star_candidates and star_radius is not None:
+        star_candidates.sort(key=lambda entry: entry[0], reverse=True)
+        star_profiles: list[NDArrayFloatType] = []
+        for peak, radius, intensity in star_candidates[:_MAX_STARS_PER_FRAME]:
+            r_ee, ee = encircled_energy(radius, intensity)
+            out.add('star_ee50', [ee_radius(r_ee, ee, 0.5)])
+            out.add('star_ee80', [ee_radius(r_ee, ee, 0.8)])
+            star_profiles.append(np.asarray(intensity, dtype=np.float64) / peak)
         with warnings.catch_warnings():
             # Outer radial bins may be NaN in every cutout.
             warnings.simplefilter('ignore', category=RuntimeWarning)
