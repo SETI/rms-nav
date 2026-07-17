@@ -253,6 +253,157 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
         ),
         {'gamma': 1.2},
     ),
+    # The four panels below mirror the ring_system catalog scenes of the same
+    # names (tests/integration/sim_scenes/ring_system/), minus the planted
+    # offsets and expected blocks the gallery does not exercise.
+    (
+        'ring_edge_wave_gap',
+        _scene(
+            [],
+            random_seed=11,
+            ring_system={
+                'geometry': {
+                    'center_v': 110.0,
+                    'center_u': 110.0,
+                    'opening_deg_obs': 50.0,
+                    'opening_deg_sun': 50.0,
+                    'node_deg': 30.0,
+                },
+                'features': [
+                    {
+                        'name': 'SHEET',
+                        'kind': 'edge',
+                        'side': 'in',
+                        'tau': 1.2,
+                        'orbit': {'a': 95.0},
+                    },
+                    {
+                        'name': 'WAVYGAP',
+                        'kind': 'gap',
+                        'tau': 1.2,
+                        'width': 6.0,
+                        'navigable': True,
+                        'orbit': {
+                            'a': 60.0,
+                            'edge_wave': {
+                                'amp': 2.0,
+                                'wavelength': 10.0,
+                                'damp': 0.6,
+                                'lam0': 45.0,
+                            },
+                        },
+                    },
+                ],
+            },
+        ),
+        {'gamma': 1.2},
+    ),
+    (
+        'ring_mmode',
+        _scene(
+            [],
+            random_seed=12,
+            ring_system={
+                'geometry': {
+                    'center_v': 110.0,
+                    'center_u': 110.0,
+                    'opening_deg_obs': 65.0,
+                    'opening_deg_sun': 65.0,
+                    'node_deg': 15.0,
+                },
+                'features': [
+                    {
+                        'name': 'BRINGEDGE',
+                        'kind': 'ringlet',
+                        'tau': 2.0,
+                        'width': 12.0,
+                        'navigable': True,
+                        'orbit': {'a': 70.0, 'modes': [{'m': 2, 'amp': 5.0, 'peri': 40.0}]},
+                    },
+                ],
+            },
+        ),
+        {'gamma': 1.2},
+    ),
+    (
+        'ring_spokes',
+        _scene(
+            [],
+            random_seed=13,
+            ring_system={
+                'geometry': {
+                    'center_v': 110.0,
+                    'center_u': 110.0,
+                    'opening_deg_obs': 90.0,
+                    'opening_deg_sun': 90.0,
+                    'node_deg': 0.0,
+                },
+                'features': [
+                    {
+                        'name': 'BSHEET',
+                        'kind': 'ringlet',
+                        'tau': 1.5,
+                        'width': 40.0,
+                        'navigable': True,
+                        'orbit': {'a': 45.0},
+                    },
+                ],
+                'azimuthal': {
+                    'spokes': {
+                        'count': 6,
+                        'r_inner': 50.0,
+                        'r_outer': 80.0,
+                        'contrast': -0.5,
+                        'width_deg': 14.0,
+                    },
+                },
+            },
+        ),
+        {'gamma': 1.2},
+    ),
+    (
+        'ring_moonlet_propeller',
+        _scene(
+            [],
+            random_seed=14,
+            ring_system={
+                'geometry': {
+                    'center_v': 110.0,
+                    'center_u': 110.0,
+                    'opening_deg_obs': 90.0,
+                    'opening_deg_sun': 90.0,
+                    'node_deg': 0.0,
+                },
+                'features': [
+                    {
+                        'name': 'ASHEET',
+                        'kind': 'ringlet',
+                        'tau': 1.8,
+                        'width': 45.0,
+                        'navigable': True,
+                        'orbit': {'a': 40.0},
+                    },
+                    {
+                        'name': 'ENCKE',
+                        'kind': 'gap',
+                        'tau': 1.8,
+                        'width': 8.0,
+                        'orbit': {'a': 58.0},
+                    },
+                ],
+                'moonlets': [
+                    {
+                        'a': 62.0,
+                        'lam_deg': 130.0,
+                        'radius_px': 1.5,
+                        'amplitude': 0.5,
+                        'propeller': {'length_deg': 25.0, 'width_px': 3.0, 'contrast': -0.7},
+                    },
+                ],
+            },
+        ),
+        {'gamma': 1.2},
+    ),
     (
         'star_field',
         _scene(

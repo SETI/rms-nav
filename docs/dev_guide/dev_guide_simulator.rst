@@ -1278,6 +1278,36 @@ The panels below are rendered by ``python -m tests.integration.sim_doc_images``
    Two ring_system ringlets (the outer one eccentric) lit by the
    single-scattering tau photometry.
 
+.. figure:: _sim_images/ring_edge_wave_gap.png
+   :width: 45%
+   :align: center
+
+   An inclined ring system (B = 50 deg, rotated node): a gap carved into a
+   sheet, its edges scalloped by a satellite edge wave downstream of the
+   perturbing moon's longitude.
+
+.. figure:: _sim_images/ring_mmode.png
+   :width: 45%
+   :align: center
+
+   A resonantly forced m = 2 ringlet under inclined projection -- the
+   two-lobed outer-B-ring edge shape, part of the catalog orbit both sides
+   evaluate.
+
+.. figure:: _sim_images/ring_spokes.png
+   :width: 45%
+   :align: center
+
+   Dark seeded spokes crossing a navigable band: azimuthally sharp,
+   radially broad intensity clutter the navigator is never told about.
+
+.. figure:: _sim_images/ring_moonlet_propeller.png
+   :width: 45%
+   :align: center
+
+   A bright moonlet with a propeller tau disturbance at the center of a
+   non-navigable gap -- a blob/star confounder sitting exactly on the ring.
+
 .. figure:: _sim_images/star_field.png
    :width: 45%
    :align: center
