@@ -19,6 +19,7 @@ import pytest
 from spindoctor.sim.forward.ring_system import (
     RING_ALBEDO_DEFAULT,
     RING_PHASE_G_DEFAULT,
+    _feature_tau_profile,
     henyey_greenstein_phase,
     render_ring_system,
     ring_reflection_factor,
@@ -26,6 +27,11 @@ from spindoctor.sim.forward.ring_system import (
 from spindoctor.sim.forward.scene_radiance import compose_scene_radiance
 from spindoctor.sim.forward.stages import new_sim_frame
 from spindoctor.sim.render import render_combined_model
+from spindoctor.sim.ring_geometry import (
+    ring_orbit_from_mapping,
+    ring_plane_from_sky,
+    ring_radial_scale,
+)
 from spindoctor.sim.scene import validate_sim_params
 from spindoctor.sim.scene_schema import SimSceneValidationError
 from spindoctor.support.types import NDArrayFloatType
@@ -127,6 +133,63 @@ def _ringlet(a: float, width: float, tau: float, **extra: Any) -> dict[str, Any]
     }
     feature.update(extra)
     return feature
+
+
+def test_feature_annulus_bounding_matches_full_grid_evaluation() -> None:
+    """Per-feature radial bounding is exact: bit-identical to full-grid math.
+
+    An inclined, node-rotated, off-center perturbed ringlet whose bounding
+    box covers only part of the frame renders the same transmission map,
+    bit for bit, as evaluating the profile form over the whole grid --
+    outside the bounded annulus the contribution is exactly zero.
+    """
+    shape = (96, 96)
+    b_obs = 35.0
+    node = 25.0
+    center_v, center_u = 40.0, 58.0
+    feature = _ringlet(22.0, 6.0, 1.3)
+    feature['orbit'] = {
+        'a': 22.0,
+        'ae': 1.5,
+        'long_peri': 40.0,
+        'rate_peri': 0.0,
+        'modes': [{'m': 3, 'amp': 0.8, 'peri': 10.0}],
+        'edge_wave': {'amp': 0.6, 'wavelength': 9.0, 'damp': 0.5, 'lam0': 45.0},
+    }
+    system = _system([feature], b_obs=b_obs, node=node)
+    system['geometry']['center_v'] = center_v
+    system['geometry']['center_u'] = center_u
+    maps = render_ring_system(shape, system, center_v=center_v, center_u=center_u, node_deg=node)
+
+    v_grid, u_grid = np.meshgrid(
+        np.arange(shape[0], dtype=np.float64) + 0.5,
+        np.arange(shape[1], dtype=np.float64) + 0.5,
+        indexing='ij',
+    )
+    r, lam, x, y = ring_plane_from_sky(
+        v_grid - center_v, u_grid - center_u, opening_deg_obs=b_obs, node_deg=node
+    )
+    tau = _feature_tau_profile(
+        feature,
+        ring_orbit_from_mapping(feature['orbit']),
+        r=r,
+        lam=lam,
+        radial_scale=ring_radial_scale(r, x, y, opening_deg_obs=b_obs),
+        os=1,
+        epoch=0.0,
+        time=0.0,
+    )
+    mu = abs(math.sin(math.radians(b_obs)))
+    expected = np.exp(-np.clip(tau, 0.0, None) / mu)
+    np.testing.assert_array_equal(maps.transmission, expected)
+
+
+def test_feature_entirely_off_grid_contributes_nothing() -> None:
+    """A feature whose projected annulus misses the frame renders no tau."""
+    system = _system([_ringlet(5000.0, 10.0, 2.0)])
+    maps = render_ring_system((96, 96), system, center_v=48.0, center_u=48.0, node_deg=0.0)
+    np.testing.assert_array_equal(maps.transmission, np.ones((96, 96)))
+    assert not maps.mask.any()
 
 
 def test_face_on_system_reduces_to_sky_plane_circles() -> None:

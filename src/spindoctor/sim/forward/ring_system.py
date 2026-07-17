@@ -53,6 +53,13 @@ Truth-side clutter: the ``azimuthal`` block (brightness modulation, a
 planet-shadow wedge, seeded spokes) scales the emitted intensity without
 touching tau or transmission, and the ``moonlets`` list embeds opaque discs
 at the ring's depth, each optionally carrying a propeller tau disturbance.
+
+Each feature is evaluated only inside its radial annulus: the orbit's exact
+radial bounds, widened by the kind's shape extent and an anti-aliasing
+margin, map through the projection to a pixel bounding box, and outside the
+bounded band every contribution is exactly 0.0 (clipped shades, the ramp's
+clipped fraction, the wave envelope's float64 underflow).  The bounding
+changes rendering cost with feature count, never the rendered values.
 """
 
 import math
@@ -92,6 +99,10 @@ RING_PHASE_G_DEFAULT: float = -0.3
 # Below this |mu0 - mu| the unlit closed form is numerically indeterminate
 # (0/0) and the analytic limit replaces it.
 _UNLIT_MU_MATCH_TOL: float = 1e-6
+# exp(-x) underflows to exactly 0.0 in float64 before x reaches 750, so a
+# wave train's tau is bitwise zero beyond this many damping lengths; the
+# radial bound uses it to stay exact rather than approximate.
+_WAVE_UNDERFLOW_DAMPINGS: float = 750.0
 
 
 @dataclass(frozen=True)
@@ -250,7 +261,15 @@ def render_ring_system(
     # subtract (tau suppression), a wave's negative lobes subtract, and the
     # sum clips at zero.  The emission's A/4 * P factor is the tau-weighted
     # mean over the positive contributions, so a single feature reproduces
-    # its closed form exactly.
+    # its closed form exactly.  Each feature is evaluated only inside its
+    # radial annulus (see the module docstring): outside it every
+    # contribution is exactly 0.0, so the bounding is a pure optimization.
+    #
+    # Anti-aliased boundaries reach at most (os/2) * radial_scale ring-plane
+    # units past their edge before the shade clips to exactly 0.0, and
+    # radial_scale <= 1/|sin B| everywhere, so this margin (twice the strict
+    # bound, for safety) keeps the bounding exact.
+    aa_margin = float(os) / mu
     tau_map = np.zeros(shape, dtype=np.float64)
     ap_weighted = np.zeros(shape, dtype=np.float64)
     ap_weight = np.zeros(shape, dtype=np.float64)
@@ -265,26 +284,45 @@ def render_ring_system(
         orbit = _orbit_with_error(
             ring_orbit_from_mapping(feature.get('orbit') or {}), feature.get('orbit_error')
         ).scaled(float(os))
+        lo, hi = _feature_radial_bounds(feature, orbit, os=os, margin=aa_margin)
+        slices = _annulus_bbox_slices(
+            shape,
+            center_v=center_v,
+            center_u=center_u,
+            r_outer=hi,
+            opening_deg_obs=b_obs,
+            node_deg=node_deg,
+        )
+        if slices is None:
+            continue
+        sub_v, sub_u = slices
+        r_sub = r[sub_v, sub_u]
+        sel = (r_sub >= lo) & (r_sub <= hi)
+        if not bool(np.any(sel)):
+            continue
         contribution = _feature_tau_profile(
             feature,
             orbit,
-            r=r,
-            lam=lam,
-            radial_scale=radial_scale,
+            r=r_sub[sel],
+            lam=lam[sub_v, sub_u][sel],
+            radial_scale=radial_scale[sub_v, sub_u][sel],
             os=os,
             epoch=epoch,
             time=time,
         )
+        tau_view = tau_map[sub_v, sub_u]
         if kind == 'gap':
-            tau_map -= contribution
+            tau_view[sel] -= contribution
         else:
-            tau_map += contribution
+            tau_view[sel] += contribution
             albedo = float(feature.get('albedo', RING_ALBEDO_DEFAULT))
             phase_g = float(feature.get('phase_g', RING_PHASE_G_DEFAULT))
             ap = albedo / 4.0 * henyey_greenstein_phase(phase_g, alpha_deg)
             positive = np.clip(contribution, 0.0, None)
-            ap_weighted += ap * positive
-            ap_weight += positive
+            ap_weighted_view = ap_weighted[sub_v, sub_u]
+            ap_weighted_view[sel] += ap * positive
+            ap_weight_view = ap_weight[sub_v, sub_u]
+            ap_weight_view[sel] += positive
     np.clip(tau_map, 0.0, None, out=tau_map)
 
     # Propeller lobes are local density disturbances, so they modify the
@@ -535,6 +573,116 @@ def _orbit_with_error(orbit: RingOrbit, error: Mapping[str, Any] | None) -> Ring
         ae=max(0.0, orbit.ae + float(error.get('delta_ae_px', 0.0))),
         long_peri=orbit.long_peri + float(error.get('delta_long_peri_deg', 0.0)),
     )
+
+
+def _orbit_radial_bounds(orbit: RingOrbit) -> tuple[float, float]:
+    """Global bounds of :func:`compute_orbit_radii` over all longitudes.
+
+    The mode-1 conic ranges over ``[a - ae, a + ae]`` exactly (pericenter to
+    apocenter), and every m >= 2 mode and the edge wave perturb the radius
+    by at most their amplitude in each direction.  The bounds hold at every
+    epoch: precession moves the pericenter longitude, never the radial
+    range.
+
+    Parameters:
+        orbit: The parsed orbit model (any consistent radial units).
+
+    Returns:
+        ``(lo, hi)`` bounds on the orbit's edge radius, same units.
+    """
+    reach = orbit.ae + sum(abs(mode.amp) for mode in orbit.modes)
+    if orbit.edge_wave is not None:
+        reach += abs(orbit.edge_wave.amp)
+    return orbit.a - reach, orbit.a + reach
+
+
+def _feature_radial_bounds(
+    feature: Mapping[str, Any],
+    orbit: RingOrbit,
+    *,
+    os: int,
+    margin: float,
+) -> tuple[float, float]:
+    """The ring-plane radial band outside which a feature's tau is exactly 0.0.
+
+    The orbit's radial bounds widen by the kind's shape extent -- the band
+    width of a ringlet / gap / ramp, the unbounded side of a one-sided
+    edge, and a wave train's decay length out to float64 underflow (beyond
+    which its envelope is bitwise zero) -- plus ``margin``, which covers the
+    anti-aliasing window's reach in ring-plane units.  Outside the returned
+    band every profile form evaluates to exactly 0.0 (clipped shades, the
+    ramp's clipped fraction, the wave's clipped upstream argument and
+    underflowed envelope), so restricting evaluation to the band is exact.
+
+    Parameters:
+        feature: The validated feature mapping.
+        orbit: The feature's orbit, scaled to the render grid.
+        os: The oversampling factor (scales the shape keys).
+        margin: The anti-aliasing safety margin in render-grid radial units.
+
+    Returns:
+        ``(lo, hi)`` in render-grid ring-plane units; ``hi`` is ``inf`` for
+        an outward-unbounded edge and ``lo`` clips at zero.
+    """
+    kind = str(feature.get('kind'))
+    lo, hi = _orbit_radial_bounds(orbit)
+    if kind in ('ringlet', 'gap', 'ramp'):
+        hi += float(feature.get('width', 0.0)) * os
+    elif kind == 'edge':
+        if str(feature.get('side', 'in')) == 'in':
+            lo = -math.inf
+        else:
+            hi = math.inf
+    elif kind == 'wave':
+        hi += float(feature.get('damping', 0.0)) * os * _WAVE_UNDERFLOW_DAMPINGS
+    return max(lo - margin, 0.0), hi + margin
+
+
+def _annulus_bbox_slices(
+    shape: tuple[int, int],
+    *,
+    center_v: float,
+    center_u: float,
+    r_outer: float,
+    opening_deg_obs: float,
+    node_deg: float,
+) -> tuple[slice, slice] | None:
+    """Grid slices bounding the sky projection of ring-plane radii <= r_outer.
+
+    A ring-plane circle of radius ``r`` projects to a sky ellipse whose
+    extents from the center are the longitude amplitudes of the projection
+    equations: ``r * hypot(sin(node), sin(B) * cos(node))`` in v and
+    ``r * hypot(cos(node), sin(B) * sin(node))`` in u.  Every pixel whose
+    ring-plane radius is at most ``r_outer`` therefore lies inside this
+    box; one pixel of slack absorbs the pixel-center convention.
+
+    Parameters:
+        shape: The render-grid shape ``(V, U)``.
+        center_v: Projected ring-system center v on the render grid.
+        center_u: Projected ring-system center u on the render grid.
+        r_outer: Outer ring-plane radius bound (render-grid units); ``inf``
+            selects the whole grid.
+        opening_deg_obs: Observer ring opening angle B in degrees.
+        node_deg: Sky position angle of the ascending node in degrees.
+
+    Returns:
+        ``(v_slice, u_slice)`` into the grid, or None when the bounding box
+        misses the grid entirely (the feature contributes nothing).
+    """
+    size_v, size_u = shape
+    if not math.isfinite(r_outer):
+        return slice(0, size_v), slice(0, size_u)
+    sin_b = math.sin(math.radians(opening_deg_obs))
+    node = math.radians(node_deg)
+    extent_v = r_outer * math.hypot(math.sin(node), sin_b * math.cos(node))
+    extent_u = r_outer * math.hypot(math.cos(node), sin_b * math.sin(node))
+    v0 = max(math.floor(center_v - extent_v) - 1, 0)
+    v1 = min(math.ceil(center_v + extent_v) + 1, size_v)
+    u0 = max(math.floor(center_u - extent_u) - 1, 0)
+    u1 = min(math.ceil(center_u + extent_u) + 1, size_u)
+    if v0 >= v1 or u0 >= u1:
+        return None
+    return slice(v0, v1), slice(u0, u1)
 
 
 def _feature_tau_profile(
