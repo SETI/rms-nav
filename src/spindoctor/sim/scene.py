@@ -112,6 +112,7 @@ DECLARED_SIM_SCENE_CLASSES: frozenset[str] = frozenset(
         'range_sweep',
         'multi_body_geometry',
         'mutual_event',
+        'atmosphere',
         'algorithmic_invariants',
         'regression',
         'artifact_sweep',
