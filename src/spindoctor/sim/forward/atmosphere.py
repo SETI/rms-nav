@@ -31,8 +31,11 @@ an opacity term.  The source is a single-scattering albedo scaled by a
 Henyey-Greenstein phase factor (forward-scattering when ``g`` > 0, which
 brightens the limb at high phase and, in the limit, produces the ring of
 light past phase 150 deg) and a wrapped illumination weight that stays
-positive a scale-height's worth of arc past the terminator (so the
-terminator brightens past 90 deg incidence instead of cutting off).  The
+positive past the terminator over the horizon-dip angle ``sqrt(2 * H / R)``
+of arc -- the solar depression at which a column one scale height up loses
+direct sunlight -- floored at 0.05 rad so a razor-thin atmosphere still
+wraps resolvably (so the terminator brightens past 90 deg incidence instead
+of cutting off).  The
 opacity is ``1 - exp(-tau)``: above the limb ``tau`` is the tangent optical
 depth, so the limb becomes a soft exponential ramp whose apparent radius
 grows with the haze brightness (hence with phase); on the disc the slant
@@ -425,6 +428,11 @@ def apply_atmosphere(
         illumination_angle=illumination_angle, phase_angle=phase_angle
     )
     hg = hg_phase_factor(spec.g, phase_angle)
+    # Terminator-wrap width: the horizon-dip angle sqrt(2 H / R), the solar
+    # depression at which a point one scale height above the surface loses
+    # direct sunlight.  A modeling choice (a physical wrap would integrate
+    # the column's shadowing), floored at 0.05 rad so a razor-thin
+    # atmosphere still brightens resolvably past the terminator.
     delta_wrap = max(math.sqrt(2.0 * scale_height / r_mean), 0.05)
 
     def _source(mu0: NDArrayFloatType) -> NDArrayFloatType:

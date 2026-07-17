@@ -1054,9 +1054,12 @@ an opacity ``1 - exp(-tau)``. Three consequences follow:
   -- at high phase than at low phase. That is the physical root of the Titan
   altitude-versus-phase problem.
 
-- **A terminator that wraps.** The illumination weight stays positive a
-  scale-height's worth of arc past the terminator, so the night side near the
-  terminator brightens smoothly instead of cutting off at 90 deg incidence.
+- **A terminator that wraps.** The illumination weight stays positive past
+  the terminator over the horizon-dip angle ``sqrt(2 * H / R)`` of arc (the
+  solar depression at which a column one scale height up loses direct
+  sunlight; ~0.5 rad for the catalog Titans, floored at 0.05 rad for thin
+  atmospheres), so the night side near the terminator brightens smoothly
+  instead of cutting off at 90 deg incidence.
 
 - **A ring of light.** A forward-scattering haze (``g`` > 0) peaks toward high
   phase, so at phase beyond about 150 deg the whole limb lights up and the
