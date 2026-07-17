@@ -382,6 +382,62 @@ def test_halo_transmission_is_the_tangent_extinction() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Limb/disc consistency at a nonzero reference altitude.
+# ---------------------------------------------------------------------------
+
+
+def test_haze_layers_invariant_under_reference_altitude_shift() -> None:
+    """Re-referencing tau_ref to another altitude leaves the whole layer alone.
+
+    ``tau_ref`` at ``ref_altitude_px = 30`` with H = 5 describes the same
+    atmosphere as ``tau_ref * exp(30 / 5)`` at the surface, so every layer
+    (on-disc haze, halo glow, halo transmission) must be identical for the
+    two specs.  The disc side derives from the surface tangent depth; a
+    tau_vert built from the raw ``tau_ref`` would leave the two disc renders
+    a factor exp(30 / 5) ~ 403 apart.
+    """
+    scale_height = 5.0
+    ref_altitude = 30.0
+    tau_ref = 0.005
+    referenced = AtmosphereSpec(
+        scale_height_px=scale_height, tau_ref=tau_ref, ref_altitude_px=ref_altitude
+    )
+    surface = AtmosphereSpec(
+        scale_height_px=scale_height,
+        tau_ref=tau_ref * math.exp(ref_altitude / scale_height),
+        ref_altitude_px=0.0,
+    )
+    layers_referenced = _centred_layers(referenced)
+    layers_surface = _centred_layers(surface)
+    np.testing.assert_allclose(layers_referenced.disc, layers_surface.disc, rtol=1e-9, atol=1e-12)
+    np.testing.assert_allclose(
+        layers_referenced.halo.emission, layers_surface.halo.emission, rtol=1e-9, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        layers_referenced.halo.transmission, layers_surface.halo.transmission, rtol=1e-9
+    )
+
+
+def test_on_disc_haze_is_continuous_across_the_limb() -> None:
+    """The disc side adjacent to the limb tracks the just-above-limb glow.
+
+    One pixel inside and one pixel outside the limb probe the two opacity
+    formulas where they meet; with the disc column derived from the surface
+    tangent depth the rendered values sit within a small factor of each
+    other at ``ref_altitude_px = 30`` (a raw-tau_ref disc column would sit
+    ~400x below the glow).
+    """
+    spec = AtmosphereSpec(scale_height_px=5.0, tau_ref=0.005, ref_altitude_px=30.0)
+    layers = _centred_layers(spec)
+    row = int(_CENTER)
+    inside = float(layers.disc[row, int(_CENTER + _RADIUS - 2)])
+    outside = float(layers.halo.emission[row, int(_CENTER + _RADIUS + 1)])
+    assert outside > 0.0
+    assert inside > outside / 3.0
+    assert inside < outside * 3.0
+
+
+# ---------------------------------------------------------------------------
 # Halo compositing: solid-silhouette truth, star extinction, ring interleave.
 # ---------------------------------------------------------------------------
 

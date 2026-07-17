@@ -37,7 +37,14 @@ opacity is ``1 - exp(-tau)``: above the limb ``tau`` is the tangent optical
 depth, so the limb becomes a soft exponential ramp whose apparent radius
 grows with the haze brightness (hence with phase); on the disc the slant
 optical depth grows toward the limb as ``1 / cos(emission)``, so the haze
-concentrates at the limb and stays faint at disc centre.
+concentrates at the limb and stays faint at disc centre.  The disc-side
+column scales from the physical vertical depth
+
+    ``tau_vert = tau_ref * exp(ref_altitude_px / H) / sqrt(2 * pi * R / H)``
+
+(the surface tangent depth divided by the grazing enhancement, ``R`` the
+mean radius and ``H`` the scale height in pixels), so the two sides of the
+limb describe one atmosphere at any reference altitude.
 
 A body without an ``atmosphere`` block never calls into this module and
 renders hard-limbed, byte-for-byte as before.
@@ -302,8 +309,16 @@ def apply_atmosphere(
     # grazing-excess column vanishes.  Deep disc interior carries no haze (the
     # on-disc opacity is the excess of the slant path over the nadir path, zero
     # at disc centre), so the cost scales with the limb band, not the frame.
+    #
+    # tau_vert is the physical vertical column depth that the on-disc slant
+    # paths scale from: the SURFACE tangent depth divided by the grazing
+    # enhancement sqrt(2 pi R / H).  tau_ref is the tangent depth at
+    # ref_altitude_px, so the surface tangent depth is
+    # tau_ref * exp(ref_altitude_px / H); dropping that factor would leave the
+    # disc side exp(ref_altitude_px / H) times weaker than the limb implies.
     geom = math.sqrt(2.0 * math.pi * r_mean / scale_height)
-    tau_vert = spec.tau_ref / max(geom, 1e-6)
+    tau_surface = spec.tau_ref * math.exp(spec.ref_altitude_px / scale_height)
+    tau_vert = tau_surface / max(geom, 1e-6)
     e_outer = 1.0 + _outer_altitude(spec) / r_mean
     # Inside, the excess column tau_vert * (1 / mu - 1) drops below _TAU_EPS
     # once cos(emission) exceeds mu_cut; that sets the inner edge of the band.
@@ -370,8 +385,10 @@ def apply_atmosphere(
         # The on-disc haze is the grazing EXCESS over the nadir column:
         # tau_vert * (1 / mu - 1), zero at disc centre and diverging toward the
         # limb, so the haze concentrates in a limb band.  tau_vert is the
-        # physical vertical depth, the tangent tau_ref divided out by the usual
-        # grazing factor sqrt(2 pi R / H) (computed once for the band above).
+        # physical vertical depth, the surface tangent depth divided out by
+        # the grazing factor sqrt(2 pi R / H) (computed once for the band
+        # above), which keeps the disc side consistent with the limb side at
+        # any ref_altitude_px.
         excess = tau_vert * (1.0 / np.maximum(mu_emit, _MU_FLOOR) - 1.0)
         opacity[inside] = 1.0 - np.exp(-excess)
 
