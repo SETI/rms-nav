@@ -213,6 +213,10 @@ class SimEditorBase(QMainWindow):
         """Build a ring tab widget (implemented in RingTabMixin)."""
         raise NotImplementedError
 
+    def _build_ring_advanced_groups(self, w: QWidget, idx: int, layout: QVBoxLayout) -> None:
+        """Add the advanced ring groups to a ring tab (RingAdvancedMixin)."""
+        raise NotImplementedError
+
     def _ring_features(self) -> list[dict[str, Any]]:
         """The live ring_system feature list (implemented in RingTabMixin)."""
         raise NotImplementedError

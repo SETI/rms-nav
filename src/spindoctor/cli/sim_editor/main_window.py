@@ -37,6 +37,7 @@ from spindoctor.cli.sim_editor.global_fields import GlobalFieldsMixin
 from spindoctor.cli.sim_editor.noise import NoiseMixin
 from spindoctor.cli.sim_editor.optics_tab import OpticsTabMixin
 from spindoctor.cli.sim_editor.render_display import RenderDisplayMixin
+from spindoctor.cli.sim_editor.ring_advanced import RingAdvancedMixin
 from spindoctor.cli.sim_editor.ring_tab import RingTabMixin
 from spindoctor.cli.sim_editor.scene_io import SceneIoMixin
 from spindoctor.cli.sim_editor.star_tab import StarTabMixin
@@ -56,6 +57,7 @@ class CreateSimulatedImageModel(
     ExpectedOutcomeMixin,
     BodyAppearanceMixin,
     BodyTabMixin,
+    RingAdvancedMixin,
     RingTabMixin,
     StarTabMixin,
     TabsMixin,

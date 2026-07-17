@@ -6,9 +6,11 @@ the photometric truth scalars) and owns the handlers that write ring fields
 back into the data model.  The first feature's tab additionally carries the
 system-level controls: the shared projection geometry (center, opening
 angles, node), the phase angle, and the optional physical range / pixel
-scale.  The orbit's m-mode / edge-wave lists and the truth-side
-orbit_error / declared_orbit_sigma / azimuthal / moonlets blocks are
-authorable in scene YAML but have no widgets yet.
+scale.  The orbit's m-mode / edge-wave perturbations, the truth-side
+orbit_error / declared_orbit_sigma groups, and the system-level azimuthal /
+moonlets blocks live in the sibling
+:mod:`spindoctor.cli.sim_editor.ring_advanced` mixin, appended below the
+groups built here.
 """
 
 from typing import Any
@@ -175,6 +177,8 @@ class RingTabMixin(SimEditorBase):
 
         if idx == 0:
             self._build_ring_system_group(w, fl)
+
+        self._build_ring_advanced_groups(w, idx, main_layout)
 
         delete_btn = QPushButton('Delete')
         delete_btn.clicked.connect(

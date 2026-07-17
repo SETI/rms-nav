@@ -770,3 +770,137 @@ def test_load_full_scene_syncs_confounder_star_tab(
     assert tab.catalog_error_check.isChecked() is True
     assert tab.companion_group.isChecked() is True
     assert tab.delta_mag_check.isChecked() is True
+
+
+def test_load_full_scene_syncs_ring_advanced_groups(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """The first ring tab reflects the orbit-perturbation and truth blocks after load."""
+    src = tmp_path / 'full.yaml'
+    save_sim_scene(_FULL_SCENE, src)
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(src), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    tab_idx = model._find_tab_by_properties('ring', 0)
+    assert tab_idx is not None
+    tab = model._tabs.widget(tab_idx)
+    assert len(tab.mode_rows) == 1
+    assert tab.mode_rows[0].m_spin.value() == 2
+    assert tab.edge_wave_group.isChecked() is True
+    assert tab.edge_wave_damp_spin.value() == 0.5
+    assert tab.orbit_error_group.isChecked() is True
+    assert tab.orbit_error_a_spin.value() == 1.0
+    assert tab.orbit_sigma_group.isChecked() is True
+    assert tab.azimuthal_modulation_group.isChecked() is True
+    assert tab.azimuthal_shadow_group.isChecked() is True
+    assert tab.azimuthal_spokes_group.isChecked() is True
+    assert tab.moonlets_group.isChecked() is True
+    assert len(tab.moonlet_rows) == 1
+    assert tab.moonlet_rows[0].propeller_group.isChecked() is True
+
+
+def _key_paths(value: Any, prefix: str = '') -> set[str]:
+    """Collect every nested mapping key of ``value`` as a dotted path.
+
+    List entries contribute their element keys without an index component, so
+    two features' key sets union into one path namespace.
+    """
+    paths: set[str] = set()
+    if isinstance(value, dict):
+        for key, sub in value.items():
+            path = f'{prefix}.{key}' if prefix else str(key)
+            paths.add(path)
+            paths |= _key_paths(sub, path)
+    elif isinstance(value, list):
+        for entry in value:
+            paths |= _key_paths(entry, prefix)
+    return paths
+
+
+def test_gui_authored_ring_system_reaches_every_schema_key(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Every ring_system schema key is authorable through the editor's widgets.
+
+    Authors a three-feature ring system purely through widget handlers (a
+    ringlet carrying every orbit perturbation and error block, a wave train,
+    and an in-side ramp, plus every system-level truth block), saves it, and
+    asserts the loaded scene's dotted key paths cover the schema's full
+    ring_system inventory.
+    """
+    from spindoctor.sim.scene_checks import (
+        _RING_AZIMUTHAL_KEYS,
+        _RING_EDGE_WAVE_KEYS,
+        _RING_FEATURE_KEYS,
+        _RING_FEATURE_ORBIT_KEYS,
+        _RING_MODULATION_KEYS,
+        _RING_MOONLET_KEYS,
+        _RING_ORBIT_ERROR_KEYS,
+        _RING_ORBIT_MODE_KEYS,
+        _RING_ORBIT_SIGMA_KEYS,
+        _RING_PROPELLER_KEYS,
+        _RING_SHADOW_KEYS,
+        _RING_SPOKES_KEYS,
+        _RING_SYSTEM_BLOCK_KEYS,
+        _RING_SYSTEM_GEOMETRY_KEYS,
+    )
+
+    model.sim_params['instrument'] = 'coiss_nac'
+    model.sim_params['size_v'] = 128
+    model.sim_params['size_u'] = 128
+    model._add_ring_tab()
+    tab = model._tabs.widget(model._find_tab_by_properties('ring', 0))
+    # Feature 0 (ringlet): every per-feature block.
+    tab.edge_wave_group.setChecked(True)
+    tab.orbit_error_group.setChecked(True)
+    tab.orbit_sigma_group.setChecked(True)
+    model._on_ring_add_mode(0)
+    # Photometric truth scalars and the system scalars write on change, so
+    # drive their handlers off the widget defaults.
+    model._on_ring_field(0, 'albedo', 0.6)
+    model._on_ring_field(0, 'phase_g', -0.2)
+    model._on_ring_system_field('phase_deg', 40.0)
+    model._on_ring_system_field('km_per_pixel', 100.0)
+    # System-level: range, truth clutter, and a moonlet with a propeller.
+    tab.range_km_check.click()
+    tab.azimuthal_modulation_group.setChecked(True)
+    tab.azimuthal_shadow_group.setChecked(True)
+    tab.azimuthal_spokes_group.setChecked(True)
+    tab.moonlets_group.setChecked(True)
+    model._on_ring_add_moonlet()
+    tab.moonlet_rows[0].propeller_group.setChecked(True)
+    # Features 1 and 2 cover the remaining kind-specific shape keys.
+    model._add_ring_tab()
+    model._on_ring_kind(1, 'wave')
+    model._add_ring_tab()
+    model._on_ring_kind(2, 'ramp')
+    ramp_tab = model._tabs.widget(model._find_tab_by_properties('ring', 2))
+    ramp_tab.side_combo.setCurrentText('in')
+
+    out = tmp_path / 'ring_full.yaml'
+    monkeypatch.setattr(
+        QFileDialog, 'getSaveFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._save_scene()
+    loaded = load_sim_scene(out)
+
+    authored = _key_paths(loaded['ring_system'])
+    expected: set[str] = set(_RING_SYSTEM_BLOCK_KEYS)
+    expected |= {f'geometry.{key}' for key in _RING_SYSTEM_GEOMETRY_KEYS}
+    expected |= {f'features.{key}' for key in _RING_FEATURE_KEYS}
+    expected |= {f'features.orbit.{key}' for key in _RING_FEATURE_ORBIT_KEYS}
+    expected |= {f'features.orbit.modes.{key}' for key in _RING_ORBIT_MODE_KEYS}
+    expected |= {f'features.orbit.edge_wave.{key}' for key in _RING_EDGE_WAVE_KEYS}
+    expected |= {f'features.orbit_error.{key}' for key in _RING_ORBIT_ERROR_KEYS}
+    expected |= {f'features.declared_orbit_sigma.{key}' for key in _RING_ORBIT_SIGMA_KEYS}
+    expected |= {f'azimuthal.{key}' for key in _RING_AZIMUTHAL_KEYS}
+    expected |= {f'azimuthal.modulation.{key}' for key in _RING_MODULATION_KEYS}
+    expected |= {f'azimuthal.shadow.{key}' for key in _RING_SHADOW_KEYS}
+    expected |= {f'azimuthal.spokes.{key}' for key in _RING_SPOKES_KEYS}
+    expected |= {f'moonlets.{key}' for key in _RING_MOONLET_KEYS}
+    expected |= {f'moonlets.propeller.{key}' for key in _RING_PROPELLER_KEYS}
+    missing = expected - authored
+    assert not missing, f'ring_system keys not reachable from the editor: {sorted(missing)}'
