@@ -147,6 +147,38 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
         {'gamma': 1.4},
     ),
     (
+        'haze_limb_body',
+        _scene(
+            [
+                _ellipsoid(
+                    axis1=170.0,
+                    axis2=170.0,
+                    axis3=170.0,
+                    illumination_angle=90.0,
+                    phase_angle=40.0,
+                    atmosphere={'scale_height_px': 8.0, 'tau_ref': 3.0, 'g': 0.6},
+                )
+            ]
+        ),
+        {'gamma': 1.2},
+    ),
+    (
+        'haze_crescent_horns',
+        _scene(
+            [
+                _ellipsoid(
+                    axis1=170.0,
+                    axis2=170.0,
+                    axis3=170.0,
+                    illumination_angle=90.0,
+                    phase_angle=150.0,
+                    atmosphere={'scale_height_px': 8.0, 'tau_ref': 3.0, 'g': 0.75},
+                )
+            ]
+        ),
+        {'gamma': 1.5},
+    ),
+    (
         'banded_transit',
         _scene(
             [

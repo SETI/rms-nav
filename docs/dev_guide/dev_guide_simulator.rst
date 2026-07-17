@@ -89,7 +89,10 @@ scene -- including every planted error, noise knob, and contaminant. It lives in
    * - ``telemetry.py``
      - Transmission loss; carries the per-pixel missing-data markers.
    * - ``atmosphere.py``
-     - Reserved slot for haze-limb (Titan-class) rendering; currently empty.
+     - The haze-limb layer for atmospheric (Titan-class) bodies: an
+       exponential haze column composited onto the disc, giving a soft limb, a
+       terminator that brightens past 90 deg, and a forward-scattering ring of
+       light at high phase (see :ref:`sim-atmosphere`).
    * - ``artifacts_catalog.py``
      - Per-instrument PSF, distortion-residual, and detector-chain defaults the
        ``instrument_defaults`` switch turns on (see
@@ -1029,6 +1032,53 @@ succeeds because the robust loss discards the hidden arc, not because the model
 masks it -- the confidence a hidden-arc limb feature reports is optimistic, and
 a future change that made the fit trust that arc would move the answer.
 
+.. _sim-atmosphere:
+
+Atmospheres (haze limb)
+-----------------------
+
+A body carrying an ``atmosphere`` block gains an exponential haze layer above
+its surface (``atmosphere.py``), composited onto the disc after shading. A
+line of sight grazing the body at tangent altitude ``h`` (pixels above the
+reference radius) accumulates a tangent optical depth
+``tau(h) = tau_ref * exp(-(h - ref_altitude_px) / scale_height_px)``, so
+``tau_ref`` is the tangent optical depth at ``ref_altitude_px``. The emergent
+haze brightness is a single-scattering source (a Henyey-Greenstein phase
+factor of asymmetry ``g``, times a wrapped illumination weight) multiplied by
+an opacity ``1 - exp(-tau)``. Three consequences follow:
+
+- **A soft limb.** Above the geometric limb the opacity fades as an
+  exponential ramp, so the sharp edge becomes a soft glow whose apparent
+  radius sits outside the reference radius. Because the source scales with the
+  phase factor, the ramp is brighter -- and the apparent limb sits further out
+  -- at high phase than at low phase. That is the physical root of the Titan
+  altitude-versus-phase problem.
+
+- **A terminator that wraps.** The illumination weight stays positive a
+  scale-height's worth of arc past the terminator, so the night side near the
+  terminator brightens smoothly instead of cutting off at 90 deg incidence.
+
+- **A ring of light.** A forward-scattering haze (``g`` > 0) peaks toward high
+  phase, so at phase beyond about 150 deg the whole limb lights up and the
+  crescent horns extend past the geometric terminator into a near-complete
+  ring -- Titan's ring of light, which falls out of the same layer rather than
+  being special-cased. An optional ``detached_px`` shell adds a second haze
+  band at that altitude.
+
+The layer is a truth key: the navigator's predicted body (see
+:doc:`dev_guide_navigation_models_body_simulated`) keeps a hard limb at the
+reference radius and never learns the haze exists, so the soft rendered limb is
+a deliberate model mismatch. A navigator that fits the bright sunward haze ramp
+recovers a small radius-dependent offset toward the sunlit limb -- the
+``atmosphere`` catalog scenes measure and pin that bias honestly (the
+low-phase ``titan_haze_limb`` scene records a sub-pixel sunward offset at
+medium confidence; the high-phase ``titan_crescent_horns`` scene records the
+low-confidence outcome that follows when the ring of light defeats disc
+correlation). The cost is bounded to a limb band a few scale heights deep, so a
+haze body is no more expensive than a plain one of the same size, and a body
+without an ``atmosphere`` block renders hard-limbed and byte-for-byte
+unchanged.
+
 .. _sim-ring-renderer:
 
 The ring renderer
@@ -1256,6 +1306,23 @@ The panels below are rendered by ``python -m tests.integration.sim_doc_images``
 
    A high-phase crescent with limb relief: the terminator turns ragged and the
    relief march casts shadows that grow toward it.
+
+.. figure:: _sim_images/haze_limb_body.png
+   :width: 45%
+   :align: center
+
+   An atmospheric body (see :ref:`sim-atmosphere`): the haze softens the limb
+   into an exponential ramp that reaches past the geometric edge, and the
+   terminator brightens instead of cutting off. The navigator still predicts a
+   hard limb at the reference radius.
+
+.. figure:: _sim_images/haze_crescent_horns.png
+   :width: 45%
+   :align: center
+
+   The same haze at phase 150 deg: forward scattering lights the whole limb and
+   extends the crescent horns past the terminator into a near-complete ring of
+   light.
 
 .. figure:: _sim_images/banded_transit.png
    :width: 45%
