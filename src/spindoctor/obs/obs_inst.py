@@ -29,6 +29,22 @@ class ObsInst(ABC):
         """Returns the instrument configuration."""
         return self._inst_config
 
+    @property
+    @abstractmethod
+    def camera(self) -> str:
+        """The camera that took this observation.
+
+        Instruments with more than one camera distinguish them here (Cassini
+        ISS and Voyager ISS return ``'NAC'`` or ``'WAC'``); single-camera
+        instruments return their one camera's name.  Pointing error is a
+        property of the camera, not of the instrument, so statistics are
+        grouped by this value.
+
+        Returns:
+            The camera name.
+        """
+        ...
+
     @staticmethod
     @abstractmethod
     def from_file(

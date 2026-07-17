@@ -106,7 +106,13 @@ def rows_from_metadata(
     classifier = nav.get('image_classifier') or {}
     offset = nav.get('offset_px') or [None, None]
     sigma = nav.get('sigma_px') or [None, None]
+    # A navigated image's epoch comes from its observation (provenance); an
+    # image that never loaded has no provenance, so the navigator records the
+    # epoch it read from the index under ``observation.image_et``.  Either way
+    # every image is placed in time.
     image_et = _finite_or_none(provenance.get('image_et'))
+    if image_et is None:
+        image_et = _finite_or_none(observation.get('image_et'))
     per_technique = nav.get('per_technique') or []
     timing = metadata.get('timing') or {}
     shape_v, shape_u = _image_shape(observation.get('image_shape'))
@@ -114,6 +120,9 @@ def rows_from_metadata(
     image_row: dict[str, Any] = {
         'image_name': image_name,
         'instrument': instrument,
+        # Absent for images that failed to load (no observation was built),
+        # which also have no offset to attribute to a camera.
+        'camera': _str_or_none(observation.get('camera')),
         'image_path': observation.get('image_path'),
         'image_et': image_et,
         'image_date': date_from_image_et(image_et),

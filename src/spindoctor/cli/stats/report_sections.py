@@ -12,11 +12,14 @@ from filecache import FCPath
 from spindoctor.cli.stats.report_common import (
     ReportContext,
     add_drilldown,
+    add_instrument_count_table,
     connector,
+    count_pct,
     fmt,
+    image_name_from_filename,
     percentile,
     rows,
-    write_value_hist,
+    write_stacked_value_hist,
 )
 from spindoctor.cli.stats.schema import IMAGE_COLUMNS
 from spindoctor.config import DEFAULT_CONFIG, Config
@@ -134,15 +137,19 @@ def add_suspect_offset_section(ctx: ReportContext) -> None:
     ]
     suspects: list[tuple[float, str, str, float, float, float, str]] = []
     unresolved: dict[str, int] = {}
+    screened: dict[str, int] = {}
+    suspect_counts: dict[str, int] = {}
     for image_name, instrument, dv, du, shape_v in image_rows:
         limit = resolve_offset_limit(str(instrument), str(image_name), shape_v)
         if isinstance(limit, str):
             reason = f'{instrument}: {limit}'
             unresolved[reason] = unresolved.get(reason, 0) + 1
             continue
+        screened[str(instrument)] = screened.get(str(instrument), 0) + 1
         limit_v, limit_u = limit
         ratio = max(abs(float(dv)) / limit_v, abs(float(du)) / limit_u)
         if ratio >= ctx.suspect_fraction:
+            suspect_counts[str(instrument)] = suspect_counts.get(str(instrument), 0) + 1
             suspects.append(
                 (
                     ratio,
@@ -155,15 +162,20 @@ def add_suspect_offset_section(ctx: ReportContext) -> None:
                 )
             )
     suspects.sort(key=lambda s: (-s[0], s[1]))
-    ctx.lines.append(f'Suspect images: {len(suspects)} of {len(image_rows)} screened.')
-    ctx.lines.append('')
+    n_screened = sum(screened.values())
+    ctx.lines += [
+        f'Suspect images: {count_pct(len(suspects), ctx.total_images)} of {n_screened} screened.',
+        '',
+    ]
+    add_instrument_count_table(ctx, [(['suspect'], suspect_counts)], headers=['category'])
     if len(suspects) > 0:
         shown = suspects[: ctx.top_n] if ctx.top_n > 0 else suspects
         ctx.lines += [
             '| image | instrument | dV | dU | magnitude | limit (v, u) |',
             '|---|---|---|---|---|---|',
         ]
-        for _ratio, name, instrument, dv, du, magnitude, limit_text in shown:
+        for _ratio, filename, instrument, dv, du, magnitude, limit_text in shown:
+            name = image_name_from_filename(instrument, filename)
             ctx.lines.append(
                 f'| {name} | {instrument} | {fmt(dv)} | {fmt(du)} | '
                 f'{fmt(magnitude)} | {limit_text} |'
@@ -171,7 +183,7 @@ def add_suspect_offset_section(ctx: ReportContext) -> None:
         ctx.lines.append('')
         add_drilldown(
             ctx,
-            [('suspect', [s[1] for s in suspects])],
+            [('suspect', [(s[2], s[1]) for s in suspects])],
             label='category',
             stub_prefix='suspect_offsets',
         )
@@ -259,8 +271,10 @@ def add_botsim_section(ctx: ReportContext) -> None:
         for magnitude, clock, nac_name, wac_name, residual_dv, residual_du in residuals[
             : ctx.top_n
         ]:
+            nac_image = image_name_from_filename('coiss', nac_name)
+            wac_image = image_name_from_filename('coiss', wac_name)
             ctx.lines.append(
-                f'| {clock} | {nac_name} | {wac_name} | {fmt(residual_dv)} | '
+                f'| {clock} | {nac_image} | {wac_image} | {fmt(residual_dv)} | '
                 f'{fmt(residual_du)} | {fmt(magnitude)} |'
             )
         ctx.lines.append('')
@@ -316,7 +330,7 @@ def add_failure_taxonomy_section(ctx: ReportContext) -> None:
     """
     failed_rows = rows(
         ctx.conn,
-        f'SELECT image_name, status_reason FROM images{ctx.where}'
+        f'SELECT image_name, instrument, status_reason FROM images{ctx.where}'
         + connector(ctx.where)
         + "status != 'success' ORDER BY image_name",
         ctx.params,
@@ -325,51 +339,61 @@ def add_failure_taxonomy_section(ctx: ReportContext) -> None:
         return
     source_rows = rows(
         ctx.conn,
-        'SELECT i.image_name, i.status, s.source_model, s.source_name '
+        'SELECT i.image_name, i.instrument, i.status, s.source_model, s.source_name '
         'FROM feature_sources s JOIN images i ON i.image_name = s.image_name'
         + ctx.where_i
         + ' ORDER BY i.image_name, s.source_model, s.source_name',
         ctx.params_i,
     )
     sources_by_image: dict[str, list[tuple[str, str]]] = {}
-    for image_name, _status, source_model, source_name in source_rows:
+    for image_name, _instrument, _status, source_model, source_name in source_rows:
         sources_by_image.setdefault(str(image_name), []).append(
             (str(source_model), str(source_name))
         )
 
-    by_category: dict[str, list[str]] = {category: [] for category in _CONTENT_CATEGORIES}
-    reason_counts: dict[tuple[str, str], int] = {}
-    for image_name, status_reason in failed_rows:
+    by_category: dict[str, list[tuple[str, str]]] = {
+        category: [] for category in _CONTENT_CATEGORIES
+    }
+    category_counts: dict[str, dict[str, int]] = {category: {} for category in _CONTENT_CATEGORIES}
+    reason_counts: dict[tuple[str, str], dict[str, int]] = {}
+    for image_name, instrument, status_reason in failed_rows:
         category = _content_category(sources_by_image.get(str(image_name), []))
-        by_category[category].append(str(image_name))
+        by_category[category].append((str(instrument), str(image_name)))
+        counts = category_counts[category]
+        counts[str(instrument)] = counts.get(str(instrument), 0) + 1
         key = (category, str(status_reason or '(none)'))
-        reason_counts[key] = reason_counts.get(key, 0) + 1
+        reason_bucket = reason_counts.setdefault(key, {})
+        reason_bucket[str(instrument)] = reason_bucket.get(str(instrument), 0) + 1
 
+    populated = [c for c in _CONTENT_CATEGORIES if len(by_category[c]) > 0]
     ctx.lines += [
         '## Failure taxonomy by image content',
         '',
         'Failed images classified by what the feature inventory says was in',
         'the scene.',
         '',
-        '| content | failed images |',
-        '|---|---|',
     ]
-    for category in _CONTENT_CATEGORIES:
-        if len(by_category[category]) > 0:
-            ctx.lines.append(f'| {category} | {len(by_category[category])} |')
-    ctx.lines += [
-        '',
-        '| content | reason | images |',
-        '|---|---|---|',
-    ]
-    for category in _CONTENT_CATEGORIES:
-        in_category = sorted(
-            ((reason, count) for (cat, reason), count in reason_counts.items() if cat == category),
-            key=lambda item: (-item[1], item[0]),
-        )
-        for reason, count in in_category:
-            ctx.lines.append(f'| {category} | {reason} | {count} |')
-    ctx.lines.append('')
+    add_instrument_count_table(
+        ctx,
+        [([category], category_counts[category]) for category in populated],
+        headers=['content'],
+    )
+    ordered_reasons = sorted(
+        reason_counts,
+        key=lambda key: (
+            _CONTENT_CATEGORIES.index(key[0]),
+            -sum(reason_counts[key].values()),
+            key[1],
+        ),
+    )
+    add_instrument_count_table(
+        ctx,
+        [
+            ([category, reason], reason_counts[(category, reason)])
+            for category, reason in ordered_reasons
+        ],
+        headers=['content', 'reason'],
+    )
     add_drilldown(
         ctx,
         [(category, by_category[category]) for category in _CONTENT_CATEGORIES],
@@ -378,11 +402,13 @@ def add_failure_taxonomy_section(ctx: ReportContext) -> None:
     )
 
     # Per-body failure shares over all images (successful and failed).
-    body_status: dict[str, dict[str, set[str]]] = {}
-    for image_name, status, source_model, source_name in source_rows:
+    body_status: dict[tuple[str, str], dict[str, set[str]]] = {}
+    for image_name, instrument, status, source_model, source_name in source_rows:
         if _source_kind(str(source_model)) != 'body' or str(source_name) == '(none)':
             continue
-        buckets = body_status.setdefault(str(source_name), {'failed': set(), 'success': set()})
+        buckets = body_status.setdefault(
+            (str(source_name), str(instrument)), {'failed': set(), 'success': set()}
+        )
         bucket = 'success' if str(status) == 'success' else 'failed'
         buckets[bucket].add(str(image_name))
     if len(body_status) > 0:
@@ -400,18 +426,27 @@ def add_failure_taxonomy_section(ctx: ReportContext) -> None:
             'How often each named body appears in failed versus successful',
             'images; a body with a high failure share is a modeling problem.',
             '',
-            '| body | failed images | successful images | failure share |',
-            '|---|---|---|---|',
+            '| body | instrument | failed images | successful images | failure share |',
+            '|---|---|---|---|---|',
         ]
-        for body, buckets in ranked:
+        for (body, instrument), buckets in ranked:
             n_failed = len(buckets['failed'])
             n_success = len(buckets['success'])
             share = n_failed / (n_failed + n_success)
-            ctx.lines.append(f'| {body} | {n_failed} | {n_success} | {share:.3f} |')
+            total = ctx.images_by_instrument[instrument]
+            ctx.lines.append(
+                f'| {body} | {instrument} | {count_pct(n_failed, total)} '
+                f'| {count_pct(n_success, total)} | {share:.3f} |'
+            )
         ctx.lines.append('')
+        by_body: dict[str, list[tuple[str, str]]] = {}
+        for (body, instrument), buckets in ranked:
+            by_body.setdefault(body, []).extend(
+                (instrument, name) for name in sorted(buckets['failed'])
+            )
         add_drilldown(
             ctx,
-            [(body, sorted(buckets['failed'])) for body, buckets in ranked if buckets['failed']],
+            [(body, entries) for body, entries in by_body.items() if len(entries) > 0],
             label='body',
             stub_prefix='failed_body',
         )
@@ -434,23 +469,38 @@ def add_runtime_section(ctx: ReportContext) -> None:
     if len(timing_rows) == 0:
         return
     elapsed = [float(r[2]) for r in timing_rows]
+    by_instrument: dict[str, list[float]] = {}
+    for _image_name, instrument, seconds in timing_rows:
+        by_instrument.setdefault(str(instrument), []).append(float(seconds))
     ctx.lines += [
         '## Run-time statistics',
         '',
-        '| metric | value |',
-        '|---|---|',
-        f'| images with timing | {len(elapsed)} |',
-        f'| total (s) | {fmt(sum(elapsed))} |',
-        f'| min (s) | {fmt(min(elapsed))} |',
-        f'| max (s) | {fmt(max(elapsed))} |',
-        f'| mean (s) | {fmt(statistics.fmean(elapsed))} |',
-        f'| median (s) | {fmt(statistics.median(elapsed))} |',
-        f'| stdev (s) | {fmt(statistics.stdev(elapsed) if len(elapsed) > 1 else 0.0)} |',
-        '',
+        '| instrument | images | total (s) | min (s) | max (s) | mean (s) | median (s) '
+        '| stdev (s) |',
+        '|---|---|---|---|---|---|---|---|',
     ]
-    write_value_hist(
+    series: list[tuple[str, list[float], int]] = [
+        (instrument, by_instrument.get(instrument, []), ctx.images_by_instrument[instrument])
+        for instrument in ctx.instruments
+    ]
+    # The pooled row only says something new once more than one instrument
+    # contributed to it.
+    if len(ctx.instruments) > 1:
+        series.append(('(all)', elapsed, ctx.total_images))
+    for instrument, values, denominator in series:
+        if len(values) == 0:
+            continue
+        stdev = statistics.stdev(values) if len(values) > 1 else 0.0
+        ctx.lines.append(
+            f'| {instrument} | {count_pct(len(values), denominator)} | {fmt(sum(values))} '
+            f'| {fmt(min(values))} | {fmt(max(values))} | {fmt(statistics.fmean(values))} '
+            f'| {fmt(statistics.median(values))} | {fmt(stdev)} |'
+        )
+    ctx.lines.append('')
+    write_stacked_value_hist(
         ctx.output_dir / 'runtime_hist.png',
-        elapsed,
+        by_instrument,
+        ctx.instruments,
         title='Per-image run time',
         xlabel='elapsed (s)',
     )
@@ -464,7 +514,8 @@ def add_runtime_section(ctx: ReportContext) -> None:
             '|---|---|---|',
         ]
         for image_name, instrument, seconds in slowest:
-            ctx.lines.append(f'| {image_name} | {instrument} | {fmt(float(seconds))} |')
+            name = image_name_from_filename(str(instrument), str(image_name))
+            ctx.lines.append(f'| {name} | {instrument} | {fmt(float(seconds))} |')
         ctx.lines.append('')
 
 
@@ -474,38 +525,40 @@ def add_runtime_section(ctx: ReportContext) -> None:
 
 
 def add_offset_by_group_section(ctx: ReportContext) -> None:
-    """Break the fused-offset statistics down by (instrument, image size)."""
+    """Break the fused-offset statistics down by (instrument, camera, image size)."""
     image_rows = rows(
         ctx.conn,
-        f'SELECT instrument, image_shape_v, image_shape_u, offset_dv, offset_du '
+        f'SELECT instrument, camera, image_shape_v, image_shape_u, offset_dv, offset_du '
         f'FROM images{ctx.where}'
         + connector(ctx.where)
         + "status = 'success' AND offset_dv IS NOT NULL AND offset_du IS NOT NULL "
-        'ORDER BY instrument, image_shape_v, image_shape_u',
+        'ORDER BY instrument, camera, image_shape_v, image_shape_u',
         ctx.params,
     )
-    groups: dict[tuple[str, str], list[tuple[float, float]]] = {}
-    for instrument, shape_v, shape_u, dv, du in image_rows:
+    groups: dict[tuple[str, str, str], list[tuple[float, float]]] = {}
+    for instrument, camera, shape_v, shape_u, dv, du in image_rows:
         size = f'{shape_v}x{shape_u}' if shape_v is not None and shape_u is not None else '(none)'
-        groups.setdefault((str(instrument), size), []).append((float(dv), float(du)))
+        key = (str(instrument), str(camera or '(unknown)'), size)
+        groups.setdefault(key, []).append((float(dv), float(du)))
     if len(groups) == 0:
         return
     ctx.lines += [
-        '### By instrument and image size',
+        '### By instrument, camera, and image size',
         '',
-        '| instrument | size (v x u) | n '
+        '| instrument | camera | size (v x u) | images '
         '| dV mean | dV stdev | dV min | dV max '
         '| dU mean | dU stdev | dU min | dU max |',
-        '|---|---|---|---|---|---|---|---|---|---|---|',
+        '|---|---|---|---|---|---|---|---|---|---|---|---|',
     ]
-    for instrument, size in sorted(groups):
-        offsets = groups[(instrument, size)]
+    for instrument, camera, size in sorted(groups):
+        offsets = groups[(instrument, camera, size)]
         dv = [o[0] for o in offsets]
         du = [o[1] for o in offsets]
         stdev_dv = statistics.stdev(dv) if len(dv) > 1 else 0.0
         stdev_du = statistics.stdev(du) if len(du) > 1 else 0.0
+        images = count_pct(len(offsets), ctx.images_by_instrument[instrument])
         ctx.lines.append(
-            f'| {instrument} | {size} | {len(offsets)} '
+            f'| {instrument} | {camera} | {size} | {images} '
             f'| {fmt(statistics.fmean(dv))} | {fmt(stdev_dv)} | {fmt(min(dv))} | {fmt(max(dv))} '
             f'| {fmt(statistics.fmean(du))} | {fmt(stdev_du)} | {fmt(min(du))} | {fmt(max(du))} |'
         )

@@ -2,7 +2,7 @@ import argparse
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from filecache import FCPath, FileCache
 
@@ -30,6 +30,9 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         + list(range(_MIN_2xxx_VOL, _MAX_2xxx_VOL + 1))
     )
     _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
+    _INDEX_TIME_COLUMNS = ('IMAGE_MID_TIME', 'IMAGE_TIME', 'START_TIME')
+    _INDEX_CAMERA_COLUMNS = ('INSTRUMENT_ID',)
+    _INDEX_CAMERA_MAP: ClassVar[dict[str, str]] = {'ISSNA': 'NAC', 'ISSWA': 'WAC'}
     _VOLUMES_DIR_NAME = 'calibrated'
 
     # Methods inherited from DataSetPDS3
