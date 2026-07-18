@@ -833,6 +833,55 @@ point masses, never pre-spread-then-convolved), a floor scene's rendered star
 sigma equals the navigator's configured sigma exactly and the only residual is
 the one the scene plants elsewhere.
 
+Model-mismatch sweeps
+=====================
+
+The single-variable sweep harness (:mod:`tests.integration.sim_sweep`; specs
+under ``tests/integration/sim_sweeps/``, run by
+``python -m tests.integration.sim_sweep_runner``) takes one catalog scene, walks
+a single parameter across a list of values, navigates each step, and records the
+recovered-offset error, confidence, status, and primary technique per step. A
+sweep may set ``ensemble_seeds: N`` to replicate every point across N seeds (the
+geometry fixed, the noise and confounders redrawn) so a point becomes a
+population rather than a single realization.
+
+A *model-mismatch* sweep uses this harness to characterize one render-vs-navigate
+disagreement. Each starts from a **self-consistency floor** -- the value at which
+the rendered image equals the navigator's own model, so the floor point measures
+reproducibility, not accuracy -- and walks the mismatch up; the
+recovery-error-vs-mismatch curve is the product. The floor is equality with the
+navigator's configuration (for the PSF axis, a pure Gaussian at the instrument's
+``star_psf_sigma`` with the wing weight at zero; for the photometric axis,
+Minnaert ``k = 1``, which is exactly Lambert; for the ephemeris and smear axes, a
+zero planted error). The mismatch parameter is a render-side truth key the
+boundary filter strips, so the navigator keeps its default belief while the
+render departs from it. The sweeps and their floors:
+
+- ``psf_limb_mismatch`` -- rendered PSF sigma broadened above the navigator's
+  Gaussian; the softened limb edge biases the distance-transform fit and, past a
+  few pixels of blur, washes the edge out (a navigability cliff).
+- ``photometric_minnaert_mismatch`` -- Minnaert ``k`` walked below 1; the
+  limb-darkened disc departs from the Lambert template.
+- ``spk_parallax_error`` -- a spacecraft-position error parallax-shifts the body
+  while the navigator predicts the catalog geometry; the recovery absorbs the
+  shift almost one-for-one.
+- ``differential_smear`` -- a per-object-class motion vector trails the stars
+  while the navigator predicts point sources.
+- ``ring_orbit_error`` -- a navigable ringlet's rendered orbit displaced radially
+  off the catalog orbit.
+- ``atmosphere_haze`` -- a Titan-class haze softens the limb the navigator
+  predicts as hard.
+
+The remaining Section 8 axes are covered by pre-existing sweeps
+(``noise_read_noise``, ``artifact_missing_lines``, ``irregularity_shape_mismatch``,
+``pose_disagreement``, ``star_confounder_density``, ``star_catalog_scatter``, and
+the per-technique ``*_offset_fine`` / ``*_offset_wide`` body-ephemeris sweeps) or
+by scene classes where a single-parameter sweep is not the right shape (the
+``ring_system`` clutter scenes and the ``mutual_event`` occluded-limb scenes).
+:mod:`tests.integration.sim_sweep_plots` renders the mismatch curves into
+``docs/simulator_report/_figures/mismatch_axes.png``, one panel per axis with the
+floor point drawn distinctly.
+
 .. _sim-body-renderer:
 
 The body renderer

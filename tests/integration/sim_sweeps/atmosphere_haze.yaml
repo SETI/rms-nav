@@ -1,0 +1,11 @@
+sweep_name: atmosphere_haze
+# Atmosphere-mismatch axis (Section 8): a Titan-class haze softens the limb above
+# a reference radius while the navigator predicts a hard limb at that radius.  At
+# tau_ref 0 there is no haze -- the hard-limb self-consistency floor -- and the
+# sweep walks the reference optical depth up; the haze lifts and blurs the limb
+# the disc/limb fit locks to, growing the recovered-offset error.  Fused result
+# (the disc correlation carries the low-phase Titan disc).
+base_scene: atmosphere/titan_haze_limb.yaml
+parameters: [bodies.0.atmosphere.tau_ref]
+values: [0.0, 1.0, 2.0, 4.0, 6.0]
+technique: '*'

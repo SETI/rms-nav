@@ -1,0 +1,38 @@
+schema_version: 2
+scene_name: spk_parallax_body
+instrument: coiss_nac
+size_v: 220
+size_u: 220
+random_seed: 7
+exposure_sec: 1.0
+# Spacecraft-ephemeris-mismatch base: a well-resolved sphere at a stated range,
+# with a spacecraft-position (SPK) error block whose parallax shift is zero at
+# this base value -- the self-consistency floor, where the rendered body sits at
+# the catalog position the navigator predicts.  A sweep that walks
+# ``spk_error.dv_px`` up parallax-shifts the body (scaled by
+# reference_range_km / range_km) while the navigator keeps the unshifted catalog
+# geometry, so the recovered offset must absorb a growing planted ephemeris
+# error.  The navigator-matched PSF removes any hidden PSF mismatch at the floor.
+optics:
+  psf:
+    match_navigator: true
+spk_error:
+  dv_px: 0.0
+  du_px: 0.0
+  reference_range_km: 500000.0
+bodies:
+  - name: RHEA
+    center_v: 110.0
+    center_u: 110.0
+    axis1: 90.0
+    axis2: 90.0
+    axis3: 90.0
+    illumination_angle: 25.0
+    phase_angle: 30.0
+    range_km: 500000.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.5
+offset_u: -0.5
+offset_rotation_deg: 0.0

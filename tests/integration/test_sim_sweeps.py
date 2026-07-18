@@ -341,6 +341,123 @@ def test_star_catalog_scatter_wholesale_error_never_succeeds() -> None:
 #   scatter 6.0-8.0 px: every seed fails (all techniques spurious).
 
 
+# ---------------------------------------------------------------------------
+# Section 8 model-mismatch axes: each walks a single render-vs-navigate mismatch
+# from a self-consistency floor (value 0, or equality with the navigator's
+# configuration) and asserts the recovery-error-vs-mismatch response.  The floor
+# point recovers; the mismatched points degrade.  Absolute levels are
+# sim-anchored, so the assertions are on the floor / degradation trend.
+# ---------------------------------------------------------------------------
+
+
+def test_psf_mismatch_floor_recovers() -> None:
+    """At the navigator-matched PSF (sigma 0.54) the limb recovers the offset."""
+    rows = _rows('psf_limb_mismatch')
+    assert rows[0].value == 0.54
+    assert rows[0].status == 'success'
+    assert rows[0].offset_error_px is not None
+    assert rows[0].offset_error_px < _RECOVERY_TOLERANCE_PX
+
+
+def test_psf_mismatch_degrades_to_cliff() -> None:
+    """A broad rendered PSF grows the limb error, then washes the edge out."""
+    rows = _rows('psf_limb_mismatch')
+    assert rows[0].offset_error_px is not None
+    mismatched = [r.offset_error_px for r in rows[1:] if r.offset_error_px is not None]
+    assert max(mismatched) > rows[0].offset_error_px + 0.2
+    assert rows[-1].status == 'failed'
+
+
+def test_photometric_mismatch_floor_recovers() -> None:
+    """Minnaert k=1 is Lambert, so the floor recovers the planted offset."""
+    rows = _rows('photometric_minnaert_mismatch')
+    assert rows[0].value == 1.0
+    assert rows[0].status == 'success'
+    assert rows[0].offset_error_px is not None
+    assert rows[0].offset_error_px < _RECOVERY_TOLERANCE_PX
+
+
+def test_photometric_mismatch_biases_recovery() -> None:
+    """Walking off Lambert grows the disc-correlation centroid bias."""
+    rows = _rows('photometric_minnaert_mismatch')
+    assert rows[0].offset_error_px is not None
+    mismatched = [r.offset_error_px for r in rows[1:] if r.offset_error_px is not None]
+    assert max(mismatched) > rows[0].offset_error_px + 0.2
+
+
+def test_spk_parallax_floor_recovers() -> None:
+    """With no parallax shift the body sits at its catalog position."""
+    rows = _rows('spk_parallax_error')
+    assert rows[0].value == 0.0
+    assert rows[0].status == 'success'
+    assert rows[0].offset_error_px is not None
+    assert rows[0].offset_error_px < _RECOVERY_TOLERANCE_PX
+
+
+def test_spk_parallax_error_tracks_planted_shift() -> None:
+    """The recovered-offset error grows with the planted parallax shift.
+
+    A spacecraft-position error moves the whole body while the navigator predicts
+    the unshifted catalog geometry, so the recovery absorbs the shift almost
+    one-for-one -- the error at the largest planted shift approaches its
+    magnitude.
+    """
+    rows = _rows('spk_parallax_error')
+    assert rows[-1].value == 6.0
+    assert rows[-1].offset_error_px is not None
+    assert rows[-1].offset_error_px > 4.0
+
+
+def test_differential_smear_floor_recovers() -> None:
+    """With no star trail the sharp field recovers the planted offset."""
+    rows = _rows('differential_smear')
+    assert rows[0].value == 0.0
+    assert rows[0].status == 'success'
+    assert rows[0].offset_error_px is not None
+    assert rows[0].offset_error_px < _RECOVERY_TOLERANCE_PX
+
+
+def test_differential_smear_degrades_at_long_trail() -> None:
+    """A long star trail drifts the centroids off their catalog positions."""
+    rows = _rows('differential_smear')
+    assert rows[0].offset_error_px is not None
+    assert rows[-1].offset_error_px is not None
+    assert rows[-1].offset_error_px > rows[0].offset_error_px + 0.05
+
+
+def test_ring_orbit_error_floor_recovers() -> None:
+    """With no radial orbit error the ring edge recovers the planted offset."""
+    rows = _rows('ring_orbit_error')
+    assert rows[0].value == 0.0
+    assert rows[0].status == 'success'
+    assert rows[0].offset_error_px is not None
+    assert rows[0].offset_error_px < _RECOVERY_TOLERANCE_PX
+
+
+def test_ring_orbit_error_absorbs_into_offset() -> None:
+    """A radial ring-orbit error is absorbed into the recovered offset."""
+    rows = _rows('ring_orbit_error')
+    assert rows[-1].offset_error_px is not None
+    assert rows[-1].offset_error_px > 2.0
+
+
+def test_atmosphere_haze_floor_recovers() -> None:
+    """With no haze the hard limb recovers the planted offset."""
+    rows = _rows('atmosphere_haze')
+    assert rows[0].value == 0.0
+    assert rows[0].status == 'success'
+    assert rows[0].offset_error_px is not None
+    assert rows[0].offset_error_px < _RECOVERY_TOLERANCE_PX
+
+
+def test_atmosphere_haze_biases_limb() -> None:
+    """A thickening haze lifts and blurs the limb, biasing the recovery."""
+    rows = _rows('atmosphere_haze')
+    assert rows[0].offset_error_px is not None
+    assert rows[-1].offset_error_px is not None
+    assert rows[-1].offset_error_px > rows[0].offset_error_px + 0.1
+
+
 # The per-technique dense and wide offset sweeps (``*_offset_fine`` /
 # ``*_offset_wide``) are characterization runs, not assertions: they are executed
 # by ``sim_sweep_runner`` to produce the report's figures, and the specific defect

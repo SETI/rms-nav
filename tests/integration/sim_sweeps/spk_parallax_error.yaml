@@ -1,0 +1,12 @@
+sweep_name: spk_parallax_error
+# Spacecraft-ephemeris-mismatch axis (Section 8): a spacecraft-position (SPK)
+# error parallax-shifts the body (scaled by reference_range_km / range_km) while
+# the navigator predicts the unshifted catalog geometry.  At dv_px 0 there is no
+# shift -- the self-consistency floor -- and the sweep walks the planted shift
+# up; the recovered offset must absorb the growing ephemeris error, so the
+# recovered-offset error tracks the planted shift almost one-for-one (stars, were
+# any present, would stay fixed).  Fused result.
+base_scene: model_mismatch/spk_parallax_body.yaml
+parameters: [spk_error.dv_px]
+values: [0.0, 1.0, 2.0, 4.0, 6.0]
+technique: '*'
