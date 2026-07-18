@@ -94,9 +94,17 @@ class BodyTerminatorDiagnostics:
     """Diagnostics emitted by ``BodyTerminatorNav``.
 
     Parameters: same shape as ``BodyLimbDiagnostics`` with
-    ``visible_terminator_arc_fraction`` substituted, plus the basin
-    second-opinion pair:
+    ``visible_terminator_arc_fraction`` substituted, plus the
+    terminator-specific confidence inputs and the basin second-opinion
+    pair:
 
+        mean_phase_angle_factor: Vertex-weighted mean ``sin(phase)``
+            factor across the consumed terminator features.  A confidence
+            term (a terminator sharpens with phase), so it is recorded
+            per result for the calibration fit.
+        mean_albedo_penalty: Vertex-weighted mean catalog albedo-variation
+            penalty across the consumed features; likewise a recorded
+            confidence input.
         secondary_basin_distance_px: Distance from the converged offset to
             the best competing DT-cost basin in the search window; ``None``
             when the scan did not run or found no eligible shift (``0.0``
@@ -112,6 +120,8 @@ class BodyTerminatorDiagnostics:
     dt_fit_rms_px: float = 0.0
     lm_iterations: int = 0
     tukey_inlier_count: int = 0
+    mean_phase_angle_factor: float = 0.0
+    mean_albedo_penalty: float = 0.0
     secondary_basin_distance_px: float | None = None
     secondary_basin_cost_ratio: float | None = None
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
@@ -120,6 +130,8 @@ class BodyTerminatorDiagnostics:
         'dt_fit_rms_px': 'dt_fit_rms_px',
         'lm_iterations': 'lm_iterations',
         'tukey_inlier_count': 'tukey_inlier_count',
+        'mean_phase_angle_factor': 'mean_phase_angle_factor',
+        'mean_albedo_penalty': 'mean_albedo_penalty',
         'secondary_basin_distance_px': 'secondary_basin_distance_px',
         'secondary_basin_cost_ratio': 'secondary_basin_cost_ratio',
     }

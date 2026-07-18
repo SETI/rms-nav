@@ -300,6 +300,12 @@ Diagnostics
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.tukey_inlier_count` —
   number of vertices that retained a strictly positive Tukey weight at the final estimate.
   Consumed by the spurious-detection gate.
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.mean_phase_angle_factor`
+  — vertex-weighted mean ``sin(phase)`` factor across the consumed features. Consumed by
+  the confidence formula and recorded so the calibration fit sees the same inputs.
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.mean_albedo_penalty` —
+  vertex-weighted mean catalog albedo-variation penalty across the consumed features.
+  Consumed by the confidence formula; recorded alongside it.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.secondary_basin_distance_px`
   — distance from the converged offset to the best competing DT-cost basin in the search
   window; ``None`` when the scan did not run or found no eligible shift.
