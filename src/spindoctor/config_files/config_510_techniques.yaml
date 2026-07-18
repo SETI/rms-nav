@@ -350,7 +350,7 @@ techniques:
     # First sim-anchored fit (#223; seed 20260718, full-truth-axis
     # renderer).  The campaign's terminator rows are SINGLE-CLASS: zero
     # of 116 usable rows recovered within 1 px (median error 5.2 px,
-    # p5 2.6 px) -- on randomized crescents the DT fit settles several
+    # p5 2.55 px) -- on randomized crescents the DT fit settles several
     # pixels from the planted truth, systematically toward the bright
     # limb-side gradient, and no diagnostic separates a closer result
     # from a farther one.  The L2-regularized fit therefore converges
