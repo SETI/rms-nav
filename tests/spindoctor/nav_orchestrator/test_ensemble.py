@@ -257,14 +257,14 @@ def test_derive_confidence_rank_medium_when_sigma_too_large_for_high() -> None:
 
 
 def test_derive_confidence_rank_low() -> None:
-    """Low confidence + any sigma earns the 'low' tier when ≥ 0.2."""
-    rank = derive_confidence_rank(confidence=0.3, sigma_px=(10.0, 10.0))
+    """Low confidence + any sigma earns the 'low' tier when >= 0.35."""
+    rank = derive_confidence_rank(confidence=0.4, sigma_px=(10.0, 10.0))
     assert rank == 'low'
 
 
 def test_derive_confidence_rank_failed_below_threshold() -> None:
-    """Confidence below 0.2 yields 'failed'."""
-    rank = derive_confidence_rank(confidence=0.1, sigma_px=(0.3, 0.3))
+    """Confidence below the 0.35 low-tier boundary yields 'failed'."""
+    rank = derive_confidence_rank(confidence=0.3, sigma_px=(0.3, 0.3))
     assert rank == 'failed'
 
 

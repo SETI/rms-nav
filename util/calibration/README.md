@@ -86,8 +86,10 @@ package); generated artifacts go under `_work/calibration/` (gitignored).
 
 ## Campaign timing baseline
 
-Reference throughput for the collection campaign, measured 2026-07-15 at
-commit 2b7dd8c:
+Reference throughput for the collection campaign, measured 2026-07-18 on
+the full-truth-axis renderer (campaign seed 20260718; body families
+drawing the surface / photometric truth axes and the giant-planet
+disc-texture slice):
 
 ```bash
 source setup.sh
@@ -97,10 +99,11 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
     --per-family 600 --workers 14 --out _work/calibration/rows.jsonl
 ```
 
-Result: 4200 rows, 0 errors, elapsed (real) **7m13.7s** (user 93m08.7s,
-sys 7m39.1s).  Machine: i9-13900K with logical CPUs 10-11 excluded by
-`setup.sh`, under moderate concurrent load (one agent running occasional
-tests).
+Result: 4200 rows, 0 errors, elapsed (real) **7m20-24s** across three
+passes (user ~94-95m, sys ~8m).  Machine: i9-13900K with logical CPUs
+10-11 excluded by `setup.sh`.  The previous renderer measured 7m13.7s
+(2026-07-15) with the same command, so the truth axes cost ~1.5% --
+well inside the 2x budget below.
 
 Notes on reproducing the measurement:
 

@@ -96,8 +96,10 @@ TRANSFORM_OVERRIDES: dict[tuple[str, str], dict[str, float | None]] = {
     ('RingEdgeNav', 'total_edge_length_px'): {'divisor': 1500.0, 'cap_at': 1.0},
     # raw 10.8 / 33.2 / 52.0; old /6 cap-1 pinned every row.
     ('RingAnnulusNav', 'ncc_peak'): {'offset': 6.0, 'divisor': 45.0, 'cap_at': 1.0},
-    # raw 9.2 / 42.4 / 307.8; old /20 cap-1 pinned 73% of rows.
-    ('StarUniqueMatchNav', 'predicted_snr'): {'divisor': 100.0, 'cap_at': 1.0},
+    # raw 15 / 85 / 252 on the 20260718 campaign (the flux-normalized
+    # star deposit brightened the healthy range); the /100 transform
+    # pinned 44% of rows at the cap.
+    ('StarUniqueMatchNav', 'predicted_snr'): {'divisor': 250.0, 'cap_at': 1.0},
     # raw 0.002 / 0.047 / 0.367 on the physical-body campaign; the design
     # /0.15 saturated 29% of rows.
     ('BodyBlobNav', 'max_phase_irregularity_factor'): {'divisor': 0.35, 'cap_at': 1.0},
@@ -148,15 +150,12 @@ SIGN_BY_FEATURE: dict[str, str] = {
 # campaign's rows is unchanged.
 FROZEN_ALPHAS: dict[tuple[str, str], float] = {
     # Single-body campaign scenes; keep the design's multi-body reward.
+    # (The irregularity factor and the limb arc fraction, frozen in
+    # earlier campaigns, now vary -- config_220 residuals are populated
+    # and the sim limb reports its honest clipped/occluded fraction --
+    # so both are ordinary fitted terms.)
     ('BodyDiscCorrelateNav', 'body_count'): 0.4,
     ('BodyBlobNav', 'blob_count'): 0.4,
-    # config_220 irregularity residuals are PLACEHOLDER zeros, so the
-    # factor never varied; keep it wired at zero weight until the shape
-    # table is populated (Phase 10 section B).
-    ('BodyBlobNav', 'max_phase_irregularity_factor'): 0.0,
-    # The sim limb always reports fraction 1.0 (the emitted polyline is
-    # the visible boundary); keep the design's partial-arc penalty.
-    ('BodyLimbNav', 'visible_limb_arc_fraction'): 3.0,
     # The detector always fills its max_sources=30 budget (noise peaks
     # included), so the count carries no information as wired.
     ('StarFieldFromCatalogNav', 'n_detected_sources'): 0.0,
