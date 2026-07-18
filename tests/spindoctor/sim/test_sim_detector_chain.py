@@ -127,9 +127,18 @@ def test_instrument_defaults_turns_on_poisson_and_catalog_bloom() -> None:
     resolved = resolve_detector_params(_disc('coiss_nac', artifacts={'instrument_defaults': True}))
     assert resolved.poisson is True
     assert resolved.bloom_length == 4
-    # The catalog's cohort-measured cosmic-ray rate rides along with the
-    # physical chain (missing-data loss modes stay at zero incidence).
-    assert resolved.cosmic_ray_rate_per_sec == pytest.approx(1.5e-4)
+    # The Cassini entries retain a zero cosmic-ray rate (the chain's
+    # exposure-scaling stage cannot represent the cohort's
+    # exposure-independent transients; see the catalog comment).
+    assert resolved.cosmic_ray_rate_per_sec == 0.0
+
+
+def test_cosmic_ray_measured_rate_for_gossi() -> None:
+    """The Galileo entry carries its cohort-measured cosmic-ray rate."""
+    from spindoctor.sim.forward.detector.params import resolve_detector_params
+
+    resolved = resolve_detector_params(_disc('gossi', artifacts={'instrument_defaults': True}))
+    assert resolved.cosmic_ray_rate_per_sec == pytest.approx(5.4e-4)
 
 
 def test_cosmic_ray_scene_override_beats_catalog() -> None:
@@ -138,7 +147,7 @@ def test_cosmic_ray_scene_override_beats_catalog() -> None:
 
     resolved = resolve_detector_params(
         _disc(
-            'coiss_nac',
+            'gossi',
             artifacts={'instrument_defaults': True},
             noise={'cosmic_ray_rate_per_sec': 0.0},
         )
