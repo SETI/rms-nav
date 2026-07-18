@@ -26,6 +26,12 @@ noise:
 offset_v: 1.2
 offset_u: -0.8
 offset_rotation_deg: 0.0
+# See titan_crescent_horns: at 155 deg phase the haze biases the blob centroid
+# and the terminator fit in different directions, so the ensemble reports
+# 'conflicted' rather than a confident wrong offset.  The noiseless twin removes
+# read/Poisson noise as a confound; the conflict is the atmosphere mismatch, not
+# noise.  (BodyTerminatorNav engages now that the sim body model emits
+# TERMINATOR_ARC; its confidence stays provisional pending recalibration.)
 expected:
-  status: success
-  confidence_tier: low
+  status: conflicted
+  confidence_tier: conflicted

@@ -26,6 +26,15 @@ noise:
 offset_v: 1.2
 offset_u: -0.8
 offset_rotation_deg: 0.0
+# At 155 deg phase the forward-scattering haze biases every body technique in a
+# different direction: the lit-weighted blob centroid is dragged toward the
+# bright forward-scatter horns while the terminator fit locks to the soft haze
+# gradient offset from the hard-terminator model the navigator predicts.  Those
+# two disagree, so the ensemble reports 'conflicted' rather than a confident
+# wrong offset -- the safe outcome for a body whose atmosphere the navigator
+# does not model.  (BodyTerminatorNav engages here now that the simulated body
+# model emits TERMINATOR_ARC; its confidence stays provisional pending
+# recalibration.)
 expected:
-  status: success
-  confidence_tier: low
+  status: conflicted
+  confidence_tier: conflicted

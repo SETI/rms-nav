@@ -20,7 +20,19 @@ import numpy as np
 
 from spindoctor.support.types import NDArrayFloatType
 
-__all__ = ['ellipsoid_image_normals', 'illumination_vector', 'lambert_from_normals']
+__all__ = [
+    'DARK_SIDE_ILLUM_STRENGTH',
+    'ellipsoid_image_normals',
+    'illumination_vector',
+    'lambert_from_normals',
+]
+
+# Lambertian floor for the visible-but-unlit hemisphere.  A pixel whose
+# illumination is clipped to this value sits past the terminator (its true
+# cos(incidence) is at or below the floor), so a strictly-greater comparison
+# against it separates the lit region from the unlit disc -- the boundary the
+# terminator polyline traces.  The mesh shading path mirrors this floor.
+DARK_SIDE_ILLUM_STRENGTH: float = 0.01
 
 
 def ellipsoid_image_normals(
@@ -168,10 +180,9 @@ def lambert_from_normals(
 
     # Lambertian shading: I = I_0 * max(0, cos(incidence))
     # Only apply to visible hemisphere and clip to [0, 1] range
-    dark_side_illum_strength = 0.01  # TODO make config parameter
     light_side_illum_gamma = 1  # TODO make config parameter
     illum_strength = np.where(
-        visible_hemisphere, np.clip(cos_incidence, dark_side_illum_strength, 1.0), 0.0
+        visible_hemisphere, np.clip(cos_incidence, DARK_SIDE_ILLUM_STRENGTH, 1.0), 0.0
     )
     illum_strength **= light_side_illum_gamma
 

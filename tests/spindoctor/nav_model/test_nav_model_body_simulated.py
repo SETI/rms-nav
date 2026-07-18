@@ -238,6 +238,78 @@ def test_gates_off_limb_is_geometric_not_terminator() -> None:
     assert float(radii.min()) > 62.0
 
 
+def _terminator_feature(obs: ObsSim, body_params: dict[str, Any]) -> Any:
+    """Build the model and return its emitted TERMINATOR_ARC feature, or None."""
+    model = NavModelBodySimulated('body', obs, body_params['name'], body_params)
+    model.create_model()
+    for feature in model.to_features(bare_nav_context(obs)):
+        if feature.feature_type.name == 'TERMINATOR_ARC':
+            return feature
+    return None
+
+
+def test_high_phase_body_emits_terminator_arc() -> None:
+    """A resolved body at appreciable phase emits a TERMINATOR_ARC."""
+    assert 'TERMINATOR_ARC' in _body_feature_types(_limb_obs(), _large_body(phase_angle=90.0))
+
+
+def test_zero_phase_body_emits_no_terminator_arc() -> None:
+    """A fully-lit (zero-phase) body has no terminator and emits none."""
+    assert 'TERMINATOR_ARC' not in _body_feature_types(_limb_obs(), _large_body(phase_angle=0.0))
+
+
+def test_near_zero_phase_body_emits_no_terminator_arc() -> None:
+    """Below the phase-factor floor the terminator is indistinct from the limb."""
+    assert 'TERMINATOR_ARC' not in _body_feature_types(_limb_obs(), _large_body(phase_angle=1.0))
+
+
+def test_terminator_arc_geometry_is_terminator_polyline() -> None:
+    """The emitted TERMINATOR_ARC carries a TerminatorPolyline with enough vertices."""
+    from spindoctor.feature.geometry import TerminatorPolyline
+
+    terminator = _terminator_feature(_limb_obs(), _large_body(phase_angle=90.0))
+    assert terminator is not None
+    assert isinstance(terminator.geometry, TerminatorPolyline)
+    assert terminator.geometry.vertices_vu.shape[0] >= 8
+
+
+def test_terminator_arc_is_interior_not_geometric_limb() -> None:
+    """The terminator lies inside the disc, distinct from the silhouette limb.
+
+    At 90-degree phase the lit/unlit boundary is a great circle cutting through
+    the disc centre, so its vertices span radii from near the centre out to the
+    limb -- unlike the geometric limb, whose vertices all sit near the disc
+    edge.  The mean terminator radius therefore sits well inside the limb.
+    """
+    obs = _limb_obs()
+    terminator = _terminator_feature(obs, _large_body(phase_angle=90.0))
+    assert terminator is not None
+    vertices = np.asarray(terminator.geometry.vertices_vu)
+    cv = _LIMB_SIZE / 2.0 + int(obs.extfov_margin_v)
+    cu = _LIMB_SIZE / 2.0 + int(obs.extfov_margin_u)
+    radii = np.hypot(vertices[:, 0] - cv, vertices[:, 1] - cu)
+    disc_radius = 130.0 / 2.0
+    assert float(radii.min()) < 0.5 * disc_radius
+    assert float(radii.mean()) < 0.85 * disc_radius
+
+
+def test_terminator_arc_normals_are_unit_length() -> None:
+    """The terminator polyline carries unit outward normals."""
+    terminator = _terminator_feature(_limb_obs(), _large_body(phase_angle=90.0))
+    assert terminator is not None
+    normals = np.asarray(terminator.geometry.normals_vu)
+    norms = np.hypot(normals[:, 0], normals[:, 1])
+    assert np.allclose(norms, 1.0, atol=1e-9)
+
+
+def test_terminator_arc_stays_provisional_via_flags() -> None:
+    """The terminator carries its phase-angle factor for the (uncalibrated) technique."""
+    terminator = _terminator_feature(_limb_obs(), _large_body(phase_angle=90.0))
+    assert terminator is not None
+    assert terminator.flags.body_name == 'RHEA'
+    assert terminator.flags.phase_angle_factor == pytest.approx(1.0, abs=0.02)
+
+
 def test_metadata_records_predicted_diameter() -> None:
     """The model metadata carries the rendered silhouette diameter."""
     obs = _limb_obs()

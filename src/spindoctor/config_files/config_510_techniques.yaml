@@ -35,9 +35,11 @@
 # (operator-verified offsets with measured per-technique errors), the
 # same fit reruns against it and these sim-anchored values become the
 # fallback for regimes real data cannot reach.
-# BodyTerminatorNav is the exception: the simulated body model emits no
-# TERMINATOR_ARC, so its alphas keep the uncalibrated defaults and its
-# covariance floor is inherited from BodyLimbNav.
+# BodyTerminatorNav is the exception: the simulated body model now emits
+# TERMINATOR_ARC (#223), but the calibration campaign that set these alphas
+# predates that emission, so its alphas keep the uncalibrated defaults and its
+# covariance floor is inherited from BodyLimbNav until the recalibration pass
+# re-collects terminator rows.
 # Fit reports (reliability tables, AUC/Brier, per-term health):
 # util/calibration/README.md describes how to regenerate them.
 
@@ -323,12 +325,13 @@ techniques:
       model_error_floor_px: 0.92
 
   BodyTerminatorNav:
-    # NOT sim-calibrated: the simulated body model emits no
-    # TERMINATOR_ARC (crescent sim scenes navigate by BODY_BLOB), so
-    # the calibration campaign produced no rows for this technique and
-    # the uncalibrated defaults below are retained.  Calibrating it
-    # needs either terminator emission in the sim body model (#223) or
-    # a real-anchored calibration.
+    # NOT sim-calibrated: the simulated body model now emits
+    # TERMINATOR_ARC (#223), but the calibration campaign whose rows set
+    # these alphas ran before that emission landed, so it produced no
+    # rows for this technique and the uncalibrated defaults below are
+    # retained.  The recalibration pass re-collects terminator rows on
+    # the new renderer; until then a terminator fix stays
+    # confidence_provisional like every sim-anchored result.
     alpha0: -1.0
     terms:
       - feature: visible_terminator_arc_fraction

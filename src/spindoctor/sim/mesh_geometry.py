@@ -29,11 +29,13 @@ from typing import Any
 
 import numpy as np
 
+from spindoctor.sim.ellipsoid_geometry import DARK_SIDE_ILLUM_STRENGTH
 from spindoctor.support.types import NDArrayFloatType, NDArrayIntType
 
-# Lambertian floor for the visible-but-unlit side, matching the ellipsoid
-# shading convention in spindoctor.sim.ellipsoid_geometry.
-_DARK_SIDE_ILLUM = 0.01
+# Lambertian floor for the visible-but-unlit side, shared with the ellipsoid
+# shading convention in spindoctor.sim.ellipsoid_geometry so the two paths
+# cannot desync.
+_DARK_SIDE_ILLUM = DARK_SIDE_ILLUM_STRENGTH
 
 
 @dataclass(frozen=True)
