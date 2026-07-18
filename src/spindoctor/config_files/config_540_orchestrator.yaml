@@ -11,25 +11,28 @@
 # note in config_510_techniques.yaml): derived 2026-07-18 from the
 # recalibrated campaign's fused results (util/calibration, campaign
 # seed 20260718 on the staged forward-model renderer with the full
-# surface / photometric truth axes; 3410 fused offsets, all #210
-# covariance floors live) as the smallest confidence at which the
-# tier's sigma-gated subset achieves a 0.9 success rate against the
-# tier's own error budget.  max_sigma_px values are the tier
-# definitions, not fitted.
-# - high: 0.55 (success 0.923 at sigma <= 0.5 px, err <= 0.5 px; the
-#   0.45-0.50 bands measure 0.885, below target, so the boundary moved
-#   up from the previous campaign's 0.5).
+# surface / photometric truth axes and the ring truth vocabulary;
+# 3392 fused offsets, all #210 covariance floors live) as the
+# smallest confidence at which the tier's sigma-gated subset achieves
+# a 0.9 success rate against the tier's own error budget.
+# max_sigma_px values are the tier definitions, not fitted.
+# - high: 0.85 (success 0.932 at sigma <= 0.5 px, err <= 0.5 px; the
+#   0.55-0.80 bands measure 0.874-0.8999, under target -- the ring
+#   family's planted orbit errors put tight-sigma confidently-wrong
+#   locks in the mid-confidence band, failure mass no ring diagnostic
+#   can see, so the boundary sits where the measured curve actually
+#   clears 0.9).
 # - medium: the sigma <= 2.0 px gate carries the discrimination by
-#   itself (success 0.935+ at every measured confidence band), so the
+#   itself (success 0.92+ at every measured confidence band), so the
 #   boundary rests at the same floor as the low tier and the final
 #   gate; the tiers are sigma-differentiated, which is what
 #   max_sigma_px is for.
-# min_confidence rises 0.2 -> 0.35: with the recalibrated per-technique
-# formulas the fused fit rate (err <= 3 px) measures 0.35-0.46 in the
-# 0.10-0.15 bands and 0.88 at 0.35, with almost no probability mass in
-# between (n < 15 per 0.05 band in 0.20-0.30) -- the crossing is
-# bounded inside (0.15, 0.35] and the gate takes the measured upper
-# edge.  Everything else remains subject to empirical calibration.
+# min_confidence 0.35: the fused fit rate (err <= 3 px) measures
+# 0.35-0.40 in the 0.10-0.15 bands and 0.89 at 0.35, with almost no
+# probability mass in between (n < 15 per 0.05 band in 0.20-0.30) --
+# the crossing is bounded inside (0.15, 0.35] and the gate takes the
+# measured upper edge.  Everything else remains subject to empirical
+# calibration.
 # Every floored technique's 2-sigma coverage sits at 0.86-0.87 against
 # the 0.865 reference (util/calibration/fit_floors verification); the
 # NCC techniques' size-scaled covariance terms over-cover slightly
@@ -60,7 +63,7 @@ orchestrator:
     # Confidence/sigma requirements per confidence tier; max_sigma_px
     # null means no sigma requirement for that tier.
     tier_thresholds:
-      high: {min_confidence: 0.55, max_sigma_px: 0.5}
+      high: {min_confidence: 0.85, max_sigma_px: 0.5}
       medium: {min_confidence: 0.35, max_sigma_px: 2.0}
       low: {min_confidence: 0.35, max_sigma_px: null}
   # Minimum reliability per feature type; features below their type's

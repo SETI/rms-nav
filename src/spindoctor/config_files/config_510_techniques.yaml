@@ -25,7 +25,11 @@
 # from the config_220 catalog plus the full surface / photometric truth
 # axes: photometric law and opposition surge, the limb-relief field,
 # albedo texture, gouraud shading, pose scatter, and a giant-planet
-# disc-texture / transit slice; the star families use the
+# disc-texture / transit slice with cast moon shadows; the ring family
+# draws the ring truth vocabulary -- face-on through moderately
+# inclined projections, eccentric / m-mode / edge-wave orbits, planted
+# per-feature orbit errors, non-navigable distractors; the star
+# families use the
 # flux-normalized deposit and the navigator-matched PSF).  The
 # model_error_floor_px tunables (#210) are calibrated on the same
 # campaign so each technique's 2-sigma error coverage matches the
@@ -435,27 +439,35 @@ techniques:
       basin_cost_epsilon_px: 0.25
 
   RingEdgeNav:
-    # Sim campaign (seed 20260718): n=595 usable, base rate 0.97,
-    # AUC 0.61 -> 0.74, Brier 0.034 -> 0.033.
-    alpha0: 1.998
+    # Sim campaign (seed 20260718, ring-vocabulary family: inclined
+    # through face-on projections, eccentric/m-mode/edge-wave orbits,
+    # planted orbit errors, non-navigable distractors): n=591 usable,
+    # base rate 0.90, AUC 0.68 -> 0.79, Brier 0.087 -> 0.082.  The base
+    # rate fell from the face-on-only family's 0.97: planted radial
+    # ephemeris errors and distractor ringlets put genuine failure mass
+    # in the cohort for the first time.
+    alpha0: 1.832
     terms:
-      # Campaign raw p5/p50/p95 = 440/762/1552 (the old /200 cap-1
-      # pinned every row at the cap).
+      # Campaign raw p5/p50/p95 = 509/758/2140 (inclined projections
+      # lengthen the closed-ellipse edges; the /1500 transform still
+      # spans the healthy range without pinning the bulk at the cap).
       - feature: total_edge_length_px
-        alpha: 1.137
+        alpha: 0.976
         divisor: 1500.0
         cap_at: 1.0
       # Penalise the MEAN per-edge DT residual (px), not the raw sum.  The sum
       # scales with the number of fused edges, so with a fixed divisor a frame
       # with more rings was penalised purely for having more rings, driving
       # confidence to zero on real multi-edge scenes.  The mean is
-      # edge-count independent.  The 20260718 campaign gives the term
-      # a small negative weight; most failure mass is still
-      # clean-residual wrong-ringlet locks (multi-ringlet aliasing)
-      # that the residual cannot see, so the discrimination continues
-      # to ride on edge length and the spurious gates.
+      # edge-count independent.  On the ring-vocabulary family the
+      # weight deepens (-0.023 -> -0.069): edge-wave and m-mode shapes
+      # that the fit mis-locks leave a visible residual.  Most failure
+      # mass is still clean-residual wrong-feature locks (aliasing, and
+      # planted orbit errors the fit absorbs into the offset) that the
+      # residual cannot see, so the discrimination continues to ride on
+      # edge length and the spurious gates.
       - feature: per_edge_dt_rms_mean
-        alpha: -0.023
+        alpha: -0.069
     hard_zero_if:
       at_edge: true
     tuning:
@@ -832,27 +844,30 @@ techniques:
       psf_refine_snr_max: 30.0
 
   RingAnnulusNav:
-    # Sim campaign (seed 20260718): n=527 usable, base rate 0.94,
-    # AUC 0.98 (the previous fit already ranked these rows well),
-    # Brier 0.047 -> 0.046.
-    alpha0: 0.744
+    # Sim campaign (seed 20260718, ring-vocabulary family): n=489
+    # usable, base rate 0.92, AUC 0.93 (the previous fit already ranked
+    # these rows well), Brier 0.062.  Inclined projections and planted
+    # orbit errors trimmed the base rate from the face-on-only family's
+    # 0.94; the refit redistributes weight toward the multi-annulus
+    # term without changing any transform.
+    alpha0: 0.647
     terms:
       # PSR-style quality measure of the chosen NCC peak.  Campaign raw
-      # p5/p50/p95 = 11/32/46.
+      # p5/p50/p95 = 10/27/42.
       - feature: ncc_peak
-        alpha: 1.346
+        alpha: 1.168
         offset: 6.0
         divisor: 45.0
         cap_at: 1.0
       - feature: peak_to_runner_up_ratio
-        alpha: 1.147
+        alpha: 1.059
         divisor: 2.0
         cap_at: 1.0
       # Reward additional ring systems in the composite.  The current
       # spacecraft fleet has at most a handful of multi-planet ring
       # scenes, so the saturation cap is at 2 (vs body_count's 3).
       - feature: annulus_count
-        alpha: 0.386
+        alpha: 0.593
         divisor: 2.0
         cap_at: 1.0
     hard_zero_if:

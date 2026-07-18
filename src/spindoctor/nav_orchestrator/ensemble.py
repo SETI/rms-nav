@@ -94,15 +94,16 @@ DEFAULT_PINVH_RCOND = 1.0e-9
 DEFAULT_MAX_ALLOWED_ROTATION_DEG = 5.0
 # Tier confidence boundaries are sim-anchored (fitted 2026-07-18 on the
 # recalibrated simulated-scene campaign, with the #210 covariance
-# floors live): the smallest confidence at which each tier's
-# sigma-gated subset of the campaign's fused results achieves a 0.9
-# success rate against the tier's error budget.  The medium tier's
+# floors live and the ring truth vocabulary in the scene cohort): the
+# smallest confidence at which each tier's sigma-gated subset of the
+# campaign's fused results achieves a 0.9 success rate against the
+# tier's error budget.  The medium tier's
 # sigma gate carries the discrimination by itself, so its confidence
 # boundary rests at the same 0.35 floor as the low tier and the final
 # gate (the tiers are sigma-differentiated).  Mirrored in
 # config_540_orchestrator.yaml, which carries the full provenance note.
 DEFAULT_TIER_THRESHOLDS: dict[str, dict[str, float | None]] = {
-    'high': {'min_confidence': 0.55, 'max_sigma_px': 0.5},
+    'high': {'min_confidence': 0.85, 'max_sigma_px': 0.5},
     'medium': {'min_confidence': 0.35, 'max_sigma_px': 2.0},
     'low': {'min_confidence': 0.35, 'max_sigma_px': None},
 }

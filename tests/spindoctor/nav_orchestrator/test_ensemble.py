@@ -1059,12 +1059,16 @@ def test_ensemble_single_inlier_refine_tier_caps_at_medium() -> None:
 
 
 def test_ensemble_one_star_unique_match_tier_caps_at_medium() -> None:
-    """A lone one-star unique match with tight sigma also tops out at medium."""
+    """A lone one-star unique match with tight sigma also tops out at medium.
+
+    The confidence clears the high tier's 0.85 boundary, so the medium
+    outcome isolates the single-star cap rather than the boundary.
+    """
     res = _make_result(
         technique_name='StarUniqueMatchNav',
         offset=(3.06, -0.02),
         cov=np.eye(2, dtype=np.float64) * 0.01,
-        confidence=0.6,
+        confidence=0.9,
         diagnostics=StarUniqueMatchDiagnostics(mode='one_star'),
     )
     result = ensemble(
@@ -1132,12 +1136,16 @@ def test_ensemble_single_star_plus_body_technique_keeps_high() -> None:
 
 
 def test_ensemble_multi_star_refine_keeps_high() -> None:
-    """A refine with several inliers is independently constrained; high stays."""
+    """A refine with several inliers is independently constrained; high stays.
+
+    The confidence sits above the high tier's 0.85 boundary so the tier
+    outcome isolates the multi-inlier gate, not the boundary.
+    """
     res = _make_result(
         technique_name='StarRefineNav',
         offset=(3.06, -0.02),
         cov=np.eye(2, dtype=np.float64) * 0.01,
-        confidence=0.7,
+        confidence=0.9,
         diagnostics=StarRefineDiagnostics(n_stars_used=4),
     )
     result = ensemble(
