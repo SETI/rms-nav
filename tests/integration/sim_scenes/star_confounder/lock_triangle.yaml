@@ -16,7 +16,9 @@ exposure_sec: 1.0
 # matcher over the one-star path -- it tolerates a confounder density that
 # defeats brightness-uniqueness matching.  Crowding the field further eventually
 # manufactures a spurious triangle and the lock breaks; six confounders is below
-# that density.
+# that density.  The fused confidence measures 0.80, below the high tier's 0.85
+# boundary (seed-20260718 ring-vocabulary campaign), so the lock is a
+# medium-tier result: accurate, tight sigma, mid-band confidence.
 optics:
   psf:
     match_navigator: true
@@ -39,4 +41,4 @@ offset_u: -0.61
 offset_rotation_deg: 0.0
 expected:
   status: success
-  confidence_tier: high
+  confidence_tier: medium

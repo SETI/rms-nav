@@ -11,9 +11,11 @@ exposure_sec: 1.0
 # is still infeasible (it needs three), so StarUniqueMatchNav's two-star path
 # carries the lock: it matches the predicted pair against detected peaks by their
 # relative geometry, which the dimmer scattered confounders do not reproduce, and
-# StarRefineNav then refines both inliers -- a two-star cross-check that lifts the
-# result to the high tier.  The planted offset is recovered to a few hundredths
-# of a pixel.
+# StarRefineNav then refines both inliers -- a two-star cross-check.  The planted
+# offset is recovered to a few hundredths of a pixel.  The fused confidence is the
+# two-star path's structural 0.8 cap, which sits below the high tier's 0.85
+# boundary (seed-20260718 ring-vocabulary campaign), so a two-star lock is a
+# medium-tier result: accurate, tight sigma, capped confidence.
 optics:
   psf:
     match_navigator: true
@@ -35,4 +37,4 @@ offset_u: -0.61
 offset_rotation_deg: 0.0
 expected:
   status: success
-  confidence_tier: high
+  confidence_tier: medium
