@@ -263,6 +263,26 @@ def test_near_zero_phase_body_emits_no_terminator_arc() -> None:
     assert 'TERMINATOR_ARC' not in _body_feature_types(_limb_obs(), _large_body(phase_angle=1.0))
 
 
+def test_highly_irregular_resolved_body_emits_no_terminator_arc() -> None:
+    """A resolved highly_irregular body suppresses TERMINATOR_ARC.
+
+    The shared ``shape_features_suppressed`` policy: a chaotic rotator's
+    rendered terminator does not match the real body once it is resolved,
+    so the SPICE-backed model emits none -- and the simulated model must
+    not either.
+    """
+    assert 'TERMINATOR_ARC' not in _body_feature_types(
+        _limb_obs(), _large_body(name='HYPERION', phase_angle=90.0)
+    )
+
+
+def test_regular_body_same_geometry_emits_terminator_arc() -> None:
+    """The identical geometry on a regular body still emits TERMINATOR_ARC."""
+    assert 'TERMINATOR_ARC' in _body_feature_types(
+        _limb_obs(), _large_body(name='RHEA', phase_angle=90.0)
+    )
+
+
 def test_terminator_arc_geometry_is_terminator_polyline() -> None:
     """The emitted TERMINATOR_ARC carries a TerminatorPolyline with enough vertices."""
     from spindoctor.feature.geometry import TerminatorPolyline

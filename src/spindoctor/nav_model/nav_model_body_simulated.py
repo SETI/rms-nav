@@ -30,6 +30,7 @@ from spindoctor.nav_model.nav_model_body import (
     LIMB_ARC_MIN_VERTICES,
     TERMINATOR_MIN_PHASE_FACTOR,
     TERMINATOR_MIN_VERTICES,
+    shape_features_suppressed,
 )
 from spindoctor.nav_model.nav_model_body_base import BODY_BLOB_MIN_DIAMETER_PX, NavModelBodyBase
 from spindoctor.nav_model.sim_body import create_simulated_body
@@ -597,18 +598,25 @@ class NavModelBodySimulated(NavModelBodyBase):
     def _build_terminator_arc_feature(self) -> NavFeature | None:
         """Emit a TERMINATOR_ARC from the interior lit/unlit boundary, or ``None``.
 
-        Mirrors the SPICE-backed body model's terminator gate: the phase must be
-        far enough from zero for a terminator to separate from the limb
-        (``sin(phase) >= TERMINATOR_MIN_PHASE_FACTOR``), and the boundary
-        polyline must be long enough to constrain a fit
-        (``>= TERMINATOR_MIN_VERTICES`` vertices).  Emission is ungated by the
-        limb-path resolution / phase policy gates -- the terminator is exactly
-        the high-phase feature those gates hand the body off to.  The
-        recovered offset it produces stays ``confidence_provisional`` like every
-        sim-anchored technique result, because ``BodyTerminatorNav`` is not yet
-        calibrated against the simulated renderer.
+        Mirrors the SPICE-backed body model's terminator gates: a resolved
+        ``highly_irregular`` body suppresses the feature (the shared
+        :func:`~spindoctor.nav_model.nav_model_body.shape_features_suppressed`
+        policy -- a chaotic rotator's rendered terminator does not match the
+        real body's), the phase must be far enough from zero for a terminator
+        to separate from the limb (``sin(phase) >=
+        TERMINATOR_MIN_PHASE_FACTOR``), and the boundary polyline must be long
+        enough to constrain a fit (``>= TERMINATOR_MIN_VERTICES`` vertices).
+        Emission is ungated by the limb-path resolution / phase policy gates --
+        the terminator is exactly the high-phase feature those gates hand the
+        body off to.  The recovered offset it produces stays
+        ``confidence_provisional`` like every sim-anchored technique result,
+        because ``BodyTerminatorNav`` is not yet calibrated against the
+        simulated renderer.
         """
         if self._body_mask is None:
+            return None
+        shape = load_body_shape(self._body_name, config=self._config)
+        if shape_features_suppressed(shape, self._predicted_diameter_px, config=self._config):
             return None
         phase_angle_deg = float(self._metadata.get('phase_angle_deg', 0.0))
         phase_angle_factor = abs(math.sin(math.radians(phase_angle_deg)))

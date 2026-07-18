@@ -35,9 +35,11 @@ Because the shading floors the visible-but-unlit hemisphere at a small constant
 (brightness above zero) is the whole visible disc, and the lit region is the part brighter
 than that floor; the terminator polyline is the lit pixels adjacent to the interior unlit
 disc, with the limb ring excluded so the polyline never wanders onto the silhouette. The
-gate mirrors the SPICE-backed :class:`~spindoctor.nav_model.nav_model_body.NavModelBody`
-(a ``sin(phase)`` floor and a minimum vertex count), so a simulated body offers the same
-feature set a real one would. The terminator technique is not yet calibrated against the
+gates mirror the SPICE-backed :class:`~spindoctor.nav_model.nav_model_body.NavModelBody`
+(a ``sin(phase)`` floor, a minimum vertex count, and the shared
+:func:`~spindoctor.nav_model.nav_model_body.shape_features_suppressed` policy that
+suppresses the terminator of a resolved ``highly_irregular`` body), so a simulated body
+offers the same feature set a real one would. The terminator technique is not yet calibrated against the
 simulated renderer, so a terminator fix stays ``confidence_provisional`` -- the same interim
 marker every sim-anchored confidence carries -- until the recalibration pass re-collects its
 rows.
