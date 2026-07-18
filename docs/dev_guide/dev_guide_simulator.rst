@@ -2519,7 +2519,11 @@ instrument, on seven figures of merit:
    of the navigator's predicted limb polylines (shifted onto the actual limb
    by each frame's operator-verified offset), reduced to 10-90% rise widths
    and binned by phase angle and apparent body diameter.  This is what
-   ``BodyLimbNav``'s distance transform actually sees.
+   ``BodyLimbNav``'s distance transform actually sees.  Absolute rise-width
+   medians are estimator-specific (the 10-90% estimator biases roughly +17%
+   at the widest profiles and -6% at the narrowest); both sides run the
+   identical estimator, so estimator parity -- not the absolute median --
+   is what makes the comparison fair.
 4. **Ring edges** -- the same profile machinery along predicted ring-edge
    polylines (Cassini cohort).
 5. **Dynamic range** -- fraction saturated, fraction near the frame floor,
@@ -2569,6 +2573,18 @@ measuring an artifact statistic's tails.  **No pass/fail threshold is
 attached**; the number is reported per figure of merit and judged by a
 human against the cohort's support.
 
+Curve kinds (the sky power spectrum and the star / limb / ring
+profiles) get the same scalar through
+:func:`spindoctor.sim.realism.divergence.w1_between_densities`: the
+frame-averaged curve on each side is treated as a nonnegative density
+over its axis, and the W1 along that axis (normalized by the real
+density's IQR) lands in the summary's ``curve_divergences`` block.  The
+pooled FOM 3 scalar (``limb_width_copop``) pools only strata populated
+on both sides; one-sided strata are recorded in the summary
+(``limb_bins_real_only`` / ``limb_bins_sim_only``) rather than folded
+into a mixture whose pooled W1 would measure stratum composition
+instead of width.
+
 Cohort support labels
 ---------------------
 
@@ -2609,12 +2625,13 @@ navigation pairs.  Outputs:
   committed record backing the report's tables (divergences, support
   labels, FOM 7 rows, runtime).
 
-The full-cohort run (75 frames as of 2026-07-17) takes roughly 20
-minutes on a workstation with local holdings (measured 21.3 minutes
-single-threaded, 2026-07-17); the cost is dominated by the navigator's
-feature extraction on the real frames, the full-size matched renders,
-and the FOM 7 navigation pairs.  ``--skip-fom7`` shortens it by roughly
-a third.  ``tests/integration/test_sim_realism.py`` carries
+The full-cohort run (75 frames as of 2026-07-18) takes 19 to 21 minutes
+on a workstation with local holdings (measured 18.8-21.3 minutes over
+the recorded 2026-07-17/18 runs); the cost is dominated by the
+navigator's feature extraction on the real frames and the full-size
+matched renders.  ``--skip-fom7`` saves about 17% -- the navigation
+pairs are a handful of frames per instrument, not a large share of the
+cost.  ``tests/integration/test_sim_realism.py`` carries
 the integration-tier tests: matched-scene validity per instrument,
 sim-side determinism, and an end-to-end smoke on the smallest cohort.
 
