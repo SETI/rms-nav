@@ -101,6 +101,7 @@ __all__ = [
     'TITAN_BODY_NAME',
     'NavModelBody',
     'bodies_in_extfov',
+    'limb_reliability',
     'shape_features_suppressed',
     'terminator_reliability',
 ]
@@ -964,7 +965,7 @@ def _build_limb_arc(
         position_cov_px=None,
         intensity_sigma_rel=0.0,
         preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
-        reliability=_limb_reliability(
+        reliability=limb_reliability(
             visible_arc_fraction=visible_arc_fraction,
             visible_arc_px=float(sampler.vertices_vu.shape[0]),
         ),
@@ -1123,8 +1124,14 @@ def _visible_arc_fraction(sampler: _PolylineSampler) -> float:
     return float(sampler.vertices_vu.shape[0]) / float(total)
 
 
-def _limb_reliability(*, visible_arc_fraction: float, visible_arc_px: float) -> float:
+def limb_reliability(*, visible_arc_fraction: float, visible_arc_px: float) -> float:
     """Sigmoid-of-sum reliability for LIMB_ARC features.
+
+    Shared emission policy: the SPICE-backed model scores its limb sampler
+    with this, and the simulated body model feeds it the same quantities
+    computed from its own render (arc fraction net of frame clipping and
+    body-body occlusion), so the two models cannot desync on how a limb's
+    reliability responds to arc visibility and length.
 
     The score answers a feature-existence question: is this limb arc a
     target a downstream technique should bother running on?  Per-vertex

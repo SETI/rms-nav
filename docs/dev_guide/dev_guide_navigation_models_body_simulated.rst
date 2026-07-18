@@ -242,20 +242,33 @@ Call path traced through
 3. When the predicted diameter clears the blob floor, append a BODY_BLOB built by the
    shared blob-feature helper on
    :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase`.
-4. When the diameter and phase gates pass, append a LIMB_ARC: the silhouette boundary is
-   sampled into a vertex polyline with outward normals and a fixed per-vertex sigma.
-5. When the terminator gates pass, append a TERMINATOR_ARC scored honestly: its
-   visible-arc fraction compares the in-frame lit/unlit ridge against the ridge of an
-   unclipped whole-body render of the same geometry, and its reliability applies the
-   shared :func:`~spindoctor.nav_model.nav_model_body.terminator_reliability` formula
+4. When the diameter and phase gates pass, append a LIMB_ARC scored honestly: the
+   silhouette boundary is sampled into a vertex polyline with outward normals and a
+   fixed per-vertex sigma, vertices hidden behind an explicitly nearer sibling body are
+   dropped, and the visible-arc fraction compares the surviving polyline against the
+   silhouette boundary of an unclipped whole-body render -- so a limb sliding off the
+   frame or behind another body reports the loss instead of claiming ``1.0``.  The
+   reliability applies the shared
+   :func:`~spindoctor.nav_model.nav_model_body.limb_reliability` formula (arc fraction
+   and arc length), so a deeply occluded or clipped limb can be dropped by the
+   downstream reliability gate exactly as a real one would be.
+5. When the terminator gates pass, append a TERMINATOR_ARC scored the same way: its
+   visible-arc fraction compares the surviving lit/unlit ridge (net of frame clipping
+   and sibling-body occlusion) against the ridge of an unclipped whole-body render of
+   the same geometry, and its reliability applies the shared
+   :func:`~spindoctor.nav_model.nav_model_body.terminator_reliability` formula
    (arc fraction, catalog albedo-variation penalty, ``sin(phase)`` cap) -- so a
    high-phase simulated terminator can be dropped by the downstream reliability gate
    exactly as a real one would be.
-6. Reliability on the disc and limb features is fixed at ``1.0`` (the simulated body is
-   by construction reliable; downstream gates do not drop those), while the blob carries
-   the shared detection-SNR reliability from the base class.  The limb's
-   ``visible_arc_fraction = 1.0`` is a known simplification awaiting the mutual-event
-   rework in the confidence recalibration pass.
+6. Reliability on the disc feature is fixed at ``1.0`` (the rendered template is exact by
+   construction and the correlation technique carries its own quality diagnostics),
+   while the blob carries the shared detection-SNR reliability from the base class.
+   Body-body occlusion is resolved from the sibling bodies' idealized geometry: each
+   model instance receives the OTHER bodies of the same filtered scene view, and a
+   sibling occludes only when both bodies carry an explicit ``range_km`` and the
+   sibling's is strictly nearer -- the navigator-side mirror of the renderer's rule
+   that overlapping bodies must all declare their depth.  The disc template itself is
+   not occlusion-masked (see the simulator report's known-gaps list).
 
 Examples
 ========

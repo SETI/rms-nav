@@ -8,11 +8,13 @@ exposure_sec: 1.0
 # Mutual event, grazing overlap: two well-resolved spheres whose limbs just
 # interlock (centers 100 px apart, radii 60 + 50, ~10 px of overlap depth).
 # Rendered truth (body_occlusion): FAR visible_fraction ~0.97, occluded limb
-# arc ~51 deg; NEAR fully visible.  The navigator predicts a FULL limb for
-# both bodies -- the hidden arc is genuine model error -- and BodyLimbNav's
-# robust (Tukey) fit downweights it, so navigation succeeds within a few
-# tenths of a pixel.  test_sim_mutual_event pins the offset tolerance; the
-# expected block pins the fused status/tier the ensemble measured.
+# arc ~51 deg; NEAR fully visible.  Measured ensemble behavior
+# (2026-07-18, occlusion-aware sim limb): FAR's LIMB_ARC drops the arc
+# hidden behind NEAR and reports visible_arc_fraction 0.86 (reliability
+# 0.78), so the fit never sees the interlocked arc, and navigation
+# succeeds within a few tenths of a pixel.  test_sim_mutual_event pins
+# the offset tolerance; the expected block pins the fused status/tier the
+# ensemble measured.
 bodies:
   - name: FAR
     shape_model: ellipsoid

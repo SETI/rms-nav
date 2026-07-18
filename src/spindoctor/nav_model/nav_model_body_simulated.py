@@ -34,6 +34,7 @@ from spindoctor.nav_model.nav_model_body import (
     LIMB_ARC_MIN_VERTICES,
     TERMINATOR_MIN_PHASE_FACTOR,
     TERMINATOR_MIN_VERTICES,
+    limb_reliability,
     shape_features_suppressed,
     terminator_reliability,
 )
@@ -263,6 +264,13 @@ class NavModelBodySimulated(NavModelBodyBase):
             Crater and anti-aliasing keys are accepted but ignored;
             anti-aliasing is always maximal here.
         config: Optional ``Config`` override.
+        sibling_bodies: Idealized parameter dicts of the OTHER bodies in the
+            same scene (from the same filtered ``nav_params['bodies']`` list
+            this body came from).  A sibling with an explicitly nearer
+            ``range_km`` occludes this body's predicted limb / terminator
+            arcs: occluded vertices are dropped from the emitted polylines
+            and the visible-arc fractions report the loss, mirroring how the
+            SPICE-backed model's per-vertex drops feed its arc fraction.
     """
 
     def __init__(
@@ -273,14 +281,17 @@ class NavModelBodySimulated(NavModelBodyBase):
         sim_params: dict[str, Any],
         *,
         config: Config | None = None,
+        sibling_bodies: list[dict[str, Any]] | None = None,
     ) -> None:
         super().__init__(name, obs, config=config)
         self.apply_limb_emission_gates: bool = True
         self._body_name = body_name.upper()
         self._sim_params: dict[str, Any] = dict(sim_params)
+        self._sibling_bodies: list[dict[str, Any]] = [dict(s) for s in sibling_bodies or []]
         self._model_img: NDArrayFloatType | None = None
         self._body_mask: NDArrayBoolType | None = None
         self._limb_mask: NDArrayBoolType | None = None
+        self._occluder_mask: NDArrayBoolType | None = None
         self._predicted_center_vu: tuple[float, float] = (0.0, 0.0)
         self._predicted_diameter_px: float = 0.0
         self._km_per_pixel_at_limb: float = 0.0
@@ -320,11 +331,11 @@ class NavModelBodySimulated(NavModelBodyBase):
         nav_params = getattr(obs, 'nav_params', None)
         if not isinstance(nav_params, dict):
             return []
+        bodies = [bp for bp in nav_params.get('bodies', []) or [] if isinstance(bp, dict)]
         out: list[NavModel] = []
-        for body_params in nav_params.get('bodies', []) or []:
-            if not isinstance(body_params, dict):
-                continue
+        for index, body_params in enumerate(bodies):
             body_name = str(body_params.get('name', 'SIM-BODY'))
+            siblings = [dict(bp) for j, bp in enumerate(bodies) if j != index]
             out.append(
                 cls(
                     f'body_sim:{body_name}',
@@ -332,6 +343,7 @@ class NavModelBodySimulated(NavModelBodyBase):
                     body_name,
                     dict(body_params),
                     config=config,
+                    sibling_bodies=siblings,
                 )
             )
         return out
@@ -358,8 +370,9 @@ class NavModelBodySimulated(NavModelBodyBase):
         *,
         size: tuple[int, int] | None = None,
         center: tuple[float, float] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> NDArrayFloatType:
-        """Render the body's data-coordinate image at the given phase angle.
+        """Render a body's data-coordinate image at the given phase angle.
 
         The predicted shape is read from this model's own params, which need
         not match what was rendered into the image: an irregular body can be
@@ -374,12 +387,15 @@ class NavModelBodySimulated(NavModelBodyBase):
                 shape.  The unclipped whole-body render behind the
                 visible-arc fraction passes a body-sized canvas here.
             center: Optional body centre ``(v, u)`` on that canvas; defaults
-                to the model's own predicted centre.
+                to the rendered params' own predicted centre.
+            params: Optional body-parameter dict to render instead of this
+                model's own ``sim_params``.  The occlusion path renders each
+                nearer sibling's predicted silhouette through this.
 
         Returns:
             The rendered image on the requested canvas.
         """
-        p = self._sim_params
+        p = self._sim_params if params is None else params
         data_size_v, data_size_u = (
             size
             if size is not None
@@ -451,6 +467,7 @@ class NavModelBodySimulated(NavModelBodyBase):
             center_u + ext_margin_u,
         )
         self._subject_range_km = float(p.get('range_km', float('inf')))
+        self._occluder_mask = self._compute_occluder_mask()
         # Predicted disc diameter: the longer pixel extent of the rendered
         # silhouette.  Drives the BODY_BLOB emission gate and covariance.
         self._predicted_diameter_px = _silhouette_diameter_px(body_mask)
@@ -562,6 +579,114 @@ class NavModelBodySimulated(NavModelBodyBase):
         lit_boundary_ext[slice_v, slice_u] = boundary & lit
         return _limb_polyline_from_mask(lit_boundary_ext, full_mask_ext)
 
+    def _compute_occluder_mask(self) -> NDArrayBoolType | None:
+        """Union silhouette (extfov coords) of explicitly nearer sibling bodies.
+
+        A sibling occludes this body only when BOTH ranges are explicit and
+        the sibling's is strictly smaller -- the navigator-side mirror of the
+        renderer's rule that overlapping bodies must all carry an explicit
+        ``range_km`` before their stacking means anything.  Each occluder's
+        silhouette is its own predicted render (``> 0`` covers the whole
+        visible disc: the shading floors the unlit hemisphere above zero, and
+        a solid body occludes with its full silhouette, lit or not).
+
+        Returns:
+            The extfov-shape boolean mask, or ``None`` when no sibling
+            occludes (the common single-body case costs nothing).
+        """
+        own_range = float(self._sim_params.get('range_km', float('inf')))
+        occluders = [
+            s for s in self._sibling_bodies if float(s.get('range_km', float('inf'))) < own_range
+        ]
+        if not occluders:
+            return None
+        data_size_v = int(self.obs.data_shape_v)
+        data_size_u = int(self.obs.data_shape_u)
+        mask = np.zeros((data_size_v, data_size_u), dtype=np.bool_)
+        for sibling in occluders:
+            phase_rad = float(np.radians(sibling.get('phase_angle', 0.0)))
+            mask |= self._render_body_image(phase_rad, params=sibling) > 0.0
+        if not mask.any():
+            return None
+        ext_margin_v = int(self.obs.extfov_margin_v)
+        ext_margin_u = int(self.obs.extfov_margin_u)
+        mask_full = self.obs.make_extfov_false()
+        mask_full[
+            ext_margin_v : ext_margin_v + data_size_v,
+            ext_margin_u : ext_margin_u + data_size_u,
+        ] = mask
+        return mask_full
+
+    def _drop_occluded_vertices(
+        self,
+        vertices_vu: NDArrayFloatType,
+        normals_vu: NDArrayFloatType,
+    ) -> tuple[NDArrayFloatType, NDArrayFloatType]:
+        """Drop polyline vertices hidden behind a nearer sibling body.
+
+        A hidden arc has no counterpart edge in the image (the occluder's
+        disc covers it), so fitting it could only anchor on the occluder's
+        own limb; dropping it keeps the DT fit on arcs that exist and lets
+        the visible-arc fraction report the loss honestly.
+
+        Parameters:
+            vertices_vu: Polyline vertices, extfov coords, shape ``(N, 2)``.
+            normals_vu: Matching outward normals, shape ``(N, 2)``.
+
+        Returns:
+            The surviving ``(vertices_vu, normals_vu)``; unchanged when no
+            sibling occludes.
+        """
+        if self._occluder_mask is None or vertices_vu.shape[0] == 0:
+            return vertices_vu, normals_vu
+        vs = vertices_vu[:, 0].astype(np.intp)
+        us = vertices_vu[:, 1].astype(np.intp)
+        keep = ~self._occluder_mask[vs, us]
+        return vertices_vu[keep], normals_vu[keep]
+
+    def _limb_visible_arc_fraction(self, visible_vertex_count: int) -> float:
+        """Fraction of the full predicted silhouette boundary the fit sees.
+
+        The sim analog of the SPICE-backed model's ``_visible_arc_fraction``
+        (survivors over the predicted ridge): the denominator is the
+        silhouette-boundary length of an *unclipped* render of the same body
+        at the same phase -- a canvas sized to the whole silhouette,
+        independent of the frame -- and the numerator is the vertex count
+        that survived frame clipping and sibling-body occlusion.  A fully
+        framed, unoccluded body scores ~1.0; a body sliding off the frame or
+        hiding behind a nearer body scores the surviving fraction.  Both
+        renders read only the model's own idealized params.
+
+        Parameters:
+            visible_vertex_count: Vertex count of the surviving limb
+                polyline.
+
+        Returns:
+            The [0, 1] visible-arc fraction.  1.0 when the unclipped render
+            has no boundary to compare against (a degenerate geometry).
+        """
+        p = self._sim_params
+        max_axis = max(
+            float(p.get('axis1', 0.0)),
+            float(p.get('axis2', 0.0)),
+            float(p.get('axis3', 0.0)),
+        )
+        # Canvas comfortably larger than the silhouette: half again the
+        # longest axis (mesh relief can push past the ellipsoid bound)
+        # plus a fixed margin.
+        canvas = math.ceil(max_axis * 1.5) + 16
+        full_img = self._render_body_image(
+            float(np.radians(p.get('phase_angle', 0.0))),
+            size=(canvas, canvas),
+            center=(canvas / 2.0, canvas / 2.0),
+        )
+        full_mask = full_img > 0.0
+        full_boundary = self._compute_limb_mask_from_body_mask(full_mask)
+        total = int(np.count_nonzero(full_boundary))
+        if total <= 0:
+            return 1.0
+        return min(1.0, float(visible_vertex_count) / float(total))
+
     def _build_limb_arc_feature(self) -> NavFeature | None:
         """Emit a LIMB_ARC from the rendered silhouette boundary, or ``None``.
 
@@ -587,12 +712,31 @@ class NavModelBodySimulated(NavModelBodyBase):
             if float(self._metadata.get('phase_angle_deg', 0.0)) > _LIMB_MAX_PHASE_DEG:
                 return None
             vertices_vu, normals_vu = _limb_polyline_from_mask(self._limb_mask, self._body_mask)
+            vertices_vu, normals_vu = self._drop_occluded_vertices(vertices_vu, normals_vu)
             if vertices_vu.shape[0] < _MIN_LIMB_ARC_VERTICES:
                 return None
+            # Honest reliability inputs, mirroring the SPICE-backed model:
+            # the visible-arc fraction compares the surviving polyline (net
+            # of frame clipping and sibling-body occlusion) against the
+            # unclipped whole-body silhouette boundary, and the shared
+            # reliability formula scores it.  These feed BodyLimbNav's
+            # visible_limb_arc_fraction confidence term, so a clipped or
+            # occluded sim limb scores like a real one instead of pinning
+            # every input at 1.0.
+            visible_arc_fraction = self._limb_visible_arc_fraction(vertices_vu.shape[0])
+            reliability = limb_reliability(
+                visible_arc_fraction=visible_arc_fraction,
+                visible_arc_px=float(vertices_vu.shape[0]),
+            )
         else:
             vertices_vu, normals_vu = self._lit_geometric_limb_polyline()
             if vertices_vu.shape[0] == 0:
                 return None
+            # Measurement path (realism match): the geometry is the product
+            # and no technique consumes the score, so the reliability inputs
+            # stay at their vacuous 1.0.
+            visible_arc_fraction = 1.0
+            reliability = 1.0
         n = vertices_vu.shape[0]
         sigma_normal = np.full(n, _LIMB_SIGMA_NORMAL_PX, dtype=np.float64)
         sigma_tangent = np.full(n, _LIMB_SIGMA_TANGENT_PX, dtype=np.float64)
@@ -611,10 +755,13 @@ class NavModelBodySimulated(NavModelBodyBase):
             position_cov_px=None,
             intensity_sigma_rel=0.0,
             preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
-            reliability=1.0,
-            reliability_reasons=NavReliabilityBreakdown(visible_arc_fraction=1.0),
+            reliability=reliability,
+            reliability_reasons=NavReliabilityBreakdown(visible_arc_fraction=visible_arc_fraction),
             usable_types=frozenset({NavFeatureType.LIMB_ARC}),
-            flags=LimbArcFlags(body_name=self._body_name, visible_arc_fraction=1.0),
+            flags=LimbArcFlags(
+                body_name=self._body_name,
+                visible_arc_fraction=visible_arc_fraction,
+            ),
         )
 
     def _terminator_polyline(self) -> tuple[NDArrayFloatType, NDArrayFloatType]:
@@ -658,13 +805,14 @@ class NavModelBodySimulated(NavModelBodyBase):
         (survivors over the predicted ridge): the denominator is the
         terminator ridge length of an *unclipped* render of the same body at
         the same phase and lighting -- a canvas sized to the whole silhouette,
-        independent of the frame -- and the numerator is the ridge the framed
-        render actually yields.  A fully framed body scores ~1.0; a body whose
-        terminator runs off the frame edge scores the surviving fraction.
+        independent of the frame -- and the numerator is the ridge that
+        survived frame clipping and sibling-body occlusion.  A fully framed,
+        unoccluded body scores ~1.0; a body whose terminator runs off the
+        frame edge or behind a nearer body scores the surviving fraction.
         Both renders read only the model's own idealized params.
 
         Parameters:
-            visible_vertex_count: Vertex count of the in-frame terminator
+            visible_vertex_count: Vertex count of the surviving terminator
                 polyline.
 
         Returns:
@@ -720,17 +868,19 @@ class NavModelBodySimulated(NavModelBodyBase):
         if phase_angle_factor < TERMINATOR_MIN_PHASE_FACTOR:
             return None
         vertices_vu, normals_vu = self._terminator_polyline()
+        vertices_vu, normals_vu = self._drop_occluded_vertices(vertices_vu, normals_vu)
         if vertices_vu.shape[0] < TERMINATOR_MIN_VERTICES:
             return None
         n = vertices_vu.shape[0]
         sigma_normal = np.full(n, _TERMINATOR_SIGMA_NORMAL_PX, dtype=np.float64)
         sigma_tangent = np.full(n, _TERMINATOR_SIGMA_TANGENT_PX, dtype=np.float64)
         # Honest reliability inputs, mirroring the SPICE-backed model: the
-        # visible-arc fraction compares the in-frame ridge against the
-        # unclipped whole-body ridge, and the shared reliability formula
-        # applies the catalog albedo-variation and sin(phase) penalties.
-        # These feed BodyTerminatorNav's confidence terms, so a sim terminator
-        # scores like a real one instead of pinning every input at 1.0.
+        # visible-arc fraction compares the surviving ridge (net of frame
+        # clipping and sibling-body occlusion) against the unclipped
+        # whole-body ridge, and the shared reliability formula applies the
+        # catalog albedo-variation and sin(phase) penalties.  These feed
+        # BodyTerminatorNav's confidence terms, so a sim terminator scores
+        # like a real one instead of pinning every input at 1.0.
         visible_arc_fraction = self._terminator_visible_arc_fraction(n)
         albedo_penalty = min(1.0, shape.albedo_variation)
         reliability = terminator_reliability(

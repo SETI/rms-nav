@@ -1,9 +1,11 @@
 """Behavioral checks for the mutual-event scene class.
 
 A grazing two-body overlap must still navigate to its planted offset within
-tolerance, and the navigator-side simulated body model must predict the FULL
-limb of both bodies -- no masking of the occluded arc exists, so the hidden
-arc is genuine model error the robust limb fit has to absorb.  The deeper
+tolerance, and the navigator-side simulated body model must predict
+occlusion-aware limbs: the near body's limb stays complete, while the far
+body's limb loses the arc hidden behind the near body's silhouette and its
+``visible_arc_fraction`` reports the loss honestly (the input the limb
+reliability and BodyLimbNav's confidence formula consume).  The deeper
 overlaps' fused outcomes are pinned by their scenes' ``expected`` blocks
 (test_sim_expected) and their baselines.
 
@@ -47,14 +49,15 @@ def test_grazing_overlap_navigates_within_tolerance() -> None:
     assert abs(result.offset_px[1] - scene['offset_u']) < 0.5
 
 
-def test_navigator_predicts_full_limbs_for_both_bodies() -> None:
-    """Both bodies emit complete limb arcs: the occluded arc is model error.
+def test_navigator_predicts_occlusion_aware_limbs() -> None:
+    """The far body's limb loses its hidden arc; the near body's stays whole.
 
-    ``NavModelBodySimulated`` renders each body in isolation, so the far
-    body's predicted limb circle is complete even where the near body hides
-    it in the image -- there is no occlusion masking on the navigator side.
-    The vertices must surround each body's center in all four azimuthal
-    quadrants, and the feature must claim a fully visible arc.
+    ``NavModelBodySimulated`` predicts each body from its own idealized
+    params but knows its siblings' idealized geometry too (both are
+    catalog/SPICE-class knowledge), so the arc of FAR's limb behind NEAR's
+    silhouette is dropped from the polyline and ``visible_arc_fraction``
+    reports the surviving share -- at this ~206-degree occlusion roughly
+    0.4 of the full circle -- instead of claiming 1.0.
     """
     scene = _load('mutual_deep')
     obs = ObsSim.from_file('/tmp/mutual_event.yaml', sim_params=scene)
@@ -66,18 +69,31 @@ def test_navigator_predicts_full_limbs_for_both_bodies() -> None:
             if feature.feature_type is NavFeatureType.LIMB_ARC:
                 limb_features[feature.feature_id] = feature
     assert set(limb_features) == {'limb_arc:FAR', 'limb_arc:NEAR'}
-    for body, center_u in (('FAR', 95.0), ('NEAR', 110.0)):
-        feature = limb_features[f'limb_arc:{body}']
-        assert feature.flags.visible_arc_fraction == 1.0  # type: ignore[union-attr]
-        vertices = feature.geometry.vertices_vu  # type: ignore[union-attr]
-        dv = vertices[:, 0] - (128.0 + obs.extfov_margin_v)
-        du = vertices[:, 1] - (center_u + obs.extfov_margin_u)
-        quadrants = {(bool(a), bool(b)) for a, b in zip(dv >= 0, du >= 0, strict=True)}
-        assert quadrants == {(False, False), (False, True), (True, False), (True, True)}, (
-            f'{body} limb does not surround its center: {sorted(quadrants)}'
-        )
-        # The limb is a closed circle: azimuth coverage has no gap larger
-        # than a few degrees.
-        azimuths = np.sort(np.arctan2(du, dv))
-        gaps = np.diff(np.concatenate([azimuths, [azimuths[0] + 2.0 * np.pi]]))
-        assert float(np.degrees(gaps.max())) < 10.0
+
+    near = limb_features['limb_arc:NEAR']
+    assert near.flags.visible_arc_fraction > 0.9  # type: ignore[union-attr]
+    vertices = near.geometry.vertices_vu  # type: ignore[union-attr]
+    dv = vertices[:, 0] - (128.0 + obs.extfov_margin_v)
+    du = vertices[:, 1] - (110.0 + obs.extfov_margin_u)
+    quadrants = {(bool(a), bool(b)) for a, b in zip(dv >= 0, du >= 0, strict=True)}
+    assert quadrants == {(False, False), (False, True), (True, False), (True, True)}, (
+        f'NEAR limb does not surround its center: {sorted(quadrants)}'
+    )
+    # The near limb is a closed circle: azimuth coverage has no gap larger
+    # than a few degrees.
+    azimuths = np.sort(np.arctan2(du, dv))
+    gaps = np.diff(np.concatenate([azimuths, [azimuths[0] + 2.0 * np.pi]]))
+    assert float(np.degrees(gaps.max())) < 10.0
+
+    far = limb_features['limb_arc:FAR']
+    far_fraction = float(far.flags.visible_arc_fraction)  # type: ignore[union-attr]
+    assert far_fraction < 0.55
+    assert far_fraction > 0.25
+    # No surviving FAR vertex sits inside NEAR's silhouette (radius 65 px
+    # at center (128, 110)).
+    far_vertices = far.geometry.vertices_vu  # type: ignore[union-attr]
+    distance_from_near = np.hypot(
+        far_vertices[:, 0] - (128.0 + obs.extfov_margin_v),
+        far_vertices[:, 1] - (110.0 + obs.extfov_margin_u),
+    )
+    assert float(distance_from_near.min()) > 64.0

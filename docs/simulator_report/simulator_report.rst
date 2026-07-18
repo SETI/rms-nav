@@ -632,12 +632,16 @@ cannot close, it is recorded here rather than force-fitted:
    shines.  Simulated star-technique success on body-crossing fields is
    therefore optimistic: real frames lose stars behind dark limbs that
    simulated frames keep.
-2. **Occluded limbs claim full reliability.**  In mutual-event scenes the
-   simulated body model emits its limb arc with full
-   ``visible_arc_fraction`` and reliability even where another body
-   occludes it; the occlusion is recorded in the scene truth but does not
-   yet reduce the emitted feature's claim.  Pending the recalibration
-   pass, mutual-event confidences remain provisional.
+2. **Disc templates ignore body-body occlusion.**  The simulated limb and
+   terminator arcs are occlusion-aware: vertices hidden behind an
+   explicitly nearer sibling body are dropped from the emitted polylines
+   and ``visible_arc_fraction`` reports the loss, so a mutual-event limb
+   scores like the partial arc it is.  The ``BODY_DISC`` correlation
+   template, however, still renders each body in isolation: at deep
+   overlap the far body's template contains disc area the image does not
+   show, a coherent mismatch the correlator's robust machinery absorbs
+   rather than discounts.  The mutual-event scenes pin the measured
+   (accurate) outcomes; an occlusion-aware disc template remains open.
 3. **Calibrated-product quantization scars.**  The sim's calibrated path
    retains full LSB quantization texture: its measured sky-noise floor is
    ~1 DN-equivalent at every exposure (Cassini CALIB and Voyager GEOMED
