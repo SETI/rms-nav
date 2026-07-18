@@ -1131,18 +1131,26 @@ reference radius and never learns the haze exists, so the soft rendered limb is
 a deliberate model mismatch. A navigator that fits the bright sunward haze ramp
 recovers a small offset toward the sunlit limb whose size tracks the
 phase-dependent apparent limb radius (and the haze parameters) -- the
-``atmosphere`` catalog scenes measure and pin that bias honestly (the
-low-phase ``titan_haze_limb`` scene records a sub-pixel sunward offset at
-medium confidence; the high-phase ``titan_crescent_horns`` scene records the
-low-confidence outcome that follows when the ring of light defeats disc
-correlation -- and that fused answer lands tens of pixels from the truth,
-the exact value a noise-realization artifact, which is exactly why the
-scene pins the tier rather than the offset. Its noiseless sibling
-``titan_crescent_horns_noiseless`` -- Poisson and read noise off, the same
-haze and phase geometry -- pins the systematic failure itself
-deterministically: the fused offset lands about 30 px off in ``du``
-(planted -0.8, recovered 29.17) at the same low tier, so the ring of light
-alone, not the noise, carries the answer that far). The haze evaluation is restricted to the bounding box of the
+``atmosphere`` catalog scenes measure and pin that bias honestly. The
+low-phase ``titan_haze_limb`` scene records a sub-pixel sunward offset (a few
+tenths of a pixel in ``du``) at the medium tier, the limb DT fit and the disc
+correlation agreeing on the haze-lifted limb. At high phase the haze is
+outright hostile: in ``titan_crescent_horns`` (155 deg) the ring of light
+defeats the disc correlation (spurious -- there is no full lit disc), the
+predicted terminator arc is emitted but dropped by the feature reliability
+gate before any technique runs (its honestly computed reliability, capped by
+``sin(155 deg)`` = 0.42, scores 0.26 against the 0.30 ``TERMINATOR_ARC``
+threshold), and the haze-dragged blob centroid alone carries the fused answer:
+a *low-tier success roughly 30 px off* in ``du``. Nothing vetoes that wrong
+answer -- the low tier, at the blob's 0.40 confidence cap, is the only flag --
+so the scene pins the tier and status rather than presenting the outcome as
+safe; the gate margin rests on uncalibrated defaults that the confidence
+recalibration pass will refit, re-landing these expectations. The noiseless
+sibling ``titan_crescent_horns_noiseless`` -- Poisson and read noise off, the
+same haze and phase geometry -- pins the systematic bias itself
+deterministically (planted ``du`` -0.8, recovered 29.17), so the ring of
+light alone, not the noise, carries the answer that far. The haze evaluation
+is restricted to the bounding box of the
 body plus its halo (out to a detached shell's reach), so its cost scales with
 that box rather than the frame, and a body without an ``atmosphere`` block
 renders hard-limbed and byte-for-byte unchanged.
