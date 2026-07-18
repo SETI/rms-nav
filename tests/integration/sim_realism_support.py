@@ -79,15 +79,17 @@ _MAX_STARS_PER_FRAME = 8
 # pooled distribution; vertices are decimated evenly to this count.
 _MAX_PROFILES_PER_FEATURE = 200
 
-# Flat-top (clipped-core) star guard: reject a cutout when at least this
+# Flat-top (plateau-core) star guard: reject a cutout when at least this
 # many pixels of the central 3x3 sit within a relative epsilon of the
-# cutout maximum.  A clipped core shares one value after the ADC ceiling,
-# and a calibration that rescales the frame preserves that equality -- so
-# the plateau test works on cohorts whose calibrated units define no fixed
-# saturation level (CALIB / GEOMED I/F), where the explicit level test
-# cannot run.  An unsaturated PSF core peaks on one pixel (its neighbors
-# sit well below for every catalog kernel), so three-at-max is a clip
-# signature, not a brightness cut.
+# cutout maximum.  A central plateau carries no sub-pixel shape
+# information for the encircled-energy radii, whatever produced it: a
+# clipped core shares one value after the ADC ceiling (and a calibration
+# that rescales the frame preserves that equality, so the test works on
+# cohorts whose calibrated units define no fixed saturation level), and a
+# faint core quantized onto very few output levels can tie the same way
+# (observed on noise-free simulated 8-bit frames, where a 1-2 LSB core
+# ties across the plateau).  Both plateau kinds are rejected; the test is
+# a shape-information guard, not solely a clip signature.
 _FLAT_TOP_MIN_PIXELS = 3
 _FLAT_TOP_REL_EPS = 1e-6
 

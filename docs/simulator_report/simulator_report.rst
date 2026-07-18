@@ -1193,8 +1193,10 @@ background glow the matched sky frames do not model (see the known gaps).
 
 **Voyager ISS** (3 frames, limited).  The GEOMED star frame gives 8 real
 star cutouts (EE50 median 1.22 px) against two simulated ones (EE50
-median 3.46 px, after the flat-top guard rejects the brightest
-quantized simulated core) -- one frame and two noise-dominated cutouts
+median 3.46 px, after the plateau guard rejects the brightest simulated
+core, whose noise-free 8-bit quantization ties its central pixels at 1-2
+LSB -- a quantization plateau with no sub-pixel shape information, not a
+clipped core) -- one frame and two noise-dominated cutouts
 constrain nothing, so the vgiss PSF comparison is *unconstrained*: the
 retained interim sigma stands on its published-range provenance alone,
 not on cohort evidence.  The vidicon read noise was tuned down from its

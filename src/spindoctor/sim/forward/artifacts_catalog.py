@@ -392,8 +392,10 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         # the truly stationary component is only 1e-6) and which the FOM 6
         # split itself counts as transient because sim hot pixels reseed
         # per scene.  Adding a separate cosmic-ray term double-counts the
-        # same measured spikes: 5.4e-4 events/px/s (tried 2026-07-18)
-        # raised the simulated fraction to 2.3e-4 against the 1.2e-4 real.
+        # same measured spikes: two rates were tried 2026-07-18 (1.6e-3
+        # from the raw split, then 5.4e-4 refit excluding star frames);
+        # even the refit raised the simulated fraction to 2.3e-4 against
+        # the 1.2e-4 real.
         # Unblocked by a fixed-position per-detector hot-pixel map, which
         # would free the transient budget for a real radiation term.
         'cosmic_ray_rate_per_sec': 0.0,

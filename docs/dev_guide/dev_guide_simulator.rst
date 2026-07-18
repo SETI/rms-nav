@@ -2523,7 +2523,12 @@ instrument, on seven figures of merit:
    medians are estimator-specific (the 10-90% estimator biases roughly +17%
    at the widest profiles and -6% at the narrowest); both sides run the
    identical estimator, so estimator parity -- not the absolute median --
-   is what makes the comparison fair.
+   is what makes the comparison fair.  One asymmetry survives parity:
+   real-side profile centers inherit the sidecar offset's finite
+   uncertainty and per-star catalog/distortion residuals, while sim-side
+   centers are exact by construction, so misregistration inflates only
+   the real widths and part of any tuned PSF wing may absorb
+   registration error rather than optics.
 4. **Ring edges** -- the same profile machinery along predicted ring-edge
    polylines (Cassini cohort).
 5. **Dynamic range** -- fraction saturated, fraction near the frame floor,
