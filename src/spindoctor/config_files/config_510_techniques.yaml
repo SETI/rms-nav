@@ -355,7 +355,7 @@ techniques:
     # limb-side gradient, and no diagnostic separates a closer result
     # from a farther one.  The L2-regularized fit therefore converges
     # to an honest low plateau (confidence ~0.03-0.05): a terminator
-    # fix cannot pass the ensemble's 0.2 gate on its own or outweigh a
+    # fix cannot pass the ensemble's 0.35 gate on its own or outweigh a
     # calibrated technique, which also ends the uncalibrated-default
     # era in which terminator locks at ~0.7 confidence dragged fused
     # results to their own multi-pixel offsets.  The arc-fraction,
