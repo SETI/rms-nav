@@ -188,7 +188,8 @@ def _mesh_pose_figure() -> None:
 # first sweep value) into the mismatched regime; the recovery-error-vs-mismatch
 # curve is the product.  The floor point is drawn distinctly and labelled.
 _MISMATCH_AXES = [
-    ('psf_limb_mismatch', 'rendered PSF sigma (px)', 'PSF mismatch (limb)'),
+    ('psf_limb_mismatch', 'rendered PSF sigma (px)', 'PSF core mismatch (limb)'),
+    ('psf_limb_wings', 'rendered PSF wing energy fraction', 'PSF wing mismatch (limb)'),
     ('photometric_minnaert_mismatch', 'Minnaert k (1.0 = Lambert)', 'Photometric mismatch (disc)'),
     ('spk_parallax_error', 'planted parallax shift (px)', 'Spacecraft ephemeris'),
     ('differential_smear', 'star trail length (px)', 'Differential smear (stars)'),
@@ -204,10 +205,16 @@ def _mismatch_axes_figure() -> None:
     mismatch parameter.  The zero-mismatch point (equality with the navigator's
     configuration) is drawn as the self-consistency floor -- a bound on
     reproducibility, not accuracy -- and a failed step (the navigability cliff)
-    is annotated on the axis rather than plotted.
+    is annotated on the axis rather than plotted.  The grid is sized to the
+    axis count; any unused trailing panel is hidden.
     """
-    fig, axes = plt.subplots(2, 3, figsize=(13.5, 8.0))
-    for ax, (name, xlabel, title) in zip(axes.ravel(), _MISMATCH_AXES, strict=True):
+    n_cols = 3
+    n_rows = -(-len(_MISMATCH_AXES) // n_cols)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(13.5, 4.0 * n_rows))
+    flat_axes = list(axes.ravel())
+    for ax in flat_axes[len(_MISMATCH_AXES) :]:
+        ax.set_axis_off()
+    for ax, (name, xlabel, title) in zip(flat_axes, _MISMATCH_AXES, strict=False):
         rows = _load(name)
         solved = [
             (r['value'], r['offset_error_px']) for r in rows if r.get('offset_error_px') is not None

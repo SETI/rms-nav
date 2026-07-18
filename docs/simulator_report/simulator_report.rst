@@ -1433,10 +1433,14 @@ the dedicated sweep or the scene class that drives it:
      - Render knob
      - Navigate-side assumption
      - Machinery
-   * - PSF mismatch
+   * - PSF core mismatch
      - ``optics.psf`` sigma broadened
      - pure Gaussian at ``star_psf_sigma``
      - sweep ``psf_limb_mismatch``
+   * - PSF wing mismatch
+     - ``optics.psf`` Moffat wing energy ``w`` raised
+     - pure Gaussian (no wings)
+     - sweep ``psf_limb_wings``
    * - Shape mismatch
      - mesh relief / assumed pose
      - ellipsoid / wrong-pose mesh
@@ -1490,12 +1494,16 @@ the dedicated sweep or the scene class that drives it:
      - not modeled
      - sweep ``artifact_missing_lines`` and ``artifact_sweep`` scene class
 
-Six of these sweeps -- ``psf_limb_mismatch``,
+Seven of these sweeps -- ``psf_limb_mismatch``, ``psf_limb_wings``,
 ``photometric_minnaert_mismatch``, ``spk_parallax_error``,
 ``differential_smear``, ``ring_orbit_error``, and ``atmosphere_haze`` -- each
 begin at a self-consistency floor: their first swept value plants no mismatch,
 so its recovery error is the floor (reproducibility), not accuracy, and the
 curve reads as accuracy only from the second point on.
+
+One PSF render knob remains unswept: the renderer has no pointing-jitter
+kernel, so the PSF-mismatch coverage above is core sigma and wing energy only;
+a jitter axis needs a renderer knob before it can be swept.
 
 Summary
 =======

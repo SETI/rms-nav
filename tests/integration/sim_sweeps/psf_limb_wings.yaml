@@ -1,0 +1,14 @@
+sweep_name: psf_limb_wings
+# PSF wing-mismatch axis (Section 8): the navigator models a pure Gaussian, so
+# any Moffat wing energy in the rendered kernel is unmodeled.  The base scene's
+# kernel is the navigator-matched Gaussian core (sigma 0.54, w = 0 -- the
+# self-consistency floor shared with psf_limb_mismatch); the sweep walks the
+# wing energy fraction w up at fixed core sigma, moving flux from the core into
+# the isotropic Moffat halo (r0 = 2, n = 3).  The halo softens the limb-edge
+# gradient the distance-transform fit aligns to without broadening the core, so
+# the recovered-offset error grows more gently than under core-sigma mismatch.
+# Pinned to BodyLimbNav like the sigma axis.
+base_scene: model_mismatch/psf_limb_body.yaml
+parameters: [optics.psf.w]
+values: [0.0, 0.1, 0.2, 0.4, 0.6]
+technique: BodyLimbNav

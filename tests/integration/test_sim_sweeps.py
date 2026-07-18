@@ -368,6 +368,35 @@ def test_psf_mismatch_degrades_to_cliff() -> None:
     assert rows[-1].status == 'failed'
 
 
+def test_psf_wings_floor_recovers() -> None:
+    """At zero wing energy the kernel is the navigator-matched pure Gaussian."""
+    rows = _rows('psf_limb_wings')
+    assert rows[0].value == 0.0
+    assert rows[0].status == 'success'
+    assert rows[0].offset_error_px is not None
+    assert rows[0].offset_error_px < _RECOVERY_TOLERANCE_PX
+
+
+def test_psf_wings_bias_stays_gentle() -> None:
+    """Unmodeled Moffat wing energy biases the limb gently, without a cliff.
+
+    Unlike the core-sigma axis (whose blur washes the limb gradient out to
+    outright failure), moving up to 60% of the kernel energy into the
+    isotropic wing leaves the core sharp: every step still recovers within
+    tolerance, and the error at the largest wing sits above the floor
+    (measured ~0.08 px -> ~0.14 px).  The axis pins that measured shape --
+    wing mismatch alone does not break the DT limb fit.
+    """
+    rows = _rows('psf_limb_wings')
+    for row in rows:
+        assert row.status == 'success'
+        assert row.offset_error_px is not None
+        assert row.offset_error_px < _RECOVERY_TOLERANCE_PX
+    assert rows[-1].offset_error_px is not None
+    assert rows[0].offset_error_px is not None
+    assert rows[-1].offset_error_px > rows[0].offset_error_px
+
+
 def test_photometric_mismatch_floor_recovers() -> None:
     """Minnaert k=1 is Lambert, so the floor recovers the planted offset."""
     rows = _rows('photometric_minnaert_mismatch')
