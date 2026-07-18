@@ -48,6 +48,18 @@ package); generated artifacts go under `_work/calibration/` (gitignored).
 4. Write the fitted alphas into `config_510_techniques.yaml` (by hand, so
    the YAML comments stay curated), then **re-collect** — fused
    confidences depend on the per-technique alphas.
+
+   What a re-collect can and cannot verify: scene draws are
+   seed-deterministic and a pass-1 technique's diagnostics and errors do
+   not depend on any confidence formula, so pass-over-pass alpha
+   reproduction is *structural* for the pass-1 techniques — reproducing
+   them confirms only that the pipeline is deterministic.  The
+   substantive convergence content of a re-collect is the
+   prior-dependent pass-2 technique (`StarRefineNav`: the pass-1
+   formulas change which priors reach pass 2, so its cohort genuinely
+   re-forms) and the fused quantities the next two steps check (the
+   floors re-solving to ~0 additional, the gate curves re-deriving to
+   the shipped boundaries).
 5. **`fit_floors.py`** — solves each technique's `model_error_floor_px`
    tuning value (#210): the quadrature floor that brings the 2-sigma
    coverage of `sqrt(sigma_reported^2 + floor^2)` to the 2D-Gaussian
