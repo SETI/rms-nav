@@ -1261,8 +1261,8 @@ genuinely unknown orientation testable.
    * - ``planted_offset_limb_mesh``
      - BodyLimbNav (mesh = mesh)
      - (1.43, -0.61) px
-     - (1.26, -0.53) px
-     - 0.19 px
+     - (1.39, -0.60) px
+     - 0.04 px
    * - ``planted_offset_blob_mesh_crescent``
      - BodyBlobNav (mesh, 120 deg)
      - (1.43, -0.61) px
@@ -1271,15 +1271,15 @@ genuinely unknown orientation testable.
    * - ``planted_offset_shapemismatch``
      - full ensemble (predict ellipsoid)
      - (1.43, -0.61) px
-     - (1.99, -0.90) px
-     - 0.63 px
+     - (0.75, -0.61) px
+     - 0.68 px
 
 When the predicted geometry matches the rendered mesh, the mesh disc, mesh limb,
 and mesh crescent recover the planted offset as tightly as their ellipsoid
 counterparts (0.00-0.21 px). The fourth row is the shape-mismatch case: the frame
 renders a mildly irregular mesh but the navigator predicts its smooth
 (ellipsoidal) limit at the same pose, and the body still navigates -- the disc
-correlation aligns the two filled silhouettes and recovers to within
+correlation aligns the two filled silhouettes and recovers to about
 two-thirds of a pixel.
 
 Shape mismatch vs irregularity
