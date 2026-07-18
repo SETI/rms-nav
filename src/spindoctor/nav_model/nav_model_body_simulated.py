@@ -5,9 +5,13 @@ rotation, lighting) rather than from SPICE.  Used by the simulated-image
 GUI to compose synthetic test scenes; the rendered body becomes a
 ``BODY_DISC`` ``NavFeature`` that the standard pipeline can navigate
 against.  A well-resolved low-phase body also emits a ``LIMB_ARC``, and a
-body at appreciable phase emits a ``TERMINATOR_ARC`` -- both with the same
-feature semantics the SPICE-backed ``NavModelBody`` uses, so a sim scene
-exercises the same techniques a real frame would.
+body at appreciable phase emits a ``TERMINATOR_ARC`` -- both matching the
+SPICE-backed ``NavModelBody``'s geometry and gating semantics (polyline
+conventions, emission gates, reliability inputs), so a sim scene exercises
+the same techniques a real frame would.  The per-vertex sigma model is the
+deliberate exception: the real model derives per-vertex sigmas from the
+PSF, limb softness, and albedo terms, while the noise-free sim render
+carries fixed per-vertex values (see ``_TERMINATOR_SIGMA_NORMAL_PX``).
 """
 
 from __future__ import annotations
