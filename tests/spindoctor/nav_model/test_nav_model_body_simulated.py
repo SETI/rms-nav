@@ -658,6 +658,10 @@ def test_occluded_terminator_fraction_drops() -> None:
         for f in model_occ.to_features(bare_nav_context(obs))
         if f.feature_type.name == 'TERMINATOR_ARC'
     )
+    from spindoctor.feature.flags import TerminatorArcFlags
+
+    assert isinstance(occluded.flags, TerminatorArcFlags)
+    assert isinstance(alone.flags, TerminatorArcFlags)
     assert occluded.flags.visible_arc_fraction < alone.flags.visible_arc_fraction - 0.1
 
 
