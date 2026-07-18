@@ -33,14 +33,17 @@ offset_rotation_deg: 0.0
 # honestly computed reliability (visible-arc fraction ~1.0, the albedo penalty,
 # and the sin(155 deg) = 0.42 phase cap) it scores 0.26 against the 0.30
 # TERMINATOR_ARC reliability gate, so BodyBlobNav is the only surviving
-# technique and the fused answer is a low-tier success at the blob's 0.40
-# confidence cap -- roughly 30 px wrong.  This is NOT a designed-safe outcome:
-# no second technique remains to veto the haze-biased blob, the low tier (plus
-# the provisional-confidence marker every sim-anchored result carries) is the
-# only flag, and the deciding margin is thin -- reliability 0.26 vs the 0.30
-# gate, both resting on uncalibrated defaults.  The confidence recalibration
-# pass re-collects terminator rows against these honest inputs and will re-land
-# this scene's expected outcome.
+# technique.  Re-measured 2026-07-18 under the recalibrated formulas (seed
+# 20260718 campaign): the outcome PERSISTS -- a low-tier success at the
+# blob's 0.40 structural cap, ~30 px wrong (measured offset (3.18, 29.26)
+# vs planted (1.2, -0.8), fused sigma 4.25 px).  The recalibration
+# tightened the margin rather than closing the hole: the fused 0.40 now
+# sits 0.05 above the raised 0.35 ensemble gate (previously 0.20), and no
+# second technique remains to veto the haze-biased blob.  This scene is
+# standing ensemble-gap evidence: nothing in the blob's diagnostics can
+# see a systematic photometric bias, so only a cross-technique veto (or a
+# haze-aware blob model) can close it.  The low tier plus the
+# provisional-confidence marker remain the only flags.
 expected:
   status: success
   confidence_tier: low

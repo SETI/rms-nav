@@ -211,22 +211,23 @@ sigmoid combination; see :doc:`dev_guide_techniques_confidence`. Spec is
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
 - :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.predicted_snr` —
-  alpha = 1.295, offset = 0.0, divisor = 100.0, cap at 1.0. Predicted SNR of the brightest
-  catalog star. Higher SNR shrinks the centroid CRLB; saturates at SNR=100 (calibration
-  campaign raw p5/p50/p95 = 9/42/308).
+  alpha = 0.809, offset = 0.0, divisor = 250.0, cap at 1.0. Predicted SNR of the brightest
+  catalog star. Higher SNR shrinks the centroid CRLB; saturates at SNR=250 (calibration
+  campaign raw p5/p50/p95 = 15/85/252 — the sim's flux-normalized star deposit brightens
+  the healthy range, so the divisor spans it).
 - :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.brightness_margin_mag`
-  — alpha = 1.288, offset = 1.5, divisor = 1.5, cap at 1.0. Magnitude margin to the
+  — alpha = 1.002, offset = 1.5, divisor = 1.5, cap at 1.0. Magnitude margin to the
   next-brightest predictable star in the extfov. Below the 1.5 mag floor the 1-star path
   short-circuits before reaching the formula; above the floor, additional margin earns
   confidence up to a 1.5 mag span.
 - :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.residual_px` —
-  alpha = -0.45, offset = 0.0, divisor = 2.0, no cap. Detection-vs-prediction residual.
+  alpha = -0.112, offset = 0.0, divisor = 2.0, no cap. Detection-vs-prediction residual.
   Larger residuals pull confidence down.
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
 confidence to zero before the sigmoid evaluates. The constant baseline is
-:math:`\alpha_{0} = 1.156`. No post-sigmoid ``hard_cap`` is applied at the spec level; the
+:math:`\alpha_{0} = 0.781`. No post-sigmoid ``hard_cap`` is applied at the spec level; the
 per-mode caps above are applied by the technique itself.
 
 Implementation

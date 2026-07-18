@@ -7,9 +7,14 @@ sweep_name: irregularity_shape_mismatch
 # ellipsoidal model cannot remove -- grows monotonically with irregularity, the
 # regime the phase_irregularity_factor term is meant to capture.  The walk runs
 # to 0.7 because the fused confidence is non-monotonic over this mesh
-# realization (it re-saturates around 0.5-0.6 despite a 10+ px bias -- the
-# confidently-wrong regime the sim-anchored recalibration phase exists to fix)
-# and only clearly drops at the top of the walk.
+# realization: it dips through the mid-range and re-saturates to 0.99 from
+# lumpiness 0.5 despite a 10+ px bias.  The 2026-07-18 recalibration measured
+# rather than fixed this: the campaign renders bodies at their published
+# shape-residual relief (lumpiness up to ~0.15), so the fitted formula has no
+# support beyond the physical range and the correlation diagnostics genuinely
+# carry no mismatch signal there -- standing ensemble-gap evidence (the
+# pose-free blob disagrees by pixels at the top of the walk; a cross-technique
+# veto, not a refit, is what could close it).
 base_scene: algorithmic_invariants/planted_offset_shapemismatch.yaml
 parameters: [bodies.0.mesh_lumpiness]
 values: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]

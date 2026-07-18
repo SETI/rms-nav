@@ -257,14 +257,14 @@ def test_derive_confidence_rank_medium_when_sigma_too_large_for_high() -> None:
 
 
 def test_derive_confidence_rank_low() -> None:
-    """Low confidence + any sigma earns the 'low' tier when ≥ 0.2."""
-    rank = derive_confidence_rank(confidence=0.3, sigma_px=(10.0, 10.0))
+    """Low confidence + any sigma earns the 'low' tier when >= 0.35."""
+    rank = derive_confidence_rank(confidence=0.4, sigma_px=(10.0, 10.0))
     assert rank == 'low'
 
 
 def test_derive_confidence_rank_failed_below_threshold() -> None:
-    """Confidence below 0.2 yields 'failed'."""
-    rank = derive_confidence_rank(confidence=0.1, sigma_px=(0.3, 0.3))
+    """Confidence below the 0.35 low-tier boundary yields 'failed'."""
+    rank = derive_confidence_rank(confidence=0.3, sigma_px=(0.3, 0.3))
     assert rank == 'failed'
 
 
@@ -1037,15 +1037,16 @@ def test_ensemble_lone_vs_lone_comparable_confidence_still_conflicts() -> None:
 def test_ensemble_single_inlier_refine_tier_caps_at_medium() -> None:
     """A lone one-inlier refine never earns the high tier.
 
-    The single-inlier confidence cap (0.5) sits exactly on the high
-    tier's min_confidence boundary and the refine's localization sigma
-    is CRLB-tight, so without the guard the result would earn high.
+    The confidence is set above the high tier's min_confidence boundary
+    and the refine's localization sigma is CRLB-tight, so without the
+    single-inlier guard the result would earn high; the guard alone
+    holds it at medium.
     """
     res = _make_result(
         technique_name='StarRefineNav',
         offset=(3.06, -0.02),
         cov=np.eye(2, dtype=np.float64) * 0.01,
-        confidence=0.5,
+        confidence=0.9,
         diagnostics=StarRefineDiagnostics(n_stars_used=1),
     )
     result = ensemble(
@@ -1059,12 +1060,16 @@ def test_ensemble_single_inlier_refine_tier_caps_at_medium() -> None:
 
 
 def test_ensemble_one_star_unique_match_tier_caps_at_medium() -> None:
-    """A lone one-star unique match with tight sigma also tops out at medium."""
+    """A lone one-star unique match with tight sigma also tops out at medium.
+
+    The confidence clears the high tier's 0.85 boundary, so the medium
+    outcome isolates the single-star cap rather than the boundary.
+    """
     res = _make_result(
         technique_name='StarUniqueMatchNav',
         offset=(3.06, -0.02),
         cov=np.eye(2, dtype=np.float64) * 0.01,
-        confidence=0.6,
+        confidence=0.9,
         diagnostics=StarUniqueMatchDiagnostics(mode='one_star'),
     )
     result = ensemble(
@@ -1084,14 +1089,14 @@ def test_ensemble_two_single_star_members_still_cap_at_medium() -> None:
         technique_name='StarUniqueMatchNav',
         offset=(3.06, -0.02),
         cov=cov,
-        confidence=0.5,
+        confidence=0.9,
         diagnostics=StarUniqueMatchDiagnostics(mode='one_star'),
     )
     refine = _make_result(
         technique_name='StarRefineNav',
         offset=(3.10, -0.05),
         cov=cov,
-        confidence=0.5,
+        confidence=0.9,
         diagnostics=StarRefineDiagnostics(n_stars_used=1),
     )
     result = ensemble(
@@ -1132,12 +1137,16 @@ def test_ensemble_single_star_plus_body_technique_keeps_high() -> None:
 
 
 def test_ensemble_multi_star_refine_keeps_high() -> None:
-    """A refine with several inliers is independently constrained; high stays."""
+    """A refine with several inliers is independently constrained; high stays.
+
+    The confidence sits above the high tier's 0.85 boundary so the tier
+    outcome isolates the multi-inlier gate, not the boundary.
+    """
     res = _make_result(
         technique_name='StarRefineNav',
         offset=(3.06, -0.02),
         cov=np.eye(2, dtype=np.float64) * 0.01,
-        confidence=0.7,
+        confidence=0.9,
         diagnostics=StarRefineDiagnostics(n_stars_used=4),
     )
     result = ensemble(

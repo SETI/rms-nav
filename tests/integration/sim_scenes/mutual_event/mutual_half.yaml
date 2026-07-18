@@ -8,12 +8,13 @@ exposure_sec: 1.0
 # Mutual event, half overlap: the near body hides about a third of the far
 # body's disc and over a quarter of its limb (centers 55 px apart).
 # Rendered truth (body_occlusion): FAR visible_fraction ~0.67, occluded limb
-# arc ~100 deg; NEAR fully visible.  Measured ensemble behavior: BOTH
-# techniques stay accurate -- the disc correlation is anchored by the intact
-# NEAR template and the limb fit's robust loss rejects the hidden-arc
-# residuals -- so the fused result remains an accurate success at medium
-# tier rather than degrading to conflicted.  The expected block pins that
-# measured outcome.
+# arc ~100 deg; NEAR fully visible.  Measured ensemble behavior
+# (2026-07-18, occlusion-aware sim limb): FAR's LIMB_ARC drops the hidden
+# arc and reports visible_arc_fraction 0.72 (reliability 0.75); BOTH
+# techniques stay accurate -- the disc correlation is anchored by the
+# intact NEAR template and the limb fit runs on visible arcs only -- so
+# the fused result remains an accurate success at medium tier rather than
+# degrading to conflicted.  The expected block pins that measured outcome.
 bodies:
   - name: FAR
     shape_model: ellipsoid

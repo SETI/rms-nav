@@ -33,9 +33,10 @@ offset_rotation_deg: 0.0
 # roughly 30 px wrong -- no remaining technique vetoes it.  The noiseless twin
 # removes read/Poisson noise as a confound and pins the systematic bias itself
 # deterministically (recovered du ~29.2 vs planted -0.8): the haze alone, not
-# the noise, carries the answer that far.  The margin at the reliability gate
-# is thin and rests on uncalibrated defaults; the confidence recalibration
-# pass will re-land this scene's expected outcome.
+# the noise, carries the answer that far.  Re-measured 2026-07-18 under the
+# recalibrated formulas: the outcome persists (fused 0.40 at the blob's
+# structural cap, now 0.05 above the raised 0.35 ensemble gate), so the
+# scene stands as ensemble-gap evidence alongside its noisy twin.
 expected:
   status: success
   confidence_tier: low

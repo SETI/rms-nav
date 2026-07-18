@@ -241,8 +241,8 @@ The orchestrator-side helpers are:
   Raises :exc:`ValueError` on the first unknown name.
 - :func:`~spindoctor.nav_technique.nav_technique.log_confidence_breakdown` — emits the breakdown at
   DEBUG always, and also at INFO when the calibrated confidence falls at or below a
-  ``low_threshold`` (default 0.1). This is what surfaces "alpha=-0.41 dt_fit_rms_px=8.7
-  contribution=-3.57 drove confidence below the low-confidence threshold" in the
+  ``low_threshold`` (default 0.1). This is what surfaces "alpha=-1.303 dt_fit_rms_px=8.7
+  contribution=-11.34 drove confidence below the low-confidence threshold" in the
   per-image log.
 
 Examples
@@ -283,11 +283,11 @@ processed. The same check fires for unknown
 ``0.85``,
 :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px` ``0.4`` px, and
 :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px` ``120`` px feeds
-the spec ``alpha0 = -2.386``, ``alpha(visible_limb_arc_fraction) = 3.0``,
-``alpha(dt_fit_rms_px) = -0.41``, ``alpha(visible_arc_px / 440, capped at 1) = 1.254``. The
+the spec ``alpha0 = 0.132``, ``alpha(visible_limb_arc_fraction) = 1.068``,
+``alpha(dt_fit_rms_px) = -1.303``, ``alpha(visible_arc_px / 440, capped at 1) = 0.776``. The
 sigmoid argument is
-:math:`-2.386 + 3.0 \cdot 0.85 - 0.41 \cdot 0.4 + 1.254 \cdot (120 / 440) = 0.342`, the
-sigmoid evaluates to approximately ``0.585``, and the technique reports a calibrated
-confidence of ~0.58. When :func:`~spindoctor.nav_technique.nav_technique.log_confidence_breakdown`
+:math:`0.132 + 1.068 \cdot 0.85 - 1.303 \cdot 0.4 + 0.776 \cdot (120 / 440) = 0.730`, the
+sigmoid evaluates to approximately ``0.675``, and the technique reports a calibrated
+confidence of ~0.67. When :func:`~spindoctor.nav_technique.nav_technique.log_confidence_breakdown`
 fires, every term's raw / normalised / contribution numbers appear in the per-image log so an
 operator can trace which diagnostic carried the score.

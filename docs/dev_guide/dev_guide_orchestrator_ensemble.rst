@@ -204,9 +204,12 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.conflicted_confidence_multiplier` —
   float, default ``0.3``. Additional multiplier when the conflicted branch fires.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.min_confidence` — float, default
-  ``0.2``. Final-result threshold below which the ensemble returns
+  ``0.35``. Final-result threshold below which the ensemble returns
   :meth:`~spindoctor.nav_orchestrator.nav_result.NavResult.failed` instead of
-  :meth:`~spindoctor.nav_orchestrator.nav_result.NavResult.success`.
+  :meth:`~spindoctor.nav_orchestrator.nav_result.NavResult.success`. The calibration
+  campaign's fused fit rate (error at most 3 px) measures 0.35-0.40 in the 0.10-0.15
+  confidence bands and 0.89 at 0.35, with almost no probability mass in between, so the
+  gate takes the measured upper edge of that crossing.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.pinvh_rcond` — float, default
   ``1.0e-9``. Cutoff for :func:`scipy.linalg.pinvh`.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.max_allowed_rotation_deg` — float,
@@ -216,12 +219,20 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
   :class:`~spindoctor.support.exceptions.NavContractError`.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.tier_thresholds` — mapping
   ``rank -> {min_confidence, max_sigma_px}``; default thresholds give ``'high'`` for
-  confidence at or above 0.5 with sigma at most 0.5 px, ``'medium'`` for confidence at
-  or above 0.2 with sigma at most 2.0 px, and ``'low'`` for confidence at or above 0.2
-  with no sigma cap. The tiers are sigma-differentiated: with calibrated covariances the
-  ``max_sigma_px`` gate carries most of the discrimination, so the ``'medium'`` and
-  ``'low'`` confidence floors rest at the same value. The Step 7 tier caps apply on top
-  of these thresholds.
+  confidence at or above 0.85 with sigma at most 0.5 px, ``'medium'`` for confidence at
+  or above 0.35 with sigma at most 2.0 px, and ``'low'`` for confidence at or above 0.35
+  with no sigma cap. Each tier boundary is the smallest confidence at which the tier's
+  sigma-gated subset achieves a 0.9 success rate against the tier's own error budget on
+  the calibration campaign (the ``max_sigma_px`` values are the tier definitions, not
+  fitted); the high boundary sits at 0.85 because the campaign's ring family plants
+  per-feature orbit errors that produce tight-sigma, confidently-wrong locks in the
+  0.55-0.80 band, failure mass no ring diagnostic can see. The tiers are
+  sigma-differentiated: with calibrated covariances the ``max_sigma_px`` gate carries
+  most of the discrimination, so the ``'medium'`` and ``'low'`` confidence floors rest
+  at the same value as the final ``min_confidence`` gate. A structural consequence:
+  the two-star and one-star confidence caps (0.8 / 0.7) sit below the high boundary,
+  so capped star locks top out at medium regardless of quality. The Step 7 tier caps
+  apply on top of these thresholds.
 
 Implementation
 ==============

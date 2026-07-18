@@ -603,11 +603,15 @@ are recorded in the summary JSON (``fom7_rows``).  Headline reading of the
   WAC and LORRI star pairs, with the simulated inlier residuals tighter
   than the real ones (0.02-0.05 px vs 0.09-0.33 px) -- the sim errs
   optimistic on star sharpness.
-- The Cassini ring pair is indistinguishable: ``RingEdgeNav`` reports
-  0.952 confidence on both the real frame and its matched render.
+- The Cassini ring pair separates on residual texture: ``RingEdgeNav``
+  reports 0.71 on the real frame versus 0.94 on its matched render.
+  The real frame's ring structure the renderer does not model leaves a
+  ~28 px mean per-edge DT residual (the matched render fits to ~1.5 px),
+  and the ring-vocabulary calibration prices that residual, so the sim
+  errs optimistic on ring-scene sharpness.
 - The limb pairs split: on the NAC pair both sides succeed (0.77 real vs
-  0.81 sim) with the simulated DT residual three times the real one;
-  on the WAC pair the real limb fit succeeds at 0.83 while the matched
+  0.65 sim) with the simulated DT residual three times the real one;
+  on the WAC pair the real limb fit succeeds at 0.76 while the matched
   simulated result is discarded by its own ensemble.
 - The NAC star pair inverts: the real frame's field lock fails (3
   inliers; a known caveat of that cohort frame) while its matched render
@@ -632,12 +636,16 @@ cannot close, it is recorded here rather than force-fitted:
    shines.  Simulated star-technique success on body-crossing fields is
    therefore optimistic: real frames lose stars behind dark limbs that
    simulated frames keep.
-2. **Occluded limbs claim full reliability.**  In mutual-event scenes the
-   simulated body model emits its limb arc with full
-   ``visible_arc_fraction`` and reliability even where another body
-   occludes it; the occlusion is recorded in the scene truth but does not
-   yet reduce the emitted feature's claim.  Pending the recalibration
-   pass, mutual-event confidences remain provisional.
+2. **Disc templates ignore body-body occlusion.**  The simulated limb and
+   terminator arcs are occlusion-aware: vertices hidden behind an
+   explicitly nearer sibling body are dropped from the emitted polylines
+   and ``visible_arc_fraction`` reports the loss, so a mutual-event limb
+   scores like the partial arc it is.  The ``BODY_DISC`` correlation
+   template, however, still renders each body in isolation: at deep
+   overlap the far body's template contains disc area the image does not
+   show, a coherent mismatch the correlator's robust machinery absorbs
+   rather than discounts.  The mutual-event scenes pin the measured
+   (accurate) outcomes; an occlusion-aware disc template remains open.
 3. **Calibrated-product quantization scars.**  The sim's calibrated path
    retains full LSB quantization texture: its measured sky-noise floor is
    ~1 DN-equivalent at every exposure (Cassini CALIB and Voyager GEOMED
@@ -788,28 +796,28 @@ disc and star scenes.
    * - ``planted_offset_irregular``
      - BodyDiscCorrelateNav (mesh)
      - (1.43, -0.61) px
-     - (1.43, -0.62) px
-     - 0.01 px
+     - (1.43, -0.61) px
+     - 0.00 px
    * - ``planted_offset_blob``
      - BodyBlobNav
      - (1.43, -0.61) px
-     - (1.42, -0.62) px
-     - 0.02 px
+     - (1.50, -0.60) px
+     - 0.07 px
    * - ``planted_offset_blob_crescent``
      - BodyBlobNav (120 deg)
      - (1.43, -0.61) px
-     - (1.24, -0.59) px
-     - 0.19 px
+     - (1.21, -0.53) px
+     - 0.23 px
    * - ``planted_offset_star_field``
      - StarField + UniqueMatch + Refine
      - (1.43, -0.61) px
-     - (1.32, -0.65) px
-     - 0.12 px
+     - (1.45, -0.58) px
+     - 0.04 px
    * - ``planted_offset_limb``
      - BodyLimbNav
      - (1.43, -0.61) px
-     - (1.40, -0.66) px
-     - 0.06 px
+     - (1.50, -0.60) px
+     - 0.07 px
    * - ``planted_offset_ring``
      - RingEdgeNav
      - (1.43, -0.61) px
@@ -826,10 +834,10 @@ Observations:
 * All scenes plant the **same** off-grid offset ``(1.43, -0.61)`` px, so the
   per-technique errors are at one common sub-pixel phase and directly comparable.
   Every technique recovers well within the 1.0 px (and third-of-a-degree) bound.
-* At this phase the mesh disc and ring edge recover to ~0.01 px, the blob to
-  ~0.02 px, the limb to ~0.06 px, and the disc to ~0.07 px; the fused star field
-  to ~0.12 px.
-* The high-phase blob crescent (~0.19 px at 120 deg) is the hardest case: only a
+* At this phase (2026-07-18 measurement) the mesh disc recovers exactly, the
+  ring edge to ~0.01 px, the fused star field to ~0.04 px, and the disc, blob,
+  and limb scenes to ~0.07 px.
+* The high-phase blob crescent (~0.23 px at 120 deg) is the hardest case: only a
   thin lit crescent constrains the centroid. It still recovers sub-pixel.
 * These are single-phase samples, so a given technique can sit above or below its
   multi-offset median in the offset-accuracy section (e.g. the disc's ~0.07 px here
@@ -876,12 +884,12 @@ cliff:
      - BodyDiscCorrelateNav
    * - 16
      - success
-     - 0.00 px
+     - 0.01 px
      - 0.75
      - BodyDiscCorrelateNav
    * - 32
      - success
-     - 0.00 px
+     - 0.01 px
      - 0.75
      - BodyDiscCorrelateNav
    * - 64
@@ -913,8 +921,8 @@ Varying ``bodies.0.phase_angle`` across the full range on the resolved sphere:
    * - 0
      - success
      - 0.00 px
-     - 0.40
-     - BodyBlobNav
+     - 0.75
+     - BodyDiscCorrelateNav
    * - 30
      - success
      - 0.00 px
@@ -937,18 +945,18 @@ Varying ``bodies.0.phase_angle`` across the full range on the resolved sphere:
      - BodyDiscCorrelateNav
    * - 150
      - success
-     - 0.00 px
-     - 0.65
+     - 0.01 px
+     - 0.62
      - BodyDiscCorrelateNav
 
 The resolved body navigates to success at every phase and recovers the planted
 offset to within ~0.01 px throughout. The disc correlation holds its accuracy as
 the terminator sweeps across the lit disc -- the gradient-domain matched filter
 keys on the sunward limb, which stays a sharp, well-defined feature at every
-phase -- so there is no mid-phase accuracy penalty. At zero phase the blob's
-lit-weighted centroid wins the technique selection outright: a fully-lit disc has
-no correlation-gradient advantage for the disc to exploit. From 30 deg onward the
-disc carries the frame.
+phase -- so there is no mid-phase accuracy penalty. The disc correlation carries
+the frame at every step, including zero phase (where the blob centroid agrees but
+its 0.40 structural cap keeps it the secondary), with confidence easing from 0.75
+toward 0.62 as the shrinking lit fraction softens the correlation diagnostics.
 
 Body-size (range) sweep
 -----------------------
@@ -967,9 +975,9 @@ This is the technique ladder the range regime is meant to exercise:
      - Primary technique
    * - 130
      - success
-     - 0.01 px
+     - 0.02 px
      - 0.99
-     - BodyLimbNav
+     - BodyDiscCorrelateNav
    * - 90
      - success
      - 0.00 px
@@ -1007,11 +1015,14 @@ This is the technique ladder the range regime is meant to exercise:
      - --
 
 The primary technique transitions cleanly as resolution falls: a well-resolved
-body (130 px) is navigated by the limb fit; a mid-size body by the disc
-correlation; a small body (6-20 px) falls to the orientation-free blob
-centroid; and the smallest body (4 px, below the 5 px ``BODY_BLOB`` emission
-floor) is unnavigable. Every navigable step recovers the planted offset
-exactly. This transition is the sim's most direct verification that the
+body (130 px) fuses the limb fit with the disc correlation at 0.99 combined
+confidence (the disc ranks primary -- with the 2.61 px limb model-error floor
+priced into its covariance, the limb corroborates the fuse rather than leading
+it); a mid-size body is carried by the disc correlation alone; a small body
+(6-20 px) falls to the orientation-free blob centroid; and the smallest body
+(4 px, below the 5 px ``BODY_BLOB`` emission floor) is unnavigable. Every
+navigable step recovers the planted offset to within a few hundredths of a
+pixel. This transition is the sim's most direct verification that the
 orchestrator selects the right technique for the available resolution.
 
 Offset accuracy by technique
@@ -1285,17 +1296,24 @@ term is meant to capture.
 
    Recovered-offset error (red) and fused confidence (blue) vs rendered mesh
    lumpiness, with the prediction pinned to the zero-relief limit. The bias grows
-   from ~0.3 px (no mismatch) to ~4 px at heavy relief while the confidence falls
-   from ~0.99 to ~0.71 -- the navigator both mis-locates the body and reports
-   lower confidence as the shape diverges.
+   from ~0.1 px (no mismatch) to ~17 px at extreme relief; the confidence dips
+   through the mid-range (0.70-0.81 at lumpiness 0.2-0.4) and then re-saturates
+   to 0.99 at the top of the walk -- a confidently-wrong regime.
 
-The recovered error grows monotonically with relief (0.33, 0.47, 1.33, 2.17,
-4.02, 4.03 px at lumpiness 0.0 through 0.5) and the fused confidence falls in
-step (0.99 down to 0.71). At low relief the limb fit carries the frame at high
-confidence; from lumpiness 0.2 the primary hands off to the disc correlation,
-which still locks onto the silhouette but drifts with the unmodelled relief --
-exactly the failure the irregular-body confidence penalty must learn to
-distrust. The body keeps navigating to a ``success`` status throughout.
+The recovered error grows monotonically with relief (0.09, 0.68, 3.06, 5.28,
+8.44, 10.87, 13.98, 17.03 px at lumpiness 0.0 through 0.7; 2026-07-18
+measurement) while the fused confidence is non-monotonic: it dips to 0.70-0.81
+in the mid-range and re-saturates to 0.99 from lumpiness 0.5, where the
+correlation diagnostics on a heavily faceted silhouette look as sharp as a
+clean lock. The seed-20260718 calibration campaign renders every body at the
+relief its published shape residual implies (lumpiness up to ~0.15 for the
+catalog's irregulars), so the formula is calibrated only over that physical
+range; beyond it the diagnostics genuinely carry no mismatch signal and the
+sigmoid extrapolates anti-calibrated. This is standing ensemble-gap evidence in
+the same family as the ring's planted orbit error: no disc diagnostic can see
+a coherent shape mismatch, so closing the extreme-relief hole needs a
+cross-technique veto (the pose-free blob disagrees by several pixels here),
+not a refit. The body keeps navigating to a ``success`` status throughout.
 
 Pose disagreement
 -----------------
@@ -1311,13 +1329,13 @@ limb fit:
 
    Pinned-limb recovered-offset error vs the predicted pose's disagreement with
    the true (rendered) pose (a tumble about the body's long axis). The limb keeps
-   returning a fix across the swept range, but its error climbs from 0.27 px at
-   the true pose to 4.2 px at a 45 deg disagreement -- a confidently-wrong limb
-   that does not self-flag here.
+   returning a fix across the swept range, but its error climbs from 0.31 px at
+   a 35 deg disagreement to 4.8 px at 110 deg -- a confidently-wrong limb that
+   does not self-flag here.
 
-The limb error climbs monotonically from 0.27 px at the true pose to 4.2 px at a
-45 deg tumble, all the while still reporting ``success`` at ~0.76 confidence: it
-does not self-flag in this range. A wrong in-plane roll degrades it far more
+The limb error climbs monotonically from 0.31 px at a 35 deg tumble to 4.8 px at
+110 deg (2026-07-18 measurement), all the while still reporting ``success`` at
+0.55-0.61 confidence: it does not self-flag in this range. A wrong in-plane roll degrades it far more
 sharply -- tens of pixels, and there it does self-flag spurious. The pose-free
 blob centroid, by contrast, stays accurate on the same wrong-pose body, because a
 centrally-symmetric (low-relief triaxial) body's lit-weighted centroid barely
@@ -1343,19 +1361,19 @@ and the separability floor:
      - --
      - collapses to 0 (spurious)
    * - 0.5 deg
-     - 0.05 deg
+     - 0.03 deg (conflicted)
      - collapses to 0 (spurious)
    * - 0.75 deg
      - --
      - 0.69 deg (partial)
    * - 1.0 deg
-     - 0.01 deg
+     - 0.00 deg
      - 1.04 deg
    * - 1.5 deg
-     - 0.01 deg
+     - 0.02 deg
      - 1.51 deg
    * - 2.0 deg
-     - 0.12 deg
+     - 0.01 deg
      - 1.89 deg
 
 A small roll is not separable from a translation. ``StarFieldFromCatalogNav``'s
@@ -1365,8 +1383,12 @@ spurious flag); a fitted roll below the configurable
 the rotation-unobservable sentinel variance and the
 ``rotation_below_separability_floor`` diagnostics flag, never as a confident
 near-zero value.
-The two-star ``StarUniqueMatchNav`` path recovers down to ~0.5 deg, so the *full
-ensemble* recovers the 0.5 deg roll even where the field matcher alone does not.
+The two-star ``StarUniqueMatchNav`` path recovers down to ~0.5 deg, so at a
+0.5 deg roll the ensemble's roll estimate stays accurate (0.03 deg error) even
+though the fused status reports ``conflicted`` -- the roll-blind and
+roll-solving results disagree about the translation by more than the agreement
+budget, and under the 0.35 acceptance gate that disagreement surfaces instead
+of being averaged away.
 At exactly zero roll no technique reports a rotation. Above ~2-3 deg the inlier
 count falls below quorum. The usable window for the field matcher is therefore
 roughly 0.75-2 deg, widening to ~0.5 deg with the two-star path. See
@@ -1479,7 +1501,7 @@ the dedicated sweep or the scene class that drives it:
      - sweep ``star_catalog_scatter``
    * - Mutual event
      - overlapping bodies
-     - full limbs of both
+     - occlusion-aware limb arcs; isolated disc templates
      - ``mutual_event`` scene class
    * - Atmosphere
      - ``atmosphere`` ``tau_ref`` haze
@@ -1527,13 +1549,15 @@ Summary
 * The sweeps show the expected qualitative behaviour: navigation degrades to a
   clean failure past the noise cliff, the resolved body recovers across the full
   phase range with no mid-phase accuracy penalty, and the primary technique walks
-  the limb -> disc -> blob ladder as a body shrinks.
+  from the limb-corroborated disc fuse on a well-resolved body through the disc
+  alone to the blob as a body shrinks.
 * A small camera roll is not separable from a translation: the field matcher
   recovers rolls only above ~0.75 deg (the two-star fit extends this to ~0.5 deg),
   and the small-body navigation floor (the 5 px ``BODY_BLOB`` emission floor) is
   set by the feature-emission gate, not the centroid algorithm. Navigation is
   unit-agnostic: I/F frames navigate identically to raw DN.
 * The confidence column reflects the sim-calibrated per-technique formulas
-  (limb ~0.99, disc ~0.65-0.77, blob capped at 0.40 on clean frames); the report
-  verifies the recovered geometry and the technique selection, while tier
-  behaviour on real frames is validated against the operator-curated library.
+  (seed-20260718 campaign: the limb-corroborated fuse ~0.99, disc ~0.62-0.75,
+  blob capped at 0.40 on clean frames); the report verifies the recovered
+  geometry and the technique selection, while tier behaviour on real frames is
+  validated against the operator-curated library.

@@ -9,14 +9,17 @@ exposure_sec: 1.0
 # 15 px off the far body's center hides almost all of it.  Rendered truth
 # (body_occlusion): FAR visible_fraction ~0.09, occluded limb arc ~206 deg
 # (over half the limb circle); NEAR fully visible.  Measured ensemble
-# behavior: the navigator still predicts BOTH full limbs (the far body's
-# hidden arc is model error the model does not mask -- its LIMB_ARC still
-# claims visible_arc_fraction 1.0), the joint limb fit keeps ~539 of 708
-# vertices as inliers (the Tukey loss rejects the hidden arc), and both
-# techniques land within ~0.2 px, fusing to an accurate medium-tier
-# success.  No confident-wrong result and no double-counting conflict was
-# observed at any overlap depth; the expected block pins that measured
-# outcome so a regression toward hidden-arc lock-on fails loudly.
+# behavior (2026-07-18, occlusion-aware sim limb): the navigator drops
+# FAR's hidden arc from the predicted polyline -- its idealized view knows
+# NEAR's geometry and explicit nearer range_km -- so FAR's LIMB_ARC
+# reports visible_arc_fraction 0.41 (reliability 0.64) instead of
+# claiming 1.0, the joint limb fit runs on arcs that exist in the image,
+# and both techniques land within ~0.1 px, fusing to an accurate
+# medium-tier success.  FAR's residual terminator arc is occlusion-
+# reduced too (fraction 0.27) and stays below the 0.30 reliability gate.
+# No confident-wrong result and no double-counting conflict was observed
+# at any overlap depth; the expected block pins that measured outcome so
+# a regression toward hidden-arc lock-on fails loudly.
 bodies:
   - name: FAR
     shape_model: ellipsoid

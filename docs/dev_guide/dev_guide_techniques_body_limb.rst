@@ -99,8 +99,10 @@ Sources of uncertainty
 The reported covariance is the Moore-Penrose pseudoinverse of the M-estimator information
 matrix at convergence, scaled by the per-vertex Tukey weights, with the calibrated
 model-error floor added in quadrature to the translation diagonal
-(``add_model_error_floor(cov, model_error_floor_px)`` with the calibrated 0.92 px value —
-the Tukey-weighted DT covariance under-reports the limb model error, and the floor restores
+(``add_model_error_floor(cov, model_error_floor_px)`` with the calibrated 2.61 px value —
+the Tukey-weighted DT covariance under-reports the limb model error, which is dominated by
+physics the fit cannot see: the limb-relief field, albedo texture, and non-Lambert shading
+all displace the rendered limb from the smooth predicted silhouette. The floor restores
 the campaign's 2-sigma coverage to the 2-D-Gaussian reference). The covariance
 reflects the *shape* of the cost surface near the minimum and the surviving inlier population;
 it does not capture systematic biases (e.g. an inflation of the per-vertex sigma due to
@@ -186,9 +188,12 @@ All numeric tunables for this technique live in ``techniques.BodyLimbNav.tuning`
   the dominant limb error is the model-vs-image edge offset discussed above, not DT
   quantization, and refining onto the gradient peak sharpens that offset. See
   :doc:`dev_guide_techniques_dt_fitting`.
-- ``model_error_floor_px`` — float, default ``0.92`` px. Calibrated model-error floor
+- ``model_error_floor_px`` — float, default ``2.61`` px. Calibrated model-error floor
   added in quadrature to the covariance's translation diagonal (see "Sources of
-  uncertainty").
+  uncertainty"). The 2026-07-18 calibration campaign measured 2-sigma coverage 0.68 at
+  a 0.92 px floor and 0.86 at this value. The floor sits above the medium tier's 2.0 px
+  sigma cap, so a limb-only fix surfaces as a low-tier result — the honest price of a
+  limb whose position error is set by unmodeled terrain.
 - ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
   distance from any search-window axis bound falls within this tolerance is flagged
   :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`. Matches the bilinear-DT half-cell width.
@@ -215,20 +220,23 @@ combination, see :doc:`dev_guide_techniques_confidence` for the per-term arithme
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` flags carried on the result.
 
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.visible_limb_arc_fraction` —
-  alpha = 3.0, offset = 0.0, divisor = 1.0, no cap.
+  alpha = 1.068, offset = 0.0, divisor = 1.0, no cap.
   Fraction of the polyline (weighted by surviving vertex count across consumed ``LIMB_ARC``
   features) whose vertices were not pre-rejected by the model-side shadow / FOV gates. One
-  means every offered vertex is usable.
-- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px` — alpha = -0.41,
+  means every offered vertex is usable. The sim limb reports its honest visible-arc
+  fraction (surviving polyline over the unclipped whole-body silhouette boundary, net of
+  frame clipping and sibling-body occlusion), so the partial-arc penalty is fitted rather
+  than frozen at a design prior (calibration campaign raw p5/p50/p95 = 0.33/0.76/1.0).
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px` — alpha = -1.303,
   offset = 0.0, divisor = 1.0, no cap. Final root-mean-square DT residual after LM
   convergence; smaller is sharper.
-- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px` — alpha = 1.254,
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px` — alpha = 0.776,
   offset = 0.0, divisor = 440.0, cap at 1.0. Total surviving polyline length in pixels,
   capped after normalisation. More polyline earns confidence up to a 440-pixel saturation
-  point (calibration campaign raw p5/p50/p95 = 151/280/440).
+  point (calibration campaign raw p5/p50/p95 = 150/280/433).
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces the confidence to zero before
-the sigmoid is evaluated. The constant baseline is :math:`\alpha_{0} = -2.386`. No post-sigmoid
+the sigmoid is evaluated. The constant baseline is :math:`\alpha_{0} = 0.132`. No post-sigmoid
 ``hard_cap`` is applied.
 
 Implementation
@@ -366,7 +374,7 @@ Examples
     :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` fuses them into a joint
     translation and
     converges to :math:`(\Delta v, \Delta u) = (7.00, -18.00)` px against an operator-verified
-    ground truth of ``(7.03, -18.42)`` px. The technique reports a confidence near 0.24 — the
+    ground truth of ``(7.03, -18.42)`` px. The technique reports a reduced confidence — the
     sigmoid is drawn down by the modest visible-arc length of each limb on its own — but the
     fit is geometrically correct.
 

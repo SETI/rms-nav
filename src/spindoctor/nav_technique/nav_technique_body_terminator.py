@@ -423,6 +423,8 @@ class BodyTerminatorNav(NavTechnique):
                 dt_fit_rms_px=float(result.rms_px),
                 lm_iterations=int(result.iterations),
                 tukey_inlier_count=int(result.inlier_count),
+                mean_phase_angle_factor=mean_phase,
+                mean_albedo_penalty=mean_albedo,
                 secondary_basin_distance_px=secondary_basin_distance_px,
                 secondary_basin_cost_ratio=secondary_basin_cost_ratio,
             )
@@ -430,8 +432,6 @@ class BodyTerminatorNav(NavTechnique):
                 at_edge=at_edge,
                 spurious=bool(spurious),
                 diagnostics=diagnostics,
-                mean_phase_angle_factor=mean_phase,
-                mean_albedo_penalty=mean_albedo,
             )
             assert self.confidence_spec is not None  # set as class attribute
             confidence, breakdown = evaluate_sigmoid_combination(
@@ -496,8 +496,6 @@ class _TerminatorConfidenceContext:
         at_edge: bool,
         spurious: bool,
         diagnostics: BodyTerminatorDiagnostics,
-        mean_phase_angle_factor: float,
-        mean_albedo_penalty: float,
     ) -> None:
         self.at_edge = at_edge
         self.spurious = spurious
@@ -506,8 +504,8 @@ class _TerminatorConfidenceContext:
         self.dt_fit_rms_px = diagnostics.dt_fit_rms_px
         self.lm_iterations = diagnostics.lm_iterations
         self.tukey_inlier_count = diagnostics.tukey_inlier_count
-        self.mean_phase_angle_factor = mean_phase_angle_factor
-        self.mean_albedo_penalty = mean_albedo_penalty
+        self.mean_phase_angle_factor = diagnostics.mean_phase_angle_factor
+        self.mean_albedo_penalty = diagnostics.mean_albedo_penalty
 
 
 def _aggregate_visible_arc_fraction(features: list[NavFeature]) -> float:

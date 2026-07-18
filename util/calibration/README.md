@@ -48,6 +48,18 @@ package); generated artifacts go under `_work/calibration/` (gitignored).
 4. Write the fitted alphas into `config_510_techniques.yaml` (by hand, so
    the YAML comments stay curated), then **re-collect** — fused
    confidences depend on the per-technique alphas.
+
+   What a re-collect can and cannot verify: scene draws are
+   seed-deterministic and a pass-1 technique's diagnostics and errors do
+   not depend on any confidence formula, so pass-over-pass alpha
+   reproduction is *structural* for the pass-1 techniques — reproducing
+   them confirms only that the pipeline is deterministic.  The
+   substantive convergence content of a re-collect is the
+   prior-dependent pass-2 technique (`StarRefineNav`: the pass-1
+   formulas change which priors reach pass 2, so its cohort genuinely
+   re-forms) and the fused quantities the next two steps check (the
+   floors re-solving to ~0 additional, the gate curves re-deriving to
+   the shipped boundaries).
 5. **`fit_floors.py`** — solves each technique's `model_error_floor_px`
    tuning value (#210): the quadrature floor that brings the 2-sigma
    coverage of `sqrt(sigma_reported^2 + floor^2)` to the 2D-Gaussian
@@ -84,10 +96,23 @@ package); generated artifacts go under `_work/calibration/` (gitignored).
        --workers 8 --out _work/calibration/library_crosscheck.md
    ```
 
+   The seed-20260718 campaign's cross-check record is tracked in
+   `CAMPAIGN_20260718.md` (this directory): 75 sidecars -- status
+   69/75, tier 46/75, offset-within-slack 54/61, zero pipeline
+   exceptions -- with per-frame attribution for every flip (the
+   dominant confusions are high->medium under the 0.85 high-tier
+   boundary and medium->low under the 2.61 px limb floor), the
+   W1444747627 single-frame diagnosis, and the CI-gate consequence:
+   the sidecar tier expectations predate the recalibration, the
+   historical failure-set gate no longer applies as-is, and a sidecar
+   re-ratchet is an operator decision.
+
 ## Campaign timing baseline
 
-Reference throughput for the collection campaign, measured 2026-07-15 at
-commit 2b7dd8c:
+Reference throughput for the collection campaign, measured 2026-07-18 on
+the full-truth-axis renderer (campaign seed 20260718; body families
+drawing the surface / photometric truth axes and the giant-planet
+disc-texture slice):
 
 ```bash
 source setup.sh
@@ -97,10 +122,11 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
     --per-family 600 --workers 14 --out _work/calibration/rows.jsonl
 ```
 
-Result: 4200 rows, 0 errors, elapsed (real) **7m13.7s** (user 93m08.7s,
-sys 7m39.1s).  Machine: i9-13900K with logical CPUs 10-11 excluded by
-`setup.sh`, under moderate concurrent load (one agent running occasional
-tests).
+Result: 4200 rows, 0 errors, elapsed (real) **7m20-24s** across three
+passes (user ~94-95m, sys ~8m).  Machine: i9-13900K with logical CPUs
+10-11 excluded by `setup.sh`.  The previous renderer measured 7m13.7s
+(2026-07-15) with the same command, so the truth axes cost ~1.5% --
+well inside the 2x budget below.
 
 Notes on reproducing the measurement:
 
@@ -128,8 +154,9 @@ ordering, not per-technique reliability; they are retained, not fitted.
 ## Caveats
 
 - **Sim-anchored basis.** Every value fitted here is only as real as
-  the simulator's match to real images, which has not been quantified
-  yet.  `confidence_provisional` stays true
+  the simulator's match to real images -- quantified per instrument in
+  the simulator report's realism-match section, but not yet
+  real-anchored.  `confidence_provisional` stays true
   in the metadata until a real-anchored calibration lands.
 - The scene families cover the sim's rendering vocabulary; regimes the
   sim cannot render (real PSF wings, saturation bloom on stars,
