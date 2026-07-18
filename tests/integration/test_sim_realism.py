@@ -81,6 +81,21 @@ def test_matched_limb_scene_tracks_diameter_and_phase() -> None:
     assert body['phase_angle'] == pytest.approx(17.7)
 
 
+def test_matched_ring_body_tracks_diameter_and_phase() -> None:
+    """The ring_plus_body moon mirrors the real body's scale and phase.
+
+    The cohort's ring frames carry small moons at every phase; a
+    fixed-size fixed-phase body would land the sim widths in a different
+    FOM 3 stratum than the matched real body's.
+    """
+    scene = matched_scene(
+        'N2', 'ring_plus_body', 'coiss_calib_nac', 0.68, diameter_px=55.0, phase_angle_deg=126.3
+    )
+    body = scene['bodies'][0]
+    assert body['axis1'] == pytest.approx(55.0)
+    assert body['phase_angle'] == pytest.approx(126.3)
+
+
 def test_sim_side_extraction_is_deterministic() -> None:
     """Two extractions of one matched record produce identical samples."""
     record = FrameRecord(

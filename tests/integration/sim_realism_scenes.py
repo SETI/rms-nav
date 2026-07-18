@@ -200,6 +200,8 @@ def ring_scene(
     *,
     curved: bool,
     with_body: bool,
+    diameter_px: float = 150.0,
+    phase_angle_deg: float = 45.0,
 ) -> dict[str, Any]:
     """A matched ring frame: three sharp-edged features around an annulus.
 
@@ -210,6 +212,13 @@ def ring_scene(
         curved: True for an open (curved-edge) geometry, False for a
             shallow opening whose edges cross the frame nearly straight.
         with_body: Add a central body (the ring_plus_body class).
+        diameter_px: The real body's predicted apparent diameter for the
+            ``with_body`` case.  The cohort's ring_plus_body frames carry
+            small moons at every phase, and a fixed-size body would place
+            the sim widths in a different FOM 3 stratum than the matched
+            real body's.
+        phase_angle_deg: The real frame's phase angle for the ``with_body``
+            case (same stratification argument).
     """
     seed = _seed_for(image_id)
     scene = _base_scene(f'realism_ring_{image_id}', instrument, exposure_sec, seed, size_vu)
@@ -270,16 +279,17 @@ def ring_scene(
         ],
     }
     if with_body:
+        axis = max(40.0, float(diameter_px))
         scene['bodies'] = [
             {
                 'name': 'REALISM_PLANET',
                 'center_v': center_v,
                 'center_u': center_u,
-                'axis1': round(90.0 * scale, 1),
-                'axis2': round(90.0 * scale, 1),
-                'axis3': round(90.0 * scale, 1),
+                'axis1': axis,
+                'axis2': axis,
+                'axis3': axis,
                 'illumination_angle': 0.0,
-                'phase_angle': 30.0,
+                'phase_angle': float(min(max(phase_angle_deg, 0.0), 179.0)),
                 # Same content-matching choice as the limb scenes: airless
                 # bodies shade Lommel-Seeliger, and a Lambert ramp would
                 # masquerade as limb softness in the FOM 3 widths.
@@ -311,10 +321,11 @@ def matched_scene(
         size_vu: The real frame's (v, u) shape; the matched frame renders
             at the same size so floor and coverage statistics compare the
             same scene geometry.
-        diameter_px: Real body's apparent diameter for limb classes (from
-            the navigator's model metadata; the default covers frames
-            where no body model could be built).
-        phase_angle_deg: Real frame's phase angle for limb classes.
+        diameter_px: Real body's apparent diameter for the limb classes
+            and ring_plus_body (from the navigator's model metadata; the
+            default covers frames where no body model could be built).
+        phase_angle_deg: Real frame's phase angle for the limb classes
+            and ring_plus_body.
 
     Returns:
         A validated scene mapping.
@@ -342,6 +353,8 @@ def matched_scene(
             size_vu,
             curved=scene_class != 'ring_only_flat',
             with_body=scene_class == 'ring_plus_body',
+            diameter_px=diameter_px,
+            phase_angle_deg=phase_angle_deg,
         )
     else:
         scene = sky_scene(image_id, instrument, exposure_sec, size_vu)
