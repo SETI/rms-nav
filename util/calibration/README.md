@@ -131,8 +131,9 @@ ordering, not per-technique reliability; they are retained, not fitted.
 ## Caveats
 
 - **Sim-anchored basis.** Every value fitted here is only as real as
-  the simulator's match to real images, which has not been quantified
-  yet.  `confidence_provisional` stays true
+  the simulator's match to real images -- quantified per instrument in
+  the simulator report's realism-match section, but not yet
+  real-anchored.  `confidence_provisional` stays true
   in the metadata until a real-anchored calibration lands.
 - The scene families cover the sim's rendering vocabulary; regimes the
   sim cannot render (real PSF wings, saturation bloom on stars,
