@@ -249,12 +249,14 @@ sigmoid combination; see :doc:`dev_guide_techniques_confidence`. The formula spe
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.ncc_peak` — alpha = 0.123,
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.ncc_peak` — alpha = 0.051,
   offset = 6.0, divisor = 14.0, cap at 1.0. PSR-style quality measure of the chosen NCC
-  peak. The calibration campaign's raw p5/p50/p95 is 6.3/9.6/19.9, so the offset-6
-  divisor-14 transform spans that range in [0, 1].
+  peak. The calibration campaign's raw p5/p50/p95 is 6.2/9.9/20.5, so the offset-6
+  divisor-14 transform spans that range in [0, 1]. The fitted weight is small: with
+  textured and banded discs in the cohort a sharp peak no longer separates success from
+  failure — the peak-to-runner-up ratio and consistency carry the discrimination.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_ratio` —
-  alpha = -1.159, offset = 0.0, divisor = 1.0, no cap. Pyramid-level consistency
+  alpha = -1.365, offset = 0.0, divisor = 1.0, no cap. Pyramid-level consistency
   normalized by the per-image diameter-scaled spurious threshold: a ratio below 1.0 means
   the result is within budget, and a ratio of exactly 1.0 sits at the spurious edge, where
   the term contributes its full negative alpha to the sigmoid argument. Using the ratio
@@ -263,14 +265,15 @@ sigmoid combination; see :doc:`dev_guide_techniques_confidence`. The formula spe
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.body_count` — alpha = 0.4,
   offset = 0.0, divisor = 3.0, cap at 1.0. Number of ``BODY_DISC`` features fused into the
   composite. More bodies sharpen the joint geometric constraint up to a 3-body saturation.
+  Not identifiable in the single-body sim campaign; retained at the design prior.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.peak_to_runner_up_ratio` —
-  alpha = 1.187, offset = 0.0, divisor = 2.0, cap at 1.0. Ratio of the winning peak's
+  alpha = 1.121, offset = 0.0, divisor = 2.0, cap at 1.0. Ratio of the winning peak's
   quality to the next-best peak outside the exclusion radius.
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
 confidence to zero before the sigmoid evaluates. The constant baseline is
-:math:`\alpha_{0} = 0.377`. No post-sigmoid ``hard_cap`` is applied.
+:math:`\alpha_{0} = 0.429`. No post-sigmoid ``hard_cap`` is applied.
 
 Implementation
 ==============

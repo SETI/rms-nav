@@ -107,7 +107,7 @@ Sources of uncertainty
 
 The reported covariance is the Moore-Penrose pseudoinverse of the M-estimator information
 matrix at convergence, scaled by the per-vertex Tukey weights, with the calibrated
-``model_error_floor_px`` (0.92 px) added in quadrature to the translation diagonal.
+``model_error_floor_px`` (4.32 px) added in quadrature to the translation diagonal.
 It does not capture
 systematic biases (an under-modelled per-body albedo gradient propagates straight into the
 covariance) and it does not capture model-side uncertainty in the SPICE prediction itself.
@@ -167,12 +167,13 @@ All numeric tunables for this technique live in ``techniques.BodyTerminatorNav.t
 - ``lm_tikhonov_alpha`` — float, default ``0.0`` (dimensionless). Tikhonov anchor strength
   toward the coarse-NCC seed; 0 disables the anchor (the trust region is the harder
   bound).
-- ``model_error_floor_px`` — float, default ``0.92`` px. Model-error floor added in
-  quadrature to the covariance's translation diagonal. Copied from ``BodyLimbNav``'s
-  calibrated value: the sim emits no terminator arcs to calibrate against, and a
-  terminator is a strictly softer edge than a limb fitted by the same DT machinery, so the
-  limb's floor is a lower bound. The two scalars are not linked; refitting the limb floor
-  must revisit this one.
+- ``model_error_floor_px`` — float, default ``4.32`` px. Model-error floor added in
+  quadrature to the covariance's translation diagonal, solved on the technique's own
+  calibration-campaign rows: the DT fit's reported sigma (~1.2 px) sits far below its
+  actual recovery error (median 5.2 px), so the floor carries nearly all of the honest
+  uncertainty. The campaign measured 2-sigma coverage 0.04 before flooring and 0.87
+  after. A terminator fix is therefore always a low-tier result, consistent with its
+  fallback-only ensemble role.
 - ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
   distance from any search-window axis bound falls within this tolerance is flagged
   :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`. Matches the
@@ -211,28 +212,40 @@ attributes off :class:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagn
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` flags.
 
+The spec is fitted against the simulated-scene calibration campaign, whose terminator rows
+are single-class: zero of 116 usable rows recovered within 1 px (median error 5.2 px,
+p5 2.6 px). On randomized crescents the DT fit settles several pixels from the planted
+truth, systematically toward the bright limb-side gradient, and no diagnostic separates a
+closer result from a farther one, so the L2-regularized fit converges to an honest low
+plateau (confidence ~0.03-0.05): a terminator fix cannot pass the ensemble's 0.35 gate on
+its own or outweigh a calibrated technique. The arc-fraction, arc-length, and phase terms
+are sign-bounded to zero by the single-class rows (no success mass to reward); they stay
+wired for a future real-anchored calibration.
+
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.visible_terminator_arc_fraction`
-  — alpha = 2.0, offset = 0.0, divisor = 1.0, no cap. Vertex-weighted average of the
+  — alpha = 0.0, offset = 0.0, divisor = 1.0, no cap. Vertex-weighted average of the
   per-feature visible-arc fraction across consumed ``TERMINATOR_ARC`` features.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.dt_fit_rms_px` —
-  alpha = -1.0, offset = 0.0, divisor = 1.0, no cap. Final root-mean-square DT residual
+  alpha = -1.533, offset = 0.0, divisor = 1.0, no cap. Final root-mean-square DT residual
   after LM convergence; smaller is sharper.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.visible_arc_px` —
-  alpha = 0.4, offset = 0.0, divisor = 100.0, cap at 1.0. Total surviving polyline length in
-  pixels, capped after normalisation. More polyline earns confidence up to a 100-pixel
-  saturation point.
-- ``mean_phase_angle_factor`` — alpha = 1.0, offset = 0.0, divisor = 1.0, no cap. Mean of
+  alpha = 0.0, offset = 0.0, divisor = 100.0, cap at 1.0. Total surviving polyline length in
+  pixels, capped after normalisation.
+- ``mean_phase_angle_factor`` — alpha = 0.0, offset = 0.0, divisor = 1.0, no cap. Mean of
   :math:`\sin(\phi)` across consumed terminators (read off the per-feature
-  :class:`~spindoctor.feature.flags.TerminatorArcFlags`). High-phase scenes earn confidence; low
-  phase pulls confidence down.
-- ``mean_albedo_penalty`` — alpha = -1.5, offset = 0.0, divisor = 1.0, no cap. Mean of the
+  :class:`~spindoctor.feature.flags.TerminatorArcFlags`).
+- ``mean_albedo_penalty`` — alpha = -0.216, offset = 0.0, divisor = 1.0, no cap. Mean of the
   per-body albedo penalty (read off the per-feature reliability breakdown). High-albedo
   bodies pull confidence down; uniform low-albedo bodies leave it unchanged.
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
 confidence to zero before the sigmoid evaluates. The constant baseline is
-:math:`\alpha_{0} = -1.0`. No post-sigmoid ``hard_cap`` is applied.
+:math:`\alpha_{0} = -1.93`. No post-sigmoid ``hard_cap`` is applied.
+
+The confidence trust label stays provisional even though the technique is sim-fitted: the
+realism match that anchors the calibration basis computed its limb-rise figure of merit on
+the limb side only, so no terminator-side rise-width divergence verdict exists yet.
 
 Implementation
 ==============
@@ -398,8 +411,9 @@ Examples
     :class:`~spindoctor.nav_technique.nav_technique_body_terminator.BodyTerminatorNav` fuses them
     into a joint translation. On this scene the multi-body crescent geometry produces a
     coarse-NCC seed at a wrong local minimum (~31 px off-axis); the LM converges near that
-    seed and reports sub-pixel RMS with most vertices as inliers, scoring high confidence on
-    a wrong answer. The orchestrator's ensemble combine, combined with the limb and disc
-    techniques' agreement around the operator-verified offset
-    :math:`(\Delta v, \Delta u) = (7.03, -18.42)` px, refuses to commit and reports
-    ``status=conflicted``.
+    seed and reports sub-pixel RMS with most vertices as inliers — a clean-looking
+    mis-convergence that no residual metric flags, exactly the failure mode the calibration
+    campaign measured. The calibrated formula holds the result to its low plateau, and the
+    ensemble's fallback-tier supersession drops it in favour of the limb and disc fits,
+    which agree around the operator-verified offset
+    :math:`(\Delta v, \Delta u) = (7.03, -18.42)` px.

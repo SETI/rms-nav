@@ -1144,8 +1144,10 @@ threshold), and the haze-dragged blob centroid alone carries the fused answer:
 a *low-tier success roughly 30 px off* in ``du``. Nothing vetoes that wrong
 answer -- the low tier, at the blob's 0.40 confidence cap, is the only flag --
 so the scene pins the tier and status rather than presenting the outcome as
-safe; the gate margin rests on uncalibrated defaults that the confidence
-recalibration pass will refit, re-landing these expectations. The noiseless
+safe.  Re-measured under the 2026-07-18 recalibration, the outcome persists
+with a thinner margin: the fused 0.40 sits 0.05 above the 0.35 ensemble
+acceptance gate, and the scene stands as ensemble-gap evidence (no blob
+diagnostic can see a systematic photometric bias). The noiseless
 sibling ``titan_crescent_horns_noiseless`` -- Poisson and read noise off, the
 same haze and phase geometry -- pins the systematic bias itself
 deterministically (planted ``du`` -0.8, recovered 29.17), so the ring of

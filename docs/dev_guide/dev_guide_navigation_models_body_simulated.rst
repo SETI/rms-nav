@@ -42,10 +42,11 @@ gates mirror the SPICE-backed :class:`~spindoctor.nav_model.nav_model_body.NavMo
 (a ``sin(phase)`` floor, a minimum vertex count, and the shared
 :func:`~spindoctor.nav_model.nav_model_body.shape_features_suppressed` policy that
 suppresses the terminator of a resolved ``highly_irregular`` body), so a simulated body
-offers the same feature set a real one would. The terminator technique is not yet calibrated against the
-simulated renderer, so a terminator fix stays ``confidence_provisional`` -- the same interim
-marker every sim-anchored confidence carries -- until the recalibration pass re-collects its
-rows.
+offers the same feature set a real one would. The terminator technique is sim-fitted on
+these emissions (2026-07-18 campaign; the fit came out single-class, so its formula is a
+low plateau -- see ``config_510_techniques.yaml``), and a terminator fix stays
+``confidence_provisional``: the realism match has no terminator-side rise-width verdict,
+which is the condition that gates trust in its confidences.
 
 The model overrides :meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs` to build
 one instance per body of a simulated observation; the parent

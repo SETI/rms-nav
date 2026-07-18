@@ -184,16 +184,15 @@ sigmoid combination; see :doc:`dev_guide_techniques_confidence`. The formula spe
   surviving ring-edge polylines. More polyline earns confidence up to a 1500-pixel
   saturation point (calibration campaign raw p5/p50/p95 = 440/762/1552).
 - :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.per_edge_dt_rms_mean` —
-  alpha = 0.0, offset = 0.0, divisor = 1.0, no cap. Mean per-edge final DT RMS value; the
-  mean rather than the raw sum because the sum scales with the number of fused edges, so a
-  fixed divisor would penalise a frame purely for having more rings. The sim calibration
-  fit drives the alpha to its sign bound at 0.0: the campaign's failures are clean-residual
-  wrong-ringlet locks that the residual cannot see, and an unconstrained fit would have
-  given the term a positive (anti-calibrated) weight. Kept wired for a future
-  real-anchored calibration.
+  alpha = -0.023, offset = 0.0, divisor = 1.0, no cap. Mean per-edge final DT RMS value;
+  the mean rather than the raw sum because the sum scales with the number of fused edges,
+  so a fixed divisor would penalise a frame purely for having more rings. The sim
+  calibration fit gives the term only a small negative weight: most of the campaign's
+  failure mass is clean-residual wrong-ringlet locks (multi-ringlet aliasing) that the
+  residual cannot see, so the discrimination rides on edge length and the spurious gates.
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`
-firing forces confidence to zero. The constant baseline is :math:`\alpha_{0} = 1.841`. No
+firing forces confidence to zero. The constant baseline is :math:`\alpha_{0} = 1.998`. No
 post-sigmoid ``hard_cap`` is applied.
 
 Implementation

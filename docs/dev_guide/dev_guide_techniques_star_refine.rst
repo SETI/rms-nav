@@ -161,9 +161,10 @@ All numeric tunables for this technique live in ``techniques.StarRefineNav.tunin
   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.max_rotation_deg` at which the converged rotation magnitude trips :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`. Only the
   multi-inlier Procrustes path uses this threshold; a 1-inlier refine always reports rotation
   as unobservable.
-- ``model_error_floor_px`` — float, default ``0.22`` px. Calibrated model-error floor added
-  in quadrature to the covariance's translation diagonal: the calibration campaign's
-  2-sigma coverage was 0.60 versus the 0.865 reference before flooring, 0.86 after.
+- ``model_error_floor_px`` — float, default ``0.27`` px. Calibrated model-error floor added
+  in quadrature to the covariance's translation diagonal: the 2026-07-18 calibration
+  campaign measured 2-sigma coverage 0.83 at a 0.22 px floor and 0.87 at this value,
+  against the 0.865 reference.
 
 Per-instrument overrides
 ------------------------
@@ -184,19 +185,20 @@ combination, see :doc:`dev_guide_techniques_confidence` for the per-term arithme
 ``techniques.StarRefineNav`` in the same YAML file and consumes attributes off
 :class:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics` plus :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- :attr:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics.n_stars_used` — alpha = 1.144,
+- :attr:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics.n_stars_used` — alpha = 1.228,
   offset = 0.0, divisor = 5.0, cap at 1.0. Number of stars that survived the per-star
   quality gates. More inliers earn confidence up to a five-star saturation point.
 - :attr:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics.median_pos_err_px` —
-  alpha = -0.822, offset = 0.0, divisor = 1.0, no cap. Median per-star Euclidean residual
+  alpha = -0.81, offset = 0.0, divisor = 1.0, no cap. Median per-star Euclidean residual
   (observed centroid vs. shifted prediction). Larger residuals pull confidence down.
 - :attr:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics.residual_scatter_px` —
-  alpha = -0.213, offset = 0.0, divisor = 1.0, no cap. Per-axis weighted RMS of the per-star
-  residuals about the fitted delta. Internally inconsistent inlier sets pull confidence
-  down.
+  alpha = 0.0, offset = 0.0, divisor = 1.0, no cap. Per-axis weighted RMS of the per-star
+  residuals about the fitted delta. Sign-bounded to zero on the calibration campaign (the
+  median per-star error already carries the same signal on those rows); kept wired for a
+  future real-anchored calibration.
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces confidence to zero before the
-sigmoid is evaluated. The constant baseline is :math:`\alpha_{0} = 1.888`. No post-sigmoid
+sigmoid is evaluated. The constant baseline is :math:`\alpha_{0} = 1.795`. No post-sigmoid
 ``hard_cap`` is applied at the spec level; the ``single_inlier_confidence_cap`` above is
 applied by the technique itself only when exactly one inlier survived.
 
