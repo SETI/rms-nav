@@ -183,6 +183,74 @@ def _mesh_pose_figure() -> None:
     plt.close(fig)
 
 
+# The Section 8 model-mismatch axes: (sweep name, x-axis label, panel title).
+# Each walks one render-vs-navigate mismatch from a self-consistency floor (the
+# first sweep value) into the mismatched regime; the recovery-error-vs-mismatch
+# curve is the product.  The floor point is drawn distinctly and labelled.
+_MISMATCH_AXES = [
+    ('psf_limb_mismatch', 'rendered PSF sigma (px)', 'PSF core mismatch (limb)'),
+    ('psf_limb_wings', 'rendered PSF wing energy fraction', 'PSF wing mismatch (limb)'),
+    ('photometric_minnaert_mismatch', 'Minnaert k (1.0 = Lambert)', 'Photometric mismatch (disc)'),
+    ('spk_parallax_error', 'planted parallax shift (px)', 'Spacecraft ephemeris'),
+    ('differential_smear', 'star trail length (px)', 'Differential smear (stars)'),
+    ('ring_orbit_error', 'planted ring radial error (px)', 'Ring ephemeris (edge)'),
+    ('atmosphere_haze', 'haze reference optical depth', 'Atmosphere (limb)'),
+]
+
+
+def _mismatch_axes_figure() -> None:
+    """Grid the Section 8 recovery-error-vs-mismatch curves, floor point labelled.
+
+    One panel per mismatch axis: recovered-offset error versus the swept
+    mismatch parameter.  The zero-mismatch point (equality with the navigator's
+    configuration) is drawn as the self-consistency floor -- a bound on
+    reproducibility, not accuracy -- and a failed step (the navigability cliff)
+    is annotated on the axis rather than plotted.  The grid is sized to the
+    axis count; any unused trailing panel is hidden.
+    """
+    n_cols = 3
+    n_rows = -(-len(_MISMATCH_AXES) // n_cols)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(13.5, 4.0 * n_rows))
+    flat_axes = list(axes.ravel())
+    for ax in flat_axes[len(_MISMATCH_AXES) :]:
+        ax.set_axis_off()
+    for ax, (name, xlabel, title) in zip(flat_axes, _MISMATCH_AXES, strict=False):
+        rows = _load(name)
+        solved = [
+            (r['value'], r['offset_error_px']) for r in rows if r.get('offset_error_px') is not None
+        ]
+        failed = [r['value'] for r in rows if r.get('offset_error_px') is None]
+        if solved:
+            xs, ys = zip(*solved, strict=True)
+            ax.plot(xs, ys, marker='o', ms=4, lw=1.2, color='tab:blue', label='recovery error')
+            ax.plot(
+                [xs[0]],
+                [ys[0]],
+                marker='*',
+                ms=13,
+                color='tab:green',
+                lw=0,
+                label='self-consistency floor (not accuracy)',
+            )
+        for x in failed:
+            ax.axvline(x, color='tab:gray', ls='--', alpha=0.6)
+        if failed:
+            ax.axvline(failed[0], color='tab:gray', ls='--', alpha=0.6, label='fit failed (cliff)')
+        ax.set_yscale('log')
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel('recovered-offset error (px)')
+        ax.set_title(title, fontsize=10)
+        ax.grid(True, which='both', ls=':', alpha=0.5)
+        ax.legend(fontsize=7, loc='best')
+    fig.suptitle(
+        'Recovery error vs model mismatch (Section 8 axes); zero-mismatch = self-consistency floor',
+        fontsize=12,
+    )
+    fig.tight_layout()
+    fig.savefig(_FIGURES_ROOT / 'mismatch_axes.png', dpi=110)
+    plt.close(fig)
+
+
 def generate_plots() -> list[Path]:
     """Render all report figures from the sweep results; return their paths."""
     _FIGURES_ROOT.mkdir(parents=True, exist_ok=True)
@@ -200,6 +268,7 @@ def generate_plots() -> list[Path]:
     _rotation_figure()
     _mesh_irregularity_figure()
     _mesh_pose_figure()
+    _mismatch_axes_figure()
     return sorted(_FIGURES_ROOT.glob('*.png'))
 
 

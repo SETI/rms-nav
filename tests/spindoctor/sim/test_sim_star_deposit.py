@@ -150,6 +150,27 @@ def test_floor_star_truth_records_the_rendered_sigma() -> None:
     assert meta['star_info'][0]['sigma'] == 0.77
 
 
+def test_no_psf_star_truth_records_zero_sigma() -> None:
+    """With no PSF block the truth records the spike's actual extent, 0.0.
+
+    A stars scene without any PSF renders 1-pixel spikes; recording the
+    navigator's configured sigma there would falsely mark the render as
+    PSF-matched and hide the mismatch from floor-integrity checks.
+    """
+    scene = _star_scene('coiss_wac')
+    _, meta = render_combined_model(scene)
+    assert meta['star_info'][0]['sigma'] == 0.0
+
+
+def test_no_psf_star_pixels_unchanged_by_sigma_record() -> None:
+    """The recorded sigma is metadata only: the no-PSF deposit stays a spike."""
+    scene = _star_scene('coiss_wac')
+    img, _ = render_combined_model(scene)
+    cutout = img[28:37, 28:37]
+    # A 1-px spike concentrates essentially all cutout flux in one pixel.
+    assert float(cutout.max()) / float(cutout.sum()) > 0.9
+
+
 def test_instrument_defaults_star_reproduces_the_catalog_kernel() -> None:
     """An instrument_defaults star's profile is the catalog kernel to quantization.
 

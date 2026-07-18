@@ -1,0 +1,35 @@
+schema_version: 2
+scene_name: smear_star_field
+instrument: coiss_nac
+size_v: 128
+size_u: 128
+random_seed: 7
+exposure_sec: 1.0
+# Differential-smear base: a bright star field with a per-object-class smear
+# entry for the stars whose motion vector is zero at this base value -- the
+# self-consistency floor, where the rendered stars are sharp points the
+# navigator's unsmeared prediction matches.  A sweep that walks
+# ``optics.smear[0].dv_px`` up trails the stars (the tracked-target class stays
+# sharp) while the navigator still predicts point sources, growing a controlled
+# differential-smear mismatch that widens the star centroids off their catalog
+# positions.  The navigator-matched PSF keeps the floor free of a hidden PSF
+# mismatch.
+optics:
+  psf:
+    match_navigator: true
+  smear:
+    - {dv_px: 0.0, du_px: 0.0, object_class: stars}
+bodies: []
+stars:
+  - {name: F1, v: 30.0, u: 40.0, vmag: 3.0}
+  - {name: F2, v: 80.0, u: 35.0, vmag: 3.6}
+  - {name: F3, v: 55.0, u: 90.0, vmag: 3.3}
+  - {name: F4, v: 95.0, u: 95.0, vmag: 4.0}
+  - {name: F5, v: 40.0, u: 100.0, vmag: 3.8}
+  - {name: F6, v: 100.0, u: 50.0, vmag: 3.5}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0

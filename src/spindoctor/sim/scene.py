@@ -114,6 +114,7 @@ DECLARED_SIM_SCENE_CLASSES: frozenset[str] = frozenset(
         'mutual_event',
         'atmosphere',
         'algorithmic_invariants',
+        'model_mismatch',
         'regression',
         'artifact_sweep',
         'star_confounder',

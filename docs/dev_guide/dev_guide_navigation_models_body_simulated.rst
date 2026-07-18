@@ -21,7 +21,31 @@ techniques consume:
 - a :data:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` (the silhouette boundary as
   a vertex polyline with outward normals) when the body is well resolved (diameter at
   least 100 px) and at low phase (at most 60 degrees), for
-  :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`.
+  :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`;
+- a :data:`~spindoctor.feature.feature_type.NavFeatureType.TERMINATOR_ARC` (the lit/unlit
+  boundary *interior* to the disc, as a vertex polyline whose outward normals point from the
+  lit side toward the unlit side) when the phase is far enough from zero for the terminator
+  to separate from the limb and the boundary is long enough to constrain a fit, for
+  :class:`~spindoctor.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`.
+
+The terminator is distinct from the limb: the limb is the silhouette edge against sky,
+while the terminator cuts *across* the disc where the lit hemisphere meets the unlit one.
+Because the shading floors the visible-but-unlit hemisphere at a small constant
+(:data:`~spindoctor.sim.ellipsoid_geometry.DARK_SIDE_ILLUM_STRENGTH`), the rendered body mask
+(brightness above zero) is the whole visible disc, and the lit region is the part brighter
+than that floor; the terminator polyline is the lit pixels adjacent to the interior unlit
+disc, with the limb ring excluded so the polyline stays interior to the disc -- except at
+the cusp-adjacent vertices of a very thin crescent, where terminator and limb meet within
+a pixel and a handful of vertices land on the silhouette (the SPICE-backed model's
+sampler shares the behaviour). The
+gates mirror the SPICE-backed :class:`~spindoctor.nav_model.nav_model_body.NavModelBody`
+(a ``sin(phase)`` floor, a minimum vertex count, and the shared
+:func:`~spindoctor.nav_model.nav_model_body.shape_features_suppressed` policy that
+suppresses the terminator of a resolved ``highly_irregular`` body), so a simulated body
+offers the same feature set a real one would. The terminator technique is not yet calibrated against the
+simulated renderer, so a terminator fix stays ``confidence_provisional`` -- the same interim
+marker every sim-anchored confidence carries -- until the recalibration pass re-collects its
+rows.
 
 The model overrides :meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs` to build
 one instance per body of a simulated observation; the parent
@@ -171,8 +195,8 @@ Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
   the shared :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase` helper, and
   records the predicted diameter and tight bounding box used to gate and emit features.
 - :meth:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_features` — emits
-  the BODY_DISC plus, when the resolution and phase gates pass, the BODY_BLOB and
-  LIMB_ARC features described under *Overview*.
+  the BODY_DISC plus, when the resolution and phase gates pass, the BODY_BLOB, LIMB_ARC, and
+  TERMINATOR_ARC features described under *Overview*.
 - :meth:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_annotations` —
   reuses the shared body annotation helper on
   :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase` to render body silhouette
@@ -220,8 +244,18 @@ Call path traced through
    :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase`.
 4. When the diameter and phase gates pass, append a LIMB_ARC: the silhouette boundary is
    sampled into a vertex polyline with outward normals and a fixed per-vertex sigma.
-5. Reliability on each feature is fixed at ``1.0`` (the simulated body is by construction
-   reliable; downstream gates do not drop it).
+5. When the terminator gates pass, append a TERMINATOR_ARC scored honestly: its
+   visible-arc fraction compares the in-frame lit/unlit ridge against the ridge of an
+   unclipped whole-body render of the same geometry, and its reliability applies the
+   shared :func:`~spindoctor.nav_model.nav_model_body.terminator_reliability` formula
+   (arc fraction, catalog albedo-variation penalty, ``sin(phase)`` cap) -- so a
+   high-phase simulated terminator can be dropped by the downstream reliability gate
+   exactly as a real one would be.
+6. Reliability on the disc and limb features is fixed at ``1.0`` (the simulated body is
+   by construction reliable; downstream gates do not drop those), while the blob carries
+   the shared detection-SNR reliability from the base class.  The limb's
+   ``visible_arc_fraction = 1.0`` is a known simplification awaiting the mutual-event
+   rework in the confidence recalibration pass.
 
 Examples
 ========

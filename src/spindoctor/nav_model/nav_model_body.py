@@ -101,6 +101,8 @@ __all__ = [
     'TITAN_BODY_NAME',
     'NavModelBody',
     'bodies_in_extfov',
+    'shape_features_suppressed',
+    'terminator_reliability',
 ]
 
 
@@ -718,21 +720,8 @@ class NavModelBody(NavModelBodyBase):
                 LIMB_ARC_MIN_VERTICES,
                 shape.shape_class_hint,
             )
-            # Highly-irregular bodies (chaotic rotators, small potato moons)
-            # have no usable ellipsoid.  Once such a body is resolved beyond a
-            # few pixels the rendered limb / terminator / disc silhouette does
-            # not match the real body, so those shape features are suppressed;
-            # a point-like BODY_BLOB still navigates the centroid.  The
-            # 'resolved' threshold reuses the bodies-config
-            # ``min_bounding_box_area`` -- its square root is the equivalent
-            # linear pixel extent (default 9 px^2 -> 3 px).  Bodies tagged
-            # merely 'irregular' are left untouched: the continuous
-            # ellipsoid-residual widening in the sigma budget already degrades
-            # their limb reliability without dropping the feature.
-            resolved_diameter_px = math.sqrt(float(self._config.bodies.min_bounding_box_area))
-            suppress_shape_features = (
-                shape.shape_class_hint == 'highly_irregular'
-                and self._predicted_diameter_px > resolved_diameter_px
+            suppress_shape_features = shape_features_suppressed(
+                shape, self._predicted_diameter_px, config=self._config
             )
             if suppress_shape_features:
                 self._logger.info(
@@ -741,7 +730,7 @@ class NavModelBody(NavModelBodyBase):
                     'BODY_DISC; BODY_BLOB may still emit',
                     self._body_name,
                     self._predicted_diameter_px,
-                    resolved_diameter_px,
+                    math.sqrt(float(self._config.bodies.min_bounding_box_area)),
                 )
             limb_arc_emitted = False
             blob_min_px = max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)
@@ -892,7 +881,7 @@ class NavModelBody(NavModelBodyBase):
             position_cov_px=None,
             intensity_sigma_rel=0.0,
             preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
-            reliability=_terminator_reliability(
+            reliability=terminator_reliability(
                 visible_arc_fraction=_visible_arc_fraction(sampler),
                 albedo_variation=shape.albedo_variation,
                 phase_factor=self._phase_angle_factor,
@@ -908,6 +897,40 @@ class NavModelBody(NavModelBodyBase):
                 phase_angle_factor=min(1.0, self._phase_angle_factor),
             ),
         )
+
+
+def shape_features_suppressed(
+    shape: BodyShape, predicted_diameter_px: float, *, config: Config
+) -> bool:
+    """Whether a body's shape features (limb / terminator / disc) are suppressed.
+
+    Highly-irregular bodies (chaotic rotators, small potato moons) have no
+    usable ellipsoid.  Once such a body is resolved beyond a few pixels the
+    rendered limb / terminator / disc silhouette does not match the real body,
+    so those shape features are suppressed; a point-like BODY_BLOB still
+    navigates the centroid.  The 'resolved' threshold reuses the bodies-config
+    ``min_bounding_box_area`` -- its square root is the equivalent linear pixel
+    extent (default 9 px^2 -> 3 px).  Bodies tagged merely 'irregular' are left
+    untouched: the continuous ellipsoid-residual widening in the sigma budget
+    already degrades their limb reliability without dropping the feature.
+
+    This is the shared emission policy: the SPICE-backed model applies it to
+    all three shape features, and the simulated body model applies it to its
+    TERMINATOR_ARC so the two models cannot desync on which bodies terminate.
+
+    Parameters:
+        shape: The body's catalog shape profile.
+        predicted_diameter_px: Predicted silhouette diameter in pixels.
+        config: Configuration supplying ``bodies.min_bounding_box_area``.
+
+    Returns:
+        True when the body's shape features must not be emitted.
+    """
+    resolved_diameter_px = math.sqrt(float(config.bodies.min_bounding_box_area))
+    return (
+        shape.shape_class_hint == 'highly_irregular'
+        and predicted_diameter_px > resolved_diameter_px
+    )
 
 
 def _build_limb_arc(
@@ -1117,10 +1140,26 @@ def _limb_reliability(*, visible_arc_fraction: float, visible_arc_px: float) -> 
     return float(_sigmoid(z))
 
 
-def _terminator_reliability(
+def terminator_reliability(
     *, visible_arc_fraction: float, albedo_variation: float, phase_factor: float
 ) -> float:
-    """Reliability of TERMINATOR_ARC mirroring the design's formula."""
+    """Reliability of TERMINATOR_ARC mirroring the design's formula.
+
+    Shared emission policy: the SPICE-backed model scores its terminator
+    sampler with this, and the simulated body model feeds it the same
+    quantities computed from its own render, so the two models cannot
+    desync on how a terminator's reliability responds to arc visibility,
+    surface albedo variation, and phase.
+
+    Parameters:
+        visible_arc_fraction: Fraction of the predicted terminator ridge
+            that is visible / usable for the fit.
+        albedo_variation: The body's catalog albedo-variation figure.
+        phase_factor: ``sin(phase_angle)``; capped at 1.0.
+
+    Returns:
+        The [0, 1] reliability score.
+    """
     base = _sigmoid(-1.0 + 1.5 * visible_arc_fraction - 1.5 * albedo_variation)
     return float(base * min(1.0, phase_factor))
 

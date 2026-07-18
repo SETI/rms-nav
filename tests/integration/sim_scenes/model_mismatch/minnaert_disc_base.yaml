@@ -1,0 +1,34 @@
+schema_version: 2
+scene_name: minnaert_disc_base
+instrument: coiss_nac
+size_v: 220
+size_u: 220
+random_seed: 7
+exposure_sec: 1.0
+# Photometric-mismatch base: a well-resolved sphere shaded by the Minnaert law.
+# The navigator's disc template always shades Lambert, and Minnaert at k = 1 is
+# exactly Lambert (I = mu0), so this base value is the self-consistency floor.
+# A sweep that walks ``bodies.0.minnaert_k`` down from 1.0 renders a limb-
+# darkened disc the Lambert template does not predict, growing a controlled
+# photometric mismatch.  The navigator-matched PSF keeps the body edge free of a
+# hidden PSF mismatch at the floor.
+optics:
+  psf:
+    match_navigator: true
+bodies:
+  - name: RHEA
+    center_v: 110.0
+    center_u: 110.0
+    axis1: 90.0
+    axis2: 90.0
+    axis3: 90.0
+    illumination_angle: 25.0
+    phase_angle: 30.0
+    photometric_law: minnaert
+    minnaert_k: 1.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.5
+offset_u: -0.5
+offset_rotation_deg: 0.0

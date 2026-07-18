@@ -1,0 +1,41 @@
+schema_version: 2
+scene_name: haze_limb_base
+instrument: coiss_nac
+size_v: 260
+size_u: 260
+random_seed: 7
+exposure_sec: 1.0
+# Atmosphere-mismatch base: the titan_haze_limb geometry rendered with an
+# explicit navigator-matched PSF (a pure Gaussian at the emulated instrument's
+# configured star_psf_sigma), so the tau_ref = 0 sweep point is a true
+# self-consistency floor -- no haze AND no hidden PSF mismatch, matching the
+# floor convention of the other model-mismatch bases.  The committed
+# titan_haze_limb scene keeps its original PSF-free render (its own baseline is
+# a separate tripwire); this base exists for the atmosphere_haze sweep.
+optics:
+  psf:
+    match_navigator: true
+bodies:
+  - name: TITAN
+    shape_model: ellipsoid
+    center_v: 130.0
+    center_u: 130.0
+    axis1: 180.0
+    axis2: 180.0
+    axis3: 180.0
+    illumination_angle: 90.0
+    phase_angle: 40.0
+    atmosphere:
+      scale_height_px: 12.0
+      tau_ref: 4.0
+      ref_altitude_px: 0.0
+      g: 0.6
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 0.0
+offset_u: 0.0
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: medium

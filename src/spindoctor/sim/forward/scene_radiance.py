@@ -141,24 +141,20 @@ def compose_scene_radiance(
     # parallax (1/range), computed at full precision on the oversampled grid.
     spk_error = params.get('spk_error') or {}
 
-    # Resolve the per-instrument config once; stars record the scene PSF sigma
-    # (or, absent a PSF, the instrument's configured sigma) for their diagnostics.
-    inst_config = resolve_sim_inst_config(
-        DEFAULT_CONFIG, params.get('instrument'), params.get('instrument_config')
-    )
-    star_psf_sigma = float(inst_config['star_psf_sigma'])
-
     # Stars are point sources deposited into the point-source plane; the scene
     # PSF (an explicit optics.psf block, the navigator-matched form, or the
     # instrument-defaults kernel) is their only convolution.  With no PSF a star
-    # is a 1-pixel spike (the undersampled limit); the recorded sigma falls back
-    # to the instrument's configured value in that case.
+    # is a 1-pixel spike (the undersampled limit); the recorded sigma is then
+    # 0.0 -- the actual rendered extent of an unconvolved deposit.  Recording
+    # the navigator's configured sigma here instead would falsely mark the
+    # scene as PSF-matched in the truth metadata, hiding a real
+    # render-vs-navigate mismatch from any floor-integrity check that reads it.
     scene_psf = effective_psf(params)
     if scene_psf is not None:
         sigma_v_psf = float(scene_psf['sigma_v'])
         rendered_sigma_det = max(sigma_v_psf, float(scene_psf.get('sigma_u', sigma_v_psf)))
     else:
-        rendered_sigma_det = star_psf_sigma
+        rendered_sigma_det = 0.0
     rendered_sigma = rendered_sigma_det * os
 
     # The photometric zero point and its unit domain (electrons for a CCD, DN for

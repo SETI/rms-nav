@@ -30,8 +30,8 @@ from spindoctor.nav_model.nav_model_body import (
     _limb_reliability,
     _PolylineSampler,
     _sigma_normal_per_vertex,
-    _terminator_reliability,
     _visible_arc_fraction,
+    terminator_reliability,
 )
 from spindoctor.nav_model.nav_model_body_base import _blob_reliability, _sigmoid
 
@@ -190,7 +190,7 @@ def test_limb_reliability_passes_gate_for_fully_lit_geometry() -> None:
 
 def test_terminator_reliability_zero_at_zero_phase() -> None:
     """Sub-solar-illuminated images produce zero terminator reliability."""
-    out = _terminator_reliability(visible_arc_fraction=1.0, albedo_variation=0.0, phase_factor=0.0)
+    out = terminator_reliability(visible_arc_fraction=1.0, albedo_variation=0.0, phase_factor=0.0)
     assert out == 0.0
 
 

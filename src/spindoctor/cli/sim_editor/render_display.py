@@ -270,8 +270,10 @@ class RenderDisplayMixin(SimEditorBase):
                 dv = img_v - cv
                 du = img_u - cu
                 r2 = dv * dv + du * du
-                # Gaussian threshold ~ 3 sigma circle
-                if r2 <= (3.0 * sigma) ** 2:
+                # Gaussian threshold ~ 3 sigma circle, floored so a
+                # PSF-free star (recorded sigma 0, a 1-px spike) still
+                # offers a clickable 1-px-radius target.
+                if r2 <= max(3.0 * sigma, 1.0) ** 2:
                     self._selected_model_key = ('star', j)
                     # Switch to star tab by finding it by properties
                     tab_idx = self._find_tab_by_properties('star', j)

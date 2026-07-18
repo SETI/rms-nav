@@ -1,0 +1,14 @@
+sweep_name: ring_orbit_error
+# Ring-ephemeris-mismatch axis (Section 8): a navigable ringlet's rendered orbit
+# is displaced radially (delta_a_px, a truth key) off the catalog orbit the
+# navigator predicts from.  At delta_a_px 0 the render matches the catalog -- the
+# self-consistency floor -- and the sweep walks the radial error up; a uniform
+# radial misplacement has no exact translational equivalent, so the robust edge
+# fit absorbs the error into the recovered offset and the recovered-offset error
+# grows with the planted displacement.  Pinned to RingEdgeNav.  The base scene's
+# own committed delta_a_px is overridden per step; its declared_orbit_sigma is
+# the error bar the navigator is entitled to (see the scene's own note).
+base_scene: ring_system/orbit_error_ringlet.yaml
+parameters: [ring_system.features.0.orbit_error.delta_a_px]
+values: [0.0, 0.5, 1.0, 2.0, 3.0, 4.0]
+technique: RingEdgeNav
