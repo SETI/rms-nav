@@ -48,8 +48,8 @@ __all__ = [
 #
 # Provenance:
 # - coiss_nac: TUNED 2026-07-17 by the realism match against the Cassini
-#   CALIB image-library cohort (brightest unsaturated stars over 6 NAC
-#   star frames): cohort encircled-energy radii EE50 = 0.91 px,
+#   CALIB image-library cohort (brightest unsaturated stars over the 11
+#   contributing NAC star frames): cohort encircled-energy radii EE50 = 0.91 px,
 #   EE80 = 1.79 px; these parameters reproduce EE50/EE80 = 0.90/1.72 px
 #   through the same estimator.  The EE80/EE50 ratio (1.97 vs 1.52 for a
 #   pure Gaussian) requires substantial mid-range wing energy, so this is
@@ -61,15 +61,15 @@ __all__ = [
 #   softer core matches the stars without that excess.  The far halo
 #   beyond the truncation window remains stray-light scope.  Replaces the
 #   interim FWHM/2.355 value.
-# - coiss_wac: TUNED 2026-07-17 from the cohort's single WAC star frame:
-#   cohort EE50/EE80 = 1.33/2.16 px through the final estimator; sigma
-#   follows the measured EE50 with the NAC wing shape.  Single-frame
-#   evidence -- treat as cohort-limited, revisit when more WAC star
-#   frames land.  Replaces the interim FWHM/2.355 value.
-# - vgiss: RETAINED interim estimate: the cohort's one star frame (9 stars,
-#   EE50 1.23 px) is consistent with sigma 0.85 through GEOMED resampling
-#   but cannot constrain the wing shape; the Voyager references publish no
-#   FWHM.
+# - coiss_wac: TUNED 2026-07-17 from the cohort's two WAC star frames
+#   (9 usable star cutouts): cohort EE50/EE80 = 1.33/2.16 px through the
+#   final estimator; sigma follows the measured EE50 with the NAC wing
+#   shape.  Two-frame evidence -- treat as cohort-limited, revisit when
+#   more WAC star frames land.  Replaces the interim FWHM/2.355 value.
+# - vgiss: RETAINED interim estimate: the cohort's one star frame (8
+#   usable star cutouts, EE50 1.22 px) cannot constrain the kernel
+#   through GEOMED resampling (the flat-top guard leaves two simulated
+#   cutouts to compare against); the Voyager references publish no FWHM.
 # - gossi: RETAINED interim published sigma: the Galileo cohort holds no
 #   star frames (negative cases only), so there is no independent PSF
 #   evidence; gossi sim accuracy is bounded by unverified PSF fidelity
