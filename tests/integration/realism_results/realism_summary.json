@@ -325,7 +325,7 @@
           "technique": "StarUniqueMatchNav"
         },
         {
-          "confidence": 0.9023304754138799,
+          "confidence": 0.9064055589923389,
           "image_id": "N1459552012_1_CALIB",
           "instrument": "coiss_calib_nac",
           "median_pos_err_px": 0.6257828988094646,
@@ -359,7 +359,7 @@
           "technique": "StarUniqueMatchNav"
         },
         {
-          "confidence": 0.9458800636072449,
+          "confidence": 0.9466377135707724,
           "image_id": "N1459552012_1_CALIB",
           "instrument": "coiss_calib_nac",
           "median_pos_err_px": 0.18171332351804445,
@@ -370,7 +370,7 @@
         },
         {
           "body_count": 1,
-          "confidence": 0.7611739637573122,
+          "confidence": 0.7222906972600613,
           "consistency_px": 2.4519304416367524,
           "consistency_ratio": 0.570216381775989,
           "image_id": "N1572105349_1_CALIB",
@@ -382,7 +382,7 @@
           "used_gradient": true
         },
         {
-          "confidence": 0.7674889484674059,
+          "confidence": 0.7682628837982739,
           "dt_fit_rms_px": 0.3435699448892097,
           "image_id": "N1572105349_1_CALIB",
           "instrument": "coiss_calib_nac",
@@ -408,7 +408,7 @@
           "confidence": 0.5,
           "image_id": "N1572105349_1_CALIB",
           "instrument": "coiss_calib_nac",
-          "median_pos_err_px": 1.6768382373743662,
+          "median_pos_err_px": 1.2797522420125171,
           "n_stars_used": 1,
           "residual_scatter_px": 0.0,
           "side": "real",
@@ -416,7 +416,7 @@
         },
         {
           "body_count": 1,
-          "confidence": 0.7737048604672728,
+          "confidence": 0.7628483739449287,
           "consistency_px": 0.1364394468482264,
           "consistency_ratio": 0.02902966954217583,
           "image_id": "N1572105349_1_CALIB",
@@ -428,7 +428,7 @@
           "used_gradient": true
         },
         {
-          "confidence": 0.8089410236143512,
+          "confidence": 0.6515334401579528,
           "dt_fit_rms_px": 1.0362344956707998,
           "image_id": "N1572105349_1_CALIB",
           "instrument": "coiss_calib_nac",
@@ -467,14 +467,14 @@
           "confidence": 0.5,
           "image_id": "N1572105349_1_CALIB",
           "instrument": "coiss_calib_nac",
-          "median_pos_err_px": 0.16489352283352363,
+          "median_pos_err_px": 0.1891584603686605,
           "n_stars_used": 1,
           "residual_scatter_px": 0.0,
           "side": "sim",
           "technique": "StarRefineNav"
         },
         {
-          "confidence": 0.9515702859230692,
+          "confidence": 0.7062814530336893,
           "edge_count": 3,
           "image_id": "N1863267861_1_CALIB",
           "instrument": "coiss_calib_nac",
@@ -487,7 +487,7 @@
           "total_edge_length_px": 2482.0
         },
         {
-          "confidence": 0.9515702859230692,
+          "confidence": 0.9373801851847972,
           "edge_count": 6,
           "image_id": "N1863267861_1_CALIB",
           "instrument": "coiss_calib_nac",
@@ -501,7 +501,7 @@
         },
         {
           "annulus_count": 2,
-          "confidence": 0.9045886138920658,
+          "confidence": 0.9040298091984978,
           "image_id": "N1863267861_1_CALIB",
           "instrument": "coiss_calib_nac",
           "ncc_peak": 23.641105637570668,
@@ -535,7 +535,7 @@
           "technique": "StarUniqueMatchNav"
         },
         {
-          "confidence": 0.9497381385791819,
+          "confidence": 0.9505525226614759,
           "image_id": "N1863267861_1_CALIB",
           "instrument": "coiss_calib_nac",
           "median_pos_err_px": 0.08255262228256689,
@@ -853,7 +853,7 @@
           "technique": "StarUniqueMatchNav"
         },
         {
-          "confidence": 0.9494947754110038,
+          "confidence": 0.9513269123542634,
           "image_id": "W1580760393_1_CALIB",
           "instrument": "coiss_calib_wac",
           "median_pos_err_px": 0.06205987946889645,
@@ -887,7 +887,7 @@
           "technique": "StarUniqueMatchNav"
         },
         {
-          "confidence": 0.9499571126548517,
+          "confidence": 0.9502334575140559,
           "image_id": "W1580760393_1_CALIB",
           "instrument": "coiss_calib_wac",
           "median_pos_err_px": 0.09090768081357789,
@@ -898,7 +898,7 @@
         },
         {
           "body_count": 1,
-          "confidence": 0.7734296025255892,
+          "confidence": 0.761818570079781,
           "consistency_px": 1.5045706730347532,
           "consistency_ratio": 0.06288696648003148,
           "image_id": "W1637520502_1_CALIB",
@@ -910,7 +910,7 @@
           "used_gradient": true
         },
         {
-          "confidence": 0.8340577919833948,
+          "confidence": 0.7633045870086458,
           "dt_fit_rms_px": 0.6178948496581013,
           "image_id": "W1637520502_1_CALIB",
           "instrument": "coiss_calib_wac",
@@ -923,7 +923,7 @@
         },
         {
           "body_count": 1,
-          "confidence": 0.7579947948318583,
+          "confidence": 0.7498689134044567,
           "consistency_px": 1.6719480124244295,
           "consistency_ratio": 0.06405931082085936,
           "image_id": "W1637520502_1_CALIB",
@@ -971,7 +971,7 @@
           "technique": "StarUniqueMatchNav"
         },
         {
-          "confidence": 0.35916414023332394,
+          "confidence": 0.3507283506363617,
           "image_id": "W1637520502_1_CALIB",
           "instrument": "coiss_calib_wac",
           "median_pos_err_px": 3.279554569331829,
@@ -1327,7 +1327,7 @@
           "technique": "StarUniqueMatchNav"
         },
         {
-          "confidence": 0.9394956897836144,
+          "confidence": 0.9428986833008064,
           "image_id": "lor_0030713591_0x633_sci",
           "instrument": "nhlorri",
           "median_pos_err_px": 0.2702078270267235,
@@ -1361,7 +1361,7 @@
           "technique": "StarUniqueMatchNav"
         },
         {
-          "confidence": 0.9528776678641295,
+          "confidence": 0.9527044623291443,
           "image_id": "lor_0030713591_0x633_sci",
           "instrument": "nhlorri",
           "median_pos_err_px": 0.02482865120063793,
@@ -1538,7 +1538,7 @@
       },
       "fom7_rows": [
         {
-          "confidence": 0.9371209902918615,
+          "confidence": 0.9337887594697993,
           "image_id": "C1205021_GEOMED",
           "instrument": "vgiss",
           "median_residual_px": 0.3840755270427068,
@@ -1562,7 +1562,7 @@
           "technique": "StarUniqueMatchNav"
         },
         {
-          "confidence": 0.9352749400319957,
+          "confidence": 0.9390050000068234,
           "image_id": "C1205021_GEOMED",
           "instrument": "vgiss",
           "median_pos_err_px": 0.35675443144919533,
@@ -1605,5 +1605,5 @@
       ]
     }
   },
-  "runtime_sec": 1183.9
+  "runtime_sec": 1311.2
 }

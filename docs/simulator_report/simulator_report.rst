@@ -603,11 +603,15 @@ are recorded in the summary JSON (``fom7_rows``).  Headline reading of the
   WAC and LORRI star pairs, with the simulated inlier residuals tighter
   than the real ones (0.02-0.05 px vs 0.09-0.33 px) -- the sim errs
   optimistic on star sharpness.
-- The Cassini ring pair is indistinguishable: ``RingEdgeNav`` reports
-  0.952 confidence on both the real frame and its matched render.
+- The Cassini ring pair separates on residual texture: ``RingEdgeNav``
+  reports 0.71 on the real frame versus 0.94 on its matched render.
+  The real frame's ring structure the renderer does not model leaves a
+  ~28 px mean per-edge DT residual (the matched render fits to ~1.5 px),
+  and the ring-vocabulary calibration prices that residual, so the sim
+  errs optimistic on ring-scene sharpness.
 - The limb pairs split: on the NAC pair both sides succeed (0.77 real vs
-  0.81 sim) with the simulated DT residual three times the real one;
-  on the WAC pair the real limb fit succeeds at 0.83 while the matched
+  0.65 sim) with the simulated DT residual three times the real one;
+  on the WAC pair the real limb fit succeeds at 0.76 while the matched
   simulated result is discarded by its own ensemble.
 - The NAC star pair inverts: the real frame's field lock fails (3
   inliers; a known caveat of that cohort frame) while its matched render

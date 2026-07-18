@@ -179,20 +179,20 @@ sigmoid combination; see :doc:`dev_guide_techniques_confidence`. The formula spe
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.ncc_peak` — alpha = 1.346,
+- :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.ncc_peak` — alpha = 1.168,
   offset = 6.0, divisor = 45.0, cap at 1.0. PSR-style quality measure of the chosen NCC
-  peak. The calibration campaign's raw p5/p50/p95 is 11/32/46, so the offset-6 divisor-45
+  peak. The calibration campaign's raw p5/p50/p95 is 10/27/42, so the offset-6 divisor-45
   transform spans that range in [0, 1].
 - :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.peak_to_runner_up_ratio` —
-  alpha = 1.147, offset = 0.0, divisor = 2.0, cap at 1.0. Ratio of the winning peak's
+  alpha = 1.059, offset = 0.0, divisor = 2.0, cap at 1.0. Ratio of the winning peak's
   quality to the next-best peak's outside the exclusion radius.
 - :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.annulus_count` —
-  alpha = 0.386, offset = 0.0, divisor = 2.0, cap at 1.0. Number of ``RING_ANNULUS`` features
+  alpha = 0.593, offset = 0.0, divisor = 2.0, cap at 1.0. Number of ``RING_ANNULUS`` features
   fused. Multi-planet scenes saturate at 2 (vs ``body_count``'s 3).
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
-confidence to zero. The constant baseline is :math:`\alpha_{0} = 0.744`. No post-sigmoid
+confidence to zero. The constant baseline is :math:`\alpha_{0} = 0.647`. No post-sigmoid
 ``hard_cap`` is applied.
 
 Implementation
