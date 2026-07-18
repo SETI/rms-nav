@@ -26,15 +26,21 @@ noise:
 offset_v: 1.2
 offset_u: -0.8
 offset_rotation_deg: 0.0
-# At 155 deg phase the forward-scattering haze biases every body technique in a
-# different direction: the lit-weighted blob centroid is dragged toward the
-# bright forward-scatter horns while the terminator fit locks to the soft haze
-# gradient offset from the hard-terminator model the navigator predicts.  Those
-# two disagree, so the ensemble reports 'conflicted' rather than a confident
-# wrong offset -- the safe outcome for a body whose atmosphere the navigator
-# does not model.  (BodyTerminatorNav engages here now that the simulated body
-# model emits TERMINATOR_ARC; its confidence stays provisional pending
-# recalibration.)
+# At 155 deg phase the forward-scattering haze defeats every body technique: the
+# disc correlation is spurious (no full lit disc to correlate), and the ring of
+# light drags the lit-weighted blob centroid ~30 px in du from the planted
+# offset.  The predicted TERMINATOR_ARC is emitted but never fitted: with its
+# honestly computed reliability (visible-arc fraction ~1.0, the albedo penalty,
+# and the sin(155 deg) = 0.42 phase cap) it scores 0.26 against the 0.30
+# TERMINATOR_ARC reliability gate, so BodyBlobNav is the only surviving
+# technique and the fused answer is a low-tier success at the blob's 0.40
+# confidence cap -- roughly 30 px wrong.  This is NOT a designed-safe outcome:
+# no second technique remains to veto the haze-biased blob, the low tier (plus
+# the provisional-confidence marker every sim-anchored result carries) is the
+# only flag, and the deciding margin is thin -- reliability 0.26 vs the 0.30
+# gate, both resting on uncalibrated defaults.  The confidence recalibration
+# pass re-collects terminator rows against these honest inputs and will re-land
+# this scene's expected outcome.
 expected:
-  status: conflicted
-  confidence_tier: conflicted
+  status: success
+  confidence_tier: low

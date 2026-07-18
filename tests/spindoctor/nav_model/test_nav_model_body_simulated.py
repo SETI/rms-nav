@@ -330,6 +330,69 @@ def test_terminator_arc_stays_provisional_via_flags() -> None:
     assert terminator.flags.phase_angle_factor == pytest.approx(1.0, abs=0.02)
 
 
+def test_terminator_reliability_matches_shared_formula() -> None:
+    """The sim terminator scores through the shared body-model reliability.
+
+    ``terminator_reliability`` applies the albedo-variation and sin(phase)
+    penalties the SPICE-backed model applies; the sim feature must carry
+    exactly that score for its own computed arc fraction.
+    """
+    import math
+
+    from spindoctor.nav_model.body_shape import load_body_shape
+    from spindoctor.nav_model.nav_model_body import terminator_reliability
+
+    terminator = _terminator_feature(_limb_obs(), _large_body(phase_angle=90.0))
+    assert terminator is not None
+    shape = load_body_shape('RHEA')
+    expected = terminator_reliability(
+        visible_arc_fraction=float(terminator.flags.visible_arc_fraction),
+        albedo_variation=shape.albedo_variation,
+        phase_factor=math.sin(math.radians(90.0)),
+    )
+    assert terminator.reliability == pytest.approx(expected)
+
+
+def test_terminator_reliability_is_not_pinned_at_one() -> None:
+    """The albedo/phase penalties keep the reliability strictly below 1.0."""
+    terminator = _terminator_feature(_limb_obs(), _large_body(phase_angle=90.0))
+    assert terminator is not None
+    assert terminator.reliability < 1.0
+
+
+def test_terminator_arc_fraction_fully_framed_is_near_one() -> None:
+    """A fully framed terminator sees almost all of the unclipped ridge."""
+    terminator = _terminator_feature(_limb_obs(), _large_body(phase_angle=90.0))
+    assert terminator is not None
+    assert terminator.flags.visible_arc_fraction > 0.95
+
+
+def test_terminator_arc_fraction_drops_when_frame_clips_it() -> None:
+    """A body whose terminator runs off the frame edge scores a lower fraction.
+
+    Centre the body near the frame edge so part of the lit/unlit boundary
+    falls outside the render; the visible-arc fraction must report the
+    surviving portion, not 1.0 (the honest input BodyTerminatorNav's
+    confidence needs).
+    """
+    clipped = _terminator_feature(_limb_obs(), _large_body(phase_angle=90.0, center_v=20.0))
+    assert clipped is not None
+    assert clipped.flags.visible_arc_fraction < 0.9
+    assert clipped.flags.visible_arc_fraction > 0.2
+
+
+def test_terminator_reliability_reasons_carry_albedo_penalty() -> None:
+    """The reliability breakdown mirrors the real model's terminator fields."""
+    from spindoctor.nav_model.body_shape import load_body_shape
+
+    terminator = _terminator_feature(_limb_obs(), _large_body(phase_angle=90.0))
+    assert terminator is not None
+    shape = load_body_shape('RHEA')
+    assert terminator.reliability_reasons.albedo_penalty == pytest.approx(
+        min(1.0, shape.albedo_variation)
+    )
+
+
 def test_metadata_records_predicted_diameter() -> None:
     """The model metadata carries the rendered silhouette diameter."""
     obs = _limb_obs()

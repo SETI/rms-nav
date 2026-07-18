@@ -102,6 +102,7 @@ __all__ = [
     'NavModelBody',
     'bodies_in_extfov',
     'shape_features_suppressed',
+    'terminator_reliability',
 ]
 
 
@@ -880,7 +881,7 @@ class NavModelBody(NavModelBodyBase):
             position_cov_px=None,
             intensity_sigma_rel=0.0,
             preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
-            reliability=_terminator_reliability(
+            reliability=terminator_reliability(
                 visible_arc_fraction=_visible_arc_fraction(sampler),
                 albedo_variation=shape.albedo_variation,
                 phase_factor=self._phase_angle_factor,
@@ -1139,10 +1140,26 @@ def _limb_reliability(*, visible_arc_fraction: float, visible_arc_px: float) -> 
     return float(_sigmoid(z))
 
 
-def _terminator_reliability(
+def terminator_reliability(
     *, visible_arc_fraction: float, albedo_variation: float, phase_factor: float
 ) -> float:
-    """Reliability of TERMINATOR_ARC mirroring the design's formula."""
+    """Reliability of TERMINATOR_ARC mirroring the design's formula.
+
+    Shared emission policy: the SPICE-backed model scores its terminator
+    sampler with this, and the simulated body model feeds it the same
+    quantities computed from its own render, so the two models cannot
+    desync on how a terminator's reliability responds to arc visibility,
+    surface albedo variation, and phase.
+
+    Parameters:
+        visible_arc_fraction: Fraction of the predicted terminator ridge
+            that is visible / usable for the fit.
+        albedo_variation: The body's catalog albedo-variation figure.
+        phase_factor: ``sin(phase_angle)``; capped at 1.0.
+
+    Returns:
+        The [0, 1] reliability score.
+    """
     base = _sigmoid(-1.0 + 1.5 * visible_arc_fraction - 1.5 * albedo_variation)
     return float(base * min(1.0, phase_factor))
 

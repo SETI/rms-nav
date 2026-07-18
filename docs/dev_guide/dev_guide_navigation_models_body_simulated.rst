@@ -241,8 +241,18 @@ Call path traced through
    :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase`.
 4. When the diameter and phase gates pass, append a LIMB_ARC: the silhouette boundary is
    sampled into a vertex polyline with outward normals and a fixed per-vertex sigma.
-5. Reliability on each feature is fixed at ``1.0`` (the simulated body is by construction
-   reliable; downstream gates do not drop it).
+5. When the terminator gates pass, append a TERMINATOR_ARC scored honestly: its
+   visible-arc fraction compares the in-frame lit/unlit ridge against the ridge of an
+   unclipped whole-body render of the same geometry, and its reliability applies the
+   shared :func:`~spindoctor.nav_model.nav_model_body.terminator_reliability` formula
+   (arc fraction, catalog albedo-variation penalty, ``sin(phase)`` cap) -- so a
+   high-phase simulated terminator can be dropped by the downstream reliability gate
+   exactly as a real one would be.
+6. Reliability on the disc and limb features is fixed at ``1.0`` (the simulated body is
+   by construction reliable; downstream gates do not drop those), while the blob carries
+   the shared detection-SNR reliability from the base class.  The limb's
+   ``visible_arc_fraction = 1.0`` is a known simplification awaiting the mutual-event
+   rework in the confidence recalibration pass.
 
 Examples
 ========
