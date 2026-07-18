@@ -33,10 +33,15 @@
 # the crossing is bounded inside (0.15, 0.35] and the gate takes the
 # measured upper edge.  Everything else remains subject to empirical
 # calibration.
-# Every floored technique's 2-sigma coverage sits at 0.86-0.87 against
-# the 0.865 reference (util/calibration/fit_floors verification); the
-# NCC techniques' size-scaled covariance terms over-cover slightly
-# (0.93-0.95), and StarUniqueMatchNav's CRLB-only sigma measures 0.85.
+# The three floors solved on their own campaign rows (BodyLimbNav
+# 2.61 px, BodyTerminatorNav 4.32 px, StarRefineNav 0.27 px) hold
+# 2-sigma coverage at 0.86-0.87 against the 0.865 reference
+# (util/calibration/fit_floors verification).  The NCC techniques
+# (disc / blob / annulus) carry floors from the campaign that first
+# solved them; the additive solver re-solves +0.000 px on the current
+# rows -- a conservative-direction check only -- and their size-scaled
+# covariance terms over-cover at 0.93-0.94.  StarUniqueMatchNav's
+# CRLB-only sigma measures 0.85.
 orchestrator:
   ensemble:
     # Mahalanobis-distance threshold for grouping per-technique results.
