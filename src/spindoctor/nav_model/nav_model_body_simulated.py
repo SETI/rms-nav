@@ -625,10 +625,14 @@ class NavModelBodySimulated(NavModelBodyBase):
         disc is their difference.  A terminator vertex is a lit pixel with an
         unlit *interior* disc pixel as a 4-neighbour -- the interior restriction
         drops the anti-aliased limb ring (unlit only because its edge brightness
-        has ramped below the floor) so the polyline never wanders onto the
-        silhouette.  The outward normal is the gradient of the lit mask, so it
-        points from the lit side toward the unlit side, the convention the
-        SPICE-backed body model's terminator sampler uses.
+        has ramped below the floor), keeping the polyline interior to the disc
+        everywhere except the cusp-adjacent vertices of a very thin crescent,
+        where terminator and limb meet within a pixel and a few vertices land
+        on the silhouette (at phase 150 roughly 9 of 155 vertices; the
+        SPICE-backed model's sampler shares the behaviour).  The outward
+        normal is the gradient of the lit mask, so it points from the lit side
+        toward the unlit side, the convention the SPICE-backed body model's
+        terminator sampler uses.
 
         Returns:
             ``(vertices_vu, normals_vu)`` in extfov coordinates; empty arrays

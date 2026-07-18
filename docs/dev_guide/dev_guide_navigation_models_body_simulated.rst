@@ -34,7 +34,10 @@ Because the shading floors the visible-but-unlit hemisphere at a small constant
 (:data:`~spindoctor.sim.ellipsoid_geometry.DARK_SIDE_ILLUM_STRENGTH`), the rendered body mask
 (brightness above zero) is the whole visible disc, and the lit region is the part brighter
 than that floor; the terminator polyline is the lit pixels adjacent to the interior unlit
-disc, with the limb ring excluded so the polyline never wanders onto the silhouette. The
+disc, with the limb ring excluded so the polyline stays interior to the disc -- except at
+the cusp-adjacent vertices of a very thin crescent, where terminator and limb meet within
+a pixel and a handful of vertices land on the silhouette (the SPICE-backed model's
+sampler shares the behaviour). The
 gates mirror the SPICE-backed :class:`~spindoctor.nav_model.nav_model_body.NavModelBody`
 (a ``sin(phase)`` floor, a minimum vertex count, and the shared
 :func:`~spindoctor.nav_model.nav_model_body.shape_features_suppressed` policy that
