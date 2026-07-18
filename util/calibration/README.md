@@ -96,6 +96,17 @@ package); generated artifacts go under `_work/calibration/` (gitignored).
        --workers 8 --out _work/calibration/library_crosscheck.md
    ```
 
+   The seed-20260718 campaign's cross-check record is tracked in
+   `CAMPAIGN_20260718.md` (this directory): 75 sidecars -- status
+   69/75, tier 46/75, offset-within-slack 54/61, zero pipeline
+   exceptions -- with per-frame attribution for every flip (the
+   dominant confusions are high->medium under the 0.85 high-tier
+   boundary and medium->low under the 2.61 px limb floor), the
+   W1444747627 single-frame diagnosis, and the CI-gate consequence:
+   the sidecar tier expectations predate the recalibration, the
+   historical failure-set gate no longer applies as-is, and a sidecar
+   re-ratchet is an operator decision.
+
 ## Campaign timing baseline
 
 Reference throughput for the collection campaign, measured 2026-07-18 on
