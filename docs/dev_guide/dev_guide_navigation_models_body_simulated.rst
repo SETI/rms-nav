@@ -21,7 +21,26 @@ techniques consume:
 - a :data:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` (the silhouette boundary as
   a vertex polyline with outward normals) when the body is well resolved (diameter at
   least 100 px) and at low phase (at most 60 degrees), for
-  :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`.
+  :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`;
+- a :data:`~spindoctor.feature.feature_type.NavFeatureType.TERMINATOR_ARC` (the lit/unlit
+  boundary *interior* to the disc, as a vertex polyline whose outward normals point from the
+  lit side toward the unlit side) when the phase is far enough from zero for the terminator
+  to separate from the limb and the boundary is long enough to constrain a fit, for
+  :class:`~spindoctor.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`.
+
+The terminator is distinct from the limb: the limb is the silhouette edge against sky,
+while the terminator cuts *across* the disc where the lit hemisphere meets the unlit one.
+Because the shading floors the visible-but-unlit hemisphere at a small constant
+(:data:`~spindoctor.sim.ellipsoid_geometry.DARK_SIDE_ILLUM_STRENGTH`), the rendered body mask
+(brightness above zero) is the whole visible disc, and the lit region is the part brighter
+than that floor; the terminator polyline is the lit pixels adjacent to the interior unlit
+disc, with the limb ring excluded so the polyline never wanders onto the silhouette. The
+gate mirrors the SPICE-backed :class:`~spindoctor.nav_model.nav_model_body.NavModelBody`
+(a ``sin(phase)`` floor and a minimum vertex count), so a simulated body offers the same
+feature set a real one would. The terminator technique is not yet calibrated against the
+simulated renderer, so a terminator fix stays ``confidence_provisional`` -- the same interim
+marker every sim-anchored confidence carries -- until the recalibration pass re-collects its
+rows.
 
 The model overrides :meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs` to build
 one instance per body of a simulated observation; the parent
@@ -171,8 +190,8 @@ Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
   the shared :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase` helper, and
   records the predicted diameter and tight bounding box used to gate and emit features.
 - :meth:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_features` — emits
-  the BODY_DISC plus, when the resolution and phase gates pass, the BODY_BLOB and
-  LIMB_ARC features described under *Overview*.
+  the BODY_DISC plus, when the resolution and phase gates pass, the BODY_BLOB, LIMB_ARC, and
+  TERMINATOR_ARC features described under *Overview*.
 - :meth:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_annotations` —
   reuses the shared body annotation helper on
   :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase` to render body silhouette
