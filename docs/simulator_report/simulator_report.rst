@@ -832,11 +832,482 @@ I/F-calibrated vs raw-DN navigation
 Every sweep and scene above renders in raw DN. The ``planted_offset_disc_if``
 invariant scene confirms navigation is unit-agnostic: the same body on the
 I/F-calibrated ``coiss_calib_nac`` instrument recovers the planted offset exactly.
-The ``calibrated_if`` render path leaves the composed signal in [0, 1] I/F units
-and applies no DN detector model (no Poisson shot noise, no full-well saturation
-gate, no bias pedestal or missing-data markers). Simulated I/F frames are
-therefore noise-light: an I/F scene exercises the navigation algorithms but not a
-realistic I/F noise regime.
+That scene carries no ``artifacts`` block, so it renders through the stage floor
+(noise-free); a ``calibrated_if`` scene with ``instrument_defaults`` runs the
+full DN detector chain and then the calibration inverse, so calibrated frames
+carry propagated shot and read noise and quantization texture in I/F units.
+The realism section below compares exactly that path against the real
+calibrated cohorts.
+
+Realism match against real cohorts
+==================================
+
+Everything above measures the navigator against frames the simulator
+rendered; this section measures the simulator against reality.  The realism
+runner (``python -m tests.integration.sim_realism``; see
+:ref:`sim-realism-match` for the machinery) compares the curated real-image
+library against matched simulated frames -- one per real frame, same
+instrument signal chain, same exposure, same content class -- on seven
+figures of merit, per instrument.  Each compared statistic is reported as a
+distribution overlay plus one scalar: the Wasserstein-1 distance on
+quantile-clipped samples, normalized by the real distribution's IQR (a
+value of 1.0 means the two distributions are displaced by about one real
+IQR).  **No pass/fail threshold is attached**; the numbers below are read
+against each cohort's support.  Figure of merit 7 (technique diagnostics)
+is read-only and was not consulted for any tuned value -- it is built from
+the navigator's own outputs, and tuning the image side until the
+navigator's diagnostics agree would re-admit circularity through parameter
+fitting.
+
+Cohort support (measured 2026-07-18, 75 frames):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 10 13 13 13 13 13 13
+
+   * - Instrument (cohort)
+     - Frames
+     - 1 noise
+     - 2 PSF
+     - 3 limbs
+     - 4 rings
+     - 5 range
+     - 6 artifacts
+   * - Cassini NAC (CALIB)
+     - 58
+     - supported
+     - supported
+     - supported
+     - supported
+     - supported
+     - supported
+   * - Cassini WAC (CALIB)
+     - 4
+     - limited
+     - limited
+     - unsupported
+     - unsupported
+     - limited
+     - limited
+   * - Galileo SSI (REDR)
+     - 8
+     - limited
+     - unsupported
+     - unsupported
+     - unsupported
+     - supported
+     - supported
+   * - Voyager ISS (GEOMED)
+     - 3
+     - limited
+     - unsupported
+     - unsupported
+     - unsupported
+     - limited
+     - limited
+   * - New Horizons LORRI (sci)
+     - 2
+     - unsupported
+     - limited
+     - unsupported
+     - unsupported
+     - limited
+     - limited
+
+Where a figure of merit is *unsupported* and no independent evidence
+exists, that instrument's sim accuracy is **bounded by unverified
+forward-model fidelity**: the Galileo cohort holds only negative-case
+frames (no star, limb, or ring content), so nothing currently verifies the
+gossi PSF or shape rendering; the Voyager and LORRI cohorts support only
+fragments.  This is a Cassini match first, and the labels say exactly how
+far the others reach.
+
+Cassini match quality
+---------------------
+
+The tuning pass (2026-07-17) adjusted the forward-model defaults in
+``sim/forward/artifacts_catalog.py`` against FOMs 1-6 -- the tuned values
+and their cohort statistics are recorded there -- and this table records
+the headline divergences before and after (normalized W1; smaller is
+better, ~1 means displaced by one real IQR):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 22 11 11 11 11
+
+   * - Statistic (FOM)
+     - Cohort median (real)
+     - W1/IQR before
+     - W1/IQR after
+     - n real
+     - n sim
+   * - sky noise sigma (FOM 1)
+     - 2.1e-4 I/F
+     - 10.0
+     - 5.0
+     - 5263
+     - 2184
+   * - sky level above floor (FOM 1)
+     - 3.8e-4 I/F
+     - 13.9
+     - 173 [#tail]_
+     - 5263
+     - 2184
+   * - noise at signal (FOM 1)
+     - 2.9e-4 I/F
+     - 13.8
+     - 5.1
+     - 15700
+     - 6440
+   * - star EE50 (FOM 2)
+     - 0.91 px
+     - 1.09
+     - 0.57
+     - 23
+     - 79
+   * - star EE80 (FOM 2)
+     - 1.79 px
+     - 1.28
+     - 0.23
+     - 23
+     - 79
+   * - limb rise width, co-populated strata (FOM 3)
+     - 2.54 px
+     - -- [#copop]_
+     - 0.16
+     - 3755
+     - 4338
+   * - ring-edge rise width (FOM 4)
+     - 2.87 px
+     - 0.47
+     - 0.43
+     - 8480
+     - 21858
+   * - near-floor fraction, 0.05-0.5 s (FOM 5)
+     - 0.107
+     - 0.76
+     - 1.84 [#floor]_
+     - 27
+     - 27
+   * - p99 - p50 stretch, 0.05-0.5 s (FOM 5)
+     - 0.104 I/F
+     - 0.89
+     - 0.28
+     - 27
+     - 27
+   * - spike fraction (FOM 6)
+     - 1.1e-4
+     - 11.0
+     - 1.2
+     - 58
+     - 58
+
+.. [#tail] Medians agree to 25% (3.0e-4 sim vs 3.8e-4 real); the large W1
+   is carried by a tail of simulated sky patches near bright content in
+   body- and ring-bearing frames -- residual halo and shading structure
+   the darkest-quartile patch selection admits on the sim side.
+
+.. [#copop] The pooled FOM 3 statistic is computed over strata populated
+   on *both* sides.  Earlier records pooled every stratum, but the
+   simulated body model's limb emission gates (diameter >= 100 px, phase
+   <= 60 deg) left six of the eight real-populated strata -- every
+   high-phase and small-body stratum -- with no sim counterpart, so the
+   previously reported pooled values (0.36 before / 0.46 after) compared
+   different stratum mixtures and were not like-for-like.  The
+   measurement path now bypasses those navigation-policy gates and the
+   matched ring-scene moon tracks the real body's diameter and phase, so
+   every real-populated stratum has a sim counterpart in the current
+   record (the summary's ``limb_bins_real_only`` is empty); a
+   like-for-like "before" number cannot be reconstructed for the
+   pre-tuning model, so the cell is blank.
+
+.. [#floor] Simulated sky is flatter than real sky relative to its own
+   noise (real frames carry background gradients and glow), so more sim
+   pixels sit within one sigma of the frame floor.  This statistic folds
+   in scene content beyond the detector chain; see the known gaps.
+
+The FOM 3 strata behind the pooled number (2026-07-18; p = phase bin
+< 60 / 60-120 / > 120 deg, r = diameter bin < 100 / 100-400 / > 400 px):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 14 17 17 17 17
+
+   * - Stratum
+     - W1/IQR
+     - real median (px)
+     - sim median (px)
+     - n real
+     - n sim
+   * - p0 r0
+     - 0.21
+     - 2.87
+     - 2.64
+     - 522
+     - 1408
+   * - p0 r1
+     - 0.33
+     - 2.75
+     - 2.75
+     - 400
+     - 400
+   * - p0 r2
+     - 0.80
+     - 3.09
+     - 2.62
+     - 733
+     - 780
+   * - p1 r0
+     - 0.92
+     - 2.18
+     - 2.45
+     - 435
+     - 398
+   * - p1 r1
+     - 0.72
+     - 2.24
+     - 2.41
+     - 922
+     - 796
+   * - p1 r2
+     - 0.45
+     - 2.58
+     - 2.39
+     - 525
+     - 200
+   * - p2 r0
+     - 1.00
+     - 1.75
+     - 2.29
+     - 70
+     - 156
+   * - p2 r1
+     - 2.04
+     - 1.71
+     - 2.18
+     - 148
+     - 200
+
+The headline reading: the star PSF now matches the cohort through the
+same estimator on both sides (EE50 0.90 sim vs 0.91 real; EE80 1.72 vs
+1.79); the stationary artifact incidence matches after the
+calibrated-chain hot-pixel retune, while the transient (cosmic-ray)
+share stays unmodeled on every chain -- each catalog entry retains an
+explicit zero beside its measured rate and the chain-model reason (see
+known gap 7); limb rise widths agree in the like-for-like pool
+(co-populated-strata medians 2.539 sim vs 2.539 px real, W1/IQR 0.16)
+with per-stratum divergences from 0.21 to 2.04 -- worst at high phase,
+where the simulated crescent limb measures *wider* than the real one
+(2.2-2.3 px vs 1.7 px medians); ring-edge widths agree at the
+few-tenths level (2.45 vs 2.87 px); and the sky-noise *level* matches
+at the median (2.2e-4 vs 2.1e-4 I/F) while the distributional
+divergence remains floored by the quantization-scar gap below.  The
+low-phase residual is not a PSF error -- FOM 2 pins the PSF
+independently -- but limb content (real topography, the Lommel-Seeliger
+approximation); the high-phase excess runs the other way and points at
+the crescent shading model.  The curve *shapes* agree far tighter than
+the scalar samples: the density-W1 of the frame-averaged curves is
+0.06 for the sky power spectrum, 0.13 for the star radial profile,
+0.02 for the limb profile, and 0.02 for the ring radial profile (axis
+units over the real IQR; ``curve_divergences`` in the summary).
+
+Two caveats apply to every FOM 2/3 width above.  First, a registration
+asymmetry: real-side star cutouts and limb profiles are centred through
+the sidecar offset and catalog geometry, so operator-verified
+registration residuals inflate the real widths one-sidedly -- the
+matched sim frames are registered exactly by construction -- and part of
+the tuned PSF wing may absorb registration error rather than optics.
+Second, the absolute rise-width medians are estimator-specific (the
+10-90% estimator biases roughly +17% at the widest profiles and -6% at
+the narrowest); what makes the comparison fair is that both sides run
+the identical estimator, so the *difference* is meaningful even where
+the absolute value is not.
+
+.. figure:: _figures/realism_coiss_calib_nac_noise.png
+   :width: 100%
+   :alt: Cassini NAC sky-noise distributions, real vs sim
+
+   FOM 1, Cassini NAC: sky-patch noise sigma, sky level above floor,
+   noise at signal, and the sky power spectrum.
+
+.. figure:: _figures/realism_coiss_calib_nac_psf.png
+   :width: 100%
+   :alt: Cassini NAC star radial profile and encircled energy, real vs sim
+
+   FOM 2, Cassini NAC: star radial profiles and encircled-energy radii.
+   The tuned kernel reproduces the cohort's EE50/EE80.
+
+.. figure:: _figures/realism_coiss_calib_nac_limb.png
+   :width: 100%
+   :alt: Cassini NAC limb profile and rise widths, real vs sim
+
+   FOM 3, Cassini NAC: normalized limb profiles and 10-90% rise widths by
+   phase (p) and resolution (r) bin.
+
+.. figure:: _figures/realism_coiss_calib_nac_ring.png
+   :width: 100%
+   :alt: Cassini NAC ring-edge profiles, real vs sim
+
+   FOM 4, Cassini NAC: ring-edge radial profiles and rise widths.
+
+.. figure:: _figures/realism_coiss_calib_nac_dynrange.png
+   :width: 100%
+   :alt: Cassini NAC exposure-stratified dynamic range, real vs sim
+
+   FOM 5, Cassini NAC: near-floor fractions and signal stretch per
+   exposure stratum.
+
+.. figure:: _figures/realism_coiss_calib_nac_artifacts.png
+   :width: 100%
+   :alt: Cassini NAC artifact incidence, real vs sim
+
+   FOM 6, Cassini NAC: measured line-loss and single-pixel-spike rates
+   against the catalog defaults.
+
+The other instruments
+---------------------
+
+**Cassini WAC** (4 frames, limited).  The cohort's two star frames give
+9 usable star cutouts that pin the tuned WAC kernel: cohort EE50/EE80 =
+1.33/2.16 px against simulated 1.13/1.90 px, normalized W1 0.42 and 0.80
+(from 1.32 and 3.16 before tuning).  The WAC *noise* comparison, though,
+diverges by two orders of magnitude one-sidedly: simulated sky sigma
+sits at 2.4e-5 I/F against 1.9e-4 real (W1/IQR 101), noise at signal
+likewise (101), and the sky level above floor at 3.7e-5 vs 3.2e-4
+(W1/IQR 2481).  A one-sided deficit of that size on the calibrated
+chain is a chain symptom, not a small-n artifact -- most plausibly the
+nominal DN-to-I/F calibration scale of the simulated chain (the
+per-filter CISSCAL scale is not modeled; the same family as known gap
+3), though the 4-frame cohort cannot close the attribution.  The
+remaining WAC statistics rest on 1-2 frames per stratum and are
+reported in the summary JSON without distributional claims.
+
+**Galileo SSI** (8 frames).  Every Galileo frame in the library is a
+negative case, so FOMs 2-4 are unsupported and *gossi sim accuracy is
+bounded by unverified forward-model fidelity* for PSF and shape rendering
+until the star-calibration frames land.  What the cohort does support:
+FOM 6 -- the measured spike rate matched the catalog after tuning
+(median measured 1.2e-4 of pixels vs simulated 1.7e-4; normalized W1 0.63, from 27.8 before tuning) -- and the observation that the real REDR sky floor
+is quantization-locked at exactly 1 LSB while the frames carry an extended
+background glow the matched sky frames do not model (see the known gaps).
+
+**Voyager ISS** (3 frames, limited).  The GEOMED star frame gives 8 real
+star cutouts (EE50 median 1.22 px) against two simulated ones (EE50
+median 3.46 px, after the plateau guard rejects the brightest simulated
+core, whose noise-free 8-bit quantization ties its central pixels at 1-2
+LSB -- a quantization plateau with no sub-pixel shape information, not a
+clipped core) -- one frame and two noise-dominated cutouts
+constrain nothing, so the vgiss PSF comparison is *unconstrained*: the
+retained interim sigma stands on its published-range provenance alone,
+not on cohort evidence.  The vidicon read noise was tuned down from its
+high-gain interim value (see the catalog); the sky-noise floor itself is
+quantization-limited on the sim side (known gaps).
+
+**New Horizons LORRI** (2 frames, limited).  Both frames are 4x4-binned
+star fields; their binned-pixel EE50 (median 0.59 px) cannot constrain the
+1x1-mode kernel the catalog carries, so the LORRI kernel is retained and
+LORRI sim accuracy for the PSF is bounded by unverified per-mode
+fidelity.  The sky statistics are pedestal-invariant by construction (the
+sci products are bias-subtracted; the sim raw chain is not).
+
+Technique diagnostics (read-only)
+---------------------------------
+
+For a handful of matched pairs per instrument (at most three: one star
+field, one limb frame, one ring frame) the full navigator ran on both the
+real frame and its matched simulated frame; the per-technique diagnostics
+are recorded in the summary JSON (``fom7_rows``).  Headline reading of the
+2026-07-18 pairs:
+
+- Star-field pairs behave comparably where both sides lock:
+  ``StarFieldFromCatalogNav`` reports 0.95 confidence on both sides of the
+  WAC and LORRI star pairs, with the simulated inlier residuals tighter
+  than the real ones (0.02-0.05 px vs 0.09-0.33 px) -- the sim errs
+  optimistic on star sharpness.
+- The Cassini ring pair is indistinguishable: ``RingEdgeNav`` reports
+  0.952 confidence on both the real frame and its matched render.
+- The limb pairs split: on the NAC pair both sides succeed (0.77 real vs
+  0.81 sim) with the simulated DT residual three times the real one;
+  on the WAC pair the real limb fit succeeds at 0.83 while the matched
+  simulated result is discarded by its own ensemble.
+- The NAC star pair inverts: the real frame's field lock fails (3
+  inliers; a known caveat of that cohort frame) while its matched render
+  locks at 0.95 -- the painted-silhouette star occlusion gap and the
+  clean simulated field both push in the optimistic direction.
+
+These rows are the evidence a human reads to judge whether the techniques
+*behave* comparably on matched frames.  They were not consulted during
+tuning and never will be: they are built from the navigator's own outputs,
+and fitting the image model to them would make navigator errors invisible
+by construction.
+
+Known gaps
+----------
+
+Where a figure of merit reveals a forward-model gap that parameter tuning
+cannot close, it is recorded here rather than force-fitted:
+
+1. **Stars shine through dark limbs.**  Star occlusion by bodies uses the
+   painted *lit* silhouette (the body mask is where the rendered body is
+   brighter than zero), so a star behind the un-lit part of a limb still
+   shines.  Simulated star-technique success on body-crossing fields is
+   therefore optimistic: real frames lose stars behind dark limbs that
+   simulated frames keep.
+2. **Occluded limbs claim full reliability.**  In mutual-event scenes the
+   simulated body model emits its limb arc with full
+   ``visible_arc_fraction`` and reliability even where another body
+   occludes it; the occlusion is recorded in the scene truth but does not
+   yet reduce the emitted feature's claim.  Pending the recalibration
+   pass, mutual-event confidences remain provisional.
+3. **Calibrated-product quantization scars.**  The sim's calibrated path
+   retains full LSB quantization texture: its measured sky-noise floor is
+   ~1 DN-equivalent at every exposure (Cassini CALIB and Voyager GEOMED
+   paths alike).  Real calibrated products sit *below* the LSB (NAC CALIB
+   ~0.1-0.4 DN-equivalent, GEOMED ~0.22 DN) because their float-valued
+   corrections -- flat fields, dark/bias frames, 2-Hz filtering, geometric
+   resampling -- dither the quantization away.  This floors the FOM 1
+   sky-noise divergence for every calibrated cohort; closing it needs a
+   calibration-scar model (sub-LSB dithering / resample texture), not
+   parameter tuning.  Tuning read noise below its published value to
+   compensate would misattribute the mismatch and was not done.  The
+   per-filter absolute DN-to-I/F scale is likewise a nominal identity
+   (signal 1.0 = I/F 1.0 at the reference exposure) rather than the real
+   per-filter CISSCAL scale, so I/F noise amplitudes carry that
+   uncertainty too.  The Cassini WAC comparison shows that scale
+   uncertainty at full size: its simulated sky sigma undershoots the
+   real cohort by roughly 8x one-sidedly (2.4e-5 vs 1.9e-4 I/F; see the
+   WAC subsection).
+4. **Hot pixels are per-scene, not per-detector.**  The simulated
+   hot-pixel population is drawn from each scene's seeded stream, so it
+   never recurs at fixed detector positions across frames the way real
+   hot pixels do.  The FOM 6 stationary/transient split therefore cannot
+   match by construction; only the total incidence is comparable (and now
+   tuned).
+5. **No per-readout-mode PSF.**  The catalog carries one kernel per
+   instrument; the LORRI cohort's 4x4-binned frames (and any summed
+   Cassini modes that enter the library later) see a different effective
+   kernel that the catalog cannot express.
+6. **Matched-frame content limits.**  Simulated ring edges are sharp
+   optical-depth steps and simulated matched bodies are relief-free
+   ellipsoids, so residual FOM 3/4 width differences fold in real edge
+   structure (ring radial profiles, limb topography) beyond the PSF that
+   FOM 2 pins independently.  The Galileo negative frames carry an
+   extended background glow (scattered light) that matched sky frames do
+   not model, which dominates that cohort's FOM 5 comparison.
+7. **Measured transients exceed what the cosmic-ray stage can express.**
+   Every cohort measures a nonzero transient spike fraction (NAC 2.75e-4,
+   WAC 4.89e-4, Galileo 1.17e-4, LORRI 3.36e-4 per frame), yet no
+   catalog entry adopts a ``cosmic_ray_rate_per_sec``: the Cassini
+   incidence is exposure-independent (readout-dominated) and
+   modest-amplitude while the chain's stage scales event counts with
+   exposure and deposits near full well -- an adoption attempt
+   (2026-07-17) inflated the matched frames' sky-noise statistics ~5x
+   and was reverted; the Galileo population is already carried by the
+   tuned per-scene hot pixels, so a separate term double-counts it; the
+   LORRI measurement is star-contaminated (both cohort frames are binned
+   star fields); and the Voyager vidicon path has no transient stage.
+   Each catalog entry records its measured rate and the unblocking
+   condition beside the retained zero.
 
 Summary
 =======

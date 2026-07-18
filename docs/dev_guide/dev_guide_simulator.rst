@@ -2490,6 +2490,162 @@ review panels:
 
    python -m tests.integration.render_contact_sheet
 
+.. _sim-realism-match:
+
+The realism match against real cohorts
+======================================
+
+Everything above renders what a scene *asks for*; the realism match measures
+how closely those renders resemble real spacecraft frames.  The runner
+
+.. code-block:: bash
+
+   python -m tests.integration.sim_realism
+
+compares the curated real-image library
+(``tests/integration/image_library/``) against matched simulated frames, per
+instrument, on seven figures of merit:
+
+1. **Sky noise** -- per-patch noise sigma from paired pixel differences
+   inside near-uniform patches (science frames have no flat-field pairs, and
+   naive signal-binning would count scene texture as noise), the sky-patch
+   level above the frame floor, noise at signal, and the sky spatial power
+   spectrum (which catches banding and coherent noise a scalar sigma cannot).
+2. **Star PSF** -- star-cutout radial profiles and encircled-energy radii
+   (EE50/EE80) on cohorts that contain star frames.  Where a cohort has no
+   star frames, the limb profile of figure 3 is the only PSF evidence and
+   the summary says so.
+3. **Limb profiles** -- intensity profiles sampled along the outward normals
+   of the navigator's predicted limb polylines (shifted onto the actual limb
+   by each frame's operator-verified offset), reduced to 10-90% rise widths
+   and binned by phase angle and apparent body diameter.  This is what
+   ``BodyLimbNav``'s distance transform actually sees.  Absolute rise-width
+   medians are estimator-specific (the 10-90% estimator biases roughly +17%
+   at the widest profiles and -6% at the narrowest); both sides run the
+   identical estimator, so estimator parity -- not the absolute median --
+   is what makes the comparison fair.  One asymmetry survives parity:
+   real-side profile centers inherit the sidecar offset's finite
+   uncertainty and per-star catalog/distortion residuals, while sim-side
+   centers are exact by construction, so misregistration inflates only
+   the real widths and part of any tuned PSF wing may absorb
+   registration error rather than optics.
+4. **Ring edges** -- the same profile machinery along predicted ring-edge
+   polylines (Cassini cohort).
+5. **Dynamic range** -- fraction saturated, fraction near the frame floor,
+   and signal-percentile stretch, always inside exposure strata: an
+   unstratified comparison measures what the spacecraft pointed at, not the
+   forward model.
+6. **Artifact incidence** -- measured rates of lost/interpolated lines and
+   single-pixel spikes, with a cross-frame split of spikes into stationary
+   (hot pixels, which recur at fixed detector positions) and transient
+   (cosmic rays), compared against the artifacts-catalog defaults.
+7. **Technique diagnostics** -- for a handful of matched real/sim pairs the
+   full navigator runs on both frames and the per-technique diagnostics
+   (inlier counts, residual scatter, confidences) are tabulated side by
+   side.
+
+Matched frames
+--------------
+
+Every real frame gets exactly one matched simulated frame: the same
+instrument signal chain (``artifacts: {instrument_defaults: true}`` on the
+instrument whose ``data_units`` match the cohort's products -- e.g.
+``coiss_calib_nac`` for the Cassini CALIB cohort), the same exposure, and
+scene content of the same class -- a star field for a star frame, an
+ellipsoid at the real body's apparent diameter and phase angle for a limb
+frame, a multi-feature ring system for a ring frame, near-empty sky for the
+negative and scattered-light frames.  Scene seeds derive from the real
+frame's image id, so the whole match is deterministic: re-running the runner
+reproduces every simulated frame and every statistic bit for bit.
+
+Both sides then run *identical* extraction code -- the same patch finder,
+the same profile sampler, and the navigator's own feature extraction
+(``NavOrchestrator.prepare``) to place limb, ring, and star geometry -- so
+estimator bias cancels in the comparison.
+
+The divergence statistic
+------------------------
+
+Each sample kind is reduced to one scalar: the Wasserstein-1 distance
+between the real and sim distributions, computed on quantile-clipped data
+(each sample winsorized at its own 1st/99th percentiles) and normalized by
+the real distribution's interquartile range
+(:func:`spindoctor.sim.realism.divergence.w1_divergence`).  W1 is a
+transport metric in the variable's own units -- a normalized value of 1.0
+means the distributions are displaced by about one real IQR -- but it is
+not outlier-robust, so the clip keeps a noise statistic from silently
+measuring an artifact statistic's tails.  **No pass/fail threshold is
+attached**; the number is reported per figure of merit and judged by a
+human against the cohort's support.
+
+Curve kinds (the sky power spectrum and the star / limb / ring
+profiles) get the same scalar through
+:func:`spindoctor.sim.realism.divergence.w1_between_densities`: the
+frame-averaged curve on each side is treated as a nonnegative density
+over its axis, and the W1 along that axis (normalized by the real
+density's IQR) lands in the summary's ``curve_divergences`` block.  The
+pooled FOM 3 scalar (``limb_width_copop``) pools only strata populated
+on both sides; one-sided strata are recorded in the summary
+(``limb_bins_real_only`` / ``limb_bins_sim_only``) rather than folded
+into a mixture whose pooled W1 would measure stratum composition
+instead of width.
+
+Cohort support labels
+---------------------
+
+A distribution statement needs frames.  Each figure of merit carries a
+support label per instrument -- ``supported`` (8+ contributing frames),
+``limited`` (2-7, reported with the caveat), or ``unsupported`` (fewer; the
+statistic is not reported, because an IQR of two frames is not a
+statistic).  Where a figure of merit is unsupported and no independent
+evidence exists, that instrument's sim accuracy is *bounded by unverified
+forward-model fidelity* and the report says exactly that rather than
+implying a match that was never measured.
+
+The FOM 7 firewall
+------------------
+
+Figures of merit 1-6 are computed from pixels and geometry alone -- they do
+not depend on how well the navigator performs.  Figure 7 is different: it is
+built from the navigator's own outputs.  If the forward model were tuned
+until the navigator's diagnostics agreed between sim and real, agreement
+would stop being evidence -- any systematic error shared by tuning target
+and measurement instrument becomes invisible, and the sim would "validate"
+the navigator by construction.  Figure 7 is therefore **read-only**: it is
+reported so a human can see whether the techniques behave comparably on
+matched frames, and it is never a tuning target.  Only FOMs 1-6 feed the
+catalog-tuning loop.
+
+Running and reading
+-------------------
+
+The runner needs the holdings and star-catalog environment variables of any
+real navigation run.  ``--instrument`` restricts to one instrument,
+``--max-frames`` caps the cohort (smoke runs), ``--skip-fom7`` skips the
+navigation pairs.  Outputs:
+
+- ``docs/simulator_report/_figures/realism_<instrument>_<fom>.png`` --
+  the overlay figures embedded in the simulator report;
+- ``tests/integration/realism_results/realism_summary.json`` -- the
+  committed record backing the report's tables (divergences, support
+  labels, FOM 7 rows, runtime).
+
+The full-cohort run (75 frames as of 2026-07-18) takes 19 to 21 minutes
+on a workstation with local holdings (measured 18.8-21.3 minutes over
+the recorded 2026-07-17/18 runs); the cost is dominated by the
+navigator's feature extraction on the real frames and the full-size
+matched renders.  ``--skip-fom7`` saves about 17% -- the navigation
+pairs are a handful of frames per instrument, not a large share of the
+cost.  ``tests/integration/test_sim_realism.py`` carries
+the integration-tier tests: matched-scene validity per instrument,
+sim-side determinism, and an end-to-end smoke on the smallest cohort.
+
+The per-instrument match quality, the figures, and the known-gaps list
+live in the simulator report's realism section
+(:doc:`/simulator_report/simulator_report`).  Tuned catalog defaults in
+``sim/forward/artifacts_catalog.py`` carry their provenance next to the
+value: which cohort statistic moved them, measured when, replacing what.
+
 See also
 ========
 

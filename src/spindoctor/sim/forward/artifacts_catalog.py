@@ -34,28 +34,53 @@ __all__ = [
 # single source of truth for the ``artifacts`` block's per-mode keys, their
 # rendering stage, per-instrument availability, and parameter schemas.  It is
 # re-exported here so the detector catalog and the mode registry share one
-# import point.  Every *loss-mode* incidence defaults to 0 even under
+# import point.  The *missing-data* loss modes default to 0 even under
 # ``instrument_defaults`` -- naming an instrument selects a signal chain, not a
-# set of transmission defects -- so loss modes are planted only by scenes that
-# configure them explicitly.
+# set of transmission defects -- so they are planted only by scenes that
+# configure them explicitly.  Cosmic rays are different: radiation on the
+# detector is environment physics, so each instrument entry carries a
+# ``cosmic_ray_rate_per_sec`` that is either cohort-measured or an explicit
+# retained zero with its reason (see the per-entry comments).
 
 # Whole-scene PSF kernel parameters per instrument, all radii in detector
-# pixels.  The core sigma comes from each camera's measured FWHM (sigma =
-# FWHM / 2.355); the wing parameters (w, r0, n) are interim, expressed as wing
-# energy fractions so the delivered kernels conserve flux.
+# pixels.  Wing parameters (w, r0, n) are expressed as wing energy fractions
+# so the delivered kernels conserve flux.
 #
-# Provenance (all interim):
-# - coiss_nac/coiss_wac sigma from the Cassini ISS measured FWHMs; the
-#   core-to-wing dynamic range beyond the truncation window is stray-light
-#   scope, so the shipped wing fraction is small.
-# - vgiss sigma is an interim estimate: the Voyager references publish no FWHM,
-#   and GEOMED resampling broadens whatever the vidicon delivered.
-# - gossi sigma is a directly published value, not FWHM / 2.355.
-# - nhlorri is elliptical (sigma_v != sigma_u) per the LORRI PSF references.
-# The wing parameters are the first quantities the realism-match pass tunes.
+# Provenance:
+# - coiss_nac: TUNED 2026-07-17 by the realism match against the Cassini
+#   CALIB image-library cohort (brightest unsaturated stars over the 11
+#   contributing NAC star frames): cohort encircled-energy radii EE50 = 0.91 px,
+#   EE80 = 1.79 px; these parameters reproduce EE50/EE80 = 0.90/1.72 px
+#   through the same estimator.  The EE80/EE50 ratio (1.97 vs 1.52 for a
+#   pure Gaussian) requires substantial mid-range wing energy, so this is
+#   an *effective* in-window kernel: the fitted w = 0.12 carries the
+#   measured 1-8 px halo energy that the interim FWHM-derived core
+#   (sigma 0.55, w 0.025) put nowhere.  A first fit at w = 0.20 matched
+#   the encircled energy but measurably over-lifted the wide-field halo
+#   (sky-patch means and mid-size-body limb widths); w = 0.12 with the
+#   softer core matches the stars without that excess.  The far halo
+#   beyond the truncation window remains stray-light scope.  Replaces the
+#   interim FWHM/2.355 value.
+# - coiss_wac: TUNED 2026-07-17 from the cohort's two WAC star frames
+#   (9 usable star cutouts): cohort EE50/EE80 = 1.33/2.16 px through the
+#   final estimator; sigma follows the measured EE50 with the NAC wing
+#   shape.  Two-frame evidence -- treat as cohort-limited, revisit when
+#   more WAC star frames land.  Replaces the interim FWHM/2.355 value.
+# - vgiss: RETAINED interim estimate: the cohort's one star frame (8
+#   usable star cutouts, EE50 1.22 px) cannot constrain the kernel
+#   through GEOMED resampling (the flat-top guard leaves two simulated
+#   cutouts to compare against); the Voyager references publish no FWHM.
+# - gossi: RETAINED interim published sigma: the Galileo cohort holds no
+#   star frames (negative cases only), so there is no independent PSF
+#   evidence; gossi sim accuracy is bounded by unverified PSF fidelity
+#   until the star-calibration frames land.
+# - nhlorri: RETAINED interim elliptical values (LORRI PSF references,
+#   1x1 mode).  The cohort's two star frames are 4x4-binned (measured
+#   binned-pixel EE50 0.59 px) and cannot constrain the 1x1 kernel; a
+#   per-readout-mode kernel is future work.
 PSF_KERNELS: dict[str, dict[str, float]] = {
-    'coiss_nac': {'sigma_v': 0.55, 'sigma_u': 0.55, 'w': 2.5e-2, 'r0': 2.0, 'n': 3.0},
-    'coiss_wac': {'sigma_v': 0.64, 'sigma_u': 0.64, 'w': 2.5e-2, 'r0': 2.0, 'n': 3.0},
+    'coiss_nac': {'sigma_v': 0.70, 'sigma_u': 0.70, 'w': 0.12, 'r0': 3.0, 'n': 4.0},
+    'coiss_wac': {'sigma_v': 1.05, 'sigma_u': 1.05, 'w': 0.12, 'r0': 3.0, 'n': 4.0},
     'vgiss': {'sigma_v': 0.85, 'sigma_u': 0.85, 'w': 1.2e-2, 'r0': 2.0, 'n': 3.0},
     'gossi': {'sigma_v': 0.80, 'sigma_u': 0.80, 'w': 1.2e-2, 'r0': 2.0, 'n': 3.0},
     'nhlorri': {'sigma_v': 1.13, 'sigma_u': 0.87, 'w': 1.2e-2, 'r0': 2.0, 'n': 3.0},
@@ -198,9 +223,21 @@ def resolve_sky_pixel_scale_arcsec(instrument: str | None) -> float:
 # bias_col_gradient_dn, bloom_length, quantization) are interim placeholders
 # sized from the 5.2-5.6 descriptions; per-scene overrides ride in the
 # truth-side noise block.  instrument_defaults also turns on Poisson shot
-# noise (a property of the electron chain itself, not a per-camera number);
-# the loss modes (cosmic rays, missing data) are artifact incidences and stay
-# at zero.
+# noise (a property of the electron chain itself, not a per-camera number)
+# and the entry's cosmic_ray_rate_per_sec; the missing-data loss modes are
+# artifact incidences and stay at zero.
+#
+# cosmic_ray_rate_per_sec is in events per pixel per second: the chain
+# multiplies it by exposure_sec, pixel_area_cm2 (default 1.0), and the pixel
+# count, so at the default unit pixel area the fluence reads per pixel.
+# The realism match's FOM 6 transient split (single-pixel spikes that do
+# NOT recur at fixed detector positions across the cohort) measures the
+# candidate rate per instrument.  Every current entry retains zero, each
+# with its measured rate, the specific reason adoption fails through this
+# chain (exposure-scaling / full-well-amplitude mismatch for Cassini,
+# double-counting against the tuned per-scene hot pixels for Galileo,
+# star-field contamination for LORRI, no vidicon stage for Voyager), and
+# the unblocking condition, recorded beside the value.
 #
 # The vidicon (Voyager) path skips the electron conversion; its noise is applied
 # directly in DN (5.3): line-correlated read noise (per-line offset +
@@ -227,6 +264,24 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         # 5.2 interim: total-charge fraction bled into the warm column above a
         # hot pixel (the streak integral, not a per-pixel amplitude).
         'hot_pixel_column_factor': 0.3,
+        # RETAINED zero 2026-07-18 after an adoption attempt.  The realism
+        # match measures a real transient single-pixel spike fraction of
+        # 2.75e-4 per frame on the 58-frame CALIB NAC cohort (stationary
+        # hot pixels excluded; star-bearing and body/ring frames agree at
+        # 2.60e-4 vs 2.79e-4, so scene point sources are not the driver).
+        # But the measured incidence is exposure-INdependent -- mean
+        # fraction ~2e-4 in every exposure band from <= 0.2 s to > 2 s,
+        # and the 22 s frame measures 1.1e-4 where an exposure-scaling
+        # fluence fitted at the median frame predicts ~3e-3 -- while this
+        # chain's cosmic-ray stage scales event counts with exposure_sec
+        # and deposits near full well.  Adopting a fitted 1.5e-4
+        # events/px/s (tried 2026-07-17) corrupted the matched frames'
+        # FOM 1 statistics (sim sky-patch sigma median 2.2e-4 -> 1.0e-3
+        # I/F against 2.1e-4 real) and overshot the FOM 6 transient
+        # fraction ~2x through the multi-pixel event morphology.
+        # Unblocked by a per-readout (exposure-independent),
+        # modest-amplitude transient term in the detector chain.
+        'cosmic_ray_rate_per_sec': 0.0,
         'banding_amplitude_e': 30.0,  # 5.2 interim (~30 e- NAC 2 Hz)
         'banding_period_px': 64.0,  # 5.2 interim (line-readout-rate period)
         'bias_pedestal_sigma_dn': 2.0,  # 5.2 interim (per-image pedestal jitter)
@@ -275,6 +330,14 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'hot_pixel_fraction': 2.0e-3,
         'hot_pixel_amplitude_e': 3.5e4,
         'hot_pixel_column_factor': 0.3,
+        # RETAINED zero 2026-07-18: same exposure-independence and
+        # full-well-amplitude mismatch as the NAC entry (the two cameras
+        # share this chain model), and the WAC's own 4-frame cohort is
+        # star-contaminated besides -- its measured 4.89e-4 per-frame
+        # transient fraction comes entirely from the three star-bearing
+        # frames while the one body frame measures zero.  Unblocked
+        # together with the NAC's per-readout transient term.
+        'cosmic_ray_rate_per_sec': 0.0,
         'banding_amplitude_e': 6.0,  # 5.2 interim (~6 e- WAC 4 Hz)
         'banding_period_px': 64.0,
         'bias_pedestal_sigma_dn': 2.0,
@@ -311,10 +374,31 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'read_noise_e': 31.0,  # 5.4 (full-res; 44 e- in summation mode)
         'bias_dn': 20.0,
         'dark_current_e_per_sec': 10.0,  # 5.4 interim (RTG-driven dark spikes)
-        'hot_pixel_fraction': 3.0e-3,
+        # TUNED 2026-07-17 by the realism match: the 8-frame Galileo REDR
+        # cohort's median measured spike fraction is 1.2e-4 with a
+        # stationary component of only 1e-6 -- the REDR blemish correction
+        # removes most hot pixels -- so the interim 3e-3 overstated the
+        # products the navigator actually sees by ~25x.
+        'hot_pixel_fraction': 1.0e-4,
         'hot_pixel_amplitude_e': 4.0e4,
         # 5.4 interim (early-blooming columns; total-charge fraction).
         'hot_pixel_column_factor': 0.5,
+        # RETAINED zero 2026-07-18 after an adoption attempt.  The realism
+        # match measures a real transient spike fraction of 1.17e-4 per
+        # frame (8-frame REDR cohort, all negative cases, so no scene
+        # point sources contaminate the split) -- but that population is
+        # already carried by the tuned hot_pixel_fraction above, which was
+        # sized to the cohort's TOTAL single-pixel incidence (1.2e-4;
+        # the truly stationary component is only 1e-6) and which the FOM 6
+        # split itself counts as transient because sim hot pixels reseed
+        # per scene.  Adding a separate cosmic-ray term double-counts the
+        # same measured spikes: two rates were tried 2026-07-18 (1.6e-3
+        # from the raw split, then 5.4e-4 refit excluding star frames);
+        # even the refit raised the simulated fraction to 2.3e-4 against
+        # the 1.2e-4 real.
+        # Unblocked by a fixed-position per-detector hot-pixel map, which
+        # would free the transient budget for a real radiation term.
+        'cosmic_ray_rate_per_sec': 0.0,
         'banding_amplitude_e': 65.0,  # 5.4 interim (~0.35 DN at gain 2 -> ~65 e-)
         'banding_period_px': 42.0,  # 5.4 (2400 Hz supply-noise comb every 42 px)
         'bias_pedestal_sigma_dn': 1.0,
@@ -367,6 +451,15 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'hot_pixel_fraction': 0.0,
         'hot_pixel_amplitude_e': 0.0,
         'hot_pixel_column_factor': 0.0,
+        # RETAINED zero 2026-07-17: the realism match measured a 3.36e-4
+        # per-frame transient spike fraction (two 5 s frames), but both
+        # cohort frames are 4x4-binned star fields and a binned faint star
+        # is indistinguishable from a transient to the single-pixel spike
+        # detector -- the cohort has no star-free frame to bound that
+        # contamination, so the measured rate is not adoptable.  Unblocked
+        # by any non-star LORRI frame entering the library; scenes can
+        # still plant the radiation_transients mode explicitly.
+        'cosmic_ray_rate_per_sec': 0.0,
         'banding_amplitude_e': 17.0,  # 5.5 interim (~0.8 DN vertical banding)
         'banding_period_px': 128.0,  # 5.5 interim
         'bias_pedestal_sigma_dn': 1.0,
@@ -407,12 +500,28 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'exposure_ref_sec': 1.0,
         'bias_dn': 20.0,
         'quantization': '8bit',
+        # Cosmic rays RETAINED at zero 2026-07-17 (no key: the vidicon DN
+        # path carries no cosmic-ray stage, so a rate here would be inert).
+        # The realism match measured a 3.5e-5 transient spike fraction over
+        # the 3-frame GEOMED cohort -- GEOMED's reseau-anchored resampling
+        # interpolates most single-pixel transients away.  Unblocked by a
+        # DN-domain transient stage plus more Voyager frames.
         'vidicon': {
-            # 5.3 interim: readout-chain noise ~0.3-0.75 DN low gain / 2.2-2.6 DN
-            # high gain; a per-line-correlated offset plus a within-line white
-            # component (the two summing in quadrature to the quoted RMS).
-            'read_noise_line_dn': 1.8,
-            'read_noise_pixel_dn': 1.8,
+            # TUNED 2026-07-17 by the realism match: the 3-frame GEOMED
+            # cohort's paired-difference sky sigma is ~0.22 DN equivalent
+            # (median 1.75e-3 I/F), placing the products in the low-gain
+            # regime of the published 0.3-0.75 DN range after GEOMED
+            # resampling smoothing.  The interim 1.8 DN values (the
+            # high-gain end) overstated the cohort's measured 0.22 DN sky
+            # sigma about 9x.  0.25 DN per
+            # component (quadrature sum ~0.35 DN, the low end of the
+            # published range): the sim's 8-bit quantization floors any
+            # sub-LSB value, so the choice is anchored to the published
+            # low-gain range rather than to the (unreachable) 0.22 DN
+            # cohort estimate -- see the realism report's known-gaps list.
+            # 3 frames is limited evidence; revisit as VGISS frames land.
+            'read_noise_line_dn': 0.25,
+            'read_noise_pixel_dn': 0.25,
             # 5.3: faint coherent periodic component (2.4 kHz vertical, ~0.5 DN
             # peak-to-peak).
             'coherent_amplitude_dn': 0.25,
@@ -453,6 +562,9 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'hot_pixel_fraction': 0.0,
         'hot_pixel_amplitude_e': 0.0,
         'hot_pixel_column_factor': 0.0,
+        # The generic block is an ideal detector with no environment, so
+        # there is no cosmic-ray flux to measure; explicitly zero.
+        'cosmic_ray_rate_per_sec': 0.0,
         'banding_amplitude_e': 0.0,
         'banding_period_px': 64.0,
         'bias_pedestal_sigma_dn': 0.0,
@@ -461,6 +573,39 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'bloom_length': 0,
         'quantization': 'exact',
     },
+}
+
+# Calibrated Cassini products (CALIB, what the navigator's cassini_iss_calib
+# path consumes) run the same cameras through CISSCAL, whose bias/dark
+# subtraction, flat-fielding, and 2-Hz noise removal strip most of the raw
+# chain's structure -- so the calibrated instruments get their own detector
+# entries instead of the raw alias.  TUNED 2026-07-17 by the realism match
+# against the 62-frame CALIB image-library cohort; every key not overridden
+# is inherited from the matching raw entry:
+# - hot_pixel_fraction: measured stationary spike fraction 1.6e-5
+#   (single-pixel spikes recurring at fixed positions across the 58-frame
+#   NAC cohort; the interim raw-chain 2e-3 overstated the calibrated
+#   products by ~100x and dominated their p99 signal percentile).
+# - banding_amplitude_e 0: CISSCAL's 2-Hz noise removal strips the coherent
+#   banding, and the cohort sky floor sits below the level at which the raw
+#   chain's 30 e- banding would register.
+# - bias_pedestal_sigma_dn / bias_row_gradient_dn / bias_col_gradient_dn 0:
+#   CISSCAL subtracts the full 2-D bias structure, not just the constant
+#   pedestal the calibration inverse already removes.
+_COISS_CALIB_OVERRIDES: dict[str, Any] = {
+    'hot_pixel_fraction': 1.6e-5,
+    'banding_amplitude_e': 0.0,
+    'bias_pedestal_sigma_dn': 0.0,
+    'bias_row_gradient_dn': 0.0,
+    'bias_col_gradient_dn': 0.0,
+}
+DETECTOR_DEFAULTS['coiss_calib_nac'] = {
+    **copy.deepcopy(DETECTOR_DEFAULTS['coiss_nac']),
+    **_COISS_CALIB_OVERRIDES,
+}
+DETECTOR_DEFAULTS['coiss_calib_wac'] = {
+    **copy.deepcopy(DETECTOR_DEFAULTS['coiss_wac']),
+    **_COISS_CALIB_OVERRIDES,
 }
 
 _coiss_alias(DETECTOR_DEFAULTS)

@@ -10,8 +10,10 @@ then ``noise`` block), then the catalog value when ``instrument_defaults`` is on
 then the disabled floor (physical-chain artifacts default to zero so an
 unconfigured scene renders a clean DN frame, per the stage-activation rule).
 ``instrument_defaults`` turns on the whole physical chain, including Poisson
-shot noise and the catalog's electron-domain full-well bloom; the loss modes
-(cosmic rays, missing data) are artifact incidences, not physical-chain noise,
+shot noise, the catalog's electron-domain full-well bloom, and the catalog's
+cohort-measured cosmic-ray rate where one is recorded (radiation on the
+detector is physics of the environment, not a transmission defect); the
+missing-data loss modes are artifact incidences, not physical-chain noise,
 and stay at zero.
 
 The ``noise.read_noise_dn`` key is a DN value, converted to electrons through
@@ -324,9 +326,15 @@ def resolve_detector_params(params: Mapping[str, Any]) -> DetectorParams:
         bloom_length = int(catalog.get('bloom_length', 0))
     else:
         bloom_length = int(sim_noise.get('bloom_length', 0))
-    cosmic_ray_rate = float(
-        scene_noise.get('cosmic_ray_rate_per_sec', sim_noise.get('cosmic_ray_rate_per_sec', 0.0))
-    )
+    # Cosmic rays: scene value, else the catalog's cohort-measured rate when
+    # instrument_defaults is on (the catalog records it per pixel per second
+    # at the chain's unit pixel area), else the config floor.
+    if 'cosmic_ray_rate_per_sec' in scene_noise:
+        cosmic_ray_rate = float(scene_noise['cosmic_ray_rate_per_sec'])
+    elif instrument_defaults and 'cosmic_ray_rate_per_sec' in catalog:
+        cosmic_ray_rate = float(catalog['cosmic_ray_rate_per_sec'])
+    else:
+        cosmic_ray_rate = float(sim_noise.get('cosmic_ray_rate_per_sec', 0.0))
     pixel_area_cm2 = float(scene_noise.get('pixel_area_cm2', sim_noise.get('pixel_area_cm2', 1.0)))
 
     dark_current = _default_or_zero(

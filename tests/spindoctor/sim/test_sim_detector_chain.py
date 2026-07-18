@@ -8,6 +8,7 @@ disabled floor (a scene with neither an artifacts nor a noise block).
 from typing import Any
 
 import numpy as np
+import pytest
 
 from spindoctor.sim.render import render_combined_model
 
@@ -126,7 +127,40 @@ def test_instrument_defaults_turns_on_poisson_and_catalog_bloom() -> None:
     resolved = resolve_detector_params(_disc('coiss_nac', artifacts={'instrument_defaults': True}))
     assert resolved.poisson is True
     assert resolved.bloom_length == 4
-    # Loss modes are artifact incidences, not physical-chain noise; they stay 0.
+    # The Cassini entries retain a zero cosmic-ray rate (the chain's
+    # exposure-scaling stage cannot represent the cohort's
+    # exposure-independent transients; see the catalog comment).
+    assert resolved.cosmic_ray_rate_per_sec == 0.0
+
+
+def test_cosmic_ray_retained_zero_for_gossi() -> None:
+    """The Galileo entry retains zero: its tuned hot-pixel fraction already
+    carries the cohort's measured single-pixel incidence."""
+    from spindoctor.sim.forward.detector.params import resolve_detector_params
+
+    resolved = resolve_detector_params(_disc('gossi', artifacts={'instrument_defaults': True}))
+    assert resolved.cosmic_ray_rate_per_sec == 0.0
+
+
+def test_cosmic_ray_scene_value_activates_the_stage() -> None:
+    """A scene noise value still turns the cosmic-ray stage on."""
+    from spindoctor.sim.forward.detector.params import resolve_detector_params
+
+    resolved = resolve_detector_params(
+        _disc(
+            'gossi',
+            artifacts={'instrument_defaults': True},
+            noise={'cosmic_ray_rate_per_sec': 2.0e-4},
+        )
+    )
+    assert resolved.cosmic_ray_rate_per_sec == pytest.approx(2.0e-4)
+
+
+def test_cosmic_ray_retained_zero_for_lorri() -> None:
+    """The LORRI catalog entry explicitly retains a zero cosmic-ray rate."""
+    from spindoctor.sim.forward.detector.params import resolve_detector_params
+
+    resolved = resolve_detector_params(_disc('nhlorri', artifacts={'instrument_defaults': True}))
     assert resolved.cosmic_ray_rate_per_sec == 0.0
 
 
@@ -137,6 +171,8 @@ def test_floor_resolves_poisson_off_and_no_bloom() -> None:
     resolved = resolve_detector_params(_disc('coiss_nac'))
     assert resolved.poisson is False
     assert resolved.bloom_length == 0
+    # No instrument_defaults: the catalog cosmic-ray rate does not activate.
+    assert resolved.cosmic_ray_rate_per_sec == 0.0
 
 
 def test_explicit_noise_override_beats_instrument_defaults() -> None:

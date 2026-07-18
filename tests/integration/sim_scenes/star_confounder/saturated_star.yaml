@@ -12,9 +12,9 @@ exposure_sec: 1.0
 # biases F5's centroid, and the six-star similarity fit carries that bias into
 # the recovered offset -- yet the navigation still succeeds at the high tier and
 # recovers the planted offset inside a tolerance that absorbs the bias.
-# Measured recovered-vs-planted error at this geometry and seed: ~0.61 px
-# (dominated by the clipped-core centroid shift on F5); the test tolerance is
-# 1.0 px.
+# Measured recovered-vs-planted error at this geometry and seed: ~0.67 px
+# under the cohort-tuned coiss_nac PSF kernel (dominated by the clipped-core
+# centroid shift on F5); the test tolerance is 1.0 px.
 artifacts:
   instrument_defaults: true
 bodies: []

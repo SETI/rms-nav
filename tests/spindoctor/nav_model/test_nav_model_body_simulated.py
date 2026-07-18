@@ -9,6 +9,7 @@ that the predicted mesh reproduces the rendered data when the params agree.
 from typing import Any
 
 import numpy as np
+import pytest
 from tests.shims import bare_nav_context
 
 from spindoctor.nav_model.nav_model_body_simulated import NavModelBodySimulated
@@ -184,6 +185,65 @@ def test_limb_arc_polyline_has_vertices_and_unit_normals() -> None:
     assert geometry.vertices_vu.shape[0] >= 30
     norms = np.hypot(geometry.normals_vu[:, 0], geometry.normals_vu[:, 1])
     assert np.allclose(norms, 1.0, atol=1e-9)
+
+
+def _ungated_limb_model(body_params: dict[str, Any]) -> NavModelBodySimulated:
+    """Build a model with the limb emission gates disabled (measurement path)."""
+    obs = _limb_obs()
+    model = NavModelBodySimulated('body', obs, body_params['name'], body_params)
+    model.apply_limb_emission_gates = False
+    model.create_model()
+    return model
+
+
+def _ungated_limb_vertices(body_params: dict[str, Any]) -> np.ndarray:
+    """The gates-off LIMB_ARC vertex array for the given body."""
+    from spindoctor.feature.geometry import LimbPolyline
+
+    model = _ungated_limb_model(body_params)
+    limb = next(
+        f
+        for f in model.to_features(bare_nav_context(model.obs))
+        if f.feature_type.name == 'LIMB_ARC'
+    )
+    geometry = limb.geometry
+    assert isinstance(geometry, LimbPolyline)
+    return np.asarray(geometry.vertices_vu)
+
+
+def test_gates_off_high_phase_body_emits_limb_arc() -> None:
+    """With the gates off, a high-phase body still exposes its limb geometry."""
+    vertices = _ungated_limb_vertices(_large_body(phase_angle=120.0))
+    assert vertices.shape[0] > 0
+
+
+def test_gates_off_small_body_emits_limb_arc() -> None:
+    """With the gates off, a body below the resolution floor still emits."""
+    vertices = _ungated_limb_vertices(_large_body(axis1=40.0, axis2=40.0, axis3=40.0))
+    assert vertices.shape[0] > 0
+
+
+def test_gates_off_limb_is_geometric_not_terminator() -> None:
+    """Gates-off vertices trace the geometric limb, not the lit-region boundary.
+
+    For a phase-120 sphere the lit-region boundary includes the terminator,
+    which cuts through the disc interior; the lit geometric limb keeps every
+    vertex on the silhouette outline (constant radius from the centre).
+    """
+    vertices = _ungated_limb_vertices(_large_body(phase_angle=120.0))
+    obs = _limb_obs()
+    cv = _LIMB_SIZE / 2.0 + int(obs.extfov_margin_v)
+    cu = _LIMB_SIZE / 2.0 + int(obs.extfov_margin_u)
+    radii = np.hypot(vertices[:, 0] - cv, vertices[:, 1] - cu)
+    assert float(radii.min()) > 62.0
+
+
+def test_metadata_records_predicted_diameter() -> None:
+    """The model metadata carries the rendered silhouette diameter."""
+    obs = _limb_obs()
+    model = NavModelBodySimulated('body', obs, 'RHEA', _large_body())
+    model.create_model()
+    assert model.metadata['predicted_diameter_px'] == pytest.approx(130.0, abs=3.0)
 
 
 # ---------------------------------------------------------------------------
