@@ -1,7 +1,7 @@
 {
   "confidence": 0.99,
-  "offset_du_px": -1.47,
-  "offset_dv_px": 2.57,
+  "offset_du_px": -1.58,
+  "offset_dv_px": 2.49,
   "scene_name": "mutual_deep",
   "status": "success"
 }
