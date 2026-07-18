@@ -38,12 +38,13 @@ import random
 from collections.abc import Callable
 from typing import Any
 
-# The body families deliberately do not yet draw the newer body truth axes
-# (photometric_law / opposition_surge, limb_relief_*, albedo_texture,
-# disc_texture / transits, mesh shading / pose_scatter): those axes join
-# the sweep when the calibration campaign is re-collected on this renderer
-# and every sim-anchored coefficient is refit, so no coefficient ships
-# ahead of the renderer it was fit on.
+# The body families draw the full set of body truth axes the renderer
+# carries (photometric law / opposition surge, the limb-relief field,
+# albedo texture, mesh shading / pose scatter; the disc family adds the
+# giant-planet disc_texture / transits slice), so every sim-anchored
+# coefficient is fit on the renderer it ships with.  Each mismatch axis
+# is drawn on a minority of scenes so the clean label class stays
+# dominant; see _surface_truth_axes.
 FAMILIES = (
     'disc',
     'limb',
@@ -122,6 +123,60 @@ def _base(rng: random.Random, *, size: int) -> dict[str, Any]:
     }
 
 
+# Controlled fractions of the body families that draw each surface /
+# photometric truth axis.  Every axis is a render-side mismatch the
+# navigator's smooth-Lambert prediction cannot model, so each stays a
+# minority draw: the clean class must remain dominant for the logistic
+# fit, and stacking every axis on every scene would fit the techniques
+# against a renderer regime no catalog scene uses.
+_BODY_NONLAMBERT_FRAC = 0.40  # photometric_law lommel_seeliger / minnaert
+_BODY_MINNAERT_FRAC = 0.15  # of which: minnaert with a drawn k
+_BODY_SURGE_FRAC = 0.25  # opposition_surge (matters at low phase)
+_BODY_LIMB_RELIEF_FRAC = 0.40  # limb_relief_rms / limb_relief_corr_deg
+_BODY_ALBEDO_TEXTURE_FRAC = 0.40  # multiplicative albedo noise field
+_BODY_SMOOTH_SHADING_FRAC = 0.30  # mesh gouraud shading (render side only)
+_BODY_POSE_SCATTER_FRAC = 0.15  # per-frame unmodelable pose error
+
+
+def _surface_truth_axes(rng: random.Random, body: dict[str, Any]) -> None:
+    """Draw the render-side surface / photometric truth axes onto a body.
+
+    Every key drawn here is a truth key the boundary filter strips: the
+    navigator predicts the smooth flat-shaded Lambert body at the catalog
+    pose, so each draw plants a controlled model error whose recovered
+    offset consequences the calibration fit observes.  Mutually
+    independent draws from the family RNG keep the campaign reproducible.
+
+    Parameters:
+        rng: Scene-local random generator.
+        body: The body entry to extend in place.
+    """
+    roll = rng.random()
+    if roll < _BODY_MINNAERT_FRAC:
+        body['photometric_law'] = 'minnaert'
+        body['minnaert_k'] = rng.uniform(0.5, 1.1)
+    elif roll < _BODY_NONLAMBERT_FRAC:
+        body['photometric_law'] = 'lommel_seeliger'
+    if rng.random() < _BODY_SURGE_FRAC:
+        body['opposition_surge'] = {
+            'amplitude': rng.uniform(0.2, 1.0),
+            'width_deg': rng.uniform(2.0, 8.0),
+        }
+    if rng.random() < _BODY_LIMB_RELIEF_FRAC:
+        # h/R from smooth-icy (~0.002) through battered-small-moon (~0.03).
+        body['limb_relief_rms'] = math.exp(rng.uniform(math.log(0.002), math.log(0.03)))
+        body['limb_relief_corr_deg'] = rng.uniform(5.0, 25.0)
+    if rng.random() < _BODY_ALBEDO_TEXTURE_FRAC:
+        body['albedo_texture'] = {
+            'rms': rng.uniform(0.05, 0.30),
+            'corr_px': rng.uniform(5.0, 30.0),
+        }
+    if rng.random() < _BODY_SMOOTH_SHADING_FRAC:
+        body['shading'] = 'gouraud'
+    if rng.random() < _BODY_POSE_SCATTER_FRAC:
+        body['pose_scatter'] = {'sigma_deg': rng.uniform(0.5, 5.0)}
+
+
 def _catalog_body(
     rng: random.Random,
     *,
@@ -143,6 +198,8 @@ def _catalog_body(
     residual-over-radius ratio the ``max_phase_irregularity_factor``
     confidence term consumes.  ``km_per_pixel`` gives the sim blob feature
     the physical scale that factor needs (it reports 0.0 without it).
+    Every body also rolls the surface / photometric truth axes
+    (:func:`_surface_truth_axes`).
 
     Parameters:
         rng: Scene-local random generator.
@@ -176,7 +233,7 @@ def _catalog_body(
     else:
         axis2 = radius * rng.uniform(0.97, 1.0)
         axis3 = radius * rng.uniform(0.95, 1.0)
-    return {
+    body: dict[str, Any] = {
         'name': name,
         'shape_model': 'polyhedral_mesh',
         'mesh_lumpiness': lumpiness,
@@ -192,10 +249,25 @@ def _catalog_body(
         'km_per_pixel': mean_radius_km / radius,
         'nav_override': nav_override,
     }
+    _surface_truth_axes(rng, body)
+    return body
+
+
+# Fraction of disc scenes rendering a banded giant-planet-class disc
+# (zones/belts plus storm ovals), and, within those, the fraction adding
+# a transiting moon and its cast shadow -- the sharp circular false
+# crater the disc correlation can lock onto.
+_DISC_BANDED_FRAC = 0.15
+_DISC_TRANSIT_FRAC = 0.40
 
 
 def gen_disc(rng: random.Random) -> dict[str, Any]:
     """Resolved body at low-moderate phase (BodyDiscCorrelateNav regime).
+
+    A minority slice renders the giant-planet disc regime: latitude bands
+    with storm ovals (``disc_texture``), optionally crossed by a
+    transiting moon and its shadow (``transits``) -- all truth-side disc
+    texture the navigator's smooth template cannot model.
 
     Parameters:
         rng: Scene-local random generator.
@@ -219,6 +291,39 @@ def gen_disc(rng: random.Random) -> dict[str, Any]:
         illumination=illumination,
         irregular_fraction=0.35,
     )
+    if rng.random() < _DISC_BANDED_FRAC:
+        storms = []
+        for _ in range(rng.randint(0, 2)):
+            storms.append(
+                {
+                    'lat_deg': rng.uniform(-50.0, 50.0),
+                    'lon_deg': rng.uniform(60.0, 120.0),
+                    'radius_deg': rng.uniform(4.0, 12.0),
+                    'albedo_factor': rng.uniform(0.7, 1.3),
+                }
+            )
+        body['disc_texture'] = {
+            'band_amplitude': rng.uniform(0.1, 0.3),
+            'band_wavenumber': rng.uniform(4.0, 10.0),
+            'band_phase_deg': rng.uniform(0.0, 360.0),
+            'storms': storms,
+        }
+        if rng.random() < _DISC_TRANSIT_FRAC:
+            # Transiting moon inside the disc; its radius stays well below
+            # the planet's so the disc silhouette is unchanged.
+            moon_radius = radius / 2.0 * rng.uniform(0.10, 0.25)
+            dv = rng.uniform(-0.5, 0.5) * radius / 2.0
+            du = rng.uniform(-0.5, 0.5) * radius / 2.0
+            body['transits'] = [
+                {
+                    'moon': {
+                        'dv_px': dv,
+                        'du_px': du,
+                        'radius_px': moon_radius,
+                        'albedo_factor': rng.uniform(0.6, 1.4),
+                    }
+                }
+            ]
     params['bodies'] = [body]
     return params
 
