@@ -133,26 +133,27 @@ def test_instrument_defaults_turns_on_poisson_and_catalog_bloom() -> None:
     assert resolved.cosmic_ray_rate_per_sec == 0.0
 
 
-def test_cosmic_ray_measured_rate_for_gossi() -> None:
-    """The Galileo entry carries its cohort-measured cosmic-ray rate."""
+def test_cosmic_ray_retained_zero_for_gossi() -> None:
+    """The Galileo entry retains zero: its tuned hot-pixel fraction already
+    carries the cohort's measured single-pixel incidence."""
     from spindoctor.sim.forward.detector.params import resolve_detector_params
 
     resolved = resolve_detector_params(_disc('gossi', artifacts={'instrument_defaults': True}))
-    assert resolved.cosmic_ray_rate_per_sec == pytest.approx(5.4e-4)
+    assert resolved.cosmic_ray_rate_per_sec == 0.0
 
 
-def test_cosmic_ray_scene_override_beats_catalog() -> None:
-    """A scene noise value wins over the catalog's measured cosmic-ray rate."""
+def test_cosmic_ray_scene_value_activates_the_stage() -> None:
+    """A scene noise value still turns the cosmic-ray stage on."""
     from spindoctor.sim.forward.detector.params import resolve_detector_params
 
     resolved = resolve_detector_params(
         _disc(
             'gossi',
             artifacts={'instrument_defaults': True},
-            noise={'cosmic_ray_rate_per_sec': 0.0},
+            noise={'cosmic_ray_rate_per_sec': 2.0e-4},
         )
     )
-    assert resolved.cosmic_ray_rate_per_sec == 0.0
+    assert resolved.cosmic_ray_rate_per_sec == pytest.approx(2.0e-4)
 
 
 def test_cosmic_ray_retained_zero_for_lorri() -> None:

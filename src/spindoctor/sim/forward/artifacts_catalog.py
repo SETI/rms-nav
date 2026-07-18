@@ -230,14 +230,14 @@ def resolve_sky_pixel_scale_arcsec(instrument: str | None) -> float:
 # cosmic_ray_rate_per_sec is in events per pixel per second: the chain
 # multiplies it by exposure_sec, pixel_area_cm2 (default 1.0), and the pixel
 # count, so at the default unit pixel area the fluence reads per pixel.
-# Rates come from the realism match's FOM 6 transient split (single-pixel
-# spikes that do NOT recur at fixed detector positions across the cohort),
-# sized so the rendered flagged-pixel fraction reproduces the cohort's
-# measured transient fraction through the same detector.  Where the chain's
-# exposure-scaling, full-well-amplitude stage cannot represent a cohort's
-# measured incidence (the Cassini cohorts measure exposure-independent,
-# modest-amplitude transients), the entry retains zero with the reason and
-# the unblocking condition beside it.
+# The realism match's FOM 6 transient split (single-pixel spikes that do
+# NOT recur at fixed detector positions across the cohort) measures the
+# candidate rate per instrument.  Every current entry retains zero, each
+# with its measured rate, the specific reason adoption fails through this
+# chain (exposure-scaling / full-well-amplitude mismatch for Cassini,
+# double-counting against the tuned per-scene hot pixels for Galileo,
+# star-field contamination for LORRI, no vidicon stage for Voyager), and
+# the unblocking condition, recorded beside the value.
 #
 # The vidicon (Voyager) path skips the electron conversion; its noise is applied
 # directly in DN (5.3): line-correlated read noise (per-line offset +
@@ -383,20 +383,20 @@ DETECTOR_DEFAULTS: dict[str, dict[str, Any]] = {
         'hot_pixel_amplitude_e': 4.0e4,
         # 5.4 interim (early-blooming columns; total-charge fraction).
         'hot_pixel_column_factor': 0.5,
-        # MEASURED 2026-07-17 by the realism match (8-frame REDR cohort;
-        # every frame is a negative case, so no scene point sources
-        # contaminate the transient split): mean transient spike fraction
-        # 1.17e-4 per frame over exposures 0.004-0.1 s -- the Jupiter-system
-        # radiation regime rather than bare GCR flux.  The rate is sized so
-        # the rendered flagged-pixel fraction reproduces that measurement
-        # through the same detector: the stage's streak/splatter morphology
-        # flags ~3 pixels per event (the 2026-07-17 rerun rendered a 3.5e-4
-        # flagged fraction from 1.6e-3 events/px/s), so 5.4e-4 events/px/s
-        # at the cohort's exposures lands the simulated fraction on the
-        # measured one.  The cohort's narrow exposure range keeps the
-        # chain's exposure-scaling assumption inside the measured regime.
-        # Replaces the interim zero.
-        'cosmic_ray_rate_per_sec': 5.4e-4,
+        # RETAINED zero 2026-07-18 after an adoption attempt.  The realism
+        # match measures a real transient spike fraction of 1.17e-4 per
+        # frame (8-frame REDR cohort, all negative cases, so no scene
+        # point sources contaminate the split) -- but that population is
+        # already carried by the tuned hot_pixel_fraction above, which was
+        # sized to the cohort's TOTAL single-pixel incidence (1.2e-4;
+        # the truly stationary component is only 1e-6) and which the FOM 6
+        # split itself counts as transient because sim hot pixels reseed
+        # per scene.  Adding a separate cosmic-ray term double-counts the
+        # same measured spikes: 5.4e-4 events/px/s (tried 2026-07-18)
+        # raised the simulated fraction to 2.3e-4 against the 1.2e-4 real.
+        # Unblocked by a fixed-position per-detector hot-pixel map, which
+        # would free the transient budget for a real radiation term.
+        'cosmic_ray_rate_per_sec': 0.0,
         'banding_amplitude_e': 65.0,  # 5.4 interim (~0.35 DN at gain 2 -> ~65 e-)
         'banding_period_px': 42.0,  # 5.4 (2400 Hz supply-noise comb every 42 px)
         'bias_pedestal_sigma_dn': 1.0,
