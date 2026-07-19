@@ -157,9 +157,10 @@ ordering, not per-technique reliability; they are retained, not fitted.
   the simulator report's realism-match section, but not yet
   real-anchored.  `confidence_provisional` stays true
   in the metadata until a real-anchored calibration lands.
-- The scene families cover the sim's rendering vocabulary; regimes the
-  sim cannot render (real PSF wings, saturation bloom on stars,
-  calibrated-I/F detector noise) are uncalibrated by this fit.
+- The campaign's scene families do not draw every axis the renderer
+  supports: PSF wings, saturation bloom on stars, and calibrated-I/F
+  detector noise are renderable but not varied by these families, so
+  those regimes are uncalibrated by this fit.
 - The operator-curated image-library tiers are the *plausibility
   cross-check* for this calibration, never fit targets (the curation
   conventions live in `docs/dev_guide/dev_guide_image_library.rst`).
