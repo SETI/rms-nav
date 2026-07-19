@@ -396,6 +396,37 @@ def test_validate_sim_params_accepts_idealized_nav_override() -> None:
     assert validate_sim_params(params) is params
 
 
+def test_validate_sim_params_rejects_duplicate_body_names() -> None:
+    """Two bodies with the same name fail (name-keyed truth would collide)."""
+    params = _sim_params()
+    params['bodies'] = [{'name': 'RHEA', 'axis1': 40.0}, {'name': 'RHEA', 'axis1': 20.0}]
+    with pytest.raises(SimSceneValidationError, match="share the effective name 'RHEA'"):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_case_colliding_body_names() -> None:
+    """Body names collide case-insensitively (truth keys are upper-cased)."""
+    params = _sim_params()
+    params['bodies'] = [{'name': 'Rhea', 'axis1': 40.0}, {'name': 'RHEA', 'axis1': 20.0}]
+    with pytest.raises(SimSceneValidationError, match='share the effective name'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_body_name_colliding_with_default() -> None:
+    """An explicit name colliding with an unnamed body's positional default fails."""
+    params = _sim_params()
+    params['bodies'] = [{'axis1': 40.0}, {'name': 'SIM-BODY-1', 'axis1': 20.0}]
+    with pytest.raises(SimSceneValidationError, match="share the effective name 'SIM-BODY-1'"):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_distinct_body_names() -> None:
+    """Distinctly named (and defaulted) bodies validate."""
+    params = _sim_params()
+    params['bodies'] = [{'name': 'RHEA', 'axis1': 40.0}, {'axis1': 20.0}]
+    assert validate_sim_params(params) is params
+
+
 def _ring_system_params() -> dict[str, Any]:
     """A scene with a minimal valid ring_system block."""
     params = _sim_params()
@@ -444,6 +475,36 @@ def test_validate_sim_params_rejects_unknown_ring_system_key() -> None:
     params['ring_system']['spokes'] = {}
     with pytest.raises(SimSceneValidationError, match=r'ring_system.*spokes'):
         validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_duplicate_ring_feature_names() -> None:
+    """Two ring features with the same name fail (name-keyed consumers collide)."""
+    params = _ring_system_params()
+    second = dict(params['ring_system']['features'][0])
+    params['ring_system']['features'].append(second)
+    with pytest.raises(SimSceneValidationError, match="share the effective name 'F1'"):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_ring_feature_name_colliding_with_default() -> None:
+    """An explicit feature name colliding with a positional default fails."""
+    params = _ring_system_params()
+    first = dict(params['ring_system']['features'][0])
+    del first['name']
+    second = dict(params['ring_system']['features'][0])
+    second['name'] = 'RING-FEATURE-1'
+    params['ring_system']['features'] = [first, second]
+    with pytest.raises(SimSceneValidationError, match="share the effective name 'RING-FEATURE-1'"):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_distinct_ring_feature_names() -> None:
+    """Distinctly named ring features validate."""
+    params = _ring_system_params()
+    second = dict(params['ring_system']['features'][0])
+    second['name'] = 'F2'
+    params['ring_system']['features'].append(second)
+    assert validate_sim_params(params) is params
 
 
 def test_validate_sim_params_requires_ring_system_geometry() -> None:

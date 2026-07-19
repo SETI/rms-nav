@@ -30,6 +30,37 @@ from spindoctor.sim.scene_checks import (
 from spindoctor.sim.scene_schema import _BODY_IDEALIZED_KEYS, SimSceneValidationError
 
 
+def _check_body_names_unique(bodies: list[dict[str, Any]], *, source: str) -> None:
+    """Fail validation when two ``bodies`` entries share an effective name.
+
+    The renderer keys its truth records (``body_masks`` mapping, inventory,
+    render order) by each body's upper-cased name, defaulting an unnamed
+    entry to its positional ``SIM-BODY-<index + 1>`` name.  Two entries that
+    resolve to the same key would silently overwrite each other's truth
+    records, so the collision fails here instead.
+
+    Parameters:
+        bodies: The scene's ``bodies`` list (entries already type-checked).
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: If two entries share an effective name
+            (case-insensitive, positional defaults included).
+    """
+    seen: dict[str, int] = {}
+    for index, obj in enumerate(bodies):
+        effective = str(obj.get('name', f'SIM-BODY-{index + 1}')).upper()
+        if effective in seen:
+            raise SimSceneValidationError(
+                f'{source}: bodies[{seen[effective]}] and bodies[{index}] share the '
+                f'effective name {effective!r} (names are case-insensitive and an '
+                f'unnamed body defaults to its positional SIM-BODY-<n> name); '
+                f'name-keyed truth records would collide, so give each body a '
+                f'unique name'
+            )
+        seen[effective] = index
+
+
 def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
     """Validate one ``bodies`` entry's field types."""
     label = f'bodies[{index}]'

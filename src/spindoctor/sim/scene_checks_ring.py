@@ -138,6 +138,7 @@ def _check_ring_system(value: Any, *, source: str) -> None:
     _check_optional_mapping_list(features, 'ring_system.features', source=source)
     for index, feature in enumerate(features or []):
         _check_ring_feature(feature, index=index, source=source)
+    _check_ring_feature_names_unique(features or [], source=source)
     _check_ring_azimuthal(value.get('azimuthal'), source=source)
     moonlets = value.get('moonlets')
     _check_optional_mapping_list(moonlets, 'ring_system.moonlets', source=source)
@@ -238,6 +239,39 @@ def _check_ring_azimuthal(value: Any, *, source: str) -> None:
         if spokes.get('contrast') is None:
             raise SimSceneValidationError(f'{source}: {label}.contrast is required')
         _check_optional_number(spokes.get('contrast'), f'{label}.contrast', source=source)
+
+
+def _check_ring_feature_names_unique(features: list[dict[str, Any]], *, source: str) -> None:
+    """Fail validation when two ring features share an effective name.
+
+    A feature's name is its identity everywhere identity matters: the
+    per-feature truth entries carry it, and the navigator-side ring model
+    builds its upper-cased ``feature_id`` from it (an unnamed feature takes
+    a positional ``RING-FEATURE-<n>`` default).  Two features resolving to
+    the same name would collide in every such name-keyed consumer, so the
+    collision fails here, mirroring the body-name rule.
+
+    Parameters:
+        features: The ``ring_system.features`` list (entries already
+            type-checked).
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: If two features share an effective name
+            (case-insensitive, positional defaults included).
+    """
+    seen: dict[str, int] = {}
+    for index, feature in enumerate(features):
+        effective = str(feature.get('name') or f'RING-FEATURE-{index + 1}').upper()
+        if effective in seen:
+            raise SimSceneValidationError(
+                f'{source}: ring_system.features[{seen[effective]}] and '
+                f'ring_system.features[{index}] share the effective name {effective!r} '
+                f'(names are case-insensitive and an unnamed feature defaults to its '
+                f'positional RING-FEATURE-<n> name); name-keyed consumers would '
+                f'collide, so give each feature a unique name'
+            )
+        seen[effective] = index
 
 
 def _check_ring_moonlet(obj: dict[str, Any], *, index: int, source: str) -> None:
