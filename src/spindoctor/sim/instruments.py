@@ -178,6 +178,10 @@ def resolve_extfov_margin(
 
     Returns:
         The ``(v, u)`` margin entry.
+
+    Raises:
+        ValueError: If the generic fallback table is itself size-keyed and
+            carries no entry for ``size_v``.
     """
     entry = inst_config.get('extfov_margin_vu')
     if isinstance(entry, Mapping):
@@ -187,5 +191,11 @@ def resolve_extfov_margin(
         return entry
     fallback_entry = fallback_config['extfov_margin_vu']
     if isinstance(fallback_entry, Mapping):
+        if size_v not in fallback_entry:
+            raise ValueError(
+                f'no extfov_margin_vu entry for image size {size_v}: neither the '
+                f'instrument table nor the generic sim fallback covers it '
+                f'(fallback sizes: {sorted(fallback_entry)})'
+            )
         return fallback_entry[size_v]
     return fallback_entry

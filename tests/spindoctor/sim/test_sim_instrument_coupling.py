@@ -197,3 +197,27 @@ def test_instrument_config_round_trips_through_the_scene_schema(tmp_path: Path) 
     save_sim_scene(sim_params, path)
     scene = load_sim_scene(path)
     assert scene['instrument_config'] == {'star_psf_sigma': 1.5, 'noise': {'read_noise_dn': 3.0}}
+
+
+def test_extfov_margin_unmatched_size_names_the_available_keys() -> None:
+    """An uncovered image size fails with the size and the fallback keys."""
+    from spindoctor.sim.instruments import resolve_extfov_margin
+
+    with pytest.raises(ValueError, match=r'image size 777.*fallback sizes.*\[64, 512\]'):
+        resolve_extfov_margin(
+            {'extfov_margin_vu': {512: [10, 10]}},
+            {'extfov_margin_vu': {64: [4, 4], 512: [10, 10]}},
+            777,
+        )
+
+
+def test_extfov_margin_fallback_covers_uncatalogued_size() -> None:
+    """A size the instrument table lacks resolves through the generic table."""
+    from spindoctor.sim.instruments import resolve_extfov_margin
+
+    margin = resolve_extfov_margin(
+        {'extfov_margin_vu': {512: [10, 10]}},
+        {'extfov_margin_vu': {64: [4, 4], 512: [10, 10]}},
+        64,
+    )
+    assert margin == [4, 4]
