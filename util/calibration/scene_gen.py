@@ -479,8 +479,9 @@ def _ring_feature(
     - orbit-error slice (navigable features only): a planted render-side
       radial displacement delta_a_px of 0.5-3 px, either sign -- the
       published-ephemeris error scale for well-tracked ring features --
-      with matching declared_orbit_sigma error bars (the uncertainty the
-      navigator is entitled to know); eccentric features may also draw a
+      with declared_orbit_sigma error bars (the uncertainty the
+      navigator is entitled to know) drawn independently of the realized
+      error, from the same prior; eccentric features may also draw a
       pericenter error of 5-25 deg.
     """
     tau = math.exp(rng.uniform(math.log(0.2), math.log(4.0)))
@@ -513,14 +514,19 @@ def _ring_feature(
         'orbit': orbit,
     }
     if navigable and rng.random() < _RING_ORBIT_ERROR_FRAC:
+        # The declared error bar is drawn INDEPENDENTLY of the realized
+        # planted error, from the same prior the error magnitude is drawn
+        # from.  A sigma derived from the realization (e.g. 0.8-1.5x the
+        # drawn |delta_a|) would let any future fit that consumes the
+        # declared sigma learn that it predicts the per-frame realized
+        # error -- information a real published uncertainty never carries
+        # -- and the calibration would overstate such a fix's value.
         delta_a = rng.uniform(0.5, 3.0) * rng.choice((-1.0, 1.0))
         orbit_error: dict[str, float] = {'delta_a_px': delta_a}
-        declared_sigma: dict[str, float] = {'sigma_a_px': abs(delta_a) * rng.uniform(0.8, 1.5)}
+        declared_sigma: dict[str, float] = {'sigma_a_px': rng.uniform(0.5, 3.0)}
         if eccentric and rng.random() < 0.5:
             orbit_error['delta_long_peri_deg'] = rng.uniform(5.0, 25.0) * rng.choice((-1.0, 1.0))
-            declared_sigma['sigma_long_peri_deg'] = abs(
-                orbit_error['delta_long_peri_deg']
-            ) * rng.uniform(0.8, 1.5)
+            declared_sigma['sigma_long_peri_deg'] = rng.uniform(5.0, 25.0)
         feature['orbit_error'] = orbit_error
         feature['declared_orbit_sigma'] = declared_sigma
     return feature
