@@ -633,6 +633,50 @@ def test_validate_sim_params_accepts_distinct_ring_feature_names() -> None:
     assert validate_sim_params(params) is params
 
 
+def test_validate_sim_params_rejects_ring_orbit_ae_at_a() -> None:
+    """orbit.ae >= orbit.a fails at validation, not deep in the edge math."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit']['ae'] = 40.0
+    with pytest.raises(SimSceneValidationError, match='ae must be less than orbit.a'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_subcritical_ring_orbit_ae() -> None:
+    """orbit.ae below orbit.a validates."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit']['ae'] = 5.0
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_orbit_error_negating_a() -> None:
+    """A delta_a_px that drives the effective semimajor axis <= 0 fails."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit_error'] = {'delta_a_px': -40.0}
+    with pytest.raises(SimSceneValidationError, match='positive semimajor axis'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_orbit_error_driving_ae_past_a() -> None:
+    """A delta_ae_px that pushes the effective eccentricity to 1 fails."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit']['ae'] = 5.0
+    params['ring_system']['features'][0]['orbit_error'] = {'delta_ae_px': 35.0}
+    with pytest.raises(SimSceneValidationError, match='effective eccentric'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_bounded_orbit_error() -> None:
+    """Orbit-error deltas that keep the effective orbit physical validate."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit']['ae'] = 5.0
+    params['ring_system']['features'][0]['orbit_error'] = {
+        'delta_a_px': -2.0,
+        'delta_ae_px': 1.0,
+        'delta_long_peri_deg': 15.0,
+    }
+    assert validate_sim_params(params) is params
+
+
 def test_validate_sim_params_requires_ring_system_geometry() -> None:
     """A ring_system without its shared geometry block fails."""
     params = _ring_system_params()
