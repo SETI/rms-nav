@@ -161,6 +161,33 @@ def test_partial_lines_two_segments_keeps_a_trailing_segment() -> None:
     assert np.all(frame.signal[cut['row'], cut['lost_to'] :] == 1.0)
 
 
+def test_partial_lines_two_column_frame_truncates_without_error() -> None:
+    """A 2-column frame cannot host a middle segment, so every cut truncates.
+
+    A middle-segment loss needs a surviving pixel on each side of the cut;
+    on a 2-column line the segment draw used to request an empty integer
+    range and crash, so the degenerate width must fall back to truncation.
+    """
+    from spindoctor.sim.forward.feature_loci import FeatureLoci
+    from spindoctor.sim.forward.telemetry_loss import apply_partial_lines
+
+    signal = np.ones((16, 2), dtype=np.float64)
+    empty = np.empty(0, dtype=np.int64)
+    loci = FeatureLoci(rows=empty, pixel_v=empty, pixel_u=empty)
+    record = apply_partial_lines(
+        signal,
+        {'incidence': 8.0, 'max_surviving_segments': 2},
+        marker_dn=0.0,
+        rng=np.random.default_rng(3),
+        loci=loci,
+        adversarial=False,
+    )
+    assert record['cuts']
+    for cut in record['cuts']:
+        assert cut['lost_to'] == 2
+        assert cut['lost_from'] == 1
+
+
 def test_alternating_lines_blanks_every_period_line() -> None:
     """Every Nth line from the phase is blanked when the mode fires."""
     frame = _frame()

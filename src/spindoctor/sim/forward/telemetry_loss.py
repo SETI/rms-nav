@@ -133,7 +133,11 @@ def apply_partial_lines(
     rows = choose_rows(loci, n, size_v, rng, adversarial=adversarial)
     cuts: list[dict[str, int]] = []
     for row in rows.tolist():
-        if max_segments >= 2 and bool(rng.random() < 0.5):
+        # A middle-segment loss needs at least one surviving pixel on each
+        # side of a nonempty cut, so it requires 3 or more columns; a 2-column
+        # line always takes the truncation branch (the size guard precedes the
+        # rng draw so wider frames consume the stream unchanged).
+        if max_segments >= 2 and size_u >= 3 and bool(rng.random() < 0.5):
             a = int(rng.integers(1, size_u - 1))
             b = int(rng.integers(a + 1, size_u))
             signal[row, a:b] = marker_dn
