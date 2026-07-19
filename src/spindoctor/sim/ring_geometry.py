@@ -555,15 +555,22 @@ def ring_radial_scale(
 
 
 def compute_antialiasing_shade(edge_dist: NDArrayFloatType, resolution: float) -> NDArrayFloatType:
-    """Compute anti-aliasing shade from edge distance.
+    """Compute anti-aliasing shade from signed edge distance.
+
+    Callers pass the signed distance with the covered side positive: a ring
+    feature passes ``r - r_edge`` (or ``r_outer - r``) so a pixel inside the
+    band shades toward 1, and a moonlet disc passes ``radius - dist`` so a
+    pixel inside the disc shades toward 1.
 
     Parameters:
-        edge_dist: Distance from pixel center to edge (positive = outside,
-            negative = inside).
-        resolution: Pixel resolution for anti-aliasing.
+        edge_dist: Signed distance from pixel center to the edge (positive =
+            inside the covered feature, negative = outside).
+        resolution: Pixel resolution for anti-aliasing (the shade ramps over
+            one such window centred on the edge).
 
     Returns:
-        Anti-aliasing shade value [0, 1] where 0.5 means pixel center is at edge.
+        Anti-aliasing shade value [0, 1]; 0.5 means the pixel center sits
+        exactly on the edge, 1 fully covered, 0 fully outside.
     """
     shade = 0.5 + edge_dist / resolution
     shade[shade < 0.0] = 0.0

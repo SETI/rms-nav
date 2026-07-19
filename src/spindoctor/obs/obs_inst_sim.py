@@ -1,3 +1,13 @@
+"""Observation snapshot backed by a simulated-image scene.
+
+:class:`ObsSim` wraps a rendered sim scene as an oops ``Snapshot`` with a flat
+FOV and dummy geometry, so the standard navigation pipeline runs on it exactly
+as on a real frame.  The rendered image and the full scene (truth included)
+stay on the snapshot for renderer-side consumers; the navigator-side models
+see only the filtered idealized view exposed as ``obs.nav_params`` (the
+information boundary -- see :func:`spindoctor.sim.scene.build_nav_params`).
+"""
+
 import math
 from pathlib import Path
 from typing import Any, cast
@@ -37,6 +47,11 @@ class ObsSim(ObsSnapshotInst):
             **kwargs: Additional keyword arguments.
                 sim_params: Flat sim-params mapping. If present, this overrides the
                 scene file.
+
+        Returns:
+            The :class:`ObsSim` wrapping the rendered scene: the rendered
+            image as ``data``, the full scene and renderer truth metadata on
+            the snapshot, and the filtered idealized view as ``nav_params``.
         """
 
         config = config or DEFAULT_CONFIG
