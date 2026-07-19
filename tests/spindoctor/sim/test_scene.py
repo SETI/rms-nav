@@ -434,6 +434,63 @@ def test_validate_sim_params_accepts_sigma_v_only_psf() -> None:
     assert validate_sim_params(params) is params
 
 
+def test_validate_sim_params_rejects_zero_crater_max_radius() -> None:
+    """A zero crater_max_radius fails at validation, not deep in the sampler."""
+    params = _sim_params()
+    params['bodies'][0]['crater_fill'] = 0.2
+    params['bodies'][0]['crater_max_radius'] = 0
+    with pytest.raises(SimSceneValidationError, match='crater_max_radius must be a positive'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_zero_crater_min_radius() -> None:
+    """A zero crater_min_radius fails at validation."""
+    params = _sim_params()
+    params['bodies'][0]['crater_min_radius'] = 0.0
+    with pytest.raises(SimSceneValidationError, match='crater_min_radius must be a positive'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_inverted_crater_radius_band() -> None:
+    """crater_min_radius >= crater_max_radius fails."""
+    params = _sim_params()
+    params['bodies'][0]['crater_min_radius'] = 0.3
+    params['bodies'][0]['crater_max_radius'] = 0.1
+    with pytest.raises(SimSceneValidationError, match='must be less than crater_max_radius'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_crater_max_below_default_min() -> None:
+    """A lone crater_max_radius below the defaulted minimum fails."""
+    params = _sim_params()
+    params['bodies'][0]['crater_max_radius'] = 0.04
+    with pytest.raises(SimSceneValidationError, match='must be less than crater_max_radius'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_valid_crater_radius_band() -> None:
+    """A positive, ordered crater radius band validates."""
+    params = _sim_params()
+    params['bodies'][0]['crater_min_radius'] = 0.02
+    params['bodies'][0]['crater_max_radius'] = 0.2
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_crater_power_law_exponent_at_one() -> None:
+    """crater_power_law_exponent <= 1 fails with the normalizability message."""
+    params = _sim_params()
+    params['bodies'][0]['crater_power_law_exponent'] = 1.0
+    with pytest.raises(SimSceneValidationError, match='must exceed 1'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_crater_power_law_exponent_above_one() -> None:
+    """A proper power-law exponent validates."""
+    params = _sim_params()
+    params['bodies'][0]['crater_power_law_exponent'] = 2.5
+    assert validate_sim_params(params) is params
+
+
 def test_validate_sim_params_rejects_duplicate_body_names() -> None:
     """Two bodies with the same name fail (name-keyed truth would collide)."""
     params = _sim_params()

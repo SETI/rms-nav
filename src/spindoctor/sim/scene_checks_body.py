@@ -85,13 +85,11 @@ def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
         'km_per_pixel',
         'mesh_lumpiness',
         'crater_fill',
-        'crater_min_radius',
-        'crater_max_radius',
-        'crater_power_law_exponent',
         'crater_relief_scale',
         'anti_aliasing',
     ):
         _check_optional_number(obj.get(key), f'{label}.{key}', source=source)
+    _check_crater_shape_keys(obj, label=label, source=source)
     for key in ('mesh_n_lat', 'mesh_n_lon', 'mesh_seed', 'seed'):
         if obj.get(key) is not None:
             _require_int(obj, key, source=f'{source}: {label}')
@@ -131,6 +129,54 @@ def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
                 f'{source}: {label}.nav_override may only override idealized body '
                 f'keys; got {sorted(bad)}'
             )
+
+
+# The renderer's crater-radius defaults, mirrored from
+# ``spindoctor.sim.forward.body.render_single_body`` so the cross-field check
+# below sees the same effective band the renderer will sample.
+_CRATER_MIN_RADIUS_DEFAULT: float = 0.05
+_CRATER_MAX_RADIUS_DEFAULT: float = 0.25
+
+
+def _check_crater_shape_keys(obj: dict[str, Any], *, label: str, source: str) -> None:
+    """Validate one body's crater radius band and power-law exponent.
+
+    The crater radii are sampled from ``p(R) ~ R**-alpha`` over
+    ``[crater_min_radius, crater_max_radius]`` (fractions of axis1), which
+    needs a strictly positive band with ``min < max`` and ``alpha > 1``;
+    out-of-domain values validated before and then crashed (or raised) deep
+    inside the sampler, so the domain is enforced here instead.
+
+    Parameters:
+        obj: The body entry mapping.
+        label: The ``bodies[<index>]`` label for error messages.
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: On a non-positive radius, an inverted or
+            empty radius band, or an exponent of 1 or less.
+    """
+    for key in ('crater_min_radius', 'crater_max_radius'):
+        _check_optional_positive_number(obj.get(key), f'{label}.{key}', source=source)
+    min_radius = obj.get('crater_min_radius')
+    max_radius = obj.get('crater_max_radius')
+    effective_min = _CRATER_MIN_RADIUS_DEFAULT if min_radius is None else float(min_radius)
+    effective_max = _CRATER_MAX_RADIUS_DEFAULT if max_radius is None else float(max_radius)
+    if (min_radius is not None or max_radius is not None) and effective_min >= effective_max:
+        raise SimSceneValidationError(
+            f'{source}: {label}: crater_min_radius must be less than '
+            f'crater_max_radius; got {effective_min!r} >= {effective_max!r} '
+            f'(an omitted bound takes the renderer default '
+            f'{_CRATER_MIN_RADIUS_DEFAULT} / {_CRATER_MAX_RADIUS_DEFAULT})'
+        )
+    exponent = obj.get('crater_power_law_exponent')
+    _check_optional_number(exponent, f'{label}.crater_power_law_exponent', source=source)
+    if exponent is not None and float(exponent) <= 1.0:
+        raise SimSceneValidationError(
+            f'{source}: {label}.crater_power_law_exponent must exceed 1 (the '
+            f'crater radius distribution p(R) ~ R**-alpha is only normalizable '
+            f'for alpha > 1); got {exponent!r}'
+        )
 
 
 # The opposition-surge map's key inventory (a simple normalized exponential
