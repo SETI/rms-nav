@@ -99,6 +99,37 @@ def test_load_rejects_nonpositive_size(tmp_path: Path) -> None:
         load_sim_scene(path)
 
 
+def test_load_rejects_inf_positive_number(tmp_path: Path) -> None:
+    """YAML .inf on a positive-number key (exposure_sec) fails validation."""
+    path = tmp_path / 'infexp.yaml'
+    path.write_text(
+        'schema_version: 2\nscene_name: infexp\ninstrument: coiss_nac\n'
+        'size_v: 64\nsize_u: 64\nrandom_seed: 1\nexposure_sec: .inf\n'
+    )
+    with pytest.raises(SimSceneValidationError, match='exposure_sec must be finite'):
+        load_sim_scene(path)
+
+
+def test_load_rejects_inf_nonnegative_number(tmp_path: Path) -> None:
+    """YAML .inf on a non-negative-number key (noise.read_noise_dn) fails."""
+    path = tmp_path / 'infnoise.yaml'
+    path.write_text(
+        'schema_version: 2\nscene_name: infnoise\ninstrument: coiss_nac\n'
+        'size_v: 64\nsize_u: 64\nrandom_seed: 1\n'
+        'noise:\n  read_noise_dn: .inf\n'
+    )
+    with pytest.raises(SimSceneValidationError, match='read_noise_dn must be finite'):
+        load_sim_scene(path)
+
+
+def test_validate_sim_params_rejects_nan_positive_number() -> None:
+    """NaN on a positive-number key fails validation."""
+    params = _sim_params()
+    params['exposure_sec'] = float('nan')
+    with pytest.raises(SimSceneValidationError, match='exposure_sec must be finite'):
+        validate_sim_params(params)
+
+
 def test_load_rejects_schema_version_1(tmp_path: Path) -> None:
     """The loader accepts only the current schema version."""
     path = tmp_path / 'v1.yaml'

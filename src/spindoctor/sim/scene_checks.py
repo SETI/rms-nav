@@ -702,11 +702,13 @@ def _check_optional_number(value: Any, key: str, *, source: str) -> None:
 
 
 def _check_optional_positive_number(value: Any, key: str, *, source: str) -> None:
-    """Fail validation unless ``value`` is None or a positive number."""
+    """Fail validation unless ``value`` is None or a finite positive number."""
     if value is None:
         return
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
         raise SimSceneValidationError(f'{source}: {key} must be a positive number when present')
+    if not math.isfinite(float(value)):
+        raise SimSceneValidationError(f'{source}: {key} must be finite; got {value!r}')
 
 
 def _check_optional_nonnegative_int(value: Any, key: str, *, source: str) -> None:
@@ -728,11 +730,13 @@ def _check_optional_positive_int(value: Any, key: str, *, source: str) -> None:
 
 
 def _check_optional_nonnegative_number(value: Any, key: str, *, source: str) -> None:
-    """Fail validation unless ``value`` is None or a non-negative number."""
+    """Fail validation unless ``value`` is None or a finite non-negative number."""
     if value is None:
         return
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
         raise SimSceneValidationError(f'{source}: {key} must be a non-negative number when present')
+    if not math.isfinite(float(value)):
+        raise SimSceneValidationError(f'{source}: {key} must be finite; got {value!r}')
 
 
 def _check_optional_str(value: Any, key: str, *, source: str) -> None:
