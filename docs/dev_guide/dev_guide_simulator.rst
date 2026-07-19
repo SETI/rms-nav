@@ -1054,9 +1054,14 @@ truth-key upgrades on top, none of which the prediction consumes:
   rotation state; the draw is recorded in the render truth as
   ``pose_scatter_drawn_deg``.
 
-The non-Lambert photometric laws, opposition surge, and the surface-texture and
-transit families are ellipsoid-topographic-path features; a mesh body carries
-the relief, shading, detail, and pose-scatter keys.
+The non-Lambert photometric laws, opposition surge, crater carving, the
+surface-texture and transit families, and the atmosphere halo are
+ellipsoid-path features; a mesh body carries the relief, shading, detail, and
+pose-scatter keys. The scene validator *rejects* the ellipsoid-only appearance
+keys on a ``polyhedral_mesh`` body -- the mesh renderer would silently ignore
+them, and a scene that names an effect must render it or fail loudly.
+Silhouette ``anti_aliasing`` is consumed at oversample 1 only, on both render
+paths (an oversampled scene already resolves the limb on its own grid).
 
 Mutual events
 -------------

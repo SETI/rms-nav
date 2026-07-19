@@ -270,3 +270,54 @@ def test_navigator_view_is_unmoved_by_pose_scatter_and_shading() -> None:
     dressed = _pose_scatter_scene(sigma_deg=3.0)
     dressed['bodies'][0]['shading'] = 'gouraud'
     assert build_nav_params(dressed) == build_nav_params(plain)
+
+
+def test_mesh_anti_aliasing_suppressed_on_oversampled_grid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The mesh path consumes anti_aliasing only at oversample 1, like topo.
+
+    An oversampled scene already resolves the limb on its own grid, so the
+    dispatch hands the mesh rasterizer anti_aliasing 0 there; supersampling
+    on top of the oversampled grid would only multiply the render cost.
+    """
+    from spindoctor.sim.forward import body_mesh
+    from spindoctor.sim.forward.body import render_single_body
+
+    captured: list[float] = []
+    real = body_mesh.render_single_mesh_body
+
+    def _capture(*args: Any, **kwargs: Any) -> Any:
+        captured.append(float(kwargs['anti_aliasing']))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(body_mesh, 'render_single_mesh_body', _capture)
+    body_params = {
+        'name': 'LUMPY',
+        'shape_model': 'polyhedral_mesh',
+        'axis1': 24.0,
+        'axis2': 20.0,
+        'axis3': 18.0,
+        'mesh_lumpiness': 0.3,
+        'mesh_seed': 5,
+        'anti_aliasing': 1.0,
+    }
+    img = np.zeros((64, 64), dtype=np.float64)
+    render_single_body(
+        img, dict(body_params), 0.0, offset_u=0.0, ref_center_v=32.0, ref_center_u=32.0
+    )
+    img_os = np.zeros((128, 128), dtype=np.float64)
+    scaled = dict(body_params)
+    for axis_key in ('axis1', 'axis2', 'axis3'):
+        scaled[axis_key] = float(scaled[axis_key]) * 2
+    render_single_body(
+        img_os,
+        scaled,
+        0.0,
+        offset_u=0.0,
+        ref_center_v=64.0,
+        ref_center_u=64.0,
+        oversample=2,
+    )
+    assert captured[0] == 1.0
+    assert captured[1] == 0.0

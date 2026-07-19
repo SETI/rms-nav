@@ -522,6 +522,78 @@ def test_validate_sim_params_accepts_crater_power_law_exponent_above_one() -> No
     assert validate_sim_params(params) is params
 
 
+def _mesh_body() -> dict[str, Any]:
+    """A minimal valid polyhedral-mesh body entry."""
+    return {
+        'name': 'LUMPY',
+        'shape_model': 'polyhedral_mesh',
+        'axis1': 30.0,
+        'axis2': 26.0,
+        'axis3': 24.0,
+        'mesh_lumpiness': 0.4,
+        'mesh_seed': 3,
+    }
+
+
+@pytest.mark.parametrize(
+    'key,value',
+    [
+        ('atmosphere', {'scale_height_px': 4.0, 'tau_ref': 1.0}),
+        ('photometric_law', 'minnaert'),
+        ('minnaert_k', 0.6),
+        ('opposition_surge', {'amplitude': 0.4, 'width_deg': 5.0}),
+        ('albedo_texture', {'rms': 0.05, 'corr_px': 10.0}),
+        ('disc_texture', {'band_amplitude': 0.1}),
+        ('transits', [{'moon': {'radius_px': 3.0}}]),
+        ('crater_fill', 0.5),
+        ('crater_min_radius', 0.06),
+        ('crater_max_radius', 0.2),
+        ('crater_power_law_exponent', 2.5),
+        ('crater_relief_scale', 0.5),
+    ],
+)
+def test_validate_sim_params_rejects_ellipsoid_only_key_on_mesh(key: str, value: Any) -> None:
+    """An ellipsoid-only appearance key on a polyhedral_mesh body fails."""
+    params = _sim_params()
+    body = _mesh_body()
+    body[key] = value
+    params['bodies'] = [body]
+    with pytest.raises(SimSceneValidationError, match='not supported on'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_mesh_appearance_keys() -> None:
+    """The mesh-supported appearance keys validate on a mesh body."""
+    params = _sim_params()
+    body = _mesh_body()
+    body.update(
+        {
+            'shading': 'gouraud',
+            'limb_relief_rms': 0.02,
+            'limb_relief_corr_deg': 12.0,
+            'mesh_detail_octaves': 2,
+            'pose_scatter': {'sigma_deg': 1.0},
+            'anti_aliasing': 0.5,
+        }
+    )
+    params['bodies'] = [body]
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_accepts_ellipsoid_appearance_keys() -> None:
+    """The same appearance keys stay valid on an ellipsoid body."""
+    params = _sim_params()
+    params['bodies'][0].update(
+        {
+            'photometric_law': 'minnaert',
+            'minnaert_k': 0.6,
+            'crater_fill': 0.5,
+            'atmosphere': {'scale_height_px': 4.0, 'tau_ref': 1.0},
+        }
+    )
+    assert validate_sim_params(params) is params
+
+
 def test_validate_sim_params_rejects_duplicate_body_names() -> None:
     """Two bodies with the same name fail (name-keyed truth would collide)."""
     params = _sim_params()

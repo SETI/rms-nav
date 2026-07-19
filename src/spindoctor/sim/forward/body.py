@@ -720,7 +720,12 @@ def render_single_body(
             axis3=axis3,
             illumination_angle=float(illumination_angle),
             phase_angle=float(phase_angle),
-            anti_aliasing=anti_aliasing,
+            # Silhouette anti-aliasing is consumed only at oversample 1,
+            # matching the topographic path: an oversampled scene already
+            # resolves the limb on its own grid, and supersampling the mesh
+            # rasterizer on top of it would multiply the render cost for no
+            # rendered difference worth having.
+            anti_aliasing=anti_aliasing if oversample == 1 else 0.0,
             ref_center_v=ref_center_v,
             ref_center_u=ref_center_u,
             seed=seed,
