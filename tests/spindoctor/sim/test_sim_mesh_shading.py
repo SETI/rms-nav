@@ -10,7 +10,7 @@ drawn amount while the navigator's catalog view is unmoved.
 
 import copy
 import math
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -292,7 +292,7 @@ def test_mesh_anti_aliasing_suppressed_on_oversampled_grid(
         return real(*args, **kwargs)
 
     monkeypatch.setattr(body_mesh, 'render_single_mesh_body', _capture)
-    body_params = {
+    body_params: dict[str, Any] = {
         'name': 'LUMPY',
         'shape_model': 'polyhedral_mesh',
         'axis1': 24.0,
@@ -309,7 +309,7 @@ def test_mesh_anti_aliasing_suppressed_on_oversampled_grid(
     img_os = np.zeros((128, 128), dtype=np.float64)
     scaled = dict(body_params)
     for axis_key in ('axis1', 'axis2', 'axis3'):
-        scaled[axis_key] = float(scaled[axis_key]) * 2
+        scaled[axis_key] = float(cast(float, scaled[axis_key])) * 2
     render_single_body(
         img_os,
         scaled,
