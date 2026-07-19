@@ -1071,7 +1071,9 @@ Mutual events
 -------------
 
 A scene can place two bodies so the nearer one occludes part of the farther one
-(depth-ordered by ``range_km``). The renderer draws the true occlusion and
+(depth-ordered by ``range_km``; bodies at exactly equal ranges tie-break
+deterministically by scene-list position, the earlier-listed body rendering as
+the nearer). The renderer draws the true occlusion and
 records the outcome in the render truth (``body_occlusion``): each body's
 visible fraction and the angular extent of any hidden limb arc. This is
 bookkeeping the test can read, not something the navigator sees.

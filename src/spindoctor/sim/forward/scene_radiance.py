@@ -269,7 +269,13 @@ def compose_scene_radiance(
         explicit = body_params.get('range_km') is not None
         render_items.append(((float(body_scaled['range_km']), idx), body_scaled, idx, explicit))
 
-    # Sort all items far to near.
+    # Sort all items far to near.  The key is (range_km, list index), so
+    # bodies at exactly equal ranges tie-break deterministically by their
+    # scene-list position: the reversed sort paints the higher index first,
+    # making the EARLIER-listed body the nearer one (it paints last and
+    # wins overlapped pixels) -- consistent with order_near_to_far below,
+    # whose stable ascending sort also places the earlier-listed body
+    # nearer at equal ranges.
     render_items.sort(key=lambda x: x[0], reverse=True)
 
     # Render in range order (far to near)
