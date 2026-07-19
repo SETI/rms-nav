@@ -2420,6 +2420,15 @@ change alters rendered output:
   still be rendering the wrong thing; the recovered offset cannot catch that,
   only eyes on the render can.
 
+  The regeneration rule is enforced mechanically by
+  ``tests/integration/test_render_diffs.py`` (integration tier): every
+  catalog scene must have a committed ``current/`` PNG byte-identical to a
+  fresh render, every scene class must have a committed sheet, and neither
+  may outlive its scene or class. The sheets themselves are enforced for
+  presence and coverage only -- their pixels encode the previous baseline's
+  before-panels and PIL's environment-dependent label rasterization, so
+  their *content* remains a review artifact, not a byte-compared one.
+
 The two documentation galleries (``docs/dev_guide/_sim_images/`` and
 ``docs/simulator_report/_scene_images/``, both written by
 ``python -m tests.integration.sim_doc_images``) are re-rendered under the same

@@ -36,6 +36,7 @@ produced by another checkout).
 from __future__ import annotations
 
 import argparse
+import io
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,7 +49,7 @@ from spindoctor.sim.render import render_combined_model
 from spindoctor.sim.scene import iter_scene_paths, load_sim_scene, scene_class_for_path
 from spindoctor.support.types import NDArrayUint8Type
 
-__all__ = ['DIFF_AMPLIFICATION', 'generate', 'main']
+__all__ = ['DIFF_AMPLIFICATION', 'encode_current_png', 'generate', 'main']
 
 _SCENES_ROOT = Path(__file__).parent / 'sim_scenes'
 _RENDER_DIFFS_DIR = Path(__file__).parent / 'render_diffs'
@@ -75,6 +76,24 @@ class _SceneRow:
     before: NDArrayUint8Type | None
     after: NDArrayUint8Type
     diff: NDArrayUint8Type | None
+
+
+def encode_current_png(after: NDArrayUint8Type) -> bytes:
+    """The exact PNG byte encoding of a scene's ``current/`` render.
+
+    The single encoding path shared by :func:`generate` (which writes the
+    committed files) and the render-diff currency test (which byte-compares
+    fresh renders against them), so the two cannot drift apart.
+
+    Parameters:
+        after: The stretched uint8 grayscale render.
+
+    Returns:
+        The PNG file bytes.
+    """
+    buffer = io.BytesIO()
+    Image.fromarray(after, mode='L').save(buffer, format='PNG')
+    return buffer.getvalue()
 
 
 def _load_before(before_dir: Path, scene_name: str) -> NDArrayUint8Type | None:
@@ -175,7 +194,7 @@ def generate(*, before_dir: Path | None = None) -> list[Path]:
     for rows in rows_by_class.values():
         for row in rows:
             out = _CURRENT_DIR / f'{row.name}.png'
-            Image.fromarray(row.after, mode='L').save(out)
+            out.write_bytes(encode_current_png(row.after))
             written.append(out)
     return written
 
