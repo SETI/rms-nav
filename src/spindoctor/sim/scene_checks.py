@@ -35,7 +35,15 @@ from spindoctor.support.status_reason import NavStatusReason
 # are defined independently here: a sim scene is not a sidecar, so the sim path
 # owns its own copy rather than importing the sidecar module.  ``confidence_tier``
 # admits the five navigation ranks plus null (assert the status only).
-_EXPECTED_KEYS: frozenset[str] = frozenset({'status', 'status_reason', 'confidence_tier'})
+_EXPECTED_KEYS: frozenset[str] = frozenset(
+    {
+        'status',
+        'status_reason',
+        'confidence_tier',
+        'known_offset_error_px',
+        'known_offset_error_tol_px',
+    }
+)
 _EXPECTED_STATUSES: frozenset[str] = frozenset({'success', 'failed', 'conflicted'})
 _EXPECTED_TIERS: frozenset[str] = frozenset({'high', 'medium', 'low', 'failed', 'conflicted'})
 _EXPECTED_STATUS_REASONS: frozenset[str] = frozenset(reason.value for reason in NavStatusReason)
@@ -590,6 +598,13 @@ def _check_expected(value: Any, *, source: str) -> None:
     ``conflicted`` status pins the matching tier, and those tiers require the
     matching status, but only when the tier is asserted (non-null).
 
+    ``known_offset_error_px`` is the honest-pin field: the measured fused
+    offset-error magnitude a scene deliberately pins as a documented hazard (a
+    confidently wrong result the ensemble cannot currently detect).  It
+    requires ``status: success`` (a failed result has no offset to be wrong)
+    and a positive ``known_offset_error_tol_px`` tolerance, so the assertion
+    is a band -- a silent improvement and a worsening regression both fail.
+
     Parameters:
         value: The ``expected`` mapping, or None when the block is absent.
         source: Label used in error messages.
@@ -638,6 +653,23 @@ def _check_expected(value: Any, *, source: str) -> None:
         raise SimSceneValidationError(
             f'{source}: expected.status_reason must be one of '
             f'{sorted(_EXPECTED_STATUS_REASONS)} when present; got {reason!r}'
+        )
+    known_error = value.get('known_offset_error_px')
+    known_tol = value.get('known_offset_error_tol_px')
+    _check_optional_positive_number(known_error, 'expected.known_offset_error_px', source=source)
+    _check_optional_positive_number(known_tol, 'expected.known_offset_error_tol_px', source=source)
+    if known_error is not None and status != 'success':
+        raise SimSceneValidationError(
+            f'{source}: expected.known_offset_error_px requires expected.status=success'
+        )
+    if known_error is not None and known_tol is None:
+        raise SimSceneValidationError(
+            f'{source}: expected.known_offset_error_px requires '
+            f'expected.known_offset_error_tol_px (the pin is a band)'
+        )
+    if known_tol is not None and known_error is None:
+        raise SimSceneValidationError(
+            f'{source}: expected.known_offset_error_tol_px requires expected.known_offset_error_px'
         )
 
 

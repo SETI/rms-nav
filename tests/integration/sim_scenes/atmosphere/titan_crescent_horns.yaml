@@ -44,6 +44,12 @@ offset_rotation_deg: 0.0
 # see a systematic photometric bias, so only a cross-technique veto (or a
 # haze-aware blob model) can close it.  The low tier plus the
 # provisional-confidence marker remain the only flags.
+# known_offset_error_px is the honest pin: success/low is a documented
+# hazard, not an endorsement, and the measured fused error (30.13 px on
+# 2026-07-18) must stay inside its band -- silent improvement and
+# worsening both fail, so any change to this behavior is deliberate.
 expected:
   status: success
   confidence_tier: low
+  known_offset_error_px: 30.0
+  known_offset_error_tol_px: 4.0

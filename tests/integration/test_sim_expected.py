@@ -2,10 +2,13 @@
 
 Discovers every catalog scene with a scene-level ``expected`` block, renders and
 navigates it in-process, and asserts the fused outcome matches the declaration
-through the :mod:`tests.integration.sim_expected` machinery.  These are the
-false-positive-characterization scenes: a wrong-catalog or overwhelming-clutter
-frame whose CORRECT outcome is failure / low confidence, asserted here so a
-confident wrong offset is a test failure.
+through the :mod:`tests.integration.sim_expected` machinery.  Two scene kinds
+live here: the false-positive-characterization scenes (a wrong-catalog or
+overwhelming-clutter frame whose CORRECT outcome is failure / low confidence,
+asserted so a confident wrong offset is a test failure) and the honest pins
+(scenes whose confidently wrong offset is a documented, currently unmitigated
+hazard: ``known_offset_error_px`` bands the measured error so a worsening
+regression fails and a genuine fix fails loudly for a deliberate re-pin).
 
 Navigation is heavier than the structural checks (each scene renders and runs
 the full ensemble), so the module is ``@pytest.mark.integration`` -- the same
@@ -43,4 +46,7 @@ def test_scene_matches_expected_outcome(path: Path) -> None:
     expected = expected_from_scene(scene)
     assert expected is not None
     result = navigate_scene(scene)
-    assert_result_matches_expected(scene_name=scene['scene_name'], expected=expected, result=result)
+    planted = (float(scene.get('offset_v', 0.0)), float(scene.get('offset_u', 0.0)))
+    assert_result_matches_expected(
+        scene_name=scene['scene_name'], expected=expected, result=result, planted_offset_vu=planted
+    )

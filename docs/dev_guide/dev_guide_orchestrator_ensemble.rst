@@ -159,6 +159,33 @@ confidence and sigma score:
   centroid's CRLB sigma is tight. A single-star result cross-checked by a non-star
   technique can still earn ``'high'``.
 
+Confident-wrong results: what the tiers do not price
+----------------------------------------------------
+
+The confidence formulas and tier boundaries price *statistical* error -- the
+scatter the per-technique diagnostics can see -- not unmodeled *systematic*
+error. A planted radial model error can be absorbed into a high-confidence
+offset: when every feature a technique fits is displaced coherently (a ring
+feature whose real orbit sits a few pixels off the catalog orbit, a haze layer
+that moves a photometric centroid), the fit converges cleanly, the residuals
+look healthy, and no diagnostic carries the signal, so neither the sigmoid nor
+the sigma gate can demote the result. Two simulated scenes pin this family as
+standing, currently unmitigated evidence:
+
+- ``tests/integration/sim_scenes/ring_system/orbit_error_ringlet.yaml`` -- a
+  2.5 px planted radial catalog error fuses to a ~3 px wrong offset at
+  confidence 0.89, tier ``high``.
+- ``tests/integration/sim_scenes/atmosphere/titan_crescent_horns.yaml`` (and
+  its noiseless twin) -- a 155-degree haze crescent drags the blob centroid to
+  a ~30 px wrong offset that passes the acceptance gate at the blob's 0.40
+  cap, tier ``low``.
+
+Both are asserted as honest pins (``known_offset_error_px``; see
+:ref:`sim-expected`), so a worsening regression and a silent fix both fail
+CI. Until the ensemble consumes declared model-error bars (the ring case) or
+gains a cross-technique veto (the haze case), a high tier on a frame with
+plausible unmodeled systematic error is not evidence against that error.
+
 Restrictions and assumptions
 ----------------------------
 

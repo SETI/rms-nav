@@ -840,7 +840,9 @@ The expected-outcome block
 A scene may carry a scene-level ``expected`` block declaring the outcome the
 navigator should produce: a required ``status`` (``success`` / ``failed`` /
 ``conflicted``), a ``confidence_tier`` (one of the five navigation ranks, or
-null to assert the status only), and an optional ``status_reason`` token. It is
+null to assert the status only), an optional ``status_reason`` token, and an
+optional ``known_offset_error_px`` / ``known_offset_error_tol_px`` pair (the
+honest pin, below). It is
 a **test-only** key -- read by the assertion machinery in
 ``tests/integration/sim_expected.py``, fed to neither the renderer nor the
 navigator, and stripped from ``nav_params`` by the information boundary along
@@ -855,6 +857,22 @@ position, or drowns a lone star in an overwhelming confounder field, the
 *correct* navigation outcome is a failed or low-confidence result -- never a
 confident wrong offset. Each such scene carries an ``expected`` block, and the
 machinery turns "must not be confidently wrong here" into a passing assertion.
+
+**The honest pin.** A small second family inverts the reading: scenes whose
+measured behavior *is* a confidently wrong offset the ensemble cannot
+currently detect (the ``orbit_error_ringlet`` planted radial catalog error,
+the ``titan_crescent_horns`` pair's haze-dragged blob centroid). Pinning bare
+``status: success`` on such a scene would quietly freeze the wrong answer as
+correct behavior, so these scenes also declare ``known_offset_error_px`` --
+the measured fused error magnitude, from the scene's recorded baseline -- with
+a ``known_offset_error_tol_px`` band. The assertion then fails in *both*
+directions: a regression that worsens the error fails, and a genuine fix that
+shrinks it also fails loudly, prompting a deliberate re-pin (or retirement of
+the pin) instead of a silent behavior change. The pinned success is a
+documented hazard held in view, never an endorsement; the scene comments and
+the campaign record carry the analysis, and the ensemble chapter
+(:doc:`dev_guide_orchestrator_ensemble`) names the failure family for the
+readers who consume tiers.
 
 .. _sim-floor:
 

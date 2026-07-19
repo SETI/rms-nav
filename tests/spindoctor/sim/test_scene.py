@@ -307,6 +307,68 @@ def test_validate_sim_params_rejects_expected_status_reason() -> None:
         validate_sim_params(params)
 
 
+def test_validate_sim_params_accepts_known_offset_error_pin() -> None:
+    """An honest-pin band (error value plus tolerance) validates on a success."""
+    params = _sim_params()
+    params['expected'] = {
+        'status': 'success',
+        'confidence_tier': 'high',
+        'known_offset_error_px': 3.0,
+        'known_offset_error_tol_px': 1.0,
+    }
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_known_error_without_tolerance() -> None:
+    """A known_offset_error_px pin without its tolerance band fails validation."""
+    params = _sim_params()
+    params['expected'] = {
+        'status': 'success',
+        'confidence_tier': 'high',
+        'known_offset_error_px': 3.0,
+    }
+    with pytest.raises(SimSceneValidationError, match=r'known_offset_error_tol_px'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_tolerance_without_known_error() -> None:
+    """A tolerance band without the pinned error value fails validation."""
+    params = _sim_params()
+    params['expected'] = {
+        'status': 'success',
+        'confidence_tier': 'high',
+        'known_offset_error_tol_px': 1.0,
+    }
+    with pytest.raises(SimSceneValidationError, match=r'known_offset_error_px'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_known_error_on_failed_status() -> None:
+    """A known_offset_error_px pin on a failed status fails validation."""
+    params = _sim_params()
+    params['expected'] = {
+        'status': 'failed',
+        'confidence_tier': 'failed',
+        'known_offset_error_px': 3.0,
+        'known_offset_error_tol_px': 1.0,
+    }
+    with pytest.raises(SimSceneValidationError, match=r'status=success'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_nonpositive_known_error() -> None:
+    """A zero known_offset_error_px fails the positive-number check."""
+    params = _sim_params()
+    params['expected'] = {
+        'status': 'success',
+        'confidence_tier': 'high',
+        'known_offset_error_px': 0.0,
+        'known_offset_error_tol_px': 1.0,
+    }
+    with pytest.raises(SimSceneValidationError, match=r'known_offset_error_px'):
+        validate_sim_params(params)
+
+
 def test_validate_sim_params_rejects_legacy_rings_key() -> None:
     """The retired painted-annulus 'rings' list is an unknown key now."""
     params = _sim_params()
