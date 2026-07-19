@@ -7,7 +7,9 @@ and the visual-aid toggles.  Each schema block's widgets, handlers, and (in
 later phases) new control tabs live in their own mixin module.
 """
 
+import argparse
 import sys
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -380,9 +382,47 @@ class CreateSimulatedImageModel(
         self._update_display()
 
 
-def main() -> None:
-    """Launch the simulated-image editor as a standalone application."""
+def build_arg_parser() -> argparse.ArgumentParser:
+    """The scene editor's command-line parser.
+
+    Kept separate from :func:`main` so ``--help`` and argument handling are
+    testable without constructing a Qt application.
+
+    Returns:
+        The configured parser.
+    """
+    parser = argparse.ArgumentParser(
+        prog='sd_create_simulated_image',
+        description=(
+            'SpinDoctor Scene Editor: an interactive editor for simulated-image '
+            'scenes with a live preview.'
+        ),
+    )
+    parser.add_argument(
+        'scene',
+        nargs='?',
+        type=Path,
+        default=None,
+        help=(
+            'optional scene YAML to open on launch (the same files the Load '
+            'Scene button reads); omitted, the editor starts with a blank scene'
+        ),
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Launch the simulated-image scene editor as a standalone application.
+
+    Parameters:
+        argv: Command-line arguments (defaults to ``sys.argv[1:]``).  An
+            optional positional scene path is loaded through the editor's
+            Load Scene machinery after the window is built.
+    """
+    args = build_arg_parser().parse_args(argv)
     app = QApplication(sys.argv)
     window = CreateSimulatedImageModel()
+    if args.scene is not None:
+        window.load_scene_file(args.scene)
     window.show()
     sys.exit(app.exec())
