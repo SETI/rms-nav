@@ -431,7 +431,7 @@ def test_validate_sim_params_rejects_empty_psf_block() -> None:
     """A present optics.psf block without a core width fails at validation."""
     params = _sim_params()
     params['optics'] = {'psf': {}}
-    with pytest.raises(SimSceneValidationError, match='optics.psf needs sigma_v'):
+    with pytest.raises(SimSceneValidationError, match=r'optics\.psf needs sigma_v'):
         validate_sim_params(params)
 
 
@@ -439,7 +439,7 @@ def test_validate_sim_params_rejects_psf_without_sigma_v() -> None:
     """Wing-only PSF parameters without sigma_v fail at validation."""
     params = _sim_params()
     params['optics'] = {'psf': {'w': 0.1, 'r0': 2.0, 'n': 3.0}}
-    with pytest.raises(SimSceneValidationError, match='optics.psf needs sigma_v'):
+    with pytest.raises(SimSceneValidationError, match=r'optics\.psf needs sigma_v'):
         validate_sim_params(params)
 
 
@@ -536,7 +536,7 @@ def _mesh_body() -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(
-    'key,value',
+    ('key', 'value'),
     [
         ('atmosphere', {'scale_height_px': 4.0, 'tau_ref': 1.0}),
         ('photometric_law', 'minnaert'),
@@ -709,7 +709,7 @@ def test_validate_sim_params_rejects_ring_orbit_ae_at_a() -> None:
     """orbit.ae >= orbit.a fails at validation, not deep in the edge math."""
     params = _ring_system_params()
     params['ring_system']['features'][0]['orbit']['ae'] = 40.0
-    with pytest.raises(SimSceneValidationError, match='ae must be less than orbit.a'):
+    with pytest.raises(SimSceneValidationError, match=r'ae must be less than orbit\.a'):
         validate_sim_params(params)
 
 

@@ -198,6 +198,16 @@ spindoctor.sim
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.sim.scene_checks_body
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.sim.scene_checks_ring
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.sim.instruments
    :members:
    :undoc-members:
@@ -209,6 +219,33 @@ spindoctor.sim
    :show-inheritance:
 
 .. automodule:: spindoctor.sim.png_export
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.sim.realism
+
+.. automodule:: spindoctor.sim.realism.artifact_incidence
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.sim.realism.divergence
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.sim.realism.dynamic_range
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.sim.realism.noise
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.sim.realism.profiles
    :members:
    :undoc-members:
    :show-inheritance:

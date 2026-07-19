@@ -71,13 +71,12 @@ class W1Result:
 class CohortSupport(Enum):
     """How well a cohort supports a distributional statistic.
 
-    Values:
-        SUPPORTED: Enough frames for a per-frame distribution statement.
-        LIMITED: A comparison is reported but flagged as resting on too few
-            frames for distributional confidence.
-        UNSUPPORTED: The statistic is not computed; the instrument's sim
-            accuracy is bounded by unverified forward-model fidelity for
-            this figure of merit.
+    The labels: ``SUPPORTED`` means enough frames for a per-frame
+    distribution statement; ``LIMITED`` means a comparison is reported but
+    flagged as resting on too few frames for distributional confidence; and
+    ``UNSUPPORTED`` means the statistic is not computed, so the instrument's
+    sim accuracy is bounded by unverified forward-model fidelity for this
+    figure of merit.
     """
 
     SUPPORTED = 'supported'

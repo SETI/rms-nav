@@ -162,8 +162,9 @@ def check_depth_ambiguity(
         explicit_depth: Whether the body carries an explicit ``range_km``.
 
     Raises:
-        SimSceneValidationError: If the new object overlaps a painted one and
-            either of the pair lacks an explicit ``range_km``.
+        spindoctor.sim.scene_schema.SimSceneValidationError: If the new
+            object overlaps a painted one and either of the pair lacks an
+            explicit ``range_km``.
     """
     if not item_mask.any():
         return
@@ -227,8 +228,9 @@ def check_halo_ambiguity(
             for every atmospheric body, in render order.
 
     Raises:
-        SimSceneValidationError: If a halo overlaps another body's paint or
-            halo and either body lacks an explicit ``range_km``.
+        spindoctor.sim.scene_schema.SimSceneValidationError: If a halo
+            overlaps another body's paint or halo and either body lacks an
+            explicit ``range_km``.
     """
     for halo_label, halo_explicit, screen in halo_check_items:
         if not screen.mask.any():
@@ -282,8 +284,8 @@ def check_ring_system_ambiguity(
             ``range_km``.
 
     Raises:
-        SimSceneValidationError: On any overlap without a defined depth
-            relation.
+        spindoctor.sim.scene_schema.SimSceneValidationError: On any overlap
+            without a defined depth relation.
     """
     if not ring_mask.any():
         return
