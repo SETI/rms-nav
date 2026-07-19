@@ -277,8 +277,9 @@ the truth.
 **Accuracy is conditional on the realism match, per instrument.** A sim error
 curve becomes an accuracy statement only to the degree the realism match
 (:ref:`sim-realism-match`) supports it for that instrument. For the Cassini
-NAC the support is strong: the tuned star PSF reproduces the 58-frame cohort's
-encircled-energy radii through the same estimator on both sides (EE50 0.90 px
+NAC the support is strong: the tuned star PSF reproduces the cohort's
+encircled-energy radii (measured on its 23 star-bearing frames) through the
+same estimator on both sides (EE50 0.90 px
 sim vs 0.91 real, EE80 1.72 vs 1.79), limb rise widths agree in the
 like-for-like pool (medians 2.54 px both sides, normalized W1 0.16), ring-edge
 widths agree at the few-tenths level, and the frame-averaged curve shapes
@@ -2682,9 +2683,13 @@ realism addition needs -- live in their own module:
      - Shared widget helpers and the mixin-facing protocol.
 
 The GUI exposes the full scene parameter surface, so any scene that can be
-written by hand in YAML can also be built in the GUI. The one exception is
-the nested ``instrument_config`` override mapping, which the GUI carries
-through unedited. Scenes
+written by hand in YAML can also be built in the GUI. Two exceptions are
+carried through unedited rather than widget-exposed: the nested
+``instrument_config`` override mapping, and the hand-authored
+``known_offset_error_px`` / ``known_offset_error_tol_px`` pins in the
+expected block (the expected-outcome panel preserves them across its
+enable toggle but offers no controls for them; they are baseline-measured
+values, authored in YAML). Scenes
 round-trip through the **Load / Save Scene (YAML)** buttons, so a scene rendered
 in the GUI can be saved as a catalog artifact and a catalog scene can be loaded
 back to edit; ``tests/main/test_sim_editor_round_trip.py`` asserts the

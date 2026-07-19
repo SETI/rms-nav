@@ -36,6 +36,9 @@ class ExpectedOutcomeMixin(SimEditorBase):
         expected = self.sim_params.get('expected')
         has_expected = isinstance(expected, dict)
         block: dict[str, Any] = expected if isinstance(expected, dict) else {}
+        # Keys the panel has no widgets for (the hand-authored offset-error
+        # pins) survive an uncheck/recheck cycle through this stash.
+        self._removed_expected_extras: dict[str, object] = {}
 
         self._expected_group = QGroupBox('Expected outcome (test-only)')
         self._expected_group.setCheckable(True)
@@ -79,18 +82,32 @@ class ExpectedOutcomeMixin(SimEditorBase):
         return None if text == '(none)' else text
 
     def _on_expected_toggled(self, checked: bool) -> None:
-        """Insert or remove the expected block from the scene."""
+        """Insert or remove the expected block from the scene.
+
+        Keys the panel has no widgets for (the hand-authored
+        ``known_offset_error_px`` / ``known_offset_error_tol_px`` pins)
+        are preserved across an uncheck/recheck cycle rather than being
+        rebuilt away: the removed block is remembered and its extra keys
+        are re-attached when the group is re-enabled.
+        """
         if checked:
-            block: dict[str, object] = {
-                'status': self._expected_status_combo.currentText(),
-                'confidence_tier': self._tier_from_text(self._expected_tier_combo.currentText()),
-            }
+            block: dict[str, object] = dict(self._removed_expected_extras)
+            block['status'] = self._expected_status_combo.currentText()
+            block['confidence_tier'] = self._tier_from_text(self._expected_tier_combo.currentText())
             reason = self._expected_reason_edit.text().strip()
             if reason:
                 block['status_reason'] = reason
+            else:
+                block.pop('status_reason', None)
             self.sim_params['expected'] = block
         else:
-            self.sim_params.pop('expected', None)
+            removed = self.sim_params.pop('expected', None)
+            if isinstance(removed, dict):
+                self._removed_expected_extras = {
+                    key: value
+                    for key, value in removed.items()
+                    if key not in ('status', 'confidence_tier', 'status_reason')
+                }
         self._updater.request_update()
 
     def _on_expected_status(self, text: str) -> None:
