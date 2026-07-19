@@ -141,6 +141,11 @@ def test_oversample_star_records_are_detector_scale() -> None:
     info = meta['star_info'][0]
     assert abs(info['center_v'] - (star.v + 2.0)) < 1e-9
     assert abs(info['center_u'] - (star.u - 1.0)) < 1e-9
+    # The hit-test half-window never shrinks below one detector pixel: with
+    # no PSF the oversampled record floors at ``oversample`` subsamples, so
+    # the downsample's divide lands exactly at the editor's 1-px click floor.
+    assert info['psf_half_v'] == 1.0
+    assert info['psf_half_u'] == 1.0
 
 
 def test_oversample_defaulted_psf_size_survives_the_round_trip() -> None:
