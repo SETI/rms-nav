@@ -159,7 +159,8 @@ schema key is left unclassified or lands in two classes, so a schema change
 cannot dodge the classification. The boundary filter is default-deny, so the
 test-only keys are stripped from the navigator's view alongside the truth keys.
 
-The boundary is enforced structurally, not by convention:
+The boundary's enforcement has two distinct strengths, and it matters which
+applies where. The *channel* is structural:
 
 - :class:`~spindoctor.obs.obs_inst_sim.ObsSim` exposes the navigator-side
   models a **filtered view**, ``obs.nav_params``, built by
@@ -167,8 +168,8 @@ The boundary is enforced structurally, not by convention:
   (the filter is default-deny -- an unclassified or unknown key stays behind),
   a body's ``nav_override`` mapping is overlaid onto its idealized view and
   then dropped (the navigator sees what it *believes*, never the true values
-  underneath), and all values are deep copies. The renderer consumes the full
-  scene; the navigator side structurally cannot read what is not there.
+  underneath), and all values are deep copies. Nothing reachable *through
+  the filtered view* carries truth.
 - The navigator-side models read **only** ``obs.nav_params``. None of the
   renderer's output -- rendered star records, body masks, z-order maps, all
   accumulated on the frame's ``truth`` metadata -- ever crosses.
@@ -186,6 +187,24 @@ The boundary is enforced structurally, not by convention:
   the filtered view. This test is the independence guarantee: any change that
   adds a truth key must extend it in the same change (the test iterates the
   frozenset, so an unextended sample table fails loudly).
+
+The *consumer* side of the guarantee is enforced by tests and review, not by
+structure. The full scene -- planted offset included -- still rides the same
+observation object every navigator-side model holds as ``self.obs``:
+:class:`~spindoctor.obs.obs_inst_sim.ObsSim` stores it in truth-side
+attributes (``sim_params``, ``sim_offset_v`` / ``sim_offset_u``, ``sim_time``,
+and the renderer output records ``sim_body_models``, ``sim_inventory``,
+``sim_body_order_near_to_far``, ``sim_body_index_map``,
+``sim_body_mask_map``), each one attribute access away. What stands between
+navigator-side code and those attributes is that the filtered view is the
+only channel current navigator-side code reads, held there by three guards:
+the information-boundary test suite above, the static guard test
+(``tests/spindoctor/sim/test_boundary_static_guard.py``, which walks the AST
+of every module under ``nav_model/``, ``nav_technique/``, and
+``nav_orchestrator/`` and fails on any reference to a truth attribute name),
+and code review. The guarantee is mechanical for the channel and
+mechanical-plus-review for the consumers; the assessment behind this
+phrasing is recorded in ``critiques/SIM_REALISM_CRITIQUE_2026-07-18.md``.
 
 Sharing code is fine; sharing information is not
 ------------------------------------------------
