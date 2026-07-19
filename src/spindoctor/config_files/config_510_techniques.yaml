@@ -35,14 +35,24 @@
 # campaign so each technique's 2-sigma error coverage matches the
 # 2D-Gaussian expectation (0.865).  A technique's confidence
 # approximates its sim-anchored P(offset error <= 1 px) given its
-# diagnostics; hard gates (spurious / at_edge) still force 0.  The
-# calibration basis is the sim's realism (quantified per instrument in
-# the simulator report's realism-match section, but not yet
-# real-anchored), so confidence_provisional stays true in the metadata;
-# when a real-image anchor set exists (operator-verified offsets with
-# measured per-technique errors), the same fit reruns against it and
-# these sim-anchored values become the fallback for regimes real data
-# cannot reach.
+# diagnostics; hard gates (spurious / at_edge) still force 0.
+# Calibration basis and scope: the campaign renders with the empirical
+# instrument chain OFF -- no artifacts / instrument_defaults block, no
+# whole-scene PSF on the body and ring families (anti-aliased edges
+# only), the navigator-matched floor PSF on the star families, and no
+# distortion, smear, or atmosphere; noise is Poisson plus a log-uniform
+# read-noise draw (plus a stray-light slice on the star-field family)
+# -- and every scene emulates coiss_nac, although these coefficients
+# apply fleet-wide.  The realism match (simulator report, realism-match
+# section) vouches for a different renderer configuration, the one with
+# the empirical chain ON, so it does not underwrite these coefficients;
+# their real-frame meaning currently rests on the operator-sidecar
+# library cross-check recorded in util/calibration/CAMPAIGN_20260718.md.
+# confidence_provisional therefore stays true in the metadata; when a
+# real-image anchor set exists (operator-verified offsets with measured
+# per-technique errors), the same fit reruns against it and these
+# sim-anchored values become the fallback for regimes real data cannot
+# reach.
 # BodyTerminatorNav carries its first sim-anchored fit (#223): the
 # campaign's terminator rows are single-class (zero of 116 usable rows
 # within 1 px), so its formula is an honest low plateau -- see the

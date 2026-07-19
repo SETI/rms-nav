@@ -157,10 +157,19 @@ ordering, not per-technique reliability; they are retained, not fitted.
   the simulator report's realism-match section, but not yet
   real-anchored.  `confidence_provisional` stays true
   in the metadata until a real-anchored calibration lands.
-- The campaign's scene families do not draw every axis the renderer
-  supports: PSF wings, saturation bloom on stars, and calibrated-I/F
-  detector noise are renderable but not varied by these families, so
-  those regimes are uncalibrated by this fit.
+- **Chain-off render basis.** The campaign's scene families render with
+  the empirical instrument chain off: no `artifacts` /
+  `instrument_defaults`, no whole-scene PSF on the body and ring
+  families, the navigator-matched floor PSF on the star families, and
+  no distortion, smear, or atmosphere.  PSF wings, saturation bloom on
+  stars, and calibrated-I/F detector noise are renderable but likewise
+  not drawn.  The realism match vouches for the chain-*on*
+  configuration, so those regimes -- and the empirical-chain layer as a
+  whole -- are uncalibrated by this fit (see the "Calibration basis and
+  scope" section of `CAMPAIGN_20260718.md`).
+- **Single-instrument cohort.** Every campaign scene emulates
+  `coiss_nac`; the fitted alphas, floors, and tier boundaries are
+  applied fleet-wide from that one-camera cohort.
 - The operator-curated image-library tiers are the *plausibility
   cross-check* for this calibration, never fit targets (the curation
   conventions live in `docs/dev_guide/dev_guide_image_library.rst`).
