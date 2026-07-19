@@ -99,6 +99,37 @@ def test_load_rejects_nonpositive_size(tmp_path: Path) -> None:
         load_sim_scene(path)
 
 
+def test_load_rejects_inf_positive_number(tmp_path: Path) -> None:
+    """YAML .inf on a positive-number key (exposure_sec) fails validation."""
+    path = tmp_path / 'infexp.yaml'
+    path.write_text(
+        'schema_version: 2\nscene_name: infexp\ninstrument: coiss_nac\n'
+        'size_v: 64\nsize_u: 64\nrandom_seed: 1\nexposure_sec: .inf\n'
+    )
+    with pytest.raises(SimSceneValidationError, match='exposure_sec must be finite'):
+        load_sim_scene(path)
+
+
+def test_load_rejects_inf_nonnegative_number(tmp_path: Path) -> None:
+    """YAML .inf on a non-negative-number key (noise.read_noise_dn) fails."""
+    path = tmp_path / 'infnoise.yaml'
+    path.write_text(
+        'schema_version: 2\nscene_name: infnoise\ninstrument: coiss_nac\n'
+        'size_v: 64\nsize_u: 64\nrandom_seed: 1\n'
+        'noise:\n  read_noise_dn: .inf\n'
+    )
+    with pytest.raises(SimSceneValidationError, match='read_noise_dn must be finite'):
+        load_sim_scene(path)
+
+
+def test_validate_sim_params_rejects_nan_positive_number() -> None:
+    """NaN on a positive-number key fails validation."""
+    params = _sim_params()
+    params['exposure_sec'] = float('nan')
+    with pytest.raises(SimSceneValidationError, match='exposure_sec must be finite'):
+        validate_sim_params(params)
+
+
 def test_load_rejects_schema_version_1(tmp_path: Path) -> None:
     """The loader accepts only the current schema version."""
     path = tmp_path / 'v1.yaml'
@@ -234,48 +265,6 @@ def test_validate_sim_params_rejects_negative_catalog_scatter() -> None:
         validate_sim_params(params)
 
 
-def test_validate_sim_params_accepts_expected_block() -> None:
-    """A well-formed expected outcome block validates."""
-    params = _sim_params()
-    params['expected'] = {
-        'status': 'failed',
-        'confidence_tier': 'failed',
-        'status_reason': 'no_feasible_techniques',
-    }
-    assert validate_sim_params(params) is params
-
-
-def test_validate_sim_params_accepts_expected_with_null_tier() -> None:
-    """A success expected block may leave the tier unasserted (null)."""
-    params = _sim_params()
-    params['expected'] = {'status': 'success', 'confidence_tier': None}
-    assert validate_sim_params(params) is params
-
-
-def test_validate_sim_params_rejects_expected_status() -> None:
-    """An unknown expected status fails validation."""
-    params = _sim_params()
-    params['expected'] = {'status': 'triumphant', 'confidence_tier': None}
-    with pytest.raises(SimSceneValidationError, match=r'expected.status'):
-        validate_sim_params(params)
-
-
-def test_validate_sim_params_rejects_failed_status_with_wrong_tier() -> None:
-    """A failed status pins the failed tier (the sidecar cross-field rule)."""
-    params = _sim_params()
-    params['expected'] = {'status': 'failed', 'confidence_tier': 'low'}
-    with pytest.raises(SimSceneValidationError, match=r'confidence_tier=failed'):
-        validate_sim_params(params)
-
-
-def test_validate_sim_params_rejects_expected_status_reason() -> None:
-    """An out-of-vocabulary expected status_reason fails validation."""
-    params = _sim_params()
-    params['expected'] = {'status': 'failed', 'confidence_tier': 'failed', 'status_reason': 'vibes'}
-    with pytest.raises(SimSceneValidationError, match=r'status_reason'):
-        validate_sim_params(params)
-
-
 def test_validate_sim_params_rejects_legacy_rings_key() -> None:
     """The retired painted-annulus 'rings' list is an unknown key now."""
     params = _sim_params()
@@ -396,6 +385,204 @@ def test_validate_sim_params_accepts_idealized_nav_override() -> None:
     assert validate_sim_params(params) is params
 
 
+def test_validate_sim_params_rejects_empty_psf_block() -> None:
+    """A present optics.psf block without a core width fails at validation."""
+    params = _sim_params()
+    params['optics'] = {'psf': {}}
+    with pytest.raises(SimSceneValidationError, match=r'optics\.psf needs sigma_v'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_psf_without_sigma_v() -> None:
+    """Wing-only PSF parameters without sigma_v fail at validation."""
+    params = _sim_params()
+    params['optics'] = {'psf': {'w': 0.1, 'r0': 2.0, 'n': 3.0}}
+    with pytest.raises(SimSceneValidationError, match=r'optics\.psf needs sigma_v'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_false_match_navigator() -> None:
+    """match_navigator: false authors a kernel-less block and fails."""
+    params = _sim_params()
+    params['optics'] = {'psf': {'match_navigator': False}}
+    with pytest.raises(SimSceneValidationError, match='match_navigator must be true'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_match_navigator_only_psf() -> None:
+    """The navigator-matched form validates without explicit parameters."""
+    params = _sim_params()
+    params['optics'] = {'psf': {'match_navigator': True}}
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_accepts_sigma_v_only_psf() -> None:
+    """A psf block with just the core width validates."""
+    params = _sim_params()
+    params['optics'] = {'psf': {'sigma_v': 1.2}}
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_zero_crater_max_radius() -> None:
+    """A zero crater_max_radius fails at validation, not deep in the sampler."""
+    params = _sim_params()
+    params['bodies'][0]['crater_fill'] = 0.2
+    params['bodies'][0]['crater_max_radius'] = 0
+    with pytest.raises(SimSceneValidationError, match='crater_max_radius must be a positive'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_zero_crater_min_radius() -> None:
+    """A zero crater_min_radius fails at validation."""
+    params = _sim_params()
+    params['bodies'][0]['crater_min_radius'] = 0.0
+    with pytest.raises(SimSceneValidationError, match='crater_min_radius must be a positive'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_inverted_crater_radius_band() -> None:
+    """crater_min_radius >= crater_max_radius fails."""
+    params = _sim_params()
+    params['bodies'][0]['crater_min_radius'] = 0.3
+    params['bodies'][0]['crater_max_radius'] = 0.1
+    with pytest.raises(SimSceneValidationError, match='must be less than crater_max_radius'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_crater_max_below_default_min() -> None:
+    """A lone crater_max_radius below the defaulted minimum fails."""
+    params = _sim_params()
+    params['bodies'][0]['crater_max_radius'] = 0.04
+    with pytest.raises(SimSceneValidationError, match='must be less than crater_max_radius'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_valid_crater_radius_band() -> None:
+    """A positive, ordered crater radius band validates."""
+    params = _sim_params()
+    params['bodies'][0]['crater_min_radius'] = 0.02
+    params['bodies'][0]['crater_max_radius'] = 0.2
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_crater_power_law_exponent_at_one() -> None:
+    """crater_power_law_exponent <= 1 fails with the normalizability message."""
+    params = _sim_params()
+    params['bodies'][0]['crater_power_law_exponent'] = 1.0
+    with pytest.raises(SimSceneValidationError, match='must exceed 1'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_crater_power_law_exponent_above_one() -> None:
+    """A proper power-law exponent validates."""
+    params = _sim_params()
+    params['bodies'][0]['crater_power_law_exponent'] = 2.5
+    assert validate_sim_params(params) is params
+
+
+def _mesh_body() -> dict[str, Any]:
+    """A minimal valid polyhedral-mesh body entry."""
+    return {
+        'name': 'LUMPY',
+        'shape_model': 'polyhedral_mesh',
+        'axis1': 30.0,
+        'axis2': 26.0,
+        'axis3': 24.0,
+        'mesh_lumpiness': 0.4,
+        'mesh_seed': 3,
+    }
+
+
+@pytest.mark.parametrize(
+    ('key', 'value'),
+    [
+        ('atmosphere', {'scale_height_px': 4.0, 'tau_ref': 1.0}),
+        ('photometric_law', 'minnaert'),
+        ('minnaert_k', 0.6),
+        ('opposition_surge', {'amplitude': 0.4, 'width_deg': 5.0}),
+        ('albedo_texture', {'rms': 0.05, 'corr_px': 10.0}),
+        ('disc_texture', {'band_amplitude': 0.1}),
+        ('transits', [{'moon': {'radius_px': 3.0}}]),
+        ('crater_fill', 0.5),
+        ('crater_min_radius', 0.06),
+        ('crater_max_radius', 0.2),
+        ('crater_power_law_exponent', 2.5),
+        ('crater_relief_scale', 0.5),
+    ],
+)
+def test_validate_sim_params_rejects_ellipsoid_only_key_on_mesh(key: str, value: Any) -> None:
+    """An ellipsoid-only appearance key on a polyhedral_mesh body fails."""
+    params = _sim_params()
+    body = _mesh_body()
+    body[key] = value
+    params['bodies'] = [body]
+    with pytest.raises(SimSceneValidationError, match='not supported on'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_mesh_appearance_keys() -> None:
+    """The mesh-supported appearance keys validate on a mesh body."""
+    params = _sim_params()
+    body = _mesh_body()
+    body.update(
+        {
+            'shading': 'gouraud',
+            'limb_relief_rms': 0.02,
+            'limb_relief_corr_deg': 12.0,
+            'mesh_detail_octaves': 2,
+            'pose_scatter': {'sigma_deg': 1.0},
+            'anti_aliasing': 0.5,
+        }
+    )
+    params['bodies'] = [body]
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_accepts_ellipsoid_appearance_keys() -> None:
+    """The same appearance keys stay valid on an ellipsoid body."""
+    params = _sim_params()
+    params['bodies'][0].update(
+        {
+            'photometric_law': 'minnaert',
+            'minnaert_k': 0.6,
+            'crater_fill': 0.5,
+            'atmosphere': {'scale_height_px': 4.0, 'tau_ref': 1.0},
+        }
+    )
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_duplicate_body_names() -> None:
+    """Two bodies with the same name fail (name-keyed truth would collide)."""
+    params = _sim_params()
+    params['bodies'] = [{'name': 'RHEA', 'axis1': 40.0}, {'name': 'RHEA', 'axis1': 20.0}]
+    with pytest.raises(SimSceneValidationError, match="share the effective name 'RHEA'"):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_case_colliding_body_names() -> None:
+    """Body names collide case-insensitively (truth keys are upper-cased)."""
+    params = _sim_params()
+    params['bodies'] = [{'name': 'Rhea', 'axis1': 40.0}, {'name': 'RHEA', 'axis1': 20.0}]
+    with pytest.raises(SimSceneValidationError, match='share the effective name'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_body_name_colliding_with_default() -> None:
+    """An explicit name colliding with an unnamed body's positional default fails."""
+    params = _sim_params()
+    params['bodies'] = [{'axis1': 40.0}, {'name': 'SIM-BODY-1', 'axis1': 20.0}]
+    with pytest.raises(SimSceneValidationError, match="share the effective name 'SIM-BODY-1'"):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_distinct_body_names() -> None:
+    """Distinctly named (and defaulted) bodies validate."""
+    params = _sim_params()
+    params['bodies'] = [{'name': 'RHEA', 'axis1': 40.0}, {'axis1': 20.0}]
+    assert validate_sim_params(params) is params
+
+
 def _ring_system_params() -> dict[str, Any]:
     """A scene with a minimal valid ring_system block."""
     params = _sim_params()
@@ -444,6 +631,80 @@ def test_validate_sim_params_rejects_unknown_ring_system_key() -> None:
     params['ring_system']['spokes'] = {}
     with pytest.raises(SimSceneValidationError, match=r'ring_system.*spokes'):
         validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_duplicate_ring_feature_names() -> None:
+    """Two ring features with the same name fail (name-keyed consumers collide)."""
+    params = _ring_system_params()
+    second = dict(params['ring_system']['features'][0])
+    params['ring_system']['features'].append(second)
+    with pytest.raises(SimSceneValidationError, match="share the effective name 'F1'"):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_ring_feature_name_colliding_with_default() -> None:
+    """An explicit feature name colliding with a positional default fails."""
+    params = _ring_system_params()
+    first = dict(params['ring_system']['features'][0])
+    del first['name']
+    second = dict(params['ring_system']['features'][0])
+    second['name'] = 'RING-FEATURE-1'
+    params['ring_system']['features'] = [first, second]
+    with pytest.raises(SimSceneValidationError, match="share the effective name 'RING-FEATURE-1'"):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_distinct_ring_feature_names() -> None:
+    """Distinctly named ring features validate."""
+    params = _ring_system_params()
+    second = dict(params['ring_system']['features'][0])
+    second['name'] = 'F2'
+    params['ring_system']['features'].append(second)
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_ring_orbit_ae_at_a() -> None:
+    """orbit.ae >= orbit.a fails at validation, not deep in the edge math."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit']['ae'] = 40.0
+    with pytest.raises(SimSceneValidationError, match=r'ae must be less than orbit\.a'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_subcritical_ring_orbit_ae() -> None:
+    """orbit.ae below orbit.a validates."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit']['ae'] = 5.0
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_rejects_orbit_error_negating_a() -> None:
+    """A delta_a_px that drives the effective semimajor axis <= 0 fails."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit_error'] = {'delta_a_px': -40.0}
+    with pytest.raises(SimSceneValidationError, match='positive semimajor axis'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_orbit_error_driving_ae_past_a() -> None:
+    """A delta_ae_px that pushes the effective eccentricity to 1 fails."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit']['ae'] = 5.0
+    params['ring_system']['features'][0]['orbit_error'] = {'delta_ae_px': 35.0}
+    with pytest.raises(SimSceneValidationError, match='effective eccentric'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_bounded_orbit_error() -> None:
+    """Orbit-error deltas that keep the effective orbit physical validate."""
+    params = _ring_system_params()
+    params['ring_system']['features'][0]['orbit']['ae'] = 5.0
+    params['ring_system']['features'][0]['orbit_error'] = {
+        'delta_a_px': -2.0,
+        'delta_ae_px': 1.0,
+        'delta_long_peri_deg': 15.0,
+    }
+    assert validate_sim_params(params) is params
 
 
 def test_validate_sim_params_requires_ring_system_geometry() -> None:

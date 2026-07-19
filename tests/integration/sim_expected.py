@@ -3,9 +3,11 @@
 A sim scene may carry a scene-level ``expected`` block declaring the outcome the
 navigator should produce: a ``status`` (``success`` / ``failed`` / ``conflicted``),
 an optional ``confidence_tier`` (one of the five navigation ranks, or null to
-assert the status only), and an optional ``status_reason``.  This module loads
-that block and asserts a :class:`~spindoctor.nav_orchestrator.nav_result.NavResult`
-against it with clear failure messages.
+assert the status only), an optional ``status_reason``, and an optional honest
+pin ``known_offset_error_px`` / ``known_offset_error_tol_px`` pair.  This module
+loads that block and asserts a
+:class:`~spindoctor.nav_orchestrator.nav_result.NavResult` against it with clear
+failure messages.
 
 It is the sim analog of the image-library sidecar's expected-outcome regression,
 modeled on that taxonomy (status / confidence_tier / status_reason and its
@@ -14,14 +16,26 @@ so nothing here imports ``tests.integration.sidecar``.  The ``expected`` block i
 a test-only scene key -- read here, fed to neither the renderer nor the
 navigator, and stripped from ``nav_params`` by the information boundary.
 
-The expected-fail scenes are the reason this exists: when a scene renders every
-star in the wrong place, or an overwhelming confounder field, the CORRECT
-navigation outcome is a failed / low-confidence result -- never a confident wrong
-offset -- and this machinery is what turns that requirement into a test.
+The machinery asserts two distinct patterns:
+
+- **Expected-fail scenes.**  When a scene renders every star in the wrong
+  place, or an overwhelming confounder field, the CORRECT navigation outcome
+  is a failed / low-confidence result, and the status / tier assertion turns
+  that requirement into a test.
+- **Honest pins.**  A few scenes produce a confidently wrong offset the
+  ensemble cannot currently detect (a planted radial catalog error absorbed
+  into a high-tier ring lock, a high-phase haze crescent dragging the blob
+  centroid).  Their pinned ``status: success`` is NOT an endorsement -- it is
+  a documented hazard held in view.  For those scenes ``known_offset_error_px``
+  states the measured fused error magnitude and ``known_offset_error_tol_px``
+  its band, and the assertion fails when the measured error leaves the band in
+  either direction: a worsening regression fails, and a genuine fix also fails
+  loudly, prompting a deliberate re-pin instead of a silent behavior change.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -44,11 +58,18 @@ class ExpectedOutcome:
             tier unasserted (assert the status only).
         status_reason: The expected ``status_reason`` value, or ``None`` to
             leave it unasserted.
+        known_offset_error_px: For an honest pin, the measured fused
+            offset-error magnitude the scene documents as a standing hazard;
+            ``None`` leaves the error unasserted.
+        known_offset_error_tol_px: Tolerance band half-width around
+            ``known_offset_error_px``; present exactly when the pin is.
     """
 
     status: str
     confidence_tier: str | None
     status_reason: str | None
+    known_offset_error_px: float | None
+    known_offset_error_tol_px: float | None
 
 
 def expected_from_scene(sim_params: dict[str, Any]) -> ExpectedOutcome | None:
@@ -65,10 +86,14 @@ def expected_from_scene(sim_params: dict[str, Any]) -> ExpectedOutcome | None:
     block = sim_params.get('expected')
     if not isinstance(block, dict):
         return None
+    known_error = block.get('known_offset_error_px')
+    known_tol = block.get('known_offset_error_tol_px')
     return ExpectedOutcome(
         status=str(block['status']),
         confidence_tier=block.get('confidence_tier'),
         status_reason=block.get('status_reason'),
+        known_offset_error_px=None if known_error is None else float(known_error),
+        known_offset_error_tol_px=None if known_tol is None else float(known_tol),
     )
 
 
@@ -92,18 +117,29 @@ def navigate_scene(sim_params: dict[str, Any]) -> NavResult:
 
 
 def assert_result_matches_expected(
-    *, scene_name: str, expected: ExpectedOutcome, result: NavResult
+    *,
+    scene_name: str,
+    expected: ExpectedOutcome,
+    result: NavResult,
+    planted_offset_vu: tuple[float, float] | None = None,
 ) -> None:
     """Assert a NavResult matches a scene's expected outcome, with clear messages.
 
     The status is always checked; the confidence tier and the status_reason are
     checked only when the scene asserts them (a null tier or an omitted reason
-    leaves that field unconstrained).
+    leaves that field unconstrained).  When the scene carries an honest pin
+    (``known_offset_error_px``), the measured fused error magnitude against the
+    planted offset must sit inside the pin's tolerance band -- below the band
+    means the hazard quietly improved (re-measure and re-pin deliberately),
+    above it means a worsening regression.
 
     Parameters:
         scene_name: The scene name, used in the failure messages.
         expected: The scene's declared expected outcome.
         result: The navigator's fused result for the scene.
+        planted_offset_vu: The scene's planted ``(offset_v, offset_u)`` truth,
+            required when ``expected.known_offset_error_px`` is set (the test
+            harness reads it from the scene file; the navigator never sees it).
 
     Raises:
         AssertionError: On any mismatch, naming the scene and the fields.
@@ -122,3 +158,31 @@ def assert_result_matches_expected(
             f'{scene_name}: expected status_reason {expected.status_reason!r}, '
             f'got {result.status_reason.value!r}'
         )
+    if expected.known_offset_error_px is None:
+        return
+    assert expected.known_offset_error_tol_px is not None, (
+        f'{scene_name}: known_offset_error_px without its tolerance (schema bug)'
+    )
+    assert planted_offset_vu is not None, (
+        f'{scene_name}: known_offset_error_px asserted but no planted offset supplied'
+    )
+    assert result.offset_px is not None, (
+        f'{scene_name}: known_offset_error_px asserted on a result with no offset'
+    )
+    error_px = math.hypot(
+        result.offset_px[0] - planted_offset_vu[0],
+        result.offset_px[1] - planted_offset_vu[1],
+    )
+    lower = expected.known_offset_error_px - expected.known_offset_error_tol_px
+    upper = expected.known_offset_error_px + expected.known_offset_error_tol_px
+    assert error_px >= lower, (
+        f'{scene_name}: measured offset error {error_px:.2f} px fell below the pinned '
+        f'hazard band [{lower:.2f}, {upper:.2f}] px -- the documented confident-wrong '
+        f'behavior improved; re-measure and deliberately re-pin (or retire) the '
+        f'known_offset_error_px value'
+    )
+    assert error_px <= upper, (
+        f'{scene_name}: measured offset error {error_px:.2f} px exceeds the pinned '
+        f'hazard band [{lower:.2f}, {upper:.2f}] px -- the documented confident-wrong '
+        f'behavior worsened'
+    )

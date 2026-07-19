@@ -255,7 +255,8 @@ class NavModelBodySimulated(NavModelBodyBase):
             - ``name``
             - ``center_v``, ``center_u`` (pixel coordinates of the centre)
             - ``range_km`` (km; subject distance, defaults to inf)
-            - ``axis1``, ``axis2``, ``axis3`` (km; ellipsoid semi-axes)
+            - ``axis1``, ``axis2``, ``axis3`` (pixels; full widths of the
+              ellipsoid axes)
             - ``rotation_z`` (deg; rotation about the line of sight)
             - ``rotation_tilt`` (deg; tilt of the body)
             - ``illumination_angle`` (deg)
@@ -435,7 +436,7 @@ class NavModelBodySimulated(NavModelBodyBase):
             rotation_tilt=rotation_tilt_rad,
             illumination_angle=illumination_angle_rad,
             phase_angle=phase_angle_rad,
-            anti_aliasing=1,
+            anti_aliasing=1.0,
         )
 
     def _render(self) -> None:

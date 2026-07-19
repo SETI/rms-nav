@@ -153,19 +153,15 @@ def _truth_exercising_scene() -> dict[str, Any]:
                 'mesh_seed': 3,
                 'shading': _TRUTH_SAMPLES['bodies.shading'],
                 'pose_scatter': dict(_TRUTH_SAMPLES['bodies.pose_scatter']),
-                'crater_fill': _TRUTH_SAMPLES['bodies.crater_fill'],
-                'crater_min_radius': _TRUTH_SAMPLES['bodies.crater_min_radius'],
-                'crater_max_radius': _TRUTH_SAMPLES['bodies.crater_max_radius'],
-                'crater_power_law_exponent': (_TRUTH_SAMPLES['bodies.crater_power_law_exponent']),
-                'crater_relief_scale': _TRUTH_SAMPLES['bodies.crater_relief_scale'],
                 'seed': _TRUTH_SAMPLES['bodies.seed'],
                 'anti_aliasing': _TRUTH_SAMPLES['bodies.anti_aliasing'],
                 'nav_override': dict(_TRUTH_SAMPLES['bodies.nav_override']),
             },
             {
-                # An ellipsoid body carrying the topographic truth keys
-                # (relief field, photometric law, opposition surge), which
-                # the mesh body above does not consume.
+                # An ellipsoid body carrying the ellipsoid-path truth keys
+                # (craters, relief field, photometric law, opposition surge,
+                # texture, transits, atmosphere), which the validator rejects
+                # on the mesh body above.
                 'name': 'ROUND',
                 'center_v': 70.0,
                 'center_u': 24.0,
@@ -175,6 +171,11 @@ def _truth_exercising_scene() -> dict[str, Any]:
                 'illumination_angle': 40.0,
                 'phase_angle': 60.0,
                 'range_km': 800000.0,
+                'crater_fill': _TRUTH_SAMPLES['bodies.crater_fill'],
+                'crater_min_radius': _TRUTH_SAMPLES['bodies.crater_min_radius'],
+                'crater_max_radius': _TRUTH_SAMPLES['bodies.crater_max_radius'],
+                'crater_power_law_exponent': (_TRUTH_SAMPLES['bodies.crater_power_law_exponent']),
+                'crater_relief_scale': _TRUTH_SAMPLES['bodies.crater_relief_scale'],
                 'limb_relief_rms': _TRUTH_SAMPLES['bodies.limb_relief_rms'],
                 'limb_relief_corr_deg': _TRUTH_SAMPLES['bodies.limb_relief_corr_deg'],
                 'photometric_law': _TRUTH_SAMPLES['bodies.photometric_law'],

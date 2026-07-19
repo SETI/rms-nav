@@ -44,7 +44,8 @@ from spindoctor.cli.sim_editor import CreateSimulatedImageModel
 from spindoctor.sim.scene import _ALLOWED_KEYS, load_sim_scene, save_sim_scene
 
 # A v2 scene exercising the full current key inventory: every top-level key,
-# and every per-object idealized and truth key for a body, a ring, and a star.
+# and every per-object idealized and truth key across two bodies (one per
+# render path), a ring, and a star.
 _FULL_SCENE: dict[str, Any] = {
     'instrument': 'coiss_nac',
     'size_v': 128,
@@ -118,17 +119,20 @@ _FULL_SCENE: dict[str, Any] = {
         'quantization_lut': {'incidence': 1.0},
     },
     'instrument_config': {'inherit': 'coiss_nac'},
+    # The full body key inventory is split across the two render paths it
+    # belongs to: the mesh body carries the mesh-appearance keys (relief,
+    # shading, detail, pose scatter), and the ellipsoid body carries the
+    # ellipsoid-only appearance keys the validator rejects on a mesh body
+    # (craters, photometric laws, surface texture, transits, atmosphere).
     'bodies': [
         {
             'name': 'Mimas',
             'shape_model': 'polyhedral_mesh',
-            'center_v': 64.0,
-            'center_u': 64.0,
-            'axis1': 90.0,
-            'axis2': 70.0,
-            'axis3': 60.0,
-            'rotation_z': 12.0,
-            'rotation_tilt': 8.0,
+            'center_v': 40.0,
+            'center_u': 40.0,
+            'axis1': 60.0,
+            'axis2': 50.0,
+            'axis3': 45.0,
             'illumination_angle': 45.0,
             'phase_angle': 30.0,
             'range_km': 1000.0,
@@ -139,13 +143,35 @@ _FULL_SCENE: dict[str, Any] = {
             'mesh_seed': 3,
             'mesh_detail_octaves': 2,
             'pose_euler_deg': [10.0, 35.0, 0.0],
+            'limb_relief_rms': 0.015,
+            'limb_relief_corr_deg': 12.0,
+            'shading': 'gouraud',
+            'pose_scatter': {'sigma_deg': 1.5},
+            'seed': 11,
+            'anti_aliasing': 0.5,
+            'nav_override': {
+                'shape_model': 'ellipsoid',
+                'mesh_lumpiness': 0.0,
+                'pose_euler_deg': [10.0, 35.0, 0.0],
+            },
+        },
+        {
+            'name': 'Tethys',
+            'center_v': 96.0,
+            'center_u': 96.0,
+            'axis1': 44.0,
+            'axis2': 36.0,
+            'axis3': 32.0,
+            'rotation_z': 12.0,
+            'rotation_tilt': 8.0,
+            'illumination_angle': 60.0,
+            'phase_angle': 35.0,
+            'range_km': 3000.0,
             'crater_fill': 1.5,
             'crater_min_radius': 0.05,
             'crater_max_radius': 0.2,
             'crater_power_law_exponent': 3.0,
             'crater_relief_scale': 0.6,
-            'limb_relief_rms': 0.015,
-            'limb_relief_corr_deg': 12.0,
             'photometric_law': 'minnaert',
             'minnaert_k': 0.6,
             'opposition_surge': {'amplitude': 0.4, 'width_deg': 5.0},
@@ -177,16 +203,7 @@ _FULL_SCENE: dict[str, Any] = {
                 'g': 0.6,
                 'detached_px': 8.0,
             },
-            'shading': 'gouraud',
-            'pose_scatter': {'sigma_deg': 1.5},
-            'seed': 11,
-            'anti_aliasing': 0.5,
-            'nav_override': {
-                'shape_model': 'ellipsoid',
-                'mesh_lumpiness': 0.0,
-                'pose_euler_deg': [10.0, 35.0, 0.0],
-            },
-        }
+        },
     ],
     'ring_system': {
         'geometry': {

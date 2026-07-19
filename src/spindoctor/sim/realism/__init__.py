@@ -1,8 +1,8 @@
-"""Statistics machinery for the sim-vs-real realism match (plan Section 7).
+"""Statistics machinery for the sim-vs-real realism match.
 
 This package holds the figure-of-merit (FOM) statistics the realism-match
-runner (``tests/integration/sim_realism.py``) computes over the WS-3 image
-library cohort and matched simulated frames:
+runner (``tests/integration/sim_realism.py``) computes over the curated
+image-library cohort and matched simulated frames:
 
 - :mod:`spindoctor.sim.realism.divergence`: the Wasserstein-1 divergence on
   quantile-clipped samples, normalized by the real distribution's IQR, plus
@@ -25,8 +25,7 @@ are unit-testable on synthetic distributions with known answers.
 
 FOM 7 (technique-diagnostic distributions) deliberately has no module here:
 it reuses :func:`divergence.w1_divergence` on diagnostics the runner collects
-from navigation runs, and is a read-only report -- never a tuning target
-(see the tuning-loop rule in the plan's Section 7).
+from navigation runs, and is a read-only report -- never a tuning target.
 """
 
 from spindoctor.sim.realism.artifact_incidence import (

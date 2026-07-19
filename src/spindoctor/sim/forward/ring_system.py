@@ -103,6 +103,10 @@ _UNLIT_MU_MATCH_TOL: float = 1e-6
 # wave train's tau is bitwise zero beyond this many damping lengths; the
 # radial bound uses it to stay exact rather than approximate.
 _WAVE_UNDERFLOW_DAMPINGS: float = 750.0
+# exp(-0.5 * x**2) underflows to exactly 0.0 in float64 once x passes about
+# 38.7 (0.5 * x**2 > ~745.2), so a propeller's Gaussian lobes are bitwise
+# zero beyond this many sigmas; the radial bound uses it to stay exact.
+_GAUSSIAN_UNDERFLOW_SIGMAS: float = 40.0
 
 
 @dataclass(frozen=True)
@@ -326,11 +330,38 @@ def render_ring_system(
     np.clip(tau_map, 0.0, None, out=tau_map)
 
     # Propeller lobes are local density disturbances, so they modify the
-    # composed tau before the photometry evaluates it.
+    # composed tau before the photometry evaluates it.  Like the radial
+    # features, each propeller is evaluated only inside its radial annulus:
+    # beyond the Gaussian-underflow reach both lobes are bitwise 0.0, the
+    # factor is exactly 1.0, and multiplying by it is the identity, so the
+    # bounding changes cost, never values.
     for moonlet in moonlets:
         propeller = moonlet.get('propeller')
-        if propeller:
-            tau_map *= _propeller_tau_factor(moonlet, propeller, r=r, lam=lam, os=os)
+        if not propeller:
+            continue
+        a_m = float(moonlet.get('a', 0.0)) * os
+        width = float(propeller.get('width_px', 0.0)) * os
+        reach = width * (1.0 + _GAUSSIAN_UNDERFLOW_SIGMAS)
+        slices = _annulus_bbox_slices(
+            shape,
+            center_v=center_v,
+            center_u=center_u,
+            r_outer=a_m + reach,
+            opening_deg_obs=b_obs,
+            node_deg=node_deg,
+        )
+        if slices is None:
+            continue
+        sub_v, sub_u = slices
+        r_sub = r[sub_v, sub_u]
+        sel = (r_sub >= a_m - reach) & (r_sub <= a_m + reach)
+        if not bool(np.any(sel)):
+            continue
+        factor = _propeller_tau_factor(
+            moonlet, propeller, r=r_sub[sel], lam=lam[sub_v, sub_u][sel], os=os
+        )
+        tau_view = tau_map[sub_v, sub_u]
+        tau_view[sel] = tau_view[sel] * factor
 
     ap_map = np.divide(
         ap_weighted, ap_weight, out=np.zeros(shape, dtype=np.float64), where=ap_weight > 0.0
@@ -351,22 +382,28 @@ def render_ring_system(
     # Moonlet discs: opaque point-like bodies at the ring's depth.  Each
     # disc replaces the ring emission with its own, extinguishes the
     # background through the transmission screen, and joins the composited
-    # mask so a moonlet sitting in an empty gap still composites.
+    # mask so a moonlet sitting in an empty gap still composites.  The
+    # coverage is exactly 0.0 beyond half an anti-aliasing window outside
+    # the disc, so each disc is evaluated only inside its sky bounding box
+    # (outside it the compositing forms are the identity); the bounding
+    # changes cost, never values.
     for moonlet in moonlets:
-        coverage = _moonlet_disc_coverage(
+        disc = _moonlet_disc_coverage(
             moonlet,
-            v_grid,
-            u_grid,
+            shape,
             center_v=center_v,
             center_u=center_u,
             b_obs=b_obs,
             node_deg=node_deg,
             os=os,
         )
+        if disc is None:
+            continue
+        (sub_v, sub_u), coverage = disc
         amplitude = float(moonlet.get('amplitude', 0.0))
-        intensity = intensity * (1.0 - coverage) + amplitude * coverage
-        transmission = transmission * (1.0 - coverage)
-        mask = mask | (coverage > 0.0)
+        intensity[sub_v, sub_u] = intensity[sub_v, sub_u] * (1.0 - coverage) + amplitude * coverage
+        transmission[sub_v, sub_u] = transmission[sub_v, sub_u] * (1.0 - coverage)
+        mask[sub_v, sub_u] |= coverage > 0.0
 
     depth_km: NDArrayFloatType | None = None
     range_km = ring_system.get('range_km')
@@ -506,26 +543,29 @@ def _propeller_tau_factor(
 
 def _moonlet_disc_coverage(
     moonlet: Mapping[str, Any],
-    v_grid: NDArrayFloatType,
-    u_grid: NDArrayFloatType,
+    shape: tuple[int, int],
     *,
     center_v: float,
     center_u: float,
     b_obs: float,
     node_deg: float,
     os: int,
-) -> NDArrayFloatType:
-    """A moonlet's anti-aliased disc coverage on the render grid.
+) -> tuple[tuple[slice, slice], NDArrayFloatType] | None:
+    """A moonlet's anti-aliased disc coverage, bounded to its sky box.
 
     The moonlet sits in the ring plane at polar placement ``(a, lam_deg)``,
     projected to the sky through the shared projection; the disc is drawn in
     sky coordinates (a body, not a ring-plane band, so it does not
-    foreshorten with the ring).
+    foreshorten with the ring).  The coverage shade is exactly 0.0 wherever
+    the pixel centre sits half an anti-aliasing window or more outside the
+    disc radius, so the evaluation is restricted to the bounding box of that
+    reach (plus one pixel of slack for the pixel-centre convention) and the
+    caller composites only inside it -- an exact restriction, not an
+    approximation.
 
     Parameters:
         moonlet: The moonlet mapping.
-        v_grid: Per-pixel v centers on the render grid.
-        u_grid: Per-pixel u centers on the render grid.
+        shape: The render-grid shape ``(V, U)``.
         center_v: Ring-system center v on the render grid.
         center_u: Ring-system center u on the render grid.
         b_obs: Observer ring opening angle in degrees.
@@ -533,8 +573,10 @@ def _moonlet_disc_coverage(
         os: The oversampling factor.
 
     Returns:
-        Per-pixel coverage in [0, 1].
+        ``((v_slice, u_slice), coverage)`` with the box-sized per-pixel
+        coverage in [0, 1], or None when the box misses the grid entirely.
     """
+    size_v, size_u = shape
     a_m = float(moonlet.get('a', 0.0)) * os
     lam_m = math.radians(float(moonlet.get('lam_deg', 0.0)))
     radius = float(moonlet.get('radius_px', 1.0)) * os
@@ -543,8 +585,19 @@ def _moonlet_disc_coverage(
     )
     pos_v = center_v + float(dv[0])
     pos_u = center_u + float(du[0])
-    dist = np.hypot(v_grid - pos_v, u_grid - pos_u)
-    return compute_antialiasing_shade(radius - dist, float(os))
+    reach = radius + float(os) / 2.0
+    v0 = max(math.floor(pos_v - reach) - 1, 0)
+    v1 = min(math.ceil(pos_v + reach) + 1, size_v)
+    u0 = max(math.floor(pos_u - reach) - 1, 0)
+    u1 = min(math.ceil(pos_u + reach) + 1, size_u)
+    if v0 >= v1 or u0 >= u1:
+        return None
+    v_centers = np.arange(v0, v1, dtype=np.float64) + 0.5
+    u_centers = np.arange(u0, u1, dtype=np.float64) + 0.5
+    box_v, box_u = np.meshgrid(v_centers, u_centers, indexing='ij')
+    dist = np.hypot(box_v - pos_v, box_u - pos_u)
+    coverage = compute_antialiasing_shade(radius - dist, float(os))
+    return (slice(v0, v1), slice(u0, u1)), coverage
 
 
 def _orbit_with_error(orbit: RingOrbit, error: Mapping[str, Any] | None) -> RingOrbit:

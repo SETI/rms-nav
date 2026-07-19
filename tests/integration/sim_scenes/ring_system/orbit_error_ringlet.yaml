@@ -26,9 +26,16 @@ exposure_sec: 1.0
 # consuming the declared sigma_a_px (the error bar the navigator is
 # entitled to know) in the covariance or the ensemble, not a better
 # sigmoid over the diagnostics that cannot carry the signal.
+# known_offset_error_px is the honest pin: the success/high assertion
+# is a documented hazard, not an endorsement, and the measured fused
+# error (3.01 px on 2026-07-18) must stay inside its band -- a fix
+# that demotes or corrects this result fails the pin loudly and earns
+# a deliberate re-pin.
 expected:
   status: success
   confidence_tier: high
+  known_offset_error_px: 3.0
+  known_offset_error_tol_px: 1.0
 bodies: []
 ring_system:
   geometry:

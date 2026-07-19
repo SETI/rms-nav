@@ -7,8 +7,10 @@
 # sweeps and user config files can override them without code changes.
 #
 # The tier min_confidence boundaries are SIM-ANCHORED (calibrated
-# against simulated planted-truth recovery only; see the provenance
-# note in config_510_techniques.yaml): derived 2026-07-18 from the
+# against simulated planted-truth recovery only, on the same campaign
+# basis as the technique alphas: empirical instrument chain off,
+# coiss_nac-only cohort -- see the provenance note in
+# config_510_techniques.yaml): derived 2026-07-18 from the
 # recalibrated campaign's fused results (util/calibration, campaign
 # seed 20260718 on the staged forward-model renderer with the full
 # surface / photometric truth axes and the ring truth vocabulary;

@@ -63,6 +63,10 @@ scene -- including every planted error, noise knob, and contaminant. It lives in
    * - ``scene_radiance.py``
      - Composes the noise-free signal image: background stars, catalog stars,
        and the body/ring stack depth-sorted far to near.
+   * - ``scene_compositing.py``
+     - The radiance stage's translucent-screen machinery: orders the ring
+       system and body halos far to near for compositing and enforces the
+       explicit-``range_km`` depth contract on every overlap.
    * - ``body.py`` / ``body_topo.py`` / ``body_texture.py`` / ``body_mesh.py``
      - The ellipsoid body renderer and its topographic path (relief, photometric
        laws, surface texture, transits), and the polyhedral-mesh renderer (see
@@ -87,7 +91,28 @@ scene -- including every planted error, noise knob, and contaminant. It lives in
        hot pixels, banding, bias structure, cosmic rays). Carries the vidicon
        DN path and the calibrated-I/F inversion (see :ref:`sim-detector-stage`).
    * - ``telemetry.py``
-     - Transmission loss; carries the per-pixel missing-data markers.
+     - Transmission loss; carries the per-pixel missing-data markers and
+       drives the structured loss modes in their fixed physical order.
+   * - ``telemetry_loss.py``
+     - The structured telemetry-loss appliers (missing / partial /
+       alternating lines, missing blocks, garble, dead pixels, commanded
+       frame shapes), each recording its realized geometry into the frame
+       truth.
+   * - ``telemetry_artifacts.py``
+     - Telemetry-stage artifacts beyond packet loss: lossy DCT compression
+       blockiness and the Voyager GEOMED archive-processing scars.
+   * - ``artifact_modes.py``
+     - The artifact-mode registry: each mode's stage, parameter schema,
+       instrument availability, and implementation status, read by the
+       validator, both stages, and the scene editor (see
+       :ref:`sim-artifact-framework`).
+   * - ``incidence.py``
+     - Artifact-incidence measurement: the planted event counts read from
+       the frame truth and the marker-based image estimators that recover
+       them from the DN image alone (the realism match compares the two).
+   * - ``feature_loci.py``
+     - Navigation-feature loci (body / ring rows, limb and star pixels)
+       extracted from the frame truth for adversarial artifact placement.
    * - ``atmosphere.py``
      - The haze-limb layer for atmospheric (Titan-class) bodies: an
        exponential haze column composited onto the disc, giving a soft limb, a
@@ -134,7 +159,8 @@ schema key is left unclassified or lands in two classes, so a schema change
 cannot dodge the classification. The boundary filter is default-deny, so the
 test-only keys are stripped from the navigator's view alongside the truth keys.
 
-The boundary is enforced structurally, not by convention:
+The boundary's enforcement has two distinct strengths, and it matters which
+applies where. The *channel* is structural:
 
 - :class:`~spindoctor.obs.obs_inst_sim.ObsSim` exposes the navigator-side
   models a **filtered view**, ``obs.nav_params``, built by
@@ -142,8 +168,8 @@ The boundary is enforced structurally, not by convention:
   (the filter is default-deny -- an unclassified or unknown key stays behind),
   a body's ``nav_override`` mapping is overlaid onto its idealized view and
   then dropped (the navigator sees what it *believes*, never the true values
-  underneath), and all values are deep copies. The renderer consumes the full
-  scene; the navigator side structurally cannot read what is not there.
+  underneath), and all values are deep copies. Nothing reachable *through
+  the filtered view* carries truth.
 - The navigator-side models read **only** ``obs.nav_params``. None of the
   renderer's output -- rendered star records, body masks, z-order maps, all
   accumulated on the frame's ``truth`` metadata -- ever crosses.
@@ -161,6 +187,24 @@ The boundary is enforced structurally, not by convention:
   the filtered view. This test is the independence guarantee: any change that
   adds a truth key must extend it in the same change (the test iterates the
   frozenset, so an unextended sample table fails loudly).
+
+The *consumer* side of the guarantee is enforced by tests and review, not by
+structure. The full scene -- planted offset included -- still rides the same
+observation object every navigator-side model holds as ``self.obs``:
+:class:`~spindoctor.obs.obs_inst_sim.ObsSim` stores it in truth-side
+attributes (``sim_params``, ``sim_offset_v`` / ``sim_offset_u``, ``sim_time``,
+and the renderer output records ``sim_body_models``, ``sim_inventory``,
+``sim_body_order_near_to_far``, ``sim_body_index_map``,
+``sim_body_mask_map``), each one attribute access away. What stands between
+navigator-side code and those attributes is that the filtered view is the
+only channel current navigator-side code reads, held there by three guards:
+the information-boundary test suite above, the static guard test
+(``tests/spindoctor/sim/test_boundary_static_guard.py``, which walks the AST
+of every module under ``nav_model/``, ``nav_technique/``, and
+``nav_orchestrator/`` and fails on any reference to a truth attribute name),
+and code review. The guarantee is mechanical for the channel and
+mechanical-plus-review for the consumers; the assessment behind this
+phrasing is recorded in ``critiques/SIM_REALISM_CRITIQUE_2026-07-18.md``.
 
 Sharing code is fine; sharing information is not
 ------------------------------------------------
@@ -196,6 +240,134 @@ renderers. Copying the navigator's rendering choices manufactures exactly the
 shared assumption the boundary cannot detect; the shared geometry helpers are
 the sanctioned channel for conventions that must agree, and anything beyond
 them agreeing is evidence, not a goal.
+
+.. _sim-capability-envelope:
+
+What the simulator can and cannot establish
+===========================================
+
+Everything after this section describes machinery. This section states what
+that machinery's outputs *mean* -- which numbers are proofs, which are
+measurements with conditions attached, and which are not evidence at all. It
+is the chapter's answer to "what is this whole system for, and where does it
+end."
+
+The four axes
+-------------
+
+**Verification is unconditional.** Every simulated frame carries a planted
+offset the navigator cannot see, so a recovery measurement's only error is
+the error the scene planted. This does not depend on the renderer being
+realistic: the information boundary (:ref:`sim-information-boundary`)
+guarantees the navigator cannot cheat, and therefore a planted-truth recovery,
+an algorithmic-invariant test, or a regression pin is an exact statement about
+the navigation algorithms -- if a change breaks a baseline, the algorithms
+changed behavior, full stop. This is the axis on which the simulator's word is
+final.
+
+**Precision is unconditional too, and is labelled as such.** The sweep curves
+and the self-consistency floor (:ref:`sim-floor`) measure repeatability: how
+tightly the pipeline reconverges when the rendered scene equals the
+navigator's own model plus one controlled departure. The floor point on every
+mismatch curve is reproducibility, never accuracy, and both this guide and the
+simulator report mark it so. A sub-0.1 px floor says the machinery is
+numerically tight; it says nothing about how far a real frame's answer is from
+the truth.
+
+**Accuracy is conditional on the realism match, per instrument.** A sim error
+curve becomes an accuracy statement only to the degree the realism match
+(:ref:`sim-realism-match`) supports it for that instrument. For the Cassini
+NAC the support is strong: the tuned star PSF reproduces the cohort's
+encircled-energy radii (measured on its 23 star-bearing frames) through the
+same estimator on both sides (EE50 0.90 px
+sim vs 0.91 real, EE80 1.72 vs 1.79), limb rise widths agree in the
+like-for-like pool (medians 2.54 px both sides, normalized W1 0.16), ring-edge
+widths agree at the few-tenths level, and the frame-averaged curve shapes
+diverge by only 0.02-0.13. For the WAC the support is limited (four frames,
+and the calibrated-chain noise comparison diverges by orders of magnitude
+one-sidedly); for Galileo, Voyager, and LORRI the cohorts support fragments at
+most, so on those instruments the simulator's error numbers are
+reproducibility statements wearing no accuracy claim -- and will stay that way
+until their cohorts grow.
+
+**Calibration is sim-measured, with a disclosed basis and a measured
+transfer.** The confidence formulas and tier boundaries have exact meaning on
+the campaign that fitted them: each tier boundary is the smallest confidence
+at which the tier's sigma-gated subset achieves a 0.9 success rate against the
+tier's own error budget. That meaning comes with its basis attached: the
+fitting campaign rendered with the empirical instrument chain off and emulated
+the Cassini NAC exclusively (the disclosure lives in
+``util/calibration/CAMPAIGN_20260718.md``, "Calibration basis and scope"), so
+the realism match vouches for a different renderer configuration than the one
+the coefficients were fitted on. Real-frame transfer is measured, not assumed:
+the library cross-check against 75 operator sidecars agreed on status 69
+times and on tier 46, and ``confidence_provisional: true`` rides every
+metadata product until a real-anchored fit exists.
+
+What this buys in practice
+--------------------------
+
+Three things, each impossible with real frames alone:
+
+- **Navigator changes are measurable against truth.** The regression net --
+  baselines, invariants, sweeps, and the expected-outcome pins -- turns "did
+  this change help" into a measured delta against known answers, instead of a
+  judgment call over operator labels.
+- **Model error is priced honestly.** Because the campaign plants model error
+  the navigator cannot represent, the fit learns what that error costs: the
+  2.61 px limb covariance floor (unmodeled terrain bounds a limb fix's real
+  accuracy no matter how clean the fit), the terminator technique's honest
+  ~0.03-0.05 confidence plateau on a cohort with zero sub-pixel successes,
+  and occlusion-aware visible-arc fractions on mutual-event scenes are all
+  prices the simulator measured rather than guessed.
+- **Failure modes real data cannot isolate become provable.** The worked
+  example is the planted-radial-error family: ``orbit_error_ringlet`` plants
+  a 2.5 px radial catalog error and the fused result is a high-tier success
+  at confidence 0.89, roughly 3 px wrong. On a real frame this is
+  indistinguishable from a good lock -- only a frame whose truth is known by
+  construction can *prove* the ensemble confidently absorbs this error, and
+  keep proving it (the honest pin in :ref:`sim-expected`) until the gap is
+  closed.
+
+What it cannot do
+-----------------
+
+- **Certify real-frame accuracy.** The operator-verified image library
+  remains the accuracy anchor -- and its independence from the simulator is
+  precisely why the calibration is non-circular. No simulated measurement can
+  replace it; the simulator's role is to make the navigator's behavior
+  legible, not to grade its own renders.
+- **Vouch for the thin-cohort instruments.** Galileo, Voyager, and LORRI
+  numbers bound reproducibility only (see the four axes above); treating them
+  as accuracy is exactly the misreading the per-instrument support labels
+  exist to prevent.
+- **See outside its modeled axes.** A model error the renderer does not
+  implement contributes nothing to any curve or fit. The main unmodeled axes
+  today: pointing jitter within an exposure, image mid-time error, readout
+  shear, stars occulted by a dark limb (simulated star success is optimistic
+  where an unlit body should block the star), and body-on-body cast shadows
+  (mutual events render occlusion, not shadowing).
+- **Fix the gaps it exposes.** The confident-wrong pins are evidence, not
+  mitigation; closing them requires ensemble work (consuming declared
+  model-error bars, cross-technique vetoes), and until then the pinned
+  hazards stand (see the ensemble chapter,
+  :doc:`dev_guide_orchestrator_ensemble`).
+- **Transfer its calibration to real frames by itself.** That path runs
+  through the sidecar re-ratchet and a pre-stated transfer criterion (the
+  proposed transfer watch in ``util/calibration/CAMPAIGN_20260718.md``), not
+  through more simulation.
+- **Guarantee the boundary against future consumers structurally.** The
+  filtered channel is structural, but consumer discipline is enforced by the
+  boundary suite, the static guard test, and review
+  (:ref:`sim-information-boundary`); the full truth still rides the
+  observation object. The assessment of what that enforcement level does and
+  does not guarantee is recorded in
+  ``critiques/SIM_REALISM_CRITIQUE_2026-07-18.md``.
+
+The realism figures behind the accuracy axis live in the simulator report's
+realism section (:doc:`/simulator_report/simulator_report`); the calibration
+basis and the cross-check numbers live in
+``util/calibration/CAMPAIGN_20260718.md``.
 
 .. _sim-stage-pipeline:
 
@@ -796,7 +968,9 @@ The expected-outcome block
 A scene may carry a scene-level ``expected`` block declaring the outcome the
 navigator should produce: a required ``status`` (``success`` / ``failed`` /
 ``conflicted``), a ``confidence_tier`` (one of the five navigation ranks, or
-null to assert the status only), and an optional ``status_reason`` token. It is
+null to assert the status only), an optional ``status_reason`` token, and an
+optional ``known_offset_error_px`` / ``known_offset_error_tol_px`` pair (the
+honest pin, below). It is
 a **test-only** key -- read by the assertion machinery in
 ``tests/integration/sim_expected.py``, fed to neither the renderer nor the
 navigator, and stripped from ``nav_params`` by the information boundary along
@@ -811,6 +985,22 @@ position, or drowns a lone star in an overwhelming confounder field, the
 *correct* navigation outcome is a failed or low-confidence result -- never a
 confident wrong offset. Each such scene carries an ``expected`` block, and the
 machinery turns "must not be confidently wrong here" into a passing assertion.
+
+**The honest pin.** A small second family inverts the reading: scenes whose
+measured behavior *is* a confidently wrong offset the ensemble cannot
+currently detect (the ``orbit_error_ringlet`` planted radial catalog error,
+the ``titan_crescent_horns`` pair's haze-dragged blob centroid). Pinning bare
+``status: success`` on such a scene would quietly freeze the wrong answer as
+correct behavior, so these scenes also declare ``known_offset_error_px`` --
+the measured fused error magnitude, from the scene's recorded baseline -- with
+a ``known_offset_error_tol_px`` band. The assertion then fails in *both*
+directions: a regression that worsens the error fails, and a genuine fix that
+shrinks it also fails loudly, prompting a deliberate re-pin (or retirement of
+the pin) instead of a silent behavior change. The pinned success is a
+documented hazard held in view, never an endorsement; the scene comments and
+the campaign record carry the analysis, and the ensemble chapter
+(:doc:`dev_guide_orchestrator_ensemble`) names the failure family for the
+readers who consume tiers.
 
 .. _sim-floor:
 
@@ -1054,15 +1244,22 @@ truth-key upgrades on top, none of which the prediction consumes:
   rotation state; the draw is recorded in the render truth as
   ``pose_scatter_drawn_deg``.
 
-The non-Lambert photometric laws, opposition surge, and the surface-texture and
-transit families are ellipsoid-topographic-path features; a mesh body carries
-the relief, shading, detail, and pose-scatter keys.
+The non-Lambert photometric laws, opposition surge, crater carving, the
+surface-texture and transit families, and the atmosphere halo are
+ellipsoid-path features; a mesh body carries the relief, shading, detail, and
+pose-scatter keys. The scene validator *rejects* the ellipsoid-only appearance
+keys on a ``polyhedral_mesh`` body -- the mesh renderer would silently ignore
+them, and a scene that names an effect must render it or fail loudly.
+Silhouette ``anti_aliasing`` is consumed at oversample 1 only, on both render
+paths (an oversampled scene already resolves the limb on its own grid).
 
 Mutual events
 -------------
 
 A scene can place two bodies so the nearer one occludes part of the farther one
-(depth-ordered by ``range_km``). The renderer draws the true occlusion and
+(depth-ordered by ``range_km``; bodies at exactly equal ranges tie-break
+deterministically by scene-list position, the earlier-listed body rendering as
+the nearer). The renderer draws the true occlusion and
 records the outcome in the render truth (``body_occlusion``): each body's
 visible fraction and the angular extent of any hidden limb arc. This is
 bookkeeping the test can read, not something the navigator sees.
@@ -2388,6 +2585,15 @@ change alters rendered output:
   still be rendering the wrong thing; the recovered offset cannot catch that,
   only eyes on the render can.
 
+  The regeneration rule is enforced mechanically by
+  ``tests/integration/test_render_diffs.py`` (integration tier): every
+  catalog scene must have a committed ``current/`` PNG byte-identical to a
+  fresh render, every scene class must have a committed sheet, and neither
+  may outlive its scene or class. The sheets themselves are enforced for
+  presence and coverage only -- their pixels encode the previous baseline's
+  before-panels and PIL's environment-dependent label rasterization, so
+  their *content* remains a review artifact, not a byte-compared one.
+
 The two documentation galleries (``docs/dev_guide/_sim_images/`` and
 ``docs/simulator_report/_scene_images/``, both written by
 ``python -m tests.integration.sim_doc_images``) are re-rendered under the same
@@ -2477,9 +2683,13 @@ realism addition needs -- live in their own module:
      - Shared widget helpers and the mixin-facing protocol.
 
 The GUI exposes the full scene parameter surface, so any scene that can be
-written by hand in YAML can also be built in the GUI. The one exception is
-the nested ``instrument_config`` override mapping, which the GUI carries
-through unedited. Scenes
+written by hand in YAML can also be built in the GUI. Two exceptions are
+carried through unedited rather than widget-exposed: the nested
+``instrument_config`` override mapping, and the hand-authored
+``known_offset_error_px`` / ``known_offset_error_tol_px`` pins in the
+expected block (the expected-outcome panel preserves them across its
+enable toggle but offers no controls for them; they are baseline-measured
+values, authored in YAML). Scenes
 round-trip through the **Load / Save Scene (YAML)** buttons, so a scene rendered
 in the GUI can be saved as a catalog artifact and a catalog scene can be loaded
 back to edit; ``tests/main/test_sim_editor_round_trip.py`` asserts the

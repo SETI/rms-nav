@@ -43,8 +43,20 @@ class SceneIoMixin(SimEditorBase):
         )
         if not filename:
             return
+        self.load_scene_file(Path(filename))
+
+    def load_scene_file(self, path: Path) -> None:
+        """Load a scene YAML into the editor, reporting failures in a dialog.
+
+        The shared loader behind the Load Scene button and the command-line
+        scene argument: a scene that fails to parse or validate raises an
+        error dialog and leaves the editor's current state untouched.
+
+        Parameters:
+            path: Path to the ``<scene_name>.yaml`` file to load.
+        """
         try:
-            self._apply_params_dict(load_sim_scene(Path(filename)))
+            self._apply_params_dict(load_sim_scene(path))
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to load scene:\n{e!s}')
 

@@ -71,13 +71,12 @@ class W1Result:
 class CohortSupport(Enum):
     """How well a cohort supports a distributional statistic.
 
-    Values:
-        SUPPORTED: Enough frames for a per-frame distribution statement.
-        LIMITED: A comparison is reported but flagged as resting on too few
-            frames for distributional confidence.
-        UNSUPPORTED: The statistic is not computed; the instrument's sim
-            accuracy is bounded by unverified forward-model fidelity for
-            this figure of merit.
+    The labels: ``SUPPORTED`` means enough frames for a per-frame
+    distribution statement; ``LIMITED`` means a comparison is reported but
+    flagged as resting on too few frames for distributional confidence; and
+    ``UNSUPPORTED`` means the statistic is not computed, so the instrument's
+    sim accuracy is bounded by unverified forward-model fidelity for this
+    figure of merit.
     """
 
     SUPPORTED = 'supported'
@@ -117,7 +116,7 @@ def _finite(sample: NDArrayFloatType) -> NDArrayFloatType:
 
 
 def w1_divergence(real: NDArrayFloatType, sim: NDArrayFloatType) -> W1Result:
-    """The 15.10-H divergence between a real and a sim sample.
+    """The winsorized, IQR-normalized Wasserstein-1 divergence of two samples.
 
     Both samples are winsorized at their own 1st/99th percentiles, the
     Wasserstein-1 distance is computed between the winsorized samples, and

@@ -30,6 +30,61 @@ from spindoctor.sim.scene_checks import (
 from spindoctor.sim.scene_schema import _BODY_IDEALIZED_KEYS, SimSceneValidationError
 
 
+def _check_body_names_unique(bodies: list[dict[str, Any]], *, source: str) -> None:
+    """Fail validation when two ``bodies`` entries share an effective name.
+
+    The renderer keys its truth records (``body_masks`` mapping, inventory,
+    render order) by each body's upper-cased name, defaulting an unnamed
+    entry to its positional ``SIM-BODY-<index + 1>`` name.  Two entries that
+    resolve to the same key would silently overwrite each other's truth
+    records, so the collision fails here instead.
+
+    Parameters:
+        bodies: The scene's ``bodies`` list (entries already type-checked).
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: If two entries share an effective name
+            (case-insensitive, positional defaults included).
+    """
+    seen: dict[str, int] = {}
+    for index, obj in enumerate(bodies):
+        effective = str(obj.get('name', f'SIM-BODY-{index + 1}')).upper()
+        if effective in seen:
+            raise SimSceneValidationError(
+                f'{source}: bodies[{seen[effective]}] and bodies[{index}] share the '
+                f'effective name {effective!r} (names are case-insensitive and an '
+                f'unnamed body defaults to its positional SIM-BODY-<n> name); '
+                f'name-keyed truth records would collide, so give each body a '
+                f'unique name'
+            )
+        seen[effective] = index
+
+
+# Body keys the polyhedral-mesh render path does not consume: the ellipsoid
+# renderer's crater carving, the topographic path's photometric laws and
+# surface texture, and the ellipsoid-frame atmosphere halo (whose geometry is
+# built from rotation_z / rotation_tilt around the ellipse, which a mesh's
+# arbitrary Euler pose and lumpy limb do not follow).  A mesh body naming one
+# of these would silently render without it, so the combination fails loudly;
+# a mesh body's appearance vocabulary is shading, limb_relief_*,
+# mesh_detail_octaves, and pose_scatter.
+_MESH_UNSUPPORTED_KEYS: tuple[str, ...] = (
+    'atmosphere',
+    'photometric_law',
+    'minnaert_k',
+    'opposition_surge',
+    'albedo_texture',
+    'disc_texture',
+    'transits',
+    'crater_fill',
+    'crater_min_radius',
+    'crater_max_radius',
+    'crater_power_law_exponent',
+    'crater_relief_scale',
+)
+
+
 def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
     """Validate one ``bodies`` entry's field types."""
     label = f'bodies[{index}]'
@@ -40,6 +95,15 @@ def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
             f"{source}: {label}.shape_model must be 'ellipsoid' or 'polyhedral_mesh' "
             f'when present; got {shape_model!r}'
         )
+    if shape_model == 'polyhedral_mesh':
+        unsupported = [key for key in _MESH_UNSUPPORTED_KEYS if obj.get(key) is not None]
+        if unsupported:
+            raise SimSceneValidationError(
+                f'{source}: {label}: {sorted(unsupported)} are not supported on '
+                f'polyhedral_mesh bodies (the mesh renderer would silently ignore '
+                f'them); a mesh body carries the shading, limb_relief_*, '
+                f'mesh_detail_octaves, and pose_scatter appearance keys'
+            )
     for key in (
         'center_v',
         'center_u',
@@ -54,13 +118,11 @@ def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
         'km_per_pixel',
         'mesh_lumpiness',
         'crater_fill',
-        'crater_min_radius',
-        'crater_max_radius',
-        'crater_power_law_exponent',
         'crater_relief_scale',
         'anti_aliasing',
     ):
         _check_optional_number(obj.get(key), f'{label}.{key}', source=source)
+    _check_crater_shape_keys(obj, label=label, source=source)
     for key in ('mesh_n_lat', 'mesh_n_lon', 'mesh_seed', 'seed'):
         if obj.get(key) is not None:
             _require_int(obj, key, source=f'{source}: {label}')
@@ -100,6 +162,54 @@ def _check_body_object(obj: dict[str, Any], *, index: int, source: str) -> None:
                 f'{source}: {label}.nav_override may only override idealized body '
                 f'keys; got {sorted(bad)}'
             )
+
+
+# The renderer's crater-radius defaults, mirrored from
+# ``spindoctor.sim.forward.body.render_single_body`` so the cross-field check
+# below sees the same effective band the renderer will sample.
+_CRATER_MIN_RADIUS_DEFAULT: float = 0.05
+_CRATER_MAX_RADIUS_DEFAULT: float = 0.25
+
+
+def _check_crater_shape_keys(obj: dict[str, Any], *, label: str, source: str) -> None:
+    """Validate one body's crater radius band and power-law exponent.
+
+    The crater radii are sampled from ``p(R) ~ R**-alpha`` over
+    ``[crater_min_radius, crater_max_radius]`` (fractions of axis1), which
+    needs a strictly positive band with ``min < max`` and ``alpha > 1``;
+    out-of-domain values validated before and then crashed (or raised) deep
+    inside the sampler, so the domain is enforced here instead.
+
+    Parameters:
+        obj: The body entry mapping.
+        label: The ``bodies[<index>]`` label for error messages.
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: On a non-positive radius, an inverted or
+            empty radius band, or an exponent of 1 or less.
+    """
+    for key in ('crater_min_radius', 'crater_max_radius'):
+        _check_optional_positive_number(obj.get(key), f'{label}.{key}', source=source)
+    min_radius = obj.get('crater_min_radius')
+    max_radius = obj.get('crater_max_radius')
+    effective_min = _CRATER_MIN_RADIUS_DEFAULT if min_radius is None else float(min_radius)
+    effective_max = _CRATER_MAX_RADIUS_DEFAULT if max_radius is None else float(max_radius)
+    if (min_radius is not None or max_radius is not None) and effective_min >= effective_max:
+        raise SimSceneValidationError(
+            f'{source}: {label}: crater_min_radius must be less than '
+            f'crater_max_radius; got {effective_min!r} >= {effective_max!r} '
+            f'(an omitted bound takes the renderer default '
+            f'{_CRATER_MIN_RADIUS_DEFAULT} / {_CRATER_MAX_RADIUS_DEFAULT})'
+        )
+    exponent = obj.get('crater_power_law_exponent')
+    _check_optional_number(exponent, f'{label}.crater_power_law_exponent', source=source)
+    if exponent is not None and float(exponent) <= 1.0:
+        raise SimSceneValidationError(
+            f'{source}: {label}.crater_power_law_exponent must exceed 1 (the '
+            f'crater radius distribution p(R) ~ R**-alpha is only normalizable '
+            f'for alpha > 1); got {exponent!r}'
+        )
 
 
 # The opposition-surge map's key inventory (a simple normalized exponential

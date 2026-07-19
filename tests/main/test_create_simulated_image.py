@@ -585,3 +585,81 @@ def test_full_parameter_round_trip(
     star = p['stars'][0]
     assert star['move_v'] == 1.0
     assert star['catalog_name'] == 'UCAC4'
+
+
+def test_help_prints_usage_without_qt(capsys: pytest.CaptureFixture[str]) -> None:
+    """--help exits before any Qt application is constructed."""
+    from spindoctor.cli.sim_editor.main_window import main
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(['--help'])
+    assert excinfo.value.code == 0
+    out = capsys.readouterr().out
+    assert 'sd_create_simulated_image' in out
+    assert 'scene' in out
+
+
+def test_arg_parser_accepts_optional_scene_path() -> None:
+    """The positional scene argument parses to a Path (or None when omitted)."""
+    from spindoctor.cli.sim_editor.main_window import build_arg_parser
+
+    parser = build_arg_parser()
+    args = parser.parse_args(['scene.yaml'])
+    assert args.scene == Path('scene.yaml')
+    args = parser.parse_args([])
+    assert args.scene is None
+
+
+def test_load_scene_file_opens_scene(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """The command-line loader applies a scene through the Load Scene machinery."""
+
+    def _raise(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError(f'error dialog raised: {args!r}')
+
+    monkeypatch.setattr(QMessageBox, 'critical', staticmethod(_raise))
+    scene = {
+        'schema_version': 2,
+        'scene_name': 'cli_open',
+        'instrument': 'coiss_nac',
+        'size_v': 96,
+        'size_u': 96,
+        'random_seed': 5,
+        'offset_v': 1.5,
+        'bodies': [
+            {
+                'name': 'RHEA',
+                'center_v': 48.0,
+                'center_u': 48.0,
+                'axis1': 40.0,
+                'axis2': 32.0,
+                'axis3': 30.0,
+            }
+        ],
+    }
+    path = tmp_path / 'cli_open.yaml'
+    yaml = YAML(typ='safe')
+    with path.open('w') as handle:
+        yaml.dump(scene, handle)
+    model.load_scene_file(path)
+    assert model.sim_params['size_v'] == 96
+    assert model.sim_params['offset_v'] == 1.5
+    assert model.sim_params['bodies'][0]['name'] == 'RHEA'
+
+
+def test_load_scene_file_reports_invalid_scene(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """An invalid scene surfaces the error dialog and leaves the model as-is."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, 'critical', staticmethod(lambda *a, **k: calls.append(str(a[2])))
+    )
+    path = tmp_path / 'broken.yaml'
+    path.write_text('schema_version: 2\nscene_name: broken\n')
+    before = dict(model.sim_params)
+    model.load_scene_file(path)
+    assert len(calls) == 1
+    assert 'Failed to load scene' in calls[0]
+    assert model.sim_params['size_v'] == before['size_v']

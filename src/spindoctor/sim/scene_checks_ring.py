@@ -138,6 +138,7 @@ def _check_ring_system(value: Any, *, source: str) -> None:
     _check_optional_mapping_list(features, 'ring_system.features', source=source)
     for index, feature in enumerate(features or []):
         _check_ring_feature(feature, index=index, source=source)
+    _check_ring_feature_names_unique(features or [], source=source)
     _check_ring_azimuthal(value.get('azimuthal'), source=source)
     moonlets = value.get('moonlets')
     _check_optional_mapping_list(moonlets, 'ring_system.moonlets', source=source)
@@ -238,6 +239,39 @@ def _check_ring_azimuthal(value: Any, *, source: str) -> None:
         if spokes.get('contrast') is None:
             raise SimSceneValidationError(f'{source}: {label}.contrast is required')
         _check_optional_number(spokes.get('contrast'), f'{label}.contrast', source=source)
+
+
+def _check_ring_feature_names_unique(features: list[dict[str, Any]], *, source: str) -> None:
+    """Fail validation when two ring features share an effective name.
+
+    A feature's name is its identity everywhere identity matters: the
+    per-feature truth entries carry it, and the navigator-side ring model
+    builds its upper-cased ``feature_id`` from it (an unnamed feature takes
+    a positional ``RING-FEATURE-<n>`` default).  Two features resolving to
+    the same name would collide in every such name-keyed consumer, so the
+    collision fails here, mirroring the body-name rule.
+
+    Parameters:
+        features: The ``ring_system.features`` list (entries already
+            type-checked).
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: If two features share an effective name
+            (case-insensitive, positional defaults included).
+    """
+    seen: dict[str, int] = {}
+    for index, feature in enumerate(features):
+        effective = str(feature.get('name') or f'RING-FEATURE-{index + 1}').upper()
+        if effective in seen:
+            raise SimSceneValidationError(
+                f'{source}: ring_system.features[{seen[effective]}] and '
+                f'ring_system.features[{index}] share the effective name {effective!r} '
+                f'(names are case-insensitive and an unnamed feature defaults to its '
+                f'positional RING-FEATURE-<n> name); name-keyed consumers would '
+                f'collide, so give each feature a unique name'
+            )
+        seen[effective] = index
 
 
 def _check_ring_moonlet(obj: dict[str, Any], *, index: int, source: str) -> None:
@@ -361,6 +395,9 @@ def _check_ring_feature(obj: dict[str, Any], *, index: int, source: str) -> None
             )
         for key in _RING_ORBIT_ERROR_KEYS:
             _check_optional_number(orbit_error.get(key), f'{error_label}.{key}', source=source)
+        _check_ring_orbit_error_bounds(
+            obj.get('orbit') or {}, orbit_error, label=label, source=source
+        )
     sigma = obj.get('declared_orbit_sigma')
     if sigma is not None:
         sigma_label = f'{label}.declared_orbit_sigma'
@@ -381,6 +418,54 @@ def _check_ring_feature(obj: dict[str, Any], *, index: int, source: str) -> None
     if phase_g is not None and not -1.0 < float(phase_g) < 1.0:
         raise SimSceneValidationError(
             f'{source}: {label}.phase_g must lie in (-1, 1); got {phase_g!r}'
+        )
+
+
+def _check_ring_orbit_error_bounds(
+    orbit: dict[str, Any],
+    orbit_error: dict[str, Any],
+    *,
+    label: str,
+    source: str,
+) -> None:
+    """Bound a feature's planted orbit error to a renderable effective orbit.
+
+    The renderer draws the catalog orbit displaced by the ``orbit_error``
+    deltas, so the *effective* orbit must stay physical: a delta that drives
+    the semimajor axis to zero or below, or the (zero-clamped) effective
+    ``ae`` to the effective ``a`` or beyond, validated and then raised (or
+    rendered garbage) deep inside the edge-radius math.  Both bounds are
+    enforced here, on the same values the renderer will combine.
+
+    Parameters:
+        orbit: The feature's (already validated) ``orbit`` mapping.
+        orbit_error: The feature's (already type-checked) ``orbit_error``
+            mapping.
+        label: The feature label for error messages.
+        source: Label used in error messages.
+
+    Raises:
+        SimSceneValidationError: If the effective semimajor axis is not
+            positive, or the effective eccentric amplitude reaches it.
+    """
+    a = float(orbit.get('a', 0.0))
+    ae = float(orbit.get('ae', 0.0))
+    effective_a = a + float(orbit_error.get('delta_a_px', 0.0))
+    if effective_a <= 0.0:
+        raise SimSceneValidationError(
+            f'{source}: {label}.orbit_error.delta_a_px pushes the effective '
+            f'semimajor axis to {effective_a!r} (catalog a = {a!r}); the '
+            f'rendered orbit needs a positive semimajor axis'
+        )
+    # The renderer clamps a negative effective ae at a circular edge, so only
+    # the upper bound can go out of domain.
+    effective_ae = max(0.0, ae + float(orbit_error.get('delta_ae_px', 0.0)))
+    if effective_ae >= effective_a:
+        raise SimSceneValidationError(
+            f'{source}: {label}.orbit_error pushes the effective eccentric '
+            f'amplitude to {effective_ae!r} with effective semimajor axis '
+            f'{effective_a!r}; the rendered edge eccentricity ae/a must stay '
+            f'below 1'
         )
 
 
@@ -409,6 +494,12 @@ def _check_ring_feature_orbit(orbit: Any, *, label: str, source: str) -> None:
         raise SimSceneValidationError(f'{source}: {label}.orbit.a is required')
     _check_optional_positive_number(orbit.get('a'), f'{label}.orbit.a', source=source)
     _check_optional_nonnegative_number(orbit.get('ae'), f'{label}.orbit.ae', source=source)
+    if orbit.get('ae') is not None and float(orbit['ae']) >= float(orbit['a']):
+        raise SimSceneValidationError(
+            f'{source}: {label}.orbit.ae must be less than orbit.a (the edge '
+            f'eccentricity ae/a must stay below 1 for a closed elliptical '
+            f'edge); got ae = {orbit["ae"]!r} with a = {orbit["a"]!r}'
+        )
     _check_optional_number(orbit.get('long_peri'), f'{label}.orbit.long_peri', source=source)
     _check_optional_number(orbit.get('rate_peri'), f'{label}.orbit.rate_peri', source=source)
     modes = orbit.get('modes')

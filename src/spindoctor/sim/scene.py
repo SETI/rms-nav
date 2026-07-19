@@ -63,7 +63,7 @@ from spindoctor.sim.scene_checks import (
     _require_ranges_for_spk_error,
     _require_str,
 )
-from spindoctor.sim.scene_checks_body import _check_body_object
+from spindoctor.sim.scene_checks_body import _check_body_names_unique, _check_body_object
 from spindoctor.sim.scene_checks_ring import _check_ring_system
 
 # The two private inventories keep their redundant aliases: they are explicit
@@ -285,6 +285,7 @@ def validate_sim_params(
                 _check_body_object(obj, index=index, source=source)
             else:
                 _check_star_object(obj, index=index, source=source)
+    _check_body_names_unique(sim_params.get('bodies') or [], source=source)
 
     if sim_params.get('spk_error') is not None:
         _require_ranges_for_spk_error(sim_params, source=source)

@@ -436,9 +436,9 @@ ARTIFACT_MODES: dict[str, ArtifactMode] = {
 # keys.  The validator keys on this exact set.
 MODE_KEYS: frozenset[str] = frozenset(ARTIFACT_MODES)
 
-# The fixed order the telemetry stage applies its implemented loss modes in
-# (3.3: frame-level commanded shapes, then line losses, then block losses, then
-# garble, then per-pixel losses, then the row-0 header last).  ``truth_window``
+# The fixed order the telemetry stage applies its implemented loss modes in:
+# frame-level commanded shapes, then line losses, then block losses, then
+# garble, then per-pixel losses, then the row-0 header last.  ``truth_window``
 # is not here: it is a protective carve-out resolved before the loop and passed
 # to ``missing_blocks``, not a signal-mutating loss.  ``hot_pixels`` is not here
 # either: it is a detector-stage mode.

@@ -14,17 +14,20 @@ scene parameter mapping, so they cannot carry truth-side information across
 the information boundary (see ``spindoctor.sim.scene``).
 """
 
+from dataclasses import dataclass
 from typing import cast
 
 import numpy as np
 
-from spindoctor.support.types import NDArrayFloatType
+from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 __all__ = [
     'DARK_SIDE_ILLUM_STRENGTH',
+    'EllipsoidProjection',
     'ellipsoid_image_normals',
     'illumination_vector',
     'lambert_from_normals',
+    'project_ellipsoid',
 ]
 
 # Lambertian floor for the visible-but-unlit hemisphere.  A pixel whose
@@ -33,6 +36,180 @@ __all__ = [
 # against it separates the lit region from the unlit disc -- the boundary the
 # terminator polyline traces.  The mesh shading path mirrors this floor.
 DARK_SIDE_ILLUM_STRENGTH: float = 0.01
+
+
+@dataclass(frozen=True)
+class EllipsoidProjection:
+    """The projected-ellipsoid working grids both simulator sides shade from.
+
+    Produced by :func:`project_ellipsoid`; every array lives on the working
+    grid (the render grid supersampled by ``aa_scale``).
+
+    Parameters:
+        aa_scale: The anti-aliasing supersampling factor of the working grid.
+        work_center_v: Body center v at working resolution.
+        work_center_u: Body center u at working resolution.
+        work_semi_major: Semi-major axis (a) at working resolution.
+        work_semi_minor: Semi-minor axis (b) at working resolution.
+        work_semi_c: Depth semi-axis (c) at working resolution.
+        cos_rz: Cosine of the rotation_z angle.
+        sin_rz: Sine of the rotation_z angle.
+        v_coords: Centered v pixel coordinates at working resolution.
+        u_coords: Centered u pixel coordinates at working resolution.
+        v_rot: Rotated-frame v coordinate of each pixel (tilt applied).
+        u_rot: Rotated-frame u coordinate of each pixel.
+        z_coords: Depth of the visible ellipsoid surface at each pixel.
+        ellipse_dist_sq: Squared normalized ellipse distance of each pixel.
+        inside_mask: Pixels at or inside the projected ellipse boundary.
+        ellipse_mask: Ellipse coverage mask (a soft anti-aliased rim when
+            ``anti_aliasing`` > 0, else the hard boundary as floats).
+    """
+
+    aa_scale: int
+    work_center_v: float
+    work_center_u: float
+    work_semi_major: float
+    work_semi_minor: float
+    work_semi_c: float
+    cos_rz: float
+    sin_rz: float
+    v_coords: NDArrayFloatType
+    u_coords: NDArrayFloatType
+    v_rot: NDArrayFloatType
+    u_rot: NDArrayFloatType
+    z_coords: NDArrayFloatType
+    ellipse_dist_sq: NDArrayFloatType
+    inside_mask: NDArrayBoolType
+    ellipse_mask: NDArrayFloatType
+
+
+def project_ellipsoid(
+    size: tuple[int, int],
+    center: tuple[float, float],
+    axis1: float,
+    *,
+    axis2: float,
+    axis3: float,
+    rotation_z: float = 0.0,
+    rotation_tilt: float = 0.0,
+    anti_aliasing: float = 0.0,
+) -> EllipsoidProjection:
+    """Project an ellipsoid onto the image plane and build the shading grids.
+
+    This is the single implementation of the projection both simulator sides
+    shade from: the working-grid coordinate frames (in-plane rotation, tilt),
+    the visible-hemisphere depth, and the (optionally anti-aliased) coverage
+    mask.  The image-side renderer carves craters into these grids and the
+    navigator-side predicted-body renderer shades them smooth, so the planted
+    scene error is the only geometric difference between the two.
+
+    Parameters:
+        size: Tuple of (size_v, size_u) giving the image dimensions in pixels.
+        center: Tuple of (v, u) giving the center position in floating-point
+            pixels.  (0.0, 0.0) is the top-left corner of pixel (0,0),
+            (0.5, 0.5) is the center of pixel (0,0).
+        axis1: The full width of axis 1 (a) of the ellipsoid in pixels.
+        axis2: The full width of axis 2 (b) of the ellipsoid in pixels.
+        axis3: The full width of axis 3 (c) of the ellipsoid in pixels (depth).
+        rotation_z: Rotation angle around the viewing axis in radians.
+        rotation_tilt: Tilt angle of the ellipsoid in radians (0 to pi/2).
+        anti_aliasing: Anti-aliasing amount in [0, 1]; > 0 supersamples the
+            working grid (up to 4x) and softens the limb rim of
+            ``ellipse_mask``.
+
+    Returns:
+        The :class:`EllipsoidProjection` working grids.
+    """
+    size_v, size_u = size
+
+    # Convert full-width axes to half-widths for ellipsoid math
+    semi_major_axis = axis1 / 2.0
+    semi_minor_axis = axis2 / 2.0
+    semi_c_axis = axis3 / 2.0
+
+    # Determine anti-aliasing scale factor (only for limb smoothing)
+    if anti_aliasing > 0:
+        # Scale factor: 1 (no AA) to 4 (max AA)
+        aa_scale = int(1 + 3 * anti_aliasing)
+    else:
+        aa_scale = 1
+
+    # Work at higher resolution for anti-aliasing at limb
+    work_v = size_v * aa_scale
+    work_u = size_u * aa_scale
+    work_center_v = center[0] * aa_scale
+    work_center_u = center[1] * aa_scale
+    work_semi_major = semi_major_axis * aa_scale
+    work_semi_minor = semi_minor_axis * aa_scale
+    work_semi_c = semi_c_axis * aa_scale
+
+    # Create coordinate grids at pixel centers
+    # This preserves subpixel alignment such that (0.5, 0.5) refers to the center
+    # of pixel (0,0) regardless of supersampling scale.
+    v_coords, u_coords = np.mgrid[0:work_v, 0:work_u].astype(float)
+    v_coords += 0.5
+    u_coords += 0.5
+    v_coords -= work_center_v
+    u_coords -= work_center_u
+
+    # Apply rotation_z (in-plane rotation around z-axis, clockwise)
+    cos_rz = np.cos(rotation_z)
+    sin_rz = np.sin(rotation_z)
+    v_rot1 = v_coords * cos_rz - u_coords * sin_rz
+    u_rot1 = v_coords * sin_rz + u_coords * cos_rz
+
+    # Apply rotation_tilt (rotation around u-axis, tilting toward/away from viewer)
+    # This affects the apparent shape and the z-coordinate
+    cos_rt = np.cos(rotation_tilt)
+
+    # After tilt, the v coordinate is affected
+    # v_rot = v_rot1 * cos_rt (compressed by tilt)
+    # z coordinate appears: z = v_rot1 * sin_rt (tilted depth)
+    v_rot = v_rot1 * cos_rt
+    u_rot = u_rot1
+    # z will be computed from ellipsoid equation
+
+    # Compute distance from ellipse center in local coordinates (2D projection)
+    # For the visible ellipse: (v_rot/a)^2 + (u_rot/b)^2 <= 1
+    ellipse_dist_sq = (v_rot / work_semi_major) ** 2 + (u_rot / work_semi_minor) ** 2
+    ellipse_dist = np.sqrt(ellipse_dist_sq)
+
+    # Compute z coordinate for 3D ellipsoid
+    # Ellipsoid equation: (v_rot/a)^2 + (u_rot/b)^2 + (z/c)^2 = 1
+    # For visible hemisphere: z = c * sqrt(1 - (v_rot/a)^2 - (u_rot/b)^2)
+    # Only compute for points inside the ellipse
+    z_coords = np.zeros_like(v_rot)
+    inside_mask = ellipse_dist_sq <= 1.0
+    z_sq = np.maximum(0.0, 1.0 - ellipse_dist_sq[inside_mask])
+    z_coords[inside_mask] = work_semi_c * np.sqrt(z_sq)
+
+    # Create base ellipse mask (1.0 inside, 0.0 outside)
+    # Anti-aliasing only applied at the limb (edge)
+    if anti_aliasing > 0:
+        # Smooth transition zone: about 1 pixel at work resolution, only at edge
+        edge_width = 3.0
+        ellipse_mask = np.clip(1.0 - np.maximum(0, ellipse_dist - 1.0) / edge_width, 0.0, 1.0)
+    else:
+        ellipse_mask = (ellipse_dist <= 1.0).astype(float)
+
+    return EllipsoidProjection(
+        aa_scale=aa_scale,
+        work_center_v=work_center_v,
+        work_center_u=work_center_u,
+        work_semi_major=work_semi_major,
+        work_semi_minor=work_semi_minor,
+        work_semi_c=work_semi_c,
+        cos_rz=float(cos_rz),
+        sin_rz=float(sin_rz),
+        v_coords=v_coords,
+        u_coords=u_coords,
+        v_rot=v_rot,
+        u_rot=u_rot,
+        z_coords=z_coords,
+        ellipse_dist_sq=ellipse_dist_sq,
+        inside_mask=inside_mask,
+        ellipse_mask=ellipse_mask,
+    )
 
 
 def ellipsoid_image_normals(

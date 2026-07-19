@@ -184,8 +184,12 @@ def _render_stars_cached(
     # it back so the deposited star centroids exactly at its catalog position.
     grid_shift = (oversample - 1) / 2.0
     # The hit-test half-window records the rendered star extent (a few sigma of
-    # the scene PSF), in oversampled units; the downsample scales it back.
-    psf_half = max(1, int(np.round(3.0 * rendered_sigma)))
+    # the scene PSF), in oversampled units; the downsample divides it back to
+    # detector units.  The floor is one DETECTOR pixel (``oversample``
+    # subsamples), matching the editor's one-pixel click-target floor: a
+    # narrow-PSF star would otherwise record a sub-pixel window after the
+    # downsample's divide and offer no whole-pixel hit target.
+    psf_half = max(oversample, int(np.round(3.0 * rendered_sigma)))
     # A scene-level catalog-scatter sigma draws a per-star position error from a
     # seeded stream (byte-stable across processes), added to any explicit
     # per-star catalog_error.  The stream is consumed in star order so a scene's

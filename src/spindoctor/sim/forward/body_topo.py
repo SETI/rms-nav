@@ -30,8 +30,11 @@ upstream terrain in absolute heights (the march itself lives in
 dark-side floor, and the marched band is bounded by the cap, so raggedness
 grows toward the terminator and the cost stays bounded.
 
-The mesh-body path does not dispatch here: mesh bodies ignore the relief
-and photometric-law keys at present fidelity.
+The mesh-body path does not dispatch here: a polyhedral-mesh body applies
+the relief field as a per-vertex radial perturbation in
+:mod:`spindoctor.sim.forward.body_mesh`, and the scene validator rejects
+the photometric-law, surface-texture, crater, and atmosphere keys on mesh
+bodies rather than letting them silently not render.
 """
 
 import math
