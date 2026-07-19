@@ -20,6 +20,17 @@ class ImageFile:
         label_file_url: Remote URL for the label file.
         results_path_stub: Local path stub for storing results.
         index_file_row: Optional metadata from index files.
+        image_et: Optional observation epoch (TDB seconds past J2000) read
+            from the index row when the file was enumerated.  Known without
+            SPICE and without opening the image, so it is still available
+            for an image whose load fails.  None when the image was not
+            enumerated from an index, or its index row carries no readable
+            time.
+        camera: Optional name of the camera that took the image, read from
+            the index row when the file was enumerated.  Available on the
+            same terms as ``image_et``, and uses the same names as
+            ``ObsInst.camera``.  None when the image was not enumerated
+            from an index, or its index row names no recognized camera.
         extra_params: Optional extra parameters that will be passed to the observation
             class's from_file method when the file is read.
         image_url_resolver: Optional callable ``(image_file_url, label_file_path) ->
@@ -34,6 +45,8 @@ class ImageFile:
     label_file_url: FCPath
     results_path_stub: str
     index_file_row: dict[str, Any] = field(default_factory=dict)
+    image_et: float | None = None
+    camera: str | None = None
     extra_params: dict[str, Any] = field(default_factory=dict)
     image_url_resolver: Callable[[FCPath, Path], FCPath | None] | None = None
     _image_file_path: Path | None = None

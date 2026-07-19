@@ -45,6 +45,17 @@ skeleton, using the Cassini ISS implementation
    class DataSetPDS3NewInstrument(DataSetPDS3):
        _ALL_VOLUME_NAMES = tuple(f'NEWI_{n:04d}' for n in range(1, 12))
        _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
+       # Index columns naming the image's epoch and camera, in preference
+       # order.  Both are read for every enumerated image and land on
+       # ImageFile.image_et / ImageFile.camera.  Neither needs SPICE nor
+       # opens the image, so an image whose load fails for want of a kernel
+       # is still placed in time and attributed to its camera.
+       _INDEX_TIME_COLUMNS = ('IMAGE_MID_TIME', 'IMAGE_TIME')
+       _INDEX_CAMERA_COLUMNS = ('INSTRUMENT_ID',)
+       # Raw index value (upper-cased, stripped) -> the camera name the rest
+       # of the system uses, i.e. the same name ObsInst.camera returns.  An
+       # unmapped value is reported as unknown rather than passed through.
+       _INDEX_CAMERA_MAP = {'NEWICAM': 'NEWICAM'}
        _VOLUMES_DIR_NAME = 'volumes'
 
        @staticmethod
@@ -156,6 +167,15 @@ any instrument-specific helpers. Update the instrument registry in
    class ObsNewInstrument(ObsSnapshotInst):
        def __init__(self, obs, *, config=None, **kwargs):
            super().__init__(obs, config=config, **kwargs)
+
+       @property
+       def camera(self) -> str:
+           # The camera that took this observation.  Return the oops
+           # detector when the instrument has more than one camera; a
+           # single-camera instrument returns its one name.  ObsInst
+           # declares this abstract, so a subclass without it cannot be
+           # instantiated.
+           return 'NEWICAM'
 
        @classmethod
        def from_file(

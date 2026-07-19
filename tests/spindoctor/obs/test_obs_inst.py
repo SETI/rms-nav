@@ -19,6 +19,10 @@ class _ConcreteObsInst(ObsInst):
     def from_file(path: Any, **kwargs: Any) -> Any:
         raise NotImplementedError
 
+    @property
+    def camera(self) -> str:
+        return 'TEST'
+
     def star_min_usable_vmag(self) -> float:
         return 0.0
 

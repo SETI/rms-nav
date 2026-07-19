@@ -132,6 +132,15 @@ class ObsCassiniISS(ObsSnapshotInst):
             return 10.5
         return cast(float, 10.5 + np.log(self.texp) / np.log(2.512))
 
+    @property
+    def camera(self) -> str:
+        """The camera that took this observation.
+
+        Returns:
+            The oops detector name: ``'NAC'`` or ``'WAC'``.
+        """
+        return str(self.detector)
+
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for Cassini ISS.
 
@@ -164,7 +173,7 @@ class ObsCassiniISS(ObsSnapshotInst):
             'midtime_scet': (scet_start + scet_end) / 2,
             'end_time_scet': scet_end,
             'image_shape_xy': self.data_shape_uv,
-            'camera': self.detector,
+            'camera': self.camera,
             'exposure_time': self.texp,
             'filters': [self.filter1, self.filter2],
             'sampling': self.sampling,

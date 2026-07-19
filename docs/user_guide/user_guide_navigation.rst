@@ -492,6 +492,14 @@ Metadata Files (``*_metadata.json``)
 
 These JSON files contain the navigation results, including:
 
+* ``observation`` — the image's identity: name, path, instrument, and
+  ``camera`` (the camera that took it, e.g. ``NAC``). An image that fails to
+  load has no observation to ask, so the navigator falls back to what the
+  PDS3 index told it when the image was enumerated, recording ``camera``
+  and ``image_et`` there; that needs no SPICE and never opens the image, so
+  a frame whose navigation dies for want of a kernel is still placed in
+  time and attributed to its camera. An image navigated by explicit path
+  rather than enumerated from an index has neither.
 * The calculated pointing offset (dv, du)
 * Uncertainty estimates (sigma_v, sigma_u)
 * Confidence scores

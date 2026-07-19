@@ -120,9 +120,19 @@ must implement:
 - :meth:`~spindoctor.obs.obs_inst.ObsInst.star_min_usable_vmag` /
   :meth:`~spindoctor.obs.obs_inst.ObsInst.star_max_usable_vmag` — the per-instrument
   photometric window. Stars outside this window do not contribute predicted detections.
+- :attr:`~spindoctor.obs.obs_inst.ObsInst.camera` — the camera that took the
+  observation. Instruments with more than one camera distinguish them
+  (Cassini ISS and Voyager ISS return ``'NAC'`` or ``'WAC'``, from the
+  ``oops`` detector); single-camera instruments return their one camera's
+  name (``'SSI'``, ``'LORRI'``). Pointing error is a property of the camera
+  rather than the spacecraft — one Cassini WAC pixel is ten NAC pixels — so
+  this is what ``navigate_image_files`` records as ``observation.camera``
+  and what the statistics report groups offset distributions by.
 - :meth:`~spindoctor.obs.obs_inst.ObsInst.get_public_metadata` — returns a JSON-friendly dict
   of per-image metadata fields (mission, instrument, exposure, filter wheel positions,
-  etc.) for the per-image sidecar.
+  etc.) for the per-image sidecar. Read the camera from
+  :attr:`~spindoctor.obs.obs_inst.ObsInst.camera` rather than repeating a
+  literal, so the name has one source.
 
 The :attr:`~spindoctor.obs.obs_inst.ObsInst.inst_config` property exposes the per-instrument YAML block
 loaded from ``src/spindoctor/config_files/config_4N0_inst_*.yaml`` so subclass

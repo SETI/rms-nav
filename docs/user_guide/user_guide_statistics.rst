@@ -75,12 +75,24 @@ its row and children.
      - ``coiss`` / ``vgiss`` / ``gossi`` / ``nhlorri`` / ``sim``, from the
        metadata document's ``observation.instrument`` field (required; a
        document without it is skipped as an ingest error).
+   * - ``camera``
+     - TEXT
+     - The camera that took the image (``NAC`` / ``WAC`` / ``SSI`` /
+       ``LORRI``), from the metadata document's ``observation.camera``
+       field. Offset statistics group by this: pointing error belongs to
+       the camera, not the spacecraft. NULL when the document carries no
+       camera (results navigated before the field existed); it is never
+       inferred from the image name.
    * - ``image_path``
      - TEXT
      - Absolute path of the source image at navigate time.
    * - ``image_et``
      - REAL
-     - Observation midtime, TDB seconds past J2000.
+     - Observation midtime, TDB seconds past J2000. Taken from the
+       navigation provenance, or — for an image that never loaded, which
+       has no provenance — from the ``observation.image_et`` the navigator
+       read out of the PDS3 index. An image whose navigation died for want
+       of a SPICE kernel is therefore still placed in time.
    * - ``image_date``
      - TEXT
      - UTC calendar date ``YYYY-MM-DD`` derived from ``image_et``; drives
@@ -287,33 +299,61 @@ Three options control drill-down output:
 
 - ``--top-n N`` makes each categorical section (failure reasons, failure
   taxonomy, ensemble exclusions, suspect offsets) list up to N example
-  image names per category, caps the suspect-offset and worst-BOTSIM-pair
-  tables at N rows, and lists the N slowest images.
-- ``--filelists`` writes one plain-text file per category (one image name
-  per line, the full list rather than the top N) into the ``filelists/``
-  subdirectory of the output directory, ready to feed back into re-runs
-  and triage scripts.
+  image names per category and instrument, caps the suspect-offset and
+  worst-BOTSIM-pair tables at N rows, and lists the N slowest images.
+- ``--filelists`` writes one plain-text file per category and instrument
+  (one image name per line, the full list rather than the top N) into the
+  ``filelists/`` subdirectory of the output directory, ready to feed back
+  into re-runs and triage scripts.
 - ``--csv`` writes ``images.csv`` next to ``report.md``: one row per image
   with every ``images`` column plus per-image technique and feature-source
   counts, for pandas or spreadsheet analysis.
 
+The first two write *image names* rather than file names — ``N1454725799``
+rather than ``N1454725799_1_CALIB.IMG`` — because that is the token the
+datasets' ``--image-filelist`` option selects on. The filelists are
+directly consumable by it: one name per line, with a leading ``#`` comment
+naming the category.
+
+Every image count in the report carries its percentage — ``5 (3.2%)``.
+Counts are broken down by instrument: a table of counts gets one column per
+instrument plus a total column, where an instrument column's percentage is
+of that instrument's images and the total column's is of all selected
+images, so each column sums to 100% on its own. Tables of *statistics*
+rather than counts (offsets, run time, per-body shares, cross-technique
+agreement) carry an instrument column instead, a total being meaningless
+for a mean or a standard deviation. Bar charts are stacked, one segment per
+instrument, with a fixed color per instrument across every chart.
+
 The report contains:
 
-- **Success / failure counts** with a breakdown of failure reasons.
+- **Images selected** — per instrument: how many images, the first and last
+  image, and the first and last available date. Image numbers only compare
+  within one instrument, so the bounds are never pooled across instruments.
+  The date bounds are found independently of the image ordering, so a
+  single image with no recorded epoch at either end of the number range
+  cannot hide the instrument's real time span.
+- **Success / failure counts** with a breakdown of failure reasons. The
+  reason table carries each reason's status, so errors (SPICE-related or
+  not) are visible alongside outright navigation failures.
 - **Failure taxonomy by image content** — failed images classified from
   their recorded feature inventory (``stars-only``, ``single-body``,
   ``multi-body``, ``rings-only``, ``body+rings``, ``no-features``), with a
   per-category failure-reason breakdown and a per-body table of how often
   each named body appears in failed versus successful images (a body with
   a high failure share points at a modeling problem for that body).
-- **Technique usage** — runs, non-spurious runs, and mean confidence per
-  technique.
+- **Technique usage** — the images each technique ran on, plus a per-
+  technique, per-instrument detail table of non-spurious runs and mean
+  confidence.
 - **Model and source usage** — which bodies, rings, and star catalogs
   appeared, in how many images, and how many of their features survived the
   reliability gate.
 - **Offset statistics** — mean, median, standard deviation, minimum, and
-  maximum of the fused V and U offsets over successful images, with
-  histograms, plus the same statistics grouped by (instrument, image size).
+  maximum of the fused V and U offsets over successful images, grouped by
+  camera, with one histogram per camera, plus the same statistics grouped
+  by (instrument, camera, image size). Distributions are never pooled
+  across cameras: one Cassini WAC pixel is ten NAC pixels, so a pooled
+  distribution would describe neither camera.
 - **Suspect offsets** — successful images whose fused offset reaches at
   least ``--suspect-fraction`` (default 0.9) of the instrument's per-axis
   maximum expected pointing offset (the configured ``extfov_margin_vu``
@@ -334,7 +374,10 @@ The report contains:
   95th-percentile Euclidean distance between their offsets on images where
   both produced non-spurious results.
 - **Confidence calibration** — per confidence tier, the distribution of each
-  image's maximum cross-technique disagreement. Without ground truth,
+  image's maximum cross-technique disagreement. The tiers always read
+  ``high`` / ``medium`` / ``low`` / ``failed`` / ``conflicted``, so a tier
+  with no images reads as an explicit zero rather than a missing row.
+  Without ground truth,
   agreement between independent techniques is the production proxy for
   accuracy (the calibrated anchor is the simulation campaign; see
   :doc:`/dev_guide/dev_guide_techniques_confidence`): a healthy pipeline shows
@@ -342,7 +385,8 @@ The report contains:
   tier.
 - **Ensemble outlier exclusions** — how often the ensemble excluded a
   technique from the consensus, and which techniques.
-- **Run-time statistics** — minimum, maximum, mean, median, standard
+- **Run-time statistics** — per instrument (and pooled, when more than one
+  instrument is selected): minimum, maximum, mean, median, standard
   deviation, and total of the per-image wall-clock run times, a run-time
   histogram, and (with ``--top-n``) the slowest images. The section is
   omitted when no ingested document carries timing data.
