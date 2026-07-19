@@ -72,7 +72,8 @@ class CreateSimulatedImageModel(
     def __init__(self) -> None:
         """Initialize the data model, build the UI, and render the first frame."""
         super().__init__()
-        self.setWindowTitle('Create Simulated Model')
+        # The docs call this tool the sd_create_simulated_image scene editor.
+        self.setWindowTitle('SpinDoctor Scene Editor')
         self.setMinimumSize(1300, 850)
 
         # Data model mirrors JSON schema
