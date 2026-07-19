@@ -63,6 +63,10 @@ scene -- including every planted error, noise knob, and contaminant. It lives in
    * - ``scene_radiance.py``
      - Composes the noise-free signal image: background stars, catalog stars,
        and the body/ring stack depth-sorted far to near.
+   * - ``scene_compositing.py``
+     - The radiance stage's translucent-screen machinery: orders the ring
+       system and body halos far to near for compositing and enforces the
+       explicit-``range_km`` depth contract on every overlap.
    * - ``body.py`` / ``body_topo.py`` / ``body_texture.py`` / ``body_mesh.py``
      - The ellipsoid body renderer and its topographic path (relief, photometric
        laws, surface texture, transits), and the polyhedral-mesh renderer (see
