@@ -241,6 +241,133 @@ shared assumption the boundary cannot detect; the shared geometry helpers are
 the sanctioned channel for conventions that must agree, and anything beyond
 them agreeing is evidence, not a goal.
 
+.. _sim-capability-envelope:
+
+What the simulator can and cannot establish
+===========================================
+
+Everything after this section describes machinery. This section states what
+that machinery's outputs *mean* -- which numbers are proofs, which are
+measurements with conditions attached, and which are not evidence at all. It
+is the chapter's answer to "what is this whole system for, and where does it
+end."
+
+The four axes
+-------------
+
+**Verification is unconditional.** Every simulated frame carries a planted
+offset the navigator cannot see, so a recovery measurement's only error is
+the error the scene planted. This does not depend on the renderer being
+realistic: the information boundary (:ref:`sim-information-boundary`)
+guarantees the navigator cannot cheat, and therefore a planted-truth recovery,
+an algorithmic-invariant test, or a regression pin is an exact statement about
+the navigation algorithms -- if a change breaks a baseline, the algorithms
+changed behavior, full stop. This is the axis on which the simulator's word is
+final.
+
+**Precision is unconditional too, and is labelled as such.** The sweep curves
+and the self-consistency floor (:ref:`sim-floor`) measure repeatability: how
+tightly the pipeline reconverges when the rendered scene equals the
+navigator's own model plus one controlled departure. The floor point on every
+mismatch curve is reproducibility, never accuracy, and both this guide and the
+simulator report mark it so. A sub-0.1 px floor says the machinery is
+numerically tight; it says nothing about how far a real frame's answer is from
+the truth.
+
+**Accuracy is conditional on the realism match, per instrument.** A sim error
+curve becomes an accuracy statement only to the degree the realism match
+(:ref:`sim-realism-match`) supports it for that instrument. For the Cassini
+NAC the support is strong: the tuned star PSF reproduces the 58-frame cohort's
+encircled-energy radii through the same estimator on both sides (EE50 0.90 px
+sim vs 0.91 real, EE80 1.72 vs 1.79), limb rise widths agree in the
+like-for-like pool (medians 2.54 px both sides, normalized W1 0.16), ring-edge
+widths agree at the few-tenths level, and the frame-averaged curve shapes
+diverge by only 0.02-0.13. For the WAC the support is limited (four frames,
+and the calibrated-chain noise comparison diverges by orders of magnitude
+one-sidedly); for Galileo, Voyager, and LORRI the cohorts support fragments at
+most, so on those instruments the simulator's error numbers are
+reproducibility statements wearing no accuracy claim -- and will stay that way
+until their cohorts grow.
+
+**Calibration is sim-measured, with a disclosed basis and a measured
+transfer.** The confidence formulas and tier boundaries have exact meaning on
+the campaign that fitted them: each tier boundary is the smallest confidence
+at which the tier's sigma-gated subset achieves a 0.9 success rate against the
+tier's own error budget. That meaning comes with its basis attached: the
+fitting campaign rendered with the empirical instrument chain off and emulated
+the Cassini NAC exclusively (the disclosure lives in
+``util/calibration/CAMPAIGN_20260718.md``, "Calibration basis and scope"), so
+the realism match vouches for a different renderer configuration than the one
+the coefficients were fitted on. Real-frame transfer is measured, not assumed:
+the library cross-check against 75 operator sidecars agreed on status 69
+times and on tier 46, and ``confidence_provisional: true`` rides every
+metadata product until a real-anchored fit exists.
+
+What this buys in practice
+--------------------------
+
+Three things, each impossible with real frames alone:
+
+- **Navigator changes are measurable against truth.** The regression net --
+  baselines, invariants, sweeps, and the expected-outcome pins -- turns "did
+  this change help" into a measured delta against known answers, instead of a
+  judgment call over operator labels.
+- **Model error is priced honestly.** Because the campaign plants model error
+  the navigator cannot represent, the fit learns what that error costs: the
+  2.61 px limb covariance floor (unmodeled terrain bounds a limb fix's real
+  accuracy no matter how clean the fit), the terminator technique's honest
+  ~0.03-0.05 confidence plateau on a cohort with zero sub-pixel successes,
+  and occlusion-aware visible-arc fractions on mutual-event scenes are all
+  prices the simulator measured rather than guessed.
+- **Failure modes real data cannot isolate become provable.** The worked
+  example is the planted-radial-error family: ``orbit_error_ringlet`` plants
+  a 2.5 px radial catalog error and the fused result is a high-tier success
+  at confidence 0.89, roughly 3 px wrong. On a real frame this is
+  indistinguishable from a good lock -- only a frame whose truth is known by
+  construction can *prove* the ensemble confidently absorbs this error, and
+  keep proving it (the honest pin in :ref:`sim-expected`) until the gap is
+  closed.
+
+What it cannot do
+-----------------
+
+- **Certify real-frame accuracy.** The operator-verified image library
+  remains the accuracy anchor -- and its independence from the simulator is
+  precisely why the calibration is non-circular. No simulated measurement can
+  replace it; the simulator's role is to make the navigator's behavior
+  legible, not to grade its own renders.
+- **Vouch for the thin-cohort instruments.** Galileo, Voyager, and LORRI
+  numbers bound reproducibility only (see the four axes above); treating them
+  as accuracy is exactly the misreading the per-instrument support labels
+  exist to prevent.
+- **See outside its modeled axes.** A model error the renderer does not
+  implement contributes nothing to any curve or fit. The main unmodeled axes
+  today: pointing jitter within an exposure, image mid-time error, readout
+  shear, stars occulted by a dark limb (simulated star success is optimistic
+  where an unlit body should block the star), and body-on-body cast shadows
+  (mutual events render occlusion, not shadowing).
+- **Fix the gaps it exposes.** The confident-wrong pins are evidence, not
+  mitigation; closing them requires ensemble work (consuming declared
+  model-error bars, cross-technique vetoes), and until then the pinned
+  hazards stand (see the ensemble chapter,
+  :doc:`dev_guide_orchestrator_ensemble`).
+- **Transfer its calibration to real frames by itself.** That path runs
+  through the sidecar re-ratchet and a pre-stated transfer criterion (the
+  proposed transfer watch in ``util/calibration/CAMPAIGN_20260718.md``), not
+  through more simulation.
+- **Guarantee the boundary against future consumers structurally.** The
+  filtered channel is structural, but consumer discipline is enforced by the
+  boundary suite, the static guard test, and review
+  (:ref:`sim-information-boundary`); the full truth still rides the
+  observation object. The assessment of what that enforcement level does and
+  does not guarantee is recorded in
+  ``critiques/SIM_REALISM_CRITIQUE_2026-07-18.md``.
+
+The realism figures behind the accuracy axis live in the simulator report's
+realism section (:doc:`/simulator_report/simulator_report`); the calibration
+basis and the cross-check numbers live in
+``util/calibration/CAMPAIGN_20260718.md``.
+
 .. _sim-stage-pipeline:
 
 The stage pipeline
