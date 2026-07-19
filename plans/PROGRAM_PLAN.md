@@ -125,11 +125,19 @@ its section names):
    continuous background work: automated candidate discovery, operator
    votes in batches, sidecar generation. Feeds everything below.
 2. **De-circularize the simulator and prove it realistic** (#227,
-   with #223, #153, #84; WS-2) — the largest single item and the
-   highest-risk one: separate the simulator's rendering from the
-   navigator's models, then show statistically that simulated frames look
-   like real ones. Has genuine design choices; the operator approves the
-   design before build.
+   with #223, #153, #84; WS-2) — **executed 2026-07-16 to 2026-07-18**:
+   all ten phases plus a final sweep merged via the `rf_sim_realism`
+   integration branch (final merge PR #313), acceptance criteria verified.
+   The design record is archived at
+   `plans/archive/SIM_REALISM_PLAN_2026-07-18.md`; the as-built system is
+   documented in `docs/dev_guide/dev_guide_simulator.rst`, the
+   recalibration in `util/calibration/CAMPAIGN_20260718.md`, and the
+   independent assessment in
+   `critiques/SIM_REALISM_CRITIQUE_2026-07-18.md`. Remaining follow-ups:
+   #301 (ensemble diagnostic channel), #309 (realism-configured
+   multi-instrument campaign), #310 (structural boundary enforcement),
+   #311 (mirror-parity guard), plus the post-merge library sidecar
+   re-ratchet.
 3. **Prove the agreement estimator** (#224; WS-0) — before trusting
    per-technique error numbers extracted from cross-technique agreement,
    prove on known-truth simulations that the extraction math works and
@@ -414,7 +422,9 @@ and the five decision gates, not by any implementation.
 
 ## 6. Operator decision gates (collected)
 
-1. Simulator de-circularization design approval (#227) — before build.
+1. Simulator de-circularization design approval (#227) — approved and
+   executed; the remaining gate is the final merge (PR #313) and the
+   post-merge sidecar re-ratchet.
 2. Titan: implement or scope out (#60).
 3. CK kernels as a delivered product (#188).
 4. Sub-5 px body policy (#239) — decided 2026-07-14 (expected-failure
