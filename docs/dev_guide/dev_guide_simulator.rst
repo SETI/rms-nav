@@ -91,7 +91,28 @@ scene -- including every planted error, noise knob, and contaminant. It lives in
        hot pixels, banding, bias structure, cosmic rays). Carries the vidicon
        DN path and the calibrated-I/F inversion (see :ref:`sim-detector-stage`).
    * - ``telemetry.py``
-     - Transmission loss; carries the per-pixel missing-data markers.
+     - Transmission loss; carries the per-pixel missing-data markers and
+       drives the structured loss modes in their fixed physical order.
+   * - ``telemetry_loss.py``
+     - The structured telemetry-loss appliers (missing / partial /
+       alternating lines, missing blocks, garble, dead pixels, commanded
+       frame shapes), each recording its realized geometry into the frame
+       truth.
+   * - ``telemetry_artifacts.py``
+     - Telemetry-stage artifacts beyond packet loss: lossy DCT compression
+       blockiness and the Voyager GEOMED archive-processing scars.
+   * - ``artifact_modes.py``
+     - The artifact-mode registry: each mode's stage, parameter schema,
+       instrument availability, and implementation status, read by the
+       validator, both stages, and the scene editor (see
+       :ref:`sim-artifact-framework`).
+   * - ``incidence.py``
+     - Artifact-incidence measurement: the planted event counts read from
+       the frame truth and the marker-based image estimators that recover
+       them from the DN image alone (the realism match compares the two).
+   * - ``feature_loci.py``
+     - Navigation-feature loci (body / ring rows, limb and star pixels)
+       extracted from the frame truth for adversarial artifact placement.
    * - ``atmosphere.py``
      - The haze-limb layer for atmospheric (Titan-class) bodies: an
        exponential haze column composited onto the disc, giving a soft limb, a
