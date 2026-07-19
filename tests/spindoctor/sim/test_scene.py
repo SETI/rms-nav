@@ -396,6 +396,44 @@ def test_validate_sim_params_accepts_idealized_nav_override() -> None:
     assert validate_sim_params(params) is params
 
 
+def test_validate_sim_params_rejects_empty_psf_block() -> None:
+    """A present optics.psf block without a core width fails at validation."""
+    params = _sim_params()
+    params['optics'] = {'psf': {}}
+    with pytest.raises(SimSceneValidationError, match='optics.psf needs sigma_v'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_psf_without_sigma_v() -> None:
+    """Wing-only PSF parameters without sigma_v fail at validation."""
+    params = _sim_params()
+    params['optics'] = {'psf': {'w': 0.1, 'r0': 2.0, 'n': 3.0}}
+    with pytest.raises(SimSceneValidationError, match='optics.psf needs sigma_v'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_rejects_false_match_navigator() -> None:
+    """match_navigator: false authors a kernel-less block and fails."""
+    params = _sim_params()
+    params['optics'] = {'psf': {'match_navigator': False}}
+    with pytest.raises(SimSceneValidationError, match='match_navigator must be true'):
+        validate_sim_params(params)
+
+
+def test_validate_sim_params_accepts_match_navigator_only_psf() -> None:
+    """The navigator-matched form validates without explicit parameters."""
+    params = _sim_params()
+    params['optics'] = {'psf': {'match_navigator': True}}
+    assert validate_sim_params(params) is params
+
+
+def test_validate_sim_params_accepts_sigma_v_only_psf() -> None:
+    """A psf block with just the core width validates."""
+    params = _sim_params()
+    params['optics'] = {'psf': {'sigma_v': 1.2}}
+    assert validate_sim_params(params) is params
+
+
 def test_validate_sim_params_rejects_duplicate_body_names() -> None:
     """Two bodies with the same name fail (name-keyed truth would collide)."""
     params = _sim_params()

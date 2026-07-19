@@ -147,12 +147,27 @@ def _check_psf_block(value: Any, *, source: str) -> None:
         _check_optional_bool(
             value.get('match_navigator'), 'optics.psf.match_navigator', source=source
         )
+        if value.get('match_navigator') is not True:
+            raise SimSceneValidationError(
+                f'{source}: optics.psf.match_navigator must be true when present '
+                f'(a false value authors a PSF block with no kernel; drop the '
+                f'optics.psf block instead)'
+            )
         extra = set(value) - {'match_navigator'}
         if extra:
             raise SimSceneValidationError(
                 f'{source}: optics.psf.match_navigator is exclusive; drop {sorted(extra)}'
             )
         return
+    # An explicit-parameter block needs its core width: the renderer builds
+    # the kernel from sigma_v (sigma_u defaults to it), so a block without
+    # one would crash at render time instead of failing here.
+    if value.get('sigma_v') is None:
+        raise SimSceneValidationError(
+            f'{source}: optics.psf needs sigma_v (or the match_navigator form); '
+            f'a psf block without a core width renders nothing it can build a '
+            f'kernel from'
+        )
     for key in ('sigma_v', 'sigma_u', 'r0'):
         _check_optional_positive_number(value.get(key), f'optics.psf.{key}', source=source)
     _check_optional_number(value.get('w'), 'optics.psf.w', source=source)
