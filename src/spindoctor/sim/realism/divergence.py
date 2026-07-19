@@ -117,7 +117,7 @@ def _finite(sample: NDArrayFloatType) -> NDArrayFloatType:
 
 
 def w1_divergence(real: NDArrayFloatType, sim: NDArrayFloatType) -> W1Result:
-    """The 15.10-H divergence between a real and a sim sample.
+    """The winsorized, IQR-normalized Wasserstein-1 divergence of two samples.
 
     Both samples are winsorized at their own 1st/99th percentiles, the
     Wasserstein-1 distance is computed between the winsorized samples, and

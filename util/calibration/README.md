@@ -8,8 +8,7 @@ simulated scenes, because no real-image anchor set (operator-verified
 offsets with measured per-technique errors) exists yet.  When such a set
 exists, the same fit reruns against it and the sim-anchored values
 become the fallback for regimes real data cannot reach.  (Historical
-background and sequencing: `plans/VALIDATION_AND_CALIBRATION_PLAN.md`,
-issue #173.)
+background and sequencing: `plans/VALIDATION_AND_CALIBRATION_PLAN.md`.)
 
 Everything here is a repo-checkout script (not part of the distributed
 package); generated artifacts go under `_work/calibration/` (gitignored).
@@ -61,7 +60,7 @@ package); generated artifacts go under `_work/calibration/` (gitignored).
    floors re-solving to ~0 additional, the gate curves re-deriving to
    the shipped boundaries).
 5. **`fit_floors.py`** — solves each technique's `model_error_floor_px`
-   tuning value (#210): the quadrature floor that brings the 2-sigma
+   tuning value: the quadrature floor that brings the 2-sigma
    coverage of `sqrt(sigma_reported^2 + floor^2)` to the 2D-Gaussian
    expectation (0.865) against planted truth.  Run it on a collection
    pass made with the floors at their current values: a converged
@@ -133,7 +132,7 @@ Notes on reproducing the measurement:
 - The shell-level `*_NUM_THREADS=1` exports are **required**: `collect.py`
   sets the same variables inside each worker, but the workers inherit the
   parent's already-initialized BLAS thread pools under the fork start
-  method, so the in-worker pinning does not take effect (#287).  Unpinned
+  method, so the in-worker pinning does not take effect.  Unpinned
   BLAS threads oversubscribe the 14 workers and distort the timing.
 - Worker CPU affinity on this machine is load-bearing, not cosmetic:
   always `source setup.sh` first so the excluded cores stay excluded.
