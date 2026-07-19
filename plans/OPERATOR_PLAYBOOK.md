@@ -177,7 +177,7 @@ Your role at the gate: approve the frame selection. Then:
   terminator's provisional label and the sim-anchored coefficients get
   their real-world upgrade.
 - **Accuracy tail** — #233, #150/#128 (design first; see Section 3),
-  #234, #232.
+  plus #234 and #232.
 
 ## 3. Parallel fill (independent agent sessions, any order)
 
@@ -197,8 +197,8 @@ Independent review before done; all CI gates; one PR."
   per the diagnosis on #150/#128. No implementation until the design is
   operator-approved; validation must be against real images per WS-10."
 - **#179 (coarse-lock calibration pass)**: "Calibrate the coarse-search
-  edge-population lock against the image library per #179, folding in the
-  #261 false-flag datapoint."
+  edge-population lock against the image library per #179, folding in
+  the false-flag datapoint from #261."
 - **#130**: "Calibrate the star limiting-magnitude model against real
   fields per #130."
 - **#284 then #285**: "#284: fix UCAC4 bright-end photometry corrupting
@@ -206,8 +206,9 @@ Independent review before done; all CI gates; one PR."
   sparse fields (depends on #284)."
 - **#277 residue (N1853392805)**: decide among the three recorded options
   (accept 2-px-class ground truth for resolved highly-irregular bodies /
-  keep TERMINATOR_ARC for SPICE-known synchronous rotators / shape models
-  #23) and comment the decision on #277; then a session implements it.
+  keep TERMINATOR_ARC for SPICE-known synchronous rotators / shape
+  models per #23) and comment the decision on #277; then a session
+  implements it.
 - **Sim follow-ups**: #309 (realism-configured multi-instrument
   campaign — biggest calibration-credibility win available), #310
   (structural boundary enforcement), #311 (mirror-parity guard). Each
