@@ -561,6 +561,12 @@ def test_shared_rotating_bias_repaired_when_both_declared() -> None:
     ]
     naive = solve_covariance_components(frames, specs_naive, mean_model='constant')
     assert naive.covariances['disc'][0, 0] < 0.0
+    # And auto mode does NOT rescue an undeclared member: the limb's mean
+    # columns absorb only the limb-disc difference of the shared bias, so
+    # the disc's own rotating bias still aliases (c11 inflated an order of
+    # magnitude above the 0.05 truth, though no longer negative).
+    auto_naive = solve_covariance_components(frames, specs_naive)
+    assert auto_naive.covariances['disc'][0, 0] > 0.3
 
 
 def test_bootstrap_coverage_rate() -> None:

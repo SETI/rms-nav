@@ -107,7 +107,10 @@ preserves the numbers and conclusions that outlive them.
   has image-frame mean ~0 over a diverse cohort and aliases into the
   recovered covariance as `C + mu mu^T` -- silently, well-conditioned,
   and with no negative-variance symptom.  Biases locked to geometry the
-  model does not carry (e.g. illumination) still alias.
+  model does not carry (e.g. illumination) still alias.  Fitting k mean
+  columns per pair deflates the centered second moments by roughly k/n
+  (~1-2% at k <= 7, n = 400); an overfit guard falls back to
+  constant-only columns below 4 samples per column.
 - **Declared pair covariances**: adding `pair_covariances=[(i, j)]`
   turns an assumed-independent pair into a measured one; the cohort must
   be over-determined enough to carry the extra unknowns (check the
