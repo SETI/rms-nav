@@ -40,9 +40,20 @@ ground_truth:
     raw fit (-48.1864, 9.4187) projects to -27.4128 px along the normal,
     identical to the voted representative point.
     Tier ratchet 2026-07-16: the 2026-07-14 rank-aware ensemble policy caps a fused result with rank-deficient covariance at medium (the unobservable along-edge axis is an assumption, not a measurement); the RingEdgeNav fit and its projection onto the operator-verified normal are unchanged. Ratcheted high -> medium.
+    Tier ratchet 2026-07-19: the ring radial orbit-uncertainty channel
+    adds the consumed edges' catalog orbit-solution rms to the reported
+    covariance as a fully-correlated radial term. This frame's fit is
+    carried by the Keeler-A Ring OE edges (catalog rms 10.18 km) plus
+    the Keeler IEG (3.62 km) at ~1 km/px, an LM-weight-weighted
+    effective sigma of 4.44 px along the edge normal; the fused sigma
+    (3.14 px/axis) exceeds the medium tier's 2 px cap. The RingEdgeNav
+    fit and its projection onto the operator-verified normal are again
+    unchanged -- the demotion prices the a-priori radial error bar of a
+    ring-only fix at this resolution, which the navigator cannot know
+    this frame beat. Ratcheted medium -> low.
 expected:
   status: success
-  confidence_tier: medium
+  confidence_tier: low
   status_reason: rank_1_only
   primary_technique: RingEdgeNav
   techniques_must_run:
