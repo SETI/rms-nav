@@ -126,11 +126,12 @@ class BodyTerminatorDiagnostics:
             cost divided by the converged cost (epsilon-guarded); values
             below the technique's ``basin_cost_ratio_threshold`` mark the
             fit spurious.  ``None`` when not measured.
-        lm_converged: See ``BodyLimbDiagnostics.lm_converged``.
-        polarity_rejection_fraction: See
-            ``BodyLimbDiagnostics.polarity_rejection_fraction``.
-        coarse_peak_fraction: See
-            ``BodyLimbDiagnostics.coarse_peak_fraction``.
+        lm_converged: Shared DT gate diagnostic; the field carries the
+            same meaning as on ``BodyLimbDiagnostics``.
+        polarity_rejection_fraction: Shared DT gate diagnostic; the field
+            carries the same meaning as on ``BodyLimbDiagnostics``.
+        coarse_peak_fraction: Shared DT gate diagnostic; the field carries
+            the same meaning as on ``BodyLimbDiagnostics``.
     """
 
     visible_terminator_arc_fraction: float = 0.0
@@ -223,9 +224,10 @@ class RingEdgeDiagnostics:
         edge_count: Number of RING_EDGE features fused.
         is_rank_1: True if every ring-edge feature was straight-line and the
             combined covariance is rank-1.
-        lm_converged: See ``BodyLimbDiagnostics.lm_converged``.
-        coarse_peak_fraction: See
-            ``BodyLimbDiagnostics.coarse_peak_fraction``.
+        lm_converged: Shared DT gate diagnostic; the field carries the
+            same meaning as on ``BodyLimbDiagnostics``.
+        coarse_peak_fraction: Shared DT gate diagnostic; the field carries
+            the same meaning as on ``BodyLimbDiagnostics``.
         sigma_orbit_radial_px: Effective fully-correlated radial
             orbit-uncertainty sigma (px) added in quadrature to the
             reported covariance along the fit's radial direction (the
