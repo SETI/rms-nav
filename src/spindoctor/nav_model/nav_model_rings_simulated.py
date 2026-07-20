@@ -19,6 +19,7 @@ shared with the image-side renderer by design.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -94,6 +95,18 @@ class NavModelRingsSimulated(NavModelRingsBase):
         *,
         config: Config | None = None,
     ) -> None:
+        """Bind one navigable scene feature to a model instance.
+
+        Parameters:
+            name: Model instance name.
+            obs: Observation carrying the filtered scene view.
+            feature_name: The feature's name, upper-cased for labels.
+            feature_params: The feature's idealized mapping from
+                ``nav_params['ring_system']['features']``.
+            ring_system: The idealized ``ring_system`` block.
+            config: Optional ``Config`` override; ``None`` uses
+                ``DEFAULT_CONFIG``.
+        """
         super().__init__(name, obs, config=config)
         self._feature_name = feature_name.upper()
         self._feature_params: dict[str, Any] = dict(feature_params)
@@ -219,12 +232,43 @@ class NavModelRingsSimulated(NavModelRingsBase):
             ext_margin_u + data_size_u,
         )
 
+    def _declared_orbit_sigma_px(self) -> float:
+        """The declared 1-sigma radial orbit uncertainty of this feature.
+
+        For ``r ~ a (1 - e cos(theta - peri))`` the radial displacement from
+        independent semimajor-axis and radial-amplitude errors is
+        ``delta_a - delta(ae) cos(theta - peri)``, so the two declared sigmas
+        combine in QUADRATURE: ``sqrt(sigma_a**2 + sigma_ae**2)`` is the
+        1-sigma at the longitude where the eccentric term is fully in phase,
+        i.e. the max-over-longitude 1-sigma envelope.  Adding them linearly
+        (the earlier form) overstates that envelope by up to ``sqrt(2)``, and
+        the value is squared straight into a tier-gating covariance, so the
+        linear form doubled the variance at equal terms.
+
+        Returns:
+            The declared sigma in pixels; ``0.0`` when the scene declares no
+            orbit uncertainty.
+        """
+        sigma = self._feature_params.get('declared_orbit_sigma') or {}
+        sigma_a = float(sigma.get('sigma_a_px', 0.0))
+        sigma_ae = float(sigma.get('sigma_ae_px', 0.0))
+        return float(math.hypot(sigma_a, sigma_ae))
+
     def _declared_radial_sigma_px(self) -> float:
         """The per-vertex radial sigma from the declared orbit uncertainty.
 
-        The declared semimajor-axis and radial-amplitude sigmas add (a
-        conservative bound on the 1-sigma radial displacement of a catalog
-        edge), floored at the one-pixel polyline sampling resolution.
+        The declared semimajor-axis and radial-amplitude sigmas are summed
+        LINEARLY here, floored at the one-pixel polyline sampling resolution.
+
+        This deliberately does NOT share the quadrature combine of
+        :meth:`_declared_orbit_sigma_px`, which is the coherent displacement
+        bound.  This value is the per-vertex prior the robust fit weights by
+        ``1 / sigma**2``, so changing it changes the LM's inlier weighting and
+        moves the recovered offset on every scene that declares a sigma.  The
+        quadrature correction applies to the covariance term that is squared
+        into a tier gate; carrying it into the fit's weighting would be an
+        unrelated behavior change, so the two combines are kept separate and
+        this one keeps its original form.
         """
         sigma = self._feature_params.get('declared_orbit_sigma') or {}
         declared = float(sigma.get('sigma_a_px', 0.0)) + float(sigma.get('sigma_ae_px', 0.0))
@@ -283,6 +327,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
                 )
             )
         sigma_radial_px = self._declared_radial_sigma_px()
+        sigma_orbit_px = self._declared_orbit_sigma_px()
         for edge in prediction.edges:
             n = edge.vertices_vu.shape[0]
             if n == 0:
@@ -302,6 +347,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
                         ),
                         is_straight_line=is_straight,
                         bbox_extfov_vu=self._bbox_extfov_vu,
+                        sigma_orbit_radial_px=sigma_orbit_px,
                     ),
                     subject_range_km=self._subject_range_km,
                     position_cov_px=None,

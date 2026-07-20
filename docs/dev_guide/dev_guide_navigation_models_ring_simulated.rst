@@ -66,6 +66,13 @@ with the feature's ``declared_orbit_sigma`` (the catalog error bars the navigato
 entitled to know -- never the drawn error values). The along-edge sigma reflects the
 sampling resolution only.
 
+The declared orbit sigma is additionally carried, unfloored, on the emitted geometry's
+``sigma_orbit_radial_px`` -- the fully-correlated 1-sigma radial displacement of the whole
+predicted edge. The per-vertex sigma is a statistical scale that averages down as the
+vertex count grows; a catalog-orbit error displaces every vertex coherently and does not,
+so the ring-edge technique consumes this separate field to widen its reported covariance
+along the fit's radial direction (see :doc:`dev_guide_techniques_ring_edge`).
+
 Configuration
 =============
 

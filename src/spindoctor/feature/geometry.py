@@ -115,6 +115,16 @@ class RingEdgePolyline:
         is_straight_line: ``True`` if the polyline's max-deviation from a
             best-fit straight line is below the curvature threshold.
         bbox_extfov_vu: Half-open bounding box of the polyline.
+        sigma_orbit_radial_px: Fully-correlated 1-sigma radial displacement
+            of the whole predicted edge (the catalog orbit-solution
+            uncertainty), in pixels at the feature.  Distinct from
+            ``sigma_radial_per_vertex_px``: the per-vertex sigma is the
+            statistical scale of one vertex's residual and averages down as
+            ``1/sqrt(N)`` in the fit covariance, while an orbit error
+            displaces every vertex coherently and does not average down.
+            ``RingEdgeNav`` adds this term in quadrature to its reported
+            covariance along the fit's radial direction so a tight lock on
+            an uncertain orbit is not reported as a tight pointing fix.
     """
 
     vertices_vu: NDArrayFloatType
@@ -123,6 +133,7 @@ class RingEdgePolyline:
     sigma_along_edge_per_vertex_px: NDArrayFloatType
     is_straight_line: bool
     bbox_extfov_vu: tuple[int, int, int, int]
+    sigma_orbit_radial_px: float = 0.0
 
 
 @dataclass(frozen=True, eq=False)

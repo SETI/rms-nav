@@ -987,9 +987,10 @@ confident wrong offset. Each such scene carries an ``expected`` block, and the
 machinery turns "must not be confidently wrong here" into a passing assertion.
 
 **The honest pin.** A small second family inverts the reading: scenes whose
-measured behavior *is* a confidently wrong offset the ensemble cannot
-currently detect (the ``orbit_error_ringlet`` planted radial catalog error,
-the ``titan_crescent_horns`` pair's haze-dragged blob centroid). Pinning bare
+measured behavior *is* a wrong offset the ensemble cannot remove (the
+``orbit_error_ringlet`` planted radial catalog error, whose bias survives
+even though the declared-sigma covariance channel demotes its tier, and the
+``titan_crescent_horns`` pair's haze-dragged blob centroid). Pinning bare
 ``status: success`` on such a scene would quietly freeze the wrong answer as
 correct behavior, so these scenes also declare ``known_offset_error_px`` --
 the measured fused error magnitude, from the scene's recorded baseline -- with
@@ -1448,19 +1449,22 @@ orbit the navigator predicts from -- planted radial model error, the ring
 analog of the body ephemeris-error axis. Real ring features are misplaced
 relative to their published orbit solutions in exactly this way. The
 idealized ``declared_orbit_sigma`` is the uncertainty the navigator is
-*entitled* to know -- the error bars, never the drawn values -- and it widens
-the predicted edges' radial sigma.
+*entitled* to know -- the error bars, never the drawn values. It feeds the
+predicted edges twice: as the per-vertex radial sigma of the robust fit, and
+as the fully-correlated orbit-uncertainty term the ring-edge technique adds
+in quadrature to its reported covariance along the fit's radial direction
+(see :doc:`dev_guide_techniques_ring_edge`).
 
-The measured behavior on this axis is deliberately uncomfortable, and the
+The measured behavior on this axis stays deliberately uncomfortable, and the
 ``orbit_error_ringlet`` scene pins it: a navigable ringlet rendered 2.5 px
-outward of its catalog orbit navigates to a *confident, high-rank* success
-about 3 px wrong. A uniform radial misplacement has no exact translational
-equivalent, so the robust edge fit down-weights one arc, locks onto one side
-of the annulus, and absorbs the ephemeris error into the recovered offset
-instead of leaving it in the residuals. That confidently-biased recovery is
-the honest measurement of what a planted radial catalog error does to the
-current techniques -- the scene exists to keep the number in view, and the
-declared sigma is the input a future error budget has to feed it into.
+outward of its catalog orbit navigates to a success about 3 px wrong. A
+uniform radial misplacement has no exact translational equivalent, so the
+robust edge fit down-weights one arc, locks onto one side of the annulus,
+and absorbs the ephemeris error into the recovered offset instead of leaving
+it in the residuals -- the declared sigma prices that hazard (the widened
+covariance holds the fused result out of the high tier) but cannot remove
+the bias itself, which is what the scene's ``known_offset_error_px`` pin
+keeps in view.
 
 ``navigable`` (default **false**) is the information boundary in miniature:
 the filter drops non-navigable features from ``nav_params`` entirely, so the

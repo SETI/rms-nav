@@ -159,32 +159,79 @@ confidence and sigma score:
   centroid's CRLB sigma is tight. A single-star result cross-checked by a non-star
   technique can still earn ``'high'``.
 
-Confident-wrong results: what the tiers do not price
-----------------------------------------------------
+Confident-wrong results: what the tiers price and what they cannot
+------------------------------------------------------------------
 
 The confidence formulas and tier boundaries price *statistical* error -- the
 scatter the per-technique diagnostics can see -- not unmodeled *systematic*
-error. A planted radial model error can be absorbed into a high-confidence
-offset: when every feature a technique fits is displaced coherently (a ring
+error. When every feature a technique fits is displaced coherently (a ring
 feature whose real orbit sits a few pixels off the catalog orbit, a haze layer
-that moves a photometric centroid), the fit converges cleanly, the residuals
-look healthy, and no diagnostic carries the signal, so neither the sigmoid nor
-the sigma gate can demote the result. Two simulated scenes pin this family as
-standing, currently unmitigated evidence:
+that moves a photometric centroid, a shape model wrong at the mesh level), the
+fit converges cleanly, the residuals look healthy, and no diagnostic carries
+the signal, so neither the sigmoid nor the sigma gate can demote the result on
+its own.
 
-- ``tests/integration/sim_scenes/ring_system/orbit_error_ringlet.yaml`` -- a
-  2.5 px planted radial catalog error fuses to a ~3 px wrong offset at
-  confidence 0.89, tier ``high``.
+The defense the ensemble does have is technique-side model-error channels: a
+technique that *declares* a systematic uncertainty widens its reported
+covariance before the fuse, and every downstream step then prices it through
+the ordinary machinery -- the widened axis carries less precision weight in
+the merge, the fused sigma grows, and the sigma-gated tier demotes without any
+special-casing here. The ring-edge radial orbit-uncertainty channel is the
+worked example (see :doc:`dev_guide_techniques_ring_edge`): on the simulated
+planted-orbit-error scene
+(``tests/integration/sim_scenes/ring_system/orbit_error_ringlet.yaml``) the
+declared 2.5 px catalog error bar widens the fused radial sigma past the high
+tier's cap and the ~3 px biased offset demotes to ``medium``. The channel
+prices the hazard; it cannot remove the bias, so the scene keeps its
+measured-error pin. The shared DT fit-quality gates
+(:doc:`dev_guide_techniques_dt_fitting`) close the adjacent
+unverified-fit family before results reach the ensemble at all.
+
+What remains unpriced is systematic error nobody declares. The standing
+evidence:
+
+- ``tests/integration/sim_sweeps/irregularity_shape_mismatch.yaml`` -- at
+  extreme mesh-vs-ellipsoid shape mismatch the disc correlation locks onto
+  the mismatched model and the fused confidence re-saturates to ~0.99 at a
+  10-17 px error (measured 2026-07-19: 0.98 at 10.9 px, 0.99 at 14.0 and
+  17.0 px). A cross-technique veto (the pose-free blob disagrees by pixels),
+  not a per-technique channel, is the shape of a fix.
 - ``tests/integration/sim_scenes/atmosphere/titan_crescent_horns.yaml`` (and
   its noiseless twin) -- a 155-degree haze crescent drags the blob centroid to
   a ~30 px wrong offset that passes the acceptance gate at the blob's 0.40
   cap, tier ``low``.
 
-Both are asserted as honest pins (``known_offset_error_px``; see
+These are asserted as honest pins or documented sweep behavior (see
 :ref:`sim-expected`), so a worsening regression and a silent fix both fail
-CI. Until the ensemble consumes declared model-error bars (the ring case) or
-gains a cross-technique veto (the haze case), a high tier on a frame with
-plausible unmodeled systematic error is not evidence against that error.
+CI. A high tier on a frame with plausible *undeclared* systematic error is
+not evidence against that error.
+
+A related honesty caveat survives inside the confidence scalar itself: the
+two-member agreement boost assumes the members' errors are independent, so
+two techniques observing the same displaced feature (the ring-edge fit and
+the ring-annulus correlation on one misplaced ringlet) can fuse to a high
+scalar confidence even as the sigma-gated tier demotes the result. On such
+frames the tier is the trustworthy verdict and the scalar is not.
+
+That scalar is **not** inert, and it must not be dismissed as documentation.
+The tier boundaries are themselves fitted *from* it: the calibration tooling
+reads each row's fused confidence, fused sigma, and error against truth, and
+solves for the confidence at which each tier reaches its success target. A
+row pairing a near-cap confidence with a multi-pixel error is therefore a
+training point that pushes the fitted boundary upward at the next refit --
+the artifact acting on the very mechanism that is supposed to contain it.
+Two consequences worth stating plainly:
+
+- The regression scenes under ``tests/integration/sim_scenes/`` are not in
+  the calibration cohort (it is generated independently by the campaign's
+  own randomized scene generator), so no scene-level exclusion is needed
+  and none is applied.
+- The cohort's own ring family *does* plant orbit errors with declared
+  sigmas, so it generates rows with this same coupling. The next
+  recalibration has to treat them deliberately -- by pricing the
+  correlated-error discount, or by fitting the boundary against fused sigma
+  rather than the boosted scalar -- rather than absorbing them as evidence
+  that high confidence at multi-pixel error is normal.
 
 Restrictions and assumptions
 ----------------------------

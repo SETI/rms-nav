@@ -17,6 +17,7 @@ from spindoctor.nav_technique.dt_fitting import (
     LMRefineResult,
     RidgeRefineResult,
     coarse_ncc_search,
+    coarse_ncc_search_scored,
     find_secondary_dt_minimum,
     gradient_ridge_refine,
     information_matrix_to_covariance,
@@ -1183,3 +1184,189 @@ def test_find_secondary_dt_minimum_empty_polyline_returns_none() -> None:
         exclude_radius_px=5.0,
     )
     assert basin is None
+
+
+# ---------------------------------------------------------------------------
+# coarse_ncc_search_scored
+# ---------------------------------------------------------------------------
+
+
+def test_coarse_ncc_search_scored_matches_offset_form() -> None:
+    """The scored form returns the same peak offset as the offset-only form."""
+    shape = (64, 64)
+    polyline_mask = _render_circle_mask(shape, (32.0, 32.0), 12.0)
+    edge_mask = np.roll(polyline_mask, shift=(3, -2), axis=(0, 1))
+    scored = coarse_ncc_search_scored(edge_mask, polyline_mask, (10, 10))
+    assert scored.offset_vu == (3, -2)
+
+
+def test_coarse_ncc_search_scored_perfect_overlap_scores_one() -> None:
+    """A fully self-aligned mask puts every vertex on an edge pixel."""
+    shape = (32, 32)
+    polyline_mask = _render_circle_mask(shape, (16.0, 16.0), 8.0)
+    scored = coarse_ncc_search_scored(polyline_mask, polyline_mask, (4, 4))
+    assert scored.score == pytest.approx(1.0)
+
+
+def test_coarse_ncc_search_scored_partial_overlap_scores_fraction() -> None:
+    """The score is the winning shift's edge-pixel match fraction."""
+    shape = (40, 40)
+    polyline_mask = np.zeros(shape, dtype=bool)
+    polyline_mask[20, 10:30] = True  # 20 vertices on one row
+    edge_mask = np.zeros(shape, dtype=bool)
+    edge_mask[20, 10:20] = True  # only half of them are detected
+    scored = coarse_ncc_search_scored(edge_mask, polyline_mask, (2, 2))
+    assert scored.offset_vu == (0, 0)
+    assert scored.score == pytest.approx(0.5)
+
+
+def test_coarse_ncc_search_scored_empty_polyline_scores_zero() -> None:
+    shape = (24, 24)
+    edge_mask = np.zeros(shape, dtype=bool)
+    edge_mask[10, 10] = True
+    scored = coarse_ncc_search_scored(edge_mask, np.zeros(shape, dtype=bool), (3, 3))
+    assert scored.offset_vu == (0, 0)
+    assert scored.score == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# polarity_rejected_count
+# ---------------------------------------------------------------------------
+
+
+def test_lm_subpixel_refine_reports_polarity_rejected_count() -> None:
+    """The rejected-vertex count from the seed polarity filter is surfaced."""
+    shape = (96, 96)
+    radius = 18.0
+    dt = _build_dt_for_circle(shape, radius)
+    cv = shape[0] / 2.0 + 1.5
+    cu = shape[1] / 2.0 + 2.5
+    vertices, outward_normals = _build_circle_polyline((cv, cu), radius, 64)
+    normals = -outward_normals  # inward normals are accepted on a bright disc
+    rejected = np.arange(0, 12)
+    normals[rejected] = outward_normals[rejected]
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    image = _render_image_with_circle(shape, (shape[0] / 2.0, shape[1] / 2.0), radius)
+    grad = compute_image_gradient_vu(image, sigma_px=DEFAULT_IMAGE_GRADIENT_SIGMA_PX)
+    result = lm_subpixel_refine(
+        vertices_vu=vertices,
+        normals_vu=normals,
+        sigma_normal_per_vertex_px=sigmas,
+        image_edge_dt=dt,
+        image_gradient_vu=grad,
+        initial_offset_vu=(-1.0, -2.0),
+        use_polarity=True,
+    )
+    assert result.polarity_rejected_count == 12
+
+
+def test_lm_subpixel_refine_polarity_rejected_count_zero_without_polarity() -> None:
+    shape = (96, 96)
+    radius = 18.0
+    dt = _build_dt_for_circle(shape, radius)
+    vertices, outward_normals = _build_circle_polyline((shape[0] / 2.0, shape[1] / 2.0), radius, 48)
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    result = lm_subpixel_refine(
+        vertices_vu=vertices,
+        normals_vu=-outward_normals,
+        sigma_normal_per_vertex_px=sigmas,
+        image_edge_dt=dt,
+        use_polarity=False,
+    )
+    assert result.polarity_rejected_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Ridge-verified convergence
+# ---------------------------------------------------------------------------
+
+
+def test_lm_converged_flag_set_by_applied_converged_ridge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A converged ridge stage verifies a pose the DT-LM left at its cap.
+
+    The DT-LM routinely burns its iteration budget stalled on the
+    integer-quantized DT of a dense edge scene (the condition the ridge
+    stage exists to polish), so an applied AND converged ridge marks the
+    reported pose verified.  The ridge is forged so the test pins the OR
+    logic itself, not the ridge numerics.
+    """
+    from spindoctor.nav_technique.dt_fitting import ridge as _ridge_mod
+
+    shape = (96, 96)
+    radius = 18.0
+    dt = _build_dt_for_circle(shape, radius)
+    vertices, outward_normals = _build_circle_polyline((shape[0] / 2.0, shape[1] / 2.0), radius, 48)
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    image = _render_image_with_circle(shape, (shape[0] / 2.0, shape[1] / 2.0), radius)
+    grad = compute_image_gradient_vu(image, sigma_px=DEFAULT_IMAGE_GRADIENT_SIGMA_PX)
+
+    def forged_ridge(**kwargs: object) -> RidgeRefineResult:
+        offset = kwargs['initial_offset_vu']
+        assert isinstance(offset, tuple)
+        return RidgeRefineResult(
+            offset_vu=(float(offset[0]), float(offset[1])),
+            rotation_rad=0.0,
+            iterations=2,
+            converged=True,
+            applied=True,
+        )
+
+    # ``lm`` calls through the ridge MODULE (``_ridge.gradient_ridge_refine``),
+    # so patching the attribute on that module is what the driver sees.
+    monkeypatch.setattr(_ridge_mod, 'gradient_ridge_refine', forged_ridge)
+    # A far-off seed with a one-iteration budget cannot meet the step
+    # tolerance, so the DT-LM itself reports converged=False.
+    result = lm_subpixel_refine(
+        vertices_vu=vertices,
+        normals_vu=-outward_normals,
+        sigma_normal_per_vertex_px=sigmas,
+        image_edge_dt=dt,
+        image_gradient_vu=grad,
+        initial_offset_vu=(4.0, 4.0),
+        use_polarity=False,
+        max_iterations=1,
+        final_gradient_ridge=True,
+    )
+    assert result.converged is True
+
+
+def test_lm_unconverged_when_ridge_not_applied(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unapplied ridge leaves the DT-LM's own convergence verdict standing."""
+    from spindoctor.nav_technique.dt_fitting import ridge as _ridge_mod
+
+    shape = (96, 96)
+    radius = 18.0
+    dt = _build_dt_for_circle(shape, radius)
+    vertices, outward_normals = _build_circle_polyline((shape[0] / 2.0, shape[1] / 2.0), radius, 48)
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    image = _render_image_with_circle(shape, (shape[0] / 2.0, shape[1] / 2.0), radius)
+    grad = compute_image_gradient_vu(image, sigma_px=DEFAULT_IMAGE_GRADIENT_SIGMA_PX)
+
+    def forged_ridge(**kwargs: object) -> RidgeRefineResult:
+        offset = kwargs['initial_offset_vu']
+        assert isinstance(offset, tuple)
+        return RidgeRefineResult(
+            offset_vu=(float(offset[0]), float(offset[1])),
+            rotation_rad=0.0,
+            iterations=0,
+            converged=False,
+            applied=False,
+        )
+
+    # ``lm`` calls through the ridge MODULE (``_ridge.gradient_ridge_refine``),
+    # so patching the attribute on that module is what the driver sees.
+    monkeypatch.setattr(_ridge_mod, 'gradient_ridge_refine', forged_ridge)
+    result = lm_subpixel_refine(
+        vertices_vu=vertices,
+        normals_vu=-outward_normals,
+        sigma_normal_per_vertex_px=sigmas,
+        image_edge_dt=dt,
+        image_gradient_vu=grad,
+        initial_offset_vu=(4.0, 4.0),
+        use_polarity=False,
+        max_iterations=1,
+        final_gradient_ridge=True,
+    )
+    assert result.converged is False

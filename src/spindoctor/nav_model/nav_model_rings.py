@@ -30,19 +30,30 @@ from oops.backplane import Backplane
 
 from spindoctor.annotation import Annotations
 from spindoctor.config import DEFAULT_CONFIG, Config
-from spindoctor.feature.feature import NavFeature, NavReliabilityBreakdown
-from spindoctor.feature.feature_type import NavFeatureType
-from spindoctor.feature.flags import RingAnnulusFlags, RingEdgeFlags
-from spindoctor.feature.geometry import RingAnnulusGeometry, RingEdgePolyline
+from spindoctor.feature.feature import NavFeature
 from spindoctor.nav_model.nav_model import NavModel
 from spindoctor.nav_model.nav_model_rings_base import NavModelRingsBase
+from spindoctor.nav_model.ring_emission import (
+    RING_EDGE_DEFAULT_RELIABILITY,
+    RING_EDGE_SIGMA_ALONG_PX,
+    _build_annulus_feature,
+    _build_edge_feature,
+)
+from spindoctor.nav_model.ring_polyline import (
+    FLAT_CURVATURE_THRESHOLD_PX,
+    _composite_ring_renderings,
+    _is_straight_line,
+    _mask_bbox,
+    _median_radial_scale,
+    _polyline_from_edge_mask,
+    _radial_extent_px,
+)
 from spindoctor.nav_model.rings import (
     RingFeature,
     RingFeatureFilter,
     RingsRenderContext,
     validate_no_date_overlaps,
 )
-from spindoctor.support.filters import NavFilterKind, NavFilterSpec
 from spindoctor.support.time import now_dt, utc_to_et
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
@@ -56,31 +67,6 @@ __all__ = [
     'RING_EDGE_SIGMA_ALONG_PX',
     'NavModelRings',
 ]
-
-
-RING_EDGE_DEFAULT_RELIABILITY: float = 0.7
-"""Catalog default reliability for ring edges before per-image scaling.
-
-Mirrors the design's "catalog_default_reliability" term in the RING_EDGE
-sigmoid.  Phase-5 calibration may override it per planet ring.
-"""
-
-
-RING_EDGE_SIGMA_ALONG_PX: float = 0.5
-"""Per-vertex sigma_along_edge in pixels.
-
-Reflects polyline-sampling resolution; the design specifies ~0.5 px.
-"""
-
-
-FLAT_CURVATURE_THRESHOLD_PX: float = 1.0
-"""Pixel-deviation threshold below which a polyline is flagged straight.
-
-When the maximum deviation of the polyline from its best-fit straight
-line is below this value, the corresponding ``RING_EDGE`` feature is
-emitted with ``is_straight_line=True``.  The technique-level fitter
-then handles its rank-1 covariance.
-"""
 
 
 SPARSE_VISIBILITY_GRID_SIZE: int = 16
@@ -130,6 +116,18 @@ def _ring_annulus_emission_params(config: Config, planet: str) -> tuple[float, f
     planet_block = planets_block.get(planet, {}) or {}
 
     def _lookup(field: str) -> float:
+        """Read one emission field, preferring the planet block over the default.
+
+        Parameters:
+            field: Field name to read.
+
+        Returns:
+            The field's value as a float.
+
+        Raises:
+            KeyError: If neither the planet block nor the default block
+                defines the field, so a config typo fails at startup.
+        """
         if field in planet_block:
             return float(planet_block[field])
         if field in default_block:
@@ -200,6 +198,14 @@ class NavModelRings(NavModelRingsBase):
         *,
         config: Config | None = None,
     ) -> None:
+        """Build the per-planet ring model with empty render state.
+
+        Parameters:
+            name: Model instance name (e.g. ``'rings:SATURN'``).
+            obs: Observation snapshot the model renders against.
+            config: Optional ``Config`` override; ``None`` uses
+                ``DEFAULT_CONFIG``.
+        """
         super().__init__(name, obs, config=config)
         self._planet: str | None = None
         self._render_results: list[
@@ -212,6 +218,8 @@ class NavModelRings(NavModelRingsBase):
             ]
         ] = []
         self._km_per_pixel_radial: float = 0.0
+        self._radial_resolution_ext: NDArrayFloatType | None = None
+        self._ring_radius_ext: NDArrayFloatType | None = None
         self._extfov_v_size: int = 0
         self._extfov_u_size: int = 0
         self._predicted_center_vu: tuple[float, float] = (0.0, 0.0)
@@ -397,8 +405,28 @@ class NavModelRings(NavModelRingsBase):
             return
         resolutions: NDArrayFloatType = obs.ext_bp.ring_radial_resolution(ring_target).vals
         self._km_per_pixel_radial = float(np.mean(resolutions[np.isfinite(resolutions)]))
+        # Retained per pixel so a physical km displacement can be converted at
+        # the edge that carries it: the radial scale varies materially across a
+        # wide field (a frame spanning the C ring to the A ring), and the
+        # whole-image mean above is only appropriate for the per-vertex
+        # statistical sigma.
+        self._radial_resolution_ext = resolutions
+        # Retained so the emitted edge normals can be signed radially outward
+        # (see _polyline_from_edge_mask): the mask-neighbour test alone cannot
+        # tell the high-radius side from the low-radius side.
+        self._ring_radius_ext = np.asarray(bp_radii.mvals.filled(np.nan), dtype=np.float64)
 
         def min_res_at_radius(a: float) -> float | None:
+            """Finest radial resolution along the ring-plane circle of radius ``a``.
+
+            Parameters:
+                a: Ring-plane radius in km.
+
+            Returns:
+                The minimum km-per-pixel radial resolution over the pixels
+                that circle crosses, or ``None`` when it crosses none of the
+                extended FOV.
+            """
             border_arr: NDArrayBoolType = (
                 obs.ext_bp.border_atop(bp_radii.key, a).mvals.astype('bool').filled(False)
             )
@@ -571,6 +599,39 @@ class NavModelRings(NavModelRingsBase):
             max_radial_px, kmpp_threshold = _ring_annulus_emission_params(
                 self._config, self._planet or ''
             )
+            # Default radial orbit uncertainty for a catalog feature that
+            # carries no fitted rms; an edge's own rms takes precedence.  See
+            # config_050_rings.yaml for the value's provenance.
+            #
+            # CONTESTED ASSUMPTION, deliberately conservative: the catalog rms
+            # is consumed as a fully-correlated whole-edge displacement, but it
+            # is the residual of the edge's own orbit fit and therefore mixes a
+            # genuinely coherent radius error with longitude-varying resonant
+            # wander that does NOT displace the edge coherently.  The catalog
+            # shows the mixture directly -- the same A-ring outer edge is
+            # fitted to rms 10.18 km with no m-modes and 1.78 km with nine
+            # (config_310_saturn_rings.yaml), a 5.7x reduction attributable to
+            # mode structure alone -- so on the resonant edges that carry the
+            # largest rms this term is over-severe by roughly that factor.  The
+            # principled fix decomposes the catalog modes and prices only the
+            # m=0 part coherently, which needs per-mode amplitudes this channel
+            # does not consume today; until then the geometry partially
+            # compensates (wide-arc coverage shrinks the absorbed sensitivity
+            # in RingEdgeNav) and the over-severity is accepted and stated
+            # rather than modeled away.
+            default_orbit_sigma_km = float(self._config.rings['default_orbit_radial_sigma_km'])
+            # Operator-tunable severity for the contested assumption below:
+            # the fraction of the catalog rms treated as coherent.  1.0 is
+            # today's fully-correlated behavior; lowering it is the reversible
+            # lever pending the mode-aware decomposition.
+            correlated_fraction = float(
+                self._config.rings['orbit_radial_sigma_correlated_fraction']
+            )
+            if not 0.0 <= correlated_fraction <= 1.0:
+                raise ValueError(
+                    'rings.orbit_radial_sigma_correlated_fraction must be in [0, 1]; '
+                    f'got {correlated_fraction!r}'
+                )
             # System-level annulus gate: at very low ring resolution the
             # entire ring system spans only a handful of pixels, so even
             # a "well-traceable" per-edge polyline carries too little
@@ -603,7 +664,10 @@ class NavModelRings(NavModelRingsBase):
                 if not edge_info_list:
                     continue
                 for edge_mask, label_text, edge_label in edge_info_list:
-                    vertices_vu, normals_vu = _polyline_from_edge_mask(edge_mask)
+                    edge_orbit_rms_km = ring_feat.edge_uncertainty(edge_label)
+                    vertices_vu, normals_vu = _polyline_from_edge_mask(
+                        edge_mask, self._ring_radius_ext
+                    )
                     if vertices_vu.shape[0] == 0:
                         continue
                     radial_extent_px = _radial_extent_px(vertices_vu, normals_vu)
@@ -637,7 +701,26 @@ class NavModelRings(NavModelRingsBase):
                                 vertices_vu=vertices_vu,
                                 normals_vu=normals_vu,
                                 uncertainty_km=uncertainty_km,
+                                # The coherent displacement bound is a property
+                                # of THIS edge's own orbit solution, not the
+                                # feature-level max the per-vertex sigma uses.
+                                orbit_sigma_km=correlated_fraction
+                                * (
+                                    edge_orbit_rms_km
+                                    if edge_orbit_rms_km > 0.0
+                                    else default_orbit_sigma_km
+                                ),
                                 km_per_pixel_radial=max(self._km_per_pixel_radial, 1.0),
+                                # A physical km displacement converts at the
+                                # edge's own radial scale, with no rasterization
+                                # floor -- that floor belongs to the per-vertex
+                                # sigma and would understate a coherent
+                                # displacement on sub-km/px frames.
+                                orbit_km_per_pixel_radial=_median_radial_scale(
+                                    self._radial_resolution_ext,
+                                    edge_mask,
+                                    self._km_per_pixel_radial,
+                                ),
                                 is_straight_line=straight,
                                 bbox=_mask_bbox(edge_mask),
                                 subject_range_km=self._subject_range_km,
@@ -713,265 +796,3 @@ class NavModelRings(NavModelRingsBase):
                 continue
             out.add_annotations(self._create_edge_annotations(self.obs, edge_info_list, model_mask))
         return out
-
-
-def _polyline_from_edge_mask(
-    mask: NDArrayBoolType,
-) -> tuple[NDArrayFloatType, NDArrayFloatType]:
-    """Extract a polyline + per-vertex normal from a 1-pixel-wide edge mask.
-
-    Each True pixel becomes one polyline vertex.  The normal at each
-    vertex is the gradient direction across the local edge: the +1
-    side is the "high-radius" side (mask remains True looking outward)
-    and the -1 side is the gap (mask is False).  When no off-edge
-    neighbour is found (interior of a thick ridge), the normal is left
-    at zero, which is acceptable because the renderer's edge mask is
-    one pixel wide so interior ridge pixels do not occur.
-
-    Parameters:
-        mask: 2-D boolean ``(rows, cols)`` array of edge pixels in
-            extfov coordinates.
-
-    Returns:
-        ``(vertices_vu, normals_vu)`` arrays each of shape ``(N, 2)``.
-    """
-    if not mask.any():
-        empty: NDArrayFloatType = np.empty((0, 2), dtype=np.float64)
-        return empty, empty
-    vs, us = np.where(mask)
-    vertices_vu: NDArrayFloatType = np.stack([vs.astype(np.float64), us.astype(np.float64)], axis=1)
-    rows, cols = mask.shape
-    normals_vu = np.zeros_like(vertices_vu)
-    for i, (v, u) in enumerate(zip(vs, us, strict=True)):
-        v_dir = 0.0
-        u_dir = 0.0
-        if v > 0 and not mask[v - 1, u]:
-            v_dir = -1.0
-        elif v < rows - 1 and not mask[v + 1, u]:
-            v_dir = 1.0
-        if u > 0 and not mask[v, u - 1]:
-            u_dir = -1.0
-        elif u < cols - 1 and not mask[v, u + 1]:
-            u_dir = 1.0
-        norm = math.hypot(v_dir, u_dir) or 1.0
-        normals_vu[i, 0] = v_dir / norm
-        normals_vu[i, 1] = u_dir / norm
-    return vertices_vu, normals_vu
-
-
-def _radial_extent_px(vertices_vu: NDArrayFloatType, normals_vu: NDArrayFloatType) -> float:
-    """Return the polyline's radial extent (max - min projection on mean normal)."""
-    if vertices_vu.shape[0] == 0:
-        return 0.0
-    mean_normal = normals_vu.mean(axis=0)
-    norm = float(np.linalg.norm(mean_normal))
-    if norm == 0.0:
-        return 0.0
-    mean_normal = mean_normal / norm
-    projections = vertices_vu @ mean_normal
-    return float(projections.max() - projections.min())
-
-
-def _is_straight_line(vertices_vu: NDArrayFloatType) -> bool:
-    """Return True when the polyline's max-deviation from a best-fit line is tiny.
-
-    The polyline is straight when its maximum perpendicular deviation
-    from the best-fit straight line is below
-    ``FLAT_CURVATURE_THRESHOLD_PX``.  Computed by SVD of the centred
-    point cloud (the smallest singular vector is the normal direction).
-    """
-    if vertices_vu.shape[0] < 3:
-        return True
-    centred = vertices_vu - vertices_vu.mean(axis=0)
-    _, _, vh = np.linalg.svd(centred, full_matrices=False)
-    normal = vh[-1]
-    deviations = centred @ normal
-    return bool(float(np.max(np.abs(deviations))) <= FLAT_CURVATURE_THRESHOLD_PX)
-
-
-def _mask_bbox(mask: NDArrayBoolType) -> tuple[int, int, int, int]:
-    """Return ``(v_min, u_min, v_max, u_max)`` half-open bbox of True pixels."""
-    if not mask.any():
-        return (0, 0, 0, 0)
-    vs, us = np.where(mask)
-    return (
-        int(vs.min()),
-        int(us.min()),
-        int(vs.max()) + 1,
-        int(us.max()) + 1,
-    )
-
-
-def _composite_ring_renderings(
-    renderings: list[tuple[NDArrayFloatType, NDArrayBoolType, str, float]],
-    *,
-    extfov_shape: tuple[int, int],
-) -> tuple[NDArrayFloatType, NDArrayBoolType]:
-    """Union per-ring rendered images + masks into one composite annulus.
-
-    Each per-ring rendering carries an ext-FOV-shaped ``model_img`` /
-    ``model_mask`` pair from :class:`RingFeature.render`.  The composite
-    is the OR of the masks and the per-pixel maximum of the images so
-    overlapping rings keep their brightest contribution.
-
-    Parameters:
-        renderings: List of ``(model_img, model_mask, label, radial_extent)``
-            tuples (radial_extent is unused by this helper but kept on
-            the input row so the caller can read it without a second
-            iteration).
-        extfov_shape: ``(v, u)`` shape of the ext-FOV array — every
-            input rendering shares this shape.
-
-    Returns:
-        ``(composite_img, composite_mask)`` both shaped ``extfov_shape``.
-    """
-    composite_img: NDArrayFloatType = np.zeros(extfov_shape, dtype=np.float64)
-    composite_mask: NDArrayBoolType = np.zeros(extfov_shape, dtype=bool)
-    for img, mask, _label, _extent in renderings:
-        composite_img = np.maximum(composite_img, img)
-        composite_mask = composite_mask | mask
-    return composite_img, composite_mask
-
-
-def _build_edge_feature(
-    *,
-    ring_feat: RingFeature,
-    edge_label: str,
-    label_text: str,
-    planet: str,
-    vertices_vu: NDArrayFloatType,
-    normals_vu: NDArrayFloatType,
-    uncertainty_km: float,
-    km_per_pixel_radial: float,
-    is_straight_line: bool,
-    bbox: tuple[int, int, int, int],
-    subject_range_km: float,
-    source_model: str,
-) -> NavFeature:
-    """Construct a RING_EDGE NavFeature from polyline data."""
-    n = vertices_vu.shape[0]
-    sigma_radial_px = np.full(n, uncertainty_km / km_per_pixel_radial, dtype=np.float64)
-    sigma_along_px = np.full(n, RING_EDGE_SIGMA_ALONG_PX, dtype=np.float64)
-    visible_arc_fraction = 1.0
-    feature_id = f'ring_edge:{planet}:{ring_feat.key}:{edge_label}'
-    reliability = _ring_edge_reliability(
-        catalog_default=RING_EDGE_DEFAULT_RELIABILITY,
-        visible_arc_fraction=visible_arc_fraction,
-        shadow_occluded_fraction=0.0,
-        is_straight_line=is_straight_line,
-    )
-    return NavFeature(
-        feature_id=feature_id,
-        feature_type=NavFeatureType.RING_EDGE,
-        source_model=source_model,
-        geometry=RingEdgePolyline(
-            vertices_vu=vertices_vu,
-            normals_vu=normals_vu,
-            sigma_radial_per_vertex_px=sigma_radial_px,
-            sigma_along_edge_per_vertex_px=sigma_along_px,
-            is_straight_line=is_straight_line,
-            bbox_extfov_vu=bbox,
-        ),
-        subject_range_km=subject_range_km,
-        position_cov_px=None,
-        intensity_sigma_rel=0.0,
-        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
-        reliability=reliability,
-        reliability_reasons=NavReliabilityBreakdown(
-            visible_arc_fraction=visible_arc_fraction,
-            shadow_occluded_fraction=0.0,
-        ),
-        usable_types=frozenset({NavFeatureType.RING_EDGE}),
-        flags=RingEdgeFlags(
-            is_straight_line=is_straight_line,
-            polarity_predictable=False,
-            edge_name=f'{ring_feat.key}:{edge_label}',
-            planet_name=planet,
-        ),
-    )
-
-
-def _build_annulus_feature(
-    *,
-    ring_name: str,
-    planet: str,
-    model_img: NDArrayFloatType,
-    model_mask: NDArrayBoolType,
-    bbox: tuple[int, int, int, int],
-    predicted_center_vu: tuple[float, float],
-    subject_range_km: float,
-    constituent_count: int,
-    source_model: str,
-) -> NavFeature:
-    """Construct a RING_ANNULUS NavFeature when edges compress radially."""
-    feature_id = f'ring_annulus:{planet}:{ring_name}'
-    return NavFeature(
-        feature_id=feature_id,
-        feature_type=NavFeatureType.RING_ANNULUS,
-        source_model=source_model,
-        geometry=RingAnnulusGeometry(
-            bbox_extfov_vu=bbox,
-            predicted_center_vu=predicted_center_vu,
-        ),
-        subject_range_km=subject_range_km,
-        position_cov_px=None,
-        intensity_sigma_rel=0.0,
-        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
-        reliability=_ring_annulus_reliability(
-            constituent_count=constituent_count,
-            radial_extent_px=float(bbox[2] - bbox[0]),
-        ),
-        reliability_reasons=NavReliabilityBreakdown(visible_arc_fraction=1.0),
-        usable_types=frozenset({NavFeatureType.RING_ANNULUS}),
-        flags=RingAnnulusFlags(
-            planet_name=planet,
-            constituent_edge_count=constituent_count,
-        ),
-        template_img=model_img,
-        template_mask=model_mask,
-    )
-
-
-def _ring_edge_reliability(
-    *,
-    catalog_default: float,
-    visible_arc_fraction: float,
-    shadow_occluded_fraction: float,
-    is_straight_line: bool,
-) -> float:
-    """Reliability of RING_EDGE per the design's formula.
-
-    ``catalog_default * visible_arc_fraction * (1 - shadow_occluded_fraction)``
-    times a sigmoid of the (yet-uncalibrated) emission-angle factor; we
-    approximate the sigmoid by a constant in this implementation pending
-    Phase-5 calibration.  Straight-line edges get a 70% multiplier
-    because they contribute rank-1 constraints only.
-    """
-    base = catalog_default * visible_arc_fraction * (1.0 - shadow_occluded_fraction)
-    if is_straight_line:
-        base = base * 0.7
-    return float(np.clip(base, 0.0, 1.0))
-
-
-def _ring_annulus_reliability(*, constituent_count: int, radial_extent_px: float) -> float:
-    """Reliability of RING_ANNULUS per the design's formula.
-
-    The plan specifies
-    ``mean(constituent_reliabilities) * sigmoid(radial_extent_px / 50 - 1)``.
-    Per-edge constituent reliabilities are not tracked yet (the catalog
-    surfaces edge ``rms`` but no per-edge reliability scalar), so we
-    substitute the catalog-default reliability scaled by the number of
-    constituent edges (more edges -> more confident annulus, capped at 1).
-
-    Parameters:
-        constituent_count: Number of catalog edges fused into this annulus.
-        radial_extent_px: Width of the annulus in the radial direction.
-
-    Returns:
-        Reliability in ``[0, 1]``.
-    """
-    if constituent_count <= 0:
-        return 0.0
-    sigmoid_term = 1.0 / (1.0 + math.exp(-(radial_extent_px / 50.0 - 1.0)))
-    constituent_term = min(1.0, constituent_count / 5.0) * RING_EDGE_DEFAULT_RELIABILITY
-    return float(np.clip(constituent_term * sigmoid_term, 0.0, 1.0))

@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from tests.spindoctor.nav_technique.conftest import (
+    ArcPolylineFactory,
     CirclePolylineFactory,
     DiscImageFactory,
     FlatPolylineFactory,
@@ -15,11 +16,12 @@ from tests.spindoctor.nav_technique.conftest import (
 
 from spindoctor.nav_orchestrator.nav_context import NavContext
 from spindoctor.nav_technique.diagnostics import RingEdgeDiagnostics
+from spindoctor.nav_technique.dt_fitting import CoarseSearchResult
 from spindoctor.nav_technique.nav_technique_ring_edge import (
-    _RANK1_NULL_RELATIVE_THRESHOLD,
     RingEdgeNav,
     aggregate_edge_normal_angle_deg,
 )
+from spindoctor.nav_technique.ring_edge_geometry import _RANK1_NULL_RELATIVE_THRESHOLD
 
 
 def test_ring_edge_nav_recovers_planted_offset_curved(
@@ -286,8 +288,8 @@ def test_ring_edge_nav_multi_edge_with_undetected_dominant_edges_not_spurious(
     # LM-displacement gate stays quiet.
     monkeypatch.setattr(
         nav_technique_ring_edge,
-        'coarse_ncc_search',
-        lambda *_args, **_kwargs: (1, -1),
+        'coarse_ncc_search_scored',
+        lambda *_args, **_kwargs: CoarseSearchResult(offset_vu=(1, -1), score=1.0),
     )
 
     result = technique.navigate([feat_a, feat_b, feat_c], context)
@@ -359,8 +361,8 @@ def test_ring_edge_nav_rejected_edge_on_detected_structure_stays_spurious(
     )
     monkeypatch.setattr(
         nav_technique_ring_edge,
-        'coarse_ncc_search',
-        lambda *_args, **_kwargs: (1, -1),
+        'coarse_ncc_search_scored',
+        lambda *_args, **_kwargs: CoarseSearchResult(offset_vu=(1, -1), score=1.0),
     )
 
     result = technique.navigate([feat_a, feat_b], context)
@@ -427,8 +429,8 @@ def test_ring_edge_nav_rank1_well_fit_subset_stays_spurious(
     )
     monkeypatch.setattr(
         nav_technique_ring_edge,
-        'coarse_ncc_search',
-        lambda *_args, **_kwargs: (1, -1),
+        'coarse_ncc_search_scored',
+        lambda *_args, **_kwargs: CoarseSearchResult(offset_vu=(1, -1), score=1.0),
     )
 
     result = technique.navigate([flat_feat, curved_feat], context)
@@ -494,8 +496,8 @@ def test_ring_edge_nav_marks_spurious_when_every_edge_fits_poorly(
     )
     monkeypatch.setattr(
         nav_technique_ring_edge,
-        'coarse_ncc_search',
-        lambda *_args, **_kwargs: (1, -1),
+        'coarse_ncc_search_scored',
+        lambda *_args, **_kwargs: CoarseSearchResult(offset_vu=(1, -1), score=1.0),
     )
 
     result = technique.navigate(features, context)
@@ -551,8 +553,8 @@ def test_ring_edge_nav_single_edge_low_inlier_fraction_stays_spurious(
     )
     monkeypatch.setattr(
         nav_technique_ring_edge,
-        'coarse_ncc_search',
-        lambda *_args, **_kwargs: (1, -1),
+        'coarse_ncc_search_scored',
+        lambda *_args, **_kwargs: CoarseSearchResult(offset_vu=(1, -1), score=1.0),
     )
 
     result = technique.navigate([feature], context)
@@ -625,8 +627,8 @@ def test_ring_edge_nav_flat_parallel_edges_with_minority_snaps_not_spurious(
     # LM-displacement gate stays quiet; this test is about the per-edge gate.
     monkeypatch.setattr(
         nav_technique_ring_edge,
-        'coarse_ncc_search',
-        lambda *_args, **_kwargs: (-2, 0),
+        'coarse_ncc_search_scored',
+        lambda *_args, **_kwargs: CoarseSearchResult(offset_vu=(-2, 0), score=1.0),
     )
 
     result = technique.navigate(features, context)
@@ -690,8 +692,8 @@ def test_ring_edge_nav_rank1_tangent_slide_not_gated(
     )
     monkeypatch.setattr(
         nav_technique_ring_edge,
-        'coarse_ncc_search',
-        lambda *_args, **_kwargs: (-2, 0),
+        'coarse_ncc_search_scored',
+        lambda *_args, **_kwargs: CoarseSearchResult(offset_vu=(-2, 0), score=1.0),
     )
 
     result = technique.navigate([feature], context)
@@ -840,3 +842,315 @@ def test_ring_edge_nav_3dof_flat_edge_remains_rank_deficient(
     assert result.covariance_px2.shape == (3, 3)
     assert isinstance(result.diagnostics, RingEdgeDiagnostics)
     assert result.diagnostics.is_rank_1 is True
+
+
+# ---------------------------------------------------------------------------
+# Radial orbit-uncertainty channel
+# ---------------------------------------------------------------------------
+
+
+def test_ring_edge_orbit_sigma_widens_partial_arc_along_its_radial_axis(
+    disc_image: DiscImageFactory,
+    arc_polyline: ArcPolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """On a partial arc the declared sigma lands on the arc's radial axis.
+
+    A short arc's normals are nearly parallel, so a coherent radial
+    displacement is absorbed into the translation essentially one-for-one:
+    the covariance difference is the rank-1 outer product of that radial
+    direction with eigenvalue ``sigma_orbit**2``.
+    """
+    shape = (200, 200)
+    cv, cu = 100.0, 100.0
+    radius = 32.0
+    image = disc_image(shape, (cv, cu), radius)
+    vertices, outward = arc_polyline((cv - 0.7, cu - 1.3), radius, 60, -0.4, 0.4)
+    context = make_nav_context(image)
+    technique = RingEdgeNav()
+    plain = make_ring_feature(
+        'arc', vertices=vertices, outward_normals=outward, is_straight_line=False
+    )
+    declared = make_ring_feature(
+        'arc',
+        vertices=vertices,
+        outward_normals=outward,
+        is_straight_line=False,
+        sigma_orbit_radial_px=2.0,
+    )
+    result_plain = technique.navigate([plain], context)
+    result_declared = technique.navigate([declared], context)
+    diff = np.asarray(result_declared.covariance_px2) - np.asarray(result_plain.covariance_px2)
+    eigvals = np.linalg.eigvalsh(diff)
+    # The arc absorbs the displacement essentially one-for-one along its own
+    # radial axis, and slightly MORE than one-for-one: a single translation
+    # overshoots the middle of an arc to reduce the error at its ends, so the
+    # derived sensitivity runs a little above 1 and the major eigenvalue a
+    # little above sigma_orbit**2 = 4.0.
+    assert float(eigvals.max()) == pytest.approx(4.22, rel=0.02)
+    # With the sensitivity at or above 1 the isotropic complement is zero, so
+    # the perpendicular axis takes nothing.
+    assert float(eigvals.min()) == pytest.approx(0.0, abs=1.0e-9)
+
+
+def test_ring_edge_orbit_sigma_widens_full_annulus_isotropically(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A closed annulus reports the orbit bound on BOTH axes, not one.
+
+    A uniform semimajor-axis error dilates a closed ring rather than
+    translating it, so the linearized fit absorbs almost none of it and no
+    radial axis is distinguished.  The nonlinear acquisition can still lock
+    onto a translation, and which direction it picks is exactly what cannot
+    be predicted, so the inflation becomes isotropic: both axes carry the
+    full ``sigma_orbit**2``.
+
+    This is the regression guard for the earlier construction, which took the
+    dominant eigenvector of the normals' outer-product sum.  On a closed ring
+    that eigen-decomposition is degenerate (the two eigenvalues agree to ~1%,
+    so the axis is set by rounding), and it widened one arbitrary axis by the
+    full variance while leaving the perpendicular axis untouched -- letting a
+    frame the channel should demote still pass the tier gate through the
+    un-widened axis.  Both eigenvalues must now be inflated.
+    """
+    shape = (200, 200)
+    cv, cu = 100.0, 100.0
+    radius = 32.0
+    image = disc_image(shape, (cv, cu), radius)
+    vertices, outward = circle_polyline((cv - 0.7, cu - 1.3), radius, 120)
+    context = make_nav_context(image)
+    technique = RingEdgeNav()
+    plain = make_ring_feature(
+        'outer', vertices=vertices, outward_normals=outward, is_straight_line=False
+    )
+    declared = make_ring_feature(
+        'outer',
+        vertices=vertices,
+        outward_normals=outward,
+        is_straight_line=False,
+        sigma_orbit_radial_px=2.0,
+    )
+    result_plain = technique.navigate([plain], context)
+    result_declared = technique.navigate([declared], context)
+    diff = np.asarray(result_declared.covariance_px2) - np.asarray(result_plain.covariance_px2)
+    eigvals = np.linalg.eigvalsh(diff)
+    # No axis is left un-widened: the SMALLEST eigenvalue of the added term
+    # still carries essentially the whole sigma**2 = 4.0 px^2.
+    assert float(eigvals.min()) == pytest.approx(4.0, rel=0.05)
+    # And no axis is double-counted beyond the bound.
+    assert float(eigvals.max()) == pytest.approx(4.0, rel=0.05)
+
+
+def test_ring_edge_orbit_sigma_offset_unchanged(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """The channel widens the reported uncertainty; it never moves the fit."""
+    shape = (200, 200)
+    cv, cu = 100.0, 100.0
+    radius = 32.0
+    image = disc_image(shape, (cv, cu), radius)
+    vertices, outward = circle_polyline((cv - 0.7, cu - 1.3), radius, 120)
+    context = make_nav_context(image)
+    technique = RingEdgeNav()
+    plain = make_ring_feature(
+        'outer', vertices=vertices, outward_normals=outward, is_straight_line=False
+    )
+    declared = make_ring_feature(
+        'outer',
+        vertices=vertices,
+        outward_normals=outward,
+        is_straight_line=False,
+        sigma_orbit_radial_px=2.0,
+    )
+    result_plain = technique.navigate([plain], context)
+    result_declared = technique.navigate([declared], context)
+    assert result_declared.offset_px[0] == pytest.approx(result_plain.offset_px[0])
+    assert result_declared.offset_px[1] == pytest.approx(result_plain.offset_px[1])
+
+
+def test_ring_edge_orbit_sigma_rank1_scene_stays_rank1(
+    horizontal_step_image: HorizontalStepImageFactory,
+    flat_polyline: FlatPolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """On an all-straight scene the inflation follows the projection axis.
+
+    The rank-1 projected covariance must stay exactly singular along the
+    tangent after the orbit inflation (the term is added along the same
+    aggregate normal the projection used), with the normal-axis variance
+    increased by ``sigma_orbit**2``.
+    """
+    shape = (200, 200)
+    image = horizontal_step_image(shape, 100.0)
+    vertices, outward = flat_polyline(101.5, 20.0, 180.0, 120)
+    context = make_nav_context(image)
+    technique = RingEdgeNav()
+    plain = make_ring_feature(
+        'flat', vertices=vertices, outward_normals=outward, is_straight_line=True
+    )
+    declared = make_ring_feature(
+        'flat',
+        vertices=vertices,
+        outward_normals=outward,
+        is_straight_line=True,
+        sigma_orbit_radial_px=2.0,
+    )
+    result_plain = technique.navigate([plain], context)
+    result_declared = technique.navigate([declared], context)
+    eig_declared = np.linalg.eigvalsh(result_declared.covariance_px2)
+    null_eigval = float(eig_declared.min())
+    observed_eigval = float(eig_declared.max())
+    assert (
+        null_eigval == pytest.approx(0.0, abs=1.0e-9)
+        or null_eigval / observed_eigval < _RANK1_NULL_RELATIVE_THRESHOLD
+    )
+    eig_plain = np.linalg.eigvalsh(result_plain.covariance_px2)
+    assert observed_eigval == pytest.approx(float(eig_plain.max()) + 4.0, rel=1.0e-6)
+
+
+def test_ring_edge_orbit_sigma_recorded_in_diagnostics(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    shape = (200, 200)
+    cv, cu = 100.0, 100.0
+    radius = 32.0
+    image = disc_image(shape, (cv, cu), radius)
+    vertices, outward = circle_polyline((cv, cu), radius, 120)
+    feature = make_ring_feature(
+        'outer',
+        vertices=vertices,
+        outward_normals=outward,
+        is_straight_line=False,
+        sigma_orbit_radial_px=1.75,
+    )
+    technique = RingEdgeNav()
+    result = technique.navigate([feature], make_nav_context(image))
+    assert isinstance(result.diagnostics, RingEdgeDiagnostics)
+    assert result.diagnostics.sigma_orbit_radial_px == pytest.approx(1.75)
+
+
+def test_effective_orbit_sigma_is_weight_weighted_mean(
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+) -> None:
+    """Two features' sigmas combine by their share of the final LM weight."""
+    from spindoctor.nav_technique.ring_edge_geometry import _effective_orbit_sigma_px
+
+    vertices_a, normals_a = circle_polyline((50.0, 50.0), 20.0, 10)
+    vertices_b, normals_b = circle_polyline((50.0, 50.0), 30.0, 10)
+    feat_a = make_ring_feature(
+        'a',
+        vertices=vertices_a,
+        outward_normals=normals_a,
+        is_straight_line=False,
+        sigma_orbit_radial_px=1.0,
+    )
+    feat_b = make_ring_feature(
+        'b',
+        vertices=vertices_b,
+        outward_normals=normals_b,
+        is_straight_line=False,
+        sigma_orbit_radial_px=3.0,
+    )
+    # Feature a carries 3x the total weight of feature b.
+    weights = np.concatenate([np.full(10, 3.0), np.full(10, 1.0)])
+    sigma = _effective_orbit_sigma_px([feat_a, feat_b], weights)
+    assert sigma == pytest.approx((30.0 * 1.0 + 10.0 * 3.0) / 40.0)
+
+
+def test_effective_orbit_sigma_zero_weights_returns_max(
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+) -> None:
+    """A degenerate (all-zero-weight) fit falls back to the conservative max."""
+    from spindoctor.nav_technique.ring_edge_geometry import _effective_orbit_sigma_px
+
+    vertices, normals = circle_polyline((50.0, 50.0), 20.0, 10)
+    feat = make_ring_feature(
+        'a',
+        vertices=vertices,
+        outward_normals=normals,
+        is_straight_line=False,
+        sigma_orbit_radial_px=2.5,
+    )
+    sigma = _effective_orbit_sigma_px([feat], np.zeros(10))
+    assert sigma == pytest.approx(2.5)
+
+
+def test_effective_orbit_sigma_zero_when_undeclared(
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+) -> None:
+    from spindoctor.nav_technique.ring_edge_geometry import _effective_orbit_sigma_px
+
+    vertices, normals = circle_polyline((50.0, 50.0), 20.0, 10)
+    feat = make_ring_feature(
+        'a', vertices=vertices, outward_normals=normals, is_straight_line=False
+    )
+    assert _effective_orbit_sigma_px([feat], np.ones(10)) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Coarse-acquisition gate, end to end through navigate()
+# ---------------------------------------------------------------------------
+
+
+def test_ring_edge_nav_spurious_when_coarse_acquisition_finds_no_lock(
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A model with no matching image edge is rejected by the coarse gate.
+
+    Drives the real acquisition (no monkeypatched score): the image carries a
+    small disc far from the model ring, so no integer shift in the search
+    window puts an appreciable fraction of the model's rasterized polyline on
+    a detected edge pixel.  The fit has nothing to refine, and the technique
+    must self-flag rather than report the LM's polish of noise.
+    """
+    shape = (300, 300)
+    # A small bright disc in one corner: real edges exist (so the DT is not
+    # degenerate) but almost none of them lie under the long model ring.
+    image = np.zeros(shape, dtype=np.float64)
+    vs, us = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), indexing='ij')
+    image[np.hypot(vs - 30.0, us - 30.0) <= 6.0] = 100.0
+    vertices, outward = circle_polyline((170.0, 170.0), 80.0, 600)
+    feature = make_ring_feature(
+        'orphan', vertices=vertices, outward_normals=outward, is_straight_line=False
+    )
+    technique = RingEdgeNav()
+    result = technique.navigate([feature], make_nav_context(image))
+    assert isinstance(result.diagnostics, RingEdgeDiagnostics)
+    assert result.diagnostics.coarse_peak_fraction < 0.05
+    assert result.spurious is True
+
+
+def test_ring_edge_nav_healthy_scene_clears_the_coarse_gate(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """The coarse gate stays quiet on a normal acquisition (margin check)."""
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 32.0)
+    vertices, outward = circle_polyline((99.3, 98.7), 32.0, 120)
+    feature = make_ring_feature(
+        'outer', vertices=vertices, outward_normals=outward, is_straight_line=False
+    )
+    technique = RingEdgeNav()
+    result = technique.navigate([feature], make_nav_context(image))
+    assert isinstance(result.diagnostics, RingEdgeDiagnostics)
+    assert result.diagnostics.coarse_peak_fraction > 0.05
+    assert result.spurious is False

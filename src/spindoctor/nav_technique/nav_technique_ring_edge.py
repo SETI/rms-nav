@@ -13,8 +13,7 @@ body blob) before declaring a final answer.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -24,9 +23,10 @@ from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.feature.geometry import RingEdgePolyline
 from spindoctor.nav_technique.confidence import evaluate_sigmoid_combination
 from spindoctor.nav_technique.diagnostics import RingEdgeDiagnostics
+from spindoctor.nav_technique.dt_fit_gates import DTFitGateConfig, evaluate_dt_fit_gates
 from spindoctor.nav_technique.dt_fitting import (
     build_polyline_mask,
-    coarse_ncc_search,
+    coarse_ncc_search_scored,
     lm_subpixel_refine,
 )
 from spindoctor.nav_technique.feasibility import NavFeasibilityReport
@@ -36,6 +36,20 @@ from spindoctor.nav_technique.nav_technique import (
     log_confidence_breakdown,
     rotation_pivot_distance_px,
     search_window_for_obs,
+)
+from spindoctor.nav_technique.ring_edge_geometry import (
+    _absorbed_orbit_sensitivity,
+    _aggregate_normal_orientation,
+    _effective_orbit_sigma_px,
+    _is_rank_1,
+    _orbit_inflated_covariance,
+    _rank1_projected_covariance,
+)
+from spindoctor.nav_technique.ring_edge_stats import (
+    _EdgeFitStat,
+    _per_edge_fit_stats,
+    _per_edge_median_max,
+    _per_edge_rms_summed,
 )
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.support.types import NDArrayFloatType
@@ -50,14 +64,6 @@ __all__ = ['RingEdgeNav', 'aggregate_edge_normal_angle_deg']
 # ``techniques.RingEdgeNav.tuning``.  No Python-level fallback;
 # missing-key access in ``__init__`` is a KeyError so a config typo
 # fails fast at process startup.
-
-
-_RANK1_NULL_RELATIVE_THRESHOLD: float = 1.0e-8
-"""Eigenvalue ratio below which a 2x2 covariance is treated as rank-1.
-
-Matches the ensemble's scale-independent rank-deficiency test so the
-two paths agree on whether a result is rank-deficient.
-"""
 
 
 def _aggregate_ring_edges(
@@ -131,6 +137,16 @@ class RingEdgeNav(NavTechnique):
     )
 
     def __init__(self, *, config: Config | None = None) -> None:
+        """Read the technique's tunables from config.
+
+        Parameters:
+            config: Optional ``Config`` override; ``None`` uses
+                ``DEFAULT_CONFIG``.
+
+        Raises:
+            KeyError: If any tuning key is missing, so a config typo fails
+                at process startup rather than mid-image.
+        """
         super().__init__(config=config)
         self.config.read_config()  # ensure cls.tuning is populated
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
@@ -152,6 +168,7 @@ class RingEdgeNav(NavTechnique):
         self._lm_tikhonov_alpha = float(self.tuning['lm_tikhonov_alpha'])
         self._gradient_ridge_refine = bool(self.tuning['gradient_ridge_refine'])
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
+        self._dt_gate_config = DTFitGateConfig.from_tuning(self.tuning)
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable ring edge.
@@ -234,12 +251,18 @@ class RingEdgeNav(NavTechnique):
                 margin_v,
                 margin_u,
             )
-            coarse_dv, coarse_du = coarse_ncc_search(
+            coarse = coarse_ncc_search_scored(
                 edge_mask,
                 polyline_mask,
                 (margin_v, margin_u),
             )
-            self.logger.debug('Coarse NCC offset: (%d, %d)', coarse_dv, coarse_du)
+            coarse_dv, coarse_du = coarse.offset_vu
+            self.logger.debug(
+                'Coarse NCC offset: (%d, %d), peak match fraction %.3f',
+                coarse_dv,
+                coarse_du,
+                coarse.score,
+            )
             # Ring-edge polarity prediction depends on lighting / gap-vs-ringlet
             # context the catalog does not encode today; skip polarity until
             # the polarity-predictable flag is wired (deferred work).
@@ -409,6 +432,24 @@ class RingEdgeNav(NavTechnique):
                 lm_displacement_px = float(
                     math.hypot(dv_final - float(coarse_dv), du_final - float(coarse_du))
                 )
+            # Shared DT fit-quality gates.  RingEdgeNav runs polarity-free
+            # (see the lm_subpixel_refine call above), so the polarity gates
+            # are inert here; the coarse-peak and LM-convergence signals
+            # still apply.
+            gate_verdict = evaluate_dt_fit_gates(
+                result,
+                self._dt_gate_config,
+                coarse_peak_fraction=coarse.score,
+                total_vertex_count=total_vertices,
+                use_polarity=False,
+            )
+            if gate_verdict.spurious_reasons:
+                self.logger.info(
+                    'DT fit-quality gate(s) fired: %s (coarse peak %.3f, lm_converged=%s)',
+                    ', '.join(gate_verdict.spurious_reasons),
+                    gate_verdict.coarse_peak_fraction,
+                    gate_verdict.lm_converged,
+                )
             spurious = (
                 result.degenerate
                 or result.rms_px
@@ -419,6 +460,7 @@ class RingEdgeNav(NavTechnique):
                 or result.inlier_count < self._spurious_min_inliers
                 or inlier_fraction_veto
                 or lm_displacement_px > self._spurious_max_lm_displacement_px
+                or gate_verdict.spurious
             )
             rotation_rad: float | None
             sigma_rotation_rad: float | None
@@ -474,6 +516,33 @@ class RingEdgeNav(NavTechnique):
                     'reported covariance',
                     self._spurious_waiver_sigma_floor_px,
                 )
+            # Radial orbit-uncertainty channel: the LM covariance describes
+            # the statistical lock onto the MODELED annulus; a catalog-orbit
+            # error displaces the whole annulus coherently and does not
+            # average down over vertices, so the declared orbit sigma is
+            # added to the reported covariance through the translation the
+            # fit would ABSORB from such a displacement
+            # (``_absorbed_orbit_sensitivity``: a short arc absorbs it
+            # one-for-one along its normal, a full annulus barely absorbs it
+            # at all because a uniform radial error is a dilation).  On a
+            # rank-1 scene the projection's own axis is reused unchanged, so
+            # the covariance stays exactly singular along the tangent.
+            sigma_orbit_px = _effective_orbit_sigma_px(features, result.weights)
+            if sigma_orbit_px > 0.0:
+                if is_rank_1:
+                    orbit_g = _aggregate_normal_orientation(polarity_normals)
+                else:
+                    orbit_g = _absorbed_orbit_sensitivity(polarity_normals, result.weights)
+                covariance = _orbit_inflated_covariance(covariance, orbit_g, sigma_orbit_px)
+                self.logger.info(
+                    'Widening the reported covariance by the declared radial orbit '
+                    'uncertainty: sigma %.3f px, absorbed sensitivity (v, u) = '
+                    '(%.3f, %.3f) (|g| = %.3f)',
+                    sigma_orbit_px,
+                    float(orbit_g[0]),
+                    float(orbit_g[1]),
+                    float(np.linalg.norm(orbit_g)),
+                )
             per_edge_rms_mean = per_edge_rms_summed / float(max(edge_count, 1))
             diagnostics = RingEdgeDiagnostics(
                 total_edge_length_px=total_edge_length_px,
@@ -482,6 +551,9 @@ class RingEdgeNav(NavTechnique):
                 per_edge_dt_median_max=per_edge_median_max,
                 edge_count=edge_count,
                 is_rank_1=bool(is_rank_1),
+                lm_converged=gate_verdict.lm_converged,
+                coarse_peak_fraction=gate_verdict.coarse_peak_fraction,
+                sigma_orbit_radial_px=sigma_orbit_px,
             )
             assert self.confidence_spec is not None  # set as class attribute
             confidence, breakdown = evaluate_sigmoid_combination(
@@ -491,6 +563,14 @@ class RingEdgeNav(NavTechnique):
                 return_breakdown=True,
             )
             log_confidence_breakdown(self.logger, breakdown)
+            if gate_verdict.confidence_cap is not None and confidence > gate_verdict.confidence_cap:
+                self.logger.info(
+                    'LM exited at the iteration cap without converging; capping '
+                    'confidence %.4f -> %.4f',
+                    float(confidence),
+                    gate_verdict.confidence_cap,
+                )
+                confidence = gate_verdict.confidence_cap
             self.logger.info(
                 'Converged at offset (%.4f, %.4f) px, RMS %.4f px, inliers %d / %d, '
                 'rank_1=%s, confidence %.4f',
@@ -535,43 +615,24 @@ class RingEdgeNav(NavTechnique):
             )
 
 
-def _is_rank_1(covariance: NDArrayFloatType) -> bool:
-    """Return True when the covariance is rank-deficient in its translation block.
+class _RingEdgeConfidenceContext:
+    """Adapter exposing ring-edge confidence terms in a single attribute set."""
 
-    For both 2x2 (translation-only) and 3x3 (translation + rotation) inputs
-    the test runs on the top-left 2x2 block — flat-ring rank-deficiency is
-    a property of the translation parameterisation, regardless of whether
-    rotation is fit.  Uses the same scale-independent test as the ensemble
-    combine: the ratio of the smallest absolute eigenvalue to the largest
-    must fall below :data:`_RANK1_NULL_RELATIVE_THRESHOLD`.
-    """
-    if covariance.shape not in ((2, 2), (3, 3)):
-        return False
-    block = covariance[:2, :2]
-    eigvals = np.linalg.eigvalsh(block)
-    largest = float(np.abs(eigvals).max())
-    smallest = float(np.abs(eigvals).min())
-    if largest == 0.0:
-        return True
-    return smallest / largest < _RANK1_NULL_RELATIVE_THRESHOLD
+    def __init__(self, *, at_edge: bool, diagnostics: RingEdgeDiagnostics) -> None:
+        """Flatten the diagnostics plus ``at_edge`` into one attribute set.
 
-
-def _aggregate_normal_orientation(polarity_normals: NDArrayFloatType) -> NDArrayFloatType:
-    """Return the dominant unit-normal orientation of the aggregated edges.
-
-    The dominant eigenvector of the per-vertex normals' outer-product sum;
-    polarity-sign-independent (a gap's inner and outer edges carry opposite
-    normal senses, so a plain mean could cancel).
-
-    Parameters:
-        polarity_normals: ``(N, 2)`` per-vertex edge normals (either sign).
-
-    Returns:
-        Unit 2-vector in ``(v, u)`` order.
-    """
-    outer_sum = polarity_normals.T @ polarity_normals
-    _eigvals, eigvecs = np.linalg.eigh(outer_sum)
-    return cast(NDArrayFloatType, eigvecs[:, -1])
+        Parameters:
+            at_edge: Whether the converged offset reached the search-window
+                boundary; it lives on the result, not the diagnostics.
+            diagnostics: The technique's populated diagnostics.
+        """
+        self.at_edge = at_edge
+        self.total_edge_length_px = diagnostics.total_edge_length_px
+        self.per_edge_dt_rms_summed = diagnostics.per_edge_dt_rms_summed
+        self.per_edge_dt_rms_mean = diagnostics.per_edge_dt_rms_mean
+        self.per_edge_dt_median_max = diagnostics.per_edge_dt_median_max
+        self.edge_count = diagnostics.edge_count
+        self.is_rank_1 = diagnostics.is_rank_1
 
 
 def aggregate_edge_normal_angle_deg(features: list[NavFeature]) -> float | None:
@@ -603,195 +664,3 @@ def aggregate_edge_normal_angle_deg(features: list[NavFeature]) -> float | None:
     elif angle > 90.0:
         angle -= 180.0
     return float(angle)
-
-
-def _rank1_projected_covariance(
-    covariance: NDArrayFloatType, polarity_normals: NDArrayFloatType
-) -> NDArrayFloatType:
-    """Project a rank-1 fit's covariance onto its observable (edge-normal) axis.
-
-    The translation block becomes the exactly singular ``sigma_n^2 n n^T``,
-    where ``n`` is the aggregate edge-normal orientation and ``sigma_n^2``
-    the input covariance's marginal variance along it.  Exact singularity is
-    the representation the ensemble is built around: ``pinvh`` drops the
-    exact null space when forming the information matrix (keeping the
-    normal-axis measurement), the combine's rank-deficiency test fires, the
-    fused offset becomes the minimum-norm representative along the edge
-    (sliding along a straight edge is a symmetry of the scene), and the
-    unobservable axis is reported through the
-    ``sigma_along_unobservable_px = inf`` sentinel rather than an inflated
-    per-axis sigma that would poison the tier check.
-
-    The normal orientation is the dominant eigenvector of the per-vertex
-    normals' outer-product sum, which is polarity-sign-independent — the
-    aggregated edges' normals point in opposite senses (a gap's inner and
-    outer edges), so a plain mean could cancel.
-
-    For a 3x3 (rotation-fitting) covariance the rotation variance is kept
-    and the translation-rotation cross-covariances are zeroed: a
-    cross-covariance into an unobservable translation direction carries no
-    usable information.
-
-    Parameters:
-        covariance: The LM's ``(2, 2)`` or ``(3, 3)`` covariance.
-        polarity_normals: ``(N, 2)`` per-vertex edge normals (either sign).
-
-    Returns:
-        A new covariance of the input shape whose translation block is
-        exactly rank-1.
-    """
-    n_hat = _aggregate_normal_orientation(polarity_normals)
-    sigma_n_sq = float(n_hat @ covariance[:2, :2] @ n_hat)
-    projected = np.zeros_like(covariance)
-    projected[:2, :2] = sigma_n_sq * np.outer(n_hat, n_hat)
-    if covariance.shape == (3, 3):
-        projected[2, 2] = covariance[2, 2]
-    return projected
-
-
-def _per_edge_rms_summed(features: list[NavFeature], residuals: NDArrayFloatType) -> float:
-    """Sum the per-edge weighted RMS DT residual across all consumed edges."""
-    total = 0.0
-    cursor = 0
-    for feat in features:
-        if not isinstance(feat.geometry, RingEdgePolyline):
-            continue
-        n = feat.geometry.vertices_vu.shape[0]
-        if n == 0:
-            continue
-        slice_residuals = residuals[cursor : cursor + n]
-        cursor += n
-        if slice_residuals.size == 0:
-            continue
-        rms = float(np.sqrt(np.mean(slice_residuals * slice_residuals)))
-        total += rms
-    return total
-
-
-@dataclass(frozen=True)
-class _EdgeFitStat:
-    """Per-edge fit statistics for the spurious-veto waiver.
-
-    Parameters:
-        inlier_count: Vertices of this edge with a strictly positive final
-            weight (prior precision times Tukey biweight) -- the same
-            criterion ``LMRefineResult.inlier_count`` applies to the
-            aggregated vertex set.
-        vertex_count: Total vertices of this edge.
-        median_abs_residual_px: Median absolute DT residual of this edge's
-            vertices at the converged offset.  Small when the edge lies
-            along a detected image edge (whether or not the robust fit
-            kept it); tens of pixels when no image edge exists near it.
-        is_straight: The edge's ``is_straight_line`` flag; a straight edge
-            constrains only its normal axis (rank-1).
-    """
-
-    inlier_count: int
-    vertex_count: int
-    median_abs_residual_px: float
-    is_straight: bool
-
-    @property
-    def inlier_fraction(self) -> float:
-        """Fraction of this edge's vertices retained as Tukey inliers."""
-        return float(self.inlier_count) / float(self.vertex_count)
-
-
-def _per_edge_fit_stats(
-    features: list[NavFeature],
-    *,
-    residuals: NDArrayFloatType,
-    weights: NDArrayFloatType,
-) -> list[_EdgeFitStat]:
-    """Return per-edge fit statistics from the final LM residuals and weights.
-
-    Splitting the aggregate fit per edge lets the spurious gate
-    distinguish a fusion whose vertices are rejected because some edges
-    are undetectable in the image (large per-edge median residuals --
-    nothing is there) from a wrong-ring lock that leaves a rejected edge
-    sitting on a detected image edge it disagrees with.
-
-    Parameters:
-        features: The consumed features, in the order their vertices were
-            concatenated for the LM fit.
-        residuals: Per-vertex raw DT residuals from the fit, in the same
-            concatenation order.
-        weights: Per-vertex final weights from the fit, in the same
-            concatenation order.
-
-    Returns:
-        One :class:`_EdgeFitStat` per consumed non-empty edge, in
-        concatenation order.
-    """
-    stats: list[_EdgeFitStat] = []
-    cursor = 0
-    for feat in features:
-        if not isinstance(feat.geometry, RingEdgePolyline):
-            continue
-        n = feat.geometry.vertices_vu.shape[0]
-        if n == 0:
-            continue
-        slice_weights = weights[cursor : cursor + n]
-        slice_residuals = residuals[cursor : cursor + n]
-        cursor += n
-        stats.append(
-            _EdgeFitStat(
-                inlier_count=int(np.count_nonzero(slice_weights > 0.0)),
-                vertex_count=n,
-                median_abs_residual_px=float(np.median(np.abs(slice_residuals))),
-                is_straight=bool(feat.geometry.is_straight_line),
-            )
-        )
-    return stats
-
-
-def _per_edge_median_max(features: list[NavFeature], residuals: NDArrayFloatType) -> float:
-    """Return the largest per-edge median absolute DT residual across edges.
-
-    A mis-convergence *diagnostic* (surfaced through
-    :class:`RingEdgeDiagnostics`, not a spurious gate): a wholly misaligned
-    or undetected edge puts most of its vertices roughly a ringlet spacing
-    from the nearest image edge, driving its median to that spacing, while
-    a well-matched edge's median sits at the fit residual.  Taking the max
-    over edges keeps one bad edge visible among any number of clean ones.
-    Residuals alone cannot separate "misaligned" from "undetectable in the
-    image", which is why the spurious decision uses the inlier fraction
-    instead.
-
-    Parameters:
-        features: The consumed features, in the order their vertices were
-            concatenated for the LM fit.
-        residuals: Per-vertex signed DT residuals from the fit, in the same
-            concatenation order.
-
-    Returns:
-        ``max_e median(|residuals_e|)`` over the consumed edges, or ``0.0``
-        when no edge has vertices.
-    """
-    worst = 0.0
-    cursor = 0
-    for feat in features:
-        if not isinstance(feat.geometry, RingEdgePolyline):
-            continue
-        n = feat.geometry.vertices_vu.shape[0]
-        if n == 0:
-            continue
-        slice_residuals = residuals[cursor : cursor + n]
-        cursor += n
-        if slice_residuals.size == 0:
-            continue
-        worst = max(worst, float(np.median(np.abs(slice_residuals))))
-    return worst
-
-
-class _RingEdgeConfidenceContext:
-    """Adapter exposing ring-edge confidence terms in a single attribute set."""
-
-    def __init__(self, *, at_edge: bool, diagnostics: RingEdgeDiagnostics) -> None:
-        self.at_edge = at_edge
-        self.total_edge_length_px = diagnostics.total_edge_length_px
-        self.per_edge_dt_rms_summed = diagnostics.per_edge_dt_rms_summed
-        self.per_edge_dt_rms_mean = diagnostics.per_edge_dt_rms_mean
-        self.per_edge_dt_median_max = diagnostics.per_edge_dt_median_max
-        self.edge_count = diagnostics.edge_count
-        self.is_rank_1 = diagnostics.is_rank_1

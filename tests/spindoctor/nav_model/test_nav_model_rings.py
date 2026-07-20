@@ -14,18 +14,22 @@ import pytest
 
 from spindoctor.config.config import Config
 from spindoctor.nav_model.nav_model_rings import (
-    FLAT_CURVATURE_THRESHOLD_PX,
+    _require_positive_finite_planet_scalar,
+    _ring_annulus_emission_params,
+)
+from spindoctor.nav_model.ring_emission import (
     RING_EDGE_DEFAULT_RELIABILITY,
     RING_EDGE_SIGMA_ALONG_PX,
+    _ring_annulus_reliability,
+    _ring_edge_reliability,
+)
+from spindoctor.nav_model.ring_polyline import (
+    FLAT_CURVATURE_THRESHOLD_PX,
     _composite_ring_renderings,
     _is_straight_line,
     _mask_bbox,
     _polyline_from_edge_mask,
     _radial_extent_px,
-    _require_positive_finite_planet_scalar,
-    _ring_annulus_emission_params,
-    _ring_annulus_reliability,
-    _ring_edge_reliability,
 )
 
 
@@ -289,3 +293,75 @@ def test_require_positive_finite_planet_scalar_rejects_non_numeric() -> None:
         _require_positive_finite_planet_scalar(
             'SATURN', 'fade_width_pix', {'fade_width_pix': 'big'}
         )
+
+
+def test_polyline_normals_are_radially_signed_with_a_radius_backplane() -> None:
+    """A rasterized closed ring emits outward-radial normals, not scan-order ones.
+
+    The mask-neighbour test fixes only the normal AXIS: it probes ``v - 1``
+    before ``v + 1`` and ``u - 1`` before ``u + 1``, so on a closed ring the
+    emitted signs follow scan order and rasterization.  Measured on this
+    fixture without a radius backplane, the mean dot with the true outward
+    radial is ~0.00 (the axis is right, the sense is random) even though the
+    mean ABSOLUTE dot is ~0.83.
+
+    That matters beyond tidiness: ``RingEdgeNav``'s orbit-uncertainty channel
+    sums the normals, so random signs fabricate coherence on geometry that
+    should cancel -- a closed ring measured a sensitivity of ~0.85 where the
+    true value is ~0, pointing along the rasterizer's quadrant bias.
+    """
+    from spindoctor.nav_technique.ring_edge_geometry import _absorbed_orbit_sensitivity
+
+    size = 401
+    center = (size - 1) / 2.0
+    vs, us = np.meshgrid(np.arange(size), np.arange(size), indexing='ij')
+    radius = np.hypot(vs - center, us - center)
+    mask = np.abs(radius - 120.0) <= 0.5
+    ring_radius = radius.astype(np.float64)
+
+    vertices, normals = _polyline_from_edge_mask(mask, ring_radius)
+    true_radial = np.stack([vertices[:, 0] - center, vertices[:, 1] - center], axis=-1)
+    true_radial /= np.linalg.norm(true_radial, axis=1, keepdims=True)
+    dots = np.sum(normals * true_radial, axis=1)
+    # Every normal points outward: the signed mean matches the absolute mean
+    # (which is below 1 only because the axis is quantized to eight directions).
+    assert float(np.mean(dots)) == pytest.approx(float(np.mean(np.abs(dots))), abs=1.0e-9)
+    assert float(np.min(dots)) > 0.0
+
+    # And the closed-ring limit the orbit channel relies on is now reachable.
+    sensitivity = _absorbed_orbit_sensitivity(normals, np.ones(len(normals)))
+    assert float(np.linalg.norm(sensitivity)) < 0.02
+
+
+def test_polyline_normals_unsigned_without_a_radius_backplane() -> None:
+    """Without the backplane the historical unsigned axis is emitted.
+
+    The distinguishing property is the SIGN, not the length: a fully
+    radially-signed result is also unit length, so asserting length alone
+    would pass either way.  Without the backplane the sign comes from the
+    mask-neighbour scan order, which on a closed ring puts a large share of
+    the normals on the inward side -- a signed result would have none.
+    """
+    size = 201
+    center = (size - 1) / 2.0
+    vs, us = np.meshgrid(np.arange(size), np.arange(size), indexing='ij')
+    radius = np.hypot(vs - center, us - center)
+    mask = np.abs(radius - 60.0) <= 0.5
+    vertices, normals = _polyline_from_edge_mask(mask)
+    lengths = np.linalg.norm(normals, axis=1)
+    assert np.allclose(lengths, 1.0)
+
+    true_radial = np.stack([vertices[:, 0] - center, vertices[:, 1] - center], axis=-1)
+    true_radial /= np.linalg.norm(true_radial, axis=1, keepdims=True)
+    dots = np.sum(normals * true_radial, axis=1)
+    # Exactly half the ring's vertices come out pointing INWARD: the scan
+    # tests v - 1 before v + 1 and u - 1 before u + 1, so the sign is set by
+    # which neighbour is probed first, not by the geometry.
+    assert int(np.count_nonzero(dots < 0.0)) == 190
+    assert int(np.count_nonzero(dots > 0.0)) == 190
+
+    # The same fixture through the signed path leaves none pointing inward,
+    # which is the property that separates the two branches.
+    _signed_vertices, signed_normals = _polyline_from_edge_mask(mask, radius.astype(np.float64))
+    signed_dots = np.sum(signed_normals * true_radial, axis=1)
+    assert int(np.count_nonzero(signed_dots < 0.0)) == 0
