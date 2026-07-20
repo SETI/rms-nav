@@ -15,6 +15,7 @@ This guide is intended for developers who want to understand, modify, or extend 
    dev_guide_backplanes
    dev_guide_pds4
    dev_guide_simulator
+   dev_guide_agreement_estimator
    dev_guide_support
    dev_guide_testing
    dev_guide_extending
