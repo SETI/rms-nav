@@ -42,11 +42,13 @@ __all__ = [
     'DEFAULT_RIDGE_MAX_TOTAL_DISPLACEMENT_PX',
     'DEFAULT_RIDGE_SAMPLE_STEP_PX',
     'DEFAULT_TUKEY_C',
+    'CoarseSearchResult',
     'LMRefineResult',
     'RidgeRefineResult',
     'SecondaryBasin',
     'build_polyline_mask',
     'coarse_ncc_search',
+    'coarse_ncc_search_scored',
     'find_secondary_dt_minimum',
     'gradient_ridge_refine',
     'information_matrix_to_covariance',
@@ -191,6 +193,25 @@ inlier-fraction gate instead.  The value is a large-but-finite number
 """
 
 
+@dataclass(frozen=True)
+class CoarseSearchResult:
+    """Structured output of :func:`coarse_ncc_search_scored`.
+
+    Parameters:
+        offset_vu: ``(dv, du)`` integer offset pair at the peak.
+        score: The winning shift's per-vertex match fraction -- the fraction
+            of its in-bounds polyline vertices landing on edge pixels, in
+            ``[0, 1]``.  ``0.0`` when the polyline is empty or no candidate
+            shift was eligible.  A low score means the coarse acquisition
+            never had a lock: even at its best shift, most of the model
+            found no detected edge underneath it (see
+            :func:`evaluate_dt_fit_gates`).
+    """
+
+    offset_vu: tuple[int, int]
+    score: float
+
+
 def coarse_ncc_search(
     edge_mask: NDArrayBoolType,
     polyline_mask: NDArrayBoolType,
@@ -244,6 +265,43 @@ def coarse_ncc_search(
             non-negative ints, or ``min_support_fraction`` is outside
             ``[0, 1]``.
     """
+    return coarse_ncc_search_scored(
+        edge_mask,
+        polyline_mask,
+        search_window_vu,
+        min_support_fraction=min_support_fraction,
+    ).offset_vu
+
+
+def coarse_ncc_search_scored(
+    edge_mask: NDArrayBoolType,
+    polyline_mask: NDArrayBoolType,
+    search_window_vu: tuple[int, int],
+    *,
+    min_support_fraction: float = DEFAULT_COARSE_MIN_SUPPORT_FRACTION,
+) -> CoarseSearchResult:
+    """Run :func:`coarse_ncc_search` and also report the winning peak's score.
+
+    Identical search to :func:`coarse_ncc_search` (same arguments, same
+    validation, same tie-breaking); additionally returns the winning shift's
+    per-vertex match fraction so callers can gate on coarse-acquisition
+    quality.  The DT techniques call this form; the offset-only form is the
+    convenience wrapper.
+
+    Parameters:
+        edge_mask: See :func:`coarse_ncc_search`.
+        polyline_mask: See :func:`coarse_ncc_search`.
+        search_window_vu: See :func:`coarse_ncc_search`.
+        min_support_fraction: See :func:`coarse_ncc_search`.
+
+    Returns:
+        :class:`CoarseSearchResult` with the peak offset and its match
+        fraction.
+
+    Raises:
+        TypeError: if either entry of ``search_window_vu`` is not an int.
+        ValueError: same conditions as :func:`coarse_ncc_search`.
+    """
     if edge_mask.ndim != 2 or polyline_mask.ndim != 2:
         raise ValueError(
             'edge_mask and polyline_mask must be 2-D; got '
@@ -279,7 +337,7 @@ def coarse_ncc_search(
     # repeat numpy re-broadcasts.
     poly_vs, poly_us = np.where(polyline_mask)
     if poly_vs.size == 0:
-        return (0, 0)
+        return CoarseSearchResult(offset_vu=(0, 0), score=0.0)
     # Minimum in-bounds vertex count for a candidate shift to be eligible.
     # The per-vertex match fraction below is a ratio over the surviving
     # vertices, so a shift that clips nearly the whole polyline off-frame
@@ -320,7 +378,7 @@ def coarse_ncc_search(
                 best_key = key
                 best_dv = dv
                 best_du = du
-    return best_dv, best_du
+    return CoarseSearchResult(offset_vu=(best_dv, best_du), score=max(best_score, 0.0))
 
 
 @dataclass(frozen=True)
@@ -677,14 +735,25 @@ class LMRefineResult:
             dominate the mean); ``float('inf')`` when every vertex is
             polarity-rejected, so the degenerate case still trips the gate.
         iterations: Number of LM iterations actually performed.
-        converged: True if the step-norm tolerance was met before the
-            iteration cap.
+        converged: True if the reported pose is a verified optimum: either
+            the DT-LM met its step-norm tolerance before the iteration cap,
+            or the final gradient-ridge stage applied and met its own
+            step tolerance (the ridge optimum supersedes the DT objective
+            for the reported pose, and a quantized-DT stall that burns the
+            LM iteration budget at the integer seed is routine on dense
+            edge scenes -- the exact condition the ridge stage exists to
+            polish).  ``False`` means neither stage verified the pose: an
+            unverified fit, consumed by the shared DT fit-quality gates.
         inlier_count: Number of vertices that retained a strictly
             positive Tukey weight at the final estimate.
         degenerate: True when no vertex survived reweighting
             (``inlier_count == 0`` or the surviving weights sum to zero).
             In this case ``rms_px`` is ``+inf`` and ``covariance`` is
             all-``inf``; consumers treat it as a spurious fit.
+        polarity_rejected_count: Number of vertices the polarity filter
+            rejected at the seed offset (``0`` when ``use_polarity`` was
+            False).  ``polarity_rejected_count / N`` is the
+            polarity-rejection fraction the fit-quality gates consume.
     """
 
     offset_vu: tuple[float, float]
@@ -698,6 +767,7 @@ class LMRefineResult:
     converged: bool
     inlier_count: int
     degenerate: bool
+    polarity_rejected_count: int = 0
 
     def __post_init__(self) -> None:
         """Freeze the numpy arrays and validate shapes."""
@@ -1528,6 +1598,10 @@ def lm_subpixel_refine(
         if ridge.applied:
             state.dv, state.du = ridge.offset_vu
             state.dtheta = ridge.rotation_rad
+            # A converged ridge stage verifies the reported pose even when
+            # the DT-LM burned its iteration budget stalled on the
+            # integer-quantized DT (see ``LMRefineResult.converged``).
+            state.converged = state.converged or ridge.converged
             residuals_ridge, jacobian_ridge = _compute_residuals_and_jacobian(
                 vertices_vu=verts,
                 pivot_vu=pivot,
@@ -1613,4 +1687,5 @@ def lm_subpixel_refine(
         converged=state.converged,
         inlier_count=inlier_count,
         degenerate=degenerate,
+        polarity_rejected_count=int(np.count_nonzero(~state.polarity_mask)),
     )
