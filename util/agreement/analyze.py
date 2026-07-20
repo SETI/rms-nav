@@ -477,28 +477,41 @@ def report_noise_response(
     out.append('')
 
 
-def _specs_for_family(family: str) -> list[list[EstimatorSpec]]:
-    """The solve configurations reported for each family."""
+def _specs_for_family(
+    family: str,
+) -> list[tuple[list[EstimatorSpec], list[tuple[str, str]]]]:
+    """The solve configurations reported for each family.
+
+    Returns:
+        List of ``(specs, declared_pair_covariances)`` per solve.
+    """
     limb_img = EstimatorSpec('limb', 'full')
     limb_rot = EstimatorSpec('limb', 'full', basis='rotating')
     disc = EstimatorSpec('disc', 'full')
     ring = EstimatorSpec('ring', 'rank1')
     blob = EstimatorSpec('blob', 'full')
+    no_pairs: list[tuple[str, str]] = []
     if family == 'limb_disc':
-        return [[limb_img, disc]]
+        return [([limb_img, disc], no_pairs)]
     if family in ('limb_disc_ring_fixed', 'limb_disc_ring_diverse'):
-        return [[limb_img, disc, ring], [limb_img, disc, ring, blob]]
+        return [([limb_img, disc, ring], no_pairs), ([limb_img, disc, ring, blob], no_pairs)]
     if family in ('limb_ring_aniso_fixed', 'limb_ring_aniso_diverse'):
-        return [[limb_rot, ring], [limb_rot, disc, ring]]
+        return [([limb_rot, ring], no_pairs), ([limb_rot, disc, ring], no_pairs)]
     if family == 'multi_body':
-        return [
-            [
-                EstimatorSpec('limb@RHEA', 'full', group='limb'),
-                EstimatorSpec('limb@DIONE', 'full', group='limb'),
-                EstimatorSpec('disc@RHEA', 'full', group='disc'),
-                EstimatorSpec('disc@DIONE', 'full', group='disc'),
-            ]
+        multi = [
+            EstimatorSpec('limb@RHEA', 'full', group='limb'),
+            EstimatorSpec('limb@DIONE', 'full', group='limb'),
+            EstimatorSpec('disc@RHEA', 'full', group='disc'),
+            EstimatorSpec('disc@DIONE', 'full', group='disc'),
         ]
+        # The naive solve assumes cross-body same-technique independence;
+        # the second declares the limb-limb pair covariance instead of
+        # assuming it away (the measured coupling is material at ~1.5 px^2,
+        # while the disc-disc coupling, though correlated, is ~1e-4 px^2 --
+        # immaterial in magnitude, and declaring both within-group pairs
+        # would make the system degenerate again).
+        declared = [('limb@RHEA', 'limb@DIONE')]
+        return [(multi, no_pairs), (multi, declared)]
     raise ValueError(f'unknown family {family!r}')
 
 
@@ -534,10 +547,18 @@ def main(argv: list[str] | None = None) -> int:
         out.append(f'{n_rows} scenes ({n_err} errors), {len(cohort)} usable frames.')
         out.append('')
         spec_sets = _specs_for_family(family)
-        for specs in spec_sets:
+        for specs, declared_pairs in spec_sets:
             names = '+'.join(s.name for s in specs)
+            if declared_pairs:
+                names += ' (declared pair covariances)'
             usable = [c for c in cohort if sum(1 for s in specs if s.name in c.sample.offsets) >= 2]
-            report_solve(out, usable, specs, f'{family}: solve over {names}')
+            report_solve(
+                out,
+                usable,
+                specs,
+                f'{family}: solve over {names}',
+                pair_covariances=declared_pairs,
+            )
             report_truth_reference(out, usable, specs)
         # Intrinsic pair couplings (truth-based): the independence
         # assumption every undeclared pair rides on, measured per cohort.
