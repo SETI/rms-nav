@@ -419,6 +419,36 @@ def test_choose_random_images_with_offset_filter(
     assert sorted(_yielded_names(groups)) == ['N1000000101', 'N1000000201']
 
 
+@pytest.mark.parametrize('bad', [0, -1, -5])
+def test_choose_random_images_rejects_non_positive_programmatic(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, bad: int
+) -> None:
+    # 0 would silently disable sampling (yielding everything) and a negative
+    # value would yield exactly one frame; both are rejected at the boundary.
+    _install_two_camera_index(ds, monkeypatch)
+
+    with pytest.raises(ValueError, match='positive integer'):
+        list(ds.yield_image_files_index(volumes=['COISS_2001'], choose_random_images=bad))
+
+
+@pytest.mark.parametrize('bad', ['0', '-3'])
+def test_choose_random_images_argparse_rejects_non_positive(bad: str) -> None:
+    parser = argparse.ArgumentParser()
+    DataSetPDS3CassiniISS.add_selection_arguments(parser)
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(['--choose-random-images', bad])
+
+
+def test_choose_random_images_argparse_accepts_positive() -> None:
+    parser = argparse.ArgumentParser()
+    DataSetPDS3CassiniISS.add_selection_arguments(parser)
+
+    arguments = parser.parse_args(['--choose-random-images', '5'])
+
+    assert arguments.choose_random_images == 5
+
+
 def test_selection_arguments_include_results_filters() -> None:
     parser = argparse.ArgumentParser()
     DataSetPDS3CassiniISS.add_selection_arguments(parser)

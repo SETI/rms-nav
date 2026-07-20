@@ -30,6 +30,24 @@ _LABEL_IMAGE_POINTER_RE = re.compile(
 )
 
 
+def _positive_int(value: str) -> int:
+    """Parses an argparse value as a strictly positive integer.
+
+    Parameters:
+        value: The raw command-line string.
+
+    Returns:
+        The parsed integer.
+
+    Raises:
+        argparse.ArgumentTypeError: If the value is not a positive integer.
+    """
+    ivalue = int(value)
+    if ivalue <= 0:
+        raise argparse.ArgumentTypeError(f'must be a positive integer, got {value!r}')
+    return ivalue
+
+
 class DataSetPDS3(DataSet):
     """Parent class for PDS3 datasets.
 
@@ -413,10 +431,10 @@ class DataSetPDS3(DataSet):
         #     help='Expression to evaluate to decide whether to reprocess an offset')
         group.add_argument(
             '--choose-random-images',
-            type=int,
+            type=_positive_int,
             default=None,
             metavar='N',
-            help='Choose N random images to process within other constraints',
+            help='Choose N random images to process within other constraints (N must be positive)',
         )
         # group.add_argument(
         #     '--show-image-list-only', action='store_true', default=False,
@@ -679,6 +697,10 @@ class DataSetPDS3(DataSet):
         has_offset_nonspice_error: bool = kwargs.pop('has_offset_nonspice_error', False)
         nav_results_root: str | Path | FCPath | None = kwargs.pop('nav_results_root', None)
         choose_random_images: int | None = kwargs.pop('choose_random_images', None)
+        if choose_random_images is not None and choose_random_images <= 0:
+            raise ValueError(
+                f'choose_random_images must be a positive integer, got {choose_random_images}'
+            )
         max_filenames: int | None = kwargs.pop('max_filenames', None)
         arguments: argparse.Namespace | None = kwargs.pop('arguments', None)
         additional_index_columns: tuple[str, ...] = kwargs.pop('additional_index_columns', ())
