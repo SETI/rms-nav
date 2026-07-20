@@ -1292,7 +1292,7 @@ def test_lm_converged_flag_set_by_applied_converged_ridge(
     reported pose verified.  The ridge is forged so the test pins the OR
     logic itself, not the ridge numerics.
     """
-    from spindoctor.nav_technique import dt_fitting
+    from spindoctor.nav_technique.dt_fitting import ridge as _ridge_mod
 
     shape = (96, 96)
     radius = 18.0
@@ -1313,7 +1313,9 @@ def test_lm_converged_flag_set_by_applied_converged_ridge(
             applied=True,
         )
 
-    monkeypatch.setattr(dt_fitting, 'gradient_ridge_refine', forged_ridge)
+    # ``lm`` calls through the ridge MODULE (``_ridge.gradient_ridge_refine``),
+    # so patching the attribute on that module is what the driver sees.
+    monkeypatch.setattr(_ridge_mod, 'gradient_ridge_refine', forged_ridge)
     # A far-off seed with a one-iteration budget cannot meet the step
     # tolerance, so the DT-LM itself reports converged=False.
     result = lm_subpixel_refine(
@@ -1332,7 +1334,7 @@ def test_lm_converged_flag_set_by_applied_converged_ridge(
 
 def test_lm_unconverged_when_ridge_not_applied(monkeypatch: pytest.MonkeyPatch) -> None:
     """An unapplied ridge leaves the DT-LM's own convergence verdict standing."""
-    from spindoctor.nav_technique import dt_fitting
+    from spindoctor.nav_technique.dt_fitting import ridge as _ridge_mod
 
     shape = (96, 96)
     radius = 18.0
@@ -1353,7 +1355,9 @@ def test_lm_unconverged_when_ridge_not_applied(monkeypatch: pytest.MonkeyPatch) 
             applied=False,
         )
 
-    monkeypatch.setattr(dt_fitting, 'gradient_ridge_refine', forged_ridge)
+    # ``lm`` calls through the ridge MODULE (``_ridge.gradient_ridge_refine``),
+    # so patching the attribute on that module is what the driver sees.
+    monkeypatch.setattr(_ridge_mod, 'gradient_ridge_refine', forged_ridge)
     result = lm_subpixel_refine(
         vertices_vu=vertices,
         normals_vu=-outward_normals,
