@@ -245,10 +245,22 @@ class NavModelRingsSimulated(NavModelRingsBase):
     def _declared_radial_sigma_px(self) -> float:
         """The per-vertex radial sigma from the declared orbit uncertainty.
 
-        The declared orbit sigma (see :meth:`_declared_orbit_sigma_px`)
-        floored at the one-pixel polyline sampling resolution.
+        The declared semimajor-axis and radial-amplitude sigmas are summed
+        LINEARLY here, floored at the one-pixel polyline sampling resolution.
+
+        This deliberately does NOT share the quadrature combine of
+        :meth:`_declared_orbit_sigma_px`, which is the coherent displacement
+        bound.  This value is the per-vertex prior the robust fit weights by
+        ``1 / sigma**2``, so changing it changes the LM's inlier weighting and
+        moves the recovered offset on every scene that declares a sigma.  The
+        quadrature correction applies to the covariance term that is squared
+        into a tier gate; carrying it into the fit's weighting would be an
+        unrelated behavior change, so the two combines are kept separate and
+        this one keeps its original form.
         """
-        return max(_RING_EDGE_SIGMA_RADIAL_PX, self._declared_orbit_sigma_px())
+        sigma = self._feature_params.get('declared_orbit_sigma') or {}
+        declared = float(sigma.get('sigma_a_px', 0.0)) + float(sigma.get('sigma_ae_px', 0.0))
+        return max(_RING_EDGE_SIGMA_RADIAL_PX, declared)
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
         """Emit the ring features.
