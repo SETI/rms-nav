@@ -724,7 +724,7 @@ class DataSetPDS3(DataSet):
         }
         active_filter_flags = [name for name, value in results_filter_flags.items() if value]
         if active_filter_flags:
-            logger.info(f'*** Results filters:    {", ".join(active_filter_flags)}')
+            logger.info('*** Results filters:    %s', ', '.join(active_filter_flags))
         if img_name_list:
             logger.info('*** Explicit image names:')
             for explicit_img_name in img_name_list:
