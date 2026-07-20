@@ -486,7 +486,7 @@ def report_noise_response(
     out.append('Paired per-scene offset change under the noise-sigma scaling')
     out.append('(RMS |delta offset| and its correlation with the scale factor):')
     out.append('')
-    out.append('| instance | n | RMS |delta| (px) | corr(|delta|, factor) |')
+    out.append(r'| instance | n | RMS \|delta\| (px) | corr(\|delta\|, factor) |')
     out.append('|---|---|---|---|')
     for name in sorted(deltas):
         arr = np.asarray(deltas[name])
