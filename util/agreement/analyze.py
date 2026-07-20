@@ -423,6 +423,60 @@ def report_injection_response(
     out.append('')
 
 
+def report_noise_response(
+    out: list[str],
+    control: list[dict[str, Any]],
+    injected: list[dict[str, Any]],
+    family: str,
+) -> None:
+    """Paired per-scene offset deltas under the noise-sigma scaling injection.
+
+    Reports each technique's RMS offset change between the control and the
+    noise-scaled pass of the same scene, plus the correlation of the delta
+    magnitude with the injected scale factor -- a small RMS with no factor
+    dependence means the shared noise-sigma channel does not couple offsets
+    at these scales.
+
+    Parameters:
+        out: Markdown accumulator.
+        control: Control rows.
+        injected: Injected rows (noise_scale).
+        family: Family to pair on.
+    """
+    ctrl_by_id = {r['scene_id']: r for r in control if r['family'] == family and 'error' not in r}
+    deltas: dict[str, list[tuple[float, float]]] = {}
+    for row in injected:
+        if row['family'] != family or 'error' in row:
+            continue
+        ctrl = ctrl_by_id.get(row['scene_id'])
+        if ctrl is None or row['injection'].get('kind') != 'noise_scale':
+            continue
+        factor = float(row['injection']['factor'])
+        inj_off = _instance_offsets(row)
+        ctl_off = _instance_offsets(ctrl)
+        for name in set(inj_off) & set(ctl_off):
+            mag = math.hypot(
+                inj_off[name][0] - ctl_off[name][0], inj_off[name][1] - ctl_off[name][1]
+            )
+            deltas.setdefault(name, []).append((factor, mag))
+    out.append('Paired per-scene offset change under the noise-sigma scaling')
+    out.append('(RMS |delta offset| and its correlation with the scale factor):')
+    out.append('')
+    out.append('| instance | n | RMS |delta| (px) | corr(|delta|, factor) |')
+    out.append('|---|---|---|---|')
+    for name in sorted(deltas):
+        arr = np.asarray(deltas[name])
+        if arr.shape[0] < 5:
+            continue
+        rms = float(np.sqrt(np.mean(arr[:, 1] ** 2)))
+        if arr[:, 1].std() > 0 and arr[:, 0].std() > 0:
+            corr = float(np.corrcoef(arr[:, 0], arr[:, 1])[0, 1])
+        else:
+            corr = 0.0
+        out.append(f'| {name} | {arr.shape[0]} | {rms:.4f} | {corr:+.3f} |')
+    out.append('')
+
+
 def _specs_for_family(family: str) -> list[list[EstimatorSpec]]:
     """The solve configurations reported for each family."""
     limb_img = EstimatorSpec('limb', 'full')
@@ -483,9 +537,13 @@ def main(argv: list[str] | None = None) -> int:
         for specs in spec_sets:
             names = '+'.join(s.name for s in specs)
             usable = [c for c in cohort if sum(1 for s in specs if s.name in c.sample.offsets) >= 2]
-            result = report_solve(out, usable, specs, f'{family}: solve over {names}')
+            report_solve(out, usable, specs, f'{family}: solve over {names}')
             report_truth_reference(out, usable, specs)
-            del result
+        # Intrinsic pair couplings (truth-based): the independence
+        # assumption every undeclared pair rides on, measured per cohort.
+        all_instances = sorted({n for c in cohort for n in c.sample.offsets})
+        pairs = [(a, b) for i, a in enumerate(all_instances) for b in all_instances[i + 1 :]]
+        report_pair_truth(out, cohort, pairs, f'{family}: truth-based pair coupling (no injection)')
 
     if args.dt_rows is not None or args.noise_rows is not None:
         out.append('## Stage 0b: bias independence through the shared layer')
@@ -509,6 +567,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             out.append('')
             report_pair_truth(out, cohort, pivotal, f'{label}: truth-based pair coupling')
+            if label == 'noise_scale':
+                report_noise_response(out, rows, inj_rows, family)
             if label == 'dt_shift':
                 report_injection_response(out, rows, inj_rows, family)
                 out.append('Solve-side detection (declared limb-ring pair covariance,')
