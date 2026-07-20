@@ -277,6 +277,7 @@ def _gen_limb_ring_aniso(
     # body (rejection-sample the offset and line distance).
     h = 0.0
     radial_deg = 0.0
+    clearance = radius + 14.0
     for attempt in range(64):
         if diverse:
             delta = rng.uniform(-60.0, 60.0)
@@ -284,11 +285,27 @@ def _gen_limb_ring_aniso(
             delta = _FIXED_ANISO_RELATIVE_DEG
         radial_deg = (theta_deg + 180.0 + delta) % 360.0
         h = rng.uniform(60.0, 100.0)
-        if _line_clears_body(radial_deg, h, (center_v, center_u), radius + 14.0):
+        if _line_clears_body(radial_deg, h, (center_v, center_u), clearance):
             break
         if not diverse and attempt >= 8:
             # The frozen relative angle must not be resampled; widen h only.
             h = rng.uniform(80.0, 105.0)
+    if not _line_clears_body(radial_deg, h, (center_v, center_u), clearance):
+        # Deterministic fallback (no further RNG draws, so the normal
+        # path's stream -- and therefore every recorded campaign scene --
+        # is unchanged): the line exactly opposite the arc at a large h is
+        # always clear, because its distance from the body center is
+        # h + dist * cos(delta) with dist <= 0.65 * radius, which exceeds
+        # radius + 14 for h = 100 at every drawn geometry.  The fixed
+        # family keeps its frozen relative angle.
+        delta = 0.0 if diverse else _FIXED_ANISO_RELATIVE_DEG
+        radial_deg = (theta_deg + 180.0 + delta) % 360.0
+        h = 100.0
+        if not _line_clears_body(radial_deg, h, (center_v, center_u), clearance):
+            raise RuntimeError(
+                f'aniso ring placement failed clearance even at fallback: '
+                f'radius={radius:.1f} dist={dist:.1f} delta={delta:.1f}'
+            )
     a = rng.uniform(*_RING_A_RANGE)
     params['ring_system'] = _ring_system(radial_deg, h, a, rng)
     geometry = {

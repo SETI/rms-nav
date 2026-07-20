@@ -121,8 +121,16 @@ def build_cohort(rows: list[dict[str, Any]], family: str) -> list[CohortFrame]:
         axis: dict[str, float] = {}
         if 'ring_radial_deg' in geometry and 'ring' in offsets:
             axis['ring'] = math.radians(float(geometry['ring_radial_deg']))
-        if 'limb_arc_outward_deg' in geometry and 'limb' in offsets:
-            basis['limb'] = math.radians(float(geometry['limb_arc_outward_deg']))
+        if 'limb_arc_outward_deg' in geometry:
+            # The arc direction is the rotating basis for every technique
+            # navigating the clipped body: the limb (anisotropic covariance)
+            # and the disc (its inward pull toward the body center is a
+            # geometry-locked bias the solve's rotating mean columns must
+            # be able to absorb).
+            arc = math.radians(float(geometry['limb_arc_outward_deg']))
+            for name in ('limb', 'disc'):
+                if name in offsets:
+                    basis[name] = arc
         frames.append(
             CohortFrame(
                 scene_id=row['scene_id'],
@@ -303,8 +311,13 @@ def report_solve(
     out.append('|---|---|---|---|')
     for k, name in enumerate(result.param_names):
         ci = result.bootstrap_ci.get(name)
-        ci_str = f'[{ci[0]:+.4f}, {ci[1]:+.4f}]' if ci else 'n/a'
         ident = result.identifiability[name]
+        # A CI on an unidentifiable parameter would just resample the
+        # arbitrary minimum-norm split; suppress it.
+        if ci is None or ident < 0.6:
+            ci_str = '--'
+        else:
+            ci_str = f'[{ci[0]:+.4f}, {ci[1]:+.4f}]'
         flag = '' if ident > 0.99 else ' (NOT identifiable)' if ident < 0.6 else ' (partial)'
         out.append(f'| {name} | {result.params[k]:+.4f} | {ci_str} | {ident:.3f}{flag} |')
     out.append('')
@@ -415,9 +428,20 @@ def report_injection_response(
         arr = np.asarray(deltas[name])
         if arr.shape[0] < 5:
             continue
-        slope_v = float(np.polyfit(arr[:, 0], arr[:, 2], 1)[0])
-        slope_u = float(np.polyfit(arr[:, 1], arr[:, 3], 1)[0])
-        resid = np.stack([arr[:, 2] - slope_v * arr[:, 0], arr[:, 3] - slope_u * arr[:, 1]], axis=1)
+        fit_v = np.polyfit(arr[:, 0], arr[:, 2], 1)
+        fit_u = np.polyfit(arr[:, 1], arr[:, 3], 1)
+        slope_v = float(fit_v[0])
+        slope_u = float(fit_u[0])
+        # Residuals about the full fitted line (slope AND intercept); using
+        # the slope alone would inflate the RMS whenever the intercept is
+        # nonzero.
+        resid = np.stack(
+            [
+                arr[:, 2] - np.polyval(fit_v, arr[:, 0]),
+                arr[:, 3] - np.polyval(fit_u, arr[:, 1]),
+            ],
+            axis=1,
+        )
         rms = float(np.sqrt(np.mean(resid**2)))
         out.append(f'| {name} | {arr.shape[0]} | {slope_v:+.3f} | {slope_u:+.3f} | {rms:.3f} |')
     out.append('')
@@ -496,7 +520,12 @@ def _specs_for_family(
     if family in ('limb_disc_ring_fixed', 'limb_disc_ring_diverse'):
         return [([limb_img, disc, ring], no_pairs), ([limb_img, disc, ring, blob], no_pairs)]
     if family in ('limb_ring_aniso_fixed', 'limb_ring_aniso_diverse'):
-        return [([limb_rot, ring], no_pairs), ([limb_rot, disc, ring], no_pairs)]
+        # The disc on the clipped body is declared rotating too: its pull
+        # toward the body center is a geometry-locked bias that must be
+        # absorbed by the rotating mean columns, not aliased into the
+        # covariances (its covariance is then reported in the arc frame).
+        disc_rot = EstimatorSpec('disc', 'full', basis='rotating')
+        return [([limb_rot, ring], no_pairs), ([limb_rot, disc_rot, ring], no_pairs)]
     if family == 'multi_body':
         multi = [
             EstimatorSpec('limb@RHEA', 'full', group='limb'),
@@ -582,10 +611,13 @@ def main(argv: list[str] | None = None) -> int:
             cohort = build_cohort(inj_rows, family)
             out.append(f'### Injection: {label} (`{path}`)')
             out.append('')
-            out.append(
-                f'Injection parameters: sigma_px '
-                f'{inj_manifest.get("injection_sigma_px", "?")} (dt_shift only).'
-            )
+            if label == 'dt_shift':
+                out.append(
+                    f'Injection parameters: per-scene bias ~ N(0, sigma_px = '
+                    f'{inj_manifest.get("injection_sigma_px", "?")}) per axis.'
+                )
+            else:
+                out.append('Injection parameters: shared noise sigma scaled log-uniform 2-8x.')
             out.append('')
             report_pair_truth(out, cohort, pivotal, f'{label}: truth-based pair coupling')
             if label == 'noise_scale':

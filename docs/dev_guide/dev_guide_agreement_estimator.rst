@@ -48,14 +48,39 @@ therefore wrong; the estimator carries everything in matrix form:
   an explicit stationarity assumption the cohort binning must justify.
 - A pair suspected of correlated errors can be declared, adding its
   symmetric cross-covariance as unknowns instead of assuming independence;
-  the cohort must be over-determined enough to carry them.
+  the cohort must be over-determined enough to carry them. Two model
+  restrictions apply: a full/full pair's cross-covariance is a single
+  image-frame-constant matrix (no rotating form), and a pair involving a
+  rank-one technique carries one scalar, which assumes the projected
+  coupling is the same along every axis (exact only for an isotropic
+  shared error).
 
 Identifiability is an output, not an assumption: the solve reports the
 design matrix's singular spectrum, the null space mapped back to parameter
-names, and a per-parameter identifiability score. Cohort mean differences
-are subtracted before the second moments, so deterministic biases between
-techniques land in a separate mean channel rather than inflating the
-covariances.
+names, and a per-parameter identifiability score.
+
+Bias handling deserves precision, because the naive claim is false.
+Each pair's differences are centered by a fitted mean model before the
+second moments: constant (image-frame) terms always, plus rotating-frame
+mean components for every member declared rotating. The consequences:
+
+- A deterministic bias that is *constant in the image frame* lands in
+  the mean channel and never touches the covariances.
+- A *geometry-locked* bias -- constant in a rotating frame, like a limb
+  or disc fit pulled radially toward its body -- has image-frame mean
+  near zero over an orientation-diverse cohort. If its technique is
+  declared rotating, the mean model absorbs it (and reports the fitted
+  bias). If not, nothing is subtracted and the bias aliases into the
+  recovered covariance as ``C + mu mu^T`` -- silently, with the system
+  well-conditioned and, in general, no negative-variance symptom; shared
+  between two techniques it additionally creates undeclared cross terms
+  that corrupt every recovered value. Orientation diversity is therefore
+  double-edged: the same sweep that makes the system identifiable
+  converts geometry-locked biases from harmless constants into silent
+  covariance pollution. Mitigations are declaring the rotating basis or
+  estimating means bin-wise in each technique's own frame.
+- Biases locked to geometry the model does not carry (illumination
+  direction, arc fraction) are not absorbed and still alias.
 
 Where per-technique covariance is recoverable
 =============================================

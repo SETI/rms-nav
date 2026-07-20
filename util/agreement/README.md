@@ -2,7 +2,8 @@
 
 Offline tooling that validates the covariance-components estimator the
 cross-technique agreement study relies on, on truth-known simulated
-scenes (issue #224 / WS-0 of `plans/VALIDATION_AND_CALIBRATION_PLAN.md`).
+scenes (issue #224; the agreement-estimator validation stage of
+`plans/VALIDATION_AND_CALIBRATION_PLAN.md`).
 The estimator separates per-technique 2x2 error covariances from nothing
 but the techniques' pairwise disagreements; before any real-image
 per-technique number is trusted, this campaign proves on planted-truth
@@ -96,13 +97,23 @@ preserves the numbers and conclusions that outlive them.
 - **Null-space directions**: linear combinations of parameters that can
   be shifted freely without changing any observable — the explicit form
   of "this composition cannot separate these techniques".
-- **Pair mean difference**: the cohort mean of each pairwise offset
-  difference, subtracted before the second moments.  Deterministic
-  shared biases land here, not in the covariances.
+- **Pair mean channel**: each pair's differences are centered by a
+  fitted mean model before the second moments -- constant (image-frame)
+  terms always, plus rotating-frame mean columns for every
+  `basis='rotating'` member (reported in `pair_mean_model`).  A bias
+  *constant in the image frame* lands here and leaves the covariances
+  clean.  A *geometry-locked* bias (constant in a rotating frame) is
+  absorbed only when its technique is declared rotating: undeclared, it
+  has image-frame mean ~0 over a diverse cohort and aliases into the
+  recovered covariance as `C + mu mu^T` -- silently, well-conditioned,
+  and with no negative-variance symptom.  Biases locked to geometry the
+  model does not carry (e.g. illumination) still alias.
 - **Declared pair covariances**: adding `pair_covariances=[(i, j)]`
   turns an assumed-independent pair into a measured one; the cohort must
   be over-determined enough to carry the extra unknowns (check the
-  scores).
+  scores).  Model restrictions: a full/full pair's matrix is
+  image-frame constant, and a rank1-involving pair's scalar `gamma`
+  assumes an axis-independent (isotropic) projected coupling.
 
 ## Caveats
 
