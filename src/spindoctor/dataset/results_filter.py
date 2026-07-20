@@ -168,11 +168,18 @@ class ResultsFilter:
                             self._offset_rel_paths.add(rel_path)
                         elif file_name.endswith(SUMMARY_PNG_SUFFIX):
                             self._png_rel_paths.add(rel_path)
-            except OSError:
+            except (FileNotFoundError, NotADirectoryError):
+                # A volume with no results directory (or whose results path is
+                # not a directory) simply has no result files. Any other OSError
+                # (permission denied, network or cloud-backend failure) is a real
+                # scan failure that would silently corrupt the filter result, so
+                # it is allowed to propagate.
                 continue
         self._logger.info(
-            f'*** Results scan found {len(self._offset_rel_paths)} offset metadata and '
-            f'{len(self._png_rel_paths)} summary PNG files under {self._nav_results_root}'
+            '*** Results scan found %d offset metadata and %d summary PNG files under %s',
+            len(self._offset_rel_paths),
+            len(self._png_rel_paths),
+            self._nav_results_root,
         )
 
     def passes_presence(self, results_path_stub: str) -> bool:
@@ -260,20 +267,30 @@ class ResultsFilter:
     def _metadata_matches(self, image_file: ImageFile, local_path: Path) -> bool:
         """True if the image's metadata file satisfies the error filters.
 
-        A metadata file that cannot be read or parsed excludes its image with
-        a logged warning rather than aborting the enumeration.
+        A metadata file that cannot be read, cannot be decoded as UTF-8, does
+        not parse as JSON, or does not parse to a JSON object excludes its image
+        with a logged warning rather than aborting the enumeration.
 
         Parameters:
             image_file: The candidate image (for the warning message only).
             local_path: Local path of the retrieved metadata JSON file.
         """
         try:
-            metadata: dict[str, Any] = json.loads(local_path.read_text(encoding='utf-8'))
-        except (OSError, json.JSONDecodeError) as exc:
+            parsed: Any = json.loads(local_path.read_text(encoding='utf-8'))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             self._logger.warning(
-                f'Excluding {image_file.results_path_stub}: unreadable metadata file: {exc}'
+                'Excluding %s: unreadable metadata file: %s',
+                image_file.results_path_stub,
+                exc,
             )
             return False
+        if not isinstance(parsed, dict):
+            self._logger.warning(
+                'Excluding %s: metadata JSON is not an object',
+                image_file.results_path_stub,
+            )
+            return False
+        metadata: dict[str, Any] = parsed
         if metadata.get('status') != 'error':
             return False
         status_error = metadata.get('status_error')

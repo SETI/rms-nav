@@ -5,6 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import pdslogger
 import pytest
 from filecache import FCPath
 
@@ -15,6 +16,7 @@ from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
 from spindoctor.dataset.dataset_pds3_galileo_ssi import DataSetPDS3GalileoSSI
 from spindoctor.dataset.dataset_pds3_newhorizons_lorri import DataSetPDS3NewHorizonsLORRI
 from spindoctor.dataset.dataset_pds3_voyager_iss import DataSetPDS3VoyagerISS
+from spindoctor.dataset.results_filter import ResultsFilter
 
 
 @pytest.fixture
@@ -314,6 +316,81 @@ def test_has_offset_nonspice_error_matches_only_nonspice(
     )
 
     assert _yielded_names(groups) == ['N1000000102']
+
+
+def _write_result_file_bytes(
+    results_root: Path,
+    volume: str,
+    numbers: list[int],
+    camera: str,
+    num: int,
+    suffix: str,
+    content: bytes,
+) -> None:
+    """Write one synthetic result file with raw byte content (e.g. bad UTF-8)."""
+    range_dir = f'{numbers[0]:010d}_{numbers[-1]:010d}'
+    path = results_root / volume / 'data' / range_dir / f'{camera}{num:010d}_1_CALIB{suffix}'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+
+
+@pytest.mark.parametrize(
+    'bad_content',
+    [
+        pytest.param(b'[1, 2, 3]', id='json-list'),
+        pytest.param(b'null', id='json-null'),
+        pytest.param(b'\xff\xfe not valid utf-8', id='invalid-utf8'),
+    ],
+)
+def test_has_offset_error_excludes_malformed_metadata(
+    ds: DataSetPDS3CassiniISS,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    bad_content: bytes,
+) -> None:
+    # A metadata file that is valid JSON but not an object, or is not decodable
+    # UTF-8, must exclude only its own image without crashing enumeration.
+    _install_two_camera_index(ds, monkeypatch)
+    _write_result_file(
+        tmp_path,
+        'COISS_2001',
+        _FILTER_NUMS,
+        'N',
+        1000000100,
+        '_metadata.json',
+        json.dumps({'status': 'error'}),
+    )
+    _write_result_file_bytes(
+        tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000101, '_metadata.json', bad_content
+    )
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'], has_offset_error=True, nav_results_root=str(tmp_path)
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000100']
+
+
+def test_results_scan_propagates_non_missing_oserror(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A missing results directory is expected and swallowed, but any other
+    # OSError (permission denied, cloud-backend failure) must surface rather
+    # than silently yielding an empty, incorrect filter result.
+    def boom(_self: FCPath) -> object:
+        raise PermissionError('results scan denied')
+
+    monkeypatch.setattr(FCPath, 'walk', boom)
+
+    with pytest.raises(PermissionError, match='results scan denied'):
+        ResultsFilter(
+            ['COISS_2001'],
+            str(tmp_path),
+            has_offset_file=True,
+            logger=pdslogger.NullLogger(),
+        )
 
 
 @pytest.mark.parametrize(
