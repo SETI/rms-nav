@@ -334,12 +334,34 @@ def test_polyline_normals_are_radially_signed_with_a_radius_backplane() -> None:
 
 
 def test_polyline_normals_unsigned_without_a_radius_backplane() -> None:
-    """Without the backplane the historical unsigned axis is emitted."""
+    """Without the backplane the historical unsigned axis is emitted.
+
+    The distinguishing property is the SIGN, not the length: a fully
+    radially-signed result is also unit length, so asserting length alone
+    would pass either way.  Without the backplane the sign comes from the
+    mask-neighbour scan order, which on a closed ring puts a large share of
+    the normals on the inward side -- a signed result would have none.
+    """
     size = 201
     center = (size - 1) / 2.0
     vs, us = np.meshgrid(np.arange(size), np.arange(size), indexing='ij')
     radius = np.hypot(vs - center, us - center)
     mask = np.abs(radius - 60.0) <= 0.5
-    _vertices, normals = _polyline_from_edge_mask(mask)
+    vertices, normals = _polyline_from_edge_mask(mask)
     lengths = np.linalg.norm(normals, axis=1)
     assert np.allclose(lengths, 1.0)
+
+    true_radial = np.stack([vertices[:, 0] - center, vertices[:, 1] - center], axis=-1)
+    true_radial /= np.linalg.norm(true_radial, axis=1, keepdims=True)
+    dots = np.sum(normals * true_radial, axis=1)
+    # Exactly half the ring's vertices come out pointing INWARD: the scan
+    # tests v - 1 before v + 1 and u - 1 before u + 1, so the sign is set by
+    # which neighbour is probed first, not by the geometry.
+    assert int(np.count_nonzero(dots < 0.0)) == 190
+    assert int(np.count_nonzero(dots > 0.0)) == 190
+
+    # The same fixture through the signed path leaves none pointing inward,
+    # which is the property that separates the two branches.
+    _signed_vertices, signed_normals = _polyline_from_edge_mask(mask, radius.astype(np.float64))
+    signed_dots = np.sum(signed_normals * true_radial, axis=1)
+    assert int(np.count_nonzero(signed_dots < 0.0)) == 0

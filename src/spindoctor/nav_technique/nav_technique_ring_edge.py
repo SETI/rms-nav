@@ -137,6 +137,16 @@ class RingEdgeNav(NavTechnique):
     )
 
     def __init__(self, *, config: Config | None = None) -> None:
+        """Read the technique's tunables from config.
+
+        Parameters:
+            config: Optional ``Config`` override; ``None`` uses
+                ``DEFAULT_CONFIG``.
+
+        Raises:
+            KeyError: If any tuning key is missing, so a config typo fails
+                at process startup rather than mid-image.
+        """
         super().__init__(config=config)
         self.config.read_config()  # ensure cls.tuning is populated
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
@@ -609,6 +619,13 @@ class _RingEdgeConfidenceContext:
     """Adapter exposing ring-edge confidence terms in a single attribute set."""
 
     def __init__(self, *, at_edge: bool, diagnostics: RingEdgeDiagnostics) -> None:
+        """Flatten the diagnostics plus ``at_edge`` into one attribute set.
+
+        Parameters:
+            at_edge: Whether the converged offset reached the search-window
+                boundary; it lives on the result, not the diagnostics.
+            diagnostics: The technique's populated diagnostics.
+        """
         self.at_edge = at_edge
         self.total_edge_length_px = diagnostics.total_edge_length_px
         self.per_edge_dt_rms_summed = diagnostics.per_edge_dt_rms_summed

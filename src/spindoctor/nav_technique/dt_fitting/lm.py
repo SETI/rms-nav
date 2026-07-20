@@ -14,6 +14,7 @@ from scipy.linalg import pinvh
 from spindoctor.nav_technique.dt_fitting import ridge as _ridge
 from spindoctor.nav_technique.dt_fitting.coarse import polarity_filter
 from spindoctor.nav_technique.dt_fitting.constants import (
+    _INFINITY_DT_PENALTY_PX,
     DEFAULT_LM_DAMPING,
     DEFAULT_LM_MAX_ITERATIONS,
     DEFAULT_LM_STEP_TOLERANCE,
@@ -39,23 +40,6 @@ __all__ = [
     'LMRefineResult',
     'lm_subpixel_refine',
 ]
-
-_INFINITY_DT_PENALTY_PX: float = 1.0e6
-"""Effective ``+inf`` residual recorded for polarity-rejected vertices.
-
-A polarity-rejected vertex is excluded from the fit by zeroing its
-*weight* directly (the Tukey weight is multiplied by the polarity mask),
-so its exclusion is independent of its per-vertex sigma and never relies
-on this magnitude.  The penalty residual is recorded in ``raw_residuals``
-only so those arrays stay numerically well-defined; because the
-corresponding weight is zero it contributes nothing to the cost or the
-normal equations.  The ``raw_rms_px`` diagnostic deliberately excludes
-polarity-rejected vertices (it averages over the polarity-accepted
-residuals only), so this sentinel does not feed the limb / terminator
-spurious gate -- excessive polarity rejection is governed by the
-inlier-fraction gate instead.  The value is a large-but-finite number
-(not literal ``inf``) so downstream array arithmetic stays defined.
-"""
 
 
 @dataclass(frozen=True)

@@ -53,6 +53,9 @@ from spindoctor.nav_technique.dt_fitting.coarse import (
     polarity_filter,
 )
 from spindoctor.nav_technique.dt_fitting.constants import (
+    _INFINITY_DT_PENALTY_PX as _INFINITY_DT_PENALTY_PX,
+)
+from spindoctor.nav_technique.dt_fitting.constants import (
     DEFAULT_COARSE_MIN_SUPPORT_FRACTION,
     DEFAULT_LM_DAMPING,
     DEFAULT_LM_MAX_ITERATIONS,
@@ -63,9 +66,6 @@ from spindoctor.nav_technique.dt_fitting.constants import (
     DEFAULT_RIDGE_MAX_TOTAL_DISPLACEMENT_PX,
     DEFAULT_RIDGE_SAMPLE_STEP_PX,
     DEFAULT_TUKEY_C,
-)
-from spindoctor.nav_technique.dt_fitting.lm import (
-    _INFINITY_DT_PENALTY_PX as _INFINITY_DT_PENALTY_PX,
 )
 from spindoctor.nav_technique.dt_fitting.lm import (
     LMRefineResult,

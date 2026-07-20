@@ -20,7 +20,31 @@ __all__: list[str] = []
 
 
 def _per_edge_rms_summed(features: list[NavFeature], residuals: NDArrayFloatType) -> float:
-    """Sum the per-edge weighted RMS DT residual across all consumed edges."""
+    """Sum each consumed edge's UNWEIGHTED RMS DT residual.
+
+    Each edge contributes ``sqrt(mean(r**2))`` over its own slice of the
+    per-vertex residual array, and the per-edge values are summed.  No robust
+    weighting is applied, which is the point: the LM's own ``rms_px`` is
+    Tukey-WEIGHTED and collapses to near zero on exactly the mis-convergence
+    this statistic exists to surface (the fit locks onto one edge, Tukey
+    rejects the wholly mis-aligned others, and the weighted RMS reports a
+    clean fit).  Passing the raw ``LMRefineResult.residuals_px`` keeps those
+    rejected vertices in the number.
+
+    The sum grows with the number of fused edges, so the confidence formula
+    consumes the edge-count-independent mean derived from it rather than this
+    value directly.
+
+    Parameters:
+        features: The consumed features, in the order their vertices were
+            concatenated for the LM fit.
+        residuals: Per-vertex raw DT residuals from the fit, in the same
+            concatenation order.
+
+    Returns:
+        The summed per-edge RMS in pixels; ``0.0`` when no consumed edge has
+        vertices.
+    """
     total = 0.0
     cursor = 0
     for feat in features:

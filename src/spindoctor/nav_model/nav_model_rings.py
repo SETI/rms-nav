@@ -116,6 +116,18 @@ def _ring_annulus_emission_params(config: Config, planet: str) -> tuple[float, f
     planet_block = planets_block.get(planet, {}) or {}
 
     def _lookup(field: str) -> float:
+        """Read one emission field, preferring the planet block over the default.
+
+        Parameters:
+            field: Field name to read.
+
+        Returns:
+            The field's value as a float.
+
+        Raises:
+            KeyError: If neither the planet block nor the default block
+                defines the field, so a config typo fails at startup.
+        """
         if field in planet_block:
             return float(planet_block[field])
         if field in default_block:
@@ -186,6 +198,14 @@ class NavModelRings(NavModelRingsBase):
         *,
         config: Config | None = None,
     ) -> None:
+        """Build the per-planet ring model with empty render state.
+
+        Parameters:
+            name: Model instance name (e.g. ``'rings:SATURN'``).
+            obs: Observation snapshot the model renders against.
+            config: Optional ``Config`` override; ``None`` uses
+                ``DEFAULT_CONFIG``.
+        """
         super().__init__(name, obs, config=config)
         self._planet: str | None = None
         self._render_results: list[
@@ -397,6 +417,16 @@ class NavModelRings(NavModelRingsBase):
         self._ring_radius_ext = np.asarray(bp_radii.mvals.filled(np.nan), dtype=np.float64)
 
         def min_res_at_radius(a: float) -> float | None:
+            """Finest radial resolution along the ring-plane circle of radius ``a``.
+
+            Parameters:
+                a: Ring-plane radius in km.
+
+            Returns:
+                The minimum km-per-pixel radial resolution over the pixels
+                that circle crosses, or ``None`` when it crosses none of the
+                extended FOV.
+            """
             border_arr: NDArrayBoolType = (
                 obs.ext_bp.border_atop(bp_radii.key, a).mvals.astype('bool').filled(False)
             )

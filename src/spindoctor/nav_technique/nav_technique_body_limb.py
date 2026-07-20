@@ -124,6 +124,16 @@ class BodyLimbNav(NavTechnique):
     )
 
     def __init__(self, *, config: Config | None = None) -> None:
+        """Read the technique's tunables from config.
+
+        Parameters:
+            config: Optional ``Config`` override; ``None`` uses
+                ``DEFAULT_CONFIG``.
+
+        Raises:
+            KeyError: If any tuning key is missing, so a config typo fails
+                at process startup rather than mid-image.
+        """
         super().__init__(config=config)
         self.config.read_config()  # ensure cls.tuning is populated
         self._min_arc_vertices = float(self.tuning['min_arc_vertices'])
@@ -453,6 +463,15 @@ class _LimbConfidenceContext:
     """
 
     def __init__(self, *, at_edge: bool, spurious: bool, diagnostics: BodyLimbDiagnostics) -> None:
+        """Flatten the diagnostics plus the result-level flags into one set.
+
+        Parameters:
+            at_edge: Whether the converged pose reached the search-window
+                boundary; it lives on the result, not the diagnostics.
+            spurious: The technique's spurious verdict, consumed by the
+                confidence spec's hard-zero rule.
+            diagnostics: The technique's populated diagnostics.
+        """
         self.at_edge = at_edge
         self.spurious = spurious
         self.visible_limb_arc_fraction = diagnostics.visible_limb_arc_fraction

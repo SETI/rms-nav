@@ -95,6 +95,18 @@ class NavModelRingsSimulated(NavModelRingsBase):
         *,
         config: Config | None = None,
     ) -> None:
+        """Bind one navigable scene feature to a model instance.
+
+        Parameters:
+            name: Model instance name.
+            obs: Observation carrying the filtered scene view.
+            feature_name: The feature's name, upper-cased for labels.
+            feature_params: The feature's idealized mapping from
+                ``nav_params['ring_system']['features']``.
+            ring_system: The idealized ``ring_system`` block.
+            config: Optional ``Config`` override; ``None`` uses
+                ``DEFAULT_CONFIG``.
+        """
         super().__init__(name, obs, config=config)
         self._feature_name = feature_name.upper()
         self._feature_params: dict[str, Any] = dict(feature_params)
