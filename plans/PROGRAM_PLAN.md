@@ -133,15 +133,54 @@ its section names):
    documented in `docs/dev_guide/dev_guide_simulator.rst`, the
    recalibration in `util/calibration/CAMPAIGN_20260718.md`, and the
    independent assessment in
-   `critiques/SIM_REALISM_CRITIQUE_2026-07-18.md`. Remaining follow-ups:
-   #301 (ensemble diagnostic channel), #309 (realism-configured
-   multi-instrument campaign), #310 (structural boundary enforcement),
-   #311 (mirror-parity guard), plus the post-merge library sidecar
+   `critiques/SIM_REALISM_CRITIQUE_2026-07-18.md`. Follow-ups: #301
+   (ensemble diagnostic channel) is **executed** as PR #315, which in
+   turn raised #316 (contested ring-uncertainty severity, an operator
+   decision), #317 (correlated ring witnesses fused as independent —
+   sequence before the #230 recalibration), #318 (RingAnnulusNav does
+   not consume the channel, and carries 95% of the fused precision on
+   the headline scene) and #319 (no library coverage for opposed-ansae
+   geometry). #291 was re-measured and persists bit-for-bit. Still open
+   from the program itself: #309 (realism-configured multi-instrument
+   campaign), #310 (structural boundary enforcement), #311
+   (mirror-parity guard), plus the post-merge library sidecar
    re-ratchet.
-3. **Prove the agreement estimator** (#224; WS-0) — before trusting
-   per-technique error numbers extracted from cross-technique agreement,
-   prove on known-truth simulations that the extraction math works and
-   map where it is even solvable.
+
+   An audit on 2026-07-20 swept every PR in the program plus the
+   campaign record, critique, decisions log, and simulator report for
+   work that had been written down in prose but never given a tracking
+   issue. It filed **#325-#347**. The ones that change priorities rather
+   than just recording state:
+   - **#328** — a high-phase haze crescent returns a gate-passing
+     success about 30 px wrong, and nothing vetoes it. A third
+     confident-wrong family alongside #301 and #291, previously owned by
+     no issue.
+   - **#334** — the calibration has no armed falsification criterion and
+     its real-frame regression gate is suspended. The transfer watch was
+     written as a proposal and never adopted.
+   - **#346** — three library frames lock confidently onto the wrong
+     ring feature (N1492091163 at 0.92/high where the operator expected
+     failed; N1867601758 and N1867602424 at 7.14 and 9.87 px). These
+     outlive #288, which is a reconciliation issue.
+   - **#223** was re-scoped: the simulator now emits TERMINATOR_ARC and
+     the technique was fitted, but on a degenerate plateau (0 of 116
+     rows within 1 px) with no terminator-side realism verdict.
+
+   The remainder (#325-#345) record simulator fidelity gaps, unmeasured
+   interim values, and process gaps that the program documented honestly
+   at the time. None blocks the merge; several are inputs to #309.
+3. **Prove the agreement estimator** (#224; WS-0) — **executed 2026-07-19
+   to 2026-07-20** (PR #314, unmerged, targets `rf_sim_realism`). The
+   estimator, identifiability map, and campaign record live under
+   `util/agreement/`; no `src/` changes. Two results constrain item 5:
+   the **limb-ring pair is measured as correlated** through the shared
+   preprocessing layer, so it cannot carry per-technique covariance
+   claims; and the **limb-disc pair is unproven rather than clean** —
+   the shared-PSF-edge probe (#320) is outstanding and gates the study's
+   base equation. Also raised: #321 (a ~2 px inward bias on partial-arc
+   limb fits, a navigation finding in its own right), #322 (multi-body
+   frames are not independent measurements), #323 (reliability-gate
+   selection effect), #324 (estimator tests outside CI).
 4. **Validate camera distortion models** (#228; WS-17) — otherwise
    distortion masquerades as navigation error in the agreement study.
 5. **The agreement study itself** (#225, corroborated by #226; WS-1,
@@ -425,6 +464,13 @@ and the five decision gates, not by any implementation.
 1. Simulator de-circularization design approval (#227) — approved and
    executed; the remaining gate is the final merge (PR #313) and the
    post-merge sidecar re-ratchet.
+1b. **Ring orbit-uncertainty severity (#316)** — the ring radial channel
+   prices catalog fit residual as a fully correlated whole-edge
+   displacement, which the catalog's own mode-fitted epochs suggest is
+   several-fold over-severe. It demotes five operator-verified Keeler
+   frames to low. Decide: ship at the conservative default, ratchet
+   `rings.orbit_radial_sigma_correlated_fraction`, or implement the
+   wander decomposition. Reversible by config either way.
 2. Titan: implement or scope out (#60).
 3. CK kernels as a delivered product (#188).
 4. Sub-5 px body policy (#239) — decided 2026-07-14 (expected-failure

@@ -96,11 +96,32 @@ pytest tests/integration/test_autonomous_nav.py -m '' -n auto --dist=loadfile
 
 ## 2. Track A critical path (dispatch as agent sessions, in this order)
 
-### 2.1 WS-0 — prove the agreement estimator (#224)
+### 2.1 WS-0 — prove the agreement estimator (#224) — EXECUTED, PR #314
 
-The item the sim work unblocks directly: known-truth simulation is now
-trustworthy enough to prove the extraction math on. Multi-day agent work;
-no operator input needed until the report.
+Done 2026-07-19/20; PR #314 targets `rf_sim_realism` and is unmerged.
+The estimator, campaign harness, identifiability map, and campaign record
+live under `util/agreement/`; there are no `src/` changes.
+
+Findings that change what comes after, so read these before 2.4:
+
+- **limb-DT and ring-DT are not bias-independent** through the shared
+  preprocessing layer. That pair must be declared or excluded from joint
+  solves; body+ring is the common Cassini composition, so this hits the
+  main cohort.
+- **limb-DT vs disc-NCC showed no coupling** through the gradient/DT
+  channel, but only in a PSF-free regime. The shared-PSF-edge suspicion
+  on this pair is unprobed (#320) and it gates the study's *base*
+  equation.
+- **Multi-body frames are not two independent measurements** (#322):
+  cross-body limb errors correlate at +0.72 and the naive solve is
+  well-conditioned, reports everything identifiable, and misattributes
+  the coupling onto disc.
+- **A ~2 px inward bias on partial-arc limb fits** (#321) surfaced as a
+  side effect. That is a navigation finding, not only a campaign one.
+- Estimator tests do not run in CI (#324).
+
+Remaining Stage 0b work: #320 (PSF-layer probe) and #323 (reliability-gate
+selection effect). The original prompt is kept below for reference.
 
 **Prompt:**
 
@@ -156,6 +177,26 @@ batches arrive.
 
 Your role at the gate: approve the frame selection. Then:
 
+**Gates added by 2.1's results — apply these when scoping the study:**
+
+- The **limb-ring pair is measured as correlated**, so it may not carry
+  per-technique covariance claims; declare it or exclude it.
+- The **limb-disc pair is unproven, not proven clean** — #320 must run
+  before the study claims per-technique covariance on the base pair. Bulk
+  pairwise-disagreement reporting can proceed without it.
+- **Multi-body cohorts** declare the limb-limb pair (#322) and should be
+  cut by illumination geometry, since part of the coupling is
+  illumination-locked.
+- Blob and disc correlate at +0.83 on partial bodies; never share a solve
+  there.
+- Cohorts are already filtered by the reliability gate, whose selection
+  effect is unquantified (#323) — the study's covariances therefore
+  describe navigable frames rather than frames, and the report should say
+  so.
+- General warning from the campaign: a healthy identifiability report is
+  **not** evidence that independence holds, and all-positive recovered
+  variances are necessary but not sufficient.
+
 **Prompt:**
 
 > Execute the agreement study's bulk layer (WS-1, #225) per
@@ -170,7 +211,11 @@ Your role at the gate: approve the frame selection. Then:
 
 - **#229 / WS-4** — real images in CI: "Wire a small cached real-image
   tier into every-PR CI and the full suite on a schedule, per WS-4."
-- **#230 / WS-5** — re-anchor confidence on real evidence: "Re-run the
+- **#230 / WS-5** — re-anchor confidence on real evidence. **Handle #317
+  first or explicitly:** the calibration tooling fits tier boundaries from
+  the fused confidence scalar, and correlated ring witnesses emit
+  high-confidence/large-error rows that push the high-tier boundary the
+  wrong way. Then: "Re-run the
   calibration tooling against the agreement study's measurements per
   WS-5; retire the confidence_provisional marker where the evidence
   supports it; re-bless tiers with the operator." This is where the
@@ -185,13 +230,25 @@ Copy the line as the session prompt, prepending: "Work in
 /seti/newnav/rms-nav. Read CLAUDE.md and the named issue first.
 Independent review before done; all CI gates; one PR."
 
-- **#301 + #291 (ensemble diagnostic channel)**: "Design and implement
-  the diagnostic channel that lets the ensemble distinguish radial model
-  error from pointing error: consume declared_orbit_sigma in the ring
-  covariance/ensemble path and add the coarse-peak-quality/convergence
-  gates recommended in the #288 investigation records. Verify against
-  orbit_error_ringlet (its 0.89/high confident-wrong should drop) and
-  re-measure the #291 disc-correlation case."
+- **#301 + #291 (ensemble diagnostic channel)** — EXECUTED, PR #315
+  (unmerged, targets `rf_sim_realism`). The channel, the convergence
+  gate, and the fit-quality gates all landed; `orbit_error_ringlet`
+  demotes high to medium and its error improves from 3.01 to 1.54 px.
+  #291 persists bit-for-bit and is documented rather than absorbed.
+  Follow-ups, in the order they matter:
+  - **#318** (raised to Essential): RingAnnulusNav does not consume the
+    channel, and carries **95% of the fused precision** on the headline
+    scene, so the fused error bar is still optimistic (1.54 px error at
+    0.55 px sigma, ~2.8 sigma). Until this lands the channel is ~5%
+    effective wherever both ring techniques run.
+  - **#316**: the fully-correlated severity is contested and demotes five
+    operator-verified Keeler frames. Carries your decision; ratchet via
+    `rings.orbit_radial_sigma_correlated_fraction` or implement the
+    wander decomposition.
+  - **#317**: correlated ring witnesses fused as independent — sequence
+    before #230.
+  - **#319**: no library coverage for opposed-ansae geometry, so the
+    conditioning guard is unvalidated.
 - **#150/#128 (photometric limb redesign)**: "Produce the DESIGN ONLY for
   the photometric-limb fit that removes the ~0.1 px limb-darkening bias,
   per the diagnosis on #150/#128. No implementation until the design is
@@ -255,6 +312,13 @@ else. Applied to the items above:
   Section 1) or every delta must be attributed in the PR.
 - Issues: every new issue carries A-type, B-location, Priority, Effort
   labels and assignee rfrenchseti.
+- **Never leave future work, a deferred fix, a known limit, or a pending
+  decision recorded only in a PR body, a comment, a campaign record, or a
+  docstring — file a tracking issue and reference it from the prose.** A
+  2026-07-20 audit of the sim-realism program found 23 such orphans
+  (filed as #325-#347), including a confident-wrong family worth
+  Essential priority that no issue owned. PRs get merged and scroll away;
+  an item that lives only in prose is an item that will be lost.
 - Sidecar changes: one PR per review batch; per-frame dated notes in the
   sidecar, never only in gitignored files.
 - Perf tests (`tests/integration/test_sim_perf.py`): serial only, never
