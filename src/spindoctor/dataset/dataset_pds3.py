@@ -30,6 +30,24 @@ _LABEL_IMAGE_POINTER_RE = re.compile(
 )
 
 
+def _positive_int(value: str) -> int:
+    """Parses an argparse value as a strictly positive integer.
+
+    Parameters:
+        value: The raw command-line string.
+
+    Returns:
+        The parsed integer.
+
+    Raises:
+        argparse.ArgumentTypeError: If the value is not a positive integer.
+    """
+    ivalue = int(value)
+    if ivalue <= 0:
+        raise argparse.ArgumentTypeError(f'must be a positive integer, got {value!r}')
+    return ivalue
+
+
 class DataSetPDS3(DataSet):
     """Parent class for PDS3 datasets.
 
@@ -413,10 +431,10 @@ class DataSetPDS3(DataSet):
         #     help='Expression to evaluate to decide whether to reprocess an offset')
         group.add_argument(
             '--choose-random-images',
-            type=int,
+            type=_positive_int,
             default=None,
             metavar='N',
-            help='Choose N random images to process within other constraints',
+            help='Choose N random images to process within other constraints (N must be positive)',
         )
         # group.add_argument(
         #     '--show-image-list-only', action='store_true', default=False,
@@ -652,7 +670,10 @@ class DataSetPDS3(DataSet):
             nav_results_root: str | Path | FCPath | None = None,
                 Results root for the filters above.  None resolves via the
                 arguments, configuration, or NAV_RESULTS_ROOT environment variable.
-            choose_random_images: int | None = False,
+            choose_random_images: int | None = None,
+                When set, a positive count of images to sample uniformly at
+                random across the selected volumes.  Must be a positive
+                integer; non-positive values raise ValueError.
             max_filenames: Optional[int] = None,
             suffix: Optional[str] = None,
             planets: Optional[str] = None
@@ -679,6 +700,10 @@ class DataSetPDS3(DataSet):
         has_offset_nonspice_error: bool = kwargs.pop('has_offset_nonspice_error', False)
         nav_results_root: str | Path | FCPath | None = kwargs.pop('nav_results_root', None)
         choose_random_images: int | None = kwargs.pop('choose_random_images', None)
+        if choose_random_images is not None and choose_random_images <= 0:
+            raise ValueError(
+                f'choose_random_images must be a positive integer, got {choose_random_images}'
+            )
         max_filenames: int | None = kwargs.pop('max_filenames', None)
         arguments: argparse.Namespace | None = kwargs.pop('arguments', None)
         additional_index_columns: tuple[str, ...] = kwargs.pop('additional_index_columns', ())
@@ -702,7 +727,7 @@ class DataSetPDS3(DataSet):
         }
         active_filter_flags = [name for name, value in results_filter_flags.items() if value]
         if active_filter_flags:
-            logger.info(f'*** Results filters:    {", ".join(active_filter_flags)}')
+            logger.info('*** Results filters:    %s', ', '.join(active_filter_flags))
         if img_name_list:
             logger.info('*** Explicit image names:')
             for explicit_img_name in img_name_list:
@@ -770,14 +795,10 @@ class DataSetPDS3(DataSet):
                 nav_results_root = get_nav_results_root(
                     arguments if arguments is not None else argparse.Namespace(), self.config
                 )
-            if isinstance(nav_results_root, FCPath):
-                results_root = nav_results_root
-            else:
-                # Results are not shared with other processes and may change between
-                # runs, so use a private temporary cache like the writers do.
-                results_root = FileCache(None).new_path(nav_results_root)
+            # ResultsFilter accepts the str | Path | FCPath union and normalizes
+            # at its boundary, preserving an existing FCPath's file cache.
             results_filter = ResultsFilter(
-                valid_volumes, results_root, logger=logger, **results_filter_flags
+                valid_volumes, nav_results_root, logger=logger, **results_filter_flags
             )
 
         # URLs to the volume raw directory and index directory

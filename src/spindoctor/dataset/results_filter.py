@@ -21,7 +21,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, cast
 
-from filecache import FCPath
+from filecache import FCPath, FileCache
 from pdslogger import PdsLogger
 
 from .dataset import ImageFile
@@ -59,7 +59,7 @@ class ResultsFilter:
     def __init__(
         self,
         volumes: Iterable[str],
-        nav_results_root: FCPath,
+        nav_results_root: str | Path | FCPath,
         *,
         has_offset_file: bool = False,
         has_no_offset_file: bool = False,
@@ -76,7 +76,9 @@ class ResultsFilter:
             volumes: Volume names selected by the other constraints; only these
                 subdirectories of the results root are walked.
             nav_results_root: Root of the navigation results tree; may be a
-                cloud URL.
+                cloud URL.  A ``str`` or ``Path`` is normalized to an
+                :class:`FCPath` at construction; an existing :class:`FCPath` is
+                used as given so its file cache is preserved.
             has_offset_file: Only keep images whose offset metadata file exists.
             has_no_offset_file: Only keep images whose offset metadata file does
                 not exist.
@@ -120,7 +122,12 @@ class ResultsFilter:
         self._needs_offset_presence = has_offset_file or needs_metadata_read
         self._needs_png_presence = has_png_file
         self._needs_metadata_read = needs_metadata_read
-        self._nav_results_root = nav_results_root
+        if isinstance(nav_results_root, FCPath):
+            self._nav_results_root = nav_results_root
+        else:
+            # Results are not shared with other processes and may change between
+            # runs, so use a private temporary cache like the writers do.
+            self._nav_results_root = FileCache(None).new_path(nav_results_root)
         self._logger = logger
         self._offset_rel_paths: set[str] = set()
         self._png_rel_paths: set[str] = set()
@@ -168,11 +175,18 @@ class ResultsFilter:
                             self._offset_rel_paths.add(rel_path)
                         elif file_name.endswith(SUMMARY_PNG_SUFFIX):
                             self._png_rel_paths.add(rel_path)
-            except OSError:
+            except (FileNotFoundError, NotADirectoryError):
+                # A volume with no results directory (or whose results path is
+                # not a directory) simply has no result files. Any other OSError
+                # (permission denied, network or cloud-backend failure) is a real
+                # scan failure that would silently corrupt the filter result, so
+                # it is allowed to propagate.
                 continue
         self._logger.info(
-            f'*** Results scan found {len(self._offset_rel_paths)} offset metadata and '
-            f'{len(self._png_rel_paths)} summary PNG files under {self._nav_results_root}'
+            '*** Results scan found %d offset metadata and %d summary PNG files under %s',
+            len(self._offset_rel_paths),
+            len(self._png_rel_paths),
+            self._nav_results_root,
         )
 
     def passes_presence(self, results_path_stub: str) -> bool:
@@ -260,20 +274,30 @@ class ResultsFilter:
     def _metadata_matches(self, image_file: ImageFile, local_path: Path) -> bool:
         """True if the image's metadata file satisfies the error filters.
 
-        A metadata file that cannot be read or parsed excludes its image with
-        a logged warning rather than aborting the enumeration.
+        A metadata file that cannot be read, cannot be decoded as UTF-8, does
+        not parse as JSON, or does not parse to a JSON object excludes its image
+        with a logged warning rather than aborting the enumeration.
 
         Parameters:
             image_file: The candidate image (for the warning message only).
             local_path: Local path of the retrieved metadata JSON file.
         """
         try:
-            metadata: dict[str, Any] = json.loads(local_path.read_text(encoding='utf-8'))
-        except (OSError, json.JSONDecodeError) as exc:
+            parsed: Any = json.loads(local_path.read_text(encoding='utf-8'))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             self._logger.warning(
-                f'Excluding {image_file.results_path_stub}: unreadable metadata file: {exc}'
+                'Excluding %s: unreadable metadata file: %s',
+                image_file.results_path_stub,
+                exc,
             )
             return False
+        if not isinstance(parsed, dict):
+            self._logger.warning(
+                'Excluding %s: metadata JSON is not an object',
+                image_file.results_path_stub,
+            )
+            return False
+        metadata: dict[str, Any] = parsed
         if metadata.get('status') != 'error':
             return False
         status_error = metadata.get('status_error')

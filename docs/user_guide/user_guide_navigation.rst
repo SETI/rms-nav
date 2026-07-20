@@ -175,9 +175,15 @@ For PDS3 datasets (``coiss``, ``coiss_pds3``, ``coiss_cruise``, ``coiss_cruise_p
   ``--has-offset-error``, but restricted to fatal errors caused by / not caused
   by missing SPICE data.
 
-The results-file filters answer "file exists" questions by walking the results
-tree once per selected volume, and read metadata contents in batches, so they
-are efficient even when the results root is a cloud location.
+The results-file filters answer their questions three ways, all efficient even
+when the results root is a cloud location. Presence filters
+(``--has-offset-file`` / ``--has-png-file``) and the error filters
+(``--has-offset-error`` and its SPICE variants) walk the results tree once per
+selected volume and test each candidate against the collected file set. Pure
+absence filters (``--has-no-offset-file`` / ``--has-no-png-file`` with no
+presence or error filter active) do not walk the tree; they answer with batched
+``exists()`` calls. The error filters additionally retrieve the matched metadata
+files in batches to inspect their contents.
 
 Miscellaneous
 ^^^^^^^^^^^^^
