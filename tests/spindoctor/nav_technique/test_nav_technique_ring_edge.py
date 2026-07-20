@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from tests.spindoctor.nav_technique.conftest import (
+    ArcPolylineFactory,
     CirclePolylineFactory,
     DiscImageFactory,
     FlatPolylineFactory,
@@ -848,18 +849,64 @@ def test_ring_edge_nav_3dof_flat_edge_remains_rank_deficient(
 # ---------------------------------------------------------------------------
 
 
-def test_ring_edge_orbit_sigma_widens_covariance_along_one_direction(
+def test_ring_edge_orbit_sigma_widens_partial_arc_along_its_radial_axis(
+    disc_image: DiscImageFactory,
+    arc_polyline: ArcPolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """On a partial arc the declared sigma lands on the arc's radial axis.
+
+    A short arc's normals are nearly parallel, so a coherent radial
+    displacement is absorbed into the translation essentially one-for-one:
+    the covariance difference is the rank-1 outer product of that radial
+    direction with eigenvalue ``sigma_orbit**2``.
+    """
+    shape = (200, 200)
+    cv, cu = 100.0, 100.0
+    radius = 32.0
+    image = disc_image(shape, (cv, cu), radius)
+    vertices, outward = arc_polyline((cv - 0.7, cu - 1.3), radius, 60, -0.4, 0.4)
+    context = make_nav_context(image)
+    technique = RingEdgeNav()
+    plain = make_ring_feature(
+        'arc', vertices=vertices, outward_normals=outward, is_straight_line=False
+    )
+    declared = make_ring_feature(
+        'arc',
+        vertices=vertices,
+        outward_normals=outward,
+        is_straight_line=False,
+        sigma_orbit_radial_px=2.0,
+    )
+    result_plain = technique.navigate([plain], context)
+    result_declared = technique.navigate([declared], context)
+    diff = np.asarray(result_declared.covariance_px2) - np.asarray(result_plain.covariance_px2)
+    eigvals = np.linalg.eigvalsh(diff)
+    assert float(eigvals.max()) == pytest.approx(4.0, rel=1.0e-6)
+    assert float(eigvals.min()) == pytest.approx(0.0, abs=1.0e-9)
+
+
+def test_ring_edge_orbit_sigma_barely_widens_full_annulus(
     disc_image: DiscImageFactory,
     circle_polyline: CirclePolylineFactory,
     make_ring_feature: NavFeatureFactory,
     make_nav_context: NavContextFactory,
 ) -> None:
-    """Declared orbit sigma adds exactly ``sigma**2 * n n^T`` to the covariance.
+    """A full annulus absorbs almost none of a coherent radial error.
 
-    Running the identical scene with and without a declared orbit sigma
-    isolates the inflation term: the covariance difference must be the
-    rank-1 outer product of the radial direction with eigenvalue
-    ``sigma_orbit**2``.
+    A uniform semimajor-axis error dilates a closed ring rather than
+    translating it: the normals point in every direction, so the
+    least-squares translation that best explains a uniform along-normal
+    displacement is ~zero and the reported covariance must barely move.
+
+    This is the regression guard for the earlier construction, which took the
+    dominant eigenvector of the normals' outer-product sum.  On a closed ring
+    that eigen-decomposition is degenerate (the two eigenvalues agree to ~1%,
+    so the axis is set by rounding), and it widened one arbitrary axis by the
+    full variance while leaving the perpendicular axis untouched -- letting a
+    frame the channel should demote still pass the tier gate through the
+    un-widened axis.
     """
     shape = (200, 200)
     cv, cu = 100.0, 100.0
@@ -881,9 +928,9 @@ def test_ring_edge_orbit_sigma_widens_covariance_along_one_direction(
     result_plain = technique.navigate([plain], context)
     result_declared = technique.navigate([declared], context)
     diff = np.asarray(result_declared.covariance_px2) - np.asarray(result_plain.covariance_px2)
-    eigvals = np.linalg.eigvalsh(diff)
-    assert float(eigvals.max()) == pytest.approx(4.0, rel=1.0e-6)
-    assert float(eigvals.min()) == pytest.approx(0.0, abs=1.0e-9)
+    # Both axes stay put: well under 1% of the sigma**2 = 4.0 px^2 a
+    # fully-absorbed displacement would have added.
+    assert float(np.abs(diff).max()) < 0.04
 
 
 def test_ring_edge_orbit_sigma_offset_unchanged(

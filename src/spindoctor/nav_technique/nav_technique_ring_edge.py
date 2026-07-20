@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
+from scipy.linalg import pinvh
 
 from spindoctor.config import Config
 from spindoctor.feature.feature import NavFeature
@@ -26,6 +27,7 @@ from spindoctor.nav_technique.confidence import evaluate_sigmoid_combination
 from spindoctor.nav_technique.diagnostics import RingEdgeDiagnostics
 from spindoctor.nav_technique.dt_fit_gates import DTFitGateConfig, evaluate_dt_fit_gates
 from spindoctor.nav_technique.dt_fitting import (
+    DEFAULT_PINVH_RCOND,
     build_polyline_mask,
     coarse_ncc_search_scored,
     lm_subpixel_refine,
@@ -504,25 +506,29 @@ class RingEdgeNav(NavTechnique):
             # Radial orbit-uncertainty channel: the LM covariance describes
             # the statistical lock onto the MODELED annulus; a catalog-orbit
             # error displaces the whole annulus coherently and does not
-            # average down over vertices, so the declared per-feature orbit
-            # sigma is added in quadrature along the fit's radial direction.
-            # The robust fit absorbs a radial model error into the offset by
-            # locking one-sidedly (the arc the Tukey weights kept), so the
-            # inflation direction is the weight-weighted aggregate normal --
-            # except on a rank-1 scene, where the projection's own axis is
-            # reused so the covariance stays exactly singular tangentially.
+            # average down over vertices, so the declared orbit sigma is
+            # added to the reported covariance through the translation the
+            # fit would ABSORB from such a displacement
+            # (``_absorbed_orbit_sensitivity``: a short arc absorbs it
+            # one-for-one along its normal, a full annulus barely absorbs it
+            # at all because a uniform radial error is a dilation).  On a
+            # rank-1 scene the projection's own axis is reused unchanged, so
+            # the covariance stays exactly singular along the tangent.
             sigma_orbit_px = _effective_orbit_sigma_px(features, result.weights)
             if sigma_orbit_px > 0.0:
-                orbit_n_hat = _aggregate_normal_orientation(
-                    polarity_normals, weights=None if is_rank_1 else result.weights
-                )
-                covariance = _orbit_inflated_covariance(covariance, orbit_n_hat, sigma_orbit_px)
+                if is_rank_1:
+                    orbit_g = _aggregate_normal_orientation(polarity_normals)
+                else:
+                    orbit_g = _absorbed_orbit_sensitivity(polarity_normals, result.weights)
+                covariance = _orbit_inflated_covariance(covariance, orbit_g, sigma_orbit_px)
                 self.logger.info(
                     'Widening the reported covariance by the declared radial orbit '
-                    'uncertainty: sigma %.3f px along (v, u) direction (%.3f, %.3f)',
+                    'uncertainty: sigma %.3f px, absorbed sensitivity (v, u) = '
+                    '(%.3f, %.3f) (|g| = %.3f)',
                     sigma_orbit_px,
-                    float(orbit_n_hat[0]),
-                    float(orbit_n_hat[1]),
+                    float(orbit_g[0]),
+                    float(orbit_g[1]),
+                    float(np.linalg.norm(orbit_g)),
                 )
             per_edge_rms_mean = per_edge_rms_summed / float(max(edge_count, 1))
             diagnostics = RingEdgeDiagnostics(
@@ -617,39 +623,94 @@ def _is_rank_1(covariance: NDArrayFloatType) -> bool:
     return smallest / largest < _RANK1_NULL_RELATIVE_THRESHOLD
 
 
-def _aggregate_normal_orientation(
-    polarity_normals: NDArrayFloatType,
-    *,
-    weights: NDArrayFloatType | None = None,
-) -> NDArrayFloatType:
+def _aggregate_normal_orientation(polarity_normals: NDArrayFloatType) -> NDArrayFloatType:
     """Return the dominant unit-normal orientation of the aggregated edges.
 
     The dominant eigenvector of the per-vertex normals' outer-product sum;
     polarity-sign-independent (a gap's inner and outer edges carry opposite
     normal senses, so a plain mean could cancel).
 
+    Well-conditioned only when the normals concentrate around one axis, which
+    is the rank-1 (all-straight) case this serves; on a well-covered curved
+    arc the two eigenvalues converge and the returned axis is arbitrary.  The
+    orbit-uncertainty channel therefore uses
+    :func:`_absorbed_orbit_sensitivity` instead everywhere except the rank-1
+    path, which reuses this exact axis so the projected covariance stays
+    exactly singular along the tangent.
+
     Parameters:
         polarity_normals: ``(N, 2)`` per-vertex edge normals (either sign).
-        weights: Optional ``(N,)`` non-negative per-vertex weights for the
-            outer-product sum.  Passing the fit's final weights yields the
-            orientation of the arc that actually carried the fit (the
-            radial direction a one-sided lock absorbs a coherent radial
-            model error along).  ``None`` (or an all-zero vector) weights
-            every vertex equally.
 
     Returns:
         Unit 2-vector in ``(v, u)`` order.
     """
-    if weights is not None and bool(np.any(weights > 0.0)):
-        weighted = polarity_normals * weights[:, None]
-        outer_sum = weighted.T @ polarity_normals
-        # Symmetrise: the weighted product is symmetric analytically but
-        # accumulates asymmetric rounding.
-        outer_sum = 0.5 * (outer_sum + outer_sum.T)
-    else:
-        outer_sum = polarity_normals.T @ polarity_normals
+    outer_sum = polarity_normals.T @ polarity_normals
     _eigvals, eigvecs = np.linalg.eigh(outer_sum)
     return cast(NDArrayFloatType, eigvecs[:, -1])
+
+
+def _absorbed_orbit_sensitivity(
+    polarity_normals: NDArrayFloatType, weights: NDArrayFloatType
+) -> NDArrayFloatType:
+    """Return how much of a coherent radial displacement the fit absorbs as translation.
+
+    A catalog-orbit error displaces every vertex along its own outward radial
+    direction by the same amount ``d``.  The DT fit measures along-normal
+    residuals, so the translation it converges to is the weighted
+    least-squares minimiser of ``sum_i w_i (n_i . t - d)**2``, i.e. the
+    solution of ``M t = d b`` with
+
+    .. math::
+        M = \\sum_i w_i \\, n_i n_i^{T}, \\qquad b = \\sum_i w_i \\, n_i .
+
+    The absorbed translation is therefore ``t = d * g`` with ``g = M^{+} b``,
+    and a radial uncertainty ``sigma`` contributes ``sigma**2 g g^{T}`` to the
+    reported covariance.  Returning ``g`` (not a unit direction) is what makes
+    the geometry honest:
+
+    - A short arc has nearly parallel normals: ``g`` is a unit vector along
+      them, and the full variance lands on the radial axis.
+    - A rank-1 straight edge gives ``M = W n n^{T}`` and ``b = W n``, so
+      ``g = n`` exactly -- the same rank-1 term the projected covariance uses.
+    - A full annulus has ``b ~ 0``: a uniform radial error is a DILATION, not
+      a translation, so almost none of it is absorbed and the inflation
+      correctly vanishes.  The previous dominant-eigenvector construction
+      instead returned a numerically arbitrary axis in this regime (the two
+      eigenvalues converge) and widened one arbitrary axis by the full
+      variance while leaving the perpendicular axis untouched.
+
+    ``b`` uses the normals with their signs INTACT, because both emitting
+    models document ``RingEdgePolyline.normals_vu`` as radially outward per
+    vertex (the technique's aggregation applies one global flip, which
+    ``g g^T`` is invariant to).  Preserving the relative senses is what makes
+    the dilation cancellation above work, and it is also what makes opposite
+    radial sides of the planet in a wide field cancel correctly instead of
+    being fabricated into a common translation.  The failure mode of a
+    mis-signed edge is therefore an UNDER-inflation (a spurious cancellation),
+    not an over-inflation.
+
+    Parameters:
+        polarity_normals: ``(N, 2)`` per-vertex edge normals (either sign).
+        weights: ``(N,)`` non-negative per-vertex final fit weights.
+
+    Returns:
+        The ``(2,)`` sensitivity vector ``g``, with ``||g||`` capped at 1.0:
+        a coherent displacement of ``sigma`` cannot honestly move the recovered
+        translation by more than ``sigma``, and the unbounded solutions come
+        from directions the fit barely constrains (whose variance the fit's own
+        covariance already reports as large).
+    """
+    w = np.asarray(weights, np.float64)
+    if w.size == 0 or not bool(np.any(w > 0.0)):
+        w = np.ones(polarity_normals.shape[0], np.float64)
+    info = (polarity_normals * w[:, None]).T @ polarity_normals
+    info = 0.5 * (info + info.T)
+    b = w @ polarity_normals
+    g = pinvh(info, rtol=DEFAULT_PINVH_RCOND) @ b
+    norm = float(np.linalg.norm(g))
+    if norm > 1.0:
+        g = g / norm
+    return cast(NDArrayFloatType, g)
 
 
 def _effective_orbit_sigma_px(features: list[NavFeature], weights: NDArrayFloatType) -> float:
@@ -663,8 +724,19 @@ def _effective_orbit_sigma_px(features: list[NavFeature], weights: NDArrayFloatT
     weight.  The per-feature orbit errors are deliberately treated as FULLY
     CORRELATED (a weighted mean of sigmas, not an independent-error
     quadrature combine): the common multi-edge case is the inner and outer
-    edge of the same feature, whose orbit error IS shared, and treating
-    genuinely independent features as correlated only errs conservative.
+    edge of the same feature, whose orbit error IS shared.
+
+    That combine is conservative only for SAME-SENSE geometry -- features
+    whose outward radial directions point the same way in image space, so a
+    common radial error displaces them together.  For features on opposite
+    radial sides of the planet in a wide field a common error is a dilation
+    that the fit largely does not absorb as translation, and pairing a mean
+    of sigmas with one representative direction over-inflates rather than
+    erring conservative.  The geometry partially self-limits: wide-spread
+    normals shrink the absorbed-sensitivity vector
+    (:func:`_absorbed_orbit_sensitivity`), so the inflation shrinks with
+    them.  A per-feature sensitivity decomposition is what would model the
+    opposite-sense case properly.
 
     Parameters:
         features: The consumed features, in the order their vertices were
