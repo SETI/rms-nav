@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from estimator import (  # noqa: E402
+from estimator import (
     EstimatorSpec,
     FrameSample,
     solve_covariance_components,
@@ -281,9 +281,7 @@ def test_declared_pair_covariance_recovers_common_mode() -> None:
         EstimatorSpec('ring', 'rank1'),
         EstimatorSpec('blob', 'full'),
     ]
-    result = solve_covariance_components(
-        frames, specs, pair_covariances=[('limb', 'ring')]
-    )
+    result = solve_covariance_components(frames, specs, pair_covariances=[('limb', 'ring')])
     gamma = result.pair_covariances[('limb', 'ring')]
     assert isinstance(gamma, float)
     assert gamma == pytest.approx(sigma_common**2, abs=0.05)

@@ -308,7 +308,9 @@ def _basis_angle(spec: EstimatorSpec, frame: FrameSample) -> float:
     """Return the basis angle for a full instance on a frame (0 for image)."""
     if spec.basis == 'rotating':
         if spec.name not in frame.basis_angle_rad:
-            raise ValueError(f'frame is missing basis_angle_rad for rotating instance {spec.name!r}')
+            raise ValueError(
+                f'frame is missing basis_angle_rad for rotating instance {spec.name!r}'
+            )
         return float(frame.basis_angle_rad[spec.name])
     return 0.0
 
@@ -611,9 +613,7 @@ def solve_covariance_components(
             samples[b], _, _, _ = np.linalg.lstsq(a_b, y_b, rcond=None)
         lo = np.nanpercentile(samples, 2.5, axis=0)
         hi = np.nanpercentile(samples, 97.5, axis=0)
-        bootstrap_ci = {
-            name: (float(lo[k]), float(hi[k])) for k, name in enumerate(layout.names)
-        }
+        bootstrap_ci = {name: (float(lo[k]), float(hi[k])) for k, name in enumerate(layout.names)}
 
     return SolveResult(
         param_names=layout.names,
