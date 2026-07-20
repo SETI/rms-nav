@@ -216,6 +216,29 @@ Independent review before done; all CI gates; one PR."
 - **#287 (collect.py thread pinning)**: small fix; until it lands, every
   calibration campaign needs the shell-level exports below.
 
+## 3b. Model-tier guidance (where a top-tier model is truly needed)
+
+Reserve the top-tier (Fable-class) model for work where a
+plausible-but-wrong answer survives review by looking right; a
+mid-tier (Opus-class) implementer is the efficient default everywhere
+else. Applied to the items above:
+
+- **Top-tier required:** WS-0 (#224 — correlated-error estimator math and
+  the solvability map; the one item not to delegate down even with a
+  strong review); #230/WS-5 and #309 (calibration-fit adjudication on
+  messy evidence); the design and adjudication of the #301/#291 ensemble
+  diagnostic channel; and the independent-review pass on anything
+  statistical, boundary-touching, or calibration-touching, regardless of
+  who implemented it.
+- **Mid-tier drafts, top-tier adjudicates:** the #150/#128
+  photometric-limb design; #310 (the boundary restructuring — the guard
+  tests catch mechanical regressions, the review catches new leak
+  shapes).
+- **Mid-tier or below suffices:** the sidecar re-ratchet, WS-17, library
+  growth, the agreement study's bulk execution (once WS-0 hands it a
+  proven estimator), #229, #311, #284/#285, #130, #179, and the
+  documentation/engineering items.
+
 ## 4. Standing practices for every session you dispatch
 
 - Environment: `source /seti/newnav/setup.sh`. Calibration campaigns
