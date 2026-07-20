@@ -271,6 +271,45 @@ class RingFeature:
             return outer_rms
         return 0.0  # unreachable: __post_init__ ensures at least one edge
 
+    def edge_uncertainty(self, edge_type: str) -> float:
+        """RMS (km) of one named edge's own orbit solution.
+
+        Unlike :attr:`uncertainty` (the max across the feature's edges, a
+        deliberately conservative per-feature scale for the robust fit's
+        per-vertex weighting), this is the requested edge's own value.  A
+        radial displacement bound belongs to the edge whose orbit solution it
+        describes: on the Keeler-A Ring OE ringlet the inner edge is fitted to
+        1.006 km while the outer is 10.18 km, and charging the inner edge the
+        outer's quality would price a well-determined edge at its sibling's.
+
+        Parameters:
+            edge_type: The side name (``'inner'`` / ``'outer'``) or this
+                feature's catalog edge label for that side (``'IER'`` /
+                ``'OER'`` for a ringlet, ``'IEG'`` / ``'OEG'`` for a gap).
+                Both spellings are accepted because the render pipeline
+                carries the catalog label on its edge tuples while callers
+                working from the feature structure use the side name.
+
+        Returns:
+            That edge's RMS in km, or ``0.0`` when the named edge is absent
+            (a single-edge feature asked for the missing side).
+
+        Raises:
+            ValueError: If ``edge_type`` names neither a side nor one of this
+                feature's edge labels.
+        """
+        side = edge_type
+        if side not in ('inner', 'outer'):
+            label_to_side = {label: name for name, label in self.edge_labels.items()}
+            if side not in label_to_side:
+                raise ValueError(
+                    f"edge_type must be 'inner' / 'outer' or one of this feature's edge "
+                    f'labels {sorted(label_to_side)}; got {edge_type!r}'
+                )
+            side = label_to_side[side]
+        edge = self.inner_edge if side == 'inner' else self.outer_edge
+        return 0.0 if edge is None else float(edge.rms)
+
     @property
     def edge_labels(self) -> dict[str, str]:
         """Map of 'inner'/'outer' to edge label string.

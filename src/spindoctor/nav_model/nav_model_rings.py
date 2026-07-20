@@ -212,6 +212,7 @@ class NavModelRings(NavModelRingsBase):
             ]
         ] = []
         self._km_per_pixel_radial: float = 0.0
+        self._radial_resolution_ext: NDArrayFloatType | None = None
         self._extfov_v_size: int = 0
         self._extfov_u_size: int = 0
         self._predicted_center_vu: tuple[float, float] = (0.0, 0.0)
@@ -397,6 +398,12 @@ class NavModelRings(NavModelRingsBase):
             return
         resolutions: NDArrayFloatType = obs.ext_bp.ring_radial_resolution(ring_target).vals
         self._km_per_pixel_radial = float(np.mean(resolutions[np.isfinite(resolutions)]))
+        # Retained per pixel so a physical km displacement can be converted at
+        # the edge that carries it: the radial scale varies materially across a
+        # wide field (a frame spanning the C ring to the A ring), and the
+        # whole-image mean above is only appropriate for the per-vertex
+        # statistical sigma.
+        self._radial_resolution_ext = resolutions
 
         def min_res_at_radius(a: float) -> float | None:
             border_arr: NDArrayBoolType = (
@@ -571,10 +578,26 @@ class NavModelRings(NavModelRingsBase):
             max_radial_px, kmpp_threshold = _ring_annulus_emission_params(
                 self._config, self._planet or ''
             )
-            # Default fully-correlated radial orbit uncertainty for a catalog
-            # feature that carries no fitted rms; a feature's own rms is the
-            # orbit-solution quality and takes precedence.  See
+            # Default radial orbit uncertainty for a catalog feature that
+            # carries no fitted rms; an edge's own rms takes precedence.  See
             # config_050_rings.yaml for the value's provenance.
+            #
+            # CONTESTED ASSUMPTION, deliberately conservative: the catalog rms
+            # is consumed as a fully-correlated whole-edge displacement, but it
+            # is the residual of the edge's own orbit fit and therefore mixes a
+            # genuinely coherent radius error with longitude-varying resonant
+            # wander that does NOT displace the edge coherently.  The catalog
+            # shows the mixture directly -- the same A-ring outer edge is
+            # fitted to rms 10.18 km with no m-modes and 1.78 km with nine
+            # (config_310_saturn_rings.yaml), a 5.7x reduction attributable to
+            # mode structure alone -- so on the resonant edges that carry the
+            # largest rms this term is over-severe by roughly that factor.  The
+            # principled fix decomposes the catalog modes and prices only the
+            # m=0 part coherently, which needs per-mode amplitudes this channel
+            # does not consume today; until then the geometry partially
+            # compensates (wide-arc coverage shrinks the absorbed sensitivity
+            # in RingEdgeNav) and the over-severity is accepted and stated
+            # rather than modeled away.
             default_orbit_sigma_km = float(self._config.rings['default_orbit_radial_sigma_km'])
             # System-level annulus gate: at very low ring resolution the
             # entire ring system spans only a handful of pixels, so even
@@ -608,6 +631,7 @@ class NavModelRings(NavModelRingsBase):
                 if not edge_info_list:
                     continue
                 for edge_mask, label_text, edge_label in edge_info_list:
+                    edge_orbit_rms_km = ring_feat.edge_uncertainty(edge_label)
                     vertices_vu, normals_vu = _polyline_from_edge_mask(edge_mask)
                     if vertices_vu.shape[0] == 0:
                         continue
@@ -642,12 +666,25 @@ class NavModelRings(NavModelRingsBase):
                                 vertices_vu=vertices_vu,
                                 normals_vu=normals_vu,
                                 uncertainty_km=uncertainty_km,
+                                # The coherent displacement bound is a property
+                                # of THIS edge's own orbit solution, not the
+                                # feature-level max the per-vertex sigma uses.
                                 orbit_sigma_km=(
-                                    uncertainty_km
-                                    if uncertainty_km > 0.0
+                                    edge_orbit_rms_km
+                                    if edge_orbit_rms_km > 0.0
                                     else default_orbit_sigma_km
                                 ),
                                 km_per_pixel_radial=max(self._km_per_pixel_radial, 1.0),
+                                # A physical km displacement converts at the
+                                # edge's own radial scale, with no rasterization
+                                # floor -- that floor belongs to the per-vertex
+                                # sigma and would understate a coherent
+                                # displacement on sub-km/px frames.
+                                orbit_km_per_pixel_radial=_median_radial_scale(
+                                    self._radial_resolution_ext,
+                                    edge_mask,
+                                    self._km_per_pixel_radial,
+                                ),
                                 is_straight_line=straight,
                                 bbox=_mask_bbox(edge_mask),
                                 subject_range_km=self._subject_range_km,
@@ -723,6 +760,29 @@ class NavModelRings(NavModelRingsBase):
                 continue
             out.add_annotations(self._create_edge_annotations(self.obs, edge_info_list, model_mask))
         return out
+
+
+def _median_radial_scale(
+    resolutions: NDArrayFloatType | None, mask: NDArrayBoolType, fallback_km_per_px: float
+) -> float:
+    """Median ring-radial resolution (km/px) over an edge's own pixels.
+
+    Parameters:
+        resolutions: Ext-FOV ring-radial-resolution array, or ``None`` when the
+            backplane was never evaluated (a stubbed model in unit tests).
+        mask: Ext-FOV boolean mask of the edge's pixels.
+        fallback_km_per_px: Whole-image scale to use when no per-pixel array is
+            available or no masked pixel carries a finite resolution.
+
+    Returns:
+        The edge-local scale in km per pixel; strictly positive.
+    """
+    if resolutions is not None and resolutions.shape == mask.shape:
+        local = resolutions[mask]
+        local = local[np.isfinite(local) & (local > 0.0)]
+        if local.size:
+            return float(np.median(local))
+    return max(fallback_km_per_px, 1.0e-6)
 
 
 def _polyline_from_edge_mask(
@@ -854,6 +914,7 @@ def _build_edge_feature(
     uncertainty_km: float,
     orbit_sigma_km: float,
     km_per_pixel_radial: float,
+    orbit_km_per_pixel_radial: float,
     is_straight_line: bool,
     bbox: tuple[int, int, int, int],
     subject_range_km: float,
@@ -862,17 +923,21 @@ def _build_edge_feature(
     """Construct a RING_EDGE NavFeature from polyline data.
 
     ``uncertainty_km`` scales the per-vertex radial sigma (the statistical
-    residual scale of the robust fit); ``orbit_sigma_km`` is the
-    fully-correlated orbit-solution uncertainty carried on
-    ``RingEdgePolyline.sigma_orbit_radial_px`` so ``RingEdgeNav`` can widen
-    its reported covariance along the radial direction -- a coherent orbit
-    error does not average down over vertices the way the per-vertex sigma
-    does.
+    residual scale of the robust fit), converted at the floored whole-image
+    ``km_per_pixel_radial`` because that sigma is a rasterization-resolution
+    scale.  ``orbit_sigma_km`` is this edge's own orbit-solution uncertainty,
+    carried on ``RingEdgePolyline.sigma_orbit_radial_px`` so ``RingEdgeNav``
+    can widen its reported covariance -- a coherent orbit error does not
+    average down over vertices the way the per-vertex sigma does.  It converts
+    at ``orbit_km_per_pixel_radial``, the edge's OWN unfloored radial scale: a
+    physical km displacement grows in pixels as resolution improves, so the
+    per-vertex floor would understate it on the sub-km/px frames where it
+    matters most.
     """
     n = vertices_vu.shape[0]
     sigma_radial_px = np.full(n, uncertainty_km / km_per_pixel_radial, dtype=np.float64)
     sigma_along_px = np.full(n, RING_EDGE_SIGMA_ALONG_PX, dtype=np.float64)
-    sigma_orbit_px = orbit_sigma_km / km_per_pixel_radial
+    sigma_orbit_px = orbit_sigma_km / orbit_km_per_pixel_radial
     visible_arc_fraction = 1.0
     feature_id = f'ring_edge:{planet}:{ring_feat.key}:{edge_label}'
     reliability = _ring_edge_reliability(

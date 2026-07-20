@@ -10,6 +10,7 @@ carries outward radial unit normals.
 from typing import Any, cast
 
 import numpy as np
+import pytest
 
 from spindoctor.feature.composition import compose_template_features
 from spindoctor.feature.geometry import RingEdgePolyline
@@ -154,7 +155,15 @@ def test_ring_annulus_template_paints_at_ring_radius() -> None:
 
 
 def test_ring_edge_carries_declared_orbit_sigma() -> None:
-    """A declared orbit uncertainty lands on the emitted geometry unfloored."""
+    """A declared orbit uncertainty lands on the emitted geometry unfloored.
+
+    The semimajor-axis and radial-amplitude sigmas combine in QUADRATURE:
+    the eccentric term enters the radial displacement as
+    ``-delta(ae) cos(theta - peri)``, so the max-over-longitude 1-sigma of
+    the two independent terms is their quadrature sum, not their arithmetic
+    sum (which would overstate the envelope by up to sqrt(2) and double the
+    variance at equal terms).
+    """
     params = _feature_params()
     params['declared_orbit_sigma'] = {'sigma_a_px': 2.0, 'sigma_ae_px': 0.5}
     model = NavModelRingsSimulated('rings', _obs(), 'SATURN', params, _ring_system())
@@ -162,10 +171,11 @@ def test_ring_edge_carries_declared_orbit_sigma() -> None:
     features = model.to_features(cast(NavContext, None))
     edges = [f for f in features if f.feature_type.name == 'RING_EDGE']
     assert edges
+    expected = float(np.hypot(2.0, 0.5))
     for edge in edges:
         geometry = edge.geometry
         assert isinstance(geometry, RingEdgePolyline)
-        assert geometry.sigma_orbit_radial_px == 2.5
+        assert geometry.sigma_orbit_radial_px == pytest.approx(expected)
 
 
 def test_ring_edge_orbit_sigma_zero_when_undeclared() -> None:
