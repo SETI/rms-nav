@@ -13,11 +13,9 @@ body blob) before declaring a final answer.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy.linalg import pinvh
 
 from spindoctor.config import Config
 from spindoctor.feature.feature import NavFeature
@@ -27,7 +25,6 @@ from spindoctor.nav_technique.confidence import evaluate_sigmoid_combination
 from spindoctor.nav_technique.diagnostics import RingEdgeDiagnostics
 from spindoctor.nav_technique.dt_fit_gates import DTFitGateConfig, evaluate_dt_fit_gates
 from spindoctor.nav_technique.dt_fitting import (
-    DEFAULT_PINVH_RCOND,
     build_polyline_mask,
     coarse_ncc_search_scored,
     lm_subpixel_refine,
@@ -39,6 +36,20 @@ from spindoctor.nav_technique.nav_technique import (
     log_confidence_breakdown,
     rotation_pivot_distance_px,
     search_window_for_obs,
+)
+from spindoctor.nav_technique.ring_edge_geometry import (
+    _absorbed_orbit_sensitivity,
+    _aggregate_normal_orientation,
+    _effective_orbit_sigma_px,
+    _is_rank_1,
+    _orbit_inflated_covariance,
+    _rank1_projected_covariance,
+)
+from spindoctor.nav_technique.ring_edge_stats import (
+    _EdgeFitStat,
+    _per_edge_fit_stats,
+    _per_edge_median_max,
+    _per_edge_rms_summed,
 )
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.support.types import NDArrayFloatType
@@ -53,14 +64,6 @@ __all__ = ['RingEdgeNav', 'aggregate_edge_normal_angle_deg']
 # ``techniques.RingEdgeNav.tuning``.  No Python-level fallback;
 # missing-key access in ``__init__`` is a KeyError so a config typo
 # fails fast at process startup.
-
-
-_RANK1_NULL_RELATIVE_THRESHOLD: float = 1.0e-8
-"""Eigenvalue ratio below which a 2x2 covariance is treated as rank-1.
-
-Matches the ensemble's scale-independent rank-deficiency test so the
-two paths agree on whether a result is rank-deficient.
-"""
 
 
 def _aggregate_ring_edges(
@@ -602,233 +605,17 @@ class RingEdgeNav(NavTechnique):
             )
 
 
-def _is_rank_1(covariance: NDArrayFloatType) -> bool:
-    """Return True when the covariance is rank-deficient in its translation block.
+class _RingEdgeConfidenceContext:
+    """Adapter exposing ring-edge confidence terms in a single attribute set."""
 
-    For both 2x2 (translation-only) and 3x3 (translation + rotation) inputs
-    the test runs on the top-left 2x2 block — flat-ring rank-deficiency is
-    a property of the translation parameterisation, regardless of whether
-    rotation is fit.  Uses the same scale-independent test as the ensemble
-    combine: the ratio of the smallest absolute eigenvalue to the largest
-    must fall below :data:`_RANK1_NULL_RELATIVE_THRESHOLD`.
-    """
-    if covariance.shape not in ((2, 2), (3, 3)):
-        return False
-    block = covariance[:2, :2]
-    eigvals = np.linalg.eigvalsh(block)
-    largest = float(np.abs(eigvals).max())
-    smallest = float(np.abs(eigvals).min())
-    if largest == 0.0:
-        return True
-    return smallest / largest < _RANK1_NULL_RELATIVE_THRESHOLD
-
-
-def _aggregate_normal_orientation(polarity_normals: NDArrayFloatType) -> NDArrayFloatType:
-    """Return the dominant unit-normal orientation of the aggregated edges.
-
-    The dominant eigenvector of the per-vertex normals' outer-product sum;
-    polarity-sign-independent (a gap's inner and outer edges carry opposite
-    normal senses, so a plain mean could cancel).
-
-    Well-conditioned only when the normals concentrate around one axis, which
-    is the rank-1 (all-straight) case this serves; on a well-covered curved
-    arc the two eigenvalues converge and the returned axis is arbitrary.  The
-    orbit-uncertainty channel therefore uses
-    :func:`_absorbed_orbit_sensitivity` instead everywhere except the rank-1
-    path, which reuses this exact axis so the projected covariance stays
-    exactly singular along the tangent.
-
-    Parameters:
-        polarity_normals: ``(N, 2)`` per-vertex edge normals (either sign).
-
-    Returns:
-        Unit 2-vector in ``(v, u)`` order.
-    """
-    outer_sum = polarity_normals.T @ polarity_normals
-    _eigvals, eigvecs = np.linalg.eigh(outer_sum)
-    return cast(NDArrayFloatType, eigvecs[:, -1])
-
-
-def _absorbed_orbit_sensitivity(
-    polarity_normals: NDArrayFloatType, weights: NDArrayFloatType
-) -> NDArrayFloatType:
-    """Return how much of a coherent radial displacement the fit absorbs as translation.
-
-    A catalog-orbit error displaces every vertex along its own outward radial
-    direction by the same amount ``d``.  The DT fit measures along-normal
-    residuals, so the translation it converges to is the weighted
-    least-squares minimiser of ``sum_i w_i (n_i . t - d)**2``, i.e. the
-    solution of ``M t = d b`` with
-
-    .. math::
-        M = \\sum_i w_i \\, n_i n_i^{T}, \\qquad b = \\sum_i w_i \\, n_i .
-
-    The absorbed translation is therefore ``t = d * g`` with ``g = M^{+} b``,
-    and a radial uncertainty ``sigma`` contributes ``sigma**2 g g^{T}`` to the
-    reported covariance.  Returning ``g`` (not a unit direction) is what makes
-    the geometry honest:
-
-    - A short arc has nearly parallel normals: ``g`` is a unit vector along
-      them, and the full variance lands on the radial axis.
-    - A rank-1 straight edge gives ``M = W n n^{T}`` and ``b = W n``, so
-      ``g = n`` exactly -- the same rank-1 term the projected covariance uses.
-    - A full annulus has ``b ~ 0``: a uniform radial error is a DILATION, not
-      a translation, so almost none of it is absorbed and the inflation
-      correctly vanishes.  The previous dominant-eigenvector construction
-      instead returned a numerically arbitrary axis in this regime (the two
-      eigenvalues converge) and widened one arbitrary axis by the full
-      variance while leaving the perpendicular axis untouched.
-
-    ``b`` uses the normals with their signs INTACT, because both emitting
-    models document ``RingEdgePolyline.normals_vu`` as radially outward per
-    vertex (the technique's aggregation applies one global flip, which
-    ``g g^T`` is invariant to).  Preserving the relative senses is what makes
-    the dilation cancellation above work, and it is also what makes opposite
-    radial sides of the planet in a wide field cancel correctly instead of
-    being fabricated into a common translation.  The failure mode of a
-    mis-signed edge is therefore an UNDER-inflation (a spurious cancellation),
-    not an over-inflation.
-
-    Parameters:
-        polarity_normals: ``(N, 2)`` per-vertex edge normals (either sign).
-        weights: ``(N,)`` non-negative per-vertex final fit weights.
-
-    A small ``||g||`` says the LINEARIZED fit absorbs little, NOT that the
-    recovered offset is safe: the acquisition is nonlinear, and the coarse
-    integer search can still select a basin whose translation aligns a long
-    arc of a radially misplaced ring (the simulated closed-ringlet scene lands
-    ~2.2 px from truth on a 2.5 px planted radial error, with every vertex an
-    inlier).  The caller therefore blends this direction with an isotropic
-    term as ``||g||`` falls -- see :func:`_orbit_inflated_covariance` -- so a
-    near-isotropic geometry reports the bound in every direction rather than
-    reporting nothing.
-
-    Returns:
-        The ``(2,)`` sensitivity vector ``g``, with ``||g||`` capped at 1.0:
-        a coherent displacement of ``sigma`` cannot honestly move the recovered
-        translation by more than ``sigma``, and the unbounded solutions come
-        from directions the fit barely constrains (whose variance the fit's own
-        covariance already reports as large).
-    """
-    w = np.asarray(weights, np.float64)
-    if w.size == 0 or not bool(np.any(w > 0.0)):
-        w = np.ones(polarity_normals.shape[0], np.float64)
-    info = (polarity_normals * w[:, None]).T @ polarity_normals
-    info = 0.5 * (info + info.T)
-    b = w @ polarity_normals
-    g = pinvh(info, rtol=DEFAULT_PINVH_RCOND) @ b
-    norm = float(np.linalg.norm(g))
-    if norm > 1.0:
-        g = g / norm
-    return cast(NDArrayFloatType, g)
-
-
-def _effective_orbit_sigma_px(features: list[NavFeature], weights: NDArrayFloatType) -> float:
-    """Effective fully-correlated radial orbit sigma over the consumed edges.
-
-    Each consumed ``RING_EDGE`` feature carries a declared radial
-    orbit-uncertainty sigma (``RingEdgePolyline.sigma_orbit_radial_px``);
-    the fit's translation absorbs a weighted mix of the features' coherent
-    radial displacements, so the effective sigma is the mean of the
-    per-feature sigmas weighted by each feature's share of the final LM
-    weight.  The per-feature orbit errors are deliberately treated as FULLY
-    CORRELATED (a weighted mean of sigmas, not an independent-error
-    quadrature combine): the common multi-edge case is the inner and outer
-    edge of the same feature, whose orbit error IS shared.
-
-    That combine is conservative only for SAME-SENSE geometry -- features
-    whose outward radial directions point the same way in image space, so a
-    common radial error displaces them together.  For features on opposite
-    radial sides of the planet in a wide field a common error is a dilation
-    that the fit largely does not absorb as translation, and pairing a mean
-    of sigmas with one representative direction over-inflates rather than
-    erring conservative.  The geometry partially self-limits: wide-spread
-    normals shrink the absorbed-sensitivity vector
-    (:func:`_absorbed_orbit_sensitivity`), so the inflation shrinks with
-    them.  A per-feature sensitivity decomposition is what would model the
-    opposite-sense case properly.
-
-    Parameters:
-        features: The consumed features, in the order their vertices were
-            concatenated for the LM fit.
-        weights: Per-vertex final weights from the fit, in the same
-            concatenation order.
-
-    Returns:
-        The effective sigma in pixels; ``0.0`` when no feature declares an
-        orbit uncertainty.  When every vertex weight is zero (a degenerate
-        fit) the maximum declared sigma is returned -- the conservative
-        bound, though a degenerate fit is spurious anyway.
-    """
-    weighted_sum = 0.0
-    weight_total = 0.0
-    max_sigma = 0.0
-    cursor = 0
-    for feat in features:
-        if not isinstance(feat.geometry, RingEdgePolyline):
-            continue
-        n = feat.geometry.vertices_vu.shape[0]
-        if n == 0:
-            continue
-        w_f = float(np.sum(weights[cursor : cursor + n]))
-        cursor += n
-        s_f = float(feat.geometry.sigma_orbit_radial_px)
-        max_sigma = max(max_sigma, s_f)
-        weighted_sum += w_f * s_f
-        weight_total += w_f
-    if max_sigma <= 0.0:
-        return 0.0
-    if weight_total <= 0.0:
-        return max_sigma
-    return weighted_sum / weight_total
-
-
-def _orbit_inflated_covariance(
-    covariance: NDArrayFloatType,
-    sensitivity_g: NDArrayFloatType,
-    sigma_orbit_px: float,
-) -> NDArrayFloatType:
-    """Add the orbit-uncertainty variance to the covariance's translation block.
-
-    The added term interpolates between a purely directional and a purely
-    isotropic inflation on the absorbed-sensitivity magnitude ``||g||``:
-
-    .. math::
-        \\Sigma \\mathrel{+}= \\sigma^{2}
-            \\bigl[\\, g g^{T} + (1 - ||g||^{2})\\, I \\,\\bigr]
-
-    - ``||g|| = 1`` (a short arc, or a rank-1 straight edge where ``g`` is
-      exactly the projection's own axis): the term is exactly
-      ``sigma**2 g g^T``.  Only the radial axis widens, and an exactly
-      singular rank-1 covariance stays exactly singular along its tangent.
-    - ``||g|| -> 0`` (a closed annulus, or features whose radial directions
-      cancel): the term becomes ``sigma**2 I``.  The linearized fit absorbs
-      almost nothing there, but the nonlinear acquisition still can -- the
-      closed-ringlet regression scene lands ~2.2 px from truth on a 2.5 px
-      planted radial error -- and which direction it locks in is exactly what
-      cannot be predicted, so the bound is reported on every axis instead of
-      on an axis chosen by rounding.
-
-    The interpolation is smooth (no threshold to tune), every term is positive
-    semidefinite so the result stays a valid covariance, and the rotation
-    block of a 3x3 input is untouched.
-
-    Parameters:
-        covariance: ``(2, 2)`` or ``(3, 3)`` reported covariance.
-        sensitivity_g: The ``(2,)`` absorbed-translation sensitivity from
-            :func:`_absorbed_orbit_sensitivity` (or a unit radial axis on the
-            rank-1 path), in ``(v, u)`` order with ``||g|| <= 1``.
-        sigma_orbit_px: The effective orbit sigma in pixels.
-
-    Returns:
-        The inflated covariance (a new array).
-    """
-    out = np.array(covariance, dtype=np.float64, copy=True)
-    g = np.asarray(sensitivity_g, np.float64)[:2]
-    g_sq = min(float(g @ g), 1.0)
-    variance = sigma_orbit_px * sigma_orbit_px
-    out[:2, :2] += variance * (np.outer(g, g) + (1.0 - g_sq) * np.eye(2))
-    return cast(NDArrayFloatType, out)
+    def __init__(self, *, at_edge: bool, diagnostics: RingEdgeDiagnostics) -> None:
+        self.at_edge = at_edge
+        self.total_edge_length_px = diagnostics.total_edge_length_px
+        self.per_edge_dt_rms_summed = diagnostics.per_edge_dt_rms_summed
+        self.per_edge_dt_rms_mean = diagnostics.per_edge_dt_rms_mean
+        self.per_edge_dt_median_max = diagnostics.per_edge_dt_median_max
+        self.edge_count = diagnostics.edge_count
+        self.is_rank_1 = diagnostics.is_rank_1
 
 
 def aggregate_edge_normal_angle_deg(features: list[NavFeature]) -> float | None:
@@ -860,195 +647,3 @@ def aggregate_edge_normal_angle_deg(features: list[NavFeature]) -> float | None:
     elif angle > 90.0:
         angle -= 180.0
     return float(angle)
-
-
-def _rank1_projected_covariance(
-    covariance: NDArrayFloatType, polarity_normals: NDArrayFloatType
-) -> NDArrayFloatType:
-    """Project a rank-1 fit's covariance onto its observable (edge-normal) axis.
-
-    The translation block becomes the exactly singular ``sigma_n^2 n n^T``,
-    where ``n`` is the aggregate edge-normal orientation and ``sigma_n^2``
-    the input covariance's marginal variance along it.  Exact singularity is
-    the representation the ensemble is built around: ``pinvh`` drops the
-    exact null space when forming the information matrix (keeping the
-    normal-axis measurement), the combine's rank-deficiency test fires, the
-    fused offset becomes the minimum-norm representative along the edge
-    (sliding along a straight edge is a symmetry of the scene), and the
-    unobservable axis is reported through the
-    ``sigma_along_unobservable_px = inf`` sentinel rather than an inflated
-    per-axis sigma that would poison the tier check.
-
-    The normal orientation is the dominant eigenvector of the per-vertex
-    normals' outer-product sum, which is polarity-sign-independent — the
-    aggregated edges' normals point in opposite senses (a gap's inner and
-    outer edges), so a plain mean could cancel.
-
-    For a 3x3 (rotation-fitting) covariance the rotation variance is kept
-    and the translation-rotation cross-covariances are zeroed: a
-    cross-covariance into an unobservable translation direction carries no
-    usable information.
-
-    Parameters:
-        covariance: The LM's ``(2, 2)`` or ``(3, 3)`` covariance.
-        polarity_normals: ``(N, 2)`` per-vertex edge normals (either sign).
-
-    Returns:
-        A new covariance of the input shape whose translation block is
-        exactly rank-1.
-    """
-    n_hat = _aggregate_normal_orientation(polarity_normals)
-    sigma_n_sq = float(n_hat @ covariance[:2, :2] @ n_hat)
-    projected = np.zeros_like(covariance)
-    projected[:2, :2] = sigma_n_sq * np.outer(n_hat, n_hat)
-    if covariance.shape == (3, 3):
-        projected[2, 2] = covariance[2, 2]
-    return projected
-
-
-def _per_edge_rms_summed(features: list[NavFeature], residuals: NDArrayFloatType) -> float:
-    """Sum the per-edge weighted RMS DT residual across all consumed edges."""
-    total = 0.0
-    cursor = 0
-    for feat in features:
-        if not isinstance(feat.geometry, RingEdgePolyline):
-            continue
-        n = feat.geometry.vertices_vu.shape[0]
-        if n == 0:
-            continue
-        slice_residuals = residuals[cursor : cursor + n]
-        cursor += n
-        if slice_residuals.size == 0:
-            continue
-        rms = float(np.sqrt(np.mean(slice_residuals * slice_residuals)))
-        total += rms
-    return total
-
-
-@dataclass(frozen=True)
-class _EdgeFitStat:
-    """Per-edge fit statistics for the spurious-veto waiver.
-
-    Parameters:
-        inlier_count: Vertices of this edge with a strictly positive final
-            weight (prior precision times Tukey biweight) -- the same
-            criterion ``LMRefineResult.inlier_count`` applies to the
-            aggregated vertex set.
-        vertex_count: Total vertices of this edge.
-        median_abs_residual_px: Median absolute DT residual of this edge's
-            vertices at the converged offset.  Small when the edge lies
-            along a detected image edge (whether or not the robust fit
-            kept it); tens of pixels when no image edge exists near it.
-        is_straight: The edge's ``is_straight_line`` flag; a straight edge
-            constrains only its normal axis (rank-1).
-    """
-
-    inlier_count: int
-    vertex_count: int
-    median_abs_residual_px: float
-    is_straight: bool
-
-    @property
-    def inlier_fraction(self) -> float:
-        """Fraction of this edge's vertices retained as Tukey inliers."""
-        return float(self.inlier_count) / float(self.vertex_count)
-
-
-def _per_edge_fit_stats(
-    features: list[NavFeature],
-    *,
-    residuals: NDArrayFloatType,
-    weights: NDArrayFloatType,
-) -> list[_EdgeFitStat]:
-    """Return per-edge fit statistics from the final LM residuals and weights.
-
-    Splitting the aggregate fit per edge lets the spurious gate
-    distinguish a fusion whose vertices are rejected because some edges
-    are undetectable in the image (large per-edge median residuals --
-    nothing is there) from a wrong-ring lock that leaves a rejected edge
-    sitting on a detected image edge it disagrees with.
-
-    Parameters:
-        features: The consumed features, in the order their vertices were
-            concatenated for the LM fit.
-        residuals: Per-vertex raw DT residuals from the fit, in the same
-            concatenation order.
-        weights: Per-vertex final weights from the fit, in the same
-            concatenation order.
-
-    Returns:
-        One :class:`_EdgeFitStat` per consumed non-empty edge, in
-        concatenation order.
-    """
-    stats: list[_EdgeFitStat] = []
-    cursor = 0
-    for feat in features:
-        if not isinstance(feat.geometry, RingEdgePolyline):
-            continue
-        n = feat.geometry.vertices_vu.shape[0]
-        if n == 0:
-            continue
-        slice_weights = weights[cursor : cursor + n]
-        slice_residuals = residuals[cursor : cursor + n]
-        cursor += n
-        stats.append(
-            _EdgeFitStat(
-                inlier_count=int(np.count_nonzero(slice_weights > 0.0)),
-                vertex_count=n,
-                median_abs_residual_px=float(np.median(np.abs(slice_residuals))),
-                is_straight=bool(feat.geometry.is_straight_line),
-            )
-        )
-    return stats
-
-
-def _per_edge_median_max(features: list[NavFeature], residuals: NDArrayFloatType) -> float:
-    """Return the largest per-edge median absolute DT residual across edges.
-
-    A mis-convergence *diagnostic* (surfaced through
-    :class:`RingEdgeDiagnostics`, not a spurious gate): a wholly misaligned
-    or undetected edge puts most of its vertices roughly a ringlet spacing
-    from the nearest image edge, driving its median to that spacing, while
-    a well-matched edge's median sits at the fit residual.  Taking the max
-    over edges keeps one bad edge visible among any number of clean ones.
-    Residuals alone cannot separate "misaligned" from "undetectable in the
-    image", which is why the spurious decision uses the inlier fraction
-    instead.
-
-    Parameters:
-        features: The consumed features, in the order their vertices were
-            concatenated for the LM fit.
-        residuals: Per-vertex signed DT residuals from the fit, in the same
-            concatenation order.
-
-    Returns:
-        ``max_e median(|residuals_e|)`` over the consumed edges, or ``0.0``
-        when no edge has vertices.
-    """
-    worst = 0.0
-    cursor = 0
-    for feat in features:
-        if not isinstance(feat.geometry, RingEdgePolyline):
-            continue
-        n = feat.geometry.vertices_vu.shape[0]
-        if n == 0:
-            continue
-        slice_residuals = residuals[cursor : cursor + n]
-        cursor += n
-        if slice_residuals.size == 0:
-            continue
-        worst = max(worst, float(np.median(np.abs(slice_residuals))))
-    return worst
-
-
-class _RingEdgeConfidenceContext:
-    """Adapter exposing ring-edge confidence terms in a single attribute set."""
-
-    def __init__(self, *, at_edge: bool, diagnostics: RingEdgeDiagnostics) -> None:
-        self.at_edge = at_edge
-        self.total_edge_length_px = diagnostics.total_edge_length_px
-        self.per_edge_dt_rms_summed = diagnostics.per_edge_dt_rms_summed
-        self.per_edge_dt_rms_mean = diagnostics.per_edge_dt_rms_mean
-        self.per_edge_dt_median_max = diagnostics.per_edge_dt_median_max
-        self.edge_count = diagnostics.edge_count
-        self.is_rank_1 = diagnostics.is_rank_1
