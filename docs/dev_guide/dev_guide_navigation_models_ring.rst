@@ -64,6 +64,13 @@ the downstream technique handles the all-straight case.
 Per-vertex covariance
 ---------------------
 
+Each vertex's normal is signed against the ring-radius backplane so it points toward
+increasing ring radius.  The mask-neighbour test that finds the normal AXIS cannot
+distinguish the high-radius side from the low-radius side on its own -- it would emit signs
+that follow scan order and rasterization -- and the orbit-uncertainty channel sums the
+normals, so a random sign per vertex would fabricate coherence on geometry that should
+cancel.
+
 Each polyline vertex carries two per-vertex sigma values: a radial sigma along the
 outward normal (the constrainable axis) and an along-edge sigma along the polyline
 tangent (the unobservable axis).
@@ -99,9 +106,10 @@ shared M-estimator robust-weighting machinery in :mod:`spindoctor.nav_technique.
 (see :doc:`dev_guide_techniques_dt_fitting`).
 
 The same catalog RMS is carried a second time, on the emitted geometry's
-``sigma_orbit_radial_px``, as the fully-correlated radial orbit-solution uncertainty of
-the whole edge (a feature with no catalog ``rms`` falls back to
-``rings.default_orbit_radial_sigma_km``). The per-vertex sigma is a statistical scale
+``sigma_orbit_radial_px``, as the coherent radial orbit-solution uncertainty of the whole
+edge (an edge with no catalog ``rms`` falls back to
+``rings.default_orbit_radial_sigma_km``, and
+``rings.orbit_radial_sigma_correlated_fraction`` scales the whole term). The per-vertex sigma is a statistical scale
 that averages down as the vertex count grows; an orbit-solution error displaces every
 vertex of the edge coherently and does not, so the ring-edge technique adds this term in
 quadrature to its reported covariance along the fit's radial direction instead of folding

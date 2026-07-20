@@ -12,32 +12,32 @@ Each helper here is a pure function over numpy arrays; the per-technique
 classes simply assemble vertices / normals / weights and call into them.
 The interface is:
 
-* :func:`coarse_ncc_search` — integer-pixel offset from binary masks.
-* :func:`coarse_ncc_search_scored` — the same search, also reporting the
+* :func:`coarse_ncc_search` -- integer-pixel offset from binary masks.
+* :func:`coarse_ncc_search_scored` -- the same search, also reporting the
   winning shift's match fraction (the acquisition-quality signal).
-* :func:`polarity_filter` — per-vertex acceptance from gradient direction.
-* :func:`tukey_biweight_weights` — Holland-Welsch redescender weights.
-* :func:`lm_subpixel_refine` — translation (or translation + rotation) LM
+* :func:`polarity_filter` -- per-vertex acceptance from gradient direction.
+* :func:`tukey_biweight_weights` -- Holland-Welsch redescender weights.
+* :func:`lm_subpixel_refine` -- translation (or translation + rotation) LM
   refinement with Tukey reweighting against a precomputed DT.
-* :func:`information_matrix_to_covariance` — Hessian → covariance via
+* :func:`information_matrix_to_covariance` -- Hessian to covariance via
   ``pinvh`` so rank-deficient inputs are handled.
 
 The implementation is split by pipeline stage; this module re-exports the
 whole surface so consumers import from ``spindoctor.nav_technique.dt_fitting``
 regardless of which stage module a helper lives in:
 
-* :mod:`~spindoctor.nav_technique.dt_fitting.constants` — tunable defaults.
-* :mod:`~spindoctor.nav_technique.dt_fitting.coarse` — rasterization, the
+* :mod:`~spindoctor.nav_technique.dt_fitting.constants` -- tunable defaults.
+* :mod:`~spindoctor.nav_technique.dt_fitting.coarse` -- rasterization, the
   integer search, and the polarity classifier.
-* :mod:`~spindoctor.nav_technique.dt_fitting.weights` — Tukey weighting and
+* :mod:`~spindoctor.nav_technique.dt_fitting.weights` -- Tukey weighting and
   the information-matrix inversion.
-* :mod:`~spindoctor.nav_technique.dt_fitting.transforms` — pose transforms,
+* :mod:`~spindoctor.nav_technique.dt_fitting.transforms` -- pose transforms,
   the DT Jacobian, and the weighted normal equations.
-* :mod:`~spindoctor.nav_technique.dt_fitting.ridge` — the continuous
+* :mod:`~spindoctor.nav_technique.dt_fitting.ridge` -- the continuous
   gradient-ridge polish.
-* :mod:`~spindoctor.nav_technique.dt_fitting.lm` — the Levenberg-Marquardt
+* :mod:`~spindoctor.nav_technique.dt_fitting.lm` -- the Levenberg-Marquardt
   driver and its result type.
-* :mod:`~spindoctor.nav_technique.dt_fitting.basin` — the competing-basin
+* :mod:`~spindoctor.nav_technique.dt_fitting.basin` -- the competing-basin
   second opinion.
 """
 

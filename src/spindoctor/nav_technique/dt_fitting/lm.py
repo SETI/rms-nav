@@ -228,7 +228,7 @@ def lm_subpixel_refine(
         trust_region_px: Optional radius (pixels) around
             ``initial_offset_vu`` outside which a trial step is rejected
             without committing.  ``None`` (default) leaves the LM
-            unconstrained — the legacy behaviour.  When set, every
+            unconstrained, which is the default.  When set, every
             trial offset is checked against
             ``hypot(trial_dv - dv0, trial_du - du0) <= trust_region_px``;
             a violation marks the step as rejected (lambda doubled,
@@ -239,7 +239,7 @@ def lm_subpixel_refine(
             rim, terminator edge, or surface boundary).
         tikhonov_alpha: Strength of a soft Tikhonov anchor pulling the
             translation back toward ``initial_offset_vu``.  ``0`` (default)
-            disables the term — the legacy behaviour.  When positive,
+            disables the term, which is the default.  When positive,
             the cost adds a per-iteration penalty
             ``alpha * sum(weights) * ||(dv, du) - (dv0, du0)||^2`` which
             scales with the data so the LM trades off raw DT
@@ -405,7 +405,7 @@ def lm_subpixel_refine(
         trial_residuals = np.where(state.polarity_mask, trial_residuals, _INFINITY_DT_PENALTY_PX)
         # Compare ``trial_cost`` against ``cost_before`` using the SAME
         # weights computed at the start of this iteration.  Recomputing
-        # Tukey biweights at the trial offset (the legacy behaviour)
+        # Tukey biweights at the trial offset (the alternative)
         # parameterises the cost function by the offset itself, so an
         # "improvement" can mean "the trial offset's reweighting found
         # a different inlier set whose sum-of-squares is lower" rather

@@ -77,23 +77,65 @@ that averages down as :math:`1/\sqrt{N}` over the polyline, while an orbit error
 every vertex coherently and does not average down at all.
 
 The technique therefore consumes the per-feature ``sigma_orbit_radial_px`` carried on the
-:class:`~spindoctor.feature.geometry.RingEdgePolyline` geometry (the catalog orbit-solution
-uncertainty, converted to pixels at the feature by the emitting model) and adds it in
-quadrature to the reported covariance in full 2x2 form:
+:class:`~spindoctor.feature.geometry.RingEdgePolyline` geometry (that edge's own catalog
+orbit-solution uncertainty, converted to pixels at the edge's own radial scale by the
+emitting model) and adds it to the reported covariance through the translation such a
+displacement would actually be absorbed into.
+
+A coherent displacement :math:`d` moves every vertex along its own outward normal, so the
+translation the fit converges to is the weighted least-squares solution of
+:math:`M t = d\,b` with :math:`M = \sum_i w_i n_i n_i^{T}` and :math:`b = \sum_i w_i n_i`.
+Writing :math:`g = M^{+} b`, the added covariance term is
 
 .. math::
 
-    \Sigma \mathrel{+}= \sigma_{\mathrm{orbit}}^{2} \; \hat n \hat n^{T}
+    \Sigma \mathrel{+}= \sigma_{\mathrm{orbit}}^{2}
+        \bigl[\, g g^{T} + \bigl(1 - \lVert g \rVert^{2}\bigr)\, I \,\bigr]
 
-along the fit-representative radial direction :math:`\hat n`. Because a one-sided lock
-absorbs the radial error along the direction of the arc that carried the fit, :math:`\hat n`
-is the dominant eigenvector of the *final-LM-weight-weighted* outer-product sum of the
-edge normals; on an all-straight (rank-1) scene the projection's own aggregate normal is
-reused so the covariance stays exactly singular along the tangent. When several features
-fuse, the effective :math:`\sigma_{\mathrm{orbit}}` is the weight-weighted mean of the
-per-feature sigmas, deliberately treating the features' orbit errors as fully correlated
-(the common multi-edge case is the inner and outer edge of one feature, whose orbit error
-is genuinely shared; treating independent features as correlated only errs conservative).
+with the isotropic complement clamped at zero. The limits are the point of the
+construction: a short arc gives :math:`\lVert g \rVert \approx 1` along its radial axis; a
+straight (rank-1) edge gives :math:`g = n` exactly, so the projected covariance stays
+exactly singular along the tangent; a half ring gives :math:`4/\pi \approx 1.27` (one
+translation overshoots the middle of an arc to reduce the error at its ends); and a closed
+annulus gives :math:`\lVert g \rVert \approx 0`, because a uniform radial error dilates a
+closed ring rather than translating it.
+
+**What the isotropic term is for.** A small :math:`\lVert g \rVert` says the *linearized*
+fit absorbs little, not that the answer is safe: the acquisition is nonlinear, and the
+coarse integer search can still select a basin whose translation aligns a long arc of a
+radially misplaced ring. The simulated closed-ringlet scene does exactly that. Since the
+direction it locks in is precisely what cannot be predicted, the bound is reported on every
+axis instead of on an axis chosen by rounding.
+
+**What this changes in practice.** For :math:`\lVert g \rVert \le 1` the added term's major
+eigenvalue is exactly :math:`\sigma_{\mathrm{orbit}}^{2}` whatever direction :math:`g`
+points, and only the minor eigenvalue depends on the geometry. Because the tier gate reads
+:math:`\max(\sigma_{dv}, \sigma_{du})`, within that regime the derived *direction* cannot
+by itself change a tier outcome -- the behavioral change against a plain directional
+inflation is the isotropic floor it puts under the minor axis, which is what stops a
+demotable frame slipping through on an un-widened perpendicular axis. The derived
+*magnitude* does move the major axis once :math:`\lVert g \rVert` exceeds 1.
+
+This construction requires the emitted normals to carry a consistent outward-radial sense,
+which the catalog model guarantees by signing each normal against the ring-radius
+backplane. Preserving the relative senses is what makes the dilation and opposite-side
+cancellations real rather than fabricated.
+
+When several features fuse, the effective :math:`\sigma_{\mathrm{orbit}}` is the
+weight-weighted mean of the per-feature sigmas, deliberately treating the features' orbit
+errors as fully correlated (the common multi-edge case is the inner and outer edge of one
+feature, whose orbit error is genuinely shared). That combine is conservative only for
+same-sense geometry; for features on opposite radial sides of the planet a common error is
+a dilation the fit largely does not absorb, and the geometry then self-limits through
+:math:`\lVert g \rVert`.
+
+**The severity is operator-tunable.** Treating the catalog RMS as a fully coherent
+whole-edge displacement is a deliberately conservative assumption, not a measurement: the
+RMS is an orbit-fit residual that also contains longitude-varying resonant wander, which
+does not displace an edge coherently. ``rings.orbit_radial_sigma_correlated_fraction``
+(default ``1.0``) scales the coherent term, so the assumption can be ratcheted without a
+code change while the principled fix -- decomposing the catalog modes and pricing only the
+m=0 part coherently -- remains unimplemented.
 
 The ensemble consumes the widened covariance through its ordinary precision-weighted
 machinery — nothing downstream special-cases the term. A ring-edge lock on an uncertain

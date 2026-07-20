@@ -31,6 +31,15 @@ exposure_sec: 1.0
 # scene pinned before the channel existed.  The bias is priced, not
 # removed: known_offset_error_px stays the honest hazard pin at the new
 # measured magnitude.
+# NOTE ON WHAT THIS SCENE NOW GUARDS: the pin's regression function
+# changed with the number.  It no longer guards the original ~3 px
+# confident-wrong recovery -- that behavior no longer occurs, and a
+# future change that reintroduced it would show up as the error leaving
+# the 1.5 +/- 1.0 band from ABOVE, not as this pin passing.  What the
+# scene guards today is the post-channel behavior: the recovered error
+# staying near 1.5 px and the tier staying out of high.  The standing
+# hazard it documents is that a planted radial catalog error is still
+# absorbed into the offset at all.
 expected:
   status: success
   confidence_tier: medium
