@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 scene_name: planted_rotation_star_field
 instrument: coiss_nac
 size_v: 200
@@ -16,8 +16,12 @@ exposure_sec: 1.0
 # kept small (1.5 deg) so the outer stars stay within the matcher's inlier
 # tolerance; larger rolls displace them past it and drop the inlier count.
 fit_camera_rotation: true
+# Stars deposit as point masses; an explicit navigator-matched PSF gives them a
+# finite (floor-form) profile instead of a 1-pixel spike.
+optics:
+  psf:
+    match_navigator: true
 bodies: []
-rings: []
 stars:
   - {name: F1, v: 55.0, u: 70.0, vmag: 3.0}
   - {name: F2, v: 145.0, u: 130.0, vmag: 3.0}

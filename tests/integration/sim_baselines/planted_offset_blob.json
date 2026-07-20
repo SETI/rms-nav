@@ -1,6 +1,6 @@
 {
   "confidence": 0.72,
-  "offset_du_px": -0.61,
+  "offset_du_px": -0.6,
   "offset_dv_px": 1.5,
   "scene_name": "planted_offset_blob",
   "status": "success"

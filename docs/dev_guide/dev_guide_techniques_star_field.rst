@@ -244,13 +244,13 @@ sigmoid combination; see :doc:`dev_guide_techniques_confidence`. Spec is
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_inliers` — alpha = 0.906,
+- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_inliers` — alpha = 0.803,
   offset = 6.0, divisor = 6.0, cap at 1.0. Number of detection-to-catalog inliers after
   RANSAC. Saturates at 12 inliers (offset = 6 plus full cap).
 - :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.median_residual_px` —
   alpha = 0.0, offset = 0.0, divisor = 1.0, no cap. Median position residual on inliers.
-  Sign-constrained to zero by the calibration fit: with no failure class in the sim
-  campaign the residual carried no signal. Kept wired for a future real-anchored
+  Sign-constrained to zero by the calibration fit: with almost no failure class in the
+  sim campaign the residual carried no signal. Kept wired for a future real-anchored
   calibration.
 - :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_detected_sources` —
   alpha = 0.0, offset = 0.0, divisor = 30.0, cap at 1.0. Number of bright sources detected
@@ -258,17 +258,17 @@ sigmoid combination; see :doc:`dev_guide_techniques_confidence`. Spec is
   ``max_sources`` budget, noise peaks included), so it carries no information as wired;
   kept at zero weight.
 - :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_catalog_predicted` —
-  alpha = 0.777, offset = 0.0, divisor = 30.0, cap at 1.0. Number of catalog stars in the
+  alpha = 0.768, offset = 0.0, divisor = 30.0, cap at 1.0. Number of catalog stars in the
   extfov.
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
 confidence to zero before the sigmoid evaluates. The constant baseline is
-:math:`\alpha_{0} = 2.339`. A post-sigmoid ``hard_cap`` of 0.95 clamps the result: the sim
-calibration campaign was single-class (every non-spurious pattern match recovered planted
-truth), and single-class evidence cannot support confidence above ~0.95 on real frames the
-sim cannot represent (distortion, smear, saturated bloom); the ceiling is conservative
-pending a real-anchored calibration.
+:math:`\alpha_{0} = 2.288`. A post-sigmoid ``hard_cap`` of 0.95 clamps the result: the sim
+calibration campaign was near-single-class (91 of 92 non-spurious pattern matches recovered
+planted truth), and near-single-class evidence cannot support confidence above ~0.95 on real
+frames the sim cannot represent (distortion, smear, saturated bloom); the ceiling is
+conservative pending a real-anchored calibration.
 
 Implementation
 ==============

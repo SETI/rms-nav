@@ -1,0 +1,70 @@
+schema_version: 2
+scene_name: orbit_error_ringlet
+instrument: coiss_nac
+size_v: 220
+size_u: 220
+random_seed: 15
+exposure_sec: 1.0
+# The planted-ephemeris-error axis: a centred navigable ringlet whose
+# rendered orbit is displaced 2.5 px outward of the catalog orbit the
+# navigator predicts from (delta_a_px, a truth key).  A uniform radial
+# misplacement has no exact translational equivalent, but the robust
+# edge fit down-weights the far arc and locks onto one side of the
+# annulus, absorbing the ephemeris error into the recovered offset
+# instead of the residuals -- through 2026-07-18 that recovery fused as
+# a CONFIDENT high-tier success (conf 0.89, sigma 0.17 px, ~3 px wrong),
+# this scene's standing ensemble-gap evidence.
+# Deliberate re-pin (2026-07-19): RingEdgeNav now consumes the declared
+# sigma_a_px error bar.  The declared radial uncertainty is added to the
+# reported covariance through the translation such a displacement would
+# be absorbed into; on this CLOSED ringlet the linearized absorption is
+# near zero (a uniform radial error dilates a full ring rather than
+# translating it), yet the nonlinear acquisition demonstrably does lock
+# onto a translation, so the term is reported isotropically -- the bound
+# on every axis, since which direction it locks is exactly what cannot
+# be predicted.  Measured outcome: success/MEDIUM at (-0.54, -1.50) px
+# against the planted (1.0, -1.5), fused error 1.54 px, fused sigma
+# (0.548, 0.547) px -- above the high tier's 0.5 px cap, so the tier
+# demotes honestly.  The widened edge covariance also pulls the fused
+# offset toward the ring-annulus correlation, which absorbs less of the
+# radial error, so the recovered error improves from the 3.01 px this
+# scene pinned before the channel existed.  The bias is priced, not
+# removed: known_offset_error_px stays the honest hazard pin at the new
+# measured magnitude.
+# NOTE ON WHAT THIS SCENE NOW GUARDS: the pin's regression function
+# changed with the number.  It no longer guards the original ~3 px
+# confident-wrong recovery -- that behavior no longer occurs, and a
+# future change that reintroduced it would show up as the error leaving
+# the 1.5 +/- 1.0 band from ABOVE, not as this pin passing.  What the
+# scene guards today is the post-channel behavior: the recovered error
+# staying near 1.5 px and the tier staying out of high.  The standing
+# hazard it documents is that a planted radial catalog error is still
+# absorbed into the offset at all.
+expected:
+  status: success
+  confidence_tier: medium
+  known_offset_error_px: 1.5
+  known_offset_error_tol_px: 1.0
+bodies: []
+ring_system:
+  geometry:
+    center_v: 110.0
+    center_u: 110.0
+    opening_deg_obs: 90.0
+    opening_deg_sun: 90.0
+    node_deg: 0.0
+  features:
+    - name: MISPLACED
+      kind: ringlet
+      tau: 2.0
+      width: 20.0
+      navigable: true
+      orbit: {a: 60.0, ae: 0.0, long_peri: 0.0, rate_peri: 0.0}
+      orbit_error: {delta_a_px: 2.5}
+      declared_orbit_sigma: {sigma_a_px: 2.5}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.0
+offset_u: -1.5
+offset_rotation_deg: 0.0

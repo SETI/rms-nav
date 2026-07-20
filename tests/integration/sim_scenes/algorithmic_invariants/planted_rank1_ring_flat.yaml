@@ -1,29 +1,35 @@
-schema_version: 1
+schema_version: 2
 scene_name: planted_rank1_ring_flat
 instrument: coiss_nac
 size_v: 220
 size_u: 220
 random_seed: 7
 exposure_sec: 1.0
-# A flat (rank-1) ringlet: the ring centre sits ~50000 px off-frame to the
-# left, so the two edges crossing the FOV are straight to well under the
-# 1 px FLAT_CURVATURE_THRESHOLD_PX (sagitta ~0.2 px over the frame) and the
-# simulated ring model emits both RING_EDGE polylines with
-# is_straight_line=True.  Both edge normals are ~+u, so only the planted
-# offset's u component is observable; RingEdgeNav returns an exactly rank-1
-# covariance and the ensemble surfaces status_reason=rank_1_only with the
-# minimum-norm offset (the v component projected away).  This is the
-# end-to-end sim anchor for the ring_only_flat scene class (#203/#204).
+# A flat (rank-1) face-on ring_system ringlet: the ring centre sits
+# ~50000 px off-frame to the left, so the two edges crossing the FOV are
+# straight to well under the 1 px FLAT_CURVATURE_THRESHOLD_PX (sagitta
+# ~0.2 px over the frame) and the simulated ring model emits both
+# RING_EDGE polylines with is_straight_line=True.  Both edge normals are
+# ~+u, so only the planted offset's u component is observable; RingEdgeNav
+# returns an exactly rank-1 covariance and the ensemble surfaces
+# status_reason=rank_1_only with the minimum-norm offset (the v component
+# projected away).  This is the end-to-end sim anchor for the
+# ring_only_flat scene class.
 bodies: []
-rings:
-  - name: SATURN
-    feature_type: RINGLET
+ring_system:
+  geometry:
     center_v: 110.0
     center_u: -49890.0
-    inner_data:
-      - {mode: 1, a: 49960.0, rms: 1.0, ae: 0.0, long_peri: 0.0, rate_peri: 0.0}
-    outer_data:
-      - {mode: 1, a: 50040.0, rms: 1.0, ae: 0.0, long_peri: 0.0, rate_peri: 0.0}
+    opening_deg_obs: 90.0
+    opening_deg_sun: 90.0
+    node_deg: 0.0
+  features:
+    - name: SATURN
+      kind: ringlet
+      tau: 2.0
+      width: 80.0
+      navigable: true
+      orbit: {a: 49960.0, ae: 0.0, long_peri: 0.0, rate_peri: 0.0}
 noise:
   poisson: true
   read_noise_dn: 4.0

@@ -1,14 +1,16 @@
 """Simulated-rings NavModel feature emission.
 
-``NavModelRingsSimulated`` renders a ringlet and emits a ``RING_ANNULUS`` (for the
-correlation path) plus one ``RING_EDGE`` per rendered edge -- a radial-normal
-polyline ``RingEdgeNav`` fits.  These tests cover that both feature kinds are
-emitted and that the edge polyline carries outward radial unit normals.
+``NavModelRingsSimulated`` predicts a navigable ring_system ringlet and
+emits a ``RING_ANNULUS`` (for the correlation path) plus one ``RING_EDGE``
+per catalog edge -- a radial-normal polyline ``RingEdgeNav`` fits.  These
+tests cover that both feature kinds are emitted and that the edge polyline
+carries outward radial unit normals.
 """
 
 from typing import Any, cast
 
 import numpy as np
+import pytest
 
 from spindoctor.feature.composition import compose_template_features
 from spindoctor.feature.geometry import RingEdgePolyline
@@ -19,20 +21,29 @@ from spindoctor.obs.obs_inst_sim import ObsSim
 _SIZE = 220
 
 
-def _edge(a: float) -> list[dict[str, Any]]:
-    """A single mode-1 ring edge at pixel radius ``a``."""
-    return [{'mode': 1, 'a': a, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}]
-
-
-def _ring_params() -> dict[str, Any]:
-    """A centred ringlet with curved inner and outer edges."""
+def _feature_params() -> dict[str, Any]:
+    """A centred navigable ringlet with curved inner and outer edges."""
     return {
         'name': 'SATURN',
-        'feature_type': 'RINGLET',
-        'center_v': _SIZE / 2.0,
-        'center_u': _SIZE / 2.0,
-        'inner_data': _edge(60.0),
-        'outer_data': _edge(85.0),
+        'kind': 'ringlet',
+        'tau': 2.0,
+        'width': 25.0,
+        'navigable': True,
+        'orbit': {'a': 60.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0},
+    }
+
+
+def _ring_system() -> dict[str, Any]:
+    """A face-on ring_system block carrying the ringlet."""
+    return {
+        'geometry': {
+            'center_v': _SIZE / 2.0,
+            'center_u': _SIZE / 2.0,
+            'opening_deg_obs': 90.0,
+            'opening_deg_sun': 90.0,
+            'node_deg': 0.0,
+        },
+        'features': [_feature_params()],
     }
 
 
@@ -44,14 +55,14 @@ def _obs() -> ObsSim:
             'size_v': _SIZE,
             'size_u': _SIZE,
             'instrument': 'coiss_nac',
-            'rings': [_ring_params()],
+            'ring_system': _ring_system(),
         },
     )
 
 
 def _features() -> list[Any]:
     """Build the ring model and return its emitted features."""
-    model = NavModelRingsSimulated('rings', _obs(), 'SATURN', _ring_params())
+    model = NavModelRingsSimulated('rings', _obs(), 'SATURN', _feature_params(), _ring_system())
     model.create_model()
     return model.to_features(cast(NavContext, None))
 
@@ -63,7 +74,7 @@ def test_emits_ring_annulus() -> None:
 
 
 def test_emits_ring_edge_per_edge() -> None:
-    """One RING_EDGE is emitted for each rendered edge (inner + outer)."""
+    """One RING_EDGE is emitted for each catalog edge (inner + outer)."""
     edges = [f for f in _features() if f.feature_type.name == 'RING_EDGE']
     assert len(edges) == 2
 
@@ -83,6 +94,19 @@ def test_ring_edge_normals_are_unit_radial() -> None:
     assert isinstance(geometry, RingEdgePolyline)
     norms = np.hypot(geometry.normals_vu[:, 0], geometry.normals_vu[:, 1])
     assert np.allclose(norms, 1.0, atol=1e-9)
+
+
+def test_ring_edge_normals_point_outward() -> None:
+    """Each normal points away from the ring center (increasing radius)."""
+    obs = _obs()
+    center_v = _SIZE / 2.0 + obs.extfov_margin_v
+    center_u = _SIZE / 2.0 + obs.extfov_margin_u
+    edges = [f for f in _features() if f.feature_type.name == 'RING_EDGE']
+    geometry = edges[0].geometry
+    assert isinstance(geometry, RingEdgePolyline)
+    radial = geometry.vertices_vu - np.array([[center_v, center_u]])
+    dots = np.sum(radial * geometry.normals_vu, axis=1)
+    assert bool((dots > 0.0).all())
 
 
 def test_ring_annulus_template_is_bbox_local_postage_stamp() -> None:
@@ -128,3 +152,43 @@ def test_ring_annulus_template_paints_at_ring_radius() -> None:
     # Inner edge at 60 px, outer at 85 px; 1.5 px of rasterization slack.
     assert radii.min() >= 60.0 - 1.5
     assert radii.max() <= 85.0 + 1.5
+
+
+def test_ring_edge_carries_declared_orbit_sigma() -> None:
+    """A declared orbit uncertainty lands on the emitted geometry unfloored.
+
+    The semimajor-axis and radial-amplitude sigmas combine in QUADRATURE:
+    the eccentric term enters the radial displacement as
+    ``-delta(ae) cos(theta - peri)``, so the max-over-longitude 1-sigma of
+    the two independent terms is their quadrature sum, not their arithmetic
+    sum (which would overstate the envelope by up to sqrt(2) and double the
+    variance at equal terms).
+    """
+    params = _feature_params()
+    params['declared_orbit_sigma'] = {'sigma_a_px': 2.0, 'sigma_ae_px': 0.5}
+    model = NavModelRingsSimulated('rings', _obs(), 'SATURN', params, _ring_system())
+    model.create_model()
+    features = model.to_features(cast(NavContext, None))
+    edges = [f for f in features if f.feature_type.name == 'RING_EDGE']
+    assert edges
+    expected = float(np.hypot(2.0, 0.5))
+    for edge in edges:
+        geometry = edge.geometry
+        assert isinstance(geometry, RingEdgePolyline)
+        assert geometry.sigma_orbit_radial_px == pytest.approx(expected)
+
+
+def test_ring_edge_orbit_sigma_zero_when_undeclared() -> None:
+    """Without declared_orbit_sigma the systematic channel carries nothing.
+
+    The per-vertex radial sigma keeps its one-pixel sampling floor, but the
+    fully-correlated orbit sigma must stay exactly zero -- the floor is a
+    statistical scale, not a coherent displacement bound.
+    """
+    edges = [f for f in _features() if f.feature_type.name == 'RING_EDGE']
+    assert edges
+    for edge in edges:
+        geometry = edge.geometry
+        assert isinstance(geometry, RingEdgePolyline)
+        assert geometry.sigma_orbit_radial_px == 0.0
+        assert float(geometry.sigma_radial_per_vertex_px.min()) == 1.0

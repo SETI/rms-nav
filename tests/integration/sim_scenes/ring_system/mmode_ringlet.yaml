@@ -1,0 +1,43 @@
+schema_version: 2
+scene_name: mmode_ringlet
+instrument: coiss_nac
+size_v: 220
+size_u: 220
+random_seed: 12
+exposure_sec: 1.0
+# A resonantly forced m = 2 ringlet (the B-ring outer-edge shape:
+# r = a - amp*cos(2*(lam - peri)) with amp 5 px at peri 40 deg in the
+# ring-plane frame), viewed inclined at B = 65 with a rotated node.  The
+# mode is catalog knowledge in the navigable feature's orbit, so both
+# sides place the same two-lobed edges and the planted offset is
+# recoverable through the projection.
+bodies: []
+ring_system:
+  geometry:
+    center_v: 110.0
+    center_u: 110.0
+    opening_deg_obs: 65.0
+    opening_deg_sun: 65.0
+    node_deg: 15.0
+  features:
+    - name: BRINGEDGE
+      kind: ringlet
+      tau: 2.0
+      width: 12.0
+      navigable: true
+      orbit:
+        a: 70.0
+        ae: 0.0
+        long_peri: 0.0
+        rate_peri: 0.0
+        modes:
+          - {m: 2, amp: 5.0, peri: 40.0}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: -1.7
+offset_u: 0.8
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: high

@@ -1,0 +1,47 @@
+schema_version: 2
+scene_name: mutual_half
+instrument: coiss_nac
+size_v: 256
+size_u: 256
+random_seed: 42
+exposure_sec: 1.0
+# Mutual event, half overlap: the near body hides about a third of the far
+# body's disc and over a quarter of its limb (centers 55 px apart).
+# Rendered truth (body_occlusion): FAR visible_fraction ~0.67, occluded limb
+# arc ~100 deg; NEAR fully visible.  Measured ensemble behavior
+# (2026-07-18, occlusion-aware sim limb): FAR's LIMB_ARC drops the hidden
+# arc and reports visible_arc_fraction 0.72 (reliability 0.75); BOTH
+# techniques stay accurate -- the disc correlation is anchored by the
+# intact NEAR template and the limb fit runs on visible arcs only -- so
+# the fused result remains an accurate success at medium tier rather than
+# degrading to conflicted.  The expected block pins that measured outcome.
+bodies:
+  - name: FAR
+    shape_model: ellipsoid
+    center_v: 128.0
+    center_u: 95.0
+    axis1: 120.0
+    axis2: 120.0
+    axis3: 120.0
+    illumination_angle: 20.0
+    phase_angle: 30.0
+    range_km: 700000.0
+  - name: NEAR
+    shape_model: ellipsoid
+    center_v: 128.0
+    center_u: 150.0
+    axis1: 100.0
+    axis2: 100.0
+    axis3: 100.0
+    illumination_angle: 20.0
+    phase_angle: 30.0
+    range_km: 500000.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 2.5
+offset_u: -1.5
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: medium

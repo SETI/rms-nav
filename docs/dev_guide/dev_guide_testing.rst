@@ -33,8 +33,8 @@ Running the suite
    pytest -m integration               # only the integration tier
    pytest -n auto --dist=loadfile      # parallel, matching CI (loadfile avoids
                                        #   PyQt6 worker crashes)
-   pytest tests/nav/sim/test_sim_noise.py            # one file
-   pytest tests/nav/sim/test_sim_noise.py::test_foo  # one test
+   pytest tests/spindoctor/sim/test_sim_noise.py            # one file
+   pytest tests/spindoctor/sim/test_sim_noise.py::test_foo  # one test
    pytest --cov                        # with coverage
 
    ./scripts/run-all-checks.sh         # ruff + mypy + pytest + docs + markdown
@@ -70,22 +70,25 @@ tests need none of the archive environment above.
      - Tier
      - Requires
      - What it proves
-   * - Unit tests (``tests/nav/**``)
+   * - Unit tests (``tests/spindoctor/**``)
      - default
      - nothing
      - One component in isolation (config, feature, dataset, obs, model,
        technique, orchestrator, reproj, support).
-   * - Simulator unit tests (``tests/nav/sim/**``)
+   * - Simulator unit tests (``tests/spindoctor/sim/**``)
      - default
      - nothing
      - The renderer's contracts: determinism, noise, saturation, PSF, stray
        light, instrument coupling, camera roll, irregular-body rendering and the
-       ``nav_override`` channel, scene-schema validation.
-   * - GUI smoke (``tests/main/test_create_simulated_image.py``)
+       ``nav_override`` channel, scene-schema validation, and the information
+       boundary (``test_information_boundary.py``: no truth key is reachable
+       through ``obs.nav_params``).
+   * - GUI smoke (``tests/main/test_create_simulated_image.py``,
+       ``tests/main/test_sim_editor_round_trip.py``)
      - default
      - PyQt6
-     - Each GUI control wires to the right ``sim_params`` field and the
-       scene/JSON round-trip is faithful.
+     - Each GUI control wires to the right ``sim_params`` field and a YAML
+       scene round-trips through the editor without loss.
    * - Scene structural (``test_sim_scenes.py``)
      - default
      - nothing
@@ -134,10 +137,9 @@ tests need none of the archive environment above.
      - Each curated real image navigates to its expected status / tier / offset
        and matches its recorded baseline -- the calibration tripwire.
 
-The simulator's role across these tiers is described per phase in the simulator
-improvement plan and summarized in :doc:`dev_guide_simulator`. The
-operator-curated real-image cohort is documented in
-:doc:`dev_guide_image_library`.
+The simulator's role across these tiers is summarized in
+:doc:`dev_guide_simulator`. The operator-curated real-image cohort is documented
+in :doc:`dev_guide_image_library`.
 
 Characterization runners and updaters
 =====================================

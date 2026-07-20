@@ -1,3 +1,13 @@
+"""Observation snapshot backed by a simulated-image scene.
+
+:class:`ObsSim` wraps a rendered sim scene as an oops ``Snapshot`` with a flat
+FOV and dummy geometry, so the standard navigation pipeline runs on it exactly
+as on a real frame.  The rendered image and the full scene (truth included)
+stay on the snapshot for renderer-side consumers; the navigator-side models
+see only the filtered idealized view exposed as ``obs.nav_params`` (the
+information boundary -- see :func:`spindoctor.sim.scene.build_nav_params`).
+"""
+
 import math
 from pathlib import Path
 from typing import Any, cast
@@ -10,7 +20,7 @@ from spindoctor.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
 from spindoctor.obs.obs_snapshot_inst import ObsSnapshotInst
 from spindoctor.sim.instruments import resolve_extfov_margin, resolve_sim_inst_config
 from spindoctor.sim.render import render_combined_model
-from spindoctor.sim.scene import load_sim_scene
+from spindoctor.sim.scene import build_nav_params, load_sim_scene
 from spindoctor.support.types import PathLike
 
 
@@ -37,6 +47,11 @@ class ObsSim(ObsSnapshotInst):
             **kwargs: Additional keyword arguments.
                 sim_params: Flat sim-params mapping. If present, this overrides the
                 scene file.
+
+        Returns:
+            The :class:`ObsSim` wrapping the rendered scene: the rendered
+            image as ``data``, the full scene and renderer truth metadata on
+            the snapshot, and the filtered idealized view as ``nav_params``.
         """
 
         config = config or DEFAULT_CONFIG
@@ -85,20 +100,28 @@ class ObsSim(ObsSnapshotInst):
         snapshot.image_url = str(scene_path.absolute())
         snapshot.abspath = abspath
 
+        # The full scene (truth included) stays on the snapshot for the
+        # renderer-side consumers: the test harnesses that score recovery
+        # against planted truth and the backplane writer that consumes the
+        # rendered masks.  The navigator-side models consume ONLY the
+        # filtered idealized view built below.
         snapshot.sim_params = sim_params
         snapshot.sim_offset_v = offset_v
         snapshot.sim_offset_u = offset_u
         snapshot.sim_time = float(sim_params.get('time', 0.0))
-        snapshot.sim_epoch = float(sim_params.get('epoch', 0.0))
+
+        # The information boundary: nav_params is sim_params with every
+        # truth key stripped and per-body nav_override overlaid (the
+        # navigator sees the geometry it believes, never the true values
+        # underneath).  See spindoctor.sim.scene.build_nav_params.
+        snapshot.nav_params = build_nav_params(sim_params)
 
         # Render combined model
         logger.debug('Rendering combined simulated model')
         img_rendered, meta = render_combined_model(sim_params)
         snapshot.insert_subfield('data', img_rendered)
-        # Attach metadata similar to previous attributes
-        snapshot.sim_star_list = meta.get('stars', [])
+        # Renderer output metadata (truth side; never read by NavModels).
         snapshot.sim_body_models = meta.get('bodies', {})
-        snapshot.sim_rings = meta.get('rings', [])
         snapshot.sim_inventory = meta.get('inventory', {})
         snapshot.sim_body_order_near_to_far = meta.get('order_near_to_far', [])
         snapshot.sim_body_index_map = meta.get('body_index_map')
@@ -139,48 +162,73 @@ class ObsSim(ObsSnapshotInst):
     def star_max_usable_vmag(self) -> float:
         """Returns the maximum usable magnitude for stars in this observation.
 
-        Derived from the scene's own detector model rather than anchored to a
-        reference exposure the way the real instruments do it: the sim
-        renderer draws a star's PSF peak at ``signal_full_scale_dn *
-        2.512**-vmag`` DN (see ``sim.render``), so the limiting magnitude is
-        where that peak falls to twice the effective per-pixel noise sigma --
-        the matched-filter detection boundary measured on single-star sim
-        scenes.  Keeping this physical matters beyond the faint-star gate:
-        the star NavModel synthesises each STAR feature's predicted SNR (and
-        from it the CRLB position covariance and reliability score) from how
+        Derived from the emulated instrument's PUBLISHED detector model, never
+        from the scene's truth-side ``noise`` block: the navigator may know only
+        what a real pipeline could know about the camera.  The renderer
+        flux-normalizes a star (its total signal is
+        ``star_flux_dn_per_s_vmag0 * 10**(-0.4 * vmag) * exposure``, see
+        ``spindoctor.sim.forward``); a Gaussian core of the published
+        ``star_psf_sigma`` then puts a fraction ``1 / (2*pi*sigma**2)`` of that
+        total in the peak pixel.  The limiting magnitude is where that peak falls
+        to twice the effective per-pixel noise sigma -- the matched-filter
+        detection boundary.  The published DN zero point is the camera's
+        electron zero point over its standard gain state, so a real navigator
+        could know it; the scene's truth-side noise block is deliberately not
+        consulted, so a scene that plants noise different from the published
+        values produces an honestly-wrong detection limit, which is desired model
+        error, not a defect.  Keeping this physical matters beyond the faint-star
+        gate: the star NavModel synthesises each STAR feature's predicted SNR
+        (and from it the CRLB position covariance and reliability score) from how
         far the star sits above this limit, so an arbitrarily permissive
         placeholder inflates every simulated star's SNR by tens of orders of
         magnitude and collapses its covariance to zero.
 
+        The exposure the flux formula scales by is the scene's idealized
+        ``exposure_sec``, read from the navigator-visible ``nav_params`` view:
+        exposure is commanded, published information a real pipeline always
+        has, and the renderer multiplies every star's deposited flux by it, so
+        the detection limit must move by ``2.5 * log10(exposure)`` alongside
+        the flux or a long exposure's faint stars are gated out (and a short
+        exposure's noise floor is overstated).  The dummy Snapshot's ``texp``
+        deliberately stays at the 1-second reference: ``texp`` feeds the
+        observation's timing (``midtime = tstart + texp / 2`` anchors every
+        time-dependent oops computation and the reported exposure metadata),
+        and repurposing it would move the sim epoch as a side effect of a
+        photometric knob, so the limit reads the exposure directly instead.
+
         Returns:
             The maximum usable magnitude for stars in this observation.  For
-            calibrated-unit sim instruments the renderer applies no detector
-            noise, so any rendered star is detectable and the limit is a
+            calibrated-unit sim instruments the published block carries no DN
+            zero point to anchor a matched-filter limit, so the navigator uses a
             generous constant.
         """
         inst_config = self._inst_config or {}
         inst_noise = inst_config.get('noise') or {}
         if inst_config.get('data_units', 'raw_dn') != 'raw_dn':
-            # calibrated_if: the renderer leaves the composed I/F signal
-            # noise-free (detector noise there is deferred sim scope).
+            # calibrated_if: no published DN zero point to anchor the limit, so
+            # the navigator-side detection limit is a generous constant.
             return 30.0
-        # Mirror the renderer's resolution order: scene noise block first,
-        # then the emulated instrument's config, then the sim defaults.
+        # Published values only: the resolved per-instrument block (which already
+        # carries any idealized instrument_config overrides), with the generic
+        # sim block supplying any key the instrument block leaves unset.  The
+        # scene's truth-side noise block is deliberately not consulted.
         sim_noise = self.config.category('sim')['noise']
-        scene_noise = self.sim_params.get('noise') or {}
-        full_scale_frac = float(
-            scene_noise.get('signal_full_scale_frac', sim_noise['signal_full_scale_frac'])
+        zero_point_dn = float(
+            inst_noise.get('star_flux_dn_per_s_vmag0', sim_noise['star_flux_dn_per_s_vmag0'])
         )
-        signal_full_scale_dn = float(
-            scene_noise.get(
-                'signal_full_scale_dn', full_scale_frac * float(inst_noise['full_well_dn'])
-            )
+        star_psf_sigma = float(
+            inst_config.get('star_psf_sigma', self.config.category('sim')['star_psf_sigma'])
         )
-        read_noise_dn = float(scene_noise.get('read_noise_dn', inst_noise['read_noise_dn']))
-        # Poisson shot noise on the star's own counts keeps the effective
-        # sigma above ~1 DN even on a read-noise-free frame.
+        read_noise_dn = float(inst_noise['read_noise_dn'])
+        # The scene's idealized exposure (navigator-visible; see the docstring
+        # for why the Snapshot's reference texp is not consulted here).
+        exposure = float(self.nav_params.get('exposure_sec', 1.0))
+        # Peak DN of a magnitude-0 star: its total over the Gaussian PSF core.
+        peak0_dn = zero_point_dn * exposure / (2.0 * math.pi * star_psf_sigma**2)
+        # Poisson shot noise on the star's own counts keeps the effective sigma
+        # above ~1 DN even on a read-noise-free frame.
         sigma_eff = max(read_noise_dn, 1.0)
-        return 2.5 * math.log10(signal_full_scale_dn / (2.0 * sigma_eff))
+        return 2.5 * math.log10(peak0_dn / (2.0 * sigma_eff))
 
     @property
     def camera(self) -> str:

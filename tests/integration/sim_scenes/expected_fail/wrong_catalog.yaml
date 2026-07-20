@@ -1,0 +1,38 @@
+schema_version: 2
+scene_name: wrong_catalog
+instrument: coiss_nac
+size_v: 200
+size_u: 200
+random_seed: 7
+exposure_sec: 1.0
+# Every star in the wrong place: a wholesale catalog error.  The scene-level
+# star_catalog_scatter_px displaces every rendered star by an 8 px sigma draw off
+# the catalog position the navigator predicts from, so no consistent translation
+# maps the predicted field onto the detected one.  The CORRECT navigation outcome
+# is a failed / low-confidence result -- never a confident wrong offset -- because
+# the star techniques find no coherent match: StarFieldFromCatalogNav's RANSAC
+# cannot seat a consensus and StarUniqueMatchNav's peaks land nowhere near their
+# predictions.  This is the false-positive-characterization regime; the expected
+# block asserts the failure through the sim expected-outcome machinery.
+optics:
+  psf:
+    match_navigator: true
+bodies: []
+stars:
+  - {name: F1, v: 55.0, u: 70.0, vmag: 3.0}
+  - {name: F2, v: 145.0, u: 130.0, vmag: 3.2}
+  - {name: F3, v: 70.0, u: 150.0, vmag: 3.4}
+  - {name: F4, v: 150.0, u: 60.0, vmag: 3.1}
+  - {name: F5, v: 100.0, u: 100.0, vmag: 3.3}
+  - {name: F6, v: 60.0, u: 120.0, vmag: 3.0}
+star_catalog_scatter_px: 8.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0
+expected:
+  status: failed
+  confidence_tier: failed
+  status_reason: all_techniques_spurious

@@ -26,8 +26,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from spindoctor.sim.png_export import render_scene_png
-from spindoctor.sim.scene import load_sim_scene
+from spindoctor.sim.scene import load_sim_scene, validate_sim_params
 
 _DOCS = Path(__file__).parent.parent.parent / 'docs'
 _GUI_DIR = _DOCS / 'dev_guide' / '_sim_images'
@@ -82,10 +84,52 @@ def _mesh(**over: Any) -> dict[str, Any]:
     return body
 
 
+def _scatter_stars(
+    count: int,
+    seed: int,
+    *,
+    size: int = 220,
+    vmag_lo: float = 3.0,
+    vmag_hi: float = 6.0,
+    margin: float = 8.0,
+) -> list[dict[str, Any]]:
+    """Return a deterministic spread of explicit bright catalog stars.
+
+    Under the flux-normalized star model a faint sky-count field sits at the
+    read-noise floor, so a legible star-field panel is built from explicit
+    bright stars (a few hundred DN each) scattered across the frame rather than
+    a dense faint sky.  The draw is seeded, so the panel is reproducible.
+
+    Parameters:
+        count: Number of stars to scatter.
+        seed: Seed for the reproducible position / magnitude draw.
+        size: Frame edge length in pixels (stars land inside a margin of it).
+        vmag_lo: Bright end of the magnitude draw.
+        vmag_hi: Faint end of the magnitude draw.
+        margin: Keep-out border in pixels so no star clips the frame edge.
+
+    Returns:
+        A list of ``{name, v, u, vmag}`` star dicts.
+    """
+    rng = np.random.default_rng(seed)
+    stars: list[dict[str, Any]] = []
+    for i in range(count):
+        stars.append(
+            {
+                'name': f'S{i}',
+                'v': round(float(rng.uniform(margin, size - margin)), 1),
+                'u': round(float(rng.uniform(margin, size - margin)), 1),
+                'vmag': round(float(rng.uniform(vmag_lo, vmag_hi)), 2),
+            }
+        )
+    return stars
+
+
 # (filename, sim_params, render kwargs) for the developer-guide gallery.
 _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
     ('ellipsoid_body', _scene([_ellipsoid()]), {'gamma': 1.1}),
     ('mesh_body', _scene([_mesh()]), {'gamma': 1.1}),
+    ('mesh_body_gouraud', _scene([_mesh(shading='gouraud')]), {'gamma': 1.1}),
     (
         'body_craters',
         _scene([_ellipsoid(axis2=150.0, crater_fill=0.5, crater_max_radius=0.3)]),
@@ -93,42 +137,325 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
     ),
     ('crescent_body', _scene([_mesh(phase_angle=130.0)]), {'gamma': 1.4}),
     (
+        'topographic_limb',
+        _scene([_ellipsoid(limb_relief_rms=0.03, limb_relief_corr_deg=12.0)]),
+        {'gamma': 1.1},
+    ),
+    (
+        'ragged_terminator',
+        _scene([_ellipsoid(phase_angle=125.0, limb_relief_rms=0.035, limb_relief_corr_deg=10.0)]),
+        {'gamma': 1.4},
+    ),
+    (
+        'haze_limb_body',
+        _scene(
+            [
+                _ellipsoid(
+                    axis1=170.0,
+                    axis2=170.0,
+                    axis3=170.0,
+                    illumination_angle=90.0,
+                    phase_angle=40.0,
+                    atmosphere={'scale_height_px': 8.0, 'tau_ref': 3.0, 'g': 0.6},
+                )
+            ]
+        ),
+        {'gamma': 1.2},
+    ),
+    (
+        'haze_crescent_horns',
+        _scene(
+            [
+                _ellipsoid(
+                    axis1=170.0,
+                    axis2=170.0,
+                    axis3=170.0,
+                    illumination_angle=90.0,
+                    phase_angle=150.0,
+                    atmosphere={'scale_height_px': 8.0, 'tau_ref': 3.0, 'g': 0.75},
+                )
+            ]
+        ),
+        {'gamma': 1.5},
+    ),
+    (
+        'banded_transit',
+        _scene(
+            [
+                _ellipsoid(
+                    axis1=180.0,
+                    axis2=180.0,
+                    axis3=180.0,
+                    illumination_angle=20.0,
+                    phase_angle=25.0,
+                    disc_texture={
+                        'band_amplitude': 0.22,
+                        'band_wavenumber': 8.0,
+                        'storms': [
+                            {
+                                'lat_deg': -25.0,
+                                'lon_deg': 90.0,
+                                'radius_deg': 8.0,
+                                'albedo_factor': 1.35,
+                            }
+                        ],
+                    },
+                    transits=[
+                        {
+                            'moon': {
+                                'dv_px': -28.0,
+                                'du_px': 36.0,
+                                'radius_px': 11.0,
+                                'albedo_factor': 1.3,
+                            }
+                        },
+                        {
+                            'shadow': {
+                                'dv_px': 10.0,
+                                'du_px': -32.0,
+                                'radius_px': 9.0,
+                                'darkness': 0.85,
+                            }
+                        },
+                    ],
+                )
+            ]
+        ),
+        {'gamma': 1.1},
+    ),
+    (
+        'mutual_event',
+        _scene(
+            [
+                _ellipsoid(
+                    name='FAR',
+                    center_v=110.0,
+                    center_u=95.0,
+                    axis1=110.0,
+                    axis2=110.0,
+                    axis3=110.0,
+                    illumination_angle=20.0,
+                    phase_angle=30.0,
+                    range_km=700000.0,
+                ),
+                _ellipsoid(
+                    name='NEAR',
+                    center_v=110.0,
+                    center_u=125.0,
+                    axis1=120.0,
+                    axis2=120.0,
+                    axis3=120.0,
+                    illumination_angle=20.0,
+                    phase_angle=30.0,
+                    range_km=500000.0,
+                ),
+            ]
+        ),
+        {'gamma': 1.1},
+    ),
+    (
         'rings',
         _scene(
             [],
-            rings=[
-                {
-                    'name': 'RINGLET_INNER',
-                    'feature_type': 'RINGLET',
+            ring_system={
+                'geometry': {
                     'center_v': 110.0,
                     'center_u': 110.0,
-                    'inner_data': [{'mode': 1, 'a': 56.0}],
-                    'outer_data': [{'mode': 1, 'a': 66.0}],
-                    'shading_distance': 10.0,
-                    'range': 1000.0,
+                    'opening_deg_obs': 90.0,
+                    'opening_deg_sun': 90.0,
+                    'node_deg': 0.0,
                 },
-                {
-                    'name': 'RINGLET_OUTER',
-                    'feature_type': 'RINGLET',
+                'features': [
+                    {
+                        'name': 'RINGLET_INNER',
+                        'kind': 'ringlet',
+                        'tau': 2.0,
+                        'width': 10.0,
+                        'orbit': {'a': 56.0},
+                    },
+                    {
+                        'name': 'RINGLET_OUTER',
+                        'kind': 'ringlet',
+                        'tau': 0.7,
+                        'width': 8.0,
+                        'orbit': {'a': 90.0, 'ae': 6.0},
+                    },
+                ],
+            },
+        ),
+        {'gamma': 1.2},
+    ),
+    # The four panels below mirror the ring_system catalog scenes of the same
+    # names (tests/integration/sim_scenes/ring_system/), minus the planted
+    # offsets and expected blocks the gallery does not exercise.
+    (
+        'ring_edge_wave_gap',
+        _scene(
+            [],
+            random_seed=11,
+            ring_system={
+                'geometry': {
                     'center_v': 110.0,
                     'center_u': 110.0,
-                    'inner_data': [{'mode': 1, 'a': 90.0, 'ae': 6.0}],
-                    'outer_data': [{'mode': 1, 'a': 98.0, 'ae': 6.0}],
-                    'shading_distance': 10.0,
-                    'range': 1000.0,
+                    'opening_deg_obs': 50.0,
+                    'opening_deg_sun': 50.0,
+                    'node_deg': 30.0,
                 },
-            ],
+                'features': [
+                    {
+                        'name': 'SHEET',
+                        'kind': 'edge',
+                        'side': 'in',
+                        'tau': 1.2,
+                        'orbit': {'a': 95.0},
+                    },
+                    {
+                        'name': 'WAVYGAP',
+                        'kind': 'gap',
+                        'tau': 1.2,
+                        'width': 6.0,
+                        'navigable': True,
+                        'orbit': {
+                            'a': 60.0,
+                            'edge_wave': {
+                                'amp': 2.0,
+                                'wavelength': 10.0,
+                                'damp': 0.6,
+                                'lam0': 45.0,
+                            },
+                        },
+                    },
+                ],
+            },
+        ),
+        {'gamma': 1.2},
+    ),
+    (
+        'ring_mmode',
+        _scene(
+            [],
+            random_seed=12,
+            ring_system={
+                'geometry': {
+                    'center_v': 110.0,
+                    'center_u': 110.0,
+                    'opening_deg_obs': 65.0,
+                    'opening_deg_sun': 65.0,
+                    'node_deg': 15.0,
+                },
+                'features': [
+                    {
+                        'name': 'BRINGEDGE',
+                        'kind': 'ringlet',
+                        'tau': 2.0,
+                        'width': 12.0,
+                        'navigable': True,
+                        'orbit': {'a': 70.0, 'modes': [{'m': 2, 'amp': 5.0, 'peri': 40.0}]},
+                    },
+                ],
+            },
+        ),
+        {'gamma': 1.2},
+    ),
+    (
+        'ring_spokes',
+        _scene(
+            [],
+            random_seed=13,
+            ring_system={
+                'geometry': {
+                    'center_v': 110.0,
+                    'center_u': 110.0,
+                    'opening_deg_obs': 90.0,
+                    'opening_deg_sun': 90.0,
+                    'node_deg': 0.0,
+                },
+                'features': [
+                    {
+                        'name': 'BSHEET',
+                        'kind': 'ringlet',
+                        'tau': 1.5,
+                        'width': 40.0,
+                        'navigable': True,
+                        'orbit': {'a': 45.0},
+                    },
+                ],
+                'azimuthal': {
+                    'spokes': {
+                        'count': 6,
+                        'r_inner': 50.0,
+                        'r_outer': 80.0,
+                        'contrast': -0.5,
+                        'width_deg': 14.0,
+                    },
+                },
+            },
+        ),
+        {'gamma': 1.2},
+    ),
+    (
+        'ring_moonlet_propeller',
+        _scene(
+            [],
+            random_seed=14,
+            ring_system={
+                'geometry': {
+                    'center_v': 110.0,
+                    'center_u': 110.0,
+                    'opening_deg_obs': 90.0,
+                    'opening_deg_sun': 90.0,
+                    'node_deg': 0.0,
+                },
+                'features': [
+                    {
+                        'name': 'ASHEET',
+                        'kind': 'ringlet',
+                        'tau': 1.8,
+                        'width': 45.0,
+                        'navigable': True,
+                        'orbit': {'a': 40.0},
+                    },
+                    {
+                        'name': 'ENCKE',
+                        'kind': 'gap',
+                        'tau': 1.8,
+                        'width': 8.0,
+                        'orbit': {'a': 58.0},
+                    },
+                ],
+                'moonlets': [
+                    {
+                        'a': 62.0,
+                        'lam_deg': 130.0,
+                        'radius_px': 1.5,
+                        'amplitude': 0.5,
+                        'propeller': {'length_deg': 25.0, 'width_px': 3.0, 'contrast': -0.7},
+                    },
+                ],
+            },
         ),
         {'gamma': 1.2},
     ),
     (
         'star_field',
-        _scene([], background_stars_num=70, background_stars_psf_sigma=1.0),
-        {'gamma': 1.9, 'high_percentile': 99.9},
+        _scene(
+            [],
+            optics={'psf': {'match_navigator': True}},
+            stars=_scatter_stars(45, 11, vmag_hi=6.5),
+            sky_counts={'a': -1.5, 'b': 0.34, 'density_factor': 1.0},
+            noise={'poisson': True, 'read_noise_dn': 1.5},
+        ),
+        {'gamma': 1.6, 'high_percentile': 99.9},
     ),
     (
         'body_and_stars',
-        _scene([_ellipsoid(axis1=120.0, axis2=95.0, axis3=85.0)], background_stars_num=60),
+        _scene(
+            [_ellipsoid(axis1=120.0, axis2=95.0, axis3=85.0)],
+            optics={'psf': {'match_navigator': True}},
+            stars=_scatter_stars(28, 5),
+            sky_counts={'a': -1.8, 'b': 0.34, 'density_factor': 1.0},
+            noise={'poisson': True, 'read_noise_dn': 2.0},
+        ),
         {'gamma': 1.6, 'high_percentile': 99.9},
     ),
     (
@@ -161,30 +488,70 @@ _GUI_GALLERY: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
         {'gamma': 1.3, 'high_percentile': 99.7},
     ),
     (
+        'telemetry_loss',
+        _scene(
+            [
+                _ellipsoid(
+                    axis1=150.0,
+                    axis2=150.0,
+                    axis3=150.0,
+                    illumination_angle=25.0,
+                    phase_angle=30.0,
+                )
+            ],
+            artifacts={
+                'missing_lines': {'incidence': 10.0},
+                'partial_lines': {'incidence': 10.0},
+            },
+        ),
+        {'gamma': 1.15},
+    ),
+    (
         'stray_light_gradient',
         _scene(
             [_ellipsoid(axis1=120.0, axis2=95.0, axis3=85.0)],
-            stray_light={'amplitude': 0.5, 'direction_deg': 35.0, 'model': 'linear'},
+            optics={'stray_light': {'amplitude': 0.5, 'direction_deg': 35.0, 'model': 'linear'}},
         ),
         {'gamma': 1.2},
     ),
     (
         'composite_scene',
         _scene(
-            [_mesh(name='MOON', center_v=140.0, center_u=95.0, axis1=90.0, axis2=72.0, axis3=66.0)],
-            background_stars_num=40,
-            rings=[
-                {
-                    'name': 'RINGLET',
-                    'feature_type': 'RINGLET',
+            [
+                _mesh(
+                    name='MOON',
+                    center_v=140.0,
+                    center_u=95.0,
+                    axis1=90.0,
+                    axis2=72.0,
+                    axis3=66.0,
+                    range_km=500000.0,
+                )
+            ],
+            optics={'psf': {'match_navigator': True}},
+            stars=_scatter_stars(22, 3),
+            sky_counts={'a': -1.8, 'b': 0.34, 'density_factor': 1.0},
+            ring_system={
+                'geometry': {
                     'center_v': 110.0,
                     'center_u': 110.0,
-                    'inner_data': [{'mode': 1, 'a': 150.0, 'ae': 8.0}],
-                    'outer_data': [{'mode': 1, 'a': 170.0, 'ae': 8.0}],
-                    'shading_distance': 6.0,
-                    'range': 5000.0,
+                    'opening_deg_obs': 90.0,
+                    'opening_deg_sun': 90.0,
+                    'node_deg': 0.0,
                 },
-            ],
+                # The moon sits in front of the ring (physical depths).
+                'range_km': 1000000.0,
+                'km_per_pixel': 1000.0,
+                'features': [
+                    {
+                        'name': 'RINGLET',
+                        'kind': 'ringlet',
+                        'tau': 1.2,
+                        'width': 20.0,
+                        'orbit': {'a': 150.0, 'ae': 8.0},
+                    },
+                ],
+            },
             noise={'poisson': True, 'read_noise_dn': 4.0},
         ),
         {'gamma': 1.5, 'high_percentile': 99.9},
@@ -251,15 +618,31 @@ plus a per-image gamma).
 """
 
 
-def generate() -> list[Path]:
-    """Render both galleries and write their NOTES files; return all paths."""
-    written: list[Path] = []
-    _GUI_DIR.mkdir(parents=True, exist_ok=True)
-    for name, params, kwargs in _GUI_GALLERY:
-        written.append(render_scene_png(params, _GUI_DIR / f'{name}.png', upscale=2, **kwargs))
-    (_GUI_DIR / 'NOTES.md').write_text(_GUI_NOTES)
+def generate(*, gui_dir: Path | None = None, report_dir: Path | None = None) -> list[Path]:
+    """Render both galleries and write their NOTES files; return all paths.
 
-    _REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    Parameters:
+        gui_dir: Output directory for the developer-guide gallery; the
+            committed ``docs/dev_guide/_sim_images/`` when None.  The
+            staleness test points this at a temporary directory to compare
+            a fresh render against the committed PNGs.
+        report_dir: Output directory for the report scene gallery; the
+            committed ``docs/simulator_report/_scene_images/`` when None.
+
+    Returns:
+        The written paths (the gallery PNGs; the NOTES files are written
+        alongside but not returned).
+    """
+    gui_dir = _GUI_DIR if gui_dir is None else gui_dir
+    report_dir = _REPORT_DIR if report_dir is None else report_dir
+    written: list[Path] = []
+    gui_dir.mkdir(parents=True, exist_ok=True)
+    for name, params, kwargs in _GUI_GALLERY:
+        validate_sim_params(params, source=f'_GUI_GALLERY[{name}]')
+        written.append(render_scene_png(params, gui_dir / f'{name}.png', upscale=2, **kwargs))
+    (gui_dir / 'NOTES.md').write_text(_GUI_NOTES)
+
+    report_dir.mkdir(parents=True, exist_ok=True)
     for name, rel_path, kwargs in _REPORT_SCENES:
         scene_path = _SCENES_ROOT / rel_path
         if not scene_path.is_file():
@@ -268,10 +651,10 @@ def generate() -> list[Path]:
         params = load_sim_scene(scene_path)
         written.append(
             render_scene_png(
-                params, _REPORT_DIR / f'{name}.png', ignore_offset=False, upscale=2, **kwargs
+                params, report_dir / f'{name}.png', ignore_offset=False, upscale=2, **kwargs
             )
         )
-    (_REPORT_DIR / 'NOTES.md').write_text(_REPORT_NOTES)
+    (report_dir / 'NOTES.md').write_text(_REPORT_NOTES)
     return written
 
 

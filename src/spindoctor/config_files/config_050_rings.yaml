@@ -1,5 +1,45 @@
 rings:
   model_source: ephemeris
+  # Default radial orbit uncertainty (km, 1 sigma) for a catalog ring edge
+  # that carries no fitted rms.  An edge's OWN catalog rms takes precedence;
+  # this default covers only rms-less entries.  RingEdgeNav converts it to
+  # pixels at that edge's own radial scale and adds it to its reported
+  # covariance through the translation such a displacement would be absorbed
+  # into, so a tight lock on an uncertain orbit is not reported as a tight
+  # pointing fix.
+  #
+  # Provenance, measured over config_310_saturn_rings.yaml (79 rms entries,
+  # 2026-07-19): min 0.082, median 0.26, p75 1.006, p90 2.32, max 10.18 km;
+  # 21 of the 79 exceed 1 km and 8 exceed 3 km.  The distribution is strongly
+  # skewed -- well-behaved edges sit in the few-tenths-km range while resonant
+  # edges fitted without their m-modes reach 10.18 km.  2.0 km sits near p90:
+  # comfortably above the typical edge, below the resonant tail.  Note this is
+  # NOT a small term in pixels at high resolution: ring-edge navigation runs
+  # far below 5 km/px -- the ring_only_flat Keeler-gap library frames measure
+  # ~0.34 km/px at the edge, where 2 km is ~5.9 px and drives tier demotions.
+  # (An earlier note said ~1 km/px; that was the whole-image floored value,
+  # not the edge-local scale the term actually converts at.)  See
+  # nav_model_rings.py for the contested fully-correlated severity assumption
+  # this value is consumed under.
+  default_orbit_radial_sigma_km: 2.0
+
+  # Fraction of an edge's catalog rms treated as a COHERENT whole-edge
+  # displacement by the ring-edge orbit-uncertainty channel.  1.0 reproduces
+  # the fully-correlated severity described in nav_model_rings.py.
+  #
+  # This exists because that severity is a contested assumption, not a
+  # measurement: catalog rms is an orbit-fit residual mixing a coherent radius
+  # error with longitude-varying resonant wander, and the wander does not
+  # displace an edge coherently.  The catalog shows the mixture -- the same
+  # A-ring outer edge measures 10.18 km fitted without m-modes and 1.78 km
+  # with nine (a 5.7x reduction from mode structure alone).  Five
+  # operator-verified ring_only_flat Keeler frames sit at the low tier under
+  # 1.0; lowering this value is the reversible lever for revisiting that
+  # without a code change, pending the principled fix (decompose the catalog
+  # modes and price only the m=0 part coherently).  A value near 0.2 would
+  # approximate the mode-fitted-to-unfitted ratio above, but nothing has
+  # measured it, so the conservative 1.0 ships.
+  orbit_radial_sigma_correlated_fraction: 1.0
   fiducial_feature_threshold: 3
   fiducial_rms_gain: 2
   fiducial_min_feature_width: 2

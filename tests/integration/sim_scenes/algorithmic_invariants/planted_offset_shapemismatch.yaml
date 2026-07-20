@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 scene_name: planted_offset_shapemismatch
 instrument: coiss_nac
 size_v: 220
@@ -35,7 +35,6 @@ bodies:
     phase_angle: 30.0
     nav_override:
       mesh_lumpiness: 0.0
-rings: []
 noise:
   poisson: true
   read_noise_dn: 4.0

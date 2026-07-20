@@ -1,0 +1,47 @@
+schema_version: 2
+scene_name: edge_wave_gap
+instrument: coiss_nac
+size_v: 220
+size_u: 220
+random_seed: 11
+exposure_sec: 1.0
+# A Keeler-style navigable gap carved into a broad sheet, viewed inclined
+# (B = 50, node 30), whose orbit carries a satellite edge wave (amp 2 px,
+# wavelength 10 px of arc, damping 0.6 rad downstream of lam0 = 45 deg).
+# The wave is part of the catalog orbit, so the navigator predicts the same
+# scalloped edges the renderer draws and RingEdgeNav recovers the planted
+# offset from two curved, wave-perturbed arcs under projection.
+bodies: []
+ring_system:
+  geometry:
+    center_v: 110.0
+    center_u: 110.0
+    opening_deg_obs: 50.0
+    opening_deg_sun: 50.0
+    node_deg: 30.0
+  features:
+    - name: SHEET
+      kind: edge
+      side: in
+      tau: 1.2
+      orbit: {a: 95.0}
+    - name: WAVYGAP
+      kind: gap
+      tau: 1.2
+      width: 6.0
+      navigable: true
+      orbit:
+        a: 60.0
+        ae: 0.0
+        long_peri: 0.0
+        rate_peri: 0.0
+        edge_wave: {amp: 2.0, wavelength: 10.0, damp: 0.6, lam0: 45.0}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.2
+offset_u: -0.9
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: high

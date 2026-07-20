@@ -241,29 +241,30 @@ off :class:`~spindoctor.nav_technique.diagnostics.BodyBlobDiagnostics` plus
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`.
 
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyBlobDiagnostics.body_snr_inside_predicted_bbox`
-  — alpha = 0.405, offset = 0.0, divisor = 600.0, cap at 1.0. Per-image SNR inside the
+  — alpha = 0.895, offset = 0.0, divisor = 600.0, cap at 1.0. Per-image SNR inside the
   predicted bounding box. Brightness-weighted centroid uncertainty shrinks with SNR; the
-  calibration campaign's raw p5/p50/p95 is 34/109/679 (a heavy tail).
+  calibration campaign's raw p5/p50/p95 is 18/61/517 (a heavy tail).
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyBlobDiagnostics.body_extent_px` —
-  alpha = -1.477, offset = 8.0, divisor = 130.0, cap at 1.0. Predicted body's longer-axis
+  alpha = -1.063, offset = 8.0, divisor = 130.0, cap at 1.0. Predicted body's longer-axis
   extent in pixels. The alpha is *negative*, reversing the design's more-signal prior: the
   lit-weighted-centroid model error grows with apparent size, so the absolute probability
-  of recovering within 1 px falls as the blob gets bigger. Small blobs are the technique's
-  tightest regime in absolute pixels — every usable sub-22 px row on the calibration
-  campaign recovered within 1 px. Campaign raw p5/p50/p95 is 11/24/110.
+  of recovering within 1 px falls as the blob gets bigger. Small blobs remain the
+  technique's tightest regime in absolute pixels. Campaign raw p5/p50/p95 is 8/25/69.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyBlobDiagnostics.blob_count` — alpha = 0.4,
   offset = 0.0, divisor = 3.0, cap at 1.0. Number of ``BODY_BLOB`` features fused.
   Multi-body geometry over-determines the joint translation up to a 3-blob saturation.
+  Not identifiable in the single-body sim campaign; retained at the design prior.
 - :attr:`~spindoctor.nav_technique.diagnostics.BodyBlobDiagnostics.max_phase_irregularity_factor`
-  — alpha = -0.164, offset = 0.0, divisor = 0.35, cap at 1.0. Maximum phase-and-irregularity
+  — alpha = -0.545, offset = 0.0, divisor = 0.35, cap at 1.0. Maximum phase-and-irregularity
   factor across the consumed blobs (see :doc:`dev_guide_navigation_models_body` for the
-  formula); the divisor spans the campaign's raw p5/p50/p95 of 0.002/0.073/0.30. The
-  penalty is milder than a large-blob-only regime would suggest: with small blobs in the
-  fit the base rate rises and irregularity explains less of the residual failure mass.
+  formula); the divisor spans the campaign's raw p5/p50/p95 of 0.003/0.019/0.369. With
+  surface texture and relief in the rendered cohort the irregularity penalty carries
+  substantial weight: an irregular body's unpredictable shadowing is model error the
+  ellipsoidal render cannot correct.
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`
 firing forces confidence to zero before the sigmoid evaluates. The constant baseline is
-:math:`\alpha_{0} = 1.963`. A post-sigmoid ``hard_cap`` of ``0.4`` clamps the result: a
+:math:`\alpha_{0} = 1.465`. A post-sigmoid ``hard_cap`` of ``0.4`` clamps the result: a
 brightness-weighted centroid cannot drive the ensemble past 0.4 confidence even when every
 term saturates.
 

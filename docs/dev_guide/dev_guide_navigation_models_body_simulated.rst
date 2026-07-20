@@ -21,7 +21,32 @@ techniques consume:
 - a :data:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` (the silhouette boundary as
   a vertex polyline with outward normals) when the body is well resolved (diameter at
   least 100 px) and at low phase (at most 60 degrees), for
-  :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`.
+  :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`;
+- a :data:`~spindoctor.feature.feature_type.NavFeatureType.TERMINATOR_ARC` (the lit/unlit
+  boundary *interior* to the disc, as a vertex polyline whose outward normals point from the
+  lit side toward the unlit side) when the phase is far enough from zero for the terminator
+  to separate from the limb and the boundary is long enough to constrain a fit, for
+  :class:`~spindoctor.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`.
+
+The terminator is distinct from the limb: the limb is the silhouette edge against sky,
+while the terminator cuts *across* the disc where the lit hemisphere meets the unlit one.
+Because the shading floors the visible-but-unlit hemisphere at a small constant
+(:data:`~spindoctor.sim.ellipsoid_geometry.DARK_SIDE_ILLUM_STRENGTH`), the rendered body mask
+(brightness above zero) is the whole visible disc, and the lit region is the part brighter
+than that floor; the terminator polyline is the lit pixels adjacent to the interior unlit
+disc, with the limb ring excluded so the polyline stays interior to the disc -- except at
+the cusp-adjacent vertices of a very thin crescent, where terminator and limb meet within
+a pixel and a handful of vertices land on the silhouette (the SPICE-backed model's
+sampler shares the behaviour). The
+gates mirror the SPICE-backed :class:`~spindoctor.nav_model.nav_model_body.NavModelBody`
+(a ``sin(phase)`` floor, a minimum vertex count, and the shared
+:func:`~spindoctor.nav_model.nav_model_body.shape_features_suppressed` policy that
+suppresses the terminator of a resolved ``highly_irregular`` body), so a simulated body
+offers the same feature set a real one would. The terminator technique is sim-fitted on
+these emissions (2026-07-18 campaign; the fit came out single-class, so its formula is a
+low plateau -- see ``config_510_techniques.yaml``), and a terminator fix stays
+``confidence_provisional``: the realism match has no terminator-side rise-width verdict,
+which is the condition that gates trust in its confidences.
 
 The model overrides :meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs` to build
 one instance per body of a simulated observation; the parent
@@ -53,9 +78,21 @@ Restrictions and assumptions
 
 - The operator must supply finite, positive ellipsoid axes. Degenerate inputs (zero
   radius, negative axes) are rejected by
-  :func:`~spindoctor.sim.sim_body.create_simulated_body`.
-- Crater and anti-aliasing keys in the sim-params dict are accepted but ignored; the
-  simulated renderer always uses maximum anti-aliasing.
+  :func:`~spindoctor.nav_model.sim_body.create_simulated_body`.
+- The body appearance keys -- crater terrain, the limb-relief field, the photometric
+  law and opposition surge, the albedo and disc textures and transits, the atmospheric
+  haze layer, the mesh shading mode and pose scatter, and anti-aliasing -- are truth
+  keys the boundary filter strips, so this model never sees them; the predicted
+  template always renders as a smooth Lambert body at maximum anti-aliasing and zero
+  surface relief.
+- The atmosphere key deserves its own note, because its mismatch is deliberate rather
+  than incidental. When the image side renders a haze layer, the limb becomes a soft
+  ramp whose apparent radius sits outside the reference radius and shifts with phase
+  (see :ref:`sim-atmosphere`), while this model still predicts a hard limb at the
+  reference radius. That gap is the substrate for the Titan altitude-versus-phase
+  problem: a limb fit against the haze recovers a small offset toward the sunlit limb
+  whose size tracks the phase-dependent apparent limb radius (and the haze
+  parameters), and the ``atmosphere`` catalog scenes pin that measured bias.
 - The simulated body is rendered onto a fixed extfov image without per-instrument noise
   or PSF smearing; the operator's downstream noise-injection pipeline supplies those.
 
@@ -70,11 +107,12 @@ Configuration
 =============
 
 The simulated body model consumes no YAML configuration of its own; every parameter comes
-in via the per-instance ``sim_params`` dict. Expected keys:
+in via the per-body entry of the observation's filtered scene view
+(``obs.nav_params['bodies']``, see :doc:`dev_guide_simulator`). Expected keys:
 
 - ``name`` — body label used in metadata and the summary PNG.
 - ``center_v``, ``center_u`` — pixel coordinates of the body centre.
-- ``range`` — subject distance in km (defaults to ``+inf``).
+- ``range_km`` — subject distance in km (defaults to ``+inf``).
 - ``axis1``, ``axis2``, ``axis3`` — ellipsoid semi-axes in km. ``axis3`` defaults to
   ``min(axis1, axis2)``.
 - ``rotation_z`` — rotation about the line of sight (degrees).
@@ -84,14 +122,16 @@ in via the per-instance ``sim_params`` dict. Expected keys:
   degrees).
 - ``shape_model`` — ``ellipsoid`` (default) or ``polyhedral_mesh`` for an irregular body;
   a mesh reads ``mesh_lumpiness``, ``mesh_seed``, and ``pose_euler_deg`` (see
-  :func:`~spindoctor.sim.sim_body_polyhedral.mesh_spec_from_params`).
+  :func:`~spindoctor.sim.mesh_geometry.mesh_spec_from_params`).
 - ``km_per_pixel`` — optional physical scale at the limb; when absent the
   phase-irregularity factor collapses to the regular-body case.
-- ``nav_override`` — optional mapping overlaid on the body params to build the
-  predicted body, separating the render geometry from the navigation geometry
+- ``nav_override`` — optional scene mapping overlaid onto the body's idealized view by
+  the information-boundary filter before this model sees it, separating the render
+  geometry from the navigation geometry
   (see *Render geometry vs navigation geometry* below).
 
-Crater and anti-aliasing keys are accepted but ignored. The predicted silhouette diameter
+Crater and anti-aliasing keys never reach this model (the boundary filter strips them,
+so the template is a smooth, fully anti-aliased body). The predicted silhouette diameter
 gates the blob (at least 5 px) and limb (at least 100 px) emission; the diameter floor on
 the limb keeps the LM-refined fit off marginally-resolved bodies, where it would inject
 cross-process jitter into the fused offset.
@@ -107,8 +147,10 @@ the body params. By default the predicted body is built from the same params the
 renderer drew, so the navigator knows the truth (the agreeing case).
 
 An optional ``nav_override`` mapping breaks that tie. The renderer ignores it and
-always draws the true geometry; the navigator builds its predicted body from the
-body params with ``nav_override`` overlaid (``_nav_params``). This is the channel
+always draws the true geometry; the boundary filter
+(:func:`~spindoctor.sim.scene.build_nav_params`) overlays ``nav_override`` onto the
+body's idealized view and drops the key, so the predicted body is built from what the
+navigator *believes* without the true values underneath. This is the channel
 that lets the navigation geometry diverge from the render geometry, which the
 irregular-body scenarios exercise:
 
@@ -149,13 +191,13 @@ Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
 
 - :meth:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated.create_model` —
   renders the simulated body (ellipsoid via
-  :func:`~spindoctor.sim.sim_body.create_simulated_body`, or a mesh via
-  :func:`~spindoctor.sim.sim_body_polyhedral.render_mesh_body_image`), computes the limb mask via
+  :func:`~spindoctor.nav_model.sim_body.create_simulated_body`, or a mesh via
+  :func:`~spindoctor.sim.mesh_geometry.render_mesh_body_image`), computes the limb mask via
   the shared :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase` helper, and
   records the predicted diameter and tight bounding box used to gate and emit features.
 - :meth:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_features` — emits
-  the BODY_DISC plus, when the resolution and phase gates pass, the BODY_BLOB and
-  LIMB_ARC features described under *Overview*.
+  the BODY_DISC plus, when the resolution and phase gates pass, the BODY_BLOB, LIMB_ARC, and
+  TERMINATOR_ARC features described under *Overview*.
 - :meth:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_annotations` —
   reuses the shared body annotation helper on
   :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase` to render body silhouette
@@ -175,7 +217,7 @@ Call path traced through
 1. Open a logged section. Read the operator-supplied sim parameters off the per-instance
    dict.
 2. Convert per-axis rotations and angle parameters from degrees to radians.
-3. Call :func:`~spindoctor.sim.sim_body.create_simulated_body` with the per-axis radii and
+3. Call :func:`~spindoctor.nav_model.sim_body.create_simulated_body` with the per-axis radii and
    geometry; the helper returns the rendered simulated body image.
 4. Derive the body mask from the rendered image (every non-zero pixel is on the body).
 5. Compute the limb mask via
@@ -201,10 +243,33 @@ Call path traced through
 3. When the predicted diameter clears the blob floor, append a BODY_BLOB built by the
    shared blob-feature helper on
    :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase`.
-4. When the diameter and phase gates pass, append a LIMB_ARC: the silhouette boundary is
-   sampled into a vertex polyline with outward normals and a fixed per-vertex sigma.
-5. Reliability on each feature is fixed at ``1.0`` (the simulated body is by construction
-   reliable; downstream gates do not drop it).
+4. When the diameter and phase gates pass, append a LIMB_ARC scored honestly: the
+   silhouette boundary is sampled into a vertex polyline with outward normals and a
+   fixed per-vertex sigma, vertices hidden behind an explicitly nearer sibling body are
+   dropped, and the visible-arc fraction compares the surviving polyline against the
+   silhouette boundary of an unclipped whole-body render -- so a limb sliding off the
+   frame or behind another body reports the loss instead of claiming ``1.0``.  The
+   reliability applies the shared
+   :func:`~spindoctor.nav_model.nav_model_body.limb_reliability` formula (arc fraction
+   and arc length), so a deeply occluded or clipped limb can be dropped by the
+   downstream reliability gate exactly as a real one would be.
+5. When the terminator gates pass, append a TERMINATOR_ARC scored the same way: its
+   visible-arc fraction compares the surviving lit/unlit ridge (net of frame clipping
+   and sibling-body occlusion) against the ridge of an unclipped whole-body render of
+   the same geometry, and its reliability applies the shared
+   :func:`~spindoctor.nav_model.nav_model_body.terminator_reliability` formula
+   (arc fraction, catalog albedo-variation penalty, ``sin(phase)`` cap) -- so a
+   high-phase simulated terminator can be dropped by the downstream reliability gate
+   exactly as a real one would be.
+6. Reliability on the disc feature is fixed at ``1.0`` (the rendered template is exact by
+   construction and the correlation technique carries its own quality diagnostics),
+   while the blob carries the shared detection-SNR reliability from the base class.
+   Body-body occlusion is resolved from the sibling bodies' idealized geometry: each
+   model instance receives the OTHER bodies of the same filtered scene view, and a
+   sibling occludes only when both bodies carry an explicit ``range_km`` and the
+   sibling's is strictly nearer -- the navigator-side mirror of the renderer's rule
+   that overlapping bodies must all declare their depth.  The disc template itself is
+   not occlusion-masked (see the simulator report's known-gaps list).
 
 Examples
 ========

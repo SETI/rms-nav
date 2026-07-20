@@ -1,9 +1,9 @@
 """GUI smoke tests for ``spindoctor.cli.sd_create_simulated_image``.
 
-These cover the ``_load_scene`` YAML-load path, specifically that
-``shade_solid_rings`` round-trips into both the data model and its checkbox,
-and that a missing or null ``closest_planet`` falls back to ``SATURN`` without
-raising (``QComboBox.findText(None)`` would otherwise raise ``TypeError``).
+These cover the ``_load_scene`` YAML-load path, specifically that a
+``ring_system`` block round-trips into the data model, and that a missing or
+null ``closest_planet`` falls back to ``SATURN`` without raising
+(``QComboBox.findText(None)`` would otherwise raise ``TypeError``).
 """
 
 import importlib
@@ -59,7 +59,7 @@ def _load_scene_with(
 ) -> None:
     """Merge ``payload`` into a minimal valid scene, write it, and drive ``_load_scene``."""
     scene: dict[str, Any] = {
-        'schema_version': 1,
+        'schema_version': 2,
         'scene_name': 'params',
         'instrument': 'generic',
         'size_v': 128,
@@ -86,36 +86,38 @@ def _load_scene_with(
     model._load_scene()
 
 
-def test_load_shade_solid_rings_true_syncs_param(
+def test_load_ring_system_block_round_trips(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
-    """Loading ``shade_solid_rings: true`` sets the data-model flag to True."""
-    _load_scene_with(monkeypatch, model, tmp_path, {'shade_solid_rings': True})
-    assert model.sim_params['shade_solid_rings'] is True
-
-
-def test_load_shade_solid_rings_true_checks_box(
-    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
-) -> None:
-    """Loading ``shade_solid_rings: true`` checks the wired checkbox."""
-    _load_scene_with(monkeypatch, model, tmp_path, {'shade_solid_rings': True})
-    assert model._shade_solid_rings_check.isChecked() is True
-
-
-def test_load_shade_solid_rings_false_unchecks_box(
-    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
-) -> None:
-    """Loading ``shade_solid_rings: false`` clears the wired checkbox."""
-    model._shade_solid_rings_check.setChecked(True)
-    _load_scene_with(monkeypatch, model, tmp_path, {'shade_solid_rings': False})
-    assert model._shade_solid_rings_check.isChecked() is False
+    """Loading a ring_system block carries it into the data model verbatim."""
+    ring_system = {
+        'geometry': {
+            'center_v': 64.0,
+            'center_u': 64.0,
+            'opening_deg_obs': 90.0,
+            'opening_deg_sun': 90.0,
+            'node_deg': 0.0,
+        },
+        'features': [
+            {
+                'name': 'R1',
+                'kind': 'ringlet',
+                'tau': 1.0,
+                'width': 10.0,
+                'navigable': True,
+                'orbit': {'a': 30.0},
+            }
+        ],
+    }
+    _load_scene_with(monkeypatch, model, tmp_path, {'ring_system': ring_system})
+    assert model.sim_params['ring_system'] == ring_system
 
 
 def test_load_missing_closest_planet_defaults_to_saturn(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
     """A scene with no ``closest_planet`` key falls back to ``SATURN``."""
-    _load_scene_with(monkeypatch, model, tmp_path, {'shade_solid_rings': False})
+    _load_scene_with(monkeypatch, model, tmp_path, {})
     assert model.sim_params['closest_planet'] == 'SATURN'
 
 
@@ -177,8 +179,8 @@ def test_load_preserves_stray_light_block(
 ) -> None:
     """Loading a scene round-trips the catalog-only stray_light block."""
     stray = {'amplitude': 0.3, 'model': 'radial'}
-    _load_scene_with(monkeypatch, model, tmp_path, {'stray_light': stray})
-    assert model.sim_params['stray_light'] == stray
+    _load_scene_with(monkeypatch, model, tmp_path, {'optics': {'stray_light': stray}})
+    assert model.sim_params['optics']['stray_light'] == stray
 
 
 def test_default_has_no_dead_background_noise_key(model: Any) -> None:
@@ -232,32 +234,32 @@ def test_stray_light_defaults_off(model: Any) -> None:
 
 
 def test_stray_amplitude_updates_block(model: Any) -> None:
-    """The amplitude spin writes into the stray_light block."""
+    """The amplitude spin writes into the optics.stray_light block."""
     model._stray_amplitude_spin.setValue(0.4)
-    assert model.sim_params['stray_light']['amplitude'] == 0.4
+    assert model.sim_params['optics']['stray_light']['amplitude'] == 0.4
 
 
 def test_stray_direction_updates_block(model: Any) -> None:
-    """The direction spin writes direction_deg into the stray_light block."""
+    """The direction spin writes direction_deg into the optics.stray_light block."""
     model._stray_direction_spin.setValue(45.0)
-    assert model.sim_params['stray_light']['direction_deg'] == 45.0
+    assert model.sim_params['optics']['stray_light']['direction_deg'] == 45.0
 
 
 def test_stray_model_updates_block(model: Any) -> None:
-    """The model combo writes the stray_light model."""
+    """The model combo writes the optics.stray_light model."""
     model._stray_model_combo.setCurrentText('radial')
-    assert model.sim_params['stray_light']['model'] == 'radial'
+    assert model.sim_params['optics']['stray_light']['model'] == 'radial'
 
 
 def test_load_stray_light_syncs_widgets(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
-    """Loading a stray_light block syncs the panel widgets."""
+    """Loading an optics.stray_light block syncs the panel widgets."""
     _load_scene_with(
         monkeypatch,
         model,
         tmp_path,
-        {'stray_light': {'amplitude': 0.25, 'direction_deg': 90.0, 'model': 'radial'}},
+        {'optics': {'stray_light': {'amplitude': 0.25, 'direction_deg': 90.0, 'model': 'radial'}}},
     )
     assert model._stray_amplitude_spin.value() == 0.25
     assert model._stray_direction_spin.value() == 90.0
@@ -401,7 +403,7 @@ def test_load_scene_populates_model(
     """Loading a scene YAML populates the data model from it."""
     scene_yaml = tmp_path / 'loadme.yaml'
     scene_yaml.write_text(
-        'schema_version: 1\nscene_name: loadme\ninstrument: gossi\n'
+        'schema_version: 2\nscene_name: loadme\ninstrument: gossi\n'
         'size_v: 96\nsize_u: 96\nrandom_seed: 5\n'
     )
     monkeypatch.setattr(
@@ -480,9 +482,9 @@ def test_noise_bias_and_bloom_handlers(model: Any) -> None:
 def test_stray_center_zero_is_omitted(model: Any) -> None:
     """A stray-light centre of 0 is omitted (frame centre); non-zero is kept."""
     model._on_stray_center_v(40.0)
-    assert model.sim_params['stray_light']['center_v'] == 40.0
+    assert model.sim_params['optics']['stray_light']['center_v'] == 40.0
     model._on_stray_center_v(0.0)
-    assert 'center_v' not in model.sim_params.get('stray_light', {})
+    assert 'center_v' not in model.sim_params.get('optics', {}).get('stray_light', {})
 
 
 def test_body_seed_auto_omits(model: Any) -> None:
@@ -510,12 +512,14 @@ def test_full_parameter_round_trip(
             'midtime_utc': '2010-01-01T00:00:00Z',
             'fit_camera_rotation': True,
             'noise': {'poisson': True, 'read_noise_dn': 4.0, 'bias_dn': 18.0, 'bloom_length': 3},
-            'stray_light': {
-                'amplitude': 0.3,
-                'direction_deg': 35.0,
-                'model': 'radial',
-                'center_v': 40.0,
-                'center_u': 50.0,
+            'optics': {
+                'stray_light': {
+                    'amplitude': 0.3,
+                    'direction_deg': 35.0,
+                    'model': 'radial',
+                    'center_v': 40.0,
+                    'center_u': 50.0,
+                }
             },
             'bodies': [
                 {
@@ -571,7 +575,7 @@ def test_full_parameter_round_trip(
     assert p['fit_camera_rotation'] is True
     assert p['noise']['bias_dn'] == 18.0
     assert p['noise']['bloom_length'] == 3
-    assert p['stray_light']['center_v'] == 40.0
+    assert p['optics']['stray_light']['center_v'] == 40.0
     body = p['bodies'][0]
     assert body['mesh_n_lat'] == 20
     assert body['mesh_n_lon'] == 40
@@ -581,3 +585,81 @@ def test_full_parameter_round_trip(
     star = p['stars'][0]
     assert star['move_v'] == 1.0
     assert star['catalog_name'] == 'UCAC4'
+
+
+def test_help_prints_usage_without_qt(capsys: pytest.CaptureFixture[str]) -> None:
+    """--help exits before any Qt application is constructed."""
+    from spindoctor.cli.sim_editor.main_window import main
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(['--help'])
+    assert excinfo.value.code == 0
+    out = capsys.readouterr().out
+    assert 'sd_create_simulated_image' in out
+    assert 'scene' in out
+
+
+def test_arg_parser_accepts_optional_scene_path() -> None:
+    """The positional scene argument parses to a Path (or None when omitted)."""
+    from spindoctor.cli.sim_editor.main_window import build_arg_parser
+
+    parser = build_arg_parser()
+    args = parser.parse_args(['scene.yaml'])
+    assert args.scene == Path('scene.yaml')
+    args = parser.parse_args([])
+    assert args.scene is None
+
+
+def test_load_scene_file_opens_scene(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """The command-line loader applies a scene through the Load Scene machinery."""
+
+    def _raise(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError(f'error dialog raised: {args!r}')
+
+    monkeypatch.setattr(QMessageBox, 'critical', staticmethod(_raise))
+    scene = {
+        'schema_version': 2,
+        'scene_name': 'cli_open',
+        'instrument': 'coiss_nac',
+        'size_v': 96,
+        'size_u': 96,
+        'random_seed': 5,
+        'offset_v': 1.5,
+        'bodies': [
+            {
+                'name': 'RHEA',
+                'center_v': 48.0,
+                'center_u': 48.0,
+                'axis1': 40.0,
+                'axis2': 32.0,
+                'axis3': 30.0,
+            }
+        ],
+    }
+    path = tmp_path / 'cli_open.yaml'
+    yaml = YAML(typ='safe')
+    with path.open('w') as handle:
+        yaml.dump(scene, handle)
+    model.load_scene_file(path)
+    assert model.sim_params['size_v'] == 96
+    assert model.sim_params['offset_v'] == 1.5
+    assert model.sim_params['bodies'][0]['name'] == 'RHEA'
+
+
+def test_load_scene_file_reports_invalid_scene(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """An invalid scene surfaces the error dialog and leaves the model as-is."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, 'critical', staticmethod(lambda *a, **k: calls.append(str(a[2])))
+    )
+    path = tmp_path / 'broken.yaml'
+    path.write_text('schema_version: 2\nscene_name: broken\n')
+    before = dict(model.sim_params)
+    model.load_scene_file(path)
+    assert len(calls) == 1
+    assert 'Failed to load scene' in calls[0]
+    assert model.sim_params['size_v'] == before['size_v']

@@ -1,7 +1,7 @@
 {
-  "confidence": 0.99,
-  "offset_du_px": -4.03,
-  "offset_dv_px": 4.88,
+  "confidence": 0.2,
+  "offset_du_px": -4.1,
+  "offset_dv_px": 5.01,
   "scene_name": "planted_rotation_star_field",
-  "status": "success"
+  "status": "conflicted"
 }

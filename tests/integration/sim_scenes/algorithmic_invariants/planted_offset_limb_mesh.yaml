@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 scene_name: planted_offset_limb_mesh
 instrument: coiss_nac
 size_v: 220
@@ -29,7 +29,6 @@ bodies:
     axis3: 95.0
     illumination_angle: 25.0
     phase_angle: 30.0
-rings: []
 noise:
   poisson: true
   read_noise_dn: 4.0

@@ -1,11 +1,12 @@
 """Simulated-scene star NavModel.
 
-``NavModelStarsSimulated`` sources its star list from the sim renderer's output
-(``obs.sim_star_list``) instead of a catalog reduction, then reuses the
-catalog-driven ``NavModelStars`` feature-emission machinery.  These tests cover
-the obs-gated instance construction, that the model adopts the rendered star
-list, and that it emits one STAR feature per star at the *unshifted* predicted
-position (so a technique recovers the planted offset).
+``NavModelStarsSimulated`` builds its star list from the scene's idealized
+catalog entries (``obs.nav_params['stars']``) instead of a catalog reduction,
+then reuses the catalog-driven ``NavModelStars`` feature-emission machinery.
+These tests cover the obs-gated instance construction, that the model builds
+its catalog from the filtered view, and that it emits one STAR feature per
+star at the *unshifted* predicted position (so a technique recovers the
+planted offset).
 """
 
 from dataclasses import dataclass, field
@@ -30,7 +31,6 @@ def _obs(stars: list[dict[str, Any]] | None) -> ObsSim:
         'instrument': 'coiss_nac',
         'random_seed': 7,
         'bodies': [],
-        'rings': [],
     }
     if stars is not None:
         sim_params['stars'] = stars
@@ -70,8 +70,8 @@ def test_no_instance_for_simulated_obs_without_stars() -> None:
     assert NavModelStarsSimulated.instances_for_obs(obs) == []
 
 
-def test_create_model_adopts_rendered_star_list() -> None:
-    """``create_model`` populates the star list from ``obs.sim_star_list``."""
+def test_create_model_adopts_scene_star_catalog() -> None:
+    """``create_model`` populates the star list from ``obs.nav_params``."""
     obs = _obs(
         [
             {'name': 'S1', 'v': 40.0, 'u': 50.0, 'vmag': 3.0},

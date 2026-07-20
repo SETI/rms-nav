@@ -392,7 +392,7 @@ per-body silhouette navigation),
 :class:`~spindoctor.nav_model.nav_model_rings.NavModelRings` (catalog-driven
 per-planet ring navigation), the simulated-image siblings
 :class:`~spindoctor.nav_model.stars.nav_model_stars_simulated.NavModelStarsSimulated`
-(sources the star list from the sim renderer's ``obs.sim_star_list``),
+(builds the star list from the scene's catalog entries in ``obs.nav_params``),
 :class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated`,
 and
 :class:`~spindoctor.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`

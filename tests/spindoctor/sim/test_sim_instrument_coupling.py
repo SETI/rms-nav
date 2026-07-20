@@ -111,11 +111,13 @@ def test_raw_dn_render_is_in_dn() -> None:
 
 
 def test_gossi_scales_to_8bit_well() -> None:
-    """The gossi render scales to its 8-bit well rather than the 12-bit default."""
-    img, _ = render_combined_model(_lit_body_scene('gossi'))
-    # full_well 255 * default frac 0.5 -> lit signal peaks near ~128 DN, so the
-    # frame stays well under the 12-bit default scale.
-    assert float(img.max()) < 255.0
+    """The gossi render is bounded by its 8-bit ADC ceiling, unlike 12-bit coiss."""
+    gossi_img, _ = render_combined_model(_lit_body_scene('gossi'))
+    coiss_img, _ = render_combined_model(_lit_body_scene('coiss_nac'))
+    # Galileo's 8-bit ADC clips at 255 DN (the CCD full well sits above it in DN),
+    # while the Cassini 12-bit chain reaches well past 255.
+    assert float(gossi_img.max()) <= 255.0
+    assert float(coiss_img.max()) > 255.0
 
 
 def test_calibrated_if_render_stays_in_if_range() -> None:
@@ -195,3 +197,27 @@ def test_instrument_config_round_trips_through_the_scene_schema(tmp_path: Path) 
     save_sim_scene(sim_params, path)
     scene = load_sim_scene(path)
     assert scene['instrument_config'] == {'star_psf_sigma': 1.5, 'noise': {'read_noise_dn': 3.0}}
+
+
+def test_extfov_margin_unmatched_size_names_the_available_keys() -> None:
+    """An uncovered image size fails with the size and the fallback keys."""
+    from spindoctor.sim.instruments import resolve_extfov_margin
+
+    with pytest.raises(ValueError, match=r'image size 777.*fallback sizes.*\[64, 512\]'):
+        resolve_extfov_margin(
+            {'extfov_margin_vu': {512: [10, 10]}},
+            {'extfov_margin_vu': {64: [4, 4], 512: [10, 10]}},
+            777,
+        )
+
+
+def test_extfov_margin_fallback_covers_uncatalogued_size() -> None:
+    """A size the instrument table lacks resolves through the generic table."""
+    from spindoctor.sim.instruments import resolve_extfov_margin
+
+    margin = resolve_extfov_margin(
+        {'extfov_margin_vu': {512: [10, 10]}},
+        {'extfov_margin_vu': {64: [4, 4], 512: [10, 10]}},
+        64,
+    )
+    assert margin == [4, 4]

@@ -1,0 +1,40 @@
+schema_version: 2
+scene_name: psf_limb_body
+instrument: coiss_nac
+size_v: 220
+size_u: 220
+random_seed: 7
+exposure_sec: 1.0
+# PSF-mismatch base: a well-resolved limb body rendered with an explicit
+# navigator-matched PSF -- a pure Gaussian at the emulated instrument's
+# configured star_psf_sigma (0.54 px for coiss_nac), w = 0, sigma_v = sigma_u.
+# At this base value the rendered limb sharpness equals the navigator's model, so
+# it is the self-consistency floor.  A sweep that walks the rendered PSF sigma up
+# (sigma_v and sigma_u together) softens the limb edge the distance-transform fit
+# aligns to, growing a controlled PSF mismatch: the recovered offset error rises
+# and, once the limb gradient washes out past a few pixels of blur, the fit
+# fails outright -- the navigability cliff.  A bright star field's centroid is by
+# contrast unbiased under a symmetric PSF, so the limb is the technique this
+# mismatch actually bends.
+optics:
+  psf:
+    sigma_v: 0.54
+    sigma_u: 0.54
+    w: 0.0
+    r0: 2.0
+    n: 3.0
+bodies:
+  - name: RHEA
+    center_v: 110.0
+    center_u: 110.0
+    axis1: 130.0
+    axis2: 130.0
+    axis3: 130.0
+    illumination_angle: 25.0
+    phase_angle: 30.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0

@@ -1,0 +1,47 @@
+schema_version: 2
+scene_name: titan_crescent_horns_noiseless
+instrument: coiss_nac
+size_v: 260
+size_u: 260
+random_seed: 7
+exposure_sec: 1.0
+bodies:
+  - name: TITAN
+    shape_model: ellipsoid
+    center_v: 130.0
+    center_u: 130.0
+    axis1: 170.0
+    axis2: 170.0
+    axis3: 170.0
+    illumination_angle: 90.0
+    phase_angle: 155.0
+    atmosphere:
+      scale_height_px: 10.0
+      tau_ref: 3.0
+      ref_altitude_px: 0.0
+      g: 0.75
+noise:
+  poisson: false
+  read_noise_dn: 0.0
+offset_v: 1.2
+offset_u: -0.8
+offset_rotation_deg: 0.0
+# See titan_crescent_horns: the ring of light drags the blob centroid ~30 px,
+# the disc correlation is spurious, and the terminator feature is dropped by
+# the reliability gate (0.26 vs the 0.30 threshold, the sin(155 deg) phase cap
+# doing most of the capping), leaving a low-tier blob-only success that is
+# roughly 30 px wrong -- no remaining technique vetoes it.  The noiseless twin
+# removes read/Poisson noise as a confound and pins the systematic bias itself
+# deterministically (recovered du ~29.2 vs planted -0.8): the haze alone, not
+# the noise, carries the answer that far.  Re-measured 2026-07-18 under the
+# recalibrated formulas: the outcome persists (fused 0.40 at the blob's
+# structural cap, now 0.05 above the raised 0.35 ensemble gate), so the
+# scene stands as ensemble-gap evidence alongside its noisy twin.
+# known_offset_error_px is the honest pin: the measured fused error
+# (30.01 px on 2026-07-18, deterministic in this noiseless twin) must
+# stay inside its band -- silent improvement and worsening both fail.
+expected:
+  status: success
+  confidence_tier: low
+  known_offset_error_px: 30.0
+  known_offset_error_tol_px: 4.0

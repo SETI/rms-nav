@@ -1,0 +1,11 @@
+sweep_name: differential_smear
+# Differential-smear axis (Section 8): a per-object-class motion vector trails
+# the stars (the tracked-target class would stay sharp) while the navigator
+# predicts unsmeared point sources.  At dv_px 0 the stars are sharp points the
+# prediction matches -- the self-consistency floor -- and the sweep walks the
+# star trail length up; the smeared centroids drift off their catalog positions
+# and the recovered-offset error rises.  Pinned to StarFieldFromCatalogNav.
+base_scene: smear_sweep/smear_star_field.yaml
+parameters: [optics.smear.0.dv_px]
+values: [0.0, 1.0, 2.0, 4.0, 6.0]
+technique: StarFieldFromCatalogNav

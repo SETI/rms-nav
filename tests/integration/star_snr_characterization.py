@@ -94,7 +94,7 @@ def _sim_params(vmag: float, noise: dict[str, Any], stray: dict[str, Any] | None
     for star in params['stars']:
         star['vmag'] = vmag
     if stray is not None:
-        params['stray_light'] = dict(stray)
+        params['optics'] = {'stray_light': dict(stray)}
     return params
 
 

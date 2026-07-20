@@ -1,0 +1,20 @@
+sweep_name: star_catalog_scatter
+# Catalog-scatter breakdown curve on the wrong_catalog geometry.  The base scene
+# plants six bright stars and displaces every rendered one off its catalog
+# position by a seeded Gaussian of star_catalog_scatter_px; this sweep walks that
+# sigma from zero (a perfect catalog, where the field must recover the planted
+# offset) up through the 8 px wholesale-error regime the expected_fail scene
+# asserts.  The measured curve -- where recovery degrades, where the confidence
+# tiers drop, and where the techniques give up -- is characterization raw
+# material for the astrometric-residual error model; only the safety envelope
+# (clean recovery at zero, no success in the wholesale-error regime) is asserted
+# in test_sim_sweeps.
+#
+# ensemble_seeds redraws the scatter realization per seed at every sigma, so
+# each point is a small population rather than one draw: near the transition
+# the population splits between recovery and failure, which is the estimator-
+# validation raw material.  Kept small (3 seeds) for CI.
+base_scene: expected_fail/wrong_catalog.yaml
+parameters: [star_catalog_scatter_px]
+values: [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0]
+ensemble_seeds: 3

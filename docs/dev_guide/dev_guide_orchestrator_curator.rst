@@ -112,19 +112,19 @@ Examples
       "navigation_result": {
         "status": "success",
         "offset_px": [11.06, 30.53],
-        "sigma_px": [0.125, 0.122],
-        "confidence_rank": "high",
-        "confidence": 0.794,
+        "sigma_px": [2.613, 2.6128],
+        "confidence_rank": "low",
+        "confidence": 0.675,
         "confidence_provisional": true,
         "status_reason": "ok",
-        "covariance_px2": [[0.0156, 0.0017], [0.0017, 0.0148]],
+        "covariance_px2": [[6.8277, 0.0017], [0.0017, 6.8269]],
         "per_technique": [
           {
             "technique_name": "BodyLimbNav",
             "feature_ids": ["limb_arc:RHEA"],
             "offset_px": [12.06, 30.53],
-            "covariance_px2": [[0.0156, 0.0017], [0.0017, 0.0148]],
-            "confidence": 0.794,
+            "covariance_px2": [[6.8277, 0.0017], [0.0017, 6.8269]],
+            "confidence": 0.675,
             "spurious": false,
             "at_edge": false,
             "diagnostics": {

@@ -529,7 +529,14 @@ These JSON files contain the navigation results, including:
    ``confidence_provisional: true`` field in every ``_metadata.json``
    that carries a navigation result marks this sim-anchored basis
    (image-load-error metadata has no navigation result block and
-   therefore no such field).
+   therefore no such field).  The tiers additionally price statistical
+   error, not unmodeled systematic error: a coherent model error the
+   diagnostics cannot see -- a ring feature whose true orbit sits a few
+   pixels off the catalog orbit, or a high-phase haze crescent biasing
+   a centroid -- can be absorbed into a confident, gate-passing wrong
+   offset, so a high tier is not evidence against that kind of error
+   (see the ensemble chapter's confident-wrong section in the developer
+   guide).
 
 These files are also the input to the run-statistics tooling
 (``sd_stats_ingest`` / ``sd_stats_report``), which aggregates them into
@@ -563,11 +570,11 @@ Simulated Images
 SpinDoctor includes an image simulator used to test and validate the navigation
 pipeline. It is not needed for navigating real data, but a simulated frame can be
 navigated through the same pipeline by passing the ``sim`` dataset name and a path
-to a JSON parameter file:
+to a YAML scene file:
 
 .. code-block:: bash
 
-   sd_offset sim /path/to/simulated_image.json
+   sd_offset sim /path/to/scene.yaml
 
 The simulator, its scene formats, and the ``sd_create_simulated_image`` GUI are
 documented for developers in the :doc:`/dev_guide/dev_guide_simulator` chapter.

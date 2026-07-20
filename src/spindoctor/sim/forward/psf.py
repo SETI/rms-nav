@@ -1,0 +1,137 @@
+"""Whole-scene point-spread function for the optics stage.
+
+The camera's PSF blurs the entire composed radiance image, so the limb
+gradient, the ring-edge gradient, and every star shape inherit one profile.
+The kernel is a core Gaussian plus a Moffat wing::
+
+    K(r) = (1 - w) * G_norm(r; sigma_v, sigma_u) + w * M_norm(r; r0, n)
+
+Each term is separately normalized to unit sum over the truncation window, so
+``w`` is exactly the fraction of the kernel's energy in the wing and the whole
+kernel conserves flux.  The Gaussian core is elliptical (``sigma_v`` may differ
+from ``sigma_u``); the Moffat wing is isotropic.  All radii are in detector
+pixels; the kernel is sampled on the oversampled render grid, and the whole
+convolution runs there before the box downsample.
+"""
+
+from functools import lru_cache
+
+import numpy as np
+from scipy.signal import fftconvolve
+
+from spindoctor.support.types import NDArrayFloatType
+
+__all__ = [
+    'DEFAULT_TRUNCATION_PX',
+    'apply_psf',
+    'psf_kernel',
+    'psf_truncation_for_instrument',
+]
+
+# Kernel truncation radius in detector pixels: the window past which the
+# Gaussian core and Moffat wing are cut and the kernel renormalized.  Cassini's
+# documented long wings get a wider window; the far halo beyond the window is
+# stray-light scope, not kernel scope.
+DEFAULT_TRUNCATION_PX = 16
+_COISS_TRUNCATION_PX = 32
+
+
+def psf_truncation_for_instrument(instrument: str | None) -> int:
+    """Return the PSF truncation radius (detector px) for an instrument.
+
+    Parameters:
+        instrument: The sim instrument name, or None for the generic block.
+
+    Returns:
+        32 for the Cassini ISS cameras (documented long wings), else 16.
+    """
+    if instrument is not None and instrument.startswith('coiss'):
+        return _COISS_TRUNCATION_PX
+    return DEFAULT_TRUNCATION_PX
+
+
+@lru_cache(maxsize=8)
+def psf_kernel(
+    sigma_v: float,
+    sigma_u: float,
+    w: float,
+    r0: float,
+    n: float,
+    *,
+    truncation_px: int,
+    oversample: int,
+) -> NDArrayFloatType:
+    """Build the core-plus-wing PSF kernel on the oversampled grid.
+
+    Parameters:
+        sigma_v: Gaussian core sigma along v, in detector pixels.
+        sigma_u: Gaussian core sigma along u, in detector pixels.
+        w: Wing energy fraction in [0, 1] (the Moffat term's total weight).
+        r0: Moffat core radius in detector pixels.
+        n: Moffat index.
+        truncation_px: Kernel half-width in detector pixels.
+        oversample: Oversampling factor of the render grid.
+
+    Returns:
+        A ``(2*truncation_px*os + 1)`` square kernel summing to 1.0.
+    """
+    radius_os = int(truncation_px) * int(oversample)
+    offsets = np.arange(-radius_os, radius_os + 1, dtype=np.float64)
+    dv_os, du_os = np.meshgrid(offsets, offsets, indexing='ij')
+    # The kernel is sampled on the oversampled grid but parameterized in
+    # detector pixels, so convert each subsample offset back to detector units.
+    dv_det = dv_os / oversample
+    du_det = du_os / oversample
+
+    gaussian = np.exp(-0.5 * ((dv_det / sigma_v) ** 2 + (du_det / sigma_u) ** 2))
+    gaussian /= gaussian.sum()
+
+    r_det = np.sqrt(dv_det**2 + du_det**2)
+    moffat = (1.0 + (r_det / r0) ** 2) ** (-n / 2.0)
+    moffat /= moffat.sum()
+
+    kernel: NDArrayFloatType = (1.0 - w) * gaussian + w * moffat
+    return kernel
+
+
+def apply_psf(
+    signal: NDArrayFloatType,
+    point_e: NDArrayFloatType,
+    *,
+    sigma_v: float,
+    sigma_u: float,
+    w: float,
+    r0: float,
+    n: float,
+    truncation_px: int,
+    oversample: int,
+) -> None:
+    """Convolve the signal and point-source planes with the PSF kernel in place.
+
+    Both planes share every optical transform, so the same kernel blurs the
+    intensive signal (bodies, rings, sky) and the point-source electrons.  The
+    convolution is an FFT convolution (deterministic) at ``mode='same'``.
+
+    Parameters:
+        signal: The oversampled intensive-signal plane, modified in place.
+        point_e: The oversampled point-source plane, modified in place.
+        sigma_v: Gaussian core sigma along v, in detector pixels.
+        sigma_u: Gaussian core sigma along u, in detector pixels.
+        w: Wing energy fraction in [0, 1].
+        r0: Moffat core radius in detector pixels.
+        n: Moffat index.
+        truncation_px: Kernel half-width in detector pixels.
+        oversample: Oversampling factor of the render grid.
+    """
+    kernel = psf_kernel(
+        float(sigma_v),
+        float(sigma_u),
+        float(w),
+        float(r0),
+        float(n),
+        truncation_px=int(truncation_px),
+        oversample=int(oversample),
+    )
+    signal[:] = fftconvolve(signal, kernel, mode='same')
+    if float(np.count_nonzero(point_e)) > 0.0:
+        point_e[:] = fftconvolve(point_e, kernel, mode='same')

@@ -1,0 +1,36 @@
+schema_version: 2
+scene_name: double_star
+instrument: coiss_nac
+size_v: 200
+size_u: 200
+random_seed: 7
+exposure_sec: 1.0
+# A companion-bearing navigable star: a genuine (physical) catalog error.  The
+# lone navigable star carries an unresolved companion 2.5 px away, 2.5 mag
+# fainter, at 40 deg -- so the blended photocenter sits off the catalog position
+# by a magnitude-weighted amount the navigator cannot know (the catalog lists a
+# single star at the primary's position).  StarUniqueMatchNav's one-star path
+# centroids the blend and recovers an offset biased by the photocenter shift,
+# distinct from a planted astrometric error.  The separation and delta-mag are
+# chosen so the bias stays comfortably inside tolerance.
+# Measured recovered-vs-planted error at this geometry: ~0.38 px (the companion
+# photocenter pull); the test tolerance is 0.6 px.
+optics:
+  psf:
+    match_navigator: true
+bodies: []
+stars:
+  - name: N1
+    v: 100.0
+    u: 110.0
+    vmag: 2.5
+    companion: {sep_px: 2.5, delta_mag: 2.5, angle_deg: 40.0}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: medium

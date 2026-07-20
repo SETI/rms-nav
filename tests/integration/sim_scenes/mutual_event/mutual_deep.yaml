@@ -1,0 +1,52 @@
+schema_version: 2
+scene_name: mutual_deep
+instrument: coiss_nac
+size_v: 256
+size_u: 256
+random_seed: 42
+exposure_sec: 1.0
+# Mutual event, near-total occultation: a larger near body (radius 65 px)
+# 15 px off the far body's center hides almost all of it.  Rendered truth
+# (body_occlusion): FAR visible_fraction ~0.09, occluded limb arc ~206 deg
+# (over half the limb circle); NEAR fully visible.  Measured ensemble
+# behavior (2026-07-18, occlusion-aware sim limb): the navigator drops
+# FAR's hidden arc from the predicted polyline -- its idealized view knows
+# NEAR's geometry and explicit nearer range_km -- so FAR's LIMB_ARC
+# reports visible_arc_fraction 0.41 (reliability 0.64) instead of
+# claiming 1.0, the joint limb fit runs on arcs that exist in the image,
+# and both techniques land within ~0.1 px, fusing to an accurate
+# medium-tier success.  FAR's residual terminator arc is occlusion-
+# reduced too (fraction 0.27) and stays below the 0.30 reliability gate.
+# No confident-wrong result and no double-counting conflict was observed
+# at any overlap depth; the expected block pins that measured outcome so
+# a regression toward hidden-arc lock-on fails loudly.
+bodies:
+  - name: FAR
+    shape_model: ellipsoid
+    center_v: 128.0
+    center_u: 95.0
+    axis1: 120.0
+    axis2: 120.0
+    axis3: 120.0
+    illumination_angle: 20.0
+    phase_angle: 30.0
+    range_km: 700000.0
+  - name: NEAR
+    shape_model: ellipsoid
+    center_v: 128.0
+    center_u: 110.0
+    axis1: 130.0
+    axis2: 130.0
+    axis3: 130.0
+    illumination_angle: 20.0
+    phase_angle: 30.0
+    range_km: 500000.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 2.5
+offset_u: -1.5
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: medium

@@ -345,16 +345,23 @@ sibling of each model family. These are used both by
 - :mod:`spindoctor.nav_model.stars.nav_model_stars_simulated`
 - :mod:`spindoctor.nav_model.nav_model_body_simulated`
 - :mod:`spindoctor.nav_model.nav_model_rings_simulated`
-- :mod:`spindoctor.sim` — the synthetic-image renderer:
+- :mod:`spindoctor.sim` — the scene schema, the image-side forward model, and the
+  geometry helpers shared across the information boundary:
 
-  - :mod:`spindoctor.sim.render`
-  - :mod:`spindoctor.sim.scene`
-  - :mod:`spindoctor.sim.sim_body`
-  - :mod:`spindoctor.sim.sim_body_polyhedral`
-  - :mod:`spindoctor.sim.sim_ring`
+  - :mod:`spindoctor.sim.scene` — schema, validation, and the boundary filter
+  - :mod:`spindoctor.sim.render` — the cached driver over the stage pipeline
+  - :mod:`spindoctor.sim.forward` — the image-side stage pipeline
+    (:mod:`~spindoctor.sim.forward.pipeline`, :mod:`~spindoctor.sim.forward.stages`,
+    and the per-stage renderer modules)
+  - :mod:`spindoctor.sim.ellipsoid_geometry`, :mod:`spindoctor.sim.mesh_geometry`,
+    :mod:`spindoctor.sim.ring_geometry`, :mod:`spindoctor.sim.star_records` —
+    geometry/record helpers both sides share
   - :mod:`spindoctor.sim.instruments`
   - :mod:`spindoctor.sim.seeds`
   - :mod:`spindoctor.sim.png_export`
+
+- :mod:`spindoctor.nav_model.sim_body` and :mod:`spindoctor.nav_model.sim_ring` —
+  the navigator-side predicted-template renderers the simulated NavModels drive.
 
 - ``src/spindoctor/dataset/dataset_sim.py`` and ``src/spindoctor/obs/obs_inst_sim.py``
   — the simulated-image dataset and observation wrappers (not autodoc'd).

@@ -1,0 +1,55 @@
+schema_version: 2
+scene_name: banded_planet_transit
+instrument: coiss_nac
+size_v: 256
+size_u: 256
+random_seed: 17
+exposure_sec: 1.0
+# A giant-planet disc with the full texture stack: latitude bands, a
+# GRS-class storm oval, a bright transiting moon disc, and a cast shadow --
+# the sharp circular 'false crater' that disc correlation and blob
+# techniques can lock onto.  All texture keys are truth-side: the navigator
+# correlates its smooth Lambert template against the banded disc.  Measured
+# behavior: the disc correlation and the limb fit both stay accurate (fused
+# offset within ~0.12 px of the planted value), so this scene is the
+# regression tripwire for the false-crater confound: a correlator that
+# starts chasing the shadow or the storm moves the baseline and fails
+# loudly.
+bodies:
+  - name: JOVIAN
+    shape_model: ellipsoid
+    center_v: 128.0
+    center_u: 128.0
+    axis1: 200.0
+    axis2: 200.0
+    axis3: 200.0
+    illumination_angle: 20.0
+    phase_angle: 30.0
+    disc_texture:
+      band_amplitude: 0.25
+      band_wavenumber: 8.0
+      storms:
+        - lat_deg: -25.0
+          lon_deg: 90.0
+          radius_deg: 8.0
+          albedo_factor: 1.35
+    transits:
+      - moon:
+          dv_px: -30.0
+          du_px: 40.0
+          radius_px: 12.0
+          albedo_factor: 1.3
+      - shadow:
+          dv_px: 10.0
+          du_px: -35.0
+          radius_px: 10.0
+          darkness: 0.85
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 3.0
+offset_u: -2.0
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: medium

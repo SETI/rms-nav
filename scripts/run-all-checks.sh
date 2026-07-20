@@ -261,9 +261,13 @@ run_code_checks() {
     # excludes integration tests by default; with --integration / -i,
     # override by passing ``-m ""`` so the marker filter accepts every
     # test (including ones marked ``integration``).
+    # The render performance budgets assert single-core CPU time; the
+    # parallel battery's workers contend for memory bandwidth and inflate
+    # CPU time past the budgets, so the perf file is excluded from the
+    # parallel run and executed as its own serial step afterwards.
     if [ "$RUN_INTEGRATION" = true ]; then
         print_info "Running pytest (with integration tests)..."
-        pytest_marker_args=("-m" "")
+        pytest_marker_args=("-m" "" "--ignore=tests/integration/test_sim_perf.py")
     else
         print_info "Running pytest (integration tests skipped — pass -i to include)..."
         pytest_marker_args=()
@@ -274,6 +278,17 @@ run_code_checks() {
         print_error "Pytest failed"
         failed=true
         failed_checks="${failed_checks}Code - Pytest"$'\n'
+    fi
+
+    if [ "$RUN_INTEGRATION" = true ]; then
+        print_info "Running render performance budgets (serial)..."
+        if python -m pytest tests/integration/test_sim_perf.py -q -m ""; then
+            print_success "Render performance budgets passed"
+        else
+            print_error "Render performance budgets failed"
+            failed=true
+            failed_checks="${failed_checks}Code - Render performance budgets"$'\n'
+        fi
     fi
 
     deactivate 2>/dev/null || true

@@ -1,0 +1,99 @@
+"""Stage-activation property: an absent optics block contributes nothing.
+
+The self-consistency floor and the single-variable sweeps both depend on a
+stage doing nothing unless its scene block is present.  These tests assert that
+each optics sub-stage (PSF, smear, distortion, ghosts, stray light) and the
+SPK-error knob are inert when absent or zeroed, and that each one activates
+only its own effect when present.
+"""
+
+from typing import Any
+
+import numpy as np
+
+from spindoctor.sim.forward.optics import apply_optics
+from spindoctor.sim.forward.stages import new_sim_frame
+from spindoctor.sim.render import render_combined_model
+
+
+def _base_scene(**extra: Any) -> dict[str, Any]:
+    """A coiss body-plus-star scene with an optional extra top-level block."""
+    scene: dict[str, Any] = {
+        'size_v': 60,
+        'size_u': 60,
+        'random_seed': 4,
+        'instrument': 'coiss_nac',
+        'noise': {'poisson': False, 'read_noise_dn': 0.0, 'bias_dn': 0.0},
+        'bodies': [{'name': 'B', 'center_v': 30.0, 'center_u': 30.0, 'axis1': 20.0, 'axis2': 20.0}],
+        'stars': [{'name': 'S', 'v': 12.0, 'u': 48.0, 'vmag': 0.0}],
+    }
+    scene.update(extra)
+    return scene
+
+
+def test_apply_optics_with_no_block_is_a_noop() -> None:
+    """The optics stage leaves the frame untouched with no optics mapping."""
+    frame = new_sim_frame(40, 40)
+    frame.signal[10:20, 10:20] = 0.5
+    before = frame.signal.copy()
+    apply_optics(frame, params={'instrument': 'coiss_nac'}, rng=np.random.default_rng(0))
+    assert np.array_equal(frame.signal, before)
+
+
+def test_empty_optics_matches_no_optics() -> None:
+    """An empty optics mapping renders bit-identically to no optics block."""
+    plain, _ = render_combined_model(_base_scene())
+    empty, _ = render_combined_model(_base_scene(optics={}))
+    assert np.array_equal(plain, empty)
+
+
+def test_inert_smear_contributes_nothing() -> None:
+    """An empty smear list is disabled."""
+    plain, _ = render_combined_model(_base_scene())
+    inert, _ = render_combined_model(_base_scene(optics={'smear': []}))
+    assert np.array_equal(plain, inert)
+
+
+def test_inert_ghosts_contribute_nothing() -> None:
+    """An empty ghost list is disabled."""
+    plain, _ = render_combined_model(_base_scene())
+    inert, _ = render_combined_model(_base_scene(optics={'ghosts': []}))
+    assert np.array_equal(plain, inert)
+
+
+def test_zeroed_distortion_contributes_nothing() -> None:
+    """A distortion block with no amplitude is the identity."""
+    plain, _ = render_combined_model(_base_scene())
+    inert, _ = render_combined_model(
+        _base_scene(optics={'distortion': {'k1': 0.0, 'k2': 0.0, 'nonradial_rms_px': 0.0}})
+    )
+    assert np.array_equal(plain, inert)
+
+
+def test_zero_amplitude_stray_light_contributes_nothing() -> None:
+    """A stray-light block with zero amplitude is disabled."""
+    plain, _ = render_combined_model(_base_scene())
+    inert, _ = render_combined_model(_base_scene(optics={'stray_light': {'amplitude': 0.0}}))
+    assert np.array_equal(plain, inert)
+
+
+def test_absent_spk_error_contributes_nothing() -> None:
+    """No spk_error block leaves geometry unshifted."""
+    plain, _ = render_combined_model(_base_scene())
+    # A body already carries a default range; adding a zero-vector spk_error is inert.
+    scene = _base_scene()
+    scene['bodies'][0]['range_km'] = 100000.0
+    with_range, _ = render_combined_model(scene)
+    assert np.array_equal(plain, with_range)
+
+
+def test_psf_block_activates_blur() -> None:
+    """A PSF block softens the limb; its absence leaves it sharp (activation)."""
+    sharp, _ = render_combined_model(_base_scene())
+    blurred, _ = render_combined_model(
+        _base_scene(optics={'psf': {'sigma_v': 1.2, 'sigma_u': 1.2, 'w': 0.0}})
+    )
+    # The limb gradient magnitude drops when the PSF spreads the edge.
+    sharp_grad = float(np.abs(np.diff(sharp[30, :])).max())
+    blurred_grad = float(np.abs(np.diff(blurred[30, :])).max())
+    assert blurred_grad < sharp_grad

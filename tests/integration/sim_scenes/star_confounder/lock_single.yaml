@@ -1,0 +1,42 @@
+schema_version: 2
+scene_name: lock_single
+instrument: coiss_nac
+size_v: 200
+size_u: 200
+random_seed: 7
+exposure_sec: 1.0
+# One-star lock in a field of confounders.  A single navigable bright star
+# (vmag 2.5) is the only star the navigator's simulated catalog knows about;
+# the five non-navigable confounders (vmag 4.0, dropped from nav_params
+# entirely) render into the frame but are invisible to the navigator.
+# StarFieldFromCatalogNav needs a three-star pattern so it is infeasible here;
+# StarUniqueMatchNav's one-star path detects the brightest peak in the lone
+# star's search window and its brightness-uniqueness gate clears because the
+# confounders are dimmer and elsewhere in the frame -- so the technique recovers
+# the planted translation.  Raising the confounder brightness or crowding one
+# into the search window trips the gate; that transition is the breakdown curve
+# (sim_sweeps/star_confounder_density.yaml).
+# Stars deposit as point masses; the navigator-matched PSF gives them a
+# finite (floor-form) profile instead of a 1-pixel spike.
+optics:
+  psf:
+    match_navigator: true
+bodies: []
+stars:
+  - {name: N1, v: 100.0, u: 110.0, vmag: 2.5}
+  - {name: X0, v: 40.0, u: 160.0, vmag: 4.0, navigable: false}
+  - {name: X1, v: 160.0, u: 40.0, vmag: 4.0, navigable: false}
+  - {name: X2, v: 45.0, u: 45.0, vmag: 4.0, navigable: false}
+  - {name: X3, v: 155.0, u: 155.0, vmag: 4.0, navigable: false}
+  - {name: X4, v: 100.0, u: 45.0, vmag: 4.0, navigable: false}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0
+# The one-star path caps at the medium tier (no independent cross-check); the
+# planted offset is recovered to a few hundredths of a pixel.
+expected:
+  status: success
+  confidence_tier: medium

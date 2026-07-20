@@ -1,0 +1,14 @@
+sweep_name: atmosphere_haze
+# Atmosphere-mismatch axis (Section 8): a Titan-class haze softens the limb above
+# a reference radius while the navigator predicts a hard limb at that radius.  At
+# tau_ref 0 there is no haze -- and the base scene renders through the
+# navigator-matched PSF, so that point is a true self-consistency floor with no
+# hidden PSF mismatch (the floor convention the other model-mismatch bases pin).
+# The sweep walks the reference optical depth up; the haze lifts and blurs the
+# limb, growing the recovered-offset error.  Fused result; the limb DT fit
+# (BodyLimbNav) is the highest-confidence technique at every step, with the disc
+# correlation agreeing on the same haze-lifted limb.
+base_scene: model_mismatch/haze_limb_base.yaml
+parameters: [bodies.0.atmosphere.tau_ref]
+values: [0.0, 1.0, 2.0, 4.0, 6.0]
+technique: '*'

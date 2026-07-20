@@ -1,0 +1,46 @@
+schema_version: 2
+scene_name: textured_moon_offset
+instrument: coiss_nac
+size_v: 256
+size_u: 256
+random_seed: 23
+exposure_sec: 1.0
+# An icy moon with a multiplicative albedo texture: band-limited noise
+# (rms 0.25, correlation 12 px on the disc) plus a dark and a bright
+# circular albedo spot.  The texture is truth-side, so the disc correlation
+# sees realistic surface contrast against its smooth Lambert template while
+# the silhouette the limb fit uses is untouched.  Measured behavior: still
+# an accurate success (fused offset within ~0.3 px of the planted value;
+# the texture pulls the correlation peak slightly, which is exactly the
+# realistic-contrast degradation this scene keeps honest).
+bodies:
+  - name: DAPPLED
+    shape_model: ellipsoid
+    center_v: 128.0
+    center_u: 128.0
+    axis1: 140.0
+    axis2: 140.0
+    axis3: 140.0
+    illumination_angle: 20.0
+    phase_angle: 35.0
+    albedo_texture:
+      rms: 0.25
+      corr_px: 12.0
+      spots:
+        - lat_deg: 40.0
+          lon_deg: 30.0
+          radius_deg: 12.0
+          albedo_factor: 0.55
+        - lat_deg: 10.0
+          lon_deg: 300.0
+          radius_deg: 9.0
+          albedo_factor: 1.4
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: -2.2
+offset_u: 1.7
+offset_rotation_deg: 0.0
+expected:
+  status: success
+  confidence_tier: medium

@@ -403,3 +403,27 @@ def test_instances_for_obs_returns_no_models_without_extdata_shape() -> None:
 
     instances = NavModelRings.instances_for_obs(cast(Any, _BareObs()))
     assert instances == []
+
+
+def test_to_features_carries_catalog_rms_as_orbit_sigma(fake_obs: FakeObs) -> None:
+    """A feature with a catalog rms carries it as the fully-correlated orbit sigma."""
+    model = _build_rings(obs=fake_obs, edge_mask=_curved_edge_mask((110, 110)))
+    features = model.to_features(cast(Any, None))
+    assert isinstance(features[0].geometry, RingEdgePolyline)
+    # sigma_orbit_radial_px = uncertainty_km / km_per_pixel_radial.
+    assert features[0].geometry.sigma_orbit_radial_px == pytest.approx(2.0 / 5.0)
+
+
+def test_to_features_rms_less_feature_uses_config_default_orbit_sigma(
+    fake_obs: FakeObs,
+) -> None:
+    """Without a catalog rms the configured default orbit sigma applies."""
+    from spindoctor.config import DEFAULT_CONFIG
+
+    model = _build_rings(obs=fake_obs, edge_mask=_curved_edge_mask((110, 110)), uncertainty_km=0.0)
+    features = model.to_features(cast(Any, None))
+    assert isinstance(features[0].geometry, RingEdgePolyline)
+    DEFAULT_CONFIG.read_config()
+    default_km = float(DEFAULT_CONFIG.rings['default_orbit_radial_sigma_km'])
+    assert default_km == pytest.approx(2.0)
+    assert features[0].geometry.sigma_orbit_radial_px == pytest.approx(default_km / 5.0)

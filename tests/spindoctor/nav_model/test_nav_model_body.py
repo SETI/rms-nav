@@ -27,11 +27,11 @@ from spindoctor.nav_model.nav_model_body import (
     _build_polyline_sampler,
     _disc_reliability,
     _incidence_factor_array,
-    _limb_reliability,
     _PolylineSampler,
     _sigma_normal_per_vertex,
-    _terminator_reliability,
     _visible_arc_fraction,
+    limb_reliability,
+    terminator_reliability,
 )
 from spindoctor.nav_model.nav_model_body_base import _blob_reliability, _sigmoid
 
@@ -164,15 +164,15 @@ def test_sigmoid_at_zero() -> None:
 
 def test_limb_reliability_increases_with_visible_arc_fraction() -> None:
     """Reliability is monotone in ``visible_arc_fraction`` for fixed arc length."""
-    low = _limb_reliability(visible_arc_fraction=0.2, visible_arc_px=20.0)
-    high = _limb_reliability(visible_arc_fraction=0.9, visible_arc_px=20.0)
+    low = limb_reliability(visible_arc_fraction=0.2, visible_arc_px=20.0)
+    high = limb_reliability(visible_arc_fraction=0.9, visible_arc_px=20.0)
     assert high > low
 
 
 def test_limb_reliability_increases_with_arc_length() -> None:
     """Longer arcs score higher (the ``visible_arc_px`` sigmoid)."""
-    short = _limb_reliability(visible_arc_fraction=0.9, visible_arc_px=5.0)
-    long = _limb_reliability(visible_arc_fraction=0.9, visible_arc_px=200.0)
+    short = limb_reliability(visible_arc_fraction=0.9, visible_arc_px=5.0)
+    long = limb_reliability(visible_arc_fraction=0.9, visible_arc_px=200.0)
     assert long > short
 
 
@@ -184,13 +184,13 @@ def test_limb_reliability_passes_gate_for_fully_lit_geometry() -> None:
     estimate, so a textbook-good limb (Dione at low phase) must clear
     it.
     """
-    score = _limb_reliability(visible_arc_fraction=1.0, visible_arc_px=300.0)
+    score = limb_reliability(visible_arc_fraction=1.0, visible_arc_px=300.0)
     assert score > 0.5
 
 
 def test_terminator_reliability_zero_at_zero_phase() -> None:
     """Sub-solar-illuminated images produce zero terminator reliability."""
-    out = _terminator_reliability(visible_arc_fraction=1.0, albedo_variation=0.0, phase_factor=0.0)
+    out = terminator_reliability(visible_arc_fraction=1.0, albedo_variation=0.0, phase_factor=0.0)
     assert out == 0.0
 
 

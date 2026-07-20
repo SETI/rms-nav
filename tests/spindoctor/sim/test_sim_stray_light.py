@@ -10,7 +10,8 @@ from typing import Any
 import numpy as np
 import pytest
 
-from spindoctor.sim.render import apply_stray_light, render_combined_model
+from spindoctor.sim.forward.optics import apply_stray_light
+from spindoctor.sim.render import render_combined_model
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec, apply_filter
 
 
@@ -74,7 +75,7 @@ def _scene(*, stray: dict[str, Any] | None) -> dict[str, Any]:
         'noise': {'poisson': False, 'read_noise_dn': 0.0},
     }
     if stray is not None:
-        params['stray_light'] = stray
+        params['optics'] = {'stray_light': stray}
     return params
 
 
@@ -85,3 +86,48 @@ def test_render_stray_light_raises_background() -> None:
         _scene(stray={'amplitude': 0.3, 'direction_deg': 0.0, 'model': 'linear'})
     )
     assert float(lit.mean()) > float(plain.mean())
+
+
+def test_radial_stray_center_is_detector_coordinates_at_oversample() -> None:
+    """An explicit radial stray-light centre stays put when the scene oversamples.
+
+    The centre keys are detector coordinates; the optics stage runs on the
+    oversampled grid, so they must scale with the oversample factor like every
+    other pixel-space parameter or the bump slides toward the origin.
+    """
+
+    def _peak(oversample: int) -> tuple[int, int]:
+        scene = {
+            'schema_version': 2,
+            'scene_name': 'stray_center_probe',
+            'instrument': 'generic',
+            'size_v': 200,
+            'size_u': 200,
+            'random_seed': 1,
+            'exposure_sec': 1.0,
+            'offset_v': 0.0,
+            'offset_u': 0.0,
+            'bodies': [],
+            'stars': [],
+            'noise': {'poisson': False, 'read_noise_dn': 0.0},
+            'oversample': oversample,
+            'optics': {
+                'psf': {'sigma_v': 0.6, 'sigma_u': 0.6, 'w': 0.0, 'r0': 2.0, 'n': 3.0},
+                'stray_light': {
+                    'model': 'radial',
+                    'amplitude': 0.3,
+                    'center_v': 150.0,
+                    'center_u': 60.0,
+                },
+            },
+        }
+        img, _ = render_combined_model(scene)
+        v, u = np.unravel_index(np.argmax(img), img.shape)
+        return int(v), int(u)
+
+    peak_v1, peak_u1 = _peak(1)
+    peak_v4, peak_u4 = _peak(4)
+    assert abs(peak_v1 - 150) <= 1
+    assert abs(peak_u1 - 60) <= 1
+    assert abs(peak_v4 - peak_v1) <= 1
+    assert abs(peak_u4 - peak_u1) <= 1

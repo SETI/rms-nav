@@ -15,6 +15,9 @@ galileo_ssi:
     expected_noise_dn: 1.0         # PLACEHOLDER — calibrate in Phase 10
     marker_value: 0
     read_noise_dn: 1.0             # PLACEHOLDER — calibrate in Phase 10
+    # interim: photometric zero point (DN a vmag-0 star deposits per second),
+    # the electron zero point over the standard gain state.
+    star_flux_dn_per_s_vmag0: 2.14e4
   image_quality_thresholds:
     blank_max_dn: 5.0              # PLACEHOLDER — calibrate in Phase 10
     saturation_threshold_dn: 255   # 8-bit ADC

@@ -1,7 +1,7 @@
 {
   "confidence": 0.4,
   "offset_du_px": -0.5,
-  "offset_dv_px": 1.5,
+  "offset_dv_px": 1.49,
   "scene_name": "small_sphere_base",
   "status": "success"
 }

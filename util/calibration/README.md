@@ -8,8 +8,7 @@ simulated scenes, because no real-image anchor set (operator-verified
 offsets with measured per-technique errors) exists yet.  When such a set
 exists, the same fit reruns against it and the sim-anchored values
 become the fallback for regimes real data cannot reach.  (Historical
-background and sequencing: `plans/VALIDATION_AND_CALIBRATION_PLAN.md`,
-issue #173.)
+background and sequencing: `plans/VALIDATION_AND_CALIBRATION_PLAN.md`.)
 
 Everything here is a repo-checkout script (not part of the distributed
 package); generated artifacts go under `_work/calibration/` (gitignored).
@@ -48,8 +47,20 @@ package); generated artifacts go under `_work/calibration/` (gitignored).
 4. Write the fitted alphas into `config_510_techniques.yaml` (by hand, so
    the YAML comments stay curated), then **re-collect** — fused
    confidences depend on the per-technique alphas.
+
+   What a re-collect can and cannot verify: scene draws are
+   seed-deterministic and a pass-1 technique's diagnostics and errors do
+   not depend on any confidence formula, so pass-over-pass alpha
+   reproduction is *structural* for the pass-1 techniques — reproducing
+   them confirms only that the pipeline is deterministic.  The
+   substantive convergence content of a re-collect is the
+   prior-dependent pass-2 technique (`StarRefineNav`: the pass-1
+   formulas change which priors reach pass 2, so its cohort genuinely
+   re-forms) and the fused quantities the next two steps check (the
+   floors re-solving to ~0 additional, the gate curves re-deriving to
+   the shipped boundaries).
 5. **`fit_floors.py`** — solves each technique's `model_error_floor_px`
-   tuning value (#210): the quadrature floor that brings the 2-sigma
+   tuning value: the quadrature floor that brings the 2-sigma
    coverage of `sqrt(sigma_reported^2 + floor^2)` to the 2D-Gaussian
    expectation (0.865) against planted truth.  Run it on a collection
    pass made with the floors at their current values: a converged
@@ -84,6 +95,54 @@ package); generated artifacts go under `_work/calibration/` (gitignored).
        --workers 8 --out _work/calibration/library_crosscheck.md
    ```
 
+   The seed-20260718 campaign's cross-check record is tracked in
+   `CAMPAIGN_20260718.md` (this directory): 75 sidecars -- status
+   69/75, tier 46/75, offset-within-slack 54/61, zero pipeline
+   exceptions -- with per-frame attribution for every flip (the
+   dominant confusions are high->medium under the 0.85 high-tier
+   boundary and medium->low under the 2.61 px limb floor), the
+   W1444747627 single-frame diagnosis, and the CI-gate consequence:
+   the sidecar tier expectations predate the recalibration, the
+   historical failure-set gate no longer applies as-is, and a sidecar
+   re-ratchet is an operator decision.
+
+## Campaign timing baseline
+
+Reference throughput for the collection campaign, measured 2026-07-18 on
+the full-truth-axis renderer (campaign seed 20260718; body families
+drawing the surface / photometric truth axes and the giant-planet
+disc-texture slice):
+
+```bash
+source setup.sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1 \
+    python util/calibration/collect.py \
+    --per-family 600 --workers 14 --out _work/calibration/rows.jsonl
+```
+
+Result: 4200 rows, 0 errors, elapsed (real) **7m20-24s** across three
+passes (user ~94-95m, sys ~8m).  Machine: i9-13900K with logical CPUs
+10-11 excluded by `setup.sh`.  The previous renderer measured 7m13.7s
+(2026-07-15) with the same command, so the truth axes cost ~1.5% --
+well inside the 2x budget below.
+
+Notes on reproducing the measurement:
+
+- The shell-level `*_NUM_THREADS=1` exports are **required**: `collect.py`
+  sets the same variables inside each worker, but the workers inherit the
+  parent's already-initialized BLAS thread pools under the fork start
+  method, so the in-worker pinning does not take effect.  Unpinned
+  BLAS threads oversubscribe the 14 workers and distort the timing.
+- Worker CPU affinity on this machine is load-bearing, not cosmetic:
+  always `source setup.sh` first so the excluded cores stay excluded.
+
+This baseline is the renderer-throughput budget: a default-stage
+4200-scene campaign must stay within **2x this elapsed time** as the
+renderer gains fidelity.  Re-measure and update this section whenever the
+campaign command, the machine, or the renderer's default stage set
+changes materially.
+
 ## Structural caps and hard gates
 
 Post-sigmoid caps (BodyBlobNav's 0.4, StarUniqueMatchNav's per-mode
@@ -94,12 +153,23 @@ ordering, not per-technique reliability; they are retained, not fitted.
 ## Caveats
 
 - **Sim-anchored basis.** Every value fitted here is only as real as
-  the simulator's match to real images, which has not been quantified
-  yet.  `confidence_provisional` stays true
+  the simulator's match to real images -- quantified per instrument in
+  the simulator report's realism-match section, but not yet
+  real-anchored.  `confidence_provisional` stays true
   in the metadata until a real-anchored calibration lands.
-- The scene families cover the sim's rendering vocabulary; regimes the
-  sim cannot render (real PSF wings, saturation bloom on stars,
-  calibrated-I/F detector noise) are uncalibrated by this fit.
+- **Chain-off render basis.** The campaign's scene families render with
+  the empirical instrument chain off: no `artifacts` /
+  `instrument_defaults`, no whole-scene PSF on the body and ring
+  families, the navigator-matched floor PSF on the star families, and
+  no distortion, smear, or atmosphere.  PSF wings, saturation bloom on
+  stars, and calibrated-I/F detector noise are renderable but likewise
+  not drawn.  The realism match vouches for the chain-*on*
+  configuration, so those regimes -- and the empirical-chain layer as a
+  whole -- are uncalibrated by this fit (see the "Calibration basis and
+  scope" section of `CAMPAIGN_20260718.md`).
+- **Single-instrument cohort.** Every campaign scene emulates
+  `coiss_nac`; the fitted alphas, floors, and tier boundaries are
+  applied fleet-wide from that one-camera cohort.
 - The operator-curated image-library tiers are the *plausibility
   cross-check* for this calibration, never fit targets (the curation
   conventions live in `docs/dev_guide/dev_guide_image_library.rst`).

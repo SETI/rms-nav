@@ -161,8 +161,8 @@ include them. ``pyproject.toml`` sets ``addopts = ["-m", "not integration"]``.
    pytest -m ""                                # full suite (incl. integration)
    pytest -m integration                       # only integration
    pytest -n auto --dist=loadfile              # parallel (matches CI)
-   pytest tests/nav/reproj/test_bodies.py      # one file
-   pytest tests/nav/reproj/test_bodies.py::test_foo  # one test
+   pytest tests/spindoctor/reproj/test_bodies.py      # one file
+   pytest tests/spindoctor/reproj/test_bodies.py::test_foo  # one test
    pytest --cov                                # with coverage
 
 ``pytest-xdist`` must run with ``--dist=loadfile`` — the default scheduling
@@ -178,8 +178,8 @@ all-checks runner.
 Test markers and layout
 -----------------------
 
-- Unit tests live under ``tests/nav/`` and mirror ``src/spindoctor/`` directory by
-  directory (``tests/nav/reproj/test_bodies.py`` ↔ ``src/spindoctor/reproj/bodies.py``).
+- Unit tests live under ``tests/spindoctor/`` and mirror ``src/spindoctor/`` directory by
+  directory (``tests/spindoctor/reproj/test_bodies.py`` ↔ ``src/spindoctor/reproj/bodies.py``).
 - Integration tests live under ``tests/integration/`` and carry the
   ``integration`` marker. Two sub-layers: the structural-invariants test
   (fast, no holdings needed) and the per-image regression test (slow, needs

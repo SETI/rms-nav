@@ -73,6 +73,16 @@ class BodyLimbDiagnostics:
         lm_iterations: Levenberg-Marquardt iteration count.
         tukey_inlier_count: Number of polyline vertices accepted by the
             Tukey biweight robust estimator.
+        lm_converged: True when the LM met its step-norm tolerance before
+            the iteration cap; False marks an unverified fit whose
+            confidence the shared DT gates cap.
+        polarity_rejection_fraction: Fraction of model vertices whose local
+            gradient direction disagreed with the model normal at the seed.
+        coarse_peak_fraction: The winning coarse-NCC shift's in-bounds
+            match fraction over the RASTERIZED polyline pixels
+            (acquisition quality).  Its denominator is mask pixels, not
+            vertices, so it is not directly comparable to
+            ``tukey_inlier_count``.
     """
 
     visible_limb_arc_fraction: float = 0.0
@@ -80,12 +90,18 @@ class BodyLimbDiagnostics:
     dt_fit_rms_px: float = 0.0
     lm_iterations: int = 0
     tukey_inlier_count: int = 0
+    lm_converged: bool = True
+    polarity_rejection_fraction: float = 0.0
+    coarse_peak_fraction: float = 0.0
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'visible_limb_arc_fraction': 'visible_limb_arc_fraction',
         'visible_arc_px': 'visible_arc_px',
         'dt_fit_rms_px': 'dt_fit_rms_px',
         'lm_iterations': 'lm_iterations',
         'tukey_inlier_count': 'tukey_inlier_count',
+        'lm_converged': 'lm_converged',
+        'polarity_rejection_fraction': 'polarity_rejection_fraction',
+        'coarse_peak_fraction': 'coarse_peak_fraction',
     }
 
 
@@ -94,9 +110,17 @@ class BodyTerminatorDiagnostics:
     """Diagnostics emitted by ``BodyTerminatorNav``.
 
     Parameters: same shape as ``BodyLimbDiagnostics`` with
-    ``visible_terminator_arc_fraction`` substituted, plus the basin
-    second-opinion pair:
+    ``visible_terminator_arc_fraction`` substituted, plus the
+    terminator-specific confidence inputs and the basin second-opinion
+    pair:
 
+        mean_phase_angle_factor: Vertex-weighted mean ``sin(phase)``
+            factor across the consumed terminator features.  A confidence
+            term (a terminator sharpens with phase), so it is recorded
+            per result for the calibration fit.
+        mean_albedo_penalty: Vertex-weighted mean catalog albedo-variation
+            penalty across the consumed features; likewise a recorded
+            confidence input.
         secondary_basin_distance_px: Distance from the converged offset to
             the best competing DT-cost basin in the search window; ``None``
             when the scan did not run or found no eligible shift (``0.0``
@@ -105,6 +129,12 @@ class BodyTerminatorDiagnostics:
             cost divided by the converged cost (epsilon-guarded); values
             below the technique's ``basin_cost_ratio_threshold`` mark the
             fit spurious.  ``None`` when not measured.
+        lm_converged: Shared DT gate diagnostic; the field carries the
+            same meaning as on ``BodyLimbDiagnostics``.
+        polarity_rejection_fraction: Shared DT gate diagnostic; the field
+            carries the same meaning as on ``BodyLimbDiagnostics``.
+        coarse_peak_fraction: Shared DT gate diagnostic; the field carries
+            the same meaning as on ``BodyLimbDiagnostics``.
     """
 
     visible_terminator_arc_fraction: float = 0.0
@@ -112,16 +142,26 @@ class BodyTerminatorDiagnostics:
     dt_fit_rms_px: float = 0.0
     lm_iterations: int = 0
     tukey_inlier_count: int = 0
+    mean_phase_angle_factor: float = 0.0
+    mean_albedo_penalty: float = 0.0
     secondary_basin_distance_px: float | None = None
     secondary_basin_cost_ratio: float | None = None
+    lm_converged: bool = True
+    polarity_rejection_fraction: float = 0.0
+    coarse_peak_fraction: float = 0.0
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'visible_terminator_arc_fraction': 'visible_terminator_arc_fraction',
         'visible_arc_px': 'visible_arc_px',
         'dt_fit_rms_px': 'dt_fit_rms_px',
         'lm_iterations': 'lm_iterations',
         'tukey_inlier_count': 'tukey_inlier_count',
+        'mean_phase_angle_factor': 'mean_phase_angle_factor',
+        'mean_albedo_penalty': 'mean_albedo_penalty',
         'secondary_basin_distance_px': 'secondary_basin_distance_px',
         'secondary_basin_cost_ratio': 'secondary_basin_cost_ratio',
+        'lm_converged': 'lm_converged',
+        'polarity_rejection_fraction': 'polarity_rejection_fraction',
+        'coarse_peak_fraction': 'coarse_peak_fraction',
     }
 
 
@@ -187,6 +227,16 @@ class RingEdgeDiagnostics:
         edge_count: Number of RING_EDGE features fused.
         is_rank_1: True if every ring-edge feature was straight-line and the
             combined covariance is rank-1.
+        lm_converged: Shared DT gate diagnostic; the field carries the
+            same meaning as on ``BodyLimbDiagnostics``.
+        coarse_peak_fraction: Shared DT gate diagnostic; the field carries
+            the same meaning as on ``BodyLimbDiagnostics``.
+        sigma_orbit_radial_px: Effective fully-correlated radial
+            orbit-uncertainty sigma (px) added in quadrature to the
+            reported covariance along the fit's radial direction (the
+            weight-weighted combine of the consumed features'
+            ``sigma_orbit_radial_px``); ``0.0`` when no consumed feature
+            declares an orbit uncertainty.
     """
 
     total_edge_length_px: float = 0.0
@@ -195,6 +245,9 @@ class RingEdgeDiagnostics:
     per_edge_dt_median_max: float = 0.0
     edge_count: int = 0
     is_rank_1: bool = False
+    lm_converged: bool = True
+    coarse_peak_fraction: float = 0.0
+    sigma_orbit_radial_px: float = 0.0
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'total_edge_length_px': 'total_edge_length_px',
         'per_edge_dt_rms_summed': 'per_edge_dt_rms_summed',
@@ -202,6 +255,9 @@ class RingEdgeDiagnostics:
         'per_edge_dt_median_max': 'per_edge_dt_median_max',
         'edge_count': 'edge_count',
         'is_rank_1': 'is_rank_1',
+        'lm_converged': 'lm_converged',
+        'coarse_peak_fraction': 'coarse_peak_fraction',
+        'sigma_orbit_radial_px': 'sigma_orbit_radial_px',
     }
 
 

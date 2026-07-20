@@ -18,6 +18,9 @@ voyager_iss:
     expected_noise_dn: 1.0         # PLACEHOLDER — calibrate in Phase 10
     marker_value: 0
     read_noise_dn: 1.0             # PLACEHOLDER — calibrate in Phase 10
+    # interim: photometric zero point (DN a vmag-0 star deposits per second);
+    # the vidicon renders point sources directly in DN.
+    star_flux_dn_per_s_vmag0: 3.0e3
   image_quality_thresholds:
     blank_max_if: 1.0e-4            # PLACEHOLDER — calibrate in Phase 10
     noisy_threshold_if: 0.005       # PLACEHOLDER — calibrate in Phase 10

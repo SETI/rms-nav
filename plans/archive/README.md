@@ -18,6 +18,16 @@ references against the dated filenames in this directory.
 - `SIM_IMPROVEMENT_PLAN_2026-06-19.md` — simulator improvement plan, executed
   except for items deferred with issue numbers (#151, #152, #153). Section 0.1
   is the authoritative status board.
+- `SIM_REALISM_PLAN_2026-07-18.md` — the simulator realism and
+  de-circularization design (rev 2.1), fully executed 2026-07-16 to
+  2026-07-18: all ten phases (A-J) plus the final sweep merged through the
+  `rf_sim_realism` integration branch, all acceptance criteria (its
+  Section 11) verified met. The as-built system is documented in
+  `docs/dev_guide/dev_guide_simulator.rst` (including the capability
+  envelope), the calibration in `util/calibration/CAMPAIGN_20260718.md`,
+  and the independent assessment in
+  `critiques/SIM_REALISM_CRITIQUE_2026-07-18.md`; follow-up work moved to
+  GitHub issues (#301, #309, #310, #311).
 - `ROADMAP_2026-07-12.md` — the issue-ordered, Cassini-first pipeline
   build-out that served as the plan of record until 2026-07-12; consolidated
   into `plans/PROGRAM_PLAN.md` together with the post-stack task inventory.

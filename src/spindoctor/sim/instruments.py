@@ -31,6 +31,7 @@ from spindoctor.config import Config
 __all__ = [
     'GENERIC_INSTRUMENT_ALIASES',
     'SIM_INSTRUMENTS',
+    'navigator_matched_psf',
     'resolve_extfov_margin',
     'resolve_sim_inst_config',
 ]
@@ -131,6 +132,35 @@ def _resolve_base_block(config: Config, instrument: str | None) -> Mapping[str, 
     return detector_block
 
 
+def navigator_matched_psf(
+    config: Config,
+    instrument: str | None,
+    overrides: Mapping[str, Any] | None = None,
+) -> dict[str, float]:
+    """Return the navigator-matched whole-scene PSF block for an instrument.
+
+    The self-consistency floor sets the image-side PSF equal to the navigator's
+    own model: a pure Gaussian at the emulated instrument's configured
+    ``star_psf_sigma``, with no Moffat wing and no field variation.  A scene
+    authors this as ``optics.psf: {match_navigator: true}``; that authored form
+    is preserved through save / load and in the editor, and the renderer calls
+    this helper to resolve it into concrete kernel parameters when it builds
+    the kernel.
+
+    Parameters:
+        config: The active configuration.
+        instrument: The sim instrument name, a generic alias, or ``None``.
+        overrides: Optional scene-level ``instrument_config`` overrides.
+
+    Returns:
+        A concrete PSF parameter mapping (``sigma_v``, ``sigma_u``, ``w``,
+        ``r0``, ``n``) equal to the navigator's Gaussian.
+    """
+    inst_config = resolve_sim_inst_config(config, instrument, overrides)
+    sigma = float(inst_config['star_psf_sigma'])
+    return {'sigma_v': sigma, 'sigma_u': sigma, 'w': 0.0, 'r0': 2.0, 'n': 3.0}
+
+
 def resolve_extfov_margin(
     inst_config: Mapping[str, Any],
     fallback_config: Mapping[str, Any],
@@ -148,6 +178,10 @@ def resolve_extfov_margin(
 
     Returns:
         The ``(v, u)`` margin entry.
+
+    Raises:
+        ValueError: If the generic fallback table is itself size-keyed and
+            carries no entry for ``size_v``.
     """
     entry = inst_config.get('extfov_margin_vu')
     if isinstance(entry, Mapping):
@@ -157,5 +191,11 @@ def resolve_extfov_margin(
         return entry
     fallback_entry = fallback_config['extfov_margin_vu']
     if isinstance(fallback_entry, Mapping):
+        if size_v not in fallback_entry:
+            raise ValueError(
+                f'no extfov_margin_vu entry for image size {size_v}: neither the '
+                f'instrument table nor the generic sim fallback covers it '
+                f'(fallback sizes: {sorted(fallback_entry)})'
+            )
         return fallback_entry[size_v]
     return fallback_entry

@@ -159,6 +159,80 @@ confidence and sigma score:
   centroid's CRLB sigma is tight. A single-star result cross-checked by a non-star
   technique can still earn ``'high'``.
 
+Confident-wrong results: what the tiers price and what they cannot
+------------------------------------------------------------------
+
+The confidence formulas and tier boundaries price *statistical* error -- the
+scatter the per-technique diagnostics can see -- not unmodeled *systematic*
+error. When every feature a technique fits is displaced coherently (a ring
+feature whose real orbit sits a few pixels off the catalog orbit, a haze layer
+that moves a photometric centroid, a shape model wrong at the mesh level), the
+fit converges cleanly, the residuals look healthy, and no diagnostic carries
+the signal, so neither the sigmoid nor the sigma gate can demote the result on
+its own.
+
+The defense the ensemble does have is technique-side model-error channels: a
+technique that *declares* a systematic uncertainty widens its reported
+covariance before the fuse, and every downstream step then prices it through
+the ordinary machinery -- the widened axis carries less precision weight in
+the merge, the fused sigma grows, and the sigma-gated tier demotes without any
+special-casing here. The ring-edge radial orbit-uncertainty channel is the
+worked example (see :doc:`dev_guide_techniques_ring_edge`): on the simulated
+planted-orbit-error scene
+(``tests/integration/sim_scenes/ring_system/orbit_error_ringlet.yaml``) the
+declared 2.5 px catalog error bar widens the fused radial sigma past the high
+tier's cap and the ~3 px biased offset demotes to ``medium``. The channel
+prices the hazard; it cannot remove the bias, so the scene keeps its
+measured-error pin. The shared DT fit-quality gates
+(:doc:`dev_guide_techniques_dt_fitting`) close the adjacent
+unverified-fit family before results reach the ensemble at all.
+
+What remains unpriced is systematic error nobody declares. The standing
+evidence:
+
+- ``tests/integration/sim_sweeps/irregularity_shape_mismatch.yaml`` -- at
+  extreme mesh-vs-ellipsoid shape mismatch the disc correlation locks onto
+  the mismatched model and the fused confidence re-saturates to ~0.99 at a
+  10-17 px error (measured 2026-07-19: 0.98 at 10.9 px, 0.99 at 14.0 and
+  17.0 px). A cross-technique veto (the pose-free blob disagrees by pixels),
+  not a per-technique channel, is the shape of a fix.
+- ``tests/integration/sim_scenes/atmosphere/titan_crescent_horns.yaml`` (and
+  its noiseless twin) -- a 155-degree haze crescent drags the blob centroid to
+  a ~30 px wrong offset that passes the acceptance gate at the blob's 0.40
+  cap, tier ``low``.
+
+These are asserted as honest pins or documented sweep behavior (see
+:ref:`sim-expected`), so a worsening regression and a silent fix both fail
+CI. A high tier on a frame with plausible *undeclared* systematic error is
+not evidence against that error.
+
+A related honesty caveat survives inside the confidence scalar itself: the
+two-member agreement boost assumes the members' errors are independent, so
+two techniques observing the same displaced feature (the ring-edge fit and
+the ring-annulus correlation on one misplaced ringlet) can fuse to a high
+scalar confidence even as the sigma-gated tier demotes the result. On such
+frames the tier is the trustworthy verdict and the scalar is not.
+
+That scalar is **not** inert, and it must not be dismissed as documentation.
+The tier boundaries are themselves fitted *from* it: the calibration tooling
+reads each row's fused confidence, fused sigma, and error against truth, and
+solves for the confidence at which each tier reaches its success target. A
+row pairing a near-cap confidence with a multi-pixel error is therefore a
+training point that pushes the fitted boundary upward at the next refit --
+the artifact acting on the very mechanism that is supposed to contain it.
+Two consequences worth stating plainly:
+
+- The regression scenes under ``tests/integration/sim_scenes/`` are not in
+  the calibration cohort (it is generated independently by the campaign's
+  own randomized scene generator), so no scene-level exclusion is needed
+  and none is applied.
+- The cohort's own ring family *does* plant orbit errors with declared
+  sigmas, so it generates rows with this same coupling. The next
+  recalibration has to treat them deliberately -- by pricing the
+  correlated-error discount, or by fitting the boundary against fused sigma
+  rather than the boosted scalar -- rather than absorbing them as evidence
+  that high confidence at multi-pixel error is normal.
+
 Restrictions and assumptions
 ----------------------------
 
@@ -204,9 +278,12 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.conflicted_confidence_multiplier` —
   float, default ``0.3``. Additional multiplier when the conflicted branch fires.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.min_confidence` — float, default
-  ``0.2``. Final-result threshold below which the ensemble returns
+  ``0.35``. Final-result threshold below which the ensemble returns
   :meth:`~spindoctor.nav_orchestrator.nav_result.NavResult.failed` instead of
-  :meth:`~spindoctor.nav_orchestrator.nav_result.NavResult.success`.
+  :meth:`~spindoctor.nav_orchestrator.nav_result.NavResult.success`. The calibration
+  campaign's fused fit rate (error at most 3 px) measures 0.35-0.40 in the 0.10-0.15
+  confidence bands and 0.89 at 0.35, with almost no probability mass in between, so the
+  gate takes the measured upper edge of that crossing.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.pinvh_rcond` — float, default
   ``1.0e-9``. Cutoff for :func:`scipy.linalg.pinvh`.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.max_allowed_rotation_deg` — float,
@@ -216,12 +293,20 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
   :class:`~spindoctor.support.exceptions.NavContractError`.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.tier_thresholds` — mapping
   ``rank -> {min_confidence, max_sigma_px}``; default thresholds give ``'high'`` for
-  confidence at or above 0.5 with sigma at most 0.5 px, ``'medium'`` for confidence at
-  or above 0.2 with sigma at most 2.0 px, and ``'low'`` for confidence at or above 0.2
-  with no sigma cap. The tiers are sigma-differentiated: with calibrated covariances the
-  ``max_sigma_px`` gate carries most of the discrimination, so the ``'medium'`` and
-  ``'low'`` confidence floors rest at the same value. The Step 7 tier caps apply on top
-  of these thresholds.
+  confidence at or above 0.85 with sigma at most 0.5 px, ``'medium'`` for confidence at
+  or above 0.35 with sigma at most 2.0 px, and ``'low'`` for confidence at or above 0.35
+  with no sigma cap. Each tier boundary is the smallest confidence at which the tier's
+  sigma-gated subset achieves a 0.9 success rate against the tier's own error budget on
+  the calibration campaign (the ``max_sigma_px`` values are the tier definitions, not
+  fitted); the high boundary sits at 0.85 because the campaign's ring family plants
+  per-feature orbit errors that produce tight-sigma, confidently-wrong locks in the
+  0.55-0.80 band, failure mass no ring diagnostic can see. The tiers are
+  sigma-differentiated: with calibrated covariances the ``max_sigma_px`` gate carries
+  most of the discrimination, so the ``'medium'`` and ``'low'`` confidence floors rest
+  at the same value as the final ``min_confidence`` gate. A structural consequence:
+  the two-star and one-star confidence caps (0.8 / 0.7) sit below the high boundary,
+  so capped star locks top out at medium regardless of quality. The Step 7 tier caps
+  apply on top of these thresholds.
 
 Implementation
 ==============

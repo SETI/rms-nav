@@ -64,6 +64,98 @@ when at least two non-parallel edges contribute. The technique reports an
 surfaces; downstream consumers (the ensemble combine, the operator's per-image log) can
 distinguish a rank-1 ring-edge result from a full-rank one.
 
+Radial orbit-uncertainty channel
+--------------------------------
+
+The M-estimator covariance measures the statistical lock onto the *modeled* annulus. When
+the catalog orbit itself is uncertain, the whole predicted edge can sit radially displaced
+from the real one, and the robust fit absorbs that displacement into the recovered
+translation: the Tukey weights keep the arc that happens to align, the fit locks onto one
+side of the annulus, and the residuals stay clean — a tight covariance around a biased
+offset. No per-vertex sigma can price this: a per-vertex prior is a statistical scale
+that averages down as :math:`1/\sqrt{N}` over the polyline, while an orbit error displaces
+every vertex coherently and does not average down at all.
+
+The technique therefore consumes the per-feature ``sigma_orbit_radial_px`` carried on the
+:class:`~spindoctor.feature.geometry.RingEdgePolyline` geometry (that edge's own catalog
+orbit-solution uncertainty, converted to pixels at the edge's own radial scale by the
+emitting model) and adds it to the reported covariance through the translation such a
+displacement would actually be absorbed into.
+
+A coherent displacement :math:`d` moves every vertex along its own outward normal, so the
+translation the fit converges to is the weighted least-squares solution of
+:math:`M t = d\,b` with :math:`M = \sum_i w_i n_i n_i^{T}` and :math:`b = \sum_i w_i n_i`.
+Writing :math:`g = M^{+} b`, the added covariance term is
+
+.. math::
+
+    \Sigma \mathrel{+}= \sigma_{\mathrm{orbit}}^{2}
+        \bigl[\, g g^{T} + \bigl(1 - \lVert g \rVert^{2}\bigr)\, I \,\bigr]
+
+with the isotropic complement clamped at zero. The limits are the point of the
+construction: a short arc gives :math:`\lVert g \rVert \approx 1` along its radial axis; a
+straight (rank-1) edge gives :math:`g = n` exactly, so the projected covariance stays
+exactly singular along the tangent; a half ring gives :math:`4/\pi \approx 1.27` (one
+translation overshoots the middle of an arc to reduce the error at its ends); and a closed
+annulus gives :math:`\lVert g \rVert \approx 0`, because a uniform radial error dilates a
+closed ring rather than translating it.
+
+**What the isotropic term is for.** A small :math:`\lVert g \rVert` says the *linearized*
+fit absorbs little, not that the answer is safe: the acquisition is nonlinear, and the
+coarse integer search can still select a basin whose translation aligns a long arc of a
+radially misplaced ring. The simulated closed-ringlet scene does exactly that. Since the
+direction it locks in is precisely what cannot be predicted, the bound is reported on every
+axis instead of on an axis chosen by rounding.
+
+**What this changes in practice.** For :math:`\lVert g \rVert \le 1` the added term's major
+eigenvalue is exactly :math:`\sigma_{\mathrm{orbit}}^{2}` whatever direction :math:`g`
+points, and only the minor eigenvalue depends on the geometry. Because the tier gate reads
+:math:`\max(\sigma_{dv}, \sigma_{du})`, within that regime the derived *direction* cannot
+by itself change a tier outcome -- the behavioral change against a plain directional
+inflation is the isotropic floor it puts under the minor axis, which is what stops a
+demotable frame slipping through on an un-widened perpendicular axis. The derived
+*magnitude* does move the major axis once :math:`\lVert g \rVert` exceeds 1.
+
+This construction requires the emitted normals to carry a consistent outward-radial sense,
+which the catalog model guarantees by signing each normal against the ring-radius
+backplane. Preserving the relative senses is what makes the dilation and opposite-side
+cancellations real rather than fabricated.
+
+When several features fuse, the effective :math:`\sigma_{\mathrm{orbit}}` is the
+weight-weighted mean of the per-feature sigmas, deliberately treating the features' orbit
+errors as fully correlated (the common multi-edge case is the inner and outer edge of one
+feature, whose orbit error is genuinely shared). That combine is conservative only for
+same-sense geometry; for features on opposite radial sides of the planet a common error is
+a dilation the fit largely does not absorb, and the geometry then self-limits through
+:math:`\lVert g \rVert`.
+
+**The severity is operator-tunable.** Treating the catalog RMS as a fully coherent
+whole-edge displacement is a deliberately conservative assumption, not a measurement: the
+RMS is an orbit-fit residual that also contains longitude-varying resonant wander, which
+does not displace an edge coherently. ``rings.orbit_radial_sigma_correlated_fraction``
+(default ``1.0``) scales the coherent term, so the assumption can be ratcheted without a
+code change while the principled fix -- decomposing the catalog modes and pricing only the
+m=0 part coherently -- remains unimplemented.
+
+The ensemble consumes the widened covariance through its ordinary precision-weighted
+machinery — nothing downstream special-cases the term. A ring-edge lock on an uncertain
+orbit then carries an honestly wide radial axis: it fuses at reduced radial weight against
+any technique that constrains that axis independently, and the sigma-gated confidence tier
+demotes on its own when the widened axis exceeds a tier's sigma cap. The effective sigma
+is recorded on
+:attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.sigma_orbit_radial_px`.
+The channel prices the hazard; it cannot remove the underlying offset bias, which is why
+the simulator's planted-orbit-error scene keeps its measured-error pin (see the planted
+orbit error section of :doc:`dev_guide_simulator`).
+
+Fit-quality gates
+-----------------
+
+The technique also feeds the shared DT fit-quality gates (LM-convergence demotion and the
+coarse-acquisition-quality gate; the polarity gates are inert here because the fit runs
+polarity-free). The gates and their thresholds are documented at
+:doc:`dev_guide_techniques_dt_fitting`.
+
 Restrictions and assumptions
 ----------------------------
 
@@ -163,6 +255,11 @@ All numeric tunables for this technique live in ``techniques.RingEdgeNav.tuning`
   :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` once it crosses
   this fraction of the per-image
   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.max_rotation_deg` cap.
+- ``lm_unconverged_confidence_cap``, ``spurious_max_polarity_rejection_fraction``,
+  ``spurious_unconverged_polarity_rejection_fraction``,
+  ``spurious_min_coarse_peak_fraction`` — the shared DT fit-quality gate thresholds,
+  documented with their rationale at :doc:`dev_guide_techniques_dt_fitting`. The two
+  polarity thresholds are inert for this technique (the fit runs polarity-free).
 
 Per-instrument overrides
 ------------------------
@@ -180,20 +277,22 @@ sigmoid combination; see :doc:`dev_guide_techniques_confidence`. The formula spe
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`.
 
 - :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.total_edge_length_px` —
-  alpha = 1.137, offset = 0.0, divisor = 1500.0, cap at 1.0. Cumulative pixel length of all
+  alpha = 0.976, offset = 0.0, divisor = 1500.0, cap at 1.0. Cumulative pixel length of all
   surviving ring-edge polylines. More polyline earns confidence up to a 1500-pixel
-  saturation point (calibration campaign raw p5/p50/p95 = 440/762/1552).
+  saturation point (calibration campaign raw p5/p50/p95 = 509/758/2140; inclined
+  projections lengthen the closed-ellipse edges).
 - :attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.per_edge_dt_rms_mean` —
-  alpha = 0.0, offset = 0.0, divisor = 1.0, no cap. Mean per-edge final DT RMS value; the
-  mean rather than the raw sum because the sum scales with the number of fused edges, so a
-  fixed divisor would penalise a frame purely for having more rings. The sim calibration
-  fit drives the alpha to its sign bound at 0.0: the campaign's failures are clean-residual
-  wrong-ringlet locks that the residual cannot see, and an unconstrained fit would have
-  given the term a positive (anti-calibrated) weight. Kept wired for a future
-  real-anchored calibration.
+  alpha = -0.069, offset = 0.0, divisor = 1.0, no cap. Mean per-edge final DT RMS value;
+  the mean rather than the raw sum because the sum scales with the number of fused edges,
+  so a fixed divisor would penalise a frame purely for having more rings. The sim
+  calibration fit gives the term a modest negative weight (mis-locked edge-wave and
+  m-mode shapes leave a visible residual), but most of the campaign's failure mass is
+  clean-residual wrong-feature locks — aliasing, and planted orbit errors the fit absorbs
+  into the offset — that the residual cannot see, so the discrimination rides on edge
+  length and the spurious gates.
 
 Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`
-firing forces confidence to zero. The constant baseline is :math:`\alpha_{0} = 1.841`. No
+firing forces confidence to zero. The constant baseline is :math:`\alpha_{0} = 1.832`. No
 post-sigmoid ``hard_cap`` is applied.
 
 Implementation

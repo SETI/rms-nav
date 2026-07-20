@@ -21,6 +21,10 @@ sim:
     expected_noise_dn: 1.0
     marker_value: 0
     read_noise_dn: 1.0
+    # Photometric zero point: DN a vmag-0 star deposits per second.  Derived so a
+    # vmag-4 star reproduces the prior peak-normalized brightness at the generic
+    # detector (see sim/forward/artifacts_catalog.py).
+    star_flux_dn_per_s_vmag0: 1.3e4
     # Additive bias pedestal in DN.  Real raw frames sit on a bias level, so
     # signal-free sky is never exactly zero; without it the dark sky collides
     # with the missing-data marker (0) and the frame is misclassified.
@@ -28,8 +32,10 @@ sim:
     # Fraction of the instrument's full well that a normalized signal of 1.0
     # maps to, so brightness scales with the selected camera's DN depth.
     signal_full_scale_frac: 0.5
-    # Detector-noise defaults; scenes may override via a 'noise' block. Poisson
-    # shot noise is on by default; cosmic rays and dropouts are off by default.
+    # Detector-noise defaults; scenes may override via a 'noise' block.
+    # Poisson shot noise is off at the floor and turns on with a scene's
+    # noise block or artifacts.instrument_defaults; cosmic rays and
+    # dropouts are off unless a scene asks for them.
     cosmic_ray_rate_per_sec: 0.0   # events / cm^2 / sec
     pixel_area_cm2: 1.0
     missing_data_rate: 0.0         # fraction of pixels marked missing

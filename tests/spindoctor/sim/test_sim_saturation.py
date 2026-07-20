@@ -1,48 +1,51 @@
-"""Saturation clipping and column bloom for the simulator (B4).
+"""Electron-domain full-well bloom and the physical saturation level.
 
-These tests drive ``apply_saturation`` directly for the clip/bloom mechanics and
-render a bright scene end-to-end to confirm saturated pixels land on the
-orchestrator's saturation mask.
+``apply_saturation`` now caps and blooms in electrons against the full well, so a
+Cassini scene saturates at ``full_well_e / gain`` DN (below the ADC ceiling), the
+antiblooming-free CCD behavior.  These tests drive the bloom mechanics directly
+and render a bright scene end-to-end.
 """
 
 from typing import Any
 
 import numpy as np
 
-from spindoctor.sim.render import apply_saturation, render_combined_model
-from spindoctor.support.image_quality import saturation_mask
+from spindoctor.sim.forward.detector import apply_saturation
+from spindoctor.sim.render import render_combined_model
 
-_SATURATION = 4095.0
-
-
-def test_clip_caps_at_saturation() -> None:
-    """Pixels above the full well are clipped down to it."""
-    img = np.array([[0.0, 2000.0], [5000.0, 9000.0]], dtype=np.float64)
-    apply_saturation(img, saturation_dn=_SATURATION)
-    assert float(img.max()) == _SATURATION
+_FULL_WELL_E = 110.0e3
+_NAC_GAIN = 30.0
+_NAC_BIAS = 20.0
 
 
-def test_clip_leaves_subsaturated_pixels_untouched() -> None:
-    """Pixels below the full well are unchanged by clipping."""
-    img = np.array([[0.0, 2000.0], [5000.0, 9000.0]], dtype=np.float64)
-    apply_saturation(img, saturation_dn=_SATURATION)
-    assert float(img[0, 1]) == 2000.0
+def test_clip_caps_at_full_well() -> None:
+    """Electrons above the full well are capped down to it."""
+    electrons = np.array([[0.0, 5.0e4], [2.0e5, 5.0e5]], dtype=np.float64)
+    apply_saturation(electrons, full_well_e=_FULL_WELL_E)
+    assert float(electrons.max()) == _FULL_WELL_E
+
+
+def test_clip_leaves_subfull_pixels_untouched() -> None:
+    """Electrons below the full well are unchanged by capping."""
+    electrons = np.array([[0.0, 5.0e4], [2.0e5, 5.0e5]], dtype=np.float64)
+    apply_saturation(electrons, full_well_e=_FULL_WELL_E)
+    assert float(electrons[0, 1]) == 5.0e4
 
 
 def test_no_bloom_keeps_single_saturated_pixel() -> None:
     """Without bloom, only the originally over-full pixel saturates."""
-    img = np.zeros((21, 21), dtype=np.float64)
-    img[10, 10] = 50.0 * _SATURATION
-    apply_saturation(img, saturation_dn=_SATURATION, bloom_length=0)
-    assert int((img >= _SATURATION).sum()) == 1
+    electrons = np.zeros((21, 21), dtype=np.float64)
+    electrons[10, 10] = 50.0 * _FULL_WELL_E
+    apply_saturation(electrons, full_well_e=_FULL_WELL_E, bloom_length=0)
+    assert int((electrons >= _FULL_WELL_E).sum()) == 1
 
 
 def test_bloom_spreads_along_column() -> None:
     """Column bloom turns a saturated pixel into a vertical streak."""
-    img = np.zeros((21, 21), dtype=np.float64)
-    img[10, 10] = 50.0 * _SATURATION
-    apply_saturation(img, saturation_dn=_SATURATION, bloom_length=3)
-    saturated = np.argwhere(img >= _SATURATION)
+    electrons = np.zeros((21, 21), dtype=np.float64)
+    electrons[10, 10] = 50.0 * _FULL_WELL_E
+    apply_saturation(electrons, full_well_e=_FULL_WELL_E, bloom_length=3)
+    saturated = np.argwhere(electrons >= _FULL_WELL_E)
     distinct_v = {int(v) for v, _ in saturated}
     distinct_u = {int(u) for _, u in saturated}
     assert len(distinct_v) > 1
@@ -52,11 +55,11 @@ def test_bloom_spreads_along_column() -> None:
 def test_bloom_conserves_excess_floor() -> None:
     """Bloom never lowers the count of saturated pixels below the no-bloom case."""
     base = np.zeros((21, 21), dtype=np.float64)
-    base[10, 10] = 50.0 * _SATURATION
+    base[10, 10] = 50.0 * _FULL_WELL_E
     bloomed = base.copy()
-    apply_saturation(base, saturation_dn=_SATURATION, bloom_length=0)
-    apply_saturation(bloomed, saturation_dn=_SATURATION, bloom_length=4)
-    assert int((bloomed >= _SATURATION).sum()) >= int((base >= _SATURATION).sum())
+    apply_saturation(base, full_well_e=_FULL_WELL_E, bloom_length=0)
+    apply_saturation(bloomed, full_well_e=_FULL_WELL_E, bloom_length=4)
+    assert int((bloomed >= _FULL_WELL_E).sum()) >= int((base >= _FULL_WELL_E).sum())
 
 
 def _bright_scene(*, size: int = 64) -> dict[str, Any]:
@@ -66,6 +69,7 @@ def _bright_scene(*, size: int = 64) -> dict[str, Any]:
         'size_u': size,
         'random_seed': 1,
         'instrument': 'coiss_nac',
+        'exposure_sec': 1.0,
         'noise': {'signal_full_scale_frac': 2.0},
         'bodies': [
             {
@@ -80,14 +84,9 @@ def _bright_scene(*, size: int = 64) -> dict[str, Any]:
     }
 
 
-def test_render_saturates_at_full_well() -> None:
-    """A bright scene clips at the camera full well, not above it."""
+def test_render_saturates_at_physical_full_well() -> None:
+    """A bright scene clips at full_well_e / gain, below the 4095 ADC ceiling."""
     img, _ = render_combined_model(_bright_scene())
-    assert float(img.max()) == _SATURATION
-
-
-def test_render_saturation_lands_on_mask() -> None:
-    """Saturated render pixels are flagged by the orchestrator's mask."""
-    img, _ = render_combined_model(_bright_scene())
-    mask = saturation_mask(img, full_well_dn=_SATURATION)
-    assert int(mask.sum()) > 0
+    expected = round(_FULL_WELL_E / _NAC_GAIN + _NAC_BIAS)
+    assert float(img.max()) == expected
+    assert expected < 4095.0

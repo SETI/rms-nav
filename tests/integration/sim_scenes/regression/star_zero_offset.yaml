@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 scene_name: star_zero_offset
 instrument: coiss_nac
 size_v: 200
@@ -11,18 +11,25 @@ exposure_sec: 1.0
 # cosmic-ray detector, so at a near-zero offset (prediction on the star) every
 # star was gated and the star techniques had nothing to navigate.  With a zero
 # planted offset the prediction coincides exactly with each star; the star field
-# must still recover it.
+# must still recover it.  Magnitudes are distinct so the pattern matcher's
+# brightest-vertex canonicalisation is deterministic on both the catalog and the
+# detection side; equal magnitudes made the match a tie-breaking lottery over
+# the noise realization.
+# Stars deposit as point masses; an explicit navigator-matched PSF gives them a
+# finite (floor-form) profile instead of a 1-pixel spike.
+optics:
+  psf:
+    match_navigator: true
 bodies: []
-rings: []
 stars:
   - {name: S1, v: 40.0, u: 50.0, vmag: 3.0}
-  - {name: S2, v: 160.0, u: 150.0, vmag: 3.0}
-  - {name: S3, v: 70.0, u: 165.0, vmag: 3.0}
-  - {name: S4, v: 150.0, u: 55.0, vmag: 3.0}
-  - {name: S5, v: 50.0, u: 120.0, vmag: 3.0}
-  - {name: S6, v: 150.0, u: 100.0, vmag: 3.0}
-  - {name: S7, v: 112.0, u: 172.0, vmag: 3.0}
-  - {name: S8, v: 88.0, u: 38.0, vmag: 3.0}
+  - {name: S2, v: 160.0, u: 150.0, vmag: 3.1}
+  - {name: S3, v: 70.0, u: 165.0, vmag: 3.2}
+  - {name: S4, v: 150.0, u: 55.0, vmag: 3.3}
+  - {name: S5, v: 50.0, u: 120.0, vmag: 3.4}
+  - {name: S6, v: 150.0, u: 100.0, vmag: 3.5}
+  - {name: S7, v: 112.0, u: 172.0, vmag: 3.6}
+  - {name: S8, v: 88.0, u: 38.0, vmag: 3.7}
 noise:
   poisson: true
   read_noise_dn: 4.0
