@@ -31,6 +31,31 @@ technique in one frame), which asserts the technique's error covariance is
 common across the group's instances within the cohort -- an explicit
 stationarity assumption the caller must be able to defend.
 
+Bias handling: before the second moments are formed, each pair's
+differences are centered by a fitted *mean model*, not just a constant.
+The model always carries the constant (image-frame) term, and for every
+``basis='rotating'`` member it additionally carries that member's
+rotating-frame mean components ``R(theta) @ mu`` -- so a technique bias
+that is constant in the technique's own rotating frame (a limb fit pulled
+radially toward its body) is absorbed instead of aliasing into the
+recovered covariance.  The hazard this guards against is real: an
+*undeclared* rotating-frame bias has image-frame mean ~0 over an
+orientation-diverse cohort, the constant channel sees nothing, and
+``R mu mu^T R^T`` enters every second-moment equation as if it were
+covariance -- silently, with the system well-conditioned.  Declaring
+``basis='rotating'`` for a technique therefore does two jobs: it makes the
+covariance stationary in the right frame *and* it arms the rotating mean
+columns for that technique.  Biases locked to geometry the model does not
+carry (e.g. illumination direction) are NOT absorbed and still alias.
+
+Declared pair covariances carry two model restrictions the caller must
+accept: a full/full pair's ``S_ij`` is a single image-frame-constant
+symmetric matrix (there is no rotating option, even when a member is
+``basis='rotating'``), and a pair involving a rank1 instance carries one
+scalar ``gamma`` -- the projected cross-covariance is assumed independent
+of the projection axis, i.e. ``S_ij = gamma * I`` (exact for an isotropic
+shared bias, an approximation otherwise).
+
 Identifiability is part of the output, not an assumption: the solve reports
 the design matrix's singular spectrum, the (numerical) null space mapped
 back to parameter names, and a per-parameter identifiability score.  A
@@ -46,7 +71,7 @@ the unit direction ``(cos(alpha), sin(alpha))`` in (v, u) coordinates.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -64,9 +89,17 @@ __all__ = [
 PairKey = tuple[str, str]
 
 # Two rank-1 instances can only be differenced when their measurement axes
-# are parallel to within this |cos| tolerance; otherwise the pair carries no
-# common measured component and is skipped for that frame.
-_RANK1_PARALLEL_MIN_ABS_COS = 0.99
+# are parallel to within this |cos| tolerance.  The tolerance must be tight:
+# the two techniques share the frame's true offset t, and the difference of
+# the projections carries a truth leak (a_i - sign * a_j) . t that does NOT
+# cancel -- at |cos| = 0.99 (about 8 deg) a 4 px true offset leaks ~0.5 px
+# into the "difference".  At 0.9999 (0.8 deg) the leak is under ~0.06 px.
+_RANK1_PARALLEL_MIN_ABS_COS = 0.9999
+
+# The per-pair mean model falls back to constant-only columns when the pair
+# has fewer than this many samples per fitted column (guards against
+# soaking up second-moment signal with an overfitted mean on tiny cohorts).
+_MEAN_MODEL_MIN_SAMPLES_PER_COLUMN = 4
 
 
 @dataclass(frozen=True)
@@ -83,7 +116,10 @@ class EstimatorSpec:
         basis: ``'image'`` when the covariance is stationary in image
             coordinates; ``'rotating'`` when it is stationary in a
             per-frame frame whose angle each :class:`FrameSample` supplies
-            (only meaningful for ``kind='full'``).
+            (only meaningful for ``kind='full'``).  Declaring
+            ``'rotating'`` also arms the instance's rotating-frame mean
+            columns in the pair mean model, so a bias constant in that
+            frame is absorbed rather than aliased into the covariance.
         group: Parameter-sharing key.  Instances with the same group share
             one set of covariance unknowns (asserting a common error
             covariance across the instances); defaults to ``name``.
@@ -150,10 +186,21 @@ class SolveResult:
         rank1_variances: Per-group scalar variance for every rank1 group.
         pair_covariances: Recovered symmetric cross-covariance per declared
             pair (2x2 image-frame matrix for full/full pairs, scalar for
-            pairs involving a rank1 instance).
-        pair_mean_diff: Per differenced pair, the cohort mean difference
-            that was subtracted before forming second moments (the bias
-            channel; 2-vector for full/full pairs, scalar otherwise).
+            pairs involving a rank1 instance; see the module docstring for
+            the model restrictions those forms carry).
+        pair_mean_diff: Per differenced pair, the *raw image-frame* cohort
+            mean of the differences (2-vector for full/full pairs, scalar
+            otherwise).  This is the constant bias channel only: a bias
+            constant in a rotating frame averages toward zero here and is
+            instead captured by the fitted mean model
+            (``pair_mean_model``).
+        pair_mean_model: Per differenced pair, the fitted mean-model
+            coefficients as ``{column_label: value}`` (labels: ``const_v``
+            / ``const_u`` or ``const`` / ``axis_v`` / ``axis_u``, plus
+            ``<name>:mu1`` / ``<name>:mu2`` rotating-frame mean components
+            per rotating member).  When two members share one rotation
+            angle the split between their mu columns is minimum-norm; only
+            the combined fitted mean function is meaningful then.
         singular_values: Singular values of the design matrix, descending.
         condition_number: Ratio of largest to smallest singular value
             (``inf`` for an exactly rank-deficient system).
@@ -168,8 +215,9 @@ class SolveResult:
         n_equations: Scalar equations assembled.
         residual_rms: Root-mean-square residual of the fitted equations.
         bootstrap_ci: Optional per-parameter (lo, hi) percentile interval
-            from frame-resampling; empty when bootstrap was not requested.
-            Intervals for unidentifiable parameters are not meaningful.
+            from frame-resampling (the pair mean models are re-fitted per
+            replicate); empty when bootstrap was not requested.  Intervals
+            for unidentifiable parameters are not meaningful.
     """
 
     param_names: tuple[str, ...]
@@ -178,6 +226,7 @@ class SolveResult:
     rank1_variances: dict[str, float]
     pair_covariances: dict[PairKey, NDArray[np.float64] | float]
     pair_mean_diff: dict[PairKey, NDArray[np.float64] | float]
+    pair_mean_model: dict[PairKey, dict[str, float]]
     singular_values: NDArray[np.float64]
     condition_number: float
     null_space: NDArray[np.float64]
@@ -225,6 +274,12 @@ def _vech_quadratic(alpha: float) -> NDArray[np.float64]:
     a1 = math.cos(alpha)
     a2 = math.sin(alpha)
     return np.array([a1 * a1, 2.0 * a1 * a2, a2 * a2], dtype=np.float64)
+
+
+def _rot(theta: float) -> NDArray[np.float64]:
+    """Rotation matrix whose columns are the basis vectors at ``theta``."""
+    c, s = math.cos(theta), math.sin(theta)
+    return np.array([[c, -s], [s, c]], dtype=np.float64)
 
 
 @dataclass(frozen=True)
@@ -323,25 +378,31 @@ def _axis_angle(spec: EstimatorSpec, frame: FrameSample) -> float:
 
 
 @dataclass(frozen=True)
-class _PairEquations:
-    """Per-frame design/target blocks for one instance pair.
+class _PairData:
+    """Precomputed per-pair samples: raw diffs, mean design, cov design.
 
-    ``rows[f]`` and ``targets[f]`` hold that frame's equations (1 or 3 rows).
-    ``frame_index[f]`` maps back to the cohort frame index for bootstrap
-    resampling.
+    ``diffs`` is ``(n, 2)`` for full/full pairs and ``(n, 1)`` otherwise.
+    ``mean_design`` is ``(n, d, k)`` (per-sample design block of the mean
+    model), ``cov_rows`` is ``(n, d_eq, n_params)`` (per-sample block of
+    covariance equations; ``d_eq`` is 3 for full/full, 1 for scalar).
     """
 
-    rows: list[NDArray[np.float64]]
-    targets: list[NDArray[np.float64]]
+    full_full: bool
     frame_index: list[int]
+    diffs: NDArray[np.float64]
+    mean_design: NDArray[np.float64]
+    mean_columns: tuple[str, ...]
+    cov_rows: NDArray[np.float64]
 
 
-def _difference_samples(
+def _build_pair_data(
     frames: Sequence[FrameSample],
     spec_i: EstimatorSpec,
     spec_j: EstimatorSpec,
-) -> tuple[list[int], NDArray[np.float64], list[tuple[float, float]]]:
-    """Collect raw per-frame differences for one pair.
+    layout: _ParamLayout,
+    mean_model: str,
+) -> _PairData | None:
+    """Collect one pair's samples, mean-model design, and covariance rows.
 
     For a full/full pair the difference is the 2-vector ``o_i - o_j``.  When
     either member is rank1 the difference is the scalar projection of both
@@ -349,157 +410,224 @@ def _difference_samples(
     only meaningful along that axis).  A rank1/rank1 pair contributes only on
     frames where the two axes are parallel within tolerance.
 
-    Parameters:
-        frames: The cohort.
-        spec_i: First pair member.
-        spec_j: Second pair member.
-
-    Returns:
-        ``(frame_indices, diffs, angles)`` where ``diffs`` is ``(n, 2)`` for
-        full/full pairs and ``(n, 1)`` otherwise, and ``angles`` carries the
-        per-sample ``(basis_or_axis_i, basis_or_axis_j)`` angles needed to
-        rebuild design rows.
-    """
-    indices: list[int] = []
-    diffs: list[list[float]] = []
-    angles: list[tuple[float, float]] = []
-    for f_idx, frame in enumerate(frames):
-        if spec_i.name not in frame.offsets or spec_j.name not in frame.offsets:
-            continue
-        o_i = frame.offsets[spec_i.name]
-        o_j = frame.offsets[spec_j.name]
-        if spec_i.kind == 'full' and spec_j.kind == 'full':
-            indices.append(f_idx)
-            diffs.append([o_i[0] - o_j[0], o_i[1] - o_j[1]])
-            angles.append((_basis_angle(spec_i, frame), _basis_angle(spec_j, frame)))
-        elif spec_i.kind == 'rank1' and spec_j.kind == 'rank1':
-            alpha_i = _axis_angle(spec_i, frame)
-            alpha_j = _axis_angle(spec_j, frame)
-            if abs(math.cos(alpha_i - alpha_j)) < _RANK1_PARALLEL_MIN_ABS_COS:
-                continue
-            a_i = (math.cos(alpha_i), math.sin(alpha_i))
-            a_j = (math.cos(alpha_j), math.sin(alpha_j))
-            s_i = a_i[0] * o_i[0] + a_i[1] * o_i[1]
-            s_j = a_j[0] * o_j[0] + a_j[1] * o_j[1]
-            # Express both along axis i (they are parallel within tolerance;
-            # a sign flip between the axes flips s_j's sign).
-            sign = 1.0 if math.cos(alpha_i - alpha_j) >= 0 else -1.0
-            indices.append(f_idx)
-            diffs.append([s_i - sign * s_j])
-            angles.append((alpha_i, alpha_j))
-        else:
-            # Exactly one member is rank1: project both onto its axis.  The
-            # angle tuple stays positional -- slot 0 for spec_i, slot 1 for
-            # spec_j -- holding the axis angle for the rank1 member and the
-            # basis angle for the full member.
-            rank1_spec = spec_i if spec_i.kind == 'rank1' else spec_j
-            alpha = _axis_angle(rank1_spec, frame)
-            a = (math.cos(alpha), math.sin(alpha))
-            s_i = a[0] * o_i[0] + a[1] * o_i[1]
-            s_j = a[0] * o_j[0] + a[1] * o_j[1]
-            indices.append(f_idx)
-            diffs.append([s_i - s_j])
-            angle_i = alpha if spec_i.kind == 'rank1' else _basis_angle(spec_i, frame)
-            angle_j = alpha if spec_j.kind == 'rank1' else _basis_angle(spec_j, frame)
-            angles.append((angle_i, angle_j))
-    if not indices:
-        return [], np.zeros((0, 1), dtype=np.float64), []
-    return indices, np.asarray(diffs, dtype=np.float64).reshape(len(indices), -1), angles
-
-
-def _pair_equations(
-    frames: Sequence[FrameSample],
-    spec_i: EstimatorSpec,
-    spec_j: EstimatorSpec,
-    layout: _ParamLayout,
-) -> tuple[_PairEquations, NDArray[np.float64] | float] | None:
-    """Build the moment equations for one instance pair.
-
-    The cohort mean difference is subtracted before squaring, so the
-    second moments are central: a deterministic shared bias between the two
-    instances lands in the returned mean, not in the covariance system.
+    The mean model's columns are the constant (image-frame) terms plus, for
+    every ``basis='rotating'`` member, that member's rotating-frame mean
+    components; with ``mean_model='constant'`` only the constant terms are
+    kept (the pre-rotating-mean behavior, retained for comparison).  An
+    image-frame-constant shared bias is absorbed by the constant columns; a
+    rotating-frame bias is absorbed only when its member is declared
+    rotating -- an undeclared one aliases into the covariance equations
+    (see the module docstring).
 
     Parameters:
         frames: The cohort.
         spec_i: First pair member.
         spec_j: Second pair member.
         layout: Parameter layout.
+        mean_model: ``'auto'`` or ``'constant'``.
 
     Returns:
-        ``(equations, mean_diff)`` or ``None`` when the pair never co-occurs.
+        The pair data, or ``None`` when the pair never co-occurs.
     """
-    indices, diffs, angles = _difference_samples(frames, spec_i, spec_j)
-    if len(indices) == 0:
-        return None
-    mean = diffs.mean(axis=0)
-    centered = diffs - mean
     pair_slice = _pair_slice(layout, spec_i.name, spec_j.name)
-    rows: list[NDArray[np.float64]] = []
-    targets: list[NDArray[np.float64]] = []
-    frame_index: list[int] = []
     full_full = spec_i.kind == 'full' and spec_j.kind == 'full'
-    for k, f_idx in enumerate(indices):
+    rotating_members = [
+        (spec, sign)
+        for spec, sign in ((spec_i, 1.0), (spec_j, -1.0))
+        if spec.kind == 'full' and spec.basis == 'rotating'
+    ]
+    # 'constant' reproduces plain mean-centering (image-frame vector for
+    # full/full pairs, scalar for projected pairs); 'auto' adds the
+    # image-frame constant vector projected onto the varying axis (scalar
+    # pairs) and the rotating-frame mean columns per rotating member.
+    if full_full:
+        mean_columns = ['const_v', 'const_u']
+    elif mean_model == 'auto':
+        mean_columns = ['const', 'axis_v', 'axis_u']
+    else:
+        mean_columns = ['const']
+    if mean_model == 'auto':
+        for spec, _ in rotating_members:
+            mean_columns.extend([f'{spec.name}:mu1', f'{spec.name}:mu2'])
+    n_cols = len(mean_columns)
+
+    frame_index: list[int] = []
+    diffs: list[NDArray[np.float64]] = []
+    designs: list[NDArray[np.float64]] = []
+    cov_blocks: list[NDArray[np.float64]] = []
+    for f_idx, frame in enumerate(frames):
+        if spec_i.name not in frame.offsets or spec_j.name not in frame.offsets:
+            continue
+        o_i = np.asarray(frame.offsets[spec_i.name], dtype=np.float64)
+        o_j = np.asarray(frame.offsets[spec_j.name], dtype=np.float64)
         if full_full:
-            d = centered[k]
-            target = np.array([d[0] * d[0], d[0] * d[1], d[1] * d[1]], dtype=np.float64)
+            d = o_i - o_j
+            design = np.zeros((2, n_cols), dtype=np.float64)
+            design[:, 0:2] = np.eye(2)
+            col = 2
+            for spec, sign in rotating_members if mean_model == 'auto' else []:
+                design[:, col : col + 2] = sign * _rot(_basis_angle(spec, frame))
+                col += 2
             block = np.zeros((3, layout.n_params), dtype=np.float64)
-            block[:, layout.group_slices[spec_i.group_key]] += _vech_rotation(angles[k][0])
-            block[:, layout.group_slices[spec_j.group_key]] += _vech_rotation(angles[k][1])
+            block[:, layout.group_slices[spec_i.group_key]] += _vech_rotation(
+                _basis_angle(spec_i, frame)
+            )
+            block[:, layout.group_slices[spec_j.group_key]] += _vech_rotation(
+                _basis_angle(spec_j, frame)
+            )
             if pair_slice is not None:
                 block[:, pair_slice] += -2.0 * np.eye(3)
+            frame_index.append(f_idx)
+            diffs.append(d)
+            designs.append(design)
+            cov_blocks.append(block)
+            continue
+        if spec_i.kind == 'rank1' and spec_j.kind == 'rank1':
+            alpha_i = _axis_angle(spec_i, frame)
+            alpha_j = _axis_angle(spec_j, frame)
+            cos_between = math.cos(alpha_i - alpha_j)
+            if abs(cos_between) < _RANK1_PARALLEL_MIN_ABS_COS:
+                continue
+            axis = alpha_i
+            a_i = np.array([math.cos(alpha_i), math.sin(alpha_i)])
+            a_j = np.array([math.cos(alpha_j), math.sin(alpha_j)])
+            sign_j = 1.0 if cos_between >= 0 else -1.0
+            s = float(a_i @ o_i) - sign_j * float(a_j @ o_j)
         else:
-            s = centered[k, 0]
-            target = np.array([s * s], dtype=np.float64)
-            block = np.zeros((1, layout.n_params), dtype=np.float64)
-            # The projection axis is the rank1 member's axis angle, held in
-            # that member's positional slot (for rank1/rank1 pairs slot 0).
-            axis = angles[k][0] if spec_i.kind == 'rank1' else angles[k][1]
-            for spec, angle_pos in ((spec_i, 0), (spec_j, 1)):
-                sl = layout.group_slices[spec.group_key]
-                if spec.kind == 'rank1':
-                    block[0, sl] += 1.0
-                else:
-                    theta = angles[k][angle_pos]
-                    block[0, sl] += _vech_quadratic(axis) @ _vech_rotation(theta)
-            if pair_slice is not None:
-                block[0, pair_slice] += -2.0
-        rows.append(block)
-        targets.append(target)
+            rank1_spec = spec_i if spec_i.kind == 'rank1' else spec_j
+            axis = _axis_angle(rank1_spec, frame)
+            a = np.array([math.cos(axis), math.sin(axis)])
+            s = float(a @ o_i) - float(a @ o_j)
+        design = np.zeros((1, n_cols), dtype=np.float64)
+        design[0, 0] = 1.0
+        if mean_model == 'auto':
+            design[0, 1] = math.cos(axis)
+            design[0, 2] = math.sin(axis)
+            col = 3
+            for spec, sign in rotating_members:
+                a_row = np.array([math.cos(axis), math.sin(axis)]) @ _rot(_basis_angle(spec, frame))
+                design[0, col : col + 2] = sign * a_row
+                col += 2
+        block = np.zeros((1, layout.n_params), dtype=np.float64)
+        for spec in (spec_i, spec_j):
+            sl = layout.group_slices[spec.group_key]
+            if spec.kind == 'rank1':
+                block[0, sl] += 1.0
+            else:
+                theta = _basis_angle(spec, frame)
+                block[0, sl] += _vech_quadratic(axis) @ _vech_rotation(theta)
+        if pair_slice is not None:
+            block[0, pair_slice] += -2.0
         frame_index.append(f_idx)
-    mean_out: NDArray[np.float64] | float = mean if full_full else float(mean[0])
-    return _PairEquations(rows=rows, targets=targets, frame_index=frame_index), mean_out
+        diffs.append(np.array([s], dtype=np.float64))
+        designs.append(design)
+        cov_blocks.append(block)
+    if not frame_index:
+        return None
+    diffs_arr = np.stack(diffs)
+    design_arr = np.stack(designs)
+    cov_arr = np.stack(cov_blocks)
+    # Overfit guard: with too few samples per mean-model column, fall back
+    # to the constant-only columns so the mean fit cannot soak up
+    # second-moment signal.
+    min_needed = _MEAN_MODEL_MIN_SAMPLES_PER_COLUMN * n_cols
+    if diffs_arr.shape[0] < min_needed:
+        keep = 2 if full_full else 1
+        design_arr = design_arr[:, :, :keep]
+        mean_columns = mean_columns[:keep]
+    return _PairData(
+        full_full=full_full,
+        frame_index=frame_index,
+        diffs=diffs_arr,
+        mean_design=design_arr,
+        mean_columns=tuple(mean_columns),
+        cov_rows=cov_arr,
+    )
+
+
+def _fit_mean(pair: _PairData, counts: dict[int, int] | None) -> NDArray[np.float64]:
+    """Fit the pair's mean-model coefficients by (weighted) least squares.
+
+    Parameters:
+        pair: The pair data.
+        counts: Optional frame multiset (bootstrap replicate); ``None``
+            weights every sample once.
+
+    Returns:
+        Coefficient vector aligned with ``pair.mean_columns`` (minimum-norm
+        where the design is collinear, e.g. two members sharing one
+        rotation angle).
+    """
+    n, _, k = pair.mean_design.shape
+    if counts is None:
+        weights = np.ones(n, dtype=np.float64)
+    else:
+        weights = np.array(
+            [float(counts.get(f_idx, 0)) for f_idx in pair.frame_index], dtype=np.float64
+        )
+    mask = weights > 0
+    if not mask.any():
+        return np.zeros(k, dtype=np.float64)
+    sqrt_w = np.sqrt(weights[mask])[:, None]
+    rows = (pair.mean_design[mask] * sqrt_w[:, :, None]).reshape(-1, k)
+    target = (pair.diffs[mask] * sqrt_w).reshape(-1)
+    beta, _, _, _ = np.linalg.lstsq(rows, target, rcond=None)
+    return np.asarray(beta, dtype=np.float64)
+
+
+def _pair_targets(pair: _PairData, beta: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Centered second-moment targets per sample given mean coefficients.
+
+    Parameters:
+        pair: The pair data.
+        beta: Mean-model coefficients.
+
+    Returns:
+        ``(n, 3)`` vech outer-product targets for full/full pairs,
+        ``(n, 1)`` squared-residual targets otherwise.
+    """
+    residuals = pair.diffs - pair.mean_design @ beta
+    if pair.full_full:
+        r0 = residuals[:, 0]
+        r1 = residuals[:, 1]
+        return np.stack([r0 * r0, r0 * r1, r1 * r1], axis=1)
+    r = residuals[:, 0]
+    return (r * r)[:, None]
 
 
 def _assemble(
-    pair_eqs: Iterable[_PairEquations],
+    pairs: Sequence[_PairData],
     n_params: int,
-    keep_frames: NDArray[np.intp] | None = None,
+    counts: dict[int, int] | None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Stack per-pair equation blocks into a single (A, y) system.
+    """Assemble the (A, y) system: fit means, center, stack equations.
+
+    The pair mean models are (re-)fitted on exactly the frames present in
+    ``counts`` (with multiplicity), so bootstrap replicates re-center on
+    their own resample rather than reusing the full-cohort mean.
 
     Parameters:
-        pair_eqs: Equation blocks from every pair.
+        pairs: Pair data blocks.
         n_params: Width of the design matrix.
-        keep_frames: Optional multiset of frame indices (bootstrap resample);
-            a frame's equations are repeated per occurrence.  ``None`` keeps
-            every equation once.
+        counts: Optional frame multiset; ``None`` keeps every equation once.
 
     Returns:
         Design matrix ``A`` and target vector ``y``.
     """
-    counts: dict[int, int] | None = None
-    if keep_frames is not None:
-        counts = {}
-        for idx in keep_frames:
-            counts[int(idx)] = counts.get(int(idx), 0) + 1
     a_blocks: list[NDArray[np.float64]] = []
     y_blocks: list[NDArray[np.float64]] = []
-    for eqs in pair_eqs:
-        for block, target, f_idx in zip(eqs.rows, eqs.targets, eqs.frame_index, strict=True):
-            repeat = 1 if counts is None else counts.get(f_idx, 0)
-            for _ in range(repeat):
-                a_blocks.append(block)
-                y_blocks.append(target)
+    for pair in pairs:
+        beta = _fit_mean(pair, counts)
+        targets = _pair_targets(pair, beta)
+        if counts is None:
+            repeats = np.ones(len(pair.frame_index), dtype=np.intp)
+        else:
+            repeats = np.array([counts.get(f_idx, 0) for f_idx in pair.frame_index], dtype=np.intp)
+        mask = repeats > 0
+        if not mask.any():
+            continue
+        a_blocks.append(np.repeat(pair.cov_rows[mask], repeats[mask], axis=0).reshape(-1, n_params))
+        y_blocks.append(np.repeat(targets[mask], repeats[mask], axis=0).reshape(-1))
     if not a_blocks:
         return np.zeros((0, n_params), dtype=np.float64), np.zeros(0, dtype=np.float64)
     return np.vstack(a_blocks), np.concatenate(y_blocks)
@@ -510,6 +638,7 @@ def solve_covariance_components(
     specs: Sequence[EstimatorSpec],
     *,
     pair_covariances: Sequence[PairKey] = (),
+    mean_model: Literal['auto', 'constant'] = 'auto',
     practical_sv_ratio: float = 1e-6,
     n_bootstrap: int = 0,
     bootstrap_seed: int = 0,
@@ -517,10 +646,12 @@ def solve_covariance_components(
     """Solve the covariance-components system for a cohort of frames.
 
     Every co-occurring instance pair contributes central second-moment
-    equations; the stacked linear system is solved by minimum-norm least
-    squares.  Identifiability is diagnosed from the design matrix's singular
-    spectrum and reported per parameter -- a degenerate composition returns
-    its null space explicitly rather than failing.
+    equations (centered by the fitted per-pair mean model; see the module
+    docstring for what the mean model does and does not absorb); the
+    stacked linear system is solved by minimum-norm least squares.
+    Identifiability is diagnosed from the design matrix's singular
+    spectrum and reported per parameter -- a degenerate composition
+    returns its null space explicitly rather than failing.
 
     Parameters:
         frames: Cohort of per-frame samples.
@@ -529,11 +660,20 @@ def solve_covariance_components(
             cross-covariance should be solved for instead of assumed zero.
             Declaring a pair adds unknowns; the cohort must be
             over-determined enough to carry them (check the returned
-            identifiability scores).
+            identifiability scores).  Model restrictions: a full/full
+            pair's matrix is image-frame constant (no rotating option),
+            and a rank1-involving pair's scalar ``gamma`` assumes the
+            projected cross-covariance is axis-independent
+            (``S = gamma * I``).
+        mean_model: ``'auto'`` (default) fits constant plus rotating-frame
+            mean columns for rotating members; ``'constant'`` fits the
+            constant term only (retained to demonstrate the aliasing an
+            unmodeled rotating bias produces).
         practical_sv_ratio: Singular values below this fraction of the
             largest are treated as null directions.
         n_bootstrap: Number of frame-resampling bootstrap replicates for
-            percentile confidence intervals (0 disables).
+            percentile confidence intervals (0 disables).  Each replicate
+            re-fits the pair mean models on its own resample.
         bootstrap_seed: Seed for the bootstrap resampler.
 
     Returns:
@@ -551,23 +691,27 @@ def solve_covariance_components(
     if len(specs) < 2:
         raise ValueError('at least two estimator instances are required')
     layout = _build_layout(specs, pair_covariances)
-    pair_blocks: dict[PairKey, _PairEquations] = {}
+    pair_data: dict[PairKey, _PairData] = {}
     pair_means: dict[PairKey, NDArray[np.float64] | float] = {}
+    pair_mean_models: dict[PairKey, dict[str, float]] = {}
     for i in range(len(specs)):
         for j in range(i + 1, len(specs)):
-            built = _pair_equations(frames, specs[i], specs[j], layout)
+            built = _build_pair_data(frames, specs[i], specs[j], layout, mean_model)
             if built is None:
                 continue
-            eqs, mean = built
-            pair_blocks[(specs[i].name, specs[j].name)] = eqs
-            pair_means[(specs[i].name, specs[j].name)] = mean
-    a_mat, y_vec = _assemble(pair_blocks.values(), layout.n_params)
+            key = (specs[i].name, specs[j].name)
+            pair_data[key] = built
+            raw_mean = built.diffs.mean(axis=0)
+            pair_means[key] = raw_mean if built.full_full else float(raw_mean[0])
+            beta_full = _fit_mean(built, None)
+            pair_mean_models[key] = {
+                label: float(beta_full[k]) for k, label in enumerate(built.mean_columns)
+            }
+    pairs = list(pair_data.values())
+    a_mat, y_vec = _assemble(pairs, layout.n_params, None)
     if a_mat.shape[0] == 0:
         raise ValueError('no pair of instances ever co-occurs; nothing to solve')
-    params, _, _, sv = np.linalg.lstsq(a_mat, y_vec, rcond=None)
-    sv = np.sort(np.asarray(sv, dtype=np.float64))[::-1]
-    # np.linalg.lstsq returns only nonzero singular values for rank-deficient
-    # systems on some backends; recompute the full spectrum for diagnostics.
+    params, _, _, _ = np.linalg.lstsq(a_mat, y_vec, rcond=None)
     _, full_sv, vt = np.linalg.svd(a_mat, full_matrices=False)
     sv_max = float(full_sv[0]) if full_sv.size else 0.0
     null_mask = full_sv < practical_sv_ratio * sv_max
@@ -583,21 +727,21 @@ def solve_covariance_components(
 
     covariances: dict[str, NDArray[np.float64]] = {}
     rank1_variances: dict[str, float] = {}
-    for key, sl in layout.group_slices.items():
-        if layout.group_kind[key] == 'full':
+    for key_str, sl in layout.group_slices.items():
+        if layout.group_kind[key_str] == 'full':
             c11, c12, c22 = params[sl]
-            covariances[key] = np.array([[c11, c12], [c12, c22]], dtype=np.float64)
+            covariances[key_str] = np.array([[c11, c12], [c12, c22]], dtype=np.float64)
         else:
-            rank1_variances[key] = float(params[sl][0])
+            rank1_variances[key_str] = float(params[sl][0])
     pair_cov_out: dict[PairKey, NDArray[np.float64] | float] = {}
-    for pair, sl in layout.pair_slices.items():
+    for pair_key, sl in layout.pair_slices.items():
         vals = params[sl]
         if vals.size == 3:
-            pair_cov_out[pair] = np.array(
+            pair_cov_out[pair_key] = np.array(
                 [[vals[0], vals[1]], [vals[1], vals[2]]], dtype=np.float64
             )
         else:
-            pair_cov_out[pair] = float(vals[0])
+            pair_cov_out[pair_key] = float(vals[0])
 
     bootstrap_ci: dict[str, tuple[float, float]] = {}
     if n_bootstrap > 0:
@@ -605,8 +749,11 @@ def solve_covariance_components(
         n_frames = len(frames)
         samples = np.empty((n_bootstrap, layout.n_params), dtype=np.float64)
         for b in range(n_bootstrap):
-            resample = rng.integers(0, n_frames, size=n_frames).astype(np.intp)
-            a_b, y_b = _assemble(pair_blocks.values(), layout.n_params, keep_frames=resample)
+            resample = rng.integers(0, n_frames, size=n_frames)
+            b_counts: dict[int, int] = {}
+            for idx in resample:
+                b_counts[int(idx)] = b_counts.get(int(idx), 0) + 1
+            a_b, y_b = _assemble(pairs, layout.n_params, b_counts)
             if a_b.shape[0] == 0:
                 samples[b] = np.nan
                 continue
@@ -622,6 +769,7 @@ def solve_covariance_components(
         rank1_variances=rank1_variances,
         pair_covariances=pair_cov_out,
         pair_mean_diff=pair_means,
+        pair_mean_model=pair_mean_models,
         singular_values=np.asarray(full_sv, dtype=np.float64),
         condition_number=condition,
         null_space=np.asarray(null_space, dtype=np.float64),

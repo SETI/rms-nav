@@ -435,3 +435,168 @@ def test_rank1_pair_skipped_when_axes_perpendicular() -> None:
     specs = [EstimatorSpec('r1', 'rank1'), EstimatorSpec('r2', 'rank1')]
     with pytest.raises(ValueError, match='co-occurs'):
         solve_covariance_components(frames, specs)
+
+
+def _rotating_bias_frames(
+    rng: np.random.Generator,
+    n: int,
+    mu_limb: tuple[float, float],
+    mu_disc: tuple[float, float] | None,
+) -> list[FrameSample]:
+    """Frames with geometry-locked (rotating-frame) technique biases.
+
+    The limb error is drawn in a per-frame rotating basis with a constant
+    bias ``mu_limb`` in that basis; when ``mu_disc`` is given the disc
+    error also carries a rotating bias with the same per-frame angle (the
+    partial-body situation where both techniques are pulled toward the
+    body center).  A rank1 ring with a diverse axis completes the system.
+
+    Parameters:
+        rng: Random generator.
+        n: Number of frames.
+        mu_limb: Limb bias in the rotating frame.
+        mu_disc: Optional disc bias in the same rotating frame.
+
+    Returns:
+        The frame list.
+    """
+    c_limb = np.array([[0.3, 0.0], [0.0, 0.5]])
+    c_disc = np.array([[0.05, 0.0], [0.0, 0.05]])
+    s2_ring = 0.01
+    frames: list[FrameSample] = []
+    for _ in range(n):
+        theta = float(rng.uniform(0.0, 2.0 * math.pi))
+        r = _rot(theta)
+        e_l = r @ (_draw(rng, c_limb) + np.asarray(mu_limb))
+        e_d = _draw(rng, c_disc)
+        if mu_disc is not None:
+            e_d = e_d + r @ np.asarray(mu_disc)
+        alpha = float(rng.uniform(0.0, 2.0 * math.pi))
+        a = np.array([math.cos(alpha), math.sin(alpha)])
+        t = np.array([-a[1], a[0]])
+        e_r = float(rng.normal(0.0, math.sqrt(s2_ring))) * a + float(rng.normal(0.0, 30.0)) * t
+        frames.append(
+            FrameSample(
+                offsets={
+                    'limb': (float(e_l[0]), float(e_l[1])),
+                    'disc': (float(e_d[0]), float(e_d[1])),
+                    'ring': (float(e_r[0]), float(e_r[1])),
+                },
+                basis_angle_rad={'limb': theta, 'disc': theta},
+                axis_angle_rad={'ring': alpha},
+            )
+        )
+    return frames
+
+
+def test_rotating_bias_aliases_under_constant_centering() -> None:
+    """A rotating-frame bias is invisible to constant centering and aliases.
+
+    The image-frame mean of a rotating bias is ~0 over a diverse cohort,
+    so the constant channel subtracts nothing and mu mu^T lands in the
+    recovered covariance (C + mu mu^T) with the system fully identifiable
+    and no negative-variance symptom anywhere.
+    """
+    rng = np.random.default_rng(30)
+    frames = _rotating_bias_frames(rng, 5000, (-2.0, 0.0), None)
+    specs = [
+        EstimatorSpec('limb', 'full', basis='rotating'),
+        EstimatorSpec('disc', 'full'),
+        EstimatorSpec('ring', 'rank1'),
+    ]
+    result = solve_covariance_components(frames, specs, mean_model='constant')
+    mean = result.pair_mean_diff[('limb', 'disc')]
+    assert isinstance(mean, np.ndarray)
+    # The constant bias channel sees nothing...
+    assert float(np.abs(mean).max()) < 0.1
+    # ...and the limb variance is inflated to ~ C + mu^2 = 0.3 + 4.0.
+    assert result.covariances['limb'][0, 0] == pytest.approx(4.3, abs=0.3)
+    assert result.null_space.shape[0] == 0
+
+
+def test_rotating_mean_model_absorbs_geometry_locked_bias() -> None:
+    """Experiment A: the rotating mean columns restore the true covariance."""
+    rng = np.random.default_rng(31)
+    frames = _rotating_bias_frames(rng, 6000, (-2.0, 0.0), None)
+    specs = [
+        EstimatorSpec('limb', 'full', basis='rotating'),
+        EstimatorSpec('disc', 'full'),
+        EstimatorSpec('ring', 'rank1'),
+    ]
+    result = solve_covariance_components(frames, specs)
+    assert result.covariances['limb'][0, 0] == pytest.approx(0.3, abs=0.06)
+    assert result.covariances['limb'][1, 1] == pytest.approx(0.5, abs=0.08)
+    assert result.rank1_variances['ring'] == pytest.approx(0.01, abs=0.05)
+    # The fitted mean model exposes the bias it absorbed.
+    model = result.pair_mean_model[('limb', 'ring')]
+    assert model['limb:mu1'] == pytest.approx(-2.0, abs=0.1)
+
+
+def test_shared_rotating_bias_repaired_when_both_declared() -> None:
+    """Experiment B: shared rotating biases stop corrupting the solve.
+
+    With limb and disc both biased in the same rotating frame and both
+    declared rotating, the mean model absorbs the shared component: the
+    disc covariance no longer goes negative and every value returns to
+    truth.  (With disc left undeclared the corruption persists -- the
+    absorption follows the declaration.)
+    """
+    rng = np.random.default_rng(32)
+    frames = _rotating_bias_frames(rng, 6000, (-2.0, 0.0), (-1.5, 0.0))
+    specs_declared = [
+        EstimatorSpec('limb', 'full', basis='rotating'),
+        EstimatorSpec('disc', 'full', basis='rotating'),
+        EstimatorSpec('ring', 'rank1'),
+    ]
+    result = solve_covariance_components(frames, specs_declared)
+    assert result.covariances['limb'][0, 0] == pytest.approx(0.3, abs=0.06)
+    assert result.covariances['disc'][0, 0] == pytest.approx(0.05, abs=0.05)
+    assert result.covariances['disc'][0, 0] > 0.0
+    assert result.rank1_variances['ring'] == pytest.approx(0.01, abs=0.05)
+    # Undeclared disc: the corruption persists (documented limitation).
+    specs_naive = [
+        EstimatorSpec('limb', 'full', basis='rotating'),
+        EstimatorSpec('disc', 'full'),
+        EstimatorSpec('ring', 'rank1'),
+    ]
+    naive = solve_covariance_components(frames, specs_naive, mean_model='constant')
+    assert naive.covariances['disc'][0, 0] < 0.0
+
+
+def test_bootstrap_coverage_rate() -> None:
+    """Bootstrap CIs cover the truth for nearly all identifiable parameters.
+
+    Not a single-parameter spot check: all nine parameters of a fully
+    identifiable three-technique system are checked at once.  At 95%
+    nominal coverage the expectation is ~8.55 covered; requiring at least
+    7 catches gross miscoverage while tolerating the ~7% chance of two
+    marginal misses (percentile bootstrap on variance parameters is
+    slightly anti-conservative even with per-replicate re-centering).
+    """
+    rng = np.random.default_rng(33)
+    frames = _make_frames(rng, 1500, with_blob=True)
+    specs = [
+        EstimatorSpec('limb', 'full'),
+        EstimatorSpec('disc', 'full'),
+        EstimatorSpec('blob', 'full'),
+    ]
+    result = solve_covariance_components(frames, specs, n_bootstrap=150, bootstrap_seed=9)
+    truth = {
+        'limb': C_LIMB,
+        'disc': C_DISC,
+        'blob': C_BLOB,
+    }
+    covered = 0
+    total = 0
+    for group, cov in truth.items():
+        for name, value in (
+            (f'{group}:c11', cov[0, 0]),
+            (f'{group}:c12', cov[0, 1]),
+            (f'{group}:c22', cov[1, 1]),
+        ):
+            lo, hi = result.bootstrap_ci[name]
+            total += 1
+            if lo <= value <= hi:
+                covered += 1
+    assert total == 9
+    assert covered >= 7
