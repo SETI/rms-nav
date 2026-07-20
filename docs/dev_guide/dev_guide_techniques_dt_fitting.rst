@@ -357,7 +357,12 @@ Source files:
 Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
 
 - :func:`~spindoctor.nav_technique.dt_fitting.coarse_ncc_search` — the integer-shift binary
-  cross-correlation.
+  cross-correlation (offset-only convenience form).
+- :func:`~spindoctor.nav_technique.dt_fitting.coarse_ncc_search_scored` — the same search
+  returning a :class:`~spindoctor.nav_technique.dt_fitting.CoarseSearchResult`, whose
+  ``score`` is the winning shift's per-vertex edge-pixel match fraction — the
+  acquisition-quality signal the fit-quality gates consume. The DT techniques call this
+  form.
 - :func:`~spindoctor.nav_technique.dt_fitting.polarity_filter` — per-vertex polarity acceptance from
   the gradient vector image.
 - :func:`~spindoctor.nav_technique.dt_fitting.tukey_biweight_weights` — Holland-Welsch redescender
@@ -383,15 +388,18 @@ example documented at :doc:`dev_guide_techniques_body_limb`):
 2. Render the polyline into a binary mask aligned with the image edge mask.
 3. Read the search-window margin via
    :func:`~spindoctor.nav_technique.nav_technique.search_window_for_obs`.
-4. Call :func:`~spindoctor.nav_technique.dt_fitting.coarse_ncc_search` to obtain the integer seed.
+4. Call :func:`~spindoctor.nav_technique.dt_fitting.coarse_ncc_search_scored` to obtain the
+   integer seed and its acquisition score.
 5. Decide whether to fit camera rotation; when rotation is fit, set the rotation pivot to the
    vertex centroid and read the pivot-to-image-centre distance via
    :func:`~spindoctor.nav_technique.nav_technique.rotation_pivot_distance_px`.
 6. Call :func:`~spindoctor.nav_technique.dt_fitting.lm_subpixel_refine` with the polyline, the
    per-vertex sigmas, the integer seed, and the rotation options.
 7. Apply the per-technique at-edge and spurious tests against the converged
-   :class:`~spindoctor.nav_technique.dt_fitting.LMRefineResult`.
-8. Build the per-technique diagnostics dataclass and evaluate the confidence formula.
+   :class:`~spindoctor.nav_technique.dt_fitting.LMRefineResult`, plus the shared fit-quality
+   gates (below).
+8. Build the per-technique diagnostics dataclass and evaluate the confidence formula
+   (capped by the gates' convergence demotion when it applies).
 
 The :class:`~spindoctor.nav_technique.dt_fitting.LMRefineResult` exposes the converged offset
 :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.offset_vu`, the rotation
@@ -406,10 +414,55 @@ polarity-rejected vertex's near-infinite synthetic residual cannot inflate it �
 gate that consumes it stays meaningful in multi-body scenes where a secondary body contributes a
 few wrong-polarity vertices), the
 :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.iterations` count, the
-:attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.converged` flag, the
+:attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.converged` flag (true when either
+the DT-LM met its step tolerance or the final gradient-ridge stage applied and met its own —
+a quantized-DT stall that burns the LM budget at the integer seed is routine on dense edge
+scenes, and a converged ridge polish verifies the reported pose), the
 :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.degenerate` flag (set when no vertex
-survives reweighting), and the
-:attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.inlier_count`.
+survives reweighting), the
+:attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.inlier_count`, and the
+:attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.polarity_rejected_count` (the
+polarity-fraction numerator the fit-quality gates consume).
+
+Shared fit-quality gates
+========================
+
+``src/spindoctor/nav_technique/dt_fit_gates.py`` is the shared verdict layer over the
+fitting machinery's health signals; every DT technique calls
+:func:`~spindoctor.nav_technique.dt_fit_gates.evaluate_dt_fit_gates` with its
+:class:`~spindoctor.nav_technique.dt_fitting.LMRefineResult`, its coarse acquisition score,
+and its per-technique thresholds
+(:class:`~spindoctor.nav_technique.dt_fit_gates.DTFitGateConfig`, read from the technique's
+``tuning`` block). Three signals feed the verdict:
+
+- **LM convergence** (``lm_unconverged_confidence_cap``). A fit neither the DT-LM nor the
+  ridge stage verified is unverified, not necessarily wrong: formal convergence flickers on
+  healthy dense-edge scenes, so the consequence is a demotion, not a reject — the
+  post-sigmoid confidence is capped just below the high tier's boundary, denying the fit
+  solo high-tier standing while leaving genuine cross-technique corroboration able to
+  rescue the frame.
+- **Polarity-rejection fraction** (``spurious_max_polarity_rejection_fraction``,
+  ``spurious_unconverged_polarity_rejection_fraction``). The fraction of model vertices
+  whose local gradient direction disagrees with the model normal at the seed. Healthy
+  multi-body frames run around 11 % (a small secondary body on the ansa contributes
+  wrong-polarity vertices while the dominant limb fits cleanly), so the standalone hard
+  gate sits far above that band and catches only grossly wrong locks. The discriminating
+  form is the *combined* gate: an unconverged LM whose polarity rejection is also elevated
+  is the signature of a coarse-seed mis-lock the LM could neither escape nor verify — a
+  Cassini body-mostly-offscreen investigation measured 12.7 % rejection at the iteration
+  cap on a seed 6.8 px off, while the healthy frames at comparable rejection all converge.
+  Both polarity gates are inert for the polarity-free ring-edge fit.
+- **Coarse acquisition quality** (``spurious_min_coarse_peak_fraction``). The winning
+  coarse shift's edge-pixel match fraction. A seed whose best shift leaves most of the
+  model off every detected edge never had a lock to refine — the LM then polishes noise.
+  The shipped threshold is deliberately conservative plumbing; deriving a
+  library-calibrated lock is separate calibration work.
+
+A firing hard gate ORs into the technique's own spurious decision (the reasons are
+logged); the convergence demotion caps the calibrated confidence after the sigmoid.
+The measured quantities land on the technique diagnostics (``lm_converged``,
+``polarity_rejection_fraction``, ``coarse_peak_fraction``) so every gate decision is
+auditable per frame.
 
 Examples
 ========

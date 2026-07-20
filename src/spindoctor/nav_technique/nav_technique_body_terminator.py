@@ -27,10 +27,11 @@ from spindoctor.feature.flags import TerminatorArcFlags
 from spindoctor.feature.geometry import TerminatorPolyline
 from spindoctor.nav_technique.confidence import evaluate_sigmoid_combination
 from spindoctor.nav_technique.diagnostics import BodyTerminatorDiagnostics
+from spindoctor.nav_technique.dt_fit_gates import DTFitGateConfig, evaluate_dt_fit_gates
 from spindoctor.nav_technique.dt_fitting import (
     _rotate_vertices,
     build_polyline_mask,
-    coarse_ncc_search,
+    coarse_ncc_search_scored,
     find_secondary_dt_minimum,
     lm_subpixel_refine,
 )
@@ -170,6 +171,7 @@ class BodyTerminatorNav(NavTechnique):
         self._basin_cost_ratio_threshold = float(self.tuning['basin_cost_ratio_threshold'])
         self._basin_exclude_radius_px = float(self.tuning['basin_exclude_radius_px'])
         self._basin_cost_epsilon_px = float(self.tuning['basin_cost_epsilon_px'])
+        self._dt_gate_config = DTFitGateConfig.from_tuning(self.tuning)
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries a usable terminator arc.
@@ -275,12 +277,18 @@ class BodyTerminatorNav(NavTechnique):
                 margin_v,
                 margin_u,
             )
-            coarse_dv, coarse_du = coarse_ncc_search(
+            coarse = coarse_ncc_search_scored(
                 edge_mask,
                 polyline_mask,
                 (margin_v, margin_u),
             )
-            self.logger.debug('Coarse NCC offset: (%d, %d)', coarse_dv, coarse_du)
+            coarse_dv, coarse_du = coarse.offset_vu
+            self.logger.debug(
+                'Coarse NCC offset: (%d, %d), peak match fraction %.3f',
+                coarse_dv,
+                coarse_du,
+                coarse.score,
+            )
             fit_rotation = bool(context.fit_camera_rotation)
             pivot_vu = (float(vertices[:, 0].mean()), float(vertices[:, 1].mean()))
             pivot_distance = (
@@ -363,6 +371,22 @@ class BodyTerminatorNav(NavTechnique):
                 self._spurious_dt_floor_px,
                 self._spurious_dt_rms_factor * sigma_min_px,
             )
+            gate_verdict = evaluate_dt_fit_gates(
+                result,
+                self._dt_gate_config,
+                coarse_peak_fraction=coarse.score,
+                total_vertex_count=n_vertices,
+                use_polarity=True,
+            )
+            if gate_verdict.spurious_reasons:
+                self.logger.info(
+                    'DT fit-quality gate(s) fired: %s (polarity rejection %.3f, '
+                    'coarse peak %.3f, lm_converged=%s)',
+                    ', '.join(gate_verdict.spurious_reasons),
+                    gate_verdict.polarity_rejection_fraction,
+                    gate_verdict.coarse_peak_fraction,
+                    gate_verdict.lm_converged,
+                )
             spurious = (
                 result.degenerate
                 or result.rms_px > dt_rms_threshold
@@ -370,6 +394,7 @@ class BodyTerminatorNav(NavTechnique):
                 or result.inlier_count < self._spurious_min_inliers
                 or inlier_fraction < self._spurious_min_inlier_fraction
                 or lm_displacement_px > self._spurious_max_lm_displacement_px
+                or gate_verdict.spurious
             )
             # Basin second-opinion (#125): a textured surface can offer the
             # DT fit a rival alignment (crater shadow, albedo boundary) that
@@ -427,6 +452,9 @@ class BodyTerminatorNav(NavTechnique):
                 mean_albedo_penalty=mean_albedo,
                 secondary_basin_distance_px=secondary_basin_distance_px,
                 secondary_basin_cost_ratio=secondary_basin_cost_ratio,
+                lm_converged=gate_verdict.lm_converged,
+                polarity_rejection_fraction=gate_verdict.polarity_rejection_fraction,
+                coarse_peak_fraction=gate_verdict.coarse_peak_fraction,
             )
             confidence_context = _TerminatorConfidenceContext(
                 at_edge=at_edge,
@@ -441,6 +469,14 @@ class BodyTerminatorNav(NavTechnique):
                 return_breakdown=True,
             )
             log_confidence_breakdown(self.logger, breakdown)
+            if gate_verdict.confidence_cap is not None and confidence > gate_verdict.confidence_cap:
+                self.logger.info(
+                    'LM exited at the iteration cap without converging; capping '
+                    'confidence %.4f -> %.4f',
+                    float(confidence),
+                    gate_verdict.confidence_cap,
+                )
+                confidence = gate_verdict.confidence_cap
             self.logger.info(
                 'Converged at offset (%.4f, %.4f) px, RMS %.4f px, inliers %d / %d, '
                 'confidence %.4f',

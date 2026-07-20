@@ -355,6 +355,37 @@ techniques:
       # surfaces as a low-tier result -- the honest price of a limb
       # whose position error is set by unmodeled terrain.
       model_error_floor_px: 2.61
+      # Shared DT fit-quality gates (dt_fit_gates.py).  A fit neither the
+      # DT-LM nor the gradient-ridge stage verified (both exited at their
+      # iteration caps without meeting the step tolerance) is an
+      # unverified fit: its confidence is capped JUST below the high
+      # tier's 0.85 boundary, so it cannot carry a high-tier result on
+      # its own but is not otherwise degraded -- formal convergence
+      # flickers on healthy dense-edge scenes (sim ring sweeps show
+      # sub-millipixel recoveries whose ridge stage misses the 1e-3 px
+      # step tolerance), so a deep cap would strafe good fits.  The hard
+      # consequence for a genuinely mis-locked unconverged fit rides on
+      # the combined polarity gate below.
+      lm_unconverged_confidence_cap: 0.84
+      # Standalone polarity-rejection hard gate.  Healthy multi-body
+      # frames run ~11% rejection (small secondary moons on the ansa
+      # contribute wrong-polarity limb vertices while the dominant limb
+      # fits cleanly; Cassini DIONE N1702389073 measures 0.110), so the
+      # standalone threshold sits far above that band and catches only
+      # grossly wrong locks.
+      spurious_max_polarity_rejection_fraction: 0.35
+      # Combined gate: unconverged AND elevated polarity rejection is
+      # the coarse-seed mis-lock signature (Cassini Tethys N1716186428:
+      # 12.7% rejection at the 30-iteration cap on a seed 6.8 px off in
+      # du; the healthy 11%-rejection frames all converge).
+      spurious_unconverged_polarity_rejection_fraction: 0.10
+      # Coarse-NCC acquisition-quality gate: the winning coarse shift's
+      # in-bounds vertex match fraction must reach this, or the seed
+      # never had a lock and the LM refined noise.  Conservative
+      # plumbing default -- healthy library limb fits measure well
+      # above it.
+      # The full library-calibrated threshold lock is #179's scope.
+      spurious_min_coarse_peak_fraction: 0.05
 
   BodyTerminatorNav:
     # First sim-anchored fit (#223; seed 20260718, full-truth-axis
@@ -447,6 +478,12 @@ techniques:
       basin_cost_ratio_threshold: 1.2
       basin_exclude_radius_px: 5.0
       basin_cost_epsilon_px: 0.25
+      # Shared DT fit-quality gates; see ``BodyLimbNav`` for the
+      # rationale behind each threshold.
+      lm_unconverged_confidence_cap: 0.84
+      spurious_max_polarity_rejection_fraction: 0.35
+      spurious_unconverged_polarity_rejection_fraction: 0.10
+      spurious_min_coarse_peak_fraction: 0.05
 
   RingEdgeNav:
     # Sim campaign (seed 20260718, ring-vocabulary family: inclined
@@ -561,6 +598,15 @@ techniques:
       # Rotation-axis ``at_edge`` fraction; see
       # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
       rotation_at_edge_fraction: 0.95
+      # Shared DT fit-quality gates; see ``BodyLimbNav`` for the
+      # rationale.  RingEdgeNav runs polarity-free (the ring catalog
+      # does not yet encode lighting / gap-vs-ringlet polarity), so the
+      # two polarity thresholds are inert here until that flag is
+      # wired; the convergence cap and the coarse-peak gate apply.
+      lm_unconverged_confidence_cap: 0.84
+      spurious_max_polarity_rejection_fraction: 0.35
+      spurious_unconverged_polarity_rejection_fraction: 0.10
+      spurious_min_coarse_peak_fraction: 0.05
 
   StarUniqueMatchNav:
     # The 1-star path is capped at 0.7 inside the technique (single match
