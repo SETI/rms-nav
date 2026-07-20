@@ -219,16 +219,27 @@ class NavModelRingsSimulated(NavModelRingsBase):
             ext_margin_u + data_size_u,
         )
 
+    def _declared_orbit_sigma_px(self) -> float:
+        """The declared 1-sigma radial orbit uncertainty of this feature.
+
+        The declared semimajor-axis and radial-amplitude sigmas add (a
+        conservative bound on the 1-sigma coherent radial displacement of a
+        catalog edge).  ``0.0`` when the scene declares no orbit
+        uncertainty.
+
+        Returns:
+            The declared sigma in pixels.
+        """
+        sigma = self._feature_params.get('declared_orbit_sigma') or {}
+        return float(sigma.get('sigma_a_px', 0.0)) + float(sigma.get('sigma_ae_px', 0.0))
+
     def _declared_radial_sigma_px(self) -> float:
         """The per-vertex radial sigma from the declared orbit uncertainty.
 
-        The declared semimajor-axis and radial-amplitude sigmas add (a
-        conservative bound on the 1-sigma radial displacement of a catalog
-        edge), floored at the one-pixel polyline sampling resolution.
+        The declared orbit sigma (see :meth:`_declared_orbit_sigma_px`)
+        floored at the one-pixel polyline sampling resolution.
         """
-        sigma = self._feature_params.get('declared_orbit_sigma') or {}
-        declared = float(sigma.get('sigma_a_px', 0.0)) + float(sigma.get('sigma_ae_px', 0.0))
-        return max(_RING_EDGE_SIGMA_RADIAL_PX, declared)
+        return max(_RING_EDGE_SIGMA_RADIAL_PX, self._declared_orbit_sigma_px())
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
         """Emit the ring features.
@@ -283,6 +294,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
                 )
             )
         sigma_radial_px = self._declared_radial_sigma_px()
+        sigma_orbit_px = self._declared_orbit_sigma_px()
         for edge in prediction.edges:
             n = edge.vertices_vu.shape[0]
             if n == 0:
@@ -302,6 +314,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
                         ),
                         is_straight_line=is_straight,
                         bbox_extfov_vu=self._bbox_extfov_vu,
+                        sigma_orbit_radial_px=sigma_orbit_px,
                     ),
                     subject_range_km=self._subject_range_km,
                     position_cov_px=None,

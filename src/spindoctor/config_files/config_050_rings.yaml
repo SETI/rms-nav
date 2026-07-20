@@ -1,5 +1,19 @@
 rings:
   model_source: ephemeris
+  # Default fully-correlated radial orbit uncertainty (km, 1 sigma) for a
+  # catalog ring feature that carries no fitted edge rms.  A feature's own
+  # catalog rms (the orbit-solution residual) takes precedence; this default
+  # covers only rms-less entries.  RingEdgeNav converts it to pixels at the
+  # feature and adds it in quadrature to its reported covariance along the
+  # fit's radial direction, so a tight lock on an uncertain orbit is not
+  # reported as a tight pointing fix.  2 km is the conservative end of the
+  # occultation-based Saturn ring orbit solutions the shipped catalog derives
+  # from: sharp, well-behaved edges fit to RMS residuals of roughly 0.2-1 km
+  # (the catalog's own rms entries run 0.16-0.94 km), while edges with
+  # unmodeled time-variable structure (the resonant B-ring outer edge family)
+  # show km-scale excursions.  At the >= 5 km/px scales where ring-edge
+  # navigation operates this contributes <= 0.4 px in quadrature.
+  default_orbit_radial_sigma_km: 2.0
   fiducial_feature_threshold: 3
   fiducial_rms_gain: 2
   fiducial_min_feature_width: 2

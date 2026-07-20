@@ -64,6 +64,56 @@ when at least two non-parallel edges contribute. The technique reports an
 surfaces; downstream consumers (the ensemble combine, the operator's per-image log) can
 distinguish a rank-1 ring-edge result from a full-rank one.
 
+Radial orbit-uncertainty channel
+--------------------------------
+
+The M-estimator covariance measures the statistical lock onto the *modeled* annulus. When
+the catalog orbit itself is uncertain, the whole predicted edge can sit radially displaced
+from the real one, and the robust fit absorbs that displacement into the recovered
+translation: the Tukey weights keep the arc that happens to align, the fit locks onto one
+side of the annulus, and the residuals stay clean — a tight covariance around a biased
+offset. No per-vertex sigma can price this: a per-vertex prior is a statistical scale
+that averages down as :math:`1/\sqrt{N}` over the polyline, while an orbit error displaces
+every vertex coherently and does not average down at all.
+
+The technique therefore consumes the per-feature ``sigma_orbit_radial_px`` carried on the
+:class:`~spindoctor.feature.geometry.RingEdgePolyline` geometry (the catalog orbit-solution
+uncertainty, converted to pixels at the feature by the emitting model) and adds it in
+quadrature to the reported covariance in full 2x2 form:
+
+.. math::
+
+    \Sigma \mathrel{+}= \sigma_{\mathrm{orbit}}^{2} \; \hat n \hat n^{T}
+
+along the fit-representative radial direction :math:`\hat n`. Because a one-sided lock
+absorbs the radial error along the direction of the arc that carried the fit, :math:`\hat n`
+is the dominant eigenvector of the *final-LM-weight-weighted* outer-product sum of the
+edge normals; on an all-straight (rank-1) scene the projection's own aggregate normal is
+reused so the covariance stays exactly singular along the tangent. When several features
+fuse, the effective :math:`\sigma_{\mathrm{orbit}}` is the weight-weighted mean of the
+per-feature sigmas, deliberately treating the features' orbit errors as fully correlated
+(the common multi-edge case is the inner and outer edge of one feature, whose orbit error
+is genuinely shared; treating independent features as correlated only errs conservative).
+
+The ensemble consumes the widened covariance through its ordinary precision-weighted
+machinery — nothing downstream special-cases the term. A ring-edge lock on an uncertain
+orbit then carries an honestly wide radial axis: it fuses at reduced radial weight against
+any technique that constrains that axis independently, and the sigma-gated confidence tier
+demotes on its own when the widened axis exceeds a tier's sigma cap. The effective sigma
+is recorded on
+:attr:`~spindoctor.nav_technique.diagnostics.RingEdgeDiagnostics.sigma_orbit_radial_px`.
+The channel prices the hazard; it cannot remove the underlying offset bias, which is why
+the simulator's planted-orbit-error scene keeps its measured-error pin (see the planted
+orbit error section of :doc:`dev_guide_simulator`).
+
+Fit-quality gates
+-----------------
+
+The technique also feeds the shared DT fit-quality gates (LM-convergence demotion and the
+coarse-acquisition-quality gate; the polarity gates are inert here because the fit runs
+polarity-free). The gates and their thresholds are documented at
+:doc:`dev_guide_techniques_dt_fitting`.
+
 Restrictions and assumptions
 ----------------------------
 
@@ -163,6 +213,11 @@ All numeric tunables for this technique live in ``techniques.RingEdgeNav.tuning`
   :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` once it crosses
   this fraction of the per-image
   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.max_rotation_deg` cap.
+- ``lm_unconverged_confidence_cap``, ``spurious_max_polarity_rejection_fraction``,
+  ``spurious_unconverged_polarity_rejection_fraction``,
+  ``spurious_min_coarse_peak_fraction`` — the shared DT fit-quality gate thresholds,
+  documented with their rationale at :doc:`dev_guide_techniques_dt_fitting`. The two
+  polarity thresholds are inert for this technique (the fit runs polarity-free).
 
 Per-instrument overrides
 ------------------------

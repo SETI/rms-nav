@@ -571,6 +571,11 @@ class NavModelRings(NavModelRingsBase):
             max_radial_px, kmpp_threshold = _ring_annulus_emission_params(
                 self._config, self._planet or ''
             )
+            # Default fully-correlated radial orbit uncertainty for a catalog
+            # feature that carries no fitted rms; a feature's own rms is the
+            # orbit-solution quality and takes precedence.  See
+            # config_050_rings.yaml for the value's provenance.
+            default_orbit_sigma_km = float(self._config.rings['default_orbit_radial_sigma_km'])
             # System-level annulus gate: at very low ring resolution the
             # entire ring system spans only a handful of pixels, so even
             # a "well-traceable" per-edge polyline carries too little
@@ -637,6 +642,11 @@ class NavModelRings(NavModelRingsBase):
                                 vertices_vu=vertices_vu,
                                 normals_vu=normals_vu,
                                 uncertainty_km=uncertainty_km,
+                                orbit_sigma_km=(
+                                    uncertainty_km
+                                    if uncertainty_km > 0.0
+                                    else default_orbit_sigma_km
+                                ),
                                 km_per_pixel_radial=max(self._km_per_pixel_radial, 1.0),
                                 is_straight_line=straight,
                                 bbox=_mask_bbox(edge_mask),
@@ -842,16 +852,27 @@ def _build_edge_feature(
     vertices_vu: NDArrayFloatType,
     normals_vu: NDArrayFloatType,
     uncertainty_km: float,
+    orbit_sigma_km: float,
     km_per_pixel_radial: float,
     is_straight_line: bool,
     bbox: tuple[int, int, int, int],
     subject_range_km: float,
     source_model: str,
 ) -> NavFeature:
-    """Construct a RING_EDGE NavFeature from polyline data."""
+    """Construct a RING_EDGE NavFeature from polyline data.
+
+    ``uncertainty_km`` scales the per-vertex radial sigma (the statistical
+    residual scale of the robust fit); ``orbit_sigma_km`` is the
+    fully-correlated orbit-solution uncertainty carried on
+    ``RingEdgePolyline.sigma_orbit_radial_px`` so ``RingEdgeNav`` can widen
+    its reported covariance along the radial direction -- a coherent orbit
+    error does not average down over vertices the way the per-vertex sigma
+    does.
+    """
     n = vertices_vu.shape[0]
     sigma_radial_px = np.full(n, uncertainty_km / km_per_pixel_radial, dtype=np.float64)
     sigma_along_px = np.full(n, RING_EDGE_SIGMA_ALONG_PX, dtype=np.float64)
+    sigma_orbit_px = orbit_sigma_km / km_per_pixel_radial
     visible_arc_fraction = 1.0
     feature_id = f'ring_edge:{planet}:{ring_feat.key}:{edge_label}'
     reliability = _ring_edge_reliability(
@@ -871,6 +892,7 @@ def _build_edge_feature(
             sigma_along_edge_per_vertex_px=sigma_along_px,
             is_straight_line=is_straight_line,
             bbox_extfov_vu=bbox,
+            sigma_orbit_radial_px=sigma_orbit_px,
         ),
         subject_range_km=subject_range_km,
         position_cov_px=None,

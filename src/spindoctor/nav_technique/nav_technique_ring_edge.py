@@ -24,9 +24,10 @@ from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.feature.geometry import RingEdgePolyline
 from spindoctor.nav_technique.confidence import evaluate_sigmoid_combination
 from spindoctor.nav_technique.diagnostics import RingEdgeDiagnostics
+from spindoctor.nav_technique.dt_fit_gates import DTFitGateConfig, evaluate_dt_fit_gates
 from spindoctor.nav_technique.dt_fitting import (
     build_polyline_mask,
-    coarse_ncc_search,
+    coarse_ncc_search_scored,
     lm_subpixel_refine,
 )
 from spindoctor.nav_technique.feasibility import NavFeasibilityReport
@@ -152,6 +153,7 @@ class RingEdgeNav(NavTechnique):
         self._lm_tikhonov_alpha = float(self.tuning['lm_tikhonov_alpha'])
         self._gradient_ridge_refine = bool(self.tuning['gradient_ridge_refine'])
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
+        self._dt_gate_config = DTFitGateConfig.from_tuning(self.tuning)
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable ring edge.
@@ -234,12 +236,18 @@ class RingEdgeNav(NavTechnique):
                 margin_v,
                 margin_u,
             )
-            coarse_dv, coarse_du = coarse_ncc_search(
+            coarse = coarse_ncc_search_scored(
                 edge_mask,
                 polyline_mask,
                 (margin_v, margin_u),
             )
-            self.logger.debug('Coarse NCC offset: (%d, %d)', coarse_dv, coarse_du)
+            coarse_dv, coarse_du = coarse.offset_vu
+            self.logger.debug(
+                'Coarse NCC offset: (%d, %d), peak match fraction %.3f',
+                coarse_dv,
+                coarse_du,
+                coarse.score,
+            )
             # Ring-edge polarity prediction depends on lighting / gap-vs-ringlet
             # context the catalog does not encode today; skip polarity until
             # the polarity-predictable flag is wired (deferred work).
@@ -409,6 +417,24 @@ class RingEdgeNav(NavTechnique):
                 lm_displacement_px = float(
                     math.hypot(dv_final - float(coarse_dv), du_final - float(coarse_du))
                 )
+            # Shared DT fit-quality gates.  RingEdgeNav runs polarity-free
+            # (see the lm_subpixel_refine call above), so the polarity gates
+            # are inert here; the coarse-peak and LM-convergence signals
+            # still apply.
+            gate_verdict = evaluate_dt_fit_gates(
+                result,
+                self._dt_gate_config,
+                coarse_peak_fraction=coarse.score,
+                total_vertex_count=total_vertices,
+                use_polarity=False,
+            )
+            if gate_verdict.spurious_reasons:
+                self.logger.info(
+                    'DT fit-quality gate(s) fired: %s (coarse peak %.3f, lm_converged=%s)',
+                    ', '.join(gate_verdict.spurious_reasons),
+                    gate_verdict.coarse_peak_fraction,
+                    gate_verdict.lm_converged,
+                )
             spurious = (
                 result.degenerate
                 or result.rms_px
@@ -419,6 +445,7 @@ class RingEdgeNav(NavTechnique):
                 or result.inlier_count < self._spurious_min_inliers
                 or inlier_fraction_veto
                 or lm_displacement_px > self._spurious_max_lm_displacement_px
+                or gate_verdict.spurious
             )
             rotation_rad: float | None
             sigma_rotation_rad: float | None
@@ -474,6 +501,29 @@ class RingEdgeNav(NavTechnique):
                     'reported covariance',
                     self._spurious_waiver_sigma_floor_px,
                 )
+            # Radial orbit-uncertainty channel: the LM covariance describes
+            # the statistical lock onto the MODELED annulus; a catalog-orbit
+            # error displaces the whole annulus coherently and does not
+            # average down over vertices, so the declared per-feature orbit
+            # sigma is added in quadrature along the fit's radial direction.
+            # The robust fit absorbs a radial model error into the offset by
+            # locking one-sidedly (the arc the Tukey weights kept), so the
+            # inflation direction is the weight-weighted aggregate normal --
+            # except on a rank-1 scene, where the projection's own axis is
+            # reused so the covariance stays exactly singular tangentially.
+            sigma_orbit_px = _effective_orbit_sigma_px(features, result.weights)
+            if sigma_orbit_px > 0.0:
+                orbit_n_hat = _aggregate_normal_orientation(
+                    polarity_normals, weights=None if is_rank_1 else result.weights
+                )
+                covariance = _orbit_inflated_covariance(covariance, orbit_n_hat, sigma_orbit_px)
+                self.logger.info(
+                    'Widening the reported covariance by the declared radial orbit '
+                    'uncertainty: sigma %.3f px along (v, u) direction (%.3f, %.3f)',
+                    sigma_orbit_px,
+                    float(orbit_n_hat[0]),
+                    float(orbit_n_hat[1]),
+                )
             per_edge_rms_mean = per_edge_rms_summed / float(max(edge_count, 1))
             diagnostics = RingEdgeDiagnostics(
                 total_edge_length_px=total_edge_length_px,
@@ -482,6 +532,9 @@ class RingEdgeNav(NavTechnique):
                 per_edge_dt_median_max=per_edge_median_max,
                 edge_count=edge_count,
                 is_rank_1=bool(is_rank_1),
+                lm_converged=gate_verdict.lm_converged,
+                coarse_peak_fraction=gate_verdict.coarse_peak_fraction,
+                sigma_orbit_radial_px=sigma_orbit_px,
             )
             assert self.confidence_spec is not None  # set as class attribute
             confidence, breakdown = evaluate_sigmoid_combination(
@@ -491,6 +544,14 @@ class RingEdgeNav(NavTechnique):
                 return_breakdown=True,
             )
             log_confidence_breakdown(self.logger, breakdown)
+            if gate_verdict.confidence_cap is not None and confidence > gate_verdict.confidence_cap:
+                self.logger.info(
+                    'LM exited at the iteration cap without converging; capping '
+                    'confidence %.4f -> %.4f',
+                    float(confidence),
+                    gate_verdict.confidence_cap,
+                )
+                confidence = gate_verdict.confidence_cap
             self.logger.info(
                 'Converged at offset (%.4f, %.4f) px, RMS %.4f px, inliers %d / %d, '
                 'rank_1=%s, confidence %.4f',
@@ -556,7 +617,11 @@ def _is_rank_1(covariance: NDArrayFloatType) -> bool:
     return smallest / largest < _RANK1_NULL_RELATIVE_THRESHOLD
 
 
-def _aggregate_normal_orientation(polarity_normals: NDArrayFloatType) -> NDArrayFloatType:
+def _aggregate_normal_orientation(
+    polarity_normals: NDArrayFloatType,
+    *,
+    weights: NDArrayFloatType | None = None,
+) -> NDArrayFloatType:
     """Return the dominant unit-normal orientation of the aggregated edges.
 
     The dominant eigenvector of the per-vertex normals' outer-product sum;
@@ -565,13 +630,103 @@ def _aggregate_normal_orientation(polarity_normals: NDArrayFloatType) -> NDArray
 
     Parameters:
         polarity_normals: ``(N, 2)`` per-vertex edge normals (either sign).
+        weights: Optional ``(N,)`` non-negative per-vertex weights for the
+            outer-product sum.  Passing the fit's final weights yields the
+            orientation of the arc that actually carried the fit (the
+            radial direction a one-sided lock absorbs a coherent radial
+            model error along).  ``None`` (or an all-zero vector) weights
+            every vertex equally.
 
     Returns:
         Unit 2-vector in ``(v, u)`` order.
     """
-    outer_sum = polarity_normals.T @ polarity_normals
+    if weights is not None and bool(np.any(weights > 0.0)):
+        weighted = polarity_normals * weights[:, None]
+        outer_sum = weighted.T @ polarity_normals
+        # Symmetrise: the weighted product is symmetric analytically but
+        # accumulates asymmetric rounding.
+        outer_sum = 0.5 * (outer_sum + outer_sum.T)
+    else:
+        outer_sum = polarity_normals.T @ polarity_normals
     _eigvals, eigvecs = np.linalg.eigh(outer_sum)
     return cast(NDArrayFloatType, eigvecs[:, -1])
+
+
+def _effective_orbit_sigma_px(features: list[NavFeature], weights: NDArrayFloatType) -> float:
+    """Effective fully-correlated radial orbit sigma over the consumed edges.
+
+    Each consumed ``RING_EDGE`` feature carries a declared radial
+    orbit-uncertainty sigma (``RingEdgePolyline.sigma_orbit_radial_px``);
+    the fit's translation absorbs a weighted mix of the features' coherent
+    radial displacements, so the effective sigma is the mean of the
+    per-feature sigmas weighted by each feature's share of the final LM
+    weight.  The per-feature orbit errors are deliberately treated as FULLY
+    CORRELATED (a weighted mean of sigmas, not an independent-error
+    quadrature combine): the common multi-edge case is the inner and outer
+    edge of the same feature, whose orbit error IS shared, and treating
+    genuinely independent features as correlated only errs conservative.
+
+    Parameters:
+        features: The consumed features, in the order their vertices were
+            concatenated for the LM fit.
+        weights: Per-vertex final weights from the fit, in the same
+            concatenation order.
+
+    Returns:
+        The effective sigma in pixels; ``0.0`` when no feature declares an
+        orbit uncertainty.  When every vertex weight is zero (a degenerate
+        fit) the maximum declared sigma is returned -- the conservative
+        bound, though a degenerate fit is spurious anyway.
+    """
+    weighted_sum = 0.0
+    weight_total = 0.0
+    max_sigma = 0.0
+    cursor = 0
+    for feat in features:
+        if not isinstance(feat.geometry, RingEdgePolyline):
+            continue
+        n = feat.geometry.vertices_vu.shape[0]
+        if n == 0:
+            continue
+        w_f = float(np.sum(weights[cursor : cursor + n]))
+        cursor += n
+        s_f = float(feat.geometry.sigma_orbit_radial_px)
+        max_sigma = max(max_sigma, s_f)
+        weighted_sum += w_f * s_f
+        weight_total += w_f
+    if max_sigma <= 0.0:
+        return 0.0
+    if weight_total <= 0.0:
+        return max_sigma
+    return weighted_sum / weight_total
+
+
+def _orbit_inflated_covariance(
+    covariance: NDArrayFloatType,
+    n_hat: NDArrayFloatType,
+    sigma_orbit_px: float,
+) -> NDArrayFloatType:
+    """Add the orbit-uncertainty variance along ``n_hat`` to the covariance.
+
+    Returns a copy of ``covariance`` with ``sigma_orbit_px**2 *
+    outer(n_hat, n_hat)`` added to the translation block -- the full 2x2
+    (directional) form of the quadrature sum, so only the radial axis
+    widens.  The rotation block of a 3x3 input is untouched.  Adding a
+    positive-semidefinite rank-1 term preserves positive semidefiniteness,
+    and adding it along a rank-1 projection's own axis preserves exact
+    tangential singularity.
+
+    Parameters:
+        covariance: ``(2, 2)`` or ``(3, 3)`` reported covariance.
+        n_hat: Unit 2-vector radial direction in ``(v, u)`` order.
+        sigma_orbit_px: The effective orbit sigma in pixels.
+
+    Returns:
+        The inflated covariance (a new array).
+    """
+    out = np.array(covariance, dtype=np.float64, copy=True)
+    out[:2, :2] += (sigma_orbit_px * sigma_orbit_px) * np.outer(n_hat[:2], n_hat[:2])
+    return cast(NDArrayFloatType, out)
 
 
 def aggregate_edge_normal_angle_deg(features: list[NavFeature]) -> float | None:

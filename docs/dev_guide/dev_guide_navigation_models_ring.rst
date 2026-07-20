@@ -98,6 +98,15 @@ per-vertex radial sigma, and the technique-side fitter handles that scatter via 
 shared M-estimator robust-weighting machinery in :mod:`spindoctor.nav_technique.dt_fitting`
 (see :doc:`dev_guide_techniques_dt_fitting`).
 
+The same catalog RMS is carried a second time, on the emitted geometry's
+``sigma_orbit_radial_px``, as the fully-correlated radial orbit-solution uncertainty of
+the whole edge (a feature with no catalog ``rms`` falls back to
+``rings.default_orbit_radial_sigma_km``). The per-vertex sigma is a statistical scale
+that averages down as the vertex count grows; an orbit-solution error displaces every
+vertex of the edge coherently and does not, so the ring-edge technique adds this term in
+quadrature to its reported covariance along the fit's radial direction instead of folding
+it into the per-vertex weights (see :doc:`dev_guide_techniques_ring_edge`).
+
 Annulus template
 ----------------
 
@@ -127,12 +136,14 @@ Sources of uncertainty
 
 The per-vertex radial sigma is the catalog-side RMS projected to pixels at the ring's
 radial scale. It does not capture the optical PSF blur, the per-edge photometric softness
-against the background, a per-image radial bias from a wrong epoch ring solution, or a
-longitude-dependent brightness modulation that would shift the apparent edge position
-non-uniformly around the ring. Those terms enter the technique-side fit through the
-M-estimator's robust weighting (which down-weights vertices whose DT residual is
-inconsistent with the per-vertex sigma) rather than by inflating the sigma itself; see
-:doc:`dev_guide_techniques_dt_fitting` for the fitter's treatment. Edges flagged
+against the background, or a longitude-dependent brightness modulation that would shift
+the apparent edge position non-uniformly around the ring. Those terms enter the
+technique-side fit through the M-estimator's robust weighting (which down-weights
+vertices whose DT residual is inconsistent with the per-vertex sigma) rather than by
+inflating the sigma itself; see :doc:`dev_guide_techniques_dt_fitting` for the fitter's
+treatment. A coherent radial bias from the orbit solution itself is priced separately
+through ``sigma_orbit_radial_px`` (above), which the ring-edge technique adds to its
+reported covariance rather than to any per-vertex weight. Edges flagged
 :attr:`~spindoctor.feature.flags.RingEdgeFlags.is_straight_line` are rank-1 along radial only;
 edges that pass the curvature classification carry full-rank locally-observable
 information.

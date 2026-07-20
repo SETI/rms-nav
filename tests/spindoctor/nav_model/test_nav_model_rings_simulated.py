@@ -151,3 +151,34 @@ def test_ring_annulus_template_paints_at_ring_radius() -> None:
     # Inner edge at 60 px, outer at 85 px; 1.5 px of rasterization slack.
     assert radii.min() >= 60.0 - 1.5
     assert radii.max() <= 85.0 + 1.5
+
+
+def test_ring_edge_carries_declared_orbit_sigma() -> None:
+    """A declared orbit uncertainty lands on the emitted geometry unfloored."""
+    params = _feature_params()
+    params['declared_orbit_sigma'] = {'sigma_a_px': 2.0, 'sigma_ae_px': 0.5}
+    model = NavModelRingsSimulated('rings', _obs(), 'SATURN', params, _ring_system())
+    model.create_model()
+    features = model.to_features(cast(NavContext, None))
+    edges = [f for f in features if f.feature_type.name == 'RING_EDGE']
+    assert edges
+    for edge in edges:
+        geometry = edge.geometry
+        assert isinstance(geometry, RingEdgePolyline)
+        assert geometry.sigma_orbit_radial_px == 2.5
+
+
+def test_ring_edge_orbit_sigma_zero_when_undeclared() -> None:
+    """Without declared_orbit_sigma the systematic channel carries nothing.
+
+    The per-vertex radial sigma keeps its one-pixel sampling floor, but the
+    fully-correlated orbit sigma must stay exactly zero -- the floor is a
+    statistical scale, not a coherent displacement bound.
+    """
+    edges = [f for f in _features() if f.feature_type.name == 'RING_EDGE']
+    assert edges
+    for edge in edges:
+        geometry = edge.geometry
+        assert isinstance(geometry, RingEdgePolyline)
+        assert geometry.sigma_orbit_radial_px == 0.0
+        assert float(geometry.sigma_radial_per_vertex_px.min()) == 1.0

@@ -7,33 +7,32 @@ random_seed: 15
 exposure_sec: 1.0
 # The planted-ephemeris-error axis: a centred navigable ringlet whose
 # rendered orbit is displaced 2.5 px outward of the catalog orbit the
-# navigator predicts from (delta_a_px, a truth key).  Measured outcome
-# (2026-07-16, re-measured 2026-07-18 under the ring-vocabulary
-# recalibration): the fused result is a CONFIDENT success (conf 0.89,
-# rank high) at (-1.89, -2.35) px against the planted (1.0, -1.5) -- a
-# ~3 px wrong offset.  A uniform radial misplacement has no exact
-# translational equivalent, but the robust edge fit down-weights the far
-# arc and locks onto one side of the annulus, absorbing the ephemeris
-# error into the recovered offset instead of the residuals.  The
-# seed-20260718 refit did not close this even with planted orbit errors
-# in the calibration cohort at scale (the ring family's orbit-error
-# slice) and the high-tier boundary raised to 0.85 on exactly this
-# failure mass: RingEdgeNav's diagnostics (clean residual, long edges)
-# genuinely cannot see a planted radial catalog error, so the fused
-# confidence (0.89) and sigma (0.17 px) keep the result in the high
-# tier.  That confidently-biased recovery is this scene's pinned
-# behavior and standing ensemble-gap evidence: closing it requires
-# consuming the declared sigma_a_px (the error bar the navigator is
-# entitled to know) in the covariance or the ensemble, not a better
-# sigmoid over the diagnostics that cannot carry the signal.
-# known_offset_error_px is the honest pin: the success/high assertion
-# is a documented hazard, not an endorsement, and the measured fused
-# error (3.01 px on 2026-07-18) must stay inside its band -- a fix
-# that demotes or corrects this result fails the pin loudly and earns
-# a deliberate re-pin.
+# navigator predicts from (delta_a_px, a truth key).  A uniform radial
+# misplacement has no exact translational equivalent, but the robust
+# edge fit down-weights the far arc and locks onto one side of the
+# annulus, absorbing the ephemeris error into the recovered offset
+# instead of the residuals -- through 2026-07-18 that recovery fused as
+# a CONFIDENT high-tier success (conf 0.89, sigma 0.17 px, ~3 px wrong),
+# this scene's standing ensemble-gap evidence.
+# Deliberate re-pin (2026-07-19): RingEdgeNav now consumes the declared
+# sigma_a_px error bar -- the fully-correlated radial orbit uncertainty
+# is added in quadrature to its reported covariance along the fit's
+# radial direction -- so the fused sigma honestly widens (0.21, 0.53 px)
+# and the sigma-gated tier demotes out of high to medium.  Measured
+# outcome: success/medium at (-2.01, -1.87) px against the planted
+# (1.0, -1.5), fused error 3.03 px, inside the unchanged pin band.  The
+# offset bias itself remains (the technique still locks one-sided; the
+# channel prices the error, it cannot remove it), so
+# known_offset_error_px stays the honest hazard pin.  The fused scalar
+# confidence now reads the 0.99 combined-confidence cap: widening the
+# edge covariance balances the two members' precision weights, which
+# unlocks the two-member agreement boost even though both techniques
+# observe the same misplaced annulus -- the known correlated-error
+# ensemble artifact (#222-family in the issue tracker), deliberately
+# not asserted here; the sigma-gated tier carries the honest verdict.
 expected:
   status: success
-  confidence_tier: high
+  confidence_tier: medium
   known_offset_error_px: 3.0
   known_offset_error_tol_px: 1.0
 bodies: []
