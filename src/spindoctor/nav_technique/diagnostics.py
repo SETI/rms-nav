@@ -79,7 +79,10 @@ class BodyLimbDiagnostics:
         polarity_rejection_fraction: Fraction of model vertices whose local
             gradient direction disagreed with the model normal at the seed.
         coarse_peak_fraction: The winning coarse-NCC shift's in-bounds
-            vertex match fraction (acquisition quality).
+            match fraction over the RASTERIZED polyline pixels
+            (acquisition quality).  Its denominator is mask pixels, not
+            vertices, so it is not directly comparable to
+            ``tukey_inlier_count``.
     """
 
     visible_limb_arc_fraction: float = 0.0

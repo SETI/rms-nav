@@ -417,7 +417,9 @@ few wrong-polarity vertices), the
 :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.converged` flag (true when either
 the DT-LM met its step tolerance or the final gradient-ridge stage applied and met its own —
 a quantized-DT stall that burns the LM budget at the integer seed is routine on dense edge
-scenes, and a converged ridge polish verifies the reported pose), the
+scenes; note this certifies LOCAL optimality only, since the ridge is seeded from the DT-LM
+pose and displacement-capped, so it polishes the same lock rather than re-checking the
+acquisition), the
 :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.degenerate` flag (set when no vertex
 survives reweighting), the
 :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.inlier_count`, and the
@@ -435,12 +437,14 @@ and its per-technique thresholds
 (:class:`~spindoctor.nav_technique.dt_fit_gates.DTFitGateConfig`, read from the technique's
 ``tuning`` block). Three signals feed the verdict:
 
-- **LM convergence** (``lm_unconverged_confidence_cap``). A fit neither the DT-LM nor the
-  ridge stage verified is unverified, not necessarily wrong: formal convergence flickers on
-  healthy dense-edge scenes, so the consequence is a demotion, not a reject — the
+- **LM convergence** (``lm_unconverged_confidence_cap``). A fit that reached no local
+  optimum in either stage is unverified, not necessarily wrong: formal convergence flickers
+  on healthy dense-edge scenes, so the consequence is a demotion, not a reject — the
   post-sigmoid confidence is capped just below the high tier's boundary, denying the fit
   solo high-tier standing while leaving genuine cross-technique corroboration able to
-  rescue the frame.
+  rescue the frame. Because convergence certifies only local optimality of the pose the
+  acquisition selected, a wrong lock that converges is not caught here; that is what the
+  combined polarity gate below is for.
 - **Polarity-rejection fraction** (``spurious_max_polarity_rejection_fraction``,
   ``spurious_unconverged_polarity_rejection_fraction``). The fraction of model vertices
   whose local gradient direction disagrees with the model normal at the seed. Healthy

@@ -96,15 +96,18 @@ class LMRefineResult:
             dominate the mean); ``float('inf')`` when every vertex is
             polarity-rejected, so the degenerate case still trips the gate.
         iterations: Number of LM iterations actually performed.
-        converged: True if the reported pose is a verified optimum: either
+        converged: True if the reported pose is LOCALLY converged: either
             the DT-LM met its step-norm tolerance before the iteration cap,
-            or the final gradient-ridge stage applied and met its own
-            step tolerance (the ridge optimum supersedes the DT objective
-            for the reported pose, and a quantized-DT stall that burns the
-            LM iteration budget at the integer seed is routine on dense
-            edge scenes -- the exact condition the ridge stage exists to
-            polish).  ``False`` means neither stage verified the pose: an
-            unverified fit, consumed by the shared DT fit-quality gates.
+            or the final gradient-ridge stage applied and met its own step
+            tolerance (a quantized-DT stall that burns the LM iteration
+            budget at the integer seed is routine on dense edge scenes --
+            the exact condition the ridge stage exists to polish).  This
+            certifies local optimality only: the ridge is seeded from the
+            DT-LM pose and bounded by its displacement cap, so it can only
+            polish the SAME lock, and a wrong acquisition whose ridge
+            converges is reported as converged.  ``False`` means neither
+            stage reached a local optimum, which the shared DT fit-quality
+            gates treat as an unverified fit.
         inlier_count: Number of vertices that retained a strictly
             positive Tukey weight at the final estimate.
         degenerate: True when no vertex survived reweighting

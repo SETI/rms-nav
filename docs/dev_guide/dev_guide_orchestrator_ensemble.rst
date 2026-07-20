@@ -209,9 +209,29 @@ not evidence against that error.
 A related honesty caveat survives inside the confidence scalar itself: the
 two-member agreement boost assumes the members' errors are independent, so
 two techniques observing the same displaced feature (the ring-edge fit and
-the ring-annulus correlation on one misplaced ringlet) can fuse to the
-combined-confidence cap even as the sigma-gated tier demotes the result. The
-tier, not the scalar, carries the calibrated verdict on such frames.
+the ring-annulus correlation on one misplaced ringlet) can fuse to a high
+scalar confidence even as the sigma-gated tier demotes the result. On such
+frames the tier is the trustworthy verdict and the scalar is not.
+
+That scalar is **not** inert, and it must not be dismissed as documentation.
+The tier boundaries are themselves fitted *from* it: the calibration tooling
+reads each row's fused confidence, fused sigma, and error against truth, and
+solves for the confidence at which each tier reaches its success target. A
+row pairing a near-cap confidence with a multi-pixel error is therefore a
+training point that pushes the fitted boundary upward at the next refit --
+the artifact acting on the very mechanism that is supposed to contain it.
+Two consequences worth stating plainly:
+
+- The regression scenes under ``tests/integration/sim_scenes/`` are not in
+  the calibration cohort (it is generated independently by the campaign's
+  own randomized scene generator), so no scene-level exclusion is needed
+  and none is applied.
+- The cohort's own ring family *does* plant orbit errors with declared
+  sigmas, so it generates rows with this same coupling. The next
+  recalibration has to treat them deliberately -- by pricing the
+  correlated-error discount, or by fitting the boundary against fused sigma
+  rather than the boosted scalar -- rather than absorbing them as evidence
+  that high confidence at multi-pixel error is normal.
 
 Restrictions and assumptions
 ----------------------------

@@ -378,6 +378,17 @@ techniques:
       # the coarse-seed mis-lock signature (Cassini Tethys N1716186428:
       # 12.7% rejection at the 30-iteration cap on a seed 6.8 px off in
       # du; the healthy 11%-rejection frames all converge).
+      #
+      # This gate is CONVERGENCE-discriminated, not margin-discriminated.
+      # The 0.10 threshold sits BELOW the healthy reference (0.110 on the
+      # multi-body DIONE frames), so the convergence flag is the only
+      # thing separating them: a healthy frame that both runs ~11%
+      # rejection and fails to reach a local optimum is hard-rejected.
+      # Two things to know before widening or narrowing this: the
+      # convergence flag now also counts a converged gradient-ridge
+      # polish, which makes True easier to reach; and the healthy
+      # evidence frames (N1702389073 / N1702389662 / N1702390017) are
+      # NOT in the image library, so no CI case holds this margin.
       spurious_unconverged_polarity_rejection_fraction: 0.10
       # Coarse-NCC acquisition-quality gate: the winning coarse shift's
       # in-bounds vertex match fraction must reach this, or the seed

@@ -31,13 +31,16 @@ class CoarseSearchResult:
 
     Parameters:
         offset_vu: ``(dv, du)`` integer offset pair at the peak.
-        score: The winning shift's per-vertex match fraction -- the fraction
-            of its in-bounds polyline vertices landing on edge pixels, in
-            ``[0, 1]``.  ``0.0`` when the polyline is empty or no candidate
-            shift was eligible.  A low score means the coarse acquisition
-            never had a lock: even at its best shift, most of the model
-            found no detected edge underneath it (see
-            :func:`evaluate_dt_fit_gates`).
+        score: The winning shift's match fraction -- the fraction of its
+            in-bounds RASTERIZED POLYLINE PIXELS landing on edge pixels, in
+            ``[0, 1]``.  Note the denominator counts mask pixels, not model
+            vertices: :func:`build_polyline_mask` collapses vertices that
+            round to the same pixel, so this is not directly comparable to
+            a per-vertex count such as a technique's Tukey inlier count.
+            ``0.0`` when the polyline is empty or no candidate shift was
+            eligible.  A low score means the coarse acquisition never had a
+            lock: even at its best shift, most of the model found no
+            detected edge underneath it.
     """
 
     offset_vu: tuple[int, int]
