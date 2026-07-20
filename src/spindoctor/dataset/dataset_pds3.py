@@ -670,7 +670,10 @@ class DataSetPDS3(DataSet):
             nav_results_root: str | Path | FCPath | None = None,
                 Results root for the filters above.  None resolves via the
                 arguments, configuration, or NAV_RESULTS_ROOT environment variable.
-            choose_random_images: int | None = False,
+            choose_random_images: int | None = None,
+                When set, a positive count of images to sample uniformly at
+                random across the selected volumes.  Must be a positive
+                integer; non-positive values raise ValueError.
             max_filenames: Optional[int] = None,
             suffix: Optional[str] = None,
             planets: Optional[str] = None

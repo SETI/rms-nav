@@ -509,12 +509,16 @@ def test_choose_random_images_rejects_non_positive_programmatic(
 
 
 @pytest.mark.parametrize('bad', ['0', '-3'])
-def test_choose_random_images_argparse_rejects_non_positive(bad: str) -> None:
+def test_choose_random_images_argparse_rejects_non_positive(
+    bad: str, capsys: pytest.CaptureFixture[str]
+) -> None:
     parser = argparse.ArgumentParser()
     DataSetPDS3CassiniISS.add_selection_arguments(parser)
 
     with pytest.raises(SystemExit):
         parser.parse_args(['--choose-random-images', bad])
+
+    assert 'positive integer' in capsys.readouterr().err
 
 
 def test_choose_random_images_argparse_accepts_positive() -> None:
