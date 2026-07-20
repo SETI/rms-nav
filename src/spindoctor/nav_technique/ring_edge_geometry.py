@@ -25,9 +25,21 @@ _MAX_SAME_SENSE_SENSITIVITY: float = 4.0 / math.pi
 """Analytic maximum of ``||M^+ b||`` over the same-sense arc family.
 
 Attained by a half turn of arc, where one translation must overshoot the
-middle of the arc to reduce the error at its ends.  Retained as a safety
-bound on the solved sensitivity; opposing-sense geometry is routed to the
-isotropic fallback rather than clamped to this value.
+middle of the arc to reduce the error at its ends.
+
+This is NOT a rare safety net.  It is inert across the same-sense family it
+is named for (nothing there exceeds it), but it is the operative value across
+the whole partially-opposed band: from the conditioning cutoff at about 12.6
+degrees of opposition tilt up to about 30 degrees, the unbounded solve runs
+from 4.58 down to 2.00 while the reported sensitivity is a flat 1.2732.  Over
+that roughly 17-degree-wide band of real geometry the bound, not the solve,
+sets the answer, and it deliberately under-reports the linearized model --
+accepted because that model's amplification there is the fit's own
+ill-conditioning, which the LM covariance already prices (see
+:func:`_absorbed_orbit_sensitivity`).
+
+Note it bounds at ``4 / pi``, not at 1.0: the same-sense overshoot above unity
+is real and is preserved.
 """
 
 
@@ -42,9 +54,31 @@ opposed ansae sit at ratios of 1e-2 to 1e-6 and drive the solve to
 1 / sin(tilt).  Such directions are dropped, so their contribution falls to
 the caller's isotropic term instead of an amplified axis.
 
-Five percent keeps every same-sense arc (a half turn sits at 1.0, and even a
-narrow arc's dominant direction is unaffected) while catching opposed
-geometry from about 10 degrees of tilt down.
+Five percent keeps every same-sense arc (a half turn sits at 0.999, and even
+a narrow arc's dominant direction is unaffected) while catching opposed
+geometry from about 12.6 degrees of tilt down.
+
+THE CUTOFF IS A STEP, AND THE STEP IS VISIBLE IN THE REPORTED SIGMA.  The
+crossing sits at an opposition tilt of 12.6044 degrees; sweeping tilt across
+it, the sensitivity jumps between 1.2732 and 0.  The reported covariance
+therefore steps too: the tier-relevant major sigma falls about 27 percent
+(from ``1.273 sigma`` to ``1.000 sigma``) while the minor axis rises from 0 to
+``sigma`` as the inflation becomes isotropic.  A frame whose opposition tilt
+sits near 12.6 degrees AND whose sigma sits near a tier boundary can therefore
+report a different tier for an arbitrarily small change in geometry.  This is
+deliberate and bounded -- it replaces a ``1 / sin(tilt)`` divergence that
+reached 573 at a tenth of a degree -- but anyone measuring an odd sigma on a
+two-ansa ring frame should look here first.
+
+No image-library frame exercises the opposed-ansae regime: the library's ring
+frames are narrow-angle single-ansa closeups, while the geometry this guards
+against appears in wide-field two-ansa products.  So this value has no
+calibration evidence behind it and none is currently available; it rests on
+the analytic geometry alone.  It stays hard-coded on purpose -- it is a
+numerical-conditioning guard of the same kind as
+:data:`_RANK1_NULL_RELATIVE_THRESHOLD` and ``DEFAULT_PINVH_RCOND``, not a
+physics knob.  The physics lever is
+``rings.orbit_radial_sigma_correlated_fraction``.
 """
 
 
