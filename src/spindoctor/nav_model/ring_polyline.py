@@ -18,6 +18,16 @@ from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 __all__: list[str] = []
 
 
+_MEAN_NORMAL_DEGENERATE_TOLERANCE: float = 1.0e-6
+"""Mean-normal magnitude below which the radial axis is taken as undefined.
+
+Per-vertex normals are unit length, so a well-defined mean radial direction
+has a magnitude of order one; a closed ring's radially-signed normals cancel
+to ~1e-18.  Anything below this tolerance is rounding noise whose direction
+carries no geometry.
+"""
+
+
 FLAT_CURVATURE_THRESHOLD_PX: float = 1.0
 """Pixel-deviation threshold below which a polyline is flagged straight.
 
@@ -164,13 +174,46 @@ def _radial_outward_sign(
 
 
 def _radial_extent_px(vertices_vu: NDArrayFloatType, normals_vu: NDArrayFloatType) -> float:
-    """Return the polyline's radial extent (max - min projection on mean normal)."""
+    """Return the polyline's radial extent (max - min projection on mean normal).
+
+    The projection axis is the MEAN normal, so it is sign-sensitive.  Once the
+    normals are radially signed (see :func:`_polyline_from_edge_mask`) this
+    measures the extent along the polyline's genuine mean radial direction; a
+    half turn of arc then returns the ring radius, which is geometrically
+    right, where scan-order signs previously returned a larger number set by
+    the rasterizer's quadrant bias.  The values feed the annulus emission gate
+    (``radial_extent_px <= max_radial_px``), so a short curved edge can measure
+    roughly half what it used to.
+
+    A closed or near-closed ring cancels the mean normal to numerical noise
+    rather than exactly zero, so the degenerate case is caught by a relative
+    tolerance rather than an ``== 0`` test: normalizing noise would otherwise
+    project onto an arbitrary axis, which for a projected (elliptical) ring
+    reports an extent unrelated to the true radial span.  The fallback is the
+    dominant axis of the normals' outer-product sum, which is well defined
+    whatever the signs do.
+
+    Parameters:
+        vertices_vu: ``(N, 2)`` polyline vertices.
+        normals_vu: ``(N, 2)`` per-vertex normals.
+
+    Returns:
+        The extent in pixels; ``0.0`` for an empty polyline.
+    """
     if vertices_vu.shape[0] == 0:
         return 0.0
     mean_normal = normals_vu.mean(axis=0)
     norm = float(np.linalg.norm(mean_normal))
-    if norm == 0.0:
-        return 0.0
+    if norm < _MEAN_NORMAL_DEGENERATE_TOLERANCE:
+        # Signs cancel (a closed ring): fall back to the sign-independent
+        # dominant axis of the normal distribution.
+        outer_sum = normals_vu.T @ normals_vu
+        _eigvals, eigvecs = np.linalg.eigh(outer_sum)
+        axis = eigvecs[:, -1]
+        if not np.isfinite(axis).all():
+            return 0.0
+        projections = vertices_vu @ axis
+        return float(projections.max() - projections.min())
     mean_normal = mean_normal / norm
     projections = vertices_vu @ mean_normal
     return float(projections.max() - projections.min())

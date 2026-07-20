@@ -54,6 +54,58 @@ def test_absorbed_sensitivity_opposite_sides_cancel() -> None:
     assert float(np.linalg.norm(g)) < 1.0e-9
 
 
+def _opposed_ansae(tilt_deg: float, n: int = 200) -> np.ndarray:
+    """Two edge groups with nearly antiparallel outward normals.
+
+    The geometry of two ansae of one ring in a wide field, or the near and far
+    side of the ring plane: the normals differ from exactly antiparallel by
+    ``tilt_deg``.
+    """
+    tilt = np.deg2rad(tilt_deg)
+    near = np.tile([[np.cos(tilt), np.sin(tilt)]], (n, 1))
+    far = np.tile([[-np.cos(tilt), np.sin(tilt)]], (n, 1))
+    return np.vstack([near, far])
+
+
+@pytest.mark.parametrize('tilt_deg', [10.0, 5.0, 1.0, 0.1])
+def test_absorbed_sensitivity_does_not_diverge_on_opposed_ansae(tilt_deg: float) -> None:
+    """Nearly-opposed normals must not amplify the reported uncertainty.
+
+    An unguarded least-squares solve diverges as ``1 / sin(tilt)`` here --
+    measured 5.8 at 10 degrees, 57 at 1 degree and 573 at 0.1 -- because
+    ``b`` survives only along the direction the geometry least constrains.
+    That amplification is the fit's own ill-conditioning, which the LM
+    covariance already prices, so it must not be fed back in as a coherent
+    displacement sensitivity.  The conditioning cutoff drops the direction and
+    the caller reports the isotropic bound instead.
+    """
+    normals = _opposed_ansae(tilt_deg)
+    g = _absorbed_orbit_sensitivity(normals, np.ones(len(normals)))
+    assert float(np.linalg.norm(g)) == pytest.approx(0.0, abs=1.0e-9)
+
+
+def test_absorbed_sensitivity_bounded_on_partially_opposed_geometry() -> None:
+    """Partially opposed normals stay inside the same-sense maximum.
+
+    At 30 degrees of tilt the two groups still share a radial component and
+    the solve stays inside the conditioning cutoff, but its unbounded value
+    (2.0) exceeds anything the same-sense family can reach, so it is bounded
+    at ``4 / pi``.
+    """
+    normals = _opposed_ansae(30.0)
+    g = _absorbed_orbit_sensitivity(normals, np.ones(len(normals)))
+    assert float(np.linalg.norm(g)) == pytest.approx(4.0 / np.pi, rel=1.0e-6)
+
+
+def test_absorbed_sensitivity_never_exceeds_the_same_sense_maximum() -> None:
+    """No geometry reports a sensitivity above the analytic bound."""
+    cases = [_arc_normals(deg) for deg in (5.0, 45.0, 120.0, 180.0, 270.0, 360.0)]
+    cases += [_opposed_ansae(tilt) for tilt in (0.1, 1.0, 5.0, 10.0, 30.0, 60.0)]
+    for normals in cases:
+        g = _absorbed_orbit_sensitivity(normals, np.ones(len(normals)))
+        assert float(np.linalg.norm(g)) <= 4.0 / np.pi + 1.0e-9
+
+
 def test_absorbed_sensitivity_overshoots_on_a_half_ring() -> None:
     """A half ring absorbs MORE than the displacement (the 4/pi overshoot).
 

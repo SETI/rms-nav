@@ -9,17 +9,43 @@ under the size cap; the technique imports every helper from here.
 
 from __future__ import annotations
 
+import math
 from typing import cast
 
 import numpy as np
-from scipy.linalg import pinvh
 
 from spindoctor.feature.feature import NavFeature
 from spindoctor.feature.geometry import RingEdgePolyline
-from spindoctor.nav_technique.dt_fitting import DEFAULT_PINVH_RCOND
 from spindoctor.support.types import NDArrayFloatType
 
 __all__: list[str] = []
+
+
+_MAX_SAME_SENSE_SENSITIVITY: float = 4.0 / math.pi
+"""Analytic maximum of ``||M^+ b||`` over the same-sense arc family.
+
+Attained by a half turn of arc, where one translation must overshoot the
+middle of the arc to reduce the error at its ends.  Retained as a safety
+bound on the solved sensitivity; opposing-sense geometry is routed to the
+isotropic fallback rather than clamped to this value.
+"""
+
+
+_MIN_CONSTRAINED_EIGENVALUE_RATIO: float = 0.05
+"""Relative eigenvalue below which a direction counts as unconstrained.
+
+The normals' weighted outer-product sum is the geometric information the
+absorbed-translation solve inverts.  A direction holding less than this
+fraction of the dominant eigenvalue is one the edge geometry barely
+determines, and inverting it amplifies rather than measures: two nearly
+opposed ansae sit at ratios of 1e-2 to 1e-6 and drive the solve to
+1 / sin(tilt).  Such directions are dropped, so their contribution falls to
+the caller's isotropic term instead of an amplified axis.
+
+Five percent keeps every same-sense arc (a half turn sits at 1.0, and even a
+narrow arc's dominant direction is unaffected) while catching opposed
+geometry from about 10 degrees of tilt down.
+"""
 
 
 _RANK1_NULL_RELATIVE_THRESHOLD: float = 1.0e-8
@@ -120,10 +146,6 @@ def _absorbed_orbit_sensitivity(
     mis-signed edge is therefore an UNDER-inflation (a spurious cancellation),
     not an over-inflation.
 
-    Parameters:
-        polarity_normals: ``(N, 2)`` per-vertex edge normals (either sign).
-        weights: ``(N,)`` non-negative per-vertex final fit weights.
-
     A small ``||g||`` says the LINEARIZED fit absorbs little, NOT that the
     recovered offset is safe: the acquisition is nonlinear, and the coarse
     integer search can still select a basin whose translation aligns a long
@@ -134,21 +156,41 @@ def _absorbed_orbit_sensitivity(
     near-isotropic geometry reports the bound in every direction rather than
     reporting nothing.
 
-    ``||g||`` is NOT capped.  It legitimately exceeds 1 over a wide band of
-    arc coverage (about 1.27 at 180 degrees): to explain "every vertex moved
-    outward by d" a single translation overshoots the middle of the arc to
-    reduce the error at its ends, so the fit really does absorb more than the
-    displacement itself.  An earlier revision clamped it at 1.0 on the
-    argument that a displacement of ``sigma`` cannot move the answer by more
-    than ``sigma``; that clamp contradicted the derivation it was applied to
-    and fired in essentially every non-degenerate case, making the shipped
-    behavior the clamp's rather than the model's.
+    ``||g||`` is not clamped to 1: it legitimately exceeds 1 over the
+    same-sense arc family (about ``4 / pi`` at 180 degrees), because to explain
+    "every vertex moved outward by d" a single translation overshoots the
+    middle of the arc to reduce the error at its ends.  An earlier revision
+    clamped it at 1.0, which fired in essentially every non-degenerate case
+    and made the shipped behavior the clamp's rather than the model's.
+    ``_MAX_SAME_SENSE_SENSITIVITY`` (``4 / pi``, the analytic maximum over that
+    family) is retained as a safety bound only.
+
+    OPPOSING-SENSE GEOMETRY IS DETECTED, NOT SOLVED.  When the normals carry
+    both radial senses -- the two ansae of one ring in a wide field, the near
+    and far side of the ring plane, or an arc past a half turn -- the solve
+    becomes ill-conditioned in exactly the direction ``b`` survives in, and a
+    naive ``M^{+} b`` diverges as ``1 / sin(tilt)`` (about 5.8 at 10 degrees of
+    tilt, 57 at 1 degree, 573 at 0.1).  That amplification is the FIT'S OWN
+    ill-conditioning, which the LM covariance already reports as a large
+    variance along the same direction, so feeding it back as
+    ``sigma**2 g g^T`` would double-count it.  The physics agrees: with
+    opposing radial senses a coherent radial error is largely a DILATION
+    rather than a translation.
+
+    Directions holding less than ``_MIN_CONSTRAINED_EIGENVALUE_RATIO`` of the
+    dominant eigenvalue are therefore dropped from the solve, so opposed
+    geometry contributes nothing and falls through to the caller's isotropic
+    term at ``sigma`` -- the same honest "no predictable direction" statement
+    the closed-annulus limit gets.  Clamping the divergence to a plausible
+    number instead would have hidden that the geometry is pathological.
+
+    Parameters:
+        polarity_normals: ``(N, 2)`` per-vertex edge normals (either sign).
+        weights: ``(N,)`` non-negative per-vertex final fit weights.
 
     Returns:
-        The ``(2,)`` sensitivity vector ``g``.  Magnitude is bounded in
-        practice by the pseudoinverse cutoff, which drops directions the fit
-        does not constrain (whose variance the fit's own covariance already
-        reports as large).
+        The ``(2,)`` sensitivity vector ``g``, or a zero vector when the
+        geometry spans opposing radial senses (isotropic fallback).
     """
     w = np.asarray(weights, np.float64)
     if w.size == 0 or not bool(np.any(w > 0.0)):
@@ -156,7 +198,28 @@ def _absorbed_orbit_sensitivity(
     info = (polarity_normals * w[:, None]).T @ polarity_normals
     info = 0.5 * (info + info.T)
     b = w @ polarity_normals
-    g = pinvh(info, rtol=DEFAULT_PINVH_RCOND) @ b
+    # Solve in the eigenbasis, dropping directions the normals barely
+    # constrain.  ``pinvh``'s own 1e-9 cutoff is five orders of magnitude too
+    # permissive for this: opposed-sense geometry sits at an eigenvalue ratio
+    # of 1e-2 to 1e-6 and sails through it, and since ``b`` survives ONLY in
+    # that weak direction there, the solve returns the 1 / sin(tilt)
+    # divergence.  A geometric cutoff drops it to zero instead, which the
+    # caller renders as the isotropic term.
+    eigvals, eigvecs = np.linalg.eigh(info)
+    largest = float(eigvals.max()) if eigvals.size else 0.0
+    g = np.zeros(2, np.float64)
+    if largest > 0.0:
+        for index in range(eigvals.shape[0]):
+            eigenvalue = float(eigvals[index])
+            if eigenvalue / largest < _MIN_CONSTRAINED_EIGENVALUE_RATIO:
+                continue
+            axis = eigvecs[:, index]
+            g = g + (float(axis @ b) / eigenvalue) * axis
+    norm = float(np.linalg.norm(g))
+    if norm > _MAX_SAME_SENSE_SENSITIVITY:
+        # Partially-opposed geometry that stays inside the conditioning cutoff
+        # can still solve above the same-sense maximum; bound it there.
+        g = g * (_MAX_SAME_SENSE_SENSITIVITY / norm)
     return cast(NDArrayFloatType, g)
 
 
@@ -176,14 +239,17 @@ def _effective_orbit_sigma_px(features: list[NavFeature], weights: NDArrayFloatT
     That combine is conservative only for SAME-SENSE geometry -- features
     whose outward radial directions point the same way in image space, so a
     common radial error displaces them together.  For features on opposite
-    radial sides of the planet in a wide field a common error is a dilation
-    that the fit largely does not absorb as translation, and pairing a mean
-    of sigmas with one representative direction over-inflates rather than
-    erring conservative.  The geometry partially self-limits: wide-spread
-    normals shrink the absorbed-sensitivity vector
-    (:func:`_absorbed_orbit_sensitivity`), so the inflation shrinks with
-    them.  A per-feature sensitivity decomposition is what would model the
-    opposite-sense case properly.
+    radial sides of the planet in a wide field a common error is largely a
+    dilation the fit does not absorb as translation, and pairing a mean of
+    sigmas with one shared direction does not model that.
+
+    Wide-spread normals do NOT shrink the sensitivity by themselves -- for
+    opposing senses the unguarded solve AMPLIFIES, which is why
+    :func:`_absorbed_orbit_sensitivity` detects that geometry and routes it to
+    the isotropic fallback rather than solving a direction for it.  So the
+    opposing-sense case is bounded and reported at ``sigma`` on every axis,
+    not modeled: a per-feature sensitivity decomposition is what would model
+    it properly.
 
     Parameters:
         features: The consumed features, in the order their vertices were

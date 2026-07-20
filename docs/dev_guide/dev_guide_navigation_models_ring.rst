@@ -65,7 +65,13 @@ Per-vertex covariance
 ---------------------
 
 Each vertex's normal is signed against the ring-radius backplane so it points toward
-increasing ring radius.  The mask-neighbour test that finds the normal AXIS cannot
+increasing ring radius.  This also affects the annulus emission gate below: the radial
+extent is measured by projecting onto the MEAN normal, which is sign-sensitive, so a half
+turn of arc now returns the ring radius (geometrically right) where scan-order signs
+returned a larger value set by the rasterizer's quadrant bias, and short curved edges
+measure roughly half what they used to.  An edge near the ``max_radial_px`` threshold can
+therefore emit as a ``RING_ANNULUS`` where it previously emitted as a ``RING_EDGE``,
+changing which technique navigates it.  The mask-neighbour test that finds the normal AXIS cannot
 distinguish the high-radius side from the low-radius side on its own -- it would emit signs
 that follow scan order and rasterization -- and the orbit-uncertainty channel sums the
 normals, so a random sign per vertex would fabricate coherence on geometry that should
