@@ -21,7 +21,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, cast
 
-from filecache import FCPath
+from filecache import FCPath, FileCache
 from pdslogger import PdsLogger
 
 from .dataset import ImageFile
@@ -59,7 +59,7 @@ class ResultsFilter:
     def __init__(
         self,
         volumes: Iterable[str],
-        nav_results_root: FCPath,
+        nav_results_root: str | Path | FCPath,
         *,
         has_offset_file: bool = False,
         has_no_offset_file: bool = False,
@@ -76,7 +76,9 @@ class ResultsFilter:
             volumes: Volume names selected by the other constraints; only these
                 subdirectories of the results root are walked.
             nav_results_root: Root of the navigation results tree; may be a
-                cloud URL.
+                cloud URL.  A ``str`` or ``Path`` is normalized to an
+                :class:`FCPath` at construction; an existing :class:`FCPath` is
+                used as given so its file cache is preserved.
             has_offset_file: Only keep images whose offset metadata file exists.
             has_no_offset_file: Only keep images whose offset metadata file does
                 not exist.
@@ -120,7 +122,12 @@ class ResultsFilter:
         self._needs_offset_presence = has_offset_file or needs_metadata_read
         self._needs_png_presence = has_png_file
         self._needs_metadata_read = needs_metadata_read
-        self._nav_results_root = nav_results_root
+        if isinstance(nav_results_root, FCPath):
+            self._nav_results_root = nav_results_root
+        else:
+            # Results are not shared with other processes and may change between
+            # runs, so use a private temporary cache like the writers do.
+            self._nav_results_root = FileCache(None).new_path(nav_results_root)
         self._logger = logger
         self._offset_rel_paths: set[str] = set()
         self._png_rel_paths: set[str] = set()

@@ -792,14 +792,10 @@ class DataSetPDS3(DataSet):
                 nav_results_root = get_nav_results_root(
                     arguments if arguments is not None else argparse.Namespace(), self.config
                 )
-            if isinstance(nav_results_root, FCPath):
-                results_root = nav_results_root
-            else:
-                # Results are not shared with other processes and may change between
-                # runs, so use a private temporary cache like the writers do.
-                results_root = FileCache(None).new_path(nav_results_root)
+            # ResultsFilter accepts the str | Path | FCPath union and normalizes
+            # at its boundary, preserving an existing FCPath's file cache.
             results_filter = ResultsFilter(
-                valid_volumes, results_root, logger=logger, **results_filter_flags
+                valid_volumes, nav_results_root, logger=logger, **results_filter_flags
             )
 
         # URLs to the volume raw directory and index directory
