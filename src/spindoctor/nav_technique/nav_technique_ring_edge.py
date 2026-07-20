@@ -693,6 +693,16 @@ def _absorbed_orbit_sensitivity(
         polarity_normals: ``(N, 2)`` per-vertex edge normals (either sign).
         weights: ``(N,)`` non-negative per-vertex final fit weights.
 
+    A small ``||g||`` says the LINEARIZED fit absorbs little, NOT that the
+    recovered offset is safe: the acquisition is nonlinear, and the coarse
+    integer search can still select a basin whose translation aligns a long
+    arc of a radially misplaced ring (the simulated closed-ringlet scene lands
+    ~2.2 px from truth on a 2.5 px planted radial error, with every vertex an
+    inlier).  The caller therefore blends this direction with an isotropic
+    term as ``||g||`` falls -- see :func:`_orbit_inflated_covariance` -- so a
+    near-isotropic geometry reports the bound in every direction rather than
+    reporting nothing.
+
     Returns:
         The ``(2,)`` sensitivity vector ``g``, with ``||g||`` capped at 1.0:
         a coherent displacement of ``sigma`` cannot honestly move the recovered
@@ -775,29 +785,49 @@ def _effective_orbit_sigma_px(features: list[NavFeature], weights: NDArrayFloatT
 
 def _orbit_inflated_covariance(
     covariance: NDArrayFloatType,
-    n_hat: NDArrayFloatType,
+    sensitivity_g: NDArrayFloatType,
     sigma_orbit_px: float,
 ) -> NDArrayFloatType:
-    """Add the orbit-uncertainty variance along ``n_hat`` to the covariance.
+    """Add the orbit-uncertainty variance to the covariance's translation block.
 
-    Returns a copy of ``covariance`` with ``sigma_orbit_px**2 *
-    outer(n_hat, n_hat)`` added to the translation block -- the full 2x2
-    (directional) form of the quadrature sum, so only the radial axis
-    widens.  The rotation block of a 3x3 input is untouched.  Adding a
-    positive-semidefinite rank-1 term preserves positive semidefiniteness,
-    and adding it along a rank-1 projection's own axis preserves exact
-    tangential singularity.
+    The added term interpolates between a purely directional and a purely
+    isotropic inflation on the absorbed-sensitivity magnitude ``||g||``:
+
+    .. math::
+        \\Sigma \\mathrel{+}= \\sigma^{2}
+            \\bigl[\\, g g^{T} + (1 - ||g||^{2})\\, I \\,\\bigr]
+
+    - ``||g|| = 1`` (a short arc, or a rank-1 straight edge where ``g`` is
+      exactly the projection's own axis): the term is exactly
+      ``sigma**2 g g^T``.  Only the radial axis widens, and an exactly
+      singular rank-1 covariance stays exactly singular along its tangent.
+    - ``||g|| -> 0`` (a closed annulus, or features whose radial directions
+      cancel): the term becomes ``sigma**2 I``.  The linearized fit absorbs
+      almost nothing there, but the nonlinear acquisition still can -- the
+      closed-ringlet regression scene lands ~2.2 px from truth on a 2.5 px
+      planted radial error -- and which direction it locks in is exactly what
+      cannot be predicted, so the bound is reported on every axis instead of
+      on an axis chosen by rounding.
+
+    The interpolation is smooth (no threshold to tune), every term is positive
+    semidefinite so the result stays a valid covariance, and the rotation
+    block of a 3x3 input is untouched.
 
     Parameters:
         covariance: ``(2, 2)`` or ``(3, 3)`` reported covariance.
-        n_hat: Unit 2-vector radial direction in ``(v, u)`` order.
+        sensitivity_g: The ``(2,)`` absorbed-translation sensitivity from
+            :func:`_absorbed_orbit_sensitivity` (or a unit radial axis on the
+            rank-1 path), in ``(v, u)`` order with ``||g|| <= 1``.
         sigma_orbit_px: The effective orbit sigma in pixels.
 
     Returns:
         The inflated covariance (a new array).
     """
     out = np.array(covariance, dtype=np.float64, copy=True)
-    out[:2, :2] += (sigma_orbit_px * sigma_orbit_px) * np.outer(n_hat[:2], n_hat[:2])
+    g = np.asarray(sensitivity_g, np.float64)[:2]
+    g_sq = min(float(g @ g), 1.0)
+    variance = sigma_orbit_px * sigma_orbit_px
+    out[:2, :2] += variance * (np.outer(g, g) + (1.0 - g_sq) * np.eye(2))
     return cast(NDArrayFloatType, out)
 
 

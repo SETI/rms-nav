@@ -887,18 +887,20 @@ def test_ring_edge_orbit_sigma_widens_partial_arc_along_its_radial_axis(
     assert float(eigvals.min()) == pytest.approx(0.0, abs=1.0e-9)
 
 
-def test_ring_edge_orbit_sigma_barely_widens_full_annulus(
+def test_ring_edge_orbit_sigma_widens_full_annulus_isotropically(
     disc_image: DiscImageFactory,
     circle_polyline: CirclePolylineFactory,
     make_ring_feature: NavFeatureFactory,
     make_nav_context: NavContextFactory,
 ) -> None:
-    """A full annulus absorbs almost none of a coherent radial error.
+    """A closed annulus reports the orbit bound on BOTH axes, not one.
 
     A uniform semimajor-axis error dilates a closed ring rather than
-    translating it: the normals point in every direction, so the
-    least-squares translation that best explains a uniform along-normal
-    displacement is ~zero and the reported covariance must barely move.
+    translating it, so the linearized fit absorbs almost none of it and no
+    radial axis is distinguished.  The nonlinear acquisition can still lock
+    onto a translation, and which direction it picks is exactly what cannot
+    be predicted, so the inflation becomes isotropic: both axes carry the
+    full ``sigma_orbit**2``.
 
     This is the regression guard for the earlier construction, which took the
     dominant eigenvector of the normals' outer-product sum.  On a closed ring
@@ -906,7 +908,7 @@ def test_ring_edge_orbit_sigma_barely_widens_full_annulus(
     so the axis is set by rounding), and it widened one arbitrary axis by the
     full variance while leaving the perpendicular axis untouched -- letting a
     frame the channel should demote still pass the tier gate through the
-    un-widened axis.
+    un-widened axis.  Both eigenvalues must now be inflated.
     """
     shape = (200, 200)
     cv, cu = 100.0, 100.0
@@ -928,9 +930,12 @@ def test_ring_edge_orbit_sigma_barely_widens_full_annulus(
     result_plain = technique.navigate([plain], context)
     result_declared = technique.navigate([declared], context)
     diff = np.asarray(result_declared.covariance_px2) - np.asarray(result_plain.covariance_px2)
-    # Both axes stay put: well under 1% of the sigma**2 = 4.0 px^2 a
-    # fully-absorbed displacement would have added.
-    assert float(np.abs(diff).max()) < 0.04
+    eigvals = np.linalg.eigvalsh(diff)
+    # No axis is left un-widened: the SMALLEST eigenvalue of the added term
+    # still carries essentially the whole sigma**2 = 4.0 px^2.
+    assert float(eigvals.min()) == pytest.approx(4.0, rel=0.05)
+    # And no axis is double-counted beyond the bound.
+    assert float(eigvals.max()) == pytest.approx(4.0, rel=0.05)
 
 
 def test_ring_edge_orbit_sigma_offset_unchanged(
@@ -1087,3 +1092,58 @@ def test_effective_orbit_sigma_zero_when_undeclared(
         'a', vertices=vertices, outward_normals=normals, is_straight_line=False
     )
     assert _effective_orbit_sigma_px([feat], np.ones(10)) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Coarse-acquisition gate, end to end through navigate()
+# ---------------------------------------------------------------------------
+
+
+def test_ring_edge_nav_spurious_when_coarse_acquisition_finds_no_lock(
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A model with no matching image edge is rejected by the coarse gate.
+
+    Drives the real acquisition (no monkeypatched score): the image carries a
+    small disc far from the model ring, so no integer shift in the search
+    window puts an appreciable fraction of the model's rasterized polyline on
+    a detected edge pixel.  The fit has nothing to refine, and the technique
+    must self-flag rather than report the LM's polish of noise.
+    """
+    shape = (300, 300)
+    # A small bright disc in one corner: real edges exist (so the DT is not
+    # degenerate) but almost none of them lie under the long model ring.
+    image = np.zeros(shape, dtype=np.float64)
+    vs, us = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), indexing='ij')
+    image[np.hypot(vs - 30.0, us - 30.0) <= 6.0] = 100.0
+    vertices, outward = circle_polyline((170.0, 170.0), 80.0, 600)
+    feature = make_ring_feature(
+        'orphan', vertices=vertices, outward_normals=outward, is_straight_line=False
+    )
+    technique = RingEdgeNav()
+    result = technique.navigate([feature], make_nav_context(image))
+    assert isinstance(result.diagnostics, RingEdgeDiagnostics)
+    assert result.diagnostics.coarse_peak_fraction < 0.05
+    assert result.spurious is True
+
+
+def test_ring_edge_nav_healthy_scene_clears_the_coarse_gate(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """The coarse gate stays quiet on a normal acquisition (margin check)."""
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 32.0)
+    vertices, outward = circle_polyline((99.3, 98.7), 32.0, 120)
+    feature = make_ring_feature(
+        'outer', vertices=vertices, outward_normals=outward, is_straight_line=False
+    )
+    technique = RingEdgeNav()
+    result = technique.navigate([feature], make_nav_context(image))
+    assert isinstance(result.diagnostics, RingEdgeDiagnostics)
+    assert result.diagnostics.coarse_peak_fraction > 0.05
+    assert result.spurious is False
