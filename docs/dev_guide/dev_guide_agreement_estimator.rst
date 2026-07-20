@@ -91,8 +91,11 @@ measurable by construction; the campaign record holds the numbers):
   rank-one ring. The shared-covariance assumption must hold across the
   pair (similar apparent size and geometry), and same-technique
   cross-body pairs must first be shown uncorrelated: correlation there
-  collapses the separation silently (measured in the campaign; the
-  disc-vs-disc pair on one frame is *not* clean in the current sim).
+  corrupts the separation silently while the system stays
+  well-conditioned. The campaign measured exactly this failure -- the
+  limb-vs-limb pair on one frame carries a large common-mode error in
+  the current sim -- and restoring correct recovery required declaring
+  that pair's covariance in the solve rather than assuming it away.
 
 Bias independence and the shared preprocessing layer
 ====================================================
