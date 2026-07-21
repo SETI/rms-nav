@@ -75,6 +75,8 @@ def _make_annulus_feature(
     planted_offset_vu: tuple[float, float] = (0.0, 0.0),
     subject_range_km: float = 1.5e9,
     constituent_count: int = 4,
+    orbit_normals_vu: NDArrayFloatType | None = None,
+    sigma_orbit_radial_px: float = 0.0,
 ) -> NavFeature:
     """Build a RING_ANNULUS feature whose template is shifted by a planted offset.
 
@@ -82,8 +84,12 @@ def _make_annulus_feature(
     postage-stamp bbox.  ``planted_offset_vu`` shifts the predicted
     center relative to the actual image center, so the technique should
     report ``offset_px = planted_offset_vu`` (predicted + offset =
-    actual).
+    actual).  ``orbit_normals_vu`` and ``sigma_orbit_radial_px`` populate
+    the radial orbit-uncertainty channel the technique widens its
+    covariance from.
     """
+    if orbit_normals_vu is None:
+        orbit_normals_vu = np.zeros((0, 2), dtype=np.float64)
     pred_v = image_center_vu[0] - planted_offset_vu[0]
     pred_u = image_center_vu[1] - planted_offset_vu[1]
     half_extent = round(outer_radius) + 8
@@ -106,6 +112,8 @@ def _make_annulus_feature(
         geometry=RingAnnulusGeometry(
             bbox_extfov_vu=bbox,
             predicted_center_vu=(pred_v, pred_u),
+            orbit_normals_vu=orbit_normals_vu,
+            sigma_orbit_radial_px=sigma_orbit_radial_px,
         ),
         subject_range_km=subject_range_km,
         position_cov_px=None,
@@ -480,3 +488,171 @@ def test_ring_annulus_model_error_floor_inflates_covariance(
     cov_floored = floored.navigate([feature], context).covariance_px2
     for axis in (0, 1):
         assert cov_floored[axis, axis] == pytest.approx(cov_bare[axis, axis] + 1.5**2, rel=1e-9)
+
+
+def _closed_ring_normals(count: int) -> NDArrayFloatType:
+    """Return ``count`` outward unit normals evenly spaced around a full ring."""
+    theta = np.linspace(0.0, 2.0 * np.pi, count, endpoint=False)
+    return np.stack([np.cos(theta), np.sin(theta)], axis=1)
+
+
+def _orbit_channel_fixture(
+    make_nav_context: NavContextFactory,
+    *,
+    orbit_normals_vu: NDArrayFloatType,
+    sigma_orbit_radial_px: float,
+) -> tuple[NDArrayFloatType, NDArrayFloatType]:
+    """Navigate one annulus with and without the orbit channel; return both covariances.
+
+    Both runs disable the size and localization covariance terms so the
+    only difference between them is the orbit-uncertainty inflation.
+    """
+    shape = (180, 180)
+    image_center = (90.0, 90.0)
+    image = _render_annulus_image(shape, image_center, 14.0, 28.0)
+    context = make_nav_context(image, extfov_margin_vu=(16, 16))
+    tuning = NCCCovarianceTuning(
+        localization_uncertainty_scale=0.0, model_error_size_frac=0.0, model_error_floor_px=0.0
+    )
+
+    def _cov(sigma: float) -> NDArrayFloatType:
+        feature = _make_annulus_feature(
+            'SATURN',
+            extfov_shape=shape,
+            image_center_vu=image_center,
+            inner_radius=14.0,
+            outer_radius=28.0,
+            planted_offset_vu=(2.0, -3.0),
+            orbit_normals_vu=orbit_normals_vu,
+            sigma_orbit_radial_px=sigma,
+        )
+        technique = RingAnnulusNav()
+        technique._cov_tuning = tuning
+        return np.asarray(technique.navigate([feature], context).covariance_px2)
+
+    return _cov(0.0), _cov(sigma_orbit_radial_px)
+
+
+def test_orbit_channel_inflates_isotropically_on_closed_ring(
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A closed ring's normals cancel, so the orbit sigma widens every axis equally.
+
+    A uniform radial error of a full ring is a dilation, not a
+    translation, so the absorbed direction is near zero and the bound is
+    reported on both axes (the direction the nonlinear NCC would lock is
+    unpredictable).
+    """
+    sigma = 5.0
+    cov_off, cov_on = _orbit_channel_fixture(
+        make_nav_context, orbit_normals_vu=_closed_ring_normals(360), sigma_orbit_radial_px=sigma
+    )
+    assert cov_on[0, 0] == pytest.approx(cov_off[0, 0] + sigma**2, rel=1e-6)
+    assert cov_on[1, 1] == pytest.approx(cov_off[1, 1] + sigma**2, rel=1e-6)
+
+
+def test_orbit_channel_directional_on_parallel_normals(
+    make_nav_context: NavContextFactory,
+) -> None:
+    """Normals pointing one way widen only that axis (a short arc absorbs it fully)."""
+    sigma = 5.0
+    normals = np.tile(np.array([1.0, 0.0]), (200, 1))
+    cov_off, cov_on = _orbit_channel_fixture(
+        make_nav_context, orbit_normals_vu=normals, sigma_orbit_radial_px=sigma
+    )
+    assert cov_on[0, 0] == pytest.approx(cov_off[0, 0] + sigma**2, rel=1e-6)
+    assert cov_on[1, 1] == pytest.approx(cov_off[1, 1], rel=1e-6)
+
+
+def test_orbit_channel_absent_when_sigma_zero(
+    make_nav_context: NavContextFactory,
+) -> None:
+    """No declared orbit sigma leaves the covariance and diagnostic untouched."""
+    shape = (180, 180)
+    image_center = (90.0, 90.0)
+    image = _render_annulus_image(shape, image_center, 14.0, 28.0)
+    feature = _make_annulus_feature(
+        'SATURN',
+        extfov_shape=shape,
+        image_center_vu=image_center,
+        inner_radius=14.0,
+        outer_radius=28.0,
+        planted_offset_vu=(2.0, -3.0),
+        orbit_normals_vu=_closed_ring_normals(360),
+        sigma_orbit_radial_px=0.0,
+    )
+    context = make_nav_context(image, extfov_margin_vu=(16, 16))
+    technique = RingAnnulusNav()
+    technique._cov_tuning = NCCCovarianceTuning(
+        localization_uncertainty_scale=0.0, model_error_size_frac=0.0, model_error_floor_px=0.0
+    )
+    result = technique.navigate([feature], context)
+    assert isinstance(result.diagnostics, RingAnnulusDiagnostics)
+    assert result.diagnostics.sigma_orbit_radial_px == 0.0
+
+
+def test_orbit_channel_records_effective_sigma_in_diagnostics(
+    make_nav_context: NavContextFactory,
+) -> None:
+    """The consumed orbit sigma is echoed on the diagnostics for auditability."""
+    shape = (180, 180)
+    image_center = (90.0, 90.0)
+    image = _render_annulus_image(shape, image_center, 14.0, 28.0)
+    feature = _make_annulus_feature(
+        'SATURN',
+        extfov_shape=shape,
+        image_center_vu=image_center,
+        inner_radius=14.0,
+        outer_radius=28.0,
+        orbit_normals_vu=_closed_ring_normals(360),
+        sigma_orbit_radial_px=3.5,
+    )
+    context = make_nav_context(image, extfov_margin_vu=(16, 16))
+    result = RingAnnulusNav().navigate([feature], context)
+    assert isinstance(result.diagnostics, RingAnnulusDiagnostics)
+    assert result.diagnostics.sigma_orbit_radial_px == pytest.approx(3.5)
+
+
+def test_annulus_orbit_channel_combines_features_by_vertex_share() -> None:
+    """The helper concatenates normals and vertex-weights the per-feature sigmas."""
+    from spindoctor.nav_technique.nav_technique_ring_annulus import _annulus_orbit_channel
+
+    feat_a = _make_annulus_feature(
+        'A',
+        extfov_shape=(80, 80),
+        image_center_vu=(40.0, 40.0),
+        inner_radius=10.0,
+        outer_radius=18.0,
+        orbit_normals_vu=np.tile(np.array([1.0, 0.0]), (30, 1)),
+        sigma_orbit_radial_px=2.0,
+    )
+    feat_b = _make_annulus_feature(
+        'B',
+        extfov_shape=(80, 80),
+        image_center_vu=(40.0, 40.0),
+        inner_radius=10.0,
+        outer_radius=18.0,
+        orbit_normals_vu=np.tile(np.array([1.0, 0.0]), (10, 1)),
+        sigma_orbit_radial_px=6.0,
+    )
+    _g, sigma = _annulus_orbit_channel([feat_a, feat_b])
+    # (30 * 2 + 10 * 6) / 40 = 3.0
+    assert sigma == pytest.approx(3.0)
+
+
+def test_annulus_orbit_channel_empty_when_no_sigma() -> None:
+    """A feature with normals but no declared sigma contributes nothing."""
+    from spindoctor.nav_technique.nav_technique_ring_annulus import _annulus_orbit_channel
+
+    feat = _make_annulus_feature(
+        'A',
+        extfov_shape=(80, 80),
+        image_center_vu=(40.0, 40.0),
+        inner_radius=10.0,
+        outer_radius=18.0,
+        orbit_normals_vu=np.tile(np.array([1.0, 0.0]), (30, 1)),
+        sigma_orbit_radial_px=0.0,
+    )
+    g, sigma = _annulus_orbit_channel([feat])
+    assert sigma == 0.0
+    assert float(np.linalg.norm(g)) == 0.0

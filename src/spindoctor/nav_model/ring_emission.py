@@ -114,6 +114,45 @@ def _build_edge_feature(
     )
 
 
+def _aggregate_annulus_orbit_terms(
+    orbit_terms: list[tuple[NDArrayFloatType, int, float]],
+) -> tuple[NDArrayFloatType, float]:
+    """Collapse per-edge annulus orbit terms into the composite's channel inputs.
+
+    Each entry is ``(normals_vu, vertex_count, orbit_sigma_px)`` for one edge
+    painted into the composite annulus.  Returns the concatenated outward
+    normals (signs intact, so opposing radial sides cancel in the downstream
+    absorbed-translation solve exactly as they do for RingEdgeNav) and the
+    vertex-weighted effective orbit sigma.
+
+    The per-edge sigmas are combined as a vertex-weighted mean, not in
+    quadrature: the constituent edges of one ringlet share the same orbit
+    solution, so their radial errors are treated as fully correlated -- the
+    same conservative same-sense reading RingEdgeNav's
+    ``_effective_orbit_sigma_px`` uses.  Longer visible arcs carry proportionally
+    more weight because they dominate the composite NCC.
+
+    Parameters:
+        orbit_terms: Per-edge ``(normals_vu, vertex_count, orbit_sigma_px)``.
+
+    Returns:
+        ``(orbit_normals_vu, sigma_orbit_radial_px)``.  The normals are
+        ``(0, 2)`` and the sigma ``0.0`` when no edge declares an orbit
+        uncertainty or the list is empty.
+    """
+    normals_list = [normals for normals, _count, _sigma in orbit_terms if normals.shape[0] > 0]
+    if not normals_list:
+        return np.zeros((0, 2), dtype=np.float64), 0.0
+    orbit_normals_vu = np.concatenate(normals_list, axis=0)
+    weighted_sum = 0.0
+    weight_total = 0.0
+    for _normals, count, sigma in orbit_terms:
+        weighted_sum += float(count) * sigma
+        weight_total += float(count)
+    sigma_orbit_radial_px = weighted_sum / weight_total if weight_total > 0.0 else 0.0
+    return orbit_normals_vu, sigma_orbit_radial_px
+
+
 def _build_annulus_feature(
     *,
     ring_name: str,
@@ -122,11 +161,21 @@ def _build_annulus_feature(
     model_mask: NDArrayBoolType,
     bbox: tuple[int, int, int, int],
     predicted_center_vu: tuple[float, float],
+    orbit_normals_vu: NDArrayFloatType,
+    sigma_orbit_radial_px: float,
     subject_range_km: float,
     constituent_count: int,
     source_model: str,
 ) -> NavFeature:
-    """Construct a RING_ANNULUS NavFeature when edges compress radially."""
+    """Construct a RING_ANNULUS NavFeature when edges compress radially.
+
+    ``orbit_normals_vu`` are the outward radial normals of the constituent
+    edges concatenated into the composite, and ``sigma_orbit_radial_px`` is
+    the vertex-weighted effective orbit-solution uncertainty over those edges.
+    Both are carried so ``RingAnnulusNav`` can widen its reported covariance by
+    the coherent radial orbit error along the translation its NCC would absorb
+    it into -- the correlation-side analogue of the ``RingEdgeNav`` channel.
+    """
     feature_id = f'ring_annulus:{planet}:{ring_name}'
     return NavFeature(
         feature_id=feature_id,
@@ -135,6 +184,8 @@ def _build_annulus_feature(
         geometry=RingAnnulusGeometry(
             bbox_extfov_vu=bbox,
             predicted_center_vu=predicted_center_vu,
+            orbit_normals_vu=orbit_normals_vu,
+            sigma_orbit_radial_px=sigma_orbit_radial_px,
         ),
         subject_range_km=subject_range_km,
         position_cov_px=None,

@@ -292,6 +292,8 @@ class NavModelRingsSimulated(NavModelRingsBase):
         if prediction is None:
             return []
         features: list[NavFeature] = []
+        sigma_radial_px = self._declared_radial_sigma_px()
+        sigma_orbit_px = self._declared_orbit_sigma_px()
         if prediction.template is not None and prediction.mask.any():
             mask_vs, mask_us = np.where(prediction.mask)
             bbox = (
@@ -302,6 +304,19 @@ class NavModelRingsSimulated(NavModelRingsBase):
             )
             template_img = prediction.template[bbox[0] : bbox[2], bbox[1] : bbox[3]].copy()
             template_mask = prediction.mask[bbox[0] : bbox[2], bbox[1] : bbox[3]].copy()
+            # The predicted edges are the annulus fit's own radial geometry:
+            # RingAnnulusNav derives the translation its NCC absorbs a coherent
+            # radial orbit error into from their outward normals.  All edges of
+            # a simulated feature share its single declared orbit sigma, so the
+            # effective sigma is that scalar and the normals are their concat.
+            annulus_normals = [
+                edge.normals_vu for edge in prediction.edges if edge.vertices_vu.shape[0] > 0
+            ]
+            orbit_normals_vu = (
+                np.concatenate(annulus_normals, axis=0)
+                if annulus_normals
+                else np.zeros((0, 2), dtype=np.float64)
+            )
             features.append(
                 NavFeature(
                     feature_id=f'ring_annulus:{self._feature_name}',
@@ -310,6 +325,8 @@ class NavModelRingsSimulated(NavModelRingsBase):
                     geometry=RingAnnulusGeometry(
                         bbox_extfov_vu=bbox,
                         predicted_center_vu=self._predicted_center_vu,
+                        orbit_normals_vu=orbit_normals_vu,
+                        sigma_orbit_radial_px=sigma_orbit_px,
                     ),
                     subject_range_km=self._subject_range_km,
                     position_cov_px=None,
@@ -326,8 +343,6 @@ class NavModelRingsSimulated(NavModelRingsBase):
                     template_mask=template_mask,
                 )
             )
-        sigma_radial_px = self._declared_radial_sigma_px()
-        sigma_orbit_px = self._declared_orbit_sigma_px()
         for edge in prediction.edges:
             n = edge.vertices_vu.shape[0]
             if n == 0:

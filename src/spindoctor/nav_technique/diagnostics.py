@@ -270,17 +270,25 @@ class RingAnnulusDiagnostics:
         peak_to_runner_up_ratio: NCC peak ratio.
         annulus_count: Number of RING_ANNULUS features (one per planet).
         used_gradient: True if gradient mode was selected.
+        sigma_orbit_radial_px: Effective fully-correlated radial
+            orbit-uncertainty sigma (px) added to the reported covariance
+            through the translation the NCC absorbs such a displacement into
+            (the normal-count-weighted combine of the consumed annuli's
+            ``sigma_orbit_radial_px``); ``0.0`` when no consumed annulus
+            declares an orbit uncertainty.
     """
 
     ncc_peak: float = 0.0
     peak_to_runner_up_ratio: float = 0.0
     annulus_count: int = 0
     used_gradient: bool = False
+    sigma_orbit_radial_px: float = 0.0
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'ncc_peak': 'ncc_peak',
         'peak_to_runner_up_ratio': 'peak_to_runner_up_ratio',
         'annulus_count': 'annulus_count',
         'used_gradient': 'used_gradient',
+        'sigma_orbit_radial_px': 'sigma_orbit_radial_px',
     }
 
 

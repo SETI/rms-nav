@@ -107,7 +107,38 @@ correlation area), and a ``localization_uncertainty_scale * consistency`` locali
 term plus a ``model_error_floor_px`` absolute floor carry the template model error that
 dominates the true registration error. The ring annulus size (``model_error_size_frac``)
 term is disabled by default because the ring bulk error does not track the annulus radial
-span. When the chosen peak sits within the at-edge tolerance of any axis bound the
+span.
+
+Radial orbit-uncertainty channel
+---------------------------------
+
+The matched-filter covariance describes the statistical lock onto the *modeled* annulus. A
+catalog-orbit error displaces the whole predicted annulus coherently, and the correlation
+absorbs that displacement into its reported offset without any residual scatter to reveal it
+-- the same systematic-error hazard the ring-edge fit carries. The technique therefore
+widens its covariance by the declared radial orbit uncertainty along the translation the
+correlation would absorb such a displacement into, so a tight lock on a misplaced annulus is
+not reported as a tight pointing fix. This is the correlation-side counterpart of the
+ring-edge channel documented at :doc:`dev_guide_techniques_ring_edge`; both ring techniques
+consequently price the same declared hazard, which is what lets the fused radial error bar
+cover the residual bias rather than being carried by whichever member left it un-widened.
+
+The absorbed direction comes from the annulus fit's own radial geometry: the outward normals
+of the constituent ring edges painted into the composite template, which the upstream rings
+model concatenates onto
+:attr:`~spindoctor.feature.geometry.RingAnnulusGeometry.orbit_normals_vu` with an effective
+:attr:`~spindoctor.feature.geometry.RingAnnulusGeometry.sigma_orbit_radial_px`. The technique
+feeds those normals through the same absorbed-translation solve the ring-edge fit runs on its
+fit vertices (``_absorbed_orbit_sensitivity`` in
+:mod:`spindoctor.nav_technique.ring_edge_geometry`), so both techniques price an identical
+annulus geometry identically: a short visible arc absorbs the radial error one-for-one along
+its normal (a directional widening), while a closed ring barely absorbs it -- a uniform
+radial error of a full ring is a dilation, not a translation -- and the bound is reported
+isotropically, since which direction the nonlinear acquisition locks is exactly what cannot
+be predicted. The effective sigma is echoed on
+:attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.sigma_orbit_radial_px`.
+
+When the chosen peak sits within the at-edge tolerance of any axis bound the
 result is flagged
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and the hard-zero
 gate forces confidence to zero. The pyramid consistency check flags peaks that drift across
@@ -247,6 +278,10 @@ Diagnostics
   ``RING_ANNULUS`` features fused.
 - :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.used_gradient` — True when
   ``auto`` mode picked the gradient pass.
+- :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.sigma_orbit_radial_px` —
+  effective declared radial orbit-uncertainty sigma added to the reported covariance through
+  the absorbed translation direction. Auditability only; not consumed by the confidence
+  formula.
 
 Call path
 ---------
@@ -264,8 +299,12 @@ Call path traced through
    template against the extfov image. The pyramid returns the chosen peak's
    ``(dv, du)``, the 2x2 CRLB covariance, ``quality``, ``consistency``, ``spurious``,
    ``at_edge``, ``used_gradient``, and the top-``k`` peak telemetry.
-5. The covariance shape is always (2, 2); rotation fitting is disabled for ring
-   annuli. When
+5. Widen the (2, 2) covariance by the radial orbit-uncertainty channel: aggregate the
+   consumed annuli's :attr:`~spindoctor.feature.geometry.RingAnnulusGeometry.orbit_normals_vu`
+   and effective :attr:`~spindoctor.feature.geometry.RingAnnulusGeometry.sigma_orbit_radial_px`,
+   derive the absorbed-translation sensitivity, and add the declared variance along it (see
+   "Radial orbit-uncertainty channel"). The covariance shape is always (2, 2); rotation
+   fitting is disabled for ring annuli. When
    :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true the
    technique embeds the (2, 2) translation block in a (3, 3) covariance via
    :func:`~spindoctor.nav_technique.nav_technique.embed_rotation_unobservable` and reports the

@@ -149,8 +149,14 @@ Call path traced through
 1. For a banded feature with coverage, construct one
    :data:`~spindoctor.feature.feature_type.NavFeatureType.RING_ANNULUS`
    :class:`~spindoctor.feature.feature.NavFeature` carrying the coverage template cropped to
-   its tight bounding box, the predicted center, and a
-   :class:`~spindoctor.feature.flags.RingAnnulusFlags` with the feature's name.
+   its tight bounding box, the predicted center, a
+   :class:`~spindoctor.feature.flags.RingAnnulusFlags` with the feature's name, and the
+   orbit-uncertainty channel: the predicted edges' outward normals concatenated onto
+   :attr:`~spindoctor.feature.geometry.RingAnnulusGeometry.orbit_normals_vu` with the feature's
+   single declared orbit sigma as
+   :attr:`~spindoctor.feature.geometry.RingAnnulusGeometry.sigma_orbit_radial_px`, so
+   :class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` prices a
+   misplaced orbit exactly as the ring-edge technique does.
 2. For each predicted boundary, sample its border mask into a vertex polyline with outward
    radial normals, classify it straight or curved, widen the radial sigma by the declared
    orbit uncertainty, and append a

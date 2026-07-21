@@ -5,6 +5,13 @@ orbit-uncertainty channel (the absorbed-translation sensitivity and the
 covariance inflation built from it).  Split out of
 :mod:`spindoctor.nav_technique.nav_technique_ring_edge` to keep both modules
 under the size cap; the technique imports every helper from here.
+
+The two orbit-channel helpers -- :func:`_absorbed_orbit_sensitivity` and
+:func:`_orbit_inflated_covariance` -- are shared with
+:mod:`spindoctor.nav_technique.nav_technique_ring_annulus`, so both ring
+techniques price an identical annulus geometry identically: the edge fit runs
+the sensitivity solve on its LM fit vertices, the annulus correlation on the
+constituent edge normals painted into its composite template.
 """
 
 from __future__ import annotations

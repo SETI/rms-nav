@@ -20,6 +20,7 @@ from spindoctor.nav_model.nav_model_rings import (
 from spindoctor.nav_model.ring_emission import (
     RING_EDGE_DEFAULT_RELIABILITY,
     RING_EDGE_SIGMA_ALONG_PX,
+    _aggregate_annulus_orbit_terms,
     _ring_annulus_reliability,
     _ring_edge_reliability,
 )
@@ -365,3 +366,20 @@ def test_polyline_normals_unsigned_without_a_radius_backplane() -> None:
     _signed_vertices, signed_normals = _polyline_from_edge_mask(mask, radius.astype(np.float64))
     signed_dots = np.sum(signed_normals * true_radial, axis=1)
     assert int(np.count_nonzero(signed_dots < 0.0)) == 0
+
+
+def test_aggregate_annulus_orbit_terms_vertex_weighted_mean() -> None:
+    """Per-edge orbit sigmas combine by vertex share; normals concatenate."""
+    n_a = np.tile(np.array([1.0, 0.0]), (30, 1))
+    n_b = np.tile(np.array([0.0, 1.0]), (10, 1))
+    normals, sigma = _aggregate_annulus_orbit_terms([(n_a, 30, 2.0), (n_b, 10, 6.0)])
+    assert normals.shape == (40, 2)
+    # (30 * 2 + 10 * 6) / 40 = 3.0
+    assert sigma == pytest.approx(3.0)
+
+
+def test_aggregate_annulus_orbit_terms_empty_is_no_channel() -> None:
+    """No terms yields an empty normal set and a zero sigma."""
+    normals, sigma = _aggregate_annulus_orbit_terms([])
+    assert normals.shape == (0, 2)
+    assert sigma == 0.0
