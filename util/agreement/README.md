@@ -28,12 +28,14 @@ preserves the numbers and conclusions that outlive them.
    ring edges), shared parameter groups (same technique on two bodies),
    and declared suspect-pair cross-covariances.
 2. **`scene_gen.py`** — seeded scene families whose *estimator
-   composition* is the controlled variable: `limb_disc`,
-   `limb_disc_ring_fixed` / `_diverse` (frozen vs drawn ring radial
-   direction), `limb_ring_aniso_fixed` / `_diverse` (clipped body,
-   genuinely anisotropic limb covariance), `multi_body`.  Scenes are
-   deliberately clean (smooth ellipsoids, moderate noise): the campaign
-   validates the estimator's mathematics, not technique robustness.
+   composition* is the controlled variable: `limb_disc`, `limb_disc_psf`
+   (the same body rendered through an active whole-scene PSF, for the
+   PSF-layer coupling probe below), `limb_disc_ring_fixed` / `_diverse`
+   (frozen vs drawn ring radial direction), `limb_ring_aniso_fixed` /
+   `_diverse` (clipped body, genuinely anisotropic limb covariance),
+   `multi_body`.  Scenes are deliberately clean (smooth ellipsoids,
+   moderate noise): the campaign validates the estimator's mathematics,
+   not technique robustness.
 3. **`collect.py`** — navigates every scene in-process and writes one
    JSONL row per scene: planted truth, geometry angles, and every
    per-technique result from each configured run (multi-body scenes run
@@ -49,14 +51,26 @@ preserves the numbers and conclusions that outlive them.
    products translated by a per-scene random bias, and
    `--injection noise_scale` with the shared noise-sigma estimate
    scaled — both as harness-level monkeypatches of the orchestrator
-   module (no production seam).  Injected values are drawn from the
-   campaign seed and recorded per row.
+   module (no production seam).  `--injection psf_broaden` /
+   `--injection psf_aniso` instead perturb the *render*: they overwrite
+   the scene's `optics.psf` block with a broadened (isotropic) or
+   axis-broadened (zero-mean elliptical) kernel the navigator does not
+   model, the only channel through which a shared PSF edge bias can
+   reach both the limb (distance-transform) and disc (correlation)
+   estimators — so they require the `limb_disc_psf` family, whose control
+   render matches the navigator (no mismatch).  Injected values are
+   drawn from the campaign seed and recorded per row.
 
    ```bash
    venv/bin/python util/agreement/collect.py \
        --per-family 400 --families limb_disc_ring_diverse \
        --injection dt_shift --workers 8 \
        --out _work/agreement/rows_dt.jsonl
+
+   venv/bin/python util/agreement/collect.py \
+       --per-family 400 --families limb_disc_psf \
+       --injection psf_broaden --workers 8 \
+       --out _work/agreement/psf/rows_psf_broaden.jsonl
    ```
 
 4. **`analyze.py`** — produces the Markdown report: per composition, the
@@ -65,12 +79,18 @@ preserves the numbers and conclusions that outlive them.
    degenerate compositions, and — when injected row files are supplied —
    the bias-independence tables (truth-based pair coupling per
    condition, paired per-scene injection response, solve-side detection
-   with a declared pair covariance).
+   with a declared pair covariance).  `--psf-broaden-rows` /
+   `--psf-aniso-rows` add the PSF-layer section: the limb-disc coupling
+   under a rendered PSF mismatch (control vs injected), the paired
+   per-scene limb/disc response, and the deltas decomposed onto each
+   scene's illumination axis.
 
    ```bash
    venv/bin/python util/agreement/analyze.py _work/agreement/rows.jsonl \
        --dt-rows _work/agreement/rows_dt.jsonl \
        --noise-rows _work/agreement/rows_noise.jsonl \
+       --psf-broaden-rows _work/agreement/psf/rows_psf_broaden.jsonl \
+       --psf-aniso-rows _work/agreement/psf/rows_psf_aniso.jsonl \
        --out _work/agreement/report.md
    ```
 
