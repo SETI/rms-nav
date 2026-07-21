@@ -161,18 +161,45 @@ selection effect). The original prompt is kept below for reference.
 > honestly provide, say so explicitly rather than substituting sim
 > optimism - the envelope doc lists what the sim cannot establish.
 
-### 2.2 WS-17 — validate the camera distortion models (#228)
+### 2.2 WS-17 — validate the camera distortion models (#228) -- DONE, PR #354
 
-**Prompt:**
+Done 2026-07-21; PR #354 (assumes squash-merge to `main`). The
+`experiments/fov_twist` one-off is rewritten into the maintained tool
+`util/fov_distortion/` (a pure-numpy decompose/aggregate core with unit
+tests, a star-navigation-backed per-frame measure step, and a process-pool
+driver over per-instrument cohort YAMLs). Results are published as a
+standalone chapter `docs/fov_distortion_report/` alongside the simulator
+report, and the measured residual distortion now populates the sim
+distortion defaults (`DISTORTION_RESIDUAL_PARAMS` in
+`src/spindoctor/sim/forward/artifacts_catalog.py`), replacing the interim
+single-amplitude estimates. `experiments/fov_twist/` is removed.
 
-> Execute WS-17 (#228): formalize experiments/fov_twist/find_fov_twist.py
-> into the supported suite per the reframed issue #228. Star-field
-> plate-solve residual maps per instrument/camera against the library and
-> the star-calibration frame lists; documented results under docs/;
-> measured residuals compared against the sim's residual-distortion
-> defaults in artifacts_catalog.py (update the defaults with provenance
-> if the measurements disagree). Tests, CI gates, independent review, one
-> PR. The acceptance bar is in plans/VALIDATION_AND_CALIBRATION_PLAN.md.
+Measured per instrument (star-field residual after the navigator's
+distortion model), with autonomous star nav locking only a fraction of the
+off-Cassini cohorts:
+
+- **Cassini ISS NAC/WAC** (50/50, 46/50): twist consistent at +/-0.011 deg
+  (negligible), radial distortion at the noise floor -> rotation fitting
+  stays off (matches the shipped setting).
+- **Galileo SSI** (7/18): consistent -0.053 deg twist (static kernel
+  candidate) plus a pincushion radial term reaching ~0.5 px at the corner.
+- **New Horizons LORRI pre-KE** (16/48): clean static +0.191 deg twist
+  (kernel candidate); post-KE epochs are outside pointing-kernel coverage.
+- **Voyager 2 ISS NAC/WAC** (5/27, 15/45): frame-varying twist (0.28 px
+  corner scatter, WAC mean +0.36 deg) -> per-frame rotation fitting
+  required, and the largest residual distortion of any instrument. Timing
+  the main pipeline over the 19 locked frames with rotation off vs on:
+  median 4.61 s either way (-0.02 s, 0.99x), so the "too slow" reason for
+  keeping `config_430_inst_vgiss.yaml` `fit_camera_rotation` off does not
+  hold on star fields. Voyager 1 and the candidate ("possible") frame lists
+  add nothing (VG1 locks 0; VG2 candidates lock the same handful).
+
+The confidence calibration and the operator-curated library do not enable
+instrument-default distortion, so the sim-default update leaves them
+untouched. Follow-up #355 tracks re-measuring and splitting the Voyager sim
+distortion per camera once the star lock rate improves. Independent
+verification: the branch adds no new failures against `main`; core-library
+line coverage is 91.3% on the default suite.
 
 ### 2.3 WS-3 — library growth (continuous; your votes are the bottleneck)
 
@@ -194,7 +221,7 @@ class changes recorded in `_work/cohort_curation/batch_006_followups.yaml`).
 Then resume normal batch generation (`util/cohort_curation/`) and vote as
 batches arrive.
 
-### 2.4 WS-1 — the agreement study (#225, #226); starts when 2.2 + 2.3 give it cohorts
+### 2.4 WS-1 — the agreement study (#225, #226); 2.2 done, now waits on 2.3 cohorts
 
 Your role at the gate: approve the frame selection. Then:
 
@@ -312,7 +339,7 @@ else. Applied to the items above:
   photometric-limb design; #310 (the boundary restructuring — the guard
   tests catch mechanical regressions, the review catches new leak
   shapes).
-- **Mid-tier or below suffices:** the sidecar re-ratchet, WS-17, library
+- **Mid-tier or below suffices:** the sidecar re-ratchet, library
   growth, the agreement study's bulk execution (once WS-0 hands it a
   proven estimator), #229, #311, #284/#285, #130, #179, and the
   documentation/engineering items.
@@ -422,9 +449,9 @@ is lost to a PR body; the sequencing hooks reference the sections above.
 0.1 merge #313 -> 0.2 cleanup -> 0.3 decisions   (operator, minutes)
 1   sidecar re-ratchet + adopt transfer watch    (1 session + 1 review)
 2.1 WS-0 estimator proof   \
-2.2 WS-17 distortion        |  parallel agent sessions
-2.3 batch-006 + growth     /
-2.4 agreement study bulk   (after 2.2 + 2.3; you approve frames)
+2.2 WS-17 distortion  -- DONE (PR #354)
+2.3 batch-006 + growth     /  parallel agent sessions
+2.4 agreement study bulk   (after 2.3; 2.2 done; you approve frames)
 2.5 CI tier, re-anchor confidence, accuracy tail (after 2.4)
 3   parallel fill items    (any time, independent)
 ```
