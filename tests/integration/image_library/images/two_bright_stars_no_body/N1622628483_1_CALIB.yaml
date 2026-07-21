@@ -22,10 +22,12 @@ ground_truth:
     First-curation pipeline snapshot (2026-07): status=success, confidence=0.604, rank=medium, techniques=['StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [9.6145, 8.5501], "StarRefineNav": [9.542, 7.9076]}.
     Operator comment: re-vote: rescued with relaxed gates (previous vote: None)
     A later clean run of the default pipeline (2026-07-13) navigates this frame at high/0.99 after the confidence recalibration that followed first curation; expected.confidence_tier reflects that current behavior. The frame no longer needs the relaxed-gate rescue its earlier snapshot was taken under.
+
+    Re-ratchet 2026-07-20 (sidecar reconciled to the seed-20260718 recalibration; attribution basis util/calibration/CAMPAIGN_20260718.md). Expected success/high/StarUniqueMatchNav -> measured success/high/StarRefineNav. Primary also moves to StarRefineNav: a multi-star refine (uncapped, confidence >0.50) is the highest-confidence contributor; this retires the Track-B marker that withheld refine-as-primary, whose fix shipped as the single-inlier 0.50 cap and does not apply to multi-star refines.
 expected:
   status: success
   confidence_tier: high
-  primary_technique: StarUniqueMatchNav
+  primary_technique: StarRefineNav
   techniques_must_run:
   - StarUniqueMatchNav
   techniques_must_skip: []

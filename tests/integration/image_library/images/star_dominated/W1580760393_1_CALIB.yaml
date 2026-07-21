@@ -32,12 +32,14 @@ ground_truth:
     could not close the frame); ground truth and expected were re-saved
     to success/high.
 
+    Re-ratchet 2026-07-20 (sidecar reconciled to the seed-20260718 recalibration; attribution basis util/calibration/CAMPAIGN_20260718.md). Expected success/high/StarFieldFromCatalogNav -> measured success/high/StarRefineNav. Primary re-ratcheted StarFieldFromCatalogNav->StarRefineNav: the refit re-balanced the star-field terms so the 95-star refine (0.9513) edges the field matcher 0.95 hard cap. A multi-star refine legitimately carries the pick; status/tier/offset unchanged.
+
 expected:
   # success | failed | conflicted
   status: success
   # high | medium | low | failed
   confidence_tier: high
   # e.g. BodyLimbNav
-  primary_technique: StarFieldFromCatalogNav
+  primary_technique: StarRefineNav
   techniques_must_run: [StarFieldFromCatalogNav]
   techniques_must_skip: []

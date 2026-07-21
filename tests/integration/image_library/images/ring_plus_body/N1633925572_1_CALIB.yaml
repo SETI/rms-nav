@@ -24,10 +24,12 @@ ground_truth:
     Operator comment: appended: batch-1 candidate rescued by relaxed gates (was not in the batch-1 review selection)
     A later clean run of the default pipeline (2026-07-13) navigates this frame at high/0.50 after the confidence recalibration that followed first curation; expected.confidence_tier reflects that current behavior. The frame no longer needs the relaxed-gate rescue its earlier snapshot was taken under.
     Primary ratchet 2026-07-16: RingEdgeNav is the highest-confidence technique and the ring edge is the legitimate primary for this ring_plus_body scene; applies the 2026-07-13 D6 reconciliation decision, which was documented at the time but never committed. Ratcheted StarRefineNav -> RingEdgeNav.
+
+    Re-ratchet 2026-07-20 (sidecar reconciled to the seed-20260718 recalibration; attribution basis util/calibration/CAMPAIGN_20260718.md). Expected success/high/RingEdgeNav -> measured success/medium/BodyLimbNav. Tier high->medium: pre-boundary demotion carried from the refit (fused sigma above the 0.5 px high-tier cap / mid-band fused confidence). Offset unchanged and within slack. Primary also moves to BodyLimbNav with the recalibrated confidences.
 expected:
   status: success
-  confidence_tier: high
-  primary_technique: RingEdgeNav
+  confidence_tier: medium
+  primary_technique: BodyLimbNav
   techniques_must_run:
   - StarRefineNav
   techniques_must_skip: []
