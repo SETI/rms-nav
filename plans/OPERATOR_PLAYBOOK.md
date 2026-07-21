@@ -9,7 +9,10 @@ Environment for every command below: `source /seti/newnav/setup.sh` from
 
 ## 0. Right now (operator-only, minutes)
 
-### 0.1 Merge the sim-realism program
+### 0.1 Merge the sim-realism program -- DONE
+
+Merged 2026-07-20: PR #313 squash-merged to `main` (f9c37f0). Commands
+kept for the record:
 
 ```bash
 gh pr view 313 --web      # final read if desired
@@ -23,25 +26,14 @@ the tip; the library-suite delta is 100% attributed in
 integration tier, so the green you rely on is the local battery recorded
 in those PRs.
 
-### 0.2 Clean up the investigation worktrees
+### 0.2 Clean up the investigation worktrees -- DONE
 
-The #288 evidence packet lives in the baseline worktree; keep the packet,
-drop the throwaway checkouts:
-
-```bash
-cp -r /seti/newnav/rms-nav-baseline/attr288 \
-      /seti/newnav/rms-nav/_work/attr288_packet
-cd /seti/newnav/rms-nav
-for wt in rms-nav-attr288-main rms-nav-attr288-352014d \
-          rms-nav-attr288-d694188 rms-nav-attr288-83583e9 \
-          rms-nav-attr288-1ab0395 rms-nav-attr288-a0a3040 \
-          rms-nav-attr288-27ada67 rms-nav-attr288-b3041dc \
-          rms-nav-288fix; do
-  git worktree remove --force /seti/newnav/$wt 2>/dev/null
-done
-git worktree prune
-# rms-nav-baseline: keep or remove after confirming the packet copy.
-```
+Done 2026-07-20: all investigation worktrees and their local branches were
+removed (the operator directed a full worktree cleanup, so the baseline
+worktree went too) and the checkout returned to `main`. The throwaway
+attr288 packet was therefore not copied to `_work/attr288_packet`; its
+failure taxonomy survives in the #288 issue body and is superseded by the
+Section 1 re-ratchet, which reduces #288 to the deliberately-red pins.
 
 ### 0.3 Two cheap decisions (comment on the issues)
 
@@ -55,7 +47,34 @@ gh issue comment 60  --body "Decision: <implement now | defer until X>"
 gh issue comment 188 --body "Decision: <ship | defer>"
 ```
 
-## 1. The sidecar re-ratchet (first agent session after the merge)
+## 1. The sidecar re-ratchet -- EXECUTED, PR #353 (unmerged)
+
+Done 2026-07-20; PR #353 targets `main` and is unmerged, per the "do not
+merge" instruction. The full library suite is `66 passed, 9 failed`
+(`pytest tests/integration/test_autonomous_nav.py -m '' -n auto
+--dist=loadfile`, 26 min on the canonical local machine), and the nine
+failures are exactly the deliberately-red pins below. 36 sidecars were
+re-ratcheted to measured behavior (23 tier flips under the 0.85 high
+boundary and the 2.61 px limb covariance floor, 11 primary flips to
+multi-star StarRefineNav and others, 3 conflicted->success recoveries)
+plus the C1205021_GEOMED adjudication (medium->high, which resolves #347).
+Ground-truth offsets were never touched. This clears the bulk of the #288
+library regression.
+
+Remaining red set, each owned by an open issue:
+
+| frame(s) | owner |
+|---|---|
+| N1492091163, N1867601758, N1867602424 (wrong ring-feature locks) | #346 |
+| N1853392805 (highly-irregular exclusion discards the terminator fit) | #338 |
+| N1572105349 (single-inlier refine offset-pull) | #222 (reopened) |
+| N1484593951, N1686349893 (resolved-body ~2 px offset misses) | #350 |
+| N1530185128 (recalibration-induced spurious conflict) | #351 |
+| W1444747627 (star gates spurious on a navigable small-offset field) | #352 |
+
+Filed for this task: #350, #351, #352; #222 reopened; #347 resolved by the
+adjudication. See the register in Section 3c. The original prompt and
+verify block are kept below for the record.
 
 The recalibration re-tiers real library frames; every flip is
 pre-attributed. Your role is to review the attribution table once and
@@ -80,11 +99,12 @@ table and the "Transfer watch (proposed)" section.
 > not merge it. Finish by re-running the suite and reporting the final
 > red set with the issue that owns each remaining red frame.
 
-**After the PR merges, adopt the transfer watch:** edit
-`util/calibration/CAMPAIGN_20260718.md`, change the "Transfer watch
-(proposed)" heading to "Transfer watch (adopted YYYY-MM-DD)", adjusting
-thresholds if you disagree with the proposal. That gives the calibration
-its falsification criterion.
+**Still pending -- after the PR merges, adopt the transfer watch**
+(tracked by #334): edit `util/calibration/CAMPAIGN_20260718.md`, change
+the "Transfer watch (proposed)" heading to "Transfer watch (adopted
+YYYY-MM-DD)", adjusting thresholds if you disagree with the proposal. That
+gives the calibration its falsification criterion. This is the one part of
+Section 1 not yet done.
 
 **Verify when done:**
 
@@ -295,6 +315,77 @@ else. Applied to the items above:
   growth, the agreement study's bulk execution (once WS-0 hands it a
   proven estimator), #229, #311, #284/#285, #130, #179, and the
   documentation/engineering items.
+
+## 3c. Tracking-issue register (2026-07-20 audit + re-ratchet)
+
+The 2026-07-20 sim-program audit filed #325-#347 and the Section 1
+re-ratchet filed #350-#352 (and reopened #222). All are open and carry
+A/B/Priority/Effort labels with assignee rfrenchseti. Listed here so none
+is lost to a PR body; the sequencing hooks reference the sections above.
+
+**Confident-wrong / ensemble honesty (sequence with #230/WS-5 and the
+#301/#291 channel in Section 3):**
+
+- **#328** high-phase haze crescent returns a gate-passing success ~30 px
+  wrong and nothing vetoes it (Essential; the family that had no owner)
+- **#339** scattered-light correlated disc/limb errors fused as independent
+  at the 0.99 confidence cap
+- **#346** three library frames lock confidently onto the wrong ring feature
+  (owns the N1492091163 / N1867601758 / N1867602424 red pins)
+- **#326** BODY_DISC correlation template ignores body-body occlusion at deep
+  mutual-event overlap
+- **#327** NavModelBody reports full visible_arc_fraction for limbs occluded
+  by a nearer body
+
+**Simulator fidelity gaps (feed #309 and the sim follow-ups in Section 3):**
+
+- **#325** simulated stars shine through dark limbs; star-technique success is
+  optimistic
+- **#329** simulated calibrated products floor at 1 LSB; real products dither
+  below it (WAC diverges 8x)
+- **#330** instrument chains render cosmic-ray transients at zero
+- **#331** simulated hot pixels are per-scene, not per-detector
+- **#332** PSF catalog has one kernel per instrument; binned/summed readout
+  modes are inexpressible
+- **#333** four physical error axes are unmodeled
+- **#341** the campaign's scene mixture is authored, unvalidated against real
+  frames
+- **#342** star_psf_sigma is a 3.0 placeholder on Galileo, Voyager, LORRI
+- **#343** the tuned NAC PSF wing may be absorbing operator registration error
+- **#344** haze brightness is a module constant
+- **#345** a scene can echo truth-side noise into instrument_config with no
+  validator warning
+
+**Calibration governance / CI (gate WS-5 and the CI tier in Section 2.5):**
+
+- **#334** calibration has no armed falsification criterion and its real-frame
+  gate is suspended (owns the Section 1 "adopt the transfer watch" step)
+- **#335** no canonical environment for committed sim baselines (0.99 vs
+  0.81-0.84 across machines)
+- **#336** data-independent simulator integration suites never run in Actions
+  (relates to #229/WS-4)
+- **#340** library_crosscheck records only a yes/no primary-technique flag,
+  not the winning technique
+
+**Star navigation:**
+
+- **#337** star-field matcher triplet canonicalization is a seed lottery on
+  equal-brightness fields
+
+**Library-frame reds and decisions (from the Section 1 re-ratchet):**
+
+- **#338** highly-irregular exclusion discards the ground-truth terminator fit
+  on N1853392805 (decision)
+- **#347** C1205021_GEOMED medium-vs-high provenance mismatch -- resolved by
+  the re-ratchet adjudication in PR #353
+- **#350** two resolved-body frames miss offset tolerance by ~2 px
+  (N1484593951, N1686349893)
+- **#351** recalibration turns an operator-verified success into a spurious
+  conflict (N1530185128)
+- **#352** star gates self-flag spurious on a navigable small-offset WAC frame
+  (W1444747627)
+- **#222** (reopened) single-inlier pass-2 refine pulls the fused offset off a
+  correct body fix (N1572105349)
 
 ## 4. Standing practices for every session you dispatch
 
