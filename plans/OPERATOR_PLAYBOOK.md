@@ -47,10 +47,10 @@ gh issue comment 60  --body "Decision: <implement now | defer until X>"
 gh issue comment 188 --body "Decision: <ship | defer>"
 ```
 
-## 1. The sidecar re-ratchet -- EXECUTED, PR #353 (unmerged)
+## 1. The sidecar re-ratchet -- DONE, PR #353 (merged)
 
-Done 2026-07-20; PR #353 targets `main` and is unmerged, per the "do not
-merge" instruction. The full library suite is `66 passed, 9 failed`
+Done 2026-07-20; PR #353 was squash-merged to `main` on 2026-07-21
+(97f4b41). The full library suite is `66 passed, 9 failed`
 (`pytest tests/integration/test_autonomous_nav.py -m '' -n auto
 --dist=loadfile`, 26 min on the canonical local machine), and the nine
 failures are exactly the deliberately-red pins below. 36 sidecars were
@@ -99,12 +99,13 @@ table and the "Transfer watch (proposed)" section.
 > not merge it. Finish by re-running the suite and reporting the final
 > red set with the issue that owns each remaining red frame.
 
-**Still pending -- after the PR merges, adopt the transfer watch**
-(tracked by #334): edit `util/calibration/CAMPAIGN_20260718.md`, change
-the "Transfer watch (proposed)" heading to "Transfer watch (adopted
-YYYY-MM-DD)", adjusting thresholds if you disagree with the proposal. That
-gives the calibration its falsification criterion. This is the one part of
-Section 1 not yet done.
+**Still pending -- now the immediate next step, #353 having merged: adopt
+the transfer watch** (tracked by #334): edit
+`util/calibration/CAMPAIGN_20260718.md`, change the "Transfer watch
+(proposed)" heading to "Transfer watch (adopted YYYY-MM-DD)", adjusting
+thresholds if you disagree with the proposal. That gives the calibration
+its falsification criterion. This is the one part of Section 1 not yet
+done.
 
 **Verify when done:**
 
