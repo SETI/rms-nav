@@ -501,6 +501,86 @@ def report_noise_response(
     out.append('')
 
 
+def _survival_counts(rows: list[dict[str, Any]], family: str) -> dict[str, int]:
+    """Per-instance count of scenes on which the instance produced a result."""
+    counts: dict[str, int] = {}
+    for row in rows:
+        if row['family'] != family or 'error' in row:
+            continue
+        for name in _instance_offsets(row):
+            counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def report_selection_effect(
+    out: list[str],
+    control: list[dict[str, Any]],
+    gate: list[dict[str, Any]],
+    family: str,
+    depression: float,
+) -> None:
+    """Survivorship-stratified truth comparison for the reliability-gate channel.
+
+    The gate only admits or drops features, so a surviving technique's offset
+    equals its control offset exactly; the selection effect is therefore the
+    difference between the truth-based covariance on the full (control)
+    population and on the survivor subset (the scenes the gate keeps).  This
+    is the procedure the agreement study must run on its own real cohorts,
+    where feature reliability is not degenerate; on these clean scenes it
+    reports the in-sim floor.
+
+    Parameters:
+        out: Markdown accumulator.
+        control: Control (no-injection) rows.
+        gate: Reliability-gate injection rows (survivor subset).
+        family: Family to compare on.
+        depression: Threshold depression the gate pass used.
+    """
+    full_cohort = build_cohort(control, family)
+    survivor_cohort = build_cohort(gate, family)
+    ctrl_counts = _survival_counts(control, family)
+    gate_counts = _survival_counts(gate, family)
+    out.append(f'Threshold depression: +{depression:.3f} on every per-type reliability gate.')
+    out.append('')
+    out.append('Per-instance survival (control -> gate) and marginal covariance shift:')
+    out.append('')
+    out.append('| instance | n control | n survivor | dropout | cov control -> survivor |')
+    out.append('|---|---|---|---|---|')
+    instances = sorted(set(ctrl_counts) | set(gate_counts))
+    for name in instances:
+        n_ctrl = ctrl_counts.get(name, 0)
+        n_surv = gate_counts.get(name, 0)
+        dropout = 1.0 - (n_surv / n_ctrl) if n_ctrl else 0.0
+        if name == 'ring':
+            full_radial = truth_radial_variance(full_cohort, name)
+            surv_radial = truth_radial_variance(survivor_cohort, name)
+            full_str = f's2={full_radial[1]:.4f}' if full_radial else 'n/a'
+            surv_str = f's2={surv_radial[1]:.4f}' if surv_radial else 'n/a'
+        else:
+            full_cov = truth_covariance(full_cohort, name)
+            surv_cov = truth_covariance(survivor_cohort, name)
+            full_str = _fmt_matrix(full_cov[1]) if full_cov else 'n/a'
+            surv_str = _fmt_matrix(surv_cov[1]) if surv_cov else 'n/a'
+        out.append(f'| {name} | {n_ctrl} | {n_surv} | {dropout:.1%} | {full_str} -> {surv_str} |')
+    out.append('')
+    pivotal = [('limb', 'disc'), ('limb', 'ring'), ('disc', 'ring'), ('limb', 'blob')]
+    out.append('Pairwise cross-covariance, full population -> survivor subset:')
+    out.append('')
+    out.append('| pair | cov full | cov survivor | corr full -> survivor |')
+    out.append('|---|---|---|---|')
+    for a, b in pivotal:
+        full_pair = truth_cross_covariance(full_cohort, a, b)
+        surv_pair = truth_cross_covariance(survivor_cohort, a, b)
+        if full_pair is None or surv_pair is None:
+            out.append(f'| {a} vs {b} | n/a | n/a | n/a |')
+            continue
+        out.append(
+            f'| {a} vs {b} | {full_pair[0]:+.5f} | {surv_pair[0]:+.5f} '
+            f'| {full_pair[1]:+.3f} -> {surv_pair[1]:+.3f} |'
+        )
+    out.append('')
+
+
 def _specs_for_family(
     family: str,
 ) -> list[tuple[list[EstimatorSpec], list[tuple[str, str]]]]:
@@ -550,6 +630,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('rows', type=Path, help='control (no-injection) rows file')
     parser.add_argument('--dt-rows', type=Path, default=None)
     parser.add_argument('--noise-rows', type=Path, default=None)
+    parser.add_argument('--gate-rows', type=Path, default=None)
     parser.add_argument('--out', type=Path, default=None)
     args = parser.parse_args(argv)
 
@@ -595,7 +676,7 @@ def main(argv: list[str] | None = None) -> int:
         pairs = [(a, b) for i, a in enumerate(all_instances) for b in all_instances[i + 1 :]]
         report_pair_truth(out, cohort, pairs, f'{family}: truth-based pair coupling (no injection)')
 
-    if args.dt_rows is not None or args.noise_rows is not None:
+    if args.dt_rows is not None or args.noise_rows is not None or args.gate_rows is not None:
         out.append('## Stage 0b: bias independence through the shared layer')
         out.append('')
         family = 'limb_disc_ring_diverse'
@@ -650,6 +731,26 @@ def main(argv: list[str] | None = None) -> int:
                     pair_covariances=[('limb', 'ring')],
                 )
                 report_truth_reference(out, usable, specs)
+
+        if args.gate_rows is not None:
+            gate_manifest, gate_rows = load_rows(args.gate_rows)
+            out.append(f'### Injection: reliability_gate (`{args.gate_rows}`)')
+            out.append('')
+            out.append(
+                'The reliability gate filters rather than shifts: it admits or '
+                'drops features, never moving a surviving technique offset. Its '
+                'common-mode effect is a survivorship selection on the cohort, '
+                'measured by comparing the truth-based covariance on the full '
+                'population against the survivor subset.'
+            )
+            out.append('')
+            report_selection_effect(
+                out,
+                rows,
+                gate_rows,
+                family,
+                float(gate_manifest.get('gate_depression', 0.0)),
+            )
 
     text = '\n'.join(out) + '\n'
     if args.out is not None:
