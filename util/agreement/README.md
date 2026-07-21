@@ -48,18 +48,23 @@ preserves the numbers and conclusions that outlive them.
    ```
 
    `--injection dt_shift` re-runs with the shared gradient / edge-DT
-   products translated by a per-scene random bias, and
+   products translated by a per-scene random bias,
    `--injection noise_scale` with the shared noise-sigma estimate
-   scaled — both as harness-level monkeypatches of the orchestrator
-   module (no production seam).  `--injection psf_broaden` /
-   `--injection psf_aniso` instead perturb the *render*: they overwrite
-   the scene's `optics.psf` block with a broadened (isotropic) or
-   axis-broadened (zero-mean elliptical) kernel the navigator does not
-   model, the only channel through which a shared PSF edge bias can
-   reach both the limb (distance-transform) and disc (correlation)
-   estimators — so they require the `limb_disc_psf` family, whose control
-   render matches the navigator (no mismatch).  Injected values are
-   drawn from the campaign seed and recorded per row.
+   scaled, and `--injection reliability_gate` with every per-type
+   reliability threshold raised by `--gate-depression` — all as
+   harness-level monkeypatches of the orchestrator module (no
+   production seam).  The first two shift a surviving technique's
+   offset; the gate only admits or drops, so it is the pure selection
+   channel (a surviving technique's offset is byte-identical to the
+   control pass).  `--injection psf_broaden` / `--injection psf_aniso`
+   instead perturb the *render*: they overwrite the scene's `optics.psf`
+   block with a broadened (isotropic) or axis-broadened (zero-mean
+   elliptical) kernel the navigator does not model, the only channel
+   through which a shared PSF edge bias can reach both the limb
+   (distance-transform) and disc (correlation) estimators — so they
+   require the `limb_disc_psf` family, whose control render matches the
+   navigator (no mismatch).  Injected values are drawn from the campaign
+   seed and recorded per row.
 
    ```bash
    venv/bin/python util/agreement/collect.py \
@@ -73,39 +78,65 @@ preserves the numbers and conclusions that outlive them.
        --out _work/agreement/psf/rows_psf_broaden.jsonl
    ```
 
-4. **`analyze.py`** — produces the Markdown report: per composition, the
+4. **`selection.py`** — the survivorship (selection-effect) model for a
+   shared layer that *filters* rather than *shifts*.  The reliability
+   gate never moves a surviving offset, so its common-mode effect is a
+   selection on the cohort, not a bias; a covariance measured downstream
+   of it describes the survivor population.  This module quantifies the
+   distortion on planted error arrays (truth-based, so exact) *under a
+   separable, monotonic admission model*: under that structure separately
+   gated independent errors are not coupled by survival (joint survival
+   factorizes) and gating only attenuates each marginal variance, while a
+   shared scene latent driving both error and admission attenuates the
+   shared cross-covariance toward zero.  The grid is a scenario result
+   conditional on that model, not a universal real-cohort bound: per-type
+   thresholds make the gates separate functions but do not by themselves
+   establish separability in error space (the real score-error structure
+   is #358's to measure).  Its `main` prints the grid the campaign record
+   quotes:
+
+   ```bash
+   venv/bin/python util/agreement/selection.py --n 200000
+   ```
+
+5. **`analyze.py`** — produces the Markdown report: per composition, the
    truth-free solve next to the truth-based reference (empirical error
    covariance against planted offsets), the null-space demonstration for
    degenerate compositions, and — when injected row files are supplied —
    the bias-independence tables (truth-based pair coupling per
    condition, paired per-scene injection response, solve-side detection
-   with a declared pair covariance).  `--psf-broaden-rows` /
-   `--psf-aniso-rows` add the PSF-layer section: the limb-disc coupling
-   under a rendered PSF mismatch (control vs injected), the paired
-   per-scene limb/disc response, and the deltas decomposed onto each
-   scene's illumination axis.
+   with a declared pair covariance).  `--gate-rows` adds the
+   survivorship-stratified selection-effect table (full population vs
+   survivor subset), the procedure the agreement study runs on its own
+   real cohorts.  `--psf-broaden-rows` / `--psf-aniso-rows` add the
+   PSF-layer section: the limb-disc coupling under a rendered PSF
+   mismatch (control vs injected), the paired per-scene limb/disc
+   response, and the deltas decomposed onto each scene's illumination
+   axis.
 
    ```bash
    venv/bin/python util/agreement/analyze.py _work/agreement/rows.jsonl \
        --dt-rows _work/agreement/rows_dt.jsonl \
        --noise-rows _work/agreement/rows_noise.jsonl \
+       --gate-rows _work/agreement/rows_gate.jsonl \
        --psf-broaden-rows _work/agreement/psf/rows_psf_broaden.jsonl \
        --psf-aniso-rows _work/agreement/psf/rows_psf_aniso.jsonl \
        --out _work/agreement/report.md
    ```
 
-5. **`tests/`** — pytest suite for the estimator (synthetic-Gaussian
-   recovery and degeneracy demonstrations for every composition regime)
-   and the scene generator (determinism, schema validity, geometry
-   invariants).  `util/` is outside the repo's CI pytest/ruff/mypy
-   scope; run them directly:
+6. **`tests/`** — pytest suite for the estimator (synthetic-Gaussian
+   recovery and degeneracy demonstrations for every composition regime),
+   the scene generator (determinism, schema validity, geometry
+   invariants), and the selection model (the factorization and
+   attenuation facts above).  `util/` is outside the repo's CI
+   pytest/ruff/mypy scope; run them directly:
 
    ```bash
    venv/bin/python -m pytest util/agreement/tests -q
    ruff check util/agreement && ruff format --check util/agreement
    MYPYPATH=src mypy --strict util/agreement/estimator.py \
        util/agreement/scene_gen.py util/agreement/analyze.py \
-       util/agreement/collect.py
+       util/agreement/collect.py util/agreement/selection.py
    ```
 
 ## Reading the estimator output
@@ -155,3 +186,13 @@ preserves the numbers and conclusions that outlive them.
   measured per-technique covariances are near-floor values specific to
   this validation cohort — inputs for checking the solve, not shippable
   technique accuracy numbers.
+- **Selection effect is bounded, not measured, in-sim.**  The gate's
+  distortion of a covariance depends on how strongly feature reliability
+  tracks technique error.  In the clean cohort the load-bearing feature
+  reliabilities are near-degenerate across scenes, so the gate acts as an
+  all-or-nothing cliff rather than a scene-selective filter, and the
+  direct in-sim selection effect on the load-bearing covariances is a
+  floor value.  The `selection.py` model supplies the bound for the
+  error-correlated case the real cohorts may sit in; the actual coupling
+  strength is a property of the real reliability scores, outside the
+  simulator's envelope.

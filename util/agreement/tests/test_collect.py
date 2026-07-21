@@ -31,26 +31,26 @@ def _psf_scene() -> dict[str, object]:
 
 def test_draw_none_is_disabled() -> None:
     """The 'none' draw carries no bias."""
-    assert _draw_injection('none', 'scene', _SEED, 0.7) == {'kind': 'none'}
+    assert _draw_injection('none', 'scene', _SEED, 0.7, 0.0) == {'kind': 'none'}
 
 
 def test_draw_psf_broaden_is_deterministic() -> None:
     """The same scene/seed redraws the same broadening factor."""
-    a = _draw_injection('psf_broaden', 'limb_disc_psf_00000', _SEED, 0.7)
-    b = _draw_injection('psf_broaden', 'limb_disc_psf_00000', _SEED, 0.7)
+    a = _draw_injection('psf_broaden', 'limb_disc_psf_00000', _SEED, 0.7, 0.0)
+    b = _draw_injection('psf_broaden', 'limb_disc_psf_00000', _SEED, 0.7, 0.0)
     assert a == b
 
 
 def test_draw_psf_broaden_factor_in_range() -> None:
     """The broadening factor stays inside its declared log-uniform range."""
-    draw = _draw_injection('psf_broaden', 'limb_disc_psf_00003', _SEED, 0.7)
+    draw = _draw_injection('psf_broaden', 'limb_disc_psf_00003', _SEED, 0.7, 0.0)
     assert draw['kind'] == 'psf_broaden'
     assert 1.4 <= draw['factor'] <= 3.0
 
 
 def test_draw_psf_aniso_carries_an_axis() -> None:
     """The anisotropic draw names the broadened axis."""
-    draw = _draw_injection('psf_aniso', 'limb_disc_psf_00001', _SEED, 0.7)
+    draw = _draw_injection('psf_aniso', 'limb_disc_psf_00001', _SEED, 0.7, 0.0)
     assert draw['kind'] == 'psf_aniso'
     assert draw['axis'] in ('v', 'u')
     assert 1.6 <= draw['factor'] <= 3.5

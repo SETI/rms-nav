@@ -11,15 +11,25 @@ own limb/disc estimates; ring-bearing compositions add a blob-only run
 never touches the shared gradient/DT products.
 
 Shared-bias injection (the bias-independence stage) is harness-level only.
-Two families of injection exist, both recorded per row and neither touching
+Three families of injection exist, all recorded per row and none touching
 ``src/``:
 
 - Shared preprocessing layer (nav-side monkeypatch of the orchestrator
-  module): ``--injection dt_shift`` translates the shared gradient /
-  edge-distance-transform products by a per-scene random bias, and
-  ``--injection noise_scale`` scales the single shared noise estimate.  Only
-  the distance-transform techniques read those products, so a
+  module): ``--injection dt_shift`` monkeypatches
+  ``compute_all_image_derivatives`` so every DT technique sees the shared
+  gradient / edge-distance-transform products translated by a per-scene
+  random bias, and ``--injection noise_scale`` monkeypatches
+  ``estimate_image_noise_sigma`` to scale the single shared noise estimate.
+  Only the distance-transform techniques read those products, so a
   correlation/centroid technique (disc, blob) is decoupled by construction.
+- Reliability gate (nav-side monkeypatch of ``FeatureReliabilityGate.apply``):
+  ``--injection reliability_gate`` tightens every per-type threshold by a
+  fixed depression (``--gate-depression``), so more features are dropped and
+  whole techniques stop reporting on the lower-reliability scenes.  Unlike
+  the other channels the gate never shifts a surviving technique's offset --
+  it only admits or drops -- so it is the pure *selection* channel: pairing a
+  gate pass with the control pass by scene id recovers, for every scene, both
+  the technique's true (unperturbed) error and whether it survived.
 - PSF layer (render-side, via the scene's ``optics.psf`` block):
   ``--injection psf_broaden`` renders the whole-scene PSF with its core sigma
   scaled up by a per-scene factor, and ``--injection psf_aniso`` renders it
@@ -62,7 +72,14 @@ from scene_gen import FAMILIES, generate_scenes  # noqa: E402
 DEFAULT_SEED = 20260719
 DEFAULT_OUT = REPO / '_work/agreement/rows.jsonl'
 
-INJECTION_KINDS = ('none', 'dt_shift', 'noise_scale', 'psf_broaden', 'psf_aniso')
+INJECTION_KINDS = (
+    'none',
+    'dt_shift',
+    'noise_scale',
+    'reliability_gate',
+    'psf_broaden',
+    'psf_aniso',
+)
 
 # PSF-layer injection: per-scene multiplicative broadening of the rendered PSF
 # core sigma above the navigator's modeled sigma (log-uniform draw).  The
@@ -96,7 +113,9 @@ def _runs_for_family(family: str) -> list[dict[str, Any]]:
     return runs
 
 
-def _draw_injection(kind: str, scene_id: str, seed: int, sigma_px: float) -> dict[str, Any]:
+def _draw_injection(
+    kind: str, scene_id: str, seed: int, sigma_px: float, gate_depression: float
+) -> dict[str, Any]:
     """Draw the per-scene injection values (recorded in the row).
 
     Parameters:
@@ -104,12 +123,18 @@ def _draw_injection(kind: str, scene_id: str, seed: int, sigma_px: float) -> dic
         scene_id: Scene identifier (part of the draw key).
         seed: Campaign seed (part of the draw key).
         sigma_px: Per-axis standard deviation of the dt_shift bias draw.
+        gate_depression: Fixed amount every reliability threshold is raised
+            by in the ``reliability_gate`` channel (constant across the
+            pass, so the per-scene dropout is set by the scene's own feature
+            reliabilities rather than a per-scene draw).
 
     Returns:
         Dict describing the injection (``{'kind': 'none'}`` when disabled).
     """
     if kind == 'none':
         return {'kind': 'none'}
+    if kind == 'reliability_gate':
+        return {'kind': 'reliability_gate', 'depression': gate_depression}
     rng = random.Random(f'{seed}/{scene_id}/inject')
     if kind == 'dt_shift':
         return {
@@ -190,6 +215,34 @@ def _apply_injection(injection: dict[str, Any]) -> list[tuple[Any, str, Any]]:
 
         patched.append((orch_mod, 'estimate_image_noise_sigma', real_noise))
         orch_mod.estimate_image_noise_sigma = injected_noise  # type: ignore[attr-defined,assignment]
+    elif injection['kind'] == 'reliability_gate':
+        from spindoctor.feature.reliability import FeatureReliabilityGate, GatedFeatureRecord
+
+        depression = float(injection['depression'])
+        real_apply = FeatureReliabilityGate.apply
+
+        def injected_apply(self: Any, features: list[Any]) -> tuple[list[Any], list[Any]]:
+            # Reproduce the real gate logic with every threshold raised by
+            # ``depression``; at depression 0 this is byte-for-byte the
+            # production admission rule.  Dropping features is all the gate
+            # does, so a surviving technique's offset is unchanged.
+            kept: list[Any] = []
+            gated: list[Any] = []
+            for feature in features:
+                threshold = self.thresholds.get(feature.feature_type, 0.0) + depression
+                if feature.reliability < threshold:
+                    gated.append(
+                        GatedFeatureRecord(
+                            feature=feature,
+                            reason=f'reliability_gate_injection_depression_{depression:.3f}',
+                        )
+                    )
+                else:
+                    kept.append(feature)
+            return kept, gated
+
+        patched.append((FeatureReliabilityGate, 'apply', real_apply))
+        FeatureReliabilityGate.apply = injected_apply  # type: ignore[method-assign]
     return patched
 
 
@@ -355,8 +408,17 @@ def main(argv: list[str] | None = None) -> int:
         default=0.7,
         help='per-axis sigma of the dt_shift bias draw',
     )
+    parser.add_argument(
+        '--gate-depression',
+        type=float,
+        default=0.15,
+        help='amount every reliability threshold is raised in the reliability_gate channel',
+    )
     parser.add_argument('--out', type=Path, default=DEFAULT_OUT)
     args = parser.parse_args(argv)
+
+    if not math.isfinite(args.gate_depression) or args.gate_depression < 0.0:
+        parser.error('--gate-depression must be a non-negative finite number')
 
     families = [f.strip() for f in args.families.split(',') if f.strip()]
     tasks = []
@@ -365,7 +427,11 @@ def main(argv: list[str] | None = None) -> int:
             family, args.per_family, campaign_seed=args.seed
         ):
             injection = _draw_injection(
-                args.injection, scene_id, args.seed, args.injection_sigma_px
+                args.injection,
+                scene_id,
+                args.seed,
+                args.injection_sigma_px,
+                args.gate_depression,
             )
             tasks.append((scene_id, family, sim_params, geometry, injection))
 
@@ -383,6 +449,7 @@ def main(argv: list[str] | None = None) -> int:
                     'families': families,
                     'injection': args.injection,
                     'injection_sigma_px': args.injection_sigma_px,
+                    'gate_depression': args.gate_depression,
                     'n_scenes': len(tasks),
                 }
             )
