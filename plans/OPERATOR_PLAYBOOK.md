@@ -163,7 +163,7 @@ selection effect). The original prompt is kept below for reference.
 
 ### 2.2 WS-17 — validate the camera distortion models (#228) -- DONE, PR #354
 
-Done 2026-07-21; PR #354 (assumes squash-merge to `main`). The
+Done 2026-07-21; PR #354 squash-merged to `main` (a2227db). The
 `experiments/fov_twist` one-off is rewritten into the maintained tool
 `util/fov_distortion/` (a pure-numpy decompose/aggregate core with unit
 tests, a star-navigation-backed per-frame measure step, and a process-pool
@@ -284,7 +284,7 @@ Independent review before done; all CI gates; one PR."
   demotes high to medium and its error improves from 3.01 to 1.54 px.
   #291 persists bit-for-bit and is documented rather than absorbed.
   Follow-ups, in the order they matter:
-  - **#318** — DONE, PR #356 (assumes squash-merge to `main`).
+  - **#318** — DONE, PR #356 squash-merged to `main` (366880c).
     RingAnnulusNav now consumes the channel: the ring models attach
     `orbit_normals_vu` and an effective `sigma_orbit_radial_px` to
     `RingAnnulusGeometry`, and the technique widens its NCC covariance
