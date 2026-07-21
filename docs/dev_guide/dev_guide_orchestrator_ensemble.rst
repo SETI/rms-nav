@@ -176,14 +176,21 @@ technique that *declares* a systematic uncertainty widens its reported
 covariance before the fuse, and every downstream step then prices it through
 the ordinary machinery -- the widened axis carries less precision weight in
 the merge, the fused sigma grows, and the sigma-gated tier demotes without any
-special-casing here. The ring-edge radial orbit-uncertainty channel is the
-worked example (see :doc:`dev_guide_techniques_ring_edge`): on the simulated
-planted-orbit-error scene
-(``tests/integration/sim_scenes/ring_system/orbit_error_ringlet.yaml``) the
-declared 2.5 px catalog error bar widens the fused radial sigma past the high
-tier's cap and the ~3 px biased offset demotes to ``medium``. The channel
-prices the hazard; it cannot remove the bias, so the scene keeps its
-measured-error pin. The shared DT fit-quality gates
+special-casing here. The ring radial orbit-uncertainty channel is the worked
+example (see :doc:`dev_guide_techniques_ring_edge` and
+:doc:`dev_guide_techniques_ring_annulus`): on the simulated planted-orbit-error
+scene (``tests/integration/sim_scenes/ring_system/orbit_error_ringlet.yaml``)
+both ring techniques widen their reported covariance by the declared 2.5 px
+catalog error bar along the translation each would absorb such a displacement
+into -- the edge fit from its fit vertices, the annulus correlation from the
+same edge normals painted into its composite template. The fused radial sigma
+grows past the high tier's cap and the biased offset demotes to ``medium``.
+Because both members price the same hazard rather than one carrying an
+un-widened radial axis, the fused sigma covers the residual bias (a measured
+~2.3 px error against a ~1.8 px fused sigma, about 1.3 sigma, where widening the
+edge fit alone left ~2.8 sigma). The channel prices the hazard; it cannot
+remove the bias, so the scene keeps its measured-error pin. The shared DT
+fit-quality gates
 (:doc:`dev_guide_techniques_dt_fitting`) close the adjacent
 unverified-fit family before results reach the ensemble at all.
 
@@ -210,8 +217,12 @@ A related honesty caveat survives inside the confidence scalar itself: the
 two-member agreement boost assumes the members' errors are independent, so
 two techniques observing the same displaced feature (the ring-edge fit and
 the ring-annulus correlation on one misplaced ringlet) can fuse to a high
-scalar confidence even as the sigma-gated tier demotes the result. On such
-frames the tier is the trustworthy verdict and the scalar is not.
+scalar confidence even as the sigma-gated tier demotes the result. The
+planted-orbit-error scene above is exactly this case: once both ring
+techniques widen isotropically their radial weights re-couple, the agreement
+boost engages, and the scene reports a ~0.99 scalar at ``medium`` tier and
+~2.3 px error. On such frames the tier is the trustworthy verdict and the
+scalar is not.
 
 That scalar is **not** inert, and it must not be dismissed as documentation.
 The tier boundaries are themselves fitted *from* it: the calibration tooling

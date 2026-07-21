@@ -36,6 +36,7 @@ from spindoctor.nav_model.nav_model_rings_base import NavModelRingsBase
 from spindoctor.nav_model.ring_emission import (
     RING_EDGE_DEFAULT_RELIABILITY,
     RING_EDGE_SIGMA_ALONG_PX,
+    _aggregate_annulus_orbit_terms,
     _build_annulus_feature,
     _build_edge_feature,
 )
@@ -654,6 +655,12 @@ class NavModelRings(NavModelRingsBase):
             # reliability formula would gate them all out
             # (min(1, 1/5) * 0.7 = 0.14 < 0.30 threshold).
             annulus_renderings: list[tuple[NDArrayFloatType, NDArrayBoolType, str, float]] = []
+            # Per-annulus-edge orbit terms: (normals, vertex_count, orbit_sigma_px).
+            # The composite RING_ANNULUS carries the concatenated normals and the
+            # vertex-weighted effective orbit sigma so RingAnnulusNav can widen
+            # its covariance by the same coherent-radial-error channel RingEdgeNav
+            # applies per edge.
+            annulus_orbit_terms: list[tuple[NDArrayFloatType, int, float]] = []
             for (
                 ring_feat,
                 model_img,
@@ -672,12 +679,31 @@ class NavModelRings(NavModelRingsBase):
                         continue
                     radial_extent_px = _radial_extent_px(vertices_vu, normals_vu)
                     straight = _is_straight_line(vertices_vu)
+                    # The coherent displacement bound is a property of THIS edge's
+                    # own orbit solution, not the feature-level max the per-vertex
+                    # sigma uses; a physical km displacement converts at the edge's
+                    # own unfloored radial scale (the per-vertex floor belongs to
+                    # the statistical sigma and would understate a coherent
+                    # displacement on sub-km/px frames).  Computed once here so the
+                    # edge and annulus paths price the same edge identically.
+                    orbit_sigma_km = correlated_fraction * (
+                        edge_orbit_rms_km if edge_orbit_rms_km > 0.0 else default_orbit_sigma_km
+                    )
+                    orbit_km_per_pixel_radial = _median_radial_scale(
+                        self._radial_resolution_ext,
+                        edge_mask,
+                        self._km_per_pixel_radial,
+                    )
+                    orbit_sigma_px = orbit_sigma_km / orbit_km_per_pixel_radial
                     use_annulus = force_annulus or (
                         radial_extent_px <= max_radial_px and not straight
                     )
                     if use_annulus:
                         annulus_renderings.append(
                             (model_img, model_mask, label_text, radial_extent_px)
+                        )
+                        annulus_orbit_terms.append(
+                            (normals_vu, int(vertices_vu.shape[0]), orbit_sigma_px)
                         )
                         self._logger.debug(
                             'ANNULUS %r -> vertices=%d, radial_extent=%.2f px, '
@@ -701,26 +727,9 @@ class NavModelRings(NavModelRingsBase):
                                 vertices_vu=vertices_vu,
                                 normals_vu=normals_vu,
                                 uncertainty_km=uncertainty_km,
-                                # The coherent displacement bound is a property
-                                # of THIS edge's own orbit solution, not the
-                                # feature-level max the per-vertex sigma uses.
-                                orbit_sigma_km=correlated_fraction
-                                * (
-                                    edge_orbit_rms_km
-                                    if edge_orbit_rms_km > 0.0
-                                    else default_orbit_sigma_km
-                                ),
+                                orbit_sigma_km=orbit_sigma_km,
                                 km_per_pixel_radial=max(self._km_per_pixel_radial, 1.0),
-                                # A physical km displacement converts at the
-                                # edge's own radial scale, with no rasterization
-                                # floor -- that floor belongs to the per-vertex
-                                # sigma and would understate a coherent
-                                # displacement on sub-km/px frames.
-                                orbit_km_per_pixel_radial=_median_radial_scale(
-                                    self._radial_resolution_ext,
-                                    edge_mask,
-                                    self._km_per_pixel_radial,
-                                ),
+                                orbit_km_per_pixel_radial=orbit_km_per_pixel_radial,
                                 is_straight_line=straight,
                                 bbox=_mask_bbox(edge_mask),
                                 subject_range_km=self._subject_range_km,
@@ -745,6 +754,9 @@ class NavModelRings(NavModelRingsBase):
                 composite_bbox = _mask_bbox(composite_mask)
                 composite_radial_extent_px = float(composite_bbox[2] - composite_bbox[0])
                 joint_label = ', '.join(sorted({label for _, _, label, _ in annulus_renderings}))
+                orbit_normals_vu, sigma_orbit_radial_px = _aggregate_annulus_orbit_terms(
+                    annulus_orbit_terms
+                )
                 # The template payload convention (``compose_template_features``)
                 # is a postage stamp local to ``bbox_extfov_vu``; crop the
                 # ext-FOV-sized composite down to the bbox.  Passing the full
@@ -765,6 +777,8 @@ class NavModelRings(NavModelRingsBase):
                         ],
                         bbox=composite_bbox,
                         predicted_center_vu=self._predicted_center_vu,
+                        orbit_normals_vu=orbit_normals_vu,
+                        sigma_orbit_radial_px=sigma_orbit_radial_px,
                         subject_range_km=self._subject_range_km,
                         constituent_count=len(annulus_renderings),
                         source_model=self.name,

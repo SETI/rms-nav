@@ -284,11 +284,25 @@ Independent review before done; all CI gates; one PR."
   demotes high to medium and its error improves from 3.01 to 1.54 px.
   #291 persists bit-for-bit and is documented rather than absorbed.
   Follow-ups, in the order they matter:
-  - **#318** (raised to Essential): RingAnnulusNav does not consume the
-    channel, and carries **95% of the fused precision** on the headline
-    scene, so the fused error bar is still optimistic (1.54 px error at
-    0.55 px sigma, ~2.8 sigma). Until this lands the channel is ~5%
-    effective wherever both ring techniques run.
+  - **#318** — DONE, PR #356 (assumes squash-merge to `main`).
+    RingAnnulusNav now consumes the channel: the ring models attach
+    `orbit_normals_vu` and an effective `sigma_orbit_radial_px` to
+    `RingAnnulusGeometry`, and the technique widens its NCC covariance
+    from the same absorbed-translation sensitivity RingEdgeNav uses, so
+    both ring techniques price an identical annulus geometry identically
+    (a short visible arc widens one-for-one along its normal; a closed
+    ring barely absorbs a uniform radial error). On `orbit_error_ringlet`
+    RingAnnulusNav's radial sigma rises from 0.56 to ~2.56 px, the fused
+    sigma widens to ~1.79 px (calibration ~1.3 sigma, was ~2.8), and the
+    fused error bar now covers the residual bias; the tier stays medium,
+    correctly, and the scene pin is re-measured to the honest post-channel
+    behaviour (recovered error 2.31 px). The channel is now effective on
+    both ring techniques rather than ~5%, and
+    `rings.orbit_radial_sigma_correlated_fraction` scales both. Caveat:
+    widening both members isotropically re-couples their weights and
+    resurfaces the correlated-witness scalar (0.99 on this scene) -- that
+    is #317, documented at the scene pin and in the ensemble guide, not
+    masked.
   - **#316**: the fully-correlated severity is contested and demotes five
     operator-verified Keeler frames. Carries your decision; ratchet via
     `rings.orbit_radial_sigma_correlated_fraction` or implement the

@@ -132,6 +132,18 @@ template image of the entire ring system
 The template's bounding box is the union of the per-edge bounding boxes; the template
 brightness at each pixel is the sum of the per-ring-edge contributions.
 
+The annulus feature also carries the same coherent orbit-uncertainty channel as the per-edge
+path, so the correlation technique can price a misplaced catalog orbit rather than reporting
+a tight lock on it. The constituent edges' outward normals are concatenated onto
+:attr:`~spindoctor.feature.geometry.RingAnnulusGeometry.orbit_normals_vu`, and their per-edge
+orbit sigmas (each the catalog RMS, or ``rings.default_orbit_radial_sigma_km`` in its absence,
+scaled by ``rings.orbit_radial_sigma_correlated_fraction`` and converted at the edge's own
+radial scale) combine into a vertex-weighted effective
+:attr:`~spindoctor.feature.geometry.RingAnnulusGeometry.sigma_orbit_radial_px`.
+:class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` widens its reported
+covariance from those, exactly as the ring-edge technique does from its fit vertices (see
+:doc:`dev_guide_techniques_ring_annulus`).
+
 Restrictions and assumptions
 ----------------------------
 

@@ -11,7 +11,9 @@ boxes are half-open in the numpy slicing sense: ``v_min, u_min, v_max,
 u_max`` with ``arr[v_min:v_max, u_min:u_max]`` covering the box.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+import numpy as np
 
 from spindoctor.support.types import NDArrayFloatType
 
@@ -187,10 +189,31 @@ class RingAnnulusGeometry:
     Parameters:
         bbox_extfov_vu: Half-open bounding box where the template sits.
         predicted_center_vu: Predicted planet center for the ring system.
+        orbit_normals_vu: ``(M, 2)`` outward radial normals of the constituent
+            ring edges painted into the composite template, concatenated across
+            edges with their signs intact.  This is the annulus fit's own
+            radial geometry: a coherent catalog-orbit error moves every one of
+            these vertices along its own normal, and ``RingAnnulusNav`` uses
+            the aggregate to derive how much of that displacement its
+            translation-only NCC absorbs (the same absorbed-sensitivity solve
+            ``RingEdgeNav`` runs on its fit vertices).  Empty when the emitting
+            model tracks no per-edge geometry for the composite.
+        sigma_orbit_radial_px: Effective fully-correlated 1-sigma radial
+            displacement of the predicted annulus (the catalog orbit-solution
+            uncertainty), in pixels, aggregated over the constituent edges by
+            their vertex share.  Distinct from any per-vertex statistical
+            sigma: an orbit error displaces the whole annulus coherently and
+            does not average down over vertices, so ``RingAnnulusNav`` adds it
+            to its reported covariance through the absorbed translation
+            direction rather than letting a tight NCC lock on a misplaced
+            annulus be reported as a tight pointing fix.  ``0.0`` when no
+            constituent edge declares an orbit uncertainty.
     """
 
     bbox_extfov_vu: tuple[int, int, int, int]
     predicted_center_vu: tuple[float, float]
+    orbit_normals_vu: NDArrayFloatType = field(default_factory=lambda: np.zeros((0, 2)))
+    sigma_orbit_radial_px: float = 0.0
 
 
 @dataclass(frozen=True, eq=False)

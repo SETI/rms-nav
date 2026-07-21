@@ -43,6 +43,10 @@ from spindoctor.nav_technique.nav_technique import (
     rotation_unobservable_sigma_rad,
     search_window_for_obs,
 )
+from spindoctor.nav_technique.ring_edge_geometry import (
+    _absorbed_orbit_sensitivity,
+    _orbit_inflated_covariance,
+)
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.support.correlate import navigate_with_pyramid_kpeaks, peak_to_runner_up_ratio
 from spindoctor.support.types import NDArrayFloatType
@@ -98,6 +102,54 @@ def _annulus_span_px(features: list[NavFeature]) -> float:
         v_min, u_min, v_max, u_max = feature.geometry.bbox_extfov_vu
         max_extent_px = max(max_extent_px, v_max - v_min, u_max - u_min)
     return float(max_extent_px)
+
+
+def _annulus_orbit_channel(
+    features: list[NavFeature],
+) -> tuple[NDArrayFloatType, float]:
+    """Aggregate the consumed annuli's radial orbit-uncertainty channel inputs.
+
+    Concatenates the per-feature outward edge normals and derives the
+    absorbed-translation sensitivity ``g`` the composite NCC would take on
+    from a coherent radial orbit error, plus the effective fully-correlated
+    orbit sigma over the consumed annuli.  ``g`` comes from the same
+    absorbed-translation solve ``RingEdgeNav`` runs on its fit vertices
+    (:func:`~spindoctor.nav_technique.ring_edge_geometry._absorbed_orbit_sensitivity`),
+    so both ring techniques price an identical annulus geometry identically:
+    a short visible arc absorbs a radial error one-for-one along its normal, a
+    closed ring barely absorbs it (a uniform radial error is a dilation) and
+    falls through to the caller's isotropic bound.
+
+    Per-feature sigmas are combined as a normal-count-weighted mean (fully
+    correlated), matching the emission-side aggregation; the vertices carry no
+    fit weight here, so every vertex weighs equally in ``g``.
+
+    Parameters:
+        features: The consumed ``RING_ANNULUS`` features.
+
+    Returns:
+        ``(sensitivity_g, sigma_orbit_radial_px)``.  ``g`` is ``(2,)`` and the
+        sigma ``0.0`` when no consumed annulus declares an orbit uncertainty.
+    """
+    normals_list: list[NDArrayFloatType] = []
+    weighted_sum = 0.0
+    weight_total = 0.0
+    for feat in features:
+        geometry = feat.geometry
+        if not isinstance(geometry, RingAnnulusGeometry):
+            continue
+        normals = np.asarray(geometry.orbit_normals_vu, np.float64)
+        sigma = float(geometry.sigma_orbit_radial_px)
+        if normals.shape[0] == 0 or sigma <= 0.0:
+            continue
+        normals_list.append(normals)
+        weighted_sum += float(normals.shape[0]) * sigma
+        weight_total += float(normals.shape[0])
+    if not normals_list or weight_total <= 0.0:
+        return np.zeros(2, np.float64), 0.0
+    all_normals = np.concatenate(normals_list, axis=0)
+    sensitivity_g = _absorbed_orbit_sensitivity(all_normals, np.ones(all_normals.shape[0]))
+    return sensitivity_g, weighted_sum / weight_total
 
 
 class RingAnnulusNav(NavTechnique):
@@ -239,6 +291,29 @@ class RingAnnulusNav(NavTechnique):
                 size_frac=self._cov_tuning.model_error_size_frac,
                 floor_px=self._cov_tuning.model_error_floor_px,
             )
+            # Radial orbit-uncertainty channel: the NCC covariance describes the
+            # statistical lock onto the MODELED annulus, but a catalog-orbit
+            # error displaces the whole annulus coherently and the correlation
+            # absorbs it into the reported offset.  Widen the covariance by the
+            # declared orbit sigma along the translation such a displacement is
+            # absorbed into -- the correlation-side analogue of the RingEdgeNav
+            # channel, so a tight lock on a misplaced annulus is not reported as
+            # a tight pointing fix.  On a closed ring the absorbed direction is
+            # near zero (a uniform radial error dilates rather than translates)
+            # and the bound is reported isotropically, since which way the
+            # nonlinear acquisition locks is exactly what cannot be predicted.
+            orbit_g, sigma_orbit_px = _annulus_orbit_channel(eligible)
+            if sigma_orbit_px > 0.0:
+                covariance_2x2 = _orbit_inflated_covariance(covariance_2x2, orbit_g, sigma_orbit_px)
+                self.logger.info(
+                    'Widening the reported covariance by the declared radial orbit '
+                    'uncertainty: sigma %.3f px, absorbed sensitivity (v, u) = '
+                    '(%.3f, %.3f) (|g| = %.3f)',
+                    sigma_orbit_px,
+                    float(orbit_g[0]),
+                    float(orbit_g[1]),
+                    float(np.linalg.norm(orbit_g)),
+                )
             fit_rotation = bool(context.fit_camera_rotation)
             covariance: NDArrayFloatType = (
                 embed_rotation_unobservable(covariance_2x2) if fit_rotation else covariance_2x2
@@ -253,6 +328,7 @@ class RingAnnulusNav(NavTechnique):
                 peak_to_runner_up_ratio=peak_to_runner_up_ratio(top_k_peaks),
                 annulus_count=len(eligible),
                 used_gradient=used_gradient,
+                sigma_orbit_radial_px=sigma_orbit_px,
             )
             assert self.confidence_spec is not None  # set as class attribute
             confidence, breakdown = evaluate_sigmoid_combination(
