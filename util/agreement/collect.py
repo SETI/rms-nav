@@ -315,6 +315,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--out', type=Path, default=DEFAULT_OUT)
     args = parser.parse_args(argv)
 
+    if not math.isfinite(args.gate_depression) or args.gate_depression < 0.0:
+        parser.error('--gate-depression must be a non-negative finite number')
+
     families = [f.strip() for f in args.families.split(',') if f.strip()]
     tasks = []
     for family in families:

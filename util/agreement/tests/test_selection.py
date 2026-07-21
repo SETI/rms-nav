@@ -57,6 +57,12 @@ def test_stratum_stats_rejects_misaligned() -> None:
         stratum_stats(np.zeros(3), np.zeros(4))
 
 
+def test_stratum_stats_rejects_non_1d() -> None:
+    """A 2-D error array raises ValueError before the shape-match check."""
+    with pytest.raises(ValueError, match='must be 1-D'):
+        stratum_stats(np.zeros((3, 2)), np.zeros((3, 2)))
+
+
 def test_trial_rejects_bad_n() -> None:
     """A trial with fewer than two scenes raises."""
     rng = np.random.default_rng(0)

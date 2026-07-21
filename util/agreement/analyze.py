@@ -94,12 +94,51 @@ def _instance_offsets(row: dict[str, Any]) -> dict[str, tuple[float, float]]:
     return offsets
 
 
-def build_cohort(rows: list[dict[str, Any]], family: str) -> list[CohortFrame]:
-    """Assemble estimator frames for one family's rows.
+def _frame_from_row(
+    row: dict[str, Any], offsets: dict[str, tuple[float, float]]
+) -> CohortFrame | None:
+    """Build one cohort frame from a row and a chosen instance-offset set.
 
     Ring instances take their per-frame radial axis, and the clipped-limb
     families take the limb's rotating basis angle, from the row geometry
-    (derived from the idealized scene parameters, not truth keys).
+    (derived from the idealized scene parameters, not truth keys).  The
+    ``offsets`` argument lets a caller substitute a filtered or alternate-source
+    offset set (e.g. control-pass offsets under a gate survival mask) while
+    keeping the row's geometry and planted truth.
+
+    Parameters:
+        row: One collection row (supplies geometry and planted truth).
+        offsets: The per-instance offsets to place on the frame.
+
+    Returns:
+        The cohort frame, or ``None`` when fewer than two instances are given.
+    """
+    if len(offsets) < 2:
+        return None
+    geometry = row['geometry']
+    basis: dict[str, float] = {}
+    axis: dict[str, float] = {}
+    if 'ring_radial_deg' in geometry and 'ring' in offsets:
+        axis['ring'] = math.radians(float(geometry['ring_radial_deg']))
+    if 'limb_arc_outward_deg' in geometry:
+        # The arc direction is the rotating basis for every technique
+        # navigating the clipped body: the limb (anisotropic covariance)
+        # and the disc (its inward pull toward the body center is a
+        # geometry-locked bias the solve's rotating mean columns must
+        # be able to absorb).
+        arc = math.radians(float(geometry['limb_arc_outward_deg']))
+        for name in ('limb', 'disc'):
+            if name in offsets:
+                basis[name] = arc
+    return CohortFrame(
+        scene_id=row['scene_id'],
+        sample=FrameSample(offsets=offsets, basis_angle_rad=basis, axis_angle_rad=axis),
+        truth=(float(row['planted']['dv']), float(row['planted']['du'])),
+    )
+
+
+def build_cohort(rows: list[dict[str, Any]], family: str) -> list[CohortFrame]:
+    """Assemble estimator frames for one family's rows.
 
     Parameters:
         rows: All rows from a collection pass.
@@ -113,31 +152,51 @@ def build_cohort(rows: list[dict[str, Any]], family: str) -> list[CohortFrame]:
     for row in rows:
         if row['family'] != family or 'error' in row:
             continue
-        offsets = _instance_offsets(row)
-        if len(offsets) < 2:
+        frame = _frame_from_row(row, _instance_offsets(row))
+        if frame is not None:
+            frames.append(frame)
+    return frames
+
+
+def build_survivor_cohort(
+    control: list[dict[str, Any]], gate: list[dict[str, Any]], family: str
+) -> list[CohortFrame]:
+    """Control-offset cohort masked to the instances that survived the gate.
+
+    Survivorship membership comes from the gate pass (which instances still
+    produced a result on each scene), but the offset *values* come from the
+    matched control row.  This isolates the selection effect from any offset
+    change: even if a future gate perturbation shifted a surviving offset,
+    the comparison would still measure only which scenes and instances the
+    gate removed, never an offset difference.  (The reliability_gate channel
+    is a pure selection channel -- surviving offsets are byte-identical to
+    control -- so on these rows the result equals ``build_cohort(gate, ...)``;
+    the substitution is a hardening, not a correction.)
+
+    Parameters:
+        control: Control (no-injection) rows.
+        gate: Reliability-gate injection rows (survivor membership).
+        family: Family to select.
+
+    Returns:
+        The survivor cohort frames, control offsets under the gate mask.
+    """
+    survivors = {
+        row['scene_id']: set(_instance_offsets(row))
+        for row in gate
+        if row['family'] == family and 'error' not in row
+    }
+    frames: list[CohortFrame] = []
+    for row in control:
+        if row['family'] != family or 'error' in row:
             continue
-        geometry = row['geometry']
-        basis: dict[str, float] = {}
-        axis: dict[str, float] = {}
-        if 'ring_radial_deg' in geometry and 'ring' in offsets:
-            axis['ring'] = math.radians(float(geometry['ring_radial_deg']))
-        if 'limb_arc_outward_deg' in geometry:
-            # The arc direction is the rotating basis for every technique
-            # navigating the clipped body: the limb (anisotropic covariance)
-            # and the disc (its inward pull toward the body center is a
-            # geometry-locked bias the solve's rotating mean columns must
-            # be able to absorb).
-            arc = math.radians(float(geometry['limb_arc_outward_deg']))
-            for name in ('limb', 'disc'):
-                if name in offsets:
-                    basis[name] = arc
-        frames.append(
-            CohortFrame(
-                scene_id=row['scene_id'],
-                sample=FrameSample(offsets=offsets, basis_angle_rad=basis, axis_angle_rad=axis),
-                truth=(float(row['planted']['dv']), float(row['planted']['du'])),
-            )
-        )
+        kept = survivors.get(row['scene_id'])
+        if kept is None:
+            continue
+        offsets = {name: off for name, off in _instance_offsets(row).items() if name in kept}
+        frame = _frame_from_row(row, offsets)
+        if frame is not None:
+            frames.append(frame)
     return frames
 
 
@@ -502,7 +561,15 @@ def report_noise_response(
 
 
 def _survival_counts(rows: list[dict[str, Any]], family: str) -> dict[str, int]:
-    """Per-instance count of scenes on which the instance produced a result."""
+    """Per-instance count of scenes on which the instance produced a result.
+
+    Parameters:
+        rows: All rows from a collection pass.
+        family: Family to select.
+
+    Returns:
+        Mapping of instance name to the number of scenes it survived on.
+    """
     counts: dict[str, int] = {}
     for row in rows:
         if row['family'] != family or 'error' in row:
@@ -521,23 +588,24 @@ def report_selection_effect(
 ) -> None:
     """Survivorship-stratified truth comparison for the reliability-gate channel.
 
-    The gate only admits or drops features, so a surviving technique's offset
-    equals its control offset exactly; the selection effect is therefore the
-    difference between the truth-based covariance on the full (control)
-    population and on the survivor subset (the scenes the gate keeps).  This
-    is the procedure the agreement study must run on its own real cohorts,
-    where feature reliability is not degenerate; on these clean scenes it
-    reports the in-sim floor.
+    The selection effect is the difference between the truth-based covariance on
+    the full (control) population and on the survivor subset (the scenes and
+    instances the gate keeps).  Survivor membership comes from the gate pass but
+    the offset values come from the matched control rows (see
+    :func:`build_survivor_cohort`), so the comparison isolates selection from any
+    offset change.  This is the procedure the agreement study must run on its own
+    real cohorts, where feature reliability is not degenerate; on these clean
+    scenes it reports the in-sim floor.
 
     Parameters:
         out: Markdown accumulator.
         control: Control (no-injection) rows.
-        gate: Reliability-gate injection rows (survivor subset).
+        gate: Reliability-gate injection rows (survivor membership).
         family: Family to compare on.
         depression: Threshold depression the gate pass used.
     """
     full_cohort = build_cohort(control, family)
-    survivor_cohort = build_cohort(gate, family)
+    survivor_cohort = build_survivor_cohort(control, gate, family)
     ctrl_counts = _survival_counts(control, family)
     gate_counts = _survival_counts(gate, family)
     out.append(f'Threshold depression: +{depression:.3f} on every per-type reliability gate.')
@@ -734,6 +802,21 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.gate_rows is not None:
             gate_manifest, gate_rows = load_rows(args.gate_rows)
+            gate_kind = gate_manifest.get('injection')
+            if gate_kind != 'reliability_gate':
+                raise ValueError(
+                    f'--gate-rows manifest injection is {gate_kind!r}, expected '
+                    "'reliability_gate'; the selection-effect comparison is only "
+                    'valid for a reliability_gate pass'
+                )
+            gate_seed = gate_manifest.get('campaign_seed')
+            ctrl_seed = manifest.get('campaign_seed')
+            if gate_seed != ctrl_seed:
+                raise ValueError(
+                    f'--gate-rows campaign_seed {gate_seed!r} does not match the '
+                    f'control seed {ctrl_seed!r}; the passes must share scenes to '
+                    'pair by scene id'
+                )
             out.append(f'### Injection: reliability_gate (`{args.gate_rows}`)')
             out.append('')
             out.append(

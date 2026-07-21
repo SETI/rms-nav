@@ -68,12 +68,17 @@ preserves the numbers and conclusions that outlive them.
    gate never moves a surviving offset, so its common-mode effect is a
    selection on the cohort, not a bias; a covariance measured downstream
    of it describes the survivor population.  This module quantifies the
-   distortion on planted error arrays (truth-based, so exact): it makes
-   precise that separate per-technique gates on independent errors do
-   not manufacture cross-covariance (joint survival factorizes) and only
-   attenuate each marginal variance, while a shared scene latent driving
-   both error and admission attenuates the shared cross-covariance toward
-   zero.  Its `main` prints the bound grid the campaign record quotes:
+   distortion on planted error arrays (truth-based, so exact) *under a
+   separable, monotonic admission model*: under that structure separately
+   gated independent errors are not coupled by survival (joint survival
+   factorizes) and gating only attenuates each marginal variance, while a
+   shared scene latent driving both error and admission attenuates the
+   shared cross-covariance toward zero.  The grid is a scenario result
+   conditional on that model, not a universal real-cohort bound: per-type
+   thresholds make the gates separate functions but do not by themselves
+   establish separability in error space (the real score-error structure
+   is #358's to measure).  Its `main` prints the grid the campaign record
+   quotes:
 
    ```bash
    venv/bin/python util/agreement/selection.py --n 200000

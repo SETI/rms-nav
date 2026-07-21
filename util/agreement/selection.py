@@ -12,17 +12,22 @@ whole population.
 
 This module is the truth-based instrument for that effect.  It works on planted
 error arrays (never on real frames), so every number it returns is an exact
-statement about how survivorship distorts a covariance -- the axis on which the
-simulator's word is final.  Two facts it makes precise:
+statement about how survivorship distorts a covariance *in this model* -- the
+axis on which the simulator's word is final.  The results below are scenario
+results conditional on the model's admission being **separable** (each
+technique admitted by a gate on its own error plus a shared latent, never on
+the other technique's error) and **monotonic** (larger error magnitude, lower
+chance of admission).  Under that structure:
 
-- **Separate per-technique gates do not manufacture cross-covariance.**  When
-  two techniques have independent errors and each is admitted by its own gate,
-  the joint-survival event factorizes across the two, so the survivor
-  cross-covariance stays at its (zero) population value.  What separate gating
-  *does* do is attenuate each technique's *marginal* covariance when survival
-  tracks that technique's own error -- survivors are the low-error frames, so a
-  per-technique sigma measured on survivors understates the population sigma.
-- **A shared scene latent is the only channel that distorts the pairwise
+- **Separately-gated independent errors are not coupled by survival.**  When
+  two techniques have independent errors and each is admitted by a gate on its
+  own error, the joint-survival event factorizes across the two, so the
+  survivor cross-covariance stays at its (zero) population value.  What separate
+  gating *does* do is attenuate each technique's *marginal* covariance when
+  survival tracks that technique's own error -- survivors are the low-error
+  frames, so a per-technique sigma measured on survivors understates the
+  population sigma.
+- **A shared scene latent is the channel that distorts the pairwise
   covariance.**  When a common scene-quality factor drives both techniques'
   errors *and* their admission, conditioning on survival truncates that
   latent's variance and so attenuates the shared (cross) covariance toward zero.
@@ -31,12 +36,15 @@ The model plants ``e_i = common_gain * q + eps_i`` with a shared scene latent
 ``q`` and independent per-technique noise ``eps_i``, then admits a scene when
 both techniques' "badness" (a weighted sum of the shared-latent and own-error
 magnitudes) is small enough to hit a target survival fraction.  Sweeping the
-gate weights and the survival fraction bounds the distortion: at a given real
-per-technique dropout fraction and a given strength of the reliability-vs-error
-coupling, the induced change in any recovered covariance element is at most what
-this model reports.  What the model cannot supply -- the actual strength of that
-coupling on real frames -- is a property of the real reliability scores, outside
-the simulator's envelope.
+gate weights and the survival fraction *characterizes* the distortion under that
+admission model -- it is not a universal bound on a real cohort.  Two real-frame
+properties the model cannot supply set where a real cohort lands: how strongly
+each reliability score tracks its own technique's error, and whether the two
+scores' error-dependence is genuinely separable or is shared (both scores
+falling with a common image-quality factor) or inverse.  Per-type thresholds
+make the gates separate *functions* but do not by themselves establish that
+separability in error space; that check is a real-frame measurement outside the
+simulator's envelope.
 
 All statistics are per-axis scalars (variance and covariance along one image
 axis): the agreement solve reduces every rank-1 (ring) pair to a per-axis
@@ -108,8 +116,10 @@ def stratum_stats(err_a: NDArray[np.float64], err_b: NDArray[np.float64]) -> Str
         below two samples they are reported as zero.
 
     Raises:
-        ValueError: if the two arrays differ in length.
+        ValueError: if either array is not 1-D, or the two differ in length.
     """
+    if err_a.ndim != 1 or err_b.ndim != 1:
+        raise ValueError(f'err_a and err_b must be 1-D; got ndim {err_a.ndim} and {err_b.ndim}')
     if err_a.shape != err_b.shape:
         raise ValueError(f'err_a and err_b must align; got {err_a.shape} and {err_b.shape}')
     n = int(err_a.shape[0])
@@ -212,7 +222,14 @@ def synthetic_selection_trial(
 
 
 def _fmt(stats: StratumStats) -> str:
-    """One-line rendering of a stratum's moments."""
+    """One-line rendering of a stratum's moments.
+
+    Parameters:
+        stats: The stratum statistics to render.
+
+    Returns:
+        A compact single-line string of the counts and moments.
+    """
     return (
         f'n={stats.n:5d} var_a={stats.var_a:6.3f} var_b={stats.var_b:6.3f} '
         f'cov={stats.cov_ab:+.3f} corr={stats.corr_ab:+.3f}'
