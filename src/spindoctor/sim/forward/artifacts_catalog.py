@@ -18,7 +18,7 @@ from spindoctor.sim.forward.artifact_modes import ARTIFACT_MODES, MODE_KEYS
 __all__ = [
     'ARTIFACT_MODES',
     'DETECTOR_DEFAULTS',
-    'DISTORTION_RESIDUAL_RMS_PX',
+    'DISTORTION_RESIDUAL_PARAMS',
     'MODE_KEYS',
     'PSF_KERNELS',
     'SKY_PIXEL_SCALE_ARCSEC',
@@ -87,18 +87,25 @@ PSF_KERNELS: dict[str, dict[str, float]] = {
 }
 
 # Residual geometric-distortion RMS displacement over the frame, in detector
-# pixels: the error remaining after the navigator applies each instrument's
-# known distortion model (the only distortion actually present in the frames
-# the pipeline consumes).  All values are interim, pending the per-instrument
-# star-field residual measurement; the Cassini corrected field is sub-pixel,
-# Voyager GEOMED products carry ~1 px internal error, and the mapped-field
-# cameras sit in between.
-DISTORTION_RESIDUAL_RMS_PX: dict[str, float] = {
-    'coiss_nac': 0.1,
-    'coiss_wac': 0.1,
-    'gossi': 0.05,
-    'nhlorri': 0.05,
-    'vgiss': 1.0,
+# The residual geometric distortion remaining after the navigator applies each
+# instrument's known distortion model -- the only distortion actually present
+# in the frames the pipeline consumes.  Each block is a radial polynomial in the
+# normalized field radius (``k1`` on rho^2, ``k2`` on rho^4, matching the sim
+# distortion warp) plus a non-radial wander RMS.  Values are measured from the
+# per-instrument star-field FOV distortion analysis: the Cassini corrected field
+# is sub-pixel and close to radially symmetric, Galileo carries a pincushion
+# term reaching ~0.5 px at the corner, New Horizons LORRI is near its noise
+# floor, and the Voyager GEOMED products carry several tenths of a pixel of both
+# radial and non-radial distortion.  The Voyager block is the Voyager 2 WAC
+# measurement; the two Voyager missions and their narrow- and wide-angle cameras
+# have distinct optics, so a single key under-represents that spread until
+# per-camera keys and locked frames for each are available.
+DISTORTION_RESIDUAL_PARAMS: dict[str, dict[str, float]] = {
+    'coiss_nac': {'k1': 3.17e-04, 'k2': -3.51e-04, 'nonradial_rms_px': 0.0},
+    'coiss_wac': {'k1': 9.0e-06, 'k2': 5.48e-05, 'nonradial_rms_px': 0.0},
+    'gossi': {'k1': -3.47e-04, 'k2': 1.72e-03, 'nonradial_rms_px': 0.0},
+    'nhlorri': {'k1': 8.13e-04, 'k2': -1.10e-03, 'nonradial_rms_px': 0.0},
+    'vgiss': {'k1': -6.88e-03, 'k2': 1.46e-02, 'nonradial_rms_px': 0.2},
 }
 
 
@@ -161,7 +168,7 @@ def _coiss_alias(table: dict[str, Any]) -> None:
 
 
 _coiss_alias(PSF_KERNELS)
-_coiss_alias(DISTORTION_RESIDUAL_RMS_PX)
+_coiss_alias(DISTORTION_RESIDUAL_PARAMS)
 _coiss_alias(STAR_FLUX_E_PER_S_VMAG0)
 _coiss_alias(SKY_PIXEL_SCALE_ARCSEC)
 

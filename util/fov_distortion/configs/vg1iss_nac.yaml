@@ -1,0 +1,10 @@
+inst_id: vgiss
+label: "Voyager 1 ISS NAC"
+camera: NAC
+params:
+  max_stars: 15
+  min_peak_over_background: 1.3
+  min_stars: 4
+  edge_margin_px: 30.0
+images:
+  - ${PDS3_HOLDINGS_DIR}/volumes/VGISS_6xxx/VGISS_6111/DATA/C34796XX/C3479608_GEOMED.IMG
