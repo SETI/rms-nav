@@ -47,9 +47,11 @@ FloatArray = NDArray[np.float64]
 class RigidFit:
     """Rigid similarity (rotation + translation, no scale) mapping predicted to detected.
 
-    The transform maps a predicted point ``p`` to ``R(theta) @ (p - pivot) +
-    pivot + translation``; ``rotation_rad`` is the twist and ``translation_vu``
-    the pointing offset that plain navigation removes.
+    The transform maps a predicted point ``p`` to ``R(theta) @ p +
+    translation``; ``rotation_rad`` is the twist and ``translation_vu`` the
+    global pointing offset that plain navigation removes.  ``pivot_vu`` is the
+    optical center used only as the lever-arm origin for the twist uncertainty,
+    not as a rotation pivot in the returned transform.
 
     Parameters:
         rotation_rad: Fitted twist angle in radians (positive sense follows the
@@ -58,7 +60,8 @@ class RigidFit:
         sigma_rotation_rad: One-sigma uncertainty on the twist from the inlier
             residual scatter and the star lever arm.
         translation_vu: Global ``(dv, du)`` translation.
-        pivot_vu: Optical center the rotation is expressed about.
+        pivot_vu: Optical center used as the lever-arm origin for the twist
+            uncertainty.
         residuals_vu: ``(N, 2)`` residual ``detected - transform(predicted)``
             for every star, after both rotation and translation are removed.
         rms_px: Root-mean-square magnitude of ``residuals_vu``.
@@ -232,8 +235,8 @@ def weighted_rigid_fit(
     theta = float(math.atan2(rotation[1, 0], rotation[0, 0]))
 
     pivot = np.asarray(pivot_vu, dtype=np.float64)
-    # Translation is defined so the transform maps predicted -> detected;
-    # expressed about the pivot for a pivot-aware caller.
+    # Global translation that maps predicted -> detected under the fitted
+    # rotation: modeled = rotation @ predicted + translation.
     translation = det_bar - rotation @ pred_bar
     modeled = pred @ rotation.T + translation
     residuals = det - modeled

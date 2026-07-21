@@ -14,9 +14,6 @@ camera-pointing error that survive the geometry oops already applies:
   radial model the simulator plants so the coefficients feed the simulator
   distortion stage.
 
-This is the maintained successor to the one-off `experiments/fov_twist/`
-experiment.
-
 ## Layout
 
 | Module | Role |
@@ -60,9 +57,8 @@ an instrument that ships with rotation fitting off is still measured. The
 twist and the radial term are decoupled by alternating their fits.
 
 A frame contributes to the instrument summary only if navigation locks and
-enough stars survive the centroid and residual gates. Cohorts whose frames were
-selected under an earlier navigation pipeline may lock a different subset now;
-the per-frame CSV records the status of every attempted frame.
+enough stars survive the centroid and residual gates. The per-frame CSV records
+the status of every attempted frame.
 
 ## Tests
 

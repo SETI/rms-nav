@@ -185,7 +185,7 @@ off-Cassini cohorts:
   candidate) plus a pincushion radial term reaching ~0.5 px at the corner.
 - **New Horizons LORRI pre-KE** (16/48): clean static +0.191 deg twist
   (kernel candidate); post-KE epochs are outside pointing-kernel coverage.
-- **Voyager 2 ISS NAC/WAC** (5/27, 15/45): frame-varying twist (0.28 px
+- **Voyager 2 ISS NAC/WAC** (5/27, 14/45): frame-varying twist (0.28 px
   corner scatter, WAC mean +0.36 deg) -> per-frame rotation fitting
   required, and the largest residual distortion of any instrument. Timing
   the main pipeline over the 19 locked frames with rotation off vs on:

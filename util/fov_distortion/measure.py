@@ -202,7 +202,8 @@ def measure_frame(
         inst_id: Instrument id used to select the observation class.
         params: Detection / rejection parameters; defaults if omitted.
         config: Configuration; ``DEFAULT_CONFIG`` if omitted.  ``stars.max_stars``
-            is set from ``params.max_stars`` for the duration of the call.
+            is set from ``params.max_stars`` only while the star models are built
+            and is restored afterward, so a shared config is left unchanged.
 
     Returns:
         A :class:`FrameMeasurement`.  Frames that fail to load, fail
@@ -238,8 +239,12 @@ def measure_frame(
     center = ((h - 1) / 2.0, (w - 1) / 2.0)
     rho_ref = 0.5 * math.hypot(h, w)
 
+    original_max_stars = config.stars.max_stars
     config.stars.max_stars = params.max_stars
-    models = build_models_for_obs(obs, config=config)
+    try:
+        models = build_models_for_obs(obs, config=config)
+    finally:
+        config.stars.max_stars = original_max_stars
     star_models = [m for m in models if isinstance(m, NavModelStars)]
     result = NavOrchestrator(models, only_models='stars').navigate(obs)
     if result.offset_px is None:

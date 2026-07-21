@@ -24,3 +24,5 @@ dependency and is unit-tested on synthetic point clouds:
   YAML files in ``configs/``.
 - ``run``: the campaign driver.
 """
+
+__all__: list[str] = []

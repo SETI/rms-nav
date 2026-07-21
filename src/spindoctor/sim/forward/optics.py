@@ -100,8 +100,11 @@ def _effective_distortion(params: Mapping[str, Any]) -> dict[str, Any] | None:
         return explicit
     if not instrument_defaults_on(params):
         return None
-    measured = DISTORTION_RESIDUAL_PARAMS.get(str(params.get('instrument')))
-    if not measured:
+    instrument = params.get('instrument')
+    if instrument is None:
+        return None
+    measured = DISTORTION_RESIDUAL_PARAMS.get(str(instrument))
+    if measured is None:
         return None
     return dict(measured)
 
