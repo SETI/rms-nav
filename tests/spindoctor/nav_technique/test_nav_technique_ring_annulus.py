@@ -12,7 +12,10 @@ from spindoctor.feature.flags import RingAnnulusFlags
 from spindoctor.feature.geometry import RingAnnulusGeometry
 from spindoctor.nav_technique.diagnostics import RingAnnulusDiagnostics
 from spindoctor.nav_technique.nav_technique import NCCCovarianceTuning
-from spindoctor.nav_technique.nav_technique_ring_annulus import RingAnnulusNav
+from spindoctor.nav_technique.nav_technique_ring_annulus import (
+    RingAnnulusNav,
+    _annulus_orbit_channel,
+)
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
@@ -615,7 +618,6 @@ def test_orbit_channel_records_effective_sigma_in_diagnostics(
 
 def test_annulus_orbit_channel_combines_features_by_vertex_share() -> None:
     """The helper concatenates normals and vertex-weights the per-feature sigmas."""
-    from spindoctor.nav_technique.nav_technique_ring_annulus import _annulus_orbit_channel
 
     feat_a = _make_annulus_feature(
         'A',
@@ -642,7 +644,6 @@ def test_annulus_orbit_channel_combines_features_by_vertex_share() -> None:
 
 def test_annulus_orbit_channel_empty_when_no_sigma() -> None:
     """A feature with normals but no declared sigma contributes nothing."""
-    from spindoctor.nav_technique.nav_technique_ring_annulus import _annulus_orbit_channel
 
     feat = _make_annulus_feature(
         'A',
