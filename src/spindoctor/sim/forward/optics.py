@@ -26,7 +26,7 @@ from typing import Any
 import numpy as np
 
 from spindoctor.sim.forward.artifacts_catalog import (
-    DISTORTION_RESIDUAL_RMS_PX,
+    DISTORTION_RESIDUAL_PARAMS,
     PSF_KERNELS,
 )
 from spindoctor.sim.forward.distortion import apply_distortion
@@ -83,8 +83,9 @@ def _effective_distortion(params: Mapping[str, Any]) -> dict[str, Any] | None:
     """The distortion block to apply: explicit optics.distortion, else residual.
 
     An explicit block wins; otherwise ``instrument_defaults`` supplies the
-    catalog's interim residual, an RMS displacement over the frame mapped to
-    the radial ``k1`` coefficient (with ``k2 = 0``).
+    catalog's measured per-instrument residual distortion -- the radial ``k1`` /
+    ``k2`` coefficients and the non-radial wander RMS from the star-field FOV
+    distortion analysis.
 
     Parameters:
         params: The full scene mapping.
@@ -99,40 +100,13 @@ def _effective_distortion(params: Mapping[str, Any]) -> dict[str, Any] | None:
         return explicit
     if not instrument_defaults_on(params):
         return None
-    rms_px = DISTORTION_RESIDUAL_RMS_PX.get(str(params.get('instrument')))
-    if not rms_px:
+    instrument = params.get('instrument')
+    if instrument is None:
         return None
-    size_v = int(params.get('size_v', 0))
-    size_u = int(params.get('size_u', 0))
-    if size_v <= 0 or size_u <= 0:
+    measured = DISTORTION_RESIDUAL_PARAMS.get(str(instrument))
+    if measured is None:
         return None
-    return {'k1': _k1_for_rms(rms_px, size_v, size_u), 'k2': 0.0}
-
-
-def _k1_for_rms(rms_px: float, size_v: int, size_u: int) -> float:
-    """Solve the radial coefficient k1 for a target RMS displacement over the frame.
-
-    The radial displacement at a detector pixel is ``k1 * |r|^3 / rho_ref^2`` with
-    ``rho_ref`` half the detector diagonal, so its frame RMS is
-    ``k1 / rho_ref^2 * sqrt(mean(|r|^6))``; this inverts that for k1.
-
-    Parameters:
-        rms_px: Target RMS displacement over the frame, in detector pixels.
-        size_v: Detector-grid height in pixels.
-        size_u: Detector-grid width in pixels.
-
-    Returns:
-        The radial coefficient k1 (k2 held at 0).
-    """
-    center_v = size_v / 2.0
-    center_u = size_u / 2.0
-    rho_ref = 0.5 * float(np.hypot(size_v, size_u))
-    vv, uu = np.mgrid[0:size_v, 0:size_u].astype(np.float64)
-    r2 = (vv - center_v) ** 2 + (uu - center_u) ** 2
-    mean_r6 = float(np.mean(r2**3))
-    if mean_r6 <= 0.0:
-        return 0.0
-    return rms_px * rho_ref**2 / float(np.sqrt(mean_r6))
+    return dict(measured)
 
 
 def apply_stray_light(
