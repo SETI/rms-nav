@@ -7,6 +7,13 @@ needs:
 
 - limb_disc              : one resolved body, fully in frame; BodyLimbNav and
                            BodyDiscCorrelateNav both run (no ring).
+- limb_disc_psf          : identical geometry to limb_disc but rendered through
+                           an active whole-scene PSF, so the limb edge and the
+                           disc silhouette carry a sub-pixel-resolved blurred
+                           edge.  This is the scene family the base limb-disc
+                           pair needs to probe a shared PSF edge bias (the
+                           PSF-layer injection in collect.py); that bias cannot
+                           appear in the PSF-free families.
 - limb_disc_ring_fixed   : the same body plus a straight face-on ringlet whose
                            radial direction is FROZEN across the cohort (the
                            degenerate rank-1 regime the identifiability map
@@ -45,6 +52,7 @@ from typing import Any
 
 FAMILIES = (
     'limb_disc',
+    'limb_disc_psf',
     'limb_disc_ring_fixed',
     'limb_disc_ring_diverse',
     'limb_ring_aniso_fixed',
@@ -181,6 +189,37 @@ def _gen_limb_disc(rng: random.Random) -> tuple[dict[str, Any], dict[str, Any]]:
     body, _, _ = _framed_body(rng)
     params['bodies'] = [body]
     geometry = {'composition': 'limb_disc'}
+    return params, geometry
+
+
+def _gen_limb_disc_psf(rng: random.Random) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Fully-framed partially-lit body rendered through an active whole-scene PSF.
+
+    Identical geometry to :func:`_gen_limb_disc` (limb + disc, no ring), but the
+    scene carries ``optics.psf: {match_navigator: true}`` so the control render
+    equals the navigator's own Gaussian (the self-consistency floor: no
+    render-vs-navigate PSF mismatch).  The PSF-layer injection (see
+    ``collect.py``) replaces that block with a broadened or anisotropic kernel
+    the navigator does not model; a shared PSF edge bias between the limb
+    (distance-transform) and disc (normalized cross-correlation) estimators can
+    appear only against a rendered blurred edge, which the PSF-free families
+    lack.  The body is partially lit (phase 10-45 deg), so the illumination
+    direction breaks the silhouette's symmetry and a symmetric broadening can
+    still bias the edge; the illumination direction is recorded so the analysis
+    can test whether any induced coupling is locked to it.
+
+    Parameters:
+        rng: Scene-local random generator.
+    """
+    params = _base(rng)
+    body, _, _ = _framed_body(rng)
+    params['bodies'] = [body]
+    params['optics'] = {'psf': {'match_navigator': True}}
+    geometry = {
+        'composition': 'limb_disc_psf',
+        'illumination_deg': float(body['illumination_angle']),
+        'phase_deg': float(body['phase_angle']),
+    }
     return params, geometry
 
 
@@ -346,6 +385,7 @@ def _gen_multi_body(rng: random.Random) -> tuple[dict[str, Any], dict[str, Any]]
 
 _GENERATORS: dict[str, Callable[[random.Random], tuple[dict[str, Any], dict[str, Any]]]] = {
     'limb_disc': _gen_limb_disc,
+    'limb_disc_psf': _gen_limb_disc_psf,
     'limb_disc_ring_fixed': lambda rng: _gen_limb_disc_ring(rng, diverse=False),
     'limb_disc_ring_diverse': lambda rng: _gen_limb_disc_ring(rng, diverse=True),
     'limb_ring_aniso_fixed': lambda rng: _gen_limb_ring_aniso(rng, diverse=False),

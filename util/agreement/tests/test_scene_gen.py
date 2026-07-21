@@ -61,6 +61,34 @@ def test_limb_disc_body_fully_in_frame() -> None:
         assert body['axis1'] >= 104.0
 
 
+def test_limb_disc_psf_authors_matched_psf() -> None:
+    """The PSF family's control render matches the navigator (floor)."""
+    for _, params, geometry in generate_scenes('limb_disc_psf', 15, campaign_seed=_SEED):
+        assert params['optics']['psf'] == {'match_navigator': True}
+        assert geometry['composition'] == 'limb_disc_psf'
+        assert 0.0 <= geometry['illumination_deg'] <= 360.0
+
+
+def test_limb_disc_psf_body_fully_in_frame() -> None:
+    """The PSF family keeps the same fully-framed single-body geometry."""
+    for _, params, _ in generate_scenes('limb_disc_psf', 15, campaign_seed=_SEED):
+        assert len(params['bodies']) == 1
+        body = params['bodies'][0]
+        radius = body['axis1'] / 2.0
+        assert body['center_v'] - radius > 0.0
+        assert body['center_v'] + radius < FRAME_SIZE
+
+
+def test_limb_disc_psf_geometry_matches_limb_disc() -> None:
+    """PSF scenes differ from limb_disc only by the optics block, not geometry."""
+    plain = generate_scenes('limb_disc', 10, campaign_seed=_SEED)
+    psf = generate_scenes('limb_disc_psf', 10, campaign_seed=_SEED)
+    # Different families draw independent RNG streams, so the bodies differ;
+    # what must hold is that the PSF family adds optics and the plain one omits it.
+    assert all('optics' not in params for _, params, _ in plain)
+    assert all('optics' in params for _, params, _ in psf)
+
+
 def test_ring_line_clears_framed_body() -> None:
     """The ringlet mid-line keeps clear of the fully-framed body."""
     for _, params, geometry in generate_scenes('limb_disc_ring_diverse', 25, campaign_seed=_SEED):

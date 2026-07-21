@@ -506,6 +506,100 @@ def report_injection_response(
     out.append('')
 
 
+def report_psf_coupling(
+    out: list[str],
+    control: list[dict[str, Any]],
+    injected: list[dict[str, Any]],
+    label: str,
+    *,
+    family: str = 'limb_disc_psf',
+) -> None:
+    """Paired per-scene limb/disc response to a PSF-layer render mismatch.
+
+    For every scene where both the limb and the disc are non-spurious in the
+    control (navigator-matched PSF) and the injected (broadened PSF) pass, the
+    offset delta between the two passes is the render-vs-navigate PSF mismatch's
+    effect on that technique.  The load-bearing quantity is whether the limb
+    and disc deltas move *together*: a positive cross-covariance means the base
+    pair shares a PSF edge bias, which would make ``Var(limb - disc)`` blind to
+    it exactly as the DT-layer coupling made ``Var(limb - ring)`` blind to the
+    shared gradient shift.  Because the body is partially lit, a symmetric
+    broadening biases the edge along the illumination direction, so the deltas
+    are also decomposed onto each scene's illumination axis to test whether the
+    coupling is locked to that (unmodeled) geometry.
+
+    Parameters:
+        out: Markdown accumulator.
+        control: Control rows (navigator-matched PSF).
+        injected: Injected rows (broadened PSF).
+        label: Injection label for the section heading.
+        family: PSF-bearing family to pair on.
+    """
+    ctrl_by_id = {r['scene_id']: r for r in control if r['family'] == family and 'error' not in r}
+    limb_d: list[np.ndarray] = []
+    disc_d: list[np.ndarray] = []
+    illum: list[float] = []
+    for row in injected:
+        if row['family'] != family or 'error' in row:
+            continue
+        ctrl = ctrl_by_id.get(row['scene_id'])
+        if ctrl is None or not row['injection'].get('kind', '').startswith('psf_'):
+            continue
+        inj_off = _instance_offsets(row)
+        ctl_off = _instance_offsets(ctrl)
+        if not ({'limb', 'disc'} <= set(inj_off) and {'limb', 'disc'} <= set(ctl_off)):
+            continue
+        limb_d.append(np.array(inj_off['limb']) - np.array(ctl_off['limb']))
+        disc_d.append(np.array(inj_off['disc']) - np.array(ctl_off['disc']))
+        illum.append(math.radians(float(row['geometry'].get('illumination_deg', 0.0))))
+    out.append(f'#### {label}: paired limb/disc response to the PSF mismatch')
+    out.append('')
+    if len(limb_d) < 5:
+        out.append(f'Fewer than 5 paired scenes ({len(limb_d)}); no response measured.')
+        out.append('')
+        return
+    limb = np.asarray(limb_d)
+    disc = np.asarray(disc_d)
+    n_dir = np.stack([np.cos(illum), np.sin(illum)], axis=1)
+    limb_proj = np.sum(limb * n_dir, axis=1)
+    disc_proj = np.sum(disc * n_dir, axis=1)
+    n = limb.shape[0]
+
+    def _axis_cov(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
+        covs = [float(np.cov(a[:, k], b[:, k], ddof=1)[0, 1]) for k in range(a.shape[1])]
+        corrs = []
+        for k in range(a.shape[1]):
+            sa = float(a[:, k].std(ddof=1))
+            sb = float(b[:, k].std(ddof=1))
+            corrs.append(covs[k] / (sa * sb) if sa > 0 and sb > 0 else 0.0)
+        return float(np.mean(covs)), float(np.mean(corrs))
+
+    raw_cov, raw_corr = _axis_cov(limb, disc)
+    proj_cov = float(np.cov(limb_proj, disc_proj, ddof=1)[0, 1])
+    sp_l = float(limb_proj.std(ddof=1))
+    sp_d = float(disc_proj.std(ddof=1))
+    proj_corr = proj_cov / (sp_l * sp_d) if sp_l > 0 and sp_d > 0 else 0.0
+    out.append(f'{n} paired scenes.')
+    out.append('')
+    out.append('| quantity | limb | disc |')
+    out.append('|---|---|---|')
+    out.append(
+        f'| mean delta (dv, du) px | ({limb[:, 0].mean():+.4f}, {limb[:, 1].mean():+.4f}) '
+        f'| ({disc[:, 0].mean():+.4f}, {disc[:, 1].mean():+.4f}) |'
+    )
+    out.append(
+        f'| RMS \\|delta\\| px | {float(np.sqrt(np.mean(np.sum(limb**2, axis=1)))):.4f} '
+        f'| {float(np.sqrt(np.mean(np.sum(disc**2, axis=1)))):.4f} |'
+    )
+    out.append(f'| mean delta . illum px | {limb_proj.mean():+.4f} | {disc_proj.mean():+.4f} |')
+    out.append('')
+    out.append('| coupling of the paired deltas | cross-covariance (px^2) | correlation |')
+    out.append('|---|---|---|')
+    out.append(f'| image-frame (per-axis mean) | {raw_cov:+.5f} | {raw_corr:+.3f} |')
+    out.append(f'| projected on illumination axis | {proj_cov:+.5f} | {proj_corr:+.3f} |')
+    out.append('')
+
+
 def report_noise_response(
     out: list[str],
     control: list[dict[str, Any]],
@@ -663,7 +757,10 @@ def _specs_for_family(
     ring = EstimatorSpec('ring', 'rank1')
     blob = EstimatorSpec('blob', 'full')
     no_pairs: list[tuple[str, str]] = []
-    if family == 'limb_disc':
+    if family in ('limb_disc', 'limb_disc_psf'):
+        # limb+disc alone is degenerate (the split is unidentifiable); the
+        # PSF family carries the same composition and is analyzed for coupling,
+        # not for a per-technique split.
         return [([limb_img, disc], no_pairs)]
     if family in ('limb_disc_ring_fixed', 'limb_disc_ring_diverse'):
         return [([limb_img, disc, ring], no_pairs), ([limb_img, disc, ring, blob], no_pairs)]
@@ -699,6 +796,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--dt-rows', type=Path, default=None)
     parser.add_argument('--noise-rows', type=Path, default=None)
     parser.add_argument('--gate-rows', type=Path, default=None)
+    parser.add_argument('--psf-broaden-rows', type=Path, default=None)
+    parser.add_argument('--psf-aniso-rows', type=Path, default=None)
     parser.add_argument('--out', type=Path, default=None)
     args = parser.parse_args(argv)
 
@@ -834,6 +933,35 @@ def main(argv: list[str] | None = None) -> int:
                 family,
                 float(gate_manifest.get('gate_depression', 0.0)),
             )
+
+    psf_sources = [('psf_broaden', args.psf_broaden_rows), ('psf_aniso', args.psf_aniso_rows)]
+    if any(path is not None for _, path in psf_sources):
+        out.append('## Stage 0b (PSF layer): limb-disc coupling through a PSF mismatch')
+        out.append('')
+        psf_family = 'limb_disc_psf'
+        control_psf = build_cohort(rows, psf_family)
+        report_pair_truth(
+            out,
+            control_psf,
+            [('limb', 'disc')],
+            'Control (navigator-matched PSF): truth-based limb-disc coupling',
+        )
+        for label, path in psf_sources:
+            if path is None:
+                continue
+            inj_manifest, inj_rows = load_rows(path)
+            cohort = build_cohort(inj_rows, psf_family)
+            out.append(f'### Injection: {label} (`{path}`)')
+            out.append('')
+            out.append(
+                'Injection parameters: rendered PSF core sigma scaled per scene '
+                f'({inj_manifest.get("injection", label)}), navigator PSF unchanged.'
+            )
+            out.append('')
+            report_pair_truth(
+                out, cohort, [('limb', 'disc')], f'{label}: truth-based limb-disc coupling'
+            )
+            report_psf_coupling(out, rows, inj_rows, label)
 
     text = '\n'.join(out) + '\n'
     if args.out is not None:

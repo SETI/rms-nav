@@ -10,22 +10,36 @@ own limb/disc estimates; ring-bearing compositions add a blob-only run
 (``only_techniques=['BodyBlobNav']``) to supply an extra estimator that
 never touches the shared gradient/DT products.
 
-Shared-bias injection (the bias-independence stage) is harness-level only:
-``--injection dt_shift`` monkeypatches the orchestrator module's
-``compute_all_image_derivatives`` so every DT technique sees the shared
-gradient / edge-distance-transform products translated by a per-scene
-random bias, and ``--injection noise_scale`` monkeypatches
-``estimate_image_noise_sigma`` to scale the single shared noise estimate.
-``--injection reliability_gate`` is the third shared element: it
-monkeypatches ``FeatureReliabilityGate.apply`` to tighten every per-type
-threshold by a fixed depression (``--gate-depression``), so more features
-are dropped and whole techniques stop reporting on the lower-reliability
-scenes.  Unlike the other two channels the gate never shifts a surviving
-technique's offset -- it only admits or drops -- so it is the pure
-*selection* channel: pairing a gate pass with the control pass by scene id
-recovers, for every scene, both the technique's true (unperturbed) error
-and whether it survived.  Nothing under ``src/`` changes; the injected
-values are recorded per row.
+Shared-bias injection (the bias-independence stage) is harness-level only.
+Three families of injection exist, all recorded per row and none touching
+``src/``:
+
+- Shared preprocessing layer (nav-side monkeypatch of the orchestrator
+  module): ``--injection dt_shift`` monkeypatches
+  ``compute_all_image_derivatives`` so every DT technique sees the shared
+  gradient / edge-distance-transform products translated by a per-scene
+  random bias, and ``--injection noise_scale`` monkeypatches
+  ``estimate_image_noise_sigma`` to scale the single shared noise estimate.
+  Only the distance-transform techniques read those products, so a
+  correlation/centroid technique (disc, blob) is decoupled by construction.
+- Reliability gate (nav-side monkeypatch of ``FeatureReliabilityGate.apply``):
+  ``--injection reliability_gate`` tightens every per-type threshold by a
+  fixed depression (``--gate-depression``), so more features are dropped and
+  whole techniques stop reporting on the lower-reliability scenes.  Unlike
+  the other channels the gate never shifts a surviving technique's offset --
+  it only admits or drops -- so it is the pure *selection* channel: pairing a
+  gate pass with the control pass by scene id recovers, for every scene, both
+  the technique's true (unperturbed) error and whether it survived.
+- PSF layer (render-side, via the scene's ``optics.psf`` block):
+  ``--injection psf_broaden`` renders the whole-scene PSF with its core sigma
+  scaled up by a per-scene factor, and ``--injection psf_aniso`` renders it
+  broadened along one axis only (a zero-mean elliptical kernel, so no global
+  translation).  The navigator keeps its own modeled PSF sigma, so the
+  rendered blurred edge no longer matches the template edge -- the only
+  channel through which a shared PSF edge bias can reach both the limb
+  (distance-transform) and disc (normalized cross-correlation) estimators.
+  These require a PSF-bearing scene family (``limb_disc_psf``), whose control
+  render matches the navigator (``optics.psf: {match_navigator: true}``).
 
 Run (from an activated project venv; ``source /seti/newnav/setup.sh``):
 
@@ -58,7 +72,22 @@ from scene_gen import FAMILIES, generate_scenes  # noqa: E402
 DEFAULT_SEED = 20260719
 DEFAULT_OUT = REPO / '_work/agreement/rows.jsonl'
 
-INJECTION_KINDS = ('none', 'dt_shift', 'noise_scale', 'reliability_gate')
+INJECTION_KINDS = (
+    'none',
+    'dt_shift',
+    'noise_scale',
+    'reliability_gate',
+    'psf_broaden',
+    'psf_aniso',
+)
+
+# PSF-layer injection: per-scene multiplicative broadening of the rendered PSF
+# core sigma above the navigator's modeled sigma (log-uniform draw).  The
+# anisotropic variant applies the factor to one axis only.  The ranges start
+# above 1 (a genuine mismatch) and stay inside the sim's resolvable,
+# realism-supported PSF regime for the Cassini NAC.
+_PSF_BROADEN_RANGE = (1.4, 3.0)
+_PSF_ANISO_RANGE = (1.6, 3.5)
 
 
 def _runs_for_family(family: str) -> list[dict[str, Any]]:
@@ -113,9 +142,22 @@ def _draw_injection(
             'bias_v': rng.gauss(0.0, sigma_px),
             'bias_u': rng.gauss(0.0, sigma_px),
         }
+    if kind == 'noise_scale':
+        return {
+            'kind': 'noise_scale',
+            'factor': math.exp(rng.uniform(math.log(2.0), math.log(8.0))),
+        }
+    if kind == 'psf_broaden':
+        lo, hi = _PSF_BROADEN_RANGE
+        return {
+            'kind': 'psf_broaden',
+            'factor': math.exp(rng.uniform(math.log(lo), math.log(hi))),
+        }
+    lo, hi = _PSF_ANISO_RANGE
     return {
-        'kind': 'noise_scale',
-        'factor': math.exp(rng.uniform(math.log(2.0), math.log(8.0))),
+        'kind': 'psf_aniso',
+        'factor': math.exp(rng.uniform(math.log(lo), math.log(hi))),
+        'axis': rng.choice(('v', 'u')),
     }
 
 
@@ -210,6 +252,63 @@ def _restore(patched: list[tuple[Any, str, Any]]) -> None:
         setattr(module, attribute, original)
 
 
+def _inject_sim_params(
+    sim_params: dict[str, Any], injection: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return the render-side sim_params for a PSF-layer injection.
+
+    The PSF injections act on the *rendered* scene rather than on the
+    navigator: they overwrite the scene's ``optics.psf`` block with an
+    explicit kernel broadened above the navigator's modeled sigma, while the
+    navigator's belief (its ``star_psf_sigma`` config) is untouched, so the
+    rendered blurred edge no longer matches the template edge.  ``psf_broaden``
+    scales both core sigmas by the drawn factor (isotropic); ``psf_aniso``
+    scales one axis only (a zero-mean elliptical kernel that softens the edge
+    directionally without translating the image).  Non-PSF injections leave the
+    scene unchanged (they act on the nav side; see :func:`_apply_injection`).
+
+    Parameters:
+        sim_params: The generated (validated) scene parameters.
+        injection: Draw from :func:`_draw_injection`.
+
+    Returns:
+        ``(render_params, applied)`` where ``applied`` records the resolved
+        kernel sigmas (empty for non-PSF injections).
+    """
+    kind = injection['kind']
+    if not kind.startswith('psf_'):
+        return sim_params, {}
+
+    import copy as _copy
+
+    from spindoctor.config import DEFAULT_CONFIG
+    from spindoctor.sim.instruments import navigator_matched_psf
+    from spindoctor.sim.scene import validate_sim_params
+
+    params = _copy.deepcopy(dict(sim_params))
+    base = navigator_matched_psf(
+        DEFAULT_CONFIG, params.get('instrument'), params.get('instrument_config')
+    )
+    base_sigma = float(base['sigma_v'])
+    factor = float(injection['factor'])
+    if kind == 'psf_broaden':
+        sigma_v = sigma_u = base_sigma * factor
+    elif injection.get('axis') == 'v':
+        sigma_v, sigma_u = base_sigma * factor, base_sigma
+    else:
+        sigma_v, sigma_u = base_sigma, base_sigma * factor
+    optics = dict(params.get('optics') or {})
+    optics['psf'] = {'sigma_v': sigma_v, 'sigma_u': sigma_u, 'w': 0.0, 'r0': 2.0, 'n': 3.0}
+    params['optics'] = optics
+    render_params = validate_sim_params(params, source='psf_inject')
+    applied = {
+        'base_sigma_px': base_sigma,
+        'sigma_v_px': sigma_v,
+        'sigma_u_px': sigma_u,
+    }
+    return render_params, applied
+
+
 def _navigate_one(
     task: tuple[str, str, dict[str, Any], dict[str, Any], dict[str, Any]],
 ) -> dict[str, Any]:
@@ -232,11 +331,14 @@ def _navigate_one(
         'injection': injection,
         'runs': {},
     }
+    render_params, applied = _inject_sim_params(sim_params, injection)
+    if applied:
+        row['injection'] = {**injection, **applied}
     patched = _apply_injection(injection)
     try:
         # The path is a label only (sim_params overrides the file read), but
         # FCPath resolves it, so it must sit under a real directory.
-        obs = ObsSim.from_file(f'/tmp/{scene_id}.json', sim_params=sim_params)
+        obs = ObsSim.from_file(f'/tmp/{scene_id}.json', sim_params=render_params)
         for run in _runs_for_family(family):
             orchestrator = NavOrchestrator(
                 build_models_for_obs(obs),
