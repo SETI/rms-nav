@@ -468,12 +468,17 @@ Feeding the simulator and the pointing kernels
 ----------------------------------------------
 
 The per-instrument radial coefficients ``k1`` and ``k2`` are reported in the
-simulator distortion stage's convention and set that stage's per-instrument
-defaults, alongside the non-radial RMS as the non-radial wander amplitude. The
+simulator distortion stage's convention and populate that stage's per-instrument
+residual-distortion defaults, alongside the non-radial RMS as the non-radial
+wander amplitude, replacing the earlier single-amplitude interim estimates. The
 radial amplitudes differ sharply between cameras: Cassini and New Horizons LORRI
 sit at or near their noise floors (a few hundredths of a pixel), while Galileo
 SSI reaches ~0.5 px at the field corner and Voyager several tenths of a pixel, so
-those two set meaningfully larger distortion defaults. The
+those two set meaningfully larger distortion defaults. The simulator keys
+Voyager under a single camera, so it adopts the Voyager 2 wide-angle block until
+per-camera keys exist; the confidence calibration and the operator-curated image
+library do not use the instrument-default distortion, so updating it leaves them
+untouched. The
 consistent twists (New Horizons LORRI, Galileo SSI) are the static corrections a
 future instrument or frame kernel would absorb; they are recorded here with
 their uncertainties so a kernel build can adopt them. The frame-varying Voyager
@@ -533,11 +538,27 @@ Galileo, New Horizons LORRI, and Voyager lock a smaller subset, and the single
 Voyager 1 NAC frame does not lock at all. Two causes dominate the misses --
 frames whose star field is too sparse or faint for a confident lock, and frames
 whose epoch falls outside the loaded pointing-kernel coverage (the New Horizons
-post-Kuiper-extension frames). The per-frame CSV records the status of every
-attempted frame, and the locked count per instrument appears in the tables
-above. Where an instrument yields too few locked frames to characterize its
-twist and distortion, the residual is documented as under-measured rather than
-estimated, and the adopted literature distortion model stands.
+post-Kuiper-extension frames, and the Voyager 1 frames whose kernels end in
+1980). The per-frame CSV records the status of every attempted frame, and the
+locked count per instrument appears in the tables above. Where an instrument
+yields too few locked frames to characterize its twist and distortion, the
+residual is documented as under-measured rather than estimated, and the adopted
+literature distortion model stands.
+
+Each instrument also carries a larger candidate frame list. Running those
+candidate lists adds very little: Voyager 2 NAC locks 5 of 255 and Voyager 2 WAC
+15 of 575 (the same handful the
+vetted lists find, at the same twists), while the Voyager 1 NAC and WAC
+candidate lists lock none of 234 and none of 57 -- their frames either fail
+navigation on sparse, faint fields or fall outside kernel coverage. The
+candidate lists therefore do not materially extend the Voyager measurement.
+
+The Voyager entries also under-represent the instrument spread: Voyager 1 and
+Voyager 2 flew separate cameras, and each mission's narrow- and wide-angle
+cameras have distinct optics. Each is a separate cohort here, but only Voyager 2
+locks enough frames to characterize, and its narrow- and wide-angle results
+differ (the wide-angle twist and distortion are the larger). A full Voyager
+characterization needs a per-camera locked set for all four cameras.
 
 .. _fov-running:
 
