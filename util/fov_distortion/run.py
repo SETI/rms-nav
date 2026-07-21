@@ -42,6 +42,7 @@ from util.fov_distortion.measure import (  # noqa: E402
 )
 from util.fov_distortion.plots import (  # noqa: E402
     plot_frame_decomposition,
+    plot_instrument_distortion_map,
     plot_instrument_radial,
     plot_instrument_twist,
 )
@@ -255,6 +256,7 @@ def _write_cohort_figures(
         plot_instrument_twist(summary, str(fig_dir / f'{cohort_name}_twist.png'))
     if summary.pooled_radial is not None:
         plot_instrument_radial(summary, str(fig_dir / f'{cohort_name}_radial.png'))
+        plot_instrument_distortion_map(summary, str(fig_dir / f'{cohort_name}_distortion_map.png'))
     rep = _representative_frame(summary)
     if rep is not None:
         _write_sample_figure(rep, config.params, fig_dir / f'{cohort_name}_sample.png')

@@ -25,7 +25,7 @@ experiment.
 | `aggregate.py` | Per-instrument twist-consistency verdict and rotation-fitting recommendation. No spindoctor imports. |
 | `measure.py` | Per-frame measurement: load, navigate for the translation prior, centroid every predictable star, decompose. |
 | `results.py` | Per-instrument aggregation over frames, including the pooled radial model. |
-| `plots.py` | Per-frame residual-field figure and per-instrument twist and radial figures. |
+| `plots.py` | Per-frame residual-field figure and per-instrument twist, radial, and 2-D non-rotational distortion-map figures. |
 | `config.py` / `configs/` | Per-instrument-and-camera cohort definitions (frame lists + detection parameters). |
 | `run.py` | Campaign driver. |
 | `tests/` | Unit tests on synthetic point clouds and images (no holdings needed). |
@@ -43,7 +43,8 @@ Artifacts default to `_work/fov_distortion/<cohort>/`:
 
 - `<cohort>_frames.csv` -- one row per frame (twist, radial coefficients, RMS residuals).
 - `<cohort>_summary.json` -- the instrument summary and recommendation.
-- `figures/` -- the twist, radial, and representative sample figures.
+- `figures/` -- the twist, radial, non-rotational distortion-map, and
+  representative sample figures.
 
 Pass `--report-figures` to also write the twist, radial, and sample figures into
 `docs/fov_distortion_report/_figures/` for the documentation report. Pass

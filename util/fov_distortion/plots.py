@@ -34,6 +34,7 @@ from util.fov_distortion.results import InstrumentSummary
 
 __all__ = [
     'plot_frame_decomposition',
+    'plot_instrument_distortion_map',
     'plot_instrument_radial',
     'plot_instrument_twist',
 ]
@@ -218,6 +219,121 @@ def plot_instrument_twist(summary: InstrumentSummary, path: str) -> None:
     )
     ax.legend(fontsize=9)
     ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(path, dpi=_DPI)
+    plt.close(fig)
+
+
+def _bin_field(
+    positions_vu: FloatArray,
+    vectors_vu: FloatArray,
+    image_shape: tuple[int, int],
+    n_cells: int,
+) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray]:
+    """Average per-star vectors into an ``n_cells`` x ``n_cells`` grid.
+
+    Returns the cell-center ``(v, u)`` and mean ``(dv, du)`` for cells with at
+    least one star, plus the per-cell mean magnitude for a background image.
+    """
+    h, w = image_shape
+    v_edges = np.linspace(0.0, h, n_cells + 1)
+    u_edges = np.linspace(0.0, w, n_cells + 1)
+    v_idx = np.clip(np.digitize(positions_vu[:, 0], v_edges) - 1, 0, n_cells - 1)
+    u_idx = np.clip(np.digitize(positions_vu[:, 1], u_edges) - 1, 0, n_cells - 1)
+    cell_v: list[float] = []
+    cell_u: list[float] = []
+    mean_dv: list[float] = []
+    mean_du: list[float] = []
+    magnitude = np.full((n_cells, n_cells), np.nan)
+    for vi in range(n_cells):
+        for ui in range(n_cells):
+            sel = (v_idx == vi) & (u_idx == ui)
+            if not np.any(sel):
+                continue
+            dv = float(np.mean(vectors_vu[sel, 0]))
+            du = float(np.mean(vectors_vu[sel, 1]))
+            cell_v.append(0.5 * (v_edges[vi] + v_edges[vi + 1]))
+            cell_u.append(0.5 * (u_edges[ui] + u_edges[ui + 1]))
+            mean_dv.append(dv)
+            mean_du.append(du)
+            magnitude[vi, ui] = math.hypot(dv, du)
+    return (
+        np.array([cell_v, cell_u], dtype=np.float64).T,
+        np.array([mean_dv, mean_du], dtype=np.float64).T,
+        magnitude,
+        np.array([v_edges[0], v_edges[-1], u_edges[0], u_edges[-1]], dtype=np.float64),
+    )
+
+
+def plot_instrument_distortion_map(
+    summary: InstrumentSummary, path: str, *, n_cells: int = 8
+) -> None:
+    """Write the per-instrument 2-D non-rotational distortion map.
+
+    Left: the full post-twist residual field (translation and twist removed)
+    averaged into a grid over the field of view -- the non-rotational
+    distortion, radial and non-radial together. Right: the non-radial component
+    alone (each residual with its radial projection removed), which isolates
+    tangential and decentering distortion that a purely radial model does not
+    capture.
+
+    Parameters:
+        summary: An instrument summary with pooled residuals.
+        path: Output PNG path.
+        n_cells: Grid resolution per axis.
+
+    Raises:
+        ValueError: if the summary carries no pooled residual data.
+    """
+    pooled = summary.pooled_radial
+    if pooled is None:
+        raise ValueError('summary has no pooled residual data to plot')
+
+    pred = pooled.predicted_vu
+    resid = pooled.residual_vu
+    center = np.asarray(pooled.center_vu, dtype=np.float64)
+    offset = pred - center
+    rho = np.hypot(offset[:, 0], offset[:, 1])
+    rhat = np.zeros_like(offset)
+    safe = rho > 0.0
+    rhat[safe] = offset[safe] / rho[safe, None]
+    radial_comp = np.sum(resid * rhat, axis=1)
+    nonradial_vec = resid - radial_comp[:, None] * rhat
+
+    full_rms = float(np.sqrt(np.mean(np.sum(resid**2, axis=1))))
+    nonradial_rms = float(np.sqrt(np.mean(np.sum(nonradial_vec**2, axis=1))))
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6))
+    for ax, vectors, title in (
+        (axes[0], resid, f'Full non-rotational distortion\nRMS {full_rms:.3f} px'),
+        (axes[1], nonradial_vec, f'Non-radial component only\nRMS {nonradial_rms:.3f} px'),
+    ):
+        centers, means, magnitude, extent = _bin_field(pred, vectors, pooled.image_shape, n_cells)
+        ax.imshow(
+            magnitude,
+            origin='upper',
+            extent=(extent[2], extent[3], extent[1], extent[0]),
+            cmap='viridis',
+            alpha=0.6,
+            aspect='equal',
+        )
+        typical = float(np.median(np.hypot(means[:, 0], means[:, 1]))) if means.size else 0.0
+        scale = (0.09 * max(pooled.image_shape) / typical) if typical > 0 else 1.0
+        ax.quiver(
+            centers[:, 1],
+            centers[:, 0],
+            means[:, 1] * scale,
+            means[:, 0] * scale,
+            angles='xy',
+            scale_units='xy',
+            scale=1.0,
+            color='#ffffff',
+            width=0.005,
+        )
+        ax.set_title(f'{title} (arrows x{scale:.0f})', fontsize=10)
+        ax.set_xlabel('u (px)')
+        ax.set_ylabel('v (px)')
+    fig.suptitle(f'{summary.label}: non-rotational distortion field', fontsize=12)
     fig.tight_layout()
     fig.savefig(path, dpi=_DPI)
     plt.close(fig)

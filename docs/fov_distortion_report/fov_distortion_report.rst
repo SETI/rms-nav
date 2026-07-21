@@ -372,6 +372,37 @@ well-behaved camera and for the worst case:
    Voyager 2 ISS WAC. The radial distortion reaches several tenths of a pixel
    and the floor is high, both consequences of the resampled vidicon geometry.
 
+Non-rotational distortion field
+-------------------------------
+
+The radial model captures only the rotationally symmetric part of the
+distortion. The full non-rotational distortion -- everything left after the
+translation and the twist are removed -- also carries a non-radial part:
+tangential distortion and optical decentering, which a radial polynomial cannot
+represent. Pooling every star's post-twist residual and averaging it into a grid
+over the field of view maps that structure directly. The left panel of each
+figure is the full non-rotational field; the right panel is the non-radial
+component alone, with each residual's radial projection removed.
+
+.. figure:: _figures/coiss_nac_distortion_map.png
+   :width: 100%
+   :alt: Cassini ISS NAC non-rotational distortion field and non-radial component.
+
+   Cassini ISS NAC. The full field (left) is a few hundredths of a pixel with
+   little coherent structure, and the non-radial component (right) is at the
+   noise floor: the residual distortion is small and close to radially
+   symmetric.
+
+.. figure:: _figures/vg2iss_wac_distortion_map.png
+   :width: 100%
+   :alt: Voyager 2 ISS WAC non-rotational distortion field and non-radial component.
+
+   Voyager 2 ISS WAC. The full field (left) reaches several tenths of a pixel,
+   and the non-radial component (right) is a substantial fraction of it: the
+   resampled vidicon geometry carries coherent tangential distortion, not just a
+   radial term. The non-radial RMS is the amplitude the simulator's non-radial
+   wander term reproduces.
+
 Interpretation and recommendations
 ==================================
 
@@ -399,8 +430,9 @@ Rotation fitting during navigation
   is 0.28 px, well above the threshold, and for the WAC the mean twist is large
   (+0.36 deg, +4.4 px at the corner). No static kernel removes a frame-varying
   twist, so navigation must fit the rotation per frame for these cameras. This
-  is the measured basis for keeping per-frame rotation fitting enabled on
-  Voyager. The residual distortion is the largest of any instrument, consistent
+  is the measured basis for enabling per-frame rotation fitting on Voyager, and
+  the timing below shows that fit adds negligible time on star fields. The
+  residual distortion is the largest of any instrument, consistent
   with the resampled vidicon geometry, and the residual floor is high (0.25 to
   0.34 px), so the Voyager numbers are lower-confidence than the Cassini ones.
 
@@ -415,6 +447,37 @@ future instrument or frame kernel would absorb; they are recorded here with
 their uncertainties so a kernel build can adopt them. The frame-varying Voyager
 twists are not kernel-correctable and are recorded instead as the justification
 for per-frame rotation fitting.
+
+Cost of per-frame rotation fitting
+----------------------------------
+
+Because the Voyager twist is frame-varying, navigation must fit the rotation per
+frame -- but only if that fit is affordable. Running the main navigation pipeline
+over the locked Voyager 2 frames twice, with rotation fitting off and on,
+measures that cost directly. On these star fields the fit is essentially free:
+
+.. list-table:: Main-pipeline navigation time on locked Voyager 2 frames
+   :header-rows: 1
+   :widths: 30 22 22 22
+
+   * - Cohort
+     - Rotation off (s/frame)
+     - Rotation on (s/frame)
+     - Added by rotation
+   * - Voyager 2 ISS WAC + NAC (19 frames)
+     - 4.61
+     - 4.61
+     - -0.02 (x0.99)
+
+The star-technique rotation fit is a small similarity refit on the matched
+stars, not a search, so it adds a negligible fraction of the per-frame time
+(median 4.61 s either way), which is dominated by image loading and the shared
+per-image derivatives. All nineteen locked frames navigate successfully with
+rotation fitting on and recover a per-frame twist of 0.02 to 0.51 deg. The cost
+objection to rotation fitting does not hold for star-field navigation; it
+would need separate measurement on frames whose navigation rests on the
+distance-transform body and ring techniques, where the rotation enters a
+higher-dimensional fit.
 
 Confidence and yield
 --------------------

@@ -35,7 +35,7 @@ _SIGMA_FLOOR_DEG = 1e-4
 
 @dataclass(frozen=True)
 class PooledRadial:
-    """Per-star radial residuals pooled over an instrument's frames.
+    """Per-star residuals pooled over an instrument's frames.
 
     Parameters:
         rho_n: Normalized field radius per star (``|p - center| / rho_ref``).
@@ -44,6 +44,12 @@ class PooledRadial:
         model: Aggregate radial distortion model fitted to the pool.
         residual_after_fit_px: Radial residual after the aggregate model is
             subtracted, per star.
+        predicted_vu: ``(N, 2)`` predicted star positions in ``(v, u)``.
+        residual_vu: ``(N, 2)`` post-twist residual vector per star, the full
+            non-rotational displacement (radial plus non-radial plus noise).
+        center_vu: Optical center used for the radial split.
+        image_shape: ``(height, width)`` of the sensor image the pool is drawn
+            in, for the distortion-map extent.
     """
 
     rho_n: FloatArray
@@ -51,6 +57,10 @@ class PooledRadial:
     nonradial_px: FloatArray
     model: RadialModel
     residual_after_fit_px: FloatArray
+    predicted_vu: FloatArray
+    residual_vu: FloatArray
+    center_vu: tuple[float, float]
+    image_shape: tuple[int, int]
 
 
 @dataclass(frozen=True)
@@ -160,6 +170,7 @@ def _pool_radial(frames: list[FrameMeasurement], powers: tuple[int, ...]) -> Poo
     resid_parts: list[FloatArray] = []
     rho_ref = 0.0
     center = (0.0, 0.0)
+    image_shape = (0, 0)
     for frame in frames:
         assert frame.decomposition is not None
         pred = np.array([m.predicted_vu for m in frame.stars], dtype=np.float64)
@@ -180,6 +191,7 @@ def _pool_radial(frames: list[FrameMeasurement], powers: tuple[int, ...]) -> Poo
         resid_parts.append(resid)
         rho_ref = frame.rho_ref_px
         center = frame.center_vu
+        image_shape = frame.image_shape
     if not pred_parts:
         return None
 
@@ -197,4 +209,8 @@ def _pool_radial(frames: list[FrameMeasurement], powers: tuple[int, ...]) -> Poo
         nonradial_px=nonradial,
         model=model,
         residual_after_fit_px=after_fit,
+        predicted_vu=pred_all,
+        residual_vu=resid_all,
+        center_vu=center,
+        image_shape=image_shape,
     )

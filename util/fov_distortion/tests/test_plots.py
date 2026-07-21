@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from util.fov_distortion.plots import (
     plot_frame_decomposition,
+    plot_instrument_distortion_map,
     plot_instrument_radial,
     plot_instrument_twist,
 )
@@ -29,6 +30,15 @@ def test_plot_instrument_radial_writes_png(tmp_path: Path) -> None:
     summary = summarize_instrument('syn', 'Synthetic', frames)
     out = tmp_path / 'radial.png'
     plot_instrument_radial(summary, str(out))
+    assert out.exists()
+    assert out.stat().st_size > 0
+
+
+def test_plot_instrument_distortion_map_writes_png(tmp_path: Path) -> None:
+    frames = [make_frame(twist_deg=0.05, k1=0.01, seed=i, name=f'F{i}') for i in range(6)]
+    summary = summarize_instrument('syn', 'Synthetic', frames)
+    out = tmp_path / 'distortion_map.png'
+    plot_instrument_distortion_map(summary, str(out))
     assert out.exists()
     assert out.stat().st_size > 0
 
