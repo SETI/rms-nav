@@ -365,6 +365,34 @@ well-behaved camera and for the worst case:
    radius, the centroid-plus-astrometric floor. The distortion is a few
    hundredths of a pixel and the floor rises modestly toward the edge.
 
+Between those extremes, Galileo SSI carries the most significant radial
+distortion of the well-behaved cameras. The pooled radial residual climbs
+steadily toward the edge and reaches about half a pixel at the field corner, a
+``k2``-dominated (pincushion) shape well above the ~0.1 px floor: a real
+distortion the navigator does not remove.
+
+.. figure:: _figures/gossi_radial.png
+   :width: 100%
+   :alt: Galileo SSI pooled radial distortion and residual floor.
+
+   Galileo SSI. The radial residual rises to ~0.5 px at the field corner,
+   dominated by the ``k2`` term (``k1`` -3.5e-04, ``k2`` +1.7e-03). Pooled over
+   the frames that lock, the trend is clear despite the small cohort.
+
+New Horizons LORRI carries only a small radial distortion: a low hump peaking
+near 0.06 px at mid-field, comparable to its own centroid-plus-astrometric
+floor, so the radial term is barely above the noise. LORRI's significant
+signature is the twist, not the distortion.
+
+.. figure:: _figures/nhlorri_pre_ke_radial.png
+   :width: 100%
+   :alt: New Horizons LORRI pooled radial distortion and residual floor.
+
+   New Horizons LORRI (pre-KE). The radial residual is a ~0.06 px mid-field hump
+   (``k1`` +8.1e-04, ``k2`` -1.1e-03) sitting close to the floor; the downturn
+   past the outermost radius is the low-order fit extrapolating beyond the last
+   stars.
+
 .. figure:: _figures/vg2iss_wac_radial.png
    :width: 100%
    :alt: Voyager 2 ISS WAC pooled radial distortion and residual floor.
@@ -442,6 +470,10 @@ Feeding the simulator and the pointing kernels
 The per-instrument radial coefficients ``k1`` and ``k2`` are reported in the
 simulator distortion stage's convention and set that stage's per-instrument
 defaults, alongside the non-radial RMS as the non-radial wander amplitude. The
+radial amplitudes differ sharply between cameras: Cassini and New Horizons LORRI
+sit at or near their noise floors (a few hundredths of a pixel), while Galileo
+SSI reaches ~0.5 px at the field corner and Voyager several tenths of a pixel, so
+those two set meaningfully larger distortion defaults. The
 consistent twists (New Horizons LORRI, Galileo SSI) are the static corrections a
 future instrument or frame kernel would absorb; they are recorded here with
 their uncertainties so a kernel build can adopt them. The frame-varying Voyager
