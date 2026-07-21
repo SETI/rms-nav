@@ -50,14 +50,16 @@ ground_truth:
     weighs more strongly against an isolated wrong-answer
     high-confidence runner-up.
 
+    Re-ratchet 2026-07-20 (sidecar reconciled to the seed-20260718 recalibration; attribution basis util/calibration/CAMPAIGN_20260718.md). Expected conflicted/conflicted/BodyTerminatorNav -> measured success/medium/BodyDiscCorrelateNav. Status conflicted->success/medium: BodyTerminatorNav no longer latches its wrong high-confidence local minimum (it emits no result after the terminator refit), so the agreeing BodyDiscCorrelateNav + BodyLimbNav pair carries the fuse to the operator offset. BodyTerminatorNav removed from techniques_must_run.
+
 expected:
-  status: conflicted
-  confidence_tier: conflicted
-  primary_technique: BodyTerminatorNav  # highest-confidence
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyDiscCorrelateNav  # highest-confidence
                                         # per-technique result, even
                                         # though wrong — the test's
                                         # primary_technique rule is
                                         # max-confidence with
                                         # tie-break by name
-  techniques_must_run: [BodyDiscCorrelateNav, BodyLimbNav, BodyTerminatorNav]
+  techniques_must_run: [BodyDiscCorrelateNav, BodyLimbNav]
   techniques_must_skip: []

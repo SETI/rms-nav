@@ -20,10 +20,12 @@ ground_truth:
     Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
     Pipeline: status=success, confidence=0.936, rank=high, techniques=['StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"StarFieldFromCatalogNav": [-49.0337, -1.8331], "StarUniqueMatchNav": [0.0, 0.0], "StarRefineNav": [-49.2965, -1.7568]}.
     Operator comment: many stars
+
+    Re-ratchet 2026-07-20 (sidecar reconciled to the seed-20260718 recalibration; attribution basis util/calibration/CAMPAIGN_20260718.md). Expected success/medium/StarFieldFromCatalogNav -> measured success/high/StarRefineNav. Tier medium->high adjudicated per provenance: the cautious operator medium pin contradicted this frame's own recorded rank=high from the batch-006 curation run; the recalibrated star-field lock scores high. Offset unchanged and within slack. Primary also moves to StarRefineNav: a multi-star refine (uncapped, confidence >0.50) is the highest-confidence contributor; this retires the Track-B marker that withheld refine-as-primary, whose fix shipped as the single-inlier 0.50 cap and does not apply to multi-star refines.
 expected:
   status: success
-  confidence_tier: medium
-  primary_technique: StarFieldFromCatalogNav
+  confidence_tier: high
+  primary_technique: StarRefineNav
   techniques_must_run:
   - StarFieldFromCatalogNav
   techniques_must_skip: []

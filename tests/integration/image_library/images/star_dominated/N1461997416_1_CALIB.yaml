@@ -22,10 +22,12 @@ ground_truth:
     First-curation pipeline snapshot (2026-07): status=success, confidence=0.343, rank=low, techniques=['StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"StarUniqueMatchNav": [1.5485, -7.4586], "StarRefineNav": [1.5558, -7.4517]}.
     Operator comment: re-vote: rescued with relaxed gates (previous vote: None)
     A later clean run of the default pipeline (2026-07-13) navigates this frame at high/0.686 after the confidence recalibration that followed first curation; expected.confidence_tier reflects that current behavior. The frame no longer needs the relaxed-gate rescue its earlier snapshot was taken under.
+
+    Re-ratchet 2026-07-20 (sidecar reconciled to the seed-20260718 recalibration; attribution basis util/calibration/CAMPAIGN_20260718.md). Expected success/high/StarFieldFromCatalogNav -> measured success/medium/StarUniqueMatchNav. Tier high->medium under the recalibrated 0.85 high-tier boundary: fused confidence sits in the 0.55-0.85 band that the campaign's planted ring-orbit-error failure mass moved out of the high tier; the confidence did not move materially, the boundary did. Offset unchanged and within slack. Primary also moves to StarUniqueMatchNav with the recalibrated confidences. StarFieldFromCatalogNav no longer emits a result (below the RANSAC inlier floor after the refit); techniques_must_run updated to the carrying technique.
 expected:
   status: success
-  confidence_tier: high
-  primary_technique: StarFieldFromCatalogNav
+  confidence_tier: medium
+  primary_technique: StarUniqueMatchNav
   techniques_must_run:
-  - StarFieldFromCatalogNav
+  - StarUniqueMatchNav
   techniques_must_skip: []

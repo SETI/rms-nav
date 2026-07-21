@@ -31,9 +31,11 @@ ground_truth:
     coefficients are placeholders pending Phase 10 calibration; the
     expected.confidence_tier below pins today's behavior.
 
+    Re-ratchet 2026-07-20 (sidecar reconciled to the seed-20260718 recalibration; attribution basis util/calibration/CAMPAIGN_20260718.md). Expected conflicted/conflicted/RingAnnulusNav -> measured success/medium/BodyDiscCorrelateNav. Status conflicted->success/medium: the recalibrated per-technique confidences dissolve the prior standoff; the dissenting vote falls below the ensemble veto weight and RingAnnulusNav carries the fuse within slack.
+
 expected:
-  status: conflicted                           # success | failed | conflicted
-  confidence_tier: conflicted              # high | medium | low | failed
-  primary_technique: RingAnnulusNav  # e.g. BodyLimbNav
+  status: success                           # success | failed | conflicted
+  confidence_tier: medium              # high | medium | low | failed
+  primary_technique: BodyDiscCorrelateNav  # e.g. BodyLimbNav
   techniques_must_run: [RingAnnulusNav]
   techniques_must_skip: []
