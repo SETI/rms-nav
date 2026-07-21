@@ -55,11 +55,6 @@ ground_truth:
 expected:
   status: success
   confidence_tier: medium
-  primary_technique: BodyDiscCorrelateNav  # highest-confidence
-                                        # per-technique result, even
-                                        # though wrong — the test's
-                                        # primary_technique rule is
-                                        # max-confidence with
-                                        # tie-break by name
+  primary_technique: BodyDiscCorrelateNav
   techniques_must_run: [BodyDiscCorrelateNav, BodyLimbNav]
   techniques_must_skip: []

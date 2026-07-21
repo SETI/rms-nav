@@ -31,7 +31,7 @@ ground_truth:
     coefficients are placeholders pending Phase 10 calibration; the
     expected.confidence_tier below pins today's behavior.
 
-    Re-ratchet 2026-07-20 (sidecar reconciled to the seed-20260718 recalibration; attribution basis util/calibration/CAMPAIGN_20260718.md). Expected conflicted/conflicted/RingAnnulusNav -> measured success/medium/BodyDiscCorrelateNav. Status conflicted->success/medium: the recalibrated per-technique confidences dissolve the prior standoff; the dissenting vote falls below the ensemble veto weight and RingAnnulusNav carries the fuse within slack.
+    Re-ratchet 2026-07-20 (sidecar reconciled to the seed-20260718 recalibration; attribution basis util/calibration/CAMPAIGN_20260718.md). Expected conflicted/conflicted/RingAnnulusNav -> measured success/medium/BodyDiscCorrelateNav. Status conflicted->success/medium: the recalibrated per-technique confidences dissolve the prior standoff (the dissenting vote falls below the ensemble veto weight); the Saturn disc and limb, RingAnnulusNav, and the star techniques now agree and fuse to 0.990 within slack, with BodyDiscCorrelateNav the highest-confidence contributor.
 
 expected:
   status: success                           # success | failed | conflicted
