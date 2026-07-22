@@ -69,6 +69,53 @@ image grid (a typical limb is ~200 pixels on a 1024² image), so iterating over 
 indices for each shift is faster than the full-image FFT for the search-window sizes the
 pipeline actually uses.
 
+Stage 1b — polarity-weighted coarse acquisition
+-----------------------------------------------
+
+The binary match fraction above is *polarity-blind*: a model vertex counts as a match whenever
+it lands on any detected edge pixel, regardless of that edge's orientation. In a cluttered
+scene — a ring ansa behind a limb, the terminator on a lit disc, a second moon in the field —
+a dense population of unrelated edges can out-score the short true feature arc, seeding the LM
+in the wrong basin where it converges to a confident-but-wrong offset that the downstream
+spurious gates do not always catch.
+
+:func:`~spindoctor.nav_technique.dt_fitting.coarse_polarity_search_scored` adds the
+discriminator the mask-overlap count discards: the *direction* of the image gradient under
+each vertex. A vertex still has to land on a detected edge pixel (the same density-neutral
+binary signal), but its contribution is then weighted by :math:`\max(0, \cos\theta_{i})`,
+where :math:`\theta_{i}` is the angle between the model's per-vertex outward normal and the
+image gradient vector sampled at the shifted vertex:
+
+.. math::
+
+    f_{\mathrm{pol}}(\Delta v, \Delta u) =
+        \frac{\sum_{i \in \mathrm{bounds}}
+            \mathrm{edge}[x_{i} + \Delta x] \,
+            \max\!\left(0, \hat{n}_{i} \cdot \hat{g}[x_{i} + \Delta x]\right)}
+             {N_{\mathrm{in\,bounds}}(\Delta v, \Delta u)}
+
+Both vectors are unit-normalised before the dot product, so only gradient *direction* enters:
+a faint-but-correctly-oriented true edge is never out-weighted by a bright high-contrast
+clutter edge. A vertex whose local edge runs the wrong way (gradient anti-parallel to the
+model normal — a terminator, a far-side ring edge, a crater rim) contributes nothing; an
+unrelated clutter edge at a random orientation contributes on average only
+:math:`1/\pi \approx 0.32` of its overlap; the true feature, whose edges run along the
+predicted normals by construction, keeps nearly full weight. Where every edge gradient is
+aligned with its normal (:math:`\cos\theta = 1`), each match reverts to a hard 0/1 and the
+score becomes the plain per-vertex edge-overlap fraction, so the *seed* is unchanged on clean,
+uncluttered frames — the search only diverges from the overlap argmax where polarity actually
+discriminates. (The absolute score still differs slightly from Stage 1's even in the aligned
+case: Stage 1b divides by the raw in-bounds vertex count, Stage 1 by the count of distinct
+rasterized pixels; only the argmax matters for seeding, and it coincides.) The minimum-support
+guard and the Manhattan tie-break are identical to Stage 1.
+
+This form is used exactly where its polarity signal is trustworthy: the same techniques that
+run the LM with ``use_polarity=True`` (``BodyLimbNav`` and ``BodyTerminatorNav``), whose model
+normals carry a predictable expected gradient direction. ``RingEdgeNav`` runs
+``use_polarity=False`` — a ring edge may be bright-inside or dark-inside depending on the
+lighting and gap-versus-ringlet context the catalog does not encode — so it keeps the
+polarity-blind Stage 1 search; making its coarse seed robust is separate work.
+
 Stage 2 — sub-pixel Levenberg-Marquardt refinement
 --------------------------------------------------
 
@@ -266,10 +313,12 @@ Restrictions and assumptions
 ----------------------------
 
 - The refiner is purely local; it converges to the basin of attraction selected by the coarse
-  integer seed. When the seed is wrong (a multi-body scene where the coarse NCC peak picks
-  the dominant body's limb but the technique's polyline includes an off-frame body's limb),
-  LM converges to a wrong minimum. The per-technique spurious gates are responsible for
-  catching that.
+  integer seed. When the seed is wrong (a multi-body scene where the coarse peak picks
+  a competing edge population rather than the technique's true feature arc), LM converges to a
+  wrong minimum. The polarity-weighted coarse acquisition (Stage 1b) reduces this for the
+  polarity techniques by down-weighting wrong-direction edges before the seed is chosen; a
+  seed that still lands in a wrong basin is caught by the per-technique spurious gates.
+  ``RingEdgeNav``, which cannot use polarity, relies on the seed and the gates alone.
 - Bilinear DT sampling assumes the DT is differentiable almost everywhere. Pixel-grid
   pathologies (a perfectly flat plateau across the entire search window) collapse the
   Jacobian and the LM step has no preferred direction; the refiner returns the seed unchanged
@@ -361,8 +410,13 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
 - :func:`~spindoctor.nav_technique.dt_fitting.coarse_ncc_search_scored` — the same search
   returning a :class:`~spindoctor.nav_technique.dt_fitting.CoarseSearchResult`, whose
   ``score`` is the winning shift's per-vertex edge-pixel match fraction — the
-  acquisition-quality signal the fit-quality gates consume. The DT techniques call this
-  form.
+  acquisition-quality signal the fit-quality gates consume. ``RingEdgeNav`` calls this form.
+- :func:`~spindoctor.nav_technique.dt_fitting.coarse_polarity_search_scored` — the
+  polarity-weighted variant (Stage 1b): the same integer search and
+  :class:`~spindoctor.nav_technique.dt_fitting.CoarseSearchResult` output, but each match is
+  weighted by the agreement between the model's per-vertex normal and the sampled image
+  gradient direction, so a competing wrong-polarity edge population cannot mis-seed the fit.
+  The polarity techniques (``BodyLimbNav``, ``BodyTerminatorNav``) call this form.
 - :func:`~spindoctor.nav_technique.dt_fitting.polarity_filter` — per-vertex polarity acceptance from
   the gradient vector image.
 - :func:`~spindoctor.nav_technique.dt_fitting.tukey_biweight_weights` — Holland-Welsch redescender
@@ -385,11 +439,13 @@ Consuming techniques follow the same eight-step pattern (the body-limb fit is th
 example documented at :doc:`dev_guide_techniques_body_limb`):
 
 1. Aggregate the per-feature vertex / normal / sigma arrays.
-2. Render the polyline into a binary mask aligned with the image edge mask.
+2. Threshold the truncated DT into the image edge mask.
 3. Read the search-window margin via
    :func:`~spindoctor.nav_technique.nav_technique.search_window_for_obs`.
-4. Call :func:`~spindoctor.nav_technique.dt_fitting.coarse_ncc_search_scored` to obtain the
-   integer seed and its acquisition score.
+4. Call the coarse search to obtain the integer seed and its acquisition score:
+   :func:`~spindoctor.nav_technique.dt_fitting.coarse_polarity_search_scored` for the polarity
+   techniques (``BodyLimbNav``, ``BodyTerminatorNav``), or
+   :func:`~spindoctor.nav_technique.dt_fitting.coarse_ncc_search_scored` for ``RingEdgeNav``.
 5. Decide whether to fit camera rotation; when rotation is fit, set the rotation pivot to the
    vertex centroid and read the pivot-to-image-centre distance via
    :func:`~spindoctor.nav_technique.nav_technique.rotation_pivot_distance_px`.

@@ -28,6 +28,7 @@ import os
 import random
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -170,17 +171,94 @@ def edges_in_frame(rmin: float, rmax: float) -> list[str]:
 # ---------------------------------------------------------------- star counts
 
 _UCAC4 = None
+_YBSC = None
+_TYCHO2 = None
+
+# Position match radius for cross-referencing UCAC4 against YBSC/Tycho-2;
+# mirrors config_030_stars.yaml duplicate_ra_dec_threshold_arcsec.
+_SATURATION_MATCH_RAD = math.radians(5.0 / 3600.0)
+
+
+def _catalog_positions(catalog: Any, ra: float, ra_half: float, dec_min: float,
+                       dec_max: float, vmag_max: float,
+                       allow_double: bool) -> list[tuple[float, float, float]]:
+    """Collect ``(ra, dec, vmag)`` triples from one catalog in an RA/DEC box.
+
+    Handles RA wrap by splitting the box at 0/2pi when the pointing sits
+    near the seam.
+
+    Parameters:
+        catalog: A starcat catalog instance exposing ``find_stars``.
+        ra: Box-centre right ascension in radians.
+        ra_half: Half-width of the box in RA (radians, dec-corrected).
+        dec_min: Lower declination bound in radians.
+        dec_max: Upper declination bound in radians.
+        vmag_max: Faint magnitude cutoff for the query.
+        allow_double: Whether to include double/multiple-star records
+            (required so YBSC returns bright multiples such as Eta Tau).
+
+    Returns:
+        ``(ra, dec, vmag)`` triples (radians, radians, magnitude) for every
+        record in the box with all three fields present.
+    """
+    if ra - ra_half < 0 or ra + ra_half > 2 * math.pi:
+        boxes = [(0.0, (ra + ra_half) % (2 * math.pi)),
+                 ((ra - ra_half) % (2 * math.pi), 2 * math.pi)]
+    else:
+        boxes = [(ra - ra_half, ra + ra_half)]
+    out: list[tuple[float, float, float]] = []
+    for ra0, ra1 in boxes:
+        for star in catalog.find_stars(ra_min=ra0, ra_max=ra1,
+                                       dec_min=dec_min, dec_max=dec_max,
+                                       vmag_max=vmag_max,
+                                       allow_double=allow_double):
+            v = star.vmag
+            sra = star.ra
+            sdec = star.dec
+            if v is not None and sra is not None and sdec is not None:
+                out.append((float(sra), float(sdec), float(v)))
+    return out
 
 
 def star_vmags(ra_deg: float, dec_deg: float, fov_deg: float,
                vmag_max: float) -> list[float]:
-    """Sorted vmags of UCAC4 stars in a box around the pointing."""
-    global _UCAC4
+    """Sorted vmags of stars in a box around the pointing.
+
+    UCAC4 supplies the field; its aperture photometry saturates at the
+    bright end (it lists Pleiades members near V7 instead of V3), so the
+    magnitudes are corrected against the YBSC/Tycho-2 reference via
+    :func:`spindoctor.nav_model.stars.saturation.correct_saturated_vmags`
+    before counting, so bright-star screens see true brightness.  Tycho-2
+    reaches the V6.5 to V8 stars YBSC misses, so a genuine V7 to V8 star is
+    counted at its true brightness rather than mistaken for saturation.
+
+    Parameters:
+        ra_deg: Pointing right ascension in degrees.
+        dec_deg: Pointing declination in degrees.
+        fov_deg: Full field of view in degrees; the search box is 0.75x
+            this half-width to allow for pointing error.
+        vmag_max: Faint magnitude cutoff for the catalog queries.
+
+    Returns:
+        Ascending (brightest first) V-magnitudes with UCAC4 bright-end
+        saturation corrected against the YBSC/Tycho-2 reference.
+    """
+    global _UCAC4, _YBSC, _TYCHO2
     if _UCAC4 is None:
         from starcat import UCAC4StarCatalog
         _UCAC4 = UCAC4StarCatalog(
             os.environ.get('UCAC4_PATH',
                            '/data/external-data/star-catalogs/UCAC4'))
+    if _YBSC is None:
+        from starcat import YBSCStarCatalog
+        _YBSC = YBSCStarCatalog(
+            os.environ.get('YBSC_PATH',
+                           '/data/external-data/star-catalogs/YBSC'))
+    if _TYCHO2 is None:
+        from starcat import SpiceStarCatalog
+        _TYCHO2 = SpiceStarCatalog('tycho2')
+    from spindoctor.nav_model.stars.saturation import correct_saturated_vmags
+
     half = math.radians(0.75 * fov_deg)      # frame + pointing-error margin
     dec = math.radians(dec_deg)
     ra = math.radians(ra_deg % 360.0)
@@ -188,20 +266,15 @@ def star_vmags(ra_deg: float, dec_deg: float, fov_deg: float,
     dec_max = min(dec + half, math.pi / 2)
     cosd = max(math.cos(dec), 0.05)
     ra_half = half / cosd
-    vmags: list[float] = []
-    if ra - ra_half < 0 or ra + ra_half > 2 * math.pi:
-        boxes = [(0.0, (ra + ra_half) % (2 * math.pi)),
-                 ((ra - ra_half) % (2 * math.pi), 2 * math.pi)]
-    else:
-        boxes = [(ra - ra_half, ra + ra_half)]
-    for ra0, ra1 in boxes:
-        for star in _UCAC4.find_stars(ra_min=ra0, ra_max=ra1,
-                                      dec_min=dec_min, dec_max=dec_max,
-                                      vmag_max=vmag_max):
-            v = getattr(star, 'vmag', None)
-            if v is not None:
-                vmags.append(float(v))
-    return sorted(vmags)
+
+    ucac4 = _catalog_positions(_UCAC4, ra, ra_half, dec_min, dec_max,
+                               vmag_max, allow_double=True)
+    ybsc = _catalog_positions(_YBSC, ra, ra_half, dec_min, dec_max,
+                              vmag_max, allow_double=True)
+    tycho2 = _catalog_positions(_TYCHO2, ra, ra_half, dec_min, dec_max,
+                                vmag_max, allow_double=True)
+    return correct_saturated_vmags(ucac4, ybsc, tycho2,
+                                   match_radius_rad=_SATURATION_MATCH_RAD)
 
 
 # ---------------------------------------------------------------- helpers
@@ -877,9 +950,10 @@ def scan_go() -> dict[str, list[dict]]:
         # autonomous solve on a stars-only surrogate (the Galileo
         # C00598xx quintet failed wholesale with all_techniques_spurious),
         # so require at least STAR_FIELD_MIN_INLIERS clearly-bright stars.
-        # NOTE: star_vmags reads UCAC4, whose photometry saturates at the
-        # bright end (it lists Pleiades members near V7 instead of V3); the
-        # count is therefore a conservative lower bound on bright content.
+        # star_vmags corrects UCAC4's saturated bright-end photometry against
+        # the YBSC/Tycho-2 reference (it otherwise lists Pleiades members near
+        # V7 instead of V3), so this count reflects true bright content rather
+        # than a lower bound.
         n_clear = sum(1 for v in vm if v <= lim - 1.5)
         if n_clear < STAR_FIELD_MIN_INLIERS:
             continue

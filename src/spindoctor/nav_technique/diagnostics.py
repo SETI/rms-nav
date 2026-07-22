@@ -78,11 +78,16 @@ class BodyLimbDiagnostics:
             confidence the shared DT gates cap.
         polarity_rejection_fraction: Fraction of model vertices whose local
             gradient direction disagreed with the model normal at the seed.
-        coarse_peak_fraction: The winning coarse-NCC shift's in-bounds
-            match fraction over the RASTERIZED polyline pixels
-            (acquisition quality).  Its denominator is mask pixels, not
-            vertices, so it is not directly comparable to
-            ``tukey_inlier_count``.
+        coarse_peak_fraction: The winning coarse shift's acquisition-quality
+            score.  For the polarity techniques (``BodyLimbNav``,
+            ``BodyTerminatorNav``) this is the polarity-weighted per-vertex
+            match fraction from
+            :func:`~spindoctor.nav_technique.dt_fitting.coarse_polarity_search_scored`
+            -- each in-bounds vertex on a detected edge contributes
+            ``max(0, cos theta)`` between its model normal and the local
+            image gradient, averaged over the in-bounds vertices.  It is a
+            mean over vertices, not a per-vertex count, so it is not directly
+            comparable to ``tukey_inlier_count``.
     """
 
     visible_limb_arc_fraction: float = 0.0
@@ -229,8 +234,13 @@ class RingEdgeDiagnostics:
             combined covariance is rank-1.
         lm_converged: Shared DT gate diagnostic; the field carries the
             same meaning as on ``BodyLimbDiagnostics``.
-        coarse_peak_fraction: Shared DT gate diagnostic; the field carries
-            the same meaning as on ``BodyLimbDiagnostics``.
+        coarse_peak_fraction: Shared DT gate diagnostic.  Unlike the polarity
+            techniques, ``RingEdgeNav`` runs polarity-blind (ring-edge
+            polarity is not predictable), so this is the plain mask-overlap
+            match fraction from
+            :func:`~spindoctor.nav_technique.dt_fitting.coarse_ncc_search_scored`
+            rather than the polarity-weighted score described on
+            ``BodyLimbDiagnostics``.
         sigma_orbit_radial_px: Effective fully-correlated radial
             orbit-uncertainty sigma (px) added in quadrature to the
             reported covariance along the fit's radial direction (the
@@ -308,6 +318,13 @@ class StarFieldDiagnostics:
             separability floor (``rotation_separability_floor_deg``) and
             the rotation was therefore reported as unobservable rather
             than as a confident near-zero value.
+        wide_offset_lock: True when the offset was recovered by the
+            wide-offset asterism fallback (a few trusted bright-anchor
+            seeds) rather than the strong-tier triplet RANSAC.
+        wide_offset_false_lock_expectation: Expected number of chance
+            locks of this inlier count under the uniform-detection null;
+            the false-lock significance the acceptance budget bounded.
+            ``0.0`` for strong-tier matches (the fallback did not run).
     """
 
     n_inliers: int = 0
@@ -316,6 +333,8 @@ class StarFieldDiagnostics:
     n_catalog_predicted: int = 0
     n_triplets_evaluated: int = 0
     rotation_below_separability_floor: bool = False
+    wide_offset_lock: bool = False
+    wide_offset_false_lock_expectation: float = 0.0
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'n_inliers': 'n_inliers',
         'median_residual_px': 'median_residual_px',
@@ -323,6 +342,8 @@ class StarFieldDiagnostics:
         'n_catalog_predicted': 'n_catalog_predicted',
         'n_triplets_evaluated': 'n_triplets_evaluated',
         'rotation_below_separability_floor': 'rotation_below_separability_floor',
+        'wide_offset_lock': 'wide_offset_lock',
+        'wide_offset_false_lock_expectation': 'wide_offset_false_lock_expectation',
     }
 
 

@@ -18,6 +18,7 @@ from spindoctor.nav_technique.dt_fitting import (
     RidgeRefineResult,
     coarse_ncc_search,
     coarse_ncc_search_scored,
+    coarse_polarity_search_scored,
     find_secondary_dt_minimum,
     gradient_ridge_refine,
     information_matrix_to_covariance,
@@ -359,6 +360,219 @@ def test_coarse_ncc_search_rejects_non_sequence_window() -> None:
     polyline_mask = np.zeros((4, 4), bool)
     with pytest.raises(ValueError, match='length-2 sequence of ints'):
         coarse_ncc_search(edge_mask, polyline_mask, np.array([1, 1]))  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# coarse_polarity_search_scored
+# ---------------------------------------------------------------------------
+
+
+def _uniform_gradient_field(
+    shape_vu: tuple[int, int], edge_mask: np.ndarray, direction_vu: tuple[float, float]
+) -> np.ndarray:
+    """Return an ``(H, W, 2)`` gradient field pointing ``direction_vu`` on edges."""
+    grad = np.zeros((*shape_vu, 2), np.float64)
+    grad[edge_mask, 0] = direction_vu[0]
+    grad[edge_mask, 1] = direction_vu[1]
+    return grad
+
+
+def test_coarse_polarity_search_recovers_planted_offset_on_a_disc() -> None:
+    """A polarity-aligned disc limb recovers the planted integer offset."""
+    shape = (64, 64)
+    image = _render_image_with_circle(shape, (35.0, 30.0), 12.0)
+    gradient = compute_image_gradient_vu(image, sigma_px=DEFAULT_IMAGE_GRADIENT_SIGMA_PX)
+    edge_mask = _render_circle_mask(shape, (35.0, 30.0), 12.0)
+    vertices, outward_normals = _build_circle_polyline((32.0, 32.0), 12.0, 180)
+    # The bright-disc gradient points inward, so the polarity normal is the
+    # inward (negated outward) normal -- the technique's convention.
+    polarity_normals = -outward_normals
+    result = coarse_polarity_search_scored(
+        edge_mask, gradient, vertices, polarity_normals, (10, 10)
+    )
+    assert result.offset_vu == (3, -2)
+
+
+def test_coarse_polarity_search_rejects_wrong_polarity_dense_basin() -> None:
+    """A denser but wrong-polarity edge population loses to the true arc.
+
+    This is the #179 failure mode in miniature: a competing edge region has
+    more model vertices land on edges (so the polarity-blind mask-overlap
+    search picks it), but its image gradient runs opposite the model normal.
+    The polarity-weighted search must instead pick the true, sparser arc
+    whose gradient direction agrees with the model.
+    """
+    h, w = 40, 40
+    poly_rows = np.arange(10, 30)  # 20-vertex vertical segment at column 20
+    vertices = np.stack([poly_rows.astype(np.float64), np.full(20, 20.0)], axis=-1)
+    # Model normals all point toward +u; a matching edge has its gradient in
+    # the same direction.
+    normals = np.tile(np.array([0.0, 1.0]), (20, 1))
+    edge_mask = np.zeros((h, w), dtype=bool)
+    # True arc: 12 of 20 vertices land on edges at column 23 (shift du=+3),
+    # gradient aligned with the model normal (+u).
+    edge_mask[10:22, 23] = True
+    # Distractor: all 20 vertices land on edges at column 15 (shift du=-5),
+    # a denser overlap, but gradient anti-parallel to the model normal.
+    edge_mask[10:30, 15] = True
+    gradient = np.zeros((h, w, 2), np.float64)
+    gradient[10:22, 23, 1] = 1.0  # aligned (+u)
+    gradient[10:30, 15, 1] = -1.0  # anti-aligned (-u)
+    window = (0, 8)
+    # The polarity-blind search is fooled by the denser distractor.
+    polyline_mask = np.zeros((h, w), dtype=bool)
+    polyline_mask[poly_rows, 20] = True
+    assert coarse_ncc_search(edge_mask, polyline_mask, window) == (0, -5)
+    # The polarity-weighted search recovers the true arc.
+    result = coarse_polarity_search_scored(edge_mask, gradient, vertices, normals, window)
+    assert result.offset_vu == (0, 3)
+
+
+def test_coarse_polarity_search_reduces_to_overlap_when_fully_aligned() -> None:
+    """With every edge gradient aligned to its normal the score is the overlap fraction."""
+    h, w = 40, 40
+    poly_rows = np.arange(10, 30)
+    vertices = np.stack([poly_rows.astype(np.float64), np.full(20, 20.0)], axis=-1)
+    normals = np.tile(np.array([0.0, 1.0]), (20, 1))
+    edge_mask = np.zeros((h, w), dtype=bool)
+    edge_mask[10:25, 23] = True  # 15 of 20 vertices on edges at du=+3
+    gradient = _uniform_gradient_field((h, w), edge_mask, (0.0, 1.0))
+    result = coarse_polarity_search_scored(edge_mask, gradient, vertices, normals, (0, 8))
+    assert result.offset_vu == (0, 3)
+    # 15 aligned matches over 20 vertices == 0.75, the same fraction the
+    # polarity-blind overlap search would report.
+    assert result.score == pytest.approx(0.75)
+
+
+def test_coarse_polarity_search_weights_by_cosine_not_a_hard_threshold() -> None:
+    """A partially-misaligned edge contributes cos(theta), not a full unit.
+
+    Pins the continuous ``max(0, cos theta)`` weighting: a hard-threshold
+    ``cos > 0 -> 1`` implementation would score both vertices as full matches
+    and report 1.0, so this fixture distinguishes the two designs.
+    """
+    h, w = 20, 20
+    # Two vertices, both on edges, both with a +u model normal.
+    vertices = np.array([[5.0, 10.0], [6.0, 10.0]])
+    normals = np.array([[0.0, 1.0], [0.0, 1.0]])
+    edge_mask = np.zeros((h, w), dtype=bool)
+    edge_mask[5, 10] = True
+    edge_mask[6, 10] = True
+    gradient = np.zeros((h, w, 2), np.float64)
+    gradient[5, 10] = (0.0, 1.0)  # aligned: cos = 1
+    gradient[6, 10] = (np.sqrt(3.0) / 2.0, 0.5)  # 60 deg off the normal: cos = 0.5
+    result = coarse_polarity_search_scored(edge_mask, gradient, vertices, normals, (0, 0))
+    assert result.offset_vu == (0, 0)
+    # (1.0 + 0.5) / 2 vertices == 0.75, not the 1.0 a hard threshold would give.
+    assert result.score == pytest.approx(0.75)
+
+
+def test_coarse_polarity_search_low_support_shift_is_ineligible() -> None:
+    """A near-fully-clipped perfect-polarity shift loses to a dense match.
+
+    The minimum-support guard applies in the polarity variant too: a shift
+    that clips all but two vertices off-frame cannot win on those two even
+    when their polarity is perfect.
+    """
+    h, w = 40, 40
+    poly_rows = np.arange(5, 25)  # 20-vertex vertical segment at column 20
+    vertices = np.stack([poly_rows.astype(np.float64), np.full(20, 20.0)], axis=-1)
+    normals = np.tile(np.array([0.0, 1.0]), (20, 1))
+    edge_mask = np.zeros((h, w), dtype=bool)
+    # Dense partial match at dv=+3: 18 of 20 shifted vertices on edges.
+    edge_mask[8:28, 20] = True
+    edge_mask[12, 20] = False
+    edge_mask[18, 20] = False
+    # Adversarial far edges: dv=+33 clips all but two vertices off-frame.
+    edge_mask[38, 20] = True
+    edge_mask[39, 20] = True
+    gradient = _uniform_gradient_field((h, w), edge_mask, (0.0, 1.0))  # all aligned
+    result = coarse_polarity_search_scored(edge_mask, gradient, vertices, normals, (35, 0))
+    assert result.offset_vu == (3, 0)
+
+
+def test_coarse_polarity_search_zero_normal_never_matches() -> None:
+    """A degenerate zero-length normal contributes no weight to any shift."""
+    h, w = 20, 20
+    vertices = np.array([[10.0, 10.0]])
+    normals = np.array([[0.0, 0.0]])  # degenerate
+    edge_mask = np.zeros((h, w), dtype=bool)
+    edge_mask[10, 10] = True
+    gradient = np.zeros((h, w, 2), np.float64)
+    gradient[10, 10, 1] = 1.0
+    result = coarse_polarity_search_scored(edge_mask, gradient, vertices, normals, (2, 2))
+    assert result.score == 0.0
+
+
+def test_coarse_polarity_search_empty_polyline_returns_origin() -> None:
+    """An empty polyline yields the origin offset and a zero score."""
+    edge_mask = np.zeros((16, 16), dtype=bool)
+    gradient = np.zeros((16, 16, 2), np.float64)
+    vertices = np.empty((0, 2), np.float64)
+    normals = np.empty((0, 2), np.float64)
+    result = coarse_polarity_search_scored(edge_mask, gradient, vertices, normals, (3, 3))
+    assert result.offset_vu == (0, 0)
+    assert result.score == 0.0
+
+
+@pytest.mark.parametrize(
+    ('gradient', 'vertices', 'normals', 'window', 'message'),
+    [
+        # Gradient field missing its (v, u) last axis.
+        (
+            np.zeros((8, 8), np.float64),
+            np.zeros((1, 2), np.float64),
+            np.zeros((1, 2), np.float64),
+            (1, 1),
+            r'image_gradient_vu must have shape \(H, W, 2\)',
+        ),
+        # Gradient field shape disagrees with the edge mask.
+        (
+            np.zeros((6, 6, 2), np.float64),
+            np.zeros((1, 2), np.float64),
+            np.zeros((1, 2), np.float64),
+            (1, 1),
+            'shape mismatch',
+        ),
+        # Vertices not (N, 2).
+        (
+            np.zeros((8, 8, 2), np.float64),
+            np.zeros((1, 3), np.float64),
+            np.zeros((1, 2), np.float64),
+            (1, 1),
+            r'vertices_vu must have shape \(N, 2\)',
+        ),
+        # Normals do not match vertices.
+        (
+            np.zeros((8, 8, 2), np.float64),
+            np.zeros((2, 2), np.float64),
+            np.zeros((1, 2), np.float64),
+            (1, 1),
+            'normals_vu must match vertices_vu shape',
+        ),
+    ],
+)
+def test_coarse_polarity_search_rejects_invalid_inputs(
+    gradient: np.ndarray,
+    vertices: np.ndarray,
+    normals: np.ndarray,
+    window: tuple[int, ...],
+    message: str,
+) -> None:
+    """Malformed array shapes are rejected with a named message."""
+    edge_mask = np.zeros((8, 8), bool)
+    with pytest.raises(ValueError, match=message):
+        coarse_polarity_search_scored(edge_mask, gradient, vertices, normals, window)  # type: ignore[arg-type]
+
+
+def test_coarse_polarity_search_rejects_float_window_entry() -> None:
+    """A float window entry is rejected with TypeError, matching the overlap search."""
+    edge_mask = np.zeros((8, 8), bool)
+    gradient = np.zeros((8, 8, 2), np.float64)
+    vertices = np.zeros((1, 2), np.float64)
+    normals = np.zeros((1, 2), np.float64)
+    with pytest.raises(TypeError, match=r'search_window_vu\[0\] must be int'):
+        coarse_polarity_search_scored(edge_mask, gradient, vertices, normals, (1.5, 1))  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

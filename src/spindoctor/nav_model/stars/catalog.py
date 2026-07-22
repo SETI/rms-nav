@@ -41,6 +41,13 @@ from starcat import (
 )
 
 from spindoctor.nav_model.stars.predicted_snr import SCLASS_TO_B_MINUS_V
+from spindoctor.nav_model.stars.saturation import (
+    REFERENCE_CATALOGS as _PHOTOMETRY_REFERENCE_CATALOGS,
+)
+from spindoctor.nav_model.stars.saturation import (
+    UCAC4_SATURATION_VMAG_LIMIT,
+    correct_star_photometry,
+)
 from spindoctor.support.flux import clean_sclass
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
@@ -276,6 +283,8 @@ def _find_stars_in_one_catalog(
         star.conflicts = ''
         star.temperature_faked = False
         star.johnson_mag_faked = False
+        star.photometry_corrected = False
+        star.photometry_saturated = False
         star.psf_size = obs.star_psf_size(star)
         if star.temperature is None:
             star.temperature_faked = True
@@ -479,6 +488,7 @@ def reduce_catalogs(
     overlap_vmag = float(stars_config.overlapping_vmag_threshold)
 
     kept: list[MutableStar] = []
+    photometry_reference: list[MutableStar] = []
 
     for catalog_name in stars_config.catalogs:
         next_per_catalog: list[MutableStar] = []
@@ -501,11 +511,39 @@ def reduce_catalogs(
             if len(next_per_catalog) >= max_stars:
                 break
 
+        if catalog_name.lower() in _PHOTOMETRY_REFERENCE_CATALOGS:
+            # Keep the full in-field YBSC and Tycho-2 sets as the photometric
+            # reference even where the merge later drops individual entries as
+            # duplicates; the bright-end correction reads from them below.
+            photometry_reference += next_per_catalog
+
         kept = _merge_catalogs(
             kept,
             next_per_catalog,
             duplicate_radec=duplicate_radec,
             duplicate_vmag=duplicate_vmag,
+        )
+
+    # UCAC4 aperture photometry saturates at the bright end, so a merged
+    # UCAC4 star can carry a magnitude several magnitudes too faint.  YBSC
+    # and Tycho-2 are authoritative through the saturated regime (Tycho-2
+    # reaches the V6.5 to V8 stars YBSC misses); correct the merged list
+    # against them before overlaps and DN ordering are computed so both
+    # depend on the true brightness.  Run the correction whenever a reference
+    # catalog is configured, even when its in-field query returned nothing: a
+    # bright UCAC4 record with no reference in either catalog must still be
+    # flagged saturated rather than silently trusted.
+    reference_configured = any(
+        name.lower() in _PHOTOMETRY_REFERENCE_CATALOGS for name in stars_config.catalogs
+    )
+    if reference_configured:
+        kept = correct_star_photometry(
+            kept,
+            photometry_reference,
+            match_radius_rad=duplicate_radec,
+            duplicate_vmag=duplicate_vmag,
+            catalog_order=stars_config.catalogs,
+            saturation_limit=UCAC4_SATURATION_VMAG_LIMIT,
         )
 
     _mark_visual_overlaps(kept, overlap_vmag=overlap_vmag)

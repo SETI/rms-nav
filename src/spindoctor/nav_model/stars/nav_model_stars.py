@@ -237,15 +237,25 @@ class NavModelStars(NavModel):
             # Magnitude gate: drop stars with no catalog magnitude and stars
             # fainter than the per-image limiting magnitude.  This is mostly
             # redundant with the catalog reduction's magnitude cap, but it
-            # keeps the model self-contained and handles ``vmag is None``.
-            if star.vmag is None or float(star.vmag) > mag_limit:
+            # keeps the model self-contained and handles ``vmag is None``.  A
+            # ``photometry_saturated`` star is exempt from the faint cut: its
+            # magnitude is an untrusted, too-faint saturated reading, so it
+            # must not be rejected on that reading.
+            is_saturated = bool(star.photometry_saturated)
+            if star.vmag is None or (float(star.vmag) > mag_limit and not is_saturated):
                 skipped_faint += 1
                 continue
             # Magnitude-margin-derived effective SNR: how far the star sits
             # below the limiting magnitude, expressed as a flux ratio.  A
             # star at the limit gets ``SNR_REF``; each brighter magnitude
-            # multiplies by one Pogson ratio.  No DN units are involved.
-            snr_eff = SNR_REF * (2.512 ** (mag_limit - float(star.vmag)))
+            # multiplies by one Pogson ratio.  No DN units are involved.  A
+            # saturated star's recorded magnitude is a lower bound on
+            # brightness, so it is treated as at least as bright as the
+            # limiting magnitude without fabricating a specific brighter value.
+            eff_vmag = float(star.vmag)
+            if is_saturated:
+                eff_vmag = min(eff_vmag, mag_limit)
+            snr_eff = SNR_REF * (2.512 ** (mag_limit - eff_vmag))
             snr_eff = max(snr_eff, SNR_FLOOR)
             smear_len = smear_length_px(star.move_v, star.move_u)
             # Per the design's "max_smear" gate — stars with a smear longer
@@ -317,6 +327,8 @@ class NavModelStars(NavModel):
                         in_saturation_or_cosmic_mask=False,
                         predicted_snr=float(snr_eff),
                         vmag=(None if star.vmag is None else float(star.vmag)),
+                        photometry_corrected=bool(star.photometry_corrected),
+                        photometry_saturated=is_saturated,
                     ),
                 )
             )
@@ -621,6 +633,8 @@ def _star_summary(star: MutableStar) -> dict[str, Any]:
         'ra_deg': float(np.degrees(star.ra_pm)),
         'dec_deg': float(np.degrees(star.dec_pm)),
         'vmag': star.vmag,
+        'photometry_corrected': star.photometry_corrected,
+        'photometry_saturated': star.photometry_saturated,
         'u': star.u,
         'v': star.v,
         'move_u': star.move_u,
