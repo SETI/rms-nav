@@ -30,8 +30,7 @@ from spindoctor.nav_technique.diagnostics import BodyTerminatorDiagnostics
 from spindoctor.nav_technique.dt_fit_gates import DTFitGateConfig, evaluate_dt_fit_gates
 from spindoctor.nav_technique.dt_fitting import (
     _rotate_vertices,
-    build_polyline_mask,
-    coarse_ncc_search_scored,
+    coarse_polarity_search_scored,
     find_secondary_dt_minimum,
     lm_subpixel_refine,
 )
@@ -276,7 +275,6 @@ class BodyTerminatorNav(NavTechnique):
             edge_dt = context.image_edge_dt_ext
             gradient_vu = context.image_gradient_vu_ext
             edge_mask = edge_dt <= 0.5
-            polyline_mask = build_polyline_mask(vertices, edge_dt.shape[:2])
             margin_v, margin_u = search_window_for_obs(context)
             self.logger.debug(
                 'Aggregated %d terminator vertices, sigma_normal range [%.3f, %.3f] px, '
@@ -287,14 +285,21 @@ class BodyTerminatorNav(NavTechnique):
                 margin_v,
                 margin_u,
             )
-            coarse = coarse_ncc_search_scored(
+            # Polarity-weighted coarse search: the terminator runs
+            # use_polarity=True, so the model normals carry a trustworthy
+            # expected gradient direction.  Weighting the mask overlap by it
+            # stops the lit disc's limb, rings, or a second body from
+            # out-scoring the true terminator arc and mis-seeding LM.
+            coarse = coarse_polarity_search_scored(
                 edge_mask,
-                polyline_mask,
+                gradient_vu,
+                vertices,
+                polarity_normals,
                 (margin_v, margin_u),
             )
             coarse_dv, coarse_du = coarse.offset_vu
             self.logger.debug(
-                'Coarse NCC offset: (%d, %d), peak match fraction %.3f',
+                'Coarse polarity offset: (%d, %d), peak match fraction %.3f',
                 coarse_dv,
                 coarse_du,
                 coarse.score,
