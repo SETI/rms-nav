@@ -3,7 +3,7 @@
 *The top-level plan of record for all remaining work. It is written to be
 readable without knowledge of the code internals or the statistical
 methodology; the detail lives in the three sub-plans it points to. Last
-reconciled 2026-07-14.*
+reconciled 2026-07-22.*
 
 **Document map** (what to read for what):
 
@@ -46,32 +46,25 @@ The engineering core is built and healthy: the full navigation architecture
 (nine autonomous techniques plus manual), reprojection, backplanes,
 simulation, rank-1 (single-axis) ring support, the statistics system
 (`sd_stats_ingest` / `sd_stats_report`), and strict quality gates (typing,
-linting, ~2,600 tests) are in place. PDS4 bundle generation exists only
-as partially implemented machinery (see Track D), though its generator
-backend is now spec-tested (PR #257). An independent project review
-(2026-07-08) rated the engineering strong and the self-assessment
-honest.
+linting, the full unit suite) are in place. The de-circularized, realism-
+tuned simulator and the cross-technique agreement estimator both exist and
+are proven on known-truth sims. PDS4 bundle generation exists only as
+partially implemented machinery (see Track D): a spec-tested generator
+backend, but no final templates and no schema validation.
 
-What the same review identified as the single real deficit still stands,
-half-addressed: **the validation program is designed but mostly not yet
-run.** The first slice is in place — the confidence formulas are calibrated
-against simulated scenes with planted, known-truth offsets, so confidence
-values are no longer arbitrary defaults. But the simulation's realism is
-itself unproven, which is why every output still carries a
-`confidence_provisional` marker. Turning that provisional story into a
-defensible one is Track A, the largest remaining block.
+The single largest remaining block is Track A: **the validation program is
+designed and partly built, but not yet run on real frames.** The confidence
+formulas are anchored against simulated planted-truth scenes, so confidence
+values are not arbitrary defaults, but every output still carries a
+`confidence_provisional` marker until the real-frame agreement study
+re-anchors them. Turning that provisional story into a defensible one is the
+critical path.
 
-The curated image library — the raw material for both regression testing
-and validation — stands at 69 operator-verified images (predominantly
-Cassini, with a few Voyager, Galileo, and New Horizons), plus five
-pending fixtures (the sparse-Pleiades quintet, held for #285/#284), against a
-first-stage budget of 47 spanning 17 scene classes and a final target of
-at least 120 across all four instruments. Review batch 5 (PR #260, six
-frames) merged and filled the last empty class, `ring_only_flat`; the
-operator library review (PR #262)
-re-verified five frames, added a sixth, and applied the tier ratchet
-across the library. Batch 5 also queued manual-nav frames toward the
-per-class minima.
+The curated image library — the raw material for both regression testing and
+validation — continues to grow toward the first-stage budget of 47 images
+spanning 17 scene classes (#172) and the final target of at least 120 across
+all four instruments (#235). It seeds regression baselines and the
+calibration cohort, and supplies the agreement study.
 
 ## 3. Why validation dominates the remainder (plain-language version)
 
@@ -83,10 +76,9 @@ mutually reinforcing sources of evidence:
 1. **Simulation with planted truth** — render a synthetic image where the
    correct answer is known by construction, and measure recovery error.
    Trustworthy only if the simulator is (a) independent of the navigator's
-   own models (today they share rendering code, so good scores partly
-   grade the navigator's homework with its own answer sheet) and (b)
-   demonstrably realistic compared to real images. Fixing both is the
-   heart of Track A.
+   own models and (b) demonstrably realistic compared to real images.
+   Proving the realism at campaign scale, and closing the catalogued
+   fidelity gaps, is the remaining sim work in Track A.
 2. **Agreement between independent methods on real images** — when a star
    field and a moon's edge independently yield the same pointing
    correction to within a fraction of a pixel, that agreement is evidence
@@ -124,65 +116,51 @@ its section names):
 1. **Grow the image library** (#172 first stage, #235 growth; WS-3) —
    continuous background work: automated candidate discovery, operator
    votes in batches, sidecar generation. Feeds everything below.
-2. **De-circularize the simulator and prove it realistic** (#227,
-   with #223, #153, #84; WS-2) — **executed 2026-07-16 to 2026-07-18**:
-   all ten phases plus a final sweep merged via the `rf_sim_realism`
-   integration branch (final merge PR #313), acceptance criteria verified.
-   The design record is archived at
-   `plans/archive/SIM_REALISM_PLAN_2026-07-18.md`; the as-built system is
-   documented in `docs/dev_guide/dev_guide_simulator.rst`, the
-   recalibration in `util/calibration/CAMPAIGN_20260718.md`, and the
-   independent assessment in
-   `critiques/SIM_REALISM_CRITIQUE_2026-07-18.md`. Follow-ups: #301
-   (ensemble diagnostic channel) is **executed** as PR #315, which in
-   turn raised #316 (contested ring-uncertainty severity, an operator
-   decision), #317 (correlated ring witnesses fused as independent —
-   sequence before the #230 recalibration), #318 (RingAnnulusNav does
-   not consume the channel, and carries 95% of the fused precision on
-   the headline scene) and #319 (no library coverage for opposed-ansae
-   geometry). #291 was re-measured and persists bit-for-bit. Still open
-   from the program itself: #309 (realism-configured multi-instrument
-   campaign), #310 (structural boundary enforcement), #311
-   (mirror-parity guard), plus the post-merge library sidecar
-   re-ratchet.
-
-   An audit on 2026-07-20 swept every PR in the program plus the
-   campaign record, critique, decisions log, and simulator report for
-   work that had been written down in prose but never given a tracking
-   issue. It filed **#325-#347**. The ones that change priorities rather
-   than just recording state:
-   - **#328** — a high-phase haze crescent returns a gate-passing
-     success about 30 px wrong, and nothing vetoes it. A third
-     confident-wrong family alongside #301 and #291, previously owned by
-     no issue.
-   - **#334** — the calibration has no armed falsification criterion and
-     its real-frame regression gate is suspended. The transfer watch was
-     written as a proposal and never adopted.
-   - **#346** — three library frames lock confidently onto the wrong
-     ring feature (N1492091163 at 0.92/high where the operator expected
-     failed; N1867601758 and N1867602424 at 7.14 and 9.87 px). These
-     outlive #288, which is a reconciliation issue.
-   - **#223** was re-scoped: the simulator now emits TERMINATOR_ARC and
-     the technique was fitted, but on a degenerate plateau (0 of 116
-     rows within 1 px) with no terminator-side realism verdict.
-
-   The remainder (#325-#345) record simulator fidelity gaps, unmeasured
-   interim values, and process gaps that the program documented honestly
-   at the time. None blocks the merge; several are inputs to #309.
-3. **Prove the agreement estimator** (#224; WS-0) — **executed 2026-07-19
-   to 2026-07-20** (PR #314, unmerged, targets `rf_sim_realism`). The
-   estimator, identifiability map, and campaign record live under
-   `util/agreement/`; no `src/` changes. Two results constrain item 5:
-   the **limb-ring pair is measured as correlated** through the shared
-   preprocessing layer, so it cannot carry per-technique covariance
-   claims; and the **limb-disc pair is unproven rather than clean** —
-   the shared-PSF-edge probe (#320) is outstanding and gates the study's
-   base equation. Also raised: #321 (a ~2 px inward bias on partial-arc
-   limb fits, a navigation finding in its own right), #322 (multi-body
-   frames are not independent measurements), #323 (reliability-gate
-   selection effect), #324 (estimator tests outside CI).
-4. **Validate camera distortion models** (#228; WS-17) — otherwise
-   distortion masquerades as navigation error in the agreement study.
+2. **Prove the simulator realistic** (#227, with #223, #153, #84; WS-2) —
+   the de-circularization is done and on main: an independent forward model,
+   the truth/idealized information partition with an import-graph guard,
+   model-error sweep axes, full detector noise including the I/F path, and
+   the rewritten simulator report. #227 stays open only for the *realism*
+   residual: the calibration is not yet fitted on the realism-anchored
+   renderer configuration, so the realism evidence does not underwrite the
+   shipped calibration (#309, the biggest calibration-credibility win
+   available); the terminator deliverable is degenerate with no realism
+   verdict (#223); and realism is Cassini-only with the authored scene
+   mixture unvalidated (#309, #341). Closing #227 is the operator's
+   realism-verdict gate, itself gated on #309. The catalogued
+   simulator-fidelity gaps feed #309: stars shining through dark limbs
+   (#325), the 1-LSB calibrated-product floor (#329), zero cosmic-ray
+   transients (#330), per-scene rather than per-detector hot pixels (#331),
+   one PSF kernel per instrument (#332), four unmodeled physical error axes
+   (#333), the render-time budget on oversampled grids (#290), single-annulus
+   rings vs realistic nested ringlets (#377), the placeholder
+   `star_psf_sigma` (#342), the possibly registration-absorbing NAC PSF wing
+   (#343), the constant haze brightness (#344), the truth-side-noise echo
+   into `instrument_config` (#345). The structural information-boundary guard
+   (#310) and the sim-navigator mirror-parity guard (#311) harden the
+   partition.
+3. **The agreement-estimator residual** (WS-0) — the estimator, the
+   identifiability map, and the known-truth validation are delivered and on
+   main under `util/agreement/`. Findings that constrain item 5: the
+   **limb-ring pair is measured as correlated** through the shared
+   preprocessing layer, so it cannot carry per-technique covariance claims;
+   the **limb-disc pair holds as an anchor against symmetric PSF error** but
+   its asymmetric/coma channel is unrenderable by the sim (#359) and the
+   disc's sub-pixel NCC resolution floors detectability (#361); **multi-body
+   frames are not independent measurements** (#322); a **~2 px inward bias on
+   partial-arc limb fits** (#321) surfaced as a navigation finding in its own
+   right. The open residual, all feeding the study in item 5: measure the
+   real reliability-vs-error coupling on the #225 cohorts (#358, which gates
+   the reliability-gate lower-bound claim on real frames), decide whether the
+   solve needs a survivorship correction (#360), probe the asymmetric-PSF
+   limb-disc channel (#359), quantify the disc-NCC resolution floor (#361),
+   and wire the estimator tests into CI (#324).
+4. **Camera distortion residual** (WS-17) — the star-field distortion tool
+   is delivered and on main, its measured residuals populate the sim
+   defaults, and distortion is applied per feature-position in the agreement
+   study so it does not masquerade as navigation error. The open residual is
+   #355: re-measure and split the Voyager sim distortion per camera once the
+   star-lock rate improves.
 5. **The agreement study itself** (#225, corroborated by #226; WS-1,
    WS-1b) — the flagship: run the pipeline over hundreds to thousands of
    real frames with two or more independent fiducials and publish the
@@ -190,23 +168,37 @@ its section names):
    and distortion validation; it must not wait for items 2-3, which gate
    only the finer per-technique separation.
 6. **Wire real images into CI** (#229; WS-4) — a small cached tier on
-   every PR, the full suite on a schedule.
+   every PR, the full suite on a schedule. Related: the data-independent
+   simulator suites still never run in Actions (#336), and there is no
+   canonical environment for the committed sim baselines (#335).
 7. **Re-anchor confidence on real evidence** (#230; WS-5) — re-run the
    existing calibration tooling against the agreement study's
-   measurements; retire the provisional marker.
+   measurements; retire the provisional marker. Sequence the correlated-
+   ring-witness fix (#317) and the ring orbit-uncertainty severity decision
+   (#316) before it, since both push tier boundaries the wrong way, and
+   adopt the calibration's armed falsification criterion (#334).
 8. **Close the accuracy tail** (#233 measured star SNR and constant
    sensitivity, WS-9; #150/#128 the known ~0.1 px limb bias, WS-10; #234
    realistic noise for calibrated images, WS-13; #232 end-product
    accuracy for backplanes/mosaics/PDS4 values, WS-18).
 
-**Operator's role:** batch votes on library candidates (ongoing); approve
-the simulator design (item 2); bless the realism verdict; approve
-agreement-study frame selection; re-bless tiers after item 7. Everything
+**Confident-wrong families that poison the validation data** (they belong to
+Track B but gate the study, because it consumes navigator output at scale):
+the high-phase haze crescent that returns a gate-passing success ~30 px wrong
+(#328), scattered-light disc/limb errors fused as independent (#339), the
+three frames that lock onto the wrong ring feature (#346), body-body
+occlusion ignored by the disc template (#326) and by the visible-arc report
+(#327), correlated ring witnesses fused as independent (#317), and the disc
+technique locking on at extreme shape mismatch (#291).
+
+**Operator's role:** batch votes on library candidates (ongoing); bless the
+realism verdict; approve agreement-study frame selection; make the ring
+orbit-uncertainty (#316) call; re-bless tiers after item 7. Everything
 else is agent-executable.
 
-**Parallelism:** items 1-4 all start immediately and run concurrently;
-item 5's bulk layer starts as soon as 1 and 4 give it cohorts; 6 rides
-alongside; 7-8 close out in sequence after 5.
+**Parallelism:** items 1-4 all run concurrently; item 5's bulk layer starts
+as soon as 1 and 4 give it cohorts; 6 rides alongside; 7-8 close out in
+sequence after 5.
 
 ### Track B — Navigation correctness (remaining)
 
@@ -215,45 +207,51 @@ answer or fails on a navigable scene.
 
 **Why:** these defects poison the validation data (Track A consumes the
 navigator's output at scale) and are exactly what a user hits first.
-The known defects:
+The known open defects:
 
-- **#221** — a one-axis ring measurement outvotes an absolute
-  position constraint, reporting a wrong answer at high confidence. Top
-  of the track: it is a tier-honesty defect.
-- **#222** — second-pass star refinement corroborates its own first-pass
-  input but votes as an independent opinion, inflating consensus
-  confidence. Same class of defect. Two real-frame instances found in
-  the 2026-07-13 operator library review (N1686349893, N1572105349): the 1-star refine degrades an
-  otherwise-correct body fix to ~1.8 px error while keeping a high tier.
-- **#258** — an exact recovery is downgraded to `conflicted` by a
-  low-confidence dissenter the consensus logic has already excluded
-  (two stars_plus_body frames); the agreement-gap test still counts the
-  excluded member. Same ensemble cluster as #221/#222.
-- **#259** — a one-star match with an 18 px residual passes every gate
-  on a negative-case Galileo frame (no residual gate on the one-star
-  path; the #211 ambiguity gate is vacuous with no rival). Confidently
-  wrong on an unnavigable scene.
-- **#261** — the DT mis-convergence gate false-flags a correct
-  RingEdgeNav fit spurious (per-edge median driven by one poor edge in a
-  multi-edge fusion); the frame navigates but the pipeline discards its
-  own correct high-confidence result. Concrete library datapoint for
-  #179.
-- **#263** — the single-inlier confidence cap (0.50) collides exactly
-  with the high-tier confidence threshold (0.50), so a one-star, no-
-  cross-check solution capped low *because it is weak* nonetheless earns
-  the high tier. Tier-honesty defect in the same family as #221/#222.
-- **#179** — the coarse search can lock onto the wrong edge population;
-  needs a calibration pass against the library (feeds, and is fed by,
-  #261).
+- **#222** (reopened) — a single-inlier pass-2 star refinement, seeded from
+  the pass-1 prior, votes as an independent opinion and pulls an otherwise-
+  correct body fix to ~1.8 px error while keeping a high tier
+  (N1572105349). A tier-honesty / ensemble-independence defect.
+- **#317** — ring techniques observing one catalog model are fused as
+  independent witnesses; sequence before the #230 recalibration.
+- **#328** — a high-phase haze crescent returns a gate-passing success about
+  30 px wrong and nothing vetoes it. Essential; a confident-wrong family.
+- **#339** — scattered-light frames fuse correlated disc and limb errors as
+  independent at the 0.99 confidence cap.
+- **#346** — three library frames (N1492091163, N1867601758, N1867602424)
+  lock confidently onto the wrong ring feature. Standing library reds.
+- **#291** — `BodyDiscCorrelateNav` locks on confidently at extreme shape
+  mismatch.
+- **#326 / #327** — body-body occlusion at deep mutual-event overlap is
+  ignored by the BODY_DISC correlation template (#326) and by
+  `NavModelBody`'s visible-arc-fraction report (#327).
+- **#337** — the star-field matcher's triplet canonicalization is a seed
+  lottery on equal-brightness fields.
+- **#350** — two resolved-body frames (N1484593951, N1686349893) miss the
+  offset tolerance by ~2 px after the recalibration.
+- **#351** — the recalibration turns an operator-verified success into a
+  spurious ensemble conflict (N1530185128).
+- **#352** — autonomous star gates self-flag spurious on a navigable
+  small-offset WAC frame (W1444747627).
+- **#373** — the RingEdgeNav coarse seed is not robust against competing
+  edge populations (polarity-blind); the coarse-lock family that a
+  calibration pass against the library must close.
+- **#376** — a widened saturation match can capture the wrong bright
+  reference in a crowded field.
+- **#367** — autonomous star nav cannot lock a wide offset from a single
+  detectable star.
 - **#128 / #150** — the strategic limb-navigation redesign and the ~0.1 px
   limb systematic (shared with Track A's WS-10; design first, validate
-  against real images before touching). The limb-bias diagnosis (measured
-  in two ground-truth channels) attributes the systematic to the
-  limb-darkening / photometric roll-off: the edge DT localizes the
-  gradient ridge, which sits ~0.5 px inside the geometric silhouette by an
-  illumination-dependent amount. The strongest fix is a photometric-limb
+  against real images before touching). The measured bias attributes the
+  systematic to limb-darkening / photometric roll-off: the edge DT localizes
+  the gradient ridge, which sits ~0.5 px inside the geometric silhouette by
+  an illumination-dependent amount. The strongest fix is a photometric-limb
   fit (predict the limb-darkened-disc-convolved-with-PSF profile), tracked
-  on #150. Three secondary findings split out as their own issues:
+  on #150; #128 is the fuller redesign across all body types and
+  illuminations. On real frames the fitter contributes only ~0.1 px while
+  spacecraft-position / ephemeris error dominates (0.4-1.7 px), so the
+  higher-leverage target is the pointing-kernel side (Track D #188/#50).
 - **#281** — `BodyLimbNav` mis-converges on low-phase (<15 deg) limbs
   (a 2.71 px jump at phase 10 deg on noise-free planted truth); the
   spurious gate misses it. Robustness, not precision.
@@ -264,77 +262,21 @@ The known defects:
   predicted-centre metadata at `center` vs renderer at `center - 0.5`);
   latent, does not affect the limb path today, fold into #128.
 - **#25** — model blurring for very-high-resolution bodies (investigation).
-- **#237 / #238** — two unexplained triage failures (a multi-body trio, a
-  Galileo scattered-light quintet); each is one debugging session. #238 is
-  triaged: the quintet is a sparse Pleiades field the current pipeline
-  cannot lock (few bright stars, large offset), curated as pending fixtures
-  and split into #285 (sparse-field star nav) and #284 (UCAC4 bright-end
-  photometry).
-- **#284 / #285** — split out of the #238 triage: #284 is the UCAC4
-  bright-end saturation that corrupts predicted star brightness and the
-  navigable-content screen; #285 is the capability gap where autonomous
-  star nav cannot lock a large unknown offset from a sparse star field
-  (wants wide-offset asterism matching). #285 depends on #284.
-- **#239** — operator decision: how to treat bodies smaller than ~5 px.
-- **#210** — resolved: the NCC techniques' covariances were orders of
-  magnitude over-tight; the covariance-model rederivation merged as
-  PR #278.
-- **#130** — star limiting-magnitude calibration against real fields;
-  the last open item of the small technique-quality cluster (#24, #132,
-  #133, #180 all merged in the batch above).
-- **#254** — a fully dark body emits a photometric BODY_BLOB feature
-  where the body-model dev guide says it should emit nothing; likely
-  harmless today (the reliability gate culls it) but it is a
-  model-emission spec conflict to resolve.
+- **#239** — sub-5 px body policy: decided as expected-failure curation;
+  what remains is a targeted cohort scan (predicted diameter at or below
+  ~5 px, single-body scenes) to find a qualifying frame, as library-growth
+  work.
+- **#338** — decision: the highly-irregular exclusion discards a
+  ground-truth terminator fit on N1853392805; choose among accepting the
+  2-px-class ground truth, keeping TERMINATOR_ARC for SPICE-known
+  synchronous rotators, or shape models (#23).
+- **#130** — star limiting-magnitude calibration against real fields
+  (coordinate with #233's measured-SNR work — same frames, same tooling).
+- **#60** — Titan: the interim recorded-decline handling is in place; the
+  open item is the full haze-limb navigation decision (also a Track D
+  scope gate).
 
-**Status (2026-07-14):** the batch is merged; the remaining items are
-either operator-decided (below) or deferred.
-
-- Merged: #266 (#180 failure-reason emission + #254 dark-body blob gate),
-  #267 (#132 rotation variance + #133 optimal star inlier assignment),
-  #268 (#259 one-star residual / no-rival gate), #269 (#258
-  excluded-dissenter veto + #263 one-star tier cap), #270 (#221
-  rank-aware ensemble agreement + fused-offset zeroing fix), #271 (#222
-  pass-2 refine no longer corroborates its prior), #272 (#261 robust
-  per-edge DT mis-convergence gate), #274 (#238 quintet curated as
-  pending fixtures awaiting #285/#284), #275 (#237 multi-body
-  limb-RMS-pooling fix), #276 (#128/#150 limb-bias diagnosis; follow-ups
-  #281/#282/#283), #277 (#60 interim Titan exclusion + #24
-  highly-irregular exclusion), #278 (#210 covariance-model rederivation).
-- Operator decisions settled: #239 sub-5 px bodies are to be curated as
-  expected failures, with the relaxed-disc pathway revisited after #210
-  lands honest sigmas; no qualifying frame exists in the current library
-  or triage set yet, so this waits on a targeted cohort scan (predicted
-  diameter at or below ~5 px, single-body scenes) as library-growth work.
-  #60 Titan is hard-excluded from body navigation, with an active
-  model/technique that always declines and records why — a deliberate
-  special case, not a generic atmospheric-body class, because Titan's
-  atmosphere (transparent at some wavelengths) does not generalize to
-  bodies like Venus. #24 highly-irregular bodies drop
-  shape features (limb/terminator/disc) once resolved but may still
-  navigate as point blobs. #210 gets a covariance-model rederivation, not
-  a rescale. #128/#150 starts with a diagnosis pass that separates a
-  genuine limb-fit bias from spacecraft-position / ephemeris error using
-  the simulator, and validates that the simulator's own limb render is
-  bias-free.
-- Two operator-confirmed tier ratchets (N1530185128 medium -> high,
-  W1449079117 low -> medium) are #279, merged after the ensemble stack.
-- The #128/#150 diagnosis reframed the limb redesign: the fitter
-  contributes only ~0.1 px of real-frame error while spacecraft-position
-  / ephemeris error dominates (0.4-1.7 px), so the higher-leverage target
-  is the pointing-kernel side (Track D #188/#50), not the limb fitter.
-- Residual-offset frames behind #270/#272 (N1867601758, N1867602424,
-  N1492091163) are now tier-honest but still land the wrong offset
-  because the coarse edge search locked the wrong ring-edge population;
-  correcting the offset is #179, deferred pending a calibration approach.
-- Deferred: #179 (coarse-lock calibration), #25 (high-resolution body
-  blurring), #130 (star limiting-magnitude calibration against real
-  fields). The other open Track B items are classified above: #239 waits
-  on a qualifying frame, #128/#150 is the redesign, #60 is the full
-  haze-limb decision, and #281-#285 are the batch-spawned follow-ups.
-
-**Parallelism:** fully parallel with Track A; #221/#222 have landed
-(PRs #270/#271), unblocking the agreement study at scale.
+**Parallelism:** fully parallel with Track A.
 
 ### Track C — Statistics, QA, and the accuracy checkpoint
 
@@ -362,21 +304,19 @@ commitment:
 | **Backplane content** (#28 family): finalize the backplane set and formats | #55, #54, #57, #77, then the generator hardening (including the product-correctness defects #251, #252, #253 found by the #241 test suite). |
 
 **PDS4 output bundles are required for all four instruments** — not a
-scope decision — and **none of it works today**. The Cassini path is
-partially implemented machinery with no final templates, no tests, and
-no validation; Voyager, Galileo, and New Horizons additionally hit
-not-implemented walls. The work is: finish and validate the Cassini
-path (final templates — acceptance list recorded on #53; schema
-validation; the interacting LID defects #139/#256 fixed in PR #264,
-with two characterized #256 defects — swallowed `template.write`
-errors and the dev-guide output-layout mismatch — tracked by #265),
-then generalize —
-per-mission label templates, LID builders, and collection machinery
-(#53 with #66, #67, #69, #71-#76, #79, #47, #30, #63). Distinct from this, **PDS4 *input***
-(#34) — reading PDS4-archived data instead of PDS3 — is treated like any
-other future instrument: the archives do not exist yet, their creation
-is external development outside our control, and input support is *not*
-required for project completion; when an archive appears, its support
+scope decision — and **none of it works end to end today**. The Cassini path
+is partially implemented machinery with no final templates, no schema
+validation, and only a spec-tested backend; Voyager, Galileo, and New
+Horizons additionally hit not-implemented walls. The work is: finish and
+validate the Cassini path (final templates — acceptance list recorded on
+#53; schema validation; the swallowed `template.write` errors and the
+dev-guide output-layout mismatch tracked by #265), then generalize —
+per-mission label templates, LID builders, and collection machinery (#53
+with #66, #67, #69, #71-#76, #79, #47, #30, #63). Distinct from this, **PDS4
+*input*** (#34) — reading PDS4-archived data instead of PDS3 — is treated
+like any other future instrument: the archives do not exist yet, their
+creation is external development outside our control, and input support is
+*not* required for project completion; when an archive appears, its support
 replaces the PDS3 source for that instrument.
 
 Plus, not gated on decisions: the capability matrix itself (#231),
@@ -398,6 +338,8 @@ cannot follow.
 - Untested star-conflict logic (#243); real-image baselines beyond one
   frame (#174).
 - Summary-PNG unit tests (#177).
+- The image-library regression reconciliation (#288), now reduced to the
+  deliberately-red pins owned by open navigation issues.
 - Docs: missing dev-guide pages (#178), instrument appendices (#93, with
   Track D), API-reference gaps (#244), Sphinx nitpicky-clean CI (#129),
   terminator-doc verification (#122), curation-tooling language pass
@@ -435,11 +377,10 @@ star-navigation bug fixes (#19, #18) can start any time.
 
 ## 5. Suggested global order
 
-1. **Now:** Track A items 1-4 start in parallel
-   (library growth, simulator design proposal, estimator proof,
-   distortion validation). The Track D decisions go
-   to the operator as a batch — they cost nothing to decide early and
-   unblock scoping.
+1. **Now:** Track A items 1-4 continue in parallel (library growth, sim
+   realism campaign, agreement-estimator real-frame follow-ups, distortion
+   feed-in). The Track D decisions go to the operator as a batch — they
+   cost nothing to decide early and unblock scoping.
 2. **Next:** Track A item 5 (agreement study, bulk layer first), with
    Track E test-debt and Track B remainder as parallel fill.
 3. **Then:** Track A items 6-8 (CI tiers, real-anchored recalibration,
@@ -452,57 +393,55 @@ star-navigation bug fixes (#19, #18) can start any time.
    evidence package.
 
 **Effort honesty:** Track A is multi-week at agent pace; its two largest
-items (simulator de-circularization, agreement study) are serialized only
-through the estimator proof between them. Tracks B+C+E are one to two
-weeks of interleavable small/medium items. Track D depends on scope
-decisions; Track F is another multi-week block dominated by per-instrument
-calibration repeats. Operator hands-on time is dominated by library votes
-and the five decision gates, not by any implementation.
+remaining items (sim-realism campaign, agreement study) are serialized only
+through the estimator's real-frame follow-ups between them. Tracks B+C+E are
+one to two weeks of interleavable small/medium items. Track D depends on
+scope decisions; Track F is another multi-week block dominated by
+per-instrument calibration repeats. Operator hands-on time is dominated by
+library votes and the decision gates, not by any implementation.
 
 ## 6. Operator decision gates (collected)
 
-1. Simulator de-circularization design approval (#227) — approved and
-   executed; the remaining gate is the final merge (PR #313) and the
-   post-merge sidecar re-ratchet.
-1b. **Ring orbit-uncertainty severity (#316)** — the ring radial channel
+1. **Ring orbit-uncertainty severity (#316)** — the ring radial channel
    prices catalog fit residual as a fully correlated whole-edge
    displacement, which the catalog's own mode-fitted epochs suggest is
    several-fold over-severe. It demotes five operator-verified Keeler
    frames to low. Decide: ship at the conservative default, ratchet
    `rings.orbit_radial_sigma_correlated_fraction`, or implement the
    wander decomposition. Reversible by config either way.
-2. Titan: implement or scope out (#60).
-3. CK kernels as a delivered product (#188).
-4. Sub-5 px body policy (#239) — decided 2026-07-14 (expected-failure
-   curation); what remains is the targeted cohort scan for a qualifying
-   frame.
-5. Recurring: library batch votes; realism verdict; agreement-study frame
-   selection; tier re-blessing after #230.
+2. **Titan: implement or scope out (#60).**
+3. **CK kernels as a delivered product (#188).**
+4. **Highly-irregular terminator fit (#338)** — choose among accepting the
+   2-px-class ground truth for resolved highly-irregular bodies, keeping
+   TERMINATOR_ARC for SPICE-known synchronous rotators, or shape models
+   (#23), then a session implements the choice on N1853392805.
+5. **Simulator realism verdict (#227)** — close #227 once the calibration is
+   fitted on the realism-anchored renderer configuration (#309) and the
+   realism evidence underwrites the shipped calibration; gated on #309.
+6. Recurring: library batch votes; agreement-study frame selection; tier
+   re-blessing after #230.
 
-## 7. Issue index (open work, with recently closed history)
+## 7. Issue index (open work by track)
 
-Every open issue, by track; closed issues are retained in the rows as
-history once their narrative marks them done. **Bold** = created after
-the 2026-07-11 review (the 2026-07-12 reconciliation; #251-#254 and #256
-by the 2026-07-13 backend test suites, PRs #255/#257; #258/#259/#261/#263
-by the 2026-07-13 operator library review; #265 split from #256 alongside
-the PR #264 LID fix; #281-#283 by the 2026-07-14 limb-bias diagnosis;
-#284/#285 by the 2026-07-14 scattered-light triage).
+Every open issue, listed once by the track that owns it.
 
 | Track | Issues |
 |---|---|
-| A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, **#224**, **#225**, **#226**, **#227**, **#228**, **#229**, **#230**, **#232**, **#233**, **#234**, **#235** |
-| B — navigation correctness | #24, #25, #128, #130, #132, #133, #179, #180, #210, #221, #222, **#237**, **#238**, **#239**, **#254**, **#258**, **#259**, **#261**, **#263**, **#281**, **#282**, **#283**, **#284**, **#285** |
-| C — statistics & QA | **#240** (plus the standing cross-check and campaign-report practice) |
-| D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #60, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #139, #141, #142, #188, **#231**, **#236**, **#251**, **#252**, **#253**, **#256**, **#265** |
-| E — test & docs debt | #122, #129, #177, #178, **#241**, **#242**, **#243**, **#244**, **#245** |
-| F — instruments, features, hardening | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #82, #81, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212 |
+| A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #340, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377 |
+| B — navigation correctness | #25, #128, #130, #150, #222, #239, #281, #282, #283, #291, #317, #326, #327, #328, #337, #338, #339, #346, #350, #351, #352, #367, #373, #376, #378 |
+| C — statistics & QA | #240 (plus the standing cross-check and campaign-report practice) |
+| D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #60, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #141, #142, #188, #231, #236, #251, #252, #253, #265 |
+| E — test & docs debt | #122, #129, #177, #178, #241, #242, #243, #244, #245, #288, #379 |
+| F — instruments, features, hardening | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #81, #82, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212 |
 
 Cross-listed items (listed once above, noted here): #150/#128 serve both
-Track A's limb-bias workstream and Track B's redesign; #103/#134/#126
-serve both Track D performance and Track F hardening; #93 is written in
-Track D, extended per instrument in Track F; #174 baselines are Track A
-infrastructure delivered as Track E test work.
+Track A's limb-bias workstream and Track B's redesign; #317 serves both
+Track A's confidence re-anchoring and Track B's ensemble honesty; the
+confident-wrong families (#328, #339, #346, #326, #327, #291) sit in Track B
+but gate the Track A study; #103/#134/#126 serve both Track D performance and
+Track F hardening; #93 is written in Track D, extended per instrument in
+Track F; #174 baselines are Track A infrastructure delivered as Track E test
+work.
 
 ---
 

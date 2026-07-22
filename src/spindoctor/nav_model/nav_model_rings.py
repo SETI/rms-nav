@@ -221,6 +221,7 @@ class NavModelRings(NavModelRingsBase):
         self._km_per_pixel_radial: float = 0.0
         self._radial_resolution_ext: NDArrayFloatType | None = None
         self._ring_radius_ext: NDArrayFloatType | None = None
+        self._ring_occluded_ext: NDArrayBoolType | None = None
         self._extfov_v_size: int = 0
         self._extfov_u_size: int = 0
         self._predicted_center_vu: tuple[float, float] = (0.0, 0.0)
@@ -482,6 +483,28 @@ class NavModelRings(NavModelRingsBase):
                     exc_info=True,
                 )
 
+        # Ring points hidden behind the planet globe enter neither the emitted
+        # ring-edge features nor the summary overlay.  ``where_in_front(planet,
+        # ring)`` is True at every ext-FOV pixel where the planet body is
+        # intercepted and nearer to the observer than the ring plane along the
+        # same line of sight -- exactly the pixels where the disc hides the
+        # rings.  The mask is ANDed into every edge mask below, before the
+        # per-edge polylines are sampled, so an edge segment behind the disc is
+        # never sampled as a polyline vertex and never painted across the
+        # planet.  A backplane failure degrades to no filtering (every edge
+        # kept) rather than aborting model or summary generation.
+        self._ring_occluded_ext = None
+        try:
+            occluded = obs.ext_bp.where_in_front(planet.lower(), ring_target)
+            self._ring_occluded_ext = occluded.mvals.filled(False).astype(bool)
+        except Exception:
+            self._logger.warning(
+                'Failed to compute planet occlusion of rings for %s; '
+                'occluded ring edges will still be drawn',
+                planet,
+                exc_info=True,
+            )
+
         render_context = RingsRenderContext(
             obs=obs,
             ring_target=ring_target,
@@ -513,7 +536,7 @@ class NavModelRings(NavModelRingsBase):
                         feat_model,
                         feat_mask,
                         float(render_result.uncertainty),
-                        render_result.edge_info_list,
+                        self._visible_edge_info(render_result.edge_info_list),
                     )
                 )
         self._render_results = rendered
@@ -802,7 +825,14 @@ class NavModelRings(NavModelRingsBase):
             return features
 
     def to_annotations(self, context: NavContext) -> Annotations:
-        """Render per-edge polyline overlays + ring labels."""
+        """Render per-edge polyline overlays + ring labels.
+
+        The edge masks stored on ``_render_results`` are already free of the
+        pixels the planet globe occludes -- ``_render`` trims each mask against
+        the occlusion backplane before storing it, so a Saturn-facing frame that
+        captures the far side of the rings behind the disc neither emits nor
+        draws ring edges across the planet.  See ``_render`` for the mask.
+        """
         del context
         out = Annotations()
         for _ring_feat, _model_img, model_mask, _u, edge_info_list in self._render_results:
@@ -810,3 +840,34 @@ class NavModelRings(NavModelRingsBase):
                 continue
             out.add_annotations(self._create_edge_annotations(self.obs, edge_info_list, model_mask))
         return out
+
+    def _visible_edge_info(
+        self, edge_info_list: list[tuple[NDArrayBoolType, str, str]]
+    ) -> list[tuple[NDArrayBoolType, str, str]]:
+        """Drop planet-occluded pixels from each ring-edge mask.
+
+        Applied once in ``_render`` before the trimmed masks are stored on
+        ``_render_results``, so every downstream consumer -- the emitted
+        ring-edge features (``to_features`` samples polylines from these masks)
+        and the summary overlay (``to_annotations``) -- sees only the visible
+        ring segments.
+
+        Parameters:
+            edge_info_list: ``(edge_mask, label_text, edge_label)`` tuples
+                whose masks are in ext-FOV coordinates.
+
+        Returns:
+            The same tuples with every edge mask ANDed against the visible
+            (non-occluded) region; edges left with no visible pixel are
+            dropped entirely.  When no occlusion mask is available (a backplane
+            failure degraded it to ``None``) the input is returned unchanged.
+        """
+        occluded = self._ring_occluded_ext
+        if occluded is None:
+            return edge_info_list
+        visible: list[tuple[NDArrayBoolType, str, str]] = []
+        for edge_mask, label_text, edge_label in edge_info_list:
+            trimmed = edge_mask & ~occluded
+            if np.any(trimmed):
+                visible.append((trimmed, label_text, edge_label))
+        return visible

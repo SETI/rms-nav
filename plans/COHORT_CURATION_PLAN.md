@@ -212,22 +212,14 @@ batch per PR keeps the vote-to-merge mapping clean).
 regression baselines (`python -m tests.integration.update_baselines`), then
 hand off per consumer: calibration diagnostics collection for the
 real-anchored confidence recalibration (#230 — reliability diagrams
-against measured error anchors, never tier-midpoint fitting; the
-sim-anchored interim pass is done), agreement-study runs per WS-1's harness plan (#225),
-plate solves on the star-field cohort for distortion validation (#228). CI stays tiered per WS-4's
+against measured error anchors, never tier-midpoint fitting),
+agreement-study runs per WS-1's harness plan (#225),
+plate solves on the star-field cohort for the per-camera Voyager distortion
+split (#355). CI stays tiered per WS-4's
 "Library consumers and CI tiers" note: the full library and all offline
 analyses never run per-PR.
 
 ## 5. Order of work
-
-*Status (2026-07-13): step 1 is essentially done. Review batch 5
-(PR #260) fills the last empty class, `ring_only_flat` (five rank-1
-frames plus a sixth 2-D frame, N1467344214, routed to `ring_only_curved`
-with the operator library review because the DT gate over-rejects it,
-issue #261). The library frame reconciliation (PR #262) re-verified five frames and applied the
-D6 tier ratchet across the library.
-Batch 5 also queued manual-nav frames for `one_bright_star_no_body`,
-`faint_stars`, and `body_mostly_offscreen`, so step 2 is next.*
 
 1. Fill the empty scene classes of the first-stage budget first (per-class
    state: compare the appendix budget table against

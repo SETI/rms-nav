@@ -1,222 +1,106 @@
-# Operator Playbook: from the sim-realism merge to the agreement study
+# Operator Playbook: driving the agreement study and the calibration finish
 
 *Explicit operator instructions — commands to run, files to modify, and
 prompts to hand to agent sessions — for every next step in
-`plans/PROGRAM_PLAN.md` as of 2026-07-19. Work through Section 0 in order;
+`plans/PROGRAM_PLAN.md` as of 2026-07-22. Work through Section 0 first;
 everything after it can be dispatched in parallel as agent sessions.
 Environment for every command below: `source /seti/newnav/setup.sh` from
 `/seti/newnav/rms-nav` (the venv is `venv/`).*
 
 ## 0. Right now (operator-only, minutes)
 
-### 0.1 Merge the sim-realism program -- DONE
+### 0.1 The pending decisions (comment on the issues)
 
-Merged 2026-07-20: PR #313 squash-merged to `main` (f9c37f0). Commands
-kept for the record:
+Each is a scope commitment the downstream work waits on:
 
-```bash
-gh pr view 313 --web      # final read if desired
-gh pr merge 313 --squash
-```
-
-Evidence backing the merge: every phase PR (#289-#312) was independently
-reviewed to a clean verdict and CI-gated; acceptance criteria verified at
-the tip; the library-suite delta is 100% attributed in
-`util/calibration/CAMPAIGN_20260718.md`. GitHub Actions does not run the
-integration tier, so the green you rely on is the local battery recorded
-in those PRs.
-
-### 0.2 Clean up the investigation worktrees -- DONE
-
-Done 2026-07-20: all investigation worktrees and their local branches were
-removed (the operator directed a full worktree cleanup, so the baseline
-worktree went too) and the checkout returned to `main`. The throwaway
-attr288 packet was therefore not copied to `_work/attr288_packet`; its
-failure taxonomy survives in the #288 issue body and is superseded by the
-Section 1 re-ratchet, which reduces #288 to the deliberately-red pins.
-
-### 0.3 Two cheap decisions (comment on the issues)
-
-- **#60 Titan**: implement or scope out. The sim now has the haze-limb
-  substrate ready (phase-dependent apparent radius, ring of light), so
-  "implement" is unblocked whenever you want it.
-- **#188 CK kernels as a delivered product**: yes/no/defer.
+- **#316 ring orbit-uncertainty severity**: ship at the conservative
+  default, ratchet `rings.orbit_radial_sigma_correlated_fraction`, or
+  implement the wander decomposition. It demotes five operator-verified
+  Keeler frames to low, and it must be settled before the #230
+  recalibration reads their tiers.
+- **#60 Titan**: implement haze-limb navigation or scope it out. The sim has
+  the haze-limb substrate ready (phase-dependent apparent radius, ring of
+  light), so "implement" is unblocked whenever you want it.
+- **#188 CK kernels as a delivered product**: yes / no / defer.
+- **#338 highly-irregular terminator fit (N1853392805)**: accept the
+  2-px-class ground truth, keep TERMINATOR_ARC for SPICE-known synchronous
+  rotators, or wait for shape models (#23).
 
 ```bash
+gh issue comment 316 --body "Decision: <ship default | ratchet fraction | wander decomposition>"
 gh issue comment 60  --body "Decision: <implement now | defer until X>"
 gh issue comment 188 --body "Decision: <ship | defer>"
+gh issue comment 338 --body "Decision: <accept 2px GT | keep TERMINATOR_ARC | shape models>"
 ```
 
-## 1. The sidecar re-ratchet -- DONE, PR #353 (merged)
+### 0.2 Adopt the calibration's falsification criterion (#334)
 
-Done 2026-07-20; PR #353 was squash-merged to `main` on 2026-07-21
-(97f4b41). The full library suite is `66 passed, 9 failed`
+The confidence calibration has no armed falsification criterion and its
+real-frame regression gate is suspended. Edit
+`util/calibration/CAMPAIGN_20260718.md`: change the "Transfer watch
+(proposed)" heading to "Transfer watch (adopted YYYY-MM-DD)", adjusting the
+thresholds if you disagree with the proposal. That gives the calibration a
+criterion that can fail. Tracked by #334.
+
+## 1. The deliberately-red library set
+
+The full library suite
 (`pytest tests/integration/test_autonomous_nav.py -m '' -n auto
---dist=loadfile`, 26 min on the canonical local machine), and the nine
-failures are exactly the deliberately-red pins below. 36 sidecars were
-re-ratcheted to measured behavior (23 tier flips under the 0.85 high
-boundary and the 2.61 px limb covariance floor, 11 primary flips to
-multi-star StarRefineNav and others, 3 conflicted->success recoveries)
-plus the C1205021_GEOMED adjudication (medium->high, which resolves #347).
-Ground-truth offsets were never touched. This clears the bulk of the #288
-library regression.
-
-Remaining red set, each owned by an open issue:
+--dist=loadfile`) leaves a small red set, each frame owned by an open
+navigation issue. These are pins, not regressions; do not re-ratchet them
+until the owning issue closes.
 
 | frame(s) | owner |
 |---|---|
 | N1492091163, N1867601758, N1867602424 (wrong ring-feature locks) | #346 |
 | N1853392805 (highly-irregular exclusion discards the terminator fit) | #338 |
-| N1572105349 (single-inlier refine offset-pull) | #222 (reopened) |
+| N1572105349 (single-inlier refine offset-pull) | #222 |
 | N1484593951, N1686349893 (resolved-body ~2 px offset misses) | #350 |
 | N1530185128 (recalibration-induced spurious conflict) | #351 |
 | W1444747627 (star gates spurious on a navigable small-offset field) | #352 |
 
-Filed for this task: #350, #351, #352; #222 reopened; #347 resolved by the
-adjudication. See the register in Section 3c. The original prompt and
-verify block are kept below for the record.
-
-The recalibration re-tiers real library frames; every flip is
-pre-attributed. Your role is to review the attribution table once and
-bless one PR.
-
-**Read first:** `util/calibration/CAMPAIGN_20260718.md` — the per-frame
-table and the "Transfer watch (proposed)" section.
-
-**Prompt to give a session:**
-
-> Re-ratchet the image-library sidecars to the post-recalibration
-> pipeline, following util/calibration/CAMPAIGN_20260718.md as the
-> attribution basis. Run the full library suite
-> (pytest tests/integration/test_autonomous_nav.py -m '' -n auto
-> --dist=loadfile) to capture current per-frame behavior; for every frame
-> whose flip is attributed in the campaign record, update its sidecar
-> expectations to measured behavior with a dated note naming the
-> attribution; leave the deliberately-red pins (the frames owned by open
-> issues) untouched and list them in the PR body. Adjudicate
-> C1205021_GEOMED per its provenance notes (its medium pin contradicted
-> the recorded rank=high from the start). One PR for the whole batch; do
-> not merge it. Finish by re-running the suite and reporting the final
-> red set with the issue that owns each remaining red frame.
-
-**Still pending -- now the immediate next step, #353 having merged: adopt
-the transfer watch** (tracked by #334): edit
-`util/calibration/CAMPAIGN_20260718.md`, change the "Transfer watch
-(proposed)" heading to "Transfer watch (adopted YYYY-MM-DD)", adjusting
-thresholds if you disagree with the proposal. That gives the calibration
-its falsification criterion. This is the one part of Section 1 not yet
-done.
-
-**Verify when done:**
+**Verify the pin set is exactly this after any navigation-affecting merge:**
 
 ```bash
 pytest tests/integration/test_autonomous_nav.py -m '' -n auto --dist=loadfile
-# Expect: red set = only the deliberately-pinned frames, each named in
-# the re-ratchet PR body with its owning issue.
+# Expect: red set = only the frames above; any other delta must be
+# attributed in the merging PR.
 ```
 
 ## 2. Track A critical path (dispatch as agent sessions, in this order)
 
-### 2.1 WS-0 — prove the agreement estimator (#224) — EXECUTED, PR #314
+The estimator (WS-0, `util/agreement/`) and the distortion tool (WS-17,
+`util/fov_distortion/`) are built and proven on sims; the study now needs
+the cohorts and the bulk run. The findings below constrain how the study is
+scoped — read them before 2.2.
 
-Done 2026-07-19/20; PR #314 targets `rf_sim_realism` and is unmerged.
-The estimator, campaign harness, identifiability map, and campaign record
-live under `util/agreement/`; there are no `src/` changes.
-
-Findings that change what comes after, so read these before 2.4:
+**Estimator findings that gate the study:**
 
 - **limb-DT and ring-DT are not bias-independent** through the shared
   preprocessing layer. That pair must be declared or excluded from joint
   solves; body+ring is the common Cassini composition, so this hits the
   main cohort.
-- **limb-DT vs disc-NCC showed no coupling** through the gradient/DT
-  channel, and the shared-PSF-edge suspicion on this pair (the study's
-  *base* equation) is now probed too (#320, PR #363, merged): a symmetric
-  rendered-PSF mismatch opens no shared edge bias -- the disc-NCC is ~16x
-  less PSF-sensitive than the limb-DT, which caps the coupling magnitude.
-  So the base pair holds as an anchor against symmetric PSF error in the
-  Cassini-NAC regime. Not a clean-on-all-PSF verdict: the asymmetric/coma
-  kernel that most directly matches the mechanism is unrenderable by the
-  sim (#359), and the disc's sub-pixel NCC resolution floors detectability
-  (#361).
+- **limb-DT vs disc-NCC holds as an anchor against symmetric PSF error**: a
+  symmetric rendered-PSF mismatch opens no shared edge bias (the disc-NCC is
+  ~16x less PSF-sensitive than the limb-DT). Not a clean-on-all-PSF verdict
+  — the asymmetric/coma kernel that most directly matches the mechanism is
+  unrenderable by the sim (#359), and the disc's sub-pixel NCC resolution
+  floors detectability (#361).
 - **Multi-body frames are not two independent measurements** (#322):
-  cross-body limb errors correlate at +0.72 and the naive solve is
-  well-conditioned, reports everything identifiable, and misattributes
-  the coupling onto disc.
-- **A ~2 px inward bias on partial-arc limb fits** (#321) surfaced as a
-  side effect. That is a navigation finding, not only a campaign one.
+  cross-body limb errors correlate at +0.72 and the naive solve
+  misattributes the coupling onto disc.
+- **A ~2 px inward bias on partial-arc limb fits** (#321) is a navigation
+  finding in its own right.
+- The reliability gate *filters* rather than *shifts*, so its common-mode
+  effect is a survivorship selection, not a bias — it can only make
+  agreement look better, never worse, and cannot manufacture cross-technique
+  coupling. That result is conditional on a separable/monotonic admission
+  model; the real score-vs-error coupling is deferred to #358 (the sim
+  cannot supply it), and whether the solve needs a survivorship correction
+  is #360.
 - Estimator tests do not run in CI (#324).
 
-Stage 0b is complete: #320 (PSF-layer probe, PR #363) and #323
-(reliability-gate selection effect, PR #362) both squash-merged to `main`
-on 2026-07-21. #323's finding: the reliability gate *filters* rather than
-*shifts*, so its common-mode effect is a survivorship selection, not a
-bias -- and that selection can only make agreement look better, never
-worse, and cannot manufacture cross-technique coupling; the result is
-conditional on a separable/monotonic admission model, with the real
-score-vs-error coupling deferred to #358 (the sim cannot supply it). #320's
-finding is folded into the disc-NCC bullet above. New follow-ups filed:
-#358, #359, #360, #361 (see the register in Section 3c). The original WS-0
-prompt is kept below for reference.
-
-**Prompt:**
-
-> Execute WS-0 from plans/VALIDATION_AND_CALIBRATION_PLAN.md: prove the
-> cross-technique agreement estimator on known-truth simulations. Read
-> that plan section fully first, plus the capability-envelope section of
-> docs/dev_guide/dev_guide_simulator.rst so you use the simulator inside
-> its stated envelope. Build the known-truth campaigns with the existing
-> scene machinery (planted offsets are ground truth by construction),
-> derive where the pairwise/three-cornered-hat extraction is solvable and
-> where it degenerates, validate the math against the planted truth at
-> campaign scale, and deliver: the solvability map, the validated
-> estimator implementation under util/ with tests, and a written report.
-> Use independent review before you call it done, run all CI gates, and
-> open one PR. Where the estimator needs error models the sim cannot
-> honestly provide, say so explicitly rather than substituting sim
-> optimism - the envelope doc lists what the sim cannot establish.
-
-### 2.2 WS-17 — validate the camera distortion models (#228) -- DONE, PR #354
-
-Done 2026-07-21; PR #354 squash-merged to `main` (a2227db). The
-`experiments/fov_twist` one-off is rewritten into the maintained tool
-`util/fov_distortion/` (a pure-numpy decompose/aggregate core with unit
-tests, a star-navigation-backed per-frame measure step, and a process-pool
-driver over per-instrument cohort YAMLs). Results are published as a
-standalone chapter `docs/fov_distortion_report/` alongside the simulator
-report, and the measured residual distortion now populates the sim
-distortion defaults (`DISTORTION_RESIDUAL_PARAMS` in
-`src/spindoctor/sim/forward/artifacts_catalog.py`), replacing the interim
-single-amplitude estimates. `experiments/fov_twist/` is removed.
-
-Measured per instrument (star-field residual after the navigator's
-distortion model), with autonomous star nav locking only a fraction of the
-off-Cassini cohorts:
-
-- **Cassini ISS NAC/WAC** (50/50, 46/50): twist consistent at +/-0.011 deg
-  (negligible), radial distortion at the noise floor -> rotation fitting
-  stays off (matches the shipped setting).
-- **Galileo SSI** (7/18): consistent -0.053 deg twist (static kernel
-  candidate) plus a pincushion radial term reaching ~0.5 px at the corner.
-- **New Horizons LORRI pre-KE** (16/48): clean static +0.191 deg twist
-  (kernel candidate); post-KE epochs are outside pointing-kernel coverage.
-- **Voyager 2 ISS NAC/WAC** (5/27, 14/45): frame-varying twist (0.28 px
-  corner scatter, WAC mean +0.36 deg) -> per-frame rotation fitting
-  required, and the largest residual distortion of any instrument. Timing
-  the main pipeline over the 19 locked frames with rotation off vs on:
-  median 4.61 s either way (-0.02 s, 0.99x), so the "too slow" reason for
-  keeping `config_430_inst_vgiss.yaml` `fit_camera_rotation` off does not
-  hold on star fields. Voyager 1 and the candidate ("possible") frame lists
-  add nothing (VG1 locks 0; VG2 candidates lock the same handful).
-
-The confidence calibration and the operator-curated library do not enable
-instrument-default distortion, so the sim-default update leaves them
-untouched. Follow-up #355 tracks re-measuring and splitting the Voyager sim
-distortion per camera once the star lock rate improves. Independent
-verification: the branch adds no new failures against `main`; core-library
-line coverage is 91.3% on the default suite.
-
-### 2.3 WS-3 — library growth (continuous; your votes are the bottleneck)
+### 2.1 WS-3 — library growth (continuous; your votes are the bottleneck)
 
 Next concrete step is the batch-006 manual-nav pass (7 frames voted "m",
 class changes recorded in `_work/cohort_curation/batch_006_followups.yaml`).
@@ -229,42 +113,33 @@ class changes recorded in `_work/cohort_curation/batch_006_followups.yaml`).
 > C4337947/C4401900 -> one_bright_star_no_body). Use sd_offset with the
 > manual technique for each frame; do not trust the triage offset for
 > C0164400400R (bloom-biased). Produce sidecars for the frames that
-> navigate, present the results for operator review before committing,
-> and fold the C1205021 adjudication in if Section 1's re-ratchet has not
-> already resolved it. One PR per the sidecar-batch convention.
+> navigate, present the results for operator review before committing.
+> One PR per the sidecar-batch convention.
 
 Then resume normal batch generation (`util/cohort_curation/`) and vote as
 batches arrive.
 
-### 2.4 WS-1 — the agreement study (#225, #226); 2.2 done, now waits on 2.3 cohorts
+### 2.2 WS-1 — the agreement study (#225, #226); waits on 2.1 cohorts
 
-Your role at the gate: approve the frame selection. Then:
+Your role at the gate: approve the frame selection. Apply these scoping
+gates from the estimator findings above:
 
-**Gates added by 2.1's results — apply these when scoping the study:**
-
-- The **limb-ring pair is measured as correlated**, so it may not carry
-  per-technique covariance claims; declare it or exclude it.
-- The **limb-disc pair holds as an anchor against symmetric PSF error**
-  (#320 ran, PR #363): the disc barely responds to a PSF mismatch, capping
-  the coupling. Carry a declared limb-disc covariance where precision
-  demands (a mild intrinsic negative coupling is real but its sign is
-  unreliable), and treat the asymmetric-PSF channel as still open (#359).
-- **Multi-body cohorts** declare the limb-limb pair (#322) and should be
-  cut by illumination geometry, since part of the coupling is
-  illumination-locked.
+- The **limb-ring pair is correlated**, so it may not carry per-technique
+  covariance claims; declare it or exclude it.
+- The **limb-disc pair holds as an anchor against symmetric PSF error**:
+  carry a declared limb-disc covariance where precision demands (a mild
+  intrinsic negative coupling is real but its sign is unreliable), and treat
+  the asymmetric-PSF channel as still open (#359).
+- **Multi-body cohorts** declare the limb-limb pair (#322) and should be cut
+  by illumination geometry, since part of the coupling is illumination-locked.
 - Blob and disc correlate at +0.83 on partial bodies; never share a solve
   there.
-- Cohorts are already filtered by the reliability gate; its selection
-  effect is now bounded in-sim (#323, PR #362): the gate can
-  only make agreement look better, never worse, and cannot manufacture
-  coupling, so every per-technique sigma the study reports is a lower
-  bound. The size of that optimism depends on the real score-vs-error
-  coupling, which the sim cannot supply (#358) -- the study's covariances
-  therefore describe navigable frames rather than frames, and the report
-  should say so.
-- General warning from the campaign: a healthy identifiability report is
-  **not** evidence that independence holds, and all-positive recovered
-  variances are necessary but not sufficient.
+- Cohorts are already filtered by the reliability gate; its selection effect
+  is bounded in-sim but its real-frame size is unknown until #358, so the
+  study's covariances describe *navigable* frames rather than frames, and
+  the report must say so.
+- A healthy identifiability report is **not** evidence that independence
+  holds; all-positive recovered variances are necessary but not sufficient.
 
 **Prompt:**
 
@@ -276,20 +151,22 @@ Your role at the gate: approve the frame selection. Then:
 > separation layer (it waits on WS-0's solvability map saying where it is
 > meaningful). Operator approves the frame selection before any bulk run.
 
-### 2.5 The finish line (dispatch after 2.4 produces data)
+### 2.3 The finish line (dispatch after 2.2 produces data)
 
 - **#229 / WS-4** — real images in CI: "Wire a small cached real-image
-  tier into every-PR CI and the full suite on a schedule, per WS-4."
+  tier into every-PR CI and the full suite on a schedule, per WS-4." Related:
+  the data-independent sim suites still never run in Actions (#336) and there
+  is no canonical environment for the committed sim baselines (#335).
 - **#230 / WS-5** — re-anchor confidence on real evidence. **Handle #317
   first or explicitly:** the calibration tooling fits tier boundaries from
   the fused confidence scalar, and correlated ring witnesses emit
   high-confidence/large-error rows that push the high-tier boundary the
-  wrong way. Then: "Re-run the
-  calibration tooling against the agreement study's measurements per
-  WS-5; retire the confidence_provisional marker where the evidence
-  supports it; re-bless tiers with the operator." This is where the
-  terminator's provisional label and the sim-anchored coefficients get
-  their real-world upgrade.
+  wrong way; settle #316 before reading the Keeler tiers. Then: "Re-run the
+  calibration tooling against the agreement study's measurements per WS-5;
+  retire the confidence_provisional marker where the evidence supports it;
+  re-bless tiers with the operator." This is where the terminator's
+  provisional label and the sim-anchored coefficients get their real-world
+  upgrade.
 - **Accuracy tail** — #233, #150/#128 (design first; see Section 3),
   plus #234 and #232.
 
@@ -299,39 +176,10 @@ Copy the line as the session prompt, prepending: "Work in
 /seti/newnav/rms-nav. Read CLAUDE.md and the named issue first.
 Independent review before done; all CI gates; one PR."
 
-- **#301 + #291 (ensemble diagnostic channel)** — EXECUTED, PR #315
-  (unmerged, targets `rf_sim_realism`). The channel, the convergence
-  gate, and the fit-quality gates all landed; `orbit_error_ringlet`
-  demotes high to medium and its error improves from 3.01 to 1.54 px.
-  #291 persists bit-for-bit and is documented rather than absorbed.
-  Follow-ups, in the order they matter:
-  - **#318** — DONE, PR #356 squash-merged to `main` (366880c).
-    RingAnnulusNav now consumes the channel: the ring models attach
-    `orbit_normals_vu` and an effective `sigma_orbit_radial_px` to
-    `RingAnnulusGeometry`, and the technique widens its NCC covariance
-    from the same absorbed-translation sensitivity RingEdgeNav uses, so
-    both ring techniques price an identical annulus geometry identically
-    (a short visible arc widens one-for-one along its normal; a closed
-    ring barely absorbs a uniform radial error). On `orbit_error_ringlet`
-    RingAnnulusNav's radial sigma rises from 0.56 to ~2.56 px, the fused
-    sigma widens to ~1.79 px (calibration ~1.3 sigma, was ~2.8), and the
-    fused error bar now covers the residual bias; the tier stays medium,
-    correctly, and the scene pin is re-measured to the honest post-channel
-    behaviour (recovered error 2.31 px). The channel is now effective on
-    both ring techniques rather than ~5%, and
-    `rings.orbit_radial_sigma_correlated_fraction` scales both. Caveat:
-    widening both members isotropically re-couples their weights and
-    resurfaces the correlated-witness scalar (0.99 on this scene) -- that
-    is #317, documented at the scene pin and in the ensemble guide, not
-    masked.
-  - **#316**: the fully-correlated severity is contested and demotes five
-    operator-verified Keeler frames. Carries your decision; ratchet via
-    `rings.orbit_radial_sigma_correlated_fraction` or implement the
-    wander decomposition.
-  - **#317**: correlated ring witnesses fused as independent — sequence
-    before #230.
-  - **#319**: no library coverage for opposed-ansae geometry, so the
-    conditioning guard is unvalidated.
+- **Ring ensemble follow-ups**: #317 (correlated ring witnesses fused as
+  independent — sequence before #230); #319 (no library coverage for
+  opposed-ansae geometry, so the conditioning guard is unvalidated). #316 is
+  an operator decision (Section 0.1), reversible by config either way.
 - **#150/#128 (photometric limb redesign)** *(Fable-required — see 3b;
   the physics is subtle enough that a wrong premise survives review)*:
   "Produce the DESIGN ONLY for the photometric-limb fit that removes the
@@ -340,69 +188,71 @@ Independent review before done; all CI gates; one PR."
   against real images per WS-10. Address whether the same model-vs-image
   bias applies to non-step (gradual / shouldered) ring edges, not only the
   limb."
-- **#179 (coarse-lock calibration pass)**: "Calibrate the coarse-search
-  edge-population lock against the image library per #179, folding in
-  the false-flag datapoint from #261."
+- **#373 (coarse-lock calibration pass)**: "Make the RingEdgeNav coarse
+  seed robust against competing edge populations per #373, folding in the
+  wrong-lock datapoints from #346."
 - **#130**: "Calibrate the star limiting-magnitude model against real
   fields per #130."
-- **#284 then #285**: "#284: fix UCAC4 bright-end photometry corrupting
-  predicted star brightness. Then #285: wide-offset asterism matching for
-  sparse fields (depends on #284)."
-- **#277 residue (N1853392805)**: decide among the three recorded options
-  (accept 2-px-class ground truth for resolved highly-irregular bodies /
-  keep TERMINATOR_ARC for SPICE-known synchronous rotators / shape
-  models per #23) and comment the decision on #277; then a session
-  implements it.
-- **Sim follow-ups**: #309 (realism-configured multi-instrument
-  campaign — biggest calibration-credibility win available), #310
-  (structural boundary enforcement), #311 (mirror-parity guard). Each
-  issue body is self-contained as a prompt basis.
-- **#287 (collect.py thread pinning)**: small fix; until it lands, every
-  calibration campaign needs the shell-level exports below.
+- **Star-matcher robustness**: #337 (triplet canonicalization seed lottery),
+  #376 (widened saturation captures the wrong bright reference), #367
+  (single-detectable-star wide offset). Each issue body is self-contained.
+- **Confident-wrong vetoes** (sequence with #230/WS-5): #328 (haze crescent
+  ~30 px wrong, Essential), #339 (scattered-light correlated disc/limb),
+  #291 (disc locks at extreme shape mismatch), #326/#327 (body-body
+  occlusion ignored by the disc template and the visible-arc report).
+- **Sim realism residual (#227)**: the de-circularization is done and on
+  main; #227 stays open only for the realism proof and closes at the
+  operator's realism-verdict gate, itself gated on #309. #309
+  (realism-configured multi-instrument campaign — biggest
+  calibration-credibility win available; consumes the fidelity gaps #325,
+  #329-#333, #341-#345, #290, #377) is the load-bearing step, with #310
+  (structural boundary enforcement) and #311 (mirror-parity guard) hardening
+  the partition. Each issue body is a prompt basis.
+- **#355 (Voyager sim distortion per camera)**: re-measure and split the
+  Voyager distortion defaults once the star-lock rate improves.
 
 ## 3b. Model-tier guidance (where a top-tier model is truly needed)
 
 Reserve the top-tier (Fable-class) model for work where a
 plausible-but-wrong answer survives review by looking right; a
 mid-tier (Opus-class) implementer is the efficient default everywhere
-else. Applied to the items above:
+else. Applied to the open items:
 
-- **Top-tier required:** WS-0 (#224 — correlated-error estimator math and
-  the solvability map; the one item not to delegate down even with a
-  strong review); #230/WS-5 and #309 (calibration-fit adjudication on
-  messy evidence); the design and adjudication of the #301/#291 ensemble
-  diagnostic channel; the **#150/#128 photometric-limb redesign** (both
-  the design and its adjudication — the physics is subtle and a
-  plausible-but-wrong premise rides straight through review: e.g. "rings
-  are unaffected" holds only for sharp step-edges, but a gradual or
-  shouldered ring edge carries the same model-vs-image photometric bias
-  the limb does); and the independent-review pass on anything
-  statistical, boundary-touching, or calibration-touching, regardless of
-  who implemented it.
+- **Top-tier required:** the #230/WS-5 calibration-fit adjudication and #309
+  (calibration on messy evidence); the #358/#360 survivorship-correction
+  math and the #359/#361 asymmetric-PSF coupling probes; the **#150/#128
+  photometric-limb redesign** (both the design and its adjudication — the
+  physics is subtle and a plausible-but-wrong premise rides straight through
+  review: e.g. "rings are unaffected" holds only for sharp step-edges, but a
+  gradual or shouldered ring edge carries the same model-vs-image photometric
+  bias the limb does); and the independent-review pass on anything
+  statistical, boundary-touching, or calibration-touching, regardless of who
+  implemented it.
 - **Mid-tier drafts, top-tier adjudicates:** #310 (the boundary
-  restructuring — the guard tests catch mechanical regressions, the
-  review catches new leak shapes).
-- **Mid-tier or below suffices:** the sidecar re-ratchet, library
-  growth, the agreement study's bulk execution (once WS-0 hands it a
-  proven estimator), #229, #311, #284/#285, #130, #179, and the
+  restructuring — the guard tests catch mechanical regressions, the review
+  catches new leak shapes).
+- **Mid-tier or below suffices:** library growth, the agreement study's
+  bulk execution (once WS-0 hands it a proven estimator), #229, #311, #373,
+  #130, the star-matcher items (#337, #376, #367), and the
   documentation/engineering items.
 
-## 3c. Tracking-issue register (2026-07-20 audit + re-ratchet)
+## 3c. Tracking-issue register
 
-The 2026-07-20 sim-program audit filed #325-#347 and the Section 1
-re-ratchet filed #350-#352 (and reopened #222). All are open and carry
-A/B/Priority/Effort labels with assignee rfrenchseti. Listed here so none
-is lost to a PR body; the sequencing hooks reference the sections above.
+Open issues grouped by theme so none is lost to a PR body; the sequencing
+hooks reference the sections above. All carry A/B/Priority/Effort labels
+with assignee rfrenchseti.
 
-**Confident-wrong / ensemble honesty (sequence with #230/WS-5 and the
-#301/#291 channel in Section 3):**
+**Confident-wrong / ensemble honesty (sequence with #230/WS-5):**
 
 - **#328** high-phase haze crescent returns a gate-passing success ~30 px
-  wrong and nothing vetoes it (Essential; the family that had no owner)
+  wrong and nothing vetoes it (Essential)
 - **#339** scattered-light correlated disc/limb errors fused as independent
   at the 0.99 confidence cap
 - **#346** three library frames lock confidently onto the wrong ring feature
   (owns the N1492091163 / N1867601758 / N1867602424 red pins)
+- **#317** ring techniques observing one catalog model are fused as
+  independent witnesses (sequence before #230)
+- **#291** BodyDiscCorrelateNav locks on confidently at extreme shape mismatch
 - **#326** BODY_DISC correlation template ignores body-body occlusion at deep
   mutual-event overlap
 - **#327** NavModelBody reports full visible_arc_fraction for limbs occluded
@@ -419,6 +269,9 @@ is lost to a PR body; the sequencing hooks reference the sections above.
 - **#332** PSF catalog has one kernel per instrument; binned/summed readout
   modes are inexpressible
 - **#333** four physical error axes are unmodeled
+- **#290** body renderer exceeds the sim render-time budget on oversampled grids
+- **#377** sim rings are single annuli; build realistic nested-ringlet scenes
+  and tests
 - **#341** the campaign's scene mixture is authored, unvalidated against real
   frames
 - **#342** star_psf_sigma is a 3.0 placeholder on Galileo, Voyager, LORRI
@@ -427,10 +280,10 @@ is lost to a PR body; the sequencing hooks reference the sections above.
 - **#345** a scene can echo truth-side noise into instrument_config with no
   validator warning
 
-**Calibration governance / CI (gate WS-5 and the CI tier in Section 2.5):**
+**Calibration governance / CI (gate WS-5 and the CI tier in Section 2.3):**
 
 - **#334** calibration has no armed falsification criterion and its real-frame
-  gate is suspended (owns the Section 1 "adopt the transfer watch" step)
+  gate is suspended (owns the Section 0.2 transfer-watch step)
 - **#335** no canonical environment for committed sim baselines (0.99 vs
   0.81-0.84 across machines)
 - **#336** data-independent simulator integration suites never run in Actions
@@ -442,61 +295,60 @@ is lost to a PR body; the sequencing hooks reference the sections above.
 
 - **#337** star-field matcher triplet canonicalization is a seed lottery on
   equal-brightness fields
+- **#376** widened saturation match can capture the wrong bright reference in a
+  crowded field
+- **#367** autonomous star nav cannot lock a wide offset from a single
+  detectable star
 
-**Library-frame reds and decisions (from the Section 1 re-ratchet):**
+**Library-frame reds and decisions (Section 1):**
 
 - **#338** highly-irregular exclusion discards the ground-truth terminator fit
   on N1853392805 (decision)
-- **#347** C1205021_GEOMED medium-vs-high provenance mismatch -- resolved by
-  the re-ratchet adjudication in PR #353
 - **#350** two resolved-body frames miss offset tolerance by ~2 px
   (N1484593951, N1686349893)
 - **#351** recalibration turns an operator-verified success into a spurious
   conflict (N1530185128)
 - **#352** star gates self-flag spurious on a navigable small-offset WAC frame
   (W1444747627)
-- **#222** (reopened) single-inlier pass-2 refine pulls the fused offset off a
-  correct body fix (N1572105349)
+- **#222** single-inlier pass-2 refine pulls the fused offset off a correct
+  body fix (N1572105349)
 
-**WS-0 Stage 0b follow-ups (2026-07-21; sequence with #225/WS-1 and
-#230/WS-5):** #320 and #323 are DONE (PRs #363 and #362, both merged); these
-are the pieces the sim could not close, filed from those PRs.
+**Agreement estimator real-frame follow-ups (sequence with #225/WS-1 and
+#230/WS-5):**
 
-- **#358** measure the real reliability-vs-error coupling and run the stratified
-  estimator on the real #225 cohorts -- the size of the gate's selection
-  optimism the sim cannot supply (gates the #323 lower-bound claim on real
-  frames; Important)
+- **#358** measure the real reliability-vs-error coupling and run the
+  stratified estimator on the real #225 cohorts — the size of the gate's
+  selection optimism the sim cannot supply (Important)
 - **#360** decide, after #358, whether the agreement solve needs a
-  selection-aware (survivorship) correction (Useful; a decision issue)
+  selection-aware (survivorship) correction (a decision issue)
 - **#359** probe limb-disc PSF coupling under the asymmetric/coma/field-varying
-  PSF error the sim cannot render -- the one channel #320 left open on the base
-  pair (Important)
+  PSF error the sim cannot render (Important)
 - **#361** disc-NCC sub-pixel resolution floors the smallest limb-disc coupling
-  #320 could detect (Important)
+  detectable (Important)
+- **#321** partial-arc limb fits carry an undiagnosed inward radial bias of
+  about 2 px (navigation finding)
+- **#322** cross-body limb errors correlate at +0.72; multi-body frames are
+  not independent measurements
+- **#324** agreement estimator tests do not run in CI
 
 ## 4. Standing practices for every session you dispatch
 
-- Environment: `source /seti/newnav/setup.sh`. Calibration campaigns
-  additionally need
-  `export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
-  NUMEXPR_NUM_THREADS=1` until #287 is fixed.
-- The controller pattern that executed the sim plan works: one session as
-  controller, implementer subagents per phase/slice, an independent
-  fresh-context review of every deliverable, fix rounds until the
-  critique is clean, full CI (`./scripts/run-all-checks.sh -i`), then one
-  PR. Ask for it explicitly in the prompt if you want it.
-- CI expectations: `run-all-checks.sh -i` is the pre-merge gate; the
-  library suite's red set must equal the documented pinned set (after
-  Section 1) or every delta must be attributed in the PR.
+- Environment: `source /seti/newnav/setup.sh`.
+- The controller pattern works: one session as controller, implementer
+  subagents per phase/slice, an independent fresh-context review of every
+  deliverable, fix rounds until the critique is clean, full CI
+  (`./scripts/run-all-checks.sh -i`), then one PR. Ask for it explicitly in
+  the prompt if you want it.
+- CI expectations: `run-all-checks.sh -i` is the pre-merge gate; the library
+  suite's red set must equal the documented pinned set (Section 1) or every
+  delta must be attributed in the PR.
 - Issues: every new issue carries A-type, B-location, Priority, Effort
   labels and assignee rfrenchseti.
 - **Never leave future work, a deferred fix, a known limit, or a pending
   decision recorded only in a PR body, a comment, a campaign record, or a
-  docstring — file a tracking issue and reference it from the prose.** A
-  2026-07-20 audit of the sim-realism program found 23 such orphans
-  (filed as #325-#347), including a confident-wrong family worth
-  Essential priority that no issue owned. PRs get merged and scroll away;
-  an item that lives only in prose is an item that will be lost.
+  docstring — file a tracking issue and reference it from the prose.** PRs
+  get merged and scroll away; an item that lives only in prose is an item
+  that will be lost.
 - Sidecar changes: one PR per review batch; per-frame dated notes in the
   sidecar, never only in gitignored files.
 - Perf tests (`tests/integration/test_sim_perf.py`): serial only, never
@@ -505,13 +357,10 @@ are the pieces the sim could not close, filed from those PRs.
 ## 5. Sequencing summary
 
 ```text
-0.1 merge #313 -> 0.2 cleanup -> 0.3 decisions   (operator, minutes)
-1   sidecar re-ratchet + adopt transfer watch    (1 session + 1 review)
-2.1 WS-0 estimator (exec, #314) + Stage 0b  -- DONE (PRs #362, #363 merged)
-2.2 WS-17 distortion  -- DONE (PR #354)
-2.3 batch-006 + growth     (parallel agent session; your votes gate it)
-2.4 agreement study bulk   (after 2.3; 2.2 done; you approve frames)
-2.5 CI tier, re-anchor confidence, accuracy tail (after 2.4)
+0.1 decisions (#316, #60, #188, #338) -> 0.2 adopt transfer watch (#334)  (operator, minutes)
+2.1 library growth (batch-006 + continued)   (agent session; your votes gate it)
+2.2 agreement study bulk   (after 2.1 cohorts; you approve frames)
+2.3 CI tier, re-anchor confidence, accuracy tail (after 2.2)
 3   parallel fill items    (any time, independent)
 ```
 

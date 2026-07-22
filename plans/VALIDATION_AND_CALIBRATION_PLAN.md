@@ -56,14 +56,11 @@ says *how* and defines what "validated" and "calibrated" mean. Where the two
 overlap, the methodology here is binding and the cross-track ordering there is
 binding.
 
-**Status note (2026-07-12).** Complete and out of the workstream list: WS-11
-(degenerate-rotation reporting) and WS-14 (provenance) are done;
-WS-5's interim half is done — the confidence formulas and tier
-boundaries are *sim-anchored* (fitted against simulated planted-truth
-recovery by the `util/calibration/` tooling), with `confidence_provisional`
-still true pending the real-anchored pass (#230). WS-6's honesty half (docs no
-longer overclaim) is done; the capability matrix remains (#231). Every
-still-open workstream now has a tracking issue (cross-map below).
+**Current baseline.** The confidence formulas and tier boundaries are
+*sim-anchored* — fitted against simulated planted-truth recovery by the
+`util/calibration/` tooling — and `confidence_provisional` stays true
+pending the real-anchored pass (#230). The remaining workstreams below build
+on that baseline; each has a tracking issue (cross-map below).
 
 **Two shared decisions, declared once:**
 
@@ -87,23 +84,21 @@ carry the methodology and acceptance criteria):
 
 | Workstream | GitHub issue(s) | Note |
 |---|---|---|
-| WS-0 | #224 | Estimator identifiability + bias-independence. |
+| WS-0 | #358, #359, #360, #361 | Estimator proven on sims (identifiability + bias-independence); residual is the real-frame reliability-vs-error coupling and PSF-coupling probes feeding WS-1. |
 | WS-1 | #225 | The agreement study. The statistics system reports metadata statistics and consumes WS-1's per-frame disagreement metric; it is not the agreement study. |
 | WS-1b | #226 | Reprojection consistency. |
-| WS-2 | #227 (+ #223, #153, #84) | Sim de-circularization + realism. |
-| WS-17 | #228 | Distortion validation. |
+| WS-2 | #227 (+ #223, #309, #341, #377) | De-circularization done; #227 open only for the realism residual (realism-anchored calibration #309, terminator verdict #223, sim-fidelity gaps). |
+| WS-17 | #355 | Distortion measured from star fields; residual is the per-camera Voyager sim split. |
 | WS-3 | #172, #174, #235 | 47-image stage first (#172), then the >=120 growth target (#235); discovery/review workflow in `plans/COHORT_CURATION_PLAN.md`. |
 | WS-4 | #229 | CI integration tiers. |
-| WS-5 | #230 (sim-anchored half done), #176 | Real-anchored recalibration once WS-1 anchors exist. |
-| WS-6 | #231 | Capability matrix (docs-honesty half already done). |
+| WS-5 | #230, #176 | Real-anchored recalibration once WS-1 anchors exist. |
+| WS-6 | #231 | Capability matrix. |
 | WS-7 | #60 | Titan: implement or scope out. |
 | WS-8 | #53, #67 | Output bundles for all four instruments (required). PDS4 input (#34) is availability-contingent and not required for completion. |
 | WS-9 | #233, #130, #176 | Measured star SNR + sensitivity tests (#233); constants inventory (#176); limiting magnitudes (#130). |
 | WS-10 | #150, #128 | Limb bias root cause and redesign. |
-| WS-11 | done | Degenerate-rotation reporting. |
 | WS-12 | #93 | Instrument appendices. |
 | WS-13 | #234 (+ #153) | Detector-noise model for the I/F render path. |
-| WS-14 | done | Provenance block complete. |
 | WS-15 | #236, #103, #134, #126 | Thread safety, profiling, batch-parallel throughput. |
 | WS-18 | #232 (+ #28, #66 partial) | End-product accuracy checks. |
 
@@ -506,25 +501,33 @@ substitutes for it.
 
 **Dependencies:** WS-3. Shares implementation with WS-18. **Risk:** medium.
 
-### WS-2: De-circularize the simulator AND prove it realistic (primary accuracy instrument)
-**Closes:** "the headline accuracy numbers are circular." This is now the *primary*
+### WS-2: Prove the de-circularized simulator realistic (primary accuracy instrument)
+**Closes:** "the headline accuracy numbers are circular." This is the *primary*
 source of any absolute accuracy number, since real truth is unobtainable.
+**Tracked by:** #227, open only for the realism residual below.
 
-**Problem.** `sim/render.py` and `nav_model_*_simulated.py` share
-`create_simulated_body` / `render_mesh_body_image` / `render_ring`, so model and
-data have a common parent and the sub-pixel numbers are self-consistency, not
-accuracy. Two things must both be true before sim recovery error is a credible
-accuracy estimate: the image side must be **independent** of the navigator, and
-the image side must be **realistic**.
+**Delivered (the de-circularization half, on main).** The image side no longer
+shares a rendering routine with the navigator: an independent forward model, the
+truth/idealized information partition guarded by an import/call-graph test,
+model-error sweep axes, full detector noise including the I/F path, and the
+rewritten simulator report. Sim recovery error is therefore no longer pure
+self-consistency.
 
-**Approach.** The navigator must use its *best available* model — if a better PSF
-or shape model exists, give it to the navigator; do **not** preserve a known-worse
-model just to manufacture a gap. The image side is then made *more* realistic and
-*independent in implementation*, and the residual recovery error is the genuine
-model error the real pipeline would also incur. Report error as a function of the
-*remaining* mismatch (the part the navigator cannot capture even at its best), and
-separately validate that the simulated images are statistically indistinguishable
-from real ones.
+**The realism residual (why #227 stays open).** Independence is necessary but not
+sufficient — the image side must also be **realistic**, and that is not yet
+underwritten: the calibration is not fitted on the realism-anchored renderer
+configuration (#309), the terminator deliverable is degenerate with no realism
+verdict (#223), realism is Cassini-only with the authored scene mixture
+unvalidated (#309, #341), and the catalogued sim-fidelity gaps (#325-#345) and
+single-annulus rings vs realistic nested ringlets (#377) remain. Closing #227 is
+the operator's realism-verdict gate, gated on #309.
+
+**Approach for the residual.** The navigator uses its *best available* model — do
+**not** preserve a known-worse model just to manufacture a gap. The image side is
+made *more* realistic, and the residual recovery error is the genuine model error
+the real pipeline would also incur. Report error as a function of the *remaining*
+mismatch, and separately validate that the simulated images are statistically
+indistinguishable from real ones.
 
 **Tasks.**
 - **Independent, more-realistic image model.** Render the image with a forward
@@ -706,8 +709,7 @@ provisioning in CI is the hard part; a cached fixture bundle is the mitigation.
 ### WS-5: Calibrate (or quarantine) confidence and tiers
 **Closes:** "ships a confidence it admits is meaningless."
 **Tracked by:** #230 (the real-anchored calibration — this workstream defines
-its methodology, binding per the relationship section above; the sim-anchored
-interim is done) and #176
+its methodology, binding per the relationship section above) and #176
 (constants into config, which lands before calibration writes coefficients).
 The curated library's operator-assigned `confidence_tier` labels serve as
 plausibility cross-checks and regression expectations for the calibrated
@@ -933,26 +935,26 @@ gradient-ridge refine is disabled for the limb technique
 ring-edge technique runs with it enabled (`RingEdgeNav` sets `1`). The limb's current partial
 cancellation (integer DT quantization + Tukey) is accidental.
 
-**Status (2026-07-14) — diagnosis complete (PR #276, measurement only, no fitter
-change).** The instrumented diagnosis confirms the mechanism and quantifies it:
-the genuine algorithmic bias is 0.05–0.14 px, directional (points from the lit
-limb toward the interior — a limb-darkening / photometric roll-off signature, the
-geometric edge matching a gradient ridge ~0.5 px inside the true limb), varies
-with illumination direction, and is roughly flat with body size; a ~0.05 px
+**Diagnosis (the measured basis for the redesign).** The instrumented
+diagnosis confirms the mechanism and quantifies it: the genuine algorithmic
+bias is 0.05–0.14 px, directional (points from the lit limb toward the
+interior — a limb-darkening / photometric roll-off signature, the geometric
+edge matching a gradient ridge ~0.5 px inside the true limb), varies with
+illumination direction, and is roughly flat with body size; a ~0.05 px
 sub-pixel interpolation ripple rides on top; below ~15 deg phase the fit is
-poorly conditioned. The simulator's own limb render was validated bias-free
-(<2e-5 px), so it is trustworthy ground truth. **Key finding that reframes the
-redesign:** on real limb+star frames the limb-vs-star gap is 0.5–1.8 px, an order
-of magnitude larger than the 0.1 px algorithmic bias — so the limb fitter explains
-only ~0.1 px and the remaining 0.4–1.7 px is spacecraft-position / body-ephemeris
-error (isolable only because the sim geometry is exact). Fixing the fitter buys
-~0.1 px; the dominant real-frame error is on the pointing-kernel side. Ranked
-redesign recommendation from the diagnosis: (1) fit a photometric limb (predict
-the limb-darkened-disc-convolved-with-PSF brightness profile and match it) rather
-than aligning a geometric edge to the gradient ridge (#150); (2) a matched-filter
-edge estimator to remove the interpolation ripple (#282); (3) gate low-phase
-(<~15 deg) fits (#281); (4) a minor pixel-centre-convention audit (#283). Harness
-and full report:
+poorly conditioned. The simulator's own limb render is bias-free (<2e-5 px),
+so it is trustworthy ground truth. **The finding that reframes the
+redesign:** on real limb+star frames the limb-vs-star gap is 0.5–1.8 px, an
+order of magnitude larger than the 0.1 px algorithmic bias — so the limb
+fitter explains only ~0.1 px and the remaining 0.4–1.7 px is
+spacecraft-position / body-ephemeris error (isolable only because the sim
+geometry is exact). Fixing the fitter buys ~0.1 px; the dominant real-frame
+error is on the pointing-kernel side. Ranked fixes: (1) fit a photometric
+limb (predict the limb-darkened-disc-convolved-with-PSF brightness profile
+and match it) rather than aligning a geometric edge to the gradient ridge
+(#150); (2) a matched-filter edge estimator to remove the interpolation
+ripple (#282); (3) gate low-phase (<~15 deg) fits (#281); (4) a minor
+pixel-centre-convention audit (#283). Harness and full report:
 `util/calibration/limb_bias/limb_navigation_bias_diagnosis.md`.
 
 **Tasks.**
@@ -991,36 +993,6 @@ raw-DN path.
 ---
 
 ## Phase 5 — Operational hardening
-
-### WS-11: Correctness of degenerate-rotation reporting
-**Closes:** "small rolls are silently wrong."
-
-**Tasks.** In `nav_technique_star_field.py` (and the ensemble), where the RANSAC
-matcher returns roll below the ~0.75° separability floor, **report rotation as
-unobservable** (use the `ROTATION_UNOBSERVABLE_VARIANCE` sentinel + an explicit
-flag in diagnostics/metadata) instead of returning a spurious `0.0`. Document the
-separability floor per instrument. Add a test that a sub-floor planted roll yields
-an "unobservable" flag, never a confident zero.
-
-**Acceptance criteria.** No frame reports a confident `0.0°` roll within the
-non-separable regime; the metadata carries an explicit unobservable flag.
-**Dependencies:** none. **Risk:** low.
-
-### WS-14: Complete the provenance block in output metadata
-**Closes:** the remaining gaps in "garbage in, garbage out, with no audit trail."
-
-**Scope.** `nav_orchestrator/provenance.py` + the curator already pin the git
-SHA, the loaded SPICE-kernel list, the static-data YAML hashes, and the run
-timestamp into every `_metadata.json`. What remains:
-
-**Tasks.** Add to the provenance block: a hash of the *resolved* config plus the
-applied user/CLI overrides, and the star-catalog versions used. Document how to
-reproduce a result from the block, and add a reproduce-from-metadata test.
-
-**Acceptance criteria.** Any archived result can be traced to exact kernels,
-config (including overrides), code version, and catalogs from its metadata
-alone; a reproduce-from-metadata test passes.
-**Dependencies:** none. **Risk:** low.
 
 ### WS-15: Performance and safe parallelism
 **Closes:** "it is slow," "the obvious fix for slowness is mined."
@@ -1102,8 +1074,7 @@ survives reflow.
 - **WS-6** (capability matrix) — light coupling to WS-7/8.
 - **WS-7 / WS-8 / WS-12** (Titan / PDS4 / appendices) — decision gates first.
 - **WS-9 / WS-10 / WS-13** (constants / limb bias / I/F) — WS-1 and/or WS-2.
-- **WS-11 / WS-14 / WS-15** (rotation / provenance / performance) — independent;
- start anytime.
+- **WS-15** (performance) — independent; start anytime.
 - **WS-18** (end-product accuracy) — WS-1b + WS-2 + WS-8.
 
 WS-1 gates WS-5, WS-9, WS-10 (WS-18 gates on WS-1b, not WS-1 directly).
@@ -1119,10 +1090,6 @@ real-image per-technique σ is believed. WS-1/WS-17 supply real-image *agreement
 neither alone is "the" accuracy — sim accuracy + agreement + the stated
 common-mode/identifiability/bias caveats together are the honest result.
 
-- **Milestone A — "Honest" (fast wins, no new science):** WS-11, WS-14, the WS-5
- interim provisional label, and WS-6's doc reconciliation. The system stops
- over-claiming and stops emitting silently-wrong values. These are independent and
- parallelizable.
 - **Milestone B — "Measured-as-far-as-possible":** WS-3 + WS-2 + WS-0 + WS-17 +
  WS-1 (+WS-1b) + WS-4. WS-0 first proves the agreement estimator on the sim and
  maps where per-technique σ is even recoverable; WS-1 then reports pairwise
@@ -1158,9 +1125,7 @@ common-mode/identifiability/bias caveats together are the honest result.
 | 8 | Limb bias, fix disabled | WS-10 | bias ≤ target on real+mismatched data, fix enabled |
 | 9a | Slow (~35 s/frame), O(M³) matcher | WS-15 | per-frame budget cut; matcher bounded; throughput published |
 | 9b | Reprojection thread-unsafe | WS-15 | per-thread state + proving concurrency test |
-| 9c | Sub-0.75° roll returned as spurious zero | WS-11 | unobservable flag, never confident zero |
 | 9d | I/F path noise-light/untested | WS-13 | realistic detector model + I/F in accuracy report |
-| 9e | Provenance gaps (config-override hash, catalog versions) | WS-14 | provenance block carries resolved-config hash + catalog versions; reproduce-from-metadata test passes |
 | 10 | End products (backplanes/mosaics/PDS4) accuracy untested | WS-18 | backplanes match sim truth; mosaic seams quantified; PDS4 geometry matches source |
 
 ---

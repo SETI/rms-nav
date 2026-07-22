@@ -546,13 +546,57 @@ reports; see :doc:`user_guide_statistics`.
 Summary PNG Files (``*_summary.png``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-These are annotated images showing:
+Every navigated image is paired with a ``*_summary.png``: one annotated picture
+showing what the navigator saw and where it placed its model. The source image
+is composited with the merged model overlay at the fitted offset, so a glance
+tells you whether the predicted features land on the real ones.
 
-* The original image data
-* Overlaid model features (stars, rings, bodies)
-* Text annotations
-* Scale information
-* Navigation offset information
+The base layer is the source image rendered in grayscale with a quantile
+contrast stretch. The black point sits at a low quantile; the white point adapts
+to how many bright pixels the frame carries, so a sparse star field or a small
+body against dark sky is not blown out by a handful of saturated pixels. The
+model overlay is drawn on top, shifted by the navigated ``(dv, du)`` offset so
+each prediction sits where the fit says the real feature is.
+
+The overlay carries one set of annotations per contributing model:
+
+* **Stars** -- each predicted catalog star is boxed and labelled with its name,
+  magnitude, and (when known) spectral class. Every star box is additionally
+  contrast-stretched against its own local minimum and maximum, so a faint star
+  only a few DN above a bright background stays visible inside its box even where
+  the whole-frame stretch would bury it.
+* **Bodies** -- each body in the field of view contributes its lit-limb outline,
+  with the body name labelled by an arrow pointing to the limb.
+* **Rings** -- each catalog ring edge is drawn as a polyline following the edge
+  across the frame and labelled with the edge name. Ring points hidden behind
+  the planet globe are dropped, so an edge stops at the planet limb rather than
+  being painted across the disc.
+
+A metadata text block is placed in one corner. It gives the image name, filter,
+and exposure, the navigation status (and, on success, the techniques that
+contributed to the consensus offset), and the fused confidence value with its
+tier. The corner is chosen to avoid overlapping the other annotation labels,
+breaking ties toward the darkest corner; a long technique list wraps within the
+block, and the block is omitted on a frame too small to hold it. The summary
+carries no scale bar or coordinate grid -- it is a visual check of the fit, not
+a measurement product; the numeric offset and geometry live in the metadata JSON
+and the backplanes.
+
+.. figure:: _images/summary_png_example.png
+   :width: 80%
+   :align: center
+
+   Summary PNG for the real navigated Cassini ISS frame ``N1484688342``, showing
+   every annotation family at once. A crescent Mimas carries its lit-limb outline
+   and a ``MIMAS`` label; catalog ring edges (Encke and Keeler) are drawn as
+   labelled polylines across the bright ring band; roughly a dozen predicted
+   stars are boxed and labelled with catalog name, magnitude, and spectral class,
+   each box locally contrast-stretched so the faint stars stay visible; and the
+   lower-left metadata block reports a successful fit at confidence 0.660.
+
+The overlay assembly is described in
+:doc:`/dev_guide/dev_guide_annotations`, and the ring-edge planet-occlusion trim
+in :doc:`/dev_guide/dev_guide_navigation_models_ring`.
 
 Interpreting Results
 --------------------

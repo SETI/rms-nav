@@ -36,7 +36,10 @@ from spindoctor.nav_orchestrator import (
 from spindoctor.obs import ObsSnapshotInst, obs_class_to_inst_name
 from spindoctor.support.file import json_as_string
 from spindoctor.support.misc import log_run_environment
-from spindoctor.support.summary_png import render_annotated_summary_rgb
+from spindoctor.support.summary_png import (
+    SummaryMetadata,
+    render_annotated_summary_rgb,
+)
 
 __all__ = [
     'build_metadata_from_result',
@@ -311,6 +314,59 @@ def build_metadata_from_result(
     return metadata
 
 
+def _summary_metadata_from_obs_result(obs: ObsSnapshotInst, result: NavResult) -> SummaryMetadata:
+    """Assemble the summary-PNG header block from an obs and its NavResult.
+
+    Reads the image name, filter, and exposure from the observation's public
+    metadata (degrading gracefully when a field is absent) and the status,
+    contributing techniques, and confidence from the NavResult.
+
+    Parameters:
+        obs: Observation snapshot the summary is rendered from.
+        result: Navigation result whose status / techniques / confidence
+            are reported.
+
+    Returns:
+        A populated :class:`~spindoctor.support.summary_png.SummaryMetadata`.
+    """
+    exposure_s: float | None = None
+    try:
+        public = obs.get_public_metadata()
+    except Exception as exc:
+        IMAGE_LOGGER.warning('Could not read public metadata for summary PNG: %s', exc)
+        public = {}
+    abspath = getattr(obs, 'abspath', None)
+    image_name = str(public.get('image_name') or (abspath.name if abspath is not None else ''))
+    filters = [str(f) for f in (public.get('filters') or []) if f]
+    filter_name = '+'.join(filters)
+    exposure_raw = public.get('exposure_time')
+    if exposure_raw is not None:
+        try:
+            exposure_s = float(exposure_raw)
+        except (TypeError, ValueError):
+            IMAGE_LOGGER.warning('Unparsable exposure_time %r; omitting from summary', exposure_raw)
+    # The techniques that actually contributed to the reported offset are the
+    # ensemble's consensus subset, not every technique that ran (outliers the
+    # ensemble rejected still appear in per_technique).  Fall back to the full
+    # per-technique set only if a success left the consensus list unstamped.
+    if result.status == 'success':
+        contributing = result.consensus_techniques or [
+            tr.technique_name for tr in result.per_technique
+        ]
+        techniques = tuple(sorted(set(contributing)))
+    else:
+        techniques = ()
+    return SummaryMetadata(
+        image_name=image_name,
+        filter_name=filter_name,
+        exposure_s=exposure_s,
+        status=result.status,
+        techniques=techniques,
+        confidence=result.confidence,
+        confidence_rank=result.confidence_rank,
+    )
+
+
 def write_summary_png(
     obs: ObsSnapshotInst,
     result: NavResult,
@@ -331,7 +387,10 @@ def write_summary_png(
         logger: ``pdslogger`` to emit one INFO line on success.
     """
     overlay_offset = result.offset_px if result.offset_px is not None else (0.0, 0.0)
-    rgb = render_annotated_summary_rgb(obs, result.annotations, overlay_offset)
+    summary_metadata = _summary_metadata_from_obs_result(obs, result)
+    rgb = render_annotated_summary_rgb(
+        obs, result.annotations, overlay_offset, metadata=summary_metadata
+    )
     buf = BytesIO()
     Image.fromarray(rgb, mode='RGB').save(buf, format='PNG')
     png_path.write_bytes(buf.getvalue())

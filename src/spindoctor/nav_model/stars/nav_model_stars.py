@@ -359,6 +359,7 @@ class NavModelStars(NavModel):
         text_info_list: list[AnnotationTextInfo] = []
         star_avoid_mask = obs.make_extfov_false()
         star_overlay = obs.make_extfov_false()
+        stretch_boxes: list[tuple[int, int, int, int]] = []
         for star in self._stars:
             if star.conflicts and star.conflicts != 'STAR':
                 # Skip body/ring-blocked stars; they are not labelled.
@@ -371,6 +372,10 @@ class NavModelStars(NavModel):
             u_min, v_min = obs.clip_extfov(u_int - u_half, v_int - v_half)
             u_max, v_max = obs.clip_extfov(u_int + u_half, v_int + v_half)
             star_avoid_mask[v_min : v_max + 1, u_min : u_max + 1] = True
+            # The detection box doubles as a local-contrast-stretch box in the
+            # summary PNG: a faint star a few DN above a bright background is
+            # otherwise indistinguishable from it after the whole-frame stretch.
+            stretch_boxes.append((v_min, u_min, v_max + 1, u_max + 1))
             draw_rect(
                 star_overlay,
                 True,
@@ -398,6 +403,7 @@ class NavModelStars(NavModel):
                 self._stars_config.label_star_color,
                 thicken_overlay=0,
                 avoid_mask=star_avoid_mask,
+                stretch_boxes=stretch_boxes,
                 text_info=text_info_list,
             )
         )

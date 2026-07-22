@@ -21,88 +21,25 @@ fields to match current behavior.
 
 ## Track B — Navigation correctness
 
-**Status (2026-07-14):** the batch is merged; the per-item sections below
-record the original design intent and remain the reference for anything
-still open. Merged: #180 + #254 (#266), #132 + #133 (#267), #259 (#268),
-#258 + #263 (#269), #221 (#270), #222 (#271), #261 (#272), #238 (#274,
-curated as pending fixtures — Galileo, not Voyager — awaiting #285
-sparse-field star nav and #284 UCAC4 bright-end photometry), #237 (#275, a
-real multi-body limb-RMS-pooling defect, fixed), #128/#150 diagnosis
-(#276, measurement only; follow-ups split to #281/#282/#283), #60 interim
-+ #24 (#277), #210 (#278), and the two operator tier ratchets (#279).
-Operator decisions taken 2026-07-14: #239 sub-5 px bodies become expected
-failures once a qualifying frame is curated (none exists in the current
-set — needs a targeted diameter-filtered cohort scan); #60 Titan is
-hard-excluded with an active model that records the decline — a deliberate
-special case, not a generic atmospheric-body class, because Titan's
-atmosphere (transparent at some wavelengths) does not generalize to bodies
-like Venus; #24 highly-irregular bodies drop shape features once resolved;
-#210 gets a covariance-model rederivation, not a rescale; #128/#150 starts
-with the diagnosis pass. The #128 diagnosis reframed the redesign: the
-limb fitter contributes only ~0.1 px of real-frame error while
-spacecraft-position / ephemeris error dominates (0.4-1.7 px), so the
-higher-leverage target is the pointing-kernel side, not the fitter. Still
-open in this track: #179 (coarse edge-lock calibration), #25, #130, #239
-(waiting on a qualifying frame), #128/#150 (redesign), #60 (full haze-limb
-navigation), and the batch-spawned #281/#282/#283/#284/#285.
+Ordering within the track: the confidently-wrong and ensemble-honesty
+defects first (#222, #317, #328, #339, #346, #291, #326, #327, #350, #351,
+#352), because the agreement study consumes ensemble output at scale and
+several curated library frames pin these as standing red regressions. Then
+the coarse-lock calibration (#373) and the star-matcher robustness items
+(#337, #376, #367), then the investigation/design items (#25, #128/#150),
+with the smaller decision items (#130, #239, #338) as fill.
 
-Ordering within the track: the ensemble/gate cluster first. These are the
-confidently-wrong or correct-answer-discarded defects (issues #221, #222,
-#258, #259, #261, and #263) that the agreement study will consume ensemble
-output at scale, and that several curated library frames now pin as
-standing red regressions. Then the triage sessions (#237, #238), then
-the investigation/design items (#179, #25, #128/#150), with the smaller
-items (#24, #130, #132, #133, and #180) as fill. The cluster defects were
-all surfaced or corroborated by the 2026-07-13 operator library review on
-real frames; the library entries carrying their evidence landed with PR #262.
+### #222 — Second-pass refinement votes as an independent opinion (reopened)
 
-### #221 — Rank-1 ring result outvotes an absolute constraint
-
-**Symptom** (found by the 2026-07-11 library cross-check): on flat-ring
-frames carrying both a rank-1 `RingEdgeNav` result (constrains only the
-ring-radial axis; the along-edge direction is unobservable) and an
-absolute 2-D constraint (e.g. a `BodyBlobNav` moon fix), the fused result
-follows the ring's unconstrained along-edge component and reports a high
-confidence tier with 7-10 px of along-edge error.
-
-**Where:** `src/spindoctor/nav_orchestrator/ensemble.py` — the agreement
-grouping (Mahalanobis + pixel floor), the consensus-subset outlier
-rejection, and the information-form combine. The rank-1 result's
-along-edge variance is huge, so in information form it should contribute
-almost nothing on that axis; the defect is in how agreement/consensus
-treats the pair before the combine (a rank-1 result can "agree" with
-anything along its null axis and so anchors a consensus it should not).
-
-**Fix direction:** rank-aware agreement — when grouping, compare only on
-the axes both results actually constrain (project the difference onto the
-intersection of their observable subspaces); and/or a tier guard — a
-fused result whose along-axis variance is dominated by a single rank-1
-member cannot claim a tier better than that axis's honest sigma allows.
-
-**Acceptance:** a regression test reconstructing the cross-check frame's
-geometry (rank-1 ring + blob) asserts the fused offset tracks the
-absolute constraint on the along-edge axis and the tier reflects the
-honest per-axis sigma. Existing rank-1 tests
-(`tests/spindoctor/nav_orchestrator/`, the `ring_only_flat` machinery)
-stay green.
-
-### #222 — Second-pass refinement votes as an independent opinion
-
-**Symptom** (same cross-check): `StarRefineNav` in pass 2 runs from the
-pass-1 consensus prior, lands near it (as it must — it is a local
-refinement), and is then counted as independent corroboration. A wrong
-pass-1 prior thereby gains confidence instead of being challenged; an
-expected-failed frame reported success at high tier.
-
-**Real-frame evidence** (operator library review, 2026-07-13; on #222): two frames,
-N1686349893 (stars_plus_body) and N1572105349 (body_full_fov), where
-disc and limb agree at the operator truth but the single-inlier
-StarRefine (capped to 0.5) sits ~2 px off and pulls the fused answer to
-~1.8 px error, still reported at high tier. The failure mode is not just
-inflated confidence on failed frames — it degrades accurate answers
-while keeping the tier. Both carry library sidecars pinned to that
-navigable truth, so their autonomous regressions stay red until this
-lands.
+**Symptom:** `StarRefineNav` in pass 2 runs from the pass-1 consensus prior,
+lands near it (as it must — it is a local refinement), and is then counted
+as independent corroboration. On N1572105349 (body_full_fov) disc and limb
+agree at the operator truth but the single-inlier StarRefine (capped to 0.5)
+sits ~2 px off and pulls the fused answer to ~1.8 px error, still reported at
+high tier. The failure mode is not just inflated confidence on failed frames
+— it degrades accurate answers while keeping the tier. The frame carries a
+library sidecar pinned to that navigable truth, so its autonomous regression
+stays red until this lands.
 
 **Where:** the two-pass flow in
 `src/spindoctor/nav_orchestrator/orchestrator.py` plus the ensemble's
@@ -116,149 +53,120 @@ non-independent. The metadata should record the distinction either way.
 
 **Acceptance:** a test where pass-1 produces a deliberately wrong prior
 asserts the pass-2 refinement cannot raise the consensus confidence;
-the expected-failed cross-check frame returns to failed.
+N1572105349 returns to its navigable truth at an honest tier.
 
-### #258 — Exact recovery downgraded by an excluded dissenter
+### #317 — Ring witnesses of one catalog fused as independent
 
-**Symptom** (2026-07-13 library review, two stars_plus_body frames N1530185128,
-N1550270436): a lone correct `StarUniqueMatchNav` (conf 0.8, on the
-operator truth) is downgraded to `conflicted`/0.17 by a lone wrong
-`BodyBlobNav` (0.4) that the consensus logic has *already* placed in
-`excluded_from_consensus` — yet the best-vs-runner-up summed-confidence
-gap (0.4 < the 0.5 agreement threshold) still fires because the best is
-a singleton.
+**Symptom:** `RingEdgeNav` and `RingAnnulusNav` observe the same ring
+catalog model and, once both price an identical annulus geometry, their
+weights re-couple; on a widened-radial scene the correlated-witness scalar
+reaches 0.99, so two views of one model are fused as if independent.
 
-**Where:** `src/spindoctor/nav_orchestrator/ensemble.py`
-(`_consensus_selection` / the conflicted-gap logic from #217).
+**Where:** `src/spindoctor/nav_orchestrator/ensemble.py` (agreement/fusion
+of the two ring techniques), documented at the `orbit_error_ringlet` scene
+pin and in the ensemble guide.
 
-**Fix direction:** the agreement-gap test should compare against
-non-excluded runners-up only (an excluded member should not retain veto
-power over the tier), or a singleton best that beats every non-excluded
-alternative should not be declared conflicted.
+**Fix direction:** treat the two ring techniques as correlated witnesses of
+one catalog model when combining them; **sequence before #230** so the
+recalibration does not fit tier boundaries against high-confidence/large-
+error correlated rows.
 
-**Acceptance:** a test reconstructing the singleton-best-vs-excluded-
-dissenter geometry asserts the fused result tracks the best and reports
-success, not conflicted.
+### #328 — High-phase haze crescent, gate-passing but ~30 px wrong
 
-### #259 — One-star match with a large residual passes every gate
+**Symptom:** a high-phase haze crescent returns a gate-passing success about
+30 px wrong and nothing vetoes it. A confident-wrong family that no gate
+currently owns; Essential.
 
-**Symptom** (2026-07-13 library review, negative_cases Galileo frame C0164392700R):
-`StarUniqueMatchNav` one-star mode accepts an identification whose
-detection sits 18 px from the predicted position, reporting
-success/medium on an unnavigable scene. The `residual_px` (18.2) is
-never gated, and the #211 ambiguity gate (`detection_peak_ratio`,
-`brightness_margin_mag`) is vacuous because both return the no-rival
-sentinel. Also seen: the fused result reports `rank_1_only` with the
-offset zeroed while the sole technique returned a full 2-D result — a
-separate rank-bookkeeping bug on this path.
+**Fix direction:** the issue body carries the frame and the mechanism; add a
+veto that recognizes the haze-crescent failure signature. Coordinate with
+the #60 Titan / haze-limb work, since the substrate overlaps.
 
-**Where:** `src/spindoctor/nav_technique/nav_technique_star_unique_match.py`
-(one_star acceptance); overlaps #130 and the Track F Galileo cluster.
+### #339 / #346 / #291 / #326 / #327 — the remaining confident-wrong set
 
-**Fix direction:** gate the one-star path on the position residual
-(reject a match beyond a few px of prediction); make the ambiguity gate
-require an actual rival rather than pass on the sentinel.
+- **#339** — scattered-light frames fuse correlated disc and limb errors as
+  independent at the 0.99 confidence cap; the correlation must be priced
+  before the fusion.
+- **#346** — three library frames (N1492091163, N1867601758, N1867602424)
+  lock confidently onto the wrong ring feature; standing library reds, tied
+  to the coarse-lock calibration (#373).
+- **#291** — `BodyDiscCorrelateNav` locks on confidently at extreme shape
+  mismatch; needs a mismatch veto on the correlation peak.
+- **#326 / #327** — body-body occlusion at deep mutual-event overlap is
+  ignored by the BODY_DISC correlation template (#326) and by
+  `NavModelBody`'s `visible_arc_fraction` report (#327); both over-credit an
+  occluded limb.
 
-### #261 — DT mis-convergence gate false-flags a correct fit
+### #350 / #351 / #352 — post-recalibration library reds
 
-**Symptom** (2026-07-13 library review, ring_only_curved N1467344214): `RingEdgeNav`
-converges to the operator-verified offset at RMS 0.21 px and confidence
-0.952, then flags itself spurious because `per_edge_median_max` = 46 px
-(one of three fused edges fits poorly; only 26% of vertices are inliers)
-trips the mis-convergence gate. The frame navigates; the pipeline
-discards its own correct result.
+- **#350** — two resolved-body frames (N1484593951, N1686349893) miss the
+  offset tolerance by ~2 px after the recalibration.
+- **#351** — the recalibration turns an operator-verified success into a
+  spurious ensemble conflict (N1530185128).
+- **#352** — autonomous star gates self-flag spurious on a navigable
+  small-offset WAC frame (W1444747627).
 
-**Where:** `src/spindoctor/nav_technique/dt_fitting.py` (per-edge DT
-statistics + spurious gate), `nav_technique_ring_edge.py`.
+Each is one debugging session against its named frame; the sidecars pin them
+red until resolved.
 
-**Fix direction:** gate on the fused/inlier residual rather than the
-worst single edge's median; drop or down-weight an outlier edge before
-the mis-convergence test; or make the gate rank-aware so a
-well-constrained subset carries the result. Coordinate with #179 (this
-frame is a concrete library datapoint for that calibration pass).
-
-### #263 — Single-inlier confidence cap collides with the high tier
-
-**Symptom** (2026-07-13 library crosscheck, one_bright_star_no_body W1449079117): the
-pipeline reports success/**high** at fused confidence **exactly 0.50**.
-`derive_confidence_rank` grants high when `confidence >= 0.5` and
-`max_sigma <= 0.5 px` (`DEFAULT_TIER_THRESHOLDS['high']`), and the
-single-inlier refine path caps confidence at exactly 0.50 ("no
-cross-check on a 1-star refine"). So a one-star, no-cross-check
-solution, capped low *to express that it is weak*, lands on the high
-boundary and earns high tier whenever its centroid sigma is tight.
-
-**Where:** `src/spindoctor/nav_orchestrator/ensemble.py`
-(`DEFAULT_TIER_THRESHOLDS`, `derive_confidence_rank`);
-`src/spindoctor/nav_technique/nav_technique_star_refine.py`
-(`single_inlier_confidence_cap`, default 0.5). Mirrored in
-`config_540_orchestrator.yaml`.
-
-**Fix direction:** separate the two colliding constants - lower the
-single-inlier cap below the high threshold, make the high tier require
-`confidence > 0.5` strictly, or add a tier guard so a fused result whose
-winning member is a single-inlier/one-star solution tops out at medium.
-
-**Acceptance:** a one-star, single-inlier frame cannot report better
-than medium; W1449079117's sidecar (since ratcheted to `medium` by
-PR #279) stops being a standing crosscheck disagreement.
-
-### #237 — multi_body N17023890xx trio: all techniques spurious
-
-One debugging session. Reproduce with the triage artifacts (metadata
-JSONs and summary PNGs under the gitignored `_work/` triage output; the
-frames re-run in ~35 s each with the local mounts per
-`plans/COHORT_CURATION_PLAN.md` section 1). All techniques self-flagging
-spurious on three consecutive multi-body frames suggests a shared cause:
-prime suspects are inter-body occlusion handling and model conflict
-marking (`src/spindoctor/nav_model/`), not three independent fit
-failures. Outcome is either a fix plus regression test, or a documented
-verdict that the frames are genuinely unnavigable (then they become
-`negative_cases` candidates).
-
-### #238 — Galileo (GO_0003) scattered_light C00598xx quintet fails wholesale
-
-One debugging session. Separate two hypotheses: (a) the Voyager
-photometric path (stray-light gradient handling / DoG bandpass) breaks
-navigable frames — look at the image-derivatives products and the star
-model's gating on these frames; (b) the prescan admitted frames with no
-navigable content — then the fix is the Stage-A criteria (the working
-rule: stray-light gradient AND navigable content, prescan score >= 5 plus
->= 3 stars or a resolved ring/limb), and the verdict feeds
-`util/cohort_curation/scan_stage_a.py`. Voyager runs need the
-geometrically corrected (GEOMED) products, never raw.
-
-### #179 — DT coarse-prior search vs competing edge populations
+### #373 — DT coarse-prior search vs competing edge populations
 
 The coarse NCC search over the distance-transform image can lock onto the
 wrong edge population (e.g. a ring edge when fitting a limb) and hand the
 Levenberg-Marquardt refine an unrecoverable prior.
-`src/spindoctor/nav_technique/dt_fitting.py` (`coarse_ncc_search`); the
-minimum-support guard (#191) already landed, and the terminator technique
-now has a second-minimum spurious gate (`find_secondary_dt_minimum`,
-reusable) that closes its confident-wrong endpoint. What remains is a
-calibration pass over the library: characterize when the coarse search's
-top basins are ambiguous, and either widen the second-opinion gate to the
-other DT techniques or add per-feature-type edge masking. Needs the
-library cohort; coordinate with Track A so the fix is measured, not
-guessed.
+`src/spindoctor/nav_technique/dt_fitting.py` (`coarse_ncc_search`). The
+polarity-weighted coarse seed already landed; what remains (#373) is making
+the RingEdgeNav coarse seed robust against competing edge populations even
+when polarity is blind — a calibration pass over the library that
+characterizes when the coarse search's top basins are ambiguous, and either
+widens the second-opinion gate to the other DT techniques or adds
+per-feature-type edge masking. Needs the library cohort; coordinate with
+Track A so the fix is measured, not guessed. #346 supplies the concrete
+wrong-lock datapoints.
+
+### #378 — RingAnnulus correlation template not filtered for planet occlusion
+
+The annulus-side analog of the ring-edge occlusion trim: `NavModelRings`'s
+`to_features` appends the untrusted `model_img` / `model_mask` to the
+RING_ANNULUS template without trimming against the planet-occlusion mask, so
+on low-resolution frames the annulus correlation template can include ring
+brightness behind the planet disc. Not a regression and no observed failure
+(RingAnnulusNav's NCC is robust) — a correctness/cleanliness gap: trim the
+annulus template against the same occlusion mask the ring-edge feature path
+uses.
+
+### #337 / #376 / #367 — star-matcher robustness
+
+- **#337** — the star-field matcher's triplet canonicalization is a seed
+  lottery on equal-brightness fields; make the canonical triplet order
+  deterministic and rotation-stable
+  (`nav_technique_star_field.py`).
+- **#376** — a widened saturation match can capture the wrong bright
+  reference in a crowded field; constrain the widened match to the intended
+  reference (`nav_model/stars/`).
+- **#367** — autonomous star nav cannot lock a wide offset from a single
+  detectable star; a capability gap in the one-star path.
 
 ### #128 / #150 — Limb navigation redesign and the ~0.1 px systematic
 
 The strategic pair behind several symptoms (the terminator
 mis-convergence class, #187 chaotic rotators). #150 is the measured
-~0.09-0.13 px limb bias: the
-model predicts the geometric silhouette while the image's gradient ridge
-sits ~0.1 px inside it (PSF), so `gradient_ridge_refine` is disabled for
-the limb technique (`config_510_techniques.yaml`) while ring edges run
-with it on. Candidate fixes (validation plan WS-10): forward-model the
-PSF-inward offset in `src/spindoctor/nav_model/body/nav_model_body.py`,
-or replace the integer-quantized DT with a continuous/interpolated one.
-**Constraint:** do not touch until the real-image measurement exists
-(Track A #225/#227 provide it) — the current partial cancellation is
-accidental and a well-meaning "fix" can make real accuracy worse. #128 is
-the fuller redesign (all body types and illuminations) and starts with a
-design document, not code.
+~0.09-0.13 px limb bias: the model predicts the geometric silhouette while
+the image's gradient ridge sits ~0.1 px inside it (PSF), so
+`gradient_ridge_refine` is disabled for the limb technique
+(`config_510_techniques.yaml`) while ring edges run with it on. The measured
+diagnosis attributes the dominant term to the photometric roll-off, not DT
+quantization, and ranks the fixes: (1) fit a photometric limb (predict the
+limb-darkened-disc-convolved-with-PSF brightness profile and match it, #150);
+(2) a matched-filter sub-pixel edge estimator to remove the interpolation
+ripple (#282); (3) gate low-phase (<~15 deg) fits (#281); (4) a pixel-centre
+convention audit (#283). **Constraint:** do not enable a fitter change until
+the real-image measurement exists (Track A #225 provides it) — the current
+partial cancellation is accidental and a well-meaning "fix" can make real
+accuracy worse. On real frames the fitter contributes only ~0.1 px while
+spacecraft-position / ephemeris error dominates (0.4-1.7 px), so the
+higher-leverage target is the pointing-kernel side (#188/#50). #128 is the
+fuller redesign (all body types and illuminations) and starts with a design
+document, not code.
 
 ### Smaller Track B items
 
@@ -266,34 +174,19 @@ design document, not code.
   PSF-blurred image; investigate blur-matching the model
   (`nav_model_body.py`) at high resolution. Investigation first: measure
   whether it actually moves offsets on library close-flyby frames.
-- **#24** — remove fuzzy/non-spherical bodies from techniques that assume
-  a clean ellipsoid silhouette; the body-shape table
-  (`config_220_body_shape.yaml`) now has real values to gate on.
 - **#130** — per-instrument star limiting magnitudes measured from real
   star fields (a small campaign over the library's star classes;
   coordinate with #233's measured-SNR work — same frames, same tooling).
-- **#132** — star-field rotation variance assumes isotropic residuals
-  (up to 2x off); derive the anisotropic form in
-  `nav_technique_star_field.py`.
-- **#133** — star inlier matching is greedy/order-dependent; switch to
-  optimal assignment (scipy `linear_sum_assignment`) if profiling says it
-  is affordable.
-- **#180** — wire `STATUS_REASON_INFO_TEMPLATE` through every
-  `NavResult.failed` site so each failure carries a per-image reason
-  (`src/spindoctor/nav_orchestrator/`); cheap, and it makes every other
-  item in this track easier to debug — schedule it first among the small
-  items.
-- **#239** — implement whichever sub-5 px body policy the operator picks
-  (see PROGRAM_PLAN decision gates).
-- **#254** — a fully dark body emits a BODY_BLOB where the body-model
-  dev guide says "otherwise nothing"; the two spec sources disagree
-  (the module docstring gates blobs on diameter alone). Resolve by
-  gating blob emission on a non-empty lit mask or by softening the dev
-  guide. Navigation-affecting: sequence behind the operator's library
-  review of current main, like every ensemble/model change.
-  Pipeline impact is likely nil today (the blob's reliability ~0.02 is
-  culled by the 0.20 gate); fixed by PR #266 and asserted positively in
-  `tests/spindoctor/nav_model/test_nav_model_body_render.py`.
+- **#239** — implement the sub-5 px body policy the operator settled on
+  (expected-failure curation); the open work is the targeted diameter-
+  filtered cohort scan for a qualifying single-body frame.
+- **#338** — decision: the highly-irregular exclusion discards a
+  ground-truth terminator fit on N1853392805; implement whichever option the
+  operator picks (accept the 2-px-class ground truth, keep TERMINATOR_ARC for
+  SPICE-known synchronous rotators, or shape models per #23).
+- **#60** — Titan: the recorded-decline interim is in place; the open work is
+  the full haze-limb navigation decision and, if chosen, its model and
+  technique (also a Track D scope gate).
 
 ## Track C — Statistics and QA
 
@@ -335,31 +228,22 @@ plus hook implementations, mechanical but voluminous.
 
 Work items, in dependency order:
 
-1. **#139 and #256 — LID cross-referencing (fixed in PR #264)** — the
-   global-index LID was malformed (missing `urn:nasa:pds:` prefix, wrong
-   image part) and the collection inventory LIDVIDs double-transformed
-   the image name (the on-disk name is already LID-part form, so the LID
-   builder re-applied the Cassini rotate-first-char transform):
-   `src/spindoctor/cli/pds4/collections.py`. Both are resolved together
-   by a `DataSet.pds4_lid_part_to_image_name` inverse hook — the
-   collection and global-index scanners recover the original image name
-   from each on-disk product stem before calling the canonical LID
-   builders. The strict-xfail label-round-trip tests in
-   `tests/spindoctor/cli/pds4/test_collections.py` are flipped. Two
-   characterized defects recorded on #256 are tracked by **#265** for
-   the same area: every `template.write` ignores pdstemplate's
-   error/warning counts (an unresolved variable silently drops the label
-   while the run reports success), and the dev-guide "Output layout"
-   section describes a layout neither the code nor the user guide
-   matches.
-2. **Template finalization acceptance list** — the ten items recorded
-   on #53 (2026-07-13 comment): schema validation, the unreferenced
-   `cassini:*` variables and hardcoded placeholders, TITLE/DESCRIPTION
-   wording, collection date ranges, unrendered bundle-level products,
-   variable-less global-index labels, FITS placement (#69/#30),
-   missing-value sentinels, non-navigated-image handling, and the
-   `.tab`/`.csv` + directory-layout decision. These are the acceptance
-   criteria for "final templates" in the paragraph above.
+1. **#265 — swallowed label-write errors and the output-layout mismatch**
+   — every `template.write` ignores pdstemplate's error/warning counts
+   (an unresolved variable silently drops the label while the run reports
+   success), and the dev-guide "Output layout" section describes a layout
+   neither the code nor the user guide matches:
+   `src/spindoctor/cli/pds4/collections.py` and the surrounding writer
+   path. Fix the write path to fail loudly on a dropped label and
+   reconcile the layout documentation.
+2. **Template finalization acceptance list** — the items recorded
+   on #53: schema validation, the unreferenced `cassini:*` variables and
+   hardcoded placeholders, TITLE/DESCRIPTION wording, collection date
+   ranges, unrendered bundle-level products, variable-less global-index
+   labels, FITS placement (#69/#30), missing-value sentinels,
+   non-navigated-image handling, and the `.tab`/`.csv` + directory-layout
+   decision. These are the acceptance criteria for "final templates" in
+   the paragraph above.
 3. **#69, #30** — backplane FITS description in data labels; backplane
    label design (couples to the #55 backplane-set decision).
 4. **#79** — scrape PDS4 context products for targets (feeds #73).
@@ -442,13 +326,15 @@ asserts the generated half matches the registries.
 ## Track E — Test and documentation debt
 
 - **#241 / #242** — unit tests for `spindoctor.cli.backplanes` and
-  `spindoctor.cli.pds4`. The backend halves are delivered by PRs #255
-  and #257 (99% coverage of both packages; hermetic, spec-first); the
-  remaining scope is the `sd_backplanes.py` / `sd_create_bundle.py`
-  driver arg-parsing layer, which should fold into the broader
-  sd_*-driver test effort. The suites found and pinned #251, #252,
-  #253, #256; the #256 LID xfails are flipped by PR #264, and #251,
-  #252, #253 remain (strict xfails ready to flip when each fix lands).
+  `spindoctor.cli.pds4`. The backend halves are covered (hermetic,
+  spec-first); the remaining scope is the `sd_backplanes.py` /
+  `sd_create_bundle.py` driver arg-parsing layer, which should fold into
+  the broader sd_*-driver test effort. The backplane suite carries strict
+  xfails for #251, #252, #253, ready to flip when each fix lands.
+- **#288** — image-library regression reconciliation: the standing red set
+  is now reduced to the deliberately-pinned frames, each owned by an open
+  navigation issue (#222, #338, #346, #350, #351, #352). Keep the pins
+  accurate as those issues close and re-ratchet only what they authorize.
 - **#243** — direct tests for `nav_model/stars/conflicts.py`
   (`_check_one_star`, `mark_body_and_ring_conflicts`) with synthetic
   geometry; the existing per-pixel occlusion tests cover only the
@@ -478,9 +364,9 @@ Start after Track A's Cassini verdict; per instrument the pattern is:
 fix ingest/navigation defects, add library frames (#235), extend the
 calibration (#230) and the appendix (#93).
 
-- **Voyager ISS:** #19 — star navigation broken; overlaps the distortion
-  (#228) and limiting-magnitude (#130) work, so schedule together.
-  Rotation fitting is currently off for cost (#126).
+- **Voyager ISS:** #19 — star navigation broken; overlaps the per-camera
+  Voyager distortion split (#355) and limiting-magnitude (#130) work, so
+  schedule together. Rotation fitting is currently off for cost (#126).
 - **Galileo SSI:** #18 — star navigation broken (same cluster); #17 —
   REDO product handling in the dataset layer.
 - **New Horizons LORRI:** #2 — PSF sigma calibration; #138 — decide and
