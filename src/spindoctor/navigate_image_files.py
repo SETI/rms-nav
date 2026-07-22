@@ -332,7 +332,8 @@ def _summary_metadata_from_obs_result(obs: ObsSnapshotInst, result: NavResult) -
     exposure_s: float | None = None
     try:
         public = obs.get_public_metadata()
-    except Exception:
+    except Exception as exc:
+        IMAGE_LOGGER.warning('Could not read public metadata for summary PNG: %s', exc)
         public = {}
     abspath = getattr(obs, 'abspath', None)
     image_name = str(public.get('image_name') or (abspath.name if abspath is not None else ''))
@@ -340,7 +341,10 @@ def _summary_metadata_from_obs_result(obs: ObsSnapshotInst, result: NavResult) -
     filter_name = '+'.join(filters)
     exposure_raw = public.get('exposure_time')
     if exposure_raw is not None:
-        exposure_s = float(exposure_raw)
+        try:
+            exposure_s = float(exposure_raw)
+        except (TypeError, ValueError):
+            IMAGE_LOGGER.warning('Unparsable exposure_time %r; omitting from summary', exposure_raw)
     # The techniques that actually contributed to the reported offset are the
     # ensemble's consensus subset, not every technique that ran (outliers the
     # ensemble rejected still appear in per_technique).  Fall back to the full

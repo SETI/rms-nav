@@ -605,6 +605,22 @@ def test_summary_metadata_reads_exposure_as_float() -> None:
     assert meta.exposure_s == 2.0
 
 
+def test_summary_metadata_tolerates_unparsable_exposure() -> None:
+    """A non-numeric exposure leaves the field unknown instead of crashing."""
+    obs = _FakeObsForMetadata(
+        {'image_name': 'N1.IMG', 'filters': [], 'exposure_time': 'bad'}
+    )
+    result = _FakeNavResult(
+        status='success',
+        per_technique=[_FakeTechniqueResult('StarRefineNav')],
+        consensus_techniques=['StarRefineNav'],
+        confidence=0.6,
+        confidence_rank='medium',
+    )
+    meta = _summary_metadata_from_obs_result(obs, result)  # type: ignore[arg-type]
+    assert meta.exposure_s is None
+
+
 def test_summary_metadata_uses_consensus_techniques() -> None:
     """Only the ensemble's consensus subset is reported, not every result."""
     obs = _FakeObsForMetadata({'image_name': 'N1.IMG', 'filters': ['CL1'], 'exposure_time': 1.0})

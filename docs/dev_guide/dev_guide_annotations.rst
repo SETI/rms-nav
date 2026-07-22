@@ -86,9 +86,11 @@ Summary-PNG extras
 
 Beyond the raw overlay the summary-PNG renderer
 (:func:`~spindoctor.support.summary_png.render_annotated_summary_rgb`) adds two
-presentation features. A metadata text block names the image, its filter and
-exposure, the navigation status with the contributing techniques, and the fused
-confidence; it is drawn in the least-crowded corner and steered clear of the
+presentation features. A metadata text block names the image and, when they are
+known, its filter and exposure; it reports the navigation status, the
+contributing techniques (only for a successful navigation), and the fused
+confidence (shown as ``n/a`` when none was fused). It is drawn in the
+least-crowded corner and steered clear of the
 drawn label bounding boxes (falling back to image brightness among the
 text-free corners). A per-star local contrast stretch rewrites each star
 detection box against its own min / max so a faint star a few DN above a bright

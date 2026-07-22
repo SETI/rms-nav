@@ -366,8 +366,17 @@ def test_wrap_lines_splits_line_wider_than_budget() -> None:
     image = Image.new('RGB', (200, 40))
     draw = ImageDraw.Draw(image)
     font = _load_summary_font(14)
-    wrapped = _wrap_lines_to_width(draw, ['aaaa bbbb cccc dddd eeee ffff'], font, 40)
+    source = 'aaaa bbbb cccc dddd eeee ffff'
+    wrapped = _wrap_lines_to_width(draw, [source], font, 40)
+    widths = [
+        right - left
+        for left, _top, right, _bottom in (
+            draw.textbbox((0, 0), line, font=font) for line in wrapped
+        )
+    ]
     assert len(wrapped) > 1
+    assert ' '.join(wrapped) == source
+    assert max(widths) <= 40
 
 
 def test_wrap_lines_keeps_narrow_line_intact() -> None:

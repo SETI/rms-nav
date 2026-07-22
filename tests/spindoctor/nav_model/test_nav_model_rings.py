@@ -438,7 +438,7 @@ def test_visible_edge_info_keeps_visible_edge_intact() -> None:
 
 
 def test_visible_edge_info_trims_straddling_edge() -> None:
-    """A straddling edge keeps only its visible pixels."""
+    """A straddling edge keeps its visible pixels and clears the hidden ones."""
     occluded = np.zeros((10, 10), dtype=bool)
     occluded[:, 5:] = True
     straddle = np.zeros((10, 10), dtype=bool)
@@ -448,17 +448,6 @@ def test_visible_edge_info_trims_straddling_edge() -> None:
     trimmed_mask = kept[0][0]
     assert bool(trimmed_mask[4, 3])
     assert bool(trimmed_mask[4, 4])
-
-
-def test_visible_edge_info_trims_away_hidden_pixels() -> None:
-    """The occluded pixels of a straddling edge are cleared."""
-    occluded = np.zeros((10, 10), dtype=bool)
-    occluded[:, 5:] = True
-    straddle = np.zeros((10, 10), dtype=bool)
-    straddle[4, 3:8] = True
-    model = _rings_model_with_occlusion(occluded)
-    kept = model._visible_edge_info([(straddle, 'A ring', 'a_outer')])
-    trimmed_mask = kept[0][0]
     assert not bool(trimmed_mask[4, 6])
 
 
