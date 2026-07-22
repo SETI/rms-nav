@@ -212,9 +212,9 @@ def _catalog_positions(catalog: Any, ra: float, ra_half: float, dec_min: float,
                                        dec_min=dec_min, dec_max=dec_max,
                                        vmag_max=vmag_max,
                                        allow_double=allow_double):
-            v = getattr(star, 'vmag', None)
-            sra = getattr(star, 'ra', None)
-            sdec = getattr(star, 'dec', None)
+            v = star.vmag
+            sra = star.ra
+            sdec = star.dec
             if v is not None and sra is not None and sdec is not None:
                 out.append((float(sra), float(sdec), float(v)))
     return out

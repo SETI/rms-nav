@@ -44,8 +44,8 @@ few tenths of a magnitude near :math:`V \approx 8` and climbing to several magni
 read the catalog magnitude, an uncorrected field of two genuinely bright anchor stars plus
 a faint remainder is mistaken for a scatter of comparably faint sources: the two dominant
 anchors are dragged down into the faint population and the pipeline cannot tell they are
-there. In the Pleiades, UCAC4 reports Eta Tau (true :math:`V \approx 2.9`) and 23 Tau near
-:math:`V \approx 6.7`.
+there. In the Pleiades, UCAC4 reports Eta Tau (true :math:`V \approx 2.9`) and 27 Tau (true
+:math:`V \approx 3.6`) near :math:`V \approx 6.7`.
 
 After the catalog merge, :func:`~spindoctor.nav_model.stars.saturation.correct_star_photometry`
 cross-references the merged list against a trusted-photometry reference built from the full

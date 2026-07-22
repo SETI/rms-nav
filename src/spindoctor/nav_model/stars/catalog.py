@@ -529,8 +529,14 @@ def reduce_catalogs(
     # and Tycho-2 are authoritative through the saturated regime (Tycho-2
     # reaches the V6.5 to V8 stars YBSC misses); correct the merged list
     # against them before overlaps and DN ordering are computed so both
-    # depend on the true brightness.
-    if photometry_reference:
+    # depend on the true brightness.  Run the correction whenever a reference
+    # catalog is configured, even when its in-field query returned nothing: a
+    # bright UCAC4 record with no reference in either catalog must still be
+    # flagged saturated rather than silently trusted.
+    reference_configured = any(
+        name.lower() in _PHOTOMETRY_REFERENCE_CATALOGS for name in stars_config.catalogs
+    )
+    if reference_configured:
         kept = correct_star_photometry(
             kept,
             photometry_reference,

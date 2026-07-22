@@ -530,6 +530,24 @@ def test_reduce_catalogs_flags_bright_star_without_ybsc_match(
     assert corrected.photometry_saturated is True
 
 
+def test_reduce_catalogs_flags_bright_star_when_reference_field_empty(
+    monkeypatch: pytest.MonkeyPatch, fake_obs: FakeObs
+) -> None:
+    """A bright UCAC4 star is flagged even when the field has no reference at all.
+
+    The reference catalogs are configured but return no in-field records, so
+    the correction runs on an empty reference and flags the bright UCAC4
+    record as saturated rather than silently trusting its aperture magnitude.
+    """
+    install_fake_catalogs(
+        monkeypatch,
+        ucac4=[make_star(unique_number=1, ra=0.10, dec=0.0, vmag=4.0)],
+    )
+    out = reduce_catalogs(cast(Any, fake_obs), DEFAULT_CONFIG)
+    corrected = next(s for s in out if s.catalog_name == 'ucac4')
+    assert corrected.photometry_saturated is True
+
+
 def test_reduce_catalogs_corrects_saturated_ucac4_against_tycho2(
     monkeypatch: pytest.MonkeyPatch, fake_obs: FakeObs
 ) -> None:
