@@ -37,6 +37,20 @@ For each catalog-defined ring edge the model:
 4. Walks the pixel set to produce a polyline of vertices, each with an outward radial
    normal estimated from the local radius gradient.
 
+Planet occlusion
+----------------
+
+Ring points hidden behind the planet globe are removed before any feature or overlay is
+produced. The model evaluates the ``where_in_front(planet, ring)`` backplane -- true at
+every extended-FOV pixel where the planet disc is intercepted and nearer to the observer
+than the ring plane -- and clears those pixels from every per-edge mask at render time.
+Both the emitted
+:data:`~spindoctor.feature.feature_type.NavFeatureType.RING_EDGE` features and the summary
+overlay read the same masks, so an edge segment behind the disc is neither fitted by
+:doc:`dev_guide_techniques_ring_edge` nor drawn across the planet, while a near-side edge
+crossing in front of the disc is kept. When the backplane cannot be evaluated the model
+keeps every edge rather than aborting.
+
 Per-edge feature filtering
 --------------------------
 

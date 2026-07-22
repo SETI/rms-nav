@@ -81,6 +81,22 @@ one image: what was in the source (background), what each
 predicted (overlay), and where the orchestrator placed the predictions
 relative to the data (the offset shift applied at composition time).
 
+Summary-PNG extras
+==================
+
+Beyond the raw overlay the summary-PNG renderer
+(:func:`~spindoctor.support.summary_png.render_annotated_summary_rgb`) adds two
+presentation features. A metadata text block names the image, its filter and
+exposure, the navigation status with the contributing techniques, and the fused
+confidence; it is drawn in the least-crowded corner and steered clear of the
+drawn label bounding boxes (falling back to image brightness among the
+text-free corners). A per-star local contrast stretch rewrites each star
+detection box against its own min / max so a faint star a few DN above a bright
+background stays visible even when the whole-frame stretch would bury it.
+Ring edges hidden behind the planet globe are already absent from the masks the
+overlay draws, so they are never painted across the disc (see
+:doc:`dev_guide_navigation_models_ring`).
+
 Configuration
 =============
 
