@@ -607,9 +607,7 @@ def test_summary_metadata_reads_exposure_as_float() -> None:
 
 def test_summary_metadata_tolerates_unparsable_exposure() -> None:
     """A non-numeric exposure leaves the field unknown instead of crashing."""
-    obs = _FakeObsForMetadata(
-        {'image_name': 'N1.IMG', 'filters': [], 'exposure_time': 'bad'}
-    )
+    obs = _FakeObsForMetadata({'image_name': 'N1.IMG', 'filters': [], 'exposure_time': 'bad'})
     result = _FakeNavResult(
         status='success',
         per_technique=[_FakeTechniqueResult('StarRefineNav')],
