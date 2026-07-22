@@ -48,6 +48,11 @@ from spindoctor.nav_model.stars.predicted_snr import (
     psf_aperture_pixels,
     psf_sigma_px,
 )
+from spindoctor.nav_model.stars.saturation import (
+    UCAC4_SATURATION_VMAG_LIMIT,
+    correct_saturated_vmags,
+    correct_star_photometry,
+)
 from spindoctor.nav_model.stars.smeared_psf import (
     compute_smear_vector_px,
     movement_granularity_px,
@@ -62,6 +67,7 @@ __all__ = [
     'DAOPHOT_DEFAULT_SHARPNESS_MAX',
     'DAOPHOT_DEFAULT_SHARPNESS_MIN',
     'SCLASS_TO_B_MINUS_V',
+    'UCAC4_SATURATION_VMAG_LIMIT',
     'DetectedSource',
     'NavModelStars',
     'NavModelStarsSimulated',
@@ -70,6 +76,8 @@ __all__ = [
     'centroid_gaussian_fit',
     'centroid_saturated',
     'compute_smear_vector_px',
+    'correct_saturated_vmags',
+    'correct_star_photometry',
     'detect_ccd_bloom_columns',
     'detect_sources',
     'integrated_signal_dn',

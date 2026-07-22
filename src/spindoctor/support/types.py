@@ -50,6 +50,12 @@ class MutableStar(Protocol):
     johnson_mag_v: float | None
     johnson_mag_b: float | None
     johnson_mag_faked: bool
+    # Bright-end saturation provenance (see nav_model.stars.saturation):
+    # ``photometry_corrected`` is set when ``vmag`` was replaced by a YBSC
+    # value; ``photometry_saturated`` marks a bright record whose catalog
+    # magnitude is unreliable and potentially too faint (no YBSC match).
+    photometry_corrected: bool
+    photometry_saturated: bool
     spectral_class: str | None
     temperature: float | None
     temperature_faked: bool

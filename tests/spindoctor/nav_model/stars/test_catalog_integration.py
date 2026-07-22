@@ -471,3 +471,60 @@ def test_merge_catalogs_breaks_inner_loop_on_sorted_prefix() -> None:
     )
     # No duplicate match -> both stars survive.
     assert {s.unique_number for s in out} == {1, 2}
+
+
+def test_reduce_catalogs_collapses_saturated_ucac4_onto_ybsc_twin(
+    monkeypatch: pytest.MonkeyPatch, fake_obs: FakeObs
+) -> None:
+    """A saturated UCAC4 bright star collapses onto its native YBSC twin.
+
+    UCAC4 reports the star three-plus magnitudes too faint (mirroring the
+    Pleiades Eta Tau, catalogued near V6.7 against a true V2.9), so the
+    merge kept both records; the reduction resolves the field to the single
+    YBSC record, which carries the true magnitude and accurate astrometry.
+    """
+    install_fake_catalogs(
+        monkeypatch,
+        ucac4=[make_star(unique_number=1, ra=0.10, dec=0.0, vmag=6.7)],
+        ybsc=[make_star(unique_number=2, ra=0.10, dec=0.0, vmag=2.87, b_v=-0.09)],
+    )
+    out = reduce_catalogs(cast(Any, fake_obs), DEFAULT_CONFIG)
+    assert len(out) == 1
+    # The YBSC record (not the corrected UCAC4 record) must be the survivor.
+    assert out[0].catalog_name == 'ybsc'
+    assert out[0].vmag == pytest.approx(2.87)
+
+
+def test_reduce_catalogs_corrects_sole_source_ucac4_in_place(
+    monkeypatch: pytest.MonkeyPatch, fake_obs: FakeObs
+) -> None:
+    """A saturated UCAC4 star with no surviving twin is corrected and flagged.
+
+    The YBSC value is within the duplicate-magnitude threshold, so the
+    merge already dropped the YBSC record as a duplicate; the UCAC4 record
+    remains and adopts the YBSC magnitude, flagged as corrected.
+    """
+    install_fake_catalogs(
+        monkeypatch,
+        ucac4=[make_star(unique_number=1, ra=0.10, dec=0.0, vmag=7.6)],
+        ybsc=[make_star(unique_number=2, ra=0.10, dec=0.0, vmag=5.09, b_v=0.0)],
+    )
+    out = reduce_catalogs(cast(Any, fake_obs), DEFAULT_CONFIG)
+    assert len(out) == 1
+    assert out[0].catalog_name == 'ucac4'
+    assert out[0].photometry_corrected is True
+    assert out[0].vmag == pytest.approx(5.09)
+
+
+def test_reduce_catalogs_flags_bright_star_without_ybsc_match(
+    monkeypatch: pytest.MonkeyPatch, fake_obs: FakeObs
+) -> None:
+    """A bright UCAC4 star with no co-located YBSC record is flagged saturated."""
+    install_fake_catalogs(
+        monkeypatch,
+        ucac4=[make_star(unique_number=1, ra=0.10, dec=0.0, vmag=4.0)],
+        ybsc=[make_star(unique_number=2, ra=0.40, dec=0.05, vmag=3.0, b_v=0.0)],
+    )
+    out = reduce_catalogs(cast(Any, fake_obs), DEFAULT_CONFIG)
+    corrected = next(s for s in out if s.catalog_name == 'ucac4')
+    assert corrected.photometry_saturated is True

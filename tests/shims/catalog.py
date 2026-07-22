@@ -64,6 +64,11 @@ class FakeStar:
         johnson_mag_faked: ``True`` when the reduction supplied
             ``johnson_mag_b`` from the spectral-class colour table
             instead of the catalog.
+        photometry_corrected: ``True`` when the bright-end saturation
+            pass replaced ``vmag`` with a YBSC value.
+        photometry_saturated: ``True`` when the record is bright per the
+            catalog but has no YBSC match, so its magnitude is unreliable
+            and potentially too faint.
         spectral_class: MK spectral class, e.g. ``'G0'``.  The
             reduction defaults to ``stars.default_star_class`` when
             absent.
@@ -98,6 +103,8 @@ class FakeStar:
     johnson_mag_v: float | None = None
     johnson_mag_b: float | None = None
     johnson_mag_faked: bool = False
+    photometry_corrected: bool = False
+    photometry_saturated: bool = False
     spectral_class: str | None = None
     temperature: float | None = None
     temperature_faked: bool = False

@@ -44,6 +44,8 @@ class _FakeMutableStar:
     pretty_name: str = '12345'
     name: str = ''
     vmag: float | None = 5.0
+    photometry_corrected: bool = False
+    photometry_saturated: bool = False
     spectral_class: str = 'G0'
     psf_size: tuple[int, int] = (5, 5)
     u: float = 50.0

@@ -615,6 +615,8 @@ def _star_summary(star: MutableStar) -> dict[str, Any]:
         'ra_deg': float(np.degrees(star.ra_pm)),
         'dec_deg': float(np.degrees(star.dec_pm)),
         'vmag': star.vmag,
+        'photometry_corrected': star.photometry_corrected,
+        'photometry_saturated': star.photometry_saturated,
         'u': star.u,
         'v': star.v,
         'move_u': star.move_u,

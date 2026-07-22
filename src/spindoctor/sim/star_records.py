@@ -68,6 +68,10 @@ def star_record_from_params(
     bmv = Star.bmv_from_sclass(star.spectral_class or 'G2') or 0.63
     star.johnson_mag_b = star.johnson_mag_v + bmv
     star.johnson_mag_faked = False
+    # Simulated photometry is authoritative by construction, so it is never
+    # saturated nor corrected (see nav_model/stars/saturation.py).
+    star.photometry_corrected = False
+    star.photometry_saturated = False
     star.ra_pm = 0.0
     star.dec_pm = 0.0
     star.conflicts = ''
