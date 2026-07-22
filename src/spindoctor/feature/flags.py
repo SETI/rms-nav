@@ -45,6 +45,12 @@ class StarFlags:
         vmag: Catalog V-band magnitude of the star, or ``None`` when the
             catalog entry has no magnitude.  Used by ``StarUniqueMatchNav``
             to compute the magnitude margin to the next-brightest star.
+        photometry_saturated: True if the catalog magnitude is a saturated
+            bright-end reading with no YBSC or Tycho-2 reference to correct
+            it, so ``vmag`` is an untrusted lower bound on brightness (the
+            star is at least this bright, likely brighter).  The
+            detectability model keeps such a star rather than rejecting it
+            on its too-faint reading.
     """
 
     saturated: bool = False
@@ -53,6 +59,7 @@ class StarFlags:
     in_saturation_or_cosmic_mask: bool = False
     predicted_snr: float = 0.0
     vmag: float | None = None
+    photometry_saturated: bool = False
 
     def __post_init__(self) -> None:
         """Validate ``smear_length_px`` and ``predicted_snr`` are non-negative."""

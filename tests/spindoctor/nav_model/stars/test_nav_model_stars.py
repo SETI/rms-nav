@@ -44,6 +44,8 @@ class _FakeMutableStar:
     pretty_name: str = '12345'
     name: str = ''
     vmag: float | None = 5.0
+    photometry_corrected: bool = False
+    photometry_saturated: bool = False
     spectral_class: str = 'G0'
     psf_size: tuple[int, int] = (5, 5)
     u: float = 50.0
@@ -340,6 +342,38 @@ def test_to_features_marks_in_body_when_conflict_set() -> None:
     assert isinstance(feat.flags, StarFlags)
     assert feat.flags.in_body_silhouette is True
     assert feat.reliability == 0.0
+
+
+def test_to_features_keeps_saturated_star_fainter_than_limit() -> None:
+    """A saturated star fainter than the limit is kept, not dropped.
+
+    Its recorded magnitude is an untrusted, too-faint saturated reading, so
+    the faint gate must not reject it.
+    """
+    model, _obs = _make_model(star_max_vmag=8.0)
+    saturated = _FakeMutableStar(vmag=9.0, photometry_saturated=True)
+    model._stars = [cast(MutableStar, saturated)]
+    assert len(model.to_features(cast(NavContext, _FakeContext()))) == 1
+
+
+def test_to_features_saturated_star_gets_at_least_snr_ref() -> None:
+    """A saturated star fainter than the limit is treated as at-limit bright."""
+    model, _obs = _make_model(star_max_vmag=8.0)
+    saturated = _FakeMutableStar(vmag=9.0, photometry_saturated=True)
+    model._stars = [cast(MutableStar, saturated)]
+    feat = model.to_features(cast(NavContext, _FakeContext()))[0]
+    assert isinstance(feat.flags, StarFlags)
+    assert feat.flags.predicted_snr == pytest.approx(SNR_REF)
+
+
+def test_to_features_surfaces_photometry_saturated_flag() -> None:
+    """The saturated-photometry flag is carried onto the emitted feature."""
+    model, _obs = _make_model(star_max_vmag=8.0)
+    saturated = _FakeMutableStar(vmag=6.5, photometry_saturated=True)
+    model._stars = [cast(MutableStar, saturated)]
+    feat = model.to_features(cast(NavContext, _FakeContext()))[0]
+    assert isinstance(feat.flags, StarFlags)
+    assert feat.flags.photometry_saturated is True
 
 
 def test_to_annotations_empty_when_no_stars() -> None:
