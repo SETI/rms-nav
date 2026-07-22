@@ -146,6 +146,7 @@ class AnnotationTextInfo:
         text_draw: ImageDraw.ImageDraw,
         tt_dir: str,
         show_all_positions: bool,
+        placed_bboxes: list[tuple[int, int, int, int]] | None = None,
     ) -> bool:
         """Try to place the text in a location that doesn't conflict with other elements.
 
@@ -161,6 +162,9 @@ class AnnotationTextInfo:
             tt_dir: Directory containing TrueType fonts.
             show_all_positions: Whether to try all positions or stop after finding the
                 first valid one.
+            placed_bboxes: Optional list extended with the ``(v_min, u_min,
+                v_max, u_max)`` bounding box (text-layer pixel coordinates,
+                which are the FOV coordinates) of each label position drawn.
 
         Returns:
             True if the text was successfully placed, False otherwise.
@@ -371,6 +375,8 @@ class AnnotationTextInfo:
             )
             if ann_num_mask is not None:
                 ann_num_mask[v0_margin:v1_margin, u0_margin:u1_margin] = ann_num + 1
+            if placed_bboxes is not None:
+                placed_bboxes.append((v0_margin, u0_margin, v1_margin, u1_margin))
 
             placed = True
             if not show_all_positions:

@@ -63,6 +63,8 @@ class Annotations(NavBase):
         text_use_avoid_mask: bool = True,
         text_avoid_other_text: bool = True,
         text_show_all_positions: bool = False,
+        *,
+        text_bboxes: list[tuple[int, int, int, int]] | None = None,
     ) -> NDArrayIntType | None:
         """Combines all annotations into a single graphic overlay image.
 
@@ -72,6 +74,10 @@ class Annotations(NavBase):
             text_use_avoid_mask: Whether to use avoid masks for text placement
             text_avoid_other_text: Whether text should avoid other text
             text_show_all_positions: Whether to show all possible text positions
+            text_bboxes: Optional list that, when provided, is extended with the
+                FOV-pixel ``(v_min, u_min, v_max, u_max)`` bounding box of every
+                label actually drawn.  Lets a caller steer a later overlay (the
+                summary metadata block) clear of the placed labels.
 
         Returns:
             A combined RGB array containing all annotations, or None if no annotations
@@ -110,6 +116,7 @@ class Annotations(NavBase):
                     all_avoid_mask,
                     text_avoid_other_text,
                     text_show_all_positions,
+                    placed_text_bboxes=text_bboxes,
                 )
 
             return res
@@ -122,6 +129,8 @@ class Annotations(NavBase):
         avoid_mask: NDArrayBoolType,
         text_avoid_other_text: bool,
         text_show_all_positions: bool,
+        *,
+        placed_text_bboxes: list[tuple[int, int, int, int]] | None = None,
     ) -> None:
         """Adds label text to an existing overlay image.
 
@@ -132,6 +141,8 @@ class Annotations(NavBase):
             avoid_mask: Mask indicating areas to avoid when placing text
             text_avoid_other_text: Whether text should avoid other text
             text_show_all_positions: Whether to show all possible text positions
+            placed_text_bboxes: Optional list extended with the FOV-pixel
+                ``(v_min, u_min, v_max, u_max)`` box of each drawn label.
         """
 
         text_layer = np.zeros_like(res, dtype=np.uint8)
@@ -172,6 +183,7 @@ class Annotations(NavBase):
                         text_draw=text_draw,
                         tt_dir=tt_dir,
                         show_all_positions=text_show_all_positions,
+                        placed_bboxes=placed_text_bboxes,
                     )
                     if ret:
                         found_place = True

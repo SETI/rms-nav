@@ -8,7 +8,9 @@ from spindoctor.support.summary_png import (
     SummaryMetadata,
     _apply_local_stretch_boxes,
     _extfov_box_to_data_slice,
+    _least_crowded_corner,
     _local_stretch_patch,
+    _text_overlap_area,
     build_summary_metadata_lines,
 )
 
@@ -283,3 +285,68 @@ def test_apply_local_stretch_leaves_outside_box_untouched() -> None:
     annotations = _FakeAnnotations([_FakeAnnotation([(10, 10, 17, 17)])])
     _apply_local_stretch_boxes(rgb, image, obs, annotations, (0.0, 0.0))  # type: ignore[arg-type]
     assert int(rgb[30, 30, 0]) == 0
+
+
+# ---------------------------------------------------------------------------
+# _text_overlap_area
+# ---------------------------------------------------------------------------
+
+
+def test_text_overlap_area_counts_intersection() -> None:
+    """Overlap is the intersection area of the block and a label box."""
+    # Block rows/cols [0,10); label [5,20)x[5,20) -> 5x5 = 25 px^2 overlap.
+    area = _text_overlap_area((0, 0, 10, 10), [(5, 5, 20, 20)])
+    assert area == 25
+
+
+def test_text_overlap_area_zero_when_disjoint() -> None:
+    """A label box that misses the block contributes no overlap."""
+    area = _text_overlap_area((0, 0, 10, 10), [(50, 50, 60, 60)])
+    assert area == 0
+
+
+# ---------------------------------------------------------------------------
+# _least_crowded_corner
+# ---------------------------------------------------------------------------
+
+
+def test_least_crowded_corner_darkest_wins_without_text() -> None:
+    """With no label boxes the darkest corner is chosen (brightness only)."""
+    rgb = np.full((100, 100, 3), 200, dtype=np.uint8)
+    rgb[76:96, 76:96] = 0  # bottom-right corner is darkest
+    xy = _least_crowded_corner(rgb, 20, 20, text_bboxes=None)
+    assert xy == (76, 76)
+
+
+def test_least_crowded_corner_avoids_text_blocked_corner() -> None:
+    """A corner whose block region overlaps a label is passed over."""
+    rgb = np.full((100, 100, 3), 200, dtype=np.uint8)
+    # A label covering the top-left corner region (v,u = rows,cols).
+    text = [(0, 0, 30, 30)]
+    xy = _least_crowded_corner(rgb, 20, 20, text_bboxes=text)
+    assert xy != (4, 4)
+    # The chosen corner must be free of the label box.
+    assert _text_overlap_area((xy[1], xy[0], xy[1] + 20, xy[0] + 20), text) == 0
+
+
+def test_least_crowded_corner_darker_free_corner_wins() -> None:
+    """Among text-free corners the darker one wins on brightness."""
+    rgb = np.full((100, 100, 3), 200, dtype=np.uint8)
+    rgb[76:96, 76:96] = 0  # bottom-right is the darkest free corner
+    text = [(0, 0, 30, 30)]  # blocks only the top-left corner
+    xy = _least_crowded_corner(rgb, 20, 20, text_bboxes=text)
+    assert xy == (76, 76)
+
+
+def test_least_crowded_corner_all_conflict_picks_least_overlap() -> None:
+    """When every corner conflicts, the least-overlapping corner wins."""
+    rgb = np.full((100, 100, 3), 200, dtype=np.uint8)
+    # Big label boxes fully cover three corners; a tiny one clips the fourth.
+    text = [
+        (0, 0, 24, 24),  # top-left block fully covered (400 px^2)
+        (0, 76, 24, 100),  # top-right fully covered
+        (76, 0, 100, 24),  # bottom-left fully covered
+        (76, 76, 80, 80),  # bottom-right clipped only (4x4 = 16 px^2)
+    ]
+    xy = _least_crowded_corner(rgb, 20, 20, text_bboxes=text)
+    assert xy == (76, 76)

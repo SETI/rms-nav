@@ -135,12 +135,15 @@ def render_annotated_summary_rgb(
     image_fov = np.asarray(obs.data, dtype=np.float64)
     rgb = grayscale_to_rgb_with_quantile_stretch(image_fov)
     _apply_local_stretch_boxes(rgb, image_fov, obs, annotations, offset_px)
-    overlay = annotations.combine(offset=offset_px)
+    # ``combine`` collects the FOV-pixel bounding box of every label it draws so
+    # the metadata block can be steered away from the other annotation text.
+    text_bboxes: list[tuple[int, int, int, int]] = []
+    overlay = annotations.combine(offset=offset_px, text_bboxes=text_bboxes)
     if overlay is not None:
         mask = overlay.any(axis=-1)
         rgb[mask] = overlay[mask]
     if metadata is not None:
-        _draw_metadata_block(rgb, build_summary_metadata_lines(metadata))
+        _draw_metadata_block(rgb, build_summary_metadata_lines(metadata), text_bboxes=text_bboxes)
     return rgb
 
 
@@ -237,17 +240,26 @@ def _local_stretch_patch(
     return np.stack([gray, gray, gray], axis=-1)
 
 
-def _draw_metadata_block(rgb: NDArrayUint8Type, lines: list[str]) -> None:
+def _draw_metadata_block(
+    rgb: NDArrayUint8Type,
+    lines: list[str],
+    *,
+    text_bboxes: list[tuple[int, int, int, int]] | None = None,
+) -> None:
     """Draw a metadata text block in the least-crowded corner of ``rgb``.
 
-    The corner is chosen by comparing the mean brightness of the four
-    corner patches sized to the text block and picking the darkest, so the
-    text lands where the fewest features already sit.  A translucent dark
-    panel is laid behind the text for legibility on any background.
+    The corner is chosen by :func:`_least_crowded_corner`, which prefers a
+    corner whose block region overlaps none of the other annotation labels and
+    breaks that choice by image brightness.  A translucent dark panel is laid
+    behind the text for legibility on any background.
 
     Parameters:
         rgb: FOV-shaped RGB image, modified in place.
         lines: Text lines to draw, top to bottom.
+        text_bboxes: Drawn bounding boxes of the other annotation labels in
+            FOV ``(v_min, u_min, v_max, u_max)`` pixel coordinates; the block
+            is steered away from these.  ``None`` treats every corner as
+            text-free (brightness alone decides).
     """
     if not lines:
         return
@@ -278,7 +290,7 @@ def _draw_metadata_block(rgb: NDArrayUint8Type, lines: list[str]) -> None:
         # paint a panel over the whole image.
         return
 
-    x0, y0 = _least_crowded_corner(rgb, block_w, block_h)
+    x0, y0 = _least_crowded_corner(rgb, block_w, block_h, text_bboxes=text_bboxes)
 
     panel = np.asarray(image).astype(np.float64)
     panel[y0 : y0 + block_h, x0 : x0 + block_w] *= 0.35
@@ -333,13 +345,30 @@ def _wrap_lines_to_width(
     return wrapped
 
 
-def _least_crowded_corner(rgb: NDArrayUint8Type, block_w: int, block_h: int) -> tuple[int, int]:
-    """Return the top-left ``(x, y)`` of the darkest of the four corners.
+def _least_crowded_corner(
+    rgb: NDArrayUint8Type,
+    block_w: int,
+    block_h: int,
+    *,
+    text_bboxes: list[tuple[int, int, int, int]] | None = None,
+) -> tuple[int, int]:
+    """Return the top-left ``(x, y)`` of the corner best suited to the block.
+
+    The metadata block should never land on top of another annotation label if
+    that can be avoided, so a corner whose block region overlaps no annotation
+    text bounding box is preferred outright.  Among the corners that clear the
+    text -- or all four when none do -- the choice falls back to the existing
+    image-brightness criterion (the darkest corner, where the fewest image
+    features sit).  When every corner conflicts with text the one with the
+    least text-overlap area wins, ties broken by brightness.
 
     Parameters:
         rgb: FOV-shaped RGB image.
         block_w: Block width in pixels.
         block_h: Block height in pixels.
+        text_bboxes: Other annotation labels' drawn bounding boxes in FOV
+            ``(v_min, u_min, v_max, u_max)`` pixel coordinates.  ``None`` or
+            empty makes every corner text-free so brightness alone decides.
 
     Returns:
         ``(x0, y0)`` pixel origin for the block, inset a few pixels from
@@ -348,19 +377,56 @@ def _least_crowded_corner(rgb: NDArrayUint8Type, block_w: int, block_h: int) -> 
     height, width = rgb.shape[:2]
     margin = _CORNER_MARGIN
     luminance = rgb.mean(axis=-1)
-    corners = {
-        (margin, margin): luminance[0:block_h, 0:block_w],
-        (width - block_w - margin, margin): luminance[0:block_h, width - block_w : width],
-        (margin, height - block_h - margin): luminance[height - block_h : height, 0:block_w],
-        (
-            width - block_w - margin,
-            height - block_h - margin,
-        ): luminance[height - block_h : height, width - block_w : width],
-    }
-    best_xy = min(corners, key=lambda xy: float(corners[xy].mean()))
-    x0 = max(0, min(best_xy[0], width - block_w))
-    y0 = max(0, min(best_xy[1], height - block_h))
-    return x0, y0
+    bboxes = text_bboxes or []
+    x_left = max(0, min(margin, width - block_w))
+    x_right = max(0, width - block_w - margin)
+    y_top = max(0, min(margin, height - block_h))
+    y_bottom = max(0, height - block_h - margin)
+    candidates = [
+        (x_left, y_top),
+        (x_right, y_top),
+        (x_left, y_bottom),
+        (x_right, y_bottom),
+    ]
+    best_xy = candidates[0]
+    best_key: tuple[int, float] | None = None
+    for x0, y0 in candidates:
+        block_rect = (y0, x0, y0 + block_h, x0 + block_w)
+        overlap = _text_overlap_area(block_rect, bboxes)
+        block_lum = float(luminance[y0 : y0 + block_h, x0 : x0 + block_w].mean())
+        # Sort key: prefer zero overlap (never sit on a label), then the
+        # darkest corner.  Both terms ascending, so ``min`` picks a text-free
+        # corner first and the darkest of those to break the tie.
+        key = (overlap, block_lum)
+        if best_key is None or key < best_key:
+            best_key = key
+            best_xy = (x0, y0)
+    return best_xy
+
+
+def _text_overlap_area(
+    block_rect: tuple[int, int, int, int],
+    text_bboxes: list[tuple[int, int, int, int]],
+) -> int:
+    """Total overlap area (px^2) between a block rectangle and label boxes.
+
+    Parameters:
+        block_rect: The candidate block region in FOV
+            ``(v_min, u_min, v_max, u_max)`` coordinates (max exclusive).
+        text_bboxes: Annotation label boxes in the same coordinate convention.
+
+    Returns:
+        The summed intersection area over every label box; ``0`` when the
+        block region touches no label.
+    """
+    v0b, u0b, v1b, u1b = block_rect
+    total = 0
+    for v0, u0, v1, u1 in text_bboxes:
+        dv = min(v1b, v1) - max(v0b, v0)
+        du = min(u1b, u1) - max(u0b, u0)
+        if dv > 0 and du > 0:
+            total += dv * du
+    return total
 
 
 def _load_summary_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:

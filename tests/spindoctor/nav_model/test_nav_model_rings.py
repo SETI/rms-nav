@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from spindoctor.config.config import Config
+from spindoctor.feature import NavFeatureType, RingEdgePolyline
 from spindoctor.nav_model.nav_model_rings import (
     NavModelRings,
     _require_positive_finite_planet_scalar,
@@ -388,7 +389,8 @@ def test_aggregate_annulus_orbit_terms_empty_is_no_channel() -> None:
 
 ###############################################################################
 #
-# _drop_occluded_edges -- planet-occlusion filtering of ring-edge overlays
+# Planet-occlusion filtering of ring edges -- applied at render time so both
+# the emitted ring-edge features and the summary overlay are occlusion-free.
 #
 ###############################################################################
 
@@ -398,7 +400,7 @@ def _rings_model_with_occlusion(
 ) -> NavModelRings:
     """Build a bare NavModelRings carrying only an occlusion mask.
 
-    ``_drop_occluded_edges`` touches no other state, so the model is
+    ``_visible_edge_info`` touches no other state, so the model is
     constructed without an obs or the full render pipeline.
 
     Parameters:
@@ -412,59 +414,177 @@ def _rings_model_with_occlusion(
     return model
 
 
-def test_drop_occluded_edges_removes_fully_hidden_edge() -> None:
-    """An edge entirely behind the planet is dropped from the overlay."""
+def test_visible_edge_info_removes_fully_hidden_edge() -> None:
+    """An edge entirely behind the planet is dropped from the inventory."""
     occluded = np.zeros((10, 10), dtype=bool)
     occluded[:, 5:] = True  # planet hides the right half
     hidden = np.zeros((10, 10), dtype=bool)
     hidden[2:4, 6:8] = True  # wholly inside the occluded region
     model = _rings_model_with_occlusion(occluded)
-    kept = model._drop_occluded_edges([(hidden, 'A ring', 'a_outer')])
+    kept = model._visible_edge_info([(hidden, 'A ring', 'a_outer')])
     assert kept == []
 
 
-def test_drop_occluded_edges_keeps_visible_edge_intact() -> None:
+def test_visible_edge_info_keeps_visible_edge_intact() -> None:
     """An edge entirely in front of the planet survives unchanged."""
     occluded = np.zeros((10, 10), dtype=bool)
     occluded[:, 5:] = True
     visible = np.zeros((10, 10), dtype=bool)
     visible[2:4, 1:3] = True  # wholly outside the occluded region
     model = _rings_model_with_occlusion(occluded)
-    kept = model._drop_occluded_edges([(visible, 'A ring', 'a_outer')])
+    kept = model._visible_edge_info([(visible, 'A ring', 'a_outer')])
     assert len(kept) == 1
     assert np.array_equal(kept[0][0], visible)
 
 
-def test_drop_occluded_edges_trims_straddling_edge() -> None:
+def test_visible_edge_info_trims_straddling_edge() -> None:
     """A straddling edge keeps only its visible pixels."""
     occluded = np.zeros((10, 10), dtype=bool)
     occluded[:, 5:] = True
     straddle = np.zeros((10, 10), dtype=bool)
     straddle[4, 3:8] = True  # columns 3,4 visible; 5,6,7 occluded
     model = _rings_model_with_occlusion(occluded)
-    kept = model._drop_occluded_edges([(straddle, 'A ring', 'a_outer')])
+    kept = model._visible_edge_info([(straddle, 'A ring', 'a_outer')])
     trimmed_mask = kept[0][0]
     assert bool(trimmed_mask[4, 3])
     assert bool(trimmed_mask[4, 4])
 
 
-def test_drop_occluded_edges_trims_away_hidden_pixels() -> None:
+def test_visible_edge_info_trims_away_hidden_pixels() -> None:
     """The occluded pixels of a straddling edge are cleared."""
     occluded = np.zeros((10, 10), dtype=bool)
     occluded[:, 5:] = True
     straddle = np.zeros((10, 10), dtype=bool)
     straddle[4, 3:8] = True
     model = _rings_model_with_occlusion(occluded)
-    kept = model._drop_occluded_edges([(straddle, 'A ring', 'a_outer')])
+    kept = model._visible_edge_info([(straddle, 'A ring', 'a_outer')])
     trimmed_mask = kept[0][0]
     assert not bool(trimmed_mask[4, 6])
 
 
-def test_drop_occluded_edges_no_mask_returns_input() -> None:
-    """With no occlusion signal the edge list is returned unchanged."""
+def test_visible_edge_info_no_mask_returns_input() -> None:
+    """A backplane failure (None mask) degrades to keeping every edge."""
     edge = np.zeros((10, 10), dtype=bool)
     edge[4, 3:8] = True
     edge_info = [(edge, 'A ring', 'a_outer')]
     model = _rings_model_with_occlusion(None)
-    kept = model._drop_occluded_edges(edge_info)
+    kept = model._visible_edge_info(edge_info)
     assert kept is edge_info
+
+
+###############################################################################
+#
+# Occlusion carries through to the emitted RING_EDGE features -- the root-cause
+# guarantee that RingEdgeNav never sees a vertex behind the planet globe.
+#
+###############################################################################
+
+
+class _StubRingFeature:
+    """Minimal stand-in for a ``RingFeature`` in ``to_features``.
+
+    Supplies only the two members ``to_features`` reads from a feature: the
+    catalog ``key`` used to build the feature id, and ``edge_uncertainty``.
+    """
+
+    def __init__(self, key: str) -> None:
+        """Store the catalog key.
+
+        Parameters:
+            key: Catalog key echoed into the emitted feature id.
+        """
+        self.key = key
+
+    def edge_uncertainty(self, edge_type: str) -> float:
+        """Return zero so the default orbit sigma is used.
+
+        Parameters:
+            edge_type: Edge label (ignored).
+
+        Returns:
+            ``0.0``, selecting the config default orbit sigma.
+        """
+        del edge_type
+        return 0.0
+
+
+def _rings_model_for_to_features(
+    occluded: np.ndarray | None,
+    raw_edge_info: list[tuple[np.ndarray, str, str]],
+) -> NavModelRings:
+    """Build a NavModelRings wired to emit edge features from stub render state.
+
+    Mirrors what ``_render`` stores: the raw edge masks are passed through
+    ``_visible_edge_info`` (the occlusion trim) before landing on
+    ``_render_results``, so ``to_features`` samples polylines from the trimmed
+    masks exactly as it does in production.
+
+    Parameters:
+        occluded: Ext-FOV occlusion mask (or None).
+        raw_edge_info: Untrimmed ``(edge_mask, label_text, edge_label)`` tuples.
+
+    Returns:
+        A NavModelRings ready for a ``to_features`` call.
+    """
+    v_size, u_size = raw_edge_info[0][0].shape
+    model = NavModelRings('rings:SATURN', None, config=Config())
+    model._ring_occluded_ext = occluded
+    model._planet = 'SATURN'
+    # Small radial scale keeps the system-level annulus gate from firing so the
+    # per-edge feature path (not the annulus path) is exercised.
+    model._km_per_pixel_radial = 0.1
+    model._radial_resolution_ext = np.ones((v_size, u_size), dtype=np.float64)
+    model._ring_radius_ext = None
+    model._extfov_v_size = v_size
+    model._extfov_u_size = u_size
+    model._predicted_center_vu = (v_size / 2.0, u_size / 2.0)
+    model._subject_range_km = 1.0e6
+    edge_info = model._visible_edge_info(raw_edge_info)
+    zeros = np.zeros((v_size, u_size), dtype=np.float64)
+    model._render_results = [
+        (_StubRingFeature('b_ring'), zeros, zeros.astype(bool), 1.0, edge_info)  # type: ignore[list-item]
+    ]
+    return model
+
+
+def test_emitted_edge_features_exclude_occluded_vertices() -> None:
+    """A straddling edge emits no polyline vertex behind the planet globe."""
+    occluded = np.zeros((30, 30), dtype=bool)
+    occluded[:, 15:] = True  # planet hides the right half
+    straddle = np.zeros((30, 30), dtype=bool)
+    straddle[10, 5:25] = True  # columns 5..14 visible; 15..24 occluded
+    model = _rings_model_for_to_features(occluded, [(straddle, 'B ring', 'b_outer')])
+    features = model.to_features(None)  # type: ignore[arg-type]
+    edge_features = [f for f in features if f.feature_type == NavFeatureType.RING_EDGE]
+    assert len(edge_features) == 1
+    geometry = edge_features[0].geometry
+    assert isinstance(geometry, RingEdgePolyline)
+    vertices = geometry.vertices_vu
+    assert vertices.shape[0] > 0
+    occluded_hits = [bool(occluded[int(v), int(u)]) for v, u in vertices]
+    assert not any(occluded_hits)
+
+
+def test_emitted_edge_features_drop_fully_hidden_edge() -> None:
+    """An edge entirely behind the planet contributes no feature at all."""
+    occluded = np.zeros((30, 30), dtype=bool)
+    occluded[:, 15:] = True
+    hidden = np.zeros((30, 30), dtype=bool)
+    hidden[10, 18:25] = True  # wholly inside the occluded region
+    model = _rings_model_for_to_features(occluded, [(hidden, 'B ring', 'b_outer')])
+    features = model.to_features(None)  # type: ignore[arg-type]
+    edge_features = [f for f in features if f.feature_type == NavFeatureType.RING_EDGE]
+    assert edge_features == []
+
+
+def test_emitted_edge_features_keep_all_vertices_without_mask() -> None:
+    """With no occlusion signal every edge pixel becomes a polyline vertex."""
+    edge = np.zeros((30, 30), dtype=bool)
+    edge[10, 5:25] = True
+    model = _rings_model_for_to_features(None, [(edge, 'B ring', 'b_outer')])
+    features = model.to_features(None)  # type: ignore[arg-type]
+    edge_features = [f for f in features if f.feature_type == NavFeatureType.RING_EDGE]
+    assert len(edge_features) == 1
+    geometry = edge_features[0].geometry
+    assert isinstance(geometry, RingEdgePolyline)
+    assert geometry.vertices_vu.shape[0] == 20
