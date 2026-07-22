@@ -65,10 +65,10 @@ class FakeStar:
             ``johnson_mag_b`` from the spectral-class colour table
             instead of the catalog.
         photometry_corrected: ``True`` when the bright-end saturation
-            pass replaced ``vmag`` with a YBSC value.
+            pass replaced ``vmag`` with a YBSC or Tycho-2 reference value.
         photometry_saturated: ``True`` when the record is bright per the
-            catalog but has no YBSC match, so its magnitude is unreliable
-            and potentially too faint.
+            catalog but has no reference match, so its magnitude is
+            unreliable and potentially too faint.
         spectral_class: MK spectral class, e.g. ``'G0'``.  The
             reduction defaults to ``stars.default_star_class`` when
             absent.

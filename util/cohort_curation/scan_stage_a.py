@@ -951,8 +951,9 @@ def scan_go() -> dict[str, list[dict]]:
         # C00598xx quintet failed wholesale with all_techniques_spurious),
         # so require at least STAR_FIELD_MIN_INLIERS clearly-bright stars.
         # star_vmags corrects UCAC4's saturated bright-end photometry against
-        # YBSC (it otherwise lists Pleiades members near V7 instead of V3), so
-        # this count reflects true bright content rather than a lower bound.
+        # the YBSC/Tycho-2 reference (it otherwise lists Pleiades members near
+        # V7 instead of V3), so this count reflects true bright content rather
+        # than a lower bound.
         n_clear = sum(1 for v in vm if v <= lim - 1.5)
         if n_clear < STAR_FIELD_MIN_INLIERS:
             continue
