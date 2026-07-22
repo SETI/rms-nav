@@ -332,10 +332,14 @@ Independent review before done; all CI gates; one PR."
     before #230.
   - **#319**: no library coverage for opposed-ansae geometry, so the
     conditioning guard is unvalidated.
-- **#150/#128 (photometric limb redesign)**: "Produce the DESIGN ONLY for
-  the photometric-limb fit that removes the ~0.1 px limb-darkening bias,
-  per the diagnosis on #150/#128. No implementation until the design is
-  operator-approved; validation must be against real images per WS-10."
+- **#150/#128 (photometric limb redesign)** *(Fable-required — see 3b;
+  the physics is subtle enough that a wrong premise survives review)*:
+  "Produce the DESIGN ONLY for the photometric-limb fit that removes the
+  ~0.1 px limb-darkening bias, per the diagnosis on #150/#128. No
+  implementation until the design is operator-approved; validation must be
+  against real images per WS-10. Address whether the same model-vs-image
+  bias applies to non-step (gradual / shouldered) ring edges, not only the
+  limb."
 - **#179 (coarse-lock calibration pass)**: "Calibrate the coarse-search
   edge-population lock against the image library per #179, folding in
   the false-flag datapoint from #261."
@@ -367,13 +371,17 @@ else. Applied to the items above:
   the solvability map; the one item not to delegate down even with a
   strong review); #230/WS-5 and #309 (calibration-fit adjudication on
   messy evidence); the design and adjudication of the #301/#291 ensemble
-  diagnostic channel; and the independent-review pass on anything
+  diagnostic channel; the **#150/#128 photometric-limb redesign** (both
+  the design and its adjudication — the physics is subtle and a
+  plausible-but-wrong premise rides straight through review: e.g. "rings
+  are unaffected" holds only for sharp step-edges, but a gradual or
+  shouldered ring edge carries the same model-vs-image photometric bias
+  the limb does); and the independent-review pass on anything
   statistical, boundary-touching, or calibration-touching, regardless of
   who implemented it.
-- **Mid-tier drafts, top-tier adjudicates:** the #150/#128
-  photometric-limb design; #310 (the boundary restructuring — the guard
-  tests catch mechanical regressions, the review catches new leak
-  shapes).
+- **Mid-tier drafts, top-tier adjudicates:** #310 (the boundary
+  restructuring — the guard tests catch mechanical regressions, the
+  review catches new leak shapes).
 - **Mid-tier or below suffices:** the sidecar re-ratchet, library
   growth, the agreement study's bulk execution (once WS-0 hands it a
   proven estimator), #229, #311, #284/#285, #130, #179, and the
