@@ -575,18 +575,23 @@ def correct_saturated_vmags(
     *,
     match_radius_rad: float,
     saturation_limit: float = UCAC4_SATURATION_VMAG_LIMIT,
+    min_correction_mag: float = SATURATION_CORRECTION_MIN_MAG,
 ) -> list[float]:
     """Return catalog V-magnitudes with UCAC4 bright-end saturation corrected.
 
     Each catalog star brighter than ``saturation_limit`` that positionally
-    matches a reference bright star (YBSC or Tycho-2) adopts the reference
-    magnitude; the position match widens with the magnitude gap so a
-    saturated star displaced beyond the base radius still matches.  Each
-    reference is consumed by at most one catalog star, so a reference is
-    never counted twice.  Reference stars the catalog missed entirely are
-    appended so the returned set reflects the field's true bright content.
-    Faint catalog stars and bright catalog stars with no reference keep
-    their own magnitude.
+    matches a reference bright star (YBSC or Tycho-2) and disagrees with it
+    by more than ``min_correction_mag`` adopts the reference magnitude; the
+    position match widens with the magnitude gap so a saturated star
+    displaced beyond the base radius still matches.  A catalog star that
+    matches a reference but already agrees with it is not saturated, so it
+    keeps its own reading (the same no-op band as
+    :func:`correct_star_photometry`, so the two paths share one policy).
+    Each reference is consumed by at most one catalog star, so a reference
+    is never counted twice.  Reference stars the catalog missed entirely
+    are appended so the returned set reflects the field's true bright
+    content.  Faint catalog stars and bright catalog stars with no
+    reference keep their own magnitude.
 
     This is the magnitude-only counterpart of :func:`correct_star_photometry`
     for consumers (such as the navigable-content screen) that work with
@@ -605,6 +610,9 @@ def correct_saturated_vmags(
         match_radius_rad: Base position match radius in radians.
         saturation_limit: V-magnitude brighter than which a catalog star is
             a saturation-correction candidate.
+        min_correction_mag: Smallest candidate-versus-reference magnitude
+            gap treated as saturation; a smaller gap keeps the catalog
+            reading, matching :func:`correct_star_photometry`.
 
     Returns:
         Corrected V-magnitudes sorted ascending (brightest first).
@@ -630,6 +638,13 @@ def correct_saturated_vmags(
             out.append(float(vmag))
             continue
         consumed[idx] = True
+        if abs(float(vmag) - float(ref_vmag[idx])) < min_correction_mag:
+            # Already agrees with the reference: not saturated, so keep the
+            # catalog reading (the reference is still consumed above, so it
+            # is not counted again).  This mirrors the no-op band in
+            # correct_star_photometry so the screen and the reduction agree.
+            out.append(float(vmag))
+            continue
         out.append(float(ref_vmag[idx]))
     # Append reference stars with no catalog counterpart.  A reference a
     # saturated catalog star already matched (and consumed) is skipped so it

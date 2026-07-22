@@ -1,9 +1,9 @@
 """Tests for ``spindoctor.nav_model.stars.saturation``.
 
 The bright-end correction replaces UCAC4's saturated aperture magnitude
-with the true Johnson V from YBSC wherever the two catalogs positionally
-match, and flags bright records with no YBSC match so downstream
-consumers do not trust their magnitude.
+with the true V from a YBSC or Tycho-2 reference wherever the catalogs
+positionally match, and flags bright records with no reference in either
+catalog so downstream consumers do not trust their magnitude.
 """
 
 from __future__ import annotations
@@ -611,6 +611,27 @@ def test_correct_star_photometry_no_widening_for_small_gap() -> None:
 # --------------------------------------------------------------------------
 
 
+def test_correct_star_photometry_keeps_neighbour_beyond_vmag_tolerance() -> None:
+    """A co-located neighbour outside the magnitude tolerance is not collapsed.
+
+    After correction the saturated record reads V2.87; a genuinely different
+    star at the same position but far in magnitude is not its duplicate, so
+    the collapse leaves it in place (the duplicate-magnitude guard holds even
+    inside the widened collapse radius).
+    """
+    star = _ucac4(*_ETA_TAU, 6.68)
+    ref = _ybsc(*_ETA_TAU, 2.87)
+    other = _star(catalog_name='ucac4', ra_pm=_ETA_TAU[0], dec_pm=_ETA_TAU[1], vmag=6.5, dn=1.0)
+    out = correct_star_photometry(
+        [star, other],
+        [ref],
+        match_radius_rad=_MATCH_RAD,
+        duplicate_vmag=_DVMAG,
+        catalog_order=_ORDER,
+    )
+    assert other in out
+
+
 def test_correct_star_photometry_one_reference_corrects_one_record() -> None:
     """Two distinct saturated records cannot both consume one reference.
 
@@ -721,6 +742,21 @@ def test_correct_saturated_vmags_collapses_displaced_double_count() -> None:
     ybsc = [(*_ETA_TAU, 2.87)]
     out = correct_saturated_vmags(catalog, ybsc, [], match_radius_rad=_MATCH_RAD)
     assert out == [pytest.approx(2.87)]
+
+
+def test_correct_saturated_vmags_keeps_reading_for_small_gap() -> None:
+    """A small-gap match keeps the catalog reading, matching the reduction.
+
+    The catalog value agrees with the reference to within the no-op band, so
+    it is not saturated: the screen keeps its own magnitude rather than
+    adopting the reference (exactly as ``correct_star_photometry`` leaves the
+    record untouched), and the consumed reference is not counted a second
+    time.
+    """
+    catalog = [(*_ETA_TAU, 7.5)]
+    tycho2 = [(*_ETA_TAU, 7.2)]
+    out = correct_saturated_vmags(catalog, [], tycho2, match_radius_rad=_MATCH_RAD)
+    assert out == [pytest.approx(7.5)]
 
 
 def test_correct_saturated_vmags_appends_tycho2_only_star() -> None:
