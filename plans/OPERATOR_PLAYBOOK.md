@@ -130,9 +130,15 @@ Findings that change what comes after, so read these before 2.4:
   solves; body+ring is the common Cassini composition, so this hits the
   main cohort.
 - **limb-DT vs disc-NCC showed no coupling** through the gradient/DT
-  channel, but only in a PSF-free regime. The shared-PSF-edge suspicion
-  on this pair is unprobed (#320) and it gates the study's *base*
-  equation.
+  channel, and the shared-PSF-edge suspicion on this pair (the study's
+  *base* equation) is now probed too (#320, PR #363, merged): a symmetric
+  rendered-PSF mismatch opens no shared edge bias -- the disc-NCC is ~16x
+  less PSF-sensitive than the limb-DT, which caps the coupling magnitude.
+  So the base pair holds as an anchor against symmetric PSF error in the
+  Cassini-NAC regime. Not a clean-on-all-PSF verdict: the asymmetric/coma
+  kernel that most directly matches the mechanism is unrenderable by the
+  sim (#359), and the disc's sub-pixel NCC resolution floors detectability
+  (#361).
 - **Multi-body frames are not two independent measurements** (#322):
   cross-body limb errors correlate at +0.72 and the naive solve is
   well-conditioned, reports everything identifiable, and misattributes
@@ -141,8 +147,17 @@ Findings that change what comes after, so read these before 2.4:
   side effect. That is a navigation finding, not only a campaign one.
 - Estimator tests do not run in CI (#324).
 
-Remaining Stage 0b work: #320 (PSF-layer probe) and #323 (reliability-gate
-selection effect). The original prompt is kept below for reference.
+Stage 0b is complete: #320 (PSF-layer probe, PR #363) and #323
+(reliability-gate selection effect, PR #362) both squash-merged to `main`
+on 2026-07-21. #323's finding: the reliability gate *filters* rather than
+*shifts*, so its common-mode effect is a survivorship selection, not a
+bias -- and that selection can only make agreement look better, never
+worse, and cannot manufacture cross-technique coupling; the result is
+conditional on a separable/monotonic admission model, with the real
+score-vs-error coupling deferred to #358 (the sim cannot supply it). #320's
+finding is folded into the disc-NCC bullet above. New follow-ups filed:
+#358, #359, #360, #361 (see the register in Section 3c). The original WS-0
+prompt is kept below for reference.
 
 **Prompt:**
 
@@ -229,18 +244,24 @@ Your role at the gate: approve the frame selection. Then:
 
 - The **limb-ring pair is measured as correlated**, so it may not carry
   per-technique covariance claims; declare it or exclude it.
-- The **limb-disc pair is unproven, not proven clean** — #320 must run
-  before the study claims per-technique covariance on the base pair. Bulk
-  pairwise-disagreement reporting can proceed without it.
+- The **limb-disc pair holds as an anchor against symmetric PSF error**
+  (#320 ran, PR #363): the disc barely responds to a PSF mismatch, capping
+  the coupling. Carry a declared limb-disc covariance where precision
+  demands (a mild intrinsic negative coupling is real but its sign is
+  unreliable), and treat the asymmetric-PSF channel as still open (#359).
 - **Multi-body cohorts** declare the limb-limb pair (#322) and should be
   cut by illumination geometry, since part of the coupling is
   illumination-locked.
 - Blob and disc correlate at +0.83 on partial bodies; never share a solve
   there.
-- Cohorts are already filtered by the reliability gate, whose selection
-  effect is unquantified (#323) — the study's covariances therefore
-  describe navigable frames rather than frames, and the report should say
-  so.
+- Cohorts are already filtered by the reliability gate; its selection
+  effect is now bounded in-sim (#323, PR #362): the gate can
+  only make agreement look better, never worse, and cannot manufacture
+  coupling, so every per-technique sigma the study reports is a lower
+  bound. The size of that optimism depends on the real score-vs-error
+  coupling, which the sim cannot supply (#358) -- the study's covariances
+  therefore describe navigable frames rather than frames, and the report
+  should say so.
 - General warning from the campaign: a healthy identifiability report is
   **not** evidence that independence holds, and all-positive recovered
   variances are necessary but not sufficient.
@@ -429,6 +450,22 @@ is lost to a PR body; the sequencing hooks reference the sections above.
 - **#222** (reopened) single-inlier pass-2 refine pulls the fused offset off a
   correct body fix (N1572105349)
 
+**WS-0 Stage 0b follow-ups (2026-07-21; sequence with #225/WS-1 and
+#230/WS-5):** #320 and #323 are DONE (PRs #363 and #362, both merged); these
+are the pieces the sim could not close, filed from those PRs.
+
+- **#358** measure the real reliability-vs-error coupling and run the stratified
+  estimator on the real #225 cohorts -- the size of the gate's selection
+  optimism the sim cannot supply (gates the #323 lower-bound claim on real
+  frames; Important)
+- **#360** decide, after #358, whether the agreement solve needs a
+  selection-aware (survivorship) correction (Useful; a decision issue)
+- **#359** probe limb-disc PSF coupling under the asymmetric/coma/field-varying
+  PSF error the sim cannot render -- the one channel #320 left open on the base
+  pair (Important)
+- **#361** disc-NCC sub-pixel resolution floors the smallest limb-disc coupling
+  #320 could detect (Important)
+
 ## 4. Standing practices for every session you dispatch
 
 - Environment: `source /seti/newnav/setup.sh`. Calibration campaigns
@@ -462,9 +499,9 @@ is lost to a PR body; the sequencing hooks reference the sections above.
 ```text
 0.1 merge #313 -> 0.2 cleanup -> 0.3 decisions   (operator, minutes)
 1   sidecar re-ratchet + adopt transfer watch    (1 session + 1 review)
-2.1 WS-0 estimator proof   \
+2.1 WS-0 estimator (exec, #314) + Stage 0b  -- DONE (PRs #362, #363 merged)
 2.2 WS-17 distortion  -- DONE (PR #354)
-2.3 batch-006 + growth     /  parallel agent sessions
+2.3 batch-006 + growth     (parallel agent session; your votes gate it)
 2.4 agreement study bulk   (after 2.3; 2.2 done; you approve frames)
 2.5 CI tier, re-anchor confidence, accuracy tail (after 2.4)
 3   parallel fill items    (any time, independent)
