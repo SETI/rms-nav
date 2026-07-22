@@ -56,11 +56,29 @@ import argparse
 import json
 import math
 import multiprocessing
+import os
 import random
 import sys
 import time
 from pathlib import Path
 from typing import Any
+
+# Pin native (BLAS/OpenMP) thread pools to one thread per process before the
+# first numpy import, which happens transitively through ``scene_gen`` below.
+# The worker pool uses the default fork start method, so each worker inherits
+# the parent's already-initialized threading runtime: setting these variables
+# in the pool initializer runs after that runtime is configured and has no
+# effect.  Setting them here, ahead of numpy's first import, makes the parent
+# (and therefore every forked worker it inherits from) single-threaded, which
+# is what keeps the pool from oversubscribing the machine.  ``setdefault``
+# leaves an explicit operator override in place.
+for _thread_var in (
+    'OMP_NUM_THREADS',
+    'OPENBLAS_NUM_THREADS',
+    'MKL_NUM_THREADS',
+    'NUMEXPR_NUM_THREADS',
+):
+    os.environ.setdefault(_thread_var, '1')
 
 HERE = Path(__file__).parent
 REPO = HERE.parent.parent
@@ -369,21 +387,14 @@ def _navigate_one(
 
 
 def _init_worker() -> None:
-    """Pin per-worker threading and silence the per-image logger.
+    """Silence the per-image logger in a freshly forked pool worker.
 
-    One BLAS/OpenMP thread per worker: the pool already saturates the
-    cores.  The env vars must be set before the worker's first numpy
-    import, which is why this runs in the pool initializer.
+    Thread pinning is handled at module import (one BLAS/OpenMP thread per
+    process, set before the first numpy import and inherited by every forked
+    worker), not here: under the default fork start method a worker inherits
+    the parent's already-initialized threading runtime, so setting the thread
+    variables in this initializer would be too late to take effect.
     """
-    import os
-
-    for var in (
-        'OMP_NUM_THREADS',
-        'OPENBLAS_NUM_THREADS',
-        'MKL_NUM_THREADS',
-        'NUMEXPR_NUM_THREADS',
-    ):
-        os.environ[var] = '1'
     import pdslogger
 
     from spindoctor.config.logger import IMAGE_LOGGER, MAIN_LOGGER
