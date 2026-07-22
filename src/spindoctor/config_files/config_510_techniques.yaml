@@ -851,9 +851,61 @@ techniques:
       # correspondence to count as an inlier under a candidate
       # transform.
       inlier_tolerance_px: 2.0
-      # Minimum inlier count for the matcher to accept a transform;
-      # below this the technique returns spurious.
+      # Minimum inlier count for the STRONG-tier triplet-RANSAC matcher to
+      # accept a transform; below this the technique tries the wide-offset
+      # asterism fallback (below) before returning spurious.  The floor is
+      # 6 because the RANSAC evaluates thousands of triplet seeds, so a
+      # three-inlier coincidence (a seed triangle plus zero corroboration)
+      # is reachable by chance; six inliers (seed triangle plus three
+      # corroborating stars) is the level at which a lock over that many
+      # trials is statistically decisive.
       pattern_match_min_inliers: 6
+      # Wide-offset asterism fallback for sparse few-bright-star fields
+      # with a large unknown pointing offset (the Pleiades-cluster regime).
+      # When the triplet RANSAC cannot reach pattern_match_min_inliers, seed
+      # a translation only from bright-anchor pairings -- the brightest
+      # trusted catalog stars against the brightest detections -- and accept
+      # a lower inlier count when the chance-alignment significance clears
+      # the budget below.  Restricting the seeds to a handful of
+      # brightness-anchored trials (rather than the RANSAC's thousands of
+      # triplet trials) is what makes a three-inlier lock trustworthy: the
+      # trial count, not the inlier count alone, sets the false-lock rate.
+      # 1 enables the fallback; 0 disables it (strong-tier RANSAC only).
+      wide_offset_enabled: 1
+      # Minimum inlier count for a wide-offset lock.  Hard floor of 3: two
+      # stars cannot cross-check a rigid translation (any single pair
+      # defines an exact offset), so at least one corroborating third star
+      # is required on top of the anchor pair.
+      wide_offset_min_inliers: 3
+      # Number of brightest photometry-trusted catalog stars used as seed
+      # anchors.  A star flagged photometry_saturated (#284: a bright record
+      # whose magnitude is an untrusted lower bound) is skipped as an anchor
+      # because its brightness ordering is uncertain, though it can still be
+      # a corroborating inlier.
+      wide_offset_anchor_catalog: 3
+      # Number of brightest detections paired against each catalog anchor to
+      # form the seed offsets.  The product with wide_offset_anchor_catalog
+      # bounds the seed (trial) count that enters the false-lock model.
+      wide_offset_anchor_detections: 6
+      # False-lock budget: the maximum expected number of chance locks (of
+      # the achieved inlier count, over the evaluated bright-anchor seeds)
+      # under a uniform-random-detection null.  A candidate is accepted only
+      # when its computed expectation falls at or below this.  0.01 keeps the
+      # per-frame chance-lock rate at one percent; a genuine three-inlier
+      # anchor lock on a sparse field sits several orders of magnitude below
+      # it, while a two-inlier lock (anchor pair plus one chance neighbour)
+      # sits above it and is rejected.
+      wide_offset_false_lock_budget: 0.01
+      # Maximum inlier residual RMS (px) for a wide-offset lock.  A lock
+      # whose corroborating inliers sit near the match-tolerance edge is a
+      # scattered near-chance alignment, not a rigid asterism; genuine locks
+      # cluster well inside the tolerance.
+      wide_offset_max_residual_rms_px: 1.5
+      # Post-formula confidence cap for a wide-offset lock.  Fewer
+      # corroborating stars than a strong-tier match means the result cannot
+      # claim the high tier on its own; it must still clear the ensemble gate
+      # to navigate.  0.6 lands a clean lock in the medium / low tier.
+      wide_offset_confidence_cap: 0.6
       # Pixels of slack around the search-window axis bounds for the
       # at-edge check (see StarUniqueMatchNav.at_edge_tolerance_px).
       at_edge_tolerance_px: 1.0

@@ -127,6 +127,116 @@ class _DetectedSource:
     peak_dn: float
 
 
+@dataclass(frozen=True)
+class _WideOffsetMatch:
+    """Accepted wide-offset asterism lock (see ``_wide_offset_asterism_match``).
+
+    Parameters:
+        n_inliers: Number of detection-to-catalog inliers at the winning
+            bright-anchor-seeded offset.
+        correspondences: ``(det_idx, cat_idx)`` inlier pairs, detection-index
+            ascending.
+        offset: Winning ``(dv, du)`` translation.
+        expectation: Expected number of chance locks of this inlier count,
+            the false-lock significance the acceptance budget bounds.
+        n_seeds: Number of distinct bright-anchor seed offsets evaluated (the
+            multiple-testing trial count folded into ``expectation``).
+    """
+
+    n_inliers: int
+    correspondences: list[tuple[int, int]]
+    offset: tuple[float, float]
+    expectation: float
+    n_seeds: int
+
+
+def _star_photometry_saturated(feature: NavFeature) -> bool:
+    """Return the ``#284`` ``photometry_saturated`` flag off a STAR feature.
+
+    True marks a bright star whose catalog magnitude is an untrusted lower
+    bound (no reference-catalog match); such a star's brightness ordering is
+    uncertain, so it is not used to anchor a wide-offset seed.  Features
+    whose flags predate the flag default to ``False``.
+    """
+    flags = feature.flags
+    return bool(getattr(flags, 'photometry_saturated', False))
+
+
+def _binomial_upper_tail(n_trials: int, p_success: float, k_min: int) -> float:
+    """Return ``P(X >= k_min)`` for ``X ~ Binomial(n_trials, p_success)``.
+
+    Summed exactly over the upper tail; the counts here (a dozen-odd
+    catalog stars) keep the sum tiny, so no normal / Poisson approximation
+    is needed.
+
+    Parameters:
+        n_trials: Number of Bernoulli trials (``>= 0``).
+        p_success: Per-trial success probability, clamped to ``[0, 1]``.
+        k_min: Lower bound of the tail.
+
+    Returns:
+        The upper-tail probability in ``[0, 1]``.
+    """
+    if k_min <= 0:
+        return 1.0
+    if k_min > n_trials:
+        return 0.0
+    p = min(max(p_success, 0.0), 1.0)
+    q = 1.0 - p
+    tail = 0.0
+    for k in range(k_min, n_trials + 1):
+        tail += math.comb(n_trials, k) * (p**k) * (q ** (n_trials - k))
+    return min(max(tail, 0.0), 1.0)
+
+
+def _wide_offset_false_lock_expectation(
+    *,
+    n_inliers: int,
+    n_seeds: int,
+    n_catalog: int,
+    n_detected: int,
+    tolerance_px: float,
+    image_area_px2: float,
+) -> float:
+    """Expected number of chance wide-offset locks reaching ``n_inliers``.
+
+    Under the null that the ``n_detected`` detections are scattered
+    uniformly over the image, a single catalog star coincides with some
+    detection within ``tolerance_px`` of a fixed offset with probability
+    ``p = n_detected * pi * tolerance_px**2 / image_area_px2``.  Each
+    bright-anchor seed contributes one guaranteed inlier (the anchor pair)
+    plus ``Binomial(n_catalog - 1, p)`` chance inliers among the remaining
+    catalog stars, so a seed reaches ``n_inliers`` total with probability
+    ``P(Binom(n_catalog - 1, p) >= n_inliers - 1)``.  Multiplying by the
+    ``n_seeds`` distinct seed offsets gives the expected count of chance
+    locks -- the quantity the acceptance budget bounds.
+
+    This is what lets a sparse field lock on three inliers where the
+    triplet RANSAC needs six: the RANSAC evaluates thousands of triplet
+    seeds, so three inliers (a seed triangle plus zero corroboration) are
+    routinely reachable by chance; restricting to a handful of
+    brightness-anchored seeds collapses the trial count so the same three
+    inliers become statistically decisive.
+
+    Parameters:
+        n_inliers: Inlier count of the candidate lock.
+        n_seeds: Number of distinct bright-anchor seed offsets evaluated.
+        n_catalog: Number of predicted catalog stars.
+        n_detected: Number of detected image sources.
+        tolerance_px: Inlier match radius in pixels.
+        image_area_px2: Image area in square pixels (detection density
+            denominator).
+
+    Returns:
+        Expected number of chance locks of at least ``n_inliers`` inliers.
+    """
+    if n_inliers <= 0 or n_seeds <= 0 or n_catalog <= 1 or image_area_px2 <= 0.0:
+        return 0.0
+    p_star = n_detected * math.pi * tolerance_px * tolerance_px / image_area_px2
+    tail = _binomial_upper_tail(n_catalog - 1, p_star, n_inliers - 1)
+    return float(n_seeds) * tail
+
+
 def _gaussian_kernel(sigma_px: float, *, size: int) -> NDArrayFloatType:
     """Return a normalised 2-D isotropic Gaussian matched-filter kernel.
 
@@ -514,6 +624,17 @@ class StarFieldFromCatalogNav(NavTechnique):
         # the reported covariance diagonal.  Default 0.0 -> no-op.  See
         # ORCH-001 / config_510_techniques.yaml.
         self._model_error_floor_px = load_model_error_floor(self.tuning, self.name)
+        # Wide-offset asterism matching for sparse few-bright-star fields
+        # (see config_510_techniques.yaml and ``_wide_offset_asterism_match``).
+        self._wide_offset_enabled = bool(int(self.tuning['wide_offset_enabled']))
+        self._wide_offset_min_inliers = int(self.tuning['wide_offset_min_inliers'])
+        self._wide_offset_anchor_catalog = int(self.tuning['wide_offset_anchor_catalog'])
+        self._wide_offset_anchor_detections = int(self.tuning['wide_offset_anchor_detections'])
+        self._wide_offset_false_lock_budget = float(self.tuning['wide_offset_false_lock_budget'])
+        self._wide_offset_max_residual_rms_px = float(
+            self.tuning['wide_offset_max_residual_rms_px']
+        )
+        self._wide_offset_confidence_cap = float(self.tuning['wide_offset_confidence_cap'])
         # PSF-fit re-centroiding of matched inliers (see config_510_techniques.yaml).
         self._psf_refine_enabled = bool(int(self.tuning['psf_refine_enabled']))
         self._psf_refine_box_px = int(self.tuning['psf_refine_box_px'])
@@ -528,6 +649,30 @@ class StarFieldFromCatalogNav(NavTechnique):
             )
         if self._max_sources < 3:
             raise ValueError(f'max_sources must be >= 3; got {self._max_sources}')
+        if self._wide_offset_min_inliers < 3:
+            raise ValueError(
+                f'wide_offset_min_inliers must be >= 3 (two stars cannot cross-'
+                f'check a rigid translation); got {self._wide_offset_min_inliers}'
+            )
+        if self._wide_offset_anchor_catalog < 1:
+            raise ValueError(
+                f'wide_offset_anchor_catalog must be >= 1; got {self._wide_offset_anchor_catalog}'
+            )
+        if self._wide_offset_anchor_detections < 1:
+            raise ValueError(
+                f'wide_offset_anchor_detections must be >= 1; '
+                f'got {self._wide_offset_anchor_detections}'
+            )
+        if self._wide_offset_false_lock_budget <= 0.0:
+            raise ValueError(
+                f'wide_offset_false_lock_budget must be > 0; '
+                f'got {self._wide_offset_false_lock_budget}'
+            )
+        if not 0.0 <= self._wide_offset_confidence_cap <= 1.0:
+            raise ValueError(
+                f'wide_offset_confidence_cap must lie in [0, 1]; '
+                f'got {self._wide_offset_confidence_cap}'
+            )
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Report feasibility based on the predictable-star cohort.
@@ -749,20 +894,48 @@ class StarFieldFromCatalogNav(NavTechnique):
             det_points_arr=det_points_arr,
             cat_points_arr=cat_points_arr,
         )
+        wide_offset_lock = False
+        wide_offset_expectation = 0.0
         if best is None or best[0] < self._min_inliers:
-            n_inliers = 0 if best is None else best[0]
-            return self._fail(
-                features=features,
-                reason=(f'too_few_inliers ({n_inliers} < min {self._min_inliers})'),
-                diagnostics=StarFieldDiagnostics(
-                    n_inliers=n_inliers,
-                    median_residual_px=0.0,
-                    n_detected_sources=n_detected_sources,
-                    n_catalog_predicted=n_catalog_predicted,
-                    n_triplets_evaluated=n_triplets_evaluated,
-                ),
-                fit_rotation=bool(context.fit_camera_rotation),
+            # The triplet RANSAC could not reach its strong-evidence floor.
+            # Sparse few-bright-star fields with a large unknown offset land
+            # here routinely (the faint remainder is undetectable, so no
+            # triangle carries six inliers); try the wide-offset asterism
+            # matcher, which seeds a translation from a handful of trusted
+            # bright-anchor pairings and accepts a lower inlier count only
+            # when the chance-alignment significance clears the false-lock
+            # budget.
+            det_dn = np.asarray([s.peak_dn for s in detected], np.float64)
+            image_shape = np.asarray(context.image_ext).shape
+            image_area = float(image_shape[0] * image_shape[1])
+            wide = self._wide_offset_asterism_match(
+                det_points_arr=det_points_arr,
+                det_dn=det_dn,
+                cat_points_arr=cat_points_arr,
+                ranked_catalog=ranked_catalog,
+                context=context,
+                image_area=image_area,
             )
+            if wide is None:
+                n_inliers = 0 if best is None else best[0]
+                return self._fail(
+                    features=features,
+                    reason=(
+                        f'too_few_inliers ({n_inliers} < min {self._min_inliers}) and no '
+                        f'wide-offset asterism lock cleared the false-lock budget'
+                    ),
+                    diagnostics=StarFieldDiagnostics(
+                        n_inliers=n_inliers,
+                        median_residual_px=0.0,
+                        n_detected_sources=n_detected_sources,
+                        n_catalog_predicted=n_catalog_predicted,
+                        n_triplets_evaluated=n_triplets_evaluated,
+                    ),
+                    fit_rotation=bool(context.fit_camera_rotation),
+                )
+            best = (wide.n_inliers, wide.correspondences, wide.offset)
+            wide_offset_lock = True
+            wide_offset_expectation = wide.expectation
         n_inliers, correspondences, _coarse_offset = best
         det_inliers: NDArrayFloatType = det_points_arr[[d for d, _ in correspondences]]
         cat_inliers = cat_points_arr[[c for _, c in correspondences]]
@@ -812,6 +985,8 @@ class StarFieldFromCatalogNav(NavTechnique):
             n_catalog_predicted=n_catalog_predicted,
             n_triplets_evaluated=n_triplets_evaluated,
             rotation_below_separability_floor=rotation_below_floor,
+            wide_offset_lock=wide_offset_lock,
+            wide_offset_false_lock_expectation=wide_offset_expectation,
         )
         margin_v, margin_u = search_window_for_obs(context)
         max_rotation_rad = math.radians(context.max_rotation_deg)
@@ -827,15 +1002,30 @@ class StarFieldFromCatalogNav(NavTechnique):
         confidence = self._evaluate_confidence(
             diagnostics=diagnostics, at_edge=at_edge, spurious=False
         )
+        if wide_offset_lock:
+            # A wide-offset lock rests on fewer corroborating stars than a
+            # strong-tier pattern match, so its confidence is capped below
+            # the strong-tier ceiling regardless of how the formula scores
+            # the inlier count; it must still clear the ensemble gate to
+            # navigate, but it cannot claim a high-tier result on its own.
+            capped = min(confidence, self._wide_offset_confidence_cap)
+            if capped < confidence:
+                self.logger.info(
+                    'Wide-offset lock: confidence %.4f capped to %.4f',
+                    confidence,
+                    capped,
+                )
+            confidence = capped
         consumed_ids = tuple(ranked_catalog[c].feature_id for _, c in correspondences)
         self.logger.info(
             'Pattern-match offset (%.4f, %.4f) px; %d inlier(s); median residual %.4f px; '
-            'confidence %.4f',
+            'confidence %.4f%s',
             offset_vu[0],
             offset_vu[1],
             n_inliers,
             median_residual_px,
             confidence,
+            ' [wide-offset asterism lock]' if wide_offset_lock else '',
         )
         sigma_rotation_rad: float | None
         if fit_rotation:
@@ -942,6 +1132,159 @@ class StarFieldFromCatalogNav(NavTechnique):
             if best is None or n_inliers > best[0]:
                 best = (n_inliers, pairs, offset)
         return best
+
+    def _wide_offset_asterism_match(
+        self,
+        *,
+        det_points_arr: NDArrayFloatType,
+        det_dn: NDArrayFloatType,
+        cat_points_arr: NDArrayFloatType,
+        ranked_catalog: list[NavFeature],
+        context: NavContext,
+        image_area: float,
+    ) -> _WideOffsetMatch | None:
+        """Attempt a wide-offset lock from a few trusted bright-anchor seeds.
+
+        The triplet RANSAC needs six inliers because it evaluates thousands
+        of triplet seeds, so a three-inlier coincidence is reachable by
+        chance.  This fallback instead seeds a translation only from
+        ``brightest catalog star x brightest detection`` pairings: a handful
+        of trials, each pinned to a genuinely bright, ``#284``-trusted anchor
+        (a star whose corrected magnitude is not a saturated lower bound).
+        With the trial count collapsed, an inlier count as low as
+        ``wide_offset_min_inliers`` can be statistically decisive.  A
+        candidate is accepted only when it clears every guard: the inlier
+        floor, a tight residual RMS, at least one trusted bright anchor among
+        the inliers, and -- the primary guard -- a chance-alignment
+        expectation below ``wide_offset_false_lock_budget``
+        (see :func:`_wide_offset_false_lock_expectation`).
+
+        Parameters:
+            det_points_arr: ``(N_det, 2)`` detection ``(v, u)`` positions.
+            det_dn: ``(N_det,)`` detection matched-filter peak amplitudes
+                (brightness ranking for the detection anchors).
+            cat_points_arr: ``(N_cat, 2)`` predicted catalog ``(v, u)``
+                positions, brightest first.
+            ranked_catalog: The catalog features parallel to
+                ``cat_points_arr`` (supplies the ``#284`` photometry flags).
+            context: Per-image NavContext (search-window bounds).
+            image_area: Image area in square pixels (detection-density
+                denominator for the false-lock model).
+
+        Returns:
+            A :class:`_WideOffsetMatch` when a lock cleared every guard, else
+            ``None``.
+        """
+        if not self._wide_offset_enabled:
+            return None
+        n_det = int(det_points_arr.shape[0])
+        n_cat = int(cat_points_arr.shape[0])
+        if n_det < self._wide_offset_min_inliers or n_cat < self._wide_offset_min_inliers:
+            return None
+        # Trusted bright catalog anchors: the brightest stars whose corrected
+        # magnitude is trustworthy (#284 photometry_saturated == False), so a
+        # bright-pair seed rests on a real brightness ordering rather than a
+        # saturated lower bound.  ``ranked_catalog`` is sorted by predicted
+        # SNR descending, so the first survivors are the brightest.
+        anchor_cat = [
+            j
+            for j in range(n_cat)
+            if not _star_photometry_saturated(ranked_catalog[j])
+        ][: self._wide_offset_anchor_catalog]
+        if not anchor_cat:
+            self.logger.debug(
+                'Wide-offset: no photometry-trusted bright catalog anchor; skipping'
+            )
+            return None
+        anchor_cat_set = set(anchor_cat)
+        # ``detected`` reaches this method already sorted by
+        # ``(-peak_dn, v, u)``, so the brightest detections are the leading
+        # rows; a stable argsort preserves that ``(v, u)`` tie-break and is
+        # reproducible across numpy versions (Cardinal Principle 3).
+        anchor_det = [
+            int(i)
+            for i in np.argsort(-det_dn, kind='stable')[: self._wide_offset_anchor_detections]
+        ]
+        margin_v, margin_u = search_window_for_obs(context)
+        seeds: list[tuple[float, float]] = []
+        for j in anchor_cat:
+            for i in anchor_det:
+                off = (
+                    float(det_points_arr[i, 0] - cat_points_arr[j, 0]),
+                    float(det_points_arr[i, 1] - cat_points_arr[j, 1]),
+                )
+                if abs(off[0]) <= margin_v and abs(off[1]) <= margin_u:
+                    seeds.append(off)
+        if not seeds:
+            return None
+        best: tuple[int, list[tuple[int, int]], tuple[float, float], float] | None = None
+        for off in seeds:
+            n_inliers, pairs = _optimal_inlier_assignment(
+                det_points_arr,
+                cat_points_arr,
+                offset_vu=off,
+                tolerance_px=self._inlier_tolerance_px,
+            )
+            if n_inliers < self._wide_offset_min_inliers:
+                continue
+            resid = det_points_arr[[d for d, _ in pairs]] - (
+                cat_points_arr[[c for _, c in pairs]] + np.asarray(off, np.float64)[None, :]
+            )
+            rms = float(np.sqrt(np.mean(np.sum(resid * resid, axis=1))))
+            if best is None or n_inliers > best[0] or (n_inliers == best[0] and rms < best[3]):
+                best = (n_inliers, pairs, off, rms)
+        if best is None:
+            return None
+        n_best, pairs, off, rms = best
+        if rms > self._wide_offset_max_residual_rms_px:
+            self.logger.info(
+                'Wide-offset: best %d-inlier lock residual RMS %.3f px exceeds '
+                'max %.3f px; rejecting',
+                n_best,
+                rms,
+                self._wide_offset_max_residual_rms_px,
+            )
+            return None
+        if not anchor_cat_set & {c for _, c in pairs}:
+            self.logger.info(
+                'Wide-offset: best %d-inlier lock has no trusted bright anchor among '
+                'its inliers; rejecting',
+                n_best,
+            )
+            return None
+        n_unique_seeds = len({(round(o[0], 1), round(o[1], 1)) for o in seeds})
+        expectation = _wide_offset_false_lock_expectation(
+            n_inliers=n_best,
+            n_seeds=n_unique_seeds,
+            n_catalog=n_cat,
+            n_detected=n_det,
+            tolerance_px=self._inlier_tolerance_px,
+            image_area_px2=image_area,
+        )
+        if expectation > self._wide_offset_false_lock_budget:
+            self.logger.info(
+                'Wide-offset: %d-inlier lock false-lock expectation %.3e exceeds '
+                'budget %.3e; rejecting',
+                n_best,
+                expectation,
+                self._wide_offset_false_lock_budget,
+            )
+            return None
+        self.logger.info(
+            'Wide-offset asterism lock: %d inlier(s), residual RMS %.3f px, false-lock '
+            'expectation %.3e over %d bright-anchor seed(s)',
+            n_best,
+            rms,
+            expectation,
+            n_unique_seeds,
+        )
+        return _WideOffsetMatch(
+            n_inliers=n_best,
+            correspondences=pairs,
+            offset=off,
+            expectation=expectation,
+            n_seeds=n_unique_seeds,
+        )
 
     def _tukey_refit(
         self,

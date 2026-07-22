@@ -317,6 +317,8 @@ class NavModelStars(NavModel):
                         in_saturation_or_cosmic_mask=False,
                         predicted_snr=float(snr_eff),
                         vmag=(None if star.vmag is None else float(star.vmag)),
+                        photometry_corrected=bool(star.photometry_corrected),
+                        photometry_saturated=bool(star.photometry_saturated),
                     ),
                 )
             )
