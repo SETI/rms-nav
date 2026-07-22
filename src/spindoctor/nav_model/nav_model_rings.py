@@ -221,6 +221,7 @@ class NavModelRings(NavModelRingsBase):
         self._km_per_pixel_radial: float = 0.0
         self._radial_resolution_ext: NDArrayFloatType | None = None
         self._ring_radius_ext: NDArrayFloatType | None = None
+        self._ring_occluded_ext: NDArrayBoolType | None = None
         self._extfov_v_size: int = 0
         self._extfov_u_size: int = 0
         self._predicted_center_vu: tuple[float, float] = (0.0, 0.0)
@@ -481,6 +482,28 @@ class NavModelRings(NavModelRingsBase):
                     planet,
                     exc_info=True,
                 )
+
+        # Ring points hidden behind the planet globe are drawn nowhere in the
+        # summary overlay.  ``where_in_front(planet, ring)`` is True at every
+        # ext-FOV pixel where the planet body is intercepted and nearer to the
+        # observer than the ring plane along the same line of sight -- exactly
+        # the pixels where the disc hides the rings.  A ring edge sampled behind
+        # the disc is filtered out of ``to_annotations`` rather than painted
+        # across the planet.  A backplane failure degrades to no filtering
+        # (every edge drawn) rather than aborting summary generation.
+        # The mask filters the drawn overlay only; the edge features emitted by
+        # ``create_model`` still carry occluded vertices (tracked in #372).
+        self._ring_occluded_ext = None
+        try:
+            occluded = obs.ext_bp.where_in_front(planet.lower(), ring_target)
+            self._ring_occluded_ext = occluded.mvals.filled(False).astype(bool)
+        except Exception:
+            self._logger.warning(
+                'Failed to compute planet occlusion of rings for %s; '
+                'occluded ring edges will still be drawn',
+                planet,
+                exc_info=True,
+            )
 
         render_context = RingsRenderContext(
             obs=obs,
@@ -802,11 +825,45 @@ class NavModelRings(NavModelRingsBase):
             return features
 
     def to_annotations(self, context: NavContext) -> Annotations:
-        """Render per-edge polyline overlays + ring labels."""
+        """Render per-edge polyline overlays + ring labels.
+
+        Ring-edge vertices the planet globe occludes are dropped before the
+        overlay is drawn: a Saturn-facing frame that captures the far side of
+        the rings behind the disc would otherwise paint ring edges straight
+        across the planet.  See ``_render`` for the occlusion mask.
+        """
         del context
         out = Annotations()
         for _ring_feat, _model_img, model_mask, _u, edge_info_list in self._render_results:
             if not edge_info_list:
                 continue
-            out.add_annotations(self._create_edge_annotations(self.obs, edge_info_list, model_mask))
+            visible_edges = self._drop_occluded_edges(edge_info_list)
+            if not visible_edges:
+                continue
+            out.add_annotations(self._create_edge_annotations(self.obs, visible_edges, model_mask))
         return out
+
+    def _drop_occluded_edges(
+        self, edge_info_list: list[tuple[NDArrayBoolType, str, str]]
+    ) -> list[tuple[NDArrayBoolType, str, str]]:
+        """Mask out planet-occluded pixels from each ring edge mask.
+
+        Parameters:
+            edge_info_list: ``(edge_mask, label_text, edge_label)`` tuples
+                whose masks are in ext-FOV coordinates.
+
+        Returns:
+            The same tuples with every edge mask ANDed against the visible
+            (non-occluded) region; edges left with no visible pixel are
+            dropped entirely.  When no occlusion mask is available the input
+            is returned unchanged.
+        """
+        occluded = self._ring_occluded_ext
+        if occluded is None:
+            return edge_info_list
+        visible: list[tuple[NDArrayBoolType, str, str]] = []
+        for edge_mask, label_text, edge_label in edge_info_list:
+            trimmed = edge_mask & ~occluded
+            if np.any(trimmed):
+                visible.append((trimmed, label_text, edge_label))
+        return visible

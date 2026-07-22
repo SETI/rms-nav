@@ -19,6 +19,10 @@ class Annotation:
         thicken_overlay: Number of pixels to thicken the overlay by
         text_info: Text annotation information
         avoid_mask: Boolean mask indicating areas where text should not be placed
+        stretch_boxes: Optional list of ``(v_min, u_min, v_max, u_max)`` boxes
+            in extended-FOV coordinates whose image contrast the summary
+            renderer stretches locally, so faint content (a dim star inside a
+            detection box) stays visible against a much brighter frame.
         config: Configuration object
     """
 
@@ -34,6 +38,7 @@ class Annotation:
         | tuple[AnnotationTextInfo, ...]
         | None = None,
         avoid_mask: NDArrayBoolType | None = None,
+        stretch_boxes: list[tuple[int, int, int, int]] | None = None,
         config: Config | None = None,
     ) -> None:
 
@@ -42,6 +47,7 @@ class Annotation:
         self._overlay = overlay
         self._overlay_color = overlay_color
         self._avoid_mask = avoid_mask
+        self._stretch_boxes = list(stretch_boxes) if stretch_boxes else []
         if thicken_overlay > 0:
             for u_offset in range(-thicken_overlay, thicken_overlay + 1):
                 for v_offset in range(-thicken_overlay, thicken_overlay + 1):
@@ -87,6 +93,11 @@ class Annotation:
     def avoid_mask(self) -> NDArrayBoolType | None:
         """Returns the mask indicating areas where text should not be placed, if any."""
         return self._avoid_mask
+
+    @property
+    def stretch_boxes(self) -> list[tuple[int, int, int, int]]:
+        """Returns the extended-FOV boxes whose contrast the summary stretches locally."""
+        return self._stretch_boxes
 
     @property
     def text_info_list(self) -> list[AnnotationTextInfo]:

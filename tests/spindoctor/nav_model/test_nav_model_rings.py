@@ -14,6 +14,7 @@ import pytest
 
 from spindoctor.config.config import Config
 from spindoctor.nav_model.nav_model_rings import (
+    NavModelRings,
     _require_positive_finite_planet_scalar,
     _ring_annulus_emission_params,
 )
@@ -383,3 +384,86 @@ def test_aggregate_annulus_orbit_terms_empty_is_no_channel() -> None:
     normals, sigma = _aggregate_annulus_orbit_terms([])
     assert normals.shape == (0, 2)
     assert sigma == 0.0
+
+
+###############################################################################
+#
+# _drop_occluded_edges — planet-occlusion filtering of ring-edge overlays
+#
+###############################################################################
+
+
+def _rings_model_with_occlusion(
+    occluded: np.ndarray | None,
+) -> NavModelRings:
+    """Build a bare NavModelRings carrying only an occlusion mask.
+
+    ``_drop_occluded_edges`` touches no other state, so the model is
+    constructed without an obs or the full render pipeline.
+
+    Parameters:
+        occluded: Ext-FOV occlusion mask (or None for "no signal").
+
+    Returns:
+        A NavModelRings instance with ``_ring_occluded_ext`` set.
+    """
+    model = NavModelRings.__new__(NavModelRings)
+    model._ring_occluded_ext = occluded
+    return model
+
+
+def test_drop_occluded_edges_removes_fully_hidden_edge() -> None:
+    """An edge entirely behind the planet is dropped from the overlay."""
+    occluded = np.zeros((10, 10), dtype=bool)
+    occluded[:, 5:] = True  # planet hides the right half
+    hidden = np.zeros((10, 10), dtype=bool)
+    hidden[2:4, 6:8] = True  # wholly inside the occluded region
+    model = _rings_model_with_occlusion(occluded)
+    kept = model._drop_occluded_edges([(hidden, 'A ring', 'a_outer')])
+    assert kept == []
+
+
+def test_drop_occluded_edges_keeps_visible_edge_intact() -> None:
+    """An edge entirely in front of the planet survives unchanged."""
+    occluded = np.zeros((10, 10), dtype=bool)
+    occluded[:, 5:] = True
+    visible = np.zeros((10, 10), dtype=bool)
+    visible[2:4, 1:3] = True  # wholly outside the occluded region
+    model = _rings_model_with_occlusion(occluded)
+    kept = model._drop_occluded_edges([(visible, 'A ring', 'a_outer')])
+    assert len(kept) == 1
+
+
+def test_drop_occluded_edges_trims_straddling_edge() -> None:
+    """A straddling edge keeps only its visible pixels."""
+    occluded = np.zeros((10, 10), dtype=bool)
+    occluded[:, 5:] = True
+    straddle = np.zeros((10, 10), dtype=bool)
+    straddle[4, 3:8] = True  # columns 3,4 visible; 5,6,7 occluded
+    model = _rings_model_with_occlusion(occluded)
+    kept = model._drop_occluded_edges([(straddle, 'A ring', 'a_outer')])
+    trimmed_mask = kept[0][0]
+    assert bool(trimmed_mask[4, 3])
+    assert bool(trimmed_mask[4, 4])
+
+
+def test_drop_occluded_edges_trims_away_hidden_pixels() -> None:
+    """The occluded pixels of a straddling edge are cleared."""
+    occluded = np.zeros((10, 10), dtype=bool)
+    occluded[:, 5:] = True
+    straddle = np.zeros((10, 10), dtype=bool)
+    straddle[4, 3:8] = True
+    model = _rings_model_with_occlusion(occluded)
+    kept = model._drop_occluded_edges([(straddle, 'A ring', 'a_outer')])
+    trimmed_mask = kept[0][0]
+    assert not bool(trimmed_mask[4, 6])
+
+
+def test_drop_occluded_edges_no_mask_returns_input() -> None:
+    """With no occlusion signal the edge list is returned unchanged."""
+    edge = np.zeros((10, 10), dtype=bool)
+    edge[4, 3:8] = True
+    edge_info = [(edge, 'A ring', 'a_outer')]
+    model = _rings_model_with_occlusion(None)
+    kept = model._drop_occluded_edges(edge_info)
+    assert kept is edge_info
