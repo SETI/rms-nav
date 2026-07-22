@@ -65,7 +65,62 @@ detection-to-catalog inliers within the tolerance ball are the maximum-cardinali
 assignment (solved with :func:`scipy.optimize.linear_sum_assignment`), so the count is exact
 and independent of detection ordering rather than a greedy nearest-available match that could
 strand a detection when two compete for one catalog star. The transform with the most inliers
-wins; below ``pattern_match_min_inliers`` the technique reports spurious.
+wins; below ``pattern_match_min_inliers`` the technique tries the wide-offset asterism
+fallback described next before reporting spurious.
+
+Wide-offset asterism fallback
+-----------------------------
+
+Sparse few-bright-star fields with a large unknown pointing offset (the Pleiades-cluster
+regime) routinely leave the triplet RANSAC below its strong-tier floor: the faint remainder
+is undetectable, so no triangle carries six inliers even when a handful of genuinely bright
+stars are present and correctly placed. When the RANSAC misses ``pattern_match_min_inliers``
+the technique attempts a wide-offset lock that trusts as few as ``wide_offset_min_inliers``
+inliers.
+
+The fallback does not lower the evidence bar; it lowers the trial count. It seeds a
+translation only from bright-anchor pairings -- the brightest ``wide_offset_anchor_catalog``
+photometry-trusted catalog stars against the brightest ``wide_offset_anchor_detections``
+detections -- rather than from thousands of triplet hypotheses. For each seed offset it
+solves the same maximum-cardinality one-to-one assignment used by the RANSAC and keeps the
+seed with the most inliers (ties broken by the tighter residual RMS). Because the anchor pair
+coincides exactly at its own seed offset, it is always one inlier, so a candidate reaching
+:math:`k` inliers carries the anchor plus :math:`k - 1` corroborating stars.
+
+Why three inliers can be decisive here where the RANSAC needs six: the false-lock rate is set
+by the trial count, not the inlier count alone. The RANSAC evaluates thousands of triplet
+seeds, so a three-inlier coincidence (a seed triangle plus zero corroboration) is reachable
+by chance; restricting to a handful of brightness-anchored seeds collapses the trial count so
+the same three inliers become statistically decisive. The guard quantifies this with a
+chance-alignment significance under a uniform-detection null. A single catalog star coincides
+with some detection within ``inlier_tolerance_px`` of a fixed offset with probability
+:math:`p = N_{\text{det}}\,\pi\,\tau^{2} / A`, where :math:`\tau` is the inlier tolerance and
+:math:`A` the extfov image area, so a seed reaches :math:`k` inliers with probability
+:math:`P(\mathrm{Binom}(N_{\text{cat}} - 1,\, p) \ge k - 1)`. Multiplying by the number of
+distinct seed offsets evaluated gives the expected number of chance locks
+:math:`E`; by the Markov bound the probability of any chance lock is at most :math:`E`. A
+candidate is accepted only when :math:`E` falls at or below ``wide_offset_false_lock_budget``.
+
+A candidate must also clear every remaining guard:
+
+- An inlier floor of ``wide_offset_min_inliers`` (hard minimum 3): two stars cannot
+  cross-check a rigid translation, since any single pair defines an exact offset, so at least
+  one corroborating third star is required on top of the anchor pair.
+- A residual-RMS cap (``wide_offset_max_residual_rms_px``): a lock whose corroborating inliers
+  sit near the match-tolerance edge is a scattered near-chance alignment, not a rigid
+  asterism, and is rejected; genuine locks cluster well inside the tolerance.
+- At least one trusted bright anchor must survive as an inlier. A catalog star flagged
+  ``photometry_saturated`` (its catalog magnitude is an untrusted lower bound, so its
+  brightness ordering is uncertain) is never used as a seed anchor, though it can still be a
+  corroborating inlier.
+
+An accepted wide-offset lock is confidence-capped at ``wide_offset_confidence_cap`` (0.6),
+below the high-tier floor: it rests on fewer corroborating stars than a strong-tier match, so
+it cannot claim the high tier on its own and must still clear the ensemble gate to navigate. A
+clean lock lands in the medium tier. The
+:attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.wide_offset_lock` and
+:attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.wide_offset_false_lock_expectation`
+diagnostics record that the fallback fired and the significance it cleared.
 
 PSF-fit inlier refinement
 -------------------------
@@ -192,8 +247,37 @@ in ``src/spindoctor/config_files/config_510_techniques.yaml``.
   detection-to-catalog correspondence to count as an inlier under a candidate similarity
   transform.
 - ``pattern_match_min_inliers`` — int, default ``6`` (count). Minimum inlier count for the
-  matcher to accept a transform; below this the technique returns spurious. Must be at
-  least 3 (the matcher needs at least one triplet per side).
+  strong-tier triplet RANSAC to accept a transform; below this the technique tries the
+  wide-offset asterism fallback before returning spurious. The floor is 6 because the RANSAC
+  evaluates thousands of triplet seeds, so a three-inlier coincidence is reachable by chance;
+  six inliers is the level at which a lock over that many trials is statistically decisive.
+  Must be at least 3 (the matcher needs at least one triplet per side).
+- ``wide_offset_enabled`` — int flag, default ``1``. ``1`` enables the wide-offset asterism
+  fallback for sparse few-bright-star fields; ``0`` keeps the strong-tier RANSAC only.
+- ``wide_offset_min_inliers`` — int, default ``3`` (count). Minimum inlier count for a
+  wide-offset lock. Validated to be at least 3 at load time: two stars cannot cross-check a
+  rigid translation, so at least one corroborating star beyond the anchor pair is required.
+- ``wide_offset_anchor_catalog`` — int, default ``3`` (count). Number of brightest
+  photometry-trusted catalog stars used as seed anchors. A ``photometry_saturated`` star is
+  skipped as an anchor (its brightness ordering is uncertain) but can still be a corroborating
+  inlier.
+- ``wide_offset_anchor_detections`` — int, default ``6`` (count). Number of brightest
+  detections paired against each catalog anchor to form the seed offsets. The product with
+  ``wide_offset_anchor_catalog`` bounds the seed (trial) count entering the false-lock model.
+- ``wide_offset_false_lock_budget`` — float, default ``0.01`` (expected count). Maximum
+  expected number of chance locks (of the achieved inlier count, over the evaluated
+  bright-anchor seeds) under a uniform-random-detection null; a candidate is accepted only
+  when its computed expectation falls at or below this. A genuine three-inlier anchor lock on
+  a sparse field sits several orders of magnitude below it, while a two-inlier lock sits above
+  it and is rejected.
+- ``wide_offset_max_residual_rms_px`` — float, default ``1.5`` px. Maximum inlier residual RMS
+  for a wide-offset lock. A lock whose corroborating inliers sit near the match-tolerance edge
+  is a scattered near-chance alignment, not a rigid asterism; genuine locks cluster well
+  inside the tolerance.
+- ``wide_offset_confidence_cap`` — float, default ``0.6`` (dimensionless, in ``[0, 1]``).
+  Post-formula confidence cap for a wide-offset lock. Fewer corroborating stars than a
+  strong-tier match means the result cannot claim the high tier on its own; it must still
+  clear the ensemble gate to navigate. 0.6 lands a clean lock in the medium / low tier.
 - ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
   distance from any search-window axis bound falls within this tolerance is flagged
   :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`.
@@ -270,6 +354,10 @@ planted truth), and near-single-class evidence cannot support confidence above ~
 frames the sim cannot represent (distortion, smear, saturated bloom); the ceiling is
 conservative pending a real-anchored calibration.
 
+A wide-offset asterism lock (see the fallback section above) is additionally capped at
+``wide_offset_confidence_cap`` (0.6) after the sigmoid evaluates, below the high-tier floor,
+so it cannot claim the high tier on the strength of its fewer corroborating stars alone.
+
 Implementation
 ==============
 
@@ -329,6 +417,13 @@ Diagnostics
   camera-roll separability analysis in the simulator performance report) and the
   rotation was therefore reported with the rotation-unobservable sentinel variance
   instead of a confident near-zero value.
+- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.wide_offset_lock` — true
+  when the offset was recovered by the wide-offset asterism fallback (a few trusted
+  bright-anchor seeds) rather than the strong-tier triplet RANSAC.
+- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.wide_offset_false_lock_expectation`
+  — expected number of chance locks of the achieved inlier count under the uniform-detection
+  null; the false-lock significance the acceptance budget bounded. ``0.0`` for strong-tier
+  matches, where the fallback did not run.
 
 Call path
 ---------
@@ -351,8 +446,14 @@ Call path traced through
    count inlier matches across the full catalog cohort using ``inlier_tolerance_px``.
    Keep the transform with the most inliers.
 
-   - **Below min_inliers.**  Return a spurious zero-confidence result with the diagnostic
-     fields populated for the JSON sidecar.
+   - **Below min_inliers.**  Try the wide-offset asterism fallback: seed a translation from
+     the brightest photometry-trusted catalog stars against the brightest detections and
+     accept a lock of as few as ``wide_offset_min_inliers`` inliers only when it clears the
+     residual-RMS cap, retains a trusted bright anchor, and carries a chance-alignment
+     expectation at or below ``wide_offset_false_lock_budget``. A wide-offset lock is
+     confidence-capped at ``wide_offset_confidence_cap``. If no candidate clears the guards,
+     return a spurious zero-confidence result with the diagnostic fields populated for the
+     JSON sidecar.
 
 5. Refine the inlier detection positions: for each matched inlier below the
    ``psf_refine_snr_max`` integrated-SNR ceiling, replace its moment centroid with a
