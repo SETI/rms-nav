@@ -318,6 +318,13 @@ class StarFieldDiagnostics:
             separability floor (``rotation_separability_floor_deg``) and
             the rotation was therefore reported as unobservable rather
             than as a confident near-zero value.
+        wide_offset_lock: True when the offset was recovered by the
+            wide-offset asterism fallback (a few trusted bright-anchor
+            seeds) rather than the strong-tier triplet RANSAC.
+        wide_offset_false_lock_expectation: Expected number of chance
+            locks of this inlier count under the uniform-detection null;
+            the false-lock significance the acceptance budget bounded.
+            ``0.0`` for strong-tier matches (the fallback did not run).
     """
 
     n_inliers: int = 0
@@ -326,6 +333,8 @@ class StarFieldDiagnostics:
     n_catalog_predicted: int = 0
     n_triplets_evaluated: int = 0
     rotation_below_separability_floor: bool = False
+    wide_offset_lock: bool = False
+    wide_offset_false_lock_expectation: float = 0.0
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'n_inliers': 'n_inliers',
         'median_residual_px': 'median_residual_px',
@@ -333,6 +342,8 @@ class StarFieldDiagnostics:
         'n_catalog_predicted': 'n_catalog_predicted',
         'n_triplets_evaluated': 'n_triplets_evaluated',
         'rotation_below_separability_floor': 'rotation_below_separability_floor',
+        'wide_offset_lock': 'wide_offset_lock',
+        'wide_offset_false_lock_expectation': 'wide_offset_false_lock_expectation',
     }
 
 

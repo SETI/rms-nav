@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
+from typing import cast
 
 import numpy as np
 import pytest
@@ -15,16 +16,20 @@ from tests.spindoctor.nav_technique.conftest import (
 )
 
 from spindoctor.feature.feature import NavFeature
+from spindoctor.feature.flags import StarFlags
 from spindoctor.nav_technique.diagnostics import StarFieldDiagnostics
 from spindoctor.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE, NavTechnique
 from spindoctor.nav_technique.nav_technique_star_field import (
     StarFieldFromCatalogNav,
+    _binomial_upper_tail,
     _detect_image_sources,
     _enumerate_triplets,
     _hash_distance_sq,
     _optimal_inlier_assignment,
     _solve_translation,
+    _star_photometry_saturated,
     _triplet_hash,
+    _wide_offset_false_lock_expectation,
 )
 
 
@@ -970,3 +975,279 @@ def test_build_covariance_3dof_coincident_catalog_is_rotation_unobservable() -> 
         weights=weights, residuals=residuals, cat_inliers=cat_inliers
     )
     assert cov[2, 2] == pytest.approx(ROTATION_UNOBSERVABLE_VARIANCE)
+
+
+# ---------------------------------------------------------------------------
+# Wide-offset asterism matching — false-lock significance model.
+# ---------------------------------------------------------------------------
+
+
+def test_binomial_upper_tail_full_range_is_unity() -> None:
+    """``P(X >= 0)`` is 1 for any binomial."""
+    assert _binomial_upper_tail(5, 0.3, 0) == pytest.approx(1.0)
+
+
+def test_binomial_upper_tail_above_n_is_zero() -> None:
+    """Asking for more successes than trials yields zero probability."""
+    assert _binomial_upper_tail(3, 0.3, 4) == 0.0
+
+
+def test_binomial_upper_tail_matches_closed_form() -> None:
+    """The tail sum matches a hand-computed two-of-three value."""
+    # P(X >= 2 | n=3, p=0.5) = P(2) + P(3) = 3/8 + 1/8 = 0.5.
+    assert _binomial_upper_tail(3, 0.5, 2) == pytest.approx(0.5)
+
+
+def test_wide_offset_expectation_three_inliers_is_significant() -> None:
+    """A three-inlier anchor lock sits far below a one-percent budget."""
+    expectation = _wide_offset_false_lock_expectation(
+        n_inliers=3,
+        n_seeds=15,
+        n_catalog=18,
+        n_detected=30,
+        tolerance_px=2.0,
+        image_area_px2=1500.0 * 1500.0,
+    )
+    assert expectation < 1.0e-3
+
+
+def test_wide_offset_expectation_two_inliers_exceeds_budget() -> None:
+    """A two-inlier lock (anchor plus one chance neighbour) is not significant."""
+    expectation = _wide_offset_false_lock_expectation(
+        n_inliers=2,
+        n_seeds=15,
+        n_catalog=18,
+        n_detected=30,
+        tolerance_px=2.0,
+        image_area_px2=1500.0 * 1500.0,
+    )
+    assert expectation > 0.01
+
+
+def test_wide_offset_expectation_grows_with_seed_count() -> None:
+    """More seed trials raises the chance-lock expectation monotonically."""
+    few = _wide_offset_false_lock_expectation(
+        n_seeds=5,
+        n_inliers=3,
+        n_catalog=18,
+        n_detected=30,
+        tolerance_px=2.0,
+        image_area_px2=2.25e6,
+    )
+    many = _wide_offset_false_lock_expectation(
+        n_seeds=50,
+        n_inliers=3,
+        n_catalog=18,
+        n_detected=30,
+        tolerance_px=2.0,
+        image_area_px2=2.25e6,
+    )
+    assert many > few
+
+
+def test_wide_offset_expectation_degenerate_inputs_are_zero() -> None:
+    """Non-positive or under-determined inputs return a zero expectation."""
+    assert (
+        _wide_offset_false_lock_expectation(
+            n_inliers=0,
+            n_seeds=5,
+            n_catalog=18,
+            n_detected=30,
+            tolerance_px=2.0,
+            image_area_px2=2.25e6,
+        )
+        == 0.0
+    )
+    assert (
+        _wide_offset_false_lock_expectation(
+            n_inliers=3,
+            n_seeds=5,
+            n_catalog=1,
+            n_detected=30,
+            tolerance_px=2.0,
+            image_area_px2=2.25e6,
+        )
+        == 0.0
+    )
+
+
+def test_star_photometry_saturated_reads_flag(
+    make_star_feature: NavFeatureFactory,
+) -> None:
+    """The helper reads the ``#284`` saturation flag off a STAR feature."""
+    feature = make_star_feature('star:UCAC4:0', predicted_vu=(10.0, 10.0), predicted_snr=40.0)
+    assert _star_photometry_saturated(feature) is False
+    flagged = replace(
+        feature, flags=replace(cast(StarFlags, feature.flags), photometry_saturated=True)
+    )
+    assert _star_photometry_saturated(flagged) is True
+
+
+# ---------------------------------------------------------------------------
+# Wide-offset asterism matching — technique-level.
+# ---------------------------------------------------------------------------
+
+
+def _wide_offset_field(
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+    *,
+    offset: tuple[float, float],
+    n_stars: int,
+) -> tuple[np.ndarray, list[NavFeature]]:
+    """Plant ``n_stars`` aligned stars at a wide ``offset`` on a 400 px field."""
+    centers = [
+        (70.0, 90.0),
+        (300.0, 140.0),
+        (160.0, 330.0),
+        (240.0, 250.0),
+        (110.0, 210.0),
+    ][:n_stars]
+    image = _star_field_image(centers, draw=draw_gaussian_star, shape=(400, 400), peak_dn=400.0)
+    snrs = [400.0, 120.0, 40.0, 20.0, 12.0][:n_stars]
+    features = _make_star_field_features(
+        centers, make_feature=make_star_feature, offset=offset, snrs=snrs
+    )
+    return image, features
+
+
+def test_wide_offset_lock_recovers_sparse_three_star_field(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """Three aligned stars at a wide offset lock via the asterism fallback."""
+    planted = (55.0, -70.0)
+    image, features = _wide_offset_field(
+        make_star_feature, draw_gaussian_star, offset=planted, n_stars=3
+    )
+    technique = StarFieldFromCatalogNav()
+    context = make_nav_context(image, extfov_margin_vu=(150, 150))
+    result = technique.navigate(features, context)
+    assert result.spurious is False
+    assert isinstance(result.diagnostics, StarFieldDiagnostics)
+    assert result.diagnostics.wide_offset_lock is True
+    assert result.diagnostics.n_inliers == 3
+    assert result.offset_px[0] == pytest.approx(planted[0], abs=0.5)
+    assert result.offset_px[1] == pytest.approx(planted[1], abs=0.5)
+
+
+def test_wide_offset_lock_confidence_is_capped(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """A wide-offset lock cannot exceed the configured confidence cap."""
+    image, features = _wide_offset_field(
+        make_star_feature, draw_gaussian_star, offset=(48.0, 60.0), n_stars=3
+    )
+    technique = StarFieldFromCatalogNav()
+    context = make_nav_context(image, extfov_margin_vu=(150, 150))
+    result = technique.navigate(features, context)
+    assert result.confidence <= technique._wide_offset_confidence_cap + 1e-9
+
+
+def test_wide_offset_lock_expectation_recorded(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """The accepted lock records a positive, sub-budget false-lock expectation."""
+    image, features = _wide_offset_field(
+        make_star_feature, draw_gaussian_star, offset=(40.0, 52.0), n_stars=3
+    )
+    technique = StarFieldFromCatalogNav()
+    context = make_nav_context(image, extfov_margin_vu=(150, 150))
+    result = technique.navigate(features, context)
+    assert isinstance(result.diagnostics, StarFieldDiagnostics)
+    exp = result.diagnostics.wide_offset_false_lock_expectation
+    assert 0.0 < exp <= technique._wide_offset_false_lock_budget
+
+
+def test_dense_field_uses_strong_tier_not_wide_offset(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """A six-plus-inlier field is a strong-tier match, not a wide-offset lock."""
+    centers = [
+        (60.0, 80.0),
+        (110.0, 130.0),
+        (180.0, 90.0),
+        (220.0, 200.0),
+        (90.0, 240.0),
+        (250.0, 70.0),
+    ]
+    image = _star_field_image(centers, draw=draw_gaussian_star, shape=(320, 320))
+    features = _make_star_field_features(
+        centers, make_feature=make_star_feature, offset=(3.0, -2.5)
+    )
+    technique = StarFieldFromCatalogNav()
+    context = make_nav_context(image, extfov_margin_vu=(32, 32))
+    result = technique.navigate(features, context)
+    assert isinstance(result.diagnostics, StarFieldDiagnostics)
+    assert result.diagnostics.wide_offset_lock is False
+    assert result.diagnostics.n_inliers >= 6
+
+
+def test_wide_offset_rejects_untrusted_bright_anchor(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """With every bright anchor photometry-saturated, no lock is trusted."""
+    planted = (50.0, -60.0)
+    image, features = _wide_offset_field(
+        make_star_feature, draw_gaussian_star, offset=planted, n_stars=3
+    )
+    # Flag every star's brightness as an untrusted (saturated) lower bound so
+    # the matcher has no trustworthy anchor to seed on.
+    features = [
+        replace(f, flags=replace(cast(StarFlags, f.flags), photometry_saturated=True))
+        for f in features
+    ]
+    technique = StarFieldFromCatalogNav()
+    context = make_nav_context(image, extfov_margin_vu=(150, 150))
+    result = technique.navigate(features, context)
+    assert result.spurious is True
+
+
+def test_wide_offset_rejects_incoherent_field(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """Detections with no rigid alignment to the catalog do not lock."""
+    # Three planted detections, but predictions scattered so that no single
+    # translation aligns more than the seed anchor pair.
+    image = _star_field_image(
+        [(70.0, 90.0), (300.0, 140.0), (160.0, 330.0)],
+        draw=draw_gaussian_star,
+        shape=(400, 400),
+        peak_dn=400.0,
+    )
+    features = [
+        make_star_feature('star:UCAC4:0', predicted_vu=(30.0, 40.0), predicted_snr=400.0),
+        make_star_feature('star:UCAC4:1', predicted_vu=(360.0, 60.0), predicted_snr=120.0),
+        make_star_feature('star:UCAC4:2', predicted_vu=(40.0, 360.0), predicted_snr=40.0),
+    ]
+    technique = StarFieldFromCatalogNav()
+    context = make_nav_context(image, extfov_margin_vu=(150, 150))
+    result = technique.navigate(features, context)
+    assert result.spurious is True
+
+
+def test_wide_offset_disabled_falls_through_to_spurious(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """With the fallback disabled a sub-floor field returns spurious."""
+    image, features = _wide_offset_field(
+        make_star_feature, draw_gaussian_star, offset=(45.0, -55.0), n_stars=3
+    )
+    technique = StarFieldFromCatalogNav()
+    technique._wide_offset_enabled = False
+    context = make_nav_context(image, extfov_margin_vu=(150, 150))
+    result = technique.navigate(features, context)
+    assert result.spurious is True

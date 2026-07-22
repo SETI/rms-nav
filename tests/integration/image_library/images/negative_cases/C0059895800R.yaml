@@ -13,8 +13,8 @@ ground_truth:
   offset_uncertainty_px: 99.0
   source: operator_verified
   operator: rfrench
-  verified_date: 2026-07-14
-  ui_version: spindoctor 0.0.0 (issue #238 triage)
+  verified_date: 2026-07-21
+  ui_version: spindoctor 0.1.dev61 (issue #285 wide-offset asterism matching)
   notes: |
     negative_cases curation for issue #238 (Galileo SSI 'scattered_light'
     C00598xx quintet).  Instrument: Galileo SSI (GOSSI).  The tracking issue
@@ -26,26 +26,32 @@ ground_truth:
     (prescan gradient_score ~7.4, amplitude ~4.5 DN).  The in-pipeline image
     classifier scores the frame 'clean' (noise ~1 DN), so the glare does not
     swamp detection: there is no photometric-path defect.
-    Why it is unnavigable: the field is a sparse Pleiades pointing whose only
-    genuinely bright catalog stars are two members (Eta Tau ~V2.8, 23 Tau
-    ~V4.2); the remaining ~15 predicted stars are V 6-8, at or below the
-    glare-elevated detection limit.  The star-field pattern matcher detects
-    30 sources (dominated by noise and cosmic-ray hits) but recovers only
-    1 inlier(s) against its floor of 6, and no single rigid offset aligns
-    more than ~3-4 predicted stars with a detection.  The two-star fallback
-    cannot lock the large unknown pointing offset and its brightest-pair
-    margin (1.02 mag) is below the 1.5-mag floor.  The pipeline fails closed
-    with status=failed, reason=all_techniques_spurious, which is a limit of the current pipeline, not a validated negative:
-    fewer than the required number of stars are detectable and there is no
-    resolved body or ring.
-    Ground-truth offset is a placeholder: the current pipeline cannot navigate the scene,
-    so no offset is measurable; this fixture is provisional (pending_issue #285) and must be re-verified and reclassified when #285 (sparse-field star nav) and #284 (UCAC4 bright-end photometry) land; the regression assertion is
-    expected.status=failed with reason=all_techniques_spurious.
+    First triage (2026-07-14): a sparse Pleiades pointing whose bright members
+    are Eta Tau (~V2.8) and 23 Tau (~V4.2), with the fainter V6-8 remainder at
+    or below the glare-elevated detection limit.  The pipeline failed closed with
+    reason=all_techniques_spurious.  Ground truth was a placeholder (0, 0)
+    pending #285 (sparse-field star nav) and #284 (UCAC4 bright-end photometry).
+
+    Re-ratchet 2026-07-21 (issue #285, wide-offset asterism matching; depends on
+    #284).  VALIDATED NEGATIVE under current capability: this frame stays failed,
+    and it is a genuine capability boundary, not a matcher defect.  With #284's
+    bright-end correction the bright anchor is identified, but an exhaustive
+    tight-tolerance (<=2 px) offset search over the detection list finds only ONE
+    catalog star aligned to a detection at the true wide (negative-drift) offset
+    -- the other members are below the glare-elevated detection limit or off-frame
+    at that pointing.  #285's wide-offset asterism matcher requires at least three
+    tight inliers (a trusted bright anchor plus two corroborating stars) with a
+    chance-alignment significance below budget; a single-star wide-offset lock is
+    under-determined and a false-lock trap, so the matcher correctly declines to
+    lock.  The residual single-detectable-star wide-offset gap is tracked in #367;
+    this fixture is carried as pending on that issue and must be re-verified when
+    it lands.  The regression assertion is expected.status=failed with
+    reason=all_techniques_spurious.
 expected:
   status: failed
   confidence_tier: failed
   primary_technique: StarFieldFromCatalogNav
   status_reason: all_techniques_spurious
-  pending_issue: '#285'
+  pending_issue: '#367'
   techniques_must_run: []
   techniques_must_skip: []
