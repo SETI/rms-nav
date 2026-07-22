@@ -388,7 +388,7 @@ def test_aggregate_annulus_orbit_terms_empty_is_no_channel() -> None:
 
 ###############################################################################
 #
-# _drop_occluded_edges — planet-occlusion filtering of ring-edge overlays
+# _drop_occluded_edges -- planet-occlusion filtering of ring-edge overlays
 #
 ###############################################################################
 
@@ -432,6 +432,7 @@ def test_drop_occluded_edges_keeps_visible_edge_intact() -> None:
     model = _rings_model_with_occlusion(occluded)
     kept = model._drop_occluded_edges([(visible, 'A ring', 'a_outer')])
     assert len(kept) == 1
+    assert np.array_equal(kept[0][0], visible)
 
 
 def test_drop_occluded_edges_trims_straddling_edge() -> None:

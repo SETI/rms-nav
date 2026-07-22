@@ -28,6 +28,7 @@ from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifi
 from spindoctor.nav_orchestrator.nav_result import NavResult
 from spindoctor.nav_orchestrator.provenance import Provenance
 from spindoctor.navigate_image_files import (
+    _summary_metadata_from_obs_result,
     build_timing_section,
     navigate_image_files,
     write_summary_png,
@@ -531,3 +532,141 @@ def test_build_timing_section_formats_utc() -> None:
     assert timing['start_iso8601'] == '2026-07-11T12:00:00Z'
     assert timing['end_iso8601'] == '2026-07-11T12:00:02.500000Z'
     assert timing['elapsed_s'] == 2.5
+
+
+# ---------------------------------------------------------------------------
+# _summary_metadata_from_obs_result — header assembly happy path
+# ---------------------------------------------------------------------------
+
+
+class _FakeObsForMetadata:
+    """Obs stand-in exposing get_public_metadata for the header assembler."""
+
+    def __init__(self, public: dict[str, Any]) -> None:
+        self._public = public
+
+    def get_public_metadata(self) -> dict[str, Any]:
+        return self._public
+
+
+class _FakeTechniqueResult:
+    """Technique-result stand-in exposing only a technique name."""
+
+    def __init__(self, technique_name: str) -> None:
+        self.technique_name = technique_name
+
+
+class _FakeNavResult:
+    """NavResult stand-in exposing the fields the header assembler reads."""
+
+    def __init__(
+        self,
+        *,
+        status: str,
+        per_technique: list[_FakeTechniqueResult],
+        consensus_techniques: list[str],
+        confidence: float,
+        confidence_rank: str,
+    ) -> None:
+        self.status = status
+        self.per_technique = per_technique
+        self.consensus_techniques = consensus_techniques
+        self.confidence = confidence
+        self.confidence_rank = confidence_rank
+
+
+def test_summary_metadata_joins_filters_with_plus() -> None:
+    """Multiple filters are joined with ``+`` from the public metadata."""
+    obs = _FakeObsForMetadata(
+        {'image_name': 'N1.IMG', 'filters': ['CL1', 'IR3'], 'exposure_time': 2.0}
+    )
+    result = _FakeNavResult(
+        status='success',
+        per_technique=[_FakeTechniqueResult('RingEdgeNav')],
+        consensus_techniques=['RingEdgeNav'],
+        confidence=0.6,
+        confidence_rank='medium',
+    )
+    meta = _summary_metadata_from_obs_result(obs, result)  # type: ignore[arg-type]
+    assert meta.filter_name == 'CL1+IR3'
+
+
+def test_summary_metadata_reads_exposure_as_float() -> None:
+    """The exposure time is coerced to float from the public metadata."""
+    obs = _FakeObsForMetadata({'image_name': 'N1.IMG', 'filters': [], 'exposure_time': 2})
+    result = _FakeNavResult(
+        status='success',
+        per_technique=[_FakeTechniqueResult('StarRefineNav')],
+        consensus_techniques=['StarRefineNav'],
+        confidence=0.6,
+        confidence_rank='medium',
+    )
+    meta = _summary_metadata_from_obs_result(obs, result)  # type: ignore[arg-type]
+    assert meta.exposure_s == 2.0
+
+
+def test_summary_metadata_uses_consensus_techniques() -> None:
+    """Only the ensemble's consensus subset is reported, not every result."""
+    obs = _FakeObsForMetadata({'image_name': 'N1.IMG', 'filters': ['CL1'], 'exposure_time': 1.0})
+    result = _FakeNavResult(
+        status='success',
+        per_technique=[
+            _FakeTechniqueResult('RingEdgeNav'),
+            _FakeTechniqueResult('BodyLimbNav'),  # an outlier the ensemble rejected
+        ],
+        consensus_techniques=['RingEdgeNav'],
+        confidence=0.7,
+        confidence_rank='high',
+    )
+    meta = _summary_metadata_from_obs_result(obs, result)  # type: ignore[arg-type]
+    assert meta.techniques == ('RingEdgeNav',)
+
+
+def test_summary_metadata_falls_back_to_per_technique_when_no_consensus() -> None:
+    """A success with no stamped consensus falls back to the per-technique set."""
+    obs = _FakeObsForMetadata({'image_name': 'N1.IMG', 'filters': ['CL1'], 'exposure_time': 1.0})
+    result = _FakeNavResult(
+        status='success',
+        per_technique=[_FakeTechniqueResult('BodyDiscCorrelateNav')],
+        consensus_techniques=[],
+        confidence=0.7,
+        confidence_rank='high',
+    )
+    meta = _summary_metadata_from_obs_result(obs, result)  # type: ignore[arg-type]
+    assert meta.techniques == ('BodyDiscCorrelateNav',)
+
+
+def test_summary_metadata_failed_reports_no_techniques() -> None:
+    """A failed nav reports no techniques regardless of what ran."""
+    obs = _FakeObsForMetadata({'image_name': 'N1.IMG', 'filters': ['CL1'], 'exposure_time': 1.0})
+    result = _FakeNavResult(
+        status='failed',
+        per_technique=[_FakeTechniqueResult('RingEdgeNav')],
+        consensus_techniques=[],
+        confidence=0.0,
+        confidence_rank='failed',
+    )
+    meta = _summary_metadata_from_obs_result(obs, result)  # type: ignore[arg-type]
+    assert meta.techniques == ()
+
+
+def test_summary_metadata_degrades_when_public_metadata_raises() -> None:
+    """A public-metadata failure yields empty filter and unknown exposure."""
+
+    class _RaisingObs:
+        abspath = Path('/holdings/N9.IMG')
+
+        def get_public_metadata(self) -> dict[str, Any]:
+            raise RuntimeError('no label')
+
+    result = _FakeNavResult(
+        status='failed',
+        per_technique=[],
+        consensus_techniques=[],
+        confidence=0.0,
+        confidence_rank='failed',
+    )
+    meta = _summary_metadata_from_obs_result(_RaisingObs(), result)  # type: ignore[arg-type]
+    assert meta.image_name == 'N9.IMG'
+    assert meta.filter_name == ''
+    assert meta.exposure_s is None

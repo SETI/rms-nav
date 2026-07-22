@@ -329,7 +329,6 @@ def _summary_metadata_from_obs_result(obs: ObsSnapshotInst, result: NavResult) -
     Returns:
         A populated :class:`~spindoctor.support.summary_png.SummaryMetadata`.
     """
-    filter_name = ''
     exposure_s: float | None = None
     try:
         public = obs.get_public_metadata()
@@ -342,13 +341,23 @@ def _summary_metadata_from_obs_result(obs: ObsSnapshotInst, result: NavResult) -
     exposure_raw = public.get('exposure_time')
     if exposure_raw is not None:
         exposure_s = float(exposure_raw)
-    techniques = tuple(sorted({tr.technique_name for tr in result.per_technique}))
+    # The techniques that actually contributed to the reported offset are the
+    # ensemble's consensus subset, not every technique that ran (outliers the
+    # ensemble rejected still appear in per_technique).  Fall back to the full
+    # per-technique set only if a success left the consensus list unstamped.
+    if result.status == 'success':
+        contributing = result.consensus_techniques or [
+            tr.technique_name for tr in result.per_technique
+        ]
+        techniques = tuple(sorted(set(contributing)))
+    else:
+        techniques = ()
     return SummaryMetadata(
         image_name=image_name,
         filter_name=filter_name,
         exposure_s=exposure_s,
         status=result.status,
-        techniques=techniques if result.status == 'success' else (),
+        techniques=techniques,
         confidence=result.confidence,
         confidence_rank=result.confidence_rank,
     )
