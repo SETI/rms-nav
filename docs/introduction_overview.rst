@@ -69,7 +69,8 @@ Navigation Phase
 
 * ``sd_consolidate_metadata`` - Copy each image's metadata JSON and/or summary
   PNG to a single flat directory so results are easy to browse without
-  descending the per-volume path hierarchy.
+  descending the per-volume path hierarchy (see
+  :doc:`/user_guide/user_guide_navigation`).
 
 * ``sd_stats_ingest`` - Ingest per-image navigation metadata JSON files into a
   SQLite database (see :doc:`/user_guide/user_guide_statistics`).
