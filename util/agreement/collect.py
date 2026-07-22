@@ -387,9 +387,11 @@ def _navigate_one(
 
 
 def _init_worker() -> None:
-    """Silence the per-image logger in a freshly forked pool worker.
+    """Silence the per-image and main loggers in a pool worker.
 
-    Thread pinning is handled at module import (one BLAS/OpenMP thread per
+    Runs once per worker: at fork when the pool starts, and again after each
+    ``maxtasksperchild`` respawn.  Native thread-pool pinning is handled at
+    module import (the BLAS/OpenMP/NumExpr pools are capped to one thread per
     process, set before the first numpy import and inherited by every forked
     worker), not here: under the default fork start method a worker inherits
     the parent's already-initialized threading runtime, so setting the thread

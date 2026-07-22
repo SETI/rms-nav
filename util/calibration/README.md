@@ -129,14 +129,14 @@ Notes on reproducing the measurement:
 
 - Worker thread pinning is automatic: `collect.py` sets the
   `*_NUM_THREADS=1` variables at module import, ahead of the first numpy
-  import, so the parent process starts single-threaded and every forked
-  worker inherits that.  No shell-level exports are needed.  (Setting the
-  variables in the pool initializer would be too late under the fork start
-  method, since workers inherit the parent's already-initialized BLAS
-  thread pools.)  To let workers use multiple BLAS threads for a
-  deliberately-different measurement, export the variables with higher
-  values before running -- `collect.py` uses `setdefault`, so an explicit
-  value wins.
+  import, so the parent's native BLAS/OpenMP/NumExpr thread pools are
+  capped to one thread and every forked worker inherits that.  No
+  shell-level exports are needed.  (Setting the variables in the pool
+  initializer would be too late under the fork start method, since workers
+  inherit the parent's already-initialized BLAS thread pools.)  To let
+  workers use multiple BLAS threads for a deliberately-different
+  measurement, export the variables with higher values before running --
+  `collect.py` uses `setdefault`, so an explicit value wins.
 - Worker CPU affinity on this machine is load-bearing, not cosmetic:
   always `source setup.sh` first so the excluded cores stay excluded.
 
