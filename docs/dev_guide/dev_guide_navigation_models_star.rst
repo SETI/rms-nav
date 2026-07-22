@@ -48,45 +48,68 @@ there. In the Pleiades, UCAC4 reports Eta Tau (true :math:`V \approx 2.9`) and 2
 :math:`V \approx 6.7`.
 
 After the catalog merge, :func:`~spindoctor.nav_model.stars.saturation.correct_star_photometry`
-cross-references the merged list against the full in-field YBSC set (the Yale Bright Star
-Catalogue carries real Johnson V and B photometry and is complete through the saturated
-regime). For each non-YBSC record brighter than
+cross-references the merged list against a trusted-photometry reference built from the full
+in-field YBSC and Tycho-2 sets. YBSC (the Yale Bright Star Catalogue) carries real Johnson V
+and B photometry but is complete only to about :math:`V \approx 6.5`. Tycho-2's star-mapper
+photometry does not saturate at the bright end and is complete to about :math:`V \approx 11`,
+so it reaches the :math:`V \approx 6.5` to :math:`8` stars YBSC misses. The reference is the
+in-field union of the two, with YBSC preferred wherever it covers a star (it supplies a
+self-consistent Johnson pair) and Tycho-2 supplying the rest. Only UCAC4 saturates: records
+whose catalog appears in
+:data:`~spindoctor.nav_model.stars.saturation.REFERENCE_CATALOGS` (``ybsc``, ``tycho2``)
+are the reference and are never correction candidates, so a reference is never corrected
+against itself.
+
+For each candidate record brighter than
 :data:`~spindoctor.nav_model.stars.saturation.UCAC4_SATURATION_VMAG_LIMIT` (8.0):
 
-- If it positionally matches a YBSC star and disagrees with it by more than
+- If it positionally matches a reference star and disagrees with it by more than
   :data:`~spindoctor.nav_model.stars.saturation.SATURATION_CORRECTION_MIN_MAG` (0.5 mag),
-  it adopts the YBSC magnitude (``vmag``, the Johnson pair, and a recomputed ``dn``) while
-  keeping its own astrometry, and is flagged ``photometry_corrected``.
-- If it matches a YBSC star but already agrees to within the tolerance, it is not saturated
-  and is left untouched.
-- If it has no YBSC match it is flagged ``photometry_saturated``, so downstream consumers
-  treat its magnitude as an untrusted lower bound rather than correcting it (there is no
-  reference to correct against).
+  it adopts the reference magnitude and a recomputed ``dn`` while keeping its own astrometry,
+  and is flagged ``photometry_corrected``. A match against YBSC propagates YBSC's Johnson
+  pair; a match against Tycho-2 adopts Tycho-2's V and fakes the colour from the candidate's
+  spectral class (this pipeline discards Tycho-2's own colour), setting ``johnson_mag_faked``.
+- If it matches a reference star but already agrees to within the tolerance, it is not
+  saturated and is left untouched and unflagged. This is what keeps the flag honest: a
+  genuine :math:`V \approx 7` to :math:`8` star beyond YBSC completeness matches its Tycho-2
+  reference, agrees with it, and is not mistaken for saturation.
+- If it has no reference in either catalog -- now genuinely rare -- it is flagged
+  ``photometry_saturated``, so downstream consumers treat its magnitude as an untrusted
+  lower bound on brightness rather than a trustworthy reading.
+
+Empirically, Tycho-2 agrees with YBSC to a few hundredths of a magnitude through the bright
+regime (over the Pleiades and Hyades: Eta Tau :math:`V = 2.84` vs YBSC :math:`2.87`,
+Theta-2 Tau :math:`3.39` vs :math:`3.40`, Theta-1 Tau :math:`3.84` vs :math:`3.84`) where
+UCAC4 reads the same stars near :math:`V \approx 6.7`, so extending the reference to Tycho-2
+leaves the accurate bright end untouched while filling in the stars YBSC cannot reach.
 
 Correcting a saturated magnitude then exposes a duplicate the merge missed. The merge only
 deduplicates two catalogs' records of one physical star when their magnitudes agree, so a
 star that UCAC4 saturated by more than the duplicate-magnitude tolerance survived alongside
-its accurate twin. Once corrected the two magnitudes agree, and a final pass collapses the
-revealed duplicate, keeping the twin that never needed correcting: the same saturation that
-corrupts UCAC4's photometry also displaces its astrometry, so the catalog that read the
-star at its true magnitude also placed it most accurately.
+its accurate Tycho-2 or YBSC twin. Once corrected the two magnitudes agree, and a final pass
+collapses the revealed duplicate, keeping the twin that never needed correcting: the same
+saturation that corrupts UCAC4's photometry also displaces its astrometry, so the catalog
+that read the star at its true magnitude also placed it most accurately.
 
-**Tycho-2 is a correction candidate but does not saturate.** The correction treats every
-non-YBSC record as a candidate, so Tycho-2 records pass through the same pass. Empirically,
-however, Tycho-2's star-mapper photometry agrees with YBSC to a few hundredths of a
-magnitude through the bright regime (over the Pleiades and Hyades: Eta Tau
-:math:`V = 2.84` vs YBSC :math:`2.87`, Theta-2 Tau :math:`3.39` vs :math:`3.40`,
-Theta-1 Tau :math:`3.84` vs :math:`3.84`) where UCAC4 reads the same stars near
-:math:`V \approx 6.7`. A Tycho-2 candidate therefore lands inside the no-op tolerance band
-and its accurate magnitude is preserved rather than overwritten. Tycho-2 is not used *as*
-the reference for two reasons: this pipeline discards Tycho-2's colour (its ``johnson_mag_v``
-/ ``johnson_mag_b`` are cleared and refaked from spectral class), so it cannot supply the
-self-consistent Johnson V/B pair YBSC does; and where UCAC4 double-counts a saturated
-bright star, the co-located accurate Tycho-2 record is exactly the twin that wins the
-duplicate collapse above, so Tycho-2 already delivers the accurate reading into the merged
-list under the default ``[ucac4, tycho2, ybsc]`` ordering. YBSC's role is to correct the
-*UCAC4* record and to reach bright stars that Tycho-2 (were it configured out of the catalog
-list) would not.
+**Magnitude-aware position match.** That astrometric displacement is what a fixed-radius
+match misses: a badly saturated UCAC4 record can sit farther from its true-magnitude twin
+than the base match radius, so both the reference match and the duplicate collapse widen the
+radius in proportion to how much fainter the record reads --
+:data:`~spindoctor.nav_model.stars.saturation.SATURATION_MATCH_WIDEN_PER_MAG` base radii per
+magnitude of gap, capped at
+:data:`~spindoctor.nav_model.stars.saturation.SATURATION_MATCH_MAX_WIDEN_RADII` base radii so
+the widened match never reaches an unrelated field star. A larger saturation error implies a
+larger displacement, so the widening scales with the gap. Each reference star is consumed by
+at most one corrected record, so one true-magnitude star cannot correct or absorb two
+distinct saturated records.
+
+**Detectability consumes the flag.** The detectability model exempts a ``photometry_saturated``
+star from the faint-magnitude gate -- its recorded magnitude is a too-faint saturated
+reading, so it must not be rejected on that reading -- and treats the star as at least as
+bright as the limiting magnitude when computing its effective SNR, without fabricating a
+specific brighter value. The flag is carried onto the emitted
+:class:`~spindoctor.feature.flags.StarFlags` so downstream techniques and the star metadata
+summary see it.
 
 Conflict marking
 ----------------
@@ -211,9 +234,9 @@ The model's runtime knobs live in ``stars`` in
 ``src/spindoctor/config_files/config_030_stars.yaml``.
 
 - ``catalogs`` — list[str], default ``[ucac4, tycho2, ybsc]``. Catalog priority order
-  (most-precise first). Catalog files are loaded from the configured catalog roots. YBSC
-  also serves as the photometric reference for the bright-end saturation correction
-  regardless of its list position; dropping it from the list disables that correction.
+  (most-precise first). Catalog files are loaded from the configured catalog roots. YBSC and
+  Tycho-2 also serve as the photometric reference for the bright-end saturation correction
+  regardless of their list position; dropping both from the list disables that correction.
 - ``body_conflict_margin`` — int, default ``5`` px. Margin around body silhouettes for
   the body-conflict flag.
 - ``default_star_class`` — str, default ``'G0'``. Spectral class assigned to catalog stars
@@ -313,13 +336,20 @@ Tests and downstream tools read the canonical values via these symbols.
   until the configured ``max_stars`` budget is hit, which avoids the worst case of
   pulling every dim star in a degree-square chunk of UCAC4.
 - :data:`~spindoctor.nav_model.stars.saturation.UCAC4_SATURATION_VMAG_LIMIT` — float, ``8.0``.
-  V-magnitude brighter than which UCAC4 aperture photometry is untrusted and a non-YBSC
+  V-magnitude brighter than which UCAC4 aperture photometry is untrusted and a candidate
   record becomes a saturation-correction candidate. Chosen from the UCAC4-vs-YBSC residual
   and UCAC4's documented reliable aperture range (roughly V9 to V14).
 - :data:`~spindoctor.nav_model.stars.saturation.SATURATION_CORRECTION_MIN_MAG` — float,
-  ``0.5``. Smallest catalog-versus-YBSC magnitude gap treated as real saturation; a smaller
-  gap means the record already agrees with YBSC and is left untouched. This is the no-op
-  band that preserves Tycho-2's already-accurate bright-star photometry.
+  ``0.5``. Smallest candidate-versus-reference magnitude gap treated as real saturation; a
+  smaller gap means the record already agrees with the reference and is left untouched. This
+  no-op band both preserves already-accurate bright-star photometry and leaves a genuine
+  :math:`V \approx 7` to :math:`8` star that agrees with its Tycho-2 reference unflagged.
+- :data:`~spindoctor.nav_model.stars.saturation.SATURATION_MATCH_WIDEN_PER_MAG` — float,
+  ``0.5``. Base radii of extra position-match reach per magnitude of saturation gap, so a
+  displaced saturated record still matches its true-magnitude reference.
+- :data:`~spindoctor.nav_model.stars.saturation.SATURATION_MATCH_MAX_WIDEN_RADII` — float,
+  ``3.0``. Cap on the widened match radius, in base radii, so the match never reaches an
+  unrelated field star.
 
 Per-instrument overrides
 ------------------------
@@ -342,7 +372,8 @@ Source files:
   :data:`~spindoctor.nav_model.stars.catalog.CATALOG_MAGNITUDE_BINS`.
 - ``src/spindoctor/nav_model/stars/saturation.py`` —
   :mod:`spindoctor.nav_model.stars.saturation` UCAC4 bright-end saturation correction against
-  YBSC, exposed as :func:`~spindoctor.nav_model.stars.saturation.correct_star_photometry`
+  a YBSC and Tycho-2 reference, exposed as
+  :func:`~spindoctor.nav_model.stars.saturation.correct_star_photometry`
   (the in-place record pass used by the reduction) and
   :func:`~spindoctor.nav_model.stars.saturation.correct_saturated_vmags` (the plain-magnitude
   helper the navigable-content screen shares).
@@ -428,9 +459,9 @@ curator to surface in the per-image JSON sidecar:
   ``move_v``, ``spectral_class``, and ``conflicts`` (the comma-separated body- /
   ring-occlusion flag string built from the per-star conflict marking step). The two
   ``photometry_*`` booleans are the bright-end saturation provenance:
-  ``photometry_corrected`` marks a record whose magnitude was replaced by a YBSC value, and
-  ``photometry_saturated`` marks a bright record with no YBSC match whose magnitude is an
-  untrusted lower bound.
+  ``photometry_corrected`` marks a record whose magnitude was replaced by a YBSC or Tycho-2
+  reference value, and ``photometry_saturated`` marks a bright record with no reference in
+  either catalog whose magnitude is an untrusted lower bound.
 
 Conflict-flagged stars stay in the metadata so a reviewer can see which stars were
 predicted but excluded; the upstream ``usable_stars`` filter consulted by every star
