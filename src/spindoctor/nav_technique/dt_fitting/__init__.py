@@ -50,6 +50,7 @@ from spindoctor.nav_technique.dt_fitting.coarse import (
     build_polyline_mask,
     coarse_ncc_search,
     coarse_ncc_search_scored,
+    coarse_polarity_search_scored,
     polarity_filter,
 )
 from spindoctor.nav_technique.dt_fitting.constants import (
@@ -104,6 +105,7 @@ __all__ = [
     'build_polyline_mask',
     'coarse_ncc_search',
     'coarse_ncc_search_scored',
+    'coarse_polarity_search_scored',
     'find_secondary_dt_minimum',
     'gradient_ridge_refine',
     'information_matrix_to_covariance',

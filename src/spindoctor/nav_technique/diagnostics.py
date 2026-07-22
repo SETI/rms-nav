@@ -78,11 +78,16 @@ class BodyLimbDiagnostics:
             confidence the shared DT gates cap.
         polarity_rejection_fraction: Fraction of model vertices whose local
             gradient direction disagreed with the model normal at the seed.
-        coarse_peak_fraction: The winning coarse-NCC shift's in-bounds
-            match fraction over the RASTERIZED polyline pixels
-            (acquisition quality).  Its denominator is mask pixels, not
-            vertices, so it is not directly comparable to
-            ``tukey_inlier_count``.
+        coarse_peak_fraction: The winning coarse shift's acquisition-quality
+            score.  For the polarity techniques (``BodyLimbNav``,
+            ``BodyTerminatorNav``) this is the polarity-weighted per-vertex
+            match fraction from
+            :func:`~spindoctor.nav_technique.dt_fitting.coarse_polarity_search_scored`
+            -- each in-bounds vertex on a detected edge contributes
+            ``max(0, cos theta)`` between its model normal and the local
+            image gradient, averaged over the in-bounds vertices.  It is a
+            mean over vertices, not a per-vertex count, so it is not directly
+            comparable to ``tukey_inlier_count``.
     """
 
     visible_limb_arc_fraction: float = 0.0
@@ -229,8 +234,13 @@ class RingEdgeDiagnostics:
             combined covariance is rank-1.
         lm_converged: Shared DT gate diagnostic; the field carries the
             same meaning as on ``BodyLimbDiagnostics``.
-        coarse_peak_fraction: Shared DT gate diagnostic; the field carries
-            the same meaning as on ``BodyLimbDiagnostics``.
+        coarse_peak_fraction: Shared DT gate diagnostic.  Unlike the polarity
+            techniques, ``RingEdgeNav`` runs polarity-blind (ring-edge
+            polarity is not predictable), so this is the plain mask-overlap
+            match fraction from
+            :func:`~spindoctor.nav_technique.dt_fitting.coarse_ncc_search_scored`
+            rather than the polarity-weighted score described on
+            ``BodyLimbDiagnostics``.
         sigma_orbit_radial_px: Effective fully-correlated radial
             orbit-uncertainty sigma (px) added in quadrature to the
             reported covariance along the fit's radial direction (the

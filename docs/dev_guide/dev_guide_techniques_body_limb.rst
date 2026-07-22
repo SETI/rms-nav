@@ -174,9 +174,9 @@ All numeric tunables for this technique live in ``techniques.BodyLimbNav.tuning`
   never fires; it catches any future regression that bypasses the trust region. Set
   slightly larger than ``lm_trust_region_px``.
 - ``lm_trust_region_px`` — float, default ``1.0`` px. Maximum LM displacement from the
-  integer coarse-NCC seed; the LM rejects any trial step that would land outside this
-  radius without committing. The coarse NCC returns the integer-pixel mask-overlap
-  maximum, so the true sub-pixel optimum is within ~0.71 px of the seed — 1.0 px gives
+  integer coarse seed; the LM rejects any trial step that would land outside this
+  radius without committing. The coarse search returns the integer-pixel polarity-weighted
+  match maximum, so the true sub-pixel optimum is within ~0.71 px of the seed — 1.0 px gives
   legitimate sub-pixel refinement headroom while denying the LM the runway to reach a
   2-4 px-away spurious minimum.
 - ``lm_tikhonov_alpha`` — float, default ``0.0`` (dimensionless). Tikhonov anchor strength
@@ -311,10 +311,13 @@ Call path traced through
    the private ``_aggregate_limb_features`` helper. The geometric outward normals are negated
    in this step so that the polarity test in the LM refiner expects the image gradient to
    point *into* the body silhouette.
-3. Build a binary polyline mask and pull the search-window margin off the observation via
-   :func:`~spindoctor.nav_technique.nav_technique.search_window_for_obs`. Run
-   :func:`~spindoctor.nav_technique.dt_fitting.coarse_ncc_search` on the polyline mask and the
-   thresholded edge mask to obtain an integer seed offset.
+3. Threshold the edge DT into an edge mask and pull the search-window margin off the
+   observation via :func:`~spindoctor.nav_technique.nav_technique.search_window_for_obs`. Run
+   :func:`~spindoctor.nav_technique.dt_fitting.coarse_polarity_search_scored` on the edge mask,
+   the gradient image, and the polyline vertices / polarity normals to obtain an integer seed
+   offset. The polarity weighting keeps a cluttered scene's competing edge population (a ring
+   behind the disc, the terminator, a second moon) from out-scoring the true limb arc and
+   seeding the LM in the wrong basin.
 4. Decide whether to fit camera rotation by reading
    :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`. When rotation
    is fit, the rotation pivot is set to the

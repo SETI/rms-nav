@@ -10,8 +10,8 @@ translation from one or more body terminator polylines by aligning each polyline
 image's edge-distance-transform. The technique consumes every
 :data:`~spindoctor.feature.feature_type.NavFeatureType.TERMINATOR_ARC` feature offered by the
 orchestrator, weights every vertex of a given body uniformly by an inverse-variance derived
-from that body's mean per-vertex normal sigma, and runs the same coarse-NCC plus
-Tukey-reweighted Levenberg-Marquardt refinement that
+from that body's mean per-vertex normal sigma, and runs the same polarity-weighted coarse
+acquisition plus Tukey-reweighted Levenberg-Marquardt refinement that
 :doc:`dev_guide_techniques_dt_fitting` describes for the limb fit. The output is the joint
 translation that minimises the summed weighted squared distance from the model polylines to
 the image edges, plus a covariance derived from the M-estimator information matrix at
@@ -337,10 +337,12 @@ Call path traced through
    is at least ``min_arc_vertices``, then concatenate the per-feature vertex arrays via the
    private aggregation helper. The helper also computes per-body sigma scalars (mean of the
    per-vertex normal sigmas) and the per-body phase / albedo flags.
-3. Build a binary polyline mask and pull the search-window margin off the observation via
-   :func:`~spindoctor.nav_technique.nav_technique.search_window_for_obs`. Run
-   :func:`~spindoctor.nav_technique.dt_fitting.coarse_ncc_search` on the polyline mask and the
-   thresholded edge mask to obtain an integer seed offset.
+3. Threshold the edge DT into an edge mask and pull the search-window margin off the
+   observation via :func:`~spindoctor.nav_technique.nav_technique.search_window_for_obs`. Run
+   :func:`~spindoctor.nav_technique.dt_fitting.coarse_polarity_search_scored` on the edge mask,
+   the gradient image, and the polyline vertices / polarity normals to obtain an integer seed
+   offset. The polarity weighting keeps the lit disc's limb, rings, or a neighbouring body from
+   out-scoring the true terminator arc and mis-seeding the LM.
 4. Decide whether to fit camera rotation by reading
    :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`. When rotation
    is fit, the rotation pivot is set to the centroid of the concatenated vertices and the
