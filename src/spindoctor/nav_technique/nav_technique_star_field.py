@@ -48,6 +48,7 @@ from scipy.optimize import linear_sum_assignment
 from spindoctor.config import Config
 from spindoctor.feature.feature import NavFeature
 from spindoctor.feature.feature_type import NavFeatureType
+from spindoctor.feature.flags import StarFlags
 from spindoctor.nav_model.stars.detection import matched_filter_image
 from spindoctor.nav_technique._star_helpers import (
     SimilarityFit,
@@ -151,15 +152,15 @@ class _WideOffsetMatch:
 
 
 def _star_photometry_saturated(feature: NavFeature) -> bool:
-    """Return the ``#284`` ``photometry_saturated`` flag off a STAR feature.
+    """Return the ``photometry_saturated`` flag off a STAR feature.
 
     True marks a bright star whose catalog magnitude is an untrusted lower
     bound (no reference-catalog match); such a star's brightness ordering is
-    uncertain, so it is not used to anchor a wide-offset seed.  Features
-    whose flags predate the flag default to ``False``.
+    uncertain, so it is not used to anchor a wide-offset seed.  A feature
+    whose flags are not STAR flags (so lack the field) yields ``False``.
     """
     flags = feature.flags
-    return bool(getattr(flags, 'photometry_saturated', False))
+    return isinstance(flags, StarFlags) and flags.photometry_saturated
 
 
 def _binomial_upper_tail(n_trials: int, p_success: float, k_min: int) -> float:
@@ -1186,15 +1187,11 @@ class StarFieldFromCatalogNav(NavTechnique):
         # bright-pair seed rests on a real brightness ordering rather than a
         # saturated lower bound.  ``ranked_catalog`` is sorted by predicted
         # SNR descending, so the first survivors are the brightest.
-        anchor_cat = [
-            j
-            for j in range(n_cat)
-            if not _star_photometry_saturated(ranked_catalog[j])
-        ][: self._wide_offset_anchor_catalog]
+        anchor_cat = [j for j in range(n_cat) if not _star_photometry_saturated(ranked_catalog[j])][
+            : self._wide_offset_anchor_catalog
+        ]
         if not anchor_cat:
-            self.logger.debug(
-                'Wide-offset: no photometry-trusted bright catalog anchor; skipping'
-            )
+            self.logger.debug('Wide-offset: no photometry-trusted bright catalog anchor; skipping')
             return None
         anchor_cat_set = set(anchor_cat)
         # ``detected`` reaches this method already sorted by

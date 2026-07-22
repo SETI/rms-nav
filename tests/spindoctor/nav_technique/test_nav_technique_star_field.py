@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
+from typing import cast
 
 import numpy as np
 import pytest
@@ -15,6 +16,7 @@ from tests.spindoctor.nav_technique.conftest import (
 )
 
 from spindoctor.feature.feature import NavFeature
+from spindoctor.feature.flags import StarFlags
 from spindoctor.nav_technique.diagnostics import StarFieldDiagnostics
 from spindoctor.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE, NavTechnique
 from spindoctor.nav_technique.nav_technique_star_field import (
@@ -1024,11 +1026,22 @@ def test_wide_offset_expectation_two_inliers_exceeds_budget() -> None:
 
 def test_wide_offset_expectation_grows_with_seed_count() -> None:
     """More seed trials raises the chance-lock expectation monotonically."""
-    kwargs = dict(
-        n_inliers=3, n_catalog=18, n_detected=30, tolerance_px=2.0, image_area_px2=2.25e6
+    few = _wide_offset_false_lock_expectation(
+        n_seeds=5,
+        n_inliers=3,
+        n_catalog=18,
+        n_detected=30,
+        tolerance_px=2.0,
+        image_area_px2=2.25e6,
     )
-    few = _wide_offset_false_lock_expectation(n_seeds=5, **kwargs)
-    many = _wide_offset_false_lock_expectation(n_seeds=50, **kwargs)
+    many = _wide_offset_false_lock_expectation(
+        n_seeds=50,
+        n_inliers=3,
+        n_catalog=18,
+        n_detected=30,
+        tolerance_px=2.0,
+        image_area_px2=2.25e6,
+    )
     assert many > few
 
 
@@ -1064,7 +1077,9 @@ def test_star_photometry_saturated_reads_flag(
     """The helper reads the ``#284`` saturation flag off a STAR feature."""
     feature = make_star_feature('star:UCAC4:0', predicted_vu=(10.0, 10.0), predicted_snr=40.0)
     assert _star_photometry_saturated(feature) is False
-    flagged = replace(feature, flags=replace(feature.flags, photometry_saturated=True))
+    flagged = replace(
+        feature, flags=replace(cast(StarFlags, feature.flags), photometry_saturated=True)
+    )
     assert _star_photometry_saturated(flagged) is True
 
 
@@ -1088,9 +1103,7 @@ def _wide_offset_field(
         (240.0, 250.0),
         (110.0, 210.0),
     ][:n_stars]
-    image = _star_field_image(
-        centers, draw=draw_gaussian_star, shape=(400, 400), peak_dn=400.0
-    )
+    image = _star_field_image(centers, draw=draw_gaussian_star, shape=(400, 400), peak_dn=400.0)
     snrs = [400.0, 120.0, 40.0, 20.0, 12.0][:n_stars]
     features = _make_star_field_features(
         centers, make_feature=make_star_feature, offset=offset, snrs=snrs
@@ -1190,7 +1203,8 @@ def test_wide_offset_rejects_untrusted_bright_anchor(
     # Flag every star's brightness as an untrusted (saturated) lower bound so
     # the matcher has no trustworthy anchor to seed on.
     features = [
-        replace(f, flags=replace(f.flags, photometry_saturated=True)) for f in features
+        replace(f, flags=replace(cast(StarFlags, f.flags), photometry_saturated=True))
+        for f in features
     ]
     technique = StarFieldFromCatalogNav()
     context = make_nav_context(image, extfov_margin_vu=(150, 150))
