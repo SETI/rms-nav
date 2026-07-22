@@ -115,9 +115,7 @@ disc-texture slice):
 
 ```bash
 source setup.sh
-OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
-    NUMEXPR_NUM_THREADS=1 \
-    python util/calibration/collect.py \
+python util/calibration/collect.py \
     --per-family 600 --workers 14 --out _work/calibration/rows.jsonl
 ```
 
@@ -129,11 +127,16 @@ well inside the 2x budget below.
 
 Notes on reproducing the measurement:
 
-- The shell-level `*_NUM_THREADS=1` exports are **required**: `collect.py`
-  sets the same variables inside each worker, but the workers inherit the
-  parent's already-initialized BLAS thread pools under the fork start
-  method, so the in-worker pinning does not take effect.  Unpinned
-  BLAS threads oversubscribe the 14 workers and distort the timing.
+- Worker thread pinning is automatic: `collect.py` sets the
+  `*_NUM_THREADS=1` variables at module import, ahead of the first numpy
+  import, so the parent's native BLAS/OpenMP/NumExpr thread pools are
+  capped to one thread and every forked worker inherits that.  No
+  shell-level exports are needed.  (Setting the variables in the pool
+  initializer would be too late under the fork start method, since workers
+  inherit the parent's already-initialized BLAS thread pools.)  To let
+  workers use multiple BLAS threads for a deliberately-different
+  measurement, export the variables with higher values before running --
+  `collect.py` uses `setdefault`, so an explicit value wins.
 - Worker CPU affinity on this machine is load-bearing, not cosmetic:
   always `source setup.sh` first so the excluded cores stay excluded.
 

@@ -46,14 +46,16 @@ class StarFlags:
             catalog entry has no magnitude.  Used by ``StarUniqueMatchNav``
             to compute the magnitude margin to the next-brightest star.
         photometry_corrected: True when this star's catalog magnitude was
-            replaced by a trusted Yale Bright Star Catalog value because the
+            replaced by a trusted YBSC or Tycho-2 reference value because the
             source catalog's bright-end aperture photometry was saturated, so
             its ``vmag`` (and therefore ``predicted_snr``) is trustworthy.
-        photometry_saturated: True when this star sits in the source
-            catalog's saturated regime but had no reference match, so its
-            ``vmag`` is an untrusted lower bound and the star may be brighter
-            than stated.  A wide-offset brightness anchor is trusted only
-            when this is False.
+        photometry_saturated: True when the catalog magnitude is a saturated
+            bright-end reading with no YBSC or Tycho-2 reference to correct
+            it, so ``vmag`` is an untrusted lower bound on brightness (the
+            star is at least this bright, likely brighter).  The detectability
+            model keeps such a star rather than rejecting it on its too-faint
+            reading, and a wide-offset brightness anchor is trusted only when
+            this is False.
     """
 
     saturated: bool = False

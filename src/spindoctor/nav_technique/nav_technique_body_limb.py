@@ -24,8 +24,7 @@ from spindoctor.nav_technique.confidence import evaluate_sigmoid_combination
 from spindoctor.nav_technique.diagnostics import BodyLimbDiagnostics
 from spindoctor.nav_technique.dt_fit_gates import DTFitGateConfig, evaluate_dt_fit_gates
 from spindoctor.nav_technique.dt_fitting import (
-    build_polyline_mask,
-    coarse_ncc_search_scored,
+    coarse_polarity_search_scored,
     lm_subpixel_refine,
 )
 from spindoctor.nav_technique.feasibility import NavFeasibilityReport
@@ -246,7 +245,6 @@ class BodyLimbNav(NavTechnique):
             edge_dt = context.image_edge_dt_ext
             gradient_vu = context.image_gradient_vu_ext
             edge_mask = edge_dt <= 0.5
-            polyline_mask = build_polyline_mask(vertices, edge_dt.shape[:2])
             margin_v, margin_u = search_window_for_obs(context)
             self.logger.debug(
                 'Aggregated %d limb vertices, sigma_normal range [%.3f, %.3f] px, '
@@ -257,14 +255,22 @@ class BodyLimbNav(NavTechnique):
                 margin_v,
                 margin_u,
             )
-            coarse = coarse_ncc_search_scored(
+            # Polarity-weighted coarse search: the limb runs use_polarity=True,
+            # so the model's per-vertex normals carry a trustworthy expected
+            # gradient direction.  Weighting the mask overlap by that direction
+            # keeps a cluttered scene's competing edge population (rings behind
+            # the disc, the terminator, a second moon) from out-scoring the
+            # short true-limb arc and seeding LM in the wrong basin.
+            coarse = coarse_polarity_search_scored(
                 edge_mask,
-                polyline_mask,
+                gradient_vu,
+                vertices,
+                polarity_normals,
                 (margin_v, margin_u),
             )
             coarse_dv, coarse_du = coarse.offset_vu
             self.logger.debug(
-                'Coarse NCC offset: (%d, %d), peak match fraction %.3f',
+                'Coarse polarity offset: (%d, %d), peak match fraction %.3f',
                 coarse_dv,
                 coarse_du,
                 coarse.score,

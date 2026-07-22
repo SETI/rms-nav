@@ -264,8 +264,10 @@ class RingEdgeNav(NavTechnique):
                 coarse.score,
             )
             # Ring-edge polarity prediction depends on lighting / gap-vs-ringlet
-            # context the catalog does not encode today; skip polarity until
-            # the polarity-predictable flag is wired (deferred work).
+            # context the catalog does not encode today, so this technique keeps
+            # the polarity-blind coarse seed (coarse_ncc_search_scored above)
+            # rather than the polarity-weighted acquisition the limb / terminator
+            # techniques use; making the ring seed robust is tracked in #373.
             fit_rotation = bool(context.fit_camera_rotation)
             pivot_vu = (float(vertices[:, 0].mean()), float(vertices[:, 1].mean()))
             pivot_distance = (

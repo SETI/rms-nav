@@ -113,6 +113,11 @@ spindoctor.nav_model.stars
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.nav_model.stars.saturation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.nav_model.stars.conflicts
    :members:
    :undoc-members:

@@ -172,9 +172,10 @@ def edges_in_frame(rmin: float, rmax: float) -> list[str]:
 
 _UCAC4 = None
 _YBSC = None
+_TYCHO2 = None
 
-# Position match radius for cross-referencing UCAC4 against YBSC; mirrors
-# config_030_stars.yaml duplicate_ra_dec_threshold_arcsec.
+# Position match radius for cross-referencing UCAC4 against YBSC/Tycho-2;
+# mirrors config_030_stars.yaml duplicate_ra_dec_threshold_arcsec.
 _SATURATION_MATCH_RAD = math.radians(5.0 / 3600.0)
 
 
@@ -211,9 +212,9 @@ def _catalog_positions(catalog: Any, ra: float, ra_half: float, dec_min: float,
                                        dec_min=dec_min, dec_max=dec_max,
                                        vmag_max=vmag_max,
                                        allow_double=allow_double):
-            v = getattr(star, 'vmag', None)
-            sra = getattr(star, 'ra', None)
-            sdec = getattr(star, 'dec', None)
+            v = star.vmag
+            sra = star.ra
+            sdec = star.dec
             if v is not None and sra is not None and sdec is not None:
                 out.append((float(sra), float(sdec), float(v)))
     return out
@@ -225,9 +226,11 @@ def star_vmags(ra_deg: float, dec_deg: float, fov_deg: float,
 
     UCAC4 supplies the field; its aperture photometry saturates at the
     bright end (it lists Pleiades members near V7 instead of V3), so the
-    magnitudes are corrected against YBSC via
+    magnitudes are corrected against the YBSC/Tycho-2 reference via
     :func:`spindoctor.nav_model.stars.saturation.correct_saturated_vmags`
-    before counting, so bright-star screens see true brightness.
+    before counting, so bright-star screens see true brightness.  Tycho-2
+    reaches the V6.5 to V8 stars YBSC misses, so a genuine V7 to V8 star is
+    counted at its true brightness rather than mistaken for saturation.
 
     Parameters:
         ra_deg: Pointing right ascension in degrees.
@@ -238,9 +241,9 @@ def star_vmags(ra_deg: float, dec_deg: float, fov_deg: float,
 
     Returns:
         Ascending (brightest first) V-magnitudes with UCAC4 bright-end
-        saturation corrected against YBSC.
+        saturation corrected against the YBSC/Tycho-2 reference.
     """
-    global _UCAC4, _YBSC
+    global _UCAC4, _YBSC, _TYCHO2
     if _UCAC4 is None:
         from starcat import UCAC4StarCatalog
         _UCAC4 = UCAC4StarCatalog(
@@ -251,6 +254,9 @@ def star_vmags(ra_deg: float, dec_deg: float, fov_deg: float,
         _YBSC = YBSCStarCatalog(
             os.environ.get('YBSC_PATH',
                            '/data/external-data/star-catalogs/YBSC'))
+    if _TYCHO2 is None:
+        from starcat import SpiceStarCatalog
+        _TYCHO2 = SpiceStarCatalog('tycho2')
     from spindoctor.nav_model.stars.saturation import correct_saturated_vmags
 
     half = math.radians(0.75 * fov_deg)      # frame + pointing-error margin
@@ -265,7 +271,9 @@ def star_vmags(ra_deg: float, dec_deg: float, fov_deg: float,
                                vmag_max, allow_double=True)
     ybsc = _catalog_positions(_YBSC, ra, ra_half, dec_min, dec_max,
                               vmag_max, allow_double=True)
-    return correct_saturated_vmags(ucac4, ybsc,
+    tycho2 = _catalog_positions(_TYCHO2, ra, ra_half, dec_min, dec_max,
+                                vmag_max, allow_double=True)
+    return correct_saturated_vmags(ucac4, ybsc, tycho2,
                                    match_radius_rad=_SATURATION_MATCH_RAD)
 
 
@@ -943,8 +951,9 @@ def scan_go() -> dict[str, list[dict]]:
         # C00598xx quintet failed wholesale with all_techniques_spurious),
         # so require at least STAR_FIELD_MIN_INLIERS clearly-bright stars.
         # star_vmags corrects UCAC4's saturated bright-end photometry against
-        # YBSC (it otherwise lists Pleiades members near V7 instead of V3), so
-        # this count reflects true bright content rather than a lower bound.
+        # the YBSC/Tycho-2 reference (it otherwise lists Pleiades members near
+        # V7 instead of V3), so this count reflects true bright content rather
+        # than a lower bound.
         n_clear = sum(1 for v in vm if v <= lim - 1.5)
         if n_clear < STAR_FIELD_MIN_INLIERS:
             continue
