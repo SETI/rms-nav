@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import numpy as np
+from PIL import Image, ImageDraw
 
 from spindoctor.support.summary_png import (
     SummaryMetadata,
     _apply_local_stretch_boxes,
+    _draw_metadata_block,
     _extfov_box_to_data_slice,
     _least_crowded_corner,
+    _load_summary_font,
     _local_stretch_patch,
     _text_overlap_area,
+    _wrap_lines_to_width,
     build_summary_metadata_lines,
 )
 
@@ -350,3 +354,55 @@ def test_least_crowded_corner_all_conflict_picks_least_overlap() -> None:
     ]
     xy = _least_crowded_corner(rgb, 20, 20, text_bboxes=text)
     assert xy == (76, 76)
+
+
+# ---------------------------------------------------------------------------
+# _wrap_lines_to_width
+# ---------------------------------------------------------------------------
+
+
+def test_wrap_lines_splits_line_wider_than_budget() -> None:
+    """A line wider than the pixel budget is broken across several lines."""
+    image = Image.new('RGB', (200, 40))
+    draw = ImageDraw.Draw(image)
+    font = _load_summary_font(14)
+    wrapped = _wrap_lines_to_width(draw, ['aaaa bbbb cccc dddd eeee ffff'], font, 40)
+    assert len(wrapped) > 1
+
+
+def test_wrap_lines_keeps_narrow_line_intact() -> None:
+    """A line already within the budget is returned as a single line."""
+    image = Image.new('RGB', (200, 40))
+    draw = ImageDraw.Draw(image)
+    font = _load_summary_font(14)
+    wrapped = _wrap_lines_to_width(draw, ['ab'], font, 400)
+    assert wrapped == ['ab']
+
+
+# ---------------------------------------------------------------------------
+# _draw_metadata_block
+# ---------------------------------------------------------------------------
+
+
+def test_draw_metadata_block_renders_yellow_text() -> None:
+    """On a roomy frame the block paints yellow text pixels."""
+    rgb = np.zeros((200, 200, 3), dtype=np.uint8)
+    _draw_metadata_block(rgb, ['Hello'])
+    yellow = (rgb[..., 0] > 200) & (rgb[..., 1] > 200) & (rgb[..., 2] < 80)
+    assert bool(yellow.any())
+
+
+def test_draw_metadata_block_skips_when_frame_too_small() -> None:
+    """A frame too small to hold the block is left untouched."""
+    rgb = np.zeros((8, 8, 3), dtype=np.uint8)
+    before = rgb.copy()
+    _draw_metadata_block(rgb, ['A metadata line far too wide for this frame'])
+    assert np.array_equal(rgb, before)
+
+
+def test_draw_metadata_block_empty_lines_is_noop() -> None:
+    """No lines means the image is not touched."""
+    rgb = np.zeros((200, 200, 3), dtype=np.uint8)
+    before = rgb.copy()
+    _draw_metadata_block(rgb, [])
+    assert np.array_equal(rgb, before)
