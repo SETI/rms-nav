@@ -21,8 +21,44 @@ __all__ = [
     'build_polyline_mask',
     'coarse_ncc_search',
     'coarse_ncc_search_scored',
+    'coarse_polarity_search_scored',
     'polarity_filter',
 ]
+
+
+def _validate_search_window(search_window_vu: tuple[int, int]) -> tuple[int, int]:
+    """Validate a ``(margin_v, margin_u)`` search window and return it as ints.
+
+    Shared by the coarse search entry points so the mask-overlap and the
+    polarity-weighted variants reject malformed windows with identical
+    messages.  Booleans are rejected because ``bool`` is an ``int`` subclass
+    and a ``True`` margin is far more likely a caller mistake than an
+    intended one-pixel window.
+
+    Parameters:
+        search_window_vu: ``(margin_v, margin_u)`` non-negative integers
+            bounding the search range in v and u.
+
+    Returns:
+        ``(margin_v, margin_u)`` as plain ints.
+
+    Raises:
+        TypeError: if either entry is not an int.
+        ValueError: if the argument is not a length-2 sequence or an entry
+            is negative.
+    """
+    if not isinstance(search_window_vu, tuple | list) or len(search_window_vu) != 2:
+        raise ValueError(
+            f'search_window_vu must be a length-2 sequence of ints; got {search_window_vu!r}'
+        )
+    margin_v_raw, margin_u_raw = search_window_vu[0], search_window_vu[1]
+    if not isinstance(margin_v_raw, int) or isinstance(margin_v_raw, bool):
+        raise TypeError(f'search_window_vu[0] must be int; got {type(margin_v_raw).__name__}')
+    if not isinstance(margin_u_raw, int) or isinstance(margin_u_raw, bool):
+        raise TypeError(f'search_window_vu[1] must be int; got {type(margin_u_raw).__name__}')
+    if margin_v_raw < 0 or margin_u_raw < 0:
+        raise ValueError(f'search_window_vu must be non-negative; got {search_window_vu!r}')
+    return margin_v_raw, margin_u_raw
 
 
 @dataclass(frozen=True)
@@ -149,20 +185,9 @@ def coarse_ncc_search_scored(
     # Validate explicitly rather than relying on int() coercion, which would
     # silently truncate floats and raise an unhelpful IndexError on
     # wrong-length sequences.
-    if not isinstance(search_window_vu, tuple | list) or len(search_window_vu) != 2:
-        raise ValueError(
-            f'search_window_vu must be a length-2 sequence of ints; got {search_window_vu!r}'
-        )
-    margin_v_raw, margin_u_raw = search_window_vu[0], search_window_vu[1]
-    if not isinstance(margin_v_raw, int) or isinstance(margin_v_raw, bool):
-        raise TypeError(f'search_window_vu[0] must be int; got {type(margin_v_raw).__name__}')
-    if not isinstance(margin_u_raw, int) or isinstance(margin_u_raw, bool):
-        raise TypeError(f'search_window_vu[1] must be int; got {type(margin_u_raw).__name__}')
-    if margin_v_raw < 0 or margin_u_raw < 0:
-        raise ValueError(f'search_window_vu must be non-negative; got {search_window_vu!r}')
+    margin_v, margin_u = _validate_search_window(search_window_vu)
     if not 0.0 <= min_support_fraction <= 1.0:
         raise ValueError(f'min_support_fraction must be in [0, 1]; got {min_support_fraction!r}')
-    margin_v, margin_u = margin_v_raw, margin_u_raw
     height, width = edge_mask.shape
     edge_f = edge_mask.astype(np.float64, copy=False)
     # Scan the bounded window directly: brute-force over O(margin_v * margin_u)
@@ -207,6 +232,166 @@ def coarse_ncc_search_scored(
             # more vertices in bounds.  This is not the binary NCC (which
             # would divide by ``sqrt(sv.size)``); see the docstring.
             score = float(edge_f[sv, su].sum()) / float(sv.size)
+            key = (abs(dv) + abs(du), abs(dv), dv, du)
+            if score > best_score or (score == best_score and key < best_key):
+                best_score = score
+                best_key = key
+                best_dv = dv
+                best_du = du
+    return CoarseSearchResult(offset_vu=(best_dv, best_du), score=max(best_score, 0.0))
+
+
+def coarse_polarity_search_scored(
+    edge_mask: NDArrayBoolType,
+    image_gradient_vu: NDArrayFloatType,
+    vertices_vu: NDArrayFloatType,
+    normals_vu: NDArrayFloatType,
+    search_window_vu: tuple[int, int],
+    *,
+    min_support_fraction: float = DEFAULT_COARSE_MIN_SUPPORT_FRACTION,
+) -> CoarseSearchResult:
+    """Integer coarse search scored by polarity-weighted edge overlap.
+
+    A polarity-blind mask-overlap search (:func:`coarse_ncc_search_scored`)
+    counts a model vertex as a match whenever it lands on any detected edge
+    pixel, regardless of that edge's orientation.  In a cluttered scene --
+    a ring ansa behind a limb, the terminator on a lit disc, a second moon
+    in the field -- a dense population of unrelated edges can outscore the
+    short true-limb arc, seeding the Levenberg-Marquardt stage in the wrong
+    basin where it converges to a confident-but-wrong offset.
+
+    This search adds the discriminator the mask-overlap count discards: the
+    *direction* of the image gradient under each vertex.  A vertex still has
+    to land on a detected edge pixel (the same density-neutral binary signal
+    the overlap search uses), but its contribution is then weighted by
+    ``max(0, cos theta)``, where ``theta`` is the angle between the model's
+    per-vertex outward normal and the image gradient vector sampled at the
+    shifted vertex.  A vertex whose local edge runs the wrong way (gradient
+    anti-parallel to the model normal -- a terminator, a far-side ring edge,
+    a crater rim) contributes nothing; an unrelated clutter edge at a random
+    orientation contributes on average only ``1 / pi ~ 0.32`` of its overlap.
+    The true limb, whose edges run along the predicted normals by
+    construction, keeps nearly full weight.  Only the gradient *direction*
+    enters (both vectors are unit-normalised before the dot product), so a
+    faint-but-correctly-oriented true edge is never out-weighted by a bright
+    high-contrast clutter edge -- decoupling the score from edge magnitude is
+    what keeps a high-contrast distractor from dominating.
+
+    Where the model normals are perfectly aligned with the image gradient
+    (``cos theta = 1`` at every vertex) each match reverts to a hard 0/1 and
+    the score becomes the plain per-vertex edge-overlap fraction, so the seed
+    is unchanged on clean, uncluttered frames; the search only diverges from
+    the overlap argmax where polarity actually discriminates.  (The absolute
+    score is not identical to :func:`coarse_ncc_search_scored`'s even at
+    ``cos theta = 1``: this search divides the match sum by the raw in-bounds
+    vertex count, whereas the mask-overlap search divides by the count of
+    distinct rasterized pixels, which collapses vertices that round together.
+    Only the argmax matters for seeding, and it coincides in the aligned case.)
+
+    The score is defined and validated identically to
+    :func:`coarse_ncc_search_scored` -- the per-vertex weighted match summed
+    over the in-bounds vertices and divided by their count, with the same
+    minimum-support guard against near-fully-clipped shifts and the same
+    ``(|dv| + |du|, |dv|, dv, du)`` tie-break -- except that each match is
+    the polarity weight in ``[0, 1]`` rather than a hard 0/1.  The reported
+    :attr:`CoarseSearchResult.score` is therefore the winning shift's mean
+    polarity-weighted match fraction, a stricter acquisition-quality signal
+    than the polarity-blind fraction for the shared coarse-peak spurious
+    gate to consume.
+
+    Parameters:
+        edge_mask: ``(H, W)`` boolean image edge map.
+        image_gradient_vu: ``(H, W, 2)`` per-pixel gradient vector as
+            produced by
+            :func:`spindoctor.nav_orchestrator.image_derivatives.compute_image_gradient_vu`,
+            aligned to ``edge_mask``.
+        vertices_vu: ``(N, 2)`` model polyline vertex positions in ``(v, u)``.
+        normals_vu: ``(N, 2)`` model outward normal at each vertex, in the
+            same polarity convention as :func:`polarity_filter` (the
+            direction the image gradient is expected to point at a matching
+            edge).  Need not be unit length; each normal is normalised
+            internally.
+        search_window_vu: ``(margin_v, margin_u)`` non-negative integers
+            bounding the search range in v and u.
+        min_support_fraction: Minimum fraction of the polyline's vertices
+            that must remain in bounds after a candidate shift for that
+            shift to be eligible.  See :func:`coarse_ncc_search`.
+
+    Returns:
+        :class:`CoarseSearchResult` with the peak integer offset and its
+        mean polarity-weighted match fraction.
+
+    Raises:
+        TypeError: if either entry of ``search_window_vu`` is not an int.
+        ValueError: if array shapes disagree, ``search_window_vu`` is not a
+            length-2 sequence of non-negative ints, or ``min_support_fraction``
+            is outside ``[0, 1]``.
+    """
+    if edge_mask.ndim != 2:
+        raise ValueError(f'edge_mask must be 2-D; got ndim={edge_mask.ndim}')
+    if image_gradient_vu.ndim != 3 or image_gradient_vu.shape[2] != 2:
+        raise ValueError(
+            f'image_gradient_vu must have shape (H, W, 2); got {image_gradient_vu.shape}'
+        )
+    if image_gradient_vu.shape[:2] != edge_mask.shape:
+        raise ValueError(
+            f'shape mismatch: edge_mask {edge_mask.shape} vs '
+            f'image_gradient_vu {image_gradient_vu.shape[:2]}'
+        )
+    verts = np.asarray(vertices_vu, np.float64)
+    norms = np.asarray(normals_vu, np.float64)
+    if verts.ndim != 2 or verts.shape[1] != 2:
+        raise ValueError(f'vertices_vu must have shape (N, 2); got {verts.shape}')
+    if norms.shape != verts.shape:
+        raise ValueError(f'normals_vu must match vertices_vu shape; got {norms.shape}')
+    margin_v, margin_u = _validate_search_window(search_window_vu)
+    if not 0.0 <= min_support_fraction <= 1.0:
+        raise ValueError(f'min_support_fraction must be in [0, 1]; got {min_support_fraction!r}')
+    height, width = edge_mask.shape
+    n_vertices = int(verts.shape[0])
+    if n_vertices == 0:
+        return CoarseSearchResult(offset_vu=(0, 0), score=0.0)
+    # Round the vertices once; an integer shift commutes with rounding, so the
+    # sampled pixel for shift (dv, du) is (round(v) + dv, round(u) + du).
+    base_v = np.rint(verts[:, 0]).astype(np.int64)
+    base_u = np.rint(verts[:, 1]).astype(np.int64)
+    # Unit-normalise the model normals up front; a degenerate zero normal
+    # gets a zero unit vector so it can never contribute a match.
+    norm_len = np.hypot(norms[:, 0], norms[:, 1])
+    safe_len = np.where(norm_len > 0.0, norm_len, 1.0)
+    unit_n_v = norms[:, 0] / safe_len
+    unit_n_u = norms[:, 1] / safe_len
+    grad_v_img = image_gradient_vu[:, :, 0]
+    grad_u_img = image_gradient_vu[:, :, 1]
+    min_support = min_support_fraction * float(n_vertices)
+    best_dv = 0
+    best_du = 0
+    best_score = -1.0
+    best_key = (math.inf, math.inf, math.inf, math.inf)
+    for dv in range(-margin_v, margin_v + 1):
+        shifted_v = base_v + dv
+        valid_v = (shifted_v >= 0) & (shifted_v < height)
+        if not valid_v.any():
+            continue
+        for du in range(-margin_u, margin_u + 1):
+            shifted_u = base_u + du
+            valid = valid_v & (shifted_u >= 0) & (shifted_u < width)
+            if not valid.any():
+                continue
+            sv = shifted_v[valid]
+            su = shifted_u[valid]
+            if float(sv.size) < min_support:
+                continue
+            on_edge = edge_mask[sv, su]
+            gv = grad_v_img[sv, su]
+            gu = grad_u_img[sv, su]
+            grad_len = np.hypot(gv, gu)
+            safe_grad = np.where(grad_len > 0.0, grad_len, 1.0)
+            # Cosine of the angle between the (unit) model normal and the
+            # (unit) image gradient; ``max(0, .)`` drops wrong-polarity edges.
+            cos_theta = (unit_n_v[valid] * gv + unit_n_u[valid] * gu) / safe_grad
+            weight = np.where(on_edge, np.maximum(cos_theta, 0.0), 0.0)
+            score = float(weight.sum()) / float(sv.size)
             key = (abs(dv) + abs(du), abs(dv), dv, du)
             if score > best_score or (score == best_score and key < best_key):
                 best_score = score
