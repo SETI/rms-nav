@@ -13,13 +13,36 @@ stars plus a faint remainder is mistaken for a dozen comparably faint
 stars: the two dominant anchors are dragged down into the faint
 population and the pipeline cannot tell they are there.
 
-YBSC (the Yale Bright Star Catalog) carries real Johnson V photometry
-and is complete through the saturated regime, so it is the authoritative
-reference.  Wherever a UCAC4 (or Tycho-2) star positionally matches a
-YBSC star, the YBSC magnitude replaces the saturated catalog value while
-the more precise UCAC4 astrometry is retained.  Bright stars with no
-YBSC match are flagged so downstream consumers treat their magnitude as
+YBSC (the Yale Bright Star Catalog) carries real Johnson V and B
+photometry and is complete through the saturated regime, so it is the
+authoritative reference.  Wherever a saturated catalog star positionally
+matches a YBSC star, the YBSC magnitude replaces the saturated value
+while the more precise catalog astrometry is retained.  Bright stars with
+no YBSC match are flagged so downstream consumers treat their magnitude as
 unreliable and potentially too faint rather than a trustworthy reading.
+
+Only UCAC4 saturates.  The correction treats every non-YBSC record
+brighter than the limit as a candidate, so Tycho-2 records pass through
+the same pass, but Tycho-2's star-mapper photometry does not saturate at
+the bright end: a UCAC4-vs-Tycho-2-vs-YBSC cross-match over the Pleiades
+and Hyades shows Tycho-2 agreeing with YBSC to a few hundredths of a
+magnitude (Eta Tau V2.84 vs YBSC V2.87, Theta-2 Tau V3.39 vs V3.40) where
+UCAC4 reads the same stars near V6.7.  A Tycho-2 candidate therefore falls
+inside the ``min_correction_mag`` no-op band and is left untouched, so its
+accurate magnitude is never overwritten by YBSC.  YBSC (not Tycho-2) is
+the reference because it carries a full self-consistent Johnson V/B pair,
+whereas this pipeline discards Tycho-2's colour and would otherwise fake
+it from spectral class.
+
+Because UCAC4's saturated magnitude disagrees with the Tycho-2/YBSC value
+by more than the merge's duplicate-magnitude tolerance, a bright star that
+UCAC4 saturates is kept twice after the merge: a saturated UCAC4 record
+plus its accurate Tycho-2 (or YBSC) twin.  Correcting the UCAC4 record
+brings the two magnitudes back into agreement and exposes the duplicate,
+which the final collapse resolves in favour of the twin that never needed
+correcting -- the same saturation that corrupts UCAC4's photometry also
+displaces its astrometry, so the catalog that read the star at its true
+magnitude also placed it accurately.
 
 The correction is exposed both as an in-place pass over ``MutableStar``
 records (used by the catalog reduction, which feeds the detectability
