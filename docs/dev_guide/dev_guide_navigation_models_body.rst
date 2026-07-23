@@ -155,6 +155,8 @@ disc albedo variation in a way the lit limb is not.
 Per-vertex tangent sigma is set to a small constant matching the polyline-sampling resolution;
 the DT-based fit treats motion along the polyline as essentially unobservable by construction.
 
+.. _body-visible-lit-fraction:
+
 Visible-lit and overflow fractions
 ----------------------------------
 
@@ -294,8 +296,8 @@ The occluder mask feeds three products:
   fitted polyline. It stays in the ridge total, so the ``visible_arc_fraction`` reports the loss:
   a mutual-event limb scores like the partial arc it is rather than claiming a full limb the
   distance-transform fit would then try to align against an arc the image does not show.
-- **The visible-lit fraction**, as described above, which drops the disc reliability with
-  occlusion depth.
+- **The visible-lit fraction** (:ref:`body-visible-lit-fraction`), which drops the disc
+  reliability with occlusion depth.
 - **The disc template.** The occluded pixels are trimmed out of the correlation template (both
   the brightness image and its mask), so the correlator scores only against disc brightness the
   image carries. Correlating against the missing disc area would be a coherent mismatch the

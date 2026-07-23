@@ -609,9 +609,14 @@ class NavModelBodySimulated(NavModelBodyBase):
             The extfov-shape boolean mask, or ``None`` when no sibling
             occludes (the common single-body case costs nothing).
         """
-        own_range = float(self._sim_params.get('range_km', float('inf')))
+        # Occlusion requires a known depth order: without the subject's own
+        # explicit range there is nothing to compare against, so no sibling is
+        # treated as nearer and the template is left whole rather than erased.
+        if 'range_km' not in self._sim_params:
+            return None
+        own_range = float(self._sim_params['range_km'])
         occluders = [
-            s for s in self._sibling_bodies if float(s.get('range_km', float('inf'))) < own_range
+            s for s in self._sibling_bodies if 'range_km' in s and float(s['range_km']) < own_range
         ]
         if not occluders:
             return None

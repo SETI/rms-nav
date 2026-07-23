@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from tests.shims import bare_nav_context
 
+from spindoctor.feature.feature import NavFeature
 from spindoctor.nav_model.nav_model_body_simulated import NavModelBodySimulated
 from spindoctor.nav_orchestrator.nav_context import NavContext
 from spindoctor.obs.obs_inst_sim import ObsSim
@@ -670,8 +671,19 @@ def _disc_feature(
     body_params: dict[str, Any],
     *,
     sibling_bodies: list[dict[str, Any]] | None = None,
-) -> Any:
-    """Build the model and return its emitted BODY_DISC feature."""
+) -> NavFeature:
+    """Build the simulated body model and return its emitted BODY_DISC feature.
+
+    Parameters:
+        obs: Simulated observation the model renders against.
+        body_params: Idealized parameter dict for the navigated body.
+        sibling_bodies: Idealized parameter dicts of the other bodies sharing
+            the scene, wired in as occlusion candidates; None for the
+            single-body case.
+
+    Returns:
+        The single BODY_DISC feature the model emits for this body.
+    """
     model = NavModelBodySimulated(
         'body', obs, body_params['name'], body_params, sibling_bodies=sibling_bodies
     )
@@ -694,6 +706,23 @@ def test_occluded_disc_template_drops_hidden_pixels() -> None:
     dist = np.hypot(vs - sib_v, us - sib_u)
     # The sibling is a radius-50 sphere; no template pixel survives deep inside it.
     assert int(np.count_nonzero(dist < 40.0)) == 0
+
+
+def test_occluded_disc_template_img_zero_under_sibling() -> None:
+    """The BODY_DISC template brightness is zero deep inside a nearer sibling."""
+    body = _large_body(range_km=700000.0)
+    disc = _disc_feature(_limb_obs(), body, sibling_bodies=[_near_sibling()])
+    v_min, u_min, _v_max, _u_max = disc.geometry.bbox_extfov_vu
+    obs = _limb_obs()
+    template_img = np.asarray(disc.template_img, dtype=np.float64)
+    rows, cols = template_img.shape
+    vv, uu = np.meshgrid(np.arange(rows), np.arange(cols), indexing='ij')
+    sib_v = _LIMB_SIZE / 2.0 + int(obs.extfov_margin_v) - v_min
+    sib_u = _LIMB_SIZE / 2.0 + 55.0 + int(obs.extfov_margin_u) - u_min
+    # Deep inside the radius-50 sibling the target disc is fully hidden, so the
+    # image-zeroing (not just the mask) must drive the brightness to zero there.
+    deep = np.hypot(vv - sib_v, uu - sib_u) < 40.0
+    assert float(np.max(template_img[deep])) == 0.0
 
 
 def test_occluded_disc_reliability_drops() -> None:
