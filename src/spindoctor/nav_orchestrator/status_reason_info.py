@@ -22,6 +22,14 @@ STATUS_REASON_INFO_TEMPLATE: dict[NavStatusReason, list[str]] = {
         'Final: status=conflicted',
         'Best-vs-runner-up confidence gap below threshold',
     ],
+    NavStatusReason.BODY_SHAPE_LOCK_SUSPECT: [
+        'Final: status=conflicted',
+        'Geometric body lock contradicted by the pose-free blob witness',
+    ],
+    NavStatusReason.LONE_BLOB_IN_COLLAPSED_REGIME: [
+        'Final: status=failed',
+        'Lone blob centroid survived a body whose geometric fit self-flagged spurious',
+    ],
     NavStatusReason.NO_SIGNAL_IN_IMAGE: [
         'Final: status=failed',
         'Image classifier: blank / dark frame',

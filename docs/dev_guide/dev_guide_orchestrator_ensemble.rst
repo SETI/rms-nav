@@ -242,24 +242,74 @@ agreement boost re-inflate the confidence. The shared DT fit-quality gates
 (:doc:`dev_guide_techniques_dt_fitting`) close the adjacent
 unverified-fit family before results reach the ensemble at all.
 
-What remains unpriced is systematic error nobody declares. The standing
-evidence:
+The second defense is a cross-technique one, the *body-witness veto*
+(:mod:`spindoctor.nav_orchestrator.body_witness_veto`, applied inside
+:func:`~spindoctor.nav_orchestrator.ensemble.ensemble` just before a body
+consensus would be reported as a success). A systematic bias one body
+technique cannot see is often visible as a *disagreement* against another
+technique with a different failure mode, and the pose-free brightness centroid
+(:class:`~spindoctor.nav_technique.nav_technique_body_blob.BodyBlobNav`) is the
+witness the veto reads. So the witness exists on real frames as well as
+simulated ones, :class:`~spindoctor.nav_model.nav_model_body.NavModelBody` emits
+a ``BODY_BLOB`` alongside the geometric limb / disc rather than only when the
+limb is unusable (see :doc:`dev_guide_navigation_models_body`). The blob runs
+even when a primary already covers the body -- it opts in via
+:attr:`~spindoctor.nav_technique.nav_technique.NavTechnique.runs_as_witness`,
+and is still superseded in the fuse, so only the veto sees it and the fused
+offset on a passing frame is unchanged. The veto fires in two shapes:
+
+- **Shape lock.** When the winning consensus is a geometric body technique
+  (disc correlation, limb fit) and the blob witness on the same body, at or
+  below half phase where its centroid is a trustworthy position reference,
+  disagrees with the fused offset, the geometric techniques have locked onto a
+  mismatched shape. The result is reported ``conflicted`` (``status_reason``
+  ``body_shape_lock_suspect``) rather than a confident success.
+- **Collapsed regime.** When the only surviving body offset is a past-half-phase
+  blob centroid and a sibling geometric technique on the same body self-flagged
+  spurious, the geometric fit structurally failed and only the
+  photometric-bias-prone centroid remains. If the blob disagrees with the
+  spurious technique's own coarse position -- the disc located the body while a
+  forward-scattering haze dragged the centroid away -- the frame is declined
+  (``failed``, ``status_reason`` ``lone_blob_in_collapsed_regime``). A small or
+  faint body whose spurious disc agrees with the blob (both found the same
+  body) is a legitimate blob-only success and is left alone.
+
+Each disagreement is a two-sided gate: the Euclidean separation must clear a
+body-scaled pixel floor (``max(disagreement_floor_px, disagreement_frac *
+diameter)``) *and* the Mahalanobis distance under the combined translation
+covariance must exceed ``body_witness_agreement_sigma``, so a low-SNR or
+small-body centroid whose large sigma makes the separation statistically
+consistent with agreement is not vetoed on scatter alone. Both checks apply
+only to single-body frames, where no companion body corrupts the centroid and
+the whole-frame verdict maps to one body.
+
+The two modes below are the standing evidence that motivated the veto; each is
+caught and asserts its declined outcome as a regression:
 
 - ``tests/integration/sim_sweeps/irregularity_shape_mismatch.yaml`` -- at
-  extreme mesh-vs-ellipsoid shape mismatch the disc correlation locks onto
-  the mismatched model and the fused confidence re-saturates to ~0.99 at a
-  10-17 px error (measured 2026-07-19: 0.98 at 10.9 px, 0.99 at 14.0 and
-  17.0 px). A cross-technique veto (the pose-free blob disagrees by pixels),
-  not a per-technique channel, is the shape of a fix.
+  mesh-vs-ellipsoid shape mismatch the disc correlation and the limb fit both
+  lock onto the mismatched model and agree at a multi-pixel wrong offset, and
+  the fused confidence re-saturates to ~0.99 at a 10-17 px error. The pose-free
+  blob, which does not chase the shape, disagrees by pixels; the shape-lock
+  veto reports the steps whose disagreement clears the statistical gate
+  ``conflicted``. The clean (zero-relief) step recovers the planted offset
+  sub-pixel and stays a success, so the veto separates the shape lock from the
+  legitimate fit rather than blanketing the sweep.
 - ``tests/integration/sim_scenes/atmosphere/titan_crescent_horns.yaml`` (and
   its noiseless twin) -- a 155-degree haze crescent drags the blob centroid to
-  a ~30 px wrong offset that passes the acceptance gate at the blob's 0.40
-  cap, tier ``low``.
+  a ~30 px wrong offset while the disc correlation self-flags spurious. The
+  collapsed-regime veto declines the frame instead of reporting the lone-blob
+  success.
 
-These are asserted as honest pins or documented sweep behavior (see
-:ref:`sim-expected`), so a worsening regression and a silent fix both fail
-CI. A high tier on a frame with plausible *undeclared* systematic error is
-not evidence against that error.
+The witness is a defense against a geometric lock, not a cure for the blob's
+own bias: past half phase the centroid is itself crescent- and haze-biased, so
+the shape-lock check does not trust it there, and on a multi-body frame it is
+excluded. What remains unpriced is systematic error that displaces *every*
+technique on a frame coherently, with no surviving witness that fails
+differently -- a high tier on a frame with plausible *undeclared* systematic
+error of that kind is not evidence against the error. The declined outcomes
+above are asserted (see :ref:`sim-expected`), so a worsening regression and a
+silent revert both fail CI.
 
 A related honesty caveat survives inside the confidence scalar itself: the
 two-member agreement boost assumes the members' errors are independent, so two
@@ -352,6 +402,29 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
   contributing technique clamps its rotation fit to this bound, so a result arriving
   outside it is an upstream programming error and raises
   :class:`~spindoctor.support.exceptions.NavContractError`.
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.body_witness_shape_lock_max_phase_deg` —
+  float, default ``60.0``. Phase ceiling below which the pose-free centroid is treated as a
+  trustworthy position witness for the shape-lock veto; past it the centroid's lit-hemisphere
+  bias grows and would disagree with a correct geometric fit.
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.body_witness_collapse_min_phase_deg` —
+  float, default ``90.0``. Phase floor above which a lone blob is the haze-bias suspect for the
+  collapsed-regime veto. It sits above the shape-lock ceiling, so the two checks bracket the
+  centroid's reliable-witness regime.
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.body_witness_disagreement_floor_px` —
+  float, default ``4.0``. Absolute floor of the shape-lock veto's blob-vs-fused
+  disagreement tolerance.
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.body_witness_disagreement_frac` —
+  float, default ``0.03``. Fraction of the body diameter added to the floor as the
+  body-witness veto's disagreement lower bound. Well-navigated single-body frames hold the
+  blob within ~1.5 px of the fused offset; a shape lock disagrees by 5 px and up.
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.body_witness_agreement_sigma` —
+  float, default ``2.0``. Mahalanobis-distance threshold the blob-vs-consensus disagreement
+  must exceed under the combined translation covariance before the veto fires; the pixel
+  floor is a lower bound, this is the statistical gate.
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.scattered_light_gradient_score` —
+  float, default ``5.0``. Background-gradient score at or above which the frame is treated as
+  scattered-light, so the disc and limb techniques on one body are fused as a single
+  correlated witness rather than two independent ones.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.tier_thresholds` — mapping
   ``rank -> {min_confidence, max_sigma_px}``; default thresholds give ``'high'`` for
   confidence at or above 0.85 with sigma at most 0.5 px, ``'medium'`` for confidence at
@@ -372,7 +445,7 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
 Implementation
 ==============
 
-The ensemble is split across four modules under ``src/spindoctor/nav_orchestrator/``:
+The ensemble is split across the following modules under ``src/spindoctor/nav_orchestrator/``:
 
 - ``ensemble.py`` — the reconciler itself:
   :func:`~spindoctor.nav_orchestrator.ensemble.ensemble`,
@@ -393,6 +466,10 @@ The ensemble is split across four modules under ``src/spindoctor/nav_orchestrato
   :func:`~spindoctor.nav_orchestrator.ensemble_observability.observable_basis`,
   :func:`~spindoctor.nav_orchestrator.ensemble_observability.observable_intersection_basis`,
   and :func:`~spindoctor.nav_orchestrator.ensemble_observability.mahalanobis_distance`.
+- ``body_witness_veto.py`` — the cross-technique body-witness veto:
+  :func:`~spindoctor.nav_orchestrator.body_witness_veto.evaluate_body_witness_veto`
+  and the :class:`~spindoctor.nav_orchestrator.body_witness_veto.BodyWitnessVeto`
+  verdict, read by the ensemble before a body consensus is reported.
 
 Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
@@ -401,7 +478,7 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 - :func:`~spindoctor.nav_orchestrator.ensemble.derive_confidence_rank` — assign the
   five-bucket rank from a confidence / sigma pair.
 - :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig` — frozen dataclass carrying
-  the nine tunables documented above.
+  the tunables documented above.
 
 Grouping is sponsored-neighborhood consensus selection
 (:func:`~spindoctor.nav_orchestrator.ensemble_consensus.consensus_selection`): every

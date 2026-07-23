@@ -16,6 +16,7 @@ from spindoctor.nav_orchestrator.ensemble import (
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from spindoctor.nav_orchestrator.provenance import Provenance
 from spindoctor.nav_technique.diagnostics import (
+    BodyBlobDiagnostics,
     BodyDiscDiagnostics,
     BodyLimbDiagnostics,
     NavTechniqueDiagnostics,
@@ -794,11 +795,19 @@ def test_ensemble_drops_blob_when_disc_succeeds_for_same_body() -> None:
         offset=(2.0, 3.0),
         confidence=0.6,
     )
-    blob = _body_feature_result(
+    # The blob sits far from the disc so a fused answer would be pulled off (2, 3);
+    # its high phase keeps the shape-lock witness veto from firing, isolating the
+    # supersession drop as the only reason it leaves the fuse.
+    blob = NavTechniqueResult(
         technique_name='BodyBlobNav',
-        feature_id='body_blob:MIMAS',
-        offset=(20.0, 30.0),
+        feature_ids=('body_blob:MIMAS',),
+        offset_px=(20.0, 30.0),
+        covariance_px2=np.eye(2, dtype=np.float64) * 0.25,
         confidence=0.4,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyBlobDiagnostics(body_extent_px=80.0, max_phase_angle_deg=155.0),
+        source_bodies=frozenset({'MIMAS'}),
     )
     result = ensemble(
         [disc, blob],
@@ -1572,6 +1581,74 @@ def test_ensemble_descendant_backed_runner_up_has_no_quorum() -> None:
     assert result.excluded_from_consensus == ['TechniqueB', 'StarRefineNav']
 
 
+def test_ensemble_shape_lock_veto_reports_conflicted() -> None:
+    """A geometric consensus the low-phase blob contradicts is reported conflicted."""
+    disc = NavTechniqueResult(
+        technique_name='BodyDiscCorrelateNav',
+        feature_ids=('disc:HYPERION',),
+        offset_px=(-14.5, -6.5),
+        covariance_px2=np.eye(2, dtype=np.float64) * 0.25,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyDiscDiagnostics(),
+        source_bodies=frozenset({'HYPERION'}),
+    )
+    blob = NavTechniqueResult(
+        technique_name='BodyBlobNav',
+        feature_ids=('blob:HYPERION',),
+        offset_px=(-3.8, -3.1),
+        covariance_px2=np.eye(2, dtype=np.float64) * 4.0,
+        confidence=0.4,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyBlobDiagnostics(body_extent_px=150.0, max_phase_angle_deg=30.0),
+        source_bodies=frozenset({'HYPERION'}),
+    )
+    result = ensemble(
+        [disc, blob],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'conflicted'
+    assert result.status_reason.value == 'body_shape_lock_suspect'
+
+
+def test_ensemble_lone_blob_collapsed_regime_veto_reports_failed() -> None:
+    """A lone blob with a spurious geometric sibling on the same body fails."""
+    disc = NavTechniqueResult(
+        technique_name='BodyDiscCorrelateNav',
+        feature_ids=('disc:TITAN',),
+        offset_px=(0.5, 0.5),
+        covariance_px2=np.eye(2, dtype=np.float64) * 0.25,
+        confidence=0.0,
+        spurious=True,
+        at_edge=False,
+        diagnostics=BodyDiscDiagnostics(),
+        source_bodies=frozenset({'TITAN'}),
+    )
+    blob = NavTechniqueResult(
+        technique_name='BodyBlobNav',
+        feature_ids=('blob:TITAN',),
+        offset_px=(3.2, 29.3),
+        covariance_px2=np.eye(2, dtype=np.float64) * 4.0,
+        confidence=0.4,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyBlobDiagnostics(body_extent_px=170.0, max_phase_angle_deg=155.0),
+        source_bodies=frozenset({'TITAN'}),
+    )
+    result = ensemble(
+        [disc, blob],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'failed'
+    assert result.status_reason.value == 'lone_blob_in_collapsed_regime'
+
+
 def test_ensemble_untagged_results_unchanged_by_lineage_logic() -> None:
     """Results without prior_source_techniques keep full corroboration semantics."""
     a = _make_result(technique_name='TechniqueA', offset=(1.0, 2.0), confidence=0.85)
@@ -1586,3 +1663,30 @@ def test_ensemble_untagged_results_unchanged_by_lineage_logic() -> None:
     assert result.consensus_techniques == ['TechniqueA', 'TechniqueB']
     # Two independent members still earn the 2-member agreement factor.
     assert result.confidence == pytest.approx(0.99)
+
+
+def test_config_rejects_negative_body_witness_agreement_sigma() -> None:
+    """A negative Mahalanobis threshold would veto nearly every separation."""
+    with pytest.raises(ValueError, match='body_witness_agreement_sigma must be non-negative'):
+        EnsembleConfig(body_witness_agreement_sigma=-1.0)
+
+
+def test_config_rejects_non_finite_body_witness_disagreement_floor() -> None:
+    """A non-finite disagreement floor is rejected rather than silently accepted."""
+    with pytest.raises(ValueError, match='body_witness_disagreement_floor_px must be finite'):
+        EnsembleConfig(body_witness_disagreement_floor_px=float('inf'))
+
+
+def test_config_rejects_out_of_range_shape_lock_phase() -> None:
+    """A phase ceiling outside [0, 180] deg is rejected."""
+    with pytest.raises(ValueError, match=r'body_witness_shape_lock_max_phase_deg must lie'):
+        EnsembleConfig(body_witness_shape_lock_max_phase_deg=200.0)
+
+
+def test_config_rejects_inverted_phase_window() -> None:
+    """The shape-lock ceiling must sit below the collapse floor."""
+    with pytest.raises(ValueError, match='must be below'):
+        EnsembleConfig(
+            body_witness_shape_lock_max_phase_deg=95.0,
+            body_witness_collapse_min_phase_deg=90.0,
+        )

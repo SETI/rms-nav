@@ -159,18 +159,31 @@ def test_irregularity_sweep_confidence_drops() -> None:
     """Shape mismatch drops the fused confidence below the clean baseline.
 
     Introducing a predicted-shape mismatch pulls the fused confidence below the
-    clean (rows[0]) value somewhere in the sweep.  At the extreme mismatch the
-    fix becomes confidently wrong -- the disc correlation still locks onto the
-    blob and the confidence recovers even as the offset error grows to many
-    pixels -- so the assertion is on the confidence dip rather than a monotone
-    end-to-end drop (the same self-flag limitation the pose-disagreement sweep
-    documents).  The absolute confidence levels are sim-anchored and revisited
-    by the calibration refit; the render-robust signal here is that mismatch
-    degrades confidence at all.
+    clean (rows[0]) value somewhere in the sweep.  The clean step itself is a
+    confident success; every mismatched step sits below it.
     """
     rows = _rows('irregularity_shape_mismatch')
-    mismatched_min = min(row.confidence for row in rows[1:])
-    assert mismatched_min < rows[0].confidence
+    assert all(row.confidence < rows[0].confidence for row in rows[1:])
+
+
+def test_irregularity_sweep_extreme_mismatch_vetoed() -> None:
+    """At extreme mismatch the shape-lock veto reports conflicted, not success.
+
+    The disc correlation and the limb fit both lock onto the mismatched shape
+    and agree at a multi-pixel wrong offset that would otherwise fuse to a
+    confident success.  The pose-free blob does not chase the shape, so the
+    body-witness veto reports the extreme-mismatch step conflicted -- the
+    offset error is large (see ``test_irregularity_sweep_bias_grows``) yet does
+    not carry a confident-success tier.
+    """
+    rows = _rows('irregularity_shape_mismatch')
+    assert rows[-1].status == 'conflicted'
+
+
+def test_irregularity_sweep_clean_step_still_succeeds() -> None:
+    """The zero-relief step navigates cleanly: the veto does not blanket the sweep."""
+    rows = _rows('irregularity_shape_mismatch')
+    assert rows[0].status == 'success'
 
 
 def test_pose_disagreement_starts_clean() -> None:

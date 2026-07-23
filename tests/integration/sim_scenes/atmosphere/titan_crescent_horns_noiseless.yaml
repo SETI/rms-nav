@@ -29,19 +29,14 @@ offset_rotation_deg: 0.0
 # See titan_crescent_horns: the ring of light drags the blob centroid ~30 px,
 # the disc correlation is spurious, and the terminator feature is dropped by
 # the reliability gate (0.26 vs the 0.30 threshold, the sin(155 deg) phase cap
-# doing most of the capping), leaving a low-tier blob-only success that is
-# roughly 30 px wrong -- no remaining technique vetoes it.  The noiseless twin
-# removes read/Poisson noise as a confound and pins the systematic bias itself
-# deterministically (recovered du ~29.2 vs planted -0.8): the haze alone, not
-# the noise, carries the answer that far.  Re-measured 2026-07-18 under the
-# recalibrated formulas: the outcome persists (fused 0.40 at the blob's
-# structural cap, now 0.05 above the raised 0.35 ensemble gate), so the
-# scene stands as ensemble-gap evidence alongside its noisy twin.
-# known_offset_error_px is the honest pin: the measured fused error
-# (30.01 px on 2026-07-18, deterministic in this noiseless twin) must
-# stay inside its band -- silent improvement and worsening both fail.
+# doing most of the capping), leaving the brightness centroid as the only
+# surviving technique.  The noiseless twin removes read/Poisson noise as a
+# confound and pins the systematic bias itself deterministically (recovered du
+# ~29.2 vs planted -0.8): the haze alone, not the noise, carries the answer
+# that far.  Because the disc correlation on the same body self-flagged
+# spurious, the lone-blob-in-collapsed-regime body-witness veto declines the
+# frame: the centroid's photometric bias is not reportable as a success.  The
+# deterministic twin asserts the decline is stable, not noise-dependent.
 expected:
-  status: success
-  confidence_tier: low
-  known_offset_error_px: 30.0
-  known_offset_error_tol_px: 4.0
+  status: failed
+  status_reason: lone_blob_in_collapsed_regime

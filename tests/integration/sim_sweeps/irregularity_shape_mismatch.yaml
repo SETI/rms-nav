@@ -6,15 +6,15 @@ sweep_name: irregularity_shape_mismatch
 # predicted (smooth) one.  The recovered offset error -- the centroid bias the
 # ellipsoidal model cannot remove -- grows monotonically with irregularity, the
 # regime the phase_irregularity_factor term is meant to capture.  The walk runs
-# to 0.7 because the fused confidence is non-monotonic over this mesh
-# realization: it dips through the mid-range and re-saturates to 0.99 from
-# lumpiness 0.5 despite a 10+ px bias.  The 2026-07-18 recalibration measured
-# rather than fixed this: the campaign renders bodies at their published
-# shape-residual relief (lumpiness up to ~0.15), so the fitted formula has no
-# support beyond the physical range and the correlation diagnostics genuinely
-# carry no mismatch signal there -- standing ensemble-gap evidence (the
-# pose-free blob disagrees by pixels at the top of the walk; a cross-technique
-# veto, not a refit, is what could close it).
+# to 0.7 because the disc correlation and the limb fit both lock onto the
+# mismatched shape and agree at a multi-pixel wrong offset: the fused
+# confidence once re-saturated to 0.99 from lumpiness 0.5 despite a 10+ px
+# bias, a confident-wrong lock the correlation diagnostics carry no signal for.
+# The pose-free blob does not chase the shape, so the body-witness veto (see
+# the ensemble chapter) reports these mismatched steps conflicted; the
+# clean (zero-relief) step still recovers the planted offset sub-pixel and
+# stays a success, so the veto separates the shape lock from the legitimate
+# fit rather than blanketing the walk.
 base_scene: algorithmic_invariants/planted_offset_shapemismatch.yaml
 parameters: [bodies.0.mesh_lumpiness]
 values: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]

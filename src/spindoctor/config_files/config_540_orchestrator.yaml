@@ -67,6 +67,30 @@ orchestrator:
     pinvh_rcond: 1.0e-9
     # Maximum |rotation| (deg) a 3-DoF result may take before rejection.
     max_allowed_rotation_deg: 5.0
+    # Body-witness veto: cross-technique guards on confident-wrong body
+    # locks the per-technique diagnostics cannot see (a disc / limb
+    # consensus that agreed at a shape-mismatched offset the pose-free
+    # blob contradicts, or a lone blob carrying the answer while the
+    # geometric technique on the same body self-flagged spurious).  The
+    # blob centroid's lit-hemisphere bias grows toward half phase and is
+    # re-modeled only once the coarse acquisition switches to the crescent
+    # template past it, so the two checks bracket its reliable-witness
+    # regime: the shape-lock check trusts the blob only below the low
+    # phase ceiling, the collapsed-regime check treats it as the haze-bias
+    # suspect only above the high phase floor.  The disagreement tolerance
+    # is the larger of the floor and a fraction of the body diameter;
+    # well-navigated frames hold the blob within ~1.5 px of the fused
+    # offset, while a shape lock or haze drag disagrees by 5 px and up.
+    body_witness_shape_lock_max_phase_deg: 60.0
+    body_witness_collapse_min_phase_deg: 90.0
+    body_witness_disagreement_floor_px: 4.0
+    body_witness_disagreement_frac: 0.03
+    # Mahalanobis-distance threshold the blob-vs-consensus disagreement must
+    # exceed under the combined covariance before the veto fires: the pixel
+    # floor above is a lower bound, this is the statistical gate so a low-SNR
+    # or small-body centroid whose large sigma makes the separation consistent
+    # with agreement is not vetoed on scatter alone.
+    body_witness_agreement_sigma: 2.0
     # Background-gradient score at or above which a frame is treated as
     # scattered-light, so the disc and limb techniques on one body are fused
     # as a single correlated witness rather than two independent ones.

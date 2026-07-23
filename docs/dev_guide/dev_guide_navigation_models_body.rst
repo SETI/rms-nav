@@ -239,12 +239,21 @@ the silhouette extraction:
   measures how far the limb fit can be expected to wander given the body's intrinsic
   ellipsoid-fit residual. When this scalar exceeds the documented cap the limb fit is
   information-limited; the gate rejects the
-  :attr:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` and falls back to the
-  brightness-weighted-centroid path.
+  :attr:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` and the
+  brightness-weighted-centroid path carries the body instead.
 - The **visible-lit fraction** and **overflow fraction** above. The disc gate fires only
   when :attr:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` was emitted, the
   visible-lit fraction is at or above its minimum, and the
   overflow fraction is at or below its maximum.
+
+The :data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB` gate fires whenever the
+predicted diameter clears its minimum and the body has any lit signal, independent of the limb
+gate: on a small or high-uncertainty body the blob is the *only* body feature, while on a
+well-resolved body it is co-emitted **alongside** the limb (and disc) as a witness. The
+witness blob is superseded in the fuse by any non-spurious geometric result, so it does not
+dilute the geometric offset; the ensemble's body-witness veto reads it as an independent
+pose-free cross-check against a geometric technique locked onto a mismatched shape (see
+:doc:`dev_guide_orchestrator_ensemble`).
 
 The terminator polyline gates fire when the surviving vertex count is at or above the
 configured minimum and the phase factor :math:`\sin\phi` is at or above its minimum.
@@ -667,14 +676,18 @@ Call path traced through
      :data:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` feature is emitted. The
      downstream disc gate then has a chance to fire alongside the limb arc when
      ``visible_lit_fraction`` and ``overflow_fraction`` allow.
-   - When the limb arc was rejected, the predicted disc diameter is at least
+   - The blob gate is met when the predicted disc diameter is at least
      ``max(`` :data:`~spindoctor.nav_model.nav_model_body.BODY_BLOB_MIN_DIAMETER_PX` ``,``
-     :attr:`~spindoctor.nav_model.body_shape.BodyShape.min_blob_diameter_px` ``)``, and the
-     rendered silhouette contains at least one lit pixel, a
-     :data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB` feature is emitted instead.
-     The blob feature carries the lit-weighted predicted centroid and the
-     phase-and-irregularity factor :math:`\kappa` on its
-     :class:`~spindoctor.feature.flags.BodyBlobFlags`.
+     :attr:`~spindoctor.nav_model.body_shape.BodyShape.min_blob_diameter_px` ``)`` and the
+     rendered silhouette contains at least one lit pixel. When the limb arc was rejected but
+     the blob gate is met, a
+     :data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB` feature is emitted as
+     the sole body feature. When the limb arc was emitted and the blob gate is also met, a
+     BODY_BLOB is co-emitted alongside the limb (and disc) as a witness. Either way the blob
+     feature carries the lit-weighted predicted centroid and the phase-and-irregularity factor
+     :math:`\kappa` on its :class:`~spindoctor.feature.flags.BodyBlobFlags`; the witness blob
+     is superseded in the fuse by any non-spurious geometric result and is read only by the
+     ensemble body-witness veto.
    - Otherwise no body feature is emitted (the body is too small to fit and too unresolved
      to centroid, or its silhouette is entirely in shadow and there is no photometric
      signal to centroid).
