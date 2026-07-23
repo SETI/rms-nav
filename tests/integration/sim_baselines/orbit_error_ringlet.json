@@ -1,7 +1,7 @@
 {
-  "confidence": 0.99,
-  "offset_du_px": -1.95,
-  "offset_dv_px": -1.26,
+  "confidence": 0.89,
+  "offset_du_px": -2.41,
+  "offset_dv_px": -2.03,
   "scene_name": "orbit_error_ringlet",
   "status": "success"
 }

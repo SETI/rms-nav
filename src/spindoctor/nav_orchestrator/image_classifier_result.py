@@ -54,6 +54,13 @@ class NavImageClassifierResult:
         missing_frac: Fraction of pixels equal to the missing-data marker.
         noise_sigma: Per-image MAD-based noise sigma (DN units).
         max_dn: Maximum DN observed in the image.
+        background_gradient_score: Dimensionless score of the low-order
+            brightness ramp across the sensor (affine-plane peak-to-peak over
+            residual MAD-sigma; see
+            :func:`spindoctor.support.background_gradient.background_gradient_score`).
+            A flat field scores near zero; a scattered-light veiling gradient
+            scores well above five.  ``None`` when the image is too small for
+            the measure or the downsample is perfectly planar.
         flags: Additional flags caveats (independent of ``image_class``).
     """
 
@@ -62,4 +69,5 @@ class NavImageClassifierResult:
     missing_frac: float
     noise_sigma: float
     max_dn: float
+    background_gradient_score: float | None = None
     flags: list[ImageFlag] = field(default_factory=list)
