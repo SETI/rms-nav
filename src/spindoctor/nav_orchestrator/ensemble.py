@@ -230,6 +230,47 @@ class EnsembleConfig:
         default_factory=lambda: copy.deepcopy(DEFAULT_TIER_THRESHOLDS)
     )
 
+    def __post_init__(self) -> None:
+        """Reject body-witness thresholds that would misfire the veto.
+
+        Both direct construction and ``from_mapping`` land here, so a
+        non-finite value, a negative tolerance, an out-of-range phase, or an
+        inverted phase window is rejected the same way regardless of how the
+        config was built.  A negative Mahalanobis threshold, for instance,
+        would make nearly every separation veto-worthy.
+
+        Raises:
+            ValueError: if any body-witness threshold is non-finite, a
+                tolerance is negative, a phase falls outside ``[0, 180]``, or
+                the shape-lock ceiling is not below the collapse floor.
+        """
+        non_negative = {
+            'body_witness_disagreement_floor_px': self.body_witness_disagreement_floor_px,
+            'body_witness_disagreement_frac': self.body_witness_disagreement_frac,
+            'body_witness_agreement_sigma': self.body_witness_agreement_sigma,
+        }
+        for name, value in non_negative.items():
+            if not math.isfinite(value):
+                raise ValueError(f'{name} must be finite, got {value}')
+            if value < 0.0:
+                raise ValueError(f'{name} must be non-negative, got {value}')
+        phases = {
+            'body_witness_shape_lock_max_phase_deg': self.body_witness_shape_lock_max_phase_deg,
+            'body_witness_collapse_min_phase_deg': self.body_witness_collapse_min_phase_deg,
+        }
+        for name, value in phases.items():
+            if not math.isfinite(value):
+                raise ValueError(f'{name} must be finite, got {value}')
+            if not 0.0 <= value <= 180.0:
+                raise ValueError(f'{name} must lie in [0, 180] deg, got {value}')
+        if self.body_witness_shape_lock_max_phase_deg >= self.body_witness_collapse_min_phase_deg:
+            raise ValueError(
+                'body_witness_shape_lock_max_phase_deg '
+                f'({self.body_witness_shape_lock_max_phase_deg}) must be below '
+                'body_witness_collapse_min_phase_deg '
+                f'({self.body_witness_collapse_min_phase_deg})'
+            )
+
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any] | None) -> 'EnsembleConfig':
         """Build an ``EnsembleConfig`` from a YAML-derived mapping.

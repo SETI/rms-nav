@@ -676,14 +676,18 @@ Call path traced through
      :data:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` feature is emitted. The
      downstream disc gate then has a chance to fire alongside the limb arc when
      ``visible_lit_fraction`` and ``overflow_fraction`` allow.
-   - When the limb arc was rejected, the predicted disc diameter is at least
+   - The blob gate is met when the predicted disc diameter is at least
      ``max(`` :data:`~spindoctor.nav_model.nav_model_body.BODY_BLOB_MIN_DIAMETER_PX` ``,``
-     :attr:`~spindoctor.nav_model.body_shape.BodyShape.min_blob_diameter_px` ``)``, and the
-     rendered silhouette contains at least one lit pixel, a
-     :data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB` feature is emitted instead.
-     The blob feature carries the lit-weighted predicted centroid and the
-     phase-and-irregularity factor :math:`\kappa` on its
-     :class:`~spindoctor.feature.flags.BodyBlobFlags`.
+     :attr:`~spindoctor.nav_model.body_shape.BodyShape.min_blob_diameter_px` ``)`` and the
+     rendered silhouette contains at least one lit pixel. When the limb arc was rejected but
+     the blob gate is met, a
+     :data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB` feature is emitted as
+     the sole body feature. When the limb arc was emitted and the blob gate is also met, a
+     BODY_BLOB is co-emitted alongside the limb (and disc) as a witness. Either way the blob
+     feature carries the lit-weighted predicted centroid and the phase-and-irregularity factor
+     :math:`\kappa` on its :class:`~spindoctor.feature.flags.BodyBlobFlags`; the witness blob
+     is superseded in the fuse by any non-spurious geometric result and is read only by the
+     ensemble body-witness veto.
    - Otherwise no body feature is emitted (the body is too small to fit and too unresolved
      to centroid, or its silhouette is entirely in shadow and there is no photometric
      signal to centroid).

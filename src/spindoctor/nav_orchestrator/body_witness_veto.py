@@ -53,13 +53,43 @@ from enum import Enum, auto
 import numpy as np
 
 from spindoctor.nav_orchestrator.ensemble_observability import mahalanobis_distance
+from spindoctor.nav_technique.diagnostics import BodyBlobDiagnostics
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
+from spindoctor.support.exceptions import NavContractError
 from spindoctor.support.types import NDArrayFloatType
 
 __all__ = ['BodyWitnessVeto', 'evaluate_body_witness_veto']
 
 _BLOB_TECHNIQUE = 'BodyBlobNav'
 _GEOMETRIC_BODY_TECHNIQUES = frozenset({'BodyDiscCorrelateNav', 'BodyLimbNav'})
+
+
+def _blob_diagnostics(result: NavTechniqueResult) -> BodyBlobDiagnostics:
+    """Return the ``BodyBlobDiagnostics`` a ``BodyBlobNav`` result must carry.
+
+    The veto only ever reads diagnostics off results it has already filtered to
+    :data:`_BLOB_TECHNIQUE`, so a blob result whose diagnostics are absent or of
+    the wrong type is a broken upstream contract, not a case to paper over with
+    defaults: silently reading a zero phase and zero extent would make a
+    malformed result look like a low-phase, zero-size witness and could bypass
+    the collapsed-regime veto or spuriously trip shape-lock detection.
+
+    Parameters:
+        result: A result whose ``technique_name`` is already ``BodyBlobNav``.
+
+    Returns:
+        The result's ``BodyBlobDiagnostics``.
+
+    Raises:
+        NavContractError: if the result carries no ``BodyBlobDiagnostics``.
+    """
+    diagnostics = result.diagnostics
+    if not isinstance(diagnostics, BodyBlobDiagnostics):
+        raise NavContractError(
+            f'{_BLOB_TECHNIQUE} result must carry BodyBlobDiagnostics, '
+            f'got {type(diagnostics).__name__}'
+        )
+    return diagnostics
 
 
 def _translation_block(covariance_px2: NDArrayFloatType) -> NDArrayFloatType:
@@ -177,9 +207,9 @@ def _lone_blob_collapsed(
     if any(result.technique_name != _BLOB_TECHNIQUE for result in best_group):
         return False
     high_phase_extents = [
-        float(getattr(result.diagnostics, 'body_extent_px', 0.0))
+        _blob_diagnostics(result).body_extent_px
         for result in best_group
-        if float(getattr(result.diagnostics, 'max_phase_angle_deg', 0.0)) > min_phase_deg
+        if _blob_diagnostics(result).max_phase_angle_deg > min_phase_deg
     ]
     if not high_phase_extents:
         return False
@@ -234,10 +264,10 @@ def _shape_lock_suspect(
             continue
         if not (result.source_bodies & consensus_bodies):
             continue
-        max_phase_angle_deg = float(getattr(result.diagnostics, 'max_phase_angle_deg', 0.0))
-        if max_phase_angle_deg > max_phase_deg:
+        diagnostics = _blob_diagnostics(result)
+        if diagnostics.max_phase_angle_deg > max_phase_deg:
             continue
-        body_extent_px = float(getattr(result.diagnostics, 'body_extent_px', 0.0))
+        body_extent_px = diagnostics.body_extent_px
         if _significant_disagreement(
             result.offset_px,
             result.covariance_px2,

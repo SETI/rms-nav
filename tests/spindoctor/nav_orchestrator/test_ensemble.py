@@ -1663,3 +1663,30 @@ def test_ensemble_untagged_results_unchanged_by_lineage_logic() -> None:
     assert result.consensus_techniques == ['TechniqueA', 'TechniqueB']
     # Two independent members still earn the 2-member agreement factor.
     assert result.confidence == pytest.approx(0.99)
+
+
+def test_config_rejects_negative_body_witness_agreement_sigma() -> None:
+    """A negative Mahalanobis threshold would veto nearly every separation."""
+    with pytest.raises(ValueError, match='body_witness_agreement_sigma must be non-negative'):
+        EnsembleConfig(body_witness_agreement_sigma=-1.0)
+
+
+def test_config_rejects_non_finite_body_witness_disagreement_floor() -> None:
+    """A non-finite disagreement floor is rejected rather than silently accepted."""
+    with pytest.raises(ValueError, match='body_witness_disagreement_floor_px must be finite'):
+        EnsembleConfig(body_witness_disagreement_floor_px=float('inf'))
+
+
+def test_config_rejects_out_of_range_shape_lock_phase() -> None:
+    """A phase ceiling outside [0, 180] deg is rejected."""
+    with pytest.raises(ValueError, match=r'body_witness_shape_lock_max_phase_deg must lie'):
+        EnsembleConfig(body_witness_shape_lock_max_phase_deg=200.0)
+
+
+def test_config_rejects_inverted_phase_window() -> None:
+    """The shape-lock ceiling must sit below the collapse floor."""
+    with pytest.raises(ValueError, match='must be below'):
+        EnsembleConfig(
+            body_witness_shape_lock_max_phase_deg=95.0,
+            body_witness_collapse_min_phase_deg=90.0,
+        )

@@ -163,8 +163,7 @@ def test_irregularity_sweep_confidence_drops() -> None:
     confident success; every mismatched step sits below it.
     """
     rows = _rows('irregularity_shape_mismatch')
-    mismatched_min = min(row.confidence for row in rows[1:])
-    assert mismatched_min < rows[0].confidence
+    assert all(row.confidence < rows[0].confidence for row in rows[1:])
 
 
 def test_irregularity_sweep_extreme_mismatch_vetoed() -> None:

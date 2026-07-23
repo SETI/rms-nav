@@ -7,6 +7,7 @@ veto.
 """
 
 import numpy as np
+import pytest
 
 from spindoctor.nav_orchestrator.body_witness_veto import (
     BodyWitnessVeto,
@@ -19,6 +20,7 @@ from spindoctor.nav_technique.diagnostics import (
     NavTechniqueDiagnostics,
 )
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
+from spindoctor.support.exceptions import NavContractError
 
 _SHAPE_LOCK_MAX_PHASE_DEG = 60.0
 _COLLAPSE_MIN_PHASE_DEG = 90.0
@@ -38,7 +40,20 @@ def _result(
     cov: np.ndarray | None = None,
     diagnostics: NavTechniqueDiagnostics | None = None,
 ) -> NavTechniqueResult:
-    """Build a minimal NavTechniqueResult for veto tests."""
+    """Build a minimal NavTechniqueResult for veto tests.
+
+    Parameters:
+        technique_name: Name the result reports as its producing technique.
+        offset: Predicted ``(dv, du)`` offset in pixels.
+        source_bodies: Bodies the result claims to have navigated.
+        spurious: Whether the result self-flagged spurious.
+        cov: Translation covariance; a tight default is used when None.
+        diagnostics: Per-technique diagnostics; a bare ``BodyLimbDiagnostics``
+            is used when None.
+
+    Returns:
+        The assembled ``NavTechniqueResult``.
+    """
     return NavTechniqueResult(
         technique_name=technique_name,
         feature_ids=(f'{technique_name}:f1',),
@@ -61,7 +76,19 @@ def _blob(
     spurious: bool = False,
     cov: np.ndarray | None = None,
 ) -> NavTechniqueResult:
-    """Build a BodyBlobNav witness result."""
+    """Build a BodyBlobNav witness result.
+
+    Parameters:
+        offset: Predicted ``(dv, du)`` blob-centroid offset in pixels.
+        body: The single body the blob witnesses.
+        phase_deg: Maximum phase angle carried on the blob diagnostics.
+        extent_px: Predicted body extent carried on the blob diagnostics.
+        spurious: Whether the blob result self-flagged spurious.
+        cov: Translation covariance; a tight default is used when None.
+
+    Returns:
+        A ``NavTechniqueResult`` carrying ``BodyBlobDiagnostics``.
+    """
     return _result(
         technique_name='BodyBlobNav',
         offset=offset,
@@ -78,7 +105,18 @@ def _evaluate(
     fused_offset: tuple[float, float],
     fused_cov: np.ndarray | None = None,
 ) -> BodyWitnessVeto:
-    """Call the veto with the module's default thresholds."""
+    """Call the veto with the module's default thresholds.
+
+    Parameters:
+        best_group: The winning consensus group of technique results.
+        results: All per-technique results available to the veto.
+        fused_offset: The ensemble's fused ``(dv, du)`` offset in pixels.
+        fused_cov: The fused translation covariance; a tight default is used
+            when None.
+
+    Returns:
+        The ``BodyWitnessVeto`` verdict for the scene.
+    """
     return evaluate_body_witness_veto(
         best_group,
         results,
@@ -204,6 +242,23 @@ def test_lone_blob_collapsed_fires_when_high_phase_blob_disagrees() -> None:
     blob = _blob(offset=(3.2, 29.3), body='TITAN', phase_deg=155.0, extent_px=170.0)
     verdict = _evaluate([blob], [disc, blob], (3.2, 29.3))
     assert verdict is BodyWitnessVeto.LONE_BLOB_COLLAPSED_REGIME
+
+
+def test_blob_result_without_blob_diagnostics_raises_contract_error() -> None:
+    """A BodyBlobNav result must carry BodyBlobDiagnostics, not a default.
+
+    Reading a zero phase and zero extent off a malformed blob would make it look
+    like a low-phase, zero-size witness and could bypass the collapsed-regime
+    veto, so the contract fails loudly instead.
+    """
+    bad_blob = _result(
+        technique_name='BodyBlobNav',
+        offset=(3.2, 29.3),
+        source_bodies=frozenset({'TITAN'}),
+        diagnostics=BodyLimbDiagnostics(),
+    )
+    with pytest.raises(NavContractError, match='must carry BodyBlobDiagnostics'):
+        _evaluate([bad_blob], [bad_blob], (3.2, 29.3))
 
 
 def test_lone_blob_not_vetoed_when_spurious_disc_agrees() -> None:

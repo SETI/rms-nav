@@ -402,10 +402,14 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
   contributing technique clamps its rotation fit to this bound, so a result arriving
   outside it is an upstream programming error and raises
   :class:`~spindoctor.support.exceptions.NavContractError`.
-- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.body_witness_max_phase_deg` —
-  float, default ``90.0``. Largest blob phase at which the pose-free centroid is
-  treated as a trustworthy position witness for the shape-lock veto; past half phase
-  the centroid is itself crescent- and haze-biased.
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.body_witness_shape_lock_max_phase_deg` —
+  float, default ``60.0``. Phase ceiling below which the pose-free centroid is treated as a
+  trustworthy position witness for the shape-lock veto; past it the centroid's lit-hemisphere
+  bias grows and would disagree with a correct geometric fit.
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.body_witness_collapse_min_phase_deg` —
+  float, default ``90.0``. Phase floor above which a lone blob is the haze-bias suspect for the
+  collapsed-regime veto. It sits above the shape-lock ceiling, so the two checks bracket the
+  centroid's reliable-witness regime.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.body_witness_disagreement_floor_px` —
   float, default ``4.0``. Absolute floor of the shape-lock veto's blob-vs-fused
   disagreement tolerance.
@@ -417,6 +421,10 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
   float, default ``2.0``. Mahalanobis-distance threshold the blob-vs-consensus disagreement
   must exceed under the combined translation covariance before the veto fires; the pixel
   floor is a lower bound, this is the statistical gate.
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.scattered_light_gradient_score` —
+  float, default ``5.0``. Background-gradient score at or above which the frame is treated as
+  scattered-light, so the disc and limb techniques on one body are fused as a single
+  correlated witness rather than two independent ones.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.tier_thresholds` — mapping
   ``rank -> {min_confidence, max_sigma_px}``; default thresholds give ``'high'`` for
   confidence at or above 0.85 with sigma at most 0.5 px, ``'medium'`` for confidence at
@@ -437,7 +445,7 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
 Implementation
 ==============
 
-The ensemble is split across four modules under ``src/spindoctor/nav_orchestrator/``:
+The ensemble is split across the following modules under ``src/spindoctor/nav_orchestrator/``:
 
 - ``ensemble.py`` — the reconciler itself:
   :func:`~spindoctor.nav_orchestrator.ensemble.ensemble`,
@@ -470,7 +478,7 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 - :func:`~spindoctor.nav_orchestrator.ensemble.derive_confidence_rank` — assign the
   five-bucket rank from a confidence / sigma pair.
 - :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig` — frozen dataclass carrying
-  the nine tunables documented above.
+  the tunables documented above.
 
 Grouping is sponsored-neighborhood consensus selection
 (:func:`~spindoctor.nav_orchestrator.ensemble_consensus.consensus_selection`): every
