@@ -19,7 +19,7 @@ from spindoctor.nav_model.stars.saturation import (
     SATURATION_MATCH_MAX_WIDEN_RADII,
     SATURATION_MATCH_WIDEN_PER_MAG,
     UCAC4_SATURATION_VMAG_LIMIT,
-    _nearest_mag_aware,
+    _best_mag_aware_match,
     _nearest_within,
     _widened_radius,
     correct_saturated_vmags,
@@ -683,31 +683,57 @@ def test_widened_radius_uses_per_mag_slope() -> None:
     assert got == pytest.approx(expected)
 
 
-def test_nearest_mag_aware_returns_none_for_empty_reference() -> None:
+def test_best_mag_aware_match_returns_none_for_empty_reference() -> None:
     """An empty reference set yields no match."""
     empty = np.asarray([], dtype=np.float64)
-    assert _nearest_mag_aware(0.0, 0.0, 6.0, empty, empty, empty, _MATCH_RAD) is None
+    assert _best_mag_aware_match(0.0, 0.0, 6.0, empty, empty, empty, _MATCH_RAD) is None
 
 
-def test_nearest_mag_aware_respects_available_mask() -> None:
+def test_best_mag_aware_match_respects_available_mask() -> None:
     """A reference masked unavailable is not matched even when in range."""
     ref_ra = np.asarray([_ETA_TAU[0]], dtype=np.float64)
     ref_dec = np.asarray([_ETA_TAU[1]], dtype=np.float64)
     ref_vmag = np.asarray([2.87], dtype=np.float64)
     available = np.asarray([False], dtype=np.bool_)
-    idx = _nearest_mag_aware(
+    idx = _best_mag_aware_match(
         _ETA_TAU[0], _ETA_TAU[1], 6.68, ref_ra, ref_dec, ref_vmag, _MATCH_RAD, available=available
     )
     assert idx is None
 
 
-def test_nearest_mag_aware_matches_nearest_in_range() -> None:
-    """The nearest reference inside its widened radius is returned."""
+def test_best_mag_aware_match_matches_coincident_reference() -> None:
+    """A coincident reference is returned over a fainter distant one."""
     ref_ra = np.asarray([_ETA_TAU[0], _MEROPE[0]], dtype=np.float64)
     ref_dec = np.asarray([_ETA_TAU[1], _MEROPE[1]], dtype=np.float64)
     ref_vmag = np.asarray([2.87, 4.18], dtype=np.float64)
-    idx = _nearest_mag_aware(_ETA_TAU[0], _ETA_TAU[1], 6.68, ref_ra, ref_dec, ref_vmag, _MATCH_RAD)
+    idx = _best_mag_aware_match(
+        _ETA_TAU[0], _ETA_TAU[1], 6.68, ref_ra, ref_dec, ref_vmag, _MATCH_RAD
+    )
     assert idx == 0
+
+
+def test_best_mag_aware_match_prefers_brighter_true_twin_over_nearer_unrelated() -> None:
+    """A nearer unrelated bright star does not capture the saturated candidate.
+
+    The candidate reads V6.7 (a saturated bright star).  A V4.0 reference
+    sits 4 arcsec away and the candidate's true V2.8 twin sits 8 arcsec
+    away; both fall inside their own magnitude-widened reach.  A pure
+    nearest-neighbour rule would correct the candidate to the nearer,
+    unrelated V4.0 star; the brightness preference returns the V2.8 twin
+    instead.
+    """
+    # Candidate at Eta Tau's true position; references offset east by 4 and 8
+    # arcsec.  cos(dec) ~ 1 over this small field, so a pure RA offset gives
+    # the intended separations to within the small-angle tolerance.
+    arcsec = math.radians(1.0 / 3600.0)
+    cand_ra, cand_dec = _ETA_TAU
+    unrelated_ra = cand_ra + 4.0 * arcsec / math.cos(cand_dec)
+    twin_ra = cand_ra + 8.0 * arcsec / math.cos(cand_dec)
+    ref_ra = np.asarray([unrelated_ra, twin_ra], dtype=np.float64)
+    ref_dec = np.asarray([cand_dec, cand_dec], dtype=np.float64)
+    ref_vmag = np.asarray([4.0, 2.8], dtype=np.float64)
+    idx = _best_mag_aware_match(cand_ra, cand_dec, 6.7, ref_ra, ref_dec, ref_vmag, _MATCH_RAD)
+    assert idx == 1
 
 
 # --------------------------------------------------------------------------
