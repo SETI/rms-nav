@@ -310,6 +310,11 @@ asserts the generated half matches the registries.
   modules (follow the existing PyQt6-safe autodoc pattern).
 - **#245** — self-contained language pass over `util/cohort_curation/`
   (drop the internal phase codenames; point at the committed docs).
+- **#391** — pin the lint tools (`ruff`, `mypy`, `pymarkdownlnt`) in the
+  `dev` group, or move linting to pinned `pre-commit` hooks, so a new
+  release cannot turn `main` red without a deliberate code change. A ruff
+  0.16 release promoting RUF036 did exactly that mid-batch; the offending
+  lines were fixed, but the unpinned-linter exposure remains.
 
 ## Track F — Instruments, features, hardening
 
@@ -363,6 +368,9 @@ boundaries, #109 safe-path helpers, #110 scalar validation helpers, #119 PNG
 creation location, #135 from_file dedup, #137 dead validation
 helper, #140 geometry-union access, #143 viewer cursor after pan, #144
 QApplication lifetime, #147 confidence-context dedup, #155
-display-scaling consolidation, #212 xdist worker nondeterminism
+display-scaling consolidation, #388 body-occluder bbox pre-filter (skip
+the full `where_in_front` depth test for siblings whose predicted bbox
+does not overlap, avoiding the O(bodies^2) grid pass in busy frames),
+#212 xdist worker nondeterminism
 (software-only scope; the faulty CPU cores are permanently offlined and
 nothing gates on hardware).
