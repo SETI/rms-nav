@@ -23,16 +23,24 @@ estimates become one offset.  Every step is honest:
    members: a pass-2 result whose prior was seeded by a technique in the
    same subset re-observed its own seed, so it refines the offset but
    casts no independent vote.
-5. Combine offsets within the winning subset via precision-weighted
+5. Resolve the winning subset into mutually independent estimators before
+   fusing (``resolve_independent_estimators``): drop a seeded single-star
+   refine that only re-observes its own prior, and collapse correlated
+   witnesses that share one error source (two ring techniques on one
+   catalog; disc and limb on one scattered-light gradient) to a single
+   representative.  The information-form merge assumes independence, so
+   fusing correlated members would over-tighten the covariance, inflate the
+   tier, and let a redundant member drag the offset.
+6. Combine offsets within the resolved subset via precision-weighted
    (Kalman-style) merging.
-6. Apply optional disagreement / conflict penalties.
-7. Cap the confidence tier at ``medium`` when the fused covariance is
+7. Apply optional disagreement / conflict penalties.
+8. Cap the confidence tier at ``medium`` when the fused covariance is
    rank-deficient (one translation axis unobservable) or when every
    combined member is a single-star solution (a one-star unique match
    or one-inlier refine) — neither an assumed axis nor an
    un-cross-checked star is ``high``-tier evidence, however tight the
    localization sigma.
-8. Emit a NavResult carrying the excluded technique names.
+9. Emit a NavResult carrying the excluded technique names.
 
 The ensemble is tested in isolation against synthetic per-technique results;
 correctness here is what makes the rest of the pipeline trustworthy.
@@ -58,18 +66,19 @@ from spindoctor.nav_orchestrator.ensemble_consensus import (
     corroborating_members,
     result_param_vector,
 )
+from spindoctor.nav_orchestrator.ensemble_independence import (
+    is_single_star_result,
+    resolve_independent_estimators,
+)
 from spindoctor.nav_orchestrator.ensemble_observability import (
     mixed_scale_pinvh,
     observable_basis,
+    positional_precision,
 )
 from spindoctor.nav_orchestrator.feature_summary import NavFeatureSummary
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from spindoctor.nav_orchestrator.nav_result import ConfidenceRank, NavResult
 from spindoctor.nav_orchestrator.provenance import Provenance
-from spindoctor.nav_technique.diagnostics import (
-    StarRefineDiagnostics,
-    StarUniqueMatchDiagnostics,
-)
 from spindoctor.nav_technique.nav_technique import technique_tier
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.support.exceptions import NavContractError
@@ -92,6 +101,11 @@ DEFAULT_CONFLICTED_CONFIDENCE_MULTIPLIER = 0.3
 DEFAULT_MIN_CONFIDENCE = 0.35
 DEFAULT_PINVH_RCOND = 1.0e-9
 DEFAULT_MAX_ALLOWED_ROTATION_DEG = 5.0
+# Background-gradient score at or above which a frame is treated as
+# scattered-light: the disc and limb techniques then measure the same veiling
+# ramp, so they are collapsed to one witness before the combine (issue #339).
+# Matches the cohort-curation scattered-light prescan threshold.
+DEFAULT_SCATTERED_LIGHT_GRADIENT_SCORE = 5.0
 # Tier confidence boundaries are sim-anchored (fitted 2026-07-18 on the
 # recalibrated simulated-scene campaign, with the #210 covariance
 # floors live and the ring truth vocabulary in the scene cohort): the
@@ -154,6 +168,11 @@ class EnsembleConfig:
             ``+-max_rotation_deg``, default 5 deg).  A 3-DoF result
             arriving with ``abs(rotation_rad)`` at or above this bound is a
             programming error upstream and raises ``NavContractError``.
+        scattered_light_gradient_score: Background-gradient score at or
+            above which the frame is treated as scattered-light, so the disc
+            and limb techniques on one body are fused as a single correlated
+            witness rather than two independent ones (see
+            ``resolve_independent_estimators``).
         tier_thresholds: Mapping ``rank -> {min_confidence, max_sigma_px}``;
             see ``derive_confidence_rank``.
     """
@@ -166,6 +185,7 @@ class EnsembleConfig:
     min_confidence: float = DEFAULT_MIN_CONFIDENCE
     pinvh_rcond: float = DEFAULT_PINVH_RCOND
     max_allowed_rotation_deg: float = DEFAULT_MAX_ALLOWED_ROTATION_DEG
+    scattered_light_gradient_score: float = DEFAULT_SCATTERED_LIGHT_GRADIENT_SCORE
     tier_thresholds: dict[str, dict[str, float | None]] = field(
         default_factory=lambda: copy.deepcopy(DEFAULT_TIER_THRESHOLDS)
     )
@@ -464,20 +484,16 @@ def _combine_confidence(
             (W = 0); the orchestrator's caller routes this to
             ``unobservable_offset`` failure.
     """
-    weights = []
-    for res in group:
-        cov = np.asarray(res.covariance_px2, np.float64)
-        # Weight by the *positional* precision only.  Taking trace(pinvh(cov))
-        # over a full 3-DoF covariance would add the v, u precisions (px^-2) to
-        # the rotation precision (rad^-2), so a star-field result whose rotation
-        # is tightly pinned would dominate the confidence average on an
-        # arbitrary, unit-mixed scale.  Marginalising rotation out and tracing
-        # the 2x2 translation block keeps every weight in px^-2; the additive
-        # trace (rather than det(info)^(1/p)) stays well-defined for the rank-1
-        # ring-edge covariances whose unobservable axis carries zero precision.
-        # The 2-DoF path is unchanged: cov[:2, :2] is then the whole matrix.
-        info_xy = mixed_scale_pinvh(np.ascontiguousarray(cov[:2, :2]), rcond=rcond)
-        weights.append(float(np.trace(info_xy)))
+    # Weight by the *positional* precision only.  Taking trace(pinvh(cov)) over
+    # a full 3-DoF covariance would add the v, u precisions (px^-2) to the
+    # rotation precision (rad^-2), so a star-field result whose rotation is
+    # tightly pinned would dominate the confidence average on an arbitrary,
+    # unit-mixed scale.  Marginalising rotation out and tracing the 2x2
+    # translation block keeps every weight in px^-2; the additive trace (rather
+    # than det(info)^(1/p)) stays well-defined for the rank-1 ring-edge
+    # covariances whose unobservable axis carries zero precision.  The 2-DoF
+    # path is unchanged: cov[:2, :2] is then the whole matrix.
+    weights = [positional_precision(res.covariance_px2, rcond=rcond) for res in group]
     w_total = sum(weights)
     if w_total <= 0.0:
         raise ValueError('precision-weighted combine: total weight is zero; offset is unobservable')
@@ -503,24 +519,6 @@ def _combine_confidence(
     if apply_disagreement_penalty:
         combined *= disagreement_penalty
     return combined
-
-
-def _is_single_star_result(res: NavTechniqueResult) -> bool:
-    """Return True when a result rests on a single star with no cross-check.
-
-    A one-star ``StarUniqueMatchNav`` match and a one-inlier
-    ``StarRefineNav`` refine each localize the offset from a single
-    detection: nothing in the solution corroborates the identification
-    itself.  The ensemble caps the tier of a consensus built solely from
-    such results (see :func:`ensemble`).  Multi-star solutions and every
-    non-star technique return False.
-    """
-    diag = res.diagnostics
-    if isinstance(diag, StarUniqueMatchDiagnostics):
-        return diag.mode == 'one_star'
-    if isinstance(diag, StarRefineDiagnostics):
-        return diag.n_stars_used <= 1
-    return False
 
 
 def derive_confidence_rank(
@@ -647,20 +645,55 @@ def ensemble(
     excluded = selection.excluded
     excluded_names = [r.technique_name for r in excluded]
     consensus_names = [r.technique_name for r in best_group]
-    # Vote mass and quorum count only corroborating members: a pass-2
-    # prior-descendant refines the offset but casts no independent vote
-    # (issue #222).
-    best_summed_conf = corroborating_confidence(best_group)
-    best_has_quorum = len(corroborating_members(best_group)) >= 2
+    # Resolve the winning group into mutually independent estimators before
+    # any fusion: drop a seeded single-star refine that only re-observes its
+    # own prior (issue #222), and collapse correlated witnesses that share one
+    # error source -- two ring techniques reading one catalog (issue #317), or
+    # disc and limb on one scattered-light gradient (issue #339) -- to a single
+    # representative.  The information-form combine assumes independence, so
+    # fusing correlated members would over-tighten the covariance and inflate
+    # the tier, and a redundant member would drag the fused offset.
+    resolution = resolve_independent_estimators(
+        best_group,
+        image_classifier=image_classifier,
+        scattered_light_gradient_score=cfg.scattered_light_gradient_score,
+        rcond=cfg.pinvh_rcond,
+    )
+    combine_set = resolution.estimators
+    for dropped in resolution.dropped_descendants:
+        IMAGE_LOGGER.info(
+            'Dropping seeded single-star refine %s from the combine: it '
+            're-observes its own pass-1 prior and adds no independent '
+            'constraint',
+            dropped.technique_name,
+        )
+    for collapsed in resolution.collapsed_groups:
+        IMAGE_LOGGER.info(
+            'Collapsing correlated witnesses to %s: %s share one error '
+            'source and are fused as a single witness, not independent ones',
+            collapsed[0].technique_name,
+            ', '.join(r.technique_name for r in collapsed),
+        )
+    # Vote mass and quorum count independent witnesses only, so they are
+    # measured over the resolved ``combine_set`` -- the same set the merge
+    # fuses -- not the raw consensus.  This keeps the conflict logic consistent
+    # with the merge: a collapsed correlated pair (two ring techniques, or
+    # scattered-light disc/limb) counts as the one witness it is, so it cannot
+    # claim a spurious quorum that would suppress a genuine lone-vs-lone
+    # conflict.  ``corroborating_members`` additionally drops any surviving
+    # multi-star prior-descendant, which refines the offset but casts no
+    # independent vote (issue #222).
+    best_summed_conf = corroborating_confidence(combine_set)
+    best_has_quorum = len(corroborating_members(combine_set)) >= 2
     apply_disagreement_penalty = bool(excluded)
     try:
         combined = _combine_precision_weighted(
-            best_group,
+            combine_set,
             rcond=cfg.pinvh_rcond,
             max_allowed_rotation_deg=cfg.max_allowed_rotation_deg,
         )
         combined_confidence = _combine_confidence(
-            best_group,
+            combine_set,
             rcond=cfg.pinvh_rcond,
             disagreement_penalty=cfg.disagreement_penalty,
             apply_disagreement_penalty=apply_disagreement_penalty,
@@ -783,17 +816,19 @@ def ensemble(
             '(one translation axis unobservable)'
         )
         rank = 'medium'
-    if rank == 'high' and all(_is_single_star_result(r) for r in best_group):
+    if rank == 'high' and all(is_single_star_result(r) for r in combine_set):
         # A single-star solution's confidence is deliberately capped to say
         # "weak, no cross-check" (the one-inlier refine caps at exactly the
         # high tier's confidence boundary), and its localization sigma is
         # CRLB-tight, so it would otherwise clear the high gates.  A result
         # whose every combined member rests on one star tops out at medium
-        # (issue #263).
+        # (issue #263).  Judged over the independent estimators, so a dropped
+        # seeded single-star refine does not force the cap on an otherwise
+        # multi-star consensus.
         IMAGE_LOGGER.info(
             'Tier capped at medium: every consensus member is a single-star '
             'solution with no independent cross-check (%s)',
-            ', '.join(r.technique_name for r in best_group),
+            ', '.join(r.technique_name for r in combine_set),
         )
         rank = 'medium'
     if rank == 'failed':
