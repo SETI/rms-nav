@@ -1402,9 +1402,9 @@ class BodyMosaic:
         *,
         resolution_threshold: float = 1.0,
         copy_slop: int = 0,
-        max_incidence: float | None | _UseMosaicLimitsSentinel = USE_MOSAIC_LIMITS,
-        max_emission: float | None | _UseMosaicLimitsSentinel = USE_MOSAIC_LIMITS,
-        max_resolution: float | None | _UseMosaicLimitsSentinel = USE_MOSAIC_LIMITS,
+        max_incidence: float | _UseMosaicLimitsSentinel | None = USE_MOSAIC_LIMITS,
+        max_emission: float | _UseMosaicLimitsSentinel | None = USE_MOSAIC_LIMITS,
+        max_resolution: float | _UseMosaicLimitsSentinel | None = USE_MOSAIC_LIMITS,
     ) -> None:
         """Add a reprojected image to the mosaic.
 
