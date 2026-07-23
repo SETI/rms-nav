@@ -53,6 +53,11 @@ spindoctor.nav_orchestrator
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.nav_orchestrator.ensemble_independence
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.nav_orchestrator.ensemble_observability
    :members:
    :undoc-members:

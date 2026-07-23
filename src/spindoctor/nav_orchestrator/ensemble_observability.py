@@ -25,6 +25,7 @@ __all__ = [
     'mixed_scale_pinvh',
     'observable_basis',
     'observable_intersection_basis',
+    'positional_precision',
 ]
 
 # The floor separates genuine uncertainty from sentinels: 1e10 px^2 is a
@@ -76,6 +77,34 @@ def mixed_scale_pinvh(mat: NDArrayFloatType, *, rcond: float) -> NDArrayFloatTyp
         block = np.ascontiguousarray(mat[np.ix_(regular, regular)])
         out[np.ix_(regular, regular)] = pinvh(block, rtol=rcond)
     return out
+
+
+def positional_precision(cov: NDArrayFloatType, *, rcond: float) -> float:
+    """Return the scalar positional precision of a covariance in ``px^-2``.
+
+    The positional (v, u) translation block ``cov[:2, :2]`` is pseudo-inverted
+    with :func:`mixed_scale_pinvh` (so an unobservable sentinel axis is
+    quarantined rather than truncating the well-constrained axes) and its trace
+    is returned.  Any rotation axis is marginalised out first, so the value is
+    purely the translation precision and is never skewed by a 3-DoF result's
+    unrelated ``rad^-2`` rotation precision.  The additive trace stays
+    well-defined for a rank-1 covariance whose unobservable axis carries zero
+    precision, contributing zero from that axis rather than diverging.
+
+    Parameters:
+        cov: Per-technique covariance, ``(2, 2)`` or ``(3, 3)``, in mixed
+            px / rad units.  Only the leading ``2 x 2`` translation block is
+            read.
+        rcond: Relative eigenvalue cutoff for the pseudo-inverse of the
+            translation block.
+
+    Returns:
+        ``trace(pinvh(cov[:2, :2]))``, the positional precision in ``px^-2``;
+        zero when the translation block is entirely unobservable.
+    """
+    cov = np.asarray(cov, np.float64)
+    info_xy = mixed_scale_pinvh(np.ascontiguousarray(cov[:2, :2]), rcond=rcond)
+    return float(np.trace(info_xy))
 
 
 def observable_basis(cov: NDArrayFloatType) -> NDArrayFloatType:
