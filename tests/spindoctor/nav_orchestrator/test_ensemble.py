@@ -1230,6 +1230,139 @@ def test_ensemble_rank_1_ring_disagreeing_radially_does_not_group() -> None:
     assert result.excluded_from_consensus == ['BodyBlobNav']
 
 
+def test_blob_outlier_dropped_against_two_star_consensus_commits() -> None:
+    """A lone blob a corroborated two-star fix contradicts is dropped, not conflicted.
+
+    Mirrors N1530185128: a two-star ``StarUniqueMatchNav`` on the truth and a
+    ``BodyBlobNav`` brightness centroid pixels away.  Without the drop the lone
+    blob's confidence is close enough to force the lone-vs-lone conflict; the
+    drop removes it so the star fix commits.
+    """
+    star = _make_result(
+        technique_name='StarUniqueMatchNav',
+        offset=(18.0, 0.0),
+        confidence=0.706,
+        diagnostics=StarUniqueMatchDiagnostics(mode='two_star'),
+    )
+    blob = _make_result(
+        technique_name='BodyBlobNav',
+        offset=(-1.0, 3.5),
+        confidence=0.4,
+        diagnostics=BodyBlobDiagnostics(body_extent_px=180.0, max_phase_angle_deg=28.0),
+    )
+    result = ensemble(
+        [star, blob],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+
+
+def test_blob_outlier_dropped_leaves_star_offset_undragged() -> None:
+    """The dropped blob does not drag the committed offset off the star fix."""
+    star = _make_result(
+        technique_name='StarUniqueMatchNav',
+        offset=(18.0, 0.0),
+        confidence=0.706,
+        diagnostics=StarUniqueMatchDiagnostics(mode='two_star'),
+    )
+    blob = _make_result(
+        technique_name='BodyBlobNav',
+        offset=(-1.0, 3.5),
+        confidence=0.4,
+        diagnostics=BodyBlobDiagnostics(body_extent_px=180.0, max_phase_angle_deg=28.0),
+    )
+    result = ensemble(
+        [star, blob],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.offset_px is not None
+    assert result.offset_px[0] == pytest.approx(18.0, abs=0.5)
+
+
+def test_blob_outlier_dropped_is_not_a_consensus_member() -> None:
+    """The dropped blob appears neither in the consensus nor as an excluded outlier."""
+    star = _make_result(
+        technique_name='StarUniqueMatchNav',
+        offset=(18.0, 0.0),
+        confidence=0.706,
+        diagnostics=StarUniqueMatchDiagnostics(mode='two_star'),
+    )
+    blob = _make_result(
+        technique_name='BodyBlobNav',
+        offset=(-1.0, 3.5),
+        confidence=0.4,
+        diagnostics=BodyBlobDiagnostics(body_extent_px=180.0, max_phase_angle_deg=28.0),
+    )
+    result = ensemble(
+        [star, blob],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.consensus_techniques == ['StarUniqueMatchNav']
+
+
+def test_blob_agreeing_with_star_consensus_is_kept() -> None:
+    """A blob that agrees with the star fix within the floor is not dropped."""
+    star = _make_result(
+        technique_name='StarUniqueMatchNav',
+        offset=(18.0, 0.0),
+        confidence=0.706,
+        diagnostics=StarUniqueMatchDiagnostics(mode='two_star'),
+    )
+    blob = _make_result(
+        technique_name='BodyBlobNav',
+        offset=(18.4, 0.3),
+        confidence=0.4,
+        diagnostics=BodyBlobDiagnostics(body_extent_px=180.0, max_phase_angle_deg=28.0),
+    )
+    result = ensemble(
+        [star, blob],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert 'BodyBlobNav' in result.consensus_techniques
+
+
+def test_blob_outlier_kept_against_one_star_consensus_still_conflicts() -> None:
+    """A one-star fix is not a corroborated consensus, so the blob is retained.
+
+    A single-star unique match cannot cross-check its own identification, so it
+    does not outrank the blob: the drop must not fire, and the lone-vs-lone
+    conflict between the two weak, disagreeing witnesses stands.
+    """
+    star = _make_result(
+        technique_name='StarUniqueMatchNav',
+        offset=(18.0, 0.0),
+        confidence=0.706,
+        diagnostics=StarUniqueMatchDiagnostics(mode='one_star'),
+    )
+    blob = _make_result(
+        technique_name='BodyBlobNav',
+        offset=(-1.0, 3.5),
+        confidence=0.4,
+        diagnostics=BodyBlobDiagnostics(body_extent_px=180.0, max_phase_angle_deg=28.0),
+    )
+    result = ensemble(
+        [star, blob],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'conflicted'
+
+
+def test_blob_star_disagreement_floor_rejects_negative() -> None:
+    """A negative blob/star disagreement floor is rejected at construction."""
+    with pytest.raises(ValueError, match='blob_star_disagreement_floor_px must be non-negative'):
+        EnsembleConfig(blob_star_disagreement_floor_px=-1.0)
+
+
 def test_ensemble_rotation_sentinel_does_not_zero_translation_offset() -> None:
     """A 3-DoF result with the rotation-unobservable sentinel keeps its offset.
 

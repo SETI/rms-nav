@@ -63,6 +63,16 @@ orchestrator:
     conflicted_confidence_multiplier: 0.3
     # Final-result threshold below which the ensemble returns failed.
     min_confidence: 0.35
+    # Euclidean translation distance (px) within which a BodyBlobNav
+    # brightness centroid is treated as agreeing with a corroborated
+    # (non-single-star) star fix.  When such a fix is present and the blob
+    # agrees with none within this floor, the blob is dropped from the
+    # ensemble math as a contradicted outlier: a multi-star fix outranks a
+    # lone brightness centroid as a position witness, so the centroid must
+    # not force a conflict against the star solution.  Matches
+    # agreement_pixel_floor (a blob outside the grouping tolerance of every
+    # trusted star fix is not corroborating it).  0.0 disables the drop.
+    blob_star_disagreement_floor_px: 5.0
     # rcond for scipy.linalg.pinvh.
     pinvh_rcond: 1.0e-9
     # Maximum |rotation| (deg) a 3-DoF result may take before rejection.
