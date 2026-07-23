@@ -1,7 +1,7 @@
 {
-  "confidence": 0.4,
-  "offset_du_px": 29.17,
-  "offset_dv_px": -0.36,
+  "confidence": 0.0,
+  "offset_du_px": null,
+  "offset_dv_px": null,
   "scene_name": "titan_crescent_horns_noiseless",
-  "status": "success"
+  "status": "failed"
 }

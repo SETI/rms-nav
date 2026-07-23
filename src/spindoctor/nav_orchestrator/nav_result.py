@@ -224,6 +224,7 @@ class NavResult:
         provenance: Provenance,
         excluded_from_consensus: list[str] | None = None,
         consensus_techniques: list[str] | None = None,
+        status_reason: NavStatusReason = NavStatusReason.CONFLICTED_TECHNIQUES,
         model_metadata: dict[str, dict[str, Any]] | None = None,
         annotations: Annotations | None = None,
     ) -> 'NavResult':
@@ -231,6 +232,9 @@ class NavResult:
 
         ``confidence_rank`` is hard-set to ``'conflicted'``; downstream
         consumers refuse to use these results without explicit opt-in.
+        ``status_reason`` defaults to the summed-confidence-gap conflict; a
+        cross-technique veto that reports its best group conflicted (for
+        example a suspected body shape lock) passes its own reason.
         """
         cov = np.asarray(covariance_px2, np.float64)
         sigma_dv = float(np.sqrt(max(cov[0, 0], 0.0)))
@@ -242,7 +246,7 @@ class NavResult:
             sigma_along_unobservable_px=None,
             confidence_rank='conflicted',
             confidence=confidence,
-            status_reason=NavStatusReason.CONFLICTED_TECHNIQUES,
+            status_reason=status_reason,
             covariance_px2=cov,
             per_technique=per_technique,
             feature_inventory=feature_inventory,

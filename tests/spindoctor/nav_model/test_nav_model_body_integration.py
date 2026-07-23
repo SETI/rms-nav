@@ -202,6 +202,38 @@ def test_to_features_emits_disc_alongside_limb_when_visibility_high(
     assert disc.template_mask is not None
 
 
+def test_to_features_co_emits_witness_blob_with_limb_and_disc(fake_obs: FakeObs) -> None:
+    """A resolved body co-emits BODY_BLOB alongside LIMB_ARC and BODY_DISC.
+
+    This is the reachability proof for the ensemble body-witness veto: on the
+    real (SPICE-backed) NavModelBody a single resolved body must yield the
+    geometric limb / disc AND the pose-free witness blob together, so the veto
+    has an independent cross-check to read on real frames rather than only on
+    the co-emitting simulated model.
+    """
+    model = _build_body(
+        obs=fake_obs,
+        km_per_pixel_at_limb=10.0,
+        visible_lit_fraction=BODY_DISC_MIN_VISIBLE_LIT_FRACTION + 0.1,
+        overflow_fraction=BODY_DISC_MAX_OVERFLOW_FRACTION - 0.1,
+    )
+    types = {f.feature_type for f in model.to_features(bare_nav_context(fake_obs))}
+    assert NavFeatureType.LIMB_ARC in types
+    assert NavFeatureType.BODY_DISC in types
+    assert NavFeatureType.BODY_BLOB in types
+
+
+def test_to_features_witness_blob_is_singular_with_limb(fake_obs: FakeObs) -> None:
+    """Exactly one BODY_BLOB is emitted alongside the limb (no duplicate feature)."""
+    model = _build_body(obs=fake_obs, km_per_pixel_at_limb=10.0)
+    blobs = [
+        f
+        for f in model.to_features(bare_nav_context(fake_obs))
+        if f.feature_type is NavFeatureType.BODY_BLOB
+    ]
+    assert len(blobs) == 1
+
+
 def test_to_features_skips_disc_when_overflow_high(fake_obs: FakeObs) -> None:
     """A body with too much overflow does not emit BODY_DISC."""
     model = _build_body(

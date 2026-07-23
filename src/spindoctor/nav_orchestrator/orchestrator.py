@@ -845,7 +845,7 @@ class NavOrchestrator(NavBase):
                 continue
             technique = cls(config=self.config)
             available_features = features
-            if excluded_bodies and cls.tier == 'fallback':
+            if excluded_bodies and cls.tier == 'fallback' and not cls.runs_as_witness:
                 pre_filter_count = sum(
                     1 for f in features if f.feature_type in cls.accepts_feature_types
                 )

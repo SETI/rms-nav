@@ -256,6 +256,14 @@ class NavTechnique(NavBase, ABC):
     #: mis-converge on textured surfaces with no per-technique signal
     #: to detect the failure.
     tier: ClassVar[Literal['primary', 'fallback']] = 'primary'
+    #: If ``True``, this fallback technique still runs even when a
+    #: non-spurious primary already covers its source body, so its
+    #: pose-free estimate reaches the ensemble as an independent
+    #: cross-check.  The ensemble still supersedes it in the fuse
+    #: (``_drop_superseded_fallbacks``); only the body-witness veto reads
+    #: it, to catch a geometric technique that locked onto a wrong shape.
+    #: Ignored for primary-tier techniques, which always run.
+    runs_as_witness: ClassVar[bool] = False
     #: Confidence-formula spec consumed by ``evaluate_sigmoid_combination``.
     #: Loaded from ``config_510_techniques.yaml`` and assigned at
     #: ``Config.read_config`` time.  ``None`` for techniques that opt out
