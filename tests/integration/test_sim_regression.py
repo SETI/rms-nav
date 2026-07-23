@@ -12,6 +12,7 @@ from pathlib import Path
 
 from spindoctor.nav_model import build_models_for_obs
 from spindoctor.nav_orchestrator import NavOrchestrator
+from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.obs.obs_inst_sim import ObsSim
 from spindoctor.sim.scene import load_sim_scene
 
@@ -26,8 +27,16 @@ _DISC_SUBPIXEL_TOLERANCE_PX = 0.1
 _STAR_ZERO_OFFSET_TOLERANCE_PX = 0.1
 
 
-def _technique_offset_error(scene_name: str, technique: str) -> float:
-    """Pin one technique on a regression scene; return its recovered-offset error."""
+def _pin_technique(scene_name: str, technique: str) -> NavTechniqueResult:
+    """Navigate a regression scene with one pinned technique; return its result.
+
+    Parameters:
+        scene_name: Regression scene stem under ``sim_scenes/regression``.
+        technique: The single technique to run.
+
+    Returns:
+        The pinned technique's :class:`NavTechniqueResult`.
+    """
     scene = load_sim_scene(_REGRESSION_DIR / f'{scene_name}.yaml')
     obs = ObsSim.from_file('/tmp/regression.yaml', sim_params=scene)
     result = NavOrchestrator(
@@ -35,6 +44,13 @@ def _technique_offset_error(scene_name: str, technique: str) -> float:
     ).navigate(obs)
     pinned = next((t for t in result.per_technique if t.technique_name == technique), None)
     assert pinned is not None
+    return pinned
+
+
+def _technique_offset_error(scene_name: str, technique: str) -> float:
+    """Pin one technique on a regression scene; return its recovered-offset error."""
+    scene = load_sim_scene(_REGRESSION_DIR / f'{scene_name}.yaml')
+    pinned = _pin_technique(scene_name, technique)
     assert not pinned.spurious
     assert pinned.offset_px is not None
     return math.hypot(
@@ -65,3 +81,18 @@ def test_star_field_recovers_zero_offset() -> None:
     assert _technique_offset_error('star_zero_offset', 'StarFieldFromCatalogNav') < (
         _STAR_ZERO_OFFSET_TOLERANCE_PX
     )
+
+
+def test_low_phase_limb_misconvergence_is_flagged_spurious() -> None:
+    """A low-phase limb mis-lock is rejected, never a confident wrong offset.
+
+    Guards the coarse-seed mis-lock gate: at phase 10 deg the under-conditioned
+    limb geometry lets a false overlap peak seed the fit in the wrong basin, so
+    the Levenberg-Marquardt stage ends unconverged and pinned against the trust
+    region several pixels from the true limb.  This pins the BodyLimbNav result
+    only: it must be flagged spurious so it contributes no confident multi-pixel
+    offset (the disc technique still navigates the scene, so the fused ensemble
+    result is a success).
+    """
+    pinned = _pin_technique('low_phase_limb_misconverge', 'BodyLimbNav')
+    assert pinned.spurious

@@ -658,6 +658,13 @@ Best for: scenes where one or more bodies show a visible limb arc
 images).  Feasibility threshold: at least one limb arc with at least
 30 surviving polyline vertices.
 
+At very low phase (below about 15 degrees) the lit arc spans almost the
+whole silhouette and the across-limb gradient that constrains the fit is
+weak, so the fit can lock onto the wrong basin.  The technique detects that
+mis-lock and marks the result spurious rather than emit a confident
+multi-pixel offset, so a near-fully-lit single body is navigated by the disc
+or other techniques instead of by a misleading limb fit.
+
 ``BodyTerminatorNav``
 ^^^^^^^^^^^^^^^^^^^^^
 
