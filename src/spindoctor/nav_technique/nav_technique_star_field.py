@@ -13,12 +13,19 @@ Algorithm — four sub-pieces:
    weighted centroid pins each peak's sub-pixel position.  The
    brightest ``max_sources`` survivors (default 30) feed the matcher.
 2. **Triplet hashing.**  For every unordered triplet of detected
-   sources ``{A, B, C}`` with ``A`` brightest, the hash
-   ``(d_AB / d_AC, d_BC / d_AC, ∠BAC)`` is computed.  The same hash is
-   computed for catalog triplets (``A`` = brightest by predicted SNR).
-   The hash is similarity-invariant — translation, rotation, and
-   uniform scale all leave it unchanged — so the matcher recovers
-   correspondences without already knowing the offset.
+   sources ``{A, B, C}`` the hash ``(d_AB / d_AC, d_BC / d_AC, ∠BAC)``
+   is computed.  The vertex order is canonicalised by triangle geometry
+   -- ``A`` sits opposite the longest side, ``B`` opposite the next,
+   ``C`` opposite the shortest -- which is the same physical labelling
+   for a triangle and any translated, rotated, or uniformly scaled copy.
+   The same hash is computed for catalog triplets.  The hash is
+   similarity-invariant -- translation, rotation, and uniform scale all
+   leave it unchanged -- so the matcher recovers correspondences without
+   already knowing the offset.  A purely geometric canonical order is
+   used rather than a brightness order because brightness ties on
+   equal-magnitude fields, where a brightness-keyed order would flip the
+   labelling between the detection and catalog sides run to run and under
+   image rotation.
 3. **RANSAC.**  Each (detection-triplet, catalog-triplet) candidate is
    scored by counting detection-to-catalog inliers under the
    translation it implies.  Candidates are iterated in deterministic
@@ -52,6 +59,7 @@ from spindoctor.feature.flags import StarFlags
 from spindoctor.nav_model.stars.detection import matched_filter_image
 from spindoctor.nav_technique._star_helpers import (
     SimilarityFit,
+    brightness_margin_mag,
     predicted_snr,
     predicted_vu,
     similarity_transform_fit,
@@ -142,6 +150,9 @@ class _WideOffsetMatch:
             the false-lock significance the acceptance budget bounds.
         n_seeds: Number of distinct bright-anchor seed offsets evaluated (the
             multiple-testing trial count folded into ``expectation``).
+        is_one_star: True for a single-bright-star wide-offset lock, False for
+            an asterism (multi-inlier) lock; the ensemble caps a one-star lock's
+            confidence.
     """
 
     n_inliers: int
@@ -149,6 +160,7 @@ class _WideOffsetMatch:
     offset: tuple[float, float]
     expectation: float
     n_seeds: int
+    is_one_star: bool
 
 
 def _star_photometry_saturated(feature: NavFeature) -> bool:
@@ -339,18 +351,18 @@ def _triplet_hash(
 ) -> tuple[float, float, float] | None:
     """Return the similarity-invariant ``(d_AB / d_AC, d_BC / d_AC, ∠BAC)`` triple.
 
-    Per Part 3 §"Algorithm specifics" the hash is computed with ``A``
-    canonicalised as the brightest of the triplet (the caller is
-    responsible for that canonicalisation); both ratios survive
-    arbitrary rotation, translation, and uniform scale, which is what
-    lets the matcher recover correspondences without knowing the
-    transform.
+    The hash is computed with ``A`` as the caller's canonical vertex
+    (the vertex opposite the longest side; the caller is responsible for
+    that canonicalisation); both ratios survive arbitrary rotation,
+    translation, and uniform scale, which is what lets the matcher
+    recover correspondences without knowing the transform.
 
     Parameters:
-        pa: Brightest vertex of the triplet.
-        pb, pc: The other two vertices, in caller-canonical
-            (sorted-index) order so each unordered triplet hashes
-            once.
+        pa: Canonical apex vertex of the triplet (opposite the longest
+            side).
+        pb, pc: The other two vertices, in caller-canonical order
+            (opposite the next-longest and shortest side respectively)
+            so each unordered triplet hashes once.
 
     Returns:
         ``(r1, r2, theta)`` tuple, or ``None`` for degenerate
@@ -390,8 +402,9 @@ class _Triplet:
     """One enumerated triplet, hashed in canonical form.
 
     ``idx_a / idx_b / idx_c`` reference back into the source point
-    list; ``a`` is the brightest of the three and ``(b, c)`` are
-    sorted by index ascending so each unordered triplet appears once.
+    list; ``a`` is the vertex opposite the longest side, ``b`` opposite
+    the next-longest, and ``c`` opposite the shortest, so each unordered
+    triplet appears once in a rotation-stable order.
     """
 
     idx_a: int
@@ -400,15 +413,59 @@ class _Triplet:
     hash_v: tuple[float, float, float]
 
 
+def _canonical_triplet_order(
+    points: list[tuple[float, float]],
+    triple: tuple[int, int, int],
+    brightness_rank: list[int],
+) -> tuple[int, int, int]:
+    """Return the vertex indices of ``triple`` in geometric canonical order.
+
+    Vertices are ordered by the length of the side opposite each one,
+    longest first: ``A`` sits opposite the longest side, ``B`` opposite
+    the next, ``C`` opposite the shortest.  Side lengths scale uniformly
+    under a similarity transform, so this order is identical for a
+    triangle and any translated, rotated, or uniformly scaled copy of it;
+    the detection triplet and its catalog counterpart therefore
+    canonicalise to the same physical vertex assignment without appealing
+    to brightness -- which ties on the equal-magnitude fields that made a
+    brightness-keyed order a run-to-run and by-rotation seed lottery.  A
+    near-isosceles triangle (two opposite sides of equal length) breaks
+    the tie on brightness rank ascending, then original index ascending,
+    so the order stays total and deterministic.
+
+    Parameters:
+        points: The full point list the triple indexes into.
+        triple: The three point indices, in ascending order.
+        brightness_rank: Per-point brightness rank (``0`` = brightest),
+            the secondary tie-break for a near-isosceles triangle.
+
+    Returns:
+        ``(idx_a, idx_b, idx_c)`` in canonical apex-first order.
+    """
+    i, j, k = triple
+    pi, pj, pk = points[i], points[j], points[k]
+    opp_i = math.hypot(pj[0] - pk[0], pj[1] - pk[1])
+    opp_j = math.hypot(pi[0] - pk[0], pi[1] - pk[1])
+    opp_k = math.hypot(pi[0] - pj[0], pi[1] - pj[1])
+    keyed = sorted(
+        (
+            (-opp_i, brightness_rank[i], i),
+            (-opp_j, brightness_rank[j], j),
+            (-opp_k, brightness_rank[k], k),
+        )
+    )
+    return keyed[0][2], keyed[1][2], keyed[2][2]
+
+
 def _enumerate_triplets(
     points: list[tuple[float, float]],
     brightness_rank: list[int],
 ) -> list[_Triplet]:
     """Return every canonical ``_Triplet`` over ``points``.
 
-    ``brightness_rank[i]`` is the brightness rank of point ``i``
-    (``0`` = brightest); it picks the ``a`` vertex within each
-    unordered ``(i, j, k)`` triple.  Degenerate triplets (collinear or
+    Each unordered ``(i, j, k)`` triple is canonicalised by triangle
+    geometry via :func:`_canonical_triplet_order` (``brightness_rank``
+    only breaks a near-isosceles tie).  Degenerate triplets (collinear or
     coincident) are dropped silently.
     """
     n = len(points)
@@ -416,12 +473,7 @@ def _enumerate_triplets(
     for i in range(n):
         for j in range(i + 1, n):
             for k in range(j + 1, n):
-                triple = (i, j, k)
-                ranks = (brightness_rank[i], brightness_rank[j], brightness_rank[k])
-                a_pos = int(np.argmin(np.asarray(ranks)))
-                idx_a = triple[a_pos]
-                rest = sorted(idx for idx in triple if idx != idx_a)
-                idx_b, idx_c = rest
+                idx_a, idx_b, idx_c = _canonical_triplet_order(points, (i, j, k), brightness_rank)
                 hashed = _triplet_hash(points[idx_a], points[idx_b], points[idx_c])
                 if hashed is None:
                     continue
@@ -636,6 +688,18 @@ class StarFieldFromCatalogNav(NavTechnique):
             self.tuning['wide_offset_max_residual_rms_px']
         )
         self._wide_offset_confidence_cap = float(self.tuning['wide_offset_confidence_cap'])
+        # Single-bright-star wide-offset acquisition (see
+        # config_510_techniques.yaml and ``_wide_offset_one_star_match``).
+        self._wide_offset_one_star_enabled = bool(int(self.tuning['wide_offset_one_star_enabled']))
+        self._wide_offset_one_star_catalog_margin_mag = float(
+            self.tuning['wide_offset_one_star_catalog_margin_mag']
+        )
+        self._wide_offset_one_star_detection_margin_ratio = float(
+            self.tuning['wide_offset_one_star_detection_margin_ratio']
+        )
+        self._wide_offset_one_star_confidence_cap = float(
+            self.tuning['wide_offset_one_star_confidence_cap']
+        )
         # PSF-fit re-centroiding of matched inliers (see config_510_techniques.yaml).
         self._psf_refine_enabled = bool(int(self.tuning['psf_refine_enabled']))
         self._psf_refine_box_px = int(self.tuning['psf_refine_box_px'])
@@ -673,6 +737,21 @@ class StarFieldFromCatalogNav(NavTechnique):
             raise ValueError(
                 f'wide_offset_confidence_cap must lie in [0, 1]; '
                 f'got {self._wide_offset_confidence_cap}'
+            )
+        if self._wide_offset_one_star_catalog_margin_mag <= 0.0:
+            raise ValueError(
+                f'wide_offset_one_star_catalog_margin_mag must be > 0; '
+                f'got {self._wide_offset_one_star_catalog_margin_mag}'
+            )
+        if self._wide_offset_one_star_detection_margin_ratio < 1.0:
+            raise ValueError(
+                f'wide_offset_one_star_detection_margin_ratio must be >= 1; '
+                f'got {self._wide_offset_one_star_detection_margin_ratio}'
+            )
+        if not 0.0 <= self._wide_offset_one_star_confidence_cap <= 1.0:
+            raise ValueError(
+                f'wide_offset_one_star_confidence_cap must lie in [0, 1]; '
+                f'got {self._wide_offset_one_star_confidence_cap}'
             )
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
@@ -896,6 +975,7 @@ class StarFieldFromCatalogNav(NavTechnique):
             cat_points_arr=cat_points_arr,
         )
         wide_offset_lock = False
+        one_star_lock = False
         wide_offset_expectation = 0.0
         if best is None or best[0] < self._min_inliers:
             # The triplet RANSAC could not reach its strong-evidence floor.
@@ -918,6 +998,20 @@ class StarFieldFromCatalogNav(NavTechnique):
                 image_area=image_area,
             )
             if wide is None:
+                # A field can still carry exactly one confidently-detectable
+                # star at a large offset (the fainter members below the
+                # glare-elevated detection limit).  A one-star lock has no
+                # corroborating inlier, so the anchor pairing itself must be
+                # unambiguous: both the catalog anchor and the detection
+                # anchor uniquely bright by a large margin.
+                wide = self._wide_offset_one_star_match(
+                    det_points_arr=det_points_arr,
+                    det_dn=det_dn,
+                    cat_points_arr=cat_points_arr,
+                    ranked_catalog=ranked_catalog,
+                    context=context,
+                )
+            if wide is None:
                 n_inliers = 0 if best is None else best[0]
                 return self._fail(
                     features=features,
@@ -936,6 +1030,7 @@ class StarFieldFromCatalogNav(NavTechnique):
                 )
             best = (wide.n_inliers, wide.correspondences, wide.offset)
             wide_offset_lock = True
+            one_star_lock = wide.is_one_star
             wide_offset_expectation = wide.expectation
         n_inliers, correspondences, _coarse_offset = best
         det_inliers: NDArrayFloatType = det_points_arr[[d for d, _ in correspondences]]
@@ -1009,7 +1104,14 @@ class StarFieldFromCatalogNav(NavTechnique):
             # the strong-tier ceiling regardless of how the formula scores
             # the inlier count; it must still clear the ensemble gate to
             # navigate, but it cannot claim a high-tier result on its own.
-            capped = min(confidence, self._wide_offset_confidence_cap)
+            # A one-star lock has no corroborating inlier at all and is
+            # capped lower still.
+            cap = (
+                self._wide_offset_one_star_confidence_cap
+                if one_star_lock
+                else self._wide_offset_confidence_cap
+            )
+            capped = min(confidence, cap)
             if capped < confidence:
                 self.logger.info(
                     'Wide-offset lock: confidence %.4f capped to %.4f',
@@ -1065,10 +1167,10 @@ class StarFieldFromCatalogNav(NavTechnique):
         detection-source indices ascending, catalog-triplet index)`` —
         per plans/archive/AUTONAV_PLAN_2026-06-19.md §33 the sorted-ascending detection tuple
         ``(min, mid, max)`` is the canonical tie-breaker, not the
-        canonical (a=brightest, b<c) order, because the
-        sorted-ascending key is invariant under brightness re-ranking
-        and yields bit-identical iteration across two back-to-back
-        invocations on the same obs (Cardinal Principle 3).
+        geometric apex-first ``(a, b, c)`` order, because the
+        sorted-ascending key is invariant under the vertex
+        canonicalisation and yields bit-identical iteration across two
+        back-to-back invocations on the same obs (Cardinal Principle 3).
         """
         tol_sq = self._hash_match_tolerance * self._hash_match_tolerance
         out: list[tuple[float, int, int, int, int, int, int, int]] = []
@@ -1281,6 +1383,108 @@ class StarFieldFromCatalogNav(NavTechnique):
             offset=off,
             expectation=expectation,
             n_seeds=n_unique_seeds,
+            is_one_star=False,
+        )
+
+    def _wide_offset_one_star_match(
+        self,
+        *,
+        det_points_arr: NDArrayFloatType,
+        det_dn: NDArrayFloatType,
+        cat_points_arr: NDArrayFloatType,
+        ranked_catalog: list[NavFeature],
+        context: NavContext,
+    ) -> _WideOffsetMatch | None:
+        """Attempt a wide-offset lock from a single uniquely-bright anchor pair.
+
+        The last resort when neither the triplet RANSAC nor the
+        ``>= wide_offset_min_inliers`` asterism fallback locks and a field
+        carries exactly one confidently-detectable star at a large offset.
+        A one-star lock has no corroborating inlier, so the chance-alignment
+        budget cannot vouch for it; the anchor pairing itself must instead be
+        unambiguous.  That holds only when the single trusted bright catalog
+        anchor outshines the next predictable star by
+        ``wide_offset_one_star_catalog_margin_mag`` AND the brightest
+        detection outshines the next by a peak-DN factor of
+        ``wide_offset_one_star_detection_margin_ratio``.  A glare field
+        routinely raises peaks brighter than a real faint star, so a frame
+        whose brightest detection is not uniquely dominant fails the
+        detection-margin gate and stays unlocked -- the correct verdict on a
+        field with two comparably bright peaks, where pairing the anchor with
+        the brightest peak would be a guess.
+
+        Parameters:
+            det_points_arr: ``(N_det, 2)`` detection ``(v, u)`` positions.
+            det_dn: ``(N_det,)`` detection matched-filter peak amplitudes.
+            cat_points_arr: ``(N_cat, 2)`` predicted catalog ``(v, u)``
+                positions, brightest first.
+            ranked_catalog: The catalog features parallel to
+                ``cat_points_arr`` (supplies the photometry flags).
+            context: Per-image NavContext (search-window bounds).
+
+        Returns:
+            A single-inlier :class:`_WideOffsetMatch` when the anchor pairing
+            is unambiguous and inside the search window, else ``None``.
+        """
+        if not self._wide_offset_one_star_enabled:
+            return None
+        n_det = int(det_points_arr.shape[0])
+        n_cat = int(cat_points_arr.shape[0])
+        if n_det < 1 or n_cat < 1:
+            return None
+        # The catalog anchor is the brightest predictable star.  It must be
+        # photometry-trusted (its brightness ordering is real, not a saturated
+        # lower bound) and uniquely bright over the next predictable star.
+        if _star_photometry_saturated(ranked_catalog[0]):
+            self.logger.debug('One-star: brightest catalog anchor is photometry-saturated')
+            return None
+        next_cat_snr = predicted_snr(ranked_catalog[1]) if n_cat > 1 else 0.0
+        cat_margin_mag = brightness_margin_mag(predicted_snr(ranked_catalog[0]), next_cat_snr)
+        if cat_margin_mag < self._wide_offset_one_star_catalog_margin_mag:
+            self.logger.debug(
+                'One-star: catalog anchor margin %.3f mag below floor %.3f; skipping',
+                cat_margin_mag,
+                self._wide_offset_one_star_catalog_margin_mag,
+            )
+            return None
+        # The detection anchor is the brightest peak; it must be uniquely
+        # bright over the next peak so the single pairing is not a guess.
+        order = np.argsort(-det_dn, kind='stable')
+        det_i = int(order[0])
+        dn_top = float(det_dn[det_i])
+        dn_next = float(det_dn[int(order[1])]) if n_det > 1 else 0.0
+        det_ratio = math.inf if dn_next <= 0.0 else dn_top / dn_next
+        if det_ratio < self._wide_offset_one_star_detection_margin_ratio:
+            self.logger.info(
+                'One-star: brightest detection peak ratio %.3f below floor %.3f; '
+                'rejecting (not uniquely dominant)',
+                det_ratio,
+                self._wide_offset_one_star_detection_margin_ratio,
+            )
+            return None
+        off = (
+            float(det_points_arr[det_i, 0] - cat_points_arr[0, 0]),
+            float(det_points_arr[det_i, 1] - cat_points_arr[0, 1]),
+        )
+        margin_v, margin_u = search_window_for_obs(context)
+        if abs(off[0]) > margin_v or abs(off[1]) > margin_u:
+            self.logger.debug('One-star: anchor offset outside search window; skipping')
+            return None
+        self.logger.info(
+            'One-star wide-offset lock: offset (%.4f, %.4f) px; catalog margin '
+            '%.3f mag; detection peak ratio %.3f',
+            off[0],
+            off[1],
+            cat_margin_mag,
+            det_ratio,
+        )
+        return _WideOffsetMatch(
+            n_inliers=1,
+            correspondences=[(det_i, 0)],
+            offset=off,
+            expectation=0.0,
+            n_seeds=1,
+            is_one_star=True,
         )
 
     def _tukey_refit(

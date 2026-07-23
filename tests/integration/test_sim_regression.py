@@ -65,3 +65,17 @@ def test_star_field_recovers_zero_offset() -> None:
     assert _technique_offset_error('star_zero_offset', 'StarFieldFromCatalogNav') < (
         _STAR_ZERO_OFFSET_TOLERANCE_PX
     )
+
+
+def test_star_field_recovers_zero_offset_on_equal_brightness_field() -> None:
+    """The star field recovers the offset when every star shares one magnitude.
+
+    Guards the triplet-canonicalisation seed lottery: with equal magnitudes the
+    brightness tie-break was decided differently on the catalog and detection
+    sides, so the pattern match flipped with the noise realization. The geometric
+    (opposite-side-length) canonicalisation is invariant to the tie, so recovery
+    no longer depends on which equal-brightness star wins an arbitrary tie-break.
+    """
+    assert _technique_offset_error('star_equal_brightness', 'StarFieldFromCatalogNav') < (
+        _STAR_ZERO_OFFSET_TOLERANCE_PX
+    )
