@@ -8,6 +8,11 @@ spindoctor.support
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.support.background_gradient
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.support.constants
    :members:
    :undoc-members:

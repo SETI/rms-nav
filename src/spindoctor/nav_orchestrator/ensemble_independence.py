@@ -49,9 +49,7 @@ the shared measurement rather than a spuriously tightened average of two.
 
 from dataclasses import dataclass
 
-import numpy as np
-
-from spindoctor.nav_orchestrator.ensemble_observability import mixed_scale_pinvh
+from spindoctor.nav_orchestrator.ensemble_observability import positional_precision
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from spindoctor.nav_technique.diagnostics import (
     StarRefineDiagnostics,
@@ -67,11 +65,11 @@ __all__ = [
 
 #: Ring techniques that read one shared ``NavModelRings`` catalog per frame.
 #: Any two of these observing the same frame are correlated witnesses of one
-#: model (issue #317).
+#: model.
 _RING_TECHNIQUES = frozenset({'RingEdgeNav', 'RingAnnulusNav'})
 
 #: Intensity-based body techniques that both measure a scattered-light veiling
-#: gradient when one is present, correlating their errors (issue #339).
+#: gradient when one is present, correlating their errors.
 _SCATTER_SENSITIVE_BODY_TECHNIQUES = frozenset({'BodyDiscCorrelateNav', 'BodyLimbNav'})
 
 
@@ -82,6 +80,15 @@ def is_single_star_result(res: NavTechniqueResult) -> bool:
     ``StarRefineNav`` refine each localize the offset from a single
     detection: nothing in the solution corroborates the identification
     itself.  Multi-star solutions and every non-star technique return False.
+
+    Parameters:
+        res: The per-technique result to classify.
+
+    Returns:
+        True when ``res`` is a ``StarUniqueMatchNav`` result whose match mode
+        is ``'one_star'`` or a ``StarRefineNav`` result that used at most one
+        star; False for every other result, including multi-star star results
+        and all non-star techniques.
     """
     diag = res.diagnostics
     if isinstance(diag, StarUniqueMatchDiagnostics):
@@ -112,15 +119,24 @@ class IndependenceResolution:
     collapsed_groups: list[list[NavTechniqueResult]]
 
 
-def _positional_precision(res: NavTechniqueResult, *, rcond: float) -> float:
-    """Scalar positional precision ``trace(pinvh(Sigma[:2, :2]))`` in px^-2."""
-    cov = np.asarray(res.covariance_px2, np.float64)
-    info_xy = mixed_scale_pinvh(np.ascontiguousarray(cov[:2, :2]), rcond=rcond)
-    return float(np.trace(info_xy))
-
-
 def _is_seeded_descendant(res: NavTechniqueResult, group_names: set[str]) -> bool:
-    """True when a result was seeded by another technique present in the group."""
+    """Return True when a result was seeded by another technique in the group.
+
+    A result is a seeded descendant when at least one of its
+    ``prior_source_techniques`` (the techniques whose pass-1 offset seeded its
+    search prior) is also present in the group, other than the result's own
+    technique.  A result seeded only by itself, or only by techniques absent
+    from the group, is not a descendant.
+
+    Parameters:
+        res: The result whose seeding provenance is examined.
+        group_names: The technique names of every member of the group ``res``
+            belongs to.
+
+    Returns:
+        True when ``res.prior_source_techniques`` intersects ``group_names``
+        after removing ``res``'s own technique name; False otherwise.
+    """
     return bool(res.prior_source_techniques & (group_names - {res.technique_name}))
 
 
@@ -129,10 +145,24 @@ def _correlation_adjacency(
     *,
     scattered_light: bool,
 ) -> list[set[int]]:
-    """Undirected correlation edges among group indices (R2 and R3).
+    """Return undirected correlation edges among group indices (R2 and R3).
 
-    Returns an adjacency list; index ``i`` is adjacent to ``j`` when the two
-    results are correlated witnesses of one shared error source.
+    Two results are joined by an edge when they are correlated witnesses of
+    one shared error source: R2 joins any two ring techniques (both in
+    ``_RING_TECHNIQUES``), which read one shared catalog model; R3 joins the
+    disc and limb techniques (``_SCATTER_SENSITIVE_BODY_TECHNIQUES``) observing
+    a shared body, but only when ``scattered_light`` is True.
+
+    Parameters:
+        group: The results to test pairwise, indexed positionally.
+        scattered_light: Whether the frame carries a scattered-light veiling
+            gradient; gates the R3 disc/limb edge.
+
+    Returns:
+        An adjacency list of length ``len(group)``; entry ``i`` is the set of
+        indices ``j`` correlated with result ``i``.  The relation is symmetric,
+        so ``j in adj[i]`` iff ``i in adj[j]``, and no index is adjacent to
+        itself.
     """
     n = len(group)
     adj: list[set[int]] = [set() for _ in range(n)]
@@ -159,7 +189,18 @@ def _correlation_adjacency(
 
 
 def _connected_components(adj: list[set[int]]) -> list[list[int]]:
-    """Connected components of an adjacency list, each in ascending index order."""
+    """Return the connected components of an undirected adjacency list.
+
+    Parameters:
+        adj: A symmetric adjacency list; ``adj[i]`` holds the indices adjacent
+            to ``i``.
+
+    Returns:
+        A list of components covering every index ``0 .. len(adj) - 1`` exactly
+        once.  Each component is sorted in ascending index order, and an index
+        with no edges forms its own singleton component.  The components
+        themselves are ordered by their smallest member.
+    """
     n = len(adj)
     seen = [False] * n
     components: list[list[int]] = []
@@ -252,7 +293,7 @@ def resolve_independent_estimators(
         rep_idx = max(
             comp,
             key=lambda i: (
-                _positional_precision(survivors[i], rcond=rcond),
+                positional_precision(survivors[i].covariance_px2, rcond=rcond),
                 survivors[i].technique_name,
                 survivors[i].feature_ids,
             ),

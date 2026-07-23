@@ -24,6 +24,7 @@ from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 __all__ = [
     'BLOCK_SIZE',
+    'SATURATED_GRADIENT_SCORE',
     'background_gradient_score',
 ]
 
@@ -31,6 +32,13 @@ __all__ = [
 #: into before the affine-plane fit.  The image must span at least four blocks
 #: on each axis for the score to be defined.
 BLOCK_SIZE = 16
+
+#: Score returned for a non-constant downsample whose affine-plane fit leaves
+#: exactly zero residual (an idealized, perfectly noiseless veiling ramp).  The
+#: amplitude-over-sigma ratio saturates to infinity there, so a large finite
+#: sentinel stands in for it.  It sits far above any scattered-light threshold,
+#: so such a frame is unambiguously classified as carrying a gradient.
+SATURATED_GRADIENT_SCORE = 1.0e6
 
 
 def background_gradient_score(
@@ -47,7 +55,7 @@ def background_gradient_score(
         image: 2-D float image array in any physical units.  Non-finite
             pixels (for example calibrated-I/F ``NaN`` markers) are treated
             as missing and excluded from every block median.
-        sensor_mask: Optional boolean mask, same shape as ``image``, selecting
+        sensor_mask: Optional boolean mask, exactly ``image.shape``, selecting
             true sensor pixels.  When given, non-sensor pixels (extfov padding,
             which the orchestrator fills with zeros) are excluded from the
             block medians, so the padded border does not bias the plane fit.
@@ -55,11 +63,29 @@ def background_gradient_score(
     Returns:
         The gradient score, or ``None`` when the image spans fewer than four
         blocks on either axis, when no block has a finite median, or when the
-        residual sigma is zero (a perfectly planar or constant downsample,
-        where the ratio is undefined).
+        downsample is perfectly constant (no brightness gradient at all).  A
+        non-constant downsample whose affine-plane fit leaves exactly zero
+        residual returns :data:`SATURATED_GRADIENT_SCORE`, a large finite
+        sentinel well above any scattered-light threshold: the ramp is real
+        and maximally clean, not absent.
+
+    Raises:
+        TypeError: if ``image`` is not 2-D, or ``sensor_mask`` is given but is
+            not a boolean ndarray.
+        ValueError: if ``sensor_mask`` is given but its shape differs from
+            ``image.shape``.
     """
-    h, w = image.shape
+    if image.ndim != 2:
+        raise TypeError(f'image must be 2-D, got a {image.ndim}-D array')
     b = BLOCK_SIZE
+    if sensor_mask is not None:
+        if not isinstance(sensor_mask, np.ndarray) or sensor_mask.dtype != np.bool_:
+            raise TypeError('sensor_mask must be a boolean ndarray')
+        if sensor_mask.shape != image.shape:
+            raise ValueError(
+                f'sensor_mask shape {sensor_mask.shape} must equal image shape {image.shape}'
+            )
+    h, w = image.shape
     if h < 4 * b or w < 4 * b:
         return None
     if sensor_mask is not None:
@@ -96,5 +122,9 @@ def background_gradient_score(
     sigma = 1.4826 * float(np.median(np.abs(resid - np.median(resid))))
     amp = float(plane.max() - plane.min())
     if sigma <= 0:
-        return None
+        # The block medians lie exactly on the fitted plane (zero residual).
+        # The constant case already returned above, so the values are
+        # non-constant and the plane carries a genuine, maximally clean ramp:
+        # the amp/sigma ratio saturates, so report the finite sentinel.
+        return SATURATED_GRADIENT_SCORE
     return amp / sigma

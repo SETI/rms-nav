@@ -153,9 +153,10 @@ correcting three known correlations:
 The representative of a collapsed set is its highest-positional-precision member (with a
 deterministic tie-break), so the fused offset is the single best view of the shared
 measurement, not a spuriously tightened average of two. The full consensus membership is
-still reported on
+reported on
 :attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.consensus_techniques` for
-transparency; only the fusion math sees the resolved set.
+transparency, while the resolved set of independent witnesses drives the precision-weighted
+fusion, the agreement boost, the quorum count, and the vote mass.
 
 Step 6 — precision-weighted merge
 ---------------------------------
@@ -261,15 +262,17 @@ CI. A high tier on a frame with plausible *undeclared* systematic error is
 not evidence against that error.
 
 A related honesty caveat survives inside the confidence scalar itself: the
-two-member agreement boost assumes the members' errors are independent, so
-two techniques observing the same displaced feature (the ring-edge fit and
-the ring-annulus correlation on one misplaced ringlet) can fuse to a high
-scalar confidence even as the sigma-gated tier demotes the result. The
-planted-orbit-error scene above is exactly this case: once both ring
-techniques widen isotropically their radial weights re-couple, the agreement
-boost engages, and the scene reports a ~0.99 scalar at ``medium`` tier and
-~2.3 px error. On such frames the tier is the trustworthy verdict and the
-scalar is not.
+two-member agreement boost assumes the members' errors are independent, so two
+techniques observing the same displaced feature can fuse to a high scalar
+confidence even as the sigma-gated tier demotes the result. The Step 5
+independence resolution collapses the correlations it models -- the two ring
+techniques on one catalog, disc and limb on one veiling gradient -- to a single
+witness before the merge, so those pairs do not earn the boost; the
+planted-orbit-error scene above accordingly lands at ``low`` on its honest
+~2.5 px sigma rather than at a boosted near-cap scalar. The caveat is that any
+correlation the resolution does not model still couples two members while the
+boost treats them as independent, and on such frames the tier is the
+trustworthy verdict and the scalar is not.
 
 That scalar is **not** inert, and it must not be dismissed as documentation.
 The tier boundaries are themselves fitted *from* it: the calibration tooling
@@ -284,9 +287,9 @@ Two consequences worth stating plainly:
   the calibration cohort (it is generated independently by the campaign's
   own randomized scene generator), so no scene-level exclusion is needed
   and none is applied.
-- The cohort's own ring family *does* plant orbit errors with declared
-  sigmas, so it generates rows with this same coupling. The next
-  recalibration has to treat them deliberately -- by pricing the
+- Any correlation the independence resolution does not model still generates
+  cohort rows that pair a near-cap confidence with a multi-pixel error. The
+  next recalibration has to treat them deliberately -- by pricing the
   correlated-error discount, or by fitting the boundary against fused sigma
   rather than the boosted scalar -- rather than absorbing them as evidence
   that high confidence at multi-pixel error is normal.
@@ -369,7 +372,7 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
 Implementation
 ==============
 
-The ensemble is split across three modules under ``src/spindoctor/nav_orchestrator/``:
+The ensemble is split across four modules under ``src/spindoctor/nav_orchestrator/``:
 
 - ``ensemble.py`` — the reconciler itself:
   :func:`~spindoctor.nav_orchestrator.ensemble.ensemble`,
@@ -380,6 +383,11 @@ The ensemble is split across three modules under ``src/spindoctor/nav_orchestrat
   :func:`~spindoctor.nav_orchestrator.ensemble_consensus.corroborating_members`,
   :func:`~spindoctor.nav_orchestrator.ensemble_consensus.corroborating_confidence`, and
   :func:`~spindoctor.nav_orchestrator.ensemble_consensus.result_param_vector`.
+- ``ensemble_independence.py`` — the independence-resolution step that collapses
+  correlated witnesses before the merge:
+  :func:`~spindoctor.nav_orchestrator.ensemble_independence.resolve_independent_estimators`,
+  :func:`~spindoctor.nav_orchestrator.ensemble_independence.is_single_star_result`, and
+  :class:`~spindoctor.nav_orchestrator.ensemble_independence.IndependenceResolution`.
 - ``ensemble_observability.py`` — observable-subspace linear algebra:
   :func:`~spindoctor.nav_orchestrator.ensemble_observability.mixed_scale_pinvh`,
   :func:`~spindoctor.nav_orchestrator.ensemble_observability.observable_basis`,

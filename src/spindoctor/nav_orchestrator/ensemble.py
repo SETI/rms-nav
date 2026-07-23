@@ -73,6 +73,7 @@ from spindoctor.nav_orchestrator.ensemble_independence import (
 from spindoctor.nav_orchestrator.ensemble_observability import (
     mixed_scale_pinvh,
     observable_basis,
+    positional_precision,
 )
 from spindoctor.nav_orchestrator.feature_summary import NavFeatureSummary
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
@@ -483,20 +484,16 @@ def _combine_confidence(
             (W = 0); the orchestrator's caller routes this to
             ``unobservable_offset`` failure.
     """
-    weights = []
-    for res in group:
-        cov = np.asarray(res.covariance_px2, np.float64)
-        # Weight by the *positional* precision only.  Taking trace(pinvh(cov))
-        # over a full 3-DoF covariance would add the v, u precisions (px^-2) to
-        # the rotation precision (rad^-2), so a star-field result whose rotation
-        # is tightly pinned would dominate the confidence average on an
-        # arbitrary, unit-mixed scale.  Marginalising rotation out and tracing
-        # the 2x2 translation block keeps every weight in px^-2; the additive
-        # trace (rather than det(info)^(1/p)) stays well-defined for the rank-1
-        # ring-edge covariances whose unobservable axis carries zero precision.
-        # The 2-DoF path is unchanged: cov[:2, :2] is then the whole matrix.
-        info_xy = mixed_scale_pinvh(np.ascontiguousarray(cov[:2, :2]), rcond=rcond)
-        weights.append(float(np.trace(info_xy)))
+    # Weight by the *positional* precision only.  Taking trace(pinvh(cov)) over
+    # a full 3-DoF covariance would add the v, u precisions (px^-2) to the
+    # rotation precision (rad^-2), so a star-field result whose rotation is
+    # tightly pinned would dominate the confidence average on an arbitrary,
+    # unit-mixed scale.  Marginalising rotation out and tracing the 2x2
+    # translation block keeps every weight in px^-2; the additive trace (rather
+    # than det(info)^(1/p)) stays well-defined for the rank-1 ring-edge
+    # covariances whose unobservable axis carries zero precision.  The 2-DoF
+    # path is unchanged: cov[:2, :2] is then the whole matrix.
+    weights = [positional_precision(res.covariance_px2, rcond=rcond) for res in group]
     w_total = sum(weights)
     if w_total <= 0.0:
         raise ValueError('precision-weighted combine: total weight is zero; offset is unobservable')

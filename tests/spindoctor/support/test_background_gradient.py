@@ -1,9 +1,11 @@
 """Tests for the low-order background-gradient score."""
 
 import numpy as np
+import pytest
 
 from spindoctor.support.background_gradient import (
     BLOCK_SIZE,
+    SATURATED_GRADIENT_SCORE,
     background_gradient_score,
 )
 
@@ -68,6 +70,53 @@ def test_all_nan_image_returns_none() -> None:
     """An all-missing image yields too few finite block medians to fit."""
     image = np.full((128, 128), np.nan, dtype=np.float64)
     assert background_gradient_score(image) is None
+
+
+def test_exact_plane_ramp_saturates_not_none() -> None:
+    """A noiseless ramp (zero residual sigma) returns the saturated sentinel.
+
+    The image is an exact integer affine ramp with only three non-collinear
+    blocks left finite.  Three block medians define the fitted affine plane
+    exactly, so the fit residual -- and hence the MAD-sigma -- is exactly zero.
+    A perfectly clean gradient is present, not absent, so the score must be the
+    finite saturated sentinel rather than ``None``.
+    """
+    _yy, xx = np.mgrid[0 : 6 * BLOCK_SIZE, 0 : 6 * BLOCK_SIZE]
+    image = (3 * xx + 2 * _yy).astype(np.float64)
+    finite = np.zeros(image.shape, dtype=bool)
+    for i, j in [(0, 0), (0, 1), (1, 0)]:
+        finite[i * BLOCK_SIZE : (i + 1) * BLOCK_SIZE, j * BLOCK_SIZE : (j + 1) * BLOCK_SIZE] = True
+    image[~finite] = np.nan
+    assert background_gradient_score(image) == SATURATED_GRADIENT_SCORE
+
+
+def test_constant_field_still_returns_none() -> None:
+    """A perfectly constant field has no gradient and returns None, not saturated."""
+    image = np.full((128, 128), 42.0, dtype=np.float64)
+    assert background_gradient_score(image) is None
+
+
+def test_non_2d_image_raises_type_error() -> None:
+    """A non-2-D image is rejected before any masking or downsampling."""
+    image = np.zeros((64,), dtype=np.float64)
+    with pytest.raises(TypeError, match='image must be 2-D'):
+        background_gradient_score(image)
+
+
+def test_non_boolean_mask_raises_type_error() -> None:
+    """A non-boolean sensor mask is rejected rather than silently coerced."""
+    image = np.zeros((64, 64), dtype=np.float64)
+    mask = np.ones((64, 64), dtype=np.float64)
+    with pytest.raises(TypeError, match='sensor_mask must be a boolean ndarray'):
+        background_gradient_score(image, mask)  # type: ignore[arg-type]  # wrong dtype on purpose
+
+
+def test_mismatched_mask_shape_raises_value_error() -> None:
+    """A mask whose shape differs from the image is rejected (no broadcasting)."""
+    image = np.zeros((64, 64), dtype=np.float64)
+    mask = np.ones((1, 64), dtype=bool)
+    with pytest.raises(ValueError, match='sensor_mask shape'):
+        background_gradient_score(image, mask)
 
 
 def test_sensor_mask_makes_score_independent_of_padding() -> None:

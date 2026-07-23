@@ -21,10 +21,10 @@ fields to match current behavior.
 
 ## Track B — Navigation correctness
 
-Ordering within the track: the confidently-wrong defects first (#328, #346,
-#291, #326, #327, #350, #351, #352), because the agreement study consumes
-ensemble output at scale and several curated library frames pin these as
-standing red regressions. Then the coarse-lock calibration (#373) and the
+Ordering within the track: the confidently-wrong defects first
+(#328, #346, #291, #326, #327, #350, #351, #352), because the agreement study
+consumes ensemble output at scale and several curated library frames pin these
+as standing red regressions. Then the coarse-lock calibration (#373) and the
 star-matcher robustness items (#337, #376, #367), then the
 investigation/design items (#25, #128/#150), with the smaller decision items
 (#130, #239, #338) as fill.

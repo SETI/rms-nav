@@ -59,8 +59,12 @@ class NavImageClassifierResult:
             residual MAD-sigma; see
             :func:`spindoctor.support.background_gradient.background_gradient_score`).
             A flat field scores near zero; a scattered-light veiling gradient
-            scores well above five.  ``None`` when the image is too small for
-            the measure or the downsample is perfectly planar.
+            scores well above five.  A non-constant image whose downsample fits
+            an affine plane with exactly zero residual (a perfectly noiseless
+            ramp) saturates to
+            :data:`~spindoctor.support.background_gradient.SATURATED_GRADIENT_SCORE`,
+            a large finite sentinel.  ``None`` when the image is too small for
+            the measure or the downsample is perfectly constant.
         flags: Additional flags caveats (independent of ``image_class``).
     """
 
