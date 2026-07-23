@@ -333,13 +333,13 @@ def test_disc_template_img_zero_under_occluder(monkeypatch: pytest.MonkeyPatch) 
     assert float(np.max(template_img[deep])) == 0.0
 
 
-def test_occluded_disc_visible_lit_fraction_drops(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Occlusion lowers ``visible_lit_fraction`` toward the surviving crescent."""
-    alone_model, _alone_obs = _make_model(monkeypatch, _TARGET_SPHERE, None)
-    alone_model.create_model()
-    occ_model, _occ_obs = _make_model(monkeypatch, _TARGET_SPHERE, _OCCLUDER_SPHERE)
-    occ_model.create_model()
-    assert occ_model._visible_lit_fraction < alone_model._visible_lit_fraction - 0.1
+def test_occluded_disc_reliability_drops(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Occlusion lowers the emitted BODY_DISC feature's reliability."""
+    alone_model, alone_obs = _make_model(monkeypatch, _TARGET_SPHERE, None)
+    alone = _disc_feature(alone_model, alone_obs)
+    occ_model, occ_obs = _make_model(monkeypatch, _TARGET_SPHERE, _DISC_OCCLUDER)
+    occluded = _disc_feature(occ_model, occ_obs)
+    assert occluded.reliability < alone.reliability
 
 
 def test_occluded_terminator_fraction_drops(monkeypatch: pytest.MonkeyPatch) -> None:

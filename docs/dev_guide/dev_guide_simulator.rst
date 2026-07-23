@@ -1277,11 +1277,14 @@ and the disc correlator scores only against disc brightness the image carries.
 Nothing reads a truth key: the occlusion is derived from the same idealized
 sibling geometry both models already hold.
 
-The measured technique-level behavior is accurate and honest across grazing,
-half, and deep overlap. On the deep scene the far body's disc is over 90 percent
+Across grazing, half, and deep overlap the navigator recovers each scene's
+planted offset within the tolerance the mutual-event regression pins. That is a
+statement about these simulated scenes, not a certification of real-frame
+accuracy: the sim renders an idealized occlusion the true optics only
+approximate. On the deep scene the far body's disc is over 90 percent
 hidden, so its ``visible_lit_fraction`` collapses and the disc gate drops that
-feature; the near body's disc plus both visible limb arcs fuse to an accurate
-result. The joint limb fit runs on arcs the image actually shows -- the robust
+feature; the near body's disc plus both visible limb arcs fuse to the recovered
+offset. The joint limb fit runs on arcs the image actually shows -- the robust
 Tukey biweight loss is a second line of defense against a stray vertex, not the
 mechanism that carries the result -- and no confident-wrong result or
 double-counting conflict arises. The mutual-event scenes pin the arc fractions
