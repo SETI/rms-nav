@@ -22,7 +22,7 @@ fields to match current behavior.
 ## Track B — Navigation correctness
 
 Ordering within the track: the confidently-wrong defects first
-(#346, #350, #351, #352), because the agreement study consumes ensemble output
+(#346, #350, #392), because the agreement study consumes ensemble output
 at scale and several curated library frames pin these as standing red
 regressions. Then the coarse-lock calibration (#373), then the
 investigation/design items (#25, #128/#150), with the smaller decision items
@@ -63,7 +63,13 @@ image-library false-lock sweep (#367). The low-phase limb gate (#281) is closed:
 a `BodyLimbNav` coarse-seed mis-lock below 15 deg phase is flagged spurious by an
 unconverged-at-trust-boundary gate. The ring-annulus occlusion trim (#378) is
 closed: the RING_ANNULUS correlation template is trimmed for planet occlusion,
-the annulus-side analog of the ring-edge trim.
+the annulus-side analog of the ring-edge trim. The post-recalibration library
+reds are closed in turn: a lone brightness-centroid blob that a corroborated
+star consensus contradicts is now dropped from the ensemble math, so a correct
+multi-star fix commits instead of conflicting on the blob outlier (#351); and
+the star-navigation hardening (two-star unique-match assignment plus multi-star
+refine) locks the small-offset WAC cruise field that previously self-flagged
+all-techniques-spurious (#352).
 
 ### #346 — the remaining confident-wrong ring-lock
 
@@ -71,17 +77,21 @@ the annulus-side analog of the ring-edge trim.
   lock confidently onto the wrong ring feature; standing library reds, tied
   to the coarse-lock calibration (#373).
 
-### #350 / #351 / #352 — post-recalibration library reds
+### #350 — post-recalibration resolved-body red
 
 - **#350** — two resolved-body frames (N1484593951, N1686349893) miss the
-  offset tolerance by ~2 px after the recalibration.
-- **#351** — the recalibration turns an operator-verified success into a
-  spurious ensemble conflict (N1530185128).
-- **#352** — autonomous star gates self-flag spurious on a navigable
-  small-offset WAC frame (W1444747627).
+  offset tolerance by ~2 px after the recalibration. One debugging session
+  against its named frames; the sidecars pin them red until resolved.
 
-Each is one debugging session against its named frame; the sidecars pin them
-red until resolved.
+### #392 — body-witness shape-lock veto misfire on Iapetus
+
+- **#392** — the body-witness shape-lock veto declines N1806609736 (Iapetus)
+  even though its limb fit and star techniques agree on the operator truth: the
+  extreme albedo dichotomy drags the pose-free blob centroid off the disc
+  center, and the veto reads that disagreement as a shape lock. The
+  geometric-side mirror of the ensemble blob-outlier drop that closed #351 --
+  the fix is to suppress SHAPE_LOCK_SUSPECT when a corroborated star fix agrees
+  with the vetoed geometric consensus within the grouping floor.
 
 ### #373 — DT coarse-prior search vs competing edge populations
 
@@ -285,7 +295,10 @@ asserts the generated half matches the registries.
   xfails for #251, #252, #253, ready to flip when each fix lands.
 - **#288** — image-library regression reconciliation: the standing red set
   is now reduced to the deliberately-pinned frames, each owned by an open
-  navigation issue (#338, #346, #350, #351, #352). N1572105349's pin was
+  navigation issue (#338, #346, #350, #392). N1530185128 (#351) and W1444747627
+  (#352) are now re-ratcheted to success/medium and green: the ensemble
+  blob-outlier drop lets the multi-star fix commit on the former, and the
+  star-navigation hardening already locks the latter. N1572105349's pin was
   owned by #222 (now closed by the independence resolution); its autonomous
   regression should flip green on the next integration run against real
   holdings (that suite does not run in PR CI). Keep the pins accurate as
