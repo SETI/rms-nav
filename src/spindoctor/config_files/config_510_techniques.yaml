@@ -921,6 +921,38 @@ techniques:
       # claim the high tier on its own; it must still clear the ensemble gate
       # to navigate.  0.6 lands a clean lock in the medium / low tier.
       wide_offset_confidence_cap: 0.6
+      # Single-bright-star wide-offset acquisition.  When neither the triplet
+      # RANSAC nor the >=3-inlier asterism fallback locks, a field can still
+      # carry exactly one confidently-detectable catalog star at a large
+      # unknown offset (the glare-elevated Pleiades regime, where the fainter
+      # members drop below the detection limit).  A one-star lock has no
+      # corroborating inlier and so cannot clear the chance-alignment budget;
+      # in its place the anchor pairing itself must be unambiguous, which
+      # holds only when BOTH the catalog anchor and the detection anchor are
+      # uniquely bright by a large margin.  A glare field routinely produces
+      # peaks brighter than a real faint star, so a frame whose brightest
+      # detection is not uniquely dominant (e.g. 1694 vs 1240 DN) correctly
+      # fails this gate and stays unlocked.  1 enables the one-star lock; 0
+      # disables it.  Default 0: the capability is validated on the sim
+      # scenes but held off by default pending an image-library false-lock
+      # sweep (which needs SPICE holdings the unit suite does not reach).
+      wide_offset_one_star_enabled: 0
+      # Minimum predicted-brightness margin (mag) of the catalog anchor over
+      # the next-brightest predictable catalog star for a one-star lock.  A
+      # smaller margin means more than one plausible bright anchor, so the
+      # single pairing is ambiguous and the lock is refused.
+      wide_offset_one_star_catalog_margin_mag: 1.0
+      # Minimum peak-DN ratio of the brightest detection to the
+      # next-brightest for a one-star lock.  Below this the dominant peak is
+      # not uniquely bright (a glare artifact or a comparably bright rival
+      # could be the true anchor), so the single pairing is ambiguous and the
+      # lock is refused.
+      wide_offset_one_star_detection_margin_ratio: 3.0
+      # Post-formula confidence cap for a one-star wide-offset lock.  A lock
+      # resting on a single uncorroborated anchor pairing sits below even the
+      # >=3-inlier wide-offset cap; it must still clear the ensemble gate to
+      # navigate.  0.4 lands a clean one-star lock in the low tier.
+      wide_offset_one_star_confidence_cap: 0.4
       # Pixels of slack around the search-window axis bounds for the
       # at-edge check (see StarUniqueMatchNav.at_edge_tolerance_px).
       at_edge_tolerance_px: 1.0

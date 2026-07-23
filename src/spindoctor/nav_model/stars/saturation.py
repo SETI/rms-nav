@@ -132,10 +132,13 @@ several-arcsecond slack its displacement needs.
 SATURATION_MATCH_MAX_WIDEN_RADII: float = 3.0
 """Cap on the widened position-match radius, in base radii.
 
-The widening is bounded so the match never reaches an unrelated field
-star: at the default 5 arcsec base radius the widest match is 15 arcsec,
-comfortably inside the arc-minute spacing of bright stars even in a dense
-field such as the Pleiades.
+The widening is bounded to stay inside the arc-minute spacing of bright
+stars: at the default 5 arcsec base radius the widest match is 15 arcsec,
+comfortably below the separation of bright stars even in a dense field
+such as the Pleiades.  Within the widened reach the match prefers the
+brightest qualifying reference (see :func:`_best_mag_aware_match`), so a
+nearer unrelated bright star does not capture a saturated candidate away
+from its true-magnitude twin.
 """
 
 
@@ -242,7 +245,7 @@ def _widened_radius(mag_gap: float, base_radius: float) -> float:
     return base_radius * min(factor, SATURATION_MATCH_MAX_WIDEN_RADII)
 
 
-def _nearest_mag_aware(
+def _best_mag_aware_match(
     ra: float,
     dec: float,
     vmag: float,
@@ -253,14 +256,26 @@ def _nearest_mag_aware(
     *,
     available: NDArrayBoolType | None = None,
 ) -> int | None:
-    """Return the nearest reference within a magnitude-widened match radius.
+    """Return the reference within reach that best explains the saturation.
 
     For each reference star the allowed radius is the base radius widened
     by the amount the candidate reads fainter than that reference (see
     :func:`_widened_radius`), so a strongly saturated candidate collapses
     against a displaced true-magnitude reference while a well-behaved one
-    stays near the base radius.  The nearest reference whose separation
-    falls inside its own allowed radius wins.
+    stays near the base radius.  Among the references whose separation
+    falls inside their own allowed radius, the brightest (largest
+    magnitude gap to the candidate) wins, with the nearest breaking a
+    brightness tie.
+
+    Preferring the brightest qualifying reference over the merely nearest
+    keeps a nearer unrelated bright field star from capturing a saturated
+    candidate away from its true twin: UCAC4 saturation drives a bright
+    star's reading systematically faint, so a faint reading is best
+    explained by the brightest reference that can account for it, not by
+    whichever bright star happens to sit closest.  Because a bright
+    unrelated reference earns a wide reach of its own from its large
+    magnitude gap, a pure nearest-neighbour rule would let it win over the
+    true twin when it sits closer; the brightness preference does not.
 
     Parameters:
         ra: Candidate right ascension in radians.
@@ -289,8 +304,13 @@ def _nearest_mag_aware(
         ok = ok & available
     if not bool(ok.any()):
         return None
-    masked = np.where(ok, d2, np.inf)
-    return int(np.argmin(masked))
+    # Brightest (lowest ref_vmag) qualifying reference wins; separation and
+    # then index break ties for a deterministic result.
+    big = float(np.max(d2)) + 1.0
+    ref_vmag_key = np.where(ok, ref_vmag, np.inf)
+    d2_key = np.where(ok, d2, big)
+    order = np.lexsort((np.arange(ref_ra.size), d2_key, ref_vmag_key))
+    return int(order[0])
 
 
 def reference_photometry(
@@ -422,7 +442,7 @@ def correct_star_photometry(
             continue
         if star.vmag is None or float(star.vmag) >= saturation_limit:
             continue
-        idx = _nearest_mag_aware(
+        idx = _best_mag_aware_match(
             float(star.ra_pm),
             float(star.dec_pm),
             float(star.vmag),
@@ -632,7 +652,7 @@ def correct_saturated_vmags(
         if vmag >= saturation_limit:
             out.append(float(vmag))
             continue
-        idx = _nearest_mag_aware(
+        idx = _best_mag_aware_match(
             ra, dec, vmag, ref_ra, ref_dec, ref_vmag, match_radius_rad, available=~consumed
         )
         if idx is None:

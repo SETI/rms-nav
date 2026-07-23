@@ -1,0 +1,34 @@
+schema_version: 2
+scene_name: star_equal_brightness
+instrument: coiss_nac
+size_v: 200
+size_u: 200
+random_seed: 7
+exposure_sec: 1.0
+# Regression scene for the triplet-canonicalisation seed lottery: every star
+# shares one magnitude, so a brightness-keyed apex choice would break ties
+# differently on the catalog and detection sides and the pattern match became a
+# lottery over the noise realization.  The geometric (opposite-side-length)
+# canonicalisation is invariant to that tie, so the star field recovers the
+# zero planted offset on an equal-brightness field.
+# Stars deposit as point masses; an explicit navigator-matched PSF gives them a
+# finite (floor-form) profile instead of a 1-pixel spike.
+optics:
+  psf:
+    match_navigator: true
+bodies: []
+stars:
+  - {name: S1, v: 40.0, u: 50.0, vmag: 3.3}
+  - {name: S2, v: 160.0, u: 150.0, vmag: 3.3}
+  - {name: S3, v: 70.0, u: 165.0, vmag: 3.3}
+  - {name: S4, v: 150.0, u: 55.0, vmag: 3.3}
+  - {name: S5, v: 50.0, u: 120.0, vmag: 3.3}
+  - {name: S6, v: 150.0, u: 100.0, vmag: 3.3}
+  - {name: S7, v: 112.0, u: 172.0, vmag: 3.3}
+  - {name: S8, v: 88.0, u: 38.0, vmag: 3.3}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 0.0
+offset_u: 0.0
+offset_rotation_deg: 0.0
