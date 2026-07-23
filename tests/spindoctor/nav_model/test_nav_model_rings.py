@@ -14,6 +14,7 @@ import pytest
 
 from spindoctor.config.config import Config
 from spindoctor.feature import NavFeatureType, RingEdgePolyline
+from spindoctor.feature.geometry import RingAnnulusGeometry
 from spindoctor.nav_model.nav_model_rings import (
     NavModelRings,
     _require_positive_finite_planet_scalar,
@@ -531,7 +532,7 @@ def _rings_model_for_to_features(
     edge_info = model._visible_edge_info(raw_edge_info)
     zeros = np.zeros((v_size, u_size), dtype=np.float64)
     model._render_results = [
-        (_StubRingFeature('b_ring'), zeros, zeros.astype(bool), 1.0, edge_info)  # type: ignore[list-item]
+        (_StubRingFeature('b_ring'), zeros, zeros.astype(bool), 1.0, edge_info)  # type: ignore[list-item]  # structural stub; supplies only key/edge_uncertainty
     ]
     return model
 
@@ -577,3 +578,157 @@ def test_emitted_edge_features_keep_all_vertices_without_mask() -> None:
     geometry = edge_features[0].geometry
     assert isinstance(geometry, RingEdgePolyline)
     assert geometry.vertices_vu.shape[0] == 20
+
+
+###############################################################################
+#
+# Occlusion carries through to the emitted RING_ANNULUS template -- the same
+# guarantee for the correlation-side technique that RingEdgeNav gets per edge:
+# the annulus template carries no ring brightness from behind the planet globe.
+#
+###############################################################################
+
+
+def _rings_model_for_annulus(
+    occluded: np.ndarray | None,
+    model_img: np.ndarray,
+    model_mask: np.ndarray,
+    edge_mask: np.ndarray,
+) -> NavModelRings:
+    """Build a NavModelRings wired to emit a RING_ANNULUS from stub render state.
+
+    A large radial km/px forces the system-level annulus gate on, so the single
+    surviving edge routes to the annulus-template path rather than the per-edge
+    path.  The template is composited from ``model_img`` / ``model_mask``, which
+    ``to_features`` trims against the occlusion mask before compositing -- the
+    behaviour under test.  As in ``_render``, the edge mask is passed through
+    ``_visible_edge_info`` before it lands on ``_render_results`` while the
+    full-feature render is stored untrimmed.
+
+    Parameters:
+        occluded: Ext-FOV occlusion mask (or None for "no signal").
+        model_img: Ext-FOV full-feature render brightness.
+        model_mask: Ext-FOV full-feature render mask.
+        edge_mask: Ext-FOV edge mask routing the feature to the annulus path.
+
+    Returns:
+        A NavModelRings ready for a ``to_features`` call.
+    """
+    v_size, u_size = model_img.shape
+    model = NavModelRings('rings:SATURN', None, config=Config())
+    model._ring_occluded_ext = occluded
+    model._planet = 'SATURN'
+    # Large radial scale exceeds the SATURN kmpp_threshold, forcing the
+    # system-level annulus gate so the annulus template path is exercised.
+    model._km_per_pixel_radial = 5000.0
+    model._radial_resolution_ext = np.ones((v_size, u_size), dtype=np.float64)
+    model._ring_radius_ext = None
+    model._extfov_v_size = v_size
+    model._extfov_u_size = u_size
+    model._predicted_center_vu = (v_size / 2.0, u_size / 2.0)
+    model._subject_range_km = 1.0e6
+    edge_info = model._visible_edge_info([(edge_mask, 'B ring', 'b_outer')])
+    model._render_results = [
+        (_StubRingFeature('b_ring'), model_img, model_mask, 1.0, edge_info)  # type: ignore[list-item]  # structural stub; supplies only key/edge_uncertainty
+    ]
+    return model
+
+
+def _occluded_right_half(size: int) -> np.ndarray:
+    """Return an ext-FOV occlusion mask hiding the right half of the frame.
+
+    Parameters:
+        size: Side length of the square ext-FOV.
+
+    Returns:
+        A boolean mask True at every column at or past the midline.
+    """
+    occluded = np.zeros((size, size), dtype=bool)
+    occluded[:, size // 2 :] = True
+    return occluded
+
+
+def _straddling_render(size: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return a full-feature render + edge straddling the occlusion midline.
+
+    The render band spans columns 5 through ``size - 6``, crossing the
+    right-half occlusion midline so part of it lies behind the planet disc.
+
+    Parameters:
+        size: Side length of the square ext-FOV.
+
+    Returns:
+        ``(model_img, model_mask, edge_mask)`` all shaped ``(size, size)``.
+    """
+    model_mask = np.zeros((size, size), dtype=bool)
+    model_mask[10:12, 5 : size - 5] = True
+    model_img = np.where(model_mask, 1.0, 0.0)
+    edge_mask = np.zeros((size, size), dtype=bool)
+    edge_mask[10, 5 : size - 5] = True
+    return model_img, model_mask, edge_mask
+
+
+def test_annulus_template_excludes_pixels_behind_planet_disc() -> None:
+    """No annulus-template pixel maps to an ext-FOV pixel behind the planet."""
+    occluded = _occluded_right_half(30)
+    model_img, model_mask, edge_mask = _straddling_render(30)
+    model = _rings_model_for_annulus(occluded, model_img, model_mask, edge_mask)
+    features = model.to_features(None)  # type: ignore[arg-type]
+    annulus = [f for f in features if f.feature_type == NavFeatureType.RING_ANNULUS]
+    assert len(annulus) == 1
+    geometry = annulus[0].geometry
+    assert isinstance(geometry, RingAnnulusGeometry)
+    bbox = geometry.bbox_extfov_vu
+    template_mask = annulus[0].template_mask
+    assert template_mask is not None
+    occluded_hits = [
+        bool(occluded[bbox[0] + int(i), bbox[1] + int(j)])
+        for i, j in zip(*np.nonzero(template_mask), strict=True)
+    ]
+    assert not any(occluded_hits)
+
+
+def test_annulus_template_retains_visible_ring_pixels() -> None:
+    """Trimming keeps every visible ring pixel; it removes only the occluded ones.
+
+    Complements the excludes test: together they pin the trim exactly (nothing
+    behind the disc survives, nothing in front is dropped), so the guard catches
+    over-trimming as well as under-trimming.
+    """
+    occluded = _occluded_right_half(30)
+    model_img, model_mask, edge_mask = _straddling_render(30)
+    model = _rings_model_for_annulus(occluded, model_img, model_mask, edge_mask)
+    features = model.to_features(None)  # type: ignore[arg-type]
+    annulus = [f for f in features if f.feature_type == NavFeatureType.RING_ANNULUS]
+    bbox = annulus[0].geometry.bbox_extfov_vu
+    template_mask = annulus[0].template_mask
+    assert template_mask is not None
+    covered = {
+        (bbox[0] + int(i), bbox[1] + int(j))
+        for i, j in zip(*np.nonzero(template_mask), strict=True)
+    }
+    visible_ring = {
+        (int(r), int(c)) for r, c in zip(*np.nonzero(model_mask & ~occluded), strict=True)
+    }
+    assert visible_ring <= covered
+
+
+def test_annulus_template_bbox_stops_at_the_planet_limb() -> None:
+    """The trimmed template bbox no longer spans into the occluded columns."""
+    occluded = _occluded_right_half(30)
+    model_img, model_mask, edge_mask = _straddling_render(30)
+    model = _rings_model_for_annulus(occluded, model_img, model_mask, edge_mask)
+    features = model.to_features(None)  # type: ignore[arg-type]
+    annulus = [f for f in features if f.feature_type == NavFeatureType.RING_ANNULUS]
+    bbox = annulus[0].geometry.bbox_extfov_vu
+    assert bbox[3] == 15
+
+
+def test_annulus_template_without_mask_keeps_pixels_behind_disc() -> None:
+    """A backplane failure (None mask) degrades to an untrimmed template."""
+    model_img, model_mask, edge_mask = _straddling_render(30)
+    model = _rings_model_for_annulus(None, model_img, model_mask, edge_mask)
+    features = model.to_features(None)  # type: ignore[arg-type]
+    annulus = [f for f in features if f.feature_type == NavFeatureType.RING_ANNULUS]
+    bbox = annulus[0].geometry.bbox_extfov_vu
+    assert bbox[3] == 25

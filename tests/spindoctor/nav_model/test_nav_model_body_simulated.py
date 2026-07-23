@@ -665,6 +665,56 @@ def test_occluded_terminator_fraction_drops() -> None:
     assert occluded.flags.visible_arc_fraction < alone.flags.visible_arc_fraction - 0.1
 
 
+def _disc_feature(
+    obs: ObsSim,
+    body_params: dict[str, Any],
+    *,
+    sibling_bodies: list[dict[str, Any]] | None = None,
+) -> Any:
+    """Build the model and return its emitted BODY_DISC feature."""
+    model = NavModelBodySimulated(
+        'body', obs, body_params['name'], body_params, sibling_bodies=sibling_bodies
+    )
+    model.create_model()
+    return next(
+        f for f in model.to_features(bare_nav_context(obs)) if f.feature_type.name == 'BODY_DISC'
+    )
+
+
+def test_occluded_disc_template_drops_hidden_pixels() -> None:
+    """The BODY_DISC template mask excludes pixels a nearer sibling hides."""
+    body = _large_body(range_km=700000.0)
+    disc = _disc_feature(_limb_obs(), body, sibling_bodies=[_near_sibling()])
+    v_min, u_min, _v_max, _u_max = disc.geometry.bbox_extfov_vu
+    obs = _limb_obs()
+    template_mask = np.asarray(disc.template_mask, dtype=bool)
+    vs, us = np.where(template_mask)
+    sib_v = _LIMB_SIZE / 2.0 + int(obs.extfov_margin_v) - v_min
+    sib_u = _LIMB_SIZE / 2.0 + 55.0 + int(obs.extfov_margin_u) - u_min
+    dist = np.hypot(vs - sib_v, us - sib_u)
+    # The sibling is a radius-50 sphere; no template pixel survives deep inside it.
+    assert int(np.count_nonzero(dist < 40.0)) == 0
+
+
+def test_occluded_disc_reliability_drops() -> None:
+    """A nearer sibling lowers the BODY_DISC visible fraction and reliability."""
+    body = _large_body(range_km=700000.0)
+    alone = _disc_feature(_limb_obs(), body)
+    occluded = _disc_feature(_limb_obs(), body, sibling_bodies=[_near_sibling()])
+    assert alone.reliability == pytest.approx(1.0)
+    assert occluded.reliability < 0.9
+
+
+def test_farther_sibling_leaves_disc_template_intact() -> None:
+    """A sibling with a larger range does not trim the disc template."""
+    body = _large_body(range_km=500000.0)
+    alone = _disc_feature(_limb_obs(), body)
+    behind = _disc_feature(_limb_obs(), body, sibling_bodies=[_near_sibling(range_km=700000.0)])
+    alone_pixels = int(np.count_nonzero(np.asarray(alone.template_mask, dtype=bool)))
+    behind_pixels = int(np.count_nonzero(np.asarray(behind.template_mask, dtype=bool)))
+    assert behind_pixels == alone_pixels
+
+
 def test_instances_for_obs_wires_siblings() -> None:
     """Each per-body model instance receives the other bodies as siblings."""
     far = _large_body(range_km=700000.0)

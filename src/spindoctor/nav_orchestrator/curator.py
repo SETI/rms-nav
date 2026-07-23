@@ -162,6 +162,11 @@ def _curate_image_classifier(classifier: NavImageClassifierResult) -> dict[str, 
         'missing_frac': _round_float(classifier.missing_frac, CONFIDENCE_DECIMALS),
         'noise_sigma': _round_float(classifier.noise_sigma, CONFIDENCE_DECIMALS),
         'max_dn': _round_float(classifier.max_dn, CONFIDENCE_DECIMALS),
+        'background_gradient_score': (
+            None
+            if classifier.background_gradient_score is None
+            else _round_float(classifier.background_gradient_score, CONFIDENCE_DECIMALS)
+        ),
         'flags': list(classifier.flags),
     }
 

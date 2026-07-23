@@ -1265,19 +1265,27 @@ records the outcome in the render truth (``body_occlusion``): each body's
 visible fraction and the angular extent of any hidden limb arc. This is
 bookkeeping the test can read, not something the navigator sees.
 
-The measured technique-level behavior is robust: the navigator predicts *both*
-full limbs (it does not know the hidden arc -- that arc is model error, and the
-occluded body's limb feature still reports full ``visible_arc_fraction``), the
-joint limb fit rejects the hidden arc through its Tukey biweight loss, and both
-techniques land within a fraction of a pixel and fuse to an accurate result. No
-confident-wrong result and no double-counting conflict was observed across
-grazing, half, and deep overlap.
+Both body models -- the simulated one and the SPICE-backed
+:class:`~spindoctor.nav_model.nav_model_body.NavModelBody` -- are occlusion-aware.
+Each per-body model knows the other bodies' idealized geometry and explicit
+nearer-or-farther depth order (``range_km`` in the sim; the inventory center
+range under SPICE), and from that it drops the hidden limb and terminator
+vertices from its predicted polylines, reports a ``visible_arc_fraction`` that
+falls with occlusion depth, and trims the hidden region out of the ``BODY_DISC``
+correlation template. So a mutual-event limb scores like the partial arc it is,
+and the disc correlator scores only against disc brightness the image carries.
+Nothing reads a truth key: the occlusion is derived from the same idealized
+sibling geometry both models already hold.
 
-The honest caveat, which the mutual-event scenes pin so a regression fails
-loudly: the occluded limb still *claims* full reliability. The technique
-succeeds because the robust loss discards the hidden arc, not because the model
-masks it -- the confidence a hidden-arc limb feature reports is optimistic, and
-a future change that made the fit trust that arc would move the answer.
+The measured technique-level behavior is accurate and honest across grazing,
+half, and deep overlap. On the deep scene the far body's disc is over 90 percent
+hidden, so its ``visible_lit_fraction`` collapses and the disc gate drops that
+feature; the near body's disc plus both visible limb arcs fuse to an accurate
+result. The joint limb fit runs on arcs the image actually shows -- the robust
+Tukey biweight loss is a second line of defense against a stray vertex, not the
+mechanism that carries the result -- and no confident-wrong result or
+double-counting conflict arises. The mutual-event scenes pin the arc fractions
+and offsets so a regression toward hidden-arc lock-on fails loudly.
 
 .. _sim-atmosphere:
 
@@ -1616,8 +1624,8 @@ The panels below are rendered by ``python -m tests.integration.sim_doc_images``
    :align: center
 
    A mutual event: the nearer body occludes part of the farther one. The
-   navigator still predicts both full limbs and the robust fit discards the
-   hidden arc.
+   navigator drops the hidden arc from the farther body's predicted limb and
+   trims its disc template, so each feature describes only what the image shows.
 
 .. figure:: _sim_images/rings.png
    :width: 45%

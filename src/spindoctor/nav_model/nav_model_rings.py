@@ -693,6 +693,15 @@ class NavModelRings(NavModelRingsBase):
             ) in self._render_results:
                 if not edge_info_list:
                     continue
+                # The annulus correlation template is built from these full-feature
+                # renders, so it must be cleared of ring brightness hidden behind
+                # the planet globe just as the per-edge masks already are (see
+                # _visible_edge_info).  Trim the render against the same occlusion
+                # mask before it can enter annulus_renderings; a backplane failure
+                # left the mask None and degrades to no trimming.
+                if self._ring_occluded_ext is not None:
+                    model_img = np.where(self._ring_occluded_ext, 0.0, model_img)
+                    model_mask = model_mask & ~self._ring_occluded_ext
                 for edge_mask, label_text, edge_label in edge_info_list:
                     edge_orbit_rms_km = ring_feat.edge_uncertainty(edge_label)
                     vertices_vu, normals_vu = _polyline_from_edge_mask(

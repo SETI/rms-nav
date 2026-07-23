@@ -143,6 +143,9 @@ class BodyLimbNav(NavTechnique):
         self._spurious_max_lm_displacement_px = float(
             self.tuning['spurious_max_lm_displacement_px']
         )
+        self._spurious_unconverged_trust_boundary_fraction = float(
+            self.tuning['spurious_unconverged_trust_boundary_fraction']
+        )
         self._lm_trust_region_px = float(self.tuning['lm_trust_region_px'])
         self._lm_tikhonov_alpha = float(self.tuning['lm_tikhonov_alpha'])
         self._gradient_ridge_refine = bool(self.tuning['gradient_ridge_refine'])
@@ -378,6 +381,24 @@ class BodyLimbNav(NavTechnique):
                     gate_verdict.coarse_peak_fraction,
                     gate_verdict.lm_converged,
                 )
+            # Coarse-seed mis-lock gate: an unconverged LM pinned against
+            # the trust-region boundary tried to escape the coarse basin
+            # and never verified a minimum -- the low-phase under-conditioned
+            # failure where a false overlap peak seeds the wrong basin.  A
+            # healthy sub-pixel fit sits well inside the trust region and
+            # converges, so it clears both conditions.  See
+            # ``dev_guide_techniques_body_limb``.
+            unconverged_at_trust_boundary = not gate_verdict.lm_converged and (
+                lm_displacement_px
+                >= self._spurious_unconverged_trust_boundary_fraction * self._lm_trust_region_px
+            )
+            if unconverged_at_trust_boundary:
+                self.logger.info(
+                    'Coarse-seed mis-lock: LM unconverged and pinned %.3f px from the '
+                    'coarse seed (trust region %.3f px); flagging spurious',
+                    lm_displacement_px,
+                    self._lm_trust_region_px,
+                )
             spurious = (
                 result.degenerate
                 or result.rms_px > dt_rms_threshold
@@ -385,6 +406,7 @@ class BodyLimbNav(NavTechnique):
                 or result.inlier_count < self._spurious_min_inliers
                 or inlier_fraction < self._spurious_min_inlier_fraction
                 or lm_displacement_px > self._spurious_max_lm_displacement_px
+                or unconverged_at_trust_boundary
                 or gate_verdict.spurious
             )
             visible_limb_arc_fraction = _aggregate_visible_arc_fraction(eligible_features)

@@ -21,55 +21,30 @@ fields to match current behavior.
 
 ## Track B — Navigation correctness
 
-Ordering within the track: the confidently-wrong and ensemble-honesty
-defects first (#222, #317, #328, #339, #346, #291, #326, #327, #350, #351,
-#352), because the agreement study consumes ensemble output at scale and
-several curated library frames pin these as standing red regressions. Then
-the coarse-lock calibration (#373) and the star-matcher robustness items
-(#337, #376, #367), then the investigation/design items (#25, #128/#150),
-with the smaller decision items (#130, #239, #338) as fill.
+Ordering within the track: the confidently-wrong defects first
+(#328, #346, #291, #326, #327, #350, #351, #352), because the agreement study
+consumes ensemble output at scale and several curated library frames pin these
+as standing red regressions. Then the coarse-lock calibration (#373) and the
+star-matcher robustness items (#337, #376, #367), then the
+investigation/design items (#25, #128/#150), with the smaller decision items
+(#130, #239, #338) as fill.
 
-### #222 — Second-pass refinement votes as an independent opinion (reopened)
-
-**Symptom:** `StarRefineNav` in pass 2 runs from the pass-1 consensus prior,
-lands near it (as it must — it is a local refinement), and is then counted
-as independent corroboration. On N1572105349 (body_full_fov) disc and limb
-agree at the operator truth but the single-inlier StarRefine (capped to 0.5)
-sits ~2 px off and pulls the fused answer to ~1.8 px error, still reported at
-high tier. The failure mode is not just inflated confidence on failed frames
-— it degrades accurate answers while keeping the tier. The frame carries a
-library sidecar pinned to that navigable truth, so its autonomous regression
-stays red until this lands.
-
-**Where:** the two-pass flow in
-`src/spindoctor/nav_orchestrator/orchestrator.py` plus the ensemble's
-membership rules in `ensemble.py`.
-
-**Fix direction:** results seeded from a prior are correlated with that
-prior; either exclude them from the agreement/consensus vote (use them
-only to polish the winning group's estimate) or carry an explicit
-provenance flag (`seeded_from_prior`) that the ensemble treats as
-non-independent. The metadata should record the distinction either way.
-
-**Acceptance:** a test where pass-1 produces a deliberately wrong prior
-asserts the pass-2 refinement cannot raise the consensus confidence;
-N1572105349 returns to its navigable truth at an honest tier.
-
-### #317 — Ring witnesses of one catalog fused as independent
-
-**Symptom:** `RingEdgeNav` and `RingAnnulusNav` observe the same ring
-catalog model and, once both price an identical annulus geometry, their
-weights re-couple; on a widened-radial scene the correlated-witness scalar
-reaches 0.99, so two views of one model are fused as if independent.
-
-**Where:** `src/spindoctor/nav_orchestrator/ensemble.py` (agreement/fusion
-of the two ring techniques), documented at the `orbit_error_ringlet` scene
-pin and in the ensemble guide.
-
-**Fix direction:** treat the two ring techniques as correlated witnesses of
-one catalog model when combining them; **sequence before #230** so the
-recalibration does not fit tier boundaries against high-confidence/large-
-error correlated rows.
+The ensemble-independence family (#222 seeded single-star refine, #317 two
+ring techniques on one catalog, #339 scattered-light disc/limb) is closed by
+`src/spindoctor/nav_orchestrator/ensemble_independence.py`
+(`resolve_independent_estimators`), which resolves the winning consensus group
+into mutually independent estimators before the merge: a seeded single-star
+refine is dropped when a stronger non-single-star witness is present; two ring
+techniques and (on a scattered-light frame) disc and limb are each collapsed to
+a single representative. The scattered-light signal is a runtime
+background-gradient score
+(`src/spindoctor/support/background_gradient.py`, surfaced on
+`NavImageClassifierResult`) ported from the cohort-curation prescan. See the
+"resolve independent estimators" step in the ensemble dev guide. The collapse
+uses the conservative rho=1 (fully-correlated) model; #380 tracks the
+follow-up to fit an explicit per-family cross-covariance from the agreement
+study and recover the partially-correlated precision, gated on real-frame rho
+measurements (#225).
 
 ### #328 — High-phase haze crescent, gate-passing but ~30 px wrong
 
@@ -81,11 +56,8 @@ currently owns; Essential.
 veto that recognizes the haze-crescent failure signature. Coordinate with
 the #60 Titan / haze-limb work, since the substrate overlaps.
 
-### #339 / #346 / #291 / #326 / #327 — the remaining confident-wrong set
+### #346 / #291 / #326 / #327 — the remaining confident-wrong set
 
-- **#339** — scattered-light frames fuse correlated disc and limb errors as
-  independent at the 0.99 confidence cap; the correlation must be priced
-  before the fusion.
 - **#346** — three library frames (N1492091163, N1867601758, N1867602424)
   lock confidently onto the wrong ring feature; standing library reds, tied
   to the coarse-lock calibration (#373).
@@ -333,8 +305,11 @@ asserts the generated half matches the registries.
   xfails for #251, #252, #253, ready to flip when each fix lands.
 - **#288** — image-library regression reconciliation: the standing red set
   is now reduced to the deliberately-pinned frames, each owned by an open
-  navigation issue (#222, #338, #346, #350, #351, #352). Keep the pins
-  accurate as those issues close and re-ratchet only what they authorize.
+  navigation issue (#338, #346, #350, #351, #352). N1572105349's pin was
+  owned by #222 (now closed by the independence resolution); its autonomous
+  regression should flip green on the next integration run against real
+  holdings (that suite does not run in PR CI). Keep the pins accurate as
+  issues close and re-ratchet only what they authorize.
 - **#243** — direct tests for `nav_model/stars/conflicts.py`
   (`_check_one_star`, `mark_body_and_ring_conflicts`) with synthetic
   geometry; the existing per-pixel occlusion tests cover only the
