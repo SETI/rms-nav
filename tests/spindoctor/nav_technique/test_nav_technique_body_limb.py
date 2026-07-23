@@ -27,6 +27,10 @@ SPURIOUS_MIN_INLIER_FRACTION = BodyLimbNav.tuning['spurious_min_inlier_fraction'
 SPURIOUS_MAX_LM_DISPLACEMENT_PX = BodyLimbNav.tuning['spurious_max_lm_displacement_px']
 SPURIOUS_DT_FLOOR_PX = BodyLimbNav.tuning['spurious_dt_floor_px']
 SPURIOUS_DT_RMS_FACTOR = BodyLimbNav.tuning['spurious_dt_rms_factor']
+SPURIOUS_UNCONVERGED_TRUST_BOUNDARY_FRACTION = BodyLimbNav.tuning[
+    'spurious_unconverged_trust_boundary_fraction'
+]
+LM_TRUST_REGION_PX = BodyLimbNav.tuning['lm_trust_region_px']
 
 
 def test_body_limb_nav_recovers_planted_offset_single_body(
@@ -473,6 +477,111 @@ def test_body_limb_nav_marks_spurious_when_lm_walks_far_from_coarse_seed(
     assert inlier_fraction >= SPURIOUS_MIN_INLIER_FRACTION
     # The LM displacement was forced beyond the configured threshold.
     assert result.spurious is True
+
+
+def test_body_limb_nav_marks_spurious_when_unconverged_at_trust_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """An unconverged LM pinned at the trust-region boundary is spurious.
+
+    Models the low-phase coarse-seed mis-lock: the coarse polarity search
+    seeds the wrong basin, the trust region pins the LM against its
+    boundary while it tries to escape, and it exits at the iteration cap
+    without meeting the step tolerance.  The displacement stays inside the
+    multi-pixel walk-off guard, the inliers stay healthy, and the RMS is
+    low, so only the unconverged-at-boundary gate can catch it.
+    """
+    from spindoctor.nav_technique import dt_fitting, nav_technique_body_limb
+
+    shape = (200, 200)
+    # Coarse NCC reports (0, 0) for this centered disc.
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices, outward = circle_polyline((100.0, 100.0), 30.0, 200)
+    feature = make_limb_feature('mislocked', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image)
+
+    # Displacement at the trust-region boundary from the (0, 0) seed, but
+    # well inside the multi-pixel walk-off guard; unconverged.
+    boundary_displacement = float(SPURIOUS_UNCONVERGED_TRUST_BOUNDARY_FRACTION * LM_TRUST_REGION_PX)
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(boundary_displacement, 0.0),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
+        weights=np.ones(vertices.shape[0], dtype=np.float64),
+        rms_px=0.4,
+        raw_rms_px=0.4,
+        iterations=30,
+        converged=False,
+        inlier_count=int(vertices.shape[0] * 0.6),
+        degenerate=False,
+    )
+    monkeypatch.setattr(
+        nav_technique_body_limb,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+
+    result = technique.navigate([feature], context)
+    # Sanity-check the test setup: the walk-off displacement guard would NOT fire.
+    assert boundary_displacement < SPURIOUS_MAX_LM_DISPLACEMENT_PX
+    assert result.spurious is True
+
+
+def test_body_limb_nav_unconverged_near_seed_is_not_spurious(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """The negative path: an unconverged LM that stayed near the seed is not spurious.
+
+    A healthy dense-edge fit can miss the step tolerance while sitting well
+    inside the trust region; the convergence flag alone must not reject it.
+    Only a fit that is BOTH unconverged AND pinned at the boundary trips the
+    mis-lock gate.
+    """
+    from spindoctor.nav_technique import dt_fitting, nav_technique_body_limb
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices, outward = circle_polyline((100.0, 100.0), 30.0, 1000)
+    feature = make_limb_feature('near_seed', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image)
+
+    # Unconverged, but the displacement from the (0, 0) seed stays well
+    # inside the trust-region boundary.
+    near_seed_displacement = float(
+        0.5 * SPURIOUS_UNCONVERGED_TRUST_BOUNDARY_FRACTION * LM_TRUST_REGION_PX
+    )
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(near_seed_displacement, 0.0),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
+        weights=np.ones(vertices.shape[0], dtype=np.float64),
+        rms_px=0.4,
+        raw_rms_px=0.4,
+        iterations=30,
+        converged=False,
+        inlier_count=500,
+        degenerate=False,
+    )
+    monkeypatch.setattr(
+        nav_technique_body_limb,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+
+    result = technique.navigate([feature], context)
+    assert result.spurious is False
 
 
 def test_body_limb_nav_does_not_mark_spurious_when_inlier_fraction_healthy(

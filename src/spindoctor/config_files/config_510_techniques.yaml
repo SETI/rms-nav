@@ -297,6 +297,21 @@ techniques:
       # any future regression that bypasses the trust region.  Set
       # slightly larger than ``lm_trust_region_px``.
       spurious_max_lm_displacement_px: 4.0
+      # Coarse-seed mis-lock gate.  At low phase (below ~15 deg) the lit
+      # arc spans almost the whole silhouette and the limb-darkening
+      # roll-off is nearly symmetric, so the across-limb gradient that
+      # constrains the fit is weakest exactly where the geometry offers
+      # the least leverage: a false polarity-weighted overlap peak several
+      # pixels from the true limb can outscore it and seed the LM in the
+      # wrong basin.  The trust region then pins the LM against its
+      # boundary while it tries to escape, and it exits at the iteration
+      # cap without ever meeting the step tolerance.  A fit that BOTH
+      # failed to converge AND ended at least this fraction of the trust
+      # region away from the integer coarse seed is that mis-lock; flag it
+      # spurious rather than emit a confident multi-pixel offset.  A
+      # healthy sub-pixel refinement lands within ~0.71 px of its integer
+      # seed and converges, so it clears this gate on both counts.
+      spurious_unconverged_trust_boundary_fraction: 0.9
       # Maximum LM displacement from the integer coarse-NCC seed
       # (pixels).  The LM rejects any trial step that would land
       # outside this radius without committing — preventing the
