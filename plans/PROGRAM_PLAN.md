@@ -173,10 +173,11 @@ its section names):
    canonical environment for the committed sim baselines (#335).
 7. **Re-anchor confidence on real evidence** (#230; WS-5) — re-run the
    existing calibration tooling against the agreement study's
-   measurements; retire the provisional marker. Sequence the correlated-
-   ring-witness fix (#317) and the ring orbit-uncertainty severity decision
-   (#316) before it, since both push tier boundaries the wrong way, and
-   adopt the calibration's armed falsification criterion (#334).
+   measurements; retire the provisional marker. The correlated-ring-witness
+   fix (#317) is done, so the recalibration no longer trains against those
+   rows; the ring orbit-uncertainty severity decision (#316) still sequences
+   before it, since it pushes tier boundaries the wrong way, and adopt the
+   calibration's armed falsification criterion (#334).
 8. **Close the accuracy tail** (#233 measured star SNR and constant
    sensitivity, WS-9; #150/#128 the known ~0.1 px limb bias, WS-10; #234
    realistic noise for calibrated images, WS-13; #232 end-product
@@ -185,11 +186,13 @@ its section names):
 **Confident-wrong families that poison the validation data** (they belong to
 Track B but gate the study, because it consumes navigator output at scale):
 the high-phase haze crescent that returns a gate-passing success ~30 px wrong
-(#328), scattered-light disc/limb errors fused as independent (#339), the
-three frames that lock onto the wrong ring feature (#346), body-body
+(#328), the three frames that lock onto the wrong ring feature (#346), body-body
 occlusion ignored by the disc template (#326) and by the visible-arc report
-(#327), correlated ring witnesses fused as independent (#317), and the disc
-technique locking on at extreme shape mismatch (#291).
+(#327), and the disc technique locking on at extreme shape mismatch (#291). The
+ensemble-independence family -- a seeded single-star refine dragging a body fix
+(#222), two ring techniques fused as independent witnesses (#317), and
+scattered-light disc/limb errors fused as independent (#339) -- is closed by the
+consensus independence resolution.
 
 **Operator's role:** batch votes on library candidates (ongoing); bless the
 realism verdict; approve agreement-study frame selection; make the ring
@@ -209,16 +212,8 @@ answer or fails on a navigable scene.
 navigator's output at scale) and are exactly what a user hits first.
 The known open defects:
 
-- **#222** (reopened) — a single-inlier pass-2 star refinement, seeded from
-  the pass-1 prior, votes as an independent opinion and pulls an otherwise-
-  correct body fix to ~1.8 px error while keeping a high tier
-  (N1572105349). A tier-honesty / ensemble-independence defect.
-- **#317** — ring techniques observing one catalog model are fused as
-  independent witnesses; sequence before the #230 recalibration.
 - **#328** — a high-phase haze crescent returns a gate-passing success about
   30 px wrong and nothing vetoes it. Essential; a confident-wrong family.
-- **#339** — scattered-light frames fuse correlated disc and limb errors as
-  independent at the 0.99 confidence cap.
 - **#346** — three library frames (N1492091163, N1867601758, N1867602424)
   lock confidently onto the wrong ring feature. Standing library reds.
 - **#291** — `BodyDiscCorrelateNav` locks on confidently at extreme shape
@@ -427,17 +422,16 @@ Every open issue, listed once by the track that owns it.
 
 | Track | Issues |
 |---|---|
-| A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #340, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377 |
-| B — navigation correctness | #25, #128, #130, #150, #222, #239, #281, #282, #283, #291, #317, #326, #327, #328, #337, #338, #339, #346, #350, #351, #352, #367, #373, #376, #378 |
+| A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #340, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377, #380 |
+| B — navigation correctness | #25, #128, #130, #150, #239, #281, #282, #283, #291, #326, #327, #328, #337, #338, #346, #350, #351, #352, #367, #373, #376, #378 |
 | C — statistics & QA | #240 (plus the standing cross-check and campaign-report practice) |
 | D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #60, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #141, #142, #188, #231, #236, #251, #252, #253, #265 |
 | E — test & docs debt | #122, #129, #177, #178, #241, #242, #243, #244, #245, #288, #379 |
 | F — instruments, features, hardening | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #81, #82, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212 |
 
 Cross-listed items (listed once above, noted here): #150/#128 serve both
-Track A's limb-bias workstream and Track B's redesign; #317 serves both
-Track A's confidence re-anchoring and Track B's ensemble honesty; the
-confident-wrong families (#328, #339, #346, #326, #327, #291) sit in Track B
+Track A's limb-bias workstream and Track B's redesign; the
+confident-wrong families (#328, #346, #326, #327, #291) sit in Track B
 but gate the Track A study; #103/#134/#126 serve both Track D performance and
 Track F hardening; #93 is written in Track D, extended per instrument in
 Track F; #174 baselines are Track A infrastructure delivered as Track E test

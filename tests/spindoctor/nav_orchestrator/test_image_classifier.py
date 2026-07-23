@@ -19,6 +19,25 @@ def test_classifier_clean_image_no_flags() -> None:
     assert result.flags == []
 
 
+def test_classifier_reports_background_gradient_on_ramp() -> None:
+    """A large-scale brightness ramp populates a high background-gradient score."""
+    rng = np.random.default_rng(seed=7)
+    _yy, xx = np.mgrid[0:128, 0:128]
+    image = 100.0 + 3.0 * xx + rng.normal(0.0, 2.0, size=(128, 128))
+    result = NavImageClassifier().classify(image)
+    assert result.background_gradient_score is not None
+    assert result.background_gradient_score > 5.0
+
+
+def test_classifier_background_gradient_low_on_flat_noise() -> None:
+    """A flat noisy field scores well below the scattered-light threshold."""
+    rng = np.random.default_rng(seed=8)
+    image = 100.0 + rng.normal(0.0, 3.0, size=(128, 128))
+    result = NavImageClassifier().classify(image)
+    assert result.background_gradient_score is not None
+    assert result.background_gradient_score < 5.0
+
+
 def test_classifier_blank_image() -> None:
     """A near-zero image is classified as blank."""
     image = np.zeros((64, 64), np.float64)

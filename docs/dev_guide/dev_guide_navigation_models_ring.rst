@@ -37,6 +37,8 @@ For each catalog-defined ring edge the model:
 4. Walks the pixel set to produce a polyline of vertices, each with an outward radial
    normal estimated from the local radius gradient.
 
+.. _ring-planet-occlusion:
+
 Planet occlusion
 ----------------
 
@@ -48,8 +50,14 @@ Both the emitted
 :data:`~spindoctor.feature.feature_type.NavFeatureType.RING_EDGE` features and the summary
 overlay read the same masks, so an edge segment behind the disc is neither fitted by
 :doc:`dev_guide_techniques_ring_edge` nor drawn across the planet, while a near-side edge
-crossing in front of the disc is kept. When the backplane cannot be evaluated the model
-keeps every edge rather than aborting.
+crossing in front of the disc is kept. The same backplane clears the annulus correlation
+template: the full-feature render that feeds the
+:data:`~spindoctor.feature.feature_type.NavFeatureType.RING_ANNULUS` path is trimmed against
+it before the per-ring renderings are composited, so the template carries no ring brightness
+from behind the disc and
+:doc:`dev_guide_techniques_ring_annulus` correlates only visible ring material. When the
+backplane cannot be evaluated the model keeps every edge and the full template rather than
+aborting.
 
 Per-edge feature filtering
 --------------------------
@@ -141,8 +149,10 @@ Annulus template
 When the per-planet km/px scale exceeds the configured threshold (or any single ring edge
 compresses below the per-polyline radial-pixel threshold), the model emits a single
 :attr:`~spindoctor.feature.feature_type.NavFeatureType.RING_ANNULUS` feature carrying a rendered
-template image of the entire ring system
-(every ring radius painted at the catalog brightness contrast) plus the matching mask.
+template image of the visible ring system
+(every ring radius painted at the catalog brightness contrast, with pixels behind the
+planet disc cleared as described under :ref:`ring-planet-occlusion`) plus the matching
+mask.
 The template's bounding box is the union of the per-edge bounding boxes; the template
 brightness at each pixel is the sum of the per-ring-edge contributions.
 

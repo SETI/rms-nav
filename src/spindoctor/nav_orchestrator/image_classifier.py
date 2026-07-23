@@ -24,6 +24,7 @@ from spindoctor.nav_orchestrator.image_classifier_result import (
     ImageFlag,
     NavImageClassifierResult,
 )
+from spindoctor.support.background_gradient import background_gradient_score
 from spindoctor.support.noise_estimate import estimate_image_noise_sigma
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
@@ -151,6 +152,14 @@ class NavImageClassifier:
             max_dn = float(np.nanmax(sensor))
         else:
             max_dn = 0.0
+        # Low-order brightness-ramp score over the 2-D frame (the block-median
+        # affine fit needs spatial structure, so it runs on the image array
+        # rather than the flattened sensor selection).  The sensor mask keeps
+        # extfov padding out of the plane fit -- otherwise the zero-filled
+        # border biases the score and can suppress it below the ensemble's
+        # scattered-light threshold on full-frame images.  Recorded on every
+        # verdict; the ensemble reads it when resolving disc/limb correlations.
+        background_gradient = background_gradient_score(image, sensor_mask)
         flags: list[ImageFlag] = []
         # Outcome decision: blank check runs first so a near-zero image with
         # missing-data marker == 0 isn't mis-classified as "mostly_missing".
@@ -161,6 +170,7 @@ class NavImageClassifier:
                 missing_frac=missing_frac,
                 noise_sigma=noise_sigma,
                 max_dn=max_dn,
+                background_gradient_score=background_gradient,
                 flags=flags,
             )
         if saturation_frac > self.thresholds.max_saturation_frac_clean:
@@ -170,6 +180,7 @@ class NavImageClassifier:
                 missing_frac=missing_frac,
                 noise_sigma=noise_sigma,
                 max_dn=max_dn,
+                background_gradient_score=background_gradient,
                 flags=flags,
             )
         if missing_frac > self.thresholds.max_missing_frac_clean:
@@ -179,6 +190,7 @@ class NavImageClassifier:
                 missing_frac=missing_frac,
                 noise_sigma=noise_sigma,
                 max_dn=max_dn,
+                background_gradient_score=background_gradient,
                 flags=flags,
             )
         # Otherwise the image is clean (with optional advisory flags).
@@ -192,5 +204,6 @@ class NavImageClassifier:
             missing_frac=missing_frac,
             noise_sigma=noise_sigma,
             max_dn=max_dn,
+            background_gradient_score=background_gradient,
             flags=flags,
         )
