@@ -103,6 +103,13 @@ DEFAULT_AGREEMENT_GAP = 0.5
 DEFAULT_DISAGREEMENT_PENALTY = 0.7
 DEFAULT_CONFLICTED_CONFIDENCE_MULTIPLIER = 0.3
 DEFAULT_MIN_CONFIDENCE = 0.35
+# Euclidean translation distance (px) within which a brightness-centroid blob
+# is treated as agreeing with a corroborated star consensus; beyond it the
+# blob is a contradicting outlier and is dropped from the ensemble math (a
+# multi-star fix outranks a lone centroid as a position witness).  Matches the
+# grouping pixel floor: a blob that does not even fall within the grouping
+# tolerance of a trusted star fix is not corroborating it.
+DEFAULT_BLOB_STAR_DISAGREEMENT_FLOOR_PX = 5.0
 DEFAULT_PINVH_RCOND = 1.0e-9
 DEFAULT_MAX_ALLOWED_ROTATION_DEG = 5.0
 # Body-witness veto thresholds (see body_witness_veto).  The blob centroid's
@@ -179,6 +186,13 @@ class EnsembleConfig:
             conflicted branch fires.
         min_confidence: Final-result threshold below which the ensemble
             returns NavResult.failed instead of NavResult.ok.
+        blob_star_disagreement_floor_px: Euclidean translation distance (px)
+            within which a ``BodyBlobNav`` brightness centroid is treated as
+            agreeing with a corroborated (non-single-star) star fix.  When a
+            corroborated star fix is present and the blob agrees with none
+            within this floor, the blob is dropped from the ensemble math as a
+            contradicted outlier (a multi-star fix outranks a lone centroid as
+            a position witness).  Set to ``0.0`` to disable the drop.
         pinvh_rcond: rcond for ``scipy.linalg.pinvh``.
         max_allowed_rotation_deg: Maximum magnitude (in degrees) a 3-DoF
             result's rotation may take before the ensemble rejects it.
@@ -218,6 +232,7 @@ class EnsembleConfig:
     disagreement_penalty: float = DEFAULT_DISAGREEMENT_PENALTY
     conflicted_confidence_multiplier: float = DEFAULT_CONFLICTED_CONFIDENCE_MULTIPLIER
     min_confidence: float = DEFAULT_MIN_CONFIDENCE
+    blob_star_disagreement_floor_px: float = DEFAULT_BLOB_STAR_DISAGREEMENT_FLOOR_PX
     pinvh_rcond: float = DEFAULT_PINVH_RCOND
     max_allowed_rotation_deg: float = DEFAULT_MAX_ALLOWED_ROTATION_DEG
     body_witness_shape_lock_max_phase_deg: float = DEFAULT_BODY_WITNESS_SHAPE_LOCK_MAX_PHASE_DEG
@@ -231,23 +246,26 @@ class EnsembleConfig:
     )
 
     def __post_init__(self) -> None:
-        """Reject body-witness thresholds that would misfire the veto.
+        """Reject ensemble thresholds that would misfire their gate.
 
         Both direct construction and ``from_mapping`` land here, so a
         non-finite value, a negative tolerance, an out-of-range phase, or an
         inverted phase window is rejected the same way regardless of how the
         config was built.  A negative Mahalanobis threshold, for instance,
-        would make nearly every separation veto-worthy.
+        would make nearly every separation veto-worthy, and a negative
+        ``blob_star_disagreement_floor_px`` would drop every blob.
 
         Raises:
-            ValueError: if any body-witness threshold is non-finite, a
-                tolerance is negative, a phase falls outside ``[0, 180]``, or
-                the shape-lock ceiling is not below the collapse floor.
+            ValueError: if any body-witness or blob/star tolerance is
+                non-finite or negative, a body-witness phase falls outside
+                ``[0, 180]``, or the shape-lock ceiling is not below the
+                collapse floor.
         """
         non_negative = {
             'body_witness_disagreement_floor_px': self.body_witness_disagreement_floor_px,
             'body_witness_disagreement_frac': self.body_witness_disagreement_frac,
             'body_witness_agreement_sigma': self.body_witness_agreement_sigma,
+            'blob_star_disagreement_floor_px': self.blob_star_disagreement_floor_px,
         }
         for name, value in non_negative.items():
             if not math.isfinite(value):
@@ -329,6 +347,93 @@ class EnsembleConfig:
                         ) from exc
             kwargs['tier_thresholds'] = tiers
         return cls(**kwargs)
+
+
+#: Star techniques whose non-single-star result is a corroborated, feature-
+#: matched fix (a multi-star pattern match, a two-star unique match, or a
+#: multi-star refine).  Such a fix outranks a lone brightness-centroid blob as
+#: a position witness, so a blob that disagrees with it is an outlier.
+_STAR_CONSENSUS_TECHNIQUES = frozenset(
+    {'StarFieldFromCatalogNav', 'StarUniqueMatchNav', 'StarRefineNav'}
+)
+
+#: The brightness-centroid fallback technique down-weighted against a
+#: corroborated star consensus.
+_BLOB_TECHNIQUE = 'BodyBlobNav'
+
+
+def _drop_blob_outlier_against_star_consensus(
+    results: list[NavTechniqueResult],
+    *,
+    disagreement_floor_px: float,
+) -> list[NavTechniqueResult]:
+    """Drop a lone brightness-centroid blob that a star consensus contradicts.
+
+    A ``BodyBlobNav`` result is a pose-free brightness centroid: a weak
+    position witness whose lit-hemisphere bias, on a resolved or irregular
+    body, can place it several pixels off the true center.  When a
+    corroborated star fix is present -- a non-single-star result from a star
+    technique (a multi-star pattern match, a two-star unique match, or a
+    multi-star refine), whose identification is cross-checked by more than one
+    star -- and the blob agrees with no such fix within
+    ``disagreement_floor_px``, the blob is the outlier, not the star
+    consensus.  It is dropped from the ensemble math so it neither forces a
+    conflict against the star fix nor drags the fused offset or incurs the
+    multi-group disagreement penalty.  A blob that agrees with a star fix (or
+    a frame with no corroborated star fix) is left untouched, and the
+    cross-technique body-witness veto still reads every dropped result off the
+    full ``results`` list the caller retains, so a geometric body consensus
+    the blob contradicts is unaffected.
+
+    Parameters:
+        results: The viable (non-spurious) per-technique results.
+        disagreement_floor_px: Euclidean translation distance (px) within
+            which a blob is treated as agreeing with a star fix.  Set to
+            ``0.0`` to disable the drop.
+
+    Returns:
+        A new list preserving input ordering with the outlier blob(s)
+        removed; the input list is not mutated.
+    """
+    if disagreement_floor_px <= 0.0:
+        return list(results)
+    trusted_star_fixes = [
+        r
+        for r in results
+        if r.technique_name in _STAR_CONSENSUS_TECHNIQUES and not is_single_star_result(r)
+    ]
+    if not trusted_star_fixes:
+        return list(results)
+    kept: list[NavTechniqueResult] = []
+    for r in results:
+        if r.technique_name == _BLOB_TECHNIQUE and not any(
+            _translation_distance_px(r, s) <= disagreement_floor_px for s in trusted_star_fixes
+        ):
+            IMAGE_LOGGER.info(
+                'Dropping blob outlier %s at offset (%.4f, %.4f): it disagrees with a '
+                'corroborated star consensus by more than %.2f px and is a weaker '
+                'position witness than a multi-star fix',
+                r.technique_name,
+                r.offset_px[0],
+                r.offset_px[1],
+                disagreement_floor_px,
+            )
+            continue
+        kept.append(r)
+    return kept
+
+
+def _translation_distance_px(a: NavTechniqueResult, b: NavTechniqueResult) -> float:
+    """Return the Euclidean ``(dv, du)`` distance between two results in pixels.
+
+    Parameters:
+        a: The first result.
+        b: The second result.
+
+    Returns:
+        The Euclidean distance between the two results' ``offset_px``, in pixels.
+    """
+    return math.hypot(a.offset_px[0] - b.offset_px[0], a.offset_px[1] - b.offset_px[1])
 
 
 def _source_bodies(result: NavTechniqueResult) -> frozenset[str]:
@@ -712,6 +817,16 @@ def ensemble(
     # The full ``results`` list is preserved on the NavResult for
     # diagnostics; only the ensemble math sees the filtered set.
     viable = _drop_superseded_fallbacks(viable)
+    # Drop a lone brightness-centroid blob that a corroborated star consensus
+    # contradicts: it is a weaker position witness than a multi-star fix, so it
+    # must not force a conflict against the star solution or incur the
+    # multi-group disagreement penalty.  The body-witness veto below still
+    # reads the full ``results`` list, so a geometric body consensus the blob
+    # contradicts is unaffected.
+    viable = _drop_blob_outlier_against_star_consensus(
+        viable,
+        disagreement_floor_px=cfg.blob_star_disagreement_floor_px,
+    )
     interior = [r for r in viable if not r.at_edge]
     if interior:
         viable = interior

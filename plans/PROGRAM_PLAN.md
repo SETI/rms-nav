@@ -217,10 +217,10 @@ The known open defects:
   lock confidently onto the wrong ring feature. Standing library reds.
 - **#350** — two resolved-body frames (N1484593951, N1686349893) miss the
   offset tolerance by ~2 px after the recalibration.
-- **#351** — the recalibration turns an operator-verified success into a
-  spurious ensemble conflict (N1530185128).
-- **#352** — autonomous star gates self-flag spurious on a navigable
-  small-offset WAC frame (W1444747627).
+- **#392** — the body-witness shape-lock veto misfires on Iapetus
+  (N1806609736): a correct limb+star consensus is vetoed because the
+  albedo-dichotomy-biased blob centroid disagrees. The geometric-side mirror
+  of the ensemble blob-outlier drop that closed #351.
 - **#373** — the RingEdgeNav coarse seed is not robust against competing
   edge populations (polarity-blind); the coarse-lock family that a
   calibration pass against the library must close.
@@ -408,7 +408,7 @@ Every open issue, listed once by the track that owns it.
 | Track | Issues |
 |---|---|
 | A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #340, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377, #380 |
-| B — navigation correctness | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #351, #352, #373 |
+| B — navigation correctness | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #373, #392 |
 | C — statistics & QA | #240 (plus the standing cross-check and campaign-report practice) |
 | D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #60, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #141, #142, #188, #231, #236, #251, #252, #253, #265 |
 | E — test & docs debt | #122, #129, #177, #178, #241, #242, #243, #244, #245, #288, #379, #391 |

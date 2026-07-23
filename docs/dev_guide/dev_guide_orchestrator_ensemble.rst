@@ -33,6 +33,20 @@ primary-tier result on the same body (for example a
 :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` succeeded on that
 body); a fallback with no primary coverage for its body stays in the set.
 
+A second outlier filter then removes a lone
+:class:`~spindoctor.nav_technique.nav_technique_body_blob.BodyBlobNav` brightness centroid
+that a corroborated star consensus contradicts. When a non-single-star star fix is present
+-- a multi-star pattern match, a two-star unique match, or a multi-star refine, whose
+identification is cross-checked by more than one star -- and the blob agrees with no such
+fix within ``blob_star_disagreement_floor_px`` (default 5 px), the blob is the outlier, not
+the star consensus: a photometric brightness centroid is a weaker position witness than a
+multi-star fix. Dropping it keeps a pose-free centroid biased off-center by a resolved or
+irregular body from forcing a conflict against a correct star solution or dragging the
+fused offset. A blob that agrees with the star fix, a single-star fix (not a corroborated
+consensus), or a frame with no star fix is left untouched, and the cross-technique
+body-witness veto (below) still reads every dropped result off the full result list -- so a
+geometric body consensus the blob contradicts is unaffected.
+
 Step 2 — drop at-edge
 ---------------------
 
@@ -395,6 +409,13 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
   campaign's fused fit rate (error at most 3 px) measures 0.35-0.40 in the 0.10-0.15
   confidence bands and 0.89 at 0.35, with almost no probability mass in between, so the
   gate takes the measured upper edge of that crossing.
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.blob_star_disagreement_floor_px` —
+  float, default ``5.0``. Euclidean translation distance (px) within which a
+  :class:`~spindoctor.nav_technique.nav_technique_body_blob.BodyBlobNav` brightness centroid is
+  treated as agreeing with a corroborated (non-single-star) star fix. When such a fix is present
+  and the blob agrees with none within this floor, the blob is dropped from the ensemble math as a
+  contradicted outlier, so a lone centroid cannot force a conflict against a multi-star solution
+  (Step 1). Matches ``agreement_pixel_floor``; ``0.0`` disables the drop.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.pinvh_rcond` — float, default
   ``1.0e-9``. Cutoff for :func:`scipy.linalg.pinvh`.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.max_allowed_rotation_deg` — float,
