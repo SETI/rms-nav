@@ -30,10 +30,25 @@ Triplet hashing
 ---------------
 
 For every triplet of three predictable catalog stars the matcher computes a translation- and
-rotation-invariant hash ``(d_AB / d_AC, d_BC / d_AC, angle BAC)``, where vertex ``A`` is
-canonicalised as the brightest star of the triplet and the other two follow in sorted-index
-order. The same hash is computed for every triplet of three detected sources in the image.
-Triplets with matching hashes (within a small tolerance) are candidate correspondences.
+rotation-invariant hash ``(d_AB / d_AC, d_BC / d_AC, angle BAC)``. The three vertices are put
+in a canonical order by triangle geometry: ``A`` sits opposite the longest side, ``B`` opposite
+the next-longest, and ``C`` opposite the shortest. Side lengths scale uniformly under a
+similarity transform, so this order is the same physical vertex labelling for a triangle and any
+translated, rotated, or uniformly scaled copy of it, and the detection triplet and its catalog
+counterpart canonicalise identically. The same hash is computed for every triplet of three
+detected sources in the image. Triplets with matching hashes (within a small tolerance) are
+candidate correspondences.
+
+The order is geometric rather than brightness-keyed on purpose. Ordering the vertices by
+brightness ties on an equal-magnitude field, and the pipeline's predicted magnitudes carry error
+that can manufacture ties that are not physically present, so a brightness-keyed apex would be
+decided by an arbitrary tie-break that flips the labelling between the detection and catalog
+sides from run to run and under image rotation. On a field near the inlier floor that flipped
+labelling flips the navigation outcome, giving non-deterministic output on unchanged input. The
+geometric order is total and rotation-stable: for the ordinary scalene triangle the side lengths
+fix the vertex assignment outright, and only a near-isosceles triangle (two opposite sides of
+equal length) falls through to the secondary tie-break of brightness rank and then original
+index.
 
 Source detection
 ----------------
@@ -121,6 +136,38 @@ clean lock lands in the medium tier. The
 :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.wide_offset_lock` and
 :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.wide_offset_false_lock_expectation`
 diagnostics record that the fallback fired and the significance it cleared.
+
+Single-bright-star wide-offset acquisition
+------------------------------------------
+
+A sparse field can carry exactly one confidently-detectable catalog star at a large unknown
+offset: on a glare-elevated frame the fainter members drop below the detection limit or fall
+off-frame, leaving one bright anchor and no corroborating star. Neither the triplet RANSAC nor
+the ``>= wide_offset_min_inliers`` asterism fallback can lock there, because a one-star lock has
+no corroborating inlier and so cannot clear the chance-alignment budget (a single anchor pair
+defines an exact offset, so a one-inlier lock is a chance alignment with probability one).
+
+When both fallbacks miss, and only when ``wide_offset_one_star_enabled`` is set, the technique
+attempts a one-star lock. With no corroboration to lean on, the anchor pairing itself must be
+unambiguous, which is gated on two brightness-uniqueness margins:
+
+- The brightest predictable catalog star must outshine the next by at least
+  ``wide_offset_one_star_catalog_margin_mag``, so exactly one plausible bright anchor exists on
+  the catalog side, and it must be photometry-trusted (a ``photometry_saturated`` anchor, whose
+  brightness ordering is an untrusted lower bound, is refused).
+- The brightest detection must outshine the next by a peak-DN factor of at least
+  ``wide_offset_one_star_detection_margin_ratio``, so the dominant peak is uniquely the anchor.
+  A glare field routinely raises peaks brighter than a real faint star, so a frame whose
+  brightest detection is not uniquely dominant (two comparably bright peaks) fails this gate and
+  correctly stays unlocked: pairing the anchor with one of two rival peaks would be a guess.
+
+The lock also requires the anchor offset to fall inside the search window. An accepted one-star
+lock is confidence-capped at ``wide_offset_one_star_confidence_cap``, below even the
+``>= 3``-inlier wide-offset cap, and must still clear the ensemble gate to navigate. The
+capability is validated on planted-truth scenes but ``wide_offset_one_star_enabled`` defaults to
+off, pending an image-library false-lock sweep against the SPICE holdings the unit suite does not
+reach; enabling it is a per-instrument configuration choice once that sweep confirms the
+whole-library false-lock rate stays flat.
 
 PSF-fit inlier refinement
 -------------------------
@@ -278,6 +325,20 @@ in ``src/spindoctor/config_files/config_510_techniques.yaml``.
   Post-formula confidence cap for a wide-offset lock. Fewer corroborating stars than a
   strong-tier match means the result cannot claim the high tier on its own; it must still
   clear the ensemble gate to navigate. 0.6 lands a clean lock in the medium / low tier.
+- ``wide_offset_one_star_enabled`` — int flag, default ``0``. ``1`` enables the
+  single-bright-star wide-offset acquisition (a one-inlier lock from a uniquely-bright anchor
+  pair); ``0`` disables it. Off by default pending an image-library false-lock sweep.
+- ``wide_offset_one_star_catalog_margin_mag`` — float, default ``1.0`` mag. Minimum
+  predicted-brightness margin of the catalog anchor over the next predictable star for a
+  one-star lock; a smaller margin leaves more than one plausible anchor, so the pairing is
+  ambiguous and the lock is refused.
+- ``wide_offset_one_star_detection_margin_ratio`` — float, default ``3.0`` (dimensionless).
+  Minimum peak-DN ratio of the brightest detection to the next for a one-star lock; below this
+  the dominant peak is not uniquely bright and the lock is refused.
+- ``wide_offset_one_star_confidence_cap`` — float, default ``0.4`` (dimensionless, in
+  ``[0, 1]``). Post-formula confidence cap for a one-star lock. A single uncorroborated anchor
+  pairing sits below even the ``>= 3``-inlier wide-offset cap; 0.4 lands a clean one-star lock
+  in the low tier.
 - ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
   distance from any search-window axis bound falls within this tolerance is flagged
   :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`.

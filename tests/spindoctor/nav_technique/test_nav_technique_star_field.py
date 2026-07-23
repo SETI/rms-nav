@@ -22,6 +22,7 @@ from spindoctor.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANC
 from spindoctor.nav_technique.nav_technique_star_field import (
     StarFieldFromCatalogNav,
     _binomial_upper_tail,
+    _canonical_triplet_order,
     _detect_image_sources,
     _enumerate_triplets,
     _hash_distance_sq,
@@ -188,30 +189,95 @@ def test_triplet_hash_drops_collinear() -> None:
 
 
 def test_enumerate_triplets_yields_one_per_unordered_set() -> None:
-    """Each unordered triplet appears exactly once with A=brightest."""
+    """Each unordered triplet appears once, apex opposite the longest side."""
     points = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (5.0, 5.0)]
-    # Brightness rank 0 = brightest; rank by index here.
     brightness_rank = [0, 1, 2, 3]
     triplets = _enumerate_triplets(points, brightness_rank)
     # C(4,3) = 4 triplets.
     assert len(triplets) == 4
-    # The brightest of each unordered set is correctly identified as A.
     seen_keys: set[tuple[int, int, int]] = set()
     for t in triplets:
-        # b and c indices are sorted ascending.
-        assert t.idx_b < t.idx_c
-        # A index has the lowest brightness rank.
-        ranks = (
-            brightness_rank[t.idx_a],
-            brightness_rank[t.idx_b],
-            brightness_rank[t.idx_c],
-        )
-        assert ranks[0] == min(ranks)
+        # A sits opposite the longest side (the side b--c is longest).
+        pa = points[t.idx_a]
+        pb = points[t.idx_b]
+        pc = points[t.idx_c]
+        opp_a = math.hypot(pb[0] - pc[0], pb[1] - pc[1])
+        opp_b = math.hypot(pa[0] - pc[0], pa[1] - pc[1])
+        opp_c = math.hypot(pa[0] - pb[0], pa[1] - pb[1])
+        assert opp_a == max(opp_a, opp_b, opp_c)
+        # B's opposite side is at least C's opposite side.
+        assert opp_b >= opp_c
         # Unordered triplet seen once.
-        sorted_indices = sorted([t.idx_a, t.idx_b, t.idx_c])
-        key = (sorted_indices[0], sorted_indices[1], sorted_indices[2])
+        ordered = sorted([t.idx_a, t.idx_b, t.idx_c])
+        key = (ordered[0], ordered[1], ordered[2])
         assert key not in seen_keys
         seen_keys.add(key)
+
+
+def test_enumerate_triplets_order_is_rotation_stable_on_equal_brightness() -> None:
+    """Equal-brightness triplet canonicalisation is stable under rotation.
+
+    A brightness-keyed apex would break the tie arbitrarily and flip the
+    labelling when the field rotates; the geometric order canonicalises to
+    the same physical vertex assignment for a triangle and any rotated copy.
+    """
+    points = [(0.0, 0.0), (30.0, 4.0), (10.0, 25.0)]
+    equal_brightness = [0, 0, 0]
+    base = _enumerate_triplets(points, equal_brightness)
+    assert len(base) == 1
+    theta = math.radians(37.0)
+    cos_t = math.cos(theta)
+    sin_t = math.sin(theta)
+    rotated = [(cos_t * v - sin_t * u, sin_t * v + cos_t * u) for v, u in points]
+    rotated_triplets = _enumerate_triplets(rotated, equal_brightness)
+    assert len(rotated_triplets) == 1
+    # The apex-first index order is identical before and after rotation.
+    assert (base[0].idx_a, base[0].idx_b, base[0].idx_c) == (
+        rotated_triplets[0].idx_a,
+        rotated_triplets[0].idx_b,
+        rotated_triplets[0].idx_c,
+    )
+
+
+def test_enumerate_triplets_order_independent_of_brightness_ranking() -> None:
+    """Two brightness rankings produce the same scalene-triangle apex order.
+
+    With a scalene triangle the geometry fixes the vertex order regardless
+    of how brightness ranks the vertices, so a re-ranking (the equal-vmag
+    seed lottery) cannot change which correspondences the matcher forms.
+    """
+    points = [(0.0, 0.0), (30.0, 4.0), (10.0, 25.0)]
+    order_one = _enumerate_triplets(points, [0, 1, 2])
+    order_two = _enumerate_triplets(points, [2, 0, 1])
+    assert (order_one[0].idx_a, order_one[0].idx_b, order_one[0].idx_c) == (
+        order_two[0].idx_a,
+        order_two[0].idx_b,
+        order_two[0].idx_c,
+    )
+
+
+def test_canonical_triplet_order_isosceles_breaks_tie_on_brightness() -> None:
+    """An isosceles triangle breaks the equal-opposite-side tie on brightness.
+
+    Vertices 0 and 1 have equal-length opposite sides, so geometry alone cannot
+    order them; the documented fallback orders the tied pair by brightness rank
+    ascending. With vertex 0 the brighter (lower rank), it precedes vertex 1.
+    """
+    points = [(0.0, 0.0), (10.0, 0.0), (5.0, 8.0)]
+    order = _canonical_triplet_order(points, (0, 1, 2), [0, 1, 2])
+    assert order == (2, 0, 1)
+
+
+def test_canonical_triplet_order_isosceles_tie_follows_brightness_rank() -> None:
+    """Reversing the tied pair's brightness rank swaps their canonical order.
+
+    The apex (vertex 2, opposite the longest side) is fixed by geometry, but
+    the two equal-opposite-side vertices are ordered by brightness rank, so
+    ranking vertex 1 brighter than vertex 0 places it first.
+    """
+    points = [(0.0, 0.0), (10.0, 0.0), (5.0, 8.0)]
+    order = _canonical_triplet_order(points, (0, 1, 2), [1, 0, 2])
+    assert order == (2, 1, 0)
 
 
 def test_hash_distance_sq_zero_for_identical_hashes() -> None:
@@ -471,6 +537,48 @@ def test_star_field_min_inliers_less_than_three_raises() -> None:
     try:
         technique_class.tuning = bad_tuning
         with pytest.raises(ValueError, match='pattern_match_min_inliers'):
+            technique_class()
+    finally:
+        technique_class.tuning = original_tuning
+
+
+def test_wide_offset_one_star_catalog_margin_not_positive_raises() -> None:
+    """Construction rejects a non-positive ``wide_offset_one_star_catalog_margin_mag``."""
+    technique_class = StarFieldFromCatalogNav
+    bad_tuning = dict(technique_class.tuning)
+    bad_tuning['wide_offset_one_star_catalog_margin_mag'] = 0.0
+    original_tuning = technique_class.tuning
+    try:
+        technique_class.tuning = bad_tuning
+        with pytest.raises(ValueError, match='wide_offset_one_star_catalog_margin_mag'):
+            technique_class()
+    finally:
+        technique_class.tuning = original_tuning
+
+
+def test_wide_offset_one_star_detection_ratio_below_one_raises() -> None:
+    """Construction rejects a ``wide_offset_one_star_detection_margin_ratio`` below 1."""
+    technique_class = StarFieldFromCatalogNav
+    bad_tuning = dict(technique_class.tuning)
+    bad_tuning['wide_offset_one_star_detection_margin_ratio'] = 0.9
+    original_tuning = technique_class.tuning
+    try:
+        technique_class.tuning = bad_tuning
+        with pytest.raises(ValueError, match='wide_offset_one_star_detection_margin_ratio'):
+            technique_class()
+    finally:
+        technique_class.tuning = original_tuning
+
+
+def test_wide_offset_one_star_confidence_cap_out_of_range_raises() -> None:
+    """Construction rejects a ``wide_offset_one_star_confidence_cap`` outside [0, 1]."""
+    technique_class = StarFieldFromCatalogNav
+    bad_tuning = dict(technique_class.tuning)
+    bad_tuning['wide_offset_one_star_confidence_cap'] = 1.5
+    original_tuning = technique_class.tuning
+    try:
+        technique_class.tuning = bad_tuning
+        with pytest.raises(ValueError, match='wide_offset_one_star_confidence_cap'):
             technique_class()
     finally:
         technique_class.tuning = original_tuning
@@ -1232,6 +1340,129 @@ def test_wide_offset_rejects_incoherent_field(
         make_star_feature('star:UCAC4:2', predicted_vu=(40.0, 360.0), predicted_snr=40.0),
     ]
     technique = StarFieldFromCatalogNav()
+    context = make_nav_context(image, extfov_margin_vu=(150, 150))
+    result = technique.navigate(features, context)
+    assert result.spurious is True
+
+
+def _one_star_wide_field(
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+    *,
+    offset: tuple[float, float],
+    second_detection_dn: float = 120.0,
+) -> tuple[np.ndarray, list[NavFeature]]:
+    """Plant one dominant star at a wide offset plus two off-pattern detections.
+
+    Three predictable catalog stars and three detections satisfy the
+    technique's minimum cohort, but only the bright anchor pairs (the two
+    faint detections align with neither faint catalog star under the
+    anchor's offset), so nothing above a single inlier can lock.
+    ``second_detection_dn`` controls whether the brightest detection is
+    uniquely dominant.
+    """
+    shape = (400, 400)
+    image = np.zeros(shape, dtype=np.float64)
+    anchor_pred = (40.0, 50.0)
+    anchor_det = (anchor_pred[0] + offset[0], anchor_pred[1] + offset[1])
+    draw_gaussian_star(image, anchor_det, peak_dn=400.0, sigma=1.2)
+    draw_gaussian_star(image, (150.0, 150.0), peak_dn=second_detection_dn, sigma=1.2)
+    draw_gaussian_star(image, (350.0, 350.0), peak_dn=120.0, sigma=1.2)
+    features = [
+        make_star_feature('star:UCAC4:anchor', predicted_vu=anchor_pred, predicted_snr=400.0),
+        make_star_feature('star:UCAC4:faint1', predicted_vu=(210.0, 300.0), predicted_snr=30.0),
+        make_star_feature('star:UCAC4:faint2', predicted_vu=(300.0, 210.0), predicted_snr=15.0),
+    ]
+    return image, features
+
+
+def test_one_star_wide_offset_lock_recovers_offset(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """A single uniquely-bright star locks a wide offset when enabled."""
+    planted = (60.0, 80.0)
+    image, features = _one_star_wide_field(make_star_feature, draw_gaussian_star, offset=planted)
+    technique = StarFieldFromCatalogNav()
+    technique._wide_offset_one_star_enabled = True
+    context = make_nav_context(image, extfov_margin_vu=(150, 150))
+    result = technique.navigate(features, context)
+    assert result.spurious is False
+    assert isinstance(result.diagnostics, StarFieldDiagnostics)
+    assert result.diagnostics.wide_offset_lock is True
+    assert result.diagnostics.n_inliers == 1
+    assert result.offset_px[0] == pytest.approx(planted[0], abs=0.5)
+    assert result.offset_px[1] == pytest.approx(planted[1], abs=0.5)
+
+
+def test_one_star_wide_offset_lock_confidence_capped_low(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """A one-star lock is capped below the >=3-inlier wide-offset cap."""
+    image, features = _one_star_wide_field(
+        make_star_feature, draw_gaussian_star, offset=(60.0, 80.0)
+    )
+    technique = StarFieldFromCatalogNav()
+    technique._wide_offset_one_star_enabled = True
+    context = make_nav_context(image, extfov_margin_vu=(150, 150))
+    result = technique.navigate(features, context)
+    assert result.confidence <= technique._wide_offset_one_star_confidence_cap + 1e-9
+
+
+def test_one_star_wide_offset_disabled_by_default(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """With the one-star lock off (the default), the same field stays failed."""
+    image, features = _one_star_wide_field(
+        make_star_feature, draw_gaussian_star, offset=(60.0, 80.0)
+    )
+    technique = StarFieldFromCatalogNav()
+    assert technique._wide_offset_one_star_enabled is False
+    context = make_nav_context(image, extfov_margin_vu=(150, 150))
+    result = technique.navigate(features, context)
+    assert result.spurious is True
+
+
+def test_one_star_wide_offset_rejects_non_unique_detection(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """A field with two comparably bright peaks fails the detection-margin gate.
+
+    This is the C0059893300R regime (1694 vs 1240 DN): the brightest
+    detection is not uniquely dominant, so pairing the anchor with it would
+    be a guess and the lock is correctly refused.
+    """
+    image, features = _one_star_wide_field(
+        make_star_feature, draw_gaussian_star, offset=(60.0, 80.0), second_detection_dn=400.0
+    )
+    technique = StarFieldFromCatalogNav()
+    technique._wide_offset_one_star_enabled = True
+    context = make_nav_context(image, extfov_margin_vu=(150, 150))
+    result = technique.navigate(features, context)
+    assert result.spurious is True
+
+
+def test_one_star_wide_offset_rejects_untrusted_anchor(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """A photometry-saturated brightest catalog anchor is not one-star locked."""
+    image, features = _one_star_wide_field(
+        make_star_feature, draw_gaussian_star, offset=(60.0, 80.0)
+    )
+    features[0] = replace(
+        features[0], flags=replace(cast(StarFlags, features[0].flags), photometry_saturated=True)
+    )
+    technique = StarFieldFromCatalogNav()
+    technique._wide_offset_one_star_enabled = True
     context = make_nav_context(image, extfov_margin_vu=(150, 150))
     result = technique.navigate(features, context)
     assert result.spurious is True

@@ -276,6 +276,10 @@ class NavModelBody(NavModelBodyBase):
         body_name: SPICE body name.
         inventory: Optional pre-computed inventory entry; pulled from
             ``obs.inventory`` on demand otherwise.
+        siblings: ``(body_name, range_km)`` for the other bodies in the FOV.
+            A sibling whose center range is strictly nearer occludes this
+            body's predicted limb / terminator arcs and disc template;
+            ``None`` (the common single-body case) means no sibling occludes.
         config: Optional ``Config`` override.
     """
 
@@ -288,11 +292,14 @@ class NavModelBody(NavModelBodyBase):
         body_name: str,
         *,
         inventory: dict[str, Any] | None = None,
+        siblings: list[tuple[str, float]] | None = None,
         config: Config | None = None,
     ) -> None:
         super().__init__(name, obs, config=config)
         self._body_name = body_name.upper()
         self._inventory = inventory
+        self._siblings: list[tuple[str, float]] = list(siblings or [])
+        self._occluder_mask: NDArrayBoolType | None = None
         self._model_img: NDArrayFloatType | None = None
         self._body_mask: NDArrayBoolType | None = None
         self._limb_mask: NDArrayBoolType | None = None
@@ -333,11 +340,33 @@ class NavModelBody(NavModelBodyBase):
             return []
         if config is None:
             config = DEFAULT_CONFIG
+        in_extfov = bodies_in_extfov(obs, config=config)
+        ranges = {
+            name.upper(): float(entry.get('range', float('inf'))) for name, entry in in_extfov
+        }
         out: list[NavModel] = []
-        for body_name, entry in bodies_in_extfov(obs, config=config):
+        for body_name, entry in in_extfov:
             if body_name.upper() == TITAN_BODY_NAME:
                 continue
-            out.append(cls(f'body:{body_name}', obs, body_name, inventory=entry, config=config))
+            # Every other in-FOV body is a candidate occluder (Titan included:
+            # it is not navigated as a shape, but a nearer Titan still hides a
+            # moon behind it).  The per-body render decides per pixel which are
+            # actually nearer via the backplane depth test.
+            siblings = [
+                (other.upper(), ranges[other.upper()])
+                for other, _ in in_extfov
+                if other.upper() != body_name.upper()
+            ]
+            out.append(
+                cls(
+                    f'body:{body_name}',
+                    obs,
+                    body_name,
+                    inventory=entry,
+                    siblings=siblings,
+                    config=config,
+                )
+            )
         return out
 
     def create_model(self) -> None:
@@ -637,11 +666,25 @@ class NavModelBody(NavModelBodyBase):
         else:
             km_per_pixel_local = np.zeros_like(body_mask_valid, dtype=np.float64)
 
+        # Body-body occlusion: every predicted pixel a nearer sibling body
+        # hides is dropped from the limb / terminator polylines (so the DT fit
+        # never chases an arc the image does not show) and, promoted to extfov
+        # coordinates, is trimmed out of the disc template (so the correlator
+        # does not score against disc brightness that is not there).
+        occluder_local = self._compute_occluder_local(
+            restr_bp, oversample_v=oversample_v, oversample_u=oversample_u
+        )
+        occluder_ext = obs.make_extfov_false()
+        if occluder_local is not None:
+            occluder_ext[v_slice, u_slice] = occluder_local & body_mask_valid
+        self._occluder_mask = occluder_ext
+
         limb_sampler = _build_polyline_sampler(
             local_mask=limb_mask_local,
             region_mask=body_mask_valid,
             incidence_local=incidence_vals,
             km_per_pixel_local=km_per_pixel_local,
+            occluder_local=occluder_local,
             ext_v0=ext_v0,
             ext_u0=ext_u0,
         )
@@ -650,6 +693,7 @@ class NavModelBody(NavModelBodyBase):
             region_mask=is_lit,
             incidence_local=incidence_vals,
             km_per_pixel_local=km_per_pixel_local,
+            occluder_local=occluder_local,
             ext_v0=ext_v0,
             ext_u0=ext_u0,
         )
@@ -678,7 +722,12 @@ class NavModelBody(NavModelBodyBase):
         # with partial framing.  Both regimes make the disc-correlation
         # template poor, which is exactly what the 0.4 gate screens out;
         # the phase coupling is intentional, not a normalisation bug.
-        lit_visible_in_fov = int(np.count_nonzero(lit_mask & in_sensor))
+        # A lit pixel a nearer sibling hides is not usable disc-template
+        # support, so it leaves the numerator while the denominator stays the
+        # whole predicted disc: at deep overlap ``visible_lit_fraction`` falls
+        # toward the surviving crescent, which is what the BODY_DISC gate and
+        # reliability consume.
+        lit_visible_in_fov = int(np.count_nonzero(lit_mask & in_sensor & ~occluder_ext))
         visible_lit_fraction = lit_visible_in_fov / max(body_total, 1)
         overflow_fraction = 1.0 - (body_visible / max(body_total, 1))
 
@@ -696,6 +745,54 @@ class NavModelBody(NavModelBodyBase):
             'overflow_fraction': overflow_fraction,
         }
         return model_img, limb_mask, terminator_mask, body_mask, info
+
+    def _compute_occluder_local(
+        self, restr_bp: Backplane, *, oversample_v: int, oversample_u: int
+    ) -> NDArrayBoolType | None:
+        """Union silhouette of nearer sibling bodies over the body's bbox grid.
+
+        A sibling occludes this body only when its inventory center range is
+        strictly nearer; the per-pixel depth test in
+        :meth:`oops.backplane.Backplane.where_in_front` then decides which
+        pixels the nearer body actually hides.  The result is downsampled to
+        the same discrete grid the limb / terminator masks live on.
+
+        A backplane failure on any occluder degrades to no occlusion for that
+        occluder (the arc / template stays untrimmed) rather than aborting the
+        render.
+
+        Parameters:
+            restr_bp: Backplane over the body's oversampled bbox meshgrid.
+            oversample_v: Vertical oversample factor of that meshgrid.
+            oversample_u: Horizontal oversample factor of that meshgrid.
+
+        Returns:
+            The bbox-local boolean occluder mask, or ``None`` when no sibling
+            is nearer or none hides any pixel (the common case costs nothing).
+        """
+        nearer = [name for name, rng in self._siblings if rng < self._subject_range_km]
+        if not nearer:
+            return None
+        occluder: NDArrayBoolType | None = None
+        for sibling_name in nearer:
+            try:
+                hidden = restr_bp.where_in_front(sibling_name, self._body_name)
+                hidden_over = hidden.mvals.filled(False).astype(bool)
+            except Exception:
+                self._logger.warning(
+                    'Body %s: failed to compute occlusion by %s; arc / template left untrimmed',
+                    self._body_name,
+                    sibling_name,
+                    exc_info=True,
+                )
+                continue
+            hidden_local = (
+                filter_downsample(hidden_over.astype(np.float64), oversample_v, oversample_u) >= 0.5
+            )
+            occluder = hidden_local if occluder is None else (occluder | hidden_local)
+        if occluder is None or not occluder.any():
+            return None
+        return occluder
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
         """Emit the body's NavFeatures per the design's gate rules."""
@@ -822,6 +919,15 @@ class NavModelBody(NavModelBodyBase):
         v_min, u_min, v_max, u_max = self._bbox_extfov_vu
         template_img = self._model_img[v_min:v_max, u_min:u_max].copy()
         template_mask = self._body_mask[v_min:v_max, u_min:u_max].copy()
+        # A nearer sibling body hides part of this disc; the image shows the
+        # occluder there, not this body, so drop the occluded pixels from the
+        # template.  Correlating against disc brightness that is not present
+        # would be a coherent mismatch the correlator's robust machinery
+        # absorbs rather than discounts.
+        if self._occluder_mask is not None:
+            occluded_bbox = self._occluder_mask[v_min:v_max, u_min:u_max]
+            template_img[occluded_bbox] = 0.0
+            template_mask[occluded_bbox] = False
         return NavFeature(
             feature_id=f'body_disc:{self._body_name}',
             feature_type=NavFeatureType.BODY_DISC,
@@ -986,6 +1092,7 @@ def _build_polyline_sampler(
     region_mask: NDArrayBoolType,
     incidence_local: NDArrayFloatType,
     km_per_pixel_local: NDArrayFloatType,
+    occluder_local: NDArrayBoolType | None = None,
     ext_v0: int,
     ext_u0: int,
 ) -> _PolylineSampler:
@@ -1012,6 +1119,10 @@ def _build_polyline_sampler(
             defines the outward normal.  Same shape as ``local_mask``.
         incidence_local: Per-pixel incidence angle (radians).
         km_per_pixel_local: Per-pixel km/px scale.
+        occluder_local: Optional body-body occlusion mask on the same local
+            grid; ridge vertices a nearer body hides are dropped from the
+            polyline while ``total_vertices`` keeps the full ridge, so the
+            visible-arc fraction reports the occlusion loss.
         ext_v0: Extfov v-offset of the local grid origin.
         ext_u0: Extfov u-offset of the local grid origin.
     """
@@ -1027,6 +1138,11 @@ def _build_polyline_sampler(
         # sampler's parallel arrays consistent and the downstream sigmas
         # finite and positive (which ``lm_subpixel_refine`` requires).
         resolved = km_per_pixel_local[vs, us] > 0.0
+        if occluder_local is not None:
+            # A ridge vertex a nearer body hides has no counterpart edge in
+            # the image; keep it in ``total_vertices`` but drop it from the
+            # fitted polyline so the visible-arc fraction reports the loss.
+            resolved = resolved & ~occluder_local[vs, us]
         vs, us = vs[resolved], us[resolved]
     if vs.size == 0:
         empty: NDArrayFloatType = np.empty((0, 2), dtype=np.float64)
@@ -1113,10 +1229,10 @@ def _visible_arc_fraction(sampler: _PolylineSampler) -> float:
     """Fraction of the predicted ridge vertices that survived to the fit.
 
     ``sampler.total_vertices`` is the ridge length found before per-vertex
-    drops (currently zero-resolution / off-body vertices; the table-driven
-    shadow extractor will add to this when wired), and ``vertices_vu`` holds
-    only the survivors, so the visible-arc fraction is ``survivors / total``.
-    Returns ``0.0`` when no ridge vertices were found at all.
+    drops (zero-resolution / off-body vertices and vertices a nearer sibling
+    body occludes), and ``vertices_vu`` holds only the survivors, so the
+    visible-arc fraction is ``survivors / total``.  Returns ``0.0`` when no
+    ridge vertices were found at all.
     """
     total = sampler.total_vertices
     if total <= 0:

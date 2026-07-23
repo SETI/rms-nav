@@ -11,10 +11,10 @@ exposure_sec: 1.0
 # cosmic-ray detector, so at a near-zero offset (prediction on the star) every
 # star was gated and the star techniques had nothing to navigate.  With a zero
 # planted offset the prediction coincides exactly with each star; the star field
-# must still recover it.  Magnitudes are distinct so the pattern matcher's
-# brightest-vertex canonicalisation is deterministic on both the catalog and the
-# detection side; equal magnitudes made the match a tie-breaking lottery over
-# the noise realization.
+# must still recover it.  Magnitudes are distinct here so the detection is
+# unambiguous; the equal-magnitude sibling scene star_equal_brightness exercises
+# the geometric triplet canonicalisation that keeps the match deterministic when
+# the magnitudes tie.
 # Stars deposit as point masses; an explicit navigator-matched PSF gives them a
 # finite (floor-form) profile instead of a 1-pixel spike.
 optics:

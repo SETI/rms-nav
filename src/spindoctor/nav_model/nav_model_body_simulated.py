@@ -510,6 +510,20 @@ class NavModelBodySimulated(NavModelBodyBase):
         v_min, u_min, v_max, u_max = self._bbox_extfov_vu
         template_img = self._model_img[v_min:v_max, u_min:u_max].copy()
         template_mask = self._body_mask[v_min:v_max, u_min:u_max].copy()
+        # A nearer sibling body hides part of this disc; the image shows the
+        # occluder there, not this body.  Drop the occluded pixels from the
+        # correlation template so it scores only against disc brightness the
+        # image actually carries, and report a visible fraction that falls
+        # with occlusion depth (the sim mirror of the SPICE-backed model, so
+        # the two do not desync on disc occlusion).
+        disc_visible_fraction = 1.0
+        if self._occluder_mask is not None:
+            occluded_bbox = self._occluder_mask[v_min:v_max, u_min:u_max]
+            total_disc = int(np.count_nonzero(template_mask))
+            template_img[occluded_bbox] = 0.0
+            template_mask[occluded_bbox] = False
+            visible_disc = int(np.count_nonzero(template_mask))
+            disc_visible_fraction = visible_disc / max(total_disc, 1)
         features: list[NavFeature] = [
             NavFeature(
                 feature_id=f'body_disc:{self._body_name}',
@@ -524,9 +538,9 @@ class NavModelBodySimulated(NavModelBodyBase):
                 position_cov_px=None,
                 intensity_sigma_rel=0.0,
                 preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
-                reliability=1.0,
+                reliability=disc_visible_fraction,
                 reliability_reasons=NavReliabilityBreakdown(
-                    visible_lit_fraction=1.0, overflow_fraction=0.0
+                    visible_lit_fraction=disc_visible_fraction, overflow_fraction=0.0
                 ),
                 usable_types=frozenset({NavFeatureType.BODY_DISC}),
                 flags=BodyDiscFlags(body_name=self._body_name, overflow_fov_fraction=0.0),
