@@ -1230,13 +1230,14 @@ def test_ensemble_rank_1_ring_disagreeing_radially_does_not_group() -> None:
     assert result.excluded_from_consensus == ['BodyBlobNav']
 
 
-def test_blob_outlier_dropped_against_two_star_consensus_commits() -> None:
+def test_blob_outlier_dropped_against_two_star_consensus() -> None:
     """A lone blob a corroborated two-star fix contradicts is dropped, not conflicted.
 
     Mirrors N1530185128: a two-star ``StarUniqueMatchNav`` on the truth and a
     ``BodyBlobNav`` brightness centroid pixels away.  Without the drop the lone
     blob's confidence is close enough to force the lone-vs-lone conflict; the
-    drop removes it so the star fix commits.
+    drop removes it so the star fix commits, keeps the fused offset on the star
+    solution, and leaves the blob out of the consensus.
     """
     star = _make_result(
         technique_name='StarUniqueMatchNav',
@@ -1256,35 +1257,22 @@ def test_blob_outlier_dropped_against_two_star_consensus_commits() -> None:
         image_classifier=_classifier(),
         provenance=_provenance(),
     )
+    # The blob is dropped, so the star fix commits instead of conflicting.
     assert result.status == 'success'
-
-
-def test_blob_outlier_dropped_leaves_star_offset_undragged() -> None:
-    """The dropped blob does not drag the committed offset off the star fix."""
-    star = _make_result(
-        technique_name='StarUniqueMatchNav',
-        offset=(18.0, 0.0),
-        confidence=0.706,
-        diagnostics=StarUniqueMatchDiagnostics(mode='two_star'),
-    )
-    blob = _make_result(
-        technique_name='BodyBlobNav',
-        offset=(-1.0, 3.5),
-        confidence=0.4,
-        diagnostics=BodyBlobDiagnostics(body_extent_px=180.0, max_phase_angle_deg=28.0),
-    )
-    result = ensemble(
-        [star, blob],
-        feature_inventory=[],
-        image_classifier=_classifier(),
-        provenance=_provenance(),
-    )
+    # The dropped blob does not drag the committed offset off the star fix.
     assert result.offset_px is not None
     assert result.offset_px[0] == pytest.approx(18.0, abs=0.5)
+    # The dropped blob is not a consensus member.
+    assert result.consensus_techniques == ['StarUniqueMatchNav']
 
 
-def test_blob_outlier_dropped_is_not_a_consensus_member() -> None:
-    """The dropped blob appears neither in the consensus nor as an excluded outlier."""
+def test_blob_star_disagreement_floor_zero_disables_the_drop() -> None:
+    """A zero floor disables the drop, so the contradicting blob still conflicts.
+
+    Same scene as the drop test, but ``blob_star_disagreement_floor_px=0.0``
+    turns the drop off: the lone blob is retained and forces the lone-vs-lone
+    conflict, confirming the tunable's documented disable behavior.
+    """
     star = _make_result(
         technique_name='StarUniqueMatchNav',
         offset=(18.0, 0.0),
@@ -1302,8 +1290,9 @@ def test_blob_outlier_dropped_is_not_a_consensus_member() -> None:
         feature_inventory=[],
         image_classifier=_classifier(),
         provenance=_provenance(),
+        config=EnsembleConfig(blob_star_disagreement_floor_px=0.0),
     )
-    assert result.consensus_techniques == ['StarUniqueMatchNav']
+    assert result.status == 'conflicted'
 
 
 def test_blob_agreeing_with_star_consensus_is_kept() -> None:

@@ -54,7 +54,6 @@ until the owning issue closes.
 |---|---|
 | N1492091163, N1867601758, N1867602424 (wrong ring-feature locks) | #346 |
 | N1853392805 (highly-irregular exclusion discards the terminator fit) | #338 |
-| N1572105349 (single-inlier refine offset-pull) | #222 |
 | N1484593951, N1686349893 (resolved-body ~2 px offset misses) | #350 |
 | N1806609736 (Iapetus shape-lock veto misfire vs a correct limb+star fix) | #392 |
 
@@ -308,8 +307,6 @@ with assignee rfrenchseti.
 - **#392** body-witness shape-lock veto misfires on Iapetus (N1806609736): a
   correct limb+star consensus is vetoed because the albedo-dichotomy-biased blob
   centroid disagrees; the geometric-side mirror of the #351 ensemble drop
-- **#222** single-inlier pass-2 refine pulls the fused offset off a correct
-  body fix (N1572105349)
 
 **Agreement estimator real-frame follow-ups (sequence with #225/WS-1 and
 #230/WS-5):**

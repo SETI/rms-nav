@@ -246,18 +246,20 @@ class EnsembleConfig:
     )
 
     def __post_init__(self) -> None:
-        """Reject body-witness thresholds that would misfire the veto.
+        """Reject ensemble thresholds that would misfire their gate.
 
         Both direct construction and ``from_mapping`` land here, so a
         non-finite value, a negative tolerance, an out-of-range phase, or an
         inverted phase window is rejected the same way regardless of how the
         config was built.  A negative Mahalanobis threshold, for instance,
-        would make nearly every separation veto-worthy.
+        would make nearly every separation veto-worthy, and a negative
+        ``blob_star_disagreement_floor_px`` would drop every blob.
 
         Raises:
-            ValueError: if any body-witness threshold is non-finite, a
-                tolerance is negative, a phase falls outside ``[0, 180]``, or
-                the shape-lock ceiling is not below the collapse floor.
+            ValueError: if any body-witness or blob/star tolerance is
+                non-finite or negative, a body-witness phase falls outside
+                ``[0, 180]``, or the shape-lock ceiling is not below the
+                collapse floor.
         """
         non_negative = {
             'body_witness_disagreement_floor_px': self.body_witness_disagreement_floor_px,
@@ -422,7 +424,15 @@ def _drop_blob_outlier_against_star_consensus(
 
 
 def _translation_distance_px(a: NavTechniqueResult, b: NavTechniqueResult) -> float:
-    """Return the Euclidean ``(dv, du)`` distance between two results in pixels."""
+    """Return the Euclidean ``(dv, du)`` distance between two results in pixels.
+
+    Parameters:
+        a: The first result.
+        b: The second result.
+
+    Returns:
+        The Euclidean distance between the two results' ``offset_px``, in pixels.
+    """
     return math.hypot(a.offset_px[0] - b.offset_px[0], a.offset_px[1] - b.offset_px[1])
 
 
