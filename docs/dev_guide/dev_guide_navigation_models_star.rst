@@ -98,10 +98,21 @@ radius in proportion to how much fainter the record reads --
 :data:`~spindoctor.nav_model.stars.saturation.SATURATION_MATCH_WIDEN_PER_MAG` base radii per
 magnitude of gap, capped at
 :data:`~spindoctor.nav_model.stars.saturation.SATURATION_MATCH_MAX_WIDEN_RADII` base radii so
-the widened match never reaches an unrelated field star. A larger saturation error implies a
-larger displacement, so the widening scales with the gap. Each reference star is consumed by
-at most one corrected record, so one true-magnitude star cannot correct or absorb two
-distinct saturated records.
+the widened match stays inside the arc-minute spacing of bright stars. A larger saturation
+error implies a larger displacement, so the widening scales with the gap. Each reference star
+is consumed by at most one corrected record, so one true-magnitude star cannot correct or
+absorb two distinct saturated records.
+
+Among the references that fall inside their own widened reach the match takes the brightest,
+not the merely nearest, breaking a brightness tie on separation. A bright unrelated reference
+earns a wide reach of its own from its large magnitude gap to the saturated candidate, so a
+pure nearest-neighbour rule could let it capture the candidate when it happens to sit closer
+than the true twin. Preferring the brightest qualifying reference blocks that: UCAC4
+saturation drives a bright star's reading systematically faint, so a faint reading is best
+explained by the brightest reference that can account for it. The failure mode this guards
+needs two bright stars within the widened reach, which the sparse fields the pipeline
+navigates do not present, so in practice the two rules agree; the brightness preference only
+diverges on a crowded bright field.
 
 **Detectability consumes the flag.** The detectability model exempts a ``photometry_saturated``
 star from the faint-magnitude gate -- its recorded magnitude is a too-faint saturated

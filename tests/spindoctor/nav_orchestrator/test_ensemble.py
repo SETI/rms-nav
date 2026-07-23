@@ -1,5 +1,7 @@
 """Tests for ``spindoctor.nav_orchestrator.ensemble.ensemble`` and helpers."""
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -18,6 +20,8 @@ from spindoctor.nav_technique.diagnostics import (
     BodyDiscDiagnostics,
     BodyLimbDiagnostics,
     NavTechniqueDiagnostics,
+    RingAnnulusDiagnostics,
+    RingEdgeDiagnostics,
     StarRefineDiagnostics,
     StarUniqueMatchDiagnostics,
 )
@@ -29,13 +33,14 @@ from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.support.exceptions import NavContractError
 
 
-def _classifier() -> NavImageClassifierResult:
+def _classifier(*, background_gradient_score: float | None = None) -> NavImageClassifierResult:
     return NavImageClassifierResult(
         image_class='clean',
         saturation_frac=0.0,
         missing_frac=0.0,
         noise_sigma=1.0,
         max_dn=10.0,
+        background_gradient_score=background_gradient_score,
     )
 
 
@@ -1284,6 +1289,7 @@ def _refine_result(
     confidence: float = 0.5,
     prior_sources: frozenset[str] = frozenset(),
     cov: np.ndarray | None = None,
+    n_stars_used: int = 1,
 ) -> NavTechniqueResult:
     """Build a pass-2 StarRefineNav result seeded by ``prior_sources``."""
     return NavTechniqueResult(
@@ -1294,18 +1300,20 @@ def _refine_result(
         confidence=confidence,
         spurious=False,
         at_edge=False,
-        diagnostics=StarRefineDiagnostics(n_stars_used=1),
+        diagnostics=StarRefineDiagnostics(n_stars_used=n_stars_used),
         prior_source_techniques=prior_sources,
     )
 
 
 def test_ensemble_prior_descendant_does_not_boost_confidence() -> None:
-    """A refine seeded by its groupmate adds no agreement boost.
+    """A single-star refine seeded by its groupmate adds no agreement boost.
 
     The N1492091163 anatomy: a wrong pass-1 result seeds the prior, the
     1-star refine locks onto whatever sits near the (wrong) predicted
     position, and the pair's 'agreement' must not raise the combined
-    confidence above what the pass-1 result carries alone.
+    confidence above what the pass-1 result carries alone.  The seeded
+    single-star refine is dropped from the combine entirely, so
+    the confidence is the pass-1 result's own, neither boosted nor diluted.
     """
     ring = _make_result(technique_name='RingEdgeNav', offset=(6.7, -118.6), confidence=0.9)
     tagged = _refine_result(offset=(6.8, -118.5), prior_sources=frozenset({'RingEdgeNav'}))
@@ -1324,16 +1332,51 @@ def test_ensemble_prior_descendant_does_not_boost_confidence() -> None:
     )
     assert with_tag.status == 'success'
     assert without_tag.confidence > with_tag.confidence
-    # The tagged pair collapses to the precision-weighted average with no
-    # 2-member agreement factor: (0.9 + 0.5) / 2 with equal covariances.
-    assert with_tag.confidence == pytest.approx(0.7)
+    # The seeded single-star refine is dropped, leaving the ring result alone:
+    # its own 0.9, with no 2-member agreement factor and no 0.5-dilution.
+    assert with_tag.confidence == pytest.approx(0.9)
     assert without_tag.confidence == pytest.approx(0.99)
 
 
-def test_ensemble_prior_descendant_still_refines_the_offset() -> None:
-    """A tagged refine keeps contributing its precision to the combined offset."""
+def test_ensemble_seeded_single_star_refine_does_not_drag_offset() -> None:
+    """A seeded single-star refine no longer pulls the fused offset.
+
+    The reopened N1572105349 anatomy: pass-1 techniques agree at the truth,
+    and a single-inlier StarRefine seeded from that prior sits off to one side.
+    Because it merely re-observes its own seed and adds no independent
+    constraint, it is dropped from the combine, so the fused offset stays on
+    the pass-1 result rather than being dragged toward the refine.
+    """
     ring = _make_result(technique_name='RingEdgeNav', offset=(6.0, -118.0), confidence=0.9)
     refine = _refine_result(offset=(7.0, -119.0), prior_sources=frozenset({'RingEdgeNav'}))
+    result = ensemble(
+        [ring, refine],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.offset_px is not None
+    # The refine is dropped: the offset is the ring result's, not the mean.
+    assert result.offset_px[0] == pytest.approx(6.0)
+    assert result.offset_px[1] == pytest.approx(-118.0)
+    # The full consensus membership is still reported for transparency.
+    assert result.consensus_techniques == ['RingEdgeNav', 'StarRefineNav']
+
+
+def test_ensemble_seeded_multi_star_refine_still_refines_the_offset() -> None:
+    """A seeded multi-star refine keeps contributing its precision.
+
+    Only a *single*-star seeded refine is dropped: a multi-star refine carries
+    independent catalog matches, so it still refines the fused offset even
+    though the ensemble denies it a corroboration vote.
+    """
+    ring = _make_result(technique_name='RingEdgeNav', offset=(6.0, -118.0), confidence=0.9)
+    refine = _refine_result(
+        offset=(7.0, -119.0),
+        prior_sources=frozenset({'RingEdgeNav'}),
+        n_stars_used=5,
+    )
     result = ensemble(
         [ring, refine],
         feature_inventory=[],
@@ -1345,7 +1388,147 @@ def test_ensemble_prior_descendant_still_refines_the_offset() -> None:
     # Equal covariances: the combined offset is the arithmetic mean.
     assert result.offset_px[0] == pytest.approx(6.5)
     assert result.offset_px[1] == pytest.approx(-118.5)
-    assert result.consensus_techniques == ['RingEdgeNav', 'StarRefineNav']
+
+
+def test_ensemble_two_ring_techniques_are_one_witness_not_two() -> None:
+    """RingEdge + RingAnnulus on one catalog earn no independence boost.
+
+    Two ring techniques read the same catalog model, so their agreement is not
+    independent corroboration.  Collapsing them to one witness must leave the
+    combined confidence at a single witness's level, well below the two-witness
+    boost an independent body+ring pair would earn on the same numbers.
+    """
+    tight = np.eye(2, dtype=np.float64) * 0.04
+    edge = _make_result(
+        technique_name='RingEdgeNav',
+        offset=(5.0, -6.0),
+        cov=tight,
+        confidence=0.8,
+        diagnostics=RingEdgeDiagnostics(),
+    )
+    annulus = _make_result(
+        technique_name='RingAnnulusNav',
+        offset=(5.05, -6.05),
+        cov=tight,
+        confidence=0.8,
+        diagnostics=RingAnnulusDiagnostics(),
+    )
+    ring_pair = ensemble(
+        [edge, annulus],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    # Control: an independent body+ring pair on the same numbers does earn the
+    # two-witness boost, so it lands at the confidence cap.
+    body = _make_result(
+        technique_name='BodyLimbNav',
+        offset=(5.05, -6.05),
+        cov=tight,
+        confidence=0.8,
+        diagnostics=BodyLimbDiagnostics(),
+    )
+    independent_pair = ensemble(
+        [edge, body],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert ring_pair.status == 'success'
+    # No agreement boost: the collapsed witness keeps its own 0.8, while the
+    # independent pair is boosted to the cap.
+    assert ring_pair.confidence == pytest.approx(0.8)
+    assert independent_pair.confidence > ring_pair.confidence
+    # And the collapsed covariance is not double-tightened: a single witness's
+    # sigma, larger than the fused two-witness sigma.
+    assert ring_pair.covariance_px2 is not None
+    assert independent_pair.covariance_px2 is not None
+    assert ring_pair.covariance_px2[0, 0] > independent_pair.covariance_px2[0, 0]
+
+
+def test_ensemble_collapsed_ring_pair_has_no_spurious_quorum() -> None:
+    """A collapsed ring pair counts as one witness in the conflict logic.
+
+    RingEdge + RingAnnulus agree (and collapse to one witness), and a lone
+    dissenter of comparable confidence is excluded. Because the collapsed pair
+    is one witness, this is a lone-vs-lone standoff and must go conflicted --
+    not be suppressed by the pair spuriously claiming a two-member quorum.
+    """
+    tight = np.eye(2, dtype=np.float64) * 0.04
+    loose = np.eye(2, dtype=np.float64) * 0.25
+    edge = _make_result(
+        technique_name='RingEdgeNav',
+        offset=(0.0, 0.0),
+        cov=tight,
+        confidence=0.6,
+        diagnostics=RingEdgeDiagnostics(),
+    )
+    annulus = _make_result(
+        technique_name='RingAnnulusNav',
+        offset=(0.05, 0.05),
+        cov=tight,
+        confidence=0.6,
+        diagnostics=RingAnnulusDiagnostics(),
+    )
+    dissenter = _make_result(
+        technique_name='TechniqueB', offset=(30.0, 30.0), cov=loose, confidence=0.55
+    )
+    result = ensemble(
+        [edge, annulus, dissenter],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'conflicted'
+    assert result.excluded_from_consensus == ['TechniqueB']
+
+
+def test_ensemble_scattered_light_disc_limb_are_one_witness() -> None:
+    """Disc + limb on a scattered-light frame do not inflate the tier.
+
+    On a frame whose background-gradient score clears the scattered-light
+    threshold, disc and limb measure the same veiling ramp, so their agreement
+    is not independent.  Collapsing them must keep the tier honest, whereas the
+    identical numbers on a clean frame legitimately earn the two-witness boost
+    and a high tier.
+    """
+    tight = np.eye(2, dtype=np.float64) * 0.04
+    disc = _make_result(
+        technique_name='BodyDiscCorrelateNav',
+        offset=(5.0, -6.0),
+        cov=tight,
+        confidence=0.8,
+        diagnostics=BodyDiscDiagnostics(),
+    )
+    limb = _make_result(
+        technique_name='BodyLimbNav',
+        offset=(5.05, -6.05),
+        cov=tight,
+        confidence=0.8,
+        diagnostics=BodyLimbDiagnostics(),
+    )
+    disc = dataclasses.replace(disc, source_bodies=frozenset({'MIMAS'}))
+    limb = dataclasses.replace(limb, source_bodies=frozenset({'MIMAS'}))
+    scattered = ensemble(
+        [disc, limb],
+        feature_inventory=[],
+        image_classifier=_classifier(background_gradient_score=8.0),
+        provenance=_provenance(),
+    )
+    clean = ensemble(
+        [disc, limb],
+        feature_inventory=[],
+        image_classifier=_classifier(background_gradient_score=1.0),
+        provenance=_provenance(),
+    )
+    assert scattered.status == 'success'
+    assert clean.status == 'success'
+    # Scattered: one witness, no boost -> medium tier at its own 0.8.
+    assert scattered.confidence == pytest.approx(0.8)
+    assert scattered.confidence_rank != 'high'
+    # Clean: two independent witnesses, boosted to the cap and a high tier.
+    assert clean.confidence > scattered.confidence
+    assert clean.confidence_rank == 'high'
 
 
 def test_ensemble_descendant_backed_winner_is_singleton_in_standoff() -> None:

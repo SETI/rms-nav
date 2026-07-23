@@ -175,6 +175,12 @@ would always score near unity for a fully-in-frame body and lose discriminating 
 disc gate. The overflow fraction measures the portion of the predicted disc that is outside
 the sensor FOV.
 
+A lit pixel a nearer body hides (see :ref:`body-body occlusion <body-occlusion>`) is not
+usable disc-template support, so it is excluded from the visible-lit numerator while the
+denominator stays the whole predicted disc. At deep mutual-event overlap the visible-lit
+fraction therefore falls toward the surviving crescent, which drops the disc reliability and,
+below the minimum, gates the disc feature out entirely.
+
 Lit-weighted predicted centroid
 -------------------------------
 
@@ -266,6 +272,38 @@ highly-irregular body whose predicted diameter exceeds that value drops its shap
 Below the threshold, and for bodies tagged merely ``irregular``, the shape features are
 unchanged — the continuous ellipsoid-residual widening in the per-vertex sigma budget already
 degrades an irregular body's limb reliability without dropping the feature outright.
+
+.. _body-occlusion:
+
+Body-body occlusion
+-------------------
+
+When two bodies overlap along the line of sight — a mutual event — the nearer body hides part
+of the farther one, and the image shows the occluder there, not the target. The model accounts
+for this so the features it emits describe the arcs and disc area the image actually carries.
+
+Each per-body model receives the other in-FOV bodies as siblings. A sibling occludes the target
+only when its inventory center range is strictly nearer; for each such sibling the model queries
+the SPICE backplane's ``where_in_front`` predicate over the target's bounding box, which is True
+at every pixel where the nearer body is intercepted in front of the target. The union of those
+predicates is the target's occluder mask.
+
+The occluder mask feeds three products:
+
+- **Limb and terminator polylines.** A ridge vertex the occluder hides is dropped from the
+  fitted polyline. It stays in the ridge total, so the ``visible_arc_fraction`` reports the loss:
+  a mutual-event limb scores like the partial arc it is rather than claiming a full limb the
+  distance-transform fit would then try to align against an arc the image does not show.
+- **The visible-lit fraction**, as described above, which drops the disc reliability with
+  occlusion depth.
+- **The disc template.** The occluded pixels are trimmed out of the correlation template (both
+  the brightness image and its mask), so the correlator scores only against disc brightness the
+  image carries. Correlating against the missing disc area would be a coherent mismatch the
+  robust machinery absorbs into the fit rather than discounting.
+
+A backplane failure on any occluder degrades to leaving that occluder's contribution untrimmed
+rather than aborting the render. The single-body case (no nearer sibling) computes no mask and
+costs nothing.
 
 Restrictions and assumptions
 ----------------------------

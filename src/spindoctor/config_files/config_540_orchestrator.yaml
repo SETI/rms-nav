@@ -91,6 +91,11 @@ orchestrator:
     # or small-body centroid whose large sigma makes the separation consistent
     # with agreement is not vetoed on scatter alone.
     body_witness_agreement_sigma: 2.0
+    # Background-gradient score at or above which a frame is treated as
+    # scattered-light, so the disc and limb techniques on one body are fused
+    # as a single correlated witness rather than two independent ones.
+    # Matches the cohort-curation scattered-light prescan threshold.
+    scattered_light_gradient_score: 5.0
     # Confidence/sigma requirements per confidence tier; max_sigma_px
     # null means no sigma requirement for that tier.
     tier_thresholds:

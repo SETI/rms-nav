@@ -142,10 +142,28 @@ parameter is at the configured fraction of its cap, the result is flagged :attr:
 confidence formula's hard-zero gate forces confidence to zero. The spurious tests gate on
 the Tukey-weighted DT residual RMS, the unweighted (raw) DT residual RMS against the same
 threshold (so a fit where Tukey rejects a wholly mis-aligned arc cannot pass on its
-collapsed weighted RMS), the degenerate flag, the inlier count and fraction, and the LM
-displacement from the coarse seed; when any of these fails, the result is flagged
+collapsed weighted RMS), the degenerate flag, the inlier count and fraction, the LM
+displacement from the coarse seed, and a coarse-seed mis-lock test; when any of these
+fails, the result is flagged
 :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` and similarly
 forced to zero.
+
+The mis-lock test targets a distinct low-phase failure. Near zero phase (below ~15 deg) the
+lit arc spans almost the whole silhouette and the limb-darkening roll-off is nearly
+symmetric, so the across-limb gradient that constrains the fit is weakest exactly where the
+geometry offers the least leverage. In that regime the polarity-weighted coarse search can
+find a false overlap peak several pixels from the true limb and seed the LM in the wrong
+basin. The trust region then holds the LM within ~1 px of that wrong seed, so the fit cannot
+reach the true limb and instead sits pinned against the trust-region boundary, exiting at the
+iteration cap without meeting the step tolerance. The residuals stay low and every vertex
+stays an inlier, so the RMS, inlier, and displacement guards all pass and the fit would
+otherwise report a confident multi-pixel offset. The mis-lock test catches it by the joint
+signature: a fit that BOTH failed to converge AND ended at least
+``spurious_unconverged_trust_boundary_fraction`` of the trust region away from the coarse
+seed is a wrong-basin lock and is flagged spurious. A healthy sub-pixel refinement lands
+within ~0.71 px of its integer seed and converges, so it clears the test on both counts; a
+converged fit that walked the full trust region to a good limb (common just outside the
+low-phase band) also clears it, because convergence is the discriminator.
 
 Configuration
 =============
@@ -173,6 +191,16 @@ All numeric tunables for this technique live in ``techniques.BodyLimbNav.tuning`
   the trust region below the LM cannot leave the coarse basin, so this guard normally
   never fires; it catches any future regression that bypasses the trust region. Set
   slightly larger than ``lm_trust_region_px``.
+- ``spurious_unconverged_trust_boundary_fraction`` — float, default ``0.9`` (dimensionless).
+  Coarse-seed mis-lock gate. A fit that BOTH failed to converge AND ended at least this
+  fraction of the trust region away from the integer coarse seed was pinned against the
+  trust-region boundary trying to escape a wrong-basin seed; it is flagged spurious rather
+  than allowed to emit a confident multi-pixel offset. This is the low-phase
+  (below ~15 deg) under-conditioned failure where a false overlap peak seeds the wrong basin.
+  A healthy sub-pixel fit sits within ~0.71 px of its integer seed and converges, so it
+  clears the gate. Convergence is the decisive condition: a fit that legitimately walks to
+  the trust-region boundary but still converges is not flagged, because the gate requires
+  both a failure to converge and a boundary-pinned displacement.
 - ``lm_trust_region_px`` — float, default ``1.0`` px. Maximum LM displacement from the
   integer coarse seed; the LM rejects any trial step that would land outside this
   radius without committing. The coarse search returns the integer-pixel polarity-weighted
@@ -204,7 +232,7 @@ All numeric tunables for this technique live in ``techniques.BodyLimbNav.tuning`
 Per-instrument overrides
 ------------------------
 
-The twelve keys above are global; the per-instrument YAML files in
+The thirteen keys above are global; the per-instrument YAML files in
 ``src/spindoctor/config_files/config_4N0_inst_*.yaml`` do not override any of them. The
 search-window margin used by the at-edge test comes from the per-instrument
 :class:`~spindoctor.nav_orchestrator.instrument_config.InstrumentSettings` rather than from this block.

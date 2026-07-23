@@ -473,7 +473,7 @@ same estimator on both sides (EE50 0.90 sim vs 0.91 real; EE80 1.72 vs
 calibrated-chain hot-pixel retune, while the transient (cosmic-ray)
 share stays unmodeled on every chain -- each catalog entry retains an
 explicit zero beside its measured rate and the chain-model reason (see
-known gap 7); limb rise widths agree in the like-for-like pool
+known gap 6); limb rise widths agree in the like-for-like pool
 (co-populated-strata medians 2.539 sim vs 2.539 px real, W1/IQR 0.16)
 with per-stratum divergences from 0.21 to 2.04 -- worst at high phase,
 where the simulated crescent limb measures *wider* than the real one
@@ -557,7 +557,7 @@ likewise (101), and the sky level above floor at 3.7e-5 vs 3.2e-4
 chain is a chain symptom, not a small-n artifact -- most plausibly the
 nominal DN-to-I/F calibration scale of the simulated chain (the
 per-filter CISSCAL scale is not modeled; the same family as known gap
-3), though the 4-frame cohort cannot close the attribution.  The
+2), though the 4-frame cohort cannot close the attribution.  The
 remaining WAC statistics rest on 1-2 frames per stratum and are
 reported in the summary JSON without distributional claims.
 
@@ -636,17 +636,7 @@ cannot close, it is recorded here rather than force-fitted:
    shines.  Simulated star-technique success on body-crossing fields is
    therefore optimistic: real frames lose stars behind dark limbs that
    simulated frames keep.
-2. **Disc templates ignore body-body occlusion.**  The simulated limb and
-   terminator arcs are occlusion-aware: vertices hidden behind an
-   explicitly nearer sibling body are dropped from the emitted polylines
-   and ``visible_arc_fraction`` reports the loss, so a mutual-event limb
-   scores like the partial arc it is.  The ``BODY_DISC`` correlation
-   template, however, still renders each body in isolation: at deep
-   overlap the far body's template contains disc area the image does not
-   show, a coherent mismatch the correlator's robust machinery absorbs
-   rather than discounts.  The mutual-event scenes pin the measured
-   (accurate) outcomes; an occlusion-aware disc template remains open.
-3. **Calibrated-product quantization scars.**  The sim's calibrated path
+2. **Calibrated-product quantization scars.**  The sim's calibrated path
    retains full LSB quantization texture: its measured sky-noise floor is
    ~1 DN-equivalent at every exposure (Cassini CALIB and Voyager GEOMED
    paths alike).  Real calibrated products sit *below* the LSB (NAC CALIB
@@ -664,24 +654,24 @@ cannot close, it is recorded here rather than force-fitted:
    uncertainty at full size: its simulated sky sigma undershoots the
    real cohort by roughly 8x one-sidedly (2.4e-5 vs 1.9e-4 I/F; see the
    WAC subsection).
-4. **Hot pixels are per-scene, not per-detector.**  The simulated
+3. **Hot pixels are per-scene, not per-detector.**  The simulated
    hot-pixel population is drawn from each scene's seeded stream, so it
    never recurs at fixed detector positions across frames the way real
    hot pixels do.  The FOM 6 stationary/transient split therefore cannot
    match by construction; only the total incidence is comparable (and now
    tuned).
-5. **No per-readout-mode PSF.**  The catalog carries one kernel per
+4. **No per-readout-mode PSF.**  The catalog carries one kernel per
    instrument; the LORRI cohort's 4x4-binned frames (and any summed
    Cassini modes that enter the library later) see a different effective
    kernel that the catalog cannot express.
-6. **Matched-frame content limits.**  Simulated ring edges are sharp
+5. **Matched-frame content limits.**  Simulated ring edges are sharp
    optical-depth steps and simulated matched bodies are relief-free
    ellipsoids, so residual FOM 3/4 width differences fold in real edge
    structure (ring radial profiles, limb topography) beyond the PSF that
    FOM 2 pins independently.  The Galileo negative frames carry an
    extended background glow (scattered light) that matched sky frames do
    not model, which dominates that cohort's FOM 5 comparison.
-7. **Measured transients exceed what the cosmic-ray stage can express.**
+6. **Measured transients exceed what the cosmic-ray stage can express.**
    Every cohort measures a nonzero transient spike fraction (NAC 2.75e-4,
    WAC 4.89e-4, Galileo 1.17e-4, LORRI 3.36e-4 per frame), yet no
    catalog entry adopts a ``cosmic_ray_rate_per_sec``: the Cassini
@@ -1501,7 +1491,7 @@ the dedicated sweep or the scene class that drives it:
      - sweep ``star_catalog_scatter``
    * - Mutual event
      - overlapping bodies
-     - occlusion-aware limb arcs; isolated disc templates
+     - occlusion-aware limb arcs and disc templates
      - ``mutual_event`` scene class
    * - Atmosphere
      - ``atmosphere`` ``tau_ref`` haze

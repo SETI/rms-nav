@@ -1,0 +1,37 @@
+schema_version: 2
+scene_name: low_phase_limb_misconverge
+instrument: coiss_nac
+size_v: 260
+size_u: 260
+random_seed: 7
+exposure_sec: 1.0
+# A well-resolved sphere at phase 10 deg on black sky, noise-free, with a
+# small planted sub-pixel offset.  Near zero phase the lit arc spans almost
+# the whole silhouette and the limb-darkening roll-off is nearly symmetric,
+# so the across-limb gradient that constrains the limb fit is weakest exactly
+# where the geometry offers the least leverage.  A false polarity-weighted
+# overlap peak several pixels from the true limb then outscores it, seeds the
+# Levenberg-Marquardt stage in the wrong basin, and the trust region pins the
+# fit against its boundary while it fails to converge -- a multi-pixel offset
+# on a clean single-body frame.  Measured behavior: BodyLimbNav flags the
+# fit spurious (the unconverged-at-trust-boundary mis-lock gate), so it
+# contributes no confident wrong offset; the disc technique still navigates
+# the scene, so the fused ensemble result is a success at the planted offset.
+# This scene is the tripwire for that gate: a regression that lets the
+# mis-lock through as a confident success fails loudly.
+bodies:
+  - name: RHEA
+    shape_model: ellipsoid
+    center_v: 130.0
+    center_u: 130.0
+    axis1: 160.0
+    axis2: 160.0
+    axis3: 160.0
+    illumination_angle: 25.0
+    phase_angle: 10.0
+noise:
+  poisson: false
+  read_noise_dn: 0.0
+offset_v: 0.3
+offset_u: 0.3
+offset_rotation_deg: 0.0

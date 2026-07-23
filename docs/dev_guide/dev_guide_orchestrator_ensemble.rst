@@ -18,7 +18,7 @@ fused via precision-weighted (Kalman-style) merging.
 Theory
 ======
 
-The ensemble's reconciliation is a seven-step pipeline.
+The ensemble's reconciliation is an eight-step pipeline.
 
 Step 1 — drop spurious
 ----------------------
@@ -64,10 +64,10 @@ rank-1 fit, or a rotation-unobservable star result) carries meaningless values a
 the axis it cannot observe; differencing those against a result that *does* observe
 that axis would manufacture disagreement out of nothing. Restricting the comparison to
 the directions both results genuinely constrain lets a rank-1 ring edge and a full-rank
-blob that agree radially group — and Step 5 then fuses the ring's radial precision with
+blob that agree radially group — and Step 6 then fuses the ring's radial precision with
 the blob's along-edge constraint. Two results with no shared observable direction have
 nothing to disagree on and are treated as agreeing, so their complementary constraints
-combine. The pseudo-inverse used here and in Step 5 quarantines the huge
+combine. The pseudo-inverse used here and in Step 6 quarantines the huge
 unobservable-axis sentinel variances (the ``1e15`` rotation sentinel and the
 ``1e12``-scale translation sentinels) and inverts them separately from the genuine
 block, so a sentinel axis cannot raise the eigenvalue cutoff and silently zero the
@@ -90,9 +90,11 @@ searches a small window around the pass-1 prior — is conditionally dependent o
 techniques that set that prior. The orchestrator records those techniques on the
 result's :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.prior_source_techniques`;
 when such a technique sits in the same subset, the descendant re-observed its own seed
-and casts **no independent vote** (it may still refine the fused offset in Step 5, just
-not corroborate its prior). This stops a marginal refine seeded by a wrong pass-1
-answer from "confirming" that answer and inflating consensus.
+and casts **no independent vote**. A multi-star refine may still lend its precision to
+the fused offset in Step 6; a *single*-star refine adds no independent constraint at all
+and is dropped from the combine entirely in Step 5 (below). This stops a marginal refine
+seeded by a wrong pass-1 answer from "confirming" that answer and inflating consensus, or
+from dragging the fused offset off the pass-1 techniques that agree at the truth.
 
 Exclusion forces the conflicted branch only when the excluded results constitute a
 genuine alternative answer: the strongest consensus formable among the excluded
@@ -110,10 +112,53 @@ summed-confidence gap test that then decides a conflict is applied in two regime
   not a conflict.
 
 A lone dissenter against a multi-technique consensus is outlier-rejected: the consensus
-is fused normally (with the Step 6 disagreement penalty) and the dissenter appears only
+is fused normally (with the Step 7 disagreement penalty) and the dissenter appears only
 in ``excluded_from_consensus`` and ``per_technique``.
 
-Step 5 — precision-weighted merge
+Step 5 — resolve independent estimators
+---------------------------------------
+
+The precision-weighted merge and the agreement boost both assume the members they fuse are
+*independent* measurements: their information matrices add (so two agreeing witnesses fuse
+to a tighter covariance than either alone), and their mutual agreement multiplies the
+confidence. That assumption is false whenever two members draw on the same underlying
+error source, and fusing them anyway over-tightens the covariance (inflating the tier),
+spuriously boosts the confidence, and lets a redundant member drag the offset. Before the
+merge, :func:`~spindoctor.nav_orchestrator.ensemble_independence.resolve_independent_estimators`
+resolves the winning subset into the set of estimators the merge may treat as independent,
+correcting three known correlations:
+
+- **Seeded single-star refine.** A one-inlier
+  :class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav` seeded by a
+  technique in the subset (Step 4) re-observes its own prior near the predicted position
+  and adds no independent constraint, so it is dropped from the combine entirely. A
+  multi-star refine carries genuine catalog matches and is kept (it still casts no
+  corroboration vote).
+- **Two ring techniques on one catalog.**
+  :class:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav` and
+  :class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` read the
+  same predicted ring geometry from the same catalog model; a radially misplaced catalog
+  puts both wrong by the same amount, so they are collapsed to a single representative
+  witness rather than fused as two.
+- **Disc and limb on one scattered-light gradient.** On a frame whose
+  :attr:`~spindoctor.nav_orchestrator.image_classifier_result.NavImageClassifierResult.background_gradient_score`
+  clears ``scattered_light_gradient_score`` (default 5.0), a large-scale veiling ramp
+  crosses the sensor and both
+  :class:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` and
+  :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` lock onto the ramp
+  rather than the body, correlating their errors; the disc and limb results on one body are
+  then collapsed to a single representative. On a clean frame (score below the threshold)
+  they remain two independent witnesses.
+
+The representative of a collapsed set is its highest-positional-precision member (with a
+deterministic tie-break), so the fused offset is the single best view of the shared
+measurement, not a spuriously tightened average of two. The full consensus membership is
+reported on
+:attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.consensus_techniques` for
+transparency, while the resolved set of independent witnesses drives the precision-weighted
+fusion, the agreement boost, the quorum count, and the vote mass.
+
+Step 6 — precision-weighted merge
 ---------------------------------
 
 Inside the winning group, fuse the per-technique offsets into one estimate via
@@ -124,7 +169,7 @@ pseudo-inverse of the summed information matrix. The pseudoinverse handles rank-
 inputs (e.g. a flat-ring-only result) gracefully — the unobservable axis carries an
 unbounded marginal sigma.
 
-Step 6 — disagreement and conflict penalties
+Step 7 — disagreement and conflict penalties
 --------------------------------------------
 
 When any result was excluded from the consensus, the fused confidence is multiplied
@@ -133,7 +178,7 @@ by ``disagreement_penalty`` (default 0.7). When the conflict branch fired in Ste
 ``conflicted_confidence_multiplier`` (default 0.3) applied to the winning group's
 combined confidence so the JSON sidecar reflects the conflict's severity.
 
-Step 7 — confidence-rank assignment
+Step 8 — confidence-rank assignment
 -----------------------------------
 
 The fused confidence and the per-axis sigma are mapped to a five-bucket rank
@@ -183,14 +228,17 @@ scene (``tests/integration/sim_scenes/ring_system/orbit_error_ringlet.yaml``)
 both ring techniques widen their reported covariance by the declared 2.5 px
 catalog error bar along the translation each would absorb such a displacement
 into -- the edge fit from its fit vertices, the annulus correlation from the
-same edge normals painted into its composite template. The fused radial sigma
-grows past the high tier's cap and the biased offset demotes to ``medium``.
-Because both members price the same hazard rather than one carrying an
-un-widened radial axis, the fused sigma covers the residual bias (a measured
-~2.3 px error against a ~1.8 px fused sigma, about 1.3 sigma, where widening the
-edge fit alone left ~2.8 sigma). The channel prices the hazard; it cannot
-remove the bias, so the scene keeps its measured-error pin. The shared DT
-fit-quality gates
+same edge normals painted into its composite template. Because the two ring
+techniques read one catalog model, the Step 5 independence resolution collapses
+them to a single representative witness before the merge, so the fused radial
+sigma is that one witness's honest ~2.5 px rather than the value a
+two-independent-witness fuse would shrink it to. The biased offset then demotes
+to ``low`` (a measured confidence around 0.89 against a ~2.5 px sigma that
+covers the residual bias), and the scene keeps its measured-error pin: the
+channel prices the hazard, but it cannot remove the bias. Collapsing the ring
+pair is what stops the spurious alternative -- treating the two correlated
+views as independent, which shrank the sigma below the hazard and let the
+agreement boost re-inflate the confidence. The shared DT fit-quality gates
 (:doc:`dev_guide_techniques_dt_fitting`) close the adjacent
 unverified-fit family before results reach the ensemble at all.
 
@@ -264,15 +312,17 @@ above are asserted (see :ref:`sim-expected`), so a worsening regression and a
 silent revert both fail CI.
 
 A related honesty caveat survives inside the confidence scalar itself: the
-two-member agreement boost assumes the members' errors are independent, so
-two techniques observing the same displaced feature (the ring-edge fit and
-the ring-annulus correlation on one misplaced ringlet) can fuse to a high
-scalar confidence even as the sigma-gated tier demotes the result. The
-planted-orbit-error scene above is exactly this case: once both ring
-techniques widen isotropically their radial weights re-couple, the agreement
-boost engages, and the scene reports a ~0.99 scalar at ``medium`` tier and
-~2.3 px error. On such frames the tier is the trustworthy verdict and the
-scalar is not.
+two-member agreement boost assumes the members' errors are independent, so two
+techniques observing the same displaced feature can fuse to a high scalar
+confidence even as the sigma-gated tier demotes the result. The Step 5
+independence resolution collapses the correlations it models -- the two ring
+techniques on one catalog, disc and limb on one veiling gradient -- to a single
+witness before the merge, so those pairs do not earn the boost; the
+planted-orbit-error scene above accordingly lands at ``low`` on its honest
+~2.5 px sigma rather than at a boosted near-cap scalar. The caveat is that any
+correlation the resolution does not model still couples two members while the
+boost treats them as independent, and on such frames the tier is the
+trustworthy verdict and the scalar is not.
 
 That scalar is **not** inert, and it must not be dismissed as documentation.
 The tier boundaries are themselves fitted *from* it: the calibration tooling
@@ -287,9 +337,9 @@ Two consequences worth stating plainly:
   the calibration cohort (it is generated independently by the campaign's
   own randomized scene generator), so no scene-level exclusion is needed
   and none is applied.
-- The cohort's own ring family *does* plant orbit errors with declared
-  sigmas, so it generates rows with this same coupling. The next
-  recalibration has to treat them deliberately -- by pricing the
+- Any correlation the independence resolution does not model still generates
+  cohort rows that pair a near-cap confidence with a multi-pixel error. The
+  next recalibration has to treat them deliberately -- by pricing the
   correlated-error discount, or by fitting the boundary against fused sigma
   rather than the boosted scalar -- rather than absorbing them as evidence
   that high confidence at multi-pixel error is normal.
@@ -381,13 +431,13 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
   most of the discrimination, so the ``'medium'`` and ``'low'`` confidence floors rest
   at the same value as the final ``min_confidence`` gate. A structural consequence:
   the two-star and one-star confidence caps (0.8 / 0.7) sit below the high boundary,
-  so capped star locks top out at medium regardless of quality. The Step 7 tier caps
+  so capped star locks top out at medium regardless of quality. The Step 8 tier caps
   apply on top of these thresholds.
 
 Implementation
 ==============
 
-The ensemble is split across three modules under ``src/spindoctor/nav_orchestrator/``:
+The ensemble is split across four modules under ``src/spindoctor/nav_orchestrator/``:
 
 - ``ensemble.py`` — the reconciler itself:
   :func:`~spindoctor.nav_orchestrator.ensemble.ensemble`,
@@ -398,6 +448,11 @@ The ensemble is split across three modules under ``src/spindoctor/nav_orchestrat
   :func:`~spindoctor.nav_orchestrator.ensemble_consensus.corroborating_members`,
   :func:`~spindoctor.nav_orchestrator.ensemble_consensus.corroborating_confidence`, and
   :func:`~spindoctor.nav_orchestrator.ensemble_consensus.result_param_vector`.
+- ``ensemble_independence.py`` — the independence-resolution step that collapses
+  correlated witnesses before the merge:
+  :func:`~spindoctor.nav_orchestrator.ensemble_independence.resolve_independent_estimators`,
+  :func:`~spindoctor.nav_orchestrator.ensemble_independence.is_single_star_result`, and
+  :class:`~spindoctor.nav_orchestrator.ensemble_independence.IndependenceResolution`.
 - ``ensemble_observability.py`` — observable-subspace linear algebra:
   :func:`~spindoctor.nav_orchestrator.ensemble_observability.mixed_scale_pinvh`,
   :func:`~spindoctor.nav_orchestrator.ensemble_observability.observable_basis`,
