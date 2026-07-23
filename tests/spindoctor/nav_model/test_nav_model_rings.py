@@ -721,7 +721,7 @@ def test_annulus_template_bbox_stops_at_the_planet_limb() -> None:
     features = model.to_features(None)  # type: ignore[arg-type]
     annulus = [f for f in features if f.feature_type == NavFeatureType.RING_ANNULUS]
     bbox = annulus[0].geometry.bbox_extfov_vu
-    assert bbox[3] <= 15
+    assert bbox[3] == 15
 
 
 def test_annulus_template_without_mask_keeps_pixels_behind_disc() -> None:
