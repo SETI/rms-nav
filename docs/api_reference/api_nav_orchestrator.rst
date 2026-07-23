@@ -58,6 +58,11 @@ spindoctor.nav_orchestrator
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.nav_orchestrator.body_witness_veto
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.nav_orchestrator.curator
    :members:
    :undoc-members:

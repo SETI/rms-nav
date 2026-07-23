@@ -347,10 +347,12 @@ What it cannot do
   shear, stars occulted by a dark limb (simulated star success is optimistic
   where an unlit body should block the star), and body-on-body cast shadows
   (mutual events render occlusion, not shadowing).
-- **Fix the gaps it exposes.** The confident-wrong pins are evidence, not
-  mitigation; closing them requires ensemble work (consuming declared
-  model-error bars, cross-technique vetoes), and until then the pinned
-  hazards stand (see the ensemble chapter,
+- **Fix the gaps it exposes.** A confident-wrong pin is evidence, not
+  mitigation; closing it requires ensemble work (consuming declared
+  model-error bars, cross-technique vetoes). The body-witness veto closes the
+  shape-mismatch and haze-crescent modes; the remaining pinned hazard (the
+  ring planted-orbit-error lock) stands until its own fix lands (see the
+  ensemble chapter,
   :doc:`dev_guide_orchestrator_ensemble`).
 - **Transfer its calibration to real frames by itself.** That path runs
   through the sidecar re-ratchet and a pre-stated transfer criterion (the
@@ -986,22 +988,24 @@ position, or drowns a lone star in an overwhelming confounder field, the
 confident wrong offset. Each such scene carries an ``expected`` block, and the
 machinery turns "must not be confidently wrong here" into a passing assertion.
 
-**The honest pin.** A small second family inverts the reading: scenes whose
-measured behavior *is* a wrong offset the ensemble cannot remove (the
-``orbit_error_ringlet`` planted radial catalog error, whose bias survives
-even though the declared-sigma covariance channel demotes its tier, and the
-``titan_crescent_horns`` pair's haze-dragged blob centroid). Pinning bare
+**The honest pin.** A small second family inverts the reading: a scene whose
+measured behavior *is* a wrong offset the ensemble cannot remove -- the
+``orbit_error_ringlet`` planted radial catalog error, whose bias survives even
+though the declared-sigma covariance channel demotes its tier. Pinning bare
 ``status: success`` on such a scene would quietly freeze the wrong answer as
-correct behavior, so these scenes also declare ``known_offset_error_px`` --
-the measured fused error magnitude, from the scene's recorded baseline -- with
-a ``known_offset_error_tol_px`` band. The assertion then fails in *both*
+correct behavior, so it also declares ``known_offset_error_px`` -- the measured
+fused error magnitude, from the scene's recorded baseline -- with a
+``known_offset_error_tol_px`` band. The assertion then fails in *both*
 directions: a regression that worsens the error fails, and a genuine fix that
 shrinks it also fails loudly, prompting a deliberate re-pin (or retirement of
 the pin) instead of a silent behavior change. The pinned success is a
 documented hazard held in view, never an endorsement; the scene comments and
 the campaign record carry the analysis, and the ensemble chapter
 (:doc:`dev_guide_orchestrator_ensemble`) names the failure family for the
-readers who consume tiers.
+readers who consume tiers. The ``titan_crescent_horns`` pair left this family
+once the cross-technique body-witness veto closed it: its haze-dragged
+lone-blob offset is declined outright, so the scenes assert that ``failed``
+outcome instead of an honest-pin success.
 
 .. _sim-floor:
 
@@ -1338,18 +1342,20 @@ defeats the disc correlation (spurious -- there is no full lit disc), the
 predicted terminator arc is emitted but dropped by the feature reliability
 gate before any technique runs (its honestly computed reliability, capped by
 ``sin(155 deg)`` = 0.42, scores 0.26 against the 0.30 ``TERMINATOR_ARC``
-threshold), and the haze-dragged blob centroid alone carries the fused answer:
-a *low-tier success roughly 30 px off* in ``du``. Nothing vetoes that wrong
-answer -- the low tier, at the blob's 0.40 confidence cap, is the only flag --
-so the scene pins the tier and status rather than presenting the outcome as
-safe.  Re-measured under the 2026-07-18 recalibration, the outcome persists
-with a thinner margin: the fused 0.40 sits 0.05 above the 0.35 ensemble
-acceptance gate, and the scene stands as ensemble-gap evidence (no blob
-diagnostic can see a systematic photometric bias). The noiseless
+threshold), and the haze-dragged blob centroid alone would carry the fused
+answer roughly 30 px off in ``du``. That is exactly the lone-blob collapsed
+regime the body-witness veto (see :doc:`dev_guide_orchestrator_ensemble`)
+guards: the only surviving body offset is the bias-prone centroid while a
+sibling geometric technique on the same body self-flagged spurious, so the
+frame is declined (``failed``, ``status_reason``
+``lone_blob_in_collapsed_regime``) rather than reported as a 30-px-wrong
+success -- a wrong offset that passes the acceptance gate is worse than a
+declared failure. The scene asserts that decline. The noiseless
 sibling ``titan_crescent_horns_noiseless`` -- Poisson and read noise off, the
-same haze and phase geometry -- pins the systematic bias itself
-deterministically (planted ``du`` -0.8, recovered 29.17), so the ring of
-light alone, not the noise, carries the answer that far. The haze evaluation
+same haze and phase geometry -- pins the underlying centroid bias
+deterministically (planted ``du`` -0.8, blob centroid at 29.17), so the ring
+of light alone, not the noise, drives the collapse, and the decline is stable
+rather than noise-dependent. The haze evaluation
 is restricted to the bounding box of the
 body plus its halo (out to a detached shell's reach), so its cost scales with
 that box rather than the frame, and a body without an ``atmosphere`` block

@@ -52,6 +52,10 @@ from spindoctor.feature.constants import (
     AGREEMENT_FACTOR_CAP,
     COMBINED_CONFIDENCE_CAP,
 )
+from spindoctor.nav_orchestrator.body_witness_veto import (
+    BodyWitnessVeto,
+    evaluate_body_witness_veto,
+)
 from spindoctor.nav_orchestrator.ensemble_consensus import (
     consensus_selection,
     corroborating_confidence,
@@ -92,6 +96,23 @@ DEFAULT_CONFLICTED_CONFIDENCE_MULTIPLIER = 0.3
 DEFAULT_MIN_CONFIDENCE = 0.35
 DEFAULT_PINVH_RCOND = 1.0e-9
 DEFAULT_MAX_ALLOWED_ROTATION_DEG = 5.0
+# Body-witness veto thresholds (see body_witness_veto).  The blob centroid's
+# lit-hemisphere bias grows toward half phase (and is re-modeled only once the
+# coarse acquisition switches to the crescent template past it), so the two
+# checks bracket the reliable-witness regime: the shape-lock check trusts the
+# blob only below the low phase ceiling, the collapsed-regime check treats it
+# as the haze-bias suspect only above the high phase floor.  The disagreement
+# tolerance is the larger of an absolute floor and a fraction of the body
+# diameter; well-navigated single-body frames hold the blob within ~1.5 px of
+# the fused offset, while a disc / limb shape lock disagrees by 5 px and up.
+DEFAULT_BODY_WITNESS_SHAPE_LOCK_MAX_PHASE_DEG = 60.0
+DEFAULT_BODY_WITNESS_COLLAPSE_MIN_PHASE_DEG = 90.0
+DEFAULT_BODY_WITNESS_DISAGREEMENT_FLOOR_PX = 4.0
+DEFAULT_BODY_WITNESS_DISAGREEMENT_FRAC = 0.03
+# Mahalanobis-distance threshold the blob-vs-consensus disagreement must exceed
+# under the combined covariance before the veto fires, so a large-sigma centroid
+# whose separation is statistically consistent is not vetoed on scatter alone.
+DEFAULT_BODY_WITNESS_AGREEMENT_SIGMA = 2.0
 # Tier confidence boundaries are sim-anchored (fitted 2026-07-18 on the
 # recalibrated simulated-scene campaign, with the #210 covariance
 # floors live and the ring truth vocabulary in the scene cohort): the
@@ -156,6 +177,20 @@ class EnsembleConfig:
             programming error upstream and raises ``NavContractError``.
         tier_thresholds: Mapping ``rank -> {min_confidence, max_sigma_px}``;
             see ``derive_confidence_rank``.
+        body_witness_shape_lock_max_phase_deg: Phase ceiling (degrees) below
+            which the pose-free brightness centroid is a trustworthy position
+            witness for the body shape-lock veto; the lit-hemisphere bias grows
+            toward half phase, so the ceiling sits below it.
+        body_witness_collapse_min_phase_deg: Phase floor (degrees) above which a
+            lone blob is the haze-bias-prone suspect for the collapsed-regime
+            veto.
+        body_witness_disagreement_floor_px: Absolute floor of the body-witness
+            veto's cross-technique disagreement tolerance (a lower bound).
+        body_witness_disagreement_frac: Fraction of the body diameter added to
+            the floor as the body-witness veto's disagreement lower bound.
+        body_witness_agreement_sigma: Mahalanobis-distance threshold the
+            disagreement must exceed under the combined covariance before the
+            body-witness veto fires.
     """
 
     agreement_sigma: float = DEFAULT_AGREEMENT_SIGMA
@@ -166,6 +201,11 @@ class EnsembleConfig:
     min_confidence: float = DEFAULT_MIN_CONFIDENCE
     pinvh_rcond: float = DEFAULT_PINVH_RCOND
     max_allowed_rotation_deg: float = DEFAULT_MAX_ALLOWED_ROTATION_DEG
+    body_witness_shape_lock_max_phase_deg: float = DEFAULT_BODY_WITNESS_SHAPE_LOCK_MAX_PHASE_DEG
+    body_witness_collapse_min_phase_deg: float = DEFAULT_BODY_WITNESS_COLLAPSE_MIN_PHASE_DEG
+    body_witness_disagreement_floor_px: float = DEFAULT_BODY_WITNESS_DISAGREEMENT_FLOOR_PX
+    body_witness_disagreement_frac: float = DEFAULT_BODY_WITNESS_DISAGREEMENT_FRAC
+    body_witness_agreement_sigma: float = DEFAULT_BODY_WITNESS_AGREEMENT_SIGMA
     tier_thresholds: dict[str, dict[str, float | None]] = field(
         default_factory=lambda: copy.deepcopy(DEFAULT_TIER_THRESHOLDS)
     )
@@ -759,6 +799,61 @@ def ensemble(
             provenance=provenance,
             per_technique=results,
             feature_inventory=feature_inventory,
+            model_metadata=md,
+            annotations=ann,
+        )
+    # Cross-technique body-witness veto: catch confident-wrong body locks the
+    # per-technique diagnostics cannot see -- a geometric consensus that agreed
+    # at a shape-mismatched offset the pose-free blob contradicts, or a lone
+    # blob carrying the answer in a regime where the geometric technique on the
+    # same body self-flagged spurious.
+    veto = evaluate_body_witness_veto(
+        best_group,
+        results,
+        combined.offset_px,
+        combined.covariance_px2,
+        shape_lock_max_phase_deg=cfg.body_witness_shape_lock_max_phase_deg,
+        collapse_min_phase_deg=cfg.body_witness_collapse_min_phase_deg,
+        disagreement_floor_px=cfg.body_witness_disagreement_floor_px,
+        disagreement_frac=cfg.body_witness_disagreement_frac,
+        agreement_sigma=cfg.body_witness_agreement_sigma,
+        rcond=cfg.pinvh_rcond,
+    )
+    if veto is BodyWitnessVeto.LONE_BLOB_COLLAPSED_REGIME:
+        IMAGE_LOGGER.info(
+            'Body-witness veto: the lone surviving body offset is the brightness '
+            'centroid while a geometric technique on the same body self-flagged '
+            'spurious; declining the frame (systematic photometric bias)'
+        )
+        return NavResult.failed(
+            status_reason=NavStatusReason.LONE_BLOB_IN_COLLAPSED_REGIME,
+            image_classifier=image_classifier,
+            provenance=provenance,
+            per_technique=results,
+            feature_inventory=feature_inventory,
+            model_metadata=md,
+            annotations=ann,
+        )
+    if veto is BodyWitnessVeto.SHAPE_LOCK_SUSPECT:
+        conflicted_confidence = combined_confidence * cfg.conflicted_confidence_multiplier
+        IMAGE_LOGGER.info(
+            'Body-witness veto: the geometric body consensus (%s) disagrees with '
+            'the pose-free blob witness by more than the shape-lock tolerance; '
+            'reporting conflicted (confidence %.3f)',
+            ', '.join(consensus_names),
+            conflicted_confidence,
+        )
+        return NavResult.conflicted(
+            offset_px=combined.offset_px,
+            covariance_px2=combined.covariance_px2,
+            confidence=conflicted_confidence,
+            per_technique=results,
+            feature_inventory=feature_inventory,
+            image_classifier=image_classifier,
+            provenance=provenance,
+            excluded_from_consensus=excluded_names,
+            consensus_techniques=consensus_names,
+            status_reason=NavStatusReason.BODY_SHAPE_LOCK_SUSPECT,
             model_metadata=md,
             annotations=ann,
         )

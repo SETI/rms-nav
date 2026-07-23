@@ -30,6 +30,16 @@ class NavStatusReason(StrEnum):
     - ``CONFLICTED_TECHNIQUES``: multiple agreement groups exist after
       grouping and the best-vs-runner-up summed-confidence gap is below
       ``agreement_gap``; offset reported with reduced confidence.
+    - ``BODY_SHAPE_LOCK_SUSPECT``: a geometric body consensus (disc / limb)
+      agreed at a multi-pixel offset that the pose-free brightness centroid on
+      the same well-lit body contradicts, the signature of a lock onto a
+      mismatched shape; the offset is reported conflicted rather than as a
+      confident success.
+    - ``LONE_BLOB_IN_COLLAPSED_REGIME``: the only surviving body offset is the
+      brightness centroid while a sibling geometric technique on the same body
+      self-flagged spurious (a haze crescent or otherwise defeated disc); the
+      centroid carries a systematic photometric bias no diagnostic can see, so
+      the frame is declined rather than reported as a lone-blob success.
     - ``NO_SIGNAL_IN_IMAGE``: image classifier flagged a blank or dark frame.
     - ``IMAGE_OVEREXPOSED``: image classifier saw most pixels at full-well DN.
     - ``MISSING_DATA_DOMINANT``: image classifier saw too many missing-data
@@ -63,6 +73,8 @@ class NavStatusReason(StrEnum):
     OK = 'ok'
     RANK_1_ONLY = 'rank_1_only'
     CONFLICTED_TECHNIQUES = 'conflicted_techniques'
+    BODY_SHAPE_LOCK_SUSPECT = 'body_shape_lock_suspect'
+    LONE_BLOB_IN_COLLAPSED_REGIME = 'lone_blob_in_collapsed_regime'
     NO_SIGNAL_IN_IMAGE = 'no_signal_in_image'
     IMAGE_OVEREXPOSED = 'image_overexposed'
     MISSING_DATA_DOMINANT = 'missing_data_dominant'

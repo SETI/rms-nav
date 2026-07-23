@@ -735,6 +735,7 @@ class NavModelBody(NavModelBodyBase):
                 )
             limb_arc_emitted = False
             blob_min_px = max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)
+            blob_gate_ok = self._predicted_diameter_px >= blob_min_px and self._lit_pixel_count > 0
             if (
                 not suppress_shape_features
                 and limb_vertices >= LIMB_ARC_MIN_VERTICES
@@ -753,7 +754,7 @@ class NavModelBody(NavModelBodyBase):
                     )
                 )
                 limb_arc_emitted = True
-            elif self._predicted_diameter_px >= blob_min_px and self._lit_pixel_count > 0:
+            elif blob_gate_ok:
                 features.append(self._build_blob_feature(shape, context=context))
             else:
                 self._logger.debug(
@@ -768,6 +769,15 @@ class NavModelBody(NavModelBodyBase):
                     blob_min_px,
                     self._lit_pixel_count,
                 )
+
+            # Witness BODY_BLOB alongside a geometric limb (the disc, when
+            # emitted, only accompanies the limb).  The pose-free brightness
+            # centroid is a cross-check the ensemble body-witness veto reads to
+            # catch a geometric technique locked onto a mismatched shape.  It is
+            # superseded in the fuse (BodyBlobNav.runs_as_witness), so it does
+            # not dilute the geometric offset; only the veto consumes it.
+            if limb_arc_emitted and blob_gate_ok:
+                features.append(self._build_blob_feature(shape, context=context))
 
             if not suppress_shape_features and self._should_emit_disc(limb_arc_emitted):
                 features.append(self._build_disc_feature(shape))

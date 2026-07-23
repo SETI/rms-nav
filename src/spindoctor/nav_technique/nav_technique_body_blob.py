@@ -699,6 +699,7 @@ class BodyBlobNav(NavTechnique):
     accepts_feature_types = frozenset({NavFeatureType.BODY_BLOB})
     requires_prior = False
     tier = 'fallback'
+    runs_as_witness = True
     confidence_attributes = frozenset(
         {
             'at_edge',

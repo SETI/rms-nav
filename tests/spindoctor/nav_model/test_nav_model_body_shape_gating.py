@@ -134,7 +134,14 @@ def test_irregular_body_emits_limb_when_resolved() -> None:
     assert NavFeatureType.LIMB_ARC in _emitted_types(model)
 
 
-def test_irregular_resolved_emits_no_blob_when_limb_present() -> None:
-    """The irregular path is unchanged: a resolved Phoebe emits LIMB_ARC, not BODY_BLOB."""
+def test_irregular_resolved_emits_witness_blob_with_limb() -> None:
+    """A resolved Phoebe emits its LIMB_ARC and a witness BODY_BLOB alongside it."""
     model = _make_body_model(body_name='PHOEBE', diameter_px=40.0)
-    assert NavFeatureType.BODY_BLOB not in _emitted_types(model)
+    types = _emitted_types(model)
+    assert NavFeatureType.LIMB_ARC in types
+
+
+def test_irregular_resolved_co_emits_blob_witness() -> None:
+    """The witness blob is co-emitted so the body-witness veto is reachable."""
+    model = _make_body_model(body_name='PHOEBE', diameter_px=40.0)
+    assert NavFeatureType.BODY_BLOB in _emitted_types(model)

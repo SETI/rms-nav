@@ -233,12 +233,21 @@ the silhouette extraction:
   measures how far the limb fit can be expected to wander given the body's intrinsic
   ellipsoid-fit residual. When this scalar exceeds the documented cap the limb fit is
   information-limited; the gate rejects the
-  :attr:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` and falls back to the
-  brightness-weighted-centroid path.
+  :attr:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` and the
+  brightness-weighted-centroid path carries the body instead.
 - The **visible-lit fraction** and **overflow fraction** above. The disc gate fires only
   when :attr:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` was emitted, the
   visible-lit fraction is at or above its minimum, and the
   overflow fraction is at or below its maximum.
+
+The :data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB` gate fires whenever the
+predicted diameter clears its minimum and the body has any lit signal, independent of the limb
+gate: on a small or high-uncertainty body the blob is the *only* body feature, while on a
+well-resolved body it is co-emitted **alongside** the limb (and disc) as a witness. The
+witness blob is superseded in the fuse by any non-spurious geometric result, so it does not
+dilute the geometric offset; the ensemble's body-witness veto reads it as an independent
+pose-free cross-check against a geometric technique locked onto a mismatched shape (see
+:doc:`dev_guide_orchestrator_ensemble`).
 
 The terminator polyline gates fire when the surviving vertex count is at or above the
 configured minimum and the phase factor :math:`\sin\phi` is at or above its minimum.
