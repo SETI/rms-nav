@@ -3,7 +3,7 @@
 *The top-level plan of record for all remaining work. It is written to be
 readable without knowledge of the code internals or the statistical
 methodology; the detail lives in the three sub-plans it points to. Last
-reconciled 2026-07-22.*
+reconciled 2026-07-23.*
 
 **Document map** (what to read for what):
 
@@ -184,15 +184,16 @@ its section names):
    accuracy for backplanes/mosaics/PDS4 values, WS-18).
 
 **Confident-wrong families that poison the validation data** (they belong to
-Track B but gate the study, because it consumes navigator output at scale):
-the high-phase haze crescent that returns a gate-passing success ~30 px wrong
-(#328), the three frames that lock onto the wrong ring feature (#346), body-body
-occlusion ignored by the disc template (#326) and by the visible-arc report
-(#327), and the disc technique locking on at extreme shape mismatch (#291). The
-ensemble-independence family -- a seeded single-star refine dragging a body fix
-(#222), two ring techniques fused as independent witnesses (#317), and
-scattered-light disc/limb errors fused as independent (#339) -- is closed by the
-consensus independence resolution.
+Track B but gate the study, because it consumes navigator output at scale): the
+three frames that lock onto the wrong ring feature (#346). The body-witness-veto
+family -- a high-phase haze crescent returning a gate-passing success ~30 px
+wrong (#328) and the disc technique locking on at extreme shape mismatch (#291)
+-- and the body-body occlusion pair -- the disc template (#326) and the
+visible-arc report (#327) -- are closed by the cross-technique body-witness veto
+and the occlusion-aware body model. The ensemble-independence family -- a seeded
+single-star refine dragging a body fix (#222), two ring techniques fused as
+independent witnesses (#317), and scattered-light disc/limb errors fused as
+independent (#339) -- is closed by the consensus independence resolution.
 
 **Operator's role:** batch votes on library candidates (ongoing); bless the
 realism verdict; approve agreement-study frame selection; make the ring
@@ -212,17 +213,8 @@ answer or fails on a navigable scene.
 navigator's output at scale) and are exactly what a user hits first.
 The known open defects:
 
-- **#328** — a high-phase haze crescent returns a gate-passing success about
-  30 px wrong and nothing vetoes it. Essential; a confident-wrong family.
 - **#346** — three library frames (N1492091163, N1867601758, N1867602424)
   lock confidently onto the wrong ring feature. Standing library reds.
-- **#291** — `BodyDiscCorrelateNav` locks on confidently at extreme shape
-  mismatch.
-- **#326 / #327** — body-body occlusion at deep mutual-event overlap is
-  ignored by the BODY_DISC correlation template (#326) and by
-  `NavModelBody`'s visible-arc-fraction report (#327).
-- **#337** — the star-field matcher's triplet canonicalization is a seed
-  lottery on equal-brightness fields.
 - **#350** — two resolved-body frames (N1484593951, N1686349893) miss the
   offset tolerance by ~2 px after the recalibration.
 - **#351** — the recalibration turns an operator-verified success into a
@@ -232,10 +224,6 @@ The known open defects:
 - **#373** — the RingEdgeNav coarse seed is not robust against competing
   edge populations (polarity-blind); the coarse-lock family that a
   calibration pass against the library must close.
-- **#376** — a widened saturation match can capture the wrong bright
-  reference in a crowded field.
-- **#367** — autonomous star nav cannot lock a wide offset from a single
-  detectable star.
 - **#128 / #150** — the strategic limb-navigation redesign and the ~0.1 px
   limb systematic (shared with Track A's WS-10; design first, validate
   against real images before touching). The measured bias attributes the
@@ -247,9 +235,6 @@ The known open defects:
   illuminations. On real frames the fitter contributes only ~0.1 px while
   spacecraft-position / ephemeris error dominates (0.4-1.7 px), so the
   higher-leverage target is the pointing-kernel side (Track D #188/#50).
-- **#281** — `BodyLimbNav` mis-converges on low-phase (<15 deg) limbs
-  (a 2.71 px jump at phase 10 deg on noise-free planted truth); the
-  spurious gate misses it. Robustness, not precision.
 - **#282** — a ~0.05 px, one-pixel-period sub-pixel ripple rides on top of
   the directional bias; a higher-order / matched-filter sub-pixel edge
   estimator would remove it. Precision refinement, secondary to #150.
@@ -423,7 +408,7 @@ Every open issue, listed once by the track that owns it.
 | Track | Issues |
 |---|---|
 | A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #340, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377, #380 |
-| B — navigation correctness | #25, #128, #130, #150, #239, #281, #282, #283, #291, #326, #327, #328, #337, #338, #346, #350, #351, #352, #367, #373, #376, #378 |
+| B — navigation correctness | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #351, #352, #373 |
 | C — statistics & QA | #240 (plus the standing cross-check and campaign-report practice) |
 | D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #60, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #141, #142, #188, #231, #236, #251, #252, #253, #265 |
 | E — test & docs debt | #122, #129, #177, #178, #241, #242, #243, #244, #245, #288, #379 |
@@ -431,8 +416,8 @@ Every open issue, listed once by the track that owns it.
 
 Cross-listed items (listed once above, noted here): #150/#128 serve both
 Track A's limb-bias workstream and Track B's redesign; the
-confident-wrong families (#328, #346, #326, #327, #291) sit in Track B
-but gate the Track A study; #103/#134/#126 serve both Track D performance and
+confident-wrong ring-lock family (#346) sits in Track B
+but gates the Track A study; #103/#134/#126 serve both Track D performance and
 Track F hardening; #93 is written in Track D, extended per instrument in
 Track F; #174 baselines are Track A infrastructure delivered as Track E test
 work.

@@ -22,10 +22,9 @@ fields to match current behavior.
 ## Track B — Navigation correctness
 
 Ordering within the track: the confidently-wrong defects first
-(#328, #346, #291, #326, #327, #350, #351, #352), because the agreement study
-consumes ensemble output at scale and several curated library frames pin these
-as standing red regressions. Then the coarse-lock calibration (#373) and the
-star-matcher robustness items (#337, #376, #367), then the
+(#346, #350, #351, #352), because the agreement study consumes ensemble output
+at scale and several curated library frames pin these as standing red
+regressions. Then the coarse-lock calibration (#373), then the
 investigation/design items (#25, #128/#150), with the smaller decision items
 (#130, #239, #338) as fill.
 
@@ -46,27 +45,31 @@ follow-up to fit an explicit per-family cross-covariance from the agreement
 study and recover the partially-correlated precision, gated on real-frame rho
 measurements (#225).
 
-### #328 — High-phase haze crescent, gate-passing but ~30 px wrong
+The confident-wrong body-nav family (#328 high-phase haze crescent, #291
+extreme-shape-mismatch disc/limb consensus) is closed by the cross-technique
+body-witness veto: it declines the high-phase haze-crescent gate-passing ~30 px
+success and reports the extreme-shape-mismatch disc/limb consensus conflicted
+rather than a confident-wrong 10-17 px lock. The body-body occlusion pair (#326
+BODY_DISC template, #327 `visible_arc_fraction` / `visible_lit_fraction` report)
+is closed by making `NavModelBody` body-body-occlusion-aware: the correlation
+template is trimmed against nearer-body occlusion and the visible-arc and
+visible-lit fractions no longer over-credit an occluded limb. The star-matcher
+robustness items are closed as well: triplet canonicalization is geometric
+(opposite-side-length), deterministic and rotation-stable on equal-brightness
+fields (#337); the widened saturation match prefers the brightest qualifying
+reference rather than the nearest (#376); and a single-bright-star wide-offset
+lock exists, gated behind two uniqueness margins and default-off pending an
+image-library false-lock sweep (#367). The low-phase limb gate (#281) is closed:
+a `BodyLimbNav` coarse-seed mis-lock below 15 deg phase is flagged spurious by an
+unconverged-at-trust-boundary gate. The ring-annulus occlusion trim (#378) is
+closed: the RING_ANNULUS correlation template is trimmed for planet occlusion,
+the annulus-side analog of the ring-edge trim.
 
-**Symptom:** a high-phase haze crescent returns a gate-passing success about
-30 px wrong and nothing vetoes it. A confident-wrong family that no gate
-currently owns; Essential.
-
-**Fix direction:** the issue body carries the frame and the mechanism; add a
-veto that recognizes the haze-crescent failure signature. Coordinate with
-the #60 Titan / haze-limb work, since the substrate overlaps.
-
-### #346 / #291 / #326 / #327 — the remaining confident-wrong set
+### #346 — the remaining confident-wrong ring-lock
 
 - **#346** — three library frames (N1492091163, N1867601758, N1867602424)
   lock confidently onto the wrong ring feature; standing library reds, tied
   to the coarse-lock calibration (#373).
-- **#291** — `BodyDiscCorrelateNav` locks on confidently at extreme shape
-  mismatch; needs a mismatch veto on the correlation peak.
-- **#326 / #327** — body-body occlusion at deep mutual-event overlap is
-  ignored by the BODY_DISC correlation template (#326) and by
-  `NavModelBody`'s `visible_arc_fraction` report (#327); both over-credit an
-  occluded limb.
 
 ### #350 / #351 / #352 — post-recalibration library reds
 
@@ -95,29 +98,6 @@ per-feature-type edge masking. Needs the library cohort; coordinate with
 Track A so the fix is measured, not guessed. #346 supplies the concrete
 wrong-lock datapoints.
 
-### #378 — RingAnnulus correlation template not filtered for planet occlusion
-
-The annulus-side analog of the ring-edge occlusion trim: `NavModelRings`'s
-`to_features` appends the untrusted `model_img` / `model_mask` to the
-RING_ANNULUS template without trimming against the planet-occlusion mask, so
-on low-resolution frames the annulus correlation template can include ring
-brightness behind the planet disc. Not a regression and no observed failure
-(RingAnnulusNav's NCC is robust) — a correctness/cleanliness gap: trim the
-annulus template against the same occlusion mask the ring-edge feature path
-uses.
-
-### #337 / #376 / #367 — star-matcher robustness
-
-- **#337** — the star-field matcher's triplet canonicalization is a seed
-  lottery on equal-brightness fields; make the canonical triplet order
-  deterministic and rotation-stable
-  (`nav_technique_star_field.py`).
-- **#376** — a widened saturation match can capture the wrong bright
-  reference in a crowded field; constrain the widened match to the intended
-  reference (`nav_model/stars/`).
-- **#367** — autonomous star nav cannot lock a wide offset from a single
-  detectable star; a capability gap in the one-star path.
-
 ### #128 / #150 — Limb navigation redesign and the ~0.1 px systematic
 
 The strategic pair behind several symptoms (the terminator
@@ -130,8 +110,8 @@ diagnosis attributes the dominant term to the photometric roll-off, not DT
 quantization, and ranks the fixes: (1) fit a photometric limb (predict the
 limb-darkened-disc-convolved-with-PSF brightness profile and match it, #150);
 (2) a matched-filter sub-pixel edge estimator to remove the interpolation
-ripple (#282); (3) gate low-phase (<~15 deg) fits (#281); (4) a pixel-centre
-convention audit (#283). **Constraint:** do not enable a fitter change until
+ripple (#282); (3) a pixel-centre convention audit (#283). **Constraint:** do
+not enable a fitter change until
 the real-image measurement exists (Track A #225 provides it) — the current
 partial cancellation is accidental and a well-meaning "fix" can make real
 accuracy worse. On real frames the fitter contributes only ~0.1 px while
