@@ -1737,6 +1737,59 @@ def test_ensemble_shape_lock_veto_reports_conflicted() -> None:
     assert result.status_reason.value == 'body_shape_lock_suspect'
 
 
+def test_ensemble_shape_lock_suppressed_by_corroborating_star_fix() -> None:
+    """A star fix corroborating the geometry commits, not conflicts (N1806609736).
+
+    Iapetus's albedo dichotomy drags the brightness centroid off the true disc
+    center, so the low-phase blob disagrees with a correct limb fit; a two-star
+    ``StarUniqueMatchNav`` independently confirms the geometry within the
+    grouping floor, so the blob is the outlier and the frame commits instead of
+    reporting the shape-lock conflict.
+    """
+    limb = NavTechniqueResult(
+        technique_name='BodyLimbNav',
+        feature_ids=('limb:IAPETUS',),
+        offset_px=(1.5, 12.0),
+        covariance_px2=np.eye(2, dtype=np.float64) * 0.25,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        source_bodies=frozenset({'IAPETUS'}),
+    )
+    star = _make_result(
+        technique_name='StarUniqueMatchNav',
+        offset=(1.5, 11.6),
+        confidence=0.7,
+        diagnostics=StarUniqueMatchDiagnostics(mode='two_star'),
+    )
+    blob = NavTechniqueResult(
+        technique_name='BodyBlobNav',
+        feature_ids=('blob:IAPETUS',),
+        offset_px=(1.5, 25.0),
+        covariance_px2=np.eye(2, dtype=np.float64) * 4.0,
+        confidence=0.4,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyBlobDiagnostics(body_extent_px=150.0, max_phase_angle_deg=30.0),
+        source_bodies=frozenset({'IAPETUS'}),
+    )
+    result = ensemble(
+        [limb, star, blob],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.offset_px is not None
+    # The committed offset rests on the limb/star geometry near du=11.8, not on
+    # the albedo-dragged blob centroid at du=25.0.
+    assert result.offset_px[0] == pytest.approx(1.5, abs=0.5)
+    assert result.offset_px[1] == pytest.approx(11.8, abs=1.0)
+    # The contradicting blob is not a consensus member.
+    assert 'BodyBlobNav' not in result.consensus_techniques
+
+
 def test_ensemble_lone_blob_collapsed_regime_veto_reports_failed() -> None:
     """A lone blob with a spurious geometric sibling on the same body fails."""
     disc = NavTechniqueResult(

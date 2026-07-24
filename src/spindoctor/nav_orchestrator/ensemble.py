@@ -71,6 +71,7 @@ from spindoctor.nav_orchestrator.ensemble_consensus import (
     result_param_vector,
 )
 from spindoctor.nav_orchestrator.ensemble_independence import (
+    STAR_CONSENSUS_TECHNIQUES,
     is_single_star_result,
     resolve_independent_estimators,
 )
@@ -349,14 +350,6 @@ class EnsembleConfig:
         return cls(**kwargs)
 
 
-#: Star techniques whose non-single-star result is a corroborated, feature-
-#: matched fix (a multi-star pattern match, a two-star unique match, or a
-#: multi-star refine).  Such a fix outranks a lone brightness-centroid blob as
-#: a position witness, so a blob that disagrees with it is an outlier.
-_STAR_CONSENSUS_TECHNIQUES = frozenset(
-    {'StarFieldFromCatalogNav', 'StarUniqueMatchNav', 'StarRefineNav'}
-)
-
 #: The brightness-centroid fallback technique down-weighted against a
 #: corroborated star consensus.
 _BLOB_TECHNIQUE = 'BodyBlobNav'
@@ -400,7 +393,7 @@ def _drop_blob_outlier_against_star_consensus(
     trusted_star_fixes = [
         r
         for r in results
-        if r.technique_name in _STAR_CONSENSUS_TECHNIQUES and not is_single_star_result(r)
+        if r.technique_name in STAR_CONSENSUS_TECHNIQUES and not is_single_star_result(r)
     ]
     if not trusted_star_fixes:
         return list(results)
@@ -995,7 +988,12 @@ def ensemble(
     # per-technique diagnostics cannot see -- a geometric consensus that agreed
     # at a shape-mismatched offset the pose-free blob contradicts, or a lone
     # blob carrying the answer in a regime where the geometric technique on the
-    # same body self-flagged spurious.
+    # same body self-flagged spurious.  A trusted (non-spurious, non-single-star)
+    # star fix that agrees with a geometric consensus offset within the blob/star
+    # corroboration floor corroborates the geometry and suppresses the shape-lock
+    # verdict: the blob, not the lock, is then the outlier (the geometric-side
+    # mirror of the blob-drop above, sharing its blob_star_disagreement_floor_px
+    # knob).
     veto = evaluate_body_witness_veto(
         best_group,
         results,
@@ -1006,6 +1004,7 @@ def ensemble(
         disagreement_floor_px=cfg.body_witness_disagreement_floor_px,
         disagreement_frac=cfg.body_witness_disagreement_frac,
         agreement_sigma=cfg.body_witness_agreement_sigma,
+        star_agreement_floor_px=cfg.blob_star_disagreement_floor_px,
         rcond=cfg.pinvh_rcond,
     )
     if veto is BodyWitnessVeto.LONE_BLOB_COLLAPSED_REGIME:
