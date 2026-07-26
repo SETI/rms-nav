@@ -214,12 +214,18 @@ This section defines the algorithm the code must implement. Symbols:
    mask dilated along `a_hat` only, by `+-W` (the along-track
    component is the one not yet solved); the pass-1 arc step uses
    the same c-shifted, t-dilated mask. In the recenter pass the
-   d-shift arrives implicitly by re-resampling around
-   `p0 + d * a_hat`: the pass-2 symmetry scan rides the NEW
-   candidate `c'` (not pass-1's `c_sub`), the pass-2 arc step
-   shifts by the accumulated `(c, d)`, and the along-track dilation
-   shrinks to `recenter_threshold_px` everywhere. The model ships
-   the undilated mask; the fitting code owns alignment and dilation.
+   grid moves to `p0 + d * a_hat` but the mask stays ANCHORED AT
+   `p0`: the mask is read at the sample position MINUS the
+   accumulated shift, so the residual misalignment is the
+   along-track error still left after the first pass rather than
+   the full `d`. (Resampling the mask on the moved grid instead
+   would leave it misaligned by the whole `d`, which the
+   `recenter_threshold_px` dilation is not sized for.) The pass-2
+   symmetry scan rides the NEW candidate `c'` (not pass-1's
+   `c_sub`), the pass-2 arc step shifts by the accumulated
+   `(c, d)`, and the along-track dilation shrinks to
+   `recenter_threshold_px` everywhere. The model ships the
+   undilated mask; the fitting code owns alignment and dilation.
    - *Body occluders* — nearer bodies covering Titan.
      `NavModelBody`'s existing body-body occlusion computation
      (`_compute_occluder_local` and its sibling-inventory plumbing in
@@ -386,8 +392,13 @@ injections verify the insensitivity and guard the chosen
    is at the window boundary, skip refinement and set `at_edge`).
    `sigma_cross = cross_sigma_scale * sqrt((1 - s_pk) / (2 * |a|))`,
    with `(1 - s_pk)` clamped below at 0 (parabolic refinement can
-   push `s_pk` above 1) and any non-finite result replaced by the
-   floor; then clamped to `[sigma_floor_cross_px, W]`. The formula is a
+   push `s_pk` above 1) and any non-finite result replaced by `W`
+   — the widest uncertainty this fit can express — then clamped to
+   `[sigma_floor_cross_px, W]`. [Revised during Phase A: the
+   original text said "replaced by the floor", which reports the
+   TIGHTEST possible sigma for exactly the two cases that produce a
+   non-finite estimate, an `at_edge` peak and a flat score curve.
+   Pending operator ratification.] The formula is a
    noise-deficit heuristic; `cross_sigma_scale` (default 1.0) is
    calibrated in Phase D so planted-truth cross-track z-scores are
    unit-normal, which is what makes the reported sigma meaningful.
@@ -443,11 +454,26 @@ injections verify the insensitivity and guard the chosen
    range shrunk by half the median-filter width at each end, find the
    most negative outward gradient (steepest falloff into sky) of the
    filtered profile; refine by parabolic interpolation on the three
-   gradient samples around the minimum. The window's width — not a
-   haze-altitude assumption — is what bounds where the limb may sit.
+   gradient samples around the minimum, with the refined vertex
+   clamped to `+-0.5` sample of that minimum (a vertex further out
+   than half a sample comes from noise flattening the curvature, not
+   from the limb). The window's width — not a haze-altitude
+   assumption — is what bounds where the limb may sit.
    Drop the ray unless
    `|g_min| >= min_gradient_snr * MAD(gradient over the window)`
    (raw MAD, no scale factor — this is a same-units SNR test).
+   ALSO drop the ray when the minimum lands on the first or last
+   sample of the window: that is the search saturating against its
+   own bound, not a detected extremum, and the true limb may lie
+   outside the window. (Without this rule a body displaced past the
+   window returns a cluster of rays pinned at exactly the window
+   bound, whose mutual agreement then wins the robust fit and
+   produces a gate-passing, floor-sigma answer that is wrong by the
+   whole excess — the `arc_radius` gate cannot see it, because the
+   saturation radius is inside the gate band by construction.)
+   Contaminated interior samples cost the ray nothing, but the
+   gradient samples they touch are excluded from the search so a
+   masked-out hole cannot masquerade as the steepest falloff.
 5. Robust circle fit with center constrained to the symmetry axis:
    over scalar `d` (along-track center shift) and radius `R`,
    minimize `sum_phi rho_Tukey(e_phi / s_mad)` with
@@ -458,9 +484,16 @@ injections verify the insensitivity and guard the chosen
    (reuse `tukey_biweight_weights` from
    `src/spindoctor/nav_technique/dt_fitting/weights.py` — it is a
    pure importable function); the inner step is one Gauss-Newton
-   update of `(d, R)` on the weighted residuals. Initialize
+   update of `(d, R)` on the weighted residuals, taken in FULL —
+   truncating the step to a maximum length breaks the fit outright,
+   because a clipped `d` step paired with an unclipped `R` step
+   leaves a uniform residual offset that `s_mad` (a spread, not an
+   offset) reads as an all-outlier population, and the next
+   reweighting zeroes every ray. Initialize
    `d = 0`, `R = median(rho_phi)`; iterate until `|delta d| < 0.01`
-   px or 25 iterations.
+   px or 25 iterations. Floor `s_mad` at `1e-3` px so a noiseless
+   arc, whose MAD is exactly zero, does not make every Tukey
+   argument non-finite.
 6. Uncertainty: with final weights `w_phi`, residuals `e_phi`, and
    Jacobian `J` of the residual vector with respect to `(d, R)`:
    `s2 = sum(w e^2) / max(1, sum(w) - 2)` and
@@ -622,7 +655,7 @@ New files:
 
 | File | Contents |
 |---|---|
-| `src/spindoctor/nav_technique/titan_fitting.py` | Pure fitting library: rotated-grid resample, mirror-correlation scan (with angle refinement), radial profiles, limb-gradient extraction, constrained robust circle fit. No oops, no NavContext, no config reads — plain functions on arrays plus the Section 4 parameter/result dataclasses. Everything unit-testable on synthetic arrays. |
+| `src/spindoctor/nav_technique/titan_fitting/` | Pure fitting library, split into a package under the sizing note below because the single module ran past 1000 lines: `grid.py` (axis unit vectors, rotated-grid resample, the shared array helpers), `symmetry.py` (mirror-correlation scan with angle refinement, its params/result), `arc.py` (radial profiles, limb-gradient extraction, constrained robust circle fit, its params/result), `driver.py` (`fit_titan_center`, the two-pass sequence), and `__init__.py` re-exporting the whole surface so consumers import `spindoctor.nav_technique.titan_fitting`. No oops, no NavContext, no config reads — plain functions on arrays plus the Section 4 parameter/result dataclasses. Everything unit-testable on synthetic arrays. |
 | `src/spindoctor/nav_technique/nav_technique_titan_haze.py` | `TitanHazeNav(NavTechnique)`: `is_feasible`, `navigate` (Sections 2.2-2.4, math delegated to `titan_fitting`), `confidence_spec` + `confidence_attributes`, `tier`, `accepts_feature_types`, tuning load. |
 | `tests/spindoctor/nav_technique/test_titan_fitting.py` | Phase-A unit tests. |
 | `tests/spindoctor/nav_technique/test_nav_technique_titan_haze.py` | Phase-B technique tests (use the `FakeObs` fixture pattern from `tests/spindoctor/nav_technique/conftest.py`; do not instantiate a real `ObsSnapshot` for unit tests). |
@@ -723,13 +756,20 @@ class ArcFitResult:
     radius_px: float
     n_rays_total: int
     n_rays_inlier: int
-    residual_rms_px: float
+    residual_rms_px: float         # NaN when zero rays survive
+                                   # reweighting (never 0.0, which a
+                                   # falling confidence sigmoid would
+                                   # read as maximally good); Phase B
+                                   # maps NaN to None at the
+                                   # diagnostics boundary so strict
+                                   # JSON serialization never sees a
+                                   # bare NaN
     at_edge: bool
     gate_failed: str | None        # None, or a Section 2.3 gate name
 ```
 
-Fitting-library function signatures (all in `titan_fitting.py`; pure,
-array-in/dataclass-out):
+Fitting-library function signatures (all re-exported from the
+`titan_fitting/` package; pure, array-in/dataclass-out):
 
 The leading `(image, valid_mask, center_vu)` group is positional;
 everything after it is keyword-only, per the project signature rule
@@ -743,7 +783,8 @@ def resample_rotated_grid(image, valid_mask, center_vu, *,
 
 def symmetry_scan(image, valid_mask, center_vu, *, contaminant_mask,
                   theta0_rad, r_env_px, window_px, pass_pad_px,
-                  params): ...
+                  capsule_half_extent_px=0.0,
+                  mask_shift_vu=(0.0, 0.0), params): ...
     # -> SymmetryFitResult; owns the resampling internally (calls
     # resample_rotated_grid per candidate theta), so no callback
     # parameter is needed.  valid_mask is static validity
@@ -751,22 +792,36 @@ def symmetry_scan(image, valid_mask, center_vu, *, contaminant_mask,
     # allowed) is hypothesis-riding per Section 2.1, dilated along
     # t by pass_pad_px (W in pass 1, recenter_threshold_px in the
     # recenter pass) and read c-shifted.
+    # capsule_half_extent_px selects the Section 2.2.2 annulus shape
+    # (W in pass 1 for the capsule, 0.0 in the recenter pass for the
+    # tight annulus): pass_pad_px alone cannot express both, since it
+    # must be recenter_threshold_px for the pass-2 mask.
+    # mask_shift_vu is the displacement already applied to center_vu
+    # relative to the geometry the mask was built at, so the mask
+    # stays anchored at the predicted center per Section 2.1.
 
 def radial_profiles(image, valid_mask, center_vu, *, contaminant_mask,
-                    mask_shift_vu, pass_pad_px, phi_rad_list,
-                    r_start_px, r_stop_px, r_step_px): ...
+                    mask_shift_vu, axis_dir_vu, pass_pad_px,
+                    phi_rad_list, r_start_px, r_stop_px, r_step_px): ...
     # -> (profiles, profile_valid); contaminant_mask is shifted by
     # mask_shift_vu (the accumulated center hypothesis) and dilated
-    # along a_hat by pass_pad_px before sampling
+    # along a_hat by pass_pad_px before sampling.  axis_dir_vu names
+    # that a_hat: the ray angles alone do not determine it, and an
+    # isotropic dilation of radius W would over-mask badly.
 
 def limb_radii_from_profiles(profiles, profile_valid, *, r_start_px,
-                             r_step_px, window_px_lo, window_px_hi,
-                             params): ...
-    # -> (rho_px per ray, ray_ok mask)
+                             r_step_px, r_solid_px, window_px_lo,
+                             window_px_hi, params): ...
+    # -> (rho_px per ray, ray_ok mask); r_solid_px is what makes the
+    # Section 2.3.2 rule "interior samples may be masked without
+    # harm" expressible here -- it separates the interior from the
+    # limb region the ray-drop rule polices.
 
 def constrained_circle_fit(points_vu, axis_origin_vu, axis_dir_vu, *,
-                           params): ...
-    # -> ArcFitResult
+                           r_solid_px, r_env_px, window_px, params): ...
+    # -> ArcFitResult; the three radii/window scalars carry the
+    # Section 2.3.7 arc_radius band, the |d| < W at_edge test, and
+    # the sigma clamp, none of which live in ArcFitParams.
 
 def fit_titan_center(image, valid_mask, center_vu, *,
                      contaminant_mask, theta0_rad, r_solid_px,
@@ -886,8 +941,9 @@ clean, and its acceptance line is demonstrably true.
 
 ### Phase A — fitting library
 
-Files: `titan_fitting.py`, `test_titan_fitting.py`. Implement the
-Section 4 signatures per the Section 2.2-2.3 math.
+Files: the `titan_fitting/` package (Section 3),
+`test_titan_fitting.py`. Implement the Section 4 signatures per the
+Section 2.2-2.3 math.
 
 Tests (synthetic arrays, no oops, fast):
 
@@ -896,7 +952,11 @@ Tests (synthetic arrays, no oops, fast):
    angles theta: recovered cross-track within 0.05 px, along-track
    within 0.2 px, over a grid of 5 offsets x 4 angles.
 2. Same with additive Gaussian noise at SNR ~ 20: cross-track within
-   0.15 px, along-track within 0.5 px.
+   0.15 px, along-track within 1.5 px. [bound revised from 0.5 px
+   during Phase A: unreachable with the prescribed estimator
+   (measured P95 1.01 px at SNR 20, confirmed independently by
+   implementer and reviewer); consistent with the Phase D P95 <= 3.0
+   px and Section 8 <= 3 px bounds; pending operator ratification]
 3. A Gaussian "cloud" blob injected off-axis (amplitude 30% of disc):
    both recoveries degrade by less than 2x the case-2 bounds.
 4. A north-south brightness gradient across the disc interior: the
@@ -939,9 +999,12 @@ Tests (synthetic arrays, no oops, fast):
     pass's `c_sub` alone — the double-count regression of Section
     2.4.
 
-Acceptance: the twelve test families above pass; the module imports
-nothing from spindoctor beyond `support.types` (and the dt_fitting
-weight function).
+Acceptance: the twelve test families above pass; the package imports
+nothing from spindoctor beyond `support.types` and the two
+`dt_fitting` weighting helpers (`tukey_biweight_weights` and
+`information_matrix_to_covariance`, both from
+`dt_fitting/weights.py`; reusing the second avoids duplicating the
+pseudoinverse covariance the robust fit needs).
 
 ### Phase B — model feature + technique (the vertical slice)
 
@@ -979,7 +1042,15 @@ test files.
   with reason `'no TITAN_LIMB features'` when zero); `navigate` wires
   `NavContext.image_ext` (the raw extended image — NOT the
   gradient/DT planes the DT techniques consume) through Sections
-  2.2-2.4 into a `NavTechniqueResult`.
+  2.2-2.4 into a `NavTechniqueResult`. Recenter-pass totals: the
+  assembled offset can legitimately exceed `W` with per-pass
+  `at_edge` False (Section 2.3.7 gates per pass; Section 2.4 sums
+  the passes — a truth just beyond `W` is recovered correctly via
+  the recenter). The technique sets `at_edge` on its RESULT when
+  either assembled component's magnitude reaches `W`, so the
+  ensemble's conservative at-edge treatment applies to totals
+  beyond the declared search bound. [Added during Phase A review;
+  the fitting library reports per-pass at_edge only.]
 - Confidence spec + `confidence_attributes` registered;
   `validate_registered_confidence_specs()` passes. The config_510
   entry must exist at Phase B with placeholder anchors (copy the
@@ -1202,7 +1273,14 @@ the operator rather than loosening silently.
   so the planted-truth confidence-vs-error curve is monotone and the
   Phase-D no-confident-wrong bound holds; document the sweep in a
   campaign record under `util/` with a tracking issue for anything
-  deferred.
+  deferred. Known lever carried from Phase A review (#396): with
+  the shipped defaults, 8/96 (8%) of frames with truth planted
+  OUTSIDE the search window (16-26 px at SNR 20, W = 10) lock
+  confident-wrong instead of gating; `min_gradient_snr: 4.0 -> 8.0`
+  measured 0/96 at no in-window cost (worst in-window error 1.319
+  -> 1.373 px). Evaluate that lever here; also keep
+  `radial_outer_pad_px` well above ~1.5 px so the boundary-argmin
+  drop rule retains its margin (#396).
 - Enroll Titan in the calibration tooling (Section 3 table): the
   fitters enumerate techniques BY HAND — add `TitanHazeNav` to
   `util/calibration/fit.py`'s `TECHNIQUES` tuple (with
