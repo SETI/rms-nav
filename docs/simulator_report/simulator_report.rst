@@ -1556,8 +1556,9 @@ Summary
 * The haze symmetry fit recovers a hazy body to ~0.26 px across both the dense
   sub-pixel sweep and the full navigable range, against a rendered haze limb that
   is deliberately not the circle it fits. Its randomized planted-truth campaign
-  (700 scenes over offset, phase, size, noise, clouds, and four
-  symmetry-breaking structure axes) puts the 95th percentile of recovery error at
+  (700 scenes over offset, phase, size, noise, clouds, star fields,
+  detector artifacts, and five symmetry-breaking structure axes) puts the
+  95th percentile of recovery error at
   0.17 px cross-track and 0.82 px along-track on clean scenes.
 * Irregular (mesh) bodies navigate as accurately as ellipsoids when the predicted
   geometry matches the rendered one (mesh disc, limb, and crescent all recover to

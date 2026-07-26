@@ -1017,8 +1017,10 @@ rather than an averaged circle.
 
 **Accuracy.**  Single-frame accuracy is **1 px or better cross-track and
 3 px or better along-track**.  That bound comes from planted-truth
-simulation (the 95th percentile of recovery error over 700 randomised
-scenes is 0.17 px cross-track and 0.82 px along-track) and is confirmed
+simulation (the 95th percentile of recovery error on the clean-scene
+family of a 700-scene randomised campaign is 0.17 px cross-track and
+0.82 px along-track; families with injected artifacts run wider) and is
+confirmed
 on real frames by an independent witness: over the Cassini validation
 cohort, frames where a star technique locks independently give an
 absolute per-frame anchor, and the haze fit disagrees with it by 0.99 px

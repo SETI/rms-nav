@@ -428,7 +428,8 @@ injections verify the insensitivity and guard the chosen
    TIGHTEST possible sigma for exactly the two cases that produce a
    non-finite estimate, an `at_edge` peak and a flat score curve.
    Pending operator ratification.] The formula is a
-   noise-deficit heuristic; `cross_sigma_scale` (default 1.0) is
+   noise-deficit heuristic; `cross_sigma_scale` (0.10 as set by the
+   Phase D free-row solve; the pre-calibration default was 1.0) is
    calibrated in Phase D so planted-truth cross-track z-scores are
    unit-normal, which is what makes the reported sigma meaningful.
 5. Optional angle refinement (skipped when `axis_degenerate`): repeat
@@ -995,7 +996,8 @@ titan:
       min_peak_score: 0.60
       min_valid_fraction: 0.50
       max_second_peak_ratio: 0.90
-      cross_sigma_scale: 1.0
+      # 0.10 set by the Phase D free-row solve (was 1.0 pre-calibration).
+      cross_sigma_scale: 0.10
       sigma_floor_cross_px: 0.30
     arc:
       # 60.0 through Phase D; widened by Phase E on real-frame evidence.

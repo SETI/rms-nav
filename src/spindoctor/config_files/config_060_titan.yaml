@@ -55,7 +55,7 @@ titan:
       # Held at 0.30 on real-frame evidence rather than cut to the 0.08 px
       # the simulator's cross-track rms implies.  On the 82-frame Cassini
       # cohort the cross-track disagreement against an independent star lock
-      # runs 0.99 px rms per frame and reaches 1.84 px, and repeat frames of
+      # runs 0.99 px rms per pair (0.70 px per frame) and reaches 1.84 px per pair, and repeat frames of
       # one target through one filter agree to 0.34 px -- so the reported
       # 0.36 px (this floor in quadrature with the 0.2 px model-error floor)
       # is already at or inside the measured spread.  Cutting it to satisfy

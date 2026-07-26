@@ -330,7 +330,8 @@ when its uncertainty allows; otherwise nothing).
 
 Titan produces no
 :class:`~spindoctor.nav_model.nav_model_body.NavModelBody` instance; the
-:doc:`Titan model <dev_guide_navigation_models_titan>` handles it. A ``highly_irregular`` body resolved beyond the ``min_bounding_box_area``-derived
+:doc:`Titan model <dev_guide_navigation_models_titan>` handles it. A
+``highly_irregular`` body resolved beyond the ``min_bounding_box_area``-derived
 pixel threshold emits no shape features (limb / terminator / disc) and navigates only as a
 :data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB`; ``irregular`` bodies are
 unaffected.

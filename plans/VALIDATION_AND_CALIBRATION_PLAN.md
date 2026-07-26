@@ -836,8 +836,9 @@ genuinely far better determined than the along-track one.
 
 **Stated bound (the acceptance criterion's answer).** Single-frame accuracy is
 1 px or better cross-track and 3 px or better along-track. The bound is the
-planted-truth P95 (0.17 px cross-track, 0.82 px along-track over 700
-randomized scenes) confirmed by real-frame evidence: against an independent
+planted-truth clean-scene P95 (0.17 px cross-track, 0.82 px along-track on
+the clean family of a 700-scene randomized campaign; artifact-injected
+families run wider) confirmed by real-frame evidence: against an independent
 star lock on the same frame the haze fit disagrees by 0.99 px rms cross-track
 and 1.50 px rms along-track over nine pairs, implying about 0.70 and 1.06 px
 per frame; repeat frames of one target through one filter agree to 0.34 px
