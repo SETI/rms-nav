@@ -17,6 +17,11 @@ or one too small to measure scores exactly zero, and the standard per-type
 reliability gate then removes it, so a marginal Titan resolves through the
 same statuses as any other marginal scene.
 
+The same geometry is drawn as the frame's overlay -- envelope circle,
+symmetry axis, sunward arc sector, center cross -- so an operator reading
+the summary PNG sees what the fit worked from and, because the PNG draws
+annotations at the navigated offset, where the fit put the body.
+
 Titan's atmosphere is unique among the currently navigated bodies
 (transparent at some wavelengths), so this handling is a deliberate special
 case and does not generalize to other thick-atmosphere bodies such as Venus.
@@ -32,26 +37,40 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from oops import Observation
 
-from spindoctor.annotation import Annotations
+from spindoctor.annotation import (
+    TEXTINFO_BOTTOM_ARROW,
+    TEXTINFO_LEFT_ARROW,
+    TEXTINFO_RIGHT_ARROW,
+    TEXTINFO_TOP_ARROW,
+    Annotation,
+    Annotations,
+    AnnotationTextInfo,
+    TextLocInfo,
+)
 from spindoctor.config import DEFAULT_CONFIG, Config
 from spindoctor.feature.feature import NavFeature, NavReliabilityBreakdown
 from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.feature.flags import TitanHazeFlags
 from spindoctor.feature.geometry import TitanHazeGeometry
+from spindoctor.feature.reliability import FeatureReliabilityGate
 from spindoctor.nav_model.nav_model import NavModel
 from spindoctor.nav_model.nav_model_body import TITAN_BODY_NAME, bodies_in_extfov
 from spindoctor.nav_model.titan_geometry import TitanGeometryInputs, geometry_from_obs
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
+from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from spindoctor.nav_orchestrator.nav_context import NavContext
 
 __all__ = [
+    'GATED_DOT_SPACING',
     'HIGH_PHASE_DEG',
     'NavModelTitan',
     'build_titan_feature',
+    'haze_overlay',
     'titan_haze_reliability',
 ]
 
@@ -62,6 +81,33 @@ HIGH_PHASE_DEG: float = 150.0
 Sets the ``high_phase`` flag on the emitted feature.  Above this phase the
 arc sector the circle fit relies on carries its least support, so the flag
 marks the frames whose along-track uncertainty deserves the most scrutiny.
+"""
+
+
+GATED_DOT_SPACING: int = 4
+"""Sample spacing that turns the overlay's curves from solid into dotted.
+
+The overlay is drawn solid for a feature whose reliability clears the
+per-type gate threshold and dotted for one below it, so an operator reading
+the summary PNG can tell a haze fit the pipeline would attempt from a frame
+whose geometry an autonomous run rejects before any technique sees it.
+"""
+
+
+_CURVE_SAMPLE_STEP_PX: float = 0.5
+"""Spacing of the samples every overlay curve is rasterized from.
+
+Half a pixel leaves no gaps in a solid curve at any orientation, and makes
+:data:`GATED_DOT_SPACING` a dot every two pixels.
+"""
+
+
+_CENTER_MARKER_HALF_PX: int = 4
+"""Half-length of the cross drawn at the disc center, in pixels.
+
+The summary PNG draws every annotation shifted by the navigated offset, so
+this cross marks the predicted center before navigation and the fitted
+center after it.
 """
 
 
@@ -198,6 +244,216 @@ def build_titan_feature(
     )
 
 
+def _paint_samples(
+    overlay: NDArrayBoolType,
+    v_samples: NDArrayFloatType,
+    u_samples: NDArrayFloatType,
+    *,
+    dot_spacing: int,
+) -> None:
+    """Mark the in-bounds pixels a sampled curve passes through.
+
+    Parameters:
+        overlay: Extended-frame boolean overlay, modified in place.
+        v_samples: Row coordinates of the curve samples.
+        u_samples: Column coordinates of the curve samples.
+        dot_spacing: Paint every ``dot_spacing``-th sample, so ``1`` draws a
+            solid curve and larger values a dotted one.
+    """
+    step = max(1, dot_spacing)
+    v_idx = np.rint(v_samples[::step]).astype(np.int64)
+    u_idx = np.rint(u_samples[::step]).astype(np.int64)
+    rows, cols = overlay.shape
+    inside = (v_idx >= 0) & (v_idx < rows) & (u_idx >= 0) & (u_idx < cols)
+    overlay[v_idx[inside], u_idx[inside]] = True
+
+
+def _paint_arc(
+    overlay: NDArrayBoolType,
+    center_vu: tuple[float, float],
+    radius_px: float,
+    *,
+    phi_start_rad: float,
+    phi_end_rad: float,
+    dot_spacing: int,
+) -> None:
+    """Draw a circular arc, or a full circle when the span is a full turn.
+
+    Angles follow the fitting library's convention: the point at angle
+    ``phi`` and radius ``rho`` sits at ``(v + rho sin phi, u + rho cos phi)``.
+
+    Parameters:
+        overlay: Extended-frame boolean overlay, modified in place.
+        center_vu: ``(v, u)`` center the arc is drawn about.
+        radius_px: Arc radius in pixels; a radius below one pixel, or a
+            non-finite one, draws nothing.
+        phi_start_rad: First angle of the arc.
+        phi_end_rad: Last angle of the arc.
+        dot_spacing: Solid (``1``) or dotted (larger) rasterization.
+    """
+    if not radius_px >= 1.0:
+        return
+    span = abs(phi_end_rad - phi_start_rad)
+    n_samples = max(2, math.ceil(span * radius_px / _CURVE_SAMPLE_STEP_PX) + 1)
+    phis = np.linspace(phi_start_rad, phi_end_rad, n_samples)
+    _paint_samples(
+        overlay,
+        center_vu[0] + radius_px * np.sin(phis),
+        center_vu[1] + radius_px * np.cos(phis),
+        dot_spacing=dot_spacing,
+    )
+
+
+def _paint_segment(
+    overlay: NDArrayBoolType,
+    start_vu: tuple[float, float],
+    end_vu: tuple[float, float],
+    *,
+    dot_spacing: int,
+) -> None:
+    """Draw a straight segment between two ``(v, u)`` points.
+
+    Parameters:
+        overlay: Extended-frame boolean overlay, modified in place.
+        start_vu: ``(v, u)`` start point.
+        end_vu: ``(v, u)`` end point.
+        dot_spacing: Solid (``1``) or dotted (larger) rasterization.
+    """
+    length = math.hypot(end_vu[0] - start_vu[0], end_vu[1] - start_vu[1])
+    n_samples = max(2, math.ceil(length / _CURVE_SAMPLE_STEP_PX) + 1)
+    fractions = np.linspace(0.0, 1.0, n_samples)
+    _paint_samples(
+        overlay,
+        start_vu[0] + fractions * (end_vu[0] - start_vu[0]),
+        start_vu[1] + fractions * (end_vu[1] - start_vu[1]),
+        dot_spacing=dot_spacing,
+    )
+
+
+def haze_overlay(
+    geometry: TitanGeometryInputs,
+    *,
+    sector_half_angle_deg: float,
+    dot_spacing: int = 1,
+) -> NDArrayBoolType:
+    """Rasterize the haze fit's geometry into an extended-frame overlay.
+
+    Four elements, each drawn from predicted geometry alone:
+
+    - the haze envelope circle, the outer bound of everything the fit
+      samples;
+    - the symmetry axis, the line the cross-track scan mirrors about, drawn
+      as a full chord so the operator can see the mirror plane;
+    - the sunward sector the limb-arc fit rays sweep, outlined by an arc at
+      the solid radius and the two radial edges joining it to the envelope;
+    - a cross at the disc center, which the summary PNG's offset shift moves
+      onto the fitted center.
+
+    Parameters:
+        geometry: The observation-derived haze geometry.
+        sector_half_angle_deg: Half-width of the arc-fit sector, in degrees.
+        dot_spacing: ``1`` draws solid curves; larger values dot them.
+
+    Returns:
+        A boolean array of the extended-frame shape, True on every painted
+        pixel.  Nothing is painted for a geometry that did not evaluate --
+        a zero-radius envelope, a non-finite center or axis -- because its
+        defaults put a zero-radius envelope at the frame origin, and drawing
+        a center mark there would place a mark the frame gives no evidence
+        for.
+    """
+    overlay: NDArrayBoolType = np.zeros(geometry.extfov_shape_vu, dtype=bool)
+    center = geometry.predicted_center_vu
+    theta = geometry.theta_rad
+    if not geometry.r_env_px >= 1.0:
+        return overlay
+    if not all(math.isfinite(x) for x in (center[0], center[1], theta, geometry.r_solid_px)):
+        return overlay
+    _paint_arc(
+        overlay,
+        center,
+        geometry.r_env_px,
+        phi_start_rad=0.0,
+        phi_end_rad=2.0 * math.pi,
+        dot_spacing=dot_spacing,
+    )
+    axis_vu = (math.sin(theta), math.cos(theta))
+    reach = geometry.r_env_px
+    _paint_segment(
+        overlay,
+        (center[0] - reach * axis_vu[0], center[1] - reach * axis_vu[1]),
+        (center[0] + reach * axis_vu[0], center[1] + reach * axis_vu[1]),
+        dot_spacing=dot_spacing,
+    )
+    half_angle = math.radians(sector_half_angle_deg)
+    _paint_arc(
+        overlay,
+        center,
+        geometry.r_solid_px,
+        phi_start_rad=theta - half_angle,
+        phi_end_rad=theta + half_angle,
+        dot_spacing=dot_spacing,
+    )
+    for edge_phi in (theta - half_angle, theta + half_angle):
+        edge_vu = (math.sin(edge_phi), math.cos(edge_phi))
+        _paint_segment(
+            overlay,
+            (
+                center[0] + geometry.r_solid_px * edge_vu[0],
+                center[1] + geometry.r_solid_px * edge_vu[1],
+            ),
+            (
+                center[0] + geometry.r_env_px * edge_vu[0],
+                center[1] + geometry.r_env_px * edge_vu[1],
+            ),
+            dot_spacing=dot_spacing,
+        )
+    marker = float(_CENTER_MARKER_HALF_PX)
+    _paint_segment(
+        overlay,
+        (center[0] - marker, center[1]),
+        (center[0] + marker, center[1]),
+        dot_spacing=dot_spacing,
+    )
+    _paint_segment(
+        overlay,
+        (center[0], center[1] - marker),
+        (center[0], center[1] + marker),
+        dot_spacing=dot_spacing,
+    )
+    return overlay
+
+
+def _disc_mask(
+    shape_vu: tuple[int, int], center_vu: tuple[float, float], radius_px: float
+) -> NDArrayBoolType:
+    """Return a filled disc of the given radius as a boolean array.
+
+    Parameters:
+        shape_vu: ``(rows, cols)`` shape of the array to build.
+        center_vu: ``(v, u)`` disc center.
+        radius_px: Disc radius in pixels.
+
+    Returns:
+        A boolean array True inside the disc.  Built over the disc's
+        bounding box alone, so a small body in a large frame costs no
+        full-frame arithmetic.
+    """
+    mask: NDArrayBoolType = np.zeros(shape_vu, dtype=bool)
+    rows, cols = shape_vu
+    reach = max(radius_px, 0.0)
+    v_lo = max(0, math.floor(center_vu[0] - reach))
+    v_hi = min(rows, math.ceil(center_vu[0] + reach) + 1)
+    u_lo = max(0, math.floor(center_vu[1] - reach))
+    u_hi = min(cols, math.ceil(center_vu[1] + reach) + 1)
+    if v_hi <= v_lo or u_hi <= u_lo:
+        return mask
+    vs = np.arange(v_lo, v_hi, dtype=np.float64)[:, np.newaxis] - center_vu[0]
+    us = np.arange(u_lo, u_hi, dtype=np.float64)[np.newaxis, :] - center_vu[1]
+    mask[v_lo:v_hi, u_lo:u_hi] = (vs * vs + us * us) <= reach * reach
+    return mask
+
+
 class NavModelTitan(NavModel):
     """Haze-envelope NavModel for Titan.
 
@@ -327,14 +583,100 @@ class NavModelTitan(NavModel):
         return [feature]
 
     def to_annotations(self, context: NavContext) -> Annotations:
-        """Return an empty annotation collection.
+        """Draw the haze geometry the fit works from over the frame.
+
+        The overlay carries the envelope circle, the symmetry axis, the
+        sunward arc sector, and a center cross (see :func:`haze_overlay`).
+        The summary PNG draws every annotation shifted by the navigated
+        offset, so the cross and the circle land on the fitted center when
+        an offset was committed and stay at the prediction when none was.
+
+        Curves are solid when the emitted feature's reliability clears the
+        per-type gate threshold and dotted, with the label saying so, when
+        it does not.  The technique's own accept-or-spurious verdict cannot
+        be shown here: the orchestrator merges model annotations before any
+        technique runs, so the latest state available at this point is the
+        feature's own reliability, which is what decides whether the fit is
+        attempted at all in an autonomous run.  Manual navigation
+        deliberately bypasses the gate, which is why the dotted style
+        reports low reliability rather than a gate verdict.
 
         Parameters:
-            context: Per-image navigation context; unused because the model
-                renders no overlay.
+            context: Per-image navigation context; unused because every
+                drawn quantity is predicted geometry.
 
         Returns:
-            An empty ``Annotations`` collection, always.
+            An ``Annotations`` collection holding one annotation, or an
+            empty collection when no part of the overlay lands inside the
+            extended frame.
         """
         del context
-        return Annotations()
+        geometry = self.geometry_inputs
+        feature = build_titan_feature(geometry, source_model=self.name, config=self._config)
+        gate = FeatureReliabilityGate.from_mapping(
+            self._config.orchestrator.get('reliability_gate')
+        )
+        kept, _gated = gate.apply([feature])
+        usable = len(kept) > 0
+        arc_config = self._config.titan['navigation']['arc']
+        overlay = haze_overlay(
+            geometry,
+            sector_half_angle_deg=float(arc_config['sector_half_angle_deg']),
+            dot_spacing=1 if usable else GATED_DOT_SPACING,
+        )
+        if not overlay.any():
+            self._logger.info('Haze overlay skipped: nothing to draw inside the extended frame')
+            return Annotations()
+        self._logger.info(
+            'Drew %s haze overlay (feature reliability %.3f)',
+            'solid' if usable else 'dotted',
+            feature.reliability,
+        )
+        annotations = Annotations(config=self._config)
+        annotations.add_annotations(
+            Annotation(
+                self.obs,
+                overlay,
+                self._config.bodies.label_limb_color,
+                thicken_overlay=self._config.bodies.outline_thicken,
+                avoid_mask=_disc_mask(
+                    geometry.extfov_shape_vu,
+                    geometry.predicted_center_vu,
+                    geometry.r_env_px + float(self._config.bodies.label_mask_enlarge),
+                ),
+                text_info=self._label(geometry, usable=usable),
+                config=self._config,
+            )
+        )
+        return annotations
+
+    def _label(self, geometry: TitanGeometryInputs, *, usable: bool) -> AnnotationTextInfo:
+        """Build the body label, offering one position per side of the disc.
+
+        Parameters:
+            geometry: The observation-derived haze geometry.
+            usable: Whether the emitted feature's reliability clears the
+                per-type threshold; a feature below it says so in the
+                label, because the dotted overlay alone does not explain
+                why the frame is unlikely to navigate.
+
+        Returns:
+            The label and its candidate placements, in extfov coordinates.
+        """
+        body_config = self._config.bodies
+        v_center, u_center = geometry.predicted_center_vu
+        gap = geometry.r_env_px
+        text_loc = [
+            TextLocInfo(TEXTINFO_TOP_ARROW, round(v_center - gap), round(u_center)),
+            TextLocInfo(TEXTINFO_BOTTOM_ARROW, round(v_center + gap), round(u_center)),
+            TextLocInfo(TEXTINFO_LEFT_ARROW, round(v_center), round(u_center - gap)),
+            TextLocInfo(TEXTINFO_RIGHT_ARROW, round(v_center), round(u_center + gap)),
+        ]
+        return AnnotationTextInfo(
+            TITAN_BODY_NAME if usable else f'{TITAN_BODY_NAME} (low reliability)',
+            text_loc=text_loc,
+            ref_vu=(round(v_center), round(u_center)),
+            font=body_config.label_font,
+            font_size=body_config.label_font_size,
+            color=body_config.label_font_color,
+        )

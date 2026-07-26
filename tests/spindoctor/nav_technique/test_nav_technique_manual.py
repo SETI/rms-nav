@@ -13,8 +13,10 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
+from tests.spindoctor.nav_technique.conftest import NavFeatureFactory
 
 from spindoctor.annotation import Annotations
+from spindoctor.feature.composition import compose_dialog_overlay
 from spindoctor.feature.feature import NavFeature, NavReliabilityBreakdown
 from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.feature.flags import StarFlags
@@ -288,3 +290,48 @@ def test_run_manual_nav_runs_for_polyline_only_scene(monkeypatch: pytest.MonkeyP
     assert result.status == 'success'
     assert result.offset_px == (1.0, 2.0)
     assert len(instances) == 1
+
+
+# ---------------------------------------------------------------------------
+# Titan-only scenes
+# ---------------------------------------------------------------------------
+
+
+def _titan_feature(make_titan_feature: NavFeatureFactory) -> NavFeature:
+    """Build the single haze feature a Titan-only frame carries."""
+    return make_titan_feature(predicted_center_vu=(24.0, 24.0), r_solid_px=10.0, r_env_px=12.0)
+
+
+def test_titan_only_feature_set_is_manual_nav_feasible(
+    make_titan_feature: NavFeatureFactory,
+) -> None:
+    """A hazy body alone is enough to open the dialog.
+
+    Manual navigation is the curation fallback when the autonomous
+    technique fails, so a Titan-only frame -- which carries neither a
+    template nor a polyline -- must still be manually navigable.
+    """
+    feature = _titan_feature(make_titan_feature)
+    assert NavTechniqueManual().is_feasible([feature]).feasible is True
+
+
+def test_titan_only_feature_set_counts_one_renderable_feature(
+    make_titan_feature: NavFeatureFactory,
+) -> None:
+    """The haze feature is counted as the feature the dialog will render."""
+    feature = _titan_feature(make_titan_feature)
+    assert NavTechniqueManual().is_feasible([feature]).consumed_feature_count == 1
+
+
+def test_titan_only_feature_set_composes_a_non_empty_overlay(
+    make_titan_feature: NavFeatureFactory,
+) -> None:
+    """The dialog's draggable overlay actually paints the haze envelope.
+
+    Feasibility counts geometry kinds; this is the composed bitmap the
+    operator drags, which ``run_manual_nav`` separately requires to be
+    non-empty before opening the dialog.
+    """
+    feature = _titan_feature(make_titan_feature)
+    _image, mask = compose_dialog_overlay([feature], (48, 48))
+    assert bool(mask.any()) is True

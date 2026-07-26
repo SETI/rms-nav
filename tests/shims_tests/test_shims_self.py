@@ -177,6 +177,44 @@ def test_fake_obs_extdata_padded_around_data() -> None:
     assert (obs.extdata[:2, :] == 0.0).all()
 
 
+def test_fake_obs_extract_offset_array_without_offset() -> None:
+    """``extract_offset_array`` with no offset returns the sensor-area window."""
+    obs = FakeObs(data=np.zeros((6, 6)), extfov_margin_vu=(2, 2))
+    array = np.arange(100, dtype=np.float64).reshape((10, 10))
+    out = obs.extract_offset_array(array, (0.0, 0.0))
+    assert np.array_equal(out, array[2:8, 2:8])
+
+
+def test_fake_obs_extract_offset_array_shifts_by_the_offset() -> None:
+    """A positive offset extracts the window that much earlier in the array."""
+    obs = FakeObs(data=np.zeros((6, 6)), extfov_margin_vu=(2, 2))
+    array = np.arange(100, dtype=np.float64).reshape((10, 10))
+    out = obs.extract_offset_array(array, (1.0, -1.0))
+    assert np.array_equal(out, array[1:7, 3:9])
+
+
+def test_fake_obs_extract_offset_array_zero_fills_beyond_the_extfov() -> None:
+    """An offset past the margin zero-fills the part outside the extfov."""
+    obs = FakeObs(data=np.zeros((6, 6)), extfov_margin_vu=(2, 2))
+    array = np.ones((10, 10), dtype=np.float64)
+    out = obs.extract_offset_array(array, (5.0, 0.0))
+    assert float(out[0, 0]) == 0.0
+
+
+def test_fake_obs_extract_offset_array_rejects_a_wrong_shape() -> None:
+    """An array that is not extfov-shaped is a programming error."""
+    obs = FakeObs(data=np.zeros((6, 6)), extfov_margin_vu=(2, 2))
+    with pytest.raises(ValueError, match='must equal extdata shape'):
+        obs.extract_offset_array(np.zeros((6, 6)), (0.0, 0.0))
+
+
+def test_fake_obs_extract_offset_array_rejects_a_three_dimensional_array() -> None:
+    """A 3-D array is rejected here exactly as the real method rejects it."""
+    obs = FakeObs(data=np.zeros((6, 6)), extfov_margin_vu=(2, 2))
+    with pytest.raises(ValueError, match='must equal extdata shape'):
+        obs.extract_offset_array(np.zeros((10, 10, 3)), (0.0, 0.0))
+
+
 def test_fake_obs_inventory_returns_only_requested_bodies() -> None:
     """``inventory`` returns only entries for the requested bodies."""
     inv = {

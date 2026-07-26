@@ -22,6 +22,8 @@ from spindoctor.nav_technique.titan_fitting.grid import sample_bool_nearest, val
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 __all__ = [
+    'ARC_RADIUS_MAX_FRACTION',
+    'ARC_RADIUS_MIN_FRACTION',
     'ArcFitParams',
     'ArcFitResult',
     'constrained_circle_fit',
@@ -29,10 +31,20 @@ __all__ = [
     'radial_profiles',
 ]
 
-# The fitted arc radius may not shrink below the solid body nor exceed the
-# haze envelope plus the search window by more than a few percent.
-_ARC_RADIUS_MIN_FRACTION = 0.98
-_ARC_RADIUS_MAX_FRACTION = 1.05
+ARC_RADIUS_MIN_FRACTION = 0.98
+"""Smallest fitted arc radius, as a fraction of the solid-body radius.
+
+The fitted limb cannot lie inside the solid body.  Exported because the
+consuming technique reports the band this gate tests against, and the band
+must have one definition.
+"""
+
+ARC_RADIUS_MAX_FRACTION = 1.05
+"""Largest fitted arc radius, as a fraction of ``r_env_px + window_px``.
+
+The fitted limb cannot lie beyond the haze envelope displaced by the whole
+search window, plus a few percent of slack.
+"""
 
 # IRLS control for the constrained circle fit.
 _MAX_IRLS_ITERATIONS = 25
@@ -451,9 +463,9 @@ def constrained_circle_fit(
     if n_inlier < params.min_rays or n_inlier < params.min_inlier_fraction * n_total:
         gate = 'arc_inliers'
     elif not (
-        _ARC_RADIUS_MIN_FRACTION * r_solid_px
+        ARC_RADIUS_MIN_FRACTION * r_solid_px
         <= radius
-        <= _ARC_RADIUS_MAX_FRACTION * (r_env_px + window_px)
+        <= ARC_RADIUS_MAX_FRACTION * (r_env_px + window_px)
     ):
         gate = 'arc_radius'
     elif not rms <= params.max_residual_rms_px:

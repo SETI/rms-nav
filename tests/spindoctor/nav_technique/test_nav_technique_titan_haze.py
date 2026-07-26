@@ -23,9 +23,19 @@ from tests.spindoctor.nav_technique.conftest import (
 from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.nav_technique.diagnostics import TitanHazeDiagnostics
 from spindoctor.nav_technique.nav_technique import NavTechnique
-from spindoctor.nav_technique.nav_technique_titan_haze import TitanHazeNav
+from spindoctor.nav_technique.nav_technique_titan_haze import (
+    TitanHazeNav,
+    _arc_gate_rows,
+    _symmetry_gate_rows,
+)
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
-from spindoctor.nav_technique.titan_fitting import axis_vectors
+from spindoctor.nav_technique.titan_fitting import (
+    ArcFitParams,
+    ArcFitResult,
+    SymmetryFitParams,
+    SymmetryFitResult,
+    axis_vectors,
+)
 
 SHAPE_VU = (170, 170)
 CENTER_VU = (85.0, 85.0)
@@ -538,3 +548,372 @@ def test_degenerate_axis_suppresses_angle_refinement(
     result = TitanHazeNav().navigate([feature], context)
     assert isinstance(result.diagnostics, TitanHazeDiagnostics)
     assert result.diagnostics.theta_refined_deg == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Gate table
+# ---------------------------------------------------------------------------
+
+
+_GATE_NAMES = (
+    'valid_fraction',
+    'peak_score',
+    'second_peak',
+    'cross_at_edge',
+    'ray_yield',
+    'arc_inliers',
+    'arc_radius',
+    'arc_residual',
+    'along_at_edge',
+)
+"""Every gate the technique reports on, in the order the fits evaluate them."""
+
+
+def _gate_table_rows(captured: str) -> dict[str, list[str]]:
+    """Return the gate table's rows, split into fields and keyed by gate name.
+
+    A pdslogger line carries its timestamp and level ahead of the message,
+    so the message is what follows the last separator; a table row is a
+    message whose first field is a gate name.
+    """
+    rows: dict[str, list[str]] = {}
+    for line in captured.splitlines():
+        fields = line.split('|')[-1].split()
+        if fields and fields[0] in _GATE_NAMES:
+            rows[fields[0]] = fields
+    return rows
+
+
+def _navigate_clean(
+    haze_disc_image: HazeDiscImageFactory,
+    make_nav_context: NavContextFactory,
+    make_titan_feature: NavFeatureFactory,
+) -> None:
+    """Navigate a clean rendered scene, discarding the result."""
+    _run_technique(haze_disc_image, make_nav_context, make_titan_feature, offset_vu=(0.3, -0.4))
+
+
+def test_gate_table_is_logged_inside_the_technique_section(
+    haze_disc_image: HazeDiscImageFactory,
+    make_nav_context: NavContextFactory,
+    make_titan_feature: NavFeatureFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The table is emitted, so a per-image log explains every accept or reject."""
+    _navigate_clean(haze_disc_image, make_nav_context, make_titan_feature)
+    assert 'Gate table (final pass):' in capsys.readouterr().out
+
+
+def test_gate_table_is_inside_the_named_technique_section(
+    haze_disc_image: HazeDiscImageFactory,
+    make_nav_context: NavContextFactory,
+    make_titan_feature: NavFeatureFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The table belongs to this technique's own log section."""
+    _navigate_clean(haze_disc_image, make_nav_context, make_titan_feature)
+    assert 'TECHNIQUE: TitanHazeNav' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('gate_name', _GATE_NAMES)
+def test_gate_table_reports_every_gate(
+    haze_disc_image: HazeDiscImageFactory,
+    make_nav_context: NavContextFactory,
+    make_titan_feature: NavFeatureFactory,
+    capsys: pytest.CaptureFixture[str],
+    gate_name: str,
+) -> None:
+    """Every Section-2.2 and Section-2.3 gate gets its own line."""
+    _navigate_clean(haze_disc_image, make_nav_context, make_titan_feature)
+    assert gate_name in _gate_table_rows(capsys.readouterr().out)
+
+
+def test_gate_table_reports_the_configured_threshold(
+    haze_disc_image: HazeDiscImageFactory,
+    make_nav_context: NavContextFactory,
+    make_titan_feature: NavFeatureFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Each row carries the threshold its measurement was compared against."""
+    _navigate_clean(haze_disc_image, make_nav_context, make_titan_feature)
+    row = _gate_table_rows(capsys.readouterr().out)['peak_score']
+    assert row[2:4] == ['>=', '0.6000']
+
+
+def test_gate_table_reports_the_measured_value(
+    haze_disc_image: HazeDiscImageFactory,
+    make_nav_context: NavContextFactory,
+    make_titan_feature: NavFeatureFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Each row carries the measurement, not just the verdict.
+
+    A clean rendered disc correlates almost perfectly with its mirror, so
+    the peak score is printed at four decimals somewhere above 0.9.
+    """
+    _navigate_clean(haze_disc_image, make_nav_context, make_titan_feature)
+    row = _gate_table_rows(capsys.readouterr().out)['peak_score']
+    assert float(row[1]) > 0.9
+
+
+def test_gate_table_passes_every_gate_on_a_clean_scene(
+    haze_disc_image: HazeDiscImageFactory,
+    make_nav_context: NavContextFactory,
+    make_titan_feature: NavFeatureFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No row reports a failure when the fit succeeds."""
+    _navigate_clean(haze_disc_image, make_nav_context, make_titan_feature)
+    rows = _gate_table_rows(capsys.readouterr().out)
+    assert [name for name, row in rows.items() if row[-1] != 'PASS'] == []
+
+
+def test_gate_table_marks_the_gate_that_rejected_the_frame(
+    make_nav_context: NavContextFactory,
+    make_titan_feature: NavFeatureFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The gate named in the diagnostics is the row marked FAIL."""
+    rng = np.random.default_rng(seed=7)
+    image = rng.standard_normal(SHAPE_VU) * 10.0 + 100.0
+    context = make_nav_context(image, extfov_margin_vu=(WINDOW_PX, WINDOW_PX))
+    feature = make_titan_feature(
+        predicted_center_vu=CENTER_VU, r_solid_px=R_SOLID_PX, r_env_px=R_ENV_PX
+    )
+    result = TitanHazeNav().navigate([feature], context)
+    assert isinstance(result.diagnostics, TitanHazeDiagnostics)
+    assert result.diagnostics.gate_failed is not None
+    rows = _gate_table_rows(capsys.readouterr().out)
+    assert rows[result.diagnostics.gate_failed][-1] == 'FAIL'
+
+
+def test_gate_table_marks_arc_gates_the_fit_never_reached(
+    make_nav_context: NavContextFactory,
+    make_titan_feature: NavFeatureFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Gates behind an early arc return are skipped, not reported as passing.
+
+    A featureless frame yields no usable limb rays at all, so the arc fit
+    returns before it has an inlier count, a radius, or a residual; printing
+    those defaults as verdicts would invent evidence.
+    """
+    context = make_nav_context(np.zeros(SHAPE_VU), extfov_margin_vu=(WINDOW_PX, WINDOW_PX))
+    feature = make_titan_feature(
+        predicted_center_vu=CENTER_VU, r_solid_px=R_SOLID_PX, r_env_px=R_ENV_PX
+    )
+    result = TitanHazeNav().navigate([feature], context)
+    assert isinstance(result.diagnostics, TitanHazeDiagnostics)
+    rows = _gate_table_rows(capsys.readouterr().out)
+    assert rows['arc_radius'][-1] == 'SKIP'
+
+
+# ---------------------------------------------------------------------------
+# Gate-table rows (no image, no oops)
+# ---------------------------------------------------------------------------
+
+
+_ROW_SYM_PARAMS = SymmetryFitParams(
+    annulus_inner_fraction=0.55,
+    annulus_outer_pad_px=6.0,
+    angle_refine_deg=5.0,
+    angle_refine_step_deg=0.5,
+    angle_refine_min_gain=0.02,
+    min_peak_score=0.60,
+    min_valid_fraction=0.50,
+    max_second_peak_ratio=0.90,
+    cross_sigma_scale=1.0,
+    sigma_floor_cross_px=0.30,
+)
+"""Cross-track tuning the row tests compare against, pinned independently of config."""
+
+_ROW_ARC_PARAMS = ArcFitParams(
+    sector_half_angle_deg=60.0,
+    ray_step_deg=2.0,
+    radial_step_px=0.5,
+    radial_inner_fraction=0.80,
+    radial_outer_pad_px=6.0,
+    median_filter_samples=5,
+    min_gradient_snr=4.0,
+    min_rays=20,
+    min_inlier_fraction=0.50,
+    max_residual_rms_px=2.0,
+    tukey_c=4.685,
+    along_sigma_scale=1.0,
+    sigma_floor_along_px=1.00,
+)
+"""Along-track tuning the row tests compare against, pinned independently of config."""
+
+
+def _symmetry_result(**overrides: object) -> SymmetryFitResult:
+    """Build a cross-track result that passes every gate, then apply overrides."""
+    fields: dict[str, object] = {
+        'cross_track_px': 0.3,
+        'sigma_cross_px': 0.3,
+        'theta_rad': 0.0,
+        'peak_score': 0.99,
+        'valid_fraction': 0.99,
+        'second_peak_ratio': 0.0,
+        'at_edge': False,
+        'gate_failed': None,
+    }
+    fields.update(overrides)
+    return SymmetryFitResult(**fields)  # type: ignore[arg-type]
+
+
+def _arc_result(**overrides: object) -> ArcFitResult:
+    """Build an along-track result that passes every gate, then apply overrides."""
+    fields: dict[str, object] = {
+        'along_track_px': 0.4,
+        'sigma_along_px': 1.0,
+        'radius_px': 44.0,
+        'n_rays_total': 59,
+        'n_rays_inlier': 59,
+        'residual_rms_px': 0.01,
+        'at_edge': False,
+        'gate_failed': None,
+    }
+    fields.update(overrides)
+    return ArcFitResult(**fields)  # type: ignore[arg-type]
+
+
+def _verdicts(symmetry: SymmetryFitResult, arc: ArcFitResult) -> dict[str, str]:
+    """Return every gate-table row's verdict, keyed by gate name."""
+    rows = _symmetry_gate_rows(symmetry, params=_ROW_SYM_PARAMS, window_px=float(WINDOW_PX))
+    rows += _arc_gate_rows(
+        arc,
+        params=_ROW_ARC_PARAMS,
+        r_solid_px=R_SOLID_PX,
+        r_env_px=R_ENV_PX,
+        window_px=float(WINDOW_PX),
+    )
+    return {name: verdict for name, _measured, _threshold, verdict in rows}
+
+
+_FAILING_FITS: list[tuple[str, SymmetryFitResult, ArcFitResult]] = [
+    (
+        'valid_fraction',
+        _symmetry_result(valid_fraction=0.40, gate_failed='valid_fraction'),
+        _arc_result(),
+    ),
+    ('peak_score', _symmetry_result(peak_score=0.50, gate_failed='peak_score'), _arc_result()),
+    (
+        'second_peak',
+        _symmetry_result(second_peak_ratio=0.95, gate_failed='second_peak'),
+        _arc_result(),
+    ),
+    (
+        'ray_yield',
+        _symmetry_result(),
+        _arc_result(
+            n_rays_total=5,
+            n_rays_inlier=0,
+            radius_px=0.0,
+            residual_rms_px=0.0,
+            sigma_along_px=float(WINDOW_PX),
+            along_track_px=0.0,
+            gate_failed='ray_yield',
+        ),
+    ),
+    ('arc_inliers', _symmetry_result(), _arc_result(n_rays_inlier=15, gate_failed='arc_inliers')),
+    ('arc_radius', _symmetry_result(), _arc_result(radius_px=5.0, gate_failed='arc_radius')),
+    (
+        'arc_residual',
+        _symmetry_result(),
+        _arc_result(residual_rms_px=4.0, gate_failed='arc_residual'),
+    ),
+]
+"""One fit per named gate, tripping exactly that gate the way the library does.
+
+The pair carries the ``gate_failed`` the fitting library would report, so
+each case also pins the table's row for that name to ``FAIL`` -- the
+property Phase E triage reads the table for.
+"""
+
+_NAN_FITS: list[tuple[str, SymmetryFitResult, ArcFitResult]] = [
+    ('peak_score', _symmetry_result(peak_score=float('nan')), _arc_result()),
+    ('arc_residual', _symmetry_result(), _arc_result(residual_rms_px=float('nan'))),
+]
+"""Fits whose measurement is undefined; the gates negate their comparisons
+so an unmeasurable quantity fails rather than slipping past, and the table
+must land on the same side.
+"""
+
+
+@pytest.mark.parametrize(
+    ('gate_name', 'symmetry', 'arc'), _FAILING_FITS, ids=[case[0] for case in _FAILING_FITS]
+)
+def test_gate_row_marks_the_tripped_gate_failed(
+    gate_name: str, symmetry: SymmetryFitResult, arc: ArcFitResult
+) -> None:
+    """The row the fitting library names as the failure reads FAIL."""
+    assert _verdicts(symmetry, arc)[gate_name] == 'FAIL'
+
+
+@pytest.mark.parametrize(
+    ('gate_name', 'symmetry', 'arc'), _FAILING_FITS, ids=[case[0] for case in _FAILING_FITS]
+)
+def test_gate_row_marks_only_the_tripped_gate_failed(
+    gate_name: str, symmetry: SymmetryFitResult, arc: ArcFitResult
+) -> None:
+    """No other row reads FAIL, so a flipped comparison cannot hide behind one.
+
+    A swapped threshold or an inverted predicate on any row would show up
+    here as a second failure on a fit that only tripped one gate.
+    """
+    verdicts = _verdicts(symmetry, arc)
+    assert sorted(name for name, verdict in verdicts.items() if verdict == 'FAIL') == [gate_name]
+
+
+@pytest.mark.parametrize(
+    ('gate_name', 'symmetry', 'arc'), _NAN_FITS, ids=[f'{case[0]}_nan' for case in _NAN_FITS]
+)
+def test_gate_row_fails_an_unmeasurable_quantity(
+    gate_name: str, symmetry: SymmetryFitResult, arc: ArcFitResult
+) -> None:
+    """A NaN measurement fails its gate rather than passing it."""
+    assert _verdicts(symmetry, arc)[gate_name] == 'FAIL'
+
+
+def test_gate_rows_all_pass_for_a_clean_fit() -> None:
+    """A fit that tripped nothing reads PASS on every row."""
+    verdicts = _verdicts(_symmetry_result(), _arc_result())
+    assert sorted(set(verdicts.values())) == ['PASS']
+
+
+def test_gate_rows_cover_every_named_gate() -> None:
+    """The table reports every Section-2.2 and Section-2.3 gate, and no others."""
+    assert sorted(_verdicts(_symmetry_result(), _arc_result())) == sorted(_GATE_NAMES)
+
+
+def test_cross_at_edge_row_reports_edge() -> None:
+    """A cross-track peak on the window boundary is flagged, not failed."""
+    verdicts = _verdicts(_symmetry_result(at_edge=True), _arc_result())
+    assert verdicts['cross_at_edge'] == 'EDGE'
+
+
+def test_cross_at_edge_is_not_a_gate_failure() -> None:
+    """An at-edge cross-track fit leaves every row's verdict non-FAIL."""
+    verdicts = _verdicts(_symmetry_result(at_edge=True), _arc_result())
+    assert [name for name, verdict in verdicts.items() if verdict == 'FAIL'] == []
+
+
+def test_along_at_edge_row_reports_edge() -> None:
+    """An along-track shift reaching the window bound is flagged, not failed."""
+    verdicts = _verdicts(_symmetry_result(), _arc_result(at_edge=True))
+    assert verdicts['along_at_edge'] == 'EDGE'
+
+
+def test_along_at_edge_is_not_a_gate_failure() -> None:
+    """An at-edge along-track fit leaves every row's verdict non-FAIL."""
+    verdicts = _verdicts(_symmetry_result(), _arc_result(at_edge=True))
+    assert [name for name, verdict in verdicts.items() if verdict == 'FAIL'] == []
+
+
+@pytest.mark.parametrize(
+    'gate_name', ['arc_inliers', 'arc_radius', 'arc_residual', 'along_at_edge']
+)
+def test_gate_rows_after_an_early_arc_return_are_skipped(gate_name: str) -> None:
+    """Gates behind the ray-yield return report SKIP, not a defaulted verdict."""
+    _name, symmetry, arc = _FAILING_FITS[3]
+    assert _verdicts(symmetry, arc)[gate_name] == 'SKIP'

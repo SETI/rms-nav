@@ -43,6 +43,8 @@ from spindoctor.nav_technique.nav_technique import (
 )
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.nav_technique.titan_fitting import (
+    ARC_RADIUS_MAX_FRACTION,
+    ARC_RADIUS_MIN_FRACTION,
     ArcFitParams,
     ArcFitResult,
     SymmetryFitParams,
@@ -79,6 +81,159 @@ Zero is the honest floor for a rising quality term -- no measured symmetry
 means no evidence.  Unreachable in practice: the ``peak_score`` gate rejects
 the only case that produces it.
 """
+
+
+_GATE_TABLE_FORMAT: str = '  %-14s %13s  %-24s %s'
+"""Column layout of the per-gate table logged inside the technique section."""
+
+
+_GATE_NOT_REACHED: str = '-'
+"""Measured-value placeholder for a gate the fit never reached.
+
+The arc fit returns as soon as too few rays survive, so the gates after
+``ray_yield`` have nothing measured behind them; reporting their defaulted
+values as if they had been evaluated would invent evidence.
+"""
+
+
+def _gate_verdict(passed: bool) -> str:
+    """Render a gate outcome as the table's result column."""
+    return 'PASS' if passed else 'FAIL'
+
+
+def _gate_value(value: float, *, digits: int = 4) -> str:
+    """Render a measured quantity, or ``n/a`` when the fit left it undefined."""
+    if not math.isfinite(value):
+        return 'n/a'
+    return f'{value:.{digits}f}'
+
+
+def _symmetry_gate_rows(
+    symmetry: SymmetryFitResult, *, params: SymmetryFitParams, window_px: float
+) -> list[tuple[str, str, str, str]]:
+    """Build the ``(gate, measured, threshold, result)`` rows of the cross-track fit.
+
+    Every predicate mirrors the fitting library's own comparison, negations
+    included, so a NaN measurement lands on the same side of the table as it
+    does in the gate.  The scan measures all three quantities before gating
+    any of them, so no cross-track row can be unreached.
+
+    Parameters:
+        symmetry: The final pass's cross-track fit.
+        params: The cross-track tuning constants the gates compare against.
+        window_px: Search half-window, the bound behind the at-edge flag.
+
+    Returns:
+        One row per Section-2.2 gate, in the order the library evaluates
+        them.
+    """
+    # The at-edge row is the one place the verdict is not a comparison of the
+    # two columns beside it: the scan raises the flag on the winning INTEGER
+    # shift against the truncated window, then refines the reported shift to
+    # sub-pixel.  The verdict column is authoritative; the measured column is
+    # the reported shift, and the threshold column is the bound the flag was
+    # actually tested against, so the two can straddle each other by under a
+    # pixel on a frame flagged at the edge.
+    return [
+        (
+            'valid_fraction',
+            _gate_value(symmetry.valid_fraction),
+            f'>= {params.min_valid_fraction:.4f}',
+            _gate_verdict(not symmetry.valid_fraction < params.min_valid_fraction),
+        ),
+        (
+            'peak_score',
+            _gate_value(symmetry.peak_score),
+            f'>= {params.min_peak_score:.4f}',
+            _gate_verdict(symmetry.peak_score >= params.min_peak_score),
+        ),
+        (
+            'second_peak',
+            _gate_value(symmetry.second_peak_ratio),
+            f'<= {params.max_second_peak_ratio:.4f}',
+            _gate_verdict(not symmetry.second_peak_ratio > params.max_second_peak_ratio),
+        ),
+        (
+            'cross_at_edge',
+            _gate_value(abs(symmetry.cross_track_px), digits=2),
+            f'< {float(math.floor(window_px)):.2f}',
+            'EDGE' if symmetry.at_edge else 'PASS',
+        ),
+    ]
+
+
+def _arc_gate_rows(
+    arc: ArcFitResult,
+    *,
+    params: ArcFitParams,
+    r_solid_px: float,
+    r_env_px: float,
+    window_px: float,
+) -> list[tuple[str, str, str, str]]:
+    """Build the ``(gate, measured, threshold, result)`` rows of the along-track fit.
+
+    Parameters:
+        arc: The final pass's along-track fit.
+        params: The along-track tuning constants the gates compare against.
+        r_solid_px: Solid-body radius, the lower end of the radius band.
+        r_env_px: Haze-envelope radius, which with ``window_px`` sets the
+            upper end of the radius band.
+        window_px: Search half-window, the bound behind the at-edge flag.
+
+    Returns:
+        One row per Section-2.3 gate, in the order the library evaluates
+        them.  Rows the fit never reached carry ``SKIP`` rather than the
+        verdict their defaulted values would imply.
+    """
+    min_rays = max(params.min_rays, 1)
+    inlier_fraction = arc.n_rays_inlier / arc.n_rays_total if arc.n_rays_total > 0 else 0.0
+    radius_lo = ARC_RADIUS_MIN_FRACTION * r_solid_px
+    radius_hi = ARC_RADIUS_MAX_FRACTION * (r_env_px + window_px)
+    rows = [
+        (
+            'ray_yield',
+            f'{arc.n_rays_total:d}',
+            f'>= {min_rays:d}',
+            _gate_verdict(not arc.n_rays_total < min_rays),
+        ),
+        (
+            'arc_inliers',
+            f'{arc.n_rays_inlier:d} ({inlier_fraction:.3f})',
+            f'>= {params.min_rays:d} and >= {params.min_inlier_fraction:.3f}',
+            _gate_verdict(
+                not (
+                    arc.n_rays_inlier < params.min_rays
+                    or arc.n_rays_inlier < params.min_inlier_fraction * arc.n_rays_total
+                )
+            ),
+        ),
+        (
+            'arc_radius',
+            _gate_value(arc.radius_px, digits=2),
+            f'[{radius_lo:.2f}, {radius_hi:.2f}]',
+            _gate_verdict(radius_lo <= arc.radius_px <= radius_hi),
+        ),
+        (
+            'arc_residual',
+            _gate_value(arc.residual_rms_px, digits=3),
+            f'<= {params.max_residual_rms_px:.3f}',
+            _gate_verdict(arc.residual_rms_px <= params.max_residual_rms_px),
+        ),
+        # Unlike the cross-track at-edge row, this one's columns ARE the
+        # comparison the fit made: the circle fit flags the shift it reports,
+        # against the untruncated window.
+        (
+            'along_at_edge',
+            _gate_value(abs(arc.along_track_px), digits=2),
+            f'< {window_px:.2f}',
+            'EDGE' if arc.at_edge else 'PASS',
+        ),
+    ]
+    if arc.gate_failed == 'ray_yield':
+        rows = rows[:1] + [
+            (name, _GATE_NOT_REACHED, threshold, 'SKIP') for name, _, threshold, _ in rows[1:]
+        ]
+    return rows
 
 
 def _eligible_features(features: list[NavFeature]) -> list[NavFeature]:
@@ -300,6 +455,8 @@ class TitanHazeNav(NavTechnique):
                 geometry.axis_degenerate,
                 window_px,
             )
+            sym_params = _symmetry_params(symmetry_block, angle_refine_deg=angle_refine_deg)
+            arc_params = _arc_params(nav_config['arc'])
             symmetry, arc, offset_vu, recentered = fit_titan_center(
                 np.asarray(context.image_ext, np.float64),
                 np.asarray(context.sensor_mask_ext, bool),
@@ -309,9 +466,18 @@ class TitanHazeNav(NavTechnique):
                 r_solid_px=geometry.r_solid_px,
                 r_env_px=geometry.r_env_px,
                 window_px=window_px,
-                sym_params=_symmetry_params(symmetry_block, angle_refine_deg=angle_refine_deg),
-                arc_params=_arc_params(nav_config['arc']),
+                sym_params=sym_params,
+                arc_params=arc_params,
                 recenter_threshold_px=float(nav_config['recenter_threshold_px']),
+            )
+            self._log_gate_table(
+                symmetry,
+                arc,
+                sym_params=sym_params,
+                arc_params=arc_params,
+                r_solid_px=geometry.r_solid_px,
+                r_env_px=geometry.r_env_px,
+                window_px=window_px,
             )
             return self._assemble_result(
                 feature=feature,
@@ -323,6 +489,53 @@ class TitanHazeNav(NavTechnique):
                 window_px=window_px,
                 fit_rotation=bool(context.fit_camera_rotation),
             )
+
+    def _log_gate_table(
+        self,
+        symmetry: SymmetryFitResult,
+        arc: ArcFitResult,
+        *,
+        sym_params: SymmetryFitParams,
+        arc_params: ArcFitParams,
+        r_solid_px: float,
+        r_env_px: float,
+        window_px: float,
+    ) -> None:
+        """Log every fit gate with its measurement, its threshold, and its verdict.
+
+        One line per gate, in the order the fitting library evaluates them,
+        so an operator reading the per-image log sees why a frame was
+        accepted or rejected without re-running anything.  The values are
+        the FINAL pass's: an intermediate pass is deliberately ungated.
+
+        Verdicts are ``PASS`` / ``FAIL``, ``EDGE`` on the two at-edge rows
+        (a flag, not a rejection), and ``SKIP`` on a gate the fit returned
+        before reaching.  Each verdict is authoritative; on the cross-track
+        at-edge row the two value columns are informational rather than the
+        literal comparison, for the reason given in
+        :func:`_symmetry_gate_rows`.
+
+        Parameters:
+            symmetry: The final pass's cross-track fit.
+            arc: The final pass's along-track fit.
+            sym_params: Cross-track tuning constants.
+            arc_params: Along-track tuning constants.
+            r_solid_px: Solid-body radius in pixels.
+            r_env_px: Haze-envelope radius in pixels.
+            window_px: Search half-window in pixels.
+        """
+        rows = _symmetry_gate_rows(symmetry, params=sym_params, window_px=window_px)
+        rows += _arc_gate_rows(
+            arc,
+            params=arc_params,
+            r_solid_px=r_solid_px,
+            r_env_px=r_env_px,
+            window_px=window_px,
+        )
+        self.logger.info('Gate table (final pass):')
+        self.logger.info(_GATE_TABLE_FORMAT, 'gate', 'measured', 'threshold', 'result')
+        for name, measured, threshold, verdict in rows:
+            self.logger.info(_GATE_TABLE_FORMAT, name, measured, threshold, verdict)
 
     def _assemble_result(
         self,

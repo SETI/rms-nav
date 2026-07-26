@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 
 from spindoctor.feature.feature import NavFeature
-from spindoctor.feature.geometry import BodyBlobGeometry, StarGeometry
+from spindoctor.feature.geometry import BodyBlobGeometry, StarGeometry, TitanHazeGeometry
 from spindoctor.support.image import draw_circle, draw_rect
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
@@ -121,6 +121,8 @@ def compose_dialog_overlay(
       marks (LIMB_ARC, TERMINATOR_ARC, RING_EDGE);
     - every BODY_BLOB's predicted-diameter circle outline at the
       predicted centroid;
+    - every TITAN_LIMB's haze-envelope circle outline at the predicted
+      disc center;
     - every STAR feature's bbox as a rectangle outline at the
       predicted-vu position so the operator can manually align
       catalog stars with the observed bright pixels.
@@ -168,21 +170,56 @@ def compose_dialog_overlay(
         #    predicted silhouette as a 1-pixel circle outline so the
         #    operator can still align the centroid by eye.
         if isinstance(feature.geometry, BodyBlobGeometry):
-            v_center, u_center = feature.geometry.predicted_center_vu
-            radius_px = max(1, round(feature.geometry.predicted_diameter_px / 2.0))
-            # ``draw_circle`` uses (x=u, y=v); it clips internally to the
-            # array bounds so partial-FOV blobs render their visible arc.
-            v_int = round(v_center)
-            u_int = round(u_center)
-            draw_circle(image, 1.0, u_int, v_int, radius_px)
-            draw_circle(mask, True, u_int, v_int, radius_px)
-        # 3) StarGeometry carries only a predicted (v, u) point and a
+            _paint_circle_outline(
+                image,
+                mask,
+                feature.geometry.predicted_center_vu,
+                feature.geometry.predicted_diameter_px / 2.0,
+            )
+        # 3) TitanHazeGeometry likewise has neither template nor polyline;
+        #    render the predicted haze envelope as a circle outline, the
+        #    same silhouette the haze technique fits, so a Titan-only frame
+        #    is manually navigable.
+        if isinstance(feature.geometry, TitanHazeGeometry):
+            _paint_circle_outline(
+                image,
+                mask,
+                feature.geometry.predicted_center_vu,
+                feature.geometry.r_env_px,
+            )
+        # 4) StarGeometry carries only a predicted (v, u) point and a
         #    PSF-sized bbox.  Render a rectangle outline around the
         #    bbox so the operator can see where the catalog says the
         #    star sits before clicking on the actual peak.
         if isinstance(feature.geometry, StarGeometry):
             _paint_star_marker(image, mask, feature.geometry, extfov_shape_vu)
     return image, mask
+
+
+def _paint_circle_outline(
+    image: NDArrayFloatType,
+    mask: NDArrayBoolType,
+    center_vu: tuple[float, float],
+    radius_px: float,
+) -> None:
+    """Paint a 1-pixel circle outline into the overlay image and mask.
+
+    ``draw_circle`` uses ``(x=u, y=v)`` and clips internally to the array
+    bounds, so a partially-visible circle renders the arc that lands inside
+    the ext-FOV.  The radius is floored at one pixel so a body smaller than
+    a pixel still marks its predicted position.
+
+    Parameters:
+        image: Overlay image, modified in place.
+        mask: Overlay mask, modified in place.
+        center_vu: Predicted ``(v, u)`` center of the circle.
+        radius_px: Circle radius in pixels.
+    """
+    v_int = round(center_vu[0])
+    u_int = round(center_vu[1])
+    radius_int = max(1, round(radius_px))
+    draw_circle(image, 1.0, u_int, v_int, radius_int)
+    draw_circle(mask, True, u_int, v_int, radius_int)
 
 
 def _paint_star_marker(

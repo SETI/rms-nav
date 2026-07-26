@@ -11,6 +11,7 @@ analytic backplane stand-in patched over the module's ``oops`` names.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from pathlib import Path
 from typing import Any, cast
@@ -25,8 +26,10 @@ from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.feature.geometry import TitanHazeGeometry
 from spindoctor.nav_model.nav_model_body import NavModelBody
 from spindoctor.nav_model.nav_model_titan import (
+    GATED_DOT_SPACING,
     NavModelTitan,
     build_titan_feature,
+    haze_overlay,
     titan_haze_reliability,
 )
 from spindoctor.nav_model.titan_geometry import TitanGeometryInputs
@@ -931,8 +934,315 @@ def test_create_model_logs_the_titan_section(
     assert 'TITAN MODEL' in capsys.readouterr().out
 
 
-def test_to_annotations_returns_empty_collection(tmp_path: Path) -> None:
-    """The overlay is not part of this model's responsibilities yet."""
+def test_to_annotations_is_empty_for_unevaluated_geometry(tmp_path: Path) -> None:
+    """A frame whose geometry never evaluated draws no overlay at all.
+
+    Its defaults are a zero-radius envelope at the frame origin; painting a
+    center mark there would claim a position the frame does not support.
+    """
     obs = _BrokenObs(data=np.zeros((120, 120)), extfov_margin_vu=(10, 10))
     model = NavModelTitan('titan:TITAN', cast(Any, obs), config=_titan_only_config(tmp_path))
     assert len(model.to_annotations(cast(Any, None)).annotations) == 0
+
+
+# ---------------------------------------------------------------------------
+# Overlay rasterization
+# ---------------------------------------------------------------------------
+
+
+_SECTOR_HALF_ANGLE_DEG = 60.0
+"""Arc-fit sector half-width the overlay tests draw with."""
+
+
+def _overlay(
+    *,
+    dot_spacing: int = 1,
+    center_vu: tuple[float, float] = (100.0, 100.0),
+    r_env_px: float = 60.0,
+    theta_rad: float = 0.0,
+) -> np.ndarray:
+    """Rasterize the overlay of a haze geometry with the given parameters."""
+    return haze_overlay(
+        _inputs(r_env_px=r_env_px, center_vu=center_vu, theta_rad=theta_rad),
+        sector_half_angle_deg=_SECTOR_HALF_ANGLE_DEG,
+        dot_spacing=dot_spacing,
+    )
+
+
+def _painted_near(
+    overlay: np.ndarray,
+    center_vu: tuple[float, float],
+    radius_px: float,
+    phi_deg: float,
+) -> bool:
+    """Whether any pixel within one pixel of ``(radius, phi)`` is painted.
+
+    Curves are rasterized from samples half a pixel apart, so the pixel a
+    given polar position lands on can differ by one from the ideal point's;
+    the tests assert on a one-pixel neighborhood rather than pinning the
+    rounding.
+    """
+    phi_rad = math.radians(phi_deg)
+    v = round(center_vu[0] + radius_px * math.sin(phi_rad))
+    u = round(center_vu[1] + radius_px * math.cos(phi_rad))
+    return bool(overlay[v - 1 : v + 2, u - 1 : u + 2].any())
+
+
+@pytest.mark.parametrize('phi_deg', [0.0, 45.0, 90.0, 180.0, 270.0], ids=str)
+def test_overlay_draws_the_envelope_circle(phi_deg: float) -> None:
+    """The envelope circle is painted all the way around the disc."""
+    overlay = _overlay()
+    assert _painted_near(overlay, (100.0, 100.0), 60.0, phi_deg) is True
+
+
+def test_overlay_draws_the_sunward_half_of_the_symmetry_axis() -> None:
+    """The mirror plane is drawn through the disc toward the sub-solar side."""
+    overlay = _overlay(theta_rad=math.radians(30.0))
+    assert _painted_near(overlay, (100.0, 100.0), 30.0, 30.0) is True
+
+
+def test_overlay_draws_the_anti_sunward_half_of_the_symmetry_axis() -> None:
+    """The chord spans both sides, so the mirror plane reads as a line."""
+    overlay = _overlay(theta_rad=math.radians(30.0))
+    assert _painted_near(overlay, (100.0, 100.0), 30.0, 210.0) is True
+
+
+def test_overlay_marks_the_disc_center() -> None:
+    """A cross marks the center the summary PNG then shifts onto the fit."""
+    overlay = _overlay()
+    assert bool(overlay[100, 100]) is True
+
+
+def test_overlay_draws_the_sector_arc_at_the_solid_radius() -> None:
+    """The arc-fit sector's inner boundary sits at the solid-body radius.
+
+    ``_inputs`` builds the solid radius at nine tenths of the envelope, so
+    54 px is the solid radius of the 60 px envelope drawn here.
+    """
+    overlay = _overlay(theta_rad=math.radians(30.0))
+    assert _painted_near(overlay, (100.0, 100.0), 54.0, 75.0) is True
+
+
+def test_overlay_draws_the_sector_edge_rays() -> None:
+    """The sector edges join the solid radius to the envelope."""
+    overlay = _overlay(theta_rad=math.radians(30.0))
+    edge_deg = 30.0 + _SECTOR_HALF_ANGLE_DEG
+    assert _painted_near(overlay, (100.0, 100.0), 57.0, edge_deg) is True
+
+
+def test_overlay_leaves_the_band_outside_the_sector_clear() -> None:
+    """Between the two radii, only the sector and the axis are drawn."""
+    overlay = _overlay(theta_rad=math.radians(30.0))
+    assert _painted_near(overlay, (100.0, 100.0), 57.0, 150.0) is False
+
+
+def test_gated_overlay_paints_fewer_pixels() -> None:
+    """A gated feature's curves are dotted rather than solid."""
+    solid = _overlay()
+    dotted = _overlay(dot_spacing=GATED_DOT_SPACING)
+    assert int(dotted.sum()) < int(solid.sum())
+
+
+def test_gated_overlay_paints_a_subset_of_the_solid_one() -> None:
+    """Dotting drops samples; it never moves the curves."""
+    solid = _overlay()
+    dotted = _overlay(dot_spacing=GATED_DOT_SPACING)
+    assert bool(np.all(solid[dotted]))
+
+
+def test_overlay_clips_a_body_hanging_off_the_frame_edge() -> None:
+    """A partly-framed disc paints the part that is inside the frame."""
+    overlay = _overlay(center_vu=(5.0, 5.0))
+    assert int(overlay.sum()) > 0
+
+
+def test_overlay_is_empty_for_a_body_nowhere_near_the_frame() -> None:
+    """A disc entirely outside the frame paints nothing."""
+    overlay = _overlay(center_vu=(-500.0, -500.0))
+    assert int(overlay.sum()) == 0
+
+
+def test_overlay_is_empty_for_an_unevaluated_geometry() -> None:
+    """A zero-radius envelope draws nothing, not a cross at the frame origin."""
+    overlay = _overlay(r_env_px=0.0, center_vu=(0.0, 0.0))
+    assert int(overlay.sum()) == 0
+
+
+def test_overlay_is_empty_for_a_non_finite_axis() -> None:
+    """An undefined symmetry axis draws nothing rather than raising.
+
+    Nothing in the geometry path produces one today, but the overlay is
+    built inside a sandboxed model hook: a curve sampled from a NaN angle
+    would raise where the contract promises an annotation collection.
+    """
+    overlay = _overlay(theta_rad=float('nan'))
+    assert int(overlay.sum()) == 0
+
+
+def test_overlay_is_empty_for_a_non_finite_center() -> None:
+    """An undefined disc center draws nothing rather than raising."""
+    overlay = _overlay(center_vu=(float('nan'), float('nan')))
+    assert int(overlay.sum()) == 0
+
+
+def test_overlay_is_empty_for_a_non_finite_solid_radius() -> None:
+    """An undefined solid radius draws nothing rather than raising."""
+    inputs = dataclasses.replace(_inputs(r_env_px=60.0), r_solid_px=float('nan'))
+    overlay = haze_overlay(inputs, sector_half_angle_deg=_SECTOR_HALF_ANGLE_DEG)
+    assert int(overlay.sum()) == 0
+
+
+# ---------------------------------------------------------------------------
+# Annotations
+# ---------------------------------------------------------------------------
+
+
+def _annotated_model(
+    scene: type[_SceneBackplane],
+    tmp_path: Path,
+    *,
+    center_vu: tuple[float, float] = (60.5, 60.5),
+    occluder: bool = False,
+) -> tuple[NavModelTitan, FakeObs]:
+    """Build and evaluate a Titan model over the analytic scene.
+
+    Parameters:
+        scene: The patched analytic backplane class.
+        tmp_path: Per-test directory for the satellite-list override.
+        center_vu: Titan's field-of-view center.
+        occluder: When True, a nearer moon covers enough of the disc to
+            drive the occlusion hard-zero, leaving every drawn quantity
+            (center, radii, axis) untouched.
+    """
+    scene.sub_solar_offset_vu = (10.0, 0.0)
+    scene.ring_radius_at_u = None
+    scene.titan_center_vu = center_vu
+    scene.occluder_center_vu = center_vu if occluder else None
+    scene.occluder_radius_px = 20.0
+    extra = (
+        {'RHEA': _inventory_entry((center_vu[0], center_vu[1]), 20.0, 5.0e5)} if occluder else {}
+    )
+    obs = _scene_obs(titan_entry=_inventory_entry(center_vu, 26.0, 1.2e6), extra=extra)
+    config = _titan_only_config(tmp_path)
+    if occluder:
+        config.update_config(_satellites_override(tmp_path, ('TITAN', 'RHEA')))
+    model = NavModelTitan.instances_for_obs(cast(Any, obs), config=config)[0]
+    model.create_model()
+    return cast(NavModelTitan, model), obs
+
+
+def test_to_annotations_emits_one_annotation(scene: type[_SceneBackplane], tmp_path: Path) -> None:
+    """A navigable Titan contributes exactly one annotation."""
+    model, _obs = _annotated_model(scene, tmp_path)
+    assert len(model.to_annotations(cast(Any, None)).annotations) == 1
+
+
+def test_annotation_overlay_matches_the_extended_frame(
+    scene: type[_SceneBackplane], tmp_path: Path
+) -> None:
+    """The overlay is extfov-shaped, which the Annotation itself enforces."""
+    model, obs = _annotated_model(scene, tmp_path)
+    annotation = model.to_annotations(cast(Any, None)).annotations[0]
+    assert annotation.overlay.shape == obs.extdata_shape_vu
+
+
+def test_annotation_draws_the_envelope_circle(scene: type[_SceneBackplane], tmp_path: Path) -> None:
+    """The circle is painted at the envelope radius around the disc center."""
+    model, _obs = _annotated_model(scene, tmp_path)
+    geometry = model.geometry_inputs
+    annotation = model.to_annotations(cast(Any, None)).annotations[0]
+    painted = _painted_near(
+        annotation.overlay, geometry.predicted_center_vu, geometry.r_env_px, 0.0
+    )
+    assert painted is True
+
+
+def test_annotation_uses_the_body_overlay_color(
+    scene: type[_SceneBackplane], tmp_path: Path
+) -> None:
+    """Titan's overlay is drawn in the same color as every other body's limb."""
+    model, _obs = _annotated_model(scene, tmp_path)
+    annotation = model.to_annotations(cast(Any, None)).annotations[0]
+    assert tuple(annotation.overlay_color) == tuple(Config().bodies.label_limb_color)
+
+
+def test_annotation_labels_the_body(scene: type[_SceneBackplane], tmp_path: Path) -> None:
+    """The overlay carries the body label every other body overlay carries."""
+    model, _obs = _annotated_model(scene, tmp_path)
+    annotation = model.to_annotations(cast(Any, None)).annotations[0]
+    assert annotation.text_info_list[0].text == 'TITAN'
+
+
+def test_annotation_label_names_a_low_reliability_feature(
+    scene: type[_SceneBackplane], tmp_path: Path
+) -> None:
+    """A hard-zeroed frame says so; a dotted circle alone would not explain it.
+
+    The label states what the model measured -- reliability below the
+    per-type threshold -- rather than a gate verdict, because manual
+    navigation renders the same overlay with the gate deliberately skipped.
+    """
+    model, _obs = _annotated_model(scene, tmp_path, occluder=True)
+    annotation = model.to_annotations(cast(Any, None)).annotations[0]
+    assert annotation.text_info_list[0].text == 'TITAN (low reliability)'
+
+
+def test_low_reliability_annotation_overlay_is_dotted(
+    scene: type[_SceneBackplane], tmp_path: Path
+) -> None:
+    """The same geometry draws fewer pixels once its feature scores below the gate."""
+    kept_model, _kept_obs = _annotated_model(scene, tmp_path)
+    kept = kept_model.to_annotations(cast(Any, None)).annotations[0]
+    gated_model, _gated_obs = _annotated_model(scene, tmp_path, occluder=True)
+    gated = gated_model.to_annotations(cast(Any, None)).annotations[0]
+    assert int(gated.overlay.sum()) < int(kept.overlay.sum())
+
+
+def test_annotation_avoids_placing_text_over_the_disc(
+    scene: type[_SceneBackplane], tmp_path: Path
+) -> None:
+    """The label-avoid mask covers the envelope so text lands off the body."""
+    model, _obs = _annotated_model(scene, tmp_path)
+    geometry = model.geometry_inputs
+    annotation = model.to_annotations(cast(Any, None)).annotations[0]
+    assert annotation.avoid_mask is not None
+    v = round(geometry.predicted_center_vu[0])
+    u = round(geometry.predicted_center_vu[1] + 0.5 * geometry.r_env_px)
+    assert bool(annotation.avoid_mask[v, u]) is True
+
+
+def test_annotation_renders_into_the_summary_overlay(
+    scene: type[_SceneBackplane], tmp_path: Path
+) -> None:
+    """The annotation composites into the RGB the summary PNG is written from."""
+    model, obs = _annotated_model(scene, tmp_path)
+    geometry = model.geometry_inputs
+    rgb = model.to_annotations(cast(Any, None)).combine(offset=(0.0, 0.0), include_text=False)
+    assert rgb is not None
+    margin_v, margin_u = obs.extfov_margin_vu
+    center_fov = (
+        geometry.predicted_center_vu[0] - margin_v,
+        geometry.predicted_center_vu[1] - margin_u,
+    )
+    assert _painted_near(rgb[..., 0] > 0, center_fov, geometry.r_env_px, 0.0) is True
+
+
+def test_summary_overlay_follows_the_navigated_offset(
+    scene: type[_SceneBackplane], tmp_path: Path
+) -> None:
+    """The committed offset shifts the overlay onto the fitted center.
+
+    This is what makes a predicted-geometry overlay a picture of the fit:
+    the summary PNG combines annotations at the navigated offset, so the
+    center cross lands where the technique put the body.
+    """
+    model, obs = _annotated_model(scene, tmp_path)
+    geometry = model.geometry_inputs
+    rgb = model.to_annotations(cast(Any, None)).combine(offset=(4.0, -3.0), include_text=False)
+    assert rgb is not None
+    margin_v, margin_u = obs.extfov_margin_vu
+    center_fov = (
+        geometry.predicted_center_vu[0] - margin_v + 4.0,
+        geometry.predicted_center_vu[1] - margin_u - 3.0,
+    )
+    assert _painted_near(rgb[..., 0] > 0, center_fov, 0.0, 0.0) is True

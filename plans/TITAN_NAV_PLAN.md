@@ -696,10 +696,11 @@ New files:
 | File | Contents |
 |---|---|
 | `src/spindoctor/nav_technique/titan_fitting/` | Pure fitting library, split into a package under the sizing note below because the single module ran past 1000 lines: `grid.py` (axis unit vectors, rotated-grid resample, the shared array helpers), `symmetry.py` (mirror-correlation scan with angle refinement, its params/result), `arc.py` (radial profiles, limb-gradient extraction, constrained robust circle fit, its params/result), `driver.py` (`fit_titan_center`, the two-pass sequence), and `__init__.py` re-exporting the whole surface so consumers import `spindoctor.nav_technique.titan_fitting`. No oops, no NavContext, no config reads — plain functions on arrays plus the Section 4 parameter/result dataclasses. Everything unit-testable on synthetic arrays. |
-| `src/spindoctor/nav_technique/nav_technique_titan_haze.py` | `TitanHazeNav(NavTechnique)`: `is_feasible`, `navigate` (Sections 2.2-2.4, math delegated to `titan_fitting`), `confidence_spec` + `confidence_attributes`, `tier`, `accepts_feature_types`, tuning load. |
+| `src/spindoctor/nav_technique/nav_technique_titan_haze.py` | `TitanHazeNav(NavTechnique)`: `is_feasible`, `navigate` (Sections 2.2-2.4, math delegated to `titan_fitting`), `confidence_spec` + `confidence_attributes`, `tier`, `accepts_feature_types`, tuning load; plus the Phase-C gate table logged inside the `TECHNIQUE: TitanHazeNav` section (one info line per Section 2.2.6 / 2.3.7 gate with its measurement, its threshold, and `PASS` / `FAIL` / `EDGE` / `SKIP`). |
 | `src/spindoctor/nav_model/titan_geometry.py` | Added during Phase B under the sizing note below: `TitanGeometryInputs` plus `geometry_from_obs` and every oops / star-catalog helper behind it, because the model plus its geometry extraction ran past 1000 lines in one file. `nav_model_titan.py` keeps the reliability formula, the feature build, and the NavModel class, all pure functions of `TitanGeometryInputs`. |
 | `tests/spindoctor/nav_technique/test_titan_fitting.py` | Phase-A unit tests. |
-| `tests/spindoctor/nav_technique/test_nav_technique_titan_haze.py` | Phase-B technique tests (use the `FakeObs` fixture pattern from `tests/spindoctor/nav_technique/conftest.py`; do not instantiate a real `ObsSnapshot` for unit tests). |
+| `tests/spindoctor/nav_model/test_nav_model_titan.py` | Phase-B model tests (reliability, feature payload, contaminant mask, never-raise); Phase C adds the overlay-rasterization and annotation tests. Added to this manifest during Phase C, which touched it: the file shipped with Phase B but the manifest never listed it. |
+| `tests/spindoctor/nav_technique/test_nav_technique_titan_haze.py` | Phase-B technique tests (use the `FakeObs` fixture pattern from `tests/spindoctor/nav_technique/conftest.py`; do not instantiate a real `ObsSnapshot` for unit tests); Phase C adds the gate-table tests -- capsys over a navigated frame, plus a table-driven pass over the row builders with a synthetic fit per named gate. |
 | `tests/integration/test_titan_haze_nav.py` | Phase-B integration tests (marked, holdings-fetched): model emission and technique execution on `W1822132529_1`, including the real YBSC / Tycho-2 star-mask queries. |
 | `util/titan_cohort/titan_images.csv` | Phase E: the legacy cohort list vendored into the repo (Section 6, Phase E step 1). |
 
@@ -725,6 +726,9 @@ Modified files:
 | `src/spindoctor/nav_orchestrator/feature_summary.py`, `src/spindoctor/nav_orchestrator/orchestrator.py` (inventory builders), `src/spindoctor/nav_orchestrator/curator.py` (Phase B) | Breakdown serialization, three files (Section 2.5 verified scope): `reliability_reasons` field on `NavFeatureSummary`, populated at inventory build, serialized by `_curate_feature_summary` — generic for ALL feature types; acceptance criterion 3 depends on it. No Titan-specific block. |
 | `tests/spindoctor/nav_orchestrator/test_orchestrator.py` (Phase B) | Two tests exercise the deleted path (`test_orchestrator_titan_only_yields_titan_unsupported`, `test_orchestrator_titan_plus_stars_navigates_normally`) via a `_FakeTitanModel` exposing `titan_in_fov`; rewrite both (and the fake) to the Section 2.5 status matrix (`ALL_FEATURES_GATED` with a `TITAN_LIMB` gate record / normal navigation). |
 | `src/spindoctor/feature/composition.py`, `src/spindoctor/nav_technique/nav_technique_manual.py` (Phase C) | Manual-nav support: add a `TitanHazeGeometry` branch to `compose_dialog_overlay` (envelope-circle outline at `r_env_px` around `predicted_center_vu`, following the `BodyBlobGeometry` branch pattern) and to `NavTechniqueManual.is_feasible`'s renderable-feature count. Both enumerate geometry types by hand; without both branches, manual navigation is impossible on a Titan-only frame. |
+| `tests/spindoctor/feature/test_composition.py`, `tests/spindoctor/nav_technique/test_nav_technique_manual.py` (Phase C) | Manual-nav coverage for the two branches above: the composed circle's radius and clipping, and a Titan-only feature set that is feasible and paints a non-empty drag overlay. |
+| `src/spindoctor/nav_technique/titan_fitting/arc.py`, `.../__init__.py` (Phase C) | Promote the arc-radius band constants to the package surface (`ARC_RADIUS_MIN_FRACTION` / `ARC_RADIUS_MAX_FRACTION`) so the technique's gate table quotes the band the gate itself tests, from one definition. Behavior unchanged. |
+| `tests/shims/obs.py`, `tests/shims_tests/test_shims_self.py` (Phase C) | `FakeObs.extract_offset_array`, mirroring `ObsSnapshot`'s semantics (window extraction at an offset, zero-filled past the extfov), so the overlay-render test can composite an annotation the way the summary PNG does; plus its shim self-tests. |
 | `src/spindoctor/nav_model/nav_model_body_simulated.py` (Phase D) | Exclude `TITAN` from simulated body-model selection (mirror of the real path's exclusion) once `NavModelTitanSimulated` exists — today it builds a model for EVERY body, so both models would claim a sim Titan. |
 | `tests/integration/sim_scenes/atmosphere/titan_haze_limb.yaml`, `.../titan_crescent_horns*.yaml`, `tests/integration/sim_scenes/model_mismatch/haze_limb_base.yaml` + their `sim_baselines/*.json` (Phase D) | Rename the body away from `TITAN` (e.g. `HAZEMOON`) and regenerate baselines via `update_sim_baselines` with diff review. These scenes are body-navigation fidelity records premised on a haze-BLIND navigator; without the rename the new routing flips them to `TitanHazeNav`, breaking exact-match baselines, invalidating the crescent-horns rationale comment, and destroying the `atmosphere_haze` model-mismatch sweep's purpose. |
 | `tests/spindoctor/nav_technique/test_diagnostics.py` (Phase B) | Add `TitanHazeDiagnostics` to BOTH hard-coded parametrize lists (defaults-construct + `CURATOR_FIELDS` completeness) — the lists are not auto-discovered, and `curator.assert_diagnostic_fields_present` raises at metadata-build time on any mismatch. |
@@ -1160,11 +1164,38 @@ the correct generic status.
 ### Phase C — annotations and operator surface
 
 `to_annotations` overlay: predicted envelope circle, symmetry axis,
-fitted circle center + arc sector, styled by accept/spurious; PNG
+disc-center mark + arc sector, styled by the feature's reliability; PNG
 snapshot test following `tests/spindoctor/support/test_summary_png.py`;
 keep the existing `TITAN MODEL` logger section and add the gate table
 at info level inside the technique's `TECHNIQUE: TitanHazeNav`
 section.
+[Revised during Phase C; pending operator ratification. The original
+text said "fitted circle center + arc sector, styled by
+accept/spurious". Neither the fitted center nor the technique's
+accept-or-spurious verdict exists when this runs:
+`_collect_annotations` merges every model's annotations in
+`_navigate_pipeline` BEFORE `_run_pass`, and only NavModels produce
+annotations at all. Two substitutions, both faithful to the intent.
+(a) The fit is shown by POSITION, not by a second drawn circle:
+`write_summary_png` combines annotations at `result.offset_px`, so the
+drawn envelope and the center cross land on the fitted center on a
+committed frame and stay at the prediction when no offset was
+committed — which is how every other model's overlay already reports
+its technique's answer. (b) The style encodes the accept/reject
+quantity the model DOES know, the feature's reliability against the
+per-type gate threshold: solid curves at or above it, dotted plus a
+`TITAN (low reliability)` label below it. The label says reliability
+rather than "gated" because manual navigation renders the same overlay
+with the gate deliberately skipped (`apply_gate=False`); reliability
+is also what decides whether the fit is attempted at all in an
+autonomous run, so a dotted overlay and a spurious result are never
+confusable. Showing the technique's own verdict would need a
+post-technique annotation pass, a cross-cutting orchestrator change
+outside this phase's scope. Residual, accepted: on a frame where other
+techniques also contribute, the overlay lands on the ENSEMBLE offset
+rather than on `TitanHazeNav`'s own — exactly as every other model's
+overlay behaves, and the per-technique offsets remain in the metadata
+JSON.]
 
 Manual navigation (Section 3 table): `compose_dialog_overlay` and
 `NavTechniqueManual.is_feasible` both enumerate geometry types by

@@ -46,6 +46,8 @@ a helper lives in:
 """
 
 from spindoctor.nav_technique.titan_fitting.arc import (
+    ARC_RADIUS_MAX_FRACTION,
+    ARC_RADIUS_MIN_FRACTION,
     ArcFitParams,
     ArcFitResult,
     constrained_circle_fit,
@@ -61,6 +63,8 @@ from spindoctor.nav_technique.titan_fitting.symmetry import (
 )
 
 __all__ = [
+    'ARC_RADIUS_MAX_FRACTION',
+    'ARC_RADIUS_MIN_FRACTION',
     'ArcFitParams',
     'ArcFitResult',
     'SymmetryFitParams',
