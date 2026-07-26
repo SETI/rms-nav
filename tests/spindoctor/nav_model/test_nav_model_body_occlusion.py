@@ -27,7 +27,7 @@ import spindoctor.nav_model.nav_model_body as nav_model_body_module
 from spindoctor.feature.feature import NavFeature
 from spindoctor.feature.flags import LimbArcFlags, TerminatorArcFlags
 from spindoctor.feature.geometry import LimbPolyline
-from spindoctor.nav_model.nav_model_body import NavModelBody
+from spindoctor.nav_model.nav_model_body import NavModelBody, occluder_mask_for_body
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 _TARGET = 'TARGET'
@@ -376,3 +376,63 @@ def test_instances_for_obs_wires_nearer_siblings(monkeypatch: pytest.MonkeyPatch
     models = cast(list[NavModelBody], NavModelBody.instances_for_obs(cast(Any, obs)))
     target_model = next(m for m in models if m._body_name == _TARGET)
     assert target_model._siblings == [(_OCCLUDER, 5.0e5)]
+
+
+# ---------------------------------------------------------------------------
+# The shared module-level occlusion helper
+# ---------------------------------------------------------------------------
+
+
+def _helper_backplane(target: _Sphere, occluder: _Sphere) -> Any:
+    """Instantiate the two-body backplane stand-in over a one-sample-per-pixel box."""
+    backplane_cls = _two_body_backplane_class(target, occluder)
+    meshgrid = FakeMeshgrid((0.5, 0.5), (79.5, 79.5), oversample=(1, 1), swap=True)
+    return backplane_cls(None, meshgrid=meshgrid)
+
+
+def test_occluder_helper_masks_the_nearer_sibling() -> None:
+    """The shared helper returns the silhouette of a strictly nearer sibling."""
+    bp = _helper_backplane(_TARGET_SPHERE, _DISC_OCCLUDER)
+    mask = occluder_mask_for_body(
+        bp, _TARGET, [(_OCCLUDER, 5.0e5)], 1.0e6, oversample_v=1, oversample_u=1
+    )
+    assert mask is not None
+    assert bool(mask.any()) is True
+
+
+def test_occluder_helper_ignores_a_farther_sibling() -> None:
+    """A sibling behind the subject body occludes nothing."""
+    bp = _helper_backplane(_TARGET_SPHERE, _DISC_OCCLUDER)
+    mask = occluder_mask_for_body(
+        bp, _TARGET, [(_OCCLUDER, 2.0e6)], 1.0e6, oversample_v=1, oversample_u=1
+    )
+    assert mask is None
+
+
+def test_occluder_helper_returns_none_without_siblings() -> None:
+    """A single-body scene costs nothing and reports no occlusion."""
+    bp = _helper_backplane(_TARGET_SPHERE, _DISC_OCCLUDER)
+    mask = occluder_mask_for_body(bp, _TARGET, [], 1.0e6, oversample_v=1, oversample_u=1)
+    assert mask is None
+
+
+def test_occluder_helper_degrades_on_a_backplane_failure() -> None:
+    """A backplane that cannot answer leaves the caller's mask untrimmed."""
+
+    class _RaisingBackplane:
+        """Backplane stand-in whose depth test fails the way a bad scene does."""
+
+        def where_in_front(self, sibling_name: str, body_name: str) -> Any:
+            """Raise the way an unresolvable occlusion query does inside oops."""
+            del sibling_name, body_name
+            raise ValueError('cannot resolve occlusion for this scene')
+
+    mask = occluder_mask_for_body(
+        cast(Any, _RaisingBackplane()),
+        _TARGET,
+        [(_OCCLUDER, 5.0e5)],
+        1.0e6,
+        oversample_v=1,
+        oversample_u=1,
+    )
+    assert mask is None

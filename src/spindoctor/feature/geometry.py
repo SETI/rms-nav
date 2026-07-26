@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from spindoctor.support.types import NDArrayFloatType
+from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 __all__ = [
     'BodyBlobGeometry',
@@ -27,6 +27,7 @@ __all__ = [
     'RingEdgePolyline',
     'StarGeometry',
     'TerminatorPolyline',
+    'TitanHazeGeometry',
 ]
 
 
@@ -236,6 +237,62 @@ class CartographicModelGeometry:
     overflow_fraction: float
 
 
+@dataclass(frozen=True, eq=False)
+class TitanHazeGeometry:
+    """Geometry payload for a TITAN_LIMB feature.
+
+    Describes a hazy body at its predicted pointing: where the geometric
+    disc center is, which way the sub-solar direction points, how big the
+    solid body and its haze envelope are, and which pixels the fit must
+    ignore.  The consuming technique needs no other scene knowledge.
+
+    Parameters:
+        predicted_center_vu: Geometric disc center in extfov coordinates
+            (the midpoint of the predicted bounding box, NOT a
+            brightness-weighted centroid, which phase biases along the
+            very axis the haze fit measures).
+        sun_angle_rad: Symmetry-axis angle ``theta``; the unit vector
+            ``(sin theta, cos theta)`` in ``(v, u)`` points from the disc
+            center toward the sub-solar side.
+        axis_degenerate: True when the sub-solar direction could not be
+            localized -- a near-zero-phase disc that is rotationally
+            symmetric, or a frame whose geometry could not be evaluated.
+            ``sun_angle_rad`` is then ``0.0`` and any axis is equally
+            valid, so the consuming technique skips angle refinement.
+        phase_deg: Phase angle (Sun -> body -> observer) at the disc
+            center, in degrees.
+        r_solid_px: Apparent radius of the solid body in pixels.
+        r_env_px: Apparent radius of the haze envelope (solid radius plus
+            the configured atmosphere height) in pixels.
+        km_per_px: Image scale at the body center, in kilometers per
+            pixel.
+        contaminant_mask: Boolean array of the extfov image shape marking
+            pixels the fits must ignore -- nearer bodies, ring occlusion,
+            in-frame sibling bodies, and bright catalog stars -- or
+            ``None`` when nothing is masked.  Supplied UNDILATED at
+            predicted geometry: because a pointing error translates the
+            whole scene identically, the consuming technique shifts the
+            mask by its current center hypothesis and dilates it along the
+            symmetry axis, rather than applying it statically.
+        filters: Instrument filter names for this image, recorded so
+            filter-dependent haze behavior is analyzable from production
+            output.
+        bbox_extfov_vu: Half-open bounding box ``(v_min, u_min, v_max,
+            u_max)`` covering the haze envelope in extfov coordinates.
+    """
+
+    predicted_center_vu: tuple[float, float]
+    sun_angle_rad: float
+    axis_degenerate: bool
+    phase_deg: float
+    r_solid_px: float
+    r_env_px: float
+    km_per_px: float
+    contaminant_mask: NDArrayBoolType | None
+    filters: tuple[str, ...]
+    bbox_extfov_vu: tuple[int, int, int, int]
+
+
 NavFeatureGeometry = (
     StarGeometry
     | LimbPolyline
@@ -245,5 +302,6 @@ NavFeatureGeometry = (
     | BodyBlobGeometry
     | RingAnnulusGeometry
     | CartographicModelGeometry
+    | TitanHazeGeometry
 )
 """Sum type spanning every NavFeatureType's geometry payload."""

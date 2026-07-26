@@ -1,2 +1,49 @@
 titan:
+  # Haze envelope above the solid radius, km. Bounds the search
+  # annulus and windows; the fit itself does not assume a haze
+  # altitude.
   atmosphere_height: 700
+  navigation:
+    # Hard-zero reliability floors: beyond these the feature is still
+    # emitted but with reliability 0.0, so the standard TITAN_LIMB type
+    # gate always removes it.
+    min_envelope_diameter_px: 40.0
+    max_occluded_fraction: 0.10
+    ring_occlusion_radii_km: [74490.0, 140500.0]
+    axis_min_offset_px: 3.0
+    recenter_threshold_px: 8.0
+    star_mask_vmag_limit: 8.0
+    star_mask_radius_px: 4.0
+    # Reliability sigmoid: chosen so reliability crosses the 0.30
+    # TITAN_LIMB type gate near the hard-zero floor above, keeping the
+    # two gates consistent.
+    reliability_diameter_midpoint_px: 52.0
+    reliability_diameter_scale_px: 14.0
+    # Cassini filters that see through to the surface; sets the
+    # surface_window flag (diagnostic + future refinement only).
+    surface_window_filters: [CB3]
+    symmetry:
+      annulus_inner_fraction: 0.55
+      annulus_outer_pad_px: 6.0
+      angle_refine_deg: 5.0
+      angle_refine_step_deg: 0.5
+      angle_refine_min_gain: 0.02
+      min_peak_score: 0.60
+      min_valid_fraction: 0.50
+      max_second_peak_ratio: 0.90
+      cross_sigma_scale: 1.0
+      sigma_floor_cross_px: 0.30
+    arc:
+      sector_half_angle_deg: 60.0
+      ray_step_deg: 2.0
+      radial_step_px: 0.5
+      radial_inner_fraction: 0.80
+      radial_outer_pad_px: 6.0
+      median_filter_samples: 5
+      min_gradient_snr: 4.0
+      min_rays: 20
+      min_inlier_fraction: 0.50
+      max_residual_rms_px: 2.0
+      tukey_c: 4.685
+      along_sigma_scale: 1.0
+      sigma_floor_along_px: 1.00

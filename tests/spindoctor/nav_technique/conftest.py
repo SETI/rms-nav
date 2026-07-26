@@ -19,12 +19,19 @@ import pytest
 
 from spindoctor.feature.feature import NavFeature, NavReliabilityBreakdown
 from spindoctor.feature.feature_type import NavFeatureType
-from spindoctor.feature.flags import LimbArcFlags, RingEdgeFlags, StarFlags, TerminatorArcFlags
+from spindoctor.feature.flags import (
+    LimbArcFlags,
+    RingEdgeFlags,
+    StarFlags,
+    TerminatorArcFlags,
+    TitanHazeFlags,
+)
 from spindoctor.feature.geometry import (
     LimbPolyline,
     RingEdgePolyline,
     StarGeometry,
     TerminatorPolyline,
+    TitanHazeGeometry,
 )
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from spindoctor.nav_orchestrator.image_derivatives import (
@@ -45,6 +52,9 @@ DiscImageFactory = Callable[[tuple[int, int], tuple[float, float], float], np.nd
 
 HorizontalStepImageFactory = Callable[[tuple[int, int], float], np.ndarray]
 """Signature of the ``horizontal_step_image`` factory fixture."""
+
+HazeDiscImageFactory = Callable[[tuple[int, int], tuple[float, float], float, float], np.ndarray]
+"""Signature of the ``haze_disc_image`` factory fixture."""
 
 CirclePolylineFactory = Callable[[tuple[float, float], float, int], tuple[np.ndarray, np.ndarray]]
 """Signature of the ``circle_polyline`` factory fixture."""
@@ -108,6 +118,32 @@ def _render_disc_image(
     return image.astype(np.float64)
 
 
+def _render_haze_disc_image(
+    shape: tuple[int, int],
+    center_vu: tuple[float, float],
+    r_limb_px: float,
+    theta_rad: float,
+    peak_dn: float = 1000.0,
+) -> np.ndarray:
+    """Mirror-symmetric hazy disc with a logistic limb and an along-axis ramp.
+
+    The brightness is ``peak_dn`` times a logistic falloff through
+    ``r_limb_px`` with a one-pixel scale length, modulated by a linear
+    brightening toward the sub-solar side.  The ramp runs ALONG the symmetry
+    axis, so it preserves the mirror symmetry the technique measures while
+    still giving the scene a sunward direction.
+    """
+    vs, us = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), indexing='ij')
+    dv = vs - center_vu[0]
+    du = us - center_vu[1]
+    rho = np.hypot(dv, du)
+    along = dv * np.sin(theta_rad) + du * np.cos(theta_rad)
+    modulation = 1.0 + 0.25 * along / r_limb_px
+    image = peak_dn * modulation / (1.0 + np.exp((rho - r_limb_px) / 1.0))
+    rendered: np.ndarray = image.astype(np.float64)
+    return rendered
+
+
 def _render_horizontal_step_image(shape: tuple[int, int], step_v: float) -> np.ndarray:
     """Vertical step: bright above row ``step_v``, dark below.
 
@@ -142,6 +178,12 @@ def _draw_gaussian_star(
 def disc_image() -> DiscImageFactory:
     """Factory fixture producing anti-aliased bright-disc images."""
     return _render_disc_image
+
+
+@pytest.fixture
+def haze_disc_image() -> HazeDiscImageFactory:
+    """Factory fixture producing mirror-symmetric hazy-disc images."""
+    return _render_haze_disc_image
 
 
 @pytest.fixture
@@ -482,6 +524,64 @@ def _make_star_feature(
             vmag=vmag,
         ),
     )
+
+
+def _make_titan_feature(
+    body_name: str = 'TITAN',
+    *,
+    predicted_center_vu: tuple[float, float],
+    r_solid_px: float,
+    r_env_px: float,
+    sun_angle_rad: float = 0.0,
+    axis_degenerate: bool = False,
+    phase_deg: float = 30.0,
+    km_per_px: float = 20.0,
+    contaminant_mask: np.ndarray | None = None,
+    filters: tuple[str, ...] = ('CL1', 'CL2'),
+    reliability: float = 0.9,
+) -> NavFeature:
+    """Build a ``TITAN_LIMB`` ``NavFeature`` for a hazy body."""
+    pad = int(np.ceil(r_env_px))
+    bbox = (
+        int(np.floor(predicted_center_vu[0])) - pad,
+        int(np.floor(predicted_center_vu[1])) - pad,
+        int(np.ceil(predicted_center_vu[0])) + pad + 1,
+        int(np.ceil(predicted_center_vu[1])) + pad + 1,
+    )
+    return NavFeature(
+        feature_id=f'titan_limb:{body_name}',
+        feature_type=NavFeatureType.TITAN_LIMB,
+        source_model=f'titan:{body_name}',
+        geometry=TitanHazeGeometry(
+            predicted_center_vu=predicted_center_vu,
+            sun_angle_rad=sun_angle_rad,
+            axis_degenerate=axis_degenerate,
+            phase_deg=phase_deg,
+            r_solid_px=r_solid_px,
+            r_env_px=r_env_px,
+            km_per_px=km_per_px,
+            contaminant_mask=contaminant_mask,
+            filters=filters,
+            bbox_extfov_vu=bbox,
+        ),
+        subject_range_km=1.2e6,
+        position_cov_px=None,
+        intensity_sigma_rel=0.0,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=reliability,
+        reliability_reasons=NavReliabilityBreakdown(
+            titan_envelope_diameter_px=2.0 * r_env_px,
+            titan_occluded_fraction=0.0,
+        ),
+        usable_types=frozenset({NavFeatureType.TITAN_LIMB}),
+        flags=TitanHazeFlags(body_name=body_name),
+    )
+
+
+@pytest.fixture
+def make_titan_feature() -> NavFeatureFactory:
+    """Factory fixture producing ``TITAN_LIMB`` ``NavFeature`` instances."""
+    return _make_titan_feature
 
 
 @pytest.fixture

@@ -6,6 +6,7 @@ import math
 import numpy as np
 import pytest
 
+from spindoctor.feature.feature import NavReliabilityBreakdown
 from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.nav_orchestrator.curator import (
     assert_diagnostic_fields_present,
@@ -239,3 +240,61 @@ def test_metadata_dict_techniques_used_sorted() -> None:
     """``techniques_used`` matches the per_technique technique names sorted."""
     md = build_metadata_dict(_ok_result_with_one_technique())
     assert md['techniques_used'] == ['BodyLimbNav']
+
+
+def _gated_titan_result() -> NavResult:
+    """A Titan-only frame whose lone feature the reliability gate dropped."""
+    inv = [
+        NavFeatureSummary(
+            feature_id='titan_limb:TITAN',
+            feature_type=NavFeatureType.TITAN_LIMB,
+            source_model='titan:TITAN',
+            reliability=0.0,
+            gated=True,
+            gate_reason='reliability_0.000_below_threshold_0.300',
+            bbox_extfov_vu=(10, 10, 90, 90),
+            reliability_reasons=NavReliabilityBreakdown(
+                titan_envelope_diameter_px=31.5,
+                titan_occluded_fraction=0.42,
+            ),
+        ),
+    ]
+    return NavResult.failed(
+        status_reason=NavStatusReason.ALL_FEATURES_GATED,
+        feature_inventory=inv,
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+
+
+def test_gated_feature_entry_reaches_the_json() -> None:
+    """A gated feature is recorded in the emitted metadata, not only in the log."""
+    md = json.loads(json.dumps(build_metadata_dict(_gated_titan_result())))
+    entry = md['feature_inventory'][0]
+    assert entry['gated'] is True
+
+
+def test_gated_feature_entry_names_its_type() -> None:
+    """The gate record identifies which feature type was dropped."""
+    md = json.loads(json.dumps(build_metadata_dict(_gated_titan_result())))
+    assert md['feature_inventory'][0]['feature_type'] == 'TITAN_LIMB'
+
+
+def test_gated_feature_entry_carries_its_breakdown() -> None:
+    """The reliability breakdown travels into the JSON so gates are attributable."""
+    md = json.loads(json.dumps(build_metadata_dict(_gated_titan_result())))
+    reasons = md['feature_inventory'][0]['reliability_reasons']
+    assert reasons['titan_occluded_fraction'] == pytest.approx(0.42)
+
+
+def test_breakdown_omits_inapplicable_components() -> None:
+    """Components that do not apply to a feature type are left out entirely."""
+    md = json.loads(json.dumps(build_metadata_dict(_gated_titan_result())))
+    reasons = md['feature_inventory'][0]['reliability_reasons']
+    assert 'predicted_snr' not in reasons
+
+
+def test_breakdown_is_empty_when_no_component_was_populated() -> None:
+    """A feature whose model populated no component reports an empty mapping."""
+    md = json.loads(json.dumps(build_metadata_dict(_ok_result_with_one_technique())))
+    assert md['feature_inventory'][0]['reliability_reasons'] == {}

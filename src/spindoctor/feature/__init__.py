@@ -49,6 +49,7 @@ from spindoctor.feature.flags import (
     RingEdgeFlags,
     StarFlags,
     TerminatorArcFlags,
+    TitanHazeFlags,
 )
 from spindoctor.feature.geometry import (
     BodyBlobGeometry,
@@ -60,6 +61,7 @@ from spindoctor.feature.geometry import (
     RingEdgePolyline,
     StarGeometry,
     TerminatorPolyline,
+    TitanHazeGeometry,
 )
 from spindoctor.feature.reliability import (
     DEFAULT_RELIABILITY_THRESHOLDS,
@@ -99,6 +101,8 @@ __all__ = [
     'StarGeometry',
     'TerminatorArcFlags',
     'TerminatorPolyline',
+    'TitanHazeFlags',
+    'TitanHazeGeometry',
     'compose_dialog_overlay',
     'compose_template_features',
 ]

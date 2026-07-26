@@ -14,6 +14,7 @@ from spindoctor.nav_technique.diagnostics import (
     StarFieldDiagnostics,
     StarRefineDiagnostics,
     StarUniqueMatchDiagnostics,
+    TitanHazeDiagnostics,
 )
 
 
@@ -29,6 +30,7 @@ from spindoctor.nav_technique.diagnostics import (
         StarFieldDiagnostics,
         StarUniqueMatchDiagnostics,
         StarRefineDiagnostics,
+        TitanHazeDiagnostics,
     ],
 )
 def test_diagnostic_dataclasses_construct_with_defaults(cls: type) -> None:
@@ -49,6 +51,7 @@ def test_diagnostic_dataclasses_construct_with_defaults(cls: type) -> None:
         StarFieldDiagnostics,
         StarUniqueMatchDiagnostics,
         StarRefineDiagnostics,
+        TitanHazeDiagnostics,
     ],
 )
 def test_curator_fields_lists_every_attribute(cls: type) -> None:

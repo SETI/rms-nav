@@ -16,11 +16,12 @@ from spindoctor.feature.feature import (
     body_names_from_features,
 )
 from spindoctor.feature.feature_type import NavFeatureType
-from spindoctor.feature.flags import BodyBlobFlags, BodyDiscFlags, StarFlags
+from spindoctor.feature.flags import BodyBlobFlags, BodyDiscFlags, StarFlags, TitanHazeFlags
 from spindoctor.feature.geometry import (
     BodyBlobGeometry,
     BodyDiscGeometry,
     StarGeometry,
+    TitanHazeGeometry,
 )
 from spindoctor.nav_model import NavModel
 from spindoctor.nav_orchestrator.image_classifier import ImageQualityThresholds
@@ -56,6 +57,7 @@ class _FakeObs:
         # the real obs API: ``extdata`` is the canonical input the
         # orchestrator reads.
         margin_v, margin_u = extfov_margin
+        self.extfov_margin_vu = (margin_v, margin_u)
         ext_shape = (image.shape[0] + 2 * margin_v, image.shape[1] + 2 * margin_u)
         ext = np.zeros(ext_shape, dtype=image.dtype)
         ext[margin_v : margin_v + image.shape[0], margin_u : margin_u + image.shape[1]] = image
@@ -113,22 +115,54 @@ class _FakeStarModel(NavModel):
 
 
 class _FakeTitanModel(NavModel):
-    """Fake Titan model: active, emits no features, reports Titan in FOV."""
+    """Fake Titan model emitting one TITAN_LIMB feature at a chosen reliability.
+
+    Frame quality on a hazy body is carried by the feature's reliability, not
+    by a decline, so the fake exposes the reliability as a knob: ``0.0``
+    reproduces a hard-zero frame (unframeable, occluded, or too small) and a
+    value above the type gate reproduces a navigable one.
+    """
 
     _abstract = True
 
-    def __init__(self, obs: Any) -> None:
+    def __init__(self, obs: Any, *, reliability: float = 0.0) -> None:
         super().__init__('titan:TITAN', obs)
-
-    @property
-    def titan_in_fov(self) -> bool:
-        return True
+        self._reliability = reliability
 
     def create_model(self) -> None:
         self._metadata['body'] = 'TITAN'
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
-        return []
+        return [
+            NavFeature(
+                feature_id='titan_limb:TITAN',
+                feature_type=NavFeatureType.TITAN_LIMB,
+                source_model='titan:TITAN',
+                geometry=TitanHazeGeometry(
+                    predicted_center_vu=(32.0, 32.0),
+                    sun_angle_rad=0.0,
+                    axis_degenerate=False,
+                    phase_deg=30.0,
+                    r_solid_px=12.0,
+                    r_env_px=14.0,
+                    km_per_px=25.0,
+                    contaminant_mask=None,
+                    filters=('CL1', 'CL2'),
+                    bbox_extfov_vu=(18, 18, 47, 47),
+                ),
+                subject_range_km=1.2e6,
+                position_cov_px=None,
+                intensity_sigma_rel=0.0,
+                preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+                reliability=self._reliability,
+                reliability_reasons=NavReliabilityBreakdown(
+                    titan_envelope_diameter_px=28.0,
+                    titan_occluded_fraction=0.0,
+                ),
+                usable_types=frozenset({NavFeatureType.TITAN_LIMB}),
+                flags=TitanHazeFlags(body_name='TITAN'),
+            )
+        ]
 
     def to_annotations(self, context: NavContext) -> Annotations:
         return Annotations()
@@ -259,28 +293,80 @@ def test_orchestrator_no_features_emitted_yields_no_features_extracted(
     assert result.status_reason == NavStatusReason.NO_FEATURES_EXTRACTED
 
 
-def test_orchestrator_titan_only_yields_titan_unsupported(
+def test_orchestrator_titan_hard_zero_yields_all_features_gated(
     fake_obs: _FakeObs,
 ) -> None:
-    """A frame whose only content is Titan records the reason."""
+    """A Titan-only frame at hard-zero reliability ends all_features_gated."""
     obs = fake_obs
-    model = _FakeTitanModel(obs)
+    model = _FakeTitanModel(obs, reliability=0.0)
     orch = NavOrchestrator([model])
     result = orch.navigate(obs)  # type: ignore[arg-type]
     assert result.status == 'failed'
-    assert result.status_reason == NavStatusReason.TITAN_UNSUPPORTED
+    assert result.status_reason == NavStatusReason.ALL_FEATURES_GATED
+
+
+def test_orchestrator_titan_hard_zero_records_gated_feature(
+    fake_obs: _FakeObs,
+) -> None:
+    """The gated Titan frame carries an attributing TITAN_LIMB inventory record."""
+    obs = fake_obs
+    model = _FakeTitanModel(obs, reliability=0.0)
+    orch = NavOrchestrator([model])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    gated = [
+        entry
+        for entry in result.feature_inventory
+        if entry.feature_type is NavFeatureType.TITAN_LIMB and entry.gated
+    ]
+    assert len(gated) == 1
+
+
+def test_orchestrator_titan_hard_zero_gate_record_carries_breakdown(
+    fake_obs: _FakeObs,
+) -> None:
+    """The gate record names the envelope diameter that produced the score."""
+    obs = fake_obs
+    model = _FakeTitanModel(obs, reliability=0.0)
+    orch = NavOrchestrator([model])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    entry = next(e for e in result.feature_inventory if e.feature_type is NavFeatureType.TITAN_LIMB)
+    assert entry.reliability_reasons.titan_envelope_diameter_px == 28.0
 
 
 def test_orchestrator_titan_plus_stars_navigates_normally(
     fake_obs: _FakeObs,
 ) -> None:
-    """Titan alongside navigable stars does not force the Titan reason."""
+    """A gated Titan alongside navigable stars still navigates on the stars."""
     obs = fake_obs
-    models = [_FakeStarModel(obs, feature_count=3), _FakeTitanModel(obs)]
+    models = [_FakeStarModel(obs, feature_count=3), _FakeTitanModel(obs, reliability=0.0)]
     orch = NavOrchestrator(models, only_techniques=['_FakeStarTechnique'])
     result = orch.navigate(obs)  # type: ignore[arg-type]
     assert result.status == 'success'
-    assert result.status_reason != NavStatusReason.TITAN_UNSUPPORTED
+    assert result.status_reason == NavStatusReason.OK
+
+
+def test_orchestrator_titan_usable_but_unfittable_yields_all_techniques_spurious() -> None:
+    """A usable Titan feature the real fit rejects ends all_techniques_spurious.
+
+    The image is pure noise, so every symmetry and arc gate fails; the
+    technique is expected to report a named gate rather than an offset.
+    """
+    obs = _FakeObs(extfov_margin=(8, 8))
+    model = _FakeTitanModel(obs, reliability=0.9)
+    orch = NavOrchestrator([model], only_techniques=['TitanHazeNav'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'failed'
+    assert result.status_reason == NavStatusReason.ALL_TECHNIQUES_SPURIOUS
+
+
+def test_orchestrator_titan_spurious_result_names_a_gate() -> None:
+    """The spurious Titan result attributes its failure to a named fit gate."""
+    obs = _FakeObs(extfov_margin=(8, 8))
+    model = _FakeTitanModel(obs, reliability=0.9)
+    orch = NavOrchestrator([model], only_techniques=['TitanHazeNav'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    diagnostics = result.per_technique[0].diagnostics
+    assert diagnostics.gate_failed is not None  # type: ignore[union-attr]
 
 
 def test_normalize_model_patterns_expands_bare_prefix() -> None:

@@ -25,7 +25,10 @@ Modules:
         ``NavModelRingsSimulated`` — ring model rendered from operator
         simulation parameters.
     ``nav_model_titan``
-        ``NavModelTitan`` — Titan placeholder; opaque haze, records a no-result.
+        ``NavModelTitan`` — haze-envelope model for a body whose opaque
+        atmosphere hides its surface.
+    ``titan_geometry``
+        Observation-side geometry extraction feeding ``NavModelTitan``.
     ``stars``
         Catalog-driven star ``NavModel`` and supporting helpers.
 """
@@ -39,6 +42,7 @@ from spindoctor.nav_model.nav_model_rings_base import NavModelRingsBase
 from spindoctor.nav_model.nav_model_rings_simulated import NavModelRingsSimulated
 from spindoctor.nav_model.nav_model_titan import NavModelTitan
 from spindoctor.nav_model.stars import NavModelStars, NavModelStarsSimulated
+from spindoctor.nav_model.titan_geometry import TitanGeometryInputs
 
 __all__ = [
     'NavModel',
@@ -51,5 +55,6 @@ __all__ = [
     'NavModelStars',
     'NavModelStarsSimulated',
     'NavModelTitan',
+    'TitanGeometryInputs',
     'build_models_for_obs',
 ]

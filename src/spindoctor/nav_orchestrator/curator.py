@@ -15,6 +15,7 @@ import math
 from typing import Any
 
 from spindoctor.feature.constants import JSON_INF_SENTINEL
+from spindoctor.feature.feature import NavReliabilityBreakdown
 from spindoctor.nav_orchestrator.feature_summary import NavFeatureSummary
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from spindoctor.nav_orchestrator.nav_result import NavResult
@@ -141,6 +142,29 @@ def _curate_technique_result(res: NavTechniqueResult) -> dict[str, Any]:
     return out
 
 
+def _curate_reliability_reasons(breakdown: NavReliabilityBreakdown) -> dict[str, Any]:
+    """Return the populated components of a reliability breakdown.
+
+    Components that do not apply to a feature type are ``None`` and are
+    omitted entirely, so each entry lists only the quantities that actually
+    produced the score.  Generic across feature types: a new component field
+    appears in the metadata as soon as some model populates it.
+    """
+    out: dict[str, Any] = {}
+    for f in dataclasses.fields(breakdown):
+        value = getattr(breakdown, f.name)
+        if value is None:
+            continue
+        # ``bool`` is a subclass of ``int``, not of ``float``, so the
+        # boolean components fall through to the pass-through branch and
+        # need no case of their own.
+        if isinstance(value, float):
+            out[f.name] = _round_float(value, CONFIDENCE_DECIMALS)
+        else:
+            out[f.name] = value
+    return out
+
+
 def _curate_feature_summary(summary: NavFeatureSummary) -> dict[str, Any]:
     """Return a JSON-friendly entry for one NavFeatureSummary."""
     return {
@@ -151,6 +175,7 @@ def _curate_feature_summary(summary: NavFeatureSummary) -> dict[str, Any]:
         'gated': summary.gated,
         'gate_reason': summary.gate_reason,
         'bbox_extfov_vu': list(summary.bbox_extfov_vu),
+        'reliability_reasons': _curate_reliability_reasons(summary.reliability_reasons),
     }
 
 

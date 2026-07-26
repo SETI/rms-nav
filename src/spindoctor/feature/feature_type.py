@@ -29,8 +29,11 @@ class NavFeatureType(Enum):
     - ``RING_EDGE``: a single named ring edge expressed as a polyline.
     - ``RING_ANNULUS``: a multi-ring composite rendered as a pixel template,
       used when individual edges cannot be separated at the image resolution.
-    - ``TITAN_LIMB``: reserved for Titan navigation; never emitted
-      by the current extractor set (the algorithm is unimplemented).
+    - ``TITAN_LIMB``: the haze envelope of a body whose thick atmosphere
+      hides the surface, carrying the predicted disc center, the
+      sub-solar symmetry axis, the solid and envelope radii, and a
+      contaminant mask.  Navigated by mirror-symmetry plus a sunward
+      limb-arc circle fit rather than by ellipsoid shape.
     - ``CARTOGRAPHIC_MODEL``: a pre-built cartographic mosaic of a body
       reprojected into the predicted body silhouette for high-detail
       correlation.

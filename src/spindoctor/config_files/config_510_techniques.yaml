@@ -1053,6 +1053,70 @@ techniques:
       model_error_size_frac: 0.0
       model_error_floor_px: 0.13
 
+  TitanHazeNav:
+    # PLACEHOLDER anchors, not a fit: no Titan rows exist in the
+    # calibration campaign yet, so every coefficient below is an
+    # engineering prior chosen to be monotone-sane and to put the
+    # sigmoid argument at exactly zero (confidence 0.5) when every
+    # term sits on its stated anchor.  The terms carry equal weight
+    # (|alpha| = 1.0) because nothing yet distinguishes their
+    # discriminating power.  These are replaced by a regression fit
+    # once the calibration campaign renders Titan scenes.
+    # alpha0 = -(0.70 + 0.60 + 0.60 + 0.50 - 0.50), the negated sum of
+    # the anchor-point contributions below.
+    alpha0: -1.90
+    terms:
+      # Mirror-correlation Pearson score at the winning cross-track
+      # shift.  Anchor 0.70; already in [0, 1] so it needs no scaling.
+      - feature: symmetry_peak_score
+        alpha: 1.0
+        divisor: 1.0
+        cap_at: 1.0
+      # Fraction of annulus mirror pairs that were usable.  Anchor
+      # 0.60; contaminant masking and frame edges are what reduce it.
+      - feature: symmetry_valid_fraction
+        alpha: 1.0
+        divisor: 1.0
+        cap_at: 1.0
+      # Fraction of surviving limb rays the robust circle fit kept.
+      # Anchor 0.60.
+      - feature: arc_inlier_fraction
+        alpha: 1.0
+        divisor: 1.0
+        cap_at: 1.0
+      # Apparent haze-envelope diameter.  Anchor 80 px, half the 160 px
+      # divisor, so a well-resolved Titan saturates the term and a disc
+      # near the 40 px emission floor contributes almost nothing.
+      - feature: envelope_diameter_px
+        alpha: 1.0
+        divisor: 160.0
+        cap_at: 1.0
+      # NEGATIVE alpha: a large inlier residual RMS means the sunward
+      # limb is not the circle the method assumes.  Anchor 1.5 px, half
+      # the 3.0 px divisor; the arc_residual gate rejects above 2.0 px,
+      # so the term saturates just past the gate.
+      - feature: arc_residual_rms_px
+        alpha: -1.0
+        divisor: 3.0
+        cap_at: 1.0
+    hard_zero_if:
+      # A fit whose assembled offset reaches the search window may be
+      # reporting the window bound rather than the body: the true
+      # displacement can lie outside, and a sunward limb pushed past the
+      # ray window returns rays pinned at their own search bound whose
+      # mutual agreement then wins the robust fit.  That is the
+      # confident-wrong failure mode, so an at-edge haze fit contributes
+      # no confidence at all -- matching every other technique's gate.
+      at_edge: true
+    tuning:
+      # Covariance model-error floor.  The symmetry-peak curvature and
+      # the circle fit's Gauss-Newton covariance both measure
+      # statistical precision only; the haze envelope's departure from
+      # a circle and the wavelength-dependent haze top are model error
+      # neither can see.  Fitted alongside the other techniques' floors
+      # once the calibration campaign renders Titan scenes.
+      model_error_floor_px: 0.2
+
 
 # Feature-emission tunables that decide which technique a given
 # scene's features feed.  Per-planet overrides because Saturn's ring

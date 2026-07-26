@@ -132,15 +132,32 @@ This section defines the algorithm the code must implement. Symbols:
 ### 2.1 Geometry inputs (computed by the model, at predicted pointing)
 
 1. **Predicted center** `p0 = (v0, u0)`: the geometric disc center —
-   the midpoint of Titan's oops inventory bounding box, converted to
-   extended-frame coordinates by adding the extfov margins, computed
-   inline exactly the way `NavModelBody.create_model`
-   (`src/spindoctor/nav_model/nav_model_body.py`) derives its body
-   bbox center from `obs.inventory`. Deliberately NOT the
-   lit-weighted centroid (`_lit_weighted_centroid_vu` in
-   `nav_model_body_base.py`) that body features use as their
-   predicted center: that centroid is phase-biased along the sun
-   direction, which is exactly the axis this method fits.
+   Titan's oops inventory `center_uv`, converted to extended-frame
+   coordinates by adding the extfov margins
+   (`p0 = (center_uv[1] + extfov_margin_v, center_uv[0] +
+   extfov_margin_u)`). Deliberately NOT the lit-weighted centroid
+   (`_lit_weighted_centroid_vu` in `nav_model_body_base.py`) that body
+   features use as their predicted center: that centroid is
+   phase-biased along the sun direction, which is exactly the axis
+   this method fits.
+   [Revised during Phase B review; pending operator ratification. The
+   original text derived `p0` from the midpoint of the inventory
+   bounding box, the way `NavModelBody.create_model` does. That
+   midpoint is quantized: the box edges are integers, so it lands on a
+   whole or half pixel regardless of where the body actually is —
+   measured 0.343 px of error in `u` on `W1822132529_1`, a third of
+   this method's entire 1 px cross-track budget, spent before the fit
+   starts. `center_uv` is the exact projected center and costs
+   nothing. The box midpoint remains correct for the envelope and mask
+   boxes, which are integer pixel boxes bounding where backplanes are
+   evaluated, and those keep using it.
+   Frame convention: `center_uv` is a field-of-view coordinate, and
+   adding the margin with no half-pixel adjustment is the
+   pipeline-wide convention for a predicted position — a catalog
+   star's extfov position is `star.v + extfov_margin_v`
+   (`nav_model_stars.py`). Holding to it is what makes a haze offset
+   and a star offset on the same frame directly comparable, which the
+   Phase E evidence tier (a) agreement test depends on.]
 2. **Scale and radii.** `km_per_px` = the mean of
    `float(bp.center_resolution('TITAN', axis='u').vals)` and the same
    call with `axis='v'` — the method signature is
@@ -174,7 +191,13 @@ This section defines the algorithm the code must implement. Symbols:
    the incidence backplane's valid pixels — the surface-intercept
    mask the backplane itself carries, not the envelope disc — and
    take the pixel `(ve, ue)` of MINIMUM incidence
-   — at every phase, not just below 90 degrees. The minimum-incidence
+   — at every phase, not just below 90 degrees. (Express `(ve, ue)` in
+   the SAME frame as `p0`: the meshgrid's field-of-view coordinate plus
+   the extfov margin, with no half-pixel adjustment, exactly as item 1
+   builds `p0` from `center_uv`. `theta` is a difference, so only
+   consistency matters — but converting one end to pixel indices and
+   not the other tilts the axis by half a pixel over the disc radius.
+   Noted during Phase B.) The minimum-incidence
    visible pixel always projects in the sunward image direction; the
    maximum-incidence pixel is the anti-solar surface point, which
    becomes visible above 90 degrees phase and points the wrong way
@@ -557,8 +580,23 @@ injections verify the insensitivity and guard the chosen
   gate input plus `fitted_haze_radius_km = R * km_per_px` and the
   filter names — recorded so a future haze-radius table (deferred,
   Section 9) can be built from production output.
-- Rotation: `rotation_rad = None` (rotation is unobservable from a
-  single quasi-circular feature).
+- Rotation: `rotation_rad = None` and a 2x2 covariance (rotation is
+  unobservable from a single quasi-circular feature) on the
+  instruments that do not fit camera rotation — Cassini and LORRI,
+  which is the whole Phase-E cohort. [Revised during Phase B: on an
+  instrument where `NavContext.fit_camera_rotation` is True (VGISS,
+  GOSSI) the result instead carries the rank-deficient `(3, 3)` form
+  from `embed_rotation_unobservable` with `rotation_rad = 0.0` and the
+  unobservable sigma, exactly as `BodyBlobNav` does for its equally
+  rotation-blind centroid. The reason is not a crash — the
+  mixed-DoF `ValueError` `_combine_precision_weighted` raises IS
+  caught by `ensemble`, which converts it into
+  `NavResult.failed(UNOBSERVABLE_OFFSET)` — but that outcome throws
+  away a whole Titan-plus-star Voyager or Galileo frame under a status
+  that misdescribes it: the offset was perfectly observable, the two
+  results just could not be fused. Matching the fleet's DoF convention
+  costs nothing and keeps those frames navigable. The physical claim —
+  no rotation evidence — is unchanged; only its encoding is.]
 - Technique attributes: `tier = 'primary'` (Titan has no other
   estimator; supersession semantics of the fallback tier would be
   wrong here) and `accepts_feature_types =
@@ -589,7 +627,7 @@ injections verify the insensitivity and guard the chosen
   family: the typed reliability breakdown
   (`titan_envelope_diameter_px`, `titan_occluded_fraction`) on the
   feature and its gate record.
-- **`_geometry_from_obs` never raises — the always-emit invariant
+- **`geometry_from_obs` never raises — the always-emit invariant
   depends on it.** The orchestrator's plugin sandbox DROPS a model
   whose `create_model` throws and treats a raising `to_features` as
   zero features (`_build_models` / `_extract_features` in
@@ -627,7 +665,9 @@ injections verify the insensitivity and guard the chosen
   rows, which carry scalar `reliability`, `gated`, and the
   `gate_reason` string but not the breakdown. Phase B therefore
   adds a `reliability_reasons` field to `NavFeatureSummary`
-  (`src/spindoctor/feature/feature_summary.py`), populates it where
+  (`src/spindoctor/nav_orchestrator/feature_summary.py` — the path
+  this plan gave as `src/spindoctor/feature/feature_summary.py` does
+  not exist; corrected during Phase B), populates it where
   the orchestrator builds the feature inventory, and serializes it
   in `_curate_feature_summary` (`curator.py`) — generically, for
   ALL feature types. No bespoke `titan` metadata block.
@@ -657,8 +697,10 @@ New files:
 |---|---|
 | `src/spindoctor/nav_technique/titan_fitting/` | Pure fitting library, split into a package under the sizing note below because the single module ran past 1000 lines: `grid.py` (axis unit vectors, rotated-grid resample, the shared array helpers), `symmetry.py` (mirror-correlation scan with angle refinement, its params/result), `arc.py` (radial profiles, limb-gradient extraction, constrained robust circle fit, its params/result), `driver.py` (`fit_titan_center`, the two-pass sequence), and `__init__.py` re-exporting the whole surface so consumers import `spindoctor.nav_technique.titan_fitting`. No oops, no NavContext, no config reads — plain functions on arrays plus the Section 4 parameter/result dataclasses. Everything unit-testable on synthetic arrays. |
 | `src/spindoctor/nav_technique/nav_technique_titan_haze.py` | `TitanHazeNav(NavTechnique)`: `is_feasible`, `navigate` (Sections 2.2-2.4, math delegated to `titan_fitting`), `confidence_spec` + `confidence_attributes`, `tier`, `accepts_feature_types`, tuning load. |
+| `src/spindoctor/nav_model/titan_geometry.py` | Added during Phase B under the sizing note below: `TitanGeometryInputs` plus `geometry_from_obs` and every oops / star-catalog helper behind it, because the model plus its geometry extraction ran past 1000 lines in one file. `nav_model_titan.py` keeps the reliability formula, the feature build, and the NavModel class, all pure functions of `TitanGeometryInputs`. |
 | `tests/spindoctor/nav_technique/test_titan_fitting.py` | Phase-A unit tests. |
 | `tests/spindoctor/nav_technique/test_nav_technique_titan_haze.py` | Phase-B technique tests (use the `FakeObs` fixture pattern from `tests/spindoctor/nav_technique/conftest.py`; do not instantiate a real `ObsSnapshot` for unit tests). |
+| `tests/integration/test_titan_haze_nav.py` | Phase-B integration tests (marked, holdings-fetched): model emission and technique execution on `W1822132529_1`, including the real YBSC / Tycho-2 star-mask queries. |
 | `util/titan_cohort/titan_images.csv` | Phase E: the legacy cohort list vendored into the repo (Section 6, Phase E step 1). |
 
 Modified files:
@@ -680,7 +722,7 @@ Modified files:
 | `src/spindoctor/sim/forward/atmosphere.py` + sim schema/boundary files (Phase D) | Extend the existing body `atmosphere` block (haze is an atmosphere block on a body element — do NOT invent a new top-level scene element). |
 | `tests/integration/sim_sweep.py` + the sim scene catalog (Phase D) | `titan_haze` base scene; dense sub-pixel + wide-range offset sweep entries pinning `TitanHazeNav`, matching every other technique's entries. |
 | `docs/simulator_report/simulator_report.rst` (Phase F) | Titan base scene, `TitanHazeNav` row in the per-technique offset-sweep table, regenerated response curves. |
-| `src/spindoctor/feature/feature_summary.py`, `src/spindoctor/nav_orchestrator/orchestrator.py` (inventory builders), `src/spindoctor/nav_orchestrator/curator.py` (Phase B) | Breakdown serialization, three files (Section 2.5 verified scope): `reliability_reasons` field on `NavFeatureSummary`, populated at inventory build, serialized by `_curate_feature_summary` — generic for ALL feature types; acceptance criterion 3 depends on it. No Titan-specific block. |
+| `src/spindoctor/nav_orchestrator/feature_summary.py`, `src/spindoctor/nav_orchestrator/orchestrator.py` (inventory builders), `src/spindoctor/nav_orchestrator/curator.py` (Phase B) | Breakdown serialization, three files (Section 2.5 verified scope): `reliability_reasons` field on `NavFeatureSummary`, populated at inventory build, serialized by `_curate_feature_summary` — generic for ALL feature types; acceptance criterion 3 depends on it. No Titan-specific block. |
 | `tests/spindoctor/nav_orchestrator/test_orchestrator.py` (Phase B) | Two tests exercise the deleted path (`test_orchestrator_titan_only_yields_titan_unsupported`, `test_orchestrator_titan_plus_stars_navigates_normally`) via a `_FakeTitanModel` exposing `titan_in_fov`; rewrite both (and the fake) to the Section 2.5 status matrix (`ALL_FEATURES_GATED` with a `TITAN_LIMB` gate record / normal navigation). |
 | `src/spindoctor/feature/composition.py`, `src/spindoctor/nav_technique/nav_technique_manual.py` (Phase C) | Manual-nav support: add a `TitanHazeGeometry` branch to `compose_dialog_overlay` (envelope-circle outline at `r_env_px` around `predicted_center_vu`, following the `BodyBlobGeometry` branch pattern) and to `NavTechniqueManual.is_feasible`'s renderable-feature count. Both enumerate geometry types by hand; without both branches, manual navigation is impossible on a Titan-only frame. |
 | `src/spindoctor/nav_model/nav_model_body_simulated.py` (Phase D) | Exclude `TITAN` from simulated body-model selection (mirror of the real path's exclusion) once `NavModelTitanSimulated` exists — today it builds a model for EVERY body, so both models would claim a sim Titan. |
@@ -704,7 +746,11 @@ this threshold.
 
 Sizing note: keep `titan_fitting.py` and the technique module each
 under 1000 lines; if the fitting library grows past that, split into a
-`titan_fitting/` package (symmetry / arc modules).
+`titan_fitting/` package (symmetry / arc modules). The same cap
+applies to `nav_model_titan.py`, which is why Phase B moved the
+observation-side geometry into the sibling `titan_geometry.py` — with
+`to_annotations` still to come in Phase C, one file could not hold both
+halves.
 
 ## 4. New dataclasses (signatures)
 
@@ -842,7 +888,13 @@ Section 2.1 item 5 at predicted geometry, shipped as a full
 extended-frame-shaped boolean array so the fitting signatures need
 no bbox-origin parameter; None when nothing is masked — hypothesis
 alignment and along-track dilation are the fitting code's job, not
-the model's), `filters: tuple[str, ...]`.
+the model's), `filters: tuple[str, ...]`,
+`bbox_extfov_vu: tuple[int, int, int, int]` (the envelope bbox).
+[The bbox field was added during Phase B: `_bbox_from_geometry` in
+`orchestrator.py` reads `bbox_extfov_vu` off EVERY geometry variant
+when building the feature inventory, and that read is not sandboxed,
+so a payload without it would break the orchestrator's never-raise
+contract on the first Titan frame.]
 
 `TitanHazeFlags` (in `flags.py`): `body_name: str = ''` (set to
 `'TITAN'`; the field is required for feature-level body attribution —
@@ -859,8 +911,10 @@ body-feature flags class), `surface_window_filter: bool = False`,
 `arc_rays_inlier`, `arc_inlier_fraction`, `arc_residual_rms_px`,
 `fitted_haze_radius_km`, `filters`, `recentered`, `gate_failed`.
 
-`TitanGeometryInputs` (model-internal, in `nav_model_titan.py`): the
-frozen dataclass separating oops access from reliability/feature
+`TitanGeometryInputs` (in `nav_model/titan_geometry.py`; the plan
+originally placed it in `nav_model_titan.py`, and Phase B moved it with
+the rest of the observation-side half under the Section 3 sizing note):
+the frozen dataclass separating oops access from reliability/feature
 logic — fields and testing role specified in Phase B.
 
 Feature identity: `feature_id = 'titan_limb:TITAN'` (the documented
@@ -1008,16 +1062,17 @@ pseudoinverse covariance the robust fit needs).
 
 ### Phase B — model feature + technique (the vertical slice)
 
-Files: `nav_model_titan.py`, `nav_model_body.py` (helper extraction),
-`geometry.py`, `flags.py`, `feature.py`, `feature_type.py`,
-`diagnostics.py`, `nav_technique_titan_haze.py`, registrations,
-`config_060_titan.yaml`, `config_510_techniques.yaml`, plus the new
-test files.
+Files: `nav_model_titan.py` and `titan_geometry.py`, `nav_model_body.py`
+(helper extraction), `geometry.py`, `flags.py`, `feature.py`,
+`feature_type.py`, `diagnostics.py`, `nav_technique_titan_haze.py`,
+registrations, `config_060_titan.yaml`, `config_510_techniques.yaml`,
+plus the new test files.
 
 - Model, structured for testability: `create_model` splits into
-  `_geometry_from_obs(obs, config) -> TitanGeometryInputs` (ALL oops
-  access lives here; covered by the integration-marked real-frame
-  test) and pure logic operating on `TitanGeometryInputs` (a frozen
+  `geometry_from_obs(obs, config) -> TitanGeometryInputs` (ALL oops
+  access lives here, in the sibling `titan_geometry.py`; covered by the
+  integration-marked real-frame test) and pure logic operating on
+  `TitanGeometryInputs` (a frozen
   dataclass carrying center, radii, `km_per_px`, phase, theta,
   `axis_degenerate`, `occluded_fraction`, the contaminant mask, and
   the frame bounds). The reliability unit tests (hard-zero
@@ -1201,7 +1256,16 @@ Titan-only frame is manual-nav feasible with a rendered drag overlay.
   the `is_simulated -> []` branch and owns the
   unconfigured case (a simulated Titan scene without the required
   operator parameters builds no model and resolves through the
-  standard generic reasons rather than crashing).
+  standard generic reasons rather than crashing). Sim inventory
+  contract: `src/spindoctor/sim/forward/body.py` builds inventories
+  WITHOUT the `center_uv` key the real-frame geometry path now
+  requires (Phase B center revision); a missing key degrades to a
+  hard-zero feature, not a raise, so a sim Titan would silently
+  gate out. If the simulated path reuses `geometry_from_obs`, add
+  `center_uv` to the sim inventory (it mirrors the oops contract);
+  if it reads operator parameters directly, no change is needed —
+  decide explicitly, do not rediscover this as a silent hard-zero.
+  [Noted during Phase B review.]
 - Standing per-technique sweeps: enroll `TitanHazeNav` in the
   EXISTING sweep framework alongside every other technique — add a
   `titan_haze` base scene to the sim scene catalog and dense
