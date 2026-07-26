@@ -284,6 +284,7 @@ class NavModelTitanSimulated(NavModelTitan):
             contaminant_mask=contaminant,
             extfov_shape_vu=extfov_shape_vu,
             window_px=window_px,
+            extfov_margin_vu=(float(margin_v), float(margin_u)),
             bbox_extfov_vu=(
                 math.floor(center_vu[0]) - reach,
                 math.floor(center_vu[1]) - reach,

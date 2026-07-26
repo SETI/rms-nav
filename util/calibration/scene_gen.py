@@ -24,6 +24,11 @@ regime, from clean well-resolved frames through the failure cliff:
                 (StarUniqueMatchNav one- and two-star paths); a controlled
                 fraction plant a per-star catalog error or an unresolved
                 companion (astrometric and photocenter-bias regimes)
+- titan       : a hazy Titan across apparent size, phase, and sun direction
+                (TitanHazeNav); controlled fractions break the mirror
+                symmetry the method assumes -- clouds, a tilted haze axis,
+                a non-affine hemispheric falloff, an interior ramp, a limb
+                sharpness gradient -- and add point-source contamination
 
 Every scene carries a planted (offset_v, offset_u) ground truth. The noise
 level, feature sizes/counts, and the model-error axes (mesh lumpiness vs an
@@ -57,6 +62,7 @@ FAMILIES = (
     'ring',
     'star_field',
     'star_unique',
+    'titan',
 )
 
 # Body identities the campaign draws from, with mean radius and published
@@ -732,6 +738,106 @@ def gen_star_unique(rng: random.Random) -> dict[str, Any]:
     return params
 
 
+# Titan family: the apparent-size range, phase range, and haze column the
+# planted-truth campaign draws (util/titan_truth/scene_gen.py), narrowed
+# only where this campaign's purpose differs.  The planted offset comes from
+# the shared ``_base`` draw, so Titan rows sit in the same pointing-error
+# regime as every other family and the fitted confidence is comparable
+# across techniques.
+_TITAN_RADIUS_KM = 2575.0
+_TITAN_FRAME_PX = 360
+_TITAN_MIN_SOLID_RADIUS_PX = 28.0
+_TITAN_MAX_SOLID_RADIUS_PX = 78.0
+_TITAN_MIN_PHASE_DEG = 10.0
+_TITAN_MAX_PHASE_DEG = 140.0
+
+# Controlled fractions of the Titan family breaking one class of the
+# method's assumptions each.  Kept a minority for the same reason the body
+# families keep theirs: the logistic fit needs the clean label class to stay
+# dominant, and a campaign where every scene is broken measures the failure
+# regime rather than the operating one.
+_TITAN_CLOUD_FRAC = 0.30
+_TITAN_ASYMMETRY_FRAC = 0.30
+_TITAN_STARS_FRAC = 0.25
+_TITAN_ARTIFACT_FRAC = 0.20
+
+
+def gen_titan(rng: random.Random) -> dict[str, Any]:
+    """A hazy Titan with a drawn size, phase, sun direction, and structure."""
+    params = _base(rng, size=_TITAN_FRAME_PX)
+    params['noise']['read_noise_dn'] = _read_noise(rng, hi=16.0)
+    center = _TITAN_FRAME_PX / 2.0
+    r_solid_px = rng.uniform(_TITAN_MIN_SOLID_RADIUS_PX, _TITAN_MAX_SOLID_RADIUS_PX)
+    illumination_deg = rng.uniform(0.0, 360.0)
+    atmosphere: dict[str, Any] = {
+        'scale_height_px': r_solid_px * rng.uniform(0.08, 0.18),
+        'tau_ref': rng.uniform(2.0, 5.0),
+        'ref_altitude_px': r_solid_px * rng.uniform(0.02, 0.10),
+        'g': rng.uniform(0.2, 0.7),
+    }
+    if rng.random() < _TITAN_CLOUD_FRAC:
+        blobs = []
+        for _ in range(rng.randint(1, 4)):
+            radius = 0.75 * r_solid_px * math.sqrt(rng.random())
+            angle = rng.uniform(0.0, 2.0 * math.pi)
+            blobs.append(
+                {
+                    'center_vu': [radius * math.sin(angle), radius * math.cos(angle)],
+                    'sigma_px': r_solid_px * rng.uniform(0.05, 0.20),
+                    'amplitude': rng.choice((-1.0, 1.0)) * rng.uniform(0.10, 0.35),
+                }
+            )
+        atmosphere['cloud_blobs'] = blobs
+    if rng.random() < _TITAN_ASYMMETRY_FRAC:
+        atmosphere.update(
+            {
+                'axis_tilt_deg': rng.uniform(-12.0, 12.0),
+                'ns_falloff_ratio': rng.uniform(0.6, 1.8),
+                'ns_asymmetry_amplitude': rng.uniform(-0.35, 0.35),
+                'sector_sharpness_gradient': rng.uniform(-0.3, 1.0),
+                'interior_ramp_amplitude': rng.uniform(-0.25, 0.25),
+            }
+        )
+    params['bodies'] = [
+        {
+            'name': 'TITAN',
+            'shape_model': 'ellipsoid',
+            'center_v': center,
+            'center_u': center,
+            'axis1': 2.0 * r_solid_px,
+            'axis2': 2.0 * r_solid_px,
+            'axis3': 2.0 * r_solid_px,
+            'illumination_angle': illumination_deg,
+            # The structure keys split hemispheres on the body-frame first
+            # axis; this roll puts that split line along the sun axis, which
+            # is what makes ns_asymmetry_amplitude the affine control the
+            # Pearson score is meant to absorb.
+            'rotation_z': illumination_deg - 90.0,
+            'phase_angle': rng.uniform(_TITAN_MIN_PHASE_DEG, _TITAN_MAX_PHASE_DEG),
+            'km_per_pixel': _TITAN_RADIUS_KM / r_solid_px,
+            'range_km': 1.2e6,
+            'atmosphere': atmosphere,
+        }
+    ]
+    if rng.random() < _TITAN_STARS_FRAC:
+        stars = []
+        for index in range(rng.randint(3, 12)):
+            while True:
+                v = rng.uniform(4.0, _TITAN_FRAME_PX - 4.0)
+                u = rng.uniform(4.0, _TITAN_FRAME_PX - 4.0)
+                if math.hypot(v - center, u - center) > r_solid_px:
+                    break
+            stars.append({'name': f'S{index}', 'v': v, 'u': u, 'vmag': rng.uniform(4.0, 9.5)})
+        params['stars'] = stars
+    if rng.random() < _TITAN_ARTIFACT_FRAC:
+        # The instrument's own realism-matched defect population, nothing
+        # overridden: the planted-truth campaign showed the stress condition
+        # halves the commit rate, which would move this fit off the
+        # operating regime it is meant to calibrate.
+        params['artifacts'] = {'instrument_defaults': True}
+    return params
+
+
 _GENERATORS: dict[str, Callable[[random.Random], dict[str, Any]]] = {
     'disc': gen_disc,
     'limb': gen_limb,
@@ -740,6 +846,7 @@ _GENERATORS: dict[str, Callable[[random.Random], dict[str, Any]]] = {
     'ring': gen_ring,
     'star_field': gen_star_field,
     'star_unique': gen_star_unique,
+    'titan': gen_titan,
 }
 
 

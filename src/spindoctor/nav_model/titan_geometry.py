@@ -118,6 +118,11 @@ class TitanGeometryInputs:
         extfov_shape_vu: ``(rows, columns)`` of the extended-FOV frame.
         window_px: Pointing search half-window in pixels -- the larger of
             the two extfov margins.
+        extfov_margin_vu: The two extfov margins themselves, ``(rows,
+            columns)``.  The search runs in the rotated symmetry frame,
+            where only the scalar ``window_px`` is meaningful; the
+            visibility test runs in image axes, where the per-axis margins
+            are what say whether the envelope clears the detector.
         bbox_extfov_vu: Half-open envelope bounding box in extfov
             coordinates.
         subject_range_km: Observer-to-Titan center range in kilometers.
@@ -135,6 +140,7 @@ class TitanGeometryInputs:
     contaminant_mask: NDArrayBoolType | None
     extfov_shape_vu: tuple[int, int]
     window_px: float
+    extfov_margin_vu: tuple[float, float]
     bbox_extfov_vu: tuple[int, int, int, int]
     subject_range_km: float
     filters: tuple[str, ...]
@@ -165,22 +171,23 @@ def _finite(value: Any, name: str) -> float:
     return out
 
 
-def _frame_bounds(obs: Observation) -> tuple[tuple[int, int], float]:
-    """Return the extfov shape and the search half-window for an observation.
+def _frame_bounds(obs: Observation) -> tuple[tuple[int, int], float, tuple[float, float]]:
+    """Return the extfov shape, search half-window, and per-axis margins.
 
     Falls back to a zero-sized frame when the observation cannot report
-    either quantity, which forces the reliability hard-zero path rather than
-    letting the caller raise.
+    those quantities, which forces the reliability hard-zero path rather
+    than letting the caller raise.
     """
     try:
         shape = obs.extdata_shape_vu
         margin = obs.extfov_margin_vu
         bounds = (int(shape[0]), int(shape[1]))
-        window_px = float(max(int(margin[0]), int(margin[1])))
+        margin_vu = (float(margin[0]), float(margin[1]))
+        window_px = max(margin_vu)
     except Exception:
         IMAGE_LOGGER.exception('Titan: observation exposes no extended-FOV geometry')
-        return (0, 0), 0.0
-    return bounds, window_px
+        return (0, 0), 0.0, (0.0, 0.0)
+    return bounds, window_px, margin_vu
 
 
 def _filter_names(obs: Observation) -> tuple[str, ...]:
@@ -198,6 +205,7 @@ def _degenerate_geometry(
     *,
     extfov_shape_vu: tuple[int, int],
     window_px: float,
+    extfov_margin_vu: tuple[float, float],
     filters: tuple[str, ...],
     predicted_center_vu: tuple[float, float] = (0.0, 0.0),
     subject_range_km: float = float('inf'),
@@ -220,6 +228,7 @@ def _degenerate_geometry(
         contaminant_mask=None,
         extfov_shape_vu=extfov_shape_vu,
         window_px=window_px,
+        extfov_margin_vu=extfov_margin_vu,
         bbox_extfov_vu=(0, 0, 0, 0),
         subject_range_km=subject_range_km,
         filters=filters,
@@ -708,7 +717,7 @@ def geometry_from_obs(
         ``axis_degenerate=True``, which forces the reliability hard-zero
         path.
     """
-    extfov_shape_vu, window_px = _frame_bounds(obs)
+    extfov_shape_vu, window_px, extfov_margin_vu = _frame_bounds(obs)
     filters = _filter_names(obs)
     try:
         margin_vu = (int(obs.extfov_margin_vu[0]), int(obs.extfov_margin_vu[1]))
@@ -746,13 +755,17 @@ def geometry_from_obs(
     except Exception:
         IMAGE_LOGGER.exception('Titan: inventory entry unavailable or not finite')
         return _degenerate_geometry(
-            extfov_shape_vu=extfov_shape_vu, window_px=window_px, filters=filters
+            extfov_shape_vu=extfov_shape_vu,
+            window_px=window_px,
+            extfov_margin_vu=extfov_margin_vu,
+            filters=filters,
         )
     scale = _body_scale(obs, config)
     if scale is None:
         return _degenerate_geometry(
             extfov_shape_vu=extfov_shape_vu,
             window_px=window_px,
+            extfov_margin_vu=extfov_margin_vu,
             filters=filters,
             predicted_center_vu=center_vu,
             subject_range_km=subject_range_km,
@@ -801,6 +814,7 @@ def geometry_from_obs(
         contaminant_mask=contaminant.mask,
         extfov_shape_vu=extfov_shape_vu,
         window_px=window_px,
+        extfov_margin_vu=extfov_margin_vu,
         bbox_extfov_vu=(
             env_bbox[2] + margin_vu[0],
             env_bbox[0] + margin_vu[1],

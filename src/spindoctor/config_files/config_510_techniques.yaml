@@ -1054,49 +1054,66 @@ techniques:
       model_error_floor_px: 0.13
 
   TitanHazeNav:
-    # PLACEHOLDER anchors, not a fit: no Titan rows exist in the
-    # calibration campaign yet, so every coefficient below is an
-    # engineering prior chosen to be monotone-sane and to put the
-    # sigmoid argument at exactly zero (confidence 0.5) when every
-    # term sits on its stated anchor.  The terms carry equal weight
-    # (|alpha| = 1.0) because nothing yet distinguishes their
-    # discriminating power.  These are replaced by a regression fit
-    # once the calibration campaign renders Titan scenes.
-    # alpha0 = -(0.70 + 0.60 + 0.60 + 0.50 - 0.50), the negated sum of
-    # the anchor-point contributions below.
-    alpha0: -1.90
+    # Sim-anchored fit over the 413 committed rows of the planted-truth
+    # campaign (util/titan_truth, 700 randomized scenes, campaign seed
+    # 20260725), rounded to the nearest 0.05.  Produced and verified by
+    # util/titan_truth/fit_confidence.py: --propose prints the fit, and a
+    # plain run reads these values back and scores them against the
+    # separation checks below.  The generic fitter (util/calibration/fit.py)
+    # is enrolled for this technique and was run, but its label -- recovered
+    # within 1 px -- has a base rate of 0.975 on the Titan calibration
+    # family, so every usable row falls in one class and the coefficients it
+    # returns discriminate nothing; the anchors have to separate the few
+    # rows wrong by more than twice a stated per-axis bound, so the fit
+    # behind these values up-weights exactly those rows.
+    #
+    # What the coefficients encode: the apparent envelope diameter is
+    # the dominant term because the campaign's failure mode is entirely
+    # a small-disc one -- every row wrong by more than twice its axis
+    # bound has an envelope under 140 px, where the sunward arc has its
+    # least support.  Real Cassini Titan frames run 200-1075 px, so on
+    # them that term sits at its cap and the quality terms carry the
+    # discrimination; the negative residual alpha is BOUNDED at -2.5 in
+    # the fit's own configuration rather than left at the -15.12 the
+    # unconstrained solve returns, because a rendered haze limb is
+    # exactly the circle the method assumes while a real one is not, and
+    # a residual coefficient tuned on the simulator would price real
+    # frames out of confidence altogether.  Measured: 0 of 7
+    # confident-wrong rows remain, and every real cohort frame keeps
+    # confidence in 0.53-0.88.  Provisional under the program-wide
+    # confidence_provisional marker; real-evidence re-anchoring is
+    # tracked separately.
+    alpha0: -9.30
     terms:
       # Mirror-correlation Pearson score at the winning cross-track
-      # shift.  Anchor 0.70; already in [0, 1] so it needs no scaling.
+      # shift.  Already in [0, 1] so it needs no scaling.
       - feature: symmetry_peak_score
-        alpha: 1.0
+        alpha: 2.75
         divisor: 1.0
         cap_at: 1.0
-      # Fraction of annulus mirror pairs that were usable.  Anchor
-      # 0.60; contaminant masking and frame edges are what reduce it.
+      # Fraction of annulus mirror pairs that were usable; contaminant
+      # masking and frame edges are what reduce it.
       - feature: symmetry_valid_fraction
-        alpha: 1.0
+        alpha: 1.75
         divisor: 1.0
         cap_at: 1.0
       # Fraction of surviving limb rays the robust circle fit kept.
-      # Anchor 0.60.
       - feature: arc_inlier_fraction
-        alpha: 1.0
+        alpha: 1.50
         divisor: 1.0
         cap_at: 1.0
-      # Apparent haze-envelope diameter.  Anchor 80 px, half the 160 px
-      # divisor, so a well-resolved Titan saturates the term and a disc
-      # near the 40 px emission floor contributes almost nothing.
+      # Apparent haze-envelope diameter, capped at 160 px: a
+      # well-resolved Titan saturates the term and a disc near the 40 px
+      # emission floor contributes almost nothing.
       - feature: envelope_diameter_px
-        alpha: 1.0
+        alpha: 5.55
         divisor: 160.0
         cap_at: 1.0
       # NEGATIVE alpha: a large inlier residual RMS means the sunward
-      # limb is not the circle the method assumes.  Anchor 1.5 px, half
-      # the 3.0 px divisor; the arc_residual gate rejects above 2.0 px,
-      # so the term saturates just past the gate.
+      # limb is not the circle the method assumes.  The 3.0 px divisor
+      # puts the saturation just past the 2.0 px arc_residual gate.
       - feature: arc_residual_rms_px
-        alpha: -1.0
+        alpha: -2.50
         divisor: 3.0
         cap_at: 1.0
     hard_zero_if:
@@ -1113,8 +1130,17 @@ techniques:
       # the circle fit's Gauss-Newton covariance both measure
       # statistical precision only; the haze envelope's departure from
       # a circle and the wavelength-dependent haze top are model error
-      # neither can see.  Fitted alongside the other techniques' floors
-      # once the calibration campaign renders Titan scenes.
+      # neither can see.
+      #
+      # util/calibration/fit_floors.py solves this to 0.000 px on the
+      # Titan calibration family (353 usable rows, 2-sigma coverage
+      # 0.997 against the 0.865 Gaussian target), because a rendered
+      # haze IS the circle the fit assumes and the per-axis sigma
+      # floors already over-cover there.  The value is kept above that
+      # solve on purpose: on real frames the same coverage is carried
+      # by model error the simulator cannot express, and cutting the
+      # floor to zero would narrow the reported uncertainty on exactly
+      # the population the fitter has no rows for.
       model_error_floor_px: 0.2
 
 

@@ -1,0 +1,49 @@
+# DRAFT NOMINATION -- PENDING OPERATOR VOTES.  Not a library sidecar.
+#
+# ground_truth below is the AUTONOMOUS fix, not a verified one.  Promoting
+# this frame means an operator confirming the offset against the overlay,
+# choosing the scene class (see the campaign record's recommendation), and
+# moving the file into tests/integration/image_library/images/<class>/ with
+# source, operator, and verified_date filled in.
+#
+# Why this frame:
+#   Mid-phase WAC Titan with nothing else navigable in the frame: the
+#   plain case, and the frame the technique has been exercised on since
+#   its first integration test.
+schema_version: 1
+image_id: W1822132529_1_CALIB
+mission: COISS
+camera: WAC
+image_datetime_utc: '2015-09-28T10:52:20.138'
+exposure_time_sec: 0.68
+filter_combo: 'BL1+CL1'
+image_url: 'pds3://calibrated/COISS_2xxx/COISS_2099/data/1822057149_1822284412/W1822132529_1_CALIB.IMG'
+
+# PENDING: the campaign recommends a new titan_haze class; until that is
+# decided this frame belongs to no declared class.
+scene_tags:
+  - PENDING_SCENE_CLASS
+
+ground_truth:
+  offset_dv_px: 0.1553
+  offset_du_px: 0.0952
+  offset_uncertainty_px: 0.47
+  source: PENDING_OPERATOR_VERIFICATION
+  operator: PENDING
+  verified_date: PENDING
+  ui_version: PENDING
+  notes: |
+    Autonomous fix from the 2026-07-26 Titan cohort campaign
+    (util/titan_cohort/CAMPAIGN_20260726.md). TitanHazeNav reports
+    (0.9656, -1.0465) px at confidence 0.827 from a 518.376 px envelope
+    at phase 63.056 deg, with 77 of 77 limb rays inlier and an arc
+    residual of 0.793 px. The fused offset above is the ensemble answer,
+    which on a frame with other committed techniques is not the haze fit
+    alone.
+
+expected:
+  status: success
+  confidence_tier: high
+  primary_technique: TitanHazeNav
+  techniques_must_run: []
+  techniques_must_skip: []

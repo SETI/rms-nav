@@ -271,11 +271,11 @@ expected.primary_technique     NAV_TECHNIQUES
     StarFieldFromCatalogNav
     StarUniqueMatchNav
     StarRefineNav
+    TitanHazeNav
 
   Names not yet implemented (do not use):
 
     CartographicNav     (deferred; cartographic-mosaic correlate)
-    TitanNav            (deferred; haze-aware Titan limb)
 
 expected.techniques_must_run
   Optional list. Each name MUST appear in the per_technique

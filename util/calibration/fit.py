@@ -63,6 +63,7 @@ TECHNIQUES = (
     'StarFieldFromCatalogNav',
     'StarUniqueMatchNav',
     'StarRefineNav',
+    'TitanHazeNav',
 )
 
 # Diagnostics attributes not yet wired as YAML terms but recorded per row.
@@ -139,6 +140,11 @@ SIGN_BY_FEATURE: dict[str, str] = {
     'residual_scatter_px': '-',
     'mean_phase_angle_factor': '+',
     'mean_albedo_penalty': '-',
+    'symmetry_peak_score': '+',
+    'symmetry_valid_fraction': '+',
+    'arc_inlier_fraction': '+',
+    'envelope_diameter_px': '+',
+    'arc_residual_rms_px': '-',
 }
 
 # Alphas to hold at a fixed (design-prior) value when the campaign left the

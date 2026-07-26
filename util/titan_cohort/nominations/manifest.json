@@ -1,0 +1,74 @@
+[
+  {
+    "image_id": "W1822132529_1_CALIB",
+    "rationale": "Mid-phase WAC Titan with nothing else navigable in the frame: the plain case, and the frame the technique has been exercised on since its first integration test.",
+    "status": "success",
+    "confidence_tier": "high",
+    "offset_px": [
+      0.15534505268408064,
+      0.09515276510070683
+    ],
+    "titan_haze_confidence": 0.827,
+    "titan_haze_spurious": false
+  },
+  {
+    "image_id": "W1552216540_1_CALIB",
+    "rationale": "Red-filter half of a cross-filter pair 106 s apart, with an independent star lock on the same frame.  Together with its violet twin it is the library entry that would pin the filter-independence claim.",
+    "status": "success",
+    "confidence_tier": "medium",
+    "offset_px": [
+      -0.6739340941086165,
+      -7.065262555509227
+    ],
+    "titan_haze_confidence": 0.793,
+    "titan_haze_spurious": false
+  },
+  {
+    "image_id": "W1552216646_1_CALIB",
+    "rationale": "Violet half of the same pair.  Its haze fit and the frame star lock agree to 0.9 px, and its fitted haze radius sits 66 km above the red frame - the wavelength-dependent haze top, in one matched pair.",
+    "status": "success",
+    "confidence_tier": "high",
+    "offset_px": [
+      -0.8764387661466698,
+      -8.438666820995794
+    ],
+    "titan_haze_confidence": 0.798,
+    "titan_haze_spurious": false
+  },
+  {
+    "image_id": "W1643376091_1_CALIB",
+    "rationale": "High phase (135 deg), where the sunward limb has shrunk toward a crescent and the arc fit has least support.  The upper end of the working range.",
+    "status": "success",
+    "confidence_tier": "medium",
+    "offset_px": [
+      3.659027106065548,
+      -1.0041800194699868
+    ],
+    "titan_haze_confidence": 0.778,
+    "titan_haze_spurious": false
+  },
+  {
+    "image_id": "W1883905091_1_CALIB",
+    "rationale": "The methane surface window (CB3), the one Cassini filter that sees through the haze to the ground.  The method must not depend on the haze being opaque, and this is the frame that says so.",
+    "status": "success",
+    "confidence_tier": "medium",
+    "offset_px": [
+      -0.10979183754626466,
+      1.4495398662371721
+    ],
+    "titan_haze_confidence": 0.828,
+    "titan_haze_spurious": false
+  },
+  {
+    "image_id": "N1702239331_1_CALIB",
+    "rationale": "NAC frame carrying a companion moon and a star lock alongside Titan: the multi-technique composition, where the haze result has to fuse with others rather than stand alone.",
+    "status": "success",
+    "confidence_tier": "medium",
+    "offset_px": [
+      -6.166396659273484,
+      16.14192435810753
+    ],
+    "titan_haze_confidence": 0.783,
+    "titan_haze_spurious": false
+  }
+]

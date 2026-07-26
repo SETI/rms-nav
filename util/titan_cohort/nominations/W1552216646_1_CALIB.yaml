@@ -1,0 +1,49 @@
+# DRAFT NOMINATION -- PENDING OPERATOR VOTES.  Not a library sidecar.
+#
+# ground_truth below is the AUTONOMOUS fix, not a verified one.  Promoting
+# this frame means an operator confirming the offset against the overlay,
+# choosing the scene class (see the campaign record's recommendation), and
+# moving the file into tests/integration/image_library/images/<class>/ with
+# source, operator, and verified_date filled in.
+#
+# Why this frame:
+#   Violet half of the same pair.  Its haze fit and the frame star lock
+#   agree to 0.9 px, and its fitted haze radius sits 66 km above the red
+#   frame - the wavelength-dependent haze top, in one matched pair.
+schema_version: 1
+image_id: W1552216646_1_CALIB
+mission: COISS
+camera: WAC
+image_datetime_utc: '2007-03-10T10:44:06.261'
+exposure_time_sec: 4.6
+filter_combo: 'CL1+VIO'
+image_url: 'pds3://calibrated/COISS_2xxx/COISS_2030/data/1552197101_1552225837/W1552216646_1_CALIB.IMG'
+
+# PENDING: the campaign recommends a new titan_haze class; until that is
+# decided this frame belongs to no declared class.
+scene_tags:
+  - PENDING_SCENE_CLASS
+
+ground_truth:
+  offset_dv_px: -0.8764
+  offset_du_px: -8.4387
+  offset_uncertainty_px: 0.45
+  source: PENDING_OPERATOR_VERIFICATION
+  operator: PENDING
+  verified_date: PENDING
+  ui_version: PENDING
+  notes: |
+    Autonomous fix from the 2026-07-26 Titan cohort campaign
+    (util/titan_cohort/CAMPAIGN_20260726.md). TitanHazeNav reports
+    (-1.9006, -8.2176) px at confidence 0.798 from a 584.432 px envelope
+    at phase 60.557 deg, with 78 of 79 limb rays inlier and an arc
+    residual of 1.003 px. The fused offset above is the ensemble answer,
+    which on a frame with other committed techniques is not the haze fit
+    alone.
+
+expected:
+  status: success
+  confidence_tier: high
+  primary_technique: StarRefineNav
+  techniques_must_run: []
+  techniques_must_skip: []

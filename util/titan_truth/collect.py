@@ -25,6 +25,7 @@ campaign.  Rows are written incrementally so a partial run is still usable.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import math
 import multiprocessing
@@ -71,6 +72,23 @@ _STRUCTURE_KEYS: frozenset[str] = frozenset(
 )
 DEFAULT_OUT = REPO / '_work/titan_truth/rows.jsonl'
 TECHNIQUE = 'TitanHazeNav'
+
+
+def _json_safe(value: Any) -> Any:
+    """Coerce a diagnostics value to something ``json.dumps`` accepts.
+
+    Parameters:
+        value: A diagnostics field value.
+
+    Returns:
+        The value itself when JSON-encodable, a tagged mapping for a
+        non-finite float, and its ``repr`` otherwise.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return {'__nonfinite__': repr(value)}
+    if isinstance(value, (bool, int, float, str)) or value is None:
+        return value
+    return repr(value)
 
 
 def _axis_unit_vectors(theta_rad: float) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -177,6 +195,14 @@ def _navigate_one(task: tuple[str, str, dict[str, Any]]) -> dict[str, Any]:
     row['confidence'] = float(pinned.confidence)
     row['spurious'] = bool(pinned.spurious)
     row['at_edge'] = bool(pinned.at_edge)
+    # The full diagnostics payload, so a candidate confidence spec can be
+    # scored against this campaign offline: the no-confident-wrong criterion
+    # is a statement about (confidence, error) pairs, and re-deriving the
+    # confidence of a proposed anchor set needs the terms it reads.
+    row['diagnostics'] = {
+        field.name: _json_safe(getattr(diagnostics, field.name))
+        for field in dataclasses.fields(diagnostics)
+    }
     row['gate_failed'] = diagnostics.gate_failed
     row['phase_deg'] = float(diagnostics.phase_deg)
     row['envelope_diameter_px'] = float(diagnostics.envelope_diameter_px)

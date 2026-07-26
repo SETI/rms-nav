@@ -54,6 +54,7 @@ def _inputs(
     axis_degenerate: bool = False,
     filters: tuple[str, ...] = ('CL1', 'CL2'),
     extfov_shape_vu: tuple[int, int] = _EXTFOV_SHAPE,
+    extfov_margin_vu: tuple[float, float] = (_WINDOW_PX, _WINDOW_PX),
 ) -> TitanGeometryInputs:
     """Build a ``TitanGeometryInputs`` with everything but the varied field fixed."""
     return TitanGeometryInputs(
@@ -67,7 +68,8 @@ def _inputs(
         occluded_fraction=occluded_fraction,
         contaminant_mask=None,
         extfov_shape_vu=extfov_shape_vu,
-        window_px=_WINDOW_PX,
+        window_px=max(extfov_margin_vu),
+        extfov_margin_vu=extfov_margin_vu,
         bbox_extfov_vu=(60, 60, 141, 141),
         subject_range_km=1.2e6,
         filters=filters,
@@ -160,6 +162,37 @@ def test_framed_envelope_is_not_hard_zeroed(config: Config) -> None:
         _inputs(r_env_px=52.0, center_vu=(63.0, 100.0)), config=config
     )
     assert reliability > 0.0
+
+
+def test_visibility_dilation_uses_each_axis_own_margin(config: Config) -> None:
+    """An envelope clearing the detector on both axes scores normally.
+
+    The margins here are deliberately unequal (5 rows against 40 columns,
+    the shape a Cassini NAC has).  The body centre sits at row 60 of the
+    EXTENDED frame, so it is 55 px inside the detector's top edge, and its
+    52 px envelope clears that edge by 3 px.  Dilating the row axis by the
+    40 px column margin instead would demand 92 px and fail the frame for
+    no physical reason.
+    """
+    reliability, _ = titan_haze_reliability(
+        _inputs(r_env_px=52.0, center_vu=(60.0, 100.0), extfov_margin_vu=(5.0, 40.0)),
+        config=config,
+    )
+    assert reliability > 0.0
+
+
+def test_visibility_still_hard_zeroes_when_an_axis_is_clipped(config: Config) -> None:
+    """The same body four pixels nearer the top edge fails the row test.
+
+    At row 56 of the extended frame the centre is 51 px inside the
+    detector's top edge, one pixel less than the envelope radius, so the
+    envelope genuinely crosses it.
+    """
+    reliability, _ = titan_haze_reliability(
+        _inputs(r_env_px=52.0, center_vu=(56.0, 100.0), extfov_margin_vu=(5.0, 40.0)),
+        config=config,
+    )
+    assert reliability == 0.0
 
 
 def test_hard_zero_when_occlusion_exceeds_the_maximum(config: Config) -> None:

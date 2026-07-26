@@ -325,7 +325,13 @@ This section defines the algorithm the code must implement. Symbols:
    applied cleanly. The model computes `W` in `create_model` by
    reading `obs.extfov_margin_vu` directly — `search_window_for_obs`
    is the technique-side accessor of the same values, and no
-   `NavContext` exists at model-build time.
+   `NavContext` exists at model-build time. The geometry payload
+   carries BOTH the scalar `W` and the per-axis margins it came from:
+   the scalar is what the rotated-frame search uses, and the per-axis
+   pair is what the Section 2.5 visibility condition uses, that test
+   running in image axes where per-axis margins DO apply cleanly.
+   [Added during Phase E; pending operator ratification — see the
+   visibility bullet in Section 2.5.]
 
 `occluded_fraction` = pixels of the UNDILATED occluder + ring
 components (not the sibling or star components) inside the envelope
@@ -611,12 +617,26 @@ injections verify the insensitivity and guard the chosen
   exactly like a marginal star field or a five-pixel moon.
   Reliability encodes frame quality (the Phase B
   sigmoid-times-occlusion formula) and is forced to exactly 0.0
-  under the hard conditions: the envelope disc dilated by `W` does
-  not fit inside the extended frame (full visibility is a property
+  under the hard conditions: the envelope disc dilated PER IMAGE AXIS
+  by that axis's own extfov margin does not fit inside the extended
+  frame (full visibility is a property
   of Titan's TRUE position, which can sit anywhere in the window — a
   predicted-visible but actually-clipped frame would fit sky);
   `occluded_fraction > max_occluded_fraction`; or envelope diameter
-  below `min_envelope_diameter_px`. A 0.0 can never pass the 0.30
+  below `min_envelope_diameter_px`.
+  [Revised during Phase E; pending operator ratification. The
+  original text dilated by the scalar `W`, which is the LARGER of the
+  two margins. Since the extended frame is the detector plus those
+  two margins, an axis-matched dilation makes this test say exactly
+  "the envelope clears the detector" — the physical statement
+  intended — while the scalar version says "clears the detector,
+  shrunk on the tighter axis by the difference between the margins",
+  which is 90 px per side on a Cassini NAC (50 rows against 140
+  columns) and states nothing physical. Measured on the Phase E
+  cohort: eleven `clean` frames were hard-zeroed by this condition,
+  and eight of them have Titan entirely inside the detector. The
+  scalar `W` is unchanged everywhere else; see Section 2.1 item 6.]
+  A 0.0 can never pass the 0.30
   TITAN_LIMB type threshold, so a hard condition is exactly as
   strong as a hard decline — but it flows through the EXISTING
   reliability-gate machinery (`FeatureReliabilityGate` /
@@ -702,7 +722,7 @@ New files:
 | `tests/spindoctor/nav_model/test_nav_model_titan.py` | Phase-B model tests (reliability, feature payload, contaminant mask, never-raise); Phase C adds the overlay-rasterization and annotation tests. Added to this manifest during Phase C, which touched it: the file shipped with Phase B but the manifest never listed it. |
 | `tests/spindoctor/nav_technique/test_nav_technique_titan_haze.py` | Phase-B technique tests (use the `FakeObs` fixture pattern from `tests/spindoctor/nav_technique/conftest.py`; do not instantiate a real `ObsSnapshot` for unit tests); Phase C adds the gate-table tests -- capsys over a navigated frame, plus a table-driven pass over the row builders with a synthetic fit per named gate. |
 | `tests/integration/test_titan_haze_nav.py` | Phase-B integration tests (marked, holdings-fetched): model emission and technique execution on `W1822132529_1`, including the real YBSC / Tycho-2 star-mask queries. |
-| `util/titan_cohort/titan_images.csv` | Phase E: the legacy cohort list vendored into the repo (Section 6, Phase E step 1). |
+| `util/titan_cohort/` | Phase E: the real-frame campaign. `titan_images.csv` (the legacy cohort list vendored into the repo, Section 6 Phase E step 1), `cohort.py` (flags plus holdings/epoch/filter resolution from the PDS3 volume indexes), `collect.py` (full-pipeline batch run), `analyze.py` (the four acceptance bounds plus the evidence tiers, resolved onto the technique's own axes), `build_review_batch.py` and `review_batch/` (the pending operator overlay review), `build_nominations.py` and `nominations/` (draft library sidecars, pending operator votes), `final_run_summary.csv` (one committed row per frame of the shipped configuration's run), `README.md`, `CAMPAIGN_20260726.md`. |
 
 Modified files:
 
@@ -730,8 +750,10 @@ Modified files:
 | `tests/spindoctor/nav_model/test_sim_model_selection.py` (Phase D) | Titan routing in both directions (`TITAN` -> the haze model only; every other body unaffected), plus the unconfigured-scene cases. |
 | `tests/integration/sim_sweep_plots.py` (Phase D) | Added to this manifest during Phase D. Its `_OFFSET_TECHNIQUES` list is hand-enumerated exactly like `technique_snr_characterization.py`'s `_TECHNIQUES`, and it is what draws the simulator report's `offset_accuracy_fine` / `offset_accuracy_wide` figures; omission silently drops Titan from them while every sweep still runs green. |
 | `src/spindoctor/nav_model/nav_model_titan_simulated.py` (Phase D, new) | `NavModelTitanSimulated`, a subclass of `NavModelTitan` that replaces only how `TitanGeometryInputs` is obtained (operator parameters instead of `oops`), so feature emission, reliability, the hard-zero conditions, and the overlay are inherited rather than reimplemented. |
-| `src/spindoctor/nav_model/titan_geometry.py` (Phase D) | `_paint_disc` / `_occluded_fraction` promoted to the public `paint_disc` / `occluded_disc_fraction` so the simulated model builds its contaminant mask and occluded fraction with the same code the real one does. |
-| `util/titan_truth/` (Phase D, new) | The planted-truth campaign: `scene_gen.py`, `collect.py`, `analyze.py`, `README.md`. |
+| `src/spindoctor/nav_model/titan_geometry.py` (Phase D, E) | Phase D: `_paint_disc` / `_occluded_fraction` promoted to the public `paint_disc` / `occluded_disc_fraction` so the simulated model builds its contaminant mask and occluded fraction with the same code the real one does. Phase E: `TitanGeometryInputs` gains `extfov_margin_vu` and `_frame_bounds` returns it, so the Section 2.5 visibility test can dilate per image axis (Section 2.1 item 6). |
+| `src/spindoctor/nav_model/nav_model_titan.py`, `.../nav_model_titan_simulated.py` (Phase E) | `_envelope_fits_in_frame` dilates each image axis by that axis's own extfov margin instead of by the scalar search half-window; the simulated model passes its margins through. Two unit tests cover the asymmetric-margin case in both directions. |
+| `tests/integration/image_library/images/README.txt`, `tests/integration/sim_realism.py` (Phase E) | `TitanHazeNav` moves from the not-yet-implemented list to the usable one; the model-glob map gains `titan:*` / `titan_sim:*` under a `titan_haze` key. The key is inert until a scene class is declared, so it costs nothing if the operator files Titan frames under an existing class instead. |
+| `util/titan_truth/` (Phase D, new; extended in Phase E) | The planted-truth campaign: `scene_gen.py`, `collect.py`, `analyze.py`, `README.md`. Phase E adds the full per-row diagnostics payload to `collect.py` (a candidate confidence spec cannot be scored offline without the terms it reads) and the sibling `fit_confidence.py`, which fits the technique's confidence anchors on those rows and verifies the shipped ones against the no-confident-wrong checks. |
 | `docs/simulator_report/simulator_report.rst` (Phase F) | Titan base scene, `TitanHazeNav` row in the per-technique offset-sweep table, regenerated response curves. |
 | `src/spindoctor/nav_orchestrator/feature_summary.py`, `src/spindoctor/nav_orchestrator/orchestrator.py` (inventory builders), `src/spindoctor/nav_orchestrator/curator.py` (Phase B) | Breakdown serialization, three files (Section 2.5 verified scope): `reliability_reasons` field on `NavFeatureSummary`, populated at inventory build, serialized by `_curate_feature_summary` — generic for ALL feature types; acceptance criterion 3 depends on it. No Titan-specific block. |
 | `tests/spindoctor/nav_orchestrator/test_orchestrator.py` (Phase B) | Two tests exercise the deleted path (`test_orchestrator_titan_only_yields_titan_unsupported`, `test_orchestrator_titan_plus_stars_navigates_normally`) via a `_FakeTitanModel` exposing `titan_in_fov`; rewrite both (and the fake) to the Section 2.5 status matrix (`ALL_FEATURES_GATED` with a `TITAN_LIMB` gate record / normal navigation). |
@@ -976,13 +998,15 @@ titan:
       cross_sigma_scale: 1.0
       sigma_floor_cross_px: 0.30
     arc:
-      sector_half_angle_deg: 60.0
+      # 60.0 through Phase D; widened by Phase E on real-frame evidence.
+      sector_half_angle_deg: 80.0
       ray_step_deg: 2.0
       radial_step_px: 0.5
       radial_inner_fraction: 0.80
       radial_outer_pad_px: 6.0
       median_filter_samples: 5
-      min_gradient_snr: 4.0
+      # 4.0 through Phase D; raised by Phase E (#396) at no real-frame cost.
+      min_gradient_snr: 8.0
       min_rays: 20
       min_inlier_fraction: 0.50
       max_residual_rms_px: 2.0
@@ -1644,6 +1668,106 @@ filed issue; every `rings_occluding` / `moon_occluding` / `off_edge` /
 named technique gate rather than producing a
 confident-wrong lock.
 
+Phase E outcome, as measured (82 Cassini frames, `util/titan_cohort`;
+the full record with every sweep is
+`util/titan_cohort/CAMPAIGN_20260726.md`).
+
+| criterion | bound | measured | verdict |
+|---|---|---|---|
+| clean frames accepted | >= 70% | 36/49 = 73.5% | PASS |
+| (a)+(b) pairs within 2-sigma | >= 90% | 10/12 = 83.3% | FAIL [pending operator ratification] |
+| clean-frame failures attributed | all | 13/13 | PASS |
+| adverse frames: no confident-wrong lock | all | 18/27 gate or fail a named gate, 2 emit no feature at all, 7 commit; under the criterion's own physical screen every witness places all seven inside twice a stated axis bound except `BodyBlobNav` on three, and two frames have no witness | PARTIAL |
+
+The pair bound is marked pending ratification because finding 6 argues it
+is not reachable by an honestly calibrated estimator, and changing an
+acceptance bound is the operator's call (Section 7 item 3), not this
+phase's. The measurement stands either way; what needs a decision is
+whether >= 90% on a two-axis 2-sigma conjunction remains the criterion.
+
+1. **Real frames confirm the published bound.** Against an
+   independent star lock on the same frame — nine such pairs — the
+   cross-track disagreement runs 0.99 px rms (worst 1.84) and the
+   along-track 1.50 px rms (worst 3.84), implying about 0.70 and
+   1.06 px per frame against the plan's <= 1 px and <= 3 px targets.
+   Repeat frames of one target through one filter agree to 0.34 px
+   cross-track, 0.33 px along-track, and 4 km of fitted haze radius.
+2. **The sunward-sector circle fit's `(d, R)` degeneracy is the
+   dominant real-frame error; the haze top is EXPECTED to be
+   wavelength-dependent, which is why the degeneracy matters (the
+   campaign could not itself confirm the wavelength dependence).** Widening `sector_half_angle_deg` from 60
+   to 80 degrees (correlation between `d` and `R` 0.984 -> 0.942,
+   a factor 3.5 in the variance the degeneracy adds to `d`) cut the
+   star-anchored along-track pair-difference rms from 4.23 to 1.50 px
+   and removed a confident-wrong lock on `N1647091889_1` (10.6 px from
+   its star anchor at confidence 0.85). It did NOT measurably tighten
+   the red-versus-violet fitted-radius differences themselves: over the
+   six pairs committing on both sides those span 35.0-131.2 km at
+   60 deg and 11.8-97.8 km at 80 deg, with the spread about the mean
+   essentially unchanged, so nothing there separates a physical
+   haze-top difference from fit noise. It costs simulated commit rate
+   (65% -> 59%),
+   where a rendered haze limb IS the fitted circle and the degeneracy
+   has nothing to correct; the simulator's clean bounds are unmoved.
+   This sharpens Section 9 item 1 from "enables small-disc Titan" to
+   "is the fix for the along-track error generally".
+3. **The `arc_residual` gate must NOT be raised.** It is the largest
+   single cause of clean-frame refusal and the real-frame residual
+   distribution has an inviting gap (a continuum to 3.03 px, then
+   8.99 and 57.9 px), but at 3.5 px two admitted frames lock
+   measurably wrong — one by 12.7 px against its own star anchor and
+   8.7 px against its cross-filter twin. The frames between 2 and 3 px
+   of residual are wrong, not merely noisy.
+4. **Both sigma floors are held on real-frame evidence, against the
+   simulator's advice.** Phase D implied 0.08 px cross and 0.63 px
+   along; real frames measure 0.70 and 1.06 px per frame against the
+   reported 0.36 and 1.02 px. Cutting either would report a tighter
+   uncertainty than real frames support. The along floor's consequence
+   is accepted deliberately: a Titan-only frame caps at the `medium`
+   confidence tier. The planted-truth z-score band settles the same
+   way and for a reason the aggregate hides: over all 413 committed
+   rows the along z standard deviation is 1.56, above the band, but
+   over the rows the confidence spec calls confident it is 0.32 and at
+   confidence >= 0.7 it is 0.26. The whole excess is the small-disc
+   tail the anchors reject, so the reported sigma is conservative on
+   the population the ensemble consumes; raising the floor to move the
+   all-row statistic would widen the trusted rows to cover the
+   rejected ones.
+5. **Confidence anchors separate the failure population.** Fitted over
+   the 413 committed rows of the Phase D campaign re-run at the final
+   configuration: 0 of 7 rows wrong by more than twice an axis bound
+   keep confidence >= 0.5 (they score 0.106-0.384), and among
+   confident rows the along-track maximum is 3.80 px against the 6 px
+   limit — the no-confident-wrong criterion holds as an existence
+   statement, not only as a percentile. Real-frame confidence lands in
+   0.53-0.88 (median 0.76). The anchors are produced and verified by
+   `util/titan_truth/fit_confidence.py`, which exists because the
+   generic fitter's label has a 0.975 base rate on the Titan
+   calibration family and so discriminates nothing; the residual
+   coefficient is bounded at -2.5 in that fit's own configuration
+   against the -15.12 the unconstrained solve returns, which would
+   have been a near-hard gate at 0.5 px of residual — fine in a
+   simulator whose limb is a perfect circle, ruinous on real frames
+   whose median residual is 1.1 px.
+6. **The pair bound sits at the ceiling of what an honest calibration
+   can reach.** A per-axis 2-sigma test on two axes passes at 91.1%
+   with an exactly-right covariance, so >= 90% leaves no margin; 10 of
+   12 has a binomial probability of about 0.29 under correct
+   calibration. Neither failure is a lock error (the offsets agree
+   with the star anchor to 1.4 and 1.9 px); both are the reported
+   sigma being tight, and widening a floor to convert them would
+   contradict finding 4.
+7. **Two gate mechanisms are worth follow-ups.** Radial sampling
+   reaches `r_env + pad + W`, and `W` is 140 px on a Cassini NAC, so a
+   large Titan loses whole rays to out-of-frame outer samples: of the
+   81 rays an 80 deg half-sector at 2 deg spacing offers,
+   `N1481452791_1` keeps 16 and `N1686939958_1` keeps 5. And the arc
+   residual scales with apparent size (+0.315 correlation over the 49
+   committed frames, whose median envelope is 518.4 px against the
+   569-847 px of the frames the gate refuses), so a fixed 2.0 px cap is
+   a size-dependent gate; it cannot be raised (finding 3) but a
+   size-relative form is worth measuring.
+
 ### Phase F — docs, reconciliation, deferred issues
 
 - User guide: Titan section — capability, bounds from Phase D/E, the
@@ -1788,6 +1912,15 @@ plans contain no stale Titan-decision language.
 1. Self-calibrated haze-radius table per (instrument, filter, phase
    bin) accumulated from production `fitted_haze_radius_km`
    diagnostics; enables small-disc Titan via known-radius circle fit.
+   Phase E raised the value of this: the sunward-sector fit determines
+   the limb position `d + R` far better than it separates `d` from
+   `R`, so pinning `R` from a table removes the dominant real-frame
+   error on the along-track axis and not only on small discs. Note
+   what Phase E could NOT show: the fitted radii of matched
+   cross-filter pairs span 35.0-131.2 km apart at a 60 degree
+   half-sector and 11.8-97.8 km at 80 degrees, which is too scattered
+   to separate a physical wavelength-dependent haze top from fit
+   noise. Building the table is also how that question gets answered.
 2. Methane surface-window (CB3) cartographic correlation as a
    refinement stage on Phase-1 solutions.
 3. Voyager ISS Titan validation cohort (the method is
@@ -1812,15 +1945,34 @@ plans contain no stale Titan-decision language.
    rotating-basis and pivotal-pair wiring in the same file, a
    Titan+star family in `util/agreement/scene_gen.py`, and a run key
    in `util/agreement/collect.py`.
-9. Titan library growth through the standard curation pipeline: a
-   `titan_haze` scene class in the cohort-curation taxonomy (the
-   `DECLARED_SCENE_CLASSES` enum, the COHORT_CURATION_PLAN budget
-   table and structural-invariants minima, candidate-discovery scan
-   builders in `util/cohort_curation/scan_stage_a.py`, and the
-   primary-technique rubric in `build_sidecars.py`) — Phase E
-   deliberately bypasses this pipeline via the vendored legacy
-   cohort, so growing Titan coverage beyond those frames is
-   follow-up work.
+9. Ray reach versus the search window: radial profiles are sampled
+   out to `r_env + radial_outer_pad_px + W`, and `W` is 140 px on a
+   Cassini NAC, so a large Titan loses whole rays to out-of-frame
+   outer samples even when its limb sits comfortably inside the
+   detector (Phase E measured, of the 81 rays an 80 degree
+   half-sector at 2 degree spacing offers, 16 surviving on
+   `N1481452791_1` and 5 on `N1686939958_1`). The ray-drop rule is
+   right; sizing the reach by the full search window rather than by
+   where the limb can actually be is what costs those frames.
+10. Size-relative arc-residual gate: on real frames the inlier
+    residual RMS scales with apparent size (+0.315 correlation over the
+    49 committed frames; the refused frames run 569-847 px of envelope
+    against an accepted-population median of 518.4 px), so the fixed
+    `max_residual_rms_px` is a size-dependent gate that refuses large
+    well-resolved Titans.
+    Phase E showed it must NOT simply be raised — the frames it
+    refuses between 2 and 3 px are measurably wrong — so the question
+    is whether a size-relative form separates the two populations
+    the flat cap conflates.
+11. Titan library growth through the standard curation pipeline: a
+    `titan_haze` scene class in the cohort-curation taxonomy (the
+    `DECLARED_SCENE_CLASSES` enum, the COHORT_CURATION_PLAN budget
+    table and structural-invariants minima, candidate-discovery scan
+    builders in `util/cohort_curation/scan_stage_a.py`, and the
+    primary-technique rubric in `build_sidecars.py`) — Phase E
+    deliberately bypasses this pipeline via the vendored legacy
+    cohort, so growing Titan coverage beyond those frames is
+    follow-up work.
 
 ## 10. Risks and prescribed responses
 

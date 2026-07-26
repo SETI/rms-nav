@@ -11,9 +11,9 @@ and envelope radii, and a mask of the pixels the fit must ignore.
 
 Whenever Titan is inside the extended field of view the model emits exactly
 one ``TITAN_LIMB`` feature.  Frame quality lives in that feature's
-reliability rather than in a decline: an envelope that cannot fit inside the
-extended frame wherever the true pointing puts it, one too heavily occluded,
-or one too small to measure scores exactly zero, and the standard per-type
+reliability rather than in a decline: an envelope that cannot clear the
+detector wherever the true pointing puts it, one too heavily occluded, or one
+too small to measure scores exactly zero, and the standard per-type
 reliability gate then removes it, so a marginal Titan resolves through the
 same statuses as any other marginal scene.
 
@@ -126,15 +126,26 @@ def _envelope_fits_in_frame(geometry: TitanGeometryInputs) -> bool:
     anywhere inside the pointing search window, so the disc is dilated by
     that window before the containment test.  A frame that only looks
     fully-framed at the predicted pointing would let the fit sample sky.
+
+    The dilation is per image axis, by that axis's own extfov margin, not by
+    the scalar search half-window: the extended frame is the detector plus
+    those two margins, so an axis-matched dilation makes this test say
+    exactly "the envelope clears the detector", which is the physical
+    statement intended.  Dilating both axes by the LARGER margin instead
+    would shrink the admissible region on the tighter axis by the difference
+    between them -- 90 px per side on a Cassini NAC, whose margins are 50
+    rows against 140 columns -- for no physical reason.
     """
-    reach = geometry.r_env_px + geometry.window_px
     v0, u0 = geometry.predicted_center_vu
     rows, cols = geometry.extfov_shape_vu
+    margin_v, margin_u = geometry.extfov_margin_vu
     if rows <= 0 or cols <= 0:
         return False
-    if v0 - reach < 0.0 or v0 + reach > rows - 1:
+    reach_v = geometry.r_env_px + margin_v
+    reach_u = geometry.r_env_px + margin_u
+    if v0 - reach_v < 0.0 or v0 + reach_v > rows - 1:
         return False
-    return not (u0 - reach < 0.0 or u0 + reach > cols - 1)
+    return not (u0 - reach_u < 0.0 or u0 + reach_u > cols - 1)
 
 
 def titan_haze_reliability(
@@ -148,8 +159,8 @@ def titan_haze_reliability(
     under three hard conditions, each of which makes the fit unusable rather
     than merely imprecise:
 
-    - the envelope disc dilated by the search window does not fit inside the
-      extended frame;
+    - the envelope disc, dilated per image axis by that axis's extfov
+      margin, does not fit inside the extended frame;
     - the occluded fraction exceeds ``max_occluded_fraction``;
     - the envelope diameter is below ``min_envelope_diameter_px``.
 

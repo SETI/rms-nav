@@ -32,6 +32,7 @@ TECHNIQUES = (
     'BodyLimbNav',
     'BodyTerminatorNav',
     'StarRefineNav',
+    'TitanHazeNav',
 )
 TARGET_2SIGMA = 1.0 - math.exp(-2.0)
 

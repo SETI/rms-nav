@@ -114,6 +114,7 @@ SATURATION_LEVEL: dict[str, float] = {
 _STAR_MODELS = ['stars']
 _BODY_MODELS = ['body:*', 'body_sim:*']
 _RING_MODELS = ['rings:*', 'rings_sim:*']
+_TITAN_MODELS = ['titan:*', 'titan_sim:*']
 MODELS_FOR_CLASS: dict[str, list[str]] = {
     'star_dominated': _STAR_MODELS,
     'stars_plus_body': _STAR_MODELS,
@@ -127,6 +128,10 @@ MODELS_FOR_CLASS: dict[str, list[str]] = {
     'ring_only_flat': _RING_MODELS,
     'ring_only_curved': _RING_MODELS,
     'ring_plus_body': _RING_MODELS + _BODY_MODELS,
+    # Titan frames: the haze model's own envelope, so the limb FOM measures
+    # forward-model fidelity on a hazy body rather than on a hard limb the
+    # body model would predict for it.
+    'titan_haze': _TITAN_MODELS,
 }
 
 # FOM 7 matched pairs: one frame per class per instrument, capped so the
