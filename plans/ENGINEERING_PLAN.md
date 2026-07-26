@@ -22,7 +22,7 @@ fields to match current behavior.
 ## Track B — Navigation correctness
 
 Ordering within the track: the confidently-wrong defects first
-(#346, #350, #392), because the agreement study consumes ensemble output
+(#346, #350), because the agreement study consumes ensemble output
 at scale and several curated library frames pin these as standing red
 regressions. Then the coarse-lock calibration (#373), then the
 investigation/design items (#25, #128/#150), with the smaller decision items
@@ -69,7 +69,13 @@ star consensus contradicts is now dropped from the ensemble math, so a correct
 multi-star fix commits instead of conflicting on the blob outlier (#351); and
 the star-navigation hardening (two-star unique-match assignment plus multi-star
 refine) locks the small-offset WAC cruise field that previously self-flagged
-all-techniques-spurious (#352).
+all-techniques-spurious (#352). The Iapetus shape-lock veto misfire (#392) is
+closed the same way on the geometric side: the shape-lock verdict is suppressed
+when a trusted (non-spurious, non-single-star) star fix agrees with the
+geometric consensus offset the blob disputes, so an albedo-dichotomy-biased
+centroid no longer vetoes a star-confirmed limb fit. The residual that a wrong
+trusted star fix could itself corroborate a wrong geometry -- downgrading a safe
+`conflicted` to a confident-wrong `success` in that corner -- is tracked in #394.
 
 ### #346 — the remaining confident-wrong ring-lock
 
@@ -82,16 +88,6 @@ all-techniques-spurious (#352).
 - **#350** — two resolved-body frames (N1484593951, N1686349893) miss the
   offset tolerance by ~2 px after the recalibration. One debugging session
   against its named frames; the sidecars pin them red until resolved.
-
-### #392 — body-witness shape-lock veto misfire on Iapetus
-
-- **#392** — the body-witness shape-lock veto declines N1806609736 (Iapetus)
-  even though its limb fit and star techniques agree on the operator truth: the
-  extreme albedo dichotomy drags the pose-free blob centroid off the disc
-  center, and the veto reads that disagreement as a shape lock. The
-  geometric-side mirror of the ensemble blob-outlier drop that closed #351 --
-  the fix is to suppress SHAPE_LOCK_SUSPECT when a corroborated star fix agrees
-  with the vetoed geometric consensus within the grouping floor.
 
 ### #373 — DT coarse-prior search vs competing edge populations
 
@@ -295,10 +291,12 @@ asserts the generated half matches the registries.
   xfails for #251, #252, #253, ready to flip when each fix lands.
 - **#288** — image-library regression reconciliation: the standing red set
   is now reduced to the deliberately-pinned frames, each owned by an open
-  navigation issue (#338, #346, #350, #392). N1530185128 (#351) and W1444747627
+  navigation issue (#338, #346, #350). N1530185128 (#351) and W1444747627
   (#352) are now re-ratcheted to success/medium and green: the ensemble
   blob-outlier drop lets the multi-star fix commit on the former, and the
-  star-navigation hardening already locks the latter. N1572105349's pin was
+  star-navigation hardening already locks the latter. N1806609736 (#392) is
+  green as well: the shape-lock veto no longer misfires when a star fix
+  corroborates the limb. N1572105349's pin was
   owned by #222 (now closed by the independence resolution); its autonomous
   regression should flip green on the next integration run against real
   holdings (that suite does not run in PR CI). Keep the pins accurate as

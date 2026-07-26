@@ -13,7 +13,11 @@ per-technique diagnostic can see:
   wrong offset, fusing to a high confidence.  The pose-free brightness centroid
   (:class:`~spindoctor.nav_technique.nav_technique_body_blob.BodyBlobNav`) does
   not chase the shape, so it disagrees by pixels -- the one signal that the
-  geometric lock is wrong.
+  geometric lock is wrong.  The exception is an independently corroborated
+  geometry: when a trusted (non-spurious, non-single-star) star fix agrees with
+  the geometric consensus offset the blob disputes, the blob is the outlier
+  rather than the lock, so the shape-lock verdict is suppressed and the frame
+  commits its geometric+star solution.
 
 - **Collapsed regime.**  At extreme phase a forward-scattering haze crescent
   defeats the disc correlation (it self-flags spurious) while dragging the
@@ -52,6 +56,10 @@ from enum import Enum, auto
 
 import numpy as np
 
+from spindoctor.nav_orchestrator.ensemble_independence import (
+    STAR_CONSENSUS_TECHNIQUES,
+    is_single_star_result,
+)
 from spindoctor.nav_orchestrator.ensemble_observability import mahalanobis_distance
 from spindoctor.nav_technique.diagnostics import BodyBlobDiagnostics
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
@@ -234,6 +242,67 @@ def _lone_blob_collapsed(
     return False
 
 
+def _corroborated_by_star_consensus(
+    best_group: list[NavTechniqueResult],
+    results: list[NavTechniqueResult],
+    *,
+    star_agreement_floor_px: float,
+) -> bool:
+    """Return whether a trusted star fix corroborates the geometric consensus.
+
+    A trusted star fix is a non-spurious, non-single-star result from a
+    star-consensus technique (a multi-star pattern match, a two-star unique
+    match, or a multi-star refine): its identification is cross-checked by more
+    than one star, so it is an independent geometric witness that outranks the
+    pose-free brightness centroid.  When such a fix agrees, within
+    ``star_agreement_floor_px``, with a geometric technique in the winning
+    consensus, the geometry is independently confirmed and the blob -- not the
+    geometric fit -- is the outlier, so there is no confident-wrong lock for the
+    shape-lock check to catch.  The comparison is against the geometric
+    technique's own offset, not the fused offset (which already blends any
+    grouped star), so a star that merely fused into the consensus does not vouch
+    for itself.  A single-star fix (its own identification unchecked) and a
+    spurious fix (pinned to the origin, yet still carrying a multi-star
+    diagnostic) do not count; a frame with no trusted star fix leaves the veto
+    to fire exactly as before.
+
+    Parameters:
+        best_group: The winning consensus group; its geometric members supply
+            the reference offsets the star fix is tested against.
+        results: Every per-technique result on the frame, spurious ones
+            included so they can be filtered out here.
+        star_agreement_floor_px: Euclidean translation distance (px) within
+            which a trusted star fix is treated as agreeing with a geometric
+            consensus offset.  Set to ``0.0`` to disable the suppression.
+
+    Returns:
+        True when at least one trusted star fix lies within
+        ``star_agreement_floor_px`` of a geometric consensus offset.
+    """
+    if star_agreement_floor_px <= 0.0:
+        return False
+    geometric_offsets = [
+        result.offset_px
+        for result in best_group
+        if result.technique_name in _GEOMETRIC_BODY_TECHNIQUES
+    ]
+    if not geometric_offsets:
+        return False
+    for result in results:
+        if result.technique_name not in STAR_CONSENSUS_TECHNIQUES:
+            continue
+        if result.spurious or is_single_star_result(result):
+            continue
+        for geometric_offset in geometric_offsets:
+            separation_px = math.hypot(
+                result.offset_px[0] - geometric_offset[0],
+                result.offset_px[1] - geometric_offset[1],
+            )
+            if separation_px <= star_agreement_floor_px:
+                return True
+    return False
+
+
 def _shape_lock_suspect(
     best_group: list[NavTechniqueResult],
     results: list[NavTechniqueResult],
@@ -294,6 +363,7 @@ def evaluate_body_witness_veto(
     disagreement_floor_px: float,
     disagreement_frac: float,
     agreement_sigma: float,
+    star_agreement_floor_px: float,
     rcond: float,
 ) -> BodyWitnessVeto:
     """Decide whether a body consensus is a confident-wrong lock to veto.
@@ -329,6 +399,13 @@ def evaluate_body_witness_veto(
         agreement_sigma: Mahalanobis-distance threshold the disagreement must
             exceed under the combined covariance, so a large-sigma centroid
             whose separation is statistically consistent is not vetoed.
+        star_agreement_floor_px: Blob/star corroboration floor (px) -- the
+            Euclidean distance within which a trusted (non-spurious,
+            non-single-star) star fix corroborates a geometric consensus offset.
+            When such a fix agrees with the geometry the blob disputes, the blob
+            is the outlier and the shape-lock verdict is suppressed; the
+            collapsed-regime verdict is unaffected.  Shared with the ensemble's
+            blob-drop guard.  Set to ``0.0`` to disable the suppression.
         rcond: rcond for the Mahalanobis pseudo-inverse.
 
     Returns:
@@ -366,5 +443,17 @@ def evaluate_body_witness_veto(
         agreement_sigma=agreement_sigma,
         rcond=rcond,
     ):
+        # A geometric lock the blob disputes is a confident-wrong lock only when
+        # nothing independent corroborates the geometry.  When a trusted
+        # (non-spurious, non-single-star) star fix agrees with a geometric
+        # consensus offset within the blob/star corroboration floor, the blob --
+        # not the geometric fit -- is the outlier, so there is no wrong lock to
+        # catch and the shape-lock verdict is suppressed.  This mirrors, on the
+        # geometric side, the ensemble-math drop of a lone blob that a star
+        # consensus contradicts.
+        if _corroborated_by_star_consensus(
+            best_group, results, star_agreement_floor_px=star_agreement_floor_px
+        ):
+            return BodyWitnessVeto.NONE
         return BodyWitnessVeto.SHAPE_LOCK_SUSPECT
     return BodyWitnessVeto.NONE

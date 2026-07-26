@@ -18,6 +18,8 @@ from spindoctor.nav_technique.diagnostics import (
     BodyDiscDiagnostics,
     BodyLimbDiagnostics,
     NavTechniqueDiagnostics,
+    StarRefineDiagnostics,
+    StarUniqueMatchDiagnostics,
 )
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.support.exceptions import NavContractError
@@ -27,6 +29,7 @@ _COLLAPSE_MIN_PHASE_DEG = 90.0
 _FLOOR_PX = 4.0
 _FRAC = 0.03
 _AGREEMENT_SIGMA = 2.0
+_STAR_AGREEMENT_FLOOR_PX = 5.0
 _RCOND = 1.0e-9
 _TIGHT_COV = np.eye(2, dtype=np.float64) * 0.25
 
@@ -99,6 +102,38 @@ def _blob(
     )
 
 
+def _star(
+    *,
+    technique_name: str,
+    offset: tuple[float, float],
+    diagnostics: NavTechniqueDiagnostics,
+    spurious: bool = False,
+) -> NavTechniqueResult:
+    """Build a star-technique result carrying its own diagnostics.
+
+    Star techniques leave ``source_bodies`` empty, so the result is a
+    body-independent geometric witness.
+
+    Parameters:
+        technique_name: The star technique the result reports as its producer.
+        offset: Predicted ``(dv, du)`` offset in pixels.
+        diagnostics: The star diagnostics that classify the fix as single- or
+            multi-star.
+        spurious: Whether the star result self-flagged spurious (pinned to the
+            origin with zero confidence).
+
+    Returns:
+        A ``NavTechniqueResult`` with empty ``source_bodies``.
+    """
+    return _result(
+        technique_name=technique_name,
+        offset=offset,
+        source_bodies=frozenset(),
+        spurious=spurious,
+        diagnostics=diagnostics,
+    )
+
+
 def _evaluate(
     best_group: list[NavTechniqueResult],
     results: list[NavTechniqueResult],
@@ -127,6 +162,7 @@ def _evaluate(
         disagreement_floor_px=_FLOOR_PX,
         disagreement_frac=_FRAC,
         agreement_sigma=_AGREEMENT_SIGMA,
+        star_agreement_floor_px=_STAR_AGREEMENT_FLOOR_PX,
         rcond=_RCOND,
     )
 
@@ -144,6 +180,90 @@ def test_shape_lock_fires_when_blob_contradicts_geometric_consensus() -> None:
     )
     blob = _blob(offset=(-3.8, -3.1), body='HYPERION')
     verdict = _evaluate([disc, limb], [disc, limb, blob], (-14.5, -7.0))
+    assert verdict is BodyWitnessVeto.SHAPE_LOCK_SUSPECT
+
+
+def test_shape_lock_suppressed_by_corroborating_star_consensus() -> None:
+    """A trusted star fix that confirms the geometry makes the blob the outlier.
+
+    On a body whose albedo dichotomy drags the brightness centroid off the true
+    disc center, the low-phase blob disagrees with a correct limb fit; when a
+    multi-star fix independently agrees with that geometric offset within the
+    grouping floor, the shape-lock verdict is suppressed and the frame commits.
+    """
+    limb = _result(
+        technique_name='BodyLimbNav', offset=(1.46, 12.85), source_bodies=frozenset({'IAPETUS'})
+    )
+    star = _star(
+        technique_name='StarUniqueMatchNav',
+        offset=(1.53, 11.33),
+        diagnostics=StarUniqueMatchDiagnostics(mode='two_star'),
+    )
+    blob = _blob(offset=(1.5, 25.0), body='IAPETUS')
+    verdict = _evaluate([limb, star], [limb, star, blob], (1.5, 12.0))
+    assert verdict is BodyWitnessVeto.NONE
+
+
+def test_shape_lock_not_suppressed_by_single_star_fix() -> None:
+    """A lone-star fix is not a corroborated consensus, so the veto still fires.
+
+    A one-star unique match localizes the offset from a single detection whose
+    identification nothing cross-checks; it cannot vouch for the geometry, so a
+    shape lock the blob disputes is still reported conflicted.
+    """
+    limb = _result(
+        technique_name='BodyLimbNav', offset=(1.46, 12.85), source_bodies=frozenset({'IAPETUS'})
+    )
+    star = _star(
+        technique_name='StarUniqueMatchNav',
+        offset=(1.53, 11.33),
+        diagnostics=StarUniqueMatchDiagnostics(mode='one_star'),
+    )
+    blob = _blob(offset=(1.5, 25.0), body='IAPETUS')
+    verdict = _evaluate([limb, star], [limb, star, blob], (1.5, 12.0))
+    assert verdict is BodyWitnessVeto.SHAPE_LOCK_SUSPECT
+
+
+def test_shape_lock_not_suppressed_when_star_fix_disagrees() -> None:
+    """A multi-star fix far from the geometric offset does not corroborate it.
+
+    When the only trusted star fix disagrees with the fused offset by more than
+    the grouping floor, it does not confirm the geometry, so a shape lock the
+    blob disputes still fires.
+    """
+    limb = _result(
+        technique_name='BodyLimbNav', offset=(-14.5, -7.5), source_bodies=frozenset({'HYPERION'})
+    )
+    star = _star(
+        technique_name='StarRefineNav',
+        offset=(3.0, 4.0),
+        diagnostics=StarRefineDiagnostics(n_stars_used=6),
+    )
+    blob = _blob(offset=(-3.8, -3.1), body='HYPERION')
+    verdict = _evaluate([limb, star], [limb, star, blob], (-14.5, -7.5))
+    assert verdict is BodyWitnessVeto.SHAPE_LOCK_SUSPECT
+
+
+def test_shape_lock_not_suppressed_by_spurious_star_at_origin() -> None:
+    """A spurious star pinned to the origin cannot corroborate a wrong lock.
+
+    A spurious star fix carries a multi-star diagnostic yet is pinned to offset
+    (0, 0), so on a genuine shape lock sitting near the origin its zero offset
+    would fall within the corroboration floor of the geometric consensus.  It is
+    a defeated fix, not an independent witness, so it must not suppress the veto:
+    the shape lock still reports conflicted.
+    """
+    limb = _result(
+        technique_name='BodyLimbNav', offset=(0.5, 0.5), source_bodies=frozenset({'HYPERION'})
+    )
+    star = _star(
+        technique_name='StarUniqueMatchNav',
+        offset=(0.0, 0.0),
+        diagnostics=StarUniqueMatchDiagnostics(mode='two_star'),
+        spurious=True,
+    )
+    blob = _blob(offset=(12.0, 0.5), body='HYPERION')
+    verdict = _evaluate([limb, star], [limb, star, blob], (0.5, 0.5))
     assert verdict is BodyWitnessVeto.SHAPE_LOCK_SUSPECT
 
 

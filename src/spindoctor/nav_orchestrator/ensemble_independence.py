@@ -58,10 +58,21 @@ from spindoctor.nav_technique.diagnostics import (
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 
 __all__ = [
+    'STAR_CONSENSUS_TECHNIQUES',
     'IndependenceResolution',
     'is_single_star_result',
     'resolve_independent_estimators',
 ]
+
+#: Star techniques whose non-single-star result is a corroborated, feature-
+#: matched fix (a multi-star pattern match, a two-star unique match, or a
+#: multi-star refine).  Such a fix cross-checks its identification against more
+#: than one star, so it outranks a lone brightness-centroid blob as a position
+#: witness: a blob that disagrees with it is the outlier.  Paired with
+#: :func:`is_single_star_result` to admit only the corroborated members.
+STAR_CONSENSUS_TECHNIQUES = frozenset(
+    {'StarFieldFromCatalogNav', 'StarUniqueMatchNav', 'StarRefineNav'}
+)
 
 #: Ring techniques that read one shared ``NavModelRings`` catalog per frame.
 #: Any two of these observing the same frame are correlated witnesses of one

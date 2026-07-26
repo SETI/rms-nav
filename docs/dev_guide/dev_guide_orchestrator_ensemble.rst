@@ -277,7 +277,16 @@ offset on a passing frame is unchanged. The veto fires in two shapes:
   below half phase where its centroid is a trustworthy position reference,
   disagrees with the fused offset, the geometric techniques have locked onto a
   mismatched shape. The result is reported ``conflicted`` (``status_reason``
-  ``body_shape_lock_suspect``) rather than a confident success.
+  ``body_shape_lock_suspect``) rather than a confident success -- unless a
+  trusted (non-spurious, non-single-star) star fix independently agrees with the
+  geometric consensus offset within
+  :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.blob_star_disagreement_floor_px`.
+  That
+  corroborates the geometry the blob disputes, so the blob is the outlier and the
+  shape-lock verdict is suppressed: the geometric-side mirror of the Step-1
+  blob-drop, and the reason an albedo-dichotomy body like Iapetus (whose centroid
+  is dragged off a correct limb) no longer self-vetoes when its stars confirm the
+  limb.
 - **Collapsed regime.** When the only surviving body offset is a past-half-phase
   blob centroid and a sibling geometric technique on the same body self-flagged
   spurious, the geometric fit structurally failed and only the
@@ -415,7 +424,12 @@ constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleCon
   treated as agreeing with a corroborated (non-single-star) star fix. When such a fix is present
   and the blob agrees with none within this floor, the blob is dropped from the ensemble math as a
   contradicted outlier, so a lone centroid cannot force a conflict against a multi-star solution
-  (Step 1). Matches ``agreement_pixel_floor``; ``0.0`` disables the drop.
+  (Step 1). The same floor governs the body-witness shape-lock veto's star-corroboration
+  suppression, so the ensemble-math drop and the veto-side suppression share one distance.
+  Defaults to the same value as
+  :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.agreement_pixel_floor` but is
+  an independent field: ``0.0`` disables only the blob-drop and the veto-side suppression,
+  and setting ``agreement_pixel_floor`` to ``0.0`` separately disables the grouping fallback.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.pinvh_rcond` — float, default
   ``1.0e-9``. Cutoff for :func:`scipy.linalg.pinvh`.
 - :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.max_allowed_rotation_deg` — float,
