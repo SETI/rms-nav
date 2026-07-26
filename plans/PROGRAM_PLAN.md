@@ -248,9 +248,19 @@ The known open defects:
   synchronous rotators, or shape models (#23).
 - **#130** — star limiting-magnitude calibration against real fields
   (coordinate with #233's measured-SNR work — same frames, same tooling).
-- **#60** — Titan: the interim recorded-decline handling is in place; the
-  open item is the full haze-limb navigation decision (also a Track D
-  scope gate).
+- **Titan haze fit refinements** — Titan navigates autonomously via the
+  haze solar-symmetry method, validated on an 82-frame Cassini cohort. Four
+  measured follow-ups remain: the arc ray reach is sized by the full search
+  window rather than by where the limb can be, costing rays on large
+  well-framed frames (#403); the flat arc-residual cap is a size-dependent
+  gate that cannot simply be raised (#404); the extreme-phase edge of the
+  working range is uncharacterized (#401); and the main rings are masked as
+  opaque, refusing frames visible through the C ring or the gaps (#402).
+- **#400** — the ensemble merge and tier logic have never been exercised on
+  a strongly anisotropic covariance; the haze fit reports a 0.36 px by
+  1.02 px oblique ellipse whose orientation varies with the sun direction.
+- **#406** — two pre-existing library reds (N1487595731_1, N1633925572_1)
+  that fail identically on main and were not in the pinned-red table.
 
 **Parallelism:** fully parallel with Track A.
 
@@ -270,12 +280,21 @@ instrument.
 **Goal:** every capability the docs imply either works and is validated,
 or is explicitly scoped out in the capability matrix.
 
+Titan navigation is delivered: the haze solar-symmetry method ships as a
+model, a technique, and a simulated-Titan renderer, validated against an
+82-frame Cassini cohort and a 700-scene planted-truth campaign, with the
+published bound (1 px cross-track, 3 px along-track) confirmed by
+star-anchored evidence. Two capability extensions are deferred as issues:
+the self-calibrated haze-radius table that would remove the dominant
+along-track error and answer the wavelength-dependent-haze-top question
+(#397), and methane surface-window (CB3) cartographic correlation as a
+refinement stage (#398).
+
 Some items start with an operator decision, because each is a scope
 commitment:
 
 | Decision | Then the work is |
 |---|---|
-| **Titan navigation** (#60): implement haze-limb navigation or scope it out? The interim is in place: Titan is hard-excluded from shape navigation with an active model that records the decline (`titan_unsupported`), a deliberate Titan-only special case. | A new haze-limb model and technique (hard, physics-heavy), or keeping the recorded-decline interim plus honest capability-matrix docs. |
 | **CK kernels** (#188, prerequisite #50): ship updated-pointing SPICE kernels as a product? | The kernel writer and its validation — a headline deliverable either way. |
 | **Backplane content** (#28 family): finalize the backplane set and formats | #55, #54, #57, #77, then the generator hardening (including the product-correctness defects #251, #252, #253 found by the #241 test suite). |
 
@@ -385,7 +404,12 @@ library votes and the decision gates, not by any implementation.
    frames to low. Decide: ship at the conservative default, ratchet
    `rings.orbit_radial_sigma_correlated_fraction`, or implement the
    wander decomposition. Reversible by config either way.
-2. **Titan: implement or scope out (#60).**
+2. **Titan haze navigation ratification (#407)** — the method is
+   implemented and validated; what needs a decision is a bundle of
+   mid-implementation specification changes, three acceptance bounds the
+   evidence argues with, and three staged curation artifacts (an overlay
+   review batch, six library nominations, and a `titan_haze` scene-class
+   recommendation).
 3. **CK kernels as a delivered product (#188).**
 4. **Highly-irregular terminator fit (#338)** — choose among accepting the
    2-px-class ground truth for resolved highly-irregular bodies, keeping
@@ -403,10 +427,10 @@ Every open issue, listed once by the track that owns it.
 
 | Track | Issues |
 |---|---|
-| A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #340, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377, #380 |
-| B — navigation correctness | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #373, #394 |
+| A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #340, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377, #380, #399, #405, #407 |
+| B — navigation correctness | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #373, #394, #400, #401, #402, #403, #404, #406 |
 | C — statistics & QA | #240 (plus the standing cross-check and campaign-report practice) |
-| D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #60, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #141, #142, #188, #231, #236, #251, #252, #253, #265 |
+| D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #141, #142, #188, #231, #236, #251, #252, #253, #265, #397, #398 |
 | E — test & docs debt | #122, #129, #177, #178, #241, #242, #243, #244, #245, #288, #379, #391 |
 | F — instruments, features, hardening | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #81, #82, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212, #388 |
 

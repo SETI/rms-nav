@@ -216,7 +216,7 @@ its row and children.
    * - ``source_model``
      - TEXT
      - NavModel family that produced the features (``body``, ``rings``,
-       ``stars``).
+       ``stars``, ``titan``).
    * - ``source_name``
      - TEXT
      - Body, ring, or catalog name (e.g. ``IAPETUS``, ``UCAC4``).

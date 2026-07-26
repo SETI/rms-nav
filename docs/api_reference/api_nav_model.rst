@@ -58,6 +58,16 @@ spindoctor.nav_model
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.nav_model.nav_model_titan_simulated
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.nav_model.titan_geometry
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 spindoctor.nav_model.rings
 --------------------------
 

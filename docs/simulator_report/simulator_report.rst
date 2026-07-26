@@ -99,6 +99,10 @@ navigation costs ~35 s -- and sweep to the measured per-technique ceiling:
      - ``small_sphere_base`` (20 px sphere)
      - ~extfov margin
      - lit-shape (disc / crescent) coarse acquisition
+   * - TitanHazeNav
+     - ``titan_haze`` (120 px hazy body, phase 60)
+     - ~45 px
+     - extfov margin
 
 Beyond a technique's ceiling the navigator correctly reports failure (the feature
 is outside the searchable region); the wide sweeps run to the ceiling and, for the
@@ -1064,6 +1068,10 @@ swept across the dense sub-pixel set and the wide range described under
      - 0.001
      - 0.005
      - 0.012
+   * - TitanHazeNav
+     - 0.112
+     - 0.264
+     - 0.291
 
 The correlation and centroid techniques sit at or below a few hundredths of a
 pixel; the distance-transform techniques carry a larger sub-pixel residual:
@@ -1076,6 +1084,13 @@ pixel; the distance-transform techniques carry a larger sub-pixel residual:
   across the dense sweep, both distance-transform effects that vary with the
   sub-pixel phase; they stay well inside the invariant bound. See
   :doc:`/dev_guide/dev_guide_techniques_body_limb` for the mechanism.
+- **The haze symmetry fit holds a ~0.26 px residual** across the dense sweep, and
+  it is a floor rather than a fraction-dependent wobble: the swept axis on the
+  ``titan_haze`` scene is pure cross-track, and the scene deliberately renders a
+  soft optical limb a few pixels above the solid radius, so the free-radius arc
+  fit is absorbing a real altitude mismatch at every step rather than fitting the
+  circle it assumes. See
+  :doc:`/dev_guide/dev_guide_techniques_titan_haze`.
 - **The star field is pinned here**, so its sub-pixel rows below ~1 px are absent:
   the field matcher alone does not recover a sub-pixel translation of the whole
   field (the two-star path in the full ensemble does -- see the planted-offset star
@@ -1094,7 +1109,10 @@ The wide-range sweep confirms each technique recovers across the navigable range
    the body across the full window via its coarse acquisition.
 
 The disc, ring, limb, and star recover with the same accuracy out to their
-ceilings (~48, ~48, ~40, ~20 px). The **blob now holds across the navigable
+ceilings (~48, ~48, ~40, ~20 px). The haze symmetry fit holds its ~0.26 px floor
+flat out to a planted 45 px -- the extended-FOV search margin, not a limit of the
+method: the mirror-correlation scan searches the whole margin and the arc fit
+recentres once, so nothing degrades across the range. The **blob now holds across the navigable
 range too**: for the 20 px body it stays under ~0.01 px out to ~45 px, where it
 was previously a ~6 px small-offset technique (degrading to ~5.8 px at 20 px) --
 the blob-shaped-disc coarse acquisition re-centres the integration window on the
@@ -1495,8 +1513,13 @@ the dedicated sweep or the scene class that drives it:
      - ``mutual_event`` scene class
    * - Atmosphere
      - ``atmosphere`` ``tau_ref`` haze
-     - hard limb at reference radius
+     - hard limb at reference radius (haze-blind body navigation)
      - sweep ``atmosphere_haze``
+   * - Haze symmetry structure
+     - ``atmosphere`` axis tilt, hemispheric and azimuthal falloff, interior
+       ramp, cloud blobs
+     - a haze mirror-symmetric about the predicted sun axis
+     - ``util/titan_truth`` planted-truth campaign
    * - Detector noise
      - full stage 4/5 noise stack
      - not modeled
@@ -1520,15 +1543,22 @@ a jitter axis needs a renderer knob before it can be swept.
 Summary
 =======
 
-* All seven feature techniques (disc, mesh disc, blob, high-phase blob, star
-  field, limb, ring edge) plus the camera-roll fit recover their planted
-  transform to sub-pixel / sub-half-degree accuracy on clean simulated frames.
+* All eight feature techniques (disc, mesh disc, blob, high-phase blob, star
+  field, limb, ring edge, haze symmetry) plus the camera-roll fit recover their
+  planted transform to sub-pixel / sub-half-degree accuracy on clean simulated
+  frames.
 * The disc, blob, ring edge, and star field are quantization-free: they recover
   any offset -- whole, near-boundary, or arbitrary fraction -- to a few hundredths
   of a pixel. The disc and blob are the most accurate (~0.01 px). The limb holds a
   ~0.09 px distance-transform residual and the ring a ~0.03 px residual.
 * The star field improves with SNR: a dim field recovers to ~0.02 px and a bright
   field to ~0.005 px, the most accurate of any technique.
+* The haze symmetry fit recovers a hazy body to ~0.26 px across both the dense
+  sub-pixel sweep and the full navigable range, against a rendered haze limb that
+  is deliberately not the circle it fits. Its randomized planted-truth campaign
+  (700 scenes over offset, phase, size, noise, clouds, and four
+  symmetry-breaking structure axes) puts the 95th percentile of recovery error at
+  0.17 px cross-track and 0.82 px along-track on clean scenes.
 * Irregular (mesh) bodies navigate as accurately as ellipsoids when the predicted
   geometry matches the rendered one (mesh disc, limb, and crescent all recover to
   0.00-0.21 px). When the navigator predicts the wrong shape the centroid bias

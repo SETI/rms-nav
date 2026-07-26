@@ -153,6 +153,11 @@ spindoctor.sim
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.sim.forward.haze_structure
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.sim.forward.artifact_modes
    :members:
    :undoc-members:

@@ -105,6 +105,11 @@ narrative below the diagram describes each group in turn.
           +to_annotations(context)
       }
 
+      class NavModelTitanSimulated {
+          +instances_for_obs(obs)
+          +geometry_inputs
+      }
+
       class NavTechnique {
           <<abstract>>
           +name
@@ -123,6 +128,7 @@ narrative below the diagram describes each group in turn.
       class BodyBlobNav
       class RingEdgeNav
       class RingAnnulusNav
+      class TitanHazeNav
       class NavTechniqueManual
 
       class NavOrchestrator {
@@ -240,6 +246,7 @@ narrative below the diagram describes each group in turn.
       NavModelBodyBase <|-- NavModelBodySimulated
       NavModelRingsBase <|-- NavModelRings
       NavModelRingsBase <|-- NavModelRingsSimulated
+      NavModelTitan <|-- NavModelTitanSimulated
 
       NavTechnique <|-- StarUniqueMatchNav
       NavTechnique <|-- StarFieldFromCatalogNav
@@ -250,6 +257,7 @@ narrative below the diagram describes each group in turn.
       NavTechnique <|-- BodyBlobNav
       NavTechnique <|-- RingEdgeNav
       NavTechnique <|-- RingAnnulusNav
+      NavTechnique <|-- TitanHazeNav
       NavTechnique <|-- NavTechniqueManual
 
       NavOrchestrator --> NavModel : iterates
@@ -398,8 +406,9 @@ and
 :class:`~spindoctor.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`
 (rendered from operator-supplied parameters), and
 :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (active whenever
-Titan is in the extended FOV; emits no features and instead records why a
-Titan scene cannot be navigated).
+Titan is in the extended FOV; emits the haze-envelope geometry a solar-symmetry
+fit needs) with its simulated-image sibling
+:class:`~spindoctor.nav_model.nav_model_titan_simulated.NavModelTitanSimulated`.
 
 Per-family data models live alongside the renderer classes:
 
@@ -421,12 +430,15 @@ Per-family data models live alongside the renderer classes:
   ``RingFeatureFilter``, ``RingRenderResult``, ``RingsRenderContext``,
   ``ring_math``, ``ring_types``); see
   :doc:`dev_guide_navigation_models_ring` for details.
-- **Titan** — no haze-aware data model exists yet.
-  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` builds
-  whenever Titan is in the extended FOV, emits no features, and records a
-  no-result reason instead; ``NavModelTitanSimulated`` is reserved as the
-  simulated-image sibling. See :doc:`dev_guide_navigation_models_titan`
-  for details.
+- **Titan** — the observation-side geometry lives in
+  :mod:`spindoctor.nav_model.titan_geometry`
+  (:class:`~spindoctor.nav_model.titan_geometry.TitanGeometryInputs`,
+  :func:`~spindoctor.nav_model.titan_geometry.geometry_from_obs`), so
+  everything the model does downstream of it is a pure function of one frozen
+  dataclass;
+  :class:`~spindoctor.nav_model.nav_model_titan_simulated.NavModelTitanSimulated`
+  builds the same dataclass from operator parameters. See
+  :doc:`dev_guide_navigation_models_titan` for details.
 
 NavTechnique
 ============
@@ -458,10 +470,12 @@ techniques are, by family:
 - **Ring** —
   :class:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav`,
   :class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`.
-- **Titan** — no Titan-specific techniques are registered;
-  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` is an active
-  registered model that emits no features (it records why a Titan scene
-  cannot be navigated), so no technique consumes them.
+- **Titan** —
+  :class:`~spindoctor.nav_technique.nav_technique_titan_haze.TitanHazeNav`,
+  which consumes the single
+  :data:`~spindoctor.feature.feature_type.NavFeatureType.TITAN_LIMB` feature
+  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` emits and
+  measures the offset from the haze's solar symmetry.
 
 The DT-based body / ring techniques share their coarse-NCC +
 Levenberg-Marquardt + Tukey-biweight machinery via
@@ -481,12 +495,13 @@ The ``geometry`` field carries one of the
 :data:`~spindoctor.feature.geometry.NavFeatureGeometry` payload variants
 (``StarGeometry``, ``LimbPolyline``, ``TerminatorPolyline``,
 ``RingEdgePolyline``, ``BodyDiscGeometry``, ``BodyBlobGeometry``,
-``RingAnnulusGeometry``, ``CartographicModelGeometry``); each variant
+``RingAnnulusGeometry``, ``CartographicModelGeometry``,
+``TitanHazeGeometry``); each variant
 records the in-image position the technique needs. The ``flags`` field
 carries one of the
 :data:`~spindoctor.feature.flags.NavFeatureFlags` typed dataclasses, capturing
 feature-type-specific booleans (for example,
-``RingEdgeFlags.is_straight_line``).
+``RingEdgeFlags.is_straight_line`` or ``TitanHazeFlags.high_phase``).
 
 Per-feature uncertainty in image-plane pixels lives on
 ``position_cov_px`` (or per-vertex on the polyline payloads);

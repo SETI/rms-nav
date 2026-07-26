@@ -1847,6 +1847,43 @@ whether >= 90% on a two-axis 2-sigma conjunction remains the criterion.
 Acceptance: `sphinx-build -W` clean; `pymarkdown scan` targets clean;
 plans contain no stale Titan-decision language.
 
+Phase F outcome, as executed. Every checklist item was changed or
+consciously confirmed unaffected. `sphinx-build -W` and `sphinx-build -n`
+both exit clean; nitpicky warnings fall 290 -> 277 with ZERO Titan-related
+warnings remaining and none added elsewhere. `pymarkdown scan docs/ .cursor/
+README.md CONTRIBUTING.md` is clean (0, unchanged). `ruff check`, `ruff
+format --check`, `mypy src tests`, and the 4434-test unit suite are green.
+Six things went beyond the itemized checklist and are recorded here rather
+than left as surprises:
+
+1. **A stale docstring was corrected in code.** `TitanHazeGeometry`'s
+   `predicted_center_vu` still described "the midpoint of the predicted
+   bounding box", which the Phase B centre revision replaced with the
+   projected field-of-view centre. The API reference publishes that
+   docstring, so it is a documentation defect and was fixed in
+   `src/spindoctor/feature/geometry.py`.
+2. **The API reference gained more than the two named entries.**
+   `nav_technique_titan_haze` and `nav_model_titan_simulated` were the named
+   ones; `nav_model.titan_geometry`, the `titan_fitting` package and its four
+   submodules, and `sim.forward.haze_structure` were also required, because
+   without them nine nitpicky cross-references from shipped docstrings had no
+   resolvable target.
+3. **Two stale spots outside the checklist.**
+   `dev_guide_orchestrator_feature_summary.rst` never listed the
+   `reliability_reasons` field Phase B added to `NavFeatureSummary`, and
+   `dev_guide_rotation.rst`'s rank-deficient-rotation list did not include
+   `TitanHazeNav`. Both fixed.
+4. **`#406` was filed outside the Section 9 list.** The playbook's
+   pinned-red table gives every red an owning issue; the two pre-existing
+   reds Phase E documented had none, so adding the rows without an issue
+   would have created ownerless pins.
+5. **`#396` is discharged, not deferred.** Phase E evaluated its lever and
+   shipped it (`min_gradient_snr` 8.0, `radial_outer_pad_px` 6.0), so the
+   merging PR closes it.
+6. **`/seti/newnav/CLAUDE.md` is outside the repository** (it lives one
+   directory up and is not under version control here), so its two required
+   edits are made but do not appear in the PR diff.
+
 ## 7. Execution protocol (controller contract)
 
 1. Branch `rf_titan_nav` off current `main`; one commit series per
@@ -1907,9 +1944,9 @@ plans contain no stale Titan-decision language.
 5. Docs and the five plan files reflect the shipped state; #60
    closed; deferred work exists as labeled issues, not prose.
 
-## 9. Deferred follow-ups (file as issues at merge)
+## 9. Deferred follow-ups (filed as issues)
 
-1. Self-calibrated haze-radius table per (instrument, filter, phase
+1. (#397) Self-calibrated haze-radius table per (instrument, filter, phase
    bin) accumulated from production `fitted_haze_radius_km`
    diagnostics; enables small-disc Titan via known-radius circle fit.
    Phase E raised the value of this: the sunward-sector fit determines
@@ -1921,22 +1958,23 @@ plans contain no stale Titan-decision language.
    half-sector and 11.8-97.8 km at 80 degrees, which is too scattered
    to separate a physical wavelength-dependent haze top from fit
    noise. Building the table is also how that question gets answered.
-2. Methane surface-window (CB3) cartographic correlation as a
+2. (#398) Methane surface-window (CB3) cartographic correlation as a
    refinement stage on Phase-1 solutions.
-3. Voyager ISS Titan validation cohort (the method is
+3. (#399) Voyager ISS Titan validation cohort (the method is
    instrument-independent; evidence depth is Cassini-only after
    Phase E).
-4. Ensemble handling of strongly anisotropic covariances: verify the
+4. (#400) Ensemble handling of strongly anisotropic covariances: verify the
    merge and tier logic treat a 1 px x 3 px result correctly; extend
    if Titan results expose gaps.
 5. Titan confidence re-anchoring rides #230 (real-evidence
-   recalibration) like every other technique.
-6. High-phase (> 150 degrees) Titan: measure where the sector fit
+   recalibration) like every other technique; no separate issue, and
+   #400 carries the covariance half of the same question.
+6. (#401) High-phase (> 150 degrees) Titan: measure where the sector fit
    actually fails; consider a full-ring fit at extreme phase.
-7. Ring-occlusion translucency: the Section 2.1 mask treats the main
+7. (#402) Ring-occlusion translucency: the Section 2.1 mask treats the main
    rings as opaque; frames where Titan is visible through the C ring
    or gaps currently gate out at hard-zero reliability.
-8. Titan-vs-star agreement channel: register the TitanHazeNav /
+8. (#225) Titan-vs-star agreement channel: register the TitanHazeNav /
    star-technique pair in the WS-1 agreement study (#225), so Titan
    accuracy claims graduate from this plan's acceptance evidence to
    the program's published agreement statistics. Concrete shape:
@@ -1945,7 +1983,7 @@ plans contain no stale Titan-decision language.
    rotating-basis and pivotal-pair wiring in the same file, a
    Titan+star family in `util/agreement/scene_gen.py`, and a run key
    in `util/agreement/collect.py`.
-9. Ray reach versus the search window: radial profiles are sampled
+9. (#403) Ray reach versus the search window: radial profiles are sampled
    out to `r_env + radial_outer_pad_px + W`, and `W` is 140 px on a
    Cassini NAC, so a large Titan loses whole rays to out-of-frame
    outer samples even when its limb sits comfortably inside the
@@ -1954,7 +1992,7 @@ plans contain no stale Titan-decision language.
    `N1481452791_1` and 5 on `N1686939958_1`). The ray-drop rule is
    right; sizing the reach by the full search window rather than by
    where the limb can actually be is what costs those frames.
-10. Size-relative arc-residual gate: on real frames the inlier
+10. (#404) Size-relative arc-residual gate: on real frames the inlier
     residual RMS scales with apparent size (+0.315 correlation over the
     49 committed frames; the refused frames run 569-847 px of envelope
     against an accepted-population median of 518.4 px), so the fixed
@@ -1964,7 +2002,7 @@ plans contain no stale Titan-decision language.
     refuses between 2 and 3 px are measurably wrong — so the question
     is whether a size-relative form separates the two populations
     the flat cap conflates.
-11. Titan library growth through the standard curation pipeline: a
+11. (#405) Titan library growth through the standard curation pipeline: a
     `titan_haze` scene class in the cohort-curation taxonomy (the
     `DECLARED_SCENE_CLASSES` enum, the COHORT_CURATION_PLAN budget
     table and structural-invariants minima, candidate-discovery scan
@@ -1973,6 +2011,27 @@ plans contain no stale Titan-decision language.
     deliberately bypasses this pipeline via the vendored legacy
     cohort, so growing Titan coverage beyond those frames is
     follow-up work.
+
+Filed alongside these, outside the Section 9 list:
+
+- **#407** collects every operator decision this plan defers -- the five
+  mid-implementation specification changes marked `[pending operator
+  ratification]` in Sections 2 and 6, the three acceptance bounds the
+  evidence argues with (the Phase A noisy-scene along-track bound, the
+  Phase D z-score band, the Phase E consistency-pair bound), and the three
+  staged curation artifacts (the twenty-frame overlay review batch, the six
+  library nominations, the `titan_haze` scene-class recommendation).
+- **#406** owns the two pre-existing library reds Phase E documented
+  (`N1487595731_1_CALIB`, `N1633925572_1_CALIB`); both fail identically on
+  `main` and neither contains Titan, so they are pins the playbook's table
+  had not caught up with rather than deltas from this work.
+- **#396** (the `min_gradient_snr` lever carried from the Phase A review)
+  is DISCHARGED by Phase E: `min_gradient_snr` ships at 8.0 and
+  `radial_outer_pad_px` at 6.0, measured at negligible real-frame cost, so
+  the merging PR closes it.
+- **#344** (sim haze brightness is a module constant) stays OPEN
+  deliberately: Phase D added shape and symmetry-breaking rendering, not
+  photometric brightness variation.
 
 ## 10. Risks and prescribed responses
 

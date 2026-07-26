@@ -117,8 +117,10 @@ canonical example is
 brightness-weighted centroid is rotation-invariant about itself, so a
 rotation parameter is unobservable from a blob alone. The same
 applies to :class:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`
-in 1-star mode and to flat-ring-only scenes from
-:class:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav`.
+in 1-star mode, to flat-ring-only scenes from
+:class:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav`, and to
+:class:`~spindoctor.nav_technique.nav_technique_titan_haze.TitanHazeNav`, whose
+single quasi-circular haze envelope is rotation-invariant about its own centre.
 
 To honour the parameter-vector contract (every technique on the same
 image emits the same DoF) without inventing rotation evidence, those

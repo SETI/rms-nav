@@ -142,9 +142,15 @@ document, not code.
   ground-truth terminator fit on N1853392805; implement whichever option the
   operator picks (accept the 2-px-class ground truth, keep TERMINATOR_ARC for
   SPICE-known synchronous rotators, or shape models per #23).
-- **#60** — Titan: the recorded-decline interim is in place; the open work is
-  the full haze-limb navigation decision and, if chosen, its model and
-  technique (also a Track D scope gate).
+- **Titan haze fit** — the haze solar-symmetry method ships and is validated;
+  four measured refinements remain: the arc ray reach sized by the search
+  window rather than by where the limb can be (#403), the flat arc-residual
+  cap that behaves as a size-dependent gate (#404), the uncharacterized
+  extreme-phase edge (#401), and opaque-ring masking that refuses frames
+  visible through the C ring or the gaps (#402). The ensemble has never been
+  exercised on the oblique covariance the fit reports (#400), and two
+  pre-existing library reds found while attributing its cross-check need an
+  owner (#406).
 
 ## Track C — Statistics and QA
 

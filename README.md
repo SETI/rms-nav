@@ -39,7 +39,8 @@ bodies.
 
 - **Multi-mission support**: Works with Cassini, Voyager, Galileo, and New
   Horizons imagery
-- **Multiple navigation techniques**: Star-based, body-based, and rings-based navigation
+- **Multiple navigation techniques**: Star-based, body-based, rings-based, and
+  haze-symmetry (Titan) navigation
 - **Automated offset calculation**: Determines precise pointing corrections
 - **Visualization tools**: Creates annotated images with identified features
 - **Configurable processing**: Customizable parameters for different scenarios

@@ -81,7 +81,41 @@ spindoctor.nav_technique
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.nav_technique.nav_technique_titan_haze
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.nav_technique.nav_technique_manual
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+spindoctor.nav_technique.titan_fitting
+--------------------------------------
+
+.. automodule:: spindoctor.nav_technique.titan_fitting
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :imported-members:
+
+.. automodule:: spindoctor.nav_technique.titan_fitting.grid
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.nav_technique.titan_fitting.symmetry
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.nav_technique.titan_fitting.arc
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.nav_technique.titan_fitting.driver
    :members:
    :undoc-members:
    :show-inheritance:

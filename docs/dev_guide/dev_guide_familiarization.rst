@@ -281,7 +281,7 @@ Stars (model + star techniques)
 - The shared ``_star_helpers`` module is internal and not part of the
   autodoc API.
 
-Body (additional techniques and Titan)
+Body (additional techniques) and Titan
 --------------------------------------
 
 - :doc:`dev_guide_techniques_body_terminator` — illuminated-body
@@ -289,16 +289,20 @@ Body (additional techniques and Titan)
 - :doc:`dev_guide_techniques_body_blob` — small / unresolved body
   navigation.
 - :doc:`dev_guide_techniques_body_disc` — full-disc correlation.
-- :doc:`dev_guide_techniques_body_titan` — why Titan is unsupported today.
+- :doc:`dev_guide_techniques_titan_haze` — the haze solar-symmetry fit.
 - :doc:`dev_guide_navigation_models_titan` —
-  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (records a
-  no-result for Titan pending a haze-aware extractor).
+  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (the haze
+  envelope geometry that fit consumes).
 - :mod:`spindoctor.nav_technique.nav_technique_body_terminator`
 - :mod:`spindoctor.nav_technique.nav_technique_body_blob`
 - :mod:`spindoctor.nav_technique.nav_technique_body_disc`
 - :mod:`spindoctor.support.correlate` — the shared pyramid-NCC / upsampled-DFT
   correlation engine behind the disc, blob, and annulus techniques.
 - :mod:`spindoctor.nav_model.nav_model_titan`
+- :mod:`spindoctor.nav_model.titan_geometry`
+- :mod:`spindoctor.nav_technique.nav_technique_titan_haze`
+- :mod:`spindoctor.nav_technique.titan_fitting` — the pure haze-fitting
+  library the technique wraps.
 
 Rings (model + ring techniques)
 -------------------------------
@@ -345,6 +349,7 @@ sibling of each model family. These are used both by
 - :mod:`spindoctor.nav_model.stars.nav_model_stars_simulated`
 - :mod:`spindoctor.nav_model.nav_model_body_simulated`
 - :mod:`spindoctor.nav_model.nav_model_rings_simulated`
+- :mod:`spindoctor.nav_model.nav_model_titan_simulated`
 - :mod:`spindoctor.sim` — the scene schema, the image-side forward model, and the
   geometry helpers shared across the information boundary:
 

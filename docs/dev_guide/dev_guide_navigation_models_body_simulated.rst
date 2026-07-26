@@ -89,10 +89,14 @@ Restrictions and assumptions
   than incidental. When the image side renders a haze layer, the limb becomes a soft
   ramp whose apparent radius sits outside the reference radius and shifts with phase
   (see :ref:`sim-atmosphere`), while this model still predicts a hard limb at the
-  reference radius. That gap is the substrate for the Titan altitude-versus-phase
+  reference radius. That gap is the substrate for the haze altitude-versus-phase
   problem: a limb fit against the haze recovers a small offset toward the sunlit limb
   whose size tracks the phase-dependent apparent limb radius (and the haze
-  parameters), and the ``atmosphere`` catalog scenes pin that measured bias.
+  parameters), and the ``atmosphere`` catalog scenes pin that measured bias. Those
+  scenes carry a body named ``HAZEMOON`` so they stay in this haze-blind regime; a
+  simulated body named ``TITAN`` is claimed by
+  :class:`~spindoctor.nav_model.nav_model_titan_simulated.NavModelTitanSimulated`
+  instead, which predicts the haze envelope rather than a hard limb.
 - The simulated body is rendered onto a fixed extfov image without per-instrument noise
   or PSF smearing; the operator's downstream noise-injection pipeline supplies those.
 

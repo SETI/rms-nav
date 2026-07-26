@@ -247,10 +247,10 @@ class TitanHazeGeometry:
     ignore.  The consuming technique needs no other scene knowledge.
 
     Parameters:
-        predicted_center_vu: Geometric disc center in extfov coordinates
-            (the midpoint of the predicted bounding box, NOT a
-            brightness-weighted centroid, which phase biases along the
-            very axis the haze fit measures).
+        predicted_center_vu: Geometric disc center in extfov coordinates --
+            the body's projected field-of-view center plus the extfov
+            margin.  NOT a brightness-weighted centroid, which phase biases
+            along the very axis the haze fit measures.
         sun_angle_rad: Symmetry-axis angle ``theta``; the unit vector
             ``(sin theta, cos theta)`` in ``(v, u)`` points from the disc
             center toward the sub-solar side.

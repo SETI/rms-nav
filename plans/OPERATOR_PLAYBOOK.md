@@ -18,9 +18,17 @@ Each is a scope commitment the downstream work waits on:
   implement the wander decomposition. It demotes five operator-verified
   Keeler frames to low, and it must be settled before the #230
   recalibration reads their tiers.
-- **#60 Titan**: implement haze-limb navigation or scope it out. The sim has
-  the haze-limb substrate ready (phase-dependent apparent radius, ring of
-  light), so "implement" is unblocked whenever you want it.
+- **#407 Titan haze navigation ratification**: the method is implemented and
+  validated to a stated 1 px cross-track / 3 px along-track bound. What needs
+  your decision is a bundle: five mid-implementation specification changes
+  (each recorded with the measurement behind it), three acceptance bounds the
+  evidence argues with (a unit-test noise bound, the planted-truth z-score
+  band, and the >= 90% consistency-pair bound measured at 83.3%), and three
+  staged curation artifacts — a twenty-frame overlay review batch under
+  `util/titan_cohort/review_batch/` with every vote null, six library
+  nominations with draft sidecars under `util/titan_cohort/nominations/`, and
+  a recommendation to add a `titan_haze` scene class. The issue enumerates
+  each one.
 - **#188 CK kernels as a delivered product**: yes / no / defer.
 - **#338 highly-irregular terminator fit (N1853392805)**: accept the
   2-px-class ground truth, keep TERMINATOR_ARC for SPICE-known synchronous
@@ -28,7 +36,7 @@ Each is a scope commitment the downstream work waits on:
 
 ```bash
 gh issue comment 316 --body "Decision: <ship default | ratchet fraction | wander decomposition>"
-gh issue comment 60  --body "Decision: <implement now | defer until X>"
+gh issue comment 407 --body "Decisions: <per the enumerated list>"
 gh issue comment 188 --body "Decision: <ship | defer>"
 gh issue comment 338 --body "Decision: <accept 2px GT | keep TERMINATOR_ARC | shape models>"
 ```
@@ -55,6 +63,8 @@ until the owning issue closes.
 | N1492091163, N1867601758, N1867602424 (wrong ring-feature locks) | #346 |
 | N1853392805 (highly-irregular exclusion discards the terminator fit) | #338 |
 | N1484593951, N1686349893 (resolved-body ~2 px offset misses) | #350 |
+| N1487595731_1 (multi_body: expects BodyDiscCorrelateNav primary, gets BodyLimbNav) | #406 |
+| N1633925572_1 (ring_plus_body: expects the medium tier, gets low) | #406 |
 
 **Verify the pin set is exactly this after any navigation-affecting merge:**
 
@@ -348,7 +358,7 @@ with assignee rfrenchseti.
 ## 5. Sequencing summary
 
 ```text
-0.1 decisions (#316, #60, #188, #338) -> 0.2 adopt transfer watch (#334)  (operator, minutes)
+0.1 decisions (#316, #407, #188, #338) -> 0.2 adopt transfer watch (#334)  (operator, minutes)
 2.1 library growth (batch-006 + continued)   (agent session; your votes gate it)
 2.2 agreement study bulk   (after 2.1 cohorts; you approve frames)
 2.3 CI tier, re-anchor confidence, accuracy tail (after 2.2)

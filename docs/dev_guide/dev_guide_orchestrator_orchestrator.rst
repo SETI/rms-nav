@@ -27,8 +27,8 @@ are:
 - ``_HARD_FAILURE_TO_REASON`` — the
   :class:`~spindoctor.nav_orchestrator.image_classifier.NavImageClassifier` reports ``blank``,
   ``fully_overexposed``, ``mostly_missing_data``, or ``corrupt``.
-- ``NO_FEATURES_EXTRACTED`` — every :class:`~spindoctor.nav_model.nav_model.NavModel` emitted zero features
-  (recorded as ``TITAN_UNSUPPORTED`` instead when the Titan model is present).
+- ``NO_FEATURES_EXTRACTED`` — every :class:`~spindoctor.nav_model.nav_model.NavModel` emitted
+  zero features.
 - ``ALL_FEATURES_GATED`` — the reliability gate dropped every emitted feature.
 - ``NO_FEASIBLE_TECHNIQUES`` — pass 1 produced zero technique results (no technique was
   feasible on the gated cohort).
@@ -242,10 +242,7 @@ Call path traced through
 6. Build the feature inventory, the model metadata snapshot, and the merged annotations.
 7. **Two short-circuit gates** on the gated cohort:
 
-   - ``NO_FEATURES_EXTRACTED`` when every model emitted zero features — unless the
-     Titan model is present, in which case the failure is recorded as
-     ``TITAN_UNSUPPORTED`` so a Titan-only image (whose opaque haze emits no navigable
-     features by design) is not a silent empty failure.
+   - ``NO_FEATURES_EXTRACTED`` when every model emitted zero features.
    - ``ALL_FEATURES_GATED`` when the gate dropped every feature.
 
    Each returns a failed

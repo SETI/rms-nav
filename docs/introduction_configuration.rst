@@ -199,7 +199,8 @@ Navigation Options
   is a comma-separated list of glob patterns matched against the registered
   technique names: ``BodyBlobNav``, ``BodyDiscCorrelateNav``, ``BodyLimbNav``,
   ``BodyTerminatorNav``, ``RingAnnulusNav``, ``RingEdgeNav``,
-  ``StarFieldFromCatalogNav``, ``StarRefineNav``, and ``StarUniqueMatchNav``.
+  ``StarFieldFromCatalogNav``, ``StarRefineNav``, ``StarUniqueMatchNav``, and
+  ``TitanHazeNav``.
   Shell-glob wildcards are allowed (``Star*`` selects the three star
   techniques) and a leading ``!`` excludes matching names (``!Ring*`` runs
   everything except the ring techniques). Interactive manual navigation is
