@@ -31,7 +31,20 @@ titan:
       min_peak_score: 0.60
       min_valid_fraction: 0.50
       max_second_peak_ratio: 0.90
-      cross_sigma_scale: 1.0
+      # Set from the planted-truth campaign (util/titan_truth, 700 randomized
+      # scenes, campaign seed 20260725).  The noise-deficit heuristic the
+      # cross-track sigma comes from over-states the error by about an order
+      # of magnitude on rendered haze discs: over the rows whose sigma was not
+      # already clamped to the floor below, the multiplier that makes the
+      # cross-track z-scores unit-normal measured 0.088, and 0.098 on the
+      # preceding campaign draw -- 0.10 is the stable round value between them.
+      #
+      # The reported sigma barely moves, because the floor below binds on 94%
+      # of rows either way -- which is also why the all-row z-score standard
+      # deviation cannot reach the [0.8, 1.25] acceptance band at ANY value of
+      # this scale: it saturates at 0.656 once every row sits on the floor.
+      # Closing that gap needs sigma_floor_cross_px, which Phase E owns.
+      cross_sigma_scale: 0.10
       sigma_floor_cross_px: 0.30
     arc:
       sector_half_angle_deg: 60.0
@@ -45,5 +58,21 @@ titan:
       min_inlier_fraction: 0.50
       max_residual_rms_px: 2.0
       tukey_c: 4.685
+      # Held at unity by the planted-truth campaign, and deliberately NOT
+      # retuned to satisfy the z-score band.  The few percent of rows whose
+      # fit sigma exceeds the floor below are the rows where the arc fit
+      # knows it did badly -- they carry the campaign's largest along-track
+      # errors -- and on them the estimator reports sigma too NARROW, not too
+      # wide (their own z-scores run to an rms near 3).  Shrinking this
+      # multiplier would narrow the reported uncertainty on exactly the
+      # frames that are wrong, buying a better-looking all-row statistic by
+      # making the honest minority dishonest.
+      #
+      # The consequence is that the all-row along-track z-score standard
+      # deviation sits below the [0.8, 1.25] band and no value of this
+      # multiplier fixes it, for the same reason as the cross axis: the
+      # floor below sets the reported sigma on ~97% of rows.  Only
+      # sigma_floor_along_px can settle it, and that is Phase E's, with
+      # real-frame evidence; the measured along-track rms is near 0.9 px.
       along_sigma_scale: 1.0
       sigma_floor_along_px: 1.00

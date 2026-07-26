@@ -1,0 +1,8 @@
+sweep_name: titan_offset_wide
+# Haze-symmetry offset across the navigable range.  The mirror-correlation scan
+# searches the whole +-50 px extfov margin and the arc fit recenters once, so
+# recovery holds to the margin itself rather than falling off at a few pixels.
+base_scene: atmosphere/titan_haze.yaml
+parameters: [offset_v]
+values: [0.5, 2.3, 5.7, 9.1, 13.4, 18.7, 24.2, 31.6, 38.3, 45.1]
+technique: TitanHazeNav

@@ -5,8 +5,12 @@ size_v: 260
 size_u: 260
 random_seed: 7
 exposure_sec: 1.0
+# The body is named HAZEMOON, not TITAN, deliberately: this scene is a
+# body-navigation fidelity record for a haze-BLIND navigator.  A body named
+# TITAN routes to the haze model and its symmetry technique instead, which
+# measures something else entirely.
 bodies:
-  - name: TITAN
+  - name: HAZEMOON
     shape_model: ellipsoid
     center_v: 130.0
     center_u: 130.0

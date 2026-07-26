@@ -63,7 +63,11 @@ from spindoctor.sim.scene_checks import (
     _require_ranges_for_spk_error,
     _require_str,
 )
-from spindoctor.sim.scene_checks_body import _check_body_names_unique, _check_body_object
+from spindoctor.sim.scene_checks_body import (
+    ATMOSPHERE_KEYS,
+    _check_body_names_unique,
+    _check_body_object,
+)
 from spindoctor.sim.scene_checks_ring import _check_ring_system
 
 # The two private inventories keep their redundant aliases: they are explicit
@@ -86,6 +90,7 @@ from spindoctor.sim.scene_schema import (
 
 __all__ = [
     'ALLOWED_INSTRUMENTS',
+    'ATMOSPHERE_KEYS',
     'CURRENT_SCHEMA_VERSION',
     'DECLARED_SIM_SCENE_CLASSES',
     'TOP_LEVEL_IDEALIZED_KEYS',

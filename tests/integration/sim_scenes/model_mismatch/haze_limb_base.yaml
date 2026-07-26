@@ -12,11 +12,15 @@ exposure_sec: 1.0
 # floor convention of the other model-mismatch bases.  The committed
 # titan_haze_limb scene keeps its original PSF-free render (its own baseline is
 # a separate tripwire); this base exists for the atmosphere_haze sweep.
+# The body is named HAZEMOON, not TITAN, deliberately: this scene is a
+# body-navigation fidelity record for a haze-BLIND navigator.  A body named
+# TITAN routes to the haze model and its symmetry technique instead, which
+# measures something else entirely.
 optics:
   psf:
     match_navigator: true
 bodies:
-  - name: TITAN
+  - name: HAZEMOON
     shape_model: ellipsoid
     center_v: 130.0
     center_u: 130.0

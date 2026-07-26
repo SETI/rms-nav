@@ -34,6 +34,7 @@ from spindoctor.nav_model.nav_model_body import (
     LIMB_ARC_MIN_VERTICES,
     TERMINATOR_MIN_PHASE_FACTOR,
     TERMINATOR_MIN_VERTICES,
+    TITAN_BODY_NAME,
     limb_reliability,
     shape_features_suppressed,
     terminator_reliability,
@@ -319,13 +320,23 @@ class NavModelBodySimulated(NavModelBodyBase):
         predicted body stays at the unshifted position the planted offset is
         measured from.
 
+        Titan is excluded, mirroring the catalog-driven model's own
+        exclusion: its opaque haze hides the surface an ellipsoid limb /
+        terminator / disc prediction assumes, so the shape-based techniques
+        are systematically wrong on it rather than merely noisy.  A
+        simulated Titan is navigated by the haze model instead
+        (``NavModelTitanSimulated``); without this exclusion both models
+        would claim the same body and the frame would be navigated twice,
+        once by a technique family that cannot see the limb it is fitting.
+
         Parameters:
             obs: Observation snapshot.
             config: Configuration passed to the constructed instances.  None
                 uses ``DEFAULT_CONFIG``.
 
         Returns:
-            One ``NavModelBodySimulated`` per body in the sim scene.
+            One ``NavModelBodySimulated`` per non-Titan body in the sim
+            scene.
         """
         if not getattr(obs, 'is_simulated', False):
             return []
@@ -336,6 +347,8 @@ class NavModelBodySimulated(NavModelBodyBase):
         out: list[NavModel] = []
         for index, body_params in enumerate(bodies):
             body_name = str(body_params.get('name', 'SIM-BODY'))
+            if body_name.upper() == TITAN_BODY_NAME:
+                continue
             siblings = [dict(bp) for j, bp in enumerate(bodies) if j != index]
             out.append(
                 cls(

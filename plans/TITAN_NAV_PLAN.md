@@ -720,8 +720,18 @@ Modified files:
 | `src/spindoctor/config_files/config_060_titan.yaml` | Section 5 schema (complete replacement; `atmosphere_height` currently has no code consumer, so the replacement is safe). |
 | `src/spindoctor/config_files/config_510_techniques.yaml` | `techniques.TitanHazeNav.tuning`: `model_error_floor_px` plus the confidence-spec coefficients, alongside the existing techniques' entries. (NOT config_540; nothing there reads technique tuning.) |
 | `src/spindoctor/support/status_reason.py`, `src/spindoctor/nav_orchestrator/status_reason_info.py`, `src/spindoctor/nav_orchestrator/orchestrator.py`, `tests/spindoctor/support/test_status_reason.py` | DELETE `TITAN_UNSUPPORTED` (enum member, template entry, the `_titan_in_models` + `titan_present` orchestrator special case, and the test name list + count assertion AND its "Exactly 20 values" docstring, 20 -> 19), per Section 2.5. Clean deletion, no shim; nothing pins the old string. |
-| `src/spindoctor/sim/forward/atmosphere.py` + sim schema/boundary files (Phase D) | Extend the existing body `atmosphere` block (haze is an atmosphere block on a body element — do NOT invent a new top-level scene element). |
-| `tests/integration/sim_sweep.py` + the sim scene catalog (Phase D) | `titan_haze` base scene; dense sub-pixel + wide-range offset sweep entries pinning `TitanHazeNav`, matching every other technique's entries. |
+| `src/spindoctor/sim/forward/atmosphere.py` + sim schema/boundary files (Phase D) | Extend the existing body `atmosphere` block (haze is an atmosphere block on a body element — do NOT invent a new top-level scene element). Phase D added the sibling `src/spindoctor/sim/forward/haze_structure.py` under the Section 3 sizing note: the spec, its parsing, and the per-pixel field builders for the six symmetry-breaking keys did not fit in `atmosphere.py` alongside the column arithmetic. `atmosphere.py` keeps `apply_atmosphere` and calls into it. |
+| `tests/integration/sim_sweeps/titan_offset_fine.yaml`, `.../titan_offset_wide.yaml` (Phase D, new) | Dense sub-pixel + wide-range offset sweep specs pinning `TitanHazeNav`, matching every other technique's entries. Corrected during Phase D: this plan said the entries go in `tests/integration/sim_sweep.py`, which is the harness (schema, loader, runner) and hard-codes no sweeps; every sweep is its own YAML under `sim_sweeps/`. |
+| `tests/integration/sim_scenes/atmosphere/titan_haze.yaml` + `sim_baselines/titan_haze.json` (Phase D, new) | The `titan_haze` base scene both sweeps drive, and its regression baseline (`test_every_scene_has_a_baseline` / `test_no_orphan_baselines` fire without it). |
+| `tests/integration/render_diffs/current/titan_haze.png`, `.../sheet_atmosphere.png` (Phase D) | The standing render-review artifacts, regenerated with `python -m tests.integration.render_contact_sheet`. `test_render_diffs` byte-compares every `current/` PNG against a fresh render, so a new scene without one is a red; the class sheet gains its review row. Added to this manifest during Phase D. |
+| `docs/simulator_report/_figures/offset_accuracy_fine.png`, `.../offset_accuracy_wide.png` (Phase D) | Regenerated so the report's per-technique offset curves carry `TitanHazeNav`. |
+| `tests/spindoctor/sim/test_sim_haze_structure.py` (Phase D, new) | One render-level test per new atmosphere key asserting the effect is measurably present, the gating contract (a block naming no structure key leaves the spec structureless), and the schema validation of the structure keys. |
+| `tests/spindoctor/nav_model/test_nav_model_titan_simulated.py` (Phase D, new) | Geometry translation, the contaminant-mask components, and the inherited emission path of `NavModelTitanSimulated`. |
+| `tests/spindoctor/nav_model/test_sim_model_selection.py` (Phase D) | Titan routing in both directions (`TITAN` -> the haze model only; every other body unaffected), plus the unconfigured-scene cases. |
+| `tests/integration/sim_sweep_plots.py` (Phase D) | Added to this manifest during Phase D. Its `_OFFSET_TECHNIQUES` list is hand-enumerated exactly like `technique_snr_characterization.py`'s `_TECHNIQUES`, and it is what draws the simulator report's `offset_accuracy_fine` / `offset_accuracy_wide` figures; omission silently drops Titan from them while every sweep still runs green. |
+| `src/spindoctor/nav_model/nav_model_titan_simulated.py` (Phase D, new) | `NavModelTitanSimulated`, a subclass of `NavModelTitan` that replaces only how `TitanGeometryInputs` is obtained (operator parameters instead of `oops`), so feature emission, reliability, the hard-zero conditions, and the overlay are inherited rather than reimplemented. |
+| `src/spindoctor/nav_model/titan_geometry.py` (Phase D) | `_paint_disc` / `_occluded_fraction` promoted to the public `paint_disc` / `occluded_disc_fraction` so the simulated model builds its contaminant mask and occluded fraction with the same code the real one does. |
+| `util/titan_truth/` (Phase D, new) | The planted-truth campaign: `scene_gen.py`, `collect.py`, `analyze.py`, `README.md`. |
 | `docs/simulator_report/simulator_report.rst` (Phase F) | Titan base scene, `TitanHazeNav` row in the per-technique offset-sweep table, regenerated response curves. |
 | `src/spindoctor/nav_orchestrator/feature_summary.py`, `src/spindoctor/nav_orchestrator/orchestrator.py` (inventory builders), `src/spindoctor/nav_orchestrator/curator.py` (Phase B) | Breakdown serialization, three files (Section 2.5 verified scope): `reliability_reasons` field on `NavFeatureSummary`, populated at inventory build, serialized by `_curate_feature_summary` — generic for ALL feature types; acceptance criterion 3 depends on it. No Titan-specific block. |
 | `tests/spindoctor/nav_orchestrator/test_orchestrator.py` (Phase B) | Two tests exercise the deleted path (`test_orchestrator_titan_only_yields_titan_unsupported`, `test_orchestrator_titan_plus_stars_navigates_normally`) via a `_FakeTitanModel` exposing `titan_in_fov`; rewrite both (and the fake) to the Section 2.5 status matrix (`ALL_FEATURES_GATED` with a `TITAN_LIMB` gate record / normal navigation). |
@@ -1278,8 +1288,13 @@ Titan-only frame is manual-nav feasible with a rendered drag overlay.
   new keys silently regresses them.
 - Bookkeeping for the new `titan_haze` base scene: a matching
   baseline JSON (`test_every_scene_has_a_baseline` /
-  `test_no_orphan_baselines` both fire otherwise) and a Titan entry
-  in the hard-coded `_TECHNIQUES` list of
+  `test_no_orphan_baselines` both fire otherwise), a committed
+  render-review artifact (`render_diffs/current/titan_haze.png` plus
+  the regenerated `sheet_atmosphere.png`, from
+  `python -m tests.integration.render_contact_sheet`;
+  `test_render_diffs` byte-compares every `current/` PNG against a
+  fresh render, so a new scene without one is a red), and a Titan
+  entry in the hard-coded `_TECHNIQUES` list of
   `tests/integration/technique_snr_characterization.py` (Section 3
   table).
 - `NavModelTitanSimulated` in `nav_model/`, mirroring
@@ -1296,17 +1311,36 @@ Titan-only frame is manual-nav feasible with a rendered drag overlay.
   `center_uv` to the sim inventory (it mirrors the oops contract);
   if it reads operator parameters directly, no change is needed —
   decide explicitly, do not rediscover this as a silent hard-zero.
-  [Noted during Phase B review.]
+  [Noted during Phase B review. DECIDED in Phase D: the simulated
+  model reads operator parameters directly and does NOT call
+  `geometry_from_obs`, so the sim inventory is unchanged and gains no
+  `center_uv`. It could not have reused that function in any case —
+  every branch of it needs `oops` backplanes a simulated observation
+  does not carry. What the simulated model does reuse is everything
+  downstream of the geometry dataclass, by subclassing
+  `NavModelTitan`. A separate coordinate-convention finding came out
+  of the same work and is recorded in
+  `BODY_CENTER_INDEX_OFFSET_PX`: the sim BODY renderer treats a stated
+  body centre as a corner coordinate (index centre = `center - 0.5`)
+  while the sim STAR renderer uses pixel centres, so the simulated
+  haze model applies the half-pixel shift and the simulated star model
+  does not. Measured directly: without the shift every sim frame
+  carried a flat 0.500 px cross-track error, half the clean-scene
+  budget.]
 - Standing per-technique sweeps: enroll `TitanHazeNav` in the
   EXISTING sweep framework alongside every other technique — add a
   `titan_haze` base scene to the sim scene catalog and dense
-  sub-pixel + wide-range offset sweep entries (pinning
-  `TitanHazeNav`) in `tests/integration/sim_sweep.py`, runnable via
-  `python -m tests.integration.sim_sweep_runner` like the rest.
-  These are what feed the simulator report's per-technique table and
-  response curves (Phase F); the `util/` campaign below is the
-  separate randomized multi-axis harness, not a replacement for
-  them.
+  sub-pixel + wide-range offset sweep specs (pinning `TitanHazeNav`)
+  as their own YAML files under `tests/integration/sim_sweeps/`,
+  runnable via `python -m tests.integration.sim_sweep_runner` like the
+  rest. (`sim_sweep.py` is the harness — schema, loader, runner — and
+  hard-codes no sweeps; corrected during Phase D, which is also when
+  the Section 3 row was fixed.) These feed the simulator report's
+  per-technique table and response curves (Phase F), which additionally
+  means enrolling the technique in the hand-enumerated lists of
+  `sim_sweep_plots.py` and `technique_snr_characterization.py`; the
+  `util/` campaign below is the separate randomized multi-axis
+  harness, not a replacement for them.
 - Planted-truth harness: a sweep script under `util/` (mirroring the
   existing calibration-campaign layout) running N >= 200 randomized
   scenes across offset, angle, phase, size, noise, cloud injection,
@@ -1330,6 +1364,154 @@ is evaluated here provisionally with placeholder anchors and becomes
 binding only at the Section 7 item 4 re-run, after Phase E sets the
 anchors. If the clean-scene bounds cannot be met, stop and report to
 the operator rather than loosening silently.
+
+Phase D outcome, as measured (700 scenes, seven families of 100,
+campaign seed 20260725; `util/titan_truth`). The sweeps run end to end
+with every step committed: sub-pixel recovery to 0.29 px total error and
+a navigable ceiling at the 45 px top of the wide grid, which is the
+extfov search margin rather than a limit of the method. Clean-scene
+bounds hold with large margin — cross-track P95 **0.169 px** against
+1.0, along-track P95 **0.820 px** against 3.0. Overall commit rate is
+66% (460 of 700). Five findings came out of the same run and are
+carried forward rather than smoothed over:
+
+1. **The sigma floors, not the sigma scales, set the reported
+   uncertainty, and NEITHER axis reaches the z-score band.**
+   **[Pending operator ratification, both axes.]**
+   `sigma_floor_cross_px` clamps 94% of rows and `sigma_floor_along_px`
+   99%, so the multipliers this phase owns are nearly inert.
+   `cross_sigma_scale` goes to 0.10 — the free-row unit-normal solve
+   measured 0.101 on this draw (0.088 and 0.098 on earlier ones) — and
+   `along_sigma_scale` stays at **1.0**. Measured all-row z standard
+   deviations are 0.580 cross and 0.512 along, both below the
+   [0.8, 1.25] band, and no value of either multiplier reaches it:
+   they saturate at 0.594 and 0.650 once every row sits on its floor.
+
+   The along axis was briefly set to 0.4 on an earlier draw because
+   that raised its all-row statistic into the band; that change was
+   REVERTED, and the reason is worth recording because it is a trap
+   the same evidence will set again. The few rows whose fit sigma
+   exceeds the floor are not over-conservative outliers — they are the
+   rows where the arc fit knew it had done badly, and on this draw
+   they are exactly the campaign's four worst along-track errors
+   (8.05, 6.34, 4.72, 2.92 px). Their own z-scores run to an rms of
+   3.774: the estimator reports sigma far too NARROW there, not too
+   wide. Shrinking the multiplier would have narrowed the reported
+   uncertainty further on precisely the frames that are wrong, buying
+   a better-looking aggregate by making the honest minority dishonest.
+
+   So both axes carry the same disposition: the floor is the binding
+   term and only re-tuning it can settle the statistic, which is Phase
+   E's with real-frame evidence. The targets the campaign implies are
+   `sigma_floor_along_px` near 0.63 px and `sigma_floor_cross_px` near
+   0.08 px (each the value that, in quadrature with the 0.20 px
+   model-error floor, equals the measured per-axis rms of 0.663 and
+   0.214 px). Both saturation figures are population-dependent —
+   bootstrapped over the committed rows the cross value runs 0.640 at
+   n = 454 (10-90 pct 0.544-0.755) and 0.580 at n = 100 (0.412-0.823)
+   — so the honest statement is not "the band is unreachable" but
+   **the floors pin the achievable z-std near the band's lower edge,
+   and only lowering them can settle it**. The z-versus-scale curve
+   the analyzer prints, anchored to the reported all-row z, is the
+   evidence.
+2. **The competing-peak gate is what bounds the working phase range,
+   not the estimator.** A haze disc near full illumination is close to
+   rotationally symmetric, so the mirror-correlation scan grows side
+   lobes about 15 px either side of the true axis. Measured on a
+   152 px envelope, the strongest rival runs 0.91 of the peak at phase
+   20, 0.89 at phase 40, 0.74 at phase 60, and vanishes by phase 90 —
+   straddling the 0.90 `max_second_peak_ratio` threshold. Where it
+   fires the recovered cross-track offset is nonetheless exact
+   (measured 8.001 px against a planted 8.0), so the gate is refusing
+   frames it could have navigated. Commit rate by phase bin runs
+   65 / 61 / 64 / 68 / 74 / 62% over 10-30 / 30-50 / 50-70 / 70-90 /
+   90-110 / 110-140 deg — flatter than the rival-lobe numbers alone
+   would suggest, because the arc-side gates take over where this one
+   relents (`arc_radius` alone accounts for 85 of the 240 refusals,
+   against 31 for `second_peak`). Phase E owns the threshold; the base
+   scene sits at phase 60 so the standing sweeps characterise the
+   estimator rather than the gate.
+3. **The along-track tail is a small-body-at-high-phase property of
+   the estimator itself, present in CLEAN scenes, and it is not the
+   tilted symmetry axis.** Only 5 of 460 committed rows carry an
+   along-track error above 2 px, and every one of them has an
+   apparent solid radius in the bottom sixth of the drawn range
+   (30.6-38.1 px against a 28-78 px draw) at a phase of 84-132 deg.
+   Split that way the population separates cleanly: bodies with
+   `r_solid >= 40 px` give an along-track P95 of 0.717 px and a
+   maximum of 1.655 px across ALL families and phases, while bodies
+   below 40 px at phase above 60 deg give P95 **3.009 px** and a
+   maximum of **8.050 px** — and the same small bodies below 60 deg
+   phase give P95 0.369 px. A small disc at high phase leaves the
+   sunward arc its least support, which is the mechanism. Two things
+   it is NOT: contamination (the worst row, 8.050 px, is a `clean`
+   scene) and the tilted axis (over the asymmetry family the
+   along-track error is essentially uncorrelated with `axis_tilt_deg`,
+   Spearman +0.149, and +0.043 on the cross axis).
+
+   The asymmetry family's own cost is cross-track (P95 0.345 px
+   against the clean family's 0.169) but DIFFUSE: at these draw
+   strengths no single structure key dominates it — Spearman against
+   |cross| runs +0.232 for `interior_ramp_amplitude`, +0.183 for
+   `ns_asymmetry_amplitude`, -0.266 for |`ns_falloff_ratio` - 1|, and
+   -0.005 for `sector_sharpness_gradient`, all weak and not all of one
+   sign. An earlier draw that pinned the sun to two directions showed
+   `ns_falloff_ratio` as a clean monotone driver (cross P95 0.204 ->
+   0.779 by departure from unity); that ordering does not survive
+   uniform sun coverage, so it is recorded as draw-dependent rather
+   than as a mechanism. Phase E should aim the arc-side knobs
+   (`sector_half_angle_deg`, `min_gradient_snr`) and the apparent-size
+   floor at the small-body high-phase regime, and should not expect
+   `axis_tilt_deg` to be the cross-track stressor.
+4. **Unmodelled point sources are the single largest degrader, and the
+   stress family overstates the operational case by design.** Matched
+   -scene ablation over the same 100 clean geometries, three
+   conditions: no artifacts 77% commit / cross P95 0.169 / along P95
+   0.820; the campaign's STRESS artifact draw 37% commit / cross P95
+   0.806 / along P95 1.486; the instrument's own realism-matched
+   population (`instrument_defaults` alone, nothing overridden) 79%
+   commit / cross P95 0.235 / along P95 1.444. So the operational
+   prediction is no commit-rate cost at all (79% against 77%, inside
+   the draw's own noise) and a cross-track P95 comfortably inside the
+   clean bound, while the stress condition halves the commit rate and
+   quintuples the cross-track P95 — a bound on the regime, not a
+   forecast. The stress
+   ranges are deliberate and their provenance is stated in
+   `_artifact_blocks`: hot-pixel incidence is drawn over 2e-4 to 2e-3
+   where the realism match measures a 2.75e-4 transient spike fraction
+   on the CALIB NAC cohort, and the cosmic-ray rate is drawn strictly
+   positive although the realism recalibration RETAINED zero for it
+   (the tuned hot-pixel fraction already carries that population, so a
+   nonzero rate double-counts on purpose). The `artifacts_nominal`
+   family is the realism-matched condition and is the one to quote;
+   Phase E consumes both.
+5. **The no-confident-wrong criterion PASSES as a percentile and FAILS
+   as an existence statement, and the existence reading is the one
+   Section 8 makes.** Section 8 criterion 2 says results wrong by more
+   than 2x the stated bound with confidence >= 0.5 "do not occur";
+   Phase D's acceptance line evaluates a P99, which is a different and
+   weaker question. Both readings are recorded here so the difference
+   cannot be lost. As a percentile the check passes on both axes —
+   cross P99 0.799 px against a 2.0 px limit, along P99 2.010 px
+   against 6.0 px. As an existence statement it does not: three
+   committed rows exceed 2x their axis bound while carrying confidence
+   >= 0.5, and they are the concrete population Phase E's anchors have
+   to separate:
+
+   | row | axis error | reported sigma | z | confidence | family | phase |
+   |---|---|---|---|---|---|---|
+   | `clean_0052` | along +8.050 px | 1.372 | +5.87 | 0.783 | clean | 100.8 |
+   | `clouds_0006` | along +6.340 px | 1.919 | +3.30 | 0.753 | clouds | 99.5 |
+   | `artifacts_0013` | cross -2.602 px | 0.361 | -7.22 | 0.733 | artifacts | 83.7 |
+
+   Every one of them is small-body-at-high-phase (finding 3), and
+   every one of them reports a sigma its own error dwarfs — so both
+   the confidence spec and the reported covariance have a shot at
+   catching them. The placeholder spec catches neither: it scores all
+   460 committed rows at confidence >= 0.5, so it currently filters
+   nothing at all. The criterion becomes binding at the Section 7
+   item 4 re-run, after Phase E sets the anchors; these three rows are
+   the acceptance test for them.
 
 ### Phase E — real frames, tuning, confidence anchors
 
@@ -1364,6 +1546,59 @@ the operator rather than loosening silently.
   (d) operator review of overlays for a stratified sample of ~20
   frames (filters x phase bins), dispatched as a normal
   curation-style review batch.
+- Levers handed over from Phase D, each with its measured evidence in
+  the Phase D outcome block above. They are listed here, not merely
+  cross-referenced, so the Section 7 item 2 dispatch carries them
+  inline:
+  - `sigma_floor_cross_px` (0.30): the binding term in the reported
+    cross-track uncertainty, clamping 94% of planted-truth rows. No
+    value of `cross_sigma_scale` brings the all-row z-score standard
+    deviation past 0.594, so this floor is the only lever that can
+    settle it inside [0.8, 1.25]. Measured cross-track errors have an
+    rms of 0.214 px and a clean-scene P95 of 0.169 px; a floor near
+    0.08 px is what that rms implies in quadrature with the 0.20 px
+    model-error floor.
+  - `sigma_floor_along_px` (1.00): the same story on the other axis —
+    it clamps 99% of rows, caps the all-row z-score standard deviation
+    at 0.650, and the measured along-track rms of 0.663 px implies a
+    floor near 0.63 px. It carries a second consequence beyond
+    calibration: `hypot(1.00, 0.20)` is 1.02 px against the `high`
+    tier's `max_sigma_px: 0.5` in `config_540_orchestrator.yaml`, so
+    **`TitanHazeNav` can never reach the high confidence tier** on a
+    Titan-only frame however good the fit. Every such frame caps at
+    `medium`. Decide deliberately whether that is the intended
+    statement about a one-feature estimator or an artifact of a
+    placeholder floor.
+    Lower it on real-frame evidence, not on the planted-truth rms
+    alone: the campaign's own worst rows are the ones whose fit sigma
+    already EXCEEDS this floor (finding 1), so a floor cut narrows the
+    reported uncertainty on the majority while leaving the honest
+    minority untouched, and the confident-wrong rows in finding 5
+    would get no easier to catch.
+  - Apparent-size floor for the arc fit: every along-track error above
+    2 px in the campaign came from a body under 40 px solid radius at
+    phase above 60 deg (finding 3). Consider whether
+    `min_envelope_diameter_px` (40.0, which a 30 px solid radius
+    clears at 76 px) is the right gate for that regime, or whether the
+    arc fit needs its own size condition.
+  - `max_second_peak_ratio` (0.90) at low phase: the gate refuses
+    frames whose cross-track answer is exact (measured 8.001 px
+    against a planted 8.0) because a near-fully-lit haze disc is
+    genuinely near-rotationally-symmetric. Raising it trades that
+    conservatism for false-lock exposure; the phase-versus-rival-lobe
+    numbers in Phase D finding 2 are the input.
+  - Confidence-anchor separation target: the placeholder spec scores
+    all 460 committed planted-truth rows at confidence >= 0.5, so the
+    no-confident-wrong check currently filters nothing. Finding 5
+    names the three concrete rows the anchors must separate
+    (`clean_0052`, `clouds_0006`, `artifacts_0013`); all three are
+    small-body-at-high-phase and all three report a sigma their own
+    error dwarfs, so both the spec and the covariance have a lever.
+  - Point-source contamination: the realism-matched condition costs no
+    measurable commit rate and leaves cross-track P95 inside the clean
+    bound (Phase D finding 4), while the stress condition halves the
+    commit rate. Confirm on real frames, and treat the campaign's
+    stress family as a regime bound rather than a forecast.
 - Tune Section 5 defaults from failures; set confidence-spec anchors
   so the planted-truth confidence-vs-error curve is monotone and the
   Phase-D no-confident-wrong bound holds; document the sweep in a

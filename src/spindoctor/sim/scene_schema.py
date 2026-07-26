@@ -159,7 +159,11 @@ _BODY_IDEALIZED_KEYS: frozenset[str] = frozenset(
 # scattering behavior (the navigator's template always shades Lambert),
 # 'atmosphere' is the exponential haze layer above the surface (the
 # navigator's template keeps a hard limb at the reference radius, so the
-# soft rendered limb is a designed mismatch), 'shading' is the rendered
+# soft rendered limb is a designed mismatch, and the block's structure keys
+# -- axis tilt, hemispheric and azimuthal falloff scaling, hemispheric
+# brightness, the axial interior ramp, and clouds -- are the ways nature
+# breaks the mirror symmetry a haze navigator assumes; the whole block is
+# one atomic truth entry, so every key inside it is truth), 'shading' is the rendered
 # mesh's smooth-shading mode (the shared rasterizer gains the capability;
 # the navigator's predicted mesh keeps flat shading because this key never
 # crosses), 'pose_scatter' is a per-frame unmodelable rotation-state error

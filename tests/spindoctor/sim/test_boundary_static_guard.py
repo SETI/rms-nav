@@ -16,6 +16,15 @@ on the snapshot, plus the historical ``sim_star_list`` name so it cannot
 return; a completeness test parses ``obs_inst_sim.py`` so a new truth
 attribute added there without a deny-list extension fails here, not silently.
 
+A second scan covers the ``atmosphere`` block's key names.  That block is a
+single atomic entry of the schema's truth inventory, so the structural
+boundary test can only prove the block does not cross; it cannot prove that
+no navigator-side module reaches for a key inside it by name through some
+other channel.  Scanning for the key names closes that gap, and it is the
+haze navigator that makes it worth closing: a simulated Titan model reads the
+body's idealized geometry and must never read the haze that geometry is a
+deliberate mismatch for.
+
 Legitimate exceptions, should one ever exist, go in ``_ALLOWED_REFERENCES``:
 a mapping from ``(module path relative to the spindoctor package, name)`` to a
 one-line justification.  The allowlist is currently empty -- no navigator-side
@@ -28,6 +37,7 @@ from pathlib import Path
 import pytest
 
 import spindoctor
+from spindoctor.sim.scene import ATMOSPHERE_KEYS
 
 # Truth-bearing attribute names stored on the simulated observation by
 # ObsSim.from_file (src/spindoctor/obs/obs_inst_sim.py), plus the historical
@@ -48,6 +58,15 @@ TRUTH_ATTRIBUTE_DENYLIST: frozenset[str] = frozenset(
     }
 )
 
+# Key names of the body ``atmosphere`` truth block, minus the single-letter
+# Henyey-Greenstein key: one character is not a distinctive enough token to
+# scan for (any ``.g`` attribute or ``'g'`` literal anywhere in navigator code
+# would trip it), and the multi-character keys beside it already make an
+# atmosphere-reading module impossible to write without a hit.
+ATMOSPHERE_TRUTH_KEY_NAMES: frozenset[str] = frozenset(
+    key for key in ATMOSPHERE_KEYS if len(key) > 1
+)
+
 # Navigator-side packages the guard scans, relative to the spindoctor package.
 _NAVIGATOR_PACKAGES: tuple[str, ...] = ('nav_model', 'nav_technique', 'nav_orchestrator')
 
@@ -59,46 +78,54 @@ _ALLOWED_REFERENCES: dict[tuple[str, str], str] = {}
 _PACKAGE_ROOT = Path(spindoctor.__file__).parent
 
 
-def _truth_references(source: str, *, filename: str) -> list[tuple[str, int, str]]:
-    """Return every truth-attribute reference in ``source``.
+def _truth_references(
+    source: str, *, filename: str, denied: frozenset[str] = TRUTH_ATTRIBUTE_DENYLIST
+) -> list[tuple[str, int, str]]:
+    """Return every reference to a denied name in ``source``.
 
-    A reference is an attribute access whose attribute name is on the
-    deny-list, or a string literal exactly equal to a denied name (the
-    ``getattr`` / ``vars()`` evasion).  Bare identifiers (parameter names,
-    local variables) are deliberately not flagged: the leak surface is the
-    observation object's attribute namespace, not the word itself.
+    A reference is an attribute access whose attribute name is denied, or a
+    string literal exactly equal to a denied name (the ``getattr`` /
+    ``vars()`` evasion, and the form a scene-dictionary lookup takes).  Bare
+    identifiers (parameter names, local variables) are deliberately not
+    flagged: the leak surface is the namespace a value is read out of, not
+    the word itself.
 
     Parameters:
         source: Python source text to scan.
         filename: Label used in the returned reference records.
+        denied: Names to flag; defaults to the observation-attribute
+            deny-list.
 
     Returns:
         List of ``(filename, line number, denied name)`` tuples.
     """
     references: list[tuple[str, int, str]] = []
     for node in ast.walk(ast.parse(source, filename=filename)):
-        if isinstance(node, ast.Attribute) and node.attr in TRUTH_ATTRIBUTE_DENYLIST:
+        if isinstance(node, ast.Attribute) and node.attr in denied:
             references.append((filename, node.lineno, node.attr))
         elif (
-            isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and node.value in TRUTH_ATTRIBUTE_DENYLIST
+            isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in denied
         ):
             references.append((filename, node.lineno, node.value))
     return references
 
 
-def _package_violations(package: str) -> list[str]:
-    """Return formatted, non-allowlisted truth references in ``package``."""
+def _package_violations(
+    package: str,
+    *,
+    denied: frozenset[str] = TRUTH_ATTRIBUTE_DENYLIST,
+    label: str = 'truth attribute',
+) -> list[str]:
+    """Return formatted, non-allowlisted denied-name references in ``package``."""
     violations: list[str] = []
     for path in sorted((_PACKAGE_ROOT / package).rglob('*.py')):
         rel = path.relative_to(_PACKAGE_ROOT).as_posix()
         for filename, lineno, name in _truth_references(
-            path.read_text(encoding='utf-8'), filename=rel
+            path.read_text(encoding='utf-8'), filename=rel, denied=denied
         ):
             if (rel, name) in _ALLOWED_REFERENCES:
                 continue
-            violations.append(f'{filename}:{lineno}: references truth attribute {name!r}')
+            violations.append(f'{filename}:{lineno}: references {label} {name!r}')
     return violations
 
 
@@ -134,6 +161,36 @@ def test_navigator_package_references_no_truth_attribute(package: str) -> None:
         '(read obs.nav_params instead, or add an _ALLOWED_REFERENCES entry '
         'with a justification):\n' + '\n'.join(violations)
     )
+
+
+@pytest.mark.parametrize('package', _NAVIGATOR_PACKAGES)
+def test_navigator_package_names_no_atmosphere_truth_key(package: str) -> None:
+    """No navigator-side module names a key of the haze truth block.
+
+    The structural boundary filter drops the whole ``atmosphere`` mapping,
+    so a navigator-side read of one of its keys can only come from some
+    other channel -- and would be a leak the atomic-block test cannot see.
+    """
+    violations = _package_violations(
+        package, denied=ATMOSPHERE_TRUTH_KEY_NAMES, label='atmosphere truth key'
+    )
+    assert not violations, (
+        'navigator-side code names simulated-scene haze truth keys (the haze '
+        'is nature, and the predicted geometry is a deliberate mismatch for '
+        'it):\n' + '\n'.join(violations)
+    )
+
+
+def test_atmosphere_guard_covers_the_structure_keys() -> None:
+    """The scanned name set includes every symmetry-breaking structure key.
+
+    The single-letter phase-asymmetry key is deliberately excluded (see the
+    deny-set comment); every key that names structure is long enough to
+    scan for, so none may be dropped silently.
+    """
+    from spindoctor.sim.forward.haze_structure import HAZE_STRUCTURE_KEYS
+
+    assert HAZE_STRUCTURE_KEYS <= ATMOSPHERE_TRUTH_KEY_NAMES
 
 
 def test_guard_flags_an_attribute_access() -> None:

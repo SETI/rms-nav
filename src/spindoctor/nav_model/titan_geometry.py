@@ -47,6 +47,8 @@ __all__ = [
     'STAR_MASK_YBSC_MIN_VMAG',
     'TitanGeometryInputs',
     'geometry_from_obs',
+    'occluded_disc_fraction',
+    'paint_disc',
 ]
 
 
@@ -409,8 +411,19 @@ def _ring_occlusion_local(
     return occluded
 
 
-def _paint_disc(mask: NDArrayBoolType, center_vu: tuple[float, float], radius_px: float) -> None:
-    """Set every pixel within ``radius_px`` of ``center_vu`` in place."""
+def paint_disc(mask: NDArrayBoolType, center_vu: tuple[float, float], radius_px: float) -> None:
+    """Set every pixel within ``radius_px`` of ``center_vu`` in place.
+
+    Public because the simulated haze model paints the same star discs into
+    the same kind of mask from operator parameters, and the two masks must
+    be built by one piece of code if a sim frame is to exercise what a real
+    one does.
+
+    Parameters:
+        mask: Extfov-shaped boolean mask, modified in place.
+        center_vu: ``(v, u)`` disc centre in extfov coordinates.
+        radius_px: Disc radius in pixels.
+    """
     rows, cols = mask.shape
     v_lo = max(0, math.floor(center_vu[0] - radius_px))
     v_hi = min(rows, math.ceil(center_vu[0] + radius_px) + 1)
@@ -485,10 +498,10 @@ def _paint_bright_stars(
             )
             continue
         for star in stars:
-            _paint_disc(mask, (star.v + margin_vu[0], star.u + margin_vu[1]), radius_px)
+            paint_disc(mask, (star.v + margin_vu[0], star.u + margin_vu[1]), radius_px)
 
 
-def _occluded_fraction(
+def occluded_disc_fraction(
     occluder_ext: NDArrayBoolType,
     center_vu: tuple[float, float],
     r_env_px: float,
@@ -498,6 +511,19 @@ def _occluded_fraction(
     Only true occlusion counts -- nearer bodies and the rings.  The sibling
     footprints and star discs of the contaminant mask are search-robustness
     devices, not evidence that Titan is hidden, so they are excluded here.
+
+    Public for the same reason as :func:`paint_disc`: the simulated haze
+    model reports the same quantity from operator parameters, and the
+    reliability formula both feed must not be able to disagree with itself.
+
+    Parameters:
+        occluder_ext: Extfov-shaped boolean mask of occluding pixels.
+        center_vu: ``(v, u)`` envelope centre in extfov coordinates.
+        r_env_px: Envelope radius in pixels.
+
+    Returns:
+        The hidden fraction in ``[0, 1]``; ``0.0`` for a degenerate or
+        entirely off-frame envelope.
     """
     if r_env_px <= 0.0:
         return 0.0
@@ -606,7 +632,7 @@ def _contaminant_mask(
         radius_px=float(nav_config['star_mask_radius_px']),
     )
     contaminant_ext &= _mask_box_region(extfov_shape_vu, mask_bbox, margin_vu)
-    fraction = _occluded_fraction(occluder_ext, center_vu, r_env_px)
+    fraction = occluded_disc_fraction(occluder_ext, center_vu, r_env_px)
     return _ContaminantMask(
         mask=contaminant_ext if contaminant_ext.any() else None,
         occluded_fraction=fraction,

@@ -1,0 +1,10 @@
+sweep_name: titan_offset_fine
+# Dense sub-pixel offsets on a hazy body, pinned to the haze-symmetry fit.  The
+# swept axis is offset_v, which on this scene (sun toward +u) is pure
+# CROSS-TRACK motion -- the mirror-correlation half of the method, and the
+# tighter of its two axes.  The along-track (arc-fit) axis is swept by the
+# randomized util/titan_truth campaign, which draws both components together.
+base_scene: atmosphere/titan_haze.yaml
+parameters: [offset_v]
+values: [0.0, 0.05, 0.1, 0.137, 0.2, 0.25, 0.31, 0.382, 0.45, 0.5, 0.55, 0.611, 0.667, 0.7, 0.75, 0.823, 0.9, 0.95, 1.0, 1.25, 1.5, 1.618, 1.75]
+technique: TitanHazeNav

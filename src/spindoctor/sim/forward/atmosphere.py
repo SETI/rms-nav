@@ -52,6 +52,16 @@ column scales from the physical vertical depth
 mean radius and ``H`` the scale height in pixels), so the two sides of the
 limb describe one atmosphere at any reference altitude.
 
+**Symmetry-breaking structure.**  The column described above is exactly
+mirror-symmetric about the sunward axis, which would make it useless for
+grading a navigator that measures pointing from that symmetry.  The optional
+structure keys of :mod:`spindoctor.sim.forward.haze_structure` break it --
+tilting the haze's own illumination axis, scaling the falloff length by
+hemisphere or by azimuth, scaling one hemisphere's brightness, ramping the
+disc interior, and painting clouds.  They are strictly opt-in: a block naming
+none of them leaves :attr:`AtmosphereSpec.structure` at None and every
+quantity below stays the scalar it always was.
+
 A body without an ``atmosphere`` block never calls into this module and
 renders hard-limbed, byte-for-byte as before.
 """
@@ -63,6 +73,14 @@ from typing import cast
 import numpy as np
 
 from spindoctor.sim.ellipsoid_geometry import illumination_vector
+from spindoctor.sim.forward.haze_structure import (
+    HazeStructure,
+    apply_disc_structure,
+    apply_hemispheric_scaling,
+    haze_structure_from_params,
+    scale_height_field,
+    tilted_illumination_2d,
+)
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 __all__ = [
@@ -93,6 +111,13 @@ _TAU_EPS = 1e-3
 # Floor on cos(emission) for the on-disc slant path, so the limb (where the
 # emergent-cosine vanishes) saturates smoothly instead of dividing by zero.
 _MU_FLOOR = 1e-3
+
+# Largest exponent the column arithmetic evaluates.  Every optical depth below
+# reaches the image only through ``1 - exp(-tau)``, which saturates at 1 long
+# before this, so clipping the exponent changes no rendered value while
+# keeping a very short falloff length (a structured haze at the far side of
+# the disc) from overflowing to infinity.
+_MAX_EXP_ARG = 700.0
 
 
 @dataclass(frozen=True)
@@ -168,6 +193,10 @@ class AtmosphereSpec:
             forward-scattering (bright limb at high phase).
         detached_px: Altitude of an optional detached haze shell above the
             surface, in pixels; None for no shell.
+        structure: The optional symmetry-breaking structure (see
+            :mod:`spindoctor.sim.forward.haze_structure`); None for the
+            plain mirror-symmetric column, which is what every quantity
+            here reduces to.
     """
 
     scale_height_px: float
@@ -175,6 +204,7 @@ class AtmosphereSpec:
     ref_altitude_px: float = 0.0
     g: float = 0.0
     detached_px: float | None = None
+    structure: HazeStructure | None = None
 
 
 def atmosphere_spec_from_params(
@@ -204,6 +234,7 @@ def atmosphere_spec_from_params(
         ref_altitude_px=float(atmosphere.get('ref_altitude_px', 0.0)) * os_factor,
         g=float(atmosphere.get('g', 0.0)),
         detached_px=(float(detached) * os_factor if detached is not None else None),
+        structure=haze_structure_from_params(atmosphere, oversample=os_factor),
     )
 
 
@@ -228,7 +259,12 @@ def hg_phase_factor(g: float, phase_angle: float) -> float:
     return float((1.0 - g * g) / max(denom, 1e-12))
 
 
-def tangent_optical_depth(h_px: NDArrayFloatType, spec: AtmosphereSpec) -> NDArrayFloatType:
+def tangent_optical_depth(
+    h_px: NDArrayFloatType,
+    spec: AtmosphereSpec,
+    *,
+    scale_height: float | NDArrayFloatType | None = None,
+) -> NDArrayFloatType:
     """Tangent (slant) optical depth of the haze at tangent altitude ``h_px``.
 
     The exponential column plus, when the spec carries one, a Gaussian
@@ -237,23 +273,60 @@ def tangent_optical_depth(h_px: NDArrayFloatType, spec: AtmosphereSpec) -> NDArr
     Parameters:
         h_px: Tangent altitude above the reference radius, in pixels.
         spec: The haze spec.
+        scale_height: Falloff length to use, overriding the spec's nominal
+            one; a per-pixel array when the spec's structure varies it with
+            hemisphere or azimuth.  None uses the nominal value, which is
+            what a structureless haze always does.
 
     Returns:
         The tangent optical depth at each altitude.
     """
-    scale_height = max(spec.scale_height_px, 1e-6)
-    tau = spec.tau_ref * np.exp(-(h_px - spec.ref_altitude_px) / scale_height)
+    height = max(spec.scale_height_px, 1e-6) if scale_height is None else scale_height
+    tau = spec.tau_ref * np.exp(np.minimum(-(h_px - spec.ref_altitude_px) / height, _MAX_EXP_ARG))
     if spec.detached_px is not None:
-        bump = (h_px - spec.detached_px) / scale_height
-        tau = tau + spec.tau_ref * _SHELL_AMPLITUDE * np.exp(-0.5 * bump * bump)
-    return tau
+        bump = (h_px - spec.detached_px) / height
+        tau = tau + spec.tau_ref * _SHELL_AMPLITUDE * np.exp(
+            np.maximum(-0.5 * bump * bump, -_MAX_EXP_ARG)
+        )
+    return cast(NDArrayFloatType, tau)
+
+
+def _scale_height_bounds(spec: AtmosphereSpec) -> tuple[float, float]:
+    """The smallest and largest falloff length the spec produces anywhere.
+
+    A structureless haze has one length everywhere, so both bounds are it.
+    A structured haze scales it by hemisphere and by azimuth, and the two
+    ends serve different purposes: the above-limb band must reach as far as
+    the LONGEST length carries the glow, while the on-disc band's inner edge
+    must reach as deep as the SHORTEST length makes the vertical column (a
+    shorter falloff means a denser atmosphere at the surface, hence a
+    grazing excess detectable further in).  Both are real: a hemispheric
+    ratio below one and a negative sharpness gradient each shorten the
+    length over part of the disc.
+
+    Parameters:
+        spec: The haze spec.
+
+    Returns:
+        ``(min_scale_height_px, max_scale_height_px)``, both positive.
+    """
+    nominal = max(spec.scale_height_px, 1e-6)
+    if spec.structure is None:
+        return nominal, nominal
+    return (
+        nominal * spec.structure.min_falloff_factor,
+        nominal * spec.structure.max_falloff_factor,
+    )
 
 
 def _outer_altitude(spec: AtmosphereSpec) -> float:
     """The tangent altitude beyond which the above-limb glow is negligible.
 
     Where the smooth column has fallen to :data:`_TAU_EPS`, plus a detached
-    shell's reach (its centre and three scale heights).
+    shell's reach (its centre and three scale heights).  Evaluated at the
+    longest falloff length the spec produces, so a structured haze's
+    extended hemisphere is bounded rather than clipped at an artificial
+    edge.
 
     Parameters:
         spec: The haze spec.
@@ -261,11 +334,38 @@ def _outer_altitude(spec: AtmosphereSpec) -> float:
     Returns:
         The bounding tangent altitude in pixels.
     """
-    scale_height = max(spec.scale_height_px, 1e-6)
+    _, scale_height = _scale_height_bounds(spec)
     reach = spec.ref_altitude_px + scale_height * math.log(max(spec.tau_ref / _TAU_EPS, 1.0))
     if spec.detached_px is not None:
         reach = max(reach, spec.detached_px + 3.0 * scale_height)
     return max(reach, scale_height)
+
+
+def _vertical_optical_depth(
+    spec: AtmosphereSpec, r_mean: float, scale_height: float | NDArrayFloatType
+) -> float | NDArrayFloatType:
+    """The physical vertical column depth the on-disc slant paths scale from.
+
+    The SURFACE tangent depth divided by the grazing enhancement
+    ``sqrt(2 pi R / H)``.  ``tau_ref`` is the tangent depth at
+    ``ref_altitude_px``, so the surface tangent depth carries the
+    ``exp(ref_altitude_px / H)`` factor; dropping it would leave the disc
+    side that many e-foldings weaker than the limb implies.
+
+    Parameters:
+        spec: The haze spec.
+        r_mean: Mean apparent body radius in grid pixels.
+        scale_height: The falloff length -- a scalar for a structureless
+            haze, a per-pixel array when the structure varies it.
+
+    Returns:
+        The vertical optical depth, matching the shape of ``scale_height``.
+    """
+    geom = np.sqrt(2.0 * math.pi * r_mean / scale_height)
+    tau_surface = spec.tau_ref * np.exp(
+        np.minimum(spec.ref_altitude_px / scale_height, _MAX_EXP_ARG)
+    )
+    return cast(NDArrayFloatType, tau_surface / np.maximum(geom, 1e-6))
 
 
 def _band_bbox(
@@ -387,19 +487,20 @@ def apply_atmosphere(
     # can span most of the disc; the guaranteed cost bound is the bounding
     # box computed below.
     #
-    # tau_vert is the physical vertical column depth that the on-disc slant
-    # paths scale from: the SURFACE tangent depth divided by the grazing
-    # enhancement sqrt(2 pi R / H).  tau_ref is the tangent depth at
-    # ref_altitude_px, so the surface tangent depth is
-    # tau_ref * exp(ref_altitude_px / H); dropping that factor would leave the
-    # disc side exp(ref_altitude_px / H) times weaker than the limb implies.
-    geom = math.sqrt(2.0 * math.pi * r_mean / scale_height)
-    tau_surface = spec.tau_ref * math.exp(spec.ref_altitude_px / scale_height)
-    tau_vert = tau_surface / max(geom, 1e-6)
+    # tau_vert (see _vertical_optical_depth) is the physical vertical column
+    # depth the on-disc slant paths scale from.  Both band edges are sized
+    # from the extreme falloff lengths the spec produces -- the longest for
+    # the outer reach, the deepest column for the inner edge -- so a
+    # structured haze's hemispheres are bounded, never clipped.
+    height_min, height_max = _scale_height_bounds(spec)
+    tau_vert_max = max(
+        float(_vertical_optical_depth(spec, r_mean, height_min)),
+        float(_vertical_optical_depth(spec, r_mean, height_max)),
+    )
     e_outer = 1.0 + _outer_altitude(spec) / r_mean
     # Inside, the excess column tau_vert * (1 / mu - 1) drops below _TAU_EPS
     # once cos(emission) exceeds mu_cut; that sets the inner edge of the band.
-    mu_cut = 1.0 / (1.0 + _TAU_EPS / max(tau_vert, 1e-12))
+    mu_cut = 1.0 / (1.0 + _TAU_EPS / max(tau_vert_max, 1e-12))
     e_inner2 = max(0.0, 1.0 - mu_cut * mu_cut)
 
     # Coordinate grids and every per-pixel term below are built only inside
@@ -436,9 +537,22 @@ def apply_atmosphere(
     if not band_in.any() and not band_out.any():
         return empty
 
-    illum_v, illum_u, illum_z = illumination_vector(
-        illumination_angle=illumination_angle, phase_angle=phase_angle
+    # The haze lights from its OWN axis, which a structure carrying
+    # axis_tilt_deg rotates away from the body's geometric sun direction --
+    # so the rendered mirror plane is not the one a navigator derives from
+    # the predicted sub-solar point.  The body's own shading is untouched.
+    structure = spec.structure
+    haze_illumination_angle = illumination_angle + (
+        0.0 if structure is None else math.radians(structure.axis_tilt_deg)
     )
+    illum_v, illum_u, illum_z = illumination_vector(
+        illumination_angle=haze_illumination_angle, phase_angle=phase_angle
+    )
+    # The in-plane unit direction toward the light, phase foreshortening
+    # divided out: the structure fields are image-plane geometry (which way
+    # is sunward on the disc), not illumination strength, so they must not
+    # collapse with sin(phase) the way the 3-D vector above does.
+    axis_v, axis_u = tilted_illumination_2d(structure, illumination_angle)
     hg = hg_phase_factor(spec.g, phase_angle)
     # Terminator-wrap width: the horizon-dip angle sqrt(2 H / R), the solar
     # depression at which a point one scale height above the surface loses
@@ -476,7 +590,17 @@ def apply_atmosphere(
             illum_z=illum_z,
         )
         mu_emit = np.sqrt(np.maximum(1.0 - e2_in, 0.0))
-        excess = tau_vert * (1.0 / np.maximum(mu_emit, _MU_FLOOR) - 1.0)
+        height_in = scale_height_field(
+            structure,
+            scale_height,
+            v_rot=v_rot[band_in],
+            v_ctr=np.broadcast_to(v_ctr, e2.shape)[band_in],
+            u_ctr=np.broadcast_to(u_ctr, e2.shape)[band_in],
+            illum_v=axis_v,
+            illum_u=axis_u,
+        )
+        tau_vert_in = _vertical_optical_depth(spec, r_mean, height_in)
+        excess = tau_vert_in * (1.0 / np.maximum(mu_emit, _MU_FLOOR) - 1.0)
         haze_in = _source(mu0_in) * (1.0 - np.exp(-excess))
         out_box[band_in] = np.clip(out_box[band_in] + haze_in, 0.0, 1.0)
 
@@ -496,7 +620,16 @@ def apply_atmosphere(
         rho = np.maximum(rho, 1e-9)
         mu0_out = (v_out * illum_v + u_out * illum_u) / rho
         h_out = (np.sqrt(e2[band_out]) - 1.0) * r_mean
-        opacity_out = 1.0 - np.exp(-tangent_optical_depth(h_out, spec))
+        height_out = scale_height_field(
+            structure,
+            scale_height,
+            v_rot=v_rot[band_out],
+            v_ctr=v_out,
+            u_ctr=u_out,
+            illum_v=axis_v,
+            illum_u=axis_u,
+        )
+        opacity_out = 1.0 - np.exp(-tangent_optical_depth(h_out, spec, scale_height=height_out))
         haze_out = _source(mu0_out) * opacity_out
 
         shape_out = out_box[band_out]
@@ -514,6 +647,31 @@ def apply_atmosphere(
         transmission_vals[halo] = 1.0 - opacity_out[halo]
         transmission[box_v, box_u][band_out] = transmission_vals
         halo_mask[band_out] = halo
+
+    # The disc-side structure rides on top of the composited haze: an axial
+    # brightness ramp and any clouds, both confined to the painted
+    # silhouette, then a hemispheric brightness scaling of everything --
+    # disc radiance and halo glow alike -- so the two halves the mirror maps
+    # onto each other differ by a pure scaling.  Transmission is opacity,
+    # not brightness, and is deliberately left alone.  The whole block is
+    # skipped for a structureless haze: not for tidiness but because every
+    # line of it is per-pixel work the cold-render budget does not carry.
+    if structure is not None:
+        apply_disc_structure(
+            out_box,
+            structure,
+            disc=out_box > 0.0,
+            v_ctr=v_ctr,
+            u_ctr=u_ctr,
+            r_mean=r_mean,
+            illum_v=axis_v,
+            illum_u=axis_u,
+        )
+        apply_hemispheric_scaling(out_box, structure, v_rot)
+        np.clip(out_box, 0.0, 1.0, out=out_box)
+        emission_box = emission[box_v, box_u]
+        apply_hemispheric_scaling(emission_box, structure, v_rot)
+        np.clip(emission_box, 0.0, 1.0, out=emission_box)
     return AtmosphereLayers(
         disc=out,
         halo=HaloScreen(
