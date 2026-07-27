@@ -26,7 +26,6 @@ from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.feature.geometry import TitanHazeGeometry
 from spindoctor.nav_model.nav_model_body import NavModelBody
 from spindoctor.nav_model.nav_model_titan import (
-    GATED_DOT_SPACING,
     NavModelTitan,
     build_titan_feature,
     haze_overlay,
@@ -286,6 +285,17 @@ def test_high_phase_flag_is_clear_at_moderate_phase(config: Config) -> None:
     """A moderate-phase frame is not flagged."""
     feature = build_titan_feature(_inputs(), source_model='titan:TITAN', config=config)
     assert feature.flags.high_phase is False  # type: ignore[union-attr]
+
+
+def test_high_phase_threshold_is_configurable(config: Config, tmp_path: Path) -> None:
+    """Lowering titan.navigation.high_phase_deg moves the flag's threshold."""
+    override = tmp_path / 'high_phase_override.yaml'
+    override.write_text('titan:\n  navigation:\n    high_phase_deg: 90.0\n')
+    config.update_config(override)
+    feature = build_titan_feature(
+        _inputs(phase_deg=120.0), source_model='titan:TITAN', config=config
+    )
+    assert feature.flags.high_phase is True  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
@@ -987,6 +997,10 @@ _SECTOR_HALF_ANGLE_DEG = 60.0
 """Arc-fit sector half-width the overlay tests draw with."""
 
 
+_GATED_DOT_SPACING = 4
+"""Dot spacing the gated-overlay tests draw with (the shipped config value)."""
+
+
 def _overlay(
     *,
     dot_spacing: int = 1,
@@ -1072,14 +1086,14 @@ def test_overlay_leaves_the_band_outside_the_sector_clear() -> None:
 def test_gated_overlay_paints_fewer_pixels() -> None:
     """A gated feature's curves are dotted rather than solid."""
     solid = _overlay()
-    dotted = _overlay(dot_spacing=GATED_DOT_SPACING)
+    dotted = _overlay(dot_spacing=_GATED_DOT_SPACING)
     assert int(dotted.sum()) < int(solid.sum())
 
 
 def test_gated_overlay_paints_a_subset_of_the_solid_one() -> None:
     """Dotting drops samples; it never moves the curves."""
     solid = _overlay()
-    dotted = _overlay(dot_spacing=GATED_DOT_SPACING)
+    dotted = _overlay(dot_spacing=_GATED_DOT_SPACING)
     assert bool(np.all(solid[dotted]))
 
 
@@ -1136,6 +1150,7 @@ def _annotated_model(
     *,
     center_vu: tuple[float, float] = (60.5, 60.5),
     occluder: bool = False,
+    config_override_yaml: str | None = None,
 ) -> tuple[NavModelTitan, FakeObs]:
     """Build and evaluate a Titan model over the analytic scene.
 
@@ -1146,6 +1161,8 @@ def _annotated_model(
         occluder: When True, a nearer moon covers enough of the disc to
             drive the occlusion hard-zero, leaving every drawn quantity
             (center, radii, axis) untouched.
+        config_override_yaml: Optional YAML text layered onto the config
+            after every other override.
     """
     scene.sub_solar_offset_vu = (10.0, 0.0)
     scene.ring_radius_at_u = None
@@ -1159,6 +1176,10 @@ def _annotated_model(
     config = _titan_only_config(tmp_path)
     if occluder:
         config.update_config(_satellites_override(tmp_path, ('TITAN', 'RHEA')))
+    if config_override_yaml is not None:
+        extra_override = tmp_path / 'extra_override.yaml'
+        extra_override.write_text(config_override_yaml)
+        config.update_config(extra_override)
     model = NavModelTitan.instances_for_obs(cast(Any, obs), config=config)[0]
     model.create_model()
     return cast(NavModelTitan, model), obs
@@ -1229,6 +1250,20 @@ def test_low_reliability_annotation_overlay_is_dotted(
     gated_model, _gated_obs = _annotated_model(scene, tmp_path, occluder=True)
     gated = gated_model.to_annotations(cast(Any, None)).annotations[0]
     assert int(gated.overlay.sum()) < int(kept.overlay.sum())
+
+
+def test_gated_dot_spacing_is_configurable(scene: type[_SceneBackplane], tmp_path: Path) -> None:
+    """titan.annotation.gated_dot_spacing of one renders a gated overlay solid."""
+    kept_model, _kept_obs = _annotated_model(scene, tmp_path)
+    kept = kept_model.to_annotations(cast(Any, None)).annotations[0]
+    solid_gated_model, _obs = _annotated_model(
+        scene,
+        tmp_path,
+        occluder=True,
+        config_override_yaml='titan:\n  annotation:\n    gated_dot_spacing: 1\n',
+    )
+    solid_gated = solid_gated_model.to_annotations(cast(Any, None)).annotations[0]
+    assert int(solid_gated.overlay.sum()) == int(kept.overlay.sum())
 
 
 def test_annotation_avoids_placing_text_over_the_disc(

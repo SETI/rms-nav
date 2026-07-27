@@ -22,6 +22,11 @@ titan:
     # Cassini filters that see through to the surface; sets the
     # surface_window flag (diagnostic + future refinement only).
     surface_window_filters: [CB3]
+    # Phase angle (deg) above which the sunward limb has shrunk toward a
+    # crescent; sets the high_phase flag on the emitted feature, marking
+    # the frames whose along-track uncertainty deserves the most
+    # scrutiny (the arc sector carries its least support there).
+    high_phase_deg: 150.0
     symmetry:
       annulus_inner_fraction: 0.55
       annulus_outer_pad_px: 6.0
@@ -136,3 +141,13 @@ titan:
       # coordinate is degenerate with a free radius, that is the honest
       # statement.
       sigma_floor_along_px: 1.00
+  annotation:
+    # Sample spacing that turns the overlay's curves from solid into
+    # dotted for a feature below the per-type reliability gate.  Curves
+    # are rasterized at half-pixel steps, so 4 leaves a dot every two
+    # pixels with a one-pixel gap; raise it if bodies.outline_thicken is
+    # nonzero, since thickening closes small gaps and a dotted overlay
+    # would otherwise render solid.
+    gated_dot_spacing: 4
+    # Half-length (px) of the cross drawn at the disc center.
+    center_marker_half_px: 4

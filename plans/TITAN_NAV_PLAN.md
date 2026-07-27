@@ -987,6 +987,10 @@ titan:
     # Cassini filters that see through to the surface; sets the
     # surface_window flag (diagnostic + future refinement only).
     surface_window_filters: [CB3]
+    # Phase angle (deg) setting the high_phase feature flag. [Added
+    # post-review: originally a module constant; moved to config with
+    # the titan.annotation styling keys below.]
+    high_phase_deg: 150.0
     symmetry:
       annulus_inner_fraction: 0.55
       annulus_outer_pad_px: 6.0
@@ -1015,6 +1019,12 @@ titan:
       tukey_c: 4.685
       along_sigma_scale: 1.0
       sigma_floor_along_px: 1.00
+  annotation:
+    # Overlay styling. [Added post-review: originally module constants
+    # in nav_model_titan.py; configurable because bodies.outline_thicken
+    # interacts with the dot gaps.]
+    gated_dot_spacing: 4
+    center_marker_half_px: 4
 ```
 
 Access via `config.titan` (top level is an `AttrDict`; everything

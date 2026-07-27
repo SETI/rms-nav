@@ -211,6 +211,19 @@ with the technique that reads them, at :doc:`dev_guide_techniques_titan_haze`.
      - ``[CB3]``
      - Filters that see through the haze to the surface. Sets the feature's
        ``surface_window_filter`` flag; the fit does not branch on it.
+   * - ``titan.navigation.high_phase_deg``
+     - ``150.0``
+     - Phase angle above which the feature's ``high_phase`` flag is set,
+       marking frames whose sunward arc carries its least support.
+   * - ``titan.annotation.gated_dot_spacing``
+     - ``4``
+     - Sample spacing that dots the overlay's curves for a feature below
+       the per-type reliability gate; raise it when
+       ``bodies.outline_thicken`` is nonzero, since thickening closes the
+       one-pixel gaps.
+   * - ``titan.annotation.center_marker_half_px``
+     - ``4``
+     - Half-length of the cross drawn at the disc center.
 
 The per-type reliability threshold the emitted feature is gated against is the ``TITAN_LIMB``
 entry under ``reliability_gate`` in ``config_540_orchestrator.yaml``, mirrored in

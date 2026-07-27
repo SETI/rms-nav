@@ -66,8 +66,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from spindoctor.nav_orchestrator.nav_context import NavContext
 
 __all__ = [
-    'GATED_DOT_SPACING',
-    'HIGH_PHASE_DEG',
     'NavModelTitan',
     'build_titan_feature',
     'haze_overlay',
@@ -75,39 +73,14 @@ __all__ = [
 ]
 
 
-HIGH_PHASE_DEG: float = 150.0
-"""Phase angle above which the sunward limb has shrunk toward a crescent.
-
-Sets the ``high_phase`` flag on the emitted feature.  Above this phase the
-arc sector the circle fit relies on carries its least support, so the flag
-marks the frames whose along-track uncertainty deserves the most scrutiny.
-"""
-
-
-GATED_DOT_SPACING: int = 4
-"""Sample spacing that turns the overlay's curves from solid into dotted.
-
-The overlay is drawn solid for a feature whose reliability clears the
-per-type gate threshold and dotted for one below it, so an operator reading
-the summary PNG can tell a haze fit the pipeline would attempt from a frame
-whose geometry an autonomous run rejects before any technique sees it.
-"""
-
-
 _CURVE_SAMPLE_STEP_PX: float = 0.5
 """Spacing of the samples every overlay curve is rasterized from.
 
-Half a pixel leaves no gaps in a solid curve at any orientation, and makes
-:data:`GATED_DOT_SPACING` a dot every two pixels.
-"""
-
-
-_CENTER_MARKER_HALF_PX: int = 4
-"""Half-length of the cross drawn at the disc center, in pixels.
-
-The summary PNG draws every annotation shifted by the navigated offset, so
-this cross marks the predicted center before navigation and the fitted
-center after it.
+Deliberately a constant rather than a configuration key: half a pixel is
+the largest step that leaves no gaps in a solid curve at any orientation,
+so this is the rasterizer's correctness invariant, not a preference.  A
+larger configured value would silently break the solid-versus-dotted
+distinction the ``titan.annotation`` keys rely on.
 """
 
 
@@ -219,9 +192,8 @@ def build_titan_feature(
         breakdown.
     """
     reliability, breakdown = titan_haze_reliability(geometry, config=config)
-    surface_window_filters = {
-        str(name).upper() for name in config.titan['navigation']['surface_window_filters']
-    }
+    nav_config = config.titan['navigation']
+    surface_window_filters = {str(name).upper() for name in nav_config['surface_window_filters']}
     return NavFeature(
         feature_id=f'titan_limb:{TITAN_BODY_NAME}',
         feature_type=NavFeatureType.TITAN_LIMB,
@@ -250,7 +222,7 @@ def build_titan_feature(
             surface_window_filter=any(
                 f.upper() in surface_window_filters for f in geometry.filters
             ),
-            high_phase=geometry.phase_deg >= HIGH_PHASE_DEG,
+            high_phase=geometry.phase_deg >= float(nav_config['high_phase_deg']),
         ),
     )
 
@@ -346,6 +318,7 @@ def haze_overlay(
     *,
     sector_half_angle_deg: float,
     dot_spacing: int = 1,
+    center_marker_half_px: float = 4.0,
 ) -> NDArrayBoolType:
     """Rasterize the haze fit's geometry into an extended-frame overlay.
 
@@ -364,6 +337,7 @@ def haze_overlay(
         geometry: The observation-derived haze geometry.
         sector_half_angle_deg: Half-width of the arc-fit sector, in degrees.
         dot_spacing: ``1`` draws solid curves; larger values dot them.
+        center_marker_half_px: Half-length of the center cross, in pixels.
 
     Returns:
         A boolean array of the extended-frame shape, True on every painted
@@ -419,7 +393,7 @@ def haze_overlay(
             ),
             dot_spacing=dot_spacing,
         )
-    marker = float(_CENTER_MARKER_HALF_PX)
+    marker = float(center_marker_half_px)
     _paint_segment(
         overlay,
         (center[0] - marker, center[1]),
@@ -630,10 +604,12 @@ class NavModelTitan(NavModel):
         kept, _gated = gate.apply([feature])
         usable = len(kept) > 0
         arc_config = self._config.titan['navigation']['arc']
+        annotation_config = self._config.titan['annotation']
         overlay = haze_overlay(
             geometry,
             sector_half_angle_deg=float(arc_config['sector_half_angle_deg']),
-            dot_spacing=1 if usable else GATED_DOT_SPACING,
+            dot_spacing=1 if usable else int(annotation_config['gated_dot_spacing']),
+            center_marker_half_px=float(annotation_config['center_marker_half_px']),
         )
         if not overlay.any():
             self._logger.info('Haze overlay skipped: nothing to draw inside the extended frame')

@@ -1135,6 +1135,13 @@ gate is drawn dotted and labelled ``TITAN (low reliability)``.
    * - ``titan.navigation.surface_window_filters``
      - Filters that see through the haze to the surface.  Recorded as a
        diagnostic flag; the fit does not branch on it.
+   * - ``titan.navigation.high_phase_deg``
+     - Phase angle above which the emitted feature is flagged
+       ``high_phase``, marking frames whose sunward arc carries its
+       least support.
+   * - ``titan.annotation.*``
+     - Overlay styling: the dot spacing that marks a below-gate feature
+       and the size of the center cross.
    * - ``titan.navigation.symmetry.*``
      - Cross-track scan: annulus extent, symmetry-angle refinement, the
        ``valid_fraction`` / ``peak_score`` / ``second_peak`` gate
