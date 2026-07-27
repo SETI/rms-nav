@@ -1026,8 +1026,12 @@ cohort, frames where a star technique locks independently give an
 absolute per-frame anchor, and the haze fit disagrees with it by 0.99 px
 rms cross-track and 1.50 px rms along-track over nine such pairs --
 about 0.70 and 1.06 px of single-frame error once the anchor's own
-uncertainty is removed.  Repeat frames of one target through one filter
-agree to 0.34 px cross-track and 0.33 px along-track.
+uncertainty is removed.  A second anchor class corroborates the first:
+when another moon shares the field of view, its own limb navigation
+measures the same scene-wide offset, and it agrees with the haze fit at
+2-sigma on 11 of the 12 cohort frames where both commit.  Repeat frames
+of one target through one filter agree to 0.34 px cross-track and
+0.33 px along-track.
 
 Two consequences of the along-track figure are worth planning around.
 An image whose only navigable content is Titan reports at most the

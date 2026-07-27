@@ -601,3 +601,16 @@ Cross-filter and star-anchored cohort frames
     about 0.70 and 1.06 px of single-frame error. Repeat frames of one target through one filter
     agree to 0.34 px cross-track, 0.33 px along-track, and 4 km of fitted haze radius. The full
     record is ``util/titan_cohort/CAMPAIGN_20260726.md``.
+
+Frames sharing the field of view with another body
+    A co-visible moon navigated by its own shape features measures the same scene-wide pointing
+    offset, so it anchors the haze fit exactly the way a star lock does. Across the cohort
+    frames where both commit,
+    :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` on the companion
+    body agrees with the haze fit at 2-sigma on 11 of 12 opportunities -- the second-strongest
+    real-frame corroboration after the star anchors.
+    :class:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` (3 of 7)
+    and :class:`~spindoctor.nav_technique.nav_technique_body_blob.BodyBlobNav` (6 of 12) agree
+    less often, which measures those witnesses rather than the haze fit: the companion moons
+    are small in these frames, and the blob centroid's own scatter dominates its disagreements
+    (its worst reading sits 120 px from every other technique on its frame).

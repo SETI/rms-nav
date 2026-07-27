@@ -1994,7 +1994,11 @@ than left as surprises:
    four body/ring techniques and no star technique), the
    rotating-basis and pivotal-pair wiring in the same file, a
    Titan+star family in `util/agreement/scene_gen.py`, and a run key
-   in `util/agreement/collect.py`.
+   in `util/agreement/collect.py`. Register the Titan+body pair in
+   the same pass: a co-visible moon's shape-feature lock anchors the
+   haze fit exactly the way a star lock does, and the Phase E cohort
+   measured it as the second-strongest corroboration (BodyLimbNav
+   11/12 at 2-sigma; recorded on #225).
 9. (#403) Ray reach versus the search window: radial profiles are sampled
    out to `r_env + radial_outer_pad_px + W`, and `W` is 140 px on a
    Cassini NAC, so a large Titan loses whole rays to out-of-frame
