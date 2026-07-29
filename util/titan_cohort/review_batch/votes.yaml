@@ -1,0 +1,86 @@
+# Titan cohort overlay review -- OPERATOR VOTES PENDING.
+#
+# One vote per frame. y = the drawn envelope circle, symmetry axis, and centre cross sit on the haze limb at the stated offset. m = Titan is navigable in this frame but the overlay is misaligned; the frame is kept and routed to manual navigation. n = the frame should not have navigated at all (occulted, clipped, or defective) or the image is unusable. The overlay is drawn at the ENSEMBLE offset, so on a frame with other committed techniques a small misalignment may not be the haze fit; the manifest names the per-technique haze offset for comparison.
+#
+# Nothing else in this repository writes to this file.
+votes:
+  - image_id: N1481359160_1
+    preview: 01_N1481359160_1.png
+    vote: null
+    comment: ''
+  - image_id: N1484962455_2
+    preview: 02_N1484962455_2.png
+    vote: null
+    comment: ''
+  - image_id: N1604954125_1
+    preview: 03_N1604954125_1.png
+    vote: null
+    comment: ''
+  - image_id: N1609608920_1
+    preview: 04_N1609608920_1.png
+    vote: null
+    comment: ''
+  - image_id: N1634462210_1
+    preview: 05_N1634462210_1.png
+    vote: null
+    comment: ''
+  - image_id: N1647092996_1
+    preview: 06_N1647092996_1.png
+    vote: null
+    comment: ''
+  - image_id: N1689372665_1
+    preview: 07_N1689372665_1.png
+    vote: null
+    comment: ''
+  - image_id: N1702239331_1
+    preview: 08_N1702239331_1.png
+    vote: null
+    comment: ''
+  - image_id: W1548712675_1
+    preview: 09_W1548712675_1.png
+    vote: null
+    comment: ''
+  - image_id: W1561790952_1
+    preview: 10_W1561790952_1.png
+    vote: null
+    comment: ''
+  - image_id: W1561794185_1
+    preview: 11_W1561794185_1.png
+    vote: null
+    comment: ''
+  - image_id: W1629929515_1
+    preview: 12_W1629929515_1.png
+    vote: null
+    comment: ''
+  - image_id: W1643375992_1
+    preview: 13_W1643375992_1.png
+    vote: null
+    comment: ''
+  - image_id: W1643376091_1
+    preview: 14_W1643376091_1.png
+    vote: null
+    comment: ''
+  - image_id: W1655808364_1
+    preview: 15_W1655808364_1.png
+    vote: null
+    comment: ''
+  - image_id: W1676687378_1
+    preview: 16_W1676687378_1.png
+    vote: null
+    comment: ''
+  - image_id: W1681926856_1
+    preview: 17_W1681926856_1.png
+    vote: null
+    comment: ''
+  - image_id: W1721822901_1
+    preview: 18_W1721822901_1.png
+    vote: null
+    comment: ''
+  - image_id: W1822132529_1
+    preview: 19_W1822132529_1.png
+    vote: null
+    comment: ''
+  - image_id: W1883905091_1
+    preview: 20_W1883905091_1.png
+    vote: null
+    comment: ''

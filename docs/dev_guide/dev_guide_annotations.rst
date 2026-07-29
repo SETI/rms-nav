@@ -140,7 +140,10 @@ Per-model annotation contributions
   scene's PNG overlay is visually indistinguishable from a real scene's.
 - **Titan** —
   :meth:`~spindoctor.nav_model.nav_model_titan.NavModelTitan.to_annotations`
-  returns an empty collection (the model emits no features to annotate).
+  emits the predicted haze envelope circle, the symmetry axis, the sunward
+  arc sector, and a center cross, styled by the feature's reliability
+  against the per-type gate threshold: solid curves at or above it, dotted
+  curves plus a low-reliability label below it.
 
 API reference
 =============

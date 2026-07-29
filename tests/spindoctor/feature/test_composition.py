@@ -502,3 +502,114 @@ def test_compose_dialog_overlay_star_marker_clamps_at_edge() -> None:
     assert np.count_nonzero(image) == len(expected_pixels)
     assert np.count_nonzero(mask) == len(expected_pixels)
     assert image[1, 1] == 0.0  # centre not painted
+
+
+def _make_titan(
+    *,
+    feature_id: str,
+    center: tuple[float, float],
+    r_env_px: float,
+    r_solid_px: float = 1.0,
+) -> NavFeature:
+    """Build a TITAN_LIMB feature carrying only its haze geometry."""
+    from spindoctor.feature.flags import TitanHazeFlags
+    from spindoctor.feature.geometry import TitanHazeGeometry
+
+    pad = int(np.ceil(r_env_px))
+    bbox = (
+        int(center[0]) - pad,
+        int(center[1]) - pad,
+        int(center[0]) + pad + 1,
+        int(center[1]) + pad + 1,
+    )
+    return NavFeature(
+        feature_id=feature_id,
+        feature_type=NavFeatureType.TITAN_LIMB,
+        source_model='titan:TITAN',
+        geometry=TitanHazeGeometry(
+            predicted_center_vu=center,
+            sun_angle_rad=0.0,
+            axis_degenerate=False,
+            phase_deg=30.0,
+            r_solid_px=r_solid_px,
+            r_env_px=r_env_px,
+            km_per_px=20.0,
+            contaminant_mask=None,
+            filters=('CL1', 'CL2'),
+            bbox_extfov_vu=bbox,
+        ),
+        subject_range_km=1.2e6,
+        position_cov_px=None,
+        intensity_sigma_rel=0.0,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=0.8,
+        reliability_reasons=NavReliabilityBreakdown(titan_envelope_diameter_px=2.0 * r_env_px),
+        usable_types=frozenset({NavFeatureType.TITAN_LIMB}),
+        flags=TitanHazeFlags(body_name='TITAN'),
+    )
+
+
+def test_compose_dialog_overlay_renders_titan_envelope_circle() -> None:
+    """A TITAN_LIMB feature paints a circle outline the operator can drag.
+
+    Without this branch a Titan-only frame composes an empty overlay and
+    manual navigation is impossible on it.
+    """
+    from spindoctor.feature.composition import compose_dialog_overlay
+
+    titan = _make_titan(feature_id='titan_limb:TITAN', center=(20.0, 20.0), r_env_px=5.0)
+    _image, mask = compose_dialog_overlay([titan], (40, 40))
+    assert np.count_nonzero(mask) > 0
+
+
+def test_compose_dialog_overlay_titan_circle_matches_the_blob_circle() -> None:
+    """The haze circle is rasterized exactly like a blob circle of equal radius.
+
+    Both branches paint the same predicted-silhouette outline, so pinning
+    them to each other keeps a change to one from silently diverging the
+    dialog's two circle renderings.
+    """
+    from spindoctor.feature.composition import compose_dialog_overlay
+
+    titan = _make_titan(feature_id='titan_limb:TITAN', center=(20.0, 20.0), r_env_px=5.0)
+    blob = _make_blob(
+        feature_id='body_blob:X',
+        center=(20.0, 20.0),
+        diameter_px=10.0,
+        bbox=(15, 15, 25, 25),
+    )
+    titan_image, _titan_mask = compose_dialog_overlay([titan], (40, 40))
+    blob_image, _blob_mask = compose_dialog_overlay([blob], (40, 40))
+    assert np.array_equal(titan_image, blob_image)
+
+
+def test_compose_dialog_overlay_titan_circle_uses_the_envelope_radius() -> None:
+    """The circle is drawn at the haze envelope, not at the solid body."""
+    from spindoctor.feature.composition import compose_dialog_overlay
+
+    titan = _make_titan(
+        feature_id='titan_limb:TITAN', center=(20.0, 20.0), r_env_px=8.0, r_solid_px=3.0
+    )
+    _image, mask = compose_dialog_overlay([titan], (40, 40))
+    assert bool(mask[20, 28]) is True
+
+
+def test_compose_dialog_overlay_titan_circle_leaves_the_solid_radius_clear() -> None:
+    """Nothing is painted at the solid radius; the envelope is what is drawn."""
+    from spindoctor.feature.composition import compose_dialog_overlay
+
+    titan = _make_titan(
+        feature_id='titan_limb:TITAN', center=(20.0, 20.0), r_env_px=8.0, r_solid_px=3.0
+    )
+    _image, mask = compose_dialog_overlay([titan], (40, 40))
+    assert bool(mask[20, 23]) is False
+
+
+def test_compose_dialog_overlay_titan_clips_to_extfov_bounds() -> None:
+    """A haze circle reaching past the ext-FOV paints only its visible arc."""
+    from spindoctor.feature.composition import compose_dialog_overlay
+
+    titan = _make_titan(feature_id='titan_limb:TITAN', center=(2.0, 2.0), r_env_px=10.0)
+    image, mask = compose_dialog_overlay([titan], (10, 10))
+    assert image.shape == (10, 10)
+    assert np.count_nonzero(mask) < 10

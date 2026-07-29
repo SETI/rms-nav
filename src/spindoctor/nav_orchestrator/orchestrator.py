@@ -212,16 +212,6 @@ def _normalize_model_patterns(patterns: str | list[str], names: list[str]) -> li
     return out
 
 
-def _titan_in_models(models: list[NavModel]) -> bool:
-    """Return whether the Titan model is among the built models.
-
-    Reads the ``titan_in_fov`` attribute the Titan model exposes (duck-typed
-    so no orchestrator import of the concrete model class is needed); other
-    models lack it and contribute nothing.
-    """
-    return any(getattr(model, 'titan_in_fov', False) for model in models)
-
-
 def _feature_source_bodies(feature: NavFeature) -> frozenset[str]:
     """Return the set of body names a feature was emitted for.
 
@@ -430,24 +420,8 @@ class NavOrchestrator(NavBase):
         model_metadata = self._collect_model_metadata(built_models)
         annotations = self._collect_annotations(context, built_models)
         if not all_features:
-            # Titan emits no navigable features by design (opaque haze hides
-            # the surface).  When Titan is the frame's only content the scene
-            # fails for lack of features -- but record *why* rather than the
-            # generic no-features reason, so a Titan-only image is not a silent
-            # empty failure.
-            titan_present = _titan_in_models(built_models)
-            if titan_present:
-                self._logger.info(
-                    'Titan in FOV and no navigable features extracted; '
-                    'failing with titan_unsupported'
-                )
-            no_feature_reason = (
-                NavStatusReason.TITAN_UNSUPPORTED
-                if titan_present
-                else NavStatusReason.NO_FEATURES_EXTRACTED
-            )
             return self._fail(
-                status_reason=no_feature_reason,
+                status_reason=NavStatusReason.NO_FEATURES_EXTRACTED,
                 image_classifier=image_classifier,
                 provenance=provenance,
                 feature_inventory=feature_inventory,
@@ -1094,6 +1068,7 @@ def _summary_from_feature(
         gated=gated,
         gate_reason=gate_reason,
         bbox_extfov_vu=bbox,
+        reliability_reasons=feature.reliability_reasons,
     )
 
 

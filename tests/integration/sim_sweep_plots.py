@@ -28,6 +28,7 @@ _OFFSET_TECHNIQUES = [
     ('limb', 'limb_offset_fine', 'limb_offset_wide', '^', 'BodyLimbNav'),
     ('ring', 'ring_offset_fine', 'ring_offset_wide', 'D', 'RingEdgeNav'),
     ('star', 'star_offset_fine', 'star_offset_wide', 'v', 'StarFieldFromCatalogNav'),
+    ('titan', 'titan_offset_fine', 'titan_offset_wide', 'P', 'TitanHazeNav'),
 ]
 
 

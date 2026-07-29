@@ -1,12 +1,12 @@
 """Per-technique accuracy-vs-SNR characterization across background conditions.
 
-Runner-only (NOT part of pytest): for every navigation technique (disc, blob, limb,
-ring edge, star field) this sweeps the per-image read noise from a clean frame down
-toward the navigability cliff -- i.e. across a wide signal-to-noise range -- at a
-fixed representative sub-pixel offset, under two backgrounds (nominal and a
-stray-light gradient).  It writes one comparison figure per background to
-``docs/simulator_report/_figures/`` so each technique's recovered-offset error can
-be read against SNR side by side.
+Runner-only (NOT part of pytest): for every navigation technique (disc, blob,
+limb, ring edge, star field, haze symmetry) this sweeps the per-image read noise
+from a clean frame down toward the navigability cliff -- i.e. across a wide
+signal-to-noise range -- at a fixed representative sub-pixel offset, under two
+backgrounds (nominal and a stray-light gradient).  It writes one comparison
+figure per background to ``docs/simulator_report/_figures/`` so each
+technique's recovered-offset error can be read against SNR side by side.
 
 The SNR axis is a uniform per-image proxy ``(peak - background) / robust_noise`` so
 the extended-feature techniques (disc, limb, ring) and the point-source technique
@@ -71,6 +71,7 @@ _TECHNIQUES = [
         'StarFieldFromCatalogNav',
         'v',
     ),
+    ('titan haze', 'atmosphere/titan_haze.yaml', 'TitanHazeNav', 'P'),
 ]
 
 # (label, stray_light dict | None, output filename)

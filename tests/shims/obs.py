@@ -251,6 +251,52 @@ class FakeObs:
         """Return a False-filled boolean array of the extfov shape."""
         return np.zeros(self.extdata_shape_vu, dtype=bool)
 
+    def extract_offset_array(
+        self, array: np.ndarray, offset: tuple[float, float] | tuple[int, int] | None
+    ) -> np.ndarray:
+        """Mirror ``ObsSnapshot.extract_offset_array``.
+
+        Extracts the sensor-area window of an extfov-shaped array at the
+        given ``(dv, du)`` offset; the portion of the window that falls
+        outside the extfov is left zero-filled (``False`` for a boolean
+        array), which is what the overlay compositor expects.
+
+        Parameters:
+            array: Extfov-shaped array to extract from.
+            offset: ``(dv, du)`` offset; ``None`` means no offset.
+
+        Returns:
+            The sensor-area-shaped extraction.
+
+        Raises:
+            ValueError: If ``array`` is not exactly extfov-shaped, which
+                includes a 3-D array whose leading two axes match -- the
+                real method rejects those too.
+        """
+        if array.shape != self.extdata_shape_vu:
+            raise ValueError(
+                f'array shape {array.shape} must equal extdata shape {self.extdata_shape_vu}'
+            )
+        if offset is None:
+            offset = (0, 0)
+        v_size, u_size = self.extdata_shape_vu
+        v0 = self.extfov_margin_v - int(np.round(offset[0]))
+        u0 = self.extfov_margin_u - int(np.round(offset[1]))
+        v1 = v0 + self.data_shape_v
+        u1 = u0 + self.data_shape_u
+        out = np.zeros((self.data_shape_v, self.data_shape_u, *array.shape[2:]), dtype=array.dtype)
+        src_v_lo = max(0, v0)
+        src_u_lo = max(0, u0)
+        src_v_hi = min(v_size, v1)
+        src_u_hi = min(u_size, u1)
+        if src_v_hi <= src_v_lo or src_u_hi <= src_u_lo:
+            return out
+        out[
+            src_v_lo - v0 : src_v_lo - v0 + (src_v_hi - src_v_lo),
+            src_u_lo - u0 : src_u_lo - u0 + (src_u_hi - src_u_lo),
+        ] = array[src_v_lo:src_v_hi, src_u_lo:src_u_hi]
+        return out
+
     def extfov_data_sensor_mask(self) -> np.ndarray:
         """Return a boolean mask True over the sensor area inside extfov."""
         mask = np.zeros(self.extdata_shape_vu, dtype=bool)

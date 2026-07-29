@@ -83,6 +83,12 @@ dataclass. Public fields (autodocumented at
 - :attr:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary.bbox_extfov_vu` —
   half-open ``(v_min, u_min, v_max, u_max)`` bounding box in extfov coordinates;
   4-tuple of ints.
+- :attr:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary.reliability_reasons` —
+  the producing feature's
+  :class:`~spindoctor.feature.feature.NavReliabilityBreakdown`, carried through to the
+  per-image JSON so a gated feature's cause is readable without re-running navigation. The
+  breakdown's fields are per-feature-type and optional; a missing field means "not applicable
+  to this feature type", not zero.
 
 The dataclass enforces invariants in ``__post_init__``: every field must have the
 declared type; ``reliability`` must lie in :math:`[0, 1]`; ``gate_reason`` must be a
@@ -134,7 +140,9 @@ reviewer who counts LIMB_ARC entries whose ``gate_reason`` starts with
 ``'reliability_'`` across 1,000 ``body_full_fov``-class images learns directly how
 often LIMB_ARC features fall below the reliability gate on full-disc bodies. The
 reason does not say which formula component drove the score down; that attribution
-comes from the feature's ``reliability_reasons`` breakdown.
+comes from the feature's
+:attr:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary.reliability_reasons`
+breakdown.
 
 **Per-image inventory size.**  A multi-body Cassini fly-by image with 3 bodies plus 50
 predictable stars produces an inventory of 50 STAR plus up to 12 body-derived features

@@ -21,6 +21,7 @@ __all__ = [
     'StarFieldDiagnostics',
     'StarRefineDiagnostics',
     'StarUniqueMatchDiagnostics',
+    'TitanHazeDiagnostics',
 ]
 
 
@@ -418,6 +419,95 @@ class ManualNavDiagnostics:
     }
 
 
+@dataclass(frozen=True)
+class TitanHazeDiagnostics:
+    """Diagnostics emitted by ``TitanHazeNav``.
+
+    Parameters:
+        sun_angle_deg: Symmetry-axis angle used by the final pass, in
+            degrees, measured as ``atan2(dv, du)`` from the predicted disc
+            center toward the sub-solar side.
+        axis_degenerate: True when the model could not localize the
+            sub-solar direction (near-zero phase, or unevaluable
+            geometry), so the axis angle is nominal and angle refinement
+            was skipped.
+        phase_deg: Phase angle at the body center, in degrees.
+        envelope_diameter_px: Apparent haze-envelope diameter in pixels.
+        cross_track_px: Final-pass offset component perpendicular to the
+            symmetry axis, positive along ``c_hat``.
+        along_track_px: Offset component along the symmetry axis summed
+            over every pass, positive toward the sub-solar side.
+        symmetry_peak_score: Pearson mirror-correlation score at the
+            winning cross-track shift, or ``None`` when no candidate shift
+            had enough usable signal to correlate at all (reported as
+            absent rather than as a zero score, which reads as a measured
+            total lack of symmetry rather than as no measurement).
+        symmetry_valid_fraction: Fraction of annulus mirror pairs that
+            were usable at that shift.
+        symmetry_second_peak_ratio: Normalized height of the strongest
+            competing correlation peak; ``0.0`` when there is none.
+        theta_refined_deg: Angle the refinement moved the symmetry axis
+            by, relative to the model's SPICE-derived angle, in degrees;
+            ``0.0`` when refinement did not win or was skipped.
+        arc_rays_total: Rays presented to the limb circle fit.
+        arc_rays_inlier: Rays carrying a non-zero final robust weight.
+        arc_inlier_fraction: ``arc_rays_inlier / arc_rays_total``;
+            ``0.0`` when no ray survived profile extraction.
+        arc_residual_rms_px: Root-mean-square radial residual over the
+            inlier rays, or ``None`` when the robust fit rejected every
+            ray (reported as absent rather than as a perfect zero, which
+            a falling confidence sigmoid would read as maximally good).
+        fitted_haze_radius_km: Fitted arc radius converted to kilometers
+            at the body's image scale.  Recorded so a haze-radius table
+            per instrument, filter, and phase bin can be accumulated from
+            production output.
+        filters: Instrument filter names for the image.
+        recentered: True when the large-along-track-shift second pass
+            ran.
+        gate_failed: Name of the first failed fit gate, or ``None`` when
+            every gate passed.
+    """
+
+    sun_angle_deg: float = 0.0
+    axis_degenerate: bool = False
+    phase_deg: float = 0.0
+    envelope_diameter_px: float = 0.0
+    cross_track_px: float = 0.0
+    along_track_px: float = 0.0
+    symmetry_peak_score: float | None = None
+    symmetry_valid_fraction: float = 0.0
+    symmetry_second_peak_ratio: float = 0.0
+    theta_refined_deg: float = 0.0
+    arc_rays_total: int = 0
+    arc_rays_inlier: int = 0
+    arc_inlier_fraction: float = 0.0
+    arc_residual_rms_px: float | None = None
+    fitted_haze_radius_km: float = 0.0
+    filters: tuple[str, ...] = ()
+    recentered: bool = False
+    gate_failed: str | None = None
+    CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
+        'sun_angle_deg': 'sun_angle_deg',
+        'axis_degenerate': 'axis_degenerate',
+        'phase_deg': 'phase_deg',
+        'envelope_diameter_px': 'envelope_diameter_px',
+        'cross_track_px': 'cross_track_px',
+        'along_track_px': 'along_track_px',
+        'symmetry_peak_score': 'symmetry_peak_score',
+        'symmetry_valid_fraction': 'symmetry_valid_fraction',
+        'symmetry_second_peak_ratio': 'symmetry_second_peak_ratio',
+        'theta_refined_deg': 'theta_refined_deg',
+        'arc_rays_total': 'arc_rays_total',
+        'arc_rays_inlier': 'arc_rays_inlier',
+        'arc_inlier_fraction': 'arc_inlier_fraction',
+        'arc_residual_rms_px': 'arc_residual_rms_px',
+        'fitted_haze_radius_km': 'fitted_haze_radius_km',
+        'filters': 'filters',
+        'recentered': 'recentered',
+        'gate_failed': 'gate_failed',
+    }
+
+
 NavTechniqueDiagnostics = (
     BodyDiscDiagnostics
     | BodyLimbDiagnostics
@@ -429,6 +519,7 @@ NavTechniqueDiagnostics = (
     | StarFieldDiagnostics
     | StarUniqueMatchDiagnostics
     | StarRefineDiagnostics
+    | TitanHazeDiagnostics
 )
 """Sum type spanning every per-technique diagnostics dataclass.
 

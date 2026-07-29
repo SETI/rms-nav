@@ -163,6 +163,29 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
   :attr:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics.median_pos_err_px`,
   :attr:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics.residual_scatter_px`.
 
+- :class:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics` — emitted by
+  :class:`~spindoctor.nav_technique.nav_technique_titan_haze.TitanHazeNav`. Fields:
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.sun_angle_deg`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.axis_degenerate`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.phase_deg`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.envelope_diameter_px`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.cross_track_px`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.along_track_px`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.symmetry_peak_score`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.symmetry_valid_fraction`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.symmetry_second_peak_ratio`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.theta_refined_deg`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.arc_rays_total`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.arc_rays_inlier`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.arc_inlier_fraction`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.arc_residual_rms_px`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.fitted_haze_radius_km`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.filters`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.recentered`,
+  :attr:`~spindoctor.nav_technique.diagnostics.TitanHazeDiagnostics.gate_failed`. The peak score
+  and the residual RMS are ``None`` rather than zero when the fit could not measure them, so a
+  falling confidence sigmoid cannot read an unmeasured quantity as a perfect one.
+
 - :class:`~spindoctor.nav_technique.diagnostics.ManualNavDiagnostics` — emitted by
   :class:`~spindoctor.nav_technique.nav_technique_manual.NavTechniqueManual`. Single field:
   :attr:`~spindoctor.nav_technique.diagnostics.ManualNavDiagnostics.operator_accepted`, kept

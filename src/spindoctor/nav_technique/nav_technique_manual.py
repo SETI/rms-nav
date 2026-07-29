@@ -57,7 +57,8 @@ class NavTechniqueManual(NavTechnique):
     Renderable feature kinds are template-bearing (``BODY_DISC``,
     ``RING_ANNULUS``, ``CARTOGRAPHIC_MODEL``), polyline-bearing
     (``LIMB_ARC``, ``TERMINATOR_ARC``, ``RING_EDGE``), ``BODY_BLOB``
-    (predicted-diameter circle outline), and ``STAR`` (rectangle
+    (predicted-diameter circle outline), ``TITAN_LIMB``
+    (haze-envelope circle outline), and ``STAR`` (rectangle
     outline at the predicted-vu position sized by the per-feature PSF
     bbox).
 
@@ -92,7 +93,7 @@ class NavTechniqueManual(NavTechnique):
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Manual navigation runs whenever there is anything to render.
 
-        Four feature kinds paint into the dialog's composite overlay
+        Five feature kinds paint into the dialog's composite overlay
         (see :func:`~spindoctor.feature.composition.compose_dialog_overlay`):
 
         - template-bearing (``BODY_DISC``, ``RING_ANNULUS``,
@@ -101,13 +102,19 @@ class NavTechniqueManual(NavTechnique):
           ``RING_EDGE``) — single-pixel marks at every vertex;
         - ``BODY_BLOB`` — 1-pixel circle outline at the predicted
           centroid with the predicted-diameter radius;
+        - ``TITAN_LIMB`` -- 1-pixel circle outline at the predicted disc
+          center with the haze-envelope radius;
         - ``STAR`` — rectangle outline at the predicted-vu position
           sized by the per-feature PSF bbox so the operator can see
           where the catalog says the star sits.
 
         Without any of them the dialog has nothing to display.
         """
-        from spindoctor.feature.geometry import BodyBlobGeometry, StarGeometry
+        from spindoctor.feature.geometry import (
+            BodyBlobGeometry,
+            StarGeometry,
+            TitanHazeGeometry,
+        )
 
         renderable = 0
         for f in features:
@@ -118,10 +125,7 @@ class NavTechniqueManual(NavTechnique):
             if verts is not None and np.asarray(verts).size > 0:
                 renderable += 1
                 continue
-            if isinstance(f.geometry, BodyBlobGeometry):
-                renderable += 1
-                continue
-            if isinstance(f.geometry, StarGeometry):
+            if isinstance(f.geometry, (BodyBlobGeometry, TitanHazeGeometry, StarGeometry)):
                 renderable += 1
         if renderable == 0:
             return NavFeasibilityReport(
@@ -226,12 +230,14 @@ def run_manual_nav(
         features (``BODY_DISC`` / ``RING_ANNULUS`` /
         ``CARTOGRAPHIC_MODEL``), polyline-bearing features (``LIMB_ARC``
         / ``TERMINATOR_ARC`` / ``RING_EDGE``), ``BODY_BLOB`` (1-pixel
-        circle outline at the predicted centroid), and ``STAR``
-        (rectangle outline at the predicted-vu position sized by the
-        per-feature PSF bbox).  The dialog is opened only when the
-        composed mask is non-empty; an off-frame blob, an off-image
-        star, or a polyline whose vertices all clip out-of-bounds is
-        treated as if no renderable feature were present.
+        circle outline at the predicted centroid), ``TITAN_LIMB``
+        (1-pixel circle outline at the predicted disc center with the
+        haze-envelope radius), and ``STAR`` (rectangle outline at the
+        predicted-vu position sized by the per-feature PSF bbox).  The
+        dialog is opened only when the composed mask is non-empty; an
+        off-frame blob, an off-image star, or a polyline whose vertices
+        all clip out-of-bounds is treated as if no renderable feature
+        were present.
     """
     # Local imports keep heavyweight dependencies (NavOrchestrator, NavModel
     # registry) out of import-time graphs for callers that only need the

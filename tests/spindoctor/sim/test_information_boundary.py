@@ -15,6 +15,7 @@ import pytest
 from spindoctor.obs.obs_inst_sim import ObsSim
 from spindoctor.sim.render import render_combined_model
 from spindoctor.sim.scene import (
+    ATMOSPHERE_KEYS,
     TOP_LEVEL_TEST_ONLY_KEYS,
     TOP_LEVEL_TRUTH_KEYS,
     TRUTH_KEYS,
@@ -81,12 +82,23 @@ _TRUTH_SAMPLES: dict[str, Any] = {
             'shadow': {'dv_px': 1.0, 'du_px': 4.0, 'radius_px': 3.0, 'darkness': 0.8},
         }
     ],
+    # The atmosphere block is ONE truth key, so the parametrized reachability
+    # test below probes it as a unit and a key omitted here would be neither
+    # rendered nor probed.  Every key the validator accepts is therefore
+    # listed, and ``test_atmosphere_sample_covers_every_key`` fails when the
+    # block's inventory grows without this sample growing with it.
     'bodies.atmosphere': {
         'scale_height_px': 2.0,
         'tau_ref': 1.5,
         'ref_altitude_px': 1.0,
         'g': 0.6,
         'detached_px': 5.0,
+        'interior_ramp_amplitude': 0.2,
+        'ns_asymmetry_amplitude': 0.3,
+        'ns_falloff_ratio': 1.8,
+        'axis_tilt_deg': 12.0,
+        'sector_sharpness_gradient': 0.5,
+        'cloud_blobs': [{'center_vu': [-4.0, 3.0], 'sigma_px': 2.5, 'amplitude': 0.35}],
     },
     'bodies.shading': 'gouraud',
     'bodies.pose_scatter': {'sigma_deg': 2.0},
@@ -277,6 +289,31 @@ def test_truth_key_unreachable_through_nav_params(truth_key: str) -> None:
             assert leaf not in obj
     else:
         assert truth_key not in nav
+
+
+def test_atmosphere_sample_covers_every_key() -> None:
+    """The atmosphere sample exercises every key the block may carry.
+
+    ``bodies.atmosphere`` is a single entry of ``TRUTH_KEYS``, so the
+    parametrized reachability test treats the whole block as one atomic
+    unit: a key added to the block but omitted from the sample would fail
+    nothing and would sit un-probed for leakage.  This is the check that
+    turns the block's own inventory into the completeness requirement.
+    """
+    assert set(_TRUTH_SAMPLES['bodies.atmosphere']) == set(ATMOSPHERE_KEYS)
+
+
+@pytest.mark.parametrize('key', sorted(ATMOSPHERE_KEYS))
+def test_atmosphere_key_unreachable_through_nav_params(key: str) -> None:
+    """No individual atmosphere key survives the filter on any body.
+
+    The atomic-block test alone would pass if the filter dropped the block
+    but some other channel republished a key at body level; this asserts the
+    per-key absence directly.
+    """
+    nav = build_nav_params(_truth_exercising_scene())
+    for body in nav['bodies']:
+        assert key not in body
 
 
 def test_probe_scene_actually_carries_every_truth_key() -> None:

@@ -52,7 +52,7 @@ from oops import Meshgrid
 from oops.backplane import Backplane
 
 from spindoctor.annotation import Annotations
-from spindoctor.config import DEFAULT_CONFIG, Config
+from spindoctor.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
 from spindoctor.feature.constants import (
     INCIDENCE_FACTOR_ANGLE_CAP_DEG,
     INCIDENCE_FACTOR_CLIP_DEG,
@@ -102,6 +102,7 @@ __all__ = [
     'NavModelBody',
     'bodies_in_extfov',
     'limb_reliability',
+    'occluder_mask_for_body',
     'shape_features_suppressed',
     'terminator_reliability',
 ]
@@ -189,10 +190,12 @@ Titan's thick haze hides the surface and its visible limb is the haze top,
 wavelength-dependent and hundreds of km above the ground, so ellipsoid
 limb / terminator / disc navigation is systematically wrong rather than
 merely noisy; at high phase Titan is not even a circle.  Titan builds no
-shape-based ``NavModelBody`` -- :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan`
-records a no-result instead.  Titan's atmosphere is unique (transparent in
-some wavelengths), so it is handled as a deliberate special case; its
-handling does not generalize to other thick-atmosphere bodies such as Venus.
+shape-based ``NavModelBody`` --
+:class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` emits a haze
+envelope feature instead, navigated by solar symmetry rather than by shape.
+Titan's atmosphere is unique (transparent in some wavelengths), so it is
+handled as a deliberate special case; its handling does not generalize to
+other thick-atmosphere bodies such as Venus.
 """
 
 
@@ -243,6 +246,71 @@ def bodies_in_extfov(
             continue
         out.append((body_name, entry))
     return out
+
+
+def occluder_mask_for_body(
+    restr_bp: Backplane,
+    body_name: str,
+    siblings: list[tuple[str, float]],
+    subject_range_km: float,
+    *,
+    oversample_v: int,
+    oversample_u: int,
+) -> NDArrayBoolType | None:
+    """Union silhouette of nearer sibling bodies over a body's bbox grid.
+
+    A sibling occludes the subject body only when its inventory center range
+    is strictly nearer; the per-pixel depth test in
+    :meth:`oops.backplane.Backplane.where_in_front` then decides which pixels
+    the nearer body actually hides.  The result is downsampled to the same
+    discrete grid the caller's masks live on.
+
+    A backplane failure on any occluder degrades to no occlusion for that
+    occluder (the caller's arc / template / mask stays untrimmed) rather than
+    aborting the render.
+
+    Shared by the shape-based body model and the haze model so both derive
+    body-body occlusion from one implementation; the caller supplies the
+    backplane it already built, which is what keeps the two callers' results
+    identical to what each would compute alone.
+
+    Parameters:
+        restr_bp: Backplane over the subject body's oversampled bbox
+            meshgrid.
+        body_name: SPICE name of the subject body.
+        siblings: ``(body_name, range_km)`` for the other bodies in the FOV.
+        subject_range_km: Center range of the subject body in kilometers;
+            only strictly nearer siblings are considered.
+        oversample_v: Vertical oversample factor of ``restr_bp``'s meshgrid.
+        oversample_u: Horizontal oversample factor of that meshgrid.
+
+    Returns:
+        The bbox-local boolean occluder mask, or ``None`` when no sibling is
+        nearer or none hides any pixel (the common case costs nothing).
+    """
+    nearer = [name for name, rng in siblings if rng < subject_range_km]
+    if not nearer:
+        return None
+    occluder: NDArrayBoolType | None = None
+    for sibling_name in nearer:
+        try:
+            hidden = restr_bp.where_in_front(sibling_name, body_name)
+            hidden_over = hidden.mvals.filled(False).astype(bool)
+        except Exception:
+            IMAGE_LOGGER.warning(
+                'Body %s: failed to compute occlusion by %s; arc / template left untrimmed',
+                body_name,
+                sibling_name,
+                exc_info=True,
+            )
+            continue
+        hidden_local = (
+            filter_downsample(hidden_over.astype(np.float64), oversample_v, oversample_u) >= 0.5
+        )
+        occluder = hidden_local if occluder is None else (occluder | hidden_local)
+    if occluder is None or not occluder.any():
+        return None
+    return occluder
 
 
 @dataclass(frozen=True)
@@ -671,8 +739,13 @@ class NavModelBody(NavModelBodyBase):
         # never chases an arc the image does not show) and, promoted to extfov
         # coordinates, is trimmed out of the disc template (so the correlator
         # does not score against disc brightness that is not there).
-        occluder_local = self._compute_occluder_local(
-            restr_bp, oversample_v=oversample_v, oversample_u=oversample_u
+        occluder_local = occluder_mask_for_body(
+            restr_bp,
+            body_name,
+            self._siblings,
+            self._subject_range_km,
+            oversample_v=oversample_v,
+            oversample_u=oversample_u,
         )
         occluder_ext = obs.make_extfov_false()
         if occluder_local is not None:
@@ -745,54 +818,6 @@ class NavModelBody(NavModelBodyBase):
             'overflow_fraction': overflow_fraction,
         }
         return model_img, limb_mask, terminator_mask, body_mask, info
-
-    def _compute_occluder_local(
-        self, restr_bp: Backplane, *, oversample_v: int, oversample_u: int
-    ) -> NDArrayBoolType | None:
-        """Union silhouette of nearer sibling bodies over the body's bbox grid.
-
-        A sibling occludes this body only when its inventory center range is
-        strictly nearer; the per-pixel depth test in
-        :meth:`oops.backplane.Backplane.where_in_front` then decides which
-        pixels the nearer body actually hides.  The result is downsampled to
-        the same discrete grid the limb / terminator masks live on.
-
-        A backplane failure on any occluder degrades to no occlusion for that
-        occluder (the arc / template stays untrimmed) rather than aborting the
-        render.
-
-        Parameters:
-            restr_bp: Backplane over the body's oversampled bbox meshgrid.
-            oversample_v: Vertical oversample factor of that meshgrid.
-            oversample_u: Horizontal oversample factor of that meshgrid.
-
-        Returns:
-            The bbox-local boolean occluder mask, or ``None`` when no sibling
-            is nearer or none hides any pixel (the common case costs nothing).
-        """
-        nearer = [name for name, rng in self._siblings if rng < self._subject_range_km]
-        if not nearer:
-            return None
-        occluder: NDArrayBoolType | None = None
-        for sibling_name in nearer:
-            try:
-                hidden = restr_bp.where_in_front(sibling_name, self._body_name)
-                hidden_over = hidden.mvals.filled(False).astype(bool)
-            except Exception:
-                self._logger.warning(
-                    'Body %s: failed to compute occlusion by %s; arc / template left untrimmed',
-                    self._body_name,
-                    sibling_name,
-                    exc_info=True,
-                )
-                continue
-            hidden_local = (
-                filter_downsample(hidden_over.astype(np.float64), oversample_v, oversample_u) >= 0.5
-            )
-            occluder = hidden_local if occluder is None else (occluder | hidden_local)
-        if occluder is None or not occluder.any():
-            return None
-        return occluder
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
         """Emit the body's NavFeatures per the design's gate rules."""

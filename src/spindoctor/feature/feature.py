@@ -63,6 +63,15 @@ class NavReliabilityBreakdown:
             falls inside a saturation/cosmic-ray mask pixel.
         smear_length_ok: STAR — True if smear length is below the
             ``stars.max_smear`` reject gate.
+        titan_envelope_diameter_px: TITAN_LIMB — apparent diameter of the
+            haze envelope in pixels.  The sigmoid on this quantity is the
+            reliability's size term: too small a disc leaves the
+            mirror-symmetry annulus and the limb arc too few pixels to
+            measure.
+        titan_occluded_fraction: TITAN_LIMB — fraction of the predicted
+            envelope disc hidden by a nearer body or by the rings.
+            Multiplies the size term, and beyond the configured maximum
+            forces the reliability to zero.
     """
 
     predicted_snr: float | None = None
@@ -77,6 +86,8 @@ class NavReliabilityBreakdown:
     in_body_silhouette: bool | None = None
     in_saturation_or_cosmic: bool | None = None
     smear_length_ok: bool | None = None
+    titan_envelope_diameter_px: float | None = None
+    titan_occluded_fraction: float | None = None
 
 
 @dataclass(frozen=True, eq=False)

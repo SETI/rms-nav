@@ -19,6 +19,7 @@ __all__ = [
     'RingEdgeFlags',
     'StarFlags',
     'TerminatorArcFlags',
+    'TitanHazeFlags',
 ]
 
 
@@ -271,6 +272,29 @@ class CartographicModelFlags:
     mosaic_source: str = ''
 
 
+@dataclass(frozen=True)
+class TitanHazeFlags:
+    """Flags carried on a TITAN_LIMB feature.
+
+    Parameters:
+        body_name: SPICE body name whose haze envelope this feature
+            traces.  Read by ``NavFeature.body_name`` for feature-level
+            body attribution, exactly as on the other body-feature flag
+            dataclasses.
+        surface_window_filter: True when the image was taken through a
+            filter that sees past the haze to the surface.  Recorded for
+            diagnosis and future refinement; the haze fit itself does not
+            branch on it.
+        high_phase: True when the phase angle is large enough that the
+            sunward limb arc has shrunk toward a crescent, which is the
+            regime where the sector fit has the least support.
+    """
+
+    body_name: str = ''
+    surface_window_filter: bool = False
+    high_phase: bool = False
+
+
 NavFeatureFlags = (
     StarFlags
     | LimbArcFlags
@@ -280,5 +304,6 @@ NavFeatureFlags = (
     | BodyBlobFlags
     | RingAnnulusFlags
     | CartographicModelFlags
+    | TitanHazeFlags
 )
 """Sum type spanning every NavFeatureType's flag dataclass."""

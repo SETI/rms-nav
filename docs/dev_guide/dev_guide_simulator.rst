@@ -118,6 +118,11 @@ scene -- including every planted error, noise knob, and contaminant. It lives in
        exponential haze column composited onto the disc, giving a soft limb, a
        terminator that brightens past 90 deg, and a forward-scattering ring of
        light at high phase (see :ref:`sim-atmosphere`).
+   * - ``haze_structure.py``
+     - The optional symmetry-breaking structure of that haze layer: axis tilt,
+       hemispheric and azimuthal falloff variation, an interior brightness
+       ramp, and cloud blobs. Bypassed entirely when a body's ``atmosphere``
+       block names none of its keys (see :ref:`sim-atmosphere`).
    * - ``artifacts_catalog.py``
      - Per-instrument PSF, distortion-residual, and detector-chain defaults the
        ``instrument_defaults`` switch turns on (see
@@ -320,6 +325,13 @@ Three things, each impossible with real frames alone:
   ~0.03-0.05 confidence plateau on a cohort with zero sub-pixel successes,
   and occlusion-aware visible-arc fractions on mutual-event scenes are all
   prices the simulator measured rather than guessed.
+- **A navigator's own assumption can be attacked.** A navigator that measures
+  pointing FROM a symmetry would be graded against its own premise if every
+  rendered scene held that symmetry exactly. The haze layer's structure keys
+  (:ref:`sim-atmosphere`) break it deliberately -- a tilted illumination axis,
+  a non-affine hemispheric falloff difference, an azimuthal sharpness
+  gradient, cloud blobs -- so the recovery error is measured against scenes
+  the method's assumption does not describe.
 - **Failure modes real data cannot isolate become provable.** The worked
   example is the planted-radial-error family: ``orbit_error_ringlet`` plants
   a 2.5 px radial catalog error and the fused result is a high-tier success
@@ -1065,7 +1077,9 @@ render departs from it. The sweeps and their floors:
 - ``ring_orbit_error`` -- a navigable ringlet's rendered orbit displaced radially
   off the catalog orbit.
 - ``atmosphere_haze`` -- a Titan-class haze softens the limb the navigator
-  predicts as hard.
+  predicts as hard. The sweep drives a ``HAZEMOON`` body, so it measures
+  haze-BLIND body navigation; the haze solar-symmetry fit has its own base scene
+  and offset sweeps.
 
 The remaining Section 8 axes are covered by pre-existing sweeps
 (``noise_read_noise``, ``artifact_missing_lines``, ``irregularity_shape_mismatch``,
@@ -1338,6 +1352,54 @@ an opacity ``1 - exp(-tau)``. Three consequences follow:
   the disc adds negligible slant contrast), so the shell appears solely in
   the tangent glow.
 
+**Symmetry-breaking structure.** The layer above is exactly mirror-symmetric
+about the image-plane line through the body centre and the sub-solar direction:
+one exponential column, one illumination weight, no azimuthal or hemispheric
+structure. That is a problem for grading
+:doc:`the haze solar-symmetry fit <dev_guide_techniques_titan_haze>`, which
+measures pointing FROM that symmetry and would otherwise be scored against a
+scene built from its own assumption. ``haze_structure.py`` supplies six optional
+truth keys inside the same ``atmosphere`` block that break it, each with its own
+render-level test asserting the effect is measurably present:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 32 68
+
+   * - Key
+     - Effect on the rendered haze
+   * - ``axis_tilt_deg``
+     - Rotates the haze's own illumination axis away from the geometric sun
+       direction a navigator predicts, so the true mirror plane is not the
+       predicted one.
+   * - ``ns_falloff_ratio``
+     - Scales the haze falloff length on one hemisphere only -- a genuinely
+       NON-affine difference between the two halves the mirror maps onto each
+       other, which is what actually probes a Pearson score's blindness to an
+       affine one.
+   * - ``ns_asymmetry_amplitude``
+     - Scales one hemisphere's brightness: the affine counterpart the Pearson
+       score is supposed to absorb.
+   * - ``sector_sharpness_gradient``
+     - Scales the falloff length with azimuth around the limb, walking the
+       detected limb ridge radially as a function of ray angle -- the
+       sector-asymmetric edge-localization bias.
+   * - ``interior_ramp_amplitude``
+     - Adds a linear brightness ramp along the haze axis inside the disc, the
+       seasonal north-south gradient.
+   * - ``cloud_blobs``
+     - Adds Gaussian clouds on the disc, each ``{center_vu, sigma_px,
+       amplitude}``.
+
+The hemispheres are the two sides of the body's first semi-axis in the body
+frame, so a scene that wants the hemispheric split to be the one the mirror maps
+onto itself orients its illumination perpendicular to that axis. Every field is
+optional and the whole module is bypassed when a block names none of them: the
+haze then renders through exactly the scalar arithmetic above. That gating is a
+performance contract, not only a tidiness one -- the per-pixel scale-height field
+costs an array where the base haze costs a scalar, and ``test_sim_perf.py``
+carries cold-render budgets for the structureless path.
+
 The layer is a truth key: the navigator's predicted body (see
 :doc:`dev_guide_navigation_models_body_simulated`) keeps a hard limb at the
 reference radius and never learns the haze exists, so the soft rendered limb is
@@ -1347,7 +1409,15 @@ phase-dependent apparent limb radius (and the haze parameters) -- the
 ``atmosphere`` catalog scenes measure and pin that bias honestly. The
 low-phase ``titan_haze_limb`` scene records a sub-pixel sunward offset (a few
 tenths of a pixel in ``du``) at the medium tier, the limb DT fit and the disc
-correlation agreeing on the haze-lifted limb. At high phase the haze is
+correlation agreeing on the haze-lifted limb.
+
+Everything in this paragraph is about *body* navigation against a haze the
+navigator does not model. The scenes that measure it carry a body named
+``HAZEMOON`` precisely so they stay in that regime: a body named ``TITAN`` routes
+to the haze model and
+:class:`~spindoctor.nav_technique.nav_technique_titan_haze.TitanHazeNav`, which
+is not haze-blind and measures something else entirely. The ``titan_haze`` scene
+is the one that drives that technique. At high phase the haze is
 outright hostile: in ``titan_crescent_horns`` (155 deg) the ring of light
 defeats the disc correlation (spurious -- there is no full lit disc), the
 predicted terminator arc is emitted but dropped by the feature reliability

@@ -388,10 +388,11 @@ The catalog-driven models register under these per-instance names:
 * ``titan:TITAN`` —
   :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (one
   instance whenever Titan is inside the extended FOV).  Titan's opaque
-  haze hides the surface, so the model emits no features: a frame whose
-  only navigable content is Titan fails with ``status_reason``
-  ``titan_unsupported``, while a frame containing Titan plus other
-  content navigates on the other content.
+  haze hides the surface, so instead of shape features the model emits the
+  haze-envelope geometry that
+  :class:`~spindoctor.nav_technique.nav_technique_titan_haze.TitanHazeNav`
+  navigates from.  On a simulated image the equivalent model registers as
+  ``titan_sim:TITAN``.
 
 Two convenience normalizations apply to model patterns:
 
@@ -424,6 +425,8 @@ techniques are:
   :class:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`,
   :class:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`,
   :class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav`.
+* Titan family —
+  :class:`~spindoctor.nav_technique.nav_technique_titan_haze.TitanHazeNav`.
 
 The star field matcher re-centroids each matched star with a point-spread-function fit
 when the star is faint, and keeps the simpler brightness-weighted centroid when the star
@@ -775,8 +778,9 @@ Navigation Models
 =================
 
 A *navigation model* is SpinDoctor's prediction of what the image *should*
-look like at the spacecraft's nominal pointing.  Three model families
-ship out of the box: stars, planetary bodies, and planetary rings.
+look like at the spacecraft's nominal pointing.  Four model families
+ship out of the box: stars, planetary bodies, planetary rings, and
+Titan's haze envelope.
 Each contributes one or more *features* (typed predictions with their
 own per-feature uncertainty) to the navigator.  You can restrict which
 families run by passing ``--nav-models`` on the command line; valid
@@ -978,6 +982,187 @@ to ``true`` has no effect in the current release.
 
    rings:
      remove_body_shadows: false   # default; not yet implemented
+
+Titan Navigation Model
+----------------------
+
+Titan's atmospheric haze is opaque at most wavelengths, so what a camera
+sees is not the solid surface but the haze top: hundreds of kilometres
+up, at an altitude that varies with wavelength, latitude, season, and
+phase.  Fitting an ellipsoid limb to that edge is systematically wrong
+rather than merely noisy, so Titan is navigated from a property of the
+haze itself.
+
+Absent clouds or visible surface features, a hazy atmosphere is
+mirror-symmetric about the image-plane line through the body centre and
+the sub-solar point.  The image shift perpendicular to that line
+("cross-track") is the shift that maximises mirror symmetry; and because
+the limb arc facing the Sun is close to circular, a circle fit with a
+*free* radius to that arc gives the shift along the line
+("along-track") without assuming any haze altitude.  The free radius is
+what makes the method filter-independent: a haze top that sits higher in
+blue than in red changes the fitted radius, not the fitted centre.  The
+method is published as Hanson, French, Waugh, Barth and Anderson (2025),
+*Geophysical Research Letters*, doi:10.1029/2024GL113415.
+
+**What it produces.**  Whenever Titan is inside the extended field of
+view the model emits a single ``TITAN_LIMB`` feature and
+:class:`~spindoctor.nav_technique.nav_technique_titan_haze.TitanHazeNav`
+measures the offset from it, on any instrument and any filter, with no
+per-filter or per-phase training data.  The reported
+uncertainty is deliberately *anisotropic*: the mirror-symmetry scan
+localises the cross-track direction far more tightly than the circle fit
+localises the along-track one, and the ensemble consumes that ellipse
+rather than an averaged circle.
+
+**Accuracy.**  Single-frame accuracy is **1 px or better cross-track and
+3 px or better along-track**.  That bound comes from planted-truth
+simulation (the 95th percentile of recovery error on the clean-scene
+family of a 700-scene randomised campaign is 0.17 px cross-track and
+0.82 px along-track; families with injected artifacts run wider) and is
+confirmed
+on real frames by an independent witness: over the Cassini validation
+cohort, frames where a star technique locks independently give an
+absolute per-frame anchor, and the haze fit disagrees with it by 0.99 px
+rms cross-track and 1.50 px rms along-track over nine such pairs --
+about 0.70 and 1.06 px of single-frame error once the anchor's own
+uncertainty is removed.  A second anchor class corroborates the first:
+when another moon shares the field of view, its own limb navigation
+measures the same scene-wide offset, and it agrees with the haze fit at
+2-sigma on 11 of the 12 cohort frames where both commit.  Repeat frames
+of one target through one filter agree to 0.34 px cross-track and
+0.33 px along-track.
+
+Two consequences of the along-track figure are worth planning around.
+An image whose only navigable content is Titan reports at most the
+``medium`` confidence tier, because the honest along-track uncertainty
+of a single quasi-circular feature exceeds the ``high`` tier's sigma
+budget; adding a star field or a resolved moon to the frame is what
+lifts it.  And a *small* Titan at *high* phase is the method's weak
+regime: the sunward arc has its least support there, and it is where
+essentially all of the along-track error lives.  Bodies whose apparent
+solid radius is 40 px or more recover to 0.72 px along-track at the 95th
+percentile across every phase; below 40 px above 60 degrees of phase the
+same percentile is 3.0 px.
+
+**Marginal frames are refused, not guessed.**  Three conditions score
+the feature's reliability at exactly zero, after which the standard
+per-feature-type gate removes it before any fit runs:
+
+* the haze envelope, allowing for the full pointing search window, does
+  not fit inside the detector;
+* more than ``max_occluded_fraction`` of the envelope is hidden by a
+  nearer moon or by the rings (the main rings are treated as opaque, so
+  a Titan seen through the C ring or a gap is refused rather than fitted
+  through ring stripes);
+* the envelope is smaller than ``min_envelope_diameter_px`` across.
+
+A frame refused this way ends with ``status_reason``
+``all_features_gated``, and the per-image ``_metadata.json`` records the
+measured envelope diameter and occluded fraction that produced the
+refusal, so the cause is readable without re-running anything.
+
+Frames that clear the gate can still be refused by the fit itself.  Each
+of the seven fit gates below rejects a frame with its name recorded in
+the technique's diagnostics, and a Titan-only frame whose fit is
+rejected ends ``all_techniques_spurious``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 76
+
+   * - Gate
+     - Rejects the frame when
+   * - ``valid_fraction``
+     - Too much of the symmetry annulus is masked or off-frame to
+       correlate.
+   * - ``peak_score``
+     - The best mirror-symmetry score is too low -- the haze is not
+       symmetric enough to measure.
+   * - ``second_peak``
+     - A rival symmetry peak comes too close to the winner, so the axis
+       could lock onto the wrong one.
+   * - ``ray_yield``
+     - Too few limb rays survive; the sunward limb is not detectable
+       along enough of the arc.
+   * - ``arc_inliers``
+     - The robust circle fit rejected too many of the rays it was given.
+   * - ``arc_radius``
+     - The fitted radius is implausible for the body's known size.
+   * - ``arc_residual``
+     - The sunward limb departs too far from a circle.
+
+Whichever way a frame ends, it is attributable: a committed offset, a
+named fit gate, or a gated feature whose reliability breakdown says why.
+Nothing produces a silent empty failure.
+
+**Overlay.**  The summary PNG draws the predicted haze envelope circle,
+the symmetry axis, the sunward arc sector, and a centre cross.  Because
+annotations are composited at the navigated offset, the drawn circle
+lands on the fitted position on a committed frame and stays at the SPICE
+prediction when nothing was committed.  A feature below the reliability
+gate is drawn dotted and labelled ``TITAN (low reliability)``.
+
+**Configuration.**  ``config_060_titan.yaml`` exposes:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 42 58
+
+   * - Key
+     - Effect
+   * - ``titan.atmosphere_height``
+     - Haze envelope above the solid radius in km (default 700).  Bounds
+       the search annulus and the ray windows; the fit itself assumes no
+       haze altitude.
+   * - ``titan.navigation.min_envelope_diameter_px``
+     - Envelope diameter below which reliability is forced to zero.
+   * - ``titan.navigation.max_occluded_fraction``
+     - Occluded share of the envelope above which reliability is forced
+       to zero.
+   * - ``titan.navigation.ring_occlusion_radii_km``
+     - ``[inner_km, outer_km]`` ring-plane range treated as opaque.
+   * - ``titan.navigation.axis_min_offset_px``
+     - Below this predicted-centre-to-sub-solar distance the disc is
+       treated as rotationally symmetric and the axis search is skipped.
+   * - ``titan.navigation.recenter_threshold_px``
+     - Along-track shift above which the fit runs a second, recentred
+       pass.
+   * - ``titan.navigation.star_mask_vmag_limit`` /
+       ``titan.navigation.star_mask_radius_px``
+     - Brightness above which a catalog star is masked out of the fit,
+       and the radius of each masked disc.
+   * - ``titan.navigation.reliability_diameter_midpoint_px`` /
+       ``titan.navigation.reliability_diameter_scale_px``
+     - Midpoint and width of the sigmoid that turns apparent size into
+       feature reliability.
+   * - ``titan.navigation.surface_window_filters``
+     - Filters that see through the haze to the surface.  Recorded as a
+       diagnostic flag; the fit does not branch on it.
+   * - ``titan.navigation.high_phase_deg``
+     - Phase angle above which the emitted feature is flagged
+       ``high_phase``, marking frames whose sunward arc carries its
+       least support.
+   * - ``titan.annotation.*``
+     - Overlay styling: the dot spacing that marks a below-gate feature
+       and the size of the center cross.
+   * - ``titan.navigation.symmetry.*``
+     - Cross-track scan: annulus extent, symmetry-angle refinement, the
+       ``valid_fraction`` / ``peak_score`` / ``second_peak`` gate
+       thresholds, and the reported cross-track sigma's scale and floor.
+   * - ``titan.navigation.arc.*``
+     - Along-track circle fit: sunward sector width and ray spacing,
+       radial sampling, the limb-gradient signal-to-noise cut, the
+       ``ray_yield`` / ``arc_inliers`` / ``arc_residual`` gate
+       thresholds, the robust-fit tuning constant, and the reported
+       along-track sigma's scale and floor.
+
+The covariance model-error floor and the confidence-formula
+coefficients live with the other techniques, under
+``techniques.TitanHazeNav`` in ``config_510_techniques.yaml``.  The
+developer guide documents every key's default and its measured
+justification: see :doc:`/dev_guide/dev_guide_navigation_models_titan`
+and :doc:`/dev_guide/dev_guide_techniques_titan_haze`.
 
 Consolidating Navigation Outputs
 ================================

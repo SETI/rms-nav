@@ -293,6 +293,22 @@ The WS-3 growth target (>=20 per instrument, >=120 total; #235) continues the
 same classes; the structural-invariants test asserts per-class minima on
 non-empty classes.
 
+**Pending operator recommendation: an eighteenth class, `titan_haze`**
+(`TitanHazeNav` primary; a hazy body whose navigable feature is a haze
+envelope). It is a recommendation, not a decision: neither the
+`DECLARED_SCENE_CLASSES` entry nor a budget row is added, and the six
+candidate frames are staged under `util/titan_cohort/nominations/` with draft
+sidecars rather than committed to the library, because a library sidecar's
+ground truth must be `operator_verified` and these carry an autonomous fix.
+The argument for a dedicated class: the existing body classes are defined by
+what the BODY model predicts (a hard limb, a terminator, a disc), a Titan
+frame's navigable feature is a haze envelope with no hard limb at all, its
+primary technique is one no other class uses, and its characteristic failure
+-- the along-track/radius degeneracy -- is not a failure any body class
+exercises; filing Titan frames as `body_full_fov` would make that class's
+realism figure of merit average a hard limb and a haze limb together. The
+class decision rides #407; the pipeline wiring it would need is #405.
+
 ### Per-class selection guide
 
 When a candidate sits between two classes, pick the one that exercises the

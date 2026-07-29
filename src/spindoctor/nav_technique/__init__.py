@@ -14,6 +14,8 @@ Modules:
         ``NavTechniqueResult`` dataclass.
     ``diagnostics``
         Per-technique typed diagnostics dataclasses.
+    ``titan_fitting``
+        Pure array-level fitting library for haze-symmetry navigation.
     ``confidence``
         ``evaluate_sigmoid_combination`` and the supporting ``ConfidenceSpec``
         / ``ConfidenceTerm`` dataclasses.
@@ -36,6 +38,7 @@ from spindoctor.nav_technique.diagnostics import (
     StarFieldDiagnostics,
     StarRefineDiagnostics,
     StarUniqueMatchDiagnostics,
+    TitanHazeDiagnostics,
 )
 from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import NavTechnique, filter_technique_names
@@ -49,6 +52,7 @@ from spindoctor.nav_technique.nav_technique_ring_edge import RingEdgeNav
 from spindoctor.nav_technique.nav_technique_star_field import StarFieldFromCatalogNav
 from spindoctor.nav_technique.nav_technique_star_refine import StarRefineNav
 from spindoctor.nav_technique.nav_technique_star_unique_match import StarUniqueMatchNav
+from spindoctor.nav_technique.nav_technique_titan_haze import TitanHazeNav
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 
 __all__ = [
@@ -78,6 +82,8 @@ __all__ = [
     'StarRefineNav',
     'StarUniqueMatchDiagnostics',
     'StarUniqueMatchNav',
+    'TitanHazeDiagnostics',
+    'TitanHazeNav',
     'evaluate_sigmoid_combination',
     'filter_technique_names',
     'run_manual_nav',

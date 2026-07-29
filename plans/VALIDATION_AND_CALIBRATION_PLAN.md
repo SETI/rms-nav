@@ -38,9 +38,9 @@ honestly and with its uncertainty, not to clear a numeric bar.
  tests, replaces scattered prose claims.
 5. **CI must exercise what we ship.** If real-image navigation is the product,
  real-image navigation must run automatically.
-6. **Scope honestly.** Where a capability won't be built soon (e.g. Titan), the
- claim is removed from the user-facing docs and demoted to a roadmap, not left
- as an implied feature.
+6. **Scope honestly.** Where a capability won't be built soon (e.g. PDS4 input,
+ which waits on archives that do not exist yet), the claim is removed from the
+ user-facing docs and demoted to a roadmap, not left as an implied feature.
 7. **Validation can fail.** It may reveal accuracy worse than hoped. With no spec
  to pass/fail against, a poor result is not a gate — but it feeds the algorithm
  workstreams (e.g. WS-10), it is not merely reported and shrugged off.
@@ -93,7 +93,7 @@ carry the methodology and acceptance criteria):
 | WS-4 | #229 | CI integration tiers. |
 | WS-5 | #230, #176 | Real-anchored recalibration once WS-1 anchors exist. |
 | WS-6 | #231 | Capability matrix. |
-| WS-7 | #60 | Titan: implement or scope out. |
+| WS-7 | #397, #398, #399, #400, #401, #402, #403, #404, #405, #407 | Titan haze navigation delivered and validated; open items are the deferred refinements and the operator ratification bundle (#407). |
 | WS-8 | #53, #67 | Output bundles for all four instruments (required). PDS4 input (#34) is availability-contingent and not required for completion. |
 | WS-9 | #233, #130, #176 | Measured star SNR + sensitivity tests (#233); constants inventory (#176); limiting magnitudes (#130). |
 | WS-10 | #150, #128 | Limb bias root cause and redesign. |
@@ -804,34 +804,63 @@ vapor.
  source for "what works."
 - No shipped config key is documented as functional unless the code consumes it.
 
-**Dependencies:** light coupling to WS-7/8. **Risk:** low.
+**Dependencies:** light coupling to WS-8. **Risk:** low.
 
-### WS-7: Titan navigation — implement or scope out
-**Closes:** "Titan is a no-op."
-**Tracked by:** #60 (Implement Titan navigation) for the "implement" branch.
+### WS-7: Titan navigation
+**Closes:** "Titan is a no-op." **Status:** delivered and validated; the open
+items are refinements and an operator ratification bundle.
 
-**Problem.** Titan's opaque haze hides the surface, so shape-based navigation
-is systematically wrong. The graceful-degradation half is done: Titan is
-hard-excluded from shape navigation as a deliberate Titan-only special case
-(its atmosphere, transparent at some wavelengths, does not generalize to
-other thick-atmosphere bodies), with an active model that emits no features
-and records the decline — a Titan-only frame fails with `titan_unsupported`
-rather than a silent empty result, and a Titan-plus-other-content frame
-navigates on the other content.
+**What ships.** Titan's opaque haze hides the surface, so shape-based
+navigation is systematically wrong on it and the body model excludes it. In
+its place, the haze solar-symmetry method (Hanson, French, Waugh, Barth &
+Anderson, 2025, GRL, doi:10.1029/2024GL113415): absent clouds or visible
+surface features a hazy atmosphere is mirror-symmetric about the image-plane
+line through the body centre and the sub-solar point, so the shift
+perpendicular to that line is the one maximising mirror symmetry, and a
+FREE-radius circle fit to the sunward limb arc gives the shift along it
+without assuming a haze altitude. The free radius is what makes the method
+filter-independent — a wavelength-dependent haze top moves the fitted radius,
+not the fitted centre — and no per-filter or per-phase training data exists
+anywhere in the implementation. Delivered as a model emitting one `TITAN_LIMB`
+feature, the `TitanHazeNav` technique wrapping a pure fitting library, a
+simulated-Titan renderer with symmetry-breaking haze structure, and the
+standing sweeps and campaigns that measure them.
 
-**Decision gate (do this first):** is haze-limb navigation in scope for this
-release? Pick one:
-- **Implement:** a haze-aware limb model — per-filter haze-top altitude
- profiles, a haze-limb feature type, and a DT/edge technique that fits the haze
- top instead of the solid limb, validated on real Titan frames via WS-1.
-- **Scope out:** keep the recorded-decline handling, remove Titan from
- supported-target claims, and mark it not-supported in the capability matrix.
+**Deliberate design points.** Frame quality is reliability, never a refusal to
+emit: a clipped, occluded, or too-small envelope scores exactly zero and the
+standard per-type gate removes it, so a marginal Titan resolves through the
+same statuses as any other marginal scene and carries an attributing gate
+record. There is no Titan-specific status reason. The reported covariance is
+strongly anisotropic by construction, because the cross-track direction is
+genuinely far better determined than the along-track one.
 
-**Acceptance criteria.** Either real Titan frames navigate within a stated bound,
-or Titan is unambiguously documented as not-supported (the graceful handling
-already exists).
+**Stated bound (the acceptance criterion's answer).** Single-frame accuracy is
+1 px or better cross-track and 3 px or better along-track. The bound is the
+planted-truth clean-scene P95 (0.17 px cross-track, 0.82 px along-track on
+the clean family of a 700-scene randomized campaign; artifact-injected
+families run wider) confirmed by real-frame evidence: against an independent
+star lock on the same frame the haze fit disagrees by 0.99 px rms cross-track
+and 1.50 px rms along-track over nine pairs, implying about 0.70 and 1.06 px
+per frame; repeat frames of one target through one filter agree to 0.34 px
+and 0.33 px. Measured on an 82-frame Cassini cohort: 73.5% of `clean` frames
+commit, every `clean`-frame refusal is attributed to a named gate, and no
+adverse frame produces a confident-wrong lock that a witness contradicts.
 
-**Dependencies:** WS-1 if implementing. **Risk:** high if building (haze physics is genuinely hard).
+**Open items.** The refinements are issues, not prose: the haze-radius table
+that would remove the along-track/radius degeneracy and settle whether the
+haze top is measurably wavelength-dependent (#397), CB3 surface-window
+cartographic correlation (#398), a Voyager validation cohort (#399), ensemble
+handling of the oblique covariance (#400), extreme phase (#401), ring
+translucency (#402), arc ray reach (#403), a size-relative residual gate
+(#404), and library growth through the standard curation pipeline (#405).
+Three acceptance bounds the evidence argues with, five mid-implementation
+specification changes, and three staged curation artifacts await operator
+ratification (#407).
+
+**Dependencies:** WS-1 for the agreement channel that would graduate the
+accuracy claim from this workstream's evidence to published statistics (#225).
+**Risk:** realized — the physics was hard and the delivered method sidesteps
+the hardest part of it by never assuming a haze altitude.
 
 ### WS-8: PDS4 — generalize output bundle generation (input is separate and external-dependent)
 **Closes:** "PDS4 is largely fictional."
@@ -1071,8 +1100,9 @@ survives reflow.
 - **WS-1b** — WS-3; shares its implementation with WS-18.
 - **WS-4** (CI) — WS-3 (+ WS-1 for the accuracy-regression gate).
 - **WS-5** (confidence) — WS-0, WS-1, WS-2.
-- **WS-6** (capability matrix) — light coupling to WS-7/8.
-- **WS-7 / WS-8 / WS-12** (Titan / PDS4 / appendices) — decision gates first.
+- **WS-6** (capability matrix) — light coupling to WS-8.
+- **WS-8 / WS-12** (PDS4 / appendices) — decision gates first. **WS-7** (Titan)
+  is delivered; its remaining issues are independent.
 - **WS-9 / WS-10 / WS-13** (constants / limb bias / I/F) — WS-1 and/or WS-2.
 - **WS-15** (performance) — independent; start anytime.
 - **WS-18** (end-product accuracy) — WS-1b + WS-2 + WS-8.
@@ -1101,7 +1131,7 @@ common-mode/identifiability/bias caveats together are the honest result.
 - **Milestone C — "Calibrated & defensible":** WS-5 (full), WS-9, WS-10, WS-13.
  Confidence and covariance mean something; the limb bias is fixed; the I/F path is
  real.
-- **Milestone D — "Complete & scalable":** WS-7, WS-8, WS-12, WS-15, WS-18.
+- **Milestone D — "Complete & scalable":** WS-8, WS-12, WS-15, WS-18.
  Capability gaps closed or honestly scoped; end products validated; performance and
  parallelism fit a campaign.
 
@@ -1117,7 +1147,7 @@ common-mode/identifiability/bias caveats together are the honest result.
 | 3 | ~13-image cohort; CI skips integration | WS-3, WS-4 | cohort targets met; real images run in CI + nightly accuracy gate |
 | 4 | Ships uncalibrated confidence/tiers | WS-5 | calibrated where per-technique covariance exists, sim-anchored elsewhere (basis recorded per value); reliability diagram; interim provisional label |
 | 5 | Mid-rewrite; docs ≠ code; vapor; dead config | WS-6 | test-verified capability matrix; docs/config reconciled |
-| 6a | Titan is a no-op | WS-7 | implemented+validated, or scoped-out + graceful |
+| 6a | Titan is a no-op | WS-7 | closed: haze solar-symmetry navigation implemented and validated on an 82-frame Cassini cohort to a stated 1 px cross-track / 3 px along-track bound, star-anchored |
 | 6b | PDS4 input absent; bundles Cassini-only | WS-8 | bundles schema-validate for all four instruments; input recorded as pending external archive availability |
 | 6c | Empty instrument appendices | WS-12 | all four appendices written |
 | 7a | Covariance shaped by magic constants | WS-9 | each constant derived + sensitivity-bounded |
@@ -1221,11 +1251,12 @@ report, none silently assumed):**
 - (Within-bin stationarity, covered above, is the broad limiter — it constrains the
  *pairwise* fallback too, which is *less* assumption-laden than the separation but
  not assumption-free.)
-- The Titan scope decision (build vs scope-out) should be made at the
- WS-6/WS-7 decision gates before committing build effort; the plan supports
- either branch and the matrix keeps the docs honest regardless. PDS4 output
- bundles are required for all four instruments (WS-8); only PDS4 *input* is
- external-dependent and out of the completion scope.
+- Titan navigation is built and validated (WS-7), so the capability matrix
+ records it as supported with its bound rather than as a scope question; what
+ remains open there is the ratification bundle (#407) and the deferred
+ refinements. PDS4 output bundles are required for all four instruments
+ (WS-8); only PDS4 *input* is external-dependent and out of the completion
+ scope.
 - **Validation can come back bad.** There is no fixed accuracy spec to pass (goal is
  best-achievable, honestly characterized), so a poor result is not a go/no-go gate
  — but it is not merely reported either: a worse-than-hoped σ routes into the

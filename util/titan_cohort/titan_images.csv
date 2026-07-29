@@ -1,0 +1,89 @@
+# Titan validation cohort, vendored 2026-07-26 from
+# /seti/all_repos/rms-csmithing/tests/titan_images.txt (87 lines,
+# 83 entries, 82 unique image ids -- N1484962455_2 is listed twice
+# in the source and appears once here).  The flags column is this
+# repo's reading of each freeform annotation; the annotation itself
+# is preserved verbatim in notes.
+image_id,flags,notes
+N1515117363_1,moon_occluding;rings_occluding,"Titan w/Epimetheus&edge-on rings occluding, Dione"
+N1515117689_1,moon_occluding;rings_occluding,"Titan w/Epimetheus&edge-on rings occluding occluding, Dione"
+N1515118239_1,near_edge;rings_occluding,"Titan w/edge-on rings occluding, Epimetheus, Dione; Titan near edge"
+N1515118349_1,off_edge;rings_occluding,"Titan w/edge-on rings occluding, Epimetheus, Dione; Titan slightly off edge"
+N1515118569_1,off_edge;rings_occluding,"Titan w/edge-on rings occluding, Epimetheus, Dione; Titan mostly off edge"
+N1516297000_1,high_phase;rings_occluding,Titan high phase w/edge-on rings occluding
+N1521670512_1,high_phase;moon_occluding;rings_occluding,Titan high phase w/Janus&edge-on rings occluding
+N1524901622_1,rings_occluding,Titan w/edge-on rings occluding
+N1528719506_1,high_phase;moon_occluding,Titan high phase w/Rhea occluding
+N1634462210_1,known_bad,Titan Tethys XXX BAD TITAN
+N1634462549_1,moon_occluding,Titan w/Tethys occluding
+N1634463001_1,moon_occluding,Titan w/Tethys occluding
+N1634463227_1,clean,Titan Tethys
+N1634463453_1,off_edge,Titan Tethys; Titan slightly off edge
+N1635365580_1,known_bad,Titan Rhea XXX BAD RHEA MODEL
+N1635365617_1,clean,Titan w/Rhea behind
+N1636847787_1,clean,Titan Hyperion
+N1637959164_1,clean,Titan Tethys
+N1647091889_1,clean,Titan Dione
+N1647092276_1,moon_occluding,Titan w/Dione occluding
+N1647092509_1,moon_occluding,Titan w/Dione occluding
+N1647092996_1,near_edge,Titan Dione; Titan near edge
+N1649556181_1,near_edge,Titan Dione; Titan near edge
+N1650467933_1,clean,Titan Dione
+N1686939958_1,clean,Titan Rhea
+N1689372665_1,clean,Titan Tethys
+N1702239331_1,clean,Titan Tethys
+W1822132529_1,clean,
+N1701985038_1,off_edge,Titan off edge
+N1701985208_1,moon_occluding,Second moon too close
+N1701985412_1,moon_occluding,Second moon on top of Titan
+N1715855071_1,rings_occluding,Titan occluded by rings
+W1676687378_1,rings_occluding,Some ring is overlapping Titan - E ring?
+N1487517693_1,rings_occluding,Ring is too close to Titan
+W1665740526_2,known_bad,Bad lines
+W1702446995_1,known_bad,Bad image entirely
+W1618826483_2,known_bad,Bad image entirely
+N1504004058_2,known_bad,Old - Symmetry navigates off bottom
+N1484962455_2,known_bad,Old - Not far enough along track
+W1526778201_1,clean,
+W1604464865_1,clean,
+W1604466257_1,clean,
+W1604467653_1,clean,
+W1604469049_1,clean,
+W1681926856_1,clean,VIO 16
+W1655808265_1,clean,VIO 30
+W1683615178_1,clean,VIO 45
+W1552216646_1,clean,VIO 60
+W1743914297_1,clean,VIO 73
+W1753508727_1,clean,VIO 90
+W1548712789_1,clean,VIO 104
+W1532185013_1,clean,VIO 120
+W1643375992_1,clean,VIO 135
+W1721822901_1,high_phase,VIO 149
+W1561790952_1,high_phase,VIO 166
+W1629929515_1,clean,RED 16
+W1655808364_1,clean,RED 30
+W1683615321_1,clean,RED 45
+W1552216540_1,clean,RED 60
+W1743914117_1,clean,RED 73
+W1753508826_1,clean,RED 90
+W1548712675_1,clean,RED 104
+W1532184947_1,clean,RED 120
+W1643376091_1,clean,RED 135
+W1721823033_1,high_phase,RED 149
+W1561794185_1,high_phase,RED 166
+W1548771820_1,clean,
+N1477239260_2,clean,
+N1481452791_1,clean,
+N1481359160_1,clean,
+N1487425892_2,clean,
+N1496550260_1,clean,
+N1498705305_2,clean,
+N1552432154_1,clean,
+N1585391759_1,clean,
+N1609608920_1,clean,
+N1627588920_1,clean,
+N1647460607_1,clean,
+N1604954125_1,clean,
+N1604954566_1,clean,
+W1883905091_1,clean,
+N1702246562_1,clean,

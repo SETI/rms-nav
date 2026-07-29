@@ -17,6 +17,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from spindoctor.sim.forward.haze_structure import (
+    CLOUD_BLOB_KEYS,
+    HAZE_STRUCTURE_KEYS,
+    SECTOR_REFERENCE_HALF_ANGLE_DEG,
+)
 from spindoctor.sim.forward.photometry import PHOTOMETRIC_LAWS
 from spindoctor.sim.scene_checks import (
     _check_optional_mapping_list,
@@ -279,10 +284,30 @@ def _check_body_relief_and_photometry(obj: dict[str, Any], *, label: str, source
 # The exponential haze layer: scale height and reference-altitude tangent
 # optical depth (both required and positive) define the column; the
 # reference altitude, the Henyey-Greenstein asymmetry (forward-scattering
-# when positive), and an optional detached-shell altitude are optional.
-_ATMOSPHERE_KEYS: frozenset[str] = frozenset(
-    {'scale_height_px', 'tau_ref', 'ref_altitude_px', 'g', 'detached_px'}
+# when positive), and an optional detached-shell altitude are optional.  The
+# structure keys folded in from the forward model break the column's mirror
+# symmetry (axis tilt, hemispheric and azimuthal falloff scaling, hemispheric
+# brightness, an axial interior ramp, and clouds); all are optional.
+ATMOSPHERE_KEYS: frozenset[str] = (
+    frozenset({'scale_height_px', 'tau_ref', 'ref_altitude_px', 'g', 'detached_px'})
+    | HAZE_STRUCTURE_KEYS
 )
+"""Every key one body's ``atmosphere`` block may carry.
+
+Public because the boundary tests iterate it: the whole block is ONE entry of
+the schema's truth-key inventory, so a key added here would otherwise be
+invisible to the boundary suite's completeness check.
+"""
+
+MIN_SECTOR_SHARPNESS_GRADIENT: float = -SECTOR_REFERENCE_HALF_ANGLE_DEG / 180.0
+"""Exclusive lower bound on ``sector_sharpness_gradient``.
+
+The gradient scales the haze falloff length by ``1 + g * azimuth /
+reference``, and the azimuth runs to ``pi`` at the anti-sunward point, so a
+``g`` at or below ``-reference / pi`` asks for a zero or negative length
+there.  Bounding it here means the renderer never has to decide what a
+negative atmosphere means.
+"""
 
 
 def _check_atmosphere(value: Any, *, label: str, source: str) -> None:
@@ -293,7 +318,7 @@ def _check_atmosphere(value: Any, *, label: str, source: str) -> None:
         raise SimSceneValidationError(
             f'{source}: {label}.atmosphere must be a mapping when present'
         )
-    unknown = set(value) - _ATMOSPHERE_KEYS
+    unknown = set(value) - ATMOSPHERE_KEYS
     if unknown:
         raise SimSceneValidationError(
             f'{source}: {label}.atmosphere: unknown keys: {sorted(unknown)}'
@@ -319,6 +344,65 @@ def _check_atmosphere(value: Any, *, label: str, source: str) -> None:
         raise SimSceneValidationError(
             f'{source}: {label}.atmosphere.g must lie in (-1, 1); got {g!r}'
         )
+    _check_haze_structure(value, label=label, source=source)
+
+
+def _check_haze_structure(value: dict[str, Any], *, label: str, source: str) -> None:
+    """Validate the symmetry-breaking structure keys of an ``atmosphere`` map.
+
+    The amplitudes and the axis tilt are plain numbers (a negative amplitude
+    darkens, a negative tilt rotates the other way), and the falloff ratio
+    must be positive because it multiplies a length.  The sharpness gradient
+    multiplies that same length by ``1 + g * azimuth / reference``, and the
+    azimuth reaches ``pi`` at the anti-sunward point, so keeping the length
+    positive everywhere on the limb bounds ``g`` below at
+    ``-reference / pi`` -- one third for the 60 degree reference sector.
+
+    Parameters:
+        value: One body's ``atmosphere`` mapping.
+        label: Body label used in error messages.
+        source: Scene source used in error messages.
+    """
+    for key in ('interior_ramp_amplitude', 'ns_asymmetry_amplitude', 'axis_tilt_deg'):
+        _check_optional_number(value.get(key), f'{label}.atmosphere.{key}', source=source)
+    _check_optional_positive_number(
+        value.get('ns_falloff_ratio'), f'{label}.atmosphere.ns_falloff_ratio', source=source
+    )
+    gradient = value.get('sector_sharpness_gradient')
+    _check_optional_number(gradient, f'{label}.atmosphere.sector_sharpness_gradient', source=source)
+    if gradient is not None and float(gradient) <= MIN_SECTOR_SHARPNESS_GRADIENT:
+        raise SimSceneValidationError(
+            f'{source}: {label}.atmosphere.sector_sharpness_gradient must exceed '
+            f'{MIN_SECTOR_SHARPNESS_GRADIENT:.4f} (below it the falloff length it '
+            f'scales turns negative on the anti-sunward limb); got {gradient!r}'
+        )
+    blobs = value.get('cloud_blobs')
+    if blobs is None:
+        return
+    _check_optional_mapping_list(blobs, f'{label}.atmosphere.cloud_blobs', source=source)
+    for index, blob in enumerate(blobs):
+        blob_label = f'{label}.atmosphere.cloud_blobs[{index}]'
+        unknown = set(blob) - CLOUD_BLOB_KEYS
+        if unknown:
+            raise SimSceneValidationError(
+                f'{source}: {blob_label}: unknown keys: {sorted(unknown)}'
+            )
+        for required in ('sigma_px', 'amplitude'):
+            if blob.get(required) is None:
+                raise SimSceneValidationError(f'{source}: {blob_label}.{required} is required')
+        _check_optional_positive_number(
+            blob.get('sigma_px'), f'{blob_label}.sigma_px', source=source
+        )
+        _check_optional_number(blob.get('amplitude'), f'{blob_label}.amplitude', source=source)
+        center = blob.get('center_vu')
+        if center is None:
+            continue
+        if not isinstance(center, (list, tuple)) or len(center) != 2:
+            raise SimSceneValidationError(
+                f'{source}: {blob_label}.center_vu must be a list of 2 offsets when present'
+            )
+        for offset in center:
+            _check_optional_number(offset, f'{blob_label}.center_vu[]', source=source)
 
 
 # The multiplicative albedo texture: a band-limited noise field (rms +

@@ -251,6 +251,15 @@ class FakeBackplane:
         """Return scalar center-pixel phase angle (radians)."""
         return _scalar(self._body(body_name).center_phase_rad)
 
+    def center_resolution(self, body_name: str, axis: str = 'u') -> polymath.Scalar:
+        """Return the scalar km/px scale at the body centre.
+
+        The shim reports the same scale on both axes; ``axis`` is accepted
+        for API parity with ``oops.Backplane.center_resolution``.
+        """
+        del axis
+        return _scalar(self._body(body_name).default_resolution_km_px)
+
     def where_intercepted(self, body_name: str) -> polymath.Scalar:
         """Return a boolean Scalar marking pixels intercepting the body."""
         return _scalar(self._body(body_name).intercept_mask().astype(bool))

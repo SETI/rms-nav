@@ -61,7 +61,14 @@ Body techniques
    dev_guide_techniques_body_terminator
    dev_guide_techniques_body_disc
    dev_guide_techniques_body_blob
-   dev_guide_techniques_body_titan
+
+Titan techniques
+----------------
+
+.. toctree::
+   :maxdepth: 4
+
+   dev_guide_techniques_titan_haze
 
 Ring techniques
 ---------------

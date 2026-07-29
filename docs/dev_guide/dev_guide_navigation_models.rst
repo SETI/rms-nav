@@ -36,8 +36,10 @@ Registered concrete models, grouped by feature family:
   body whose bounding box overlaps the extended FOV) and
   :class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated`
   (simulated-image GUI variant). Titan is a body too, but its surface is hidden by haze, so
-  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` records a no-result instead of
-  shape features (its reserved ``NavModelTitanSimulated`` sibling is not implemented).
+  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` emits a haze-envelope feature
+  instead of shape features, and
+  :class:`~spindoctor.nav_model.nav_model_titan_simulated.NavModelTitanSimulated` is its
+  simulated-image sibling.
 - **Rings** (:doc:`dev_guide_navigation_models_rings`) —
   :class:`~spindoctor.nav_model.nav_model_rings.NavModelRings` (catalog-driven; one instance per
   planet whose ring system is configured and visible) and

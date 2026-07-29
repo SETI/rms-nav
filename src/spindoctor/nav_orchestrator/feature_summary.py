@@ -7,8 +7,9 @@ full NavFeature (templates, polylines, covariance) because those would bloat
 the metadata.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from spindoctor.feature.feature import NavReliabilityBreakdown
 from spindoctor.feature.feature_type import NavFeatureType
 
 __all__ = ['NavFeatureSummary']
@@ -31,6 +32,12 @@ class NavFeatureSummary:
             non-empty.
         bbox_extfov_vu: Half-open ``(v_min, u_min, v_max, u_max)`` bounding
             box in extfov coordinates; a 4-tuple of ints.
+        reliability_reasons: Per-component breakdown of ``reliability``,
+            copied from the emitting feature.  The scalar score alone says a
+            feature was dropped but not what dragged it down, so the
+            breakdown is what makes a gate decision attributable from the
+            per-image metadata rather than only from a debug log.  Defaults
+            to an empty breakdown (every component ``None``).
 
     Raises:
         TypeError: if any field has the wrong type.
@@ -44,6 +51,7 @@ class NavFeatureSummary:
     gated: bool
     gate_reason: str | None
     bbox_extfov_vu: tuple[int, int, int, int]
+    reliability_reasons: NavReliabilityBreakdown = field(default_factory=NavReliabilityBreakdown)
 
     def __post_init__(self) -> None:
         """Validate types and invariants on every field."""
@@ -68,4 +76,9 @@ class NavFeatureSummary:
         ):
             raise TypeError(
                 f'bbox_extfov_vu must be a 4-tuple of ints; got {self.bbox_extfov_vu!r}'
+            )
+        if not isinstance(self.reliability_reasons, NavReliabilityBreakdown):
+            raise TypeError(
+                'reliability_reasons must be NavReliabilityBreakdown; '
+                f'got {type(self.reliability_reasons).__name__}'
             )

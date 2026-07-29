@@ -16,8 +16,8 @@ emit any subset of the four feature types its silhouette geometry justifies.
 Two body classes are excluded from shape-based navigation. Titan builds no
 :class:`~spindoctor.nav_model.nav_model_body.NavModelBody` at all: its opaque haze hides the
 surface, so ellipsoid limb / terminator / disc navigation is systematically wrong. The
-:doc:`Titan model <dev_guide_navigation_models_titan>` records a no-result for it
-instead. Bodies tagged ``highly_irregular`` in the shape table (chaotic rotators, small
+:doc:`Titan model <dev_guide_navigation_models_titan>` navigates it from the haze's solar
+symmetry instead. Bodies tagged ``highly_irregular`` in the shape table (chaotic rotators, small
 potato moons) still build a body model but suppress their shape features once resolved beyond
 a few pixels, falling back to the point-like
 :data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB` (see *Feature emission gates*
@@ -329,8 +329,9 @@ fraction falls below the photometric thresholds, emit only the geometric feature
 when its uncertainty allows; otherwise nothing).
 
 Titan produces no
-:class:`~spindoctor.nav_model.nav_model_body.NavModelBody` instance; the Titan model
-handles it. A ``highly_irregular`` body resolved beyond the ``min_bounding_box_area``-derived
+:class:`~spindoctor.nav_model.nav_model_body.NavModelBody` instance; the
+:doc:`Titan model <dev_guide_navigation_models_titan>` handles it. A
+``highly_irregular`` body resolved beyond the ``min_bounding_box_area``-derived
 pixel threshold emits no shape features (limb / terminator / disc) and navigates only as a
 :data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB`; ``irregular`` bodies are
 unaffected.

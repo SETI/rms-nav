@@ -54,10 +54,6 @@ STATUS_REASON_INFO_TEMPLATE: dict[NavStatusReason, list[str]] = {
         'Final: status=failed',
         'No config block for this instrument camera',
     ],
-    NavStatusReason.TITAN_UNSUPPORTED: [
-        'Final: status=failed',
-        'Titan in FOV: opaque-haze navigation not supported',
-    ],
     NavStatusReason.NO_FEATURES_EXTRACTED: [
         'Final: status=failed',
         'No extractor produced a feature',

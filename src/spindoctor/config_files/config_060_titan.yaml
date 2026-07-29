@@ -1,2 +1,153 @@
 titan:
+  # Haze envelope above the solid radius, km. Bounds the search
+  # annulus and windows; the fit itself does not assume a haze
+  # altitude.
   atmosphere_height: 700
+  navigation:
+    # Hard-zero reliability floors: beyond these the feature is still
+    # emitted but with reliability 0.0, so the standard TITAN_LIMB type
+    # gate always removes it.
+    min_envelope_diameter_px: 40.0
+    max_occluded_fraction: 0.10
+    ring_occlusion_radii_km: [74490.0, 140500.0]
+    axis_min_offset_px: 3.0
+    recenter_threshold_px: 8.0
+    star_mask_vmag_limit: 8.0
+    star_mask_radius_px: 4.0
+    # Reliability sigmoid: chosen so reliability crosses the 0.30
+    # TITAN_LIMB type gate near the hard-zero floor above, keeping the
+    # two gates consistent.
+    reliability_diameter_midpoint_px: 52.0
+    reliability_diameter_scale_px: 14.0
+    # Cassini filters that see through to the surface; sets the
+    # surface_window flag (diagnostic + future refinement only).
+    surface_window_filters: [CB3]
+    # Phase angle (deg) above which the sunward limb has shrunk toward a
+    # crescent; sets the high_phase flag on the emitted feature, marking
+    # the frames whose along-track uncertainty deserves the most
+    # scrutiny (the arc sector carries its least support there).
+    high_phase_deg: 150.0
+    symmetry:
+      annulus_inner_fraction: 0.55
+      annulus_outer_pad_px: 6.0
+      angle_refine_deg: 5.0
+      angle_refine_step_deg: 0.5
+      angle_refine_min_gain: 0.02
+      min_peak_score: 0.60
+      min_valid_fraction: 0.50
+      # Held at 0.90.  On the real Cassini cohort this gate never fires:
+      # across the 63 frames that reach the symmetry scan the strongest
+      # rival peak measured 0.688, with a 95th percentile of 0.453, and
+      # the near-rotationally-symmetric low-phase discs that make the
+      # simulator's side lobes straddle the threshold are not a regime
+      # the cohort's real hazes reproduce.  Raising it would buy nothing
+      # measurable on real frames and would spend the false-lock margin
+      # the simulator says is real.
+      max_second_peak_ratio: 0.90
+      # Set from the planted-truth campaign (util/titan_truth, 700 randomized
+      # scenes, campaign seed 20260725).  The noise-deficit heuristic the
+      # cross-track sigma comes from over-states the error by about an order
+      # of magnitude on rendered haze discs: over the rows whose sigma was not
+      # already clamped to the floor below, the multiplier that makes the
+      # cross-track z-scores unit-normal measured 0.088, and 0.098 on the
+      # preceding campaign draw -- 0.10 is the stable round value between them.
+      #
+      # The reported sigma barely moves, because the floor below binds on 94%
+      # of rows either way -- which is also why the all-row z-score standard
+      # deviation cannot reach the [0.8, 1.25] acceptance band at ANY value of
+      # this scale: it saturates at 0.656 once every row sits on the floor.
+      cross_sigma_scale: 0.10
+      # Held at 0.30 on real-frame evidence rather than cut to the 0.08 px
+      # the simulator's cross-track rms implies.  On the 82-frame Cassini
+      # cohort the cross-track disagreement against an independent star lock
+      # runs 0.99 px rms per pair (0.70 px per frame) and reaches 1.84 px per pair, and repeat frames of
+      # one target through one filter agree to 0.34 px -- so the reported
+      # 0.36 px (this floor in quadrature with the 0.2 px model-error floor)
+      # is already at or inside the measured spread.  Cutting it to satisfy
+      # a simulator statistic would report a tighter uncertainty than real
+      # frames support.
+      sigma_floor_cross_px: 0.30
+    arc:
+      # Widened from 60 deg on real-frame evidence.  The sunward-sector
+      # circle fit determines the limb position (d + R) far better than it
+      # separates the centre shift d from the radius R, and the variance
+      # that degeneracy adds to d falls by a factor of 3.5 between a 60 deg
+      # and an 80 deg half-sector.  It matters because the haze top is
+      # expected to be wavelength-dependent (a prior, not something the
+      # cohort could confirm against fit noise), so the true radius can
+      # differ between filters and a fit that cannot separate the two puts
+      # part of that difference into the offset.  Widening cut the along-track
+      # disagreement against an independent star lock from 4.23 to 1.50 px
+      # rms of the pair difference (worst case 10.58 -> 3.84 px) and removed
+      # a confident-wrong lock.  It did NOT measurably tighten the
+      # red-versus-violet fitted-radius differences themselves: over the six
+      # pairs that commit on both sides those span 35.0-131.2 km at 60 deg
+      # and 11.8-97.8 km at 80 deg, with the spread about the mean
+      # essentially unchanged.  The cost is a lower commit rate on
+      # simulated scenes (65% -> 59%), where a rendered haze limb is exactly
+      # the circle being fitted and the degeneracy has nothing to correct.
+      sector_half_angle_deg: 80.0
+      ray_step_deg: 2.0
+      radial_step_px: 0.5
+      radial_inner_fraction: 0.80
+      # Kept well clear of ~1.5 px: the rule that drops a ray whose
+      # steepest falloff lands on the first or last sample of its search
+      # window needs margin outside the window to have anything to detect.
+      radial_outer_pad_px: 6.0
+      median_filter_samples: 5
+      # Raised from 4.0.  With the shipped 4.0, 8% of simulated frames whose
+      # truth was planted OUTSIDE the search window locked confident-wrong
+      # instead of gating, because rays pinned at their own window bound
+      # agree with each other; at 8.0 none did.  Measured cost on the real
+      # Cassini cohort: negligible.  Of the 51 frames whose feature reached
+      # the technique in both runs, 45 keep an identical surviving-ray count
+      # and six change (59 -> 37 and 59 -> 38 on a 166 deg phase pair,
+      # 59 -> 52, 59 -> 54, 56 -> 52, 52 -> 51), every one still far above
+      # the min_rays floor, and no frame's residual RMS moves by more than
+      # 0.35 px.
+      min_gradient_snr: 8.0
+      min_rays: 20
+      min_inlier_fraction: 0.50
+      # Held at 2.0.  Raising it to 3.5 was tried and REFUSED by the
+      # evidence: it admits seven more real frames, but two of them lock
+      # measurably wrong -- one disagrees with its own independent star
+      # anchor by 12.7 px and with its cross-filter twin by 8.7 px.  The
+      # real cohort's residual distribution is a continuum from 0.29 to
+      # 3.03 px with a clean gap to the gross failures at 9.0 and 57.9 px,
+      # so the natural-looking cut in that gap is exactly the wrong one:
+      # the frames between 2 and 3 px of residual are wrong, not merely
+      # noisy.
+      max_residual_rms_px: 2.0
+      tukey_c: 4.685
+      # Held at unity by the planted-truth campaign, and deliberately NOT
+      # retuned to satisfy the z-score band.  The few percent of rows whose
+      # fit sigma exceeds the floor below are the rows where the arc fit
+      # knows it did badly -- they carry the campaign's largest along-track
+      # errors -- and on them the estimator reports sigma too NARROW, not too
+      # wide (their own z-scores run to an rms near 3).  Shrinking this
+      # multiplier would narrow the reported uncertainty on exactly the
+      # frames that are wrong, buying a better-looking all-row statistic by
+      # making the honest minority dishonest.
+      #
+      along_sigma_scale: 1.0
+      # Held at 1.00 on real-frame evidence, NOT cut to the 0.63 px the
+      # simulator's along-track rms implies.  Against an independent star
+      # lock the real cohort's along-track disagreement runs 1.06 px rms per
+      # frame and reaches 3.84 px, so the reported 1.02 px (this floor in
+      # quadrature with the model-error floor) is if anything optimistic.
+      # The consequence is deliberate: hypot(1.00, 0.20) exceeds the 0.5 px
+      # max_sigma_px of the high confidence tier, so a Titan-only frame caps
+      # at medium.  For a single quasi-circular feature whose along-track
+      # coordinate is degenerate with a free radius, that is the honest
+      # statement.
+      sigma_floor_along_px: 1.00
+  annotation:
+    # Sample spacing that turns the overlay's curves from solid into
+    # dotted for a feature below the per-type reliability gate.  Curves
+    # are rasterized at half-pixel steps, so 4 leaves a dot every two
+    # pixels with a one-pixel gap; raise it if bodies.outline_thicken is
+    # nonzero, since thickening closes small gaps and a dotted overlay
+    # would otherwise render solid.
+    gated_dot_spacing: 4
+    # Half-length (px) of the cross drawn at the disc center.
+    center_marker_half_px: 4
