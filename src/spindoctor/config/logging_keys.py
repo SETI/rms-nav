@@ -29,6 +29,7 @@ __all__ = [
     'OTHER_LOG_KEYS',
     'log_key_for',
     'model_log_keys',
+    'normalize_level',
     'technique_log_keys',
     'validate_logging_config',
 ]
@@ -46,9 +47,9 @@ CATEGORY_KEYS = frozenset({'techniques', 'models', 'other'})
 OTHER_LOG_KEYS = frozenset(
     {
         'annotate',
+        'correlate',
         'ensemble',
         'image_derivatives',
-        'nav_correlate_all',
         'obs',
         'orchestrator',
         'provenance',
@@ -100,10 +101,33 @@ def log_key_for(cls: type) -> str:
         if name.startswith(prefix) and len(name) > len(prefix):
             name = name[len(prefix) :]
             break
-    for suffix in _CLASS_NAME_SUFFIXES:
-        if name.endswith(suffix) and len(name) > len(suffix):
-            name = name[: -len(suffix)]
+    # Strip suffixes until none match rather than making one pass, so a name
+    # carrying both (a simulated technique, FooSimulatedNav) reduces the same
+    # way regardless of the order the suffixes appear in.
+    stripping = True
+    while stripping:
+        stripping = False
+        for suffix in _CLASS_NAME_SUFFIXES:
+            if name.endswith(suffix) and len(name) > len(suffix):
+                name = name[: -len(suffix)]
+                stripping = True
     return _CAMEL_BOUNDARY.sub('_', name).lower()
+
+
+def normalize_level(value: str) -> str:
+    """Return the canonical spelling of a configured level name.
+
+    Level names are accepted in any case and with surrounding whitespace, so
+    every consumer must canonicalize the same way.  This is that one place;
+    read a level through it rather than upper-casing at the point of use.
+
+    Parameters:
+        value: A level name as it appears in the configuration.
+
+    Returns:
+        The upper-case level name with surrounding whitespace removed.
+    """
+    return value.strip().upper()
 
 
 def technique_log_keys() -> frozenset[str]:
@@ -149,7 +173,7 @@ def _validate_level(value: Any, location: str) -> None:
     """
     if not isinstance(value, str):
         raise ValueError(f'{location} must be a level name string, got {type(value).__name__}')
-    if value.strip().upper() not in LOG_LEVEL_NAMES:
+    if normalize_level(value) not in LOG_LEVEL_NAMES:
         raise ValueError(f'{location} is {value!r}; expected one of {sorted(LOG_LEVEL_NAMES)}')
 
 
@@ -179,14 +203,16 @@ def _validate_category(
         _validate_level(value, f'{location}.{key}')
 
 
-def _validate_block(block: dict[str, Any], location: str, *, allow_strict_scope: bool) -> None:
+def _validate_block(block: dict[str, Any], location: str, *, is_top_level: bool) -> None:
     """Validate one logging block: the top-level section or one program's.
 
     Parameters:
         block: The mapping to validate.
         location: Dotted path of the block, used in error messages.
-        allow_strict_scope: Whether ``strict_scope`` is permitted here.  It is
-            a global switch, so a per-program block rejects it.
+        is_top_level: True for the ``logging`` section itself, False for a
+            block under ``programs``.  Only the top-level block may carry
+            ``strict_scope``, which is a global switch, or ``programs``, which
+            does not nest.
 
     Raises:
         ValueError: If the block holds an unknown key or a malformed value.
@@ -198,9 +224,14 @@ def _validate_block(block: dict[str, Any], location: str, *, allow_strict_scope:
     }
     for key, value in block.items():
         if key == _PROGRAMS_KEY:
-            continue  # handled by the caller
+            if is_top_level:
+                continue  # unpacked by validate_logging_config
+            raise ValueError(
+                f'{location}.{_PROGRAMS_KEY} does not nest; per-program overrides live '
+                f'only in the top-level logging.{_PROGRAMS_KEY} block'
+            )
         if key == _STRICT_SCOPE_KEY:
-            if not allow_strict_scope:
+            if not is_top_level:
                 raise ValueError(
                     f'{location}.{_STRICT_SCOPE_KEY} is a global setting and cannot be '
                     f'set for one program'
@@ -236,14 +267,14 @@ def validate_logging_config(config: 'Config') -> None:
         ValueError: On an unknown logging key, category, module key, program
             name, or level name.  The message names the offending dotted path.
     """
-    from spindoctor.cli.program_names import PROGRAM_NAMES
+    from spindoctor.config.program_names import PROGRAM_NAMES
 
     section = config.logging
     if not section:
         return
 
     block = dict(section)
-    _validate_block(block, 'logging', allow_strict_scope=True)
+    _validate_block(block, 'logging', is_top_level=True)
 
     programs = block.get(_PROGRAMS_KEY) or {}
     if not isinstance(programs, dict):
@@ -258,4 +289,4 @@ def validate_logging_config(config: 'Config') -> None:
             )
         if not isinstance(program_block, dict):
             raise ValueError(f'{location} must be a mapping, got {type(program_block).__name__}')
-        _validate_block(dict(program_block), location, allow_strict_scope=False)
+        _validate_block(dict(program_block), location, is_top_level=False)

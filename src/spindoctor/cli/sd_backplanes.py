@@ -19,7 +19,6 @@ package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
-from spindoctor.cli.program_names import SD_BACKPLANES
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
@@ -27,6 +26,7 @@ from spindoctor.config import (
     get_nav_results_root,
     load_default_and_user_config,
 )
+from spindoctor.config.program_names import SD_BACKPLANES
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from spindoctor.dataset.dataset import DataSet
 from spindoctor.obs import inst_name_to_obs_class

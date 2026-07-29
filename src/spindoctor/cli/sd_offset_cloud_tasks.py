@@ -20,12 +20,12 @@ from filecache import FCPath, FileCache
 package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, package_source_path)
 
-from spindoctor.cli.program_names import SD_OFFSET
 from spindoctor.config import (
     DEFAULT_CONFIG,
     get_nav_results_root,
     load_default_and_user_config,
 )
+from spindoctor.config.program_names import SD_OFFSET
 from spindoctor.dataset import dataset_name_to_inst_name
 from spindoctor.dataset.dataset import ImageFile, ImageFiles
 from spindoctor.navigate_image_files import navigate_image_files

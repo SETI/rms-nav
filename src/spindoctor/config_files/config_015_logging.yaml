@@ -41,7 +41,7 @@ logging:
     annotate: ERROR
 
   # Per-program overrides, keyed by program identity (see
-  # spindoctor/cli/program_names.py).  A block accepts any key above except
+  # spindoctor/config/program_names.py).  A block accepts any key above except
   # strict_scope, and wins over the global value for that program only:
   #
   #   programs:

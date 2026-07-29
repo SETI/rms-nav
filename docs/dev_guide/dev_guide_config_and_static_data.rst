@@ -56,7 +56,9 @@ Top-level YAML keys are exposed as
 ``cfg.bodies.use_lambert`` instead of ``cfg['bodies']['use_lambert']``. The
 shipping sections:
 
-- ``general`` — logging levels and other global settings.
+- ``general`` — global settings shared across programs.
+- ``logging`` — logger defaults, per-module levels, and per-program
+  overrides.
 - ``offset`` — correlation and star-refinement parameters.
 - ``stars`` — star-model and ring-occlusion parameters; see
   :doc:`dev_guide_navigation_models_star`.
@@ -112,7 +114,8 @@ ranges are conventional, not enforced by the loader:
      - Files
    * - ``0xx``
      - Global / model-shared
-     - ``config_010_general``, ``config_020_offset``, ``config_030_stars``,
+     - ``config_010_general``, ``config_015_logging``, ``config_020_offset``,
+       ``config_030_stars``,
        ``config_040_bodies``, ``config_050_rings``, ``config_060_titan``,
        ``config_070_bootstrap``
    * - ``1xx``
@@ -142,7 +145,9 @@ Per-file contents
 
 Each shipping file and what it holds:
 
-- ``config_010_general`` — general settings, including all logging levels.
+- ``config_010_general`` — general settings shared across programs.
+- ``config_015_logging`` — logging defaults, per-module levels, and
+  per-program overrides.
 - ``config_020_offset`` — offset-finding and star-refinement parameters.
 - ``config_030_stars`` — star-model and ring-occlusion parameters.
 - ``config_040_bodies`` — body (planet / moon) rendering parameters.

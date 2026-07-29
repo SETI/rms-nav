@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from spindoctor.cli.program_names import PROGRAM_NAMES, SD_MOSAIC, SD_OFFSET
 from spindoctor.config.config import Config
 from spindoctor.config.config_helper import load_default_and_user_config
 from spindoctor.config.logging_keys import (
@@ -15,9 +14,11 @@ from spindoctor.config.logging_keys import (
     OTHER_LOG_KEYS,
     log_key_for,
     model_log_keys,
+    normalize_level,
     technique_log_keys,
     validate_logging_config,
 )
+from spindoctor.config.program_names import PROGRAM_NAMES, SD_MOSAIC, SD_OFFSET
 
 
 def _config_with_logging(tmp_path: Path, body: str) -> Config:
@@ -261,6 +262,60 @@ def test_rejects_a_scalar_program_block(tmp_path: Path) -> None:
     config = _config_with_logging(tmp_path, f'  programs:\n    {SD_OFFSET}: DEBUG\n')
     with pytest.raises(ValueError, match='must be a mapping'):
         validate_logging_config(config)
+
+
+def test_rejects_a_programs_block_nested_in_a_program(tmp_path: Path) -> None:
+    config = _config_with_logging(
+        tmp_path,
+        f'  programs:\n    {SD_OFFSET}:\n      programs:\n        {SD_OFFSET}:\n'
+        f'          main: INFO\n',
+    )
+    with pytest.raises(ValueError, match='does not nest'):
+        validate_logging_config(config)
+
+
+def test_nesting_cannot_smuggle_past_an_unknown_key(tmp_path: Path) -> None:
+    # Without the nesting guard the inner block is skipped entirely, so keys
+    # rejected one level up would load cleanly here.
+    config = _config_with_logging(
+        tmp_path,
+        f'  programs:\n    {SD_OFFSET}:\n      programs:\n        {SD_OFFSET}:\n'
+        f'          wibble: NOT_A_LEVEL\n',
+    )
+    with pytest.raises(ValueError):
+        validate_logging_config(config)
+
+
+# ---------------------------------------------------------------------------
+# Level canonicalization
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ('raw', 'expected'),
+    [('debug', 'DEBUG'), ('  info  ', 'INFO'), ('WaRnInG', 'WARNING'), ('NONE', 'NONE')],
+)
+def test_normalize_level(raw: str, expected: str) -> None:
+    assert normalize_level(raw) == expected
+
+
+def test_normalize_level_matches_what_validation_accepts(tmp_path: Path) -> None:
+    config = _config_with_logging(tmp_path, "  main: '  debug  '\n")
+    validate_logging_config(config)
+    assert normalize_level(config.logging['main']) == 'DEBUG'
+
+
+# ---------------------------------------------------------------------------
+# Other-category keys name real components
+# ---------------------------------------------------------------------------
+
+
+def test_other_keys_name_no_dead_module() -> None:
+    assert 'nav_correlate_all' not in OTHER_LOG_KEYS
+
+
+def test_other_keys_include_the_correlation_module() -> None:
+    assert 'correlate' in OTHER_LOG_KEYS
 
 
 # ---------------------------------------------------------------------------

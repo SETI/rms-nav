@@ -42,7 +42,6 @@ from filecache import FCPath, FileCache
 package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, package_source_path)
 
-from spindoctor.cli.program_names import SD_MOSAIC
 from spindoctor.cli.reproj.args import (
     add_body_args,
     add_common_env_args,
@@ -62,6 +61,7 @@ from spindoctor.config import (
     load_default_and_user_config,
     setup_logging,
 )
+from spindoctor.config.program_names import SD_MOSAIC
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from spindoctor.dataset.dataset import DataSet, ImageFile
 from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class

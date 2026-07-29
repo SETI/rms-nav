@@ -125,22 +125,30 @@ def load_default_and_user_config(arguments: argparse.Namespace, config: Config) 
     misspelled module key, program name, or level name fails here rather than
     having no effect at the point it was meant to apply.
 
+    A file that cannot be parsed raises rather than being skipped, and the
+    error names the file, so a malformed override is not silently ignored in
+    favor of the defaults.
+
     Parameters:
         arguments: The parsed arguments containing the config_file argument.
         config: The configuration to update.
 
     Raises:
-        ValueError: If the merged ``logging`` section is not valid.
+        ValueError: If a named configuration file cannot be read, or if the
+            merged ``logging`` section is not valid.
     """
     config.read_config()
     # If the user specified one or more config files, load them; if they didn't,
     # load the default config file.  getattr rather than try/except so that an
-    # AttributeError raised from deeper in the load cannot be mistaken for the
-    # argument simply being absent.
+    # error raised from deeper in the load cannot be mistaken for the argument
+    # simply being absent.
     config_files = getattr(arguments, 'config_file', None)
     if config_files:
         for config_file in config_files:
-            config.update_config(config_file)
+            try:
+                config.update_config(config_file)
+            except (AttributeError, TypeError) as exc:
+                raise ValueError(f'Cannot read configuration file "{config_file}": {exc}') from exc
     else:
         try:
             config.update_config('nav_default_config.yaml')

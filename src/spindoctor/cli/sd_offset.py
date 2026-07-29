@@ -22,7 +22,6 @@ from filecache import FCPath, FileCache
 package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, package_source_path)
 
-from spindoctor.cli.program_names import SD_OFFSET
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
@@ -30,6 +29,7 @@ from spindoctor.config import (
     load_default_and_user_config,
     setup_logging,
 )
+from spindoctor.config.program_names import SD_OFFSET
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from spindoctor.dataset.dataset import DataSet
 from spindoctor.navigate_image_files import navigate_image_files

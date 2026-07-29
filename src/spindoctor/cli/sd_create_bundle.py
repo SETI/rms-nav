@@ -24,7 +24,6 @@ from spindoctor.cli.pds4.collections import (
     generate_collection_files,
     generate_global_index_files,
 )
-from spindoctor.cli.program_names import SD_CREATE_BUNDLE
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
@@ -33,6 +32,7 @@ from spindoctor.config import (
     get_pds4_bundle_results_root,
     load_default_and_user_config,
 )
+from spindoctor.config.program_names import SD_CREATE_BUNDLE
 from spindoctor.dataset import dataset_name_to_class, dataset_names
 from spindoctor.dataset.dataset import DataSet
 
