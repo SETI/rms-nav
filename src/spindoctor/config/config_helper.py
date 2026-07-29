@@ -2,6 +2,7 @@ import argparse
 import os
 
 from .config import Config
+from .logging_keys import validate_logging_config
 
 
 def get_backplane_results_root(arguments: argparse.Namespace, config: Config) -> str:
@@ -120,21 +121,29 @@ def get_pds4_bundle_results_root(arguments: argparse.Namespace, config: Config) 
 def load_default_and_user_config(arguments: argparse.Namespace, config: Config) -> None:
     """Load the default and user configuration (if any).
 
+    The merged result's ``logging`` section is validated before returning, so a
+    misspelled module key, program name, or level name fails here rather than
+    having no effect at the point it was meant to apply.
+
     Parameters:
         arguments: The parsed arguments containing the config_file argument.
         config: The configuration to update.
+
+    Raises:
+        ValueError: If the merged ``logging`` section is not valid.
     """
     config.read_config()
-    # If the user specified one or more config files, load them
-    try:
-        if arguments.config_file:
-            for config_file in arguments.config_file:
-                config.update_config(config_file)
-            return
-    except AttributeError:
-        pass
-    # If they didn't, load the default config file
-    try:
-        config.update_config('nav_default_config.yaml')
-    except FileNotFoundError:
-        pass
+    # If the user specified one or more config files, load them; if they didn't,
+    # load the default config file.  getattr rather than try/except so that an
+    # AttributeError raised from deeper in the load cannot be mistaken for the
+    # argument simply being absent.
+    config_files = getattr(arguments, 'config_file', None)
+    if config_files:
+        for config_file in config_files:
+            config.update_config(config_file)
+    else:
+        try:
+            config.update_config('nav_default_config.yaml')
+        except FileNotFoundError:
+            pass
+    validate_logging_config(config)

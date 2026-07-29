@@ -19,6 +19,7 @@ package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
+from spindoctor.cli.program_names import SD_BACKPLANES
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
@@ -30,6 +31,10 @@ from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name,
 from spindoctor.dataset.dataset import DataSet
 from spindoctor.obs import inst_name_to_obs_class
 from spindoctor.support.file import json_as_string
+
+PROGRAM_NAME = SD_BACKPLANES
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None

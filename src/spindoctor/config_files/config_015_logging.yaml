@@ -1,0 +1,51 @@
+# Logging configuration.
+#
+# Two loggers exist.  The main logger covers one program run and reports what
+# the program is doing at the top level.  The image logger covers one image
+# inside one per-image backend and carries that image's processing detail.
+#
+# Each logger writes to a console sink, a file sink, or both, selected by
+# command-line flags.  Both sinks always share a level, so one level per module
+# governs whatever sinks happen to be enabled.
+#
+# Levels are DEBUG, INFO, WARNING, ERROR, CRITICAL, and NONE.
+
+logging:
+
+  # Raise, rather than warn, when a component scoped to one image logs while no
+  # image scope is open.  That situation is a programming error either way; the
+  # test suite turns this on so a new occurrence fails rather than being routed
+  # quietly to the main log.
+  strict_scope: false
+
+  # Global default for each logger.
+  main: INFO
+  image: INFO
+
+  # Per-module overrides.  A category's "default" applies to every module in
+  # that category and overrides the "image" default above; a module key applies
+  # to that module alone.  Technique and model keys are the snake_case form of
+  # the class name with the NavTechnique / NavModel prefix, a trailing Nav, and
+  # a trailing Simulated removed, so TitanHazeNav is "titan_haze" and both
+  # NavModelRings and NavModelRingsSimulated are "rings".
+  techniques:
+    default: INFO
+  models:
+    default: INFO
+
+  # Image-scoped components that are neither a technique nor a model.  There is
+  # no key here for a per-image backend: a backend's verbosity is the "image"
+  # level of whichever program drives it.
+  other:
+    default: INFO
+    annotate: ERROR
+
+  # Per-program overrides, keyed by program identity (see
+  # spindoctor/cli/program_names.py).  A block accepts any key above except
+  # strict_scope, and wins over the global value for that program only:
+  #
+  #   programs:
+  #     sd_mosaic:
+  #       main: WARNING
+  #       image: DEBUG
+  programs: {}

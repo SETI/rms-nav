@@ -24,6 +24,7 @@ from spindoctor.cli.pds4.collections import (
     generate_collection_files,
     generate_global_index_files,
 )
+from spindoctor.cli.program_names import SD_CREATE_BUNDLE
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
@@ -34,6 +35,10 @@ from spindoctor.config import (
 )
 from spindoctor.dataset import dataset_name_to_class, dataset_names
 from spindoctor.dataset.dataset import DataSet
+
+PROGRAM_NAME = SD_CREATE_BUNDLE
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None

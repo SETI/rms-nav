@@ -42,6 +42,7 @@ from filecache import FCPath, FileCache
 package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, package_source_path)
 
+from spindoctor.cli.program_names import SD_MOSAIC
 from spindoctor.cli.reproj.args import (
     add_body_args,
     add_common_env_args,
@@ -68,6 +69,10 @@ from spindoctor.reproj.bodies import USE_MOSAIC_LIMITS, BodyMosaicData, BodyRepr
 from spindoctor.reproj.rings import RingMosaicData, RingReprojResult
 from spindoctor.support.file import json_as_string
 from spindoctor.support.misc import log_run_environment
+
+PROGRAM_NAME = SD_MOSAIC
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 
 def _reproject_image_log_handlers(

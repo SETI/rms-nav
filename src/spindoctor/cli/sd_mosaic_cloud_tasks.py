@@ -33,6 +33,7 @@ from filecache import FCPath, FileCache
 package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, package_source_path)
 
+from spindoctor.cli.program_names import SD_MOSAIC
 from spindoctor.cli.reproj.factories import build_body_mosaic, build_ring_mosaic
 from spindoctor.cli.reproj.offsets import apply_offset_to_obs, load_offset_if_any
 from spindoctor.cli.reproj.paths import per_image_output_path
@@ -50,6 +51,10 @@ from spindoctor.dataset.dataset import ImageFile
 from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class
 from spindoctor.reproj.bodies import BodyMosaic, BodyReprojResult
 from spindoctor.reproj.rings import RingMosaic, RingReprojResult
+
+PROGRAM_NAME = SD_MOSAIC
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 
 def _resolve_nav_results_root_fcpath(cli_args: argparse.Namespace) -> FCPath | None:
