@@ -575,17 +575,28 @@ The driver-level per-image sections in `navigate_image_files`, `sd_offset`,
 `sd_mosaic`, `backplanes` and `bundle_data` are not component-owned and are
 converted with their drivers in Phases 5 through 7.
 
-### Phase 5 — Command-line surface, every program
+### Phase 5 — Command-line surface
 
 `spindoctor/cli/logging_args.py` with `add_logging_arguments(parser)`, wired
-into the eight dispatch modules that carry a logger. Each program builds its
-main logger at startup from the resolved sinks and levels. Programs with no
-image logger reject the image flags with a clear message. The statistics and
-GUI programs are not wired in.
+into the five interactive programs: `sd_offset`, `sd_backplanes`, `sd_mosaic`,
+`sd_create_bundle` and `sd_consolidate_metadata`. Each builds its main logger
+at startup through `build_run_logging`, which resolves the levels, installs
+them for components to read, and stamps one timestamp for the whole run so a
+run's log files share it. A program with no image logger passes
+`has_image_logger=False` and so rejects the image flags by name rather than
+accepting and ignoring them.
 
-Remove `--log-level-main-console`, `--log-level-main-file`,
-`--log-level-image-console`, `--log-level-image-file`, and the ad-hoc
-`--log-level` flags in `sd_mosaic` and `sd_consolidate_metadata`.
+`nav`'s per-image logging moves to `build_image_log_handlers` here rather than
+in Phase 6, because `navigate_image_files` is the driver-side half of the same
+change and Phase 6 is what removes the *last* old caller.
+
+The four per-sink flags go, as do the ad-hoc `--log-level` in `sd_mosaic` and
+`sd_consolidate_metadata`, along with `sd_mosaic`'s `IMAGE_LOGGER.set_level`
+call, which the resolver now covers.
+
+The cloud-task drivers are wired in Phase 7 instead, with the isolation that
+defines their logging: giving them the argument surface here would hand them a
+main logger that section 2.8 says they must not have.
 
 ### Phase 6 — Image loggers for the backplane and reproj backends
 

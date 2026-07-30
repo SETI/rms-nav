@@ -25,7 +25,15 @@ from typing import Any, cast
 from filecache import FCPath
 from PIL import Image
 
-from spindoctor.config import DEFAULT_CONFIG, IMAGE_LOGGER, MAIN_LOGGER, image_log_handlers
+from spindoctor.config import (
+    DEFAULT_CONFIG,
+    IMAGE_LOGGER,
+    MAIN_LOGGER,
+    RunLogging,
+    build_image_log_handlers,
+    build_run_logging,
+)
+from spindoctor.config.program_names import SD_OFFSET
 from spindoctor.dataset.dataset import ImageFiles
 from spindoctor.nav_model import build_models_for_obs
 from spindoctor.nav_orchestrator import (
@@ -99,7 +107,7 @@ def navigate_image_files(
     nav_models: list[str] | None = None,
     nav_techniques: list[str] | None = None,
     write_output_files: bool = True,
-    log_arguments: argparse.Namespace | None = None,
+    run_logging: RunLogging | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Navigate one image batch and optionally write the result files.
 
@@ -123,9 +131,9 @@ def navigate_image_files(
         write_output_files: When True, write the metadata JSON and summary
             PNG; when False, perform a dry run and return the metadata
             dict only.
-        log_arguments: Parsed CLI arguments used to resolve the per-image
-            log-file level.  ``None`` defaults to the configured INFO
-            level.
+        run_logging: This run's resolved logging, giving the level and sinks
+            the per-image log is written with.  ``None`` resolves the
+            configuration's defaults, for a caller outside a configured run.
 
     Returns:
         Tuple ``(success, metadata)`` where ``success`` is True for an
@@ -163,11 +171,17 @@ def navigate_image_files(
     public_metadata_file = nav_results_root / (image_file.results_path_stub + '_metadata.json')
     summary_png_file = nav_results_root / (image_file.results_path_stub + '_summary.png')
 
-    timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
-    image_log_path = (
-        nav_results_root / 'logs' / (image_file.results_path_stub + '_' + timestamp + '.log')
+    if run_logging is None:
+        run_logging = build_run_logging(
+            SD_OFFSET, argparse.Namespace(), DEFAULT_CONFIG, build_main=False
+        )
+    local_handlers, image_log_path = build_image_log_handlers(
+        'nav',
+        image_file.results_path_stub,
+        run_logging.sinks,
+        run_logging.levels,
+        timestamp=run_logging.timestamp,
     )
-    local_handlers = image_log_handlers(image_log_path, log_arguments, DEFAULT_CONFIG)
 
     try:
         with logger.open(str(image_url), handler=local_handlers):

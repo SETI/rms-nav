@@ -46,6 +46,7 @@ import pdslogger
 from filecache import FCPath
 from pdslogger import PdsLogger
 
+from .logger import MAIN_LOGGER
 from .logging_keys import (
     CATEGORY_KEYS,
     LOG_LEVEL_NAMES,
@@ -63,8 +64,10 @@ __all__ = [
     'SILENT_LEVEL',
     'LogLevels',
     'LogSinks',
+    'RunLogging',
     'build_image_log_handlers',
     'build_main_logger',
+    'build_run_logging',
     'image_log_path',
     'log_levels',
     'main_log_path',
@@ -684,3 +687,63 @@ def sinks_from_arguments(arguments: argparse.Namespace | None, log_root: FCPath)
         image_console=flag('log_image_to_console', defaults.image_console),
         image_file=flag('log_image_to_file', defaults.image_file),
     )
+
+
+@dataclass(frozen=True)
+class RunLogging:
+    """What a run's logging resolved to, for the driver to pass on.
+
+    Parameters:
+        levels: The resolved levels, already installed for components to read.
+        sinks: Which sinks are enabled, and the log root.
+        timestamp: One stamp for the whole run, so a run's log files share it.
+        main_log_path: Where the main log is being written, or None when the
+            main logger has no file sink.
+    """
+
+    levels: LogLevels
+    sinks: LogSinks
+    timestamp: str
+    main_log_path: FCPath | None
+
+
+def build_run_logging(
+    program_name: str,
+    arguments: argparse.Namespace,
+    config: 'Config',
+    *,
+    build_main: bool = True,
+) -> RunLogging:
+    """Resolve this run's logging and configure the main logger.
+
+    Call once at startup, after the configuration has been loaded, before
+    anything is logged.  The resolved levels are installed globally so a
+    component deep in the pipeline can read its own level; the returned value
+    carries what a driver needs to open per-image logs.
+
+    Parameters:
+        program_name: The program's identity, which selects its configuration
+            block and names its main log directory.
+        arguments: Parsed command-line arguments.
+        config: The loaded configuration.
+        build_main: False for a program that has no main logger of its own, so
+            that levels and sinks are still resolved for its image logs.
+
+    Returns:
+        The resolved :class:`RunLogging`.
+    """
+    # Local import: config_helper imports this module for the conflict check,
+    # so importing it back at module level would close a cycle.
+    from .config_helper import get_log_root
+
+    log_root = FCPath(get_log_root(arguments, config))
+    levels = resolve_log_levels(program_name, arguments, config)
+    sinks = sinks_from_arguments(arguments, log_root)
+    set_log_levels(levels)
+    timestamp = run_timestamp()
+    main_log_path = None
+    if build_main:
+        main_log_path = build_main_logger(
+            MAIN_LOGGER, program_name, sinks, levels, timestamp=timestamp
+        )
+    return RunLogging(levels=levels, sinks=sinks, timestamp=timestamp, main_log_path=main_log_path)

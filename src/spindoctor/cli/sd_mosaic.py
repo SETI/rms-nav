@@ -56,10 +56,10 @@ from spindoctor.config import (
     DEFAULT_CONFIG,
     IMAGE_LOGGER,
     MAIN_LOGGER,
+    build_run_logging,
     get_nav_results_root,
     image_log_handlers,
     load_default_and_user_config,
-    setup_logging,
 )
 from spindoctor.config.program_names import SD_MOSAIC
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
@@ -549,21 +549,16 @@ def main() -> None:
         nav_results_root_path = FileCache(None).new_path(nav_results_root_str)
 
     try:
-        setup_logging(args, DEFAULT_CONFIG, nav_results_root_str or '')
+        # Per-image reprojection logs still go through the setup being
+        # replaced; routing them through this run's sinks happens with the
+        # reproj backend.
+        build_run_logging(PROGRAM_NAME, args, DEFAULT_CONFIG)
     except (TypeError, ValueError) as exc:
         print(f'Invalid logging configuration: {exc}', file=sys.stderr)
         sys.exit(1)
 
-    # Apply the --log-level console override to the program loggers directly.
-    # PdsLogger.set_level accepts a level-name string, so there is no need to
-    # reach through the stdlib root logger (which would also re-level every
-    # third-party library) to honour the flag.
-    log_level = args.log_level
-    if log_level is not None and isinstance(log_level, str):
-        MAIN_LOGGER.set_level(log_level.upper())
-        IMAGE_LOGGER.set_level(log_level.upper())
-
     start = time.time()
+
     log_run_environment(MAIN_LOGGER, sys.argv[1:])
 
     if args.output_cloud_tasks_file:

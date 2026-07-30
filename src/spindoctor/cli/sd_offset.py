@@ -22,12 +22,16 @@ from filecache import FCPath, FileCache
 package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, package_source_path)
 
+from spindoctor.cli.logging_args import add_logging_arguments
 from spindoctor.config import (
     DEFAULT_CONFIG,
+    IMAGE_LOGGER,
     MAIN_LOGGER,
+    RunLogging,
+    build_image_log_handlers,
+    build_run_logging,
     get_nav_results_root,
     load_default_and_user_config,
-    setup_logging,
 )
 from spindoctor.config.program_names import SD_OFFSET
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
@@ -172,42 +176,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     # Add all the arguments related to selecting files
     DATASET.add_selection_arguments(cmdparser)
 
-    # Logging arguments
-    logging_group = cmdparser.add_argument_group('Logging')
-    logging_group.add_argument(
-        '--log-level-main-console',
-        type=str,
-        default=None,
-        metavar='LEVEL',
-        help="""Log level for main logger console output to stdout (DEBUG, INFO, WARNING,
-        ERROR, CRITICAL). Defaults to config general.log_level_main_console or INFO.""",
-    )
-    logging_group.add_argument(
-        '--log-level-main-file',
-        type=str,
-        default=None,
-        metavar='LEVEL',
-        help="""Log level for the main logfile written to
-        ${NAV_RESULTS_ROOT}/logs/sd_offset/ (DEBUG, INFO, WARNING, ERROR, CRITICAL).
-        Defaults to config general.log_level_main_file or INFO.""",
-    )
-    logging_group.add_argument(
-        '--log-level-image-console',
-        type=str,
-        default=None,
-        metavar='LEVEL',
-        help="""Log level for image logger console output to stdout (DEBUG, INFO, WARNING,
-        ERROR, CRITICAL). Defaults to config general.log_level_image_console or INFO.""",
-    )
-    logging_group.add_argument(
-        '--log-level-image-file',
-        type=str,
-        default=None,
-        metavar='LEVEL',
-        help="""Log level for per-image log files written to
-        ${NAV_RESULTS_ROOT}/logs/{results_path_stub}.log (DEBUG, INFO, WARNING, ERROR,
-        CRITICAL). Defaults to config general.log_level_image_file or INFO.""",
-    )
+    add_logging_arguments(cmdparser)
 
     # Misc arguments
     misc_group = cmdparser.add_argument_group('Miscellaneous')
@@ -235,6 +204,7 @@ def _run_manual_pass(
     obs_class: type['ObsSnapshotInst'],
     arguments: argparse.Namespace,
     nav_results_root: FCPath,
+    run_logging: 'RunLogging',
     *,
     write_output_files: bool = True,
 ) -> None:
@@ -257,7 +227,6 @@ def _run_manual_pass(
     from datetime import UTC, datetime
     from itertools import islice
 
-    from spindoctor.config import IMAGE_LOGGER, image_log_handlers
     from spindoctor.nav_technique import run_manual_nav
     from spindoctor.navigate_image_files import (
         build_metadata_from_result,
@@ -302,11 +271,13 @@ def _run_manual_pass(
     summary_png_file = nav_results_root / (image_file.results_path_stub + '_summary.png')
     MAIN_LOGGER.info('Manual nav: loading image %s', image_url.as_posix())
 
-    timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
-    image_log_path = (
-        nav_results_root / 'logs' / (image_file.results_path_stub + '_' + timestamp + '.log')
+    local_handlers, image_log_path = build_image_log_handlers(
+        'nav',
+        image_file.results_path_stub,
+        run_logging.sinks,
+        run_logging.levels,
+        timestamp=run_logging.timestamp,
     )
-    local_handlers = image_log_handlers(image_log_path, arguments, DEFAULT_CONFIG)
 
     try:
         with IMAGE_LOGGER.open(str(image_url), handler=local_handlers):
@@ -370,7 +341,7 @@ def main() -> None:
     nav_results_root = FileCache(None).new_path(nav_results_root_str)
 
     try:
-        setup_logging(arguments, DEFAULT_CONFIG, nav_results_root_str)
+        run_logging = build_run_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
     except (TypeError, ValueError) as exc:
         print(f'Invalid logging configuration: {exc}', file=sys.stderr)
         sys.exit(1)
@@ -408,6 +379,7 @@ def main() -> None:
             obs_class,
             arguments,
             nav_results_root,
+            run_logging,
             write_output_files=not arguments.no_write_output_files,
         )
         sys.exit(0)
@@ -469,7 +441,7 @@ def main() -> None:
             nav_models=nav_models,
             nav_techniques=nav_techniques,
             write_output_files=not arguments.no_write_output_files,
-            log_arguments=arguments,
+            run_logging=run_logging,
         )
         if success:
             NUM_FILES_PROCESSED += 1

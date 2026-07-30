@@ -11,6 +11,8 @@ Functions:
 
 import argparse
 
+from spindoctor.cli.logging_args import add_logging_arguments
+
 # Defaults for :func:`add_body_args` (single source of truth for CLI literals).
 DEFAULT_LAT_RESOLUTION: float = 0.1
 DEFAULT_LON_RESOLUTION: float = 0.1
@@ -56,14 +58,7 @@ def add_common_env_args(parser: argparse.ArgumentParser) -> None:
             '(or if an image has no success metadata), uncorrected pointing is used.'
         ),
     )
-    log = parser.add_argument_group('Logging')
-    log.add_argument(
-        '--log-level',
-        type=str,
-        default=None,
-        metavar='LEVEL',
-        help='Console log level (DEBUG, INFO, WARNING, ERROR, CRITICAL). Default: INFO.',
-    )
+    add_logging_arguments(parser)
     misc = parser.add_argument_group('Miscellaneous')
     misc.add_argument(
         '--profile',
