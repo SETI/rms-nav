@@ -391,11 +391,23 @@ Behavior when it happens anyway:
 - A `WARNING` is emitted to the main logger naming the module and function
   that logged out of scope, **deduplicated per call site** so a loop cannot
   flood the log.
-- Under `logging.strict_scope: true` (default `false` in production, `true`
-  in the test suite) the violation raises instead.
+- Under `logging.strict_scope: true` (default `false`) the violation raises
+  instead.
 
-The test suite runs with strict scope on, so any newly-introduced violation
-fails CI rather than quietly appearing in a main log.
+Strict scope is **opt-in for tests, not suite-wide**. The original intent was
+to enable it everywhere so a new violation failed CI, but that premise does not
+survive contact with the suite: enabling it globally fails 497 tests, and
+essentially none of them are mis-bindings. A unit test exercising
+`NavModelTitan.to_annotations()` calls it directly, outside any pipeline, which
+is correct isolation testing — the component is properly image-role and the
+test is properly written. "An image-role component only logs inside an image
+scope" holds for production paths, not for tests that drive components
+individually.
+
+Enforcement therefore belongs where a scope genuinely should be open: tests
+that drive a real pipeline. A `strict_log_scope` fixture makes that a one-line
+request, and the pipeline-level tests adopt it as Phases 5 through 7 wire the
+drivers. In production the warning remains the signal.
 
 ---
 

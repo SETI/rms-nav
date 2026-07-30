@@ -3,11 +3,11 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from filecache import FCPath
 
-from spindoctor.config import MAIN_LOGGER, Config
+from spindoctor.config import MAIN_LOGGER, Config, LogRole
 from spindoctor.support.nav_base import NavBase
 
 
@@ -144,6 +144,17 @@ class ImageFiles:
 
 
 class DataSet(ABC, NavBase):
+    """Enumerates the images a run will process.
+
+    Class attributes:
+        log_role: ``LogRole.MAIN``.  Enumeration spans the whole run rather
+            than belonging to any one image, so its records go to the run's
+            log; routing them to the image logger would file them under
+            whichever image happened to be open, or none at all.
+    """
+
+    log_role: ClassVar[LogRole] = LogRole.MAIN
+
     def __init__(self, *, config: Config | None = None) -> None:
         """Initializes a dataset.
 

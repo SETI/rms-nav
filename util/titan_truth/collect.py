@@ -237,7 +237,7 @@ def _init_worker() -> None:
     """
     import pdslogger
 
-    from spindoctor.config.logger import IMAGE_LOGGER, MAIN_LOGGER
+    from spindoctor.config import IMAGE_LOGGER, MAIN_LOGGER
 
     for logger in (IMAGE_LOGGER, MAIN_LOGGER):
         logger.remove_all_handlers()

@@ -1,12 +1,10 @@
 """Logger instances and setup for the SpinDoctor pipeline.
 
-Provides two PdsLogger instances:
+Provides ``MAIN_LOGGER``, which carries top-level program events and is written
+to stdout and to a timestamped logfile under ``NAV_RESULTS_ROOT/logs/sd_offset/``.
 
-- ``MAIN_LOGGER`` (``"sd_offset"``) -- top-level program events, written to stdout
-  and to a timestamped logfile under ``NAV_RESULTS_ROOT/logs/sd_offset/``.
-- ``IMAGE_LOGGER`` (``"nav_image"``) -- per-image processing events; both its stdout
-  handler and its per-image logfile handler are attached as local handlers inside each
-  ``logger.open()`` context so they are active only while that image is being processed.
+The image logger lives in :mod:`spindoctor.config.log_scope`, which routes
+per-image records to whichever image scope is open.
 
 Call ``setup_logging()`` from ``main()`` after the nav-results root and CLI
 arguments have been resolved. It is safe to call more than once: existing
@@ -31,7 +29,7 @@ if TYPE_CHECKING:
     from .config import Config
 
 MAIN_LOGGER = pdslogger.PdsLogger('sd_offset', lognames=False, digits=3)
-IMAGE_LOGGER = pdslogger.PdsLogger('nav_image', lognames=False, digits=3)
+"""The run's logger, carrying top-level program events for one execution."""
 
 _FALLBACK_LEVEL = 'INFO'
 _ALLOWED_LOG_LEVELS = frozenset({'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'})

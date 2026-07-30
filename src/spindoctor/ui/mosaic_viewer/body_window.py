@@ -1,6 +1,8 @@
 """BodyMosaicWindow: PyQt6 window for browsing body reprojections and mosaics."""
 
 import math
+import sys
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +35,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from spindoctor.config import IMAGE_LOGGER
+from spindoctor.config import image_scope
 from spindoctor.support.time import et_to_utc
 from spindoctor.ui.common import build_stretch_controls
 from spindoctor.ui.mosaic_viewer.common import (
@@ -48,8 +50,6 @@ from spindoctor.ui.mosaic_viewer.projections import ProjectionKind
 from spindoctor.ui.mosaic_viewer.tiled_image_widget import (
     TiledImageWidget,
 )
-
-logger = IMAGE_LOGGER
 
 _STATUS_HINTS: dict[ProjectionKind, str] = {
     ProjectionKind.RECT: (
@@ -687,16 +687,18 @@ class BodyMosaicWindow(QMainWindow):
     def _load_file(self, idx: int) -> None:
         """Load body data at index ``idx``, refresh UI, overlays, and stretch.
 
-        No-op if ``idx`` is out of range. On ``load_body_file`` failure, logs the
+        No-op if ``idx`` is out of range. On ``load_body_file`` failure, prints the
         exception and shows a status-bar message without changing the current file.
         """
         if not (0 <= idx < len(self._file_paths)):
             return
         path = self._file_paths[idx]
         try:
-            dd = load_body_file(path)
+            with image_scope():
+                dd = load_body_file(path)
         except Exception as exc:
-            logger.exception('Error loading %s', path)
+            print(f'Error loading {path}', file=sys.stderr)
+            traceback.print_exc()
             self.statusBar().showMessage(f'Error loading {path}: {exc}', 5000)
             return
 
