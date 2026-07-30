@@ -22,22 +22,24 @@ logging:
   main: INFO
   image: INFO
 
-  # Per-module overrides.  A category's "default" applies to every module in
-  # that category and overrides the "image" default above; a module key applies
-  # to that module alone.  Technique and model keys are the snake_case form of
-  # the class name with the NavTechnique / NavModel prefix, a trailing Nav, and
-  # a trailing Simulated removed, so TitanHazeNav is "titan_haze" and both
-  # NavModelRings and NavModelRingsSimulated are "rings".
-  techniques:
-    default: INFO
-  models:
-    default: INFO
+  # Per-module overrides.  A module with no entry here follows the "image"
+  # level above, so nothing is listed that would only restate it: writing
+  # "default: INFO" in a category would shadow "image", and a later
+  # "image: DEBUG" would then silently fail to reach that category.  A
+  # category's "default" is for deliberately holding one category away from
+  # the image level.
+  #
+  # Technique and model keys are the snake_case form of the class name with the
+  # NavTechnique / NavModel prefix, a trailing Nav, and a trailing Simulated
+  # removed, so TitanHazeNav is "titan_haze" and both NavModelRings and
+  # NavModelRingsSimulated are "rings".
+  techniques: {}
+  models: {}
 
   # Image-scoped components that are neither a technique nor a model.  There is
   # no key here for a per-image backend: a backend's verbosity is the "image"
   # level of whichever program drives it.
   other:
-    default: INFO
     annotate: ERROR
 
   # Per-program overrides, keyed by program identity (see

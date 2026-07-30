@@ -483,9 +483,14 @@ New module `spindoctor/config/logging_config.py` (the existing
   of `get_nav_results_root`.
 - Level-name validation extended with `NONE`.
 
-With the resolver in place, retire the old path: delete `_resolve_level` and
-the nine `log_level_*` keys from `config_010_general.yaml`, and update the one
-test that asserts on them (`test_config_helper.py:431`).
+This phase builds the core and tests it directly; it does not wire it into any
+program. Wiring happens in Phases 5 through 7, which replace the eight call
+sites that still reach the old `setup_logging` / `image_log_handlers` path.
+The old `_resolve_level` and the nine `log_level_*` keys in
+`config_010_general.yaml` are therefore retired in Phase 6, when the last of
+those callers goes, along with the one test that asserts on them
+(`test_config_helper.py:431`). Removing them earlier would leave a phase that
+only deletes working configurability.
 
 ### Phase 3 — Image logger proxy, role binding, and scope enforcement
 
@@ -541,6 +546,11 @@ Route `backplane` and `reproj` per-image logging through
 `{log_root}/reproj/`. Retire `image_log_handlers()` and the bespoke path
 builders in `sd_mosaic.py` and `sd_mosaic_cloud_tasks.py`. Repoint
 `bundle_data.py`'s per-image section at the main logger.
+
+This removes the last caller of the old resolution path, so `setup_logging`,
+`_resolve_level`, and the nine `log_level_*` keys in
+`config_010_general.yaml` are deleted here, along with
+`test_config_helper.py:431`, which asserts on one of them.
 
 ### Phase 7 — Cloud-task isolation
 
