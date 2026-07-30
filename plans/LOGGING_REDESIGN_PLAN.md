@@ -163,9 +163,16 @@ Layout underneath it:
 {log_root}/{backend}/{results_path_stub}_{datetime}.log  # image logger
 ```
 
-`{datetime}` is `%Y-%m-%dT%H-%M-%S`, matching the current per-image
-convention, applied to main logs as well. `{backend}` is one of `nav`,
-`backplane`, `reproj`. `{results_path_stub}` is the existing
+`{datetime}` is `%Y-%m-%dT%H-%M-%S` **in UTC**, applied to main logs as well
+as image logs. The format matches the existing per-image convention; the
+timezone does not, because the three sites producing it today
+(`navigate_image_files.py:164`, `sd_offset.py:305`, `sd_mosaic.py:89`) use
+naive local time. Cloud-task workers processing one batch may sit in different
+zones, and a local-time name is ambiguous across a daylight-saving fall-back,
+so names would neither sort nor correlate. Those three sites are replaced in
+Phases 6 and 7.
+
+`{backend}` is one of `nav`, `backplane`, `reproj`. `{results_path_stub}` is the existing
 `ImageFile.results_path_stub`, which is `{volume}/{filespec}` without the
 extension (`dataset_pds3_cassini_iss.py:187`), so a Cassini image navigated
 by either nav driver lands at

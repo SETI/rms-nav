@@ -408,7 +408,8 @@ def test_main_logger_writes_to_the_reported_path(tmp_path: Path) -> None:
     _close(logger.handlers)
     logger.remove_all_handlers()
     assert path is not None
-    assert 'a line' in Path(path.as_posix()).read_text()
+    with path.open('r') as handle:
+        assert 'a line' in handle.read()
 
 
 def test_main_logger_reports_no_path_without_a_file_sink(tmp_path: Path) -> None:
@@ -553,7 +554,8 @@ def _emit_through_sections(
                 getattr(logger, method)(message)
     _close(handlers)
     assert path is not None
-    return Path(path.as_posix()).read_text()
+    with path.open('r') as handle:
+        return str(handle.read())
 
 
 def test_a_module_raised_above_the_image_level_reaches_the_sink(tmp_path: Path) -> None:

@@ -39,7 +39,7 @@ stdout regardless of level.
 import argparse
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import pdslogger
@@ -77,7 +77,7 @@ DEFAULT_LEVEL = 'INFO'
 """Level used when nothing in the arguments or configuration says otherwise."""
 
 LOG_TIMESTAMP_FORMAT = '%Y-%m-%dT%H-%M-%S'
-"""Suffix format distinguishing one run's log file from the next."""
+"""Suffix format distinguishing one run's log file from the next, in UTC."""
 
 BACKEND_NAMES = frozenset({'nav', 'backplane', 'reproj'})
 """Per-image backends, each owning a subtree of the log root."""
@@ -425,12 +425,17 @@ def image_log_path(
 
 
 def run_timestamp() -> str:
-    """Return the current local time formatted for a log file name.
+    """Return the current UTC time formatted for a log file name.
+
+    UTC rather than local time so that log names sort chronologically and
+    correlate across machines: cloud-task workers processing one batch may sit
+    in different zones, and a local-time name is ambiguous across a
+    daylight-saving fall-back.
 
     Returns:
         The timestamp in :data:`LOG_TIMESTAMP_FORMAT`.
     """
-    return datetime.now().strftime(LOG_TIMESTAMP_FORMAT)
+    return datetime.now(UTC).strftime(LOG_TIMESTAMP_FORMAT)
 
 
 def _handlers_for(*, console: bool, to_file: bool, path: FCPath | None, level: str) -> list[Any]:
