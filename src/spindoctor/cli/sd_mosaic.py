@@ -25,16 +25,15 @@ Either pass may be skipped with ``--skip-reproject`` / ``--skip-mosaic``.
 
 import argparse
 import cProfile
-import logging
 import math
 import os
 import sys
 import time
 import traceback
 from collections.abc import Callable
-from datetime import datetime
 from typing import cast
 
+import pdslogger
 from filecache import FCPath, FileCache
 
 # Allow running directly from the source tree:
@@ -56,14 +55,15 @@ from spindoctor.config import (
     DEFAULT_CONFIG,
     IMAGE_LOGGER,
     MAIN_LOGGER,
+    RunLogging,
+    build_image_log_handlers,
     build_run_logging,
     get_nav_results_root,
-    image_log_handlers,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_MOSAIC
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
-from spindoctor.dataset.dataset import DataSet, ImageFile
+from spindoctor.dataset.dataset import DataSet
 from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class
 from spindoctor.reproj.bodies import USE_MOSAIC_LIMITS, BodyMosaicData, BodyReprojResult
 from spindoctor.reproj.rings import RingMosaicData, RingReprojResult
@@ -73,25 +73,6 @@ from spindoctor.support.misc import log_run_environment
 PROGRAM_NAME = SD_MOSAIC
 """Program identity: names the main log directory and the
 ``logging.programs`` configuration block for this program."""
-
-
-def _reproject_image_log_handlers(
-    output_dir: FCPath,
-    image_file: ImageFile,
-    args: argparse.Namespace,
-) -> tuple[list[logging.Handler], FCPath]:
-    """Return ``(handlers, log_path)`` for per-image reprojection logs.
-
-    Writes a timestamped file next to the npz/fits products, under
-    ``<output_dir>/logs/``, using the same ``output_dir`` as
-    :func:`spindoctor.cli.reproj.paths.per_image_output_path`.
-    """
-    timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
-    image_log_path = (
-        FCPath(output_dir) / 'logs' / (image_file.results_path_stub + '_' + timestamp + '.log')
-    )
-    image_log_path.parent.mkdir(parents=True, exist_ok=True)
-    return image_log_handlers(image_log_path, args, DEFAULT_CONFIG), image_log_path
 
 
 def _log_main_exception(msg: str, *args: object) -> None:
@@ -105,6 +86,7 @@ def _log_main_exception(msg: str, *args: object) -> None:
 
 
 def _run_reproject_pass(
+    run_logging: RunLogging,
     *,
     args: argparse.Namespace,
     nav_results_root_path: FCPath | None,
@@ -118,6 +100,8 @@ def _run_reproject_pass(
     """Reproject each selected image: path checks, per-image logs, offset, save.
 
     Parameters:
+        run_logging: This run's resolved logging, giving the sinks and levels
+            each per-image log is written with.
         args: Parsed CLI namespace.
         nav_results_root_path: Optional root for ``sd_offset`` metadata (offsets).
         output_dir: Mosaic / per-image output directory.
@@ -152,11 +136,18 @@ def _run_reproject_pass(
             )
             continue
 
-        local_handlers, image_log_path = _reproject_image_log_handlers(output_dir, image_file, args)
+        local_handlers, image_log_path = build_image_log_handlers(
+            'reproj',
+            f'{subject_name}/{image_file.results_path_stub}',
+            run_logging.sinks,
+            run_logging.levels,
+            timestamp=run_logging.timestamp,
+        )
         try:
             with IMAGE_LOGGER.open(
                 f'REPROJECT {image_file.image_file_url}',
                 handler=local_handlers,
+                level=run_logging.levels.image.lower(),
             ):
                 try:
                     image_path = image_file.image_file_path.absolute()
@@ -182,11 +173,12 @@ def _run_reproject_pass(
                 except Exception:
                     _log_main_exception('Error reprojecting %s', image_file.image_file_url)
                 finally:
-                    if local_handlers:
+                    if image_log_path is not None:
                         MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
         finally:
             for handler in local_handlers:
-                handler.close()
+                if handler is not pdslogger.NULL_HANDLER:
+                    handler.close()
 
     return n_done, n_skipped
 
@@ -358,7 +350,20 @@ def parse_args(command_list: list[str]) -> tuple[str, argparse.Namespace]:
 # ---------------------------------------------------------------------------
 
 
-def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) -> None:
+def _run_body(
+    args: argparse.Namespace,
+    nav_results_root_path: FCPath | None,
+    run_logging: RunLogging,
+) -> None:
+    """Run the body workflow: reproject each selected image, then mosaic them.
+
+    Parameters:
+        args: Parsed CLI namespace.
+        nav_results_root_path: Root holding ``sd_offset`` metadata, from which
+            each image's offset is read; None leaves pointing uncorrected.
+        run_logging: This run's resolved logging, giving the sinks and levels
+            each per-image reprojection log is written with.
+    """
     assert DATASET is not None
 
     inst_name = dataset_name_to_inst_name(DATASET_NAME)  # type: ignore[arg-type]  # DATASET_NAME is set at runtime from argv; dataset_name_to_inst_name is typed for a Literal union of known dataset keys only (false-positive arg-type).
@@ -373,6 +378,7 @@ def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) ->
     if not args.skip_reproject:
         MAIN_LOGGER.info('=== Reprojection pass (body=%s) ===', mosaic.body_name)
         n_done, n_skipped = _run_reproject_pass(
+            run_logging,
             args=args,
             nav_results_root_path=nav_results_root_path,
             output_dir=output_dir,
@@ -452,7 +458,20 @@ def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) ->
 # ---------------------------------------------------------------------------
 
 
-def _run_rings(args: argparse.Namespace, nav_results_root_path: FCPath | None) -> None:
+def _run_rings(
+    args: argparse.Namespace,
+    nav_results_root_path: FCPath | None,
+    run_logging: RunLogging,
+) -> None:
+    """Run the rings workflow: reproject each selected image, then mosaic them.
+
+    Parameters:
+        args: Parsed CLI namespace.
+        nav_results_root_path: Root holding ``sd_offset`` metadata, from which
+            each image's offset is read; None leaves pointing uncorrected.
+        run_logging: This run's resolved logging, giving the sinks and levels
+            each per-image reprojection log is written with.
+    """
     assert DATASET is not None
 
     inst_name = dataset_name_to_inst_name(DATASET_NAME)  # type: ignore[arg-type]  # DATASET_NAME is set at runtime from argv; dataset_name_to_inst_name is typed for a Literal union of known dataset keys only (false-positive arg-type).
@@ -467,6 +486,7 @@ def _run_rings(args: argparse.Namespace, nav_results_root_path: FCPath | None) -
     if not args.skip_reproject:
         MAIN_LOGGER.info('=== Reprojection pass (rings, planet=%s) ===', mosaic.body_name)
         n_done, n_skipped = _run_reproject_pass(
+            run_logging,
             args=args,
             nav_results_root_path=nav_results_root_path,
             output_dir=output_dir,
@@ -554,11 +574,6 @@ def main() -> None:
         print(f'Invalid logging configuration: {exc}', file=sys.stderr)
         sys.exit(1)
 
-    # Per-image reprojection logging still goes through the setup being
-    # replaced, which the resolver does not reach, so the resolved image level
-    # is applied to the image logger directly until that backend is converted.
-    IMAGE_LOGGER.set_level(run_logging.levels.image.lower())
-
     start = time.time()
 
     log_run_environment(MAIN_LOGGER, sys.argv[1:])
@@ -574,9 +589,9 @@ def main() -> None:
 
     try:
         if mode == 'body':
-            _run_body(args, nav_results_root_path)
+            _run_body(args, nav_results_root_path, run_logging)
         else:
-            _run_rings(args, nav_results_root_path)
+            _run_rings(args, nav_results_root_path, run_logging)
     finally:
         if args.profile:
             pr.disable()

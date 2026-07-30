@@ -376,7 +376,7 @@ The command-line tools are composed of three layers:
      underlying classes gain a new option.
    - ``paths.py`` — ``per_image_output_path`` / ``mosaic_output_path`` define
      the output-file naming convention; pass-1 image logs go under
-     ``<output-dir>/logs/`` (see ``sd_mosaic._reproject_image_log_handlers``).
+     ``{log_root}/reproj/`` (see :func:`~spindoctor.config.logging_config.build_image_log_handlers`).
    - ``offsets.py`` — ``load_offset_if_any`` reads the ``_metadata.json`` file
      written by ``sd_offset`` and returns ``(dv, du)`` when ``status ==
      'success'``. ``apply_offset_to_obs`` wraps the result in
@@ -406,7 +406,7 @@ The reprojection pass loops over
 1. Compute ``per_image_output_path(output_dir, prefix, image_file, fmt=…, subject_name=mosaic.body_name)``
    (body or planet name in the filename; ``fmt`` and ``subject_name`` are keyword-only).
 2. Skip if the file exists and ``--overwrite`` is not set.
-3. Open ``IMAGE_LOGGER`` handlers writing to ``<output-dir>/logs/…``.
+3. Open the image logger handlers writing to ``{log_root}/reproj/…``.
 4. Load the observation via ``obs_class.from_file(image_path)``.
 5. Optionally apply a navigation offset via ``load_offset_if_any`` + ``apply_offset_to_obs``.
 6. Call ``reproject_one_body`` / ``reproject_one_ring`` with the computed

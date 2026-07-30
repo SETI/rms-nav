@@ -19,11 +19,7 @@ from .log_scope import (
     strict_scope,
     strict_scope_override,
 )
-from .logger import (
-    MAIN_LOGGER,
-    image_log_handlers,
-    setup_logging,
-)
+from .logger import MAIN_LOGGER
 from .logging_config import (
     BACKEND_NAMES,
     DEFAULT_LEVEL,
@@ -68,7 +64,6 @@ __all__ = [
     'get_log_root',
     'get_nav_results_root',
     'get_pds4_bundle_results_root',
-    'image_log_handlers',
     'image_log_path',
     'image_log_section',
     'image_scope',
@@ -83,7 +78,6 @@ __all__ = [
     'run_timestamp',
     'set_log_levels',
     'set_strict_scope',
-    'setup_logging',
     'sinks_from_arguments',
     'strict_scope',
     'strict_scope_override',

@@ -19,6 +19,7 @@ from spindoctor.config.logging_config import (
     LogSinks,
     build_image_log_handlers,
     build_main_logger,
+    build_run_logging,
     image_log_path,
     main_log_path,
     resolve_log_levels,
@@ -812,3 +813,101 @@ def test_a_silenced_logger_stays_silent_after_a_rebuild(
     logger.info('should not appear')
     logger.remove_all_handlers()
     assert capsys.readouterr().out == ''
+
+
+# ---------------------------------------------------------------------------
+# A results path stub reaches this from task data
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'stub',
+    [
+        '../../../escaped/evil',
+        'a/../../../evil',
+        '/etc/passwd',
+        '',
+        'has\x00null',
+        '..\\..\\evil',
+    ],
+)
+def test_a_stub_leaving_the_log_root_is_rejected(tmp_path: Path, stub: str) -> None:
+    """A stub that would put the log outside the log root is refused.
+
+    Cloud-task drivers take this value from task data, so it is not
+    necessarily trustworthy.
+    """
+    with pytest.raises(ValueError):
+        image_log_path(FCPath(str(tmp_path)), 'nav', stub, timestamp=_STAMP)
+
+
+def test_a_stub_with_subdirectories_is_accepted(tmp_path: Path) -> None:
+    """A normal stub is a relative path with directories and must still work."""
+    path = image_log_path(
+        FCPath(str(tmp_path)), 'nav', 'COISS_2058/data/1635/N123_1', timestamp=_STAMP
+    )
+    assert path.as_posix().endswith(f'nav/COISS_2058/data/1635/N123_1_{_STAMP}.log')
+
+
+def test_building_handlers_rejects_an_escaping_stub(tmp_path: Path) -> None:
+    """The handler builder refuses the same stubs the path builder does."""
+    with pytest.raises(ValueError, match='within the log root'):
+        build_image_log_handlers(
+            'nav', '../../evil', _sinks(tmp_path), LogLevels(), timestamp=_STAMP
+        )
+
+
+# ---------------------------------------------------------------------------
+# Falling back rather than losing logs
+# ---------------------------------------------------------------------------
+
+
+def _no_resolvable_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove every source that would otherwise name a log root.
+
+    Parameters:
+        monkeypatch: Fixture used to clear the environment variables.
+    """
+    for name in ('NAV_LOG_ROOT', 'NAV_RESULTS_ROOT'):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_a_fallback_root_is_used_when_nothing_else_names_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A driver that knows its own output directory keeps its logs."""
+    _no_resolvable_root(monkeypatch)
+    run_logging = build_run_logging(
+        SD_OFFSET,
+        argparse.Namespace(),
+        _config(tmp_path),
+        build_main=False,
+        fallback_log_root=FCPath(str(tmp_path / 'task_out' / 'logs')),
+    )
+    assert run_logging.sinks.image_file is True
+
+
+def test_the_fallback_root_is_where_logs_go(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fallback is used as the log root, not merely accepted."""
+    _no_resolvable_root(monkeypatch)
+    run_logging = build_run_logging(
+        SD_OFFSET,
+        argparse.Namespace(),
+        _config(tmp_path),
+        build_main=False,
+        fallback_log_root=FCPath(str(tmp_path / 'task_out' / 'logs')),
+    )
+    assert run_logging.sinks.log_root.as_posix().endswith('task_out/logs')
+
+
+def test_without_a_fallback_the_file_sinks_are_dropped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A program with nowhere to write still runs, without log files."""
+    _no_resolvable_root(monkeypatch)
+    run_logging = build_run_logging(
+        SD_OFFSET, argparse.Namespace(), _config(tmp_path), build_main=False
+    )
+    assert (run_logging.sinks.main_file, run_logging.sinks.image_file) == (False, False)

@@ -40,7 +40,7 @@ import argparse
 import logging
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 import pdslogger
@@ -76,7 +76,6 @@ __all__ = [
     'run_timestamp',
     'set_log_levels',
     'sinks_from_arguments',
-    'superseded_level_conflicts',
 ]
 
 
@@ -86,7 +85,7 @@ DEFAULT_LEVEL = 'INFO'
 LOG_TIMESTAMP_FORMAT = '%Y-%m-%dT%H-%M-%S'
 """Suffix format distinguishing one run's log file from the next, in UTC."""
 
-BACKEND_NAMES = frozenset({'nav', 'backplane', 'reproj'})
+BACKEND_NAMES = frozenset({'nav', 'backplanes', 'reproj'})
 """Per-image backends, each owning a subtree of the log root."""
 
 _OFF = 'NONE'
@@ -392,60 +391,6 @@ def _parse_log_level_arguments(
     return global_level, modules
 
 
-_SUPERSEDED_GENERAL_KEYS = {
-    'log_level_main_console': ('logging.main', 'main'),
-    'log_level_main_file': ('logging.main', 'main'),
-    'log_level_image_console': ('logging.image', 'image'),
-    'log_level_image_file': ('logging.image', 'image'),
-}
-
-
-def superseded_level_conflicts(config: 'Config') -> list[str]:
-    """Report ``general.log_level_*`` keys that disagree with the ``logging`` section.
-
-    Both spellings are still read while the older one remains wired to part of
-    the setup, and they govern different halves of the same behavior: the older
-    key sets a handler's level, the newer one the level a component's section is
-    opened at.  A configuration that raises only the older key therefore gets a
-    log file willing to accept records that the section then floors away, and
-    silently loses the detail it asked for.
-
-    Agreement is silent.  Only a genuine disagreement is worth a word, because
-    that is the only case where the value someone set fails to take effect.
-
-    Every configured program is checked, not only the global block: a program
-    raising its own ``image`` level while an older key stays low conflicts just
-    as a global one does, and the warning has to name the program for the
-    reader to find it.
-
-    Parameters:
-        config: The loaded configuration.
-
-    Returns:
-        One message per conflicting key, empty when the two agree.
-    """
-    general = dict(config.general)
-    programs = dict(config.logging).get(_PROGRAMS_KEY) or {}
-    scopes: list[tuple[str, str]] = [('', '')]
-    scopes += [(name, f' for program "{name}"') for name in sorted(programs)]
-
-    messages = []
-    for program_name, where in scopes:
-        levels = resolve_log_levels(program_name, None, config)
-        for key, (replacement, target) in sorted(_SUPERSEDED_GENERAL_KEYS.items()):
-            if key not in general:
-                continue
-            old = normalize_level(str(general[key]))
-            new = levels.main if target == 'main' else levels.for_module(target)
-            if old != new:
-                messages.append(
-                    f'Configuration sets "general.{key}" to {old} but resolves '
-                    f'"{replacement}"{where} to {new}. The two are read separately, '
-                    f'so the former will not take effect; set {replacement} instead.'
-                )
-    return messages
-
-
 _active_levels: LogLevels | None = None
 
 
@@ -502,6 +447,37 @@ def main_log_path(log_root: FCPath, program_name: str, *, timestamp: str) -> FCP
     return log_root / program_name / f'main_{timestamp}.log'
 
 
+def _validated_stub(results_path_stub: str) -> str:
+    """Return ``results_path_stub`` if it names a location inside the log root.
+
+    A stub reaches this from task data on the cloud-task path, so it is not
+    necessarily trustworthy.  Subdirectories are legitimate -- a stub is
+    normally ``{volume}/{filespec}`` -- but a stub that climbs out of the log
+    root, names an absolute path, or carries a null byte is not, and would put
+    a log file somewhere the caller never asked for.
+
+    Parameters:
+        results_path_stub: The image's results path stub.
+
+    Returns:
+        The stub, unchanged.
+
+    Raises:
+        ValueError: If the stub is absolute, empty, contains a null byte, or
+            has any parent-directory component.
+    """
+    if not results_path_stub or '\x00' in results_path_stub:
+        raise ValueError(f'Invalid results path stub for a log file: {results_path_stub!r}')
+    normalized = results_path_stub.replace('\\', '/')
+    if normalized.startswith('/') or PurePosixPath(normalized).is_absolute():
+        raise ValueError(f'Results path stub must be relative, got {results_path_stub!r}')
+    if any(part == '..' for part in PurePosixPath(normalized).parts):
+        raise ValueError(
+            f'Results path stub must stay within the log root, got {results_path_stub!r}'
+        )
+    return results_path_stub
+
+
 def image_log_path(
     log_root: FCPath, backend: str, results_path_stub: str, *, timestamp: str
 ) -> FCPath:
@@ -524,7 +500,7 @@ def image_log_path(
     """
     if backend not in BACKEND_NAMES:
         raise ValueError(f'Unknown backend {backend!r}; expected one of {sorted(BACKEND_NAMES)}')
-    return log_root / backend / f'{results_path_stub}_{timestamp}.log'
+    return log_root / backend / f'{_validated_stub(results_path_stub)}_{timestamp}.log'
 
 
 def run_timestamp() -> str:
@@ -744,6 +720,7 @@ def build_run_logging(
     config: 'Config',
     *,
     build_main: bool = True,
+    fallback_log_root: str | Path | FCPath | None = None,
 ) -> RunLogging:
     """Resolve this run's logging and configure the main logger.
 
@@ -759,6 +736,10 @@ def build_run_logging(
         config: The loaded configuration.
         build_main: False for a program that has no main logger of its own, so
             that levels and sinks are still resolved for its image logs.
+        fallback_log_root: Where to put log files when nothing else names a log
+            root.  For a driver that has somewhere sensible of its own -- a
+            cloud task knows its output directory -- this keeps its logs rather
+            than dropping them.
 
     Returns:
         The resolved :class:`RunLogging`.
@@ -769,30 +750,36 @@ def build_run_logging(
             command line is not a known component.
         TypeError: If a configured level is not a string.
     """
-    # Local import: config_helper imports this module for the conflict check,
-    # so importing it back at module level would close a cycle.
+    # Local import: config_helper imports this module, so importing it back at
+    # module level would close a cycle.
     from .config_helper import get_log_root
 
     levels = resolve_log_levels(program_name, arguments, config)
     try:
         log_root = FCPath(get_log_root(arguments, config))
     except ValueError as exc:
-        # A program with no results root of its own -- bundle summary, say --
-        # has nowhere to put log files.  That is not worth refusing to run
-        # over: drop the file sinks, say so, and carry on.
-        log_root = FCPath('.')
-        sinks = sinks_from_arguments(arguments, log_root)
-        sinks = replace(sinks, main_file=False, image_file=False)
-        set_log_levels(levels)
-        timestamp = run_timestamp()
-        if build_main:
-            build_main_logger(MAIN_LOGGER, program_name, sinks, levels, timestamp=timestamp)
+        if fallback_log_root is None:
+            # A program with no results root of its own -- bundle summary, say
+            # -- has nowhere to put log files.  That is not worth refusing to
+            # run over: drop the file sinks, say so, and carry on.
+            sinks = replace(
+                sinks_from_arguments(arguments, FCPath('.')),
+                main_file=False,
+                image_file=False,
+            )
+            set_log_levels(levels)
+            timestamp = run_timestamp()
+            if build_main:
+                build_main_logger(MAIN_LOGGER, program_name, sinks, levels, timestamp=timestamp)
+            # Warned whether or not a main logger was built: a driver without
+            # one still needs to know its image logs are going nowhere.
             MAIN_LOGGER.warning(
                 'No log root could be determined (%s); logging to the terminal only. '
                 'Pass --log-root to write log files.',
                 exc,
             )
-        return RunLogging(levels=levels, sinks=sinks, timestamp=timestamp, main_log_path=None)
+            return RunLogging(levels=levels, sinks=sinks, timestamp=timestamp, main_log_path=None)
+        log_root = FCPath(fallback_log_root)
     sinks = sinks_from_arguments(arguments, log_root)
     set_log_levels(levels)
     timestamp = run_timestamp()
@@ -801,10 +788,4 @@ def build_run_logging(
         main_log_path = build_main_logger(
             MAIN_LOGGER, program_name, sinks, levels, timestamp=timestamp
         )
-    if build_main:
-        # Reported here rather than at configuration load, so the warning is
-        # subject to the sinks and level the run actually configured instead of
-        # going to a logger that has none.
-        for message in superseded_level_conflicts(config):
-            MAIN_LOGGER.warning('%s', message)
     return RunLogging(levels=levels, sinks=sinks, timestamp=timestamp, main_log_path=main_log_path)

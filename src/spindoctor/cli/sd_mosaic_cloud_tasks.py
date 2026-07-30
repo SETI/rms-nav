@@ -22,9 +22,9 @@ import asyncio
 import os
 import sys
 import traceback
-from datetime import datetime
 from typing import Any, cast
 
+import pdslogger
 from cloud_tasks.worker import Worker, WorkerData
 from filecache import FCPath, FileCache
 
@@ -41,8 +41,9 @@ from spindoctor.config import (
     DEFAULT_CONFIG,
     IMAGE_LOGGER,
     MAIN_LOGGER,
+    build_image_log_handlers,
+    build_run_logging,
     get_nav_results_root,
-    image_log_handlers,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_MOSAIC
@@ -69,35 +70,6 @@ def _resolve_nav_results_root_fcpath(cli_args: argparse.Namespace) -> FCPath | N
 def _log_main_exception(msg: str, *args: object) -> None:
     """Log an exception with full traceback (frames plus final error line)."""
     MAIN_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
-
-
-def _safe_stub_for_image_log(results_path_stub: object, *, default: str = 'image') -> str:
-    """Reduce ``results_path_stub`` to one filename-safe segment (no directory components)."""
-    if not isinstance(results_path_stub, str):
-        return default
-    if '\x00' in results_path_stub:
-        return default
-    base = os.path.basename(results_path_stub.replace('\\', '/'))
-    if not base:
-        return default
-    safe = ''.join(ch if (ch.isalnum() or ch in '._-') else '_' for ch in base)
-    safe = safe.strip('._') or default
-    return safe[:200]
-
-
-def _resolved_image_log_path(
-    output_dir: FCPath, results_path_stub: object, timestamp: str
-) -> FCPath:
-    """Resolve ``<output_dir>/logs/<stub>_<timestamp>.log`` and ensure it stays under ``logs``."""
-    logs_dir = (output_dir / 'logs').resolve()
-    for stub in (
-        _safe_stub_for_image_log(results_path_stub),
-        _safe_stub_for_image_log('', default='image'),
-    ):
-        candidate = (output_dir / 'logs' / f'{stub}_{timestamp}.log').resolve()
-        if candidate.is_relative_to(logs_dir):
-            return candidate
-    raise ValueError(f'Refusing image log path outside output_dir/logs (root={logs_dir!r})')
 
 
 def process_task(
@@ -187,6 +159,18 @@ def process_task(
     if not isinstance(output_dir_str, str):
         return False, {'status': 'error', 'status_error': 'invalid_output_dir_type'}
 
+    # No main logger here; see the cloud-task section of the plan.  The task's
+    # own output directory is the fallback log root, because a worker is not
+    # required to have a navigation results root and its logs should not
+    # disappear when it does not.
+    run_logging = build_run_logging(
+        PROGRAM_NAME,
+        cli_args,
+        DEFAULT_CONFIG,
+        build_main=False,
+        fallback_log_root=FCPath(output_dir_str) / 'logs',
+    )
+
     prefix: str = task_arguments.get('prefix', '')
     fmt: str = task_arguments.get('format', 'fits')
     overwrite: bool = task_arguments.get('overwrite', False)
@@ -242,24 +226,28 @@ def process_task(
             MAIN_LOGGER.debug('Skipping (exists): %s', out_path)
             continue
 
-        timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
         try:
-            image_log_path = _resolved_image_log_path(
-                output_dir, image_file.results_path_stub, timestamp
+            local_handlers, image_log_path = build_image_log_handlers(
+                'reproj',
+                f'{mosaic.body_name}/{image_file.results_path_stub}',
+                run_logging.sinks,
+                run_logging.levels,
+                timestamp=run_logging.timestamp,
             )
         except ValueError as exc:
+            # results_path_stub comes from task data; a stub that would put the
+            # log outside the log root is a bad task, not a retryable failure.
             return False, {
                 'status': 'error',
-                'status_error': 'invalid_image_log_path',
+                'status_error': 'invalid_results_path_stub',
                 'status_exception': str(exc),
             }
-        image_log_path.parent.mkdir(parents=True, exist_ok=True)
-        local_handlers = image_log_handlers(image_log_path, cli_args, DEFAULT_CONFIG)
 
         try:
             with IMAGE_LOGGER.open(
                 f'REPROJECT {image_file.image_file_url}',
                 handler=local_handlers,
+                level=run_logging.levels.image.lower(),
             ):
                 try:
                     image_path = image_file.image_file_path.absolute()
@@ -292,10 +280,12 @@ def process_task(
                 except Exception:
                     _log_main_exception('Error reprojecting %s', image_file.image_file_url)
                 finally:
-                    MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
+                    if image_log_path is not None:
+                        MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
         finally:
             for handler in local_handlers:
-                handler.close()
+                if handler is not pdslogger.NULL_HANDLER:
+                    handler.close()
 
     return False, {'status': 'success'}  # No retry under any circumstances
 

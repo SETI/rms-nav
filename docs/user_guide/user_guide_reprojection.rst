@@ -502,11 +502,12 @@ Output format
 
 The default output format is FITS (``.fits``). Pass ``--format npz`` to use
 compressed NumPy archives instead. Reprojection and mosaic files live directly
-under ``<output-dir>``; the only subdirectory used is ``logs/`` for per-image
-reprojection logs from pass 1:
+under ``<output-dir>``. Per-image logs are written under the configured log
+root rather than beside the products; a cloud-tasks worker with no results root
+of its own falls back to ``<output-dir>/logs``:
 
 - Per-image reprojection: ``<output-dir>/<prefix>_<body_or_planet>_<image_stem>_reproj.<fmt>``
-- Per-image reprojection log: ``<output-dir>/logs/<results_path_stub>_<timestamp>.log``
+- Per-image reprojection log: ``{log_root}/reproj/<subject>/<results_path_stub>_<timestamp>.log``
 - Final mosaic: ``<output-dir>/<prefix>_<body_or_planet>_mosaic.<fmt>``
 
 If ``--prefix`` is empty (the default), the leading underscore is omitted.

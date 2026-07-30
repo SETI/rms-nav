@@ -22,6 +22,7 @@ sys.path.insert(0, package_source_path)
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
 from spindoctor.config import (
     DEFAULT_CONFIG,
+    build_run_logging,
     get_backplane_results_root,
     get_nav_results_root,
     load_default_and_user_config,
@@ -92,12 +93,24 @@ def process_task(
         )
         image_files.append(image_file)
 
+    # No main logger here; see the cloud-task section of the plan.  Resolved
+    # the same way the interactive driver does, so the same backend's logs land
+    # in one tree whichever driver produced them.
+    run_logging = build_run_logging(
+        PROGRAM_NAME,
+        arguments,
+        DEFAULT_CONFIG,
+        build_main=False,
+        fallback_log_root=backplane_results_root / 'logs',
+    )
+
     generate_backplanes_image_files(
         obs_class,
         ImageFiles(image_files=image_files),
         nav_results_root=nav_results_root,
         backplane_results_root=backplane_results_root,
         write_output_files=True,
+        run_logging=run_logging,
     )
 
     return False, None  # No retry under any circumstances

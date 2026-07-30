@@ -59,10 +59,7 @@ def add_common_env_args(parser: argparse.ArgumentParser) -> None:
             '(or if an image has no success metadata), uncorrected pointing is used.'
         ),
     )
-    # No image flags yet: per-image reprojection logging still goes through
-    # the setup being replaced, so offering them would accept a request this
-    # program cannot honor.
-    add_logging_arguments(parser, has_image_logger=False)
+    add_logging_arguments(parser)
     misc = parser.add_argument_group('Miscellaneous')
     misc.add_argument(
         '--profile',
