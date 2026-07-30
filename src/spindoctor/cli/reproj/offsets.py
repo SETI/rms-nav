@@ -1,8 +1,14 @@
 """Helpers for loading pre-computed navigation offsets from sd_offset results.
 
-The pattern mirrors ``src/backplanes/backplanes.py`` lines 71-79:
-read the ``_metadata.json`` file for an image and apply the stored
-``(dv, du)`` offset to the observation's FOV via ``oops.fov.OffsetFOV``.
+Read the ``_metadata.json`` file for an image and apply the stored ``(dv, du)``
+offset to the observation's FOV via ``oops.fov.OffsetFOV``.
+
+Every reason an offset could not be loaded describes one image, so it is
+reported to that image's log rather than to the run's.  These are the records
+that say a reprojection used uncorrected pointing, which is the difference
+between a product being what it claims and being quietly misregistered; they
+belong with the image they qualify, where they are still there to be found once
+the run that produced them is over.
 """
 
 import json
@@ -13,7 +19,7 @@ from pathlib import Path
 import oops
 from filecache import FCPath
 
-from spindoctor.config import MAIN_LOGGER
+from spindoctor.config import IMAGE_LOGGER
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.obs import ObsSnapshotInst
 
@@ -29,13 +35,13 @@ def _resolved_nav_metadata_path(
     """
     rel_name = f'{image_file.results_path_stub}_metadata.json'
     if '\x00' in rel_name:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'nav_results_root: metadata path contains null byte; refusing offset load for %s.',
             image_file.image_file_url,
         )
         return None
     if Path(rel_name).is_absolute():
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'nav_results_root: metadata path fragment is absolute; refusing offset load for %s.',
             image_file.image_file_url,
         )
@@ -43,7 +49,7 @@ def _resolved_nav_metadata_path(
     root = FCPath(nav_results_root).expanduser().resolve()
     candidate = (root / rel_name).resolve()
     if not candidate.is_relative_to(root):
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'nav_results_root: resolved metadata path %s is outside root %s; refusing '
             'offset load for %s (check results_path_stub for path traversal).',
             candidate,
@@ -114,13 +120,13 @@ def load_offset_if_any(
     try:
         text = metadata_path.read_text()
     except FileNotFoundError:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'nav_results_root provided but no metadata found for %s; using uncorrected pointing.',
             image_file.image_file_url,
         )
         return None
     except (OSError, UnicodeDecodeError) as exc:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Could not read metadata for %s (%s); using uncorrected pointing.',
             image_file.image_file_url,
             exc,
@@ -130,7 +136,7 @@ def load_offset_if_any(
     try:
         nav_metadata = json.loads(text)
     except json.JSONDecodeError as exc:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Invalid JSON in metadata for %s (%s); using uncorrected pointing.',
             image_file.image_file_url,
             exc,
@@ -138,7 +144,7 @@ def load_offset_if_any(
         return None
 
     if not isinstance(nav_metadata, dict):
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Nav metadata for %s is not a JSON object '
             '(type=%s, value=%r); using uncorrected pointing.',
             image_file.image_file_url,
@@ -149,7 +155,7 @@ def load_offset_if_any(
 
     status = nav_metadata.get('status')
     if status != 'success':
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Nav metadata for %s has status=%r; using uncorrected pointing.',
             image_file.image_file_url,
             status,
@@ -158,7 +164,7 @@ def load_offset_if_any(
 
     offset = nav_metadata.get('offset')
     if offset is None:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Nav metadata for %s has null offset; using uncorrected pointing.',
             image_file.image_file_url,
         )
@@ -167,21 +173,21 @@ def load_offset_if_any(
     try:
         parsed = _parse_nav_offset_pair(offset)
     except TypeError as exc:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Nav metadata for %s has invalid offset type (%s); using uncorrected pointing.',
             image_file.image_file_url,
             exc,
         )
         return None
     except ValueError as exc:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Nav metadata for %s has non-finite offset (%s); using uncorrected pointing.',
             image_file.image_file_url,
             exc,
         )
         return None
     if parsed is None:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Nav metadata for %s has malformed offset field; using uncorrected pointing.',
             image_file.image_file_url,
         )

@@ -76,13 +76,32 @@ PROGRAM_NAME = SD_MOSAIC
 
 
 def _log_main_exception(msg: str, *args: object) -> None:
-    """Log an exception with full traceback (frames plus final error line).
+    """Log a run-level exception with full traceback.
 
     ``PdsLogger.exception()`` records only ``traceback.format_tb``, which omits
     the ``SomeError: ...`` line at the end. Pass ``traceback.format_exc()`` as
     ``more=`` and disable the default partial stack to avoid duplicating frames.
+
+    Parameters:
+        msg: Message template, with pdslogger-style ``%s`` placeholders.
+        *args: Values substituted into ``msg``.
     """
     MAIN_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
+
+
+def _log_image_exception(msg: str, *args: object) -> None:
+    """Log an exception about one image, into that image's log.
+
+    The counterpart of :func:`_log_main_exception` for a failure that belongs
+    to a single image rather than to the run.  Reprojecting an image is allowed
+    to fail without stopping the pass, so this record is the only account of
+    what happened to it.
+
+    Parameters:
+        msg: Message template, with pdslogger-style ``%s`` placeholders.
+        *args: Values substituted into ``msg``.
+    """
+    IMAGE_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
 
 
 def _run_reproject_pass(
@@ -96,7 +115,7 @@ def _run_reproject_pass(
     subject_name: str,
     obs_class: type[ObsSnapshotInst],
     reproject_fn: Callable[[ObsSnapshotInst, str], BodyReprojResult | RingReprojResult],
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """Reproject each selected image: path checks, per-image logs, offset, save.
 
     Parameters:
@@ -113,12 +132,14 @@ def _run_reproject_pass(
             reprojection result with ``save()``.
 
     Returns:
-        ``(n_done, n_skipped)`` counts for the pass (dry-run does not increment
-        ``n_done``; skipped-existing increments ``n_skipped``).
+        ``(n_done, n_skipped, n_failed)`` counts for the pass (dry-run does not
+        increment ``n_done``; skipped-existing increments ``n_skipped``; an
+        image whose reprojection raised increments ``n_failed``).
     """
     assert DATASET is not None
     n_done = 0
     n_skipped = 0
+    n_failed = 0
     for imagefiles in DATASET.yield_image_files_from_arguments(args):
         image_file = imagefiles.image_files[0]
         out_path = per_image_output_path(
@@ -147,7 +168,7 @@ def _run_reproject_pass(
             with IMAGE_LOGGER.open(
                 f'REPROJECT {image_file.image_file_url}',
                 handler=local_handlers,
-                level=run_logging.levels.image.lower(),
+                level=run_logging.levels.image_section_level(),
             ):
                 try:
                     image_path = image_file.image_file_path.absolute()
@@ -168,10 +189,19 @@ def _run_reproject_pass(
                     if not args.no_write_output_files:
                         out_path.parent.mkdir(parents=True, exist_ok=True)
                         result.save(out_path)
-                        MAIN_LOGGER.info('Saved reproj: %s', out_path)
+                        IMAGE_LOGGER.info('Saved reproj: %s', out_path)
                     n_done += 1
                 except Exception:
-                    _log_main_exception('Error reprojecting %s', image_file.image_file_url)
+                    _log_image_exception('Error reprojecting %s', image_file.image_file_url)
+                    n_failed += 1
+                    # The traceback belongs to the image and stays in its log;
+                    # the run's log still has to say that an image failed, or
+                    # the only sign of it is a total that does not add up.
+                    MAIN_LOGGER.error(
+                        'Failed to reproject %s; see %s',
+                        image_file.image_file_url,
+                        image_log_path if image_log_path is not None else 'the image log',
+                    )
                 finally:
                     if image_log_path is not None:
                         MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
@@ -180,7 +210,7 @@ def _run_reproject_pass(
                 if handler is not pdslogger.NULL_HANDLER:
                     handler.close()
 
-    return n_done, n_skipped
+    return n_done, n_skipped, n_failed
 
 
 DATASET: DataSet | None = None
@@ -377,7 +407,7 @@ def _run_body(
     # ---- Pass 1: reprojection ------------------------------------------------
     if not args.skip_reproject:
         MAIN_LOGGER.info('=== Reprojection pass (body=%s) ===', mosaic.body_name)
-        n_done, n_skipped = _run_reproject_pass(
+        n_done, n_skipped, n_failed = _run_reproject_pass(
             run_logging,
             args=args,
             nav_results_root_path=nav_results_root_path,
@@ -390,7 +420,12 @@ def _run_body(
                 obs, mosaic, image_name=image_name
             ),
         )
-        MAIN_LOGGER.info('Reprojection pass complete: %d done, %d skipped.', n_done, n_skipped)
+        MAIN_LOGGER.info(
+            'Reprojection pass complete: %d done, %d skipped, %d failed.',
+            n_done,
+            n_skipped,
+            n_failed,
+        )
 
     # ---- Pass 2: mosaic ------------------------------------------------------
     if not args.skip_mosaic:
@@ -485,7 +520,7 @@ def _run_rings(
     # ---- Pass 1: reprojection ------------------------------------------------
     if not args.skip_reproject:
         MAIN_LOGGER.info('=== Reprojection pass (rings, planet=%s) ===', mosaic.body_name)
-        n_done, n_skipped = _run_reproject_pass(
+        n_done, n_skipped, n_failed = _run_reproject_pass(
             run_logging,
             args=args,
             nav_results_root_path=nav_results_root_path,
@@ -498,7 +533,12 @@ def _run_rings(
                 obs, args, mosaic, image_name=image_name
             ),
         )
-        MAIN_LOGGER.info('Reprojection pass complete: %d done, %d skipped.', n_done, n_skipped)
+        MAIN_LOGGER.info(
+            'Reprojection pass complete: %d done, %d skipped, %d failed.',
+            n_done,
+            n_skipped,
+            n_failed,
+        )
 
     # ---- Pass 2: mosaic ------------------------------------------------------
     if not args.skip_mosaic:

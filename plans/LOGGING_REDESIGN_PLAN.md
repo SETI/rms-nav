@@ -619,11 +619,21 @@ with the `logging` section while both were read.
 
 ### Phase 7 — Cloud-task isolation
 
-For the three cloud-task drivers in scope: no main logger,
-`propagate = False` on both loggers, no console handler on the image logger,
-null sink for the main logger so surviving call sites are inert. Applied
-inside `process_task`, which is what runs in the worker subprocess —
-configuring in the parent does not carry across the process boundary.
+For the three cloud-task drivers in scope: no main logger, `propagate = False` on both loggers, no console handler on either logger, null sink so surviving call sites are inert. Applied inside `process_task`, which is what runs in the worker subprocess — configuring in the parent does not carry across the process boundary.
+
+`build_cloud_task_logging` is the entry point, wrapping `build_run_logging` with the isolation applied *first*, so that even a failure to resolve the log root is reported into the null sink rather than printed. The null sink covers the image logger as well as the main one: its section handlers are attached only for the duration of a section, and between one image and the next the handler-less `print()` fallback would otherwise apply.
+
+Isolation makes a record's binding consequential rather than cosmetic, because a main-logger record in a cloud task is discarded rather than merely misfiled. Every per-image record reachable from a cloud task was audited against that, and three kinds were found:
+
+- **Rebound to the image logger**, being per-image facts already inside an image scope: the twelve "using uncorrected pointing" warnings in `cli/reproj/offsets.py`, and `Saved reproj` and the reprojection exception in both mosaic drivers. The exception was the load-bearing one — a reprojection failure does not fail its task, so that record is the only account of what happened to the image.
+- **Returned in the task result**, being decisions taken *before* any image scope exists and therefore not rebindable without recreating the empty-log-file problem Phase 6 fixed: the backplanes skip for an image whose navigation did not succeed, and the mosaic skip for an output that already exists. `generate_backplanes_image_files` returns `{'status': 'success' | 'skipped'}`, and the mosaic task returns `n_done` / `n_skipped` / `n_failed`.
+- **Left as they are**, being genuinely run-level and acceptably inert in a worker: `Wrote log to <path>`, the dry-run lines, and the mosaic-pass load errors, which are outside any image scope.
+
+Rebinding the reprojection exception cost the *interactive* driver its console report of a failed image, since `image_console` is off by default. `sd_mosaic` therefore also emits a one-line main-logger error naming the image and its log, and counts failures into the pass summary, which previously reported only done and skipped and so hid a failure as a total that did not add up.
+
+`LogLevels.image_section_level()` joins `section_level_for` in mapping a logger configured `NONE` onto the numeric silent level. The three per-image `logger.open(level=...)` sites passed `levels.image.lower()`, and pdslogger has no level of that name: `logging.image: NONE` raised `KeyError: 'none'` rather than going quiet.
+
+Left open and filed as #418: whether a task's `status` should reflect its per-image failures, rather than only the counts beside it.
 
 ### Phase 8 — Tests
 
