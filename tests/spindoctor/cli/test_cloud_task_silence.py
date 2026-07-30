@@ -11,9 +11,9 @@ exactly as a worker installs it, and measures the bytes on each descriptor.
 
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
+from filecache import FCPath
 
 # Every level, so nothing is passing merely for being below a threshold, and
 # an exception, whose traceback is the bulkiest thing a per-image log carries.
@@ -61,8 +61,7 @@ finally:
     for handler in handlers:
         handler.close()
 
-with open(sys.argv[2], 'w') as stream:
-    stream.write(path.as_posix())
+FCPath(sys.argv[2]).write_text(path.as_posix())
 """
 
 
@@ -76,24 +75,29 @@ def task_output(tmp_path_factory: pytest.TempPathFactory) -> tuple[str, str, str
     Parameters:
         tmp_path_factory: Fixture used to make the run's directory.
 
-    Yields:
+    Returns:
         Tuple of the child's stdout, its stderr, and its image log text.
     """
-    directory = tmp_path_factory.mktemp('cloud_task_silence')
+    directory = FCPath(tmp_path_factory.mktemp('cloud_task_silence'))
     script = directory / 'child.py'
     script.write_text(_CHILD)
     path_file = directory / 'log_path.txt'
 
     completed = subprocess.run(
-        [sys.executable, str(script), str(directory / 'logs'), str(path_file)],
+        [
+            sys.executable,
+            script.as_posix(),
+            (directory / 'logs').as_posix(),
+            path_file.as_posix(),
+        ],
         capture_output=True,
         text=True,
         check=False,
         timeout=300,
     )
     assert completed.returncode == 0, completed.stderr
-    log_text = Path(path_file.read_text()).read_text()
-    return completed.stdout, completed.stderr, log_text
+    log_text = FCPath(path_file.read_text()).read_text()
+    return completed.stdout, completed.stderr, str(log_text)
 
 
 def test_a_cloud_task_writes_nothing_to_stdout(task_output: tuple[str, str, str]) -> None:
@@ -126,6 +130,22 @@ def test_the_image_log_is_complete(task_output: tuple[str, str, str], canary: st
     assert canary in task_output[2]
 
 
-def test_the_exception_keeps_its_traceback(task_output: tuple[str, str, str]) -> None:
-    """The traceback survives too, since the image log is where it now lives."""
+def test_the_exception_keeps_its_type(task_output: tuple[str, str, str]) -> None:
+    """The exception survives, since the image log is where it now lives."""
     assert 'RuntimeError' in task_output[2]
+
+
+def test_the_exception_keeps_its_traceback(task_output: tuple[str, str, str]) -> None:
+    """And so does the traceback, which is the part worth having.
+
+    Naming the exception type alone would be satisfied by a one-line record.
+    The frame is what tells a reader where the image failed, and it is the
+    bulkiest thing a per-image log carries -- so if isolation were going to
+    lose anything to a size or formatting difference, it would lose this.
+    """
+    assert f'in <module>{chr(10)}' in task_output[2]
+
+
+def test_the_traceback_names_the_failing_line(task_output: tuple[str, str, str]) -> None:
+    """The frame carries the source line, not just the file it came from."""
+    assert "raise RuntimeError('CANARY-EXCEPTION')" in task_output[2]

@@ -11,6 +11,7 @@ running ``main`` with ``--help``, so what is asserted is the surface a user
 actually meets rather than a reconstruction of it.
 """
 
+import argparse
 import contextlib
 import importlib
 import io
@@ -18,11 +19,22 @@ import sys
 from pathlib import Path
 
 import pytest
+from filecache import FCPath
+
+from spindoctor.cli.logging_args import add_logging_arguments
 
 _MAIN_FLAGS = ('--log-root', '--log-main-to-console', '--log-main-to-file', '--log-level')
 _IMAGE_FLAGS = ('--log-image-to-console', '--log-image-to-file', '--log-level-image')
 
-_CLI_DIR = Path(__file__).resolve().parents[3] / 'src' / 'spindoctor' / 'cli'
+# The sink flags, which argparse gives a --no- form; the level and root flags
+# take a value and have none.
+_NEGATABLE_MAIN_FLAGS = ('--log-main-to-console', '--log-main-to-file')
+_NEGATABLE_IMAGE_FLAGS = ('--log-image-to-console', '--log-image-to-file')
+
+_MAIN_DESTINATIONS = ('log_root', 'log_main_to_console', 'log_main_to_file', 'log_level')
+_IMAGE_DESTINATIONS = ('log_image_to_console', 'log_image_to_file', 'log_level_image')
+
+_CLI_DIR = FCPath(Path(__file__).resolve().parents[3]) / 'src' / 'spindoctor' / 'cli'
 
 # Programs with a logger, and the argv that reaches their parser.  A program
 # reading its dataset or mode from argv before parsing needs it supplied.
@@ -95,7 +107,7 @@ def _source(program: str) -> str:
     Returns:
         The module's text.
     """
-    return (_CLI_DIR / f'{program}.py').read_text()
+    return str((_CLI_DIR / f'{program}.py').read_text())
 
 
 @pytest.mark.parametrize(('program', 'argv'), _WITH_ANY_LOGGER)
@@ -128,22 +140,46 @@ def test_a_program_without_images_rejects_the_image_flags(
     assert flag not in _help_text(program, argv)
 
 
-@pytest.mark.parametrize(('program', 'argv'), _WITH_ANY_LOGGER)
-def test_a_logging_flag_defaults_to_unset(program: str, argv: list[str]) -> None:
-    """The flags default to nothing, so the configuration decides.
+@pytest.mark.parametrize('destination', [*_MAIN_DESTINATIONS, *_IMAGE_DESTINATIONS])
+def test_a_logging_flag_defaults_to_unset(destination: str) -> None:
+    """Naming no flag leaves every destination None, so the configuration decides.
 
     A flag defaulting to a concrete value would override the configuration
-    just by existing, and there would be no way to ask for the configured
-    behavior on the command line.
+    just by existing, and there would be no way to ask on the command line for
+    the behavior the configuration was set up to give.  Parsed rather than read
+    out of the help text: a default that silently overrode the configuration
+    would be spelled the same way in ``--help`` as one that did not.
     """
-    assert '--log-level-main LEVEL' in _help_text(program, argv)
+    parser = argparse.ArgumentParser()
+    add_logging_arguments(parser)
+    assert getattr(parser.parse_args([]), destination) is None
+
+
+@pytest.mark.parametrize(('program', 'argv'), _WITH_ANY_LOGGER)
+@pytest.mark.parametrize('flag', _NEGATABLE_MAIN_FLAGS)
+def test_a_main_sink_can_be_turned_off(program: str, argv: list[str], flag: str) -> None:
+    """Each main sink can be turned off as well as on, from the command line."""
+    assert f'--no-{flag.removeprefix("--")}' in _help_text(program, argv)
 
 
 @pytest.mark.parametrize(('program', 'argv'), _WITH_IMAGE_LOGGER)
-def test_the_console_flags_are_negatable(program: str, argv: list[str]) -> None:
-    """Each sink can be turned off as well as on, from the command line."""
-    text = _help_text(program, argv)
-    assert '--no-log-image-to-console' in text
+@pytest.mark.parametrize('flag', _NEGATABLE_IMAGE_FLAGS)
+def test_an_image_sink_can_be_turned_off(program: str, argv: list[str], flag: str) -> None:
+    """So can each image sink, on the programs that have one."""
+    assert f'--no-{flag.removeprefix("--")}' in _help_text(program, argv)
+
+
+@pytest.mark.parametrize('flag', [*_NEGATABLE_MAIN_FLAGS, *_NEGATABLE_IMAGE_FLAGS])
+def test_turning_a_sink_off_is_distinguishable_from_saying_nothing(flag: str) -> None:
+    """The negated form resolves to False rather than back to None.
+
+    None means "the configuration decides", so a negation that produced it
+    would silently ask for the default it was trying to override.
+    """
+    parser = argparse.ArgumentParser()
+    add_logging_arguments(parser)
+    destination = flag.removeprefix('--').replace('-', '_')
+    assert getattr(parser.parse_args([f'--no-{flag.removeprefix("--")}']), destination) is False
 
 
 @pytest.mark.parametrize('program', _WITHOUT_LOGGER)

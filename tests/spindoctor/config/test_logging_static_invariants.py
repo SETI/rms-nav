@@ -17,8 +17,9 @@ import ast
 from pathlib import Path
 
 import pytest
+from filecache import FCPath
 
-_SRC = Path(__file__).resolve().parents[3] / 'src' / 'spindoctor'
+_SRC = FCPath(Path(__file__).resolve().parents[3]) / 'src' / 'spindoctor'
 
 # The statistics and GUI programs carry no logger and write to the terminal
 # with print(): neither is a batch pipeline, and both are read as they run.
@@ -44,7 +45,7 @@ _NO_STDLIB_LOGGING = [
 ]
 
 
-def _python_files(relative: str) -> list[Path]:
+def _python_files(relative: str) -> list[FCPath]:
     """Return the Python files a target names.
 
     Parameters:
@@ -57,7 +58,7 @@ def _python_files(relative: str) -> list[Path]:
     return sorted(target.rglob('*.py')) if target.is_dir() else [target]
 
 
-def _imported_names(path: Path) -> set[str]:
+def _imported_names(path: FCPath) -> set[str]:
     """Return every name a module imports.
 
     Parsed rather than matched textually, so a name in a docstring or a
@@ -107,6 +108,20 @@ def test_a_print_only_program_imports_no_pdslogger(relative: str) -> None:
     """Nor does it reach around the loggers to pdslogger itself."""
     offenders = [
         path.name for path in _python_files(relative) if 'pdslogger' in _imported_names(path)
+    ]
+    assert offenders == []
+
+
+@pytest.mark.parametrize('relative', _PRINT_ONLY)
+def test_a_print_only_program_imports_no_stdlib_logging(relative: str) -> None:
+    """Nor the stdlib module, which is the third way back to having a logger.
+
+    Checking only for the two loggers and for pdslogger would let
+    ``logging.getLogger(__name__)`` reintroduce exactly what these programs
+    were converted away from, configured by nothing this design controls.
+    """
+    offenders = [
+        path.name for path in _python_files(relative) if 'logging' in _imported_names(path)
     ]
     assert offenders == []
 
