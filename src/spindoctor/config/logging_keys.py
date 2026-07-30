@@ -60,18 +60,26 @@ LOGGER_KEYS = frozenset({'main', 'image'})
 CATEGORY_KEYS = frozenset({'techniques', 'models', 'other'})
 """Categories that group per-module overrides."""
 
-OTHER_LOG_KEYS = frozenset({'annotate'})
+OTHER_LOG_KEYS = frozenset(
+    {
+        'annotate',
+        'correlate',
+        'ensemble',
+        'image_derivatives',
+        'obs',
+        'orchestrator',
+        'provenance',
+    }
+)
 """Image-scoped modules that are neither a technique nor a model.
 
 A module earns a key here only once it opens a section of its own, because a
-level is applied at ``logger.open()`` and a key naming a component that never
-opens one would validate cleanly and then do nothing.  Annotation is currently
-the only such component; the ensemble, provenance, orchestrator, observation
-and correlation modules log inside whichever section is already open and take
-that section's level.
+level is applied at ``logger.open()``; a key naming a component that never
+opens one would validate cleanly and then do nothing.  Every key listed here
+has one.
 
-A per-image backend has no key here either.  Each program drives at most one
-backend, so that backend's verbosity is the program's ``image`` level.
+A per-image backend has no key here.  Each program drives at most one backend,
+so that backend's verbosity is the program's ``image`` level.
 """
 
 _CATEGORY_DEFAULT_KEY = 'default'

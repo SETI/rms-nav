@@ -395,9 +395,25 @@ def test_other_keys_include_the_annotation_module() -> None:
     assert 'annotate' in OTHER_LOG_KEYS
 
 
-def test_other_keys_exclude_modules_that_open_no_section() -> None:
-    """A key naming a component that never opens a section would do nothing."""
-    assert OTHER_LOG_KEYS.isdisjoint({'ensemble', 'provenance', 'orchestrator', 'obs'})
+def test_every_other_key_names_a_component_that_opens_a_section() -> None:
+    """A key naming a component that never opens a section would do nothing.
+
+    Guards the invariant directly rather than restating a list: each key must
+    appear either in a ``logged_section`` call or as a declared ``log_key``,
+    which are the two ways a component gets a section for its level to be
+    applied at.
+    """
+    import spindoctor
+
+    root = Path(spindoctor.__file__).parent
+    sources = '\n'.join(f.read_text() for f in root.rglob('*.py'))
+    missing = [
+        key
+        for key in sorted(OTHER_LOG_KEYS)
+        if f"logged_section('{key}'" not in sources
+        and f"log_key: ClassVar[str] = '{key}'" not in sources
+    ]
+    assert missing == []
 
 
 # ---------------------------------------------------------------------------

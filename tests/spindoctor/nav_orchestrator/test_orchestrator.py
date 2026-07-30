@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from spindoctor.annotation import Annotations
+from spindoctor.config import LogLevels, set_log_levels
 from spindoctor.feature.feature import (
     NavFeature,
     NavReliabilityBreakdown,
@@ -1221,6 +1222,9 @@ def test_infeasible_technique_rejection_logged_at_debug(
     fake_obs: _FakeObs, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An infeasible technique's rejection reason lands in the DEBUG log."""
+    # The orchestration section is opened at the orchestrator's configured
+    # level, so a test asserting DEBUG output has to ask for DEBUG.
+    set_log_levels(LogLevels(image='DEBUG'))
     obs = fake_obs
     model = _FakeStarModel(obs, feature_count=3)
     orch = NavOrchestrator([model], only_techniques=['_InfeasibleTechnique'])
@@ -1234,6 +1238,9 @@ def test_feasible_technique_report_logged_at_debug(
     fake_obs: _FakeObs, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A feasible technique's consumed-feature report lands in the DEBUG log."""
+    # The orchestration section is opened at the orchestrator's configured
+    # level, so a test asserting DEBUG output has to ask for DEBUG.
+    set_log_levels(LogLevels(image='DEBUG'))
     obs = fake_obs
     model = _FakeStarModel(obs, feature_count=3)
     orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])

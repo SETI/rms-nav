@@ -268,17 +268,20 @@ current class declares its key explicitly:
 |---|---|
 | `techniques` | `body_disc_correlate`, `body_blob`, `body_limb`, `body_terminator`, `ring_edge`, `ring_annulus`, `star_field_from_catalog`, `star_unique_match`, `star_refine`, `titan_haze`, `manual` |
 | `models` | `stars`, `body`, `rings`, `titan` |
-| `other` | `annotate` |
+| `other` | `annotate`, `correlate`, `ensemble`, `image_derivatives`, `obs`, `orchestrator`, `provenance` |
 
 `other` covers image-scoped components that are neither a model nor a
 technique. A component earns a key only once it opens a section of its own,
 because a level is applied at `logger.open()`; a key naming a component that
 never opens one would validate cleanly and then do nothing, which is the
 failure that left five `log_level_model_*` keys dead in the configuration this
-plan replaces. Annotation is currently the only such component. The ensemble,
-provenance, orchestrator, observation, correlation and image-derivative modules
-log inside whichever section is already open and take that section's level;
-giving them sections of their own is tracked separately (section 7).
+plan replaces. Every key listed here has a section, and a test asserts that
+correspondence rather than restating the list.
+
+Six of the seven are module-level functions rather than classes, so they take
+their section from the `logged_section` decorator rather than
+`NavBase.log_section`. Decorating avoids reshaping each function around a
+`with` block, and `ParamSpec` keeps the wrapped signature intact.
 
 `other` carries no keys for the backends either: a backend's verbosity is the
 `image` level of whichever program drives it, per the note in the previous
@@ -732,11 +735,6 @@ convention that future work gets an issue rather than a comment:
   `config_NNN_` filename prefixes is invisible from the keys themselves.
   Lifting `logging` out of `general` under this plan is one instance of the
   fix, not the whole of it.
-- **Sections for the remaining image-scoped components.** The ensemble,
-  provenance, orchestrator, observation, correlation and image-derivative
-  modules log without opening a section, so they have nowhere for a
-  per-component level to apply and carry no configuration key. Giving each a
-  section completes the per-module control this plan set out to provide.
 - **`sd_create_bundle_cloud_tasks` should not exist.** Bundle assembly is a
   packaging step over an already-processed collection, not per-image work
   suited to a task queue. Its removal, and the entry point in

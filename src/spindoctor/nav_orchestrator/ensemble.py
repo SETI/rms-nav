@@ -55,7 +55,7 @@ from typing import Any
 import numpy as np
 
 from spindoctor.annotation import Annotations
-from spindoctor.config import IMAGE_LOGGER
+from spindoctor.config import IMAGE_LOGGER, logged_section
 from spindoctor.feature.constants import (
     AGREEMENT_FACTOR_CAP,
     COMBINED_CONFIDENCE_CAP,
@@ -752,6 +752,7 @@ def derive_confidence_rank(
     return 'failed'
 
 
+@logged_section('ensemble', 'ENSEMBLE')
 def ensemble(
     results: list[NavTechniqueResult],
     *,

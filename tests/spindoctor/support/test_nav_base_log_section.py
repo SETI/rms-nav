@@ -17,6 +17,7 @@ from spindoctor.config import (
     LogSinks,
     build_image_log_handlers,
     image_scope,
+    logged_section,
     set_log_levels,
 )
 from spindoctor.nav_model.nav_model_body import NavModelBody
@@ -230,3 +231,88 @@ def test_an_explicit_none_level_inherits() -> None:
     logger.add_handler(pdslogger.NULL_HANDLER)
     with image_scope(logger), BodyLimbNav().log_section('COMPONENT', level=None):
         assert logger.level != logging.ERROR
+
+
+# ---------------------------------------------------------------------------
+# Components that are functions rather than classes
+# ---------------------------------------------------------------------------
+
+
+def _emit_in_decorated(tmp_path: Path, levels: LogLevels, log_key: str, message: str) -> str:
+    """Log a DEBUG record inside a decorated section and return the log text.
+
+    Parameters:
+        tmp_path: Directory used as the log root.
+        levels: Levels to install for the run.
+        log_key: The component key whose section to open.
+        message: Text to log.
+
+    Returns:
+        The contents of the per-image log file.
+    """
+    set_log_levels(levels)
+    handlers, path = build_image_log_handlers(
+        'nav', 'vol/N1', LogSinks(log_root=FCPath(str(tmp_path))), levels, timestamp=_STAMP
+    )
+    logger = pdslogger.PdsLogger.get_logger(f'decorated_{log_key}', lognames=False)
+    logger.remove_all_handlers()
+    logger.add_handler(pdslogger.NULL_HANDLER)
+
+    @logged_section(log_key, log_key.upper())
+    def component() -> None:
+        IMAGE_LOGGER.debug(message)
+
+    with image_scope(logger), IMAGE_LOGGER.open('IMAGE', handler=handlers):
+        component()
+    for handler in handlers:
+        handler.close()
+    assert path is not None
+    with path.open('r') as stream:
+        return str(stream.read())
+
+
+@pytest.mark.parametrize(
+    'log_key',
+    ['correlate', 'ensemble', 'image_derivatives', 'obs', 'orchestrator', 'provenance'],
+)
+def test_a_function_component_can_be_raised(tmp_path: Path, log_key: str) -> None:
+    """Each function-shaped component can be made verbose on its own."""
+    levels = LogLevels(image='INFO', modules={log_key: 'DEBUG'})
+    assert 'RAISED' in _emit_in_decorated(tmp_path, levels, log_key, 'RAISED')
+
+
+@pytest.mark.parametrize(
+    'log_key',
+    ['correlate', 'ensemble', 'image_derivatives', 'obs', 'orchestrator', 'provenance'],
+)
+def test_a_function_component_can_be_silenced(tmp_path: Path, log_key: str) -> None:
+    """Each function-shaped component can be silenced on its own."""
+    levels = LogLevels(image='DEBUG', modules={log_key: 'NONE'})
+    assert 'SILENCED' not in _emit_in_decorated(tmp_path, levels, log_key, 'SILENCED')
+
+
+def test_raising_one_function_component_leaves_another_alone(tmp_path: Path) -> None:
+    """Component keys are independent of one another."""
+    levels = LogLevels(image='INFO', modules={'ensemble': 'DEBUG'})
+    assert 'OTHER' not in _emit_in_decorated(tmp_path, levels, 'provenance', 'OTHER')
+
+
+def test_the_decorator_preserves_the_wrapped_return_value() -> None:
+    """Opening a section does not disturb what the component returns."""
+
+    @logged_section('ensemble', 'ENSEMBLE')
+    def component(value: int) -> int:
+        return value * 2
+
+    with image_scope():
+        assert component(21) == 42
+
+
+def test_the_decorator_preserves_the_wrapped_identity() -> None:
+    """The decorated component still reports its own name."""
+
+    @logged_section('ensemble', 'ENSEMBLE')
+    def component() -> None:
+        return None
+
+    assert component.__name__ == 'component'
