@@ -85,7 +85,7 @@ DEFAULT_LEVEL = 'INFO'
 LOG_TIMESTAMP_FORMAT = '%Y-%m-%dT%H-%M-%S'
 """Suffix format distinguishing one run's log file from the next, in UTC."""
 
-BACKEND_NAMES = frozenset({'nav', 'backplane', 'reproj'})
+BACKEND_NAMES = frozenset({'nav', 'backplanes', 'reproj'})
 """Per-image backends, each owning a subtree of the log root."""
 
 _OFF = 'NONE'

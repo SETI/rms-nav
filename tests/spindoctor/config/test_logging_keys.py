@@ -9,6 +9,7 @@ import pytest
 
 from spindoctor.config.config import Config
 from spindoctor.config.config_helper import load_default_and_user_config
+from spindoctor.config.logging_config import BACKEND_NAMES
 from spindoctor.config.logging_keys import (
     CATEGORY_KEYS,
     LOG_LEVEL_NAMES,
@@ -132,7 +133,7 @@ def test_shipped_model_classes_map_to_exactly_four_families() -> None:
 
 def test_no_backend_key_leaked_into_other() -> None:
     """A per-image backend is not addressable as an "other" module key."""
-    assert OTHER_LOG_KEYS.isdisjoint({'nav', 'backplane', 'reproj'})
+    assert OTHER_LOG_KEYS.isdisjoint(BACKEND_NAMES)
 
 
 # ---------------------------------------------------------------------------

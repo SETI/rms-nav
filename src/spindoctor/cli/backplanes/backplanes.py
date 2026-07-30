@@ -63,7 +63,7 @@ def generate_backplanes_image_files(
     fits_file_path = backplane_results_root / (image_file.results_path_stub + '_backplanes.fits')
 
     local_handlers, image_log_path = build_image_log_handlers(
-        'backplane',
+        'backplanes',
         image_file.results_path_stub,
         run_logging.sinks,
         run_logging.levels,

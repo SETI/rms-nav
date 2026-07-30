@@ -34,7 +34,7 @@ flags for `sd_offset` knows them for `sd_mosaic` and `sd_backplanes` too.
 The statistics and GUI programs are deliberately excluded and use `print()`
 instead — see section 2.1.
 
-**In scope:** the three per-image backends (`nav`, `backplane`, `reproj`),
+**In scope:** the three per-image backends (`nav`, `backplanes`, `reproj`),
 every program listed in section 2.1 as carrying a logger, the new top-level
 `logging` configuration section and its per-program overrides, the shared
 command-line arguments, cloud-task console isolation, tests, and a new
@@ -69,8 +69,8 @@ individually, through one of the three per-image backends, get one.
 |---|---|---|
 | `sd_offset` | yes | `nav` |
 | `sd_offset_cloud_tasks` | no | `nav` |
-| `sd_backplanes` | yes | `backplane` |
-| `sd_backplanes_cloud_tasks` | no | `backplane` |
+| `sd_backplanes` | yes | `backplanes` |
+| `sd_backplanes_cloud_tasks` | no | `backplanes` |
 | `sd_mosaic`, `sd_mosaic_rings`, `sd_mosaic_body` | yes | `reproj` |
 | `sd_mosaic_cloud_tasks` | no | `reproj` |
 | `sd_create_bundle` | yes | none |
@@ -172,7 +172,7 @@ zones, and a local-time name is ambiguous across a daylight-saving fall-back,
 so names would neither sort nor correlate. Those three sites are replaced in
 Phases 6 and 7.
 
-`{backend}` is one of `nav`, `backplane`, `reproj`. `{results_path_stub}` is the existing
+`{backend}` is one of `nav`, `backplanes`, `reproj`. `{results_path_stub}` is the existing
 `ImageFile.results_path_stub`, which is `{volume}/{filespec}` without the
 extension (`dataset_pds3_cassini_iss.py:187`), so a Cassini image navigated
 by either nav driver lands at
@@ -600,7 +600,7 @@ main logger that section 2.8 says they must not have.
 
 ### Phase 6 — Image loggers for the backplane and reproj backends
 
-Route `backplane` and `reproj` per-image logging through
+Route `backplanes` and `reproj` per-image logging through
 `build_image_log_handlers`, moving reprojection logs from `{output_dir}/logs/`
 to `{log_root}/reproj/`, and give both programs the image-logger flags they
 withhold until they can honor them. Retire `image_log_handlers()` and the
