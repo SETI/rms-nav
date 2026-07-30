@@ -36,19 +36,31 @@ def _image_file() -> ImageFile:
     )
 
 
-def _write_metadata(root: Path, metadata: object) -> None:
+def _write_metadata(nav_root: FCPath, metadata: object) -> None:
     """Write navigation metadata where the offset loader will look for it.
 
     Parameters:
-        root: The navigation results root.
+        nav_root: The navigation results root.
         metadata: The object to serialize as that image's metadata.
     """
-    path = root / f'{_STUB}_metadata.json'
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(metadata))
+    _metadata_path(nav_root).write_text(json.dumps(metadata))
 
 
-def _load_and_capture(nav_root: Path, log_root: Path) -> tuple[tuple[float, float] | None, str]:
+def _metadata_path(nav_root: FCPath) -> FCPath:
+    """Return the metadata path for the image these tests navigate.
+
+    Parameters:
+        nav_root: The navigation results root.
+
+    Returns:
+        The path, with its parent directory created.
+    """
+    path = nav_root / f'{_STUB}_metadata.json'
+    Path(path.as_posix()).parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _load_and_capture(nav_root: FCPath, log_root: FCPath) -> tuple[tuple[float, float] | None, str]:
     """Load the offset inside an image scope and return it with the image log.
 
     Parameters:
@@ -61,7 +73,7 @@ def _load_and_capture(nav_root: Path, log_root: Path) -> tuple[tuple[float, floa
     handlers, path = build_image_log_handlers(
         'reproj',
         _STUB,
-        LogSinks(log_root=FCPath(str(log_root))),
+        LogSinks(log_root=log_root),
         LogLevels(),
         timestamp=_STAMP,
     )
@@ -70,7 +82,7 @@ def _load_and_capture(nav_root: Path, log_root: Path) -> tuple[tuple[float, floa
         # the records take the handler-less print fallback and the log file
         # stays empty.
         with IMAGE_LOGGER.open('REPROJECT', handler=handlers):
-            offset = load_offset_if_any(FCPath(str(nav_root)), _image_file())
+            offset = load_offset_if_any(nav_root, _image_file())
     finally:
         for handler in handlers:
             if handler is not pdslogger.NULL_HANDLER:
@@ -82,28 +94,26 @@ def _load_and_capture(nav_root: Path, log_root: Path) -> tuple[tuple[float, floa
 
 def test_a_usable_offset_is_returned(tmp_path: Path) -> None:
     """The stored offset is loaded when navigation succeeded."""
-    nav_root = tmp_path / 'nav'
+    nav_root = FCPath(tmp_path) / 'nav'
     _write_metadata(nav_root, {'status': 'success', 'offset': [1.5, -2.5]})
-    offset, _ = _load_and_capture(nav_root, tmp_path / 'logs')
+    offset, _ = _load_and_capture(nav_root, FCPath(tmp_path) / 'logs')
     assert offset == (1.5, -2.5)
 
 
 @pytest.mark.parametrize(
-    ('metadata', 'expected'),
+    'metadata',
     [
-        ({'status': 'error', 'offset': [1.0, 2.0]}, "status='error'"),
-        ({'status': 'success', 'offset': None}, 'null offset'),
-        ({'status': 'success', 'offset': [1.0]}, 'malformed offset'),
-        ({'status': 'success', 'offset': 'nope'}, 'malformed offset'),
+        {'status': 'error', 'offset': [1.0, 2.0]},
+        {'status': 'success', 'offset': None},
+        {'status': 'success', 'offset': [1.0]},
+        {'status': 'success', 'offset': 'nope'},
     ],
 )
-def test_an_unusable_offset_is_refused(
-    tmp_path: Path, metadata: dict[str, object], expected: str
-) -> None:
+def test_an_unusable_offset_is_refused(tmp_path: Path, metadata: dict[str, object]) -> None:
     """Navigation that did not produce a usable offset yields none."""
-    nav_root = tmp_path / 'nav'
+    nav_root = FCPath(tmp_path) / 'nav'
     _write_metadata(nav_root, metadata)
-    offset, _ = _load_and_capture(nav_root, tmp_path / 'logs')
+    offset, _ = _load_and_capture(nav_root, FCPath(tmp_path) / 'logs')
     assert offset is None
 
 
@@ -119,33 +129,31 @@ def test_the_reason_reaches_the_image_log(
     tmp_path: Path, metadata: dict[str, object], expected: str
 ) -> None:
     """Why the pointing was left uncorrected is recorded against the image."""
-    nav_root = tmp_path / 'nav'
+    nav_root = FCPath(tmp_path) / 'nav'
     _write_metadata(nav_root, metadata)
-    _, log_text = _load_and_capture(nav_root, tmp_path / 'logs')
+    _, log_text = _load_and_capture(nav_root, FCPath(tmp_path) / 'logs')
     assert expected in log_text
 
 
 def test_a_missing_metadata_file_is_reported_to_the_image_log(tmp_path: Path) -> None:
     """An image with no navigation result says so in its own log."""
-    _, log_text = _load_and_capture(tmp_path / 'nav', tmp_path / 'logs')
+    _, log_text = _load_and_capture(FCPath(tmp_path) / 'nav', FCPath(tmp_path) / 'logs')
     assert 'no metadata found' in log_text
 
 
 def test_unparsable_metadata_is_reported_to_the_image_log(tmp_path: Path) -> None:
     """Metadata that is not JSON is reported against the image, not the run."""
-    nav_root = tmp_path / 'nav'
-    path = nav_root / f'{_STUB}_metadata.json'
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text('{not json')
-    _, log_text = _load_and_capture(nav_root, tmp_path / 'logs')
+    nav_root = FCPath(tmp_path) / 'nav'
+    _metadata_path(nav_root).write_text('{not json')
+    _, log_text = _load_and_capture(nav_root, FCPath(tmp_path) / 'logs')
     assert 'Invalid JSON' in log_text
 
 
 def test_metadata_that_is_not_an_object_is_reported_to_the_image_log(tmp_path: Path) -> None:
     """A JSON document of the wrong shape is reported against the image."""
-    nav_root = tmp_path / 'nav'
+    nav_root = FCPath(tmp_path) / 'nav'
     _write_metadata(nav_root, [1, 2, 3])
-    _, log_text = _load_and_capture(nav_root, tmp_path / 'logs')
+    _, log_text = _load_and_capture(nav_root, FCPath(tmp_path) / 'logs')
     assert 'not a JSON object' in log_text
 
 
@@ -162,4 +170,4 @@ def test_a_traversing_stub_is_refused(tmp_path: Path) -> None:
         results_path_stub='../../escaped/N1234567890_1',
         index_file_row={},
     )
-    assert load_offset_if_any(FCPath(str(tmp_path)), escaping) is None
+    assert load_offset_if_any(FCPath(tmp_path), escaping) is None

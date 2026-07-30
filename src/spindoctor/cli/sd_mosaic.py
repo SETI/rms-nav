@@ -81,6 +81,10 @@ def _log_main_exception(msg: str, *args: object) -> None:
     ``PdsLogger.exception()`` records only ``traceback.format_tb``, which omits
     the ``SomeError: ...`` line at the end. Pass ``traceback.format_exc()`` as
     ``more=`` and disable the default partial stack to avoid duplicating frames.
+
+    Parameters:
+        msg: Message template, with pdslogger-style ``%s`` placeholders.
+        *args: Values substituted into ``msg``.
     """
     MAIN_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
 
@@ -92,6 +96,10 @@ def _log_image_exception(msg: str, *args: object) -> None:
     to a single image rather than to the run.  Reprojecting an image is allowed
     to fail without stopping the pass, so this record is the only account of
     what happened to it.
+
+    Parameters:
+        msg: Message template, with pdslogger-style ``%s`` placeholders.
+        *args: Values substituted into ``msg``.
     """
     IMAGE_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
 

@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 
+import pdslogger
 import pytest
 
 from spindoctor.config import (
@@ -34,12 +35,17 @@ def restore_loggers_fixture() -> Iterator[None]:
     main_propagate = MAIN_LOGGER.propagate
     image_propagate = IMAGE_LOGGER.propagate
     yield
-    MAIN_LOGGER.remove_all_handlers()
-    for handler in main_handlers:
-        MAIN_LOGGER.add_handler(handler)
-    IMAGE_LOGGER.remove_all_handlers()
-    for handler in image_handlers:
-        IMAGE_LOGGER.add_handler(handler)
+    for logger, baseline in ((MAIN_LOGGER, main_handlers), (IMAGE_LOGGER, image_handlers)):
+        # remove_all_handlers only detaches, so a handler the test attached
+        # would keep its log file open for the rest of the session.  Only what
+        # the test added is closed; the baseline is put back as it was, and
+        # NULL_HANDLER is a process-wide singleton nobody here owns.
+        for handler in logger.handlers:
+            if handler not in baseline and handler is not pdslogger.NULL_HANDLER:
+                handler.close()
+        logger.remove_all_handlers()
+        for handler in baseline:
+            logger.add_handler(handler)
     MAIN_LOGGER.propagate = main_propagate
     IMAGE_LOGGER.propagate = image_propagate
 

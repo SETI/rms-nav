@@ -822,6 +822,11 @@ def isolate_cloud_task_logging() -> None:
     logger has none between one image's section and the next, so both are bound
     to the null handler and the call sites that remain are inert instead.
 
+    Call this outside any open image section.  It clears both loggers, and a
+    section's handlers are attached to the image logger for as long as that
+    section is open, so clearing one mid-image would discard the handlers that
+    image's log is being written through.
+
     Both loggers otherwise propagate to the root logger, and cloud_tasks calls
     ``logging.basicConfig`` inside each worker subprocess, which puts a handler
     there.  Every record would be emitted a second time on stderr, formatted by
@@ -837,20 +842,19 @@ def isolate_cloud_task_logging() -> None:
     # cycle.
     from .log_scope import IMAGE_LOGGER
 
-    # Detached but not closed by remove_all_handlers, so anything real is
-    # closed first; NULL_HANDLER is a process-wide singleton this module does
-    # not own.
-    for existing in list(MAIN_LOGGER.handlers):
-        if existing is not pdslogger.NULL_HANDLER:
-            existing.close()
-    MAIN_LOGGER.remove_all_handlers()
-    MAIN_LOGGER.add_handler(pdslogger.NULL_HANDLER)
-    MAIN_LOGGER.propagate = False
-
-    # The image logger keeps whatever an open section attached; this is the
-    # floor under it, for the stretches when no section is open.
-    IMAGE_LOGGER.add_handler(pdslogger.NULL_HANDLER)
-    IMAGE_LOGGER.propagate = False
+    for logger in (MAIN_LOGGER, IMAGE_LOGGER):
+        # Detached but not closed by remove_all_handlers, so anything real is
+        # closed first; NULL_HANDLER is a process-wide singleton this module
+        # does not own.  Both loggers are cleared, not just the main one: a
+        # console handler left on either from an earlier configuration would
+        # keep reaching the terminal, which turning propagation off does not
+        # prevent.
+        for existing in list(logger.handlers):
+            if existing is not pdslogger.NULL_HANDLER:
+                existing.close()
+        logger.remove_all_handlers()
+        logger.add_handler(pdslogger.NULL_HANDLER)
+        logger.propagate = False
 
 
 def build_cloud_task_logging(

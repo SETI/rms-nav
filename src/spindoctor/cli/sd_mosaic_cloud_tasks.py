@@ -74,6 +74,10 @@ def _log_image_exception(msg: str, *args: object) -> None:
     record is the only account of what happened to it.  It belongs to the image
     rather than to the run, which matters here: a cloud task has no main log,
     so a failure reported there would be reported nowhere.
+
+    Parameters:
+        msg: Message template, with pdslogger-style ``%s`` placeholders.
+        *args: Values substituted into ``msg``.
     """
     IMAGE_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
 

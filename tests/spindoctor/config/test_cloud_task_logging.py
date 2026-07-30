@@ -13,6 +13,7 @@ from filecache import FCPath
 from spindoctor.config import IMAGE_LOGGER, MAIN_LOGGER, image_scope
 from spindoctor.config.config import Config
 from spindoctor.config.logging_config import (
+    SILENT_LEVEL,
     LogLevels,
     LogSinks,
     RunLogging,
@@ -76,7 +77,7 @@ def _args(**kwargs: object) -> argparse.Namespace:
     return argparse.Namespace(**kwargs)
 
 
-def _task_logging(tmp_path: Path, **kwargs: object) -> RunLogging:
+def _task_logging(log_root: FCPath, **kwargs: object) -> RunLogging:
     """Resolve one task's logging with the log root named explicitly.
 
     ``--log-root`` is the most specific source, so naming it here keeps the
@@ -84,13 +85,15 @@ def _task_logging(tmp_path: Path, **kwargs: object) -> RunLogging:
     export ``NAV_RESULTS_ROOT``.
 
     Parameters:
-        tmp_path: Directory to use as the log root.
+        log_root: Directory to use as the log root.
         **kwargs: Further logging arguments to pass.
 
     Returns:
         The resolved :class:`RunLogging`.
     """
-    return build_cloud_task_logging(SD_OFFSET, _args(log_root=str(tmp_path), **kwargs), _config())
+    return build_cloud_task_logging(
+        SD_OFFSET, _args(log_root=log_root.as_posix(), **kwargs), _config()
+    )
 
 
 def _log_one_image(run_logging: RunLogging, message: str) -> FCPath | None:
@@ -152,7 +155,7 @@ def test_a_main_record_does_not_propagate(root_sink: io.StringIO) -> None:
 
 def test_an_image_record_does_not_propagate(tmp_path: Path, root_sink: io.StringIO) -> None:
     """An image record is not re-emitted by the worker's root handler."""
-    _log_one_image(_task_logging(tmp_path), 'IMAGE-CANARY')
+    _log_one_image(_task_logging(FCPath(tmp_path)), 'IMAGE-CANARY')
     assert 'IMAGE-CANARY' not in root_sink.getvalue()
 
 
@@ -160,7 +163,7 @@ def test_an_image_record_reaches_no_terminal(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An image record does not reach stdout either."""
-    _log_one_image(_task_logging(tmp_path), 'IMAGE-CANARY')
+    _log_one_image(_task_logging(FCPath(tmp_path)), 'IMAGE-CANARY')
     assert 'IMAGE-CANARY' not in capsys.readouterr().out
 
 
@@ -172,7 +175,7 @@ def test_an_image_record_outside_a_section_reaches_no_terminal(
     Its section handlers are attached for the duration of a section and gone
     afterwards, and a PdsLogger with none prints rather than going quiet.
     """
-    _task_logging(tmp_path)
+    _task_logging(FCPath(tmp_path))
     with image_scope():
         IMAGE_LOGGER.info('BETWEEN-IMAGES-CANARY')
     assert 'BETWEEN-IMAGES-CANARY' not in capsys.readouterr().out
@@ -198,27 +201,27 @@ def test_an_out_of_scope_image_record_reaches_no_terminal(
 
 def test_the_image_console_is_refused(tmp_path: Path) -> None:
     """--log-image-to-console cannot open a console a cloud task must not use."""
-    assert _task_logging(tmp_path, log_image_to_console=True).sinks.image_console is False
+    assert _task_logging(FCPath(tmp_path), log_image_to_console=True).sinks.image_console is False
 
 
 def test_the_main_console_is_refused(tmp_path: Path) -> None:
     """--log-main-to-console likewise cannot reach the worker's terminal."""
-    assert _task_logging(tmp_path, log_main_to_console=True).sinks.main_console is False
+    assert _task_logging(FCPath(tmp_path), log_main_to_console=True).sinks.main_console is False
 
 
 def test_no_main_log_file_is_written(tmp_path: Path) -> None:
     """A task writes no main log, so concurrent workers cannot collide on one."""
-    assert _task_logging(tmp_path).main_log_path is None
+    assert _task_logging(FCPath(tmp_path)).main_log_path is None
 
 
 def test_the_image_file_sink_survives(tmp_path: Path) -> None:
     """Per-image logs are still written; only the terminal is closed off."""
-    assert _task_logging(tmp_path).sinks.image_file is True
+    assert _task_logging(FCPath(tmp_path)).sinks.image_file is True
 
 
 def test_an_image_log_file_is_written(tmp_path: Path) -> None:
     """The image's log reaches its file rather than being suppressed with the rest."""
-    path = _log_one_image(_task_logging(tmp_path), 'IMAGE-CANARY')
+    path = _log_one_image(_task_logging(FCPath(tmp_path)), 'IMAGE-CANARY')
     assert path is not None
     with path.open('r') as stream:
         assert 'IMAGE-CANARY' in stream.read()
@@ -231,7 +234,7 @@ def test_an_image_log_file_is_written(tmp_path: Path) -> None:
 
 def test_levels_match_the_interactive_driver(tmp_path: Path) -> None:
     """An image's log reads the same whichever driver produced it."""
-    arguments = _args(log_root=str(tmp_path), log_level=['DEBUG', 'titan_haze=ERROR'])
+    arguments = _args(log_root=FCPath(tmp_path).as_posix(), log_level=['DEBUG', 'titan_haze=ERROR'])
     config = _config()
     run_logging = build_cloud_task_logging(SD_OFFSET, arguments, config)
     assert run_logging.levels == resolve_log_levels(SD_OFFSET, arguments, config)
@@ -239,7 +242,7 @@ def test_levels_match_the_interactive_driver(tmp_path: Path) -> None:
 
 def test_a_module_level_still_applies(tmp_path: Path) -> None:
     """Per-module configuration is not lost to the isolation."""
-    run_logging = _task_logging(tmp_path, log_level=['titan_haze=ERROR'])
+    run_logging = _task_logging(FCPath(tmp_path), log_level=['titan_haze=ERROR'])
     assert run_logging.levels.for_module('titan_haze') == 'ERROR'
 
 
@@ -258,7 +261,7 @@ def test_isolation_is_idempotent() -> None:
 
 def test_isolation_replaces_an_existing_main_sink(tmp_path: Path) -> None:
     """A main logger left configured by something else is taken over."""
-    MAIN_LOGGER.add_handler(pdslogger.file_handler(tmp_path / 'stale.log', level='info'))
+    MAIN_LOGGER.add_handler(pdslogger.file_handler(FCPath(tmp_path) / 'stale.log', level='info'))
     isolate_cloud_task_logging()
     assert MAIN_LOGGER.handlers == [pdslogger.NULL_HANDLER]
 
@@ -289,7 +292,7 @@ def test_an_unresolvable_log_root_drops_the_image_file_sink(
 
 def test_the_levels_are_installed_for_components(tmp_path: Path) -> None:
     """Components read the same levels the handlers were built at."""
-    _task_logging(tmp_path, log_level=['body_limb=ERROR'])
+    _task_logging(FCPath(tmp_path), log_level=['body_limb=ERROR'])
     assert log_levels().for_module('body_limb') == 'ERROR'
 
 
@@ -319,26 +322,47 @@ def test_isolating_twice_does_not_double_the_image_sink() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_an_image_section_can_be_opened_when_the_image_logger_is_off() -> None:
+def test_an_image_section_opened_when_off_takes_the_silent_level() -> None:
     """``NONE`` is a level the configuration accepts, so a section must take it.
 
     pdslogger has no level of that name and rejects it outright, so the value
-    passed to ``open`` is the numeric silent level instead.
+    passed to ``open`` is the numeric silent level instead.  Opening the
+    section at all is the thing under test -- passing the name raises -- so
+    the level it settled on is what the section is asserted to carry.
     """
     logger = pdslogger.PdsLogger.get_logger('cloud_task_none', lognames=False)
+    logger.remove_all_handlers()
     logger.add_handler(pdslogger.NULL_HANDLER)
     with (
         image_scope(logger),
         IMAGE_LOGGER.open('IMAGE', level=LogLevels(image='NONE').image_section_level()),
     ):
-        assert True
+        assert logger.level == SILENT_LEVEL
 
 
-def test_an_image_logger_configured_off_writes_nothing(tmp_path: Path) -> None:
-    """A section opened at the silent level emits none of its records."""
+def test_an_image_logger_configured_off_writes_no_file(tmp_path: Path) -> None:
+    """A logger configured off opens no log file to write nothing into."""
     levels = LogLevels(image='NONE')
     handlers, path = build_image_log_handlers(
-        'nav', 'vol/N1', LogSinks(log_root=FCPath(str(tmp_path))), levels, timestamp=_STAMP
+        'nav', 'vol/N1', LogSinks(log_root=FCPath(tmp_path)), levels, timestamp=_STAMP
+    )
+    for handler in handlers:
+        if handler is not pdslogger.NULL_HANDLER:
+            handler.close()
+    assert path is None
+
+
+def test_an_image_logger_configured_off_emits_no_record(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Its records are suppressed rather than falling through to the terminal.
+
+    With no file to write to, the handler-less print fallback is what a record
+    would otherwise reach, so the silent level has to be doing the suppressing.
+    """
+    levels = LogLevels(image='NONE')
+    handlers, _ = build_image_log_handlers(
+        'nav', 'vol/N1', LogSinks(log_root=FCPath(tmp_path)), levels, timestamp=_STAMP
     )
     try:
         with IMAGE_LOGGER.open('IMAGE', handler=handlers, level=levels.image_section_level()):
@@ -347,4 +371,16 @@ def test_an_image_logger_configured_off_writes_nothing(tmp_path: Path) -> None:
         for handler in handlers:
             if handler is not pdslogger.NULL_HANDLER:
                 handler.close()
-    assert path is None
+    assert 'SILENCED-CANARY' not in capsys.readouterr().out
+
+
+def test_isolation_removes_a_preinstalled_image_handler(tmp_path: Path) -> None:
+    """An image handler left by an earlier configuration is cleared, not kept.
+
+    Turning propagation off does not stop a handler already attached to the
+    image logger, so one reaching the terminal would survive isolation unless
+    it is removed outright.
+    """
+    IMAGE_LOGGER.add_handler(pdslogger.file_handler(FCPath(tmp_path) / 'stale.log', level='info'))
+    isolate_cloud_task_logging()
+    assert IMAGE_LOGGER.handlers == [pdslogger.NULL_HANDLER]

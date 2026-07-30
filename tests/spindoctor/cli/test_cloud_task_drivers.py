@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import pytest
 from cloud_tasks.worker import WorkerData
+from filecache import FCPath
 
 from spindoctor.cli import (
     sd_backplanes_cloud_tasks,
@@ -60,14 +61,14 @@ class _StubMosaic:
 class _Recorder:
     """Records whether the cloud-task logging builder was called."""
 
-    def __init__(self, tmp_path: Path) -> None:
-        """Prepare a recorder writing its logs under ``tmp_path``.
+    def __init__(self, log_root: FCPath) -> None:
+        """Prepare a recorder writing its logs under ``log_root``.
 
         Parameters:
-            tmp_path: Directory to use as the log root.
+            log_root: Directory to use as the log root.
         """
         self.called = False
-        self._tmp_path = tmp_path
+        self._log_root = log_root
 
     def __call__(self, *args: Any, **kwargs: Any) -> RunLogging:
         """Record the call and resolve logging with the terminal withheld.
@@ -81,7 +82,7 @@ class _Recorder:
         """
         self.called = True
         return build_cloud_task_logging(
-            'sd_offset', argparse.Namespace(log_root=str(self._tmp_path)), _config()
+            'sd_offset', argparse.Namespace(log_root=self._log_root.as_posix()), _config()
         )
 
 
@@ -96,18 +97,18 @@ def _config() -> Config:
     return config
 
 
-def _image_entry(tmp_path: Path) -> dict[str, Any]:
+def _image_entry(root: FCPath) -> dict[str, Any]:
     """Build one well-formed ``files`` entry for a task.
 
     Parameters:
-        tmp_path: Directory the referenced files would live under.
+        root: Directory the referenced files would live under.
 
     Returns:
         The task's per-image dict.
     """
     return {
-        'image_file_url': str(tmp_path / 'N1234567890_1.IMG'),
-        'label_file_url': str(tmp_path / 'N1234567890_1.LBL'),
+        'image_file_url': (root / 'N1234567890_1.IMG').as_posix(),
+        'label_file_url': (root / 'N1234567890_1.LBL').as_posix(),
         'results_path_stub': 'COISS_2001/N1234567890_1',
         'index_file_row': {},
     }
@@ -117,9 +118,11 @@ def test_the_offset_driver_isolates_its_logging(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """sd_offset_cloud_tasks resolves logging through the cloud-task builder."""
-    recorder = _Recorder(tmp_path)
+    recorder = _Recorder(FCPath(tmp_path))
     monkeypatch.setattr(sd_offset_cloud_tasks, 'build_cloud_task_logging', recorder)
-    sd_offset_cloud_tasks.process_task('task-1', {}, _worker_data(nav_results_root=str(tmp_path)))
+    sd_offset_cloud_tasks.process_task(
+        'task-1', {}, _worker_data(nav_results_root=FCPath(tmp_path).as_posix())
+    )
     assert recorder.called
 
 
@@ -127,15 +130,18 @@ def test_the_backplanes_driver_isolates_its_logging(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """sd_backplanes_cloud_tasks resolves logging through the cloud-task builder."""
-    recorder = _Recorder(tmp_path)
+    recorder = _Recorder(FCPath(tmp_path))
     monkeypatch.setattr(sd_backplanes_cloud_tasks, 'build_cloud_task_logging', recorder)
     monkeypatch.setattr(
         sd_backplanes_cloud_tasks, 'generate_backplanes_image_files', lambda *a, **k: None
     )
     sd_backplanes_cloud_tasks.process_task(
         'task-1',
-        {'dataset_name': _DATASET, 'files': [_image_entry(tmp_path)]},
-        _worker_data(nav_results_root=str(tmp_path), backplane_results_root=str(tmp_path)),
+        {'dataset_name': _DATASET, 'files': [_image_entry(FCPath(tmp_path))]},
+        _worker_data(
+            nav_results_root=FCPath(tmp_path).as_posix(),
+            backplane_results_root=FCPath(tmp_path).as_posix(),
+        ),
     )
     assert recorder.called
 
@@ -144,7 +150,7 @@ def test_the_mosaic_driver_isolates_its_logging(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """sd_mosaic_cloud_tasks resolves logging through the cloud-task builder."""
-    recorder = _Recorder(tmp_path)
+    recorder = _Recorder(FCPath(tmp_path))
     monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_cloud_task_logging', recorder)
     monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_ring_mosaic', lambda *a, **k: _StubMosaic())
     sd_mosaic_cloud_tasks.process_task(
@@ -153,8 +159,8 @@ def test_the_mosaic_driver_isolates_its_logging(
             'mode': 'rings',
             'dataset_name': _DATASET,
             'files': [],
-            'arguments': {'output_dir': str(tmp_path)},
+            'arguments': {'output_dir': FCPath(tmp_path).as_posix()},
         },
-        _worker_data(nav_results_root=str(tmp_path)),
+        _worker_data(nav_results_root=FCPath(tmp_path).as_posix()),
     )
     assert recorder.called

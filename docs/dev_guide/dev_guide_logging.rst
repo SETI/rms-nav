@@ -103,12 +103,13 @@ audience and the consequence of the line, not the call site's depth:
 Cloud tasks
 ===========
 
-The ``*_cloud_tasks`` drivers write nothing to the terminal. A worker's
-console belongs to ``cloud_tasks``, which reports task progress there under
-its own configuration; per-image processing detail goes to the per-image log
-file, under the same ``{log_root}/{backend}/`` tree the interactive driver
-writes to. Levels resolve identically, so an image's log reads the same
-whichever driver produced it.
+``sd_offset_cloud_tasks``, ``sd_backplanes_cloud_tasks`` and
+``sd_mosaic_cloud_tasks`` write nothing to the terminal. A worker's console
+belongs to ``cloud_tasks``, which reports task progress there under its own
+configuration; per-image processing detail goes to the per-image log file,
+under the same ``{log_root}/{backend}/`` tree the interactive driver writes
+to. Levels resolve identically, so an image's log reads the same whichever
+driver produced it.
 
 :func:`~spindoctor.config.logging_config.build_cloud_task_logging` is what a
 task calls in place of
@@ -117,9 +118,9 @@ logger, and it refuses a console for either logger however the configuration
 or the command line asked for one. Two details are worth knowing before
 changing anything here:
 
-* It is called **inside** ``process_task``, not once at startup. Workers are
-  spawned rather than forked, so a worker process does not inherit what the
-  parent configured.
+* It is called **inside** each worker's task handler, not once at startup.
+  Workers are spawned rather than forked, so a worker process does not inherit
+  what the parent configured.
 * Both loggers are bound to ``pdslogger.NULL_HANDLER`` and have
   ``propagate`` turned off. Neither is redundant: a ``PdsLogger`` with no
   handlers at all prints every record to stdout regardless of level, and one
