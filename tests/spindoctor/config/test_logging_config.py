@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import pdslogger
@@ -12,6 +13,8 @@ from spindoctor.config.config import Config
 from spindoctor.config.logging_config import (
     BACKEND_NAMES,
     DEFAULT_LEVEL,
+    LOG_TIMESTAMP_FORMAT,
+    SILENT_LEVEL,
     LogLevels,
     LogSinks,
     build_image_log_handlers,
@@ -19,6 +22,7 @@ from spindoctor.config.logging_config import (
     image_log_path,
     main_log_path,
     resolve_log_levels,
+    run_timestamp,
     sinks_from_arguments,
 )
 from spindoctor.config.program_names import SD_MOSAIC, SD_OFFSET
@@ -519,3 +523,279 @@ def test_no_builder_ever_returns_an_empty_handler_list(tmp_path: Path) -> None:
             if not handlers:
                 empty.append((console, to_file))
     assert empty == []
+
+
+# ---------------------------------------------------------------------------
+# Per-module levels must actually reach a sink
+# ---------------------------------------------------------------------------
+
+
+def _emit_through_sections(
+    tmp_path: Path, levels: LogLevels, emissions: list[tuple[str, str, str]]
+) -> str:
+    """Log through per-module sections and return what the image log file holds.
+
+    Parameters:
+        tmp_path: Directory used as the log root.
+        levels: Resolved levels governing the sections.
+        emissions: Tuples of module key, level-method name, and message.
+
+    Returns:
+        The text written to the image log.
+    """
+    handlers, path = build_image_log_handlers(
+        'nav', 'vol/N1', _sinks(tmp_path), levels, timestamp=_STAMP
+    )
+    logger = pdslogger.PdsLogger(f'emit_{tmp_path.name}', lognames=False)
+    with logger.open('IMAGE', handler=handlers):
+        for log_key, method, message in emissions:
+            with logger.open(f'MODULE: {log_key}', level=levels.section_level_for(log_key)):
+                getattr(logger, method)(message)
+    _close(handlers)
+    assert path is not None
+    return Path(path.as_posix()).read_text()
+
+
+def test_a_module_raised_above_the_image_level_reaches_the_sink(tmp_path: Path) -> None:
+    """A module configured more verbose than the image level actually writes."""
+    levels = LogLevels(image='INFO', modules={'titan_haze': 'DEBUG'})
+    text = _emit_through_sections(tmp_path, levels, [('titan_haze', 'debug', 'HAZE-DEBUG')])
+    assert 'HAZE-DEBUG' in text
+
+
+def test_an_unraised_module_still_honors_the_image_level(tmp_path: Path) -> None:
+    """Raising one module does not make every other module verbose."""
+    levels = LogLevels(image='INFO', modules={'titan_haze': 'DEBUG'})
+    text = _emit_through_sections(tmp_path, levels, [('ring_edge', 'debug', 'RING-DEBUG')])
+    assert 'RING-DEBUG' not in text
+
+
+def test_a_module_lowered_below_the_image_level_is_suppressed(tmp_path: Path) -> None:
+    """A module configured quieter than the image level drops its lesser records."""
+    levels = LogLevels(image='INFO', modules={'body_limb': 'ERROR'})
+    text = _emit_through_sections(tmp_path, levels, [('body_limb', 'info', 'LIMB-INFO')])
+    assert 'LIMB-INFO' not in text
+
+
+def test_a_lowered_module_still_reports_severe_records(tmp_path: Path) -> None:
+    """Quieting a module does not lose its errors."""
+    levels = LogLevels(image='INFO', modules={'body_limb': 'ERROR'})
+    text = _emit_through_sections(tmp_path, levels, [('body_limb', 'error', 'LIMB-ERROR')])
+    assert 'LIMB-ERROR' in text
+
+
+def test_handlers_are_built_at_the_most_verbose_module_level(tmp_path: Path) -> None:
+    """The sinks are opened wide enough for the most verbose module to pass."""
+    levels = LogLevels(image='WARNING', modules={'titan_haze': 'DEBUG'})
+    handlers, _ = build_image_log_handlers(
+        'nav', 'vol/N1', _sinks(tmp_path), levels, timestamp=_STAMP
+    )
+    level = handlers[0].level
+    _close(handlers)
+    assert level == logging.DEBUG
+
+
+def test_most_verbose_level_ignores_a_quieter_module(tmp_path: Path) -> None:
+    """A module quieter than the image level does not raise the handler level."""
+    levels = LogLevels(image='INFO', modules={'body_limb': 'ERROR'})
+    assert levels.most_verbose_image_level() == 'INFO'
+
+
+# ---------------------------------------------------------------------------
+# NONE
+# ---------------------------------------------------------------------------
+
+
+def test_section_level_for_a_silent_module_is_not_the_name() -> None:
+    """A NONE module resolves to a numeric level pdslogger will accept."""
+    levels = LogLevels(modules={'titan_haze': 'NONE'})
+    assert levels.section_level_for('titan_haze') == SILENT_LEVEL
+
+
+def test_a_silent_module_can_open_a_section(tmp_path: Path) -> None:
+    """Opening a section for a NONE module does not raise."""
+    levels = LogLevels(image='INFO', modules={'titan_haze': 'NONE'})
+    text = _emit_through_sections(tmp_path, levels, [('titan_haze', 'critical', 'HAZE-CRIT')])
+    assert 'HAZE-CRIT' not in text
+
+
+def test_a_silent_main_logger_reports_no_path(tmp_path: Path) -> None:
+    """A main logger at NONE writes no file, so it reports no path."""
+    logger = pdslogger.PdsLogger('test_none_path', lognames=False)
+    path = build_main_logger(
+        logger, SD_OFFSET, _sinks(tmp_path), LogLevels(main='NONE'), timestamp=_STAMP
+    )
+    logger.remove_all_handlers()
+    assert path is None
+
+
+def test_a_silent_image_logger_reports_no_path(tmp_path: Path) -> None:
+    """An image logger silenced everywhere writes no file, so it reports no path."""
+    handlers, path = build_image_log_handlers(
+        'nav', 'vol/N1', _sinks(tmp_path), LogLevels(image='NONE'), timestamp=_STAMP
+    )
+    _close(handlers)
+    assert path is None
+
+
+# ---------------------------------------------------------------------------
+# Command-line validation
+# ---------------------------------------------------------------------------
+
+
+def test_an_unknown_command_line_level_is_rejected(tmp_path: Path) -> None:
+    """A misspelled level fails with a named error rather than a later KeyError."""
+    with pytest.raises(ValueError, match='VERBOSE'):
+        resolve_log_levels(SD_OFFSET, _args(log_level=['VERBOSE']), _config(tmp_path))
+
+
+def test_an_unknown_per_logger_level_is_rejected(tmp_path: Path) -> None:
+    """A misspelled --log-level-main value is rejected."""
+    with pytest.raises(ValueError, match='log-level-main'):
+        resolve_log_levels(SD_OFFSET, _args(log_level_main='CHATTY'), _config(tmp_path))
+
+
+def test_an_unknown_command_line_module_is_rejected(tmp_path: Path) -> None:
+    """A module key naming nothing is rejected rather than silently ignored."""
+    with pytest.raises(ValueError, match='bogus_module'):
+        resolve_log_levels(SD_OFFSET, _args(log_level=['bogus_module=DEBUG']), _config(tmp_path))
+
+
+def test_a_hyphenated_module_key_is_rejected(tmp_path: Path) -> None:
+    """A near-miss spelling is rejected rather than quietly doing nothing."""
+    with pytest.raises(ValueError, match='titan-haze'):
+        resolve_log_levels(SD_OFFSET, _args(log_level=['titan-haze=DEBUG']), _config(tmp_path))
+
+
+def test_an_empty_module_key_is_rejected(tmp_path: Path) -> None:
+    """A value with nothing before the equals sign is rejected."""
+    with pytest.raises(ValueError, match='no module'):
+        resolve_log_levels(SD_OFFSET, _args(log_level=['=DEBUG']), _config(tmp_path))
+
+
+def test_an_empty_command_line_level_is_rejected(tmp_path: Path) -> None:
+    """A value with nothing after the equals sign is rejected."""
+    with pytest.raises(ValueError, match='expected one of'):
+        resolve_log_levels(SD_OFFSET, _args(log_level=['titan_haze=']), _config(tmp_path))
+
+
+def test_an_empty_per_logger_level_is_rejected(tmp_path: Path) -> None:
+    """An empty level is rejected rather than falling through to a lesser source."""
+    with pytest.raises(ValueError, match='log-level-main'):
+        resolve_log_levels(
+            SD_OFFSET, _args(log_level_main='', log_level=['ERROR']), _config(tmp_path)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Coverage the first pass missed
+# ---------------------------------------------------------------------------
+
+
+def test_log_level_image_beats_the_bare_form(tmp_path: Path) -> None:
+    """The per-logger image flag is more specific than the global one."""
+    args = _args(log_level=['DEBUG'], log_level_image='ERROR')
+    levels = resolve_log_levels(SD_OFFSET, args, _config(tmp_path))
+    assert levels.image == 'ERROR'
+
+
+def test_log_level_image_leaves_the_main_logger_alone(tmp_path: Path) -> None:
+    """Setting the image level does not change the main level."""
+    args = _args(log_level=['DEBUG'], log_level_image='ERROR')
+    levels = resolve_log_levels(SD_OFFSET, args, _config(tmp_path))
+    assert levels.main == 'DEBUG'
+
+
+def test_a_models_category_default_applies(tmp_path: Path) -> None:
+    """A models category default governs every model."""
+    config = _config(tmp_path, '  models:\n    default: DEBUG\n')
+    levels = resolve_log_levels(SD_OFFSET, None, config)
+    assert levels.for_module('rings') == 'DEBUG'
+
+
+def test_an_other_category_default_applies(tmp_path: Path) -> None:
+    """An other category default governs every module in that category."""
+    config = _config(tmp_path, '  other:\n    default: DEBUG\n')
+    levels = resolve_log_levels(SD_OFFSET, None, config)
+    assert levels.for_module('ensemble') == 'DEBUG'
+
+
+def test_run_timestamp_matches_the_documented_format(tmp_path: Path) -> None:
+    """A generated timestamp parses back under the documented format."""
+    datetime.strptime(run_timestamp(), LOG_TIMESTAMP_FORMAT)
+
+
+def test_resolution_is_stable_across_repeated_calls(tmp_path: Path) -> None:
+    """Resolving twice gives the same answer, so nothing is mutated in place."""
+    config = _config(tmp_path, f'  programs:\n    {SD_MOSAIC}:\n      main: WARNING\n')
+    first = resolve_log_levels(SD_MOSAIC, None, config)
+    second = resolve_log_levels(SD_MOSAIC, None, config)
+    assert first == second
+
+
+def test_resolving_one_program_does_not_leak_into_another(tmp_path: Path) -> None:
+    """A program's merge does not contaminate the shared configuration."""
+    config = _config(
+        tmp_path, f'  main: INFO\n  programs:\n    {SD_MOSAIC}:\n      main: WARNING\n'
+    )
+    resolve_log_levels(SD_MOSAIC, None, config)
+    assert resolve_log_levels(SD_OFFSET, None, config).main == 'INFO'
+
+
+def test_module_keys_exclude_test_registered_classes(tmp_path: Path) -> None:
+    """Stub classes other tests register do not enter the resolved key set."""
+    config = _config(tmp_path, '  techniques:\n    default: DEBUG\n')
+    levels = resolve_log_levels(SD_OFFSET, None, config)
+    offenders = [key for key in levels.modules if key.startswith('_')]
+    assert offenders == []
+
+
+def test_a_cloud_log_root_is_not_mkdired(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Building against a remote root never attempts a directory creation.
+
+    FCPath.mkdir raises NotImplementedError on a remote path, and a cloud
+    results root is exactly the cloud-task configuration, so the builder must
+    leave parent creation to the handler factory.  The factory is stubbed so
+    the test needs no credentials.
+    """
+    seen: list[str] = []
+
+    def fake_file_handler(path: FCPath, level: object = None, **kwargs: object) -> logging.Handler:
+        seen.append(FCPath(path).as_posix())
+        return logging.NullHandler()
+
+    def exploding_mkdir(*args: object, **kwargs: object) -> None:
+        raise AssertionError('the builder must not mkdir a log root')
+
+    monkeypatch.setattr(pdslogger, 'file_handler', fake_file_handler)
+    monkeypatch.setattr(FCPath, 'mkdir', exploding_mkdir)
+
+    sinks = LogSinks(log_root=FCPath('gs://example-bucket/run/logs'), main_console=False)
+    logger = pdslogger.PdsLogger('test_cloud_root', lognames=False)
+    build_main_logger(logger, SD_OFFSET, sinks, LogLevels(), timestamp=_STAMP)
+    logger.remove_all_handlers()
+    assert seen == [f'gs://example-bucket/run/logs/{SD_OFFSET}/main_{_STAMP}.log']
+
+
+def test_rebuilding_reattaches_the_shared_null_handler(tmp_path: Path) -> None:
+    """A rebuild leaves the process-wide NULL_HANDLER attached, not discarded."""
+    logger = pdslogger.PdsLogger('test_null_reuse', lognames=False)
+    silent = _sinks(tmp_path, main_console=False, main_file=False)
+    build_main_logger(logger, SD_OFFSET, silent, LogLevels(), timestamp=_STAMP)
+    build_main_logger(logger, SD_OFFSET, silent, LogLevels(), timestamp=_STAMP)
+    attached = list(logger.handlers)
+    logger.remove_all_handlers()
+    assert attached == [pdslogger.NULL_HANDLER]
+
+
+def test_a_silenced_logger_stays_silent_after_a_rebuild(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Rebuilding a fully silenced logger does not restore output."""
+    logger = pdslogger.PdsLogger('test_null_quiet', lognames=False)
+    silent = _sinks(tmp_path, main_console=False, main_file=False)
+    build_main_logger(logger, SD_OFFSET, silent, LogLevels(), timestamp=_STAMP)
+    build_main_logger(logger, SD_OFFSET, silent, LogLevels(), timestamp=_STAMP)
+    logger.info('should not appear')
+    logger.remove_all_handlers()
+    assert capsys.readouterr().out == ''

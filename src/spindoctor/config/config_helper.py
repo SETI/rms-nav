@@ -1,6 +1,8 @@
 import argparse
 import os
 
+from filecache import FCPath
+
 from .config import Config
 from .logging_keys import validate_logging_config
 
@@ -113,7 +115,9 @@ def get_log_root(arguments: argparse.Namespace, config: Config) -> str:
     if log_root_str is None:
         log_root_str = os.getenv('NAV_LOG_ROOT')
     if log_root_str is None:
-        log_root_str = os.path.join(get_nav_results_root(arguments, config), 'logs')
+        # FCPath rather than os.path.join: a results root is routinely a cloud
+        # URL, and joining those must not depend on the local path separator.
+        log_root_str = (FCPath(get_nav_results_root(arguments, config)) / 'logs').as_posix()
     return str(log_root_str)
 
 

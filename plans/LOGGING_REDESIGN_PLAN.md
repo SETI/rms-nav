@@ -124,10 +124,16 @@ Each logger has two possible sinks, console (stdout) and file. Defaults:
 
 **When a sink is enabled, its level is the level for that module. Console
 and file always share a level.** There is no per-sink level anywhere in the
-system. This is what makes `logger.open(title, level=...)` sufficient to
-express a module's verbosity: pdslogger's section level is a floor applied
-before handlers, so with both handlers at the same level the floor *is* the
-effective level, and the two sinks cannot disagree.
+system, which is what makes `logger.open(title, level=...)` sufficient to
+express a module's verbosity.
+
+The mechanism needs care. A pdslogger section level is a floor applied before
+the handlers, and each handler then applies its own level, so what reaches a
+sink is the *more severe* of the two. Handlers are therefore built at the most
+verbose level any module could ask for, and the per-section floor does all of
+the discrimination. Building them at the plain `image` level instead silently
+drops every module configured more verbose than it, while the section summary
+still counts the dropped records — output reported but never written.
 
 Enabling and disabling a sink changes only which handlers are attached when
 the logger is built. Nothing else in the system is conditional on it.
@@ -475,10 +481,13 @@ New module `spindoctor/config/logging_config.py` (the existing
 - `resolve_log_levels(program_name, arguments, config)` implementing the
   merge and precedence of section 2.6, returning a `LogLevels` dataclass.
 - `LogSinks` dataclass: the four booleans plus the resolved log root.
-- `build_main_logger(program_name, sinks, levels)` and
-  `build_image_logger(backend, results_path_stub, sinks, levels)` — attach
-  exactly the enabled handlers, or `NULL_HANDLER` if none, and return the
-  logger and the path written.
+- `build_main_logger(logger, program_name, sinks, levels)` and
+  `build_image_log_handlers(backend, results_path_stub, sinks, levels)` —
+  attach exactly the enabled handlers, or `NULL_HANDLER` if none, and report
+  the path written.  The image side returns handlers rather than attaching
+  them, because they are scoped to one `logger.open(...)` section; the caller
+  owns closing them.  Neither builds a logger, so nothing is added to
+  pdslogger's process-global registry.
 - `get_log_root(arguments, config)` in `config_helper.py`, matching the shape
   of `get_nav_results_root`.
 - Level-name validation extended with `NONE`.
