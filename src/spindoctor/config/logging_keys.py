@@ -270,13 +270,13 @@ def validate_logging_config(config: 'Config') -> None:
     from spindoctor.config.program_names import PROGRAM_NAMES
 
     section = config.logging
-    if not section:
-        return
+    if not isinstance(section, dict):
+        raise ValueError(f'logging must be a mapping, got {type(section).__name__}')
 
     block = dict(section)
     _validate_block(block, 'logging', is_top_level=True)
 
-    programs = block.get(_PROGRAMS_KEY) or {}
+    programs = block.get(_PROGRAMS_KEY, {})
     if not isinstance(programs, dict):
         raise ValueError(
             f'logging.{_PROGRAMS_KEY} must be a mapping, got {type(programs).__name__}'

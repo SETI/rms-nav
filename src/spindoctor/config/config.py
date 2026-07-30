@@ -308,7 +308,16 @@ class Config:
         new_config = self._load_yaml(config_path)
         for key in new_config:
             if key in self._config_dict and isinstance(self._config_dict[key], dict):
-                self._config_dict[key] = _deep_merge(self._config_dict[key], new_config[key])
+                overlay = new_config[key]
+                if not isinstance(overlay, dict):
+                    # A section written with no body parses to None, which would
+                    # otherwise surface as an AttributeError from inside the merge.
+                    kind = 'empty' if overlay is None else type(overlay).__name__
+                    raise ValueError(
+                        f'Config "{config_path}" section "{key}" is {kind}; expected a '
+                        f'mapping because "{key}" is a mapping in the merged configuration'
+                    )
+                self._config_dict[key] = _deep_merge(self._config_dict[key], overlay)
             else:
                 self._config_dict[key] = new_config[key]
         if read_default:
