@@ -72,6 +72,7 @@ __all__ = [
     'run_timestamp',
     'set_log_levels',
     'sinks_from_arguments',
+    'superseded_level_conflicts',
 ]
 
 
@@ -387,15 +388,65 @@ def _parse_log_level_arguments(
     return global_level, modules
 
 
+_SUPERSEDED_GENERAL_KEYS = {
+    'log_level_main_console': ('logging.main', 'main'),
+    'log_level_main_file': ('logging.main', 'main'),
+    'log_level_image_console': ('logging.image', 'image'),
+    'log_level_image_file': ('logging.image', 'image'),
+}
+
+
+def superseded_level_conflicts(program_name: str, config: 'Config') -> list[str]:
+    """Report ``general.log_level_*`` keys that disagree with the ``logging`` section.
+
+    Both spellings are still read while the older one remains wired to part of
+    the setup, and they govern different halves of the same behavior: the older
+    key sets a handler's level, the newer one the level a component's section is
+    opened at.  A configuration that raises only the older key therefore gets a
+    log file willing to accept records that the section then floors away, and
+    silently loses the detail it asked for.
+
+    Agreement is silent.  Only a genuine disagreement is worth a word, because
+    that is the only case where the value someone set fails to take effect.
+
+    Parameters:
+        program_name: The program's identity, for resolving its levels.
+        config: The loaded configuration.
+
+    Returns:
+        One message per conflicting key, empty when the two agree.
+    """
+    general = dict(config.general)
+    levels = resolve_log_levels(program_name, None, config)
+    messages = []
+    for key, (replacement, target) in sorted(_SUPERSEDED_GENERAL_KEYS.items()):
+        if key not in general:
+            continue
+        old = normalize_level(str(general[key]))
+        new = levels.main if target == 'main' else levels.for_module(target)
+        if old != new:
+            messages.append(
+                f'Configuration sets "general.{key}" to {old} but resolves '
+                f'"{replacement}" to {new}. The two are read separately, so the '
+                f'former will not take effect; set {replacement} instead.'
+            )
+    return messages
+
+
 _active_levels: LogLevels | None = None
 
 
 def set_log_levels(levels: LogLevels | None) -> None:
     """Install the levels every component resolves its own level from.
 
-    A driver resolves levels once at startup and installs them here, so a
-    component deep in the pipeline can ask for its own level without the
-    resolved set being threaded through every constructor.
+    A driver resolves levels once and installs them here, so a component deep
+    in the pipeline can ask for its own level without the resolved set being
+    threaded through every constructor.
+
+    This is process state, and cloud-task workers are spawned rather than
+    forked, so a worker does not inherit what its parent installed.  A
+    cloud-task driver installs inside the task it is processing, not once in
+    the parent.
 
     Parameters:
         levels: The resolved levels, or None to fall back to resolving the

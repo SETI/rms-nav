@@ -80,16 +80,29 @@ class NavBase:
         The level comes from the ``logging`` configuration section, so one
         component can be made verbose or quiet without affecting the rest.
         Use this rather than ``self.logger.open`` so that the component's
-        configured level is actually applied.
+        configured level is actually applied.  A main-role component takes the
+        main level; it has no per-module key, because the run's log is not
+        divided by component.
 
         Parameters:
             title: Title of the section.
             *args: Passed to ``PdsLogger.open``.
             **kwargs: Passed to ``PdsLogger.open``.  An explicit ``level``
-                overrides the configured one.
+                overrides the configured one, including ``None``, which asks
+                the section to inherit the level enclosing it.
 
         Returns:
             The context manager returned by ``PdsLogger.open``.
         """
-        kwargs.setdefault('level', log_levels().section_level_for(self.resolved_log_key))
+        if 'level' not in kwargs:
+            # "level" is absent rather than None: an explicit None means
+            # "inherit the enclosing section", which is a different request
+            # from not having said anything, and setdefault cannot tell them
+            # apart.
+            levels = log_levels()
+            kwargs['level'] = (
+                levels.main
+                if self.log_role is LogRole.MAIN
+                else levels.section_level_for(self.resolved_log_key)
+            )
         return self.logger.open(title, *args, **kwargs)

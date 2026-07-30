@@ -1,7 +1,8 @@
 """Tests for per-component log sections and the keys that configure them."""
 
-import tempfile
+import logging
 from collections.abc import Iterator
+from pathlib import Path
 
 import pdslogger
 import pytest
@@ -10,6 +11,7 @@ from filecache import FCPath
 from spindoctor.annotation.annotations import Annotations
 from spindoctor.config import (
     IMAGE_LOGGER,
+    MAIN_LOGGER,
     LogLevels,
     LogRole,
     LogSinks,
@@ -34,10 +36,11 @@ def _restore_levels() -> Iterator[None]:
     set_log_levels(None)
 
 
-def _emit(levels: LogLevels, component: NavBase, method: str, message: str) -> str:
+def _emit(tmp_path: Path, levels: LogLevels, component: NavBase, method: str, message: str) -> str:
     """Log one record inside the component's section and return the log text.
 
     Parameters:
+        tmp_path: Directory used as the log root.
         levels: Levels to install for the run.
         component: The component whose section the record is logged inside.
         method: Name of the level method to call.
@@ -47,12 +50,13 @@ def _emit(levels: LogLevels, component: NavBase, method: str, message: str) -> s
         The contents of the per-image log file.
     """
     set_log_levels(levels)
-    root = FCPath(tempfile.mkdtemp())
+    root = FCPath(str(tmp_path))
     handlers, path = build_image_log_handlers(
         'nav', 'vol/N1', LogSinks(log_root=root), levels, timestamp=_STAMP
     )
-    logger = pdslogger.PdsLogger.get_logger(f'section_{id(component)}', lognames=False)
+    logger = pdslogger.PdsLogger.get_logger(f'section_{component.resolved_log_key}', lognames=False)
     logger.remove_all_handlers()
+    logger.add_handler(pdslogger.NULL_HANDLER)
     with (
         image_scope(logger),
         IMAGE_LOGGER.open('IMAGE', handler=handlers),
@@ -133,45 +137,45 @@ def test_an_underived_subclass_keys_by_its_own_name() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_raised_module_writes_below_the_image_level() -> None:
+def test_a_raised_module_writes_below_the_image_level(tmp_path: Path) -> None:
     """A component configured more verbose than the image level actually writes."""
     levels = LogLevels(image='INFO', modules={'titan_haze': 'DEBUG'})
-    text = _emit(levels, TitanHazeNav(), 'debug', 'HAZE-DEBUG')
+    text = _emit(tmp_path, levels, TitanHazeNav(), 'debug', 'HAZE-DEBUG')
     assert 'HAZE-DEBUG' in text
 
 
-def test_an_unraised_module_is_unaffected() -> None:
+def test_an_unraised_module_is_unaffected(tmp_path: Path) -> None:
     """Raising one component does not make another verbose."""
     levels = LogLevels(image='INFO', modules={'titan_haze': 'DEBUG'})
-    text = _emit(levels, BodyLimbNav(), 'debug', 'LIMB-DEBUG')
+    text = _emit(tmp_path, levels, BodyLimbNav(), 'debug', 'LIMB-DEBUG')
     assert 'LIMB-DEBUG' not in text
 
 
-def test_a_quieted_module_drops_its_lesser_records() -> None:
+def test_a_quieted_module_drops_its_lesser_records(tmp_path: Path) -> None:
     """A component configured quieter than the image level is suppressed."""
     levels = LogLevels(image='INFO', modules={'body_limb': 'ERROR'})
-    text = _emit(levels, BodyLimbNav(), 'info', 'LIMB-INFO')
+    text = _emit(tmp_path, levels, BodyLimbNav(), 'info', 'LIMB-INFO')
     assert 'LIMB-INFO' not in text
 
 
-def test_a_quieted_module_still_reports_errors() -> None:
+def test_a_quieted_module_still_reports_errors(tmp_path: Path) -> None:
     """Quieting a component does not lose its errors."""
     levels = LogLevels(image='INFO', modules={'body_limb': 'ERROR'})
-    text = _emit(levels, BodyLimbNav(), 'error', 'LIMB-ERROR')
+    text = _emit(tmp_path, levels, BodyLimbNav(), 'error', 'LIMB-ERROR')
     assert 'LIMB-ERROR' in text
 
 
-def test_a_module_with_no_override_follows_the_image_level() -> None:
+def test_a_module_with_no_override_follows_the_image_level(tmp_path: Path) -> None:
     """A component nobody configured takes the image level."""
     levels = LogLevels(image='DEBUG')
-    text = _emit(levels, BodyLimbNav(), 'debug', 'LIMB-DEBUG')
+    text = _emit(tmp_path, levels, BodyLimbNav(), 'debug', 'LIMB-DEBUG')
     assert 'LIMB-DEBUG' in text
 
 
-def test_a_silenced_module_writes_nothing() -> None:
+def test_a_silenced_module_writes_nothing(tmp_path: Path) -> None:
     """A component configured NONE emits nothing, and does not raise doing so."""
     levels = LogLevels(image='INFO', modules={'body_limb': 'NONE'})
-    text = _emit(levels, BodyLimbNav(), 'critical', 'LIMB-CRITICAL')
+    text = _emit(tmp_path, levels, BodyLimbNav(), 'critical', 'LIMB-CRITICAL')
     assert 'LIMB-CRITICAL' not in text
 
 
@@ -181,6 +185,7 @@ def test_an_explicit_level_overrides_the_configured_one() -> None:
     set_log_levels(levels)
     logger = pdslogger.PdsLogger.get_logger('section_explicit', lognames=False)
     logger.remove_all_handlers()
+    logger.add_handler(pdslogger.NULL_HANDLER)
     technique = BodyLimbNav()
     with image_scope(logger), technique.log_section('COMPONENT', level='debug'):
         assert logger.level == 10
@@ -191,12 +196,37 @@ def test_an_explicit_level_overrides_the_configured_one() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_section_opens_on_the_components_own_logger() -> None:
-    """A main-role component sections its own logger, not the image logger."""
+def test_a_main_role_section_takes_the_main_level() -> None:
+    """A main-role component uses the main level, not the image level.
+
+    The run's log is not divided by component, so a main-role component has no
+    per-module key; taking the image level here would make the two loggers'
+    verbosity move together.
+    """
+    set_log_levels(LogLevels(main='ERROR', image='DEBUG'))
+
+    class _RunScoped(NavBase):
+        log_role = LogRole.MAIN
+
+    with _RunScoped().log_section('RUN SECTION'):
+        assert MAIN_LOGGER.level == logging.ERROR
+
+
+def test_a_main_role_section_opens_on_the_main_logger() -> None:
+    """A main-role component sections the run's logger, not the image one."""
+    set_log_levels(LogLevels(main='ERROR', image='DEBUG'))
 
     class _RunScoped(NavBase):
         log_role = LogRole.MAIN
 
     component = _RunScoped()
-    with component.log_section('RUN SECTION'):
-        pass  # opening it at all is the assertion; a wrong logger would raise
+    assert component.logger is MAIN_LOGGER
+
+
+def test_an_explicit_none_level_inherits() -> None:
+    """Passing level=None asks to inherit, which differs from saying nothing."""
+    set_log_levels(LogLevels(image='ERROR'))
+    logger = pdslogger.PdsLogger.get_logger('section_inherit', lognames=False)
+    logger.add_handler(pdslogger.NULL_HANDLER)
+    with image_scope(logger), BodyLimbNav().log_section('COMPONENT', level=None):
+        assert logger.level != logging.ERROR

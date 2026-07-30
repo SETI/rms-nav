@@ -4,6 +4,8 @@ import os
 from filecache import FCPath
 
 from .config import Config
+from .logger import MAIN_LOGGER
+from .logging_config import superseded_level_conflicts
 from .logging_keys import validate_logging_config
 
 
@@ -196,3 +198,5 @@ def load_default_and_user_config(arguments: argparse.Namespace, config: Config) 
         except FileNotFoundError:
             pass
     validate_logging_config(config)
+    for message in superseded_level_conflicts('', config):
+        MAIN_LOGGER.warning('%s', message)

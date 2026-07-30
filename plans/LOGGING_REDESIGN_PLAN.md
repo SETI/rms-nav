@@ -320,8 +320,9 @@ which only reads as "silent" because nothing in the library happens to log at
 `CRITICAL` — an incidental property, not a guarantee.
 
 The resolved level is applied at each component's existing `logger.open(...)`
-call as its `level=` argument. All 27 `open()` sites become level-aware;
-today only three are.
+call as its `level=` argument. The 22 component-owned `open()` sites become
+level-aware; before this work only three were. The driver-level per-image
+sections are converted with their drivers.
 
 ### 2.7 Command-line surface
 
