@@ -11,7 +11,3 @@ planets:
 
 general:
   truetype_font_dir: /usr/share/fonts/truetype  # TODO
-  log_level_main_console: INFO
-  log_level_main_file: INFO
-  log_level_image_console: INFO
-  log_level_image_file: INFO

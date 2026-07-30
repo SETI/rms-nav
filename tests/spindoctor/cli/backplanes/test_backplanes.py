@@ -349,7 +349,9 @@ def test_driver_skips_image_with_failed_status(
     )
     assert from_file_calls == []
     assert calls['write'] == []
-    assert list(bp_root.iterdir()) == []
+    # The skip itself is logged, so a logs directory is expected; what must not
+    # appear is any backplane product.
+    assert [entry.name for entry in bp_root.iterdir() if entry.name != 'logs'] == []
 
 
 def test_driver_skips_image_with_missing_status(

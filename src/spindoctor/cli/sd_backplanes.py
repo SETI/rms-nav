@@ -129,10 +129,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     # Dataset selection
     DATASET.add_selection_arguments(cmdparser)
 
-    # No image flags yet: per-image backplane logging still goes through the
-    # setup being replaced, so offering them would accept a request this
-    # program cannot honor.
-    add_logging_arguments(cmdparser, has_image_logger=False)
+    add_logging_arguments(cmdparser)
 
     # Misc
     misc_group = cmdparser.add_argument_group('Miscellaneous')
@@ -151,7 +148,7 @@ def main() -> None:
     # Read configuration files
     load_default_and_user_config(arguments, DEFAULT_CONFIG)
     try:
-        build_run_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
+        run_logging = build_run_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
     except (TypeError, ValueError) as exc:
         print(f'Invalid logging configuration: {exc}', file=sys.stderr)
         sys.exit(1)
@@ -222,6 +219,7 @@ def main() -> None:
                 nav_results_root=nav_results_root,
                 backplane_results_root=backplane_results_root,
                 write_output_files=not arguments.no_write_output_files,
+                run_logging=run_logging,
             )
         except FileNotFoundError as e:
             MAIN_LOGGER.error(

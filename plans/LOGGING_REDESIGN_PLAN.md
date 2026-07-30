@@ -608,10 +608,14 @@ bespoke path builders in `sd_mosaic.py` and `sd_mosaic_cloud_tasks.py`, and
 `sd_mosaic`'s interim `IMAGE_LOGGER.set_level` call. Repoint
 `bundle_data.py`'s per-image section at the main logger.
 
-This removes the last caller of the old resolution path, so `setup_logging`,
-`_resolve_level`, and the nine `log_level_*` keys in
-`config_010_general.yaml` are deleted here, along with
-`test_config_helper.py:431`, which asserts on one of them.
+`sd_mosaic_cloud_tasks`'s per-image handlers are converted here too, even
+though its main-logger isolation belongs to Phase 7, because it is otherwise
+the one remaining caller keeping the old path alive.
+
+That makes this the phase with no callers left, so `setup_logging`,
+`image_log_handlers`, `_resolve_level`, and the last four `log_level_*` keys
+are deleted, along with the conflict check that existed only to reconcile them
+with the `logging` section while both were read.
 
 ### Phase 7 — Cloud-task isolation
 

@@ -22,7 +22,6 @@ import asyncio
 import os
 import sys
 import traceback
-from datetime import datetime
 from typing import Any, cast
 
 from cloud_tasks.worker import Worker, WorkerData
@@ -41,8 +40,9 @@ from spindoctor.config import (
     DEFAULT_CONFIG,
     IMAGE_LOGGER,
     MAIN_LOGGER,
+    build_image_log_handlers,
+    build_run_logging,
     get_nav_results_root,
-    image_log_handlers,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_MOSAIC
@@ -83,21 +83,6 @@ def _safe_stub_for_image_log(results_path_stub: object, *, default: str = 'image
     safe = ''.join(ch if (ch.isalnum() or ch in '._-') else '_' for ch in base)
     safe = safe.strip('._') or default
     return safe[:200]
-
-
-def _resolved_image_log_path(
-    output_dir: FCPath, results_path_stub: object, timestamp: str
-) -> FCPath:
-    """Resolve ``<output_dir>/logs/<stub>_<timestamp>.log`` and ensure it stays under ``logs``."""
-    logs_dir = (output_dir / 'logs').resolve()
-    for stub in (
-        _safe_stub_for_image_log(results_path_stub),
-        _safe_stub_for_image_log('', default='image'),
-    ):
-        candidate = (output_dir / 'logs' / f'{stub}_{timestamp}.log').resolve()
-        if candidate.is_relative_to(logs_dir):
-            return candidate
-    raise ValueError(f'Refusing image log path outside output_dir/logs (root={logs_dir!r})')
 
 
 def process_task(
@@ -151,6 +136,8 @@ def process_task(
 
     cli_args = cast(argparse.Namespace, worker_data.args)
     load_default_and_user_config(cli_args, DEFAULT_CONFIG)
+    # No main logger here; see the cloud-task section of the plan.
+    run_logging = build_run_logging(PROGRAM_NAME, cli_args, DEFAULT_CONFIG, build_main=False)
 
     nav_results_root_path = cast(FCPath | None, getattr(worker_data, 'nav_results_root_path', None))
 
@@ -242,19 +229,13 @@ def process_task(
             MAIN_LOGGER.debug('Skipping (exists): %s', out_path)
             continue
 
-        timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
-        try:
-            image_log_path = _resolved_image_log_path(
-                output_dir, image_file.results_path_stub, timestamp
-            )
-        except ValueError as exc:
-            return False, {
-                'status': 'error',
-                'status_error': 'invalid_image_log_path',
-                'status_exception': str(exc),
-            }
-        image_log_path.parent.mkdir(parents=True, exist_ok=True)
-        local_handlers = image_log_handlers(image_log_path, cli_args, DEFAULT_CONFIG)
+        local_handlers, image_log_path = build_image_log_handlers(
+            'reproj',
+            image_file.results_path_stub,
+            run_logging.sinks,
+            run_logging.levels,
+            timestamp=run_logging.timestamp,
+        )
 
         try:
             with IMAGE_LOGGER.open(
