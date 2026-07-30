@@ -124,10 +124,16 @@ Each logger has two possible sinks, console (stdout) and file. Defaults:
 
 **When a sink is enabled, its level is the level for that module. Console
 and file always share a level.** There is no per-sink level anywhere in the
-system. This is what makes `logger.open(title, level=...)` sufficient to
-express a module's verbosity: pdslogger's section level is a floor applied
-before handlers, so with both handlers at the same level the floor *is* the
-effective level, and the two sinks cannot disagree.
+system, which is what makes `logger.open(title, level=...)` sufficient to
+express a module's verbosity.
+
+The mechanism needs care. A pdslogger section level is a floor applied before
+the handlers, and each handler then applies its own level, so what reaches a
+sink is the *more severe* of the two. Handlers are therefore built at the most
+verbose level any module could ask for, and the per-section floor does all of
+the discrimination. Building them at the plain `image` level instead silently
+drops every module configured more verbose than it, while the section summary
+still counts the dropped records — output reported but never written.
 
 Enabling and disabling a sink changes only which handlers are attached when
 the logger is built. Nothing else in the system is conditional on it.
@@ -157,9 +163,16 @@ Layout underneath it:
 {log_root}/{backend}/{results_path_stub}_{datetime}.log  # image logger
 ```
 
-`{datetime}` is `%Y-%m-%dT%H-%M-%S`, matching the current per-image
-convention, applied to main logs as well. `{backend}` is one of `nav`,
-`backplane`, `reproj`. `{results_path_stub}` is the existing
+`{datetime}` is `%Y-%m-%dT%H-%M-%S` **in UTC**, applied to main logs as well
+as image logs. The format matches the existing per-image convention; the
+timezone does not, because the three sites producing it today
+(`navigate_image_files.py:164`, `sd_offset.py:305`, `sd_mosaic.py:89`) use
+naive local time. Cloud-task workers processing one batch may sit in different
+zones, and a local-time name is ambiguous across a daylight-saving fall-back,
+so names would neither sort nor correlate. Those three sites are replaced in
+Phases 6 and 7.
+
+`{backend}` is one of `nav`, `backplane`, `reproj`. `{results_path_stub}` is the existing
 `ImageFile.results_path_stub`, which is `{volume}/{filespec}` without the
 extension (`dataset_pds3_cassini_iss.py:187`), so a Cassini image navigated
 by either nav driver lands at
@@ -475,17 +488,25 @@ New module `spindoctor/config/logging_config.py` (the existing
 - `resolve_log_levels(program_name, arguments, config)` implementing the
   merge and precedence of section 2.6, returning a `LogLevels` dataclass.
 - `LogSinks` dataclass: the four booleans plus the resolved log root.
-- `build_main_logger(program_name, sinks, levels)` and
-  `build_image_logger(backend, results_path_stub, sinks, levels)` — attach
-  exactly the enabled handlers, or `NULL_HANDLER` if none, and return the
-  logger and the path written.
+- `build_main_logger(logger, program_name, sinks, levels)` and
+  `build_image_log_handlers(backend, results_path_stub, sinks, levels)` —
+  attach exactly the enabled handlers, or `NULL_HANDLER` if none, and report
+  the path written.  The image side returns handlers rather than attaching
+  them, because they are scoped to one `logger.open(...)` section; the caller
+  owns closing them.  Neither builds a logger, so nothing is added to
+  pdslogger's process-global registry.
 - `get_log_root(arguments, config)` in `config_helper.py`, matching the shape
   of `get_nav_results_root`.
 - Level-name validation extended with `NONE`.
 
-With the resolver in place, retire the old path: delete `_resolve_level` and
-the nine `log_level_*` keys from `config_010_general.yaml`, and update the one
-test that asserts on them (`test_config_helper.py:431`).
+This phase builds the core and tests it directly; it does not wire it into any
+program. Wiring happens in Phases 5 through 7, which replace the eight call
+sites that still reach the old `setup_logging` / `image_log_handlers` path.
+The old `_resolve_level` and the nine `log_level_*` keys in
+`config_010_general.yaml` are therefore retired in Phase 6, when the last of
+those callers goes, along with the one test that asserts on them
+(`test_config_helper.py:431`). Removing them earlier would leave a phase that
+only deletes working configurability.
 
 ### Phase 3 — Image logger proxy, role binding, and scope enforcement
 
@@ -541,6 +562,11 @@ Route `backplane` and `reproj` per-image logging through
 `{log_root}/reproj/`. Retire `image_log_handlers()` and the bespoke path
 builders in `sd_mosaic.py` and `sd_mosaic_cloud_tasks.py`. Repoint
 `bundle_data.py`'s per-image section at the main logger.
+
+This removes the last caller of the old resolution path, so `setup_logging`,
+`_resolve_level`, and the nine `log_level_*` keys in
+`config_010_general.yaml` are deleted here, along with
+`test_config_helper.py:431`, which asserts on one of them.
 
 ### Phase 7 — Cloud-task isolation
 

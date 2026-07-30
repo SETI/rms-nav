@@ -1,0 +1,587 @@
+"""Resolution and construction of the two SpinDoctor loggers.
+
+Two loggers exist.  The main logger covers one program run and reports what
+the program is doing at the top level.  The image logger covers one image
+inside one per-image backend and carries that image's processing detail.
+
+Each logger writes to a console sink, a file sink, or both.  Both sinks always
+share a level, so one level per module governs whatever sinks are enabled, and
+a module's verbosity can be expressed as the ``level=`` argument of a single
+``logger.open(...)`` call.
+
+Making that work takes care.  A pdslogger section level is a floor applied
+before the handlers, and each handler then applies its own level, so what
+reaches a sink is the more severe of the two.  Handlers are therefore built at
+the most verbose level any module could ask for, and the per-section floor
+does all of the discrimination.  Building them at the plain image level would
+silently drop every module configured more verbose than it -- and the section
+summary would still count the dropped records, reporting output that was never
+written.
+
+Levels resolve in two steps.  The top-level ``logging`` block is first merged
+with ``logging.programs.<program>``, the program block winning key by key;
+then, against that merged result, the most specific setting wins:
+
+    --log-level MODULE=LEVEL
+      > <category>.<module>
+      > <category>.default
+      > --log-level-main / --log-level-image
+      > --log-level LEVEL
+      > main / image
+      > INFO
+
+Building a logger attaches exactly the enabled sinks.  When neither is
+enabled the builder attaches ``NULL_HANDLER``, because a PdsLogger left with
+no handlers does not go quiet -- it falls back to printing every record to
+stdout regardless of level.
+"""
+
+import argparse
+import logging
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
+
+import pdslogger
+from filecache import FCPath
+from pdslogger import PdsLogger
+
+from .logging_keys import (
+    CATEGORY_KEYS,
+    LOG_LEVEL_NAMES,
+    LOG_LEVEL_VALUES,
+    normalize_level,
+)
+
+if TYPE_CHECKING:
+    from .config import Config
+
+__all__ = [
+    'BACKEND_NAMES',
+    'DEFAULT_LEVEL',
+    'LOG_TIMESTAMP_FORMAT',
+    'SILENT_LEVEL',
+    'LogLevels',
+    'LogSinks',
+    'build_image_log_handlers',
+    'build_main_logger',
+    'image_log_path',
+    'main_log_path',
+    'resolve_log_levels',
+    'run_timestamp',
+    'sinks_from_arguments',
+]
+
+
+DEFAULT_LEVEL = 'INFO'
+"""Level used when nothing in the arguments or configuration says otherwise."""
+
+LOG_TIMESTAMP_FORMAT = '%Y-%m-%dT%H-%M-%S'
+"""Suffix format distinguishing one run's log file from the next, in UTC."""
+
+BACKEND_NAMES = frozenset({'nav', 'backplane', 'reproj'})
+"""Per-image backends, each owning a subtree of the log root."""
+
+_OFF = 'NONE'
+SILENT_LEVEL = LOG_LEVEL_VALUES[_OFF]
+"""Numeric level suppressing every record, for a module configured ``NONE``.
+
+pdslogger has no name for "off", so a section that must emit nothing is opened
+with this number rather than a level name.
+"""
+
+_CATEGORY_DEFAULT_KEY = 'default'
+_PROGRAMS_KEY = 'programs'
+
+
+@dataclass(frozen=True)
+class LogLevels:
+    """Resolved level for each logger and each module that overrides it.
+
+    Parameters:
+        main: Level for the main logger.
+        image: Level for the image logger, and for any image-scoped module
+            with no override of its own.
+        modules: Level per module key, for the modules that override the
+            image level.  Keys are the snake_case names validated by
+            :mod:`spindoctor.config.logging_keys`.
+    """
+
+    main: str = DEFAULT_LEVEL
+    image: str = DEFAULT_LEVEL
+    modules: dict[str, str] = field(default_factory=dict)
+
+    def for_module(self, log_key: str) -> str:
+        """Return the level name governing ``log_key``.
+
+        Parameters:
+            log_key: A module's snake_case configuration key.
+
+        Returns:
+            The module's own level if it has one, else the image level.
+        """
+        return self.modules.get(log_key, self.image)
+
+    def section_level_for(self, log_key: str) -> str | int:
+        """Return the value to pass as ``logger.open(level=...)`` for a module.
+
+        pdslogger has no level named ``NONE``, so a module configured off is
+        expressed as :data:`SILENT_LEVEL` instead of a name it would reject.
+
+        Parameters:
+            log_key: A module's snake_case configuration key.
+
+        Returns:
+            A pdslogger level name, or :data:`SILENT_LEVEL` for a module
+            configured ``NONE``.
+        """
+        level = self.for_module(log_key)
+        return SILENT_LEVEL if level == _OFF else level.lower()
+
+    def most_verbose_image_level(self) -> str:
+        """Return the least severe level any image-scoped module can request.
+
+        Image handlers are built at this level rather than at :attr:`image`,
+        because a handler filters after the per-section floor: one built at
+        :attr:`image` would discard every record from a module configured more
+        verbose than it, while the section summary still counted them.
+
+        Returns:
+            The level name to build the image sinks at.
+        """
+        candidates = [self.image, *self.modules.values()]
+        return min(candidates, key=lambda name: LOG_LEVEL_VALUES[name])
+
+
+@dataclass(frozen=True)
+class LogSinks:
+    """Which sinks each logger writes to, and where files are written.
+
+    Parameters:
+        log_root: Root directory for every log file this run produces.
+        main_console: Whether the main logger writes to stdout.
+        main_file: Whether the main logger writes to a file.
+        image_console: Whether the image logger writes to stdout.
+        image_file: Whether the image logger writes to a file.
+    """
+
+    log_root: FCPath
+    main_console: bool = True
+    main_file: bool = True
+    image_console: bool = False
+    image_file: bool = True
+
+
+def _level_or_none(value: Any, location: str) -> str | None:
+    """Return a canonicalized level name, or None when nothing was configured.
+
+    Parameters:
+        value: A configured or command-line level, possibly absent.
+        location: What supplied the value, used in the error message.
+
+    Returns:
+        The canonical level name, or None if ``value`` is absent.
+
+    Raises:
+        ValueError: If ``value`` names no known level.  The configuration side
+            is checked at load; this catches the command-line side, which
+            would otherwise reach pdslogger as a bare ``KeyError``.
+    """
+    if value is None:
+        return None
+    level = normalize_level(str(value))
+    if level not in LOG_LEVEL_NAMES:
+        raise ValueError(f'{location} is {value!r}; expected one of {sorted(LOG_LEVEL_NAMES)}')
+    return level
+
+
+def _first_set(*candidates: str | None) -> str:
+    """Return the first candidate that was actually supplied.
+
+    Written as an explicit None test rather than an ``or`` chain so that a
+    value which happens to be falsy is not skipped in favor of a less specific
+    source.
+
+    Parameters:
+        *candidates: Levels in order of decreasing precedence, the last of
+            which must be a fallback rather than None.
+
+    Returns:
+        The first non-None candidate.
+    """
+    for candidate in candidates:
+        if candidate is not None:
+            return candidate
+    return DEFAULT_LEVEL
+
+
+def _merged_logging_block(program_name: str, config: 'Config') -> dict[str, Any]:
+    """Return the logging configuration in force for one program.
+
+    The top-level block is merged with that program's block under
+    ``programs``, the program's value winning key by key.  Categories merge a
+    level deeper, so a program can override one module without restating the
+    rest of the category.
+
+    Parameters:
+        program_name: The program's identity, as declared by its dispatch
+            module.
+        config: The loaded configuration.
+
+    Returns:
+        A mapping in the shape of the top-level ``logging`` block, with the
+        ``programs`` key removed.
+    """
+    section = config.logging
+    block: dict[str, Any] = {k: v for k, v in dict(section).items() if k != _PROGRAMS_KEY}
+    for key in CATEGORY_KEYS:
+        if isinstance(block.get(key), dict):
+            block[key] = dict(block[key])
+
+    overrides = dict(section).get(_PROGRAMS_KEY) or {}
+    program_block = overrides.get(program_name) or {}
+    for key, value in dict(program_block).items():
+        if key in CATEGORY_KEYS and isinstance(value, dict):
+            merged = dict(block.get(key) or {})
+            merged.update(dict(value))
+            block[key] = merged
+        else:
+            block[key] = value
+    return block
+
+
+def resolve_log_levels(
+    program_name: str,
+    arguments: argparse.Namespace | None,
+    config: 'Config',
+) -> LogLevels:
+    """Resolve the level governing each logger and each overriding module.
+
+    Applies the merge and precedence described in the module docstring.  A
+    module named on the command line beats one named in the configuration; a
+    module named anywhere beats its category default; a category default beats
+    the per-logger default.
+
+    Parameters:
+        program_name: The program's identity, used to select its block under
+            ``logging.programs``.
+        arguments: Parsed command-line arguments, or None to resolve from the
+            configuration alone.  Recognized attributes are ``log_level``,
+            ``log_level_main``, and ``log_level_image``.
+        config: The loaded configuration.
+
+    Returns:
+        The resolved :class:`LogLevels`.
+    """
+    block = _merged_logging_block(program_name, config)
+
+    cli_global, cli_modules = _parse_log_level_arguments(arguments)
+    cli_main = _level_or_none(getattr(arguments, 'log_level_main', None), '--log-level-main')
+    cli_image = _level_or_none(getattr(arguments, 'log_level_image', None), '--log-level-image')
+
+    main = _first_set(
+        cli_main, cli_global, _level_or_none(block.get('main'), 'logging.main'), DEFAULT_LEVEL
+    )
+    image = _first_set(
+        cli_image, cli_global, _level_or_none(block.get('image'), 'logging.image'), DEFAULT_LEVEL
+    )
+
+    modules: dict[str, str] = {}
+    for category in CATEGORY_KEYS:
+        entries = block.get(category)
+        if not isinstance(entries, dict):
+            continue
+        category_default = _level_or_none(
+            entries.get(_CATEGORY_DEFAULT_KEY), f'logging.{category}.default'
+        )
+        for key, value in entries.items():
+            if key == _CATEGORY_DEFAULT_KEY:
+                continue
+            level = _level_or_none(value, f'logging.{category}.{key}')
+            if level is not None:
+                modules[key] = level
+        if category_default is not None:
+            # Applies to every module in the category that did not name itself.
+            # Recorded per known key rather than as a category-wide entry so
+            # LogLevels stays a flat lookup.
+            for key in _category_member_keys(category):
+                modules.setdefault(key, category_default)
+
+    modules.update(cli_modules)
+    return LogLevels(main=main, image=image, modules=modules)
+
+
+def _all_module_keys() -> frozenset[str]:
+    """Return every module key any category accepts.
+
+    Returns:
+        The union of the technique, model, and other key sets.
+    """
+    return frozenset().union(*(_category_member_keys(name) for name in CATEGORY_KEYS))
+
+
+def _category_member_keys(category: str) -> frozenset[str]:
+    """Return every module key belonging to ``category``.
+
+    Parameters:
+        category: One of the categories in
+            :data:`spindoctor.config.logging_keys.CATEGORY_KEYS`.
+
+    Returns:
+        The category's valid module keys.
+    """
+    from .logging_keys import OTHER_LOG_KEYS, model_log_keys, technique_log_keys
+
+    if category == 'techniques':
+        return technique_log_keys()
+    if category == 'models':
+        return model_log_keys()
+    return OTHER_LOG_KEYS
+
+
+def _parse_log_level_arguments(
+    arguments: argparse.Namespace | None,
+) -> tuple[str | None, dict[str, str]]:
+    """Split the repeatable ``--log-level`` values into global and per-module.
+
+    A bare ``LEVEL`` sets the default for both loggers; a ``MODULE=LEVEL`` pair
+    sets one module.  The last bare value wins, so a later flag overrides an
+    earlier one rather than silently combining.
+
+    Parameters:
+        arguments: Parsed command-line arguments, or None.
+
+    Returns:
+        Tuple of the global level (or None) and a mapping of module key to
+        level.
+    """
+    values = getattr(arguments, 'log_level', None) or []
+    if isinstance(values, str):
+        values = [values]
+
+    known_keys = _all_module_keys()
+    global_level: str | None = None
+    modules: dict[str, str] = {}
+    for value in values:
+        text = str(value)
+        if '=' in text:
+            key, _, level = text.partition('=')
+            key = key.strip()
+            if not key:
+                raise ValueError(f'--log-level {text!r} names no module before the "="')
+            if key not in known_keys:
+                raise ValueError(
+                    f'--log-level {text!r} names unknown module {key!r}; '
+                    f'expected one of {sorted(known_keys)}'
+                )
+            resolved = _level_or_none(level, f'--log-level {key}')
+            if resolved is None:
+                raise ValueError(f'--log-level {text!r} names no level after the "="')
+            modules[key] = resolved
+        else:
+            resolved = _level_or_none(text, '--log-level')
+            if resolved is not None:
+                global_level = resolved
+    return global_level, modules
+
+
+def main_log_path(log_root: FCPath, program_name: str, *, timestamp: str) -> FCPath:
+    """Return the path of a program run's main log file.
+
+    Parameters:
+        log_root: Root directory for this run's logs.
+        program_name: The program's identity, which names its directory.
+        timestamp: Run timestamp in :data:`LOG_TIMESTAMP_FORMAT`.
+
+    Returns:
+        ``{log_root}/{program_name}/main_{timestamp}.log``.
+    """
+    return log_root / program_name / f'main_{timestamp}.log'
+
+
+def image_log_path(
+    log_root: FCPath, backend: str, results_path_stub: str, *, timestamp: str
+) -> FCPath:
+    """Return the path of one image's log file for one backend.
+
+    The subtree is keyed by backend rather than by program, so an image's log
+    for a given stage is in one place whichever driver produced it.
+
+    Parameters:
+        log_root: Root directory for this run's logs.
+        backend: One of :data:`BACKEND_NAMES`.
+        results_path_stub: The image's results path stub.
+        timestamp: Run timestamp in :data:`LOG_TIMESTAMP_FORMAT`.
+
+    Returns:
+        ``{log_root}/{backend}/{results_path_stub}_{timestamp}.log``.
+
+    Raises:
+        ValueError: If ``backend`` is not a known backend.
+    """
+    if backend not in BACKEND_NAMES:
+        raise ValueError(f'Unknown backend {backend!r}; expected one of {sorted(BACKEND_NAMES)}')
+    return log_root / backend / f'{results_path_stub}_{timestamp}.log'
+
+
+def run_timestamp() -> str:
+    """Return the current UTC time formatted for a log file name.
+
+    UTC rather than local time so that log names sort chronologically and
+    correlate across machines: cloud-task workers processing one batch may sit
+    in different zones, and a local-time name is ambiguous across a
+    daylight-saving fall-back.
+
+    Returns:
+        The timestamp in :data:`LOG_TIMESTAMP_FORMAT`.
+    """
+    return datetime.now(UTC).strftime(LOG_TIMESTAMP_FORMAT)
+
+
+def _handlers_for(*, console: bool, to_file: bool, path: FCPath | None, level: str) -> list[Any]:
+    """Build the handler list for one logger.
+
+    Parameters:
+        console: Whether to attach a stdout handler.
+        to_file: Whether to attach a file handler.
+        path: Destination for the file handler; required when ``to_file``.
+        level: Level shared by both sinks.
+
+    Returns:
+        The handlers to attach.  Never empty: with no sink enabled the list is
+        ``[NULL_HANDLER]``, because a PdsLogger with no handlers prints every
+        record to stdout regardless of level.
+
+    Raises:
+        ValueError: If ``to_file`` is set without a ``path``.
+    """
+    handlers: list[logging.Handler] = []
+    if level != _OFF:
+        if console:
+            handlers.append(pdslogger.stream_handler(level=level.lower()))
+        if to_file:
+            if path is None:
+                raise ValueError('A file sink was requested without a destination path')
+            # No mkdir here: pdslogger.file_handler creates missing parents
+            # itself, and FCPath.mkdir raises NotImplementedError on a remote
+            # root, which is exactly the cloud-task configuration.
+            handlers.append(pdslogger.file_handler(path, level=level.lower()))
+    if not handlers:
+        handlers.append(pdslogger.NULL_HANDLER)
+    return handlers
+
+
+def build_main_logger(
+    logger: PdsLogger,
+    program_name: str,
+    sinks: LogSinks,
+    levels: LogLevels,
+    *,
+    timestamp: str | None = None,
+) -> FCPath | None:
+    """Attach this run's sinks to the main logger.
+
+    Any handlers already present are removed first, so calling this twice does
+    not duplicate output.
+
+    Parameters:
+        logger: The main logger to configure.
+        program_name: The program's identity, which names its log directory.
+        sinks: Which sinks to attach and where files go.
+        levels: Resolved levels; the main level applies to both sinks.
+        timestamp: Run timestamp for the file name; defaults to now.
+
+    Returns:
+        The path written to, or None when no file sink is enabled.
+    """
+    # remove_all_handlers detaches but does not close, so a rebuild would leak
+    # the previous run's open log file.  NULL_HANDLER is a process-wide
+    # singleton this module does not own, so it is left alone.
+    for existing in list(logger.handlers):
+        if existing is not pdslogger.NULL_HANDLER:
+            existing.close()
+    logger.remove_all_handlers()
+    stamp = timestamp if timestamp is not None else run_timestamp()
+    writes_a_file = sinks.main_file and levels.main != _OFF
+    path = main_log_path(sinks.log_root, program_name, timestamp=stamp) if writes_a_file else None
+    for handler in _handlers_for(
+        console=sinks.main_console, to_file=sinks.main_file, path=path, level=levels.main
+    ):
+        logger.add_handler(handler)
+    return path
+
+
+def build_image_log_handlers(
+    backend: str,
+    results_path_stub: str,
+    sinks: LogSinks,
+    levels: LogLevels,
+    *,
+    timestamp: str | None = None,
+) -> tuple[list[Any], FCPath | None]:
+    """Build the handlers for one image, to be attached for that image only.
+
+    The handlers are returned rather than attached because the image logger
+    scopes them to a single ``logger.open(...)`` section.  Closing the section
+    detaches them but does not close them, so the caller owns disposal and must
+    close each handler once the image is done.
+
+    Parameters:
+        backend: The per-image backend, one of :data:`BACKEND_NAMES`.
+        results_path_stub: The image's results path stub.
+        sinks: Which sinks to attach and where files go.
+        levels: Resolved levels; the image level applies to both sinks.
+        timestamp: Run timestamp for the file name; defaults to now.
+
+    Returns:
+        Tuple of the handlers and the path written to, the latter None when no
+        file sink is enabled.
+
+    Raises:
+        ValueError: If ``backend`` is not a known backend.
+    """
+    # Validated up front so a typo fails the same way whether or not a file
+    # sink happens to be enabled.
+    if backend not in BACKEND_NAMES:
+        raise ValueError(f'Unknown backend {backend!r}; expected one of {sorted(BACKEND_NAMES)}')
+    stamp = timestamp if timestamp is not None else run_timestamp()
+    # Built at the most verbose level any module can ask for; the per-section
+    # floor set from LogLevels.section_level_for then does the discrimination.
+    handler_level = levels.most_verbose_image_level()
+    writes_a_file = sinks.image_file and handler_level != _OFF
+    path = (
+        image_log_path(sinks.log_root, backend, results_path_stub, timestamp=stamp)
+        if writes_a_file
+        else None
+    )
+    handlers = _handlers_for(
+        console=sinks.image_console, to_file=sinks.image_file, path=path, level=handler_level
+    )
+    return handlers, path
+
+
+def sinks_from_arguments(arguments: argparse.Namespace | None, log_root: FCPath) -> LogSinks:
+    """Build the sink selection from command-line arguments.
+
+    Each sink keeps its default unless the corresponding flag was given.
+
+    Parameters:
+        arguments: Parsed command-line arguments, or None for the defaults.
+        log_root: Resolved log root for this run.
+
+    Returns:
+        The resolved :class:`LogSinks`.
+    """
+    defaults = LogSinks(log_root=log_root)
+
+    def flag(name: str, default: bool) -> bool:
+        value = getattr(arguments, name, None)
+        return default if value is None else bool(value)
+
+    return LogSinks(
+        log_root=log_root,
+        main_console=flag('log_main_to_console', defaults.main_console),
+        main_file=flag('log_main_to_file', defaults.main_file),
+        image_console=flag('log_image_to_console', defaults.image_console),
+        image_file=flag('log_image_to_file', defaults.image_file),
+    )

@@ -1,6 +1,8 @@
 import argparse
 import os
 
+from filecache import FCPath
+
 from .config import Config
 from .logging_keys import validate_logging_config
 
@@ -78,6 +80,45 @@ def get_nav_results_root(arguments: argparse.Namespace, config: Config) -> str:
             'environment variable must be set'
         )
     return nav_results_root_str
+
+
+def get_log_root(arguments: argparse.Namespace, config: Config) -> str:
+    """Get the log root from the arguments, configuration, or environment.
+
+    First look in ``arguments.log_root``, then in ``config.environment.log_root``,
+    then in the environment variable ``NAV_LOG_ROOT``.  Unlike the other roots
+    this one has a fallback rather than an error: logs belong under the
+    navigation results root by default, so a run that has not been told where to
+    put them still puts them somewhere predictable.
+
+    Parameters:
+        arguments: The parsed arguments.
+        config: The configuration possibly containing the environment section.
+
+    Returns:
+        The log root.
+
+    Raises:
+        ValueError: If neither a log root nor a navigation results root can be
+            determined.
+    """
+    log_root_str = None
+    try:
+        log_root_str = arguments.log_root
+    except AttributeError:
+        pass
+    if log_root_str is None:
+        try:
+            log_root_str = config.environment.log_root
+        except AttributeError:
+            pass
+    if log_root_str is None:
+        log_root_str = os.getenv('NAV_LOG_ROOT')
+    if log_root_str is None:
+        # FCPath rather than os.path.join: a results root is routinely a cloud
+        # URL, and joining those must not depend on the local path separator.
+        log_root_str = (FCPath(get_nav_results_root(arguments, config)) / 'logs').as_posix()
+    return str(log_root_str)
 
 
 def get_pds4_bundle_results_root(arguments: argparse.Namespace, config: Config) -> str:
