@@ -40,6 +40,7 @@ import argparse
 import logging
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pdslogger
@@ -707,11 +708,15 @@ class RunLogging:
     main_log_path: FCPath | None
 
 
-def run_logging_for_root(log_root: FCPath, program_name: str = '') -> RunLogging:
+def run_logging_for_root(log_root: str | Path | FCPath, program_name: str = '') -> RunLogging:
     """Resolve logging against an explicit log root, with no arguments.
 
     For a library caller that already knows where its results go and has no
-    command line to consult.  Levels come from the configuration alone.
+    command line to consult.  Levels come from the configuration alone, and
+    are installed so that the sections a component opens are floored at the
+    same levels the handlers were built at; leaving them uninstalled would let
+    the two disagree, which silently drops records that the handlers would
+    have accepted.
 
     Parameters:
         log_root: Root directory for this run's log files.
@@ -724,9 +729,10 @@ def run_logging_for_root(log_root: FCPath, program_name: str = '') -> RunLogging
     from .config import DEFAULT_CONFIG
 
     levels = resolve_log_levels(program_name, None, DEFAULT_CONFIG)
+    set_log_levels(levels)
     return RunLogging(
         levels=levels,
-        sinks=sinks_from_arguments(None, log_root),
+        sinks=sinks_from_arguments(None, FCPath(log_root)),
         timestamp=run_timestamp(),
         main_log_path=None,
     )
@@ -756,6 +762,12 @@ def build_run_logging(
 
     Returns:
         The resolved :class:`RunLogging`.
+
+    Raises:
+        ValueError: If a level named on the command line or in the
+            configuration is not a known level, or a module named on the
+            command line is not a known component.
+        TypeError: If a configured level is not a string.
     """
     # Local import: config_helper imports this module for the conflict check,
     # so importing it back at module level would close a cycle.

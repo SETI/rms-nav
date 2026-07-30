@@ -53,9 +53,10 @@ Configuration files use YAML format and are organized into sections:
      nav_results_root: /path/to/results
      pds3_holdings_root: /path/to/pds3
 
-   general:
-     log_level_model_stars: DEBUG
-     log_level_model_rings: DEBUG
+   logging:
+     models:
+       stars: DEBUG
+       rings: DEBUG
 
    offset:
      correlation_fft_upsample_factor: 128
@@ -71,57 +72,22 @@ define the same setting, the value from the last file loaded takes precedence.
 Logging Configuration
 ---------------------
 
-All logging levels live in the ``general`` configuration section. Each key accepts
-a standard log-level string: ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``, or
-``CRITICAL``. Set them in your ``nav_default_config.yaml`` or a ``--config-file``
-to override the built-in defaults shown below.
-
-**Main logger** (``sd_offset`` -- top-level program events):
-
-* ``general.log_level_main_console`` (default: ``INFO``): Level for output written
-  to stdout while the program runs.
-* ``general.log_level_main_file`` (default: ``INFO``): Level for the timestamped
-  logfile written to ``$NAV_RESULTS_ROOT/logs/sd_offset/``.
-
-**Image logger** (``nav_image`` -- per-image processing events, active only while
-an image is being processed):
-
-* ``general.log_level_image_console`` (default: ``INFO``): Level for output written
-  to stdout during image processing.
-* ``general.log_level_image_file`` (default: ``INFO``): Level for the per-image
-  logfile written to ``$NAV_RESULTS_ROOT/logs/{results_path_stub}.log``.
-
-**Navigation model loggers**:
-
-* ``general.log_level_model_bodies`` (default: ``INFO``): Logging level for the
-  body (planet and moon) navigation model.
-* ``general.log_level_model_stars`` (default: ``INFO``): Logging level for the
-  star navigation model.
-* ``general.log_level_model_rings`` (default: ``INFO``): Logging level for the
-  ring navigation model.
-* ``general.log_level_model_titan`` (default: ``INFO``): Logging level for the
-  Titan navigation model.
-
-**Navigation technique loggers**:
-
-The autonomous-navigation pipeline routes every per-image technique line
-through ``IMAGE_LOGGER``; there is no per-technique log-level knob.  Each
-technique opens a ``with self.logger.open(f'TECHNIQUE: {self.name}')``
-section so the per-image log file delimits each technique's contribution.
-
-**Annotation**:
-
-* ``general.log_level_annotate`` (default: ``ERROR``): Logging level for the
-  image annotation step.
+Logging is configured by the top-level ``logging`` section, described under
+`Logging Options`_ below, together with command-line options that override it.
+Two loggers write during a run: the main logger, covering one program run, and
+the image logger, covering one image inside one processing stage. A component
+can be given its own level, so one technique or model can be made verbose or
+quiet without affecting the rest.
 
 Example -- enable verbose output for star and ring models while keeping other
 components at the default level:
 
 .. code-block:: yaml
 
-   general:
-     log_level_model_stars: DEBUG
-     log_level_model_rings: DEBUG
+   logging:
+     models:
+       stars: DEBUG
+       rings: DEBUG
 
 Creating a User Configuration File
 ===================================

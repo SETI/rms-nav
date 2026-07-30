@@ -601,9 +601,11 @@ main logger that section 2.8 says they must not have.
 ### Phase 6 — Image loggers for the backplane and reproj backends
 
 Route `backplane` and `reproj` per-image logging through
-`build_image_logger`, moving reprojection logs from `{output_dir}/logs/` to
-`{log_root}/reproj/`. Retire `image_log_handlers()` and the bespoke path
-builders in `sd_mosaic.py` and `sd_mosaic_cloud_tasks.py`. Repoint
+`build_image_log_handlers`, moving reprojection logs from `{output_dir}/logs/`
+to `{log_root}/reproj/`, and give both programs the image-logger flags they
+withhold until they can honor them. Retire `image_log_handlers()` and the
+bespoke path builders in `sd_mosaic.py` and `sd_mosaic_cloud_tasks.py`, and
+`sd_mosaic`'s interim `IMAGE_LOGGER.set_level` call. Repoint
 `bundle_data.py`'s per-image section at the main logger.
 
 This removes the last caller of the old resolution path, so `setup_logging`,

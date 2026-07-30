@@ -195,7 +195,8 @@ Logging options
 
 Two loggers write during a run. The main logger reports what the program is
 doing at the top level and writes to the terminal and to a file. The image
-logger carries the detail of processing one image and writes to a file only.
+logger carries the detail of processing one image and writes to a file by
+default, though it can write to the console as well.
 Both sinks of a logger always share a level, so there is one level to set per
 component rather than one per sink.
 
