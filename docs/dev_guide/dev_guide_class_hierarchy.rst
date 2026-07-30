@@ -320,11 +320,12 @@ properties:
 - :attr:`~spindoctor.support.nav_base.NavBase.logger` — the logger this
   component belongs to, selected by its
   :attr:`~spindoctor.support.nav_base.NavBase.log_role`. The default,
-  ``LogRole.IMAGE``, gives ``IMAGE_LOGGER`` from
-  :mod:`spindoctor.config.log_scope`, a proxy resolving to whichever image
-  scope is open. A component whose work spans a run rather than an image, as
-  :class:`~spindoctor.dataset.dataset.DataSet` does, declares
-  ``LogRole.MAIN`` and gets ``MAIN_LOGGER``. Subclasses log through this
+  :attr:`~spindoctor.config.log_scope.LogRole.IMAGE`, gives
+  :data:`~spindoctor.config.log_scope.IMAGE_LOGGER`, a proxy resolving to
+  whichever image scope is open. A component whose work spans a run rather
+  than an image, as :class:`~spindoctor.dataset.dataset.DataSet` does,
+  declares :attr:`~spindoctor.config.log_scope.LogRole.MAIN` and gets
+  :data:`~spindoctor.config.logger.MAIN_LOGGER`. Subclasses log through this
   property; never through the stdlib :mod:`logging` module.
 
 Construction follows a single contract: every subclass takes a

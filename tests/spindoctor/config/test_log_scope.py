@@ -1,12 +1,19 @@
 """Tests for image-scope routing, logger roles, and scope enforcement."""
 
+import importlib
 import logging
 from collections.abc import Iterator
 
 import pdslogger
 import pytest
 
-from spindoctor.config import IMAGE_LOGGER, MAIN_LOGGER, LogRole, LogScopeError
+from spindoctor.config import (
+    DEFAULT_CONFIG,
+    IMAGE_LOGGER,
+    MAIN_LOGGER,
+    LogRole,
+    LogScopeError,
+)
 from spindoctor.config.log_scope import (
     _DEFAULT_IMAGE_LOGGER,
     _reset_reported_call_sites,
@@ -14,7 +21,9 @@ from spindoctor.config.log_scope import (
     image_scope_is_open,
     set_strict_scope,
     strict_scope,
+    strict_scope_override,
 )
+from spindoctor.dataset.dataset import DataSet
 from spindoctor.support.nav_base import NavBase
 
 
@@ -22,11 +31,16 @@ from spindoctor.support.nav_base import NavBase
 def _isolate_scope_state() -> Iterator[None]:
     """Restore the strict-scope switch and warning memory around each test.
 
+    Saves the override rather than the resolved value: strict_scope() collapses
+    "no override" into the configured boolean, so restoring that would pin the
+    global and quietly break a later test that expects the configuration to
+    govern.
+
     The warning is deduplicated per call site for the life of the process, so
     without this reset a test asserting on the warning would pass or fail
     depending on whether an earlier test had already reported the same line.
     """
-    previous = strict_scope()
+    previous = strict_scope_override()
     _reset_reported_call_sites()
     yield
     set_strict_scope(previous)
@@ -40,8 +54,6 @@ def recording_logger() -> Iterator[tuple[pdslogger.PdsLogger, list[str]]]:
     Yields:
         Tuple of the logger and the list its records accumulate in.
     """
-    import logging
-
     records: list[str] = []
 
     class _Capture(logging.Handler):
@@ -241,8 +253,6 @@ def test_the_suite_is_permissive_by_default() -> None:
 
 def test_the_dataset_is_main_role() -> None:
     """Enumeration spans the run, so DataSet logs to the main logger."""
-    from spindoctor.dataset.dataset import DataSet
-
     assert DataSet.log_role is LogRole.MAIN
 
 
@@ -277,8 +287,6 @@ def test_a_main_role_component_never_trips_scope_enforcement(
 )
 def test_no_logger_survives_in_a_print_only_module(module_name: str) -> None:
     """The statistics and GUI modules hold no logger to trip scope enforcement."""
-    import importlib
-
     module = importlib.import_module(module_name)
     offenders = [
         name
@@ -397,8 +405,6 @@ def test_an_out_of_scope_exception_keeps_its_traceback(
 
 def test_the_config_key_enables_strict_scope(monkeypatch: pytest.MonkeyPatch) -> None:
     """logging.strict_scope is read, not merely shipped and validated."""
-    from spindoctor.config import DEFAULT_CONFIG
-
     DEFAULT_CONFIG.ensure_loaded()
     monkeypatch.setitem(DEFAULT_CONFIG.logging, 'strict_scope', True)
     set_strict_scope(None)
@@ -407,8 +413,6 @@ def test_the_config_key_enables_strict_scope(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_the_config_key_can_disable_strict_scope(monkeypatch: pytest.MonkeyPatch) -> None:
     """The configured value governs in both directions."""
-    from spindoctor.config import DEFAULT_CONFIG
-
     DEFAULT_CONFIG.ensure_loaded()
     monkeypatch.setitem(DEFAULT_CONFIG.logging, 'strict_scope', False)
     set_strict_scope(None)

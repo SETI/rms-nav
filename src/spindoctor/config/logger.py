@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from .config import Config
 
 MAIN_LOGGER = pdslogger.PdsLogger('sd_offset', lognames=False, digits=3)
+"""The run's logger, carrying top-level program events for one execution."""
 
 _FALLBACK_LEVEL = 'INFO'
 _ALLOWED_LOG_LEVELS = frozenset({'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'})

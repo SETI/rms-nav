@@ -15,6 +15,7 @@ from .log_scope import (
     image_scope_is_open,
     set_strict_scope,
     strict_scope,
+    strict_scope_override,
 )
 from .logger import (
     MAIN_LOGGER,
@@ -71,5 +72,6 @@ __all__ = [
     'setup_logging',
     'sinks_from_arguments',
     'strict_scope',
+    'strict_scope_override',
     'validate_logging_config',
 ]

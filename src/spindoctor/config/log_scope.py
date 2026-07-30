@@ -44,6 +44,7 @@ __all__ = [
     'image_scope_is_open',
     'set_strict_scope',
     'strict_scope',
+    'strict_scope_override',
 ]
 
 
@@ -51,10 +52,10 @@ class LogRole(Enum):
     """Which logger a component's records belong to."""
 
     MAIN = 'main'
-    """Work spanning a whole run: enumeration, totals, per-image progress."""
+    """For work spanning a whole run, such as enumeration and totals."""
 
     IMAGE = 'image'
-    """Work on one image: models, techniques, reprojection, annotation."""
+    """For work on one image, such as models, techniques and annotation."""
 
 
 class LogScopeError(RuntimeError):
@@ -84,6 +85,19 @@ def set_strict_scope(enabled: bool | None) -> None:
     """
     global _strict_scope_override
     _strict_scope_override = enabled
+
+
+def strict_scope_override() -> bool | None:
+    """Return the override in force, distinct from the resolved behavior.
+
+    :func:`strict_scope` collapses "no override" into the configured value, so
+    a caller saving and restoring state must read the override itself; saving
+    the resolved boolean would pin it and lose the deferral.
+
+    Returns:
+        The override, or None when behavior defers to the configuration.
+    """
+    return _strict_scope_override
 
 
 def strict_scope() -> bool:
@@ -333,4 +347,4 @@ class ImageLoggerProxy:
 
 
 IMAGE_LOGGER = ImageLoggerProxy()
-"""The image logger: a proxy resolving to whichever image scope is open."""
+"""A proxy resolving to whichever image scope is currently open."""
