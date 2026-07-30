@@ -22,6 +22,7 @@ sys.path.insert(0, package_source_path)
 
 from spindoctor.config import (
     DEFAULT_CONFIG,
+    build_cloud_task_logging,
     get_nav_results_root,
     load_default_and_user_config,
 )
@@ -70,6 +71,15 @@ def process_task(
         return False, {'status': 'error', 'status_error': 'no_nav_root'}
     nav_results_root = FileCache(None).new_path(nav_results_root_str)
 
+    # Configured inside the task rather than once at startup: workers are
+    # spawned, so a worker process does not inherit this from its parent.
+    run_logging = build_cloud_task_logging(
+        PROGRAM_NAME,
+        arguments,
+        DEFAULT_CONFIG,
+        fallback_log_root=nav_results_root / 'logs',
+    )
+
     nav_models = task_data.get('arguments', {}).get('nav_models', None)
     nav_techniques = task_data.get('arguments', {}).get('nav_techniques', None)
     dataset_name = task_data.get('dataset_name')
@@ -117,6 +127,7 @@ def process_task(
         nav_results_root=nav_results_root,
         nav_models=nav_models,
         nav_techniques=nav_techniques,
+        run_logging=run_logging,
     )
 
     return False, metadata  # No retry under any circumstances

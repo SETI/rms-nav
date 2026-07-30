@@ -66,10 +66,12 @@ __all__ = [
     'LogLevels',
     'LogSinks',
     'RunLogging',
+    'build_cloud_task_logging',
     'build_image_log_handlers',
     'build_main_logger',
     'build_run_logging',
     'image_log_path',
+    'isolate_cloud_task_logging',
     'log_levels',
     'main_log_path',
     'resolve_log_levels',
@@ -789,3 +791,96 @@ def build_run_logging(
             MAIN_LOGGER, program_name, sinks, levels, timestamp=timestamp
         )
     return RunLogging(levels=levels, sinks=sinks, timestamp=timestamp, main_log_path=main_log_path)
+
+
+def isolate_cloud_task_logging() -> None:
+    """Detach both loggers from the terminal a cloud-task worker owns.
+
+    A worker's console is the worker's own, reporting task progress under
+    cloud_tasks' configuration; per-image processing detail belongs in the
+    per-image log file, not interleaved with it.  Two separate paths would put
+    it on the console anyway, and closing one without the other leaves the
+    output there:
+
+    Neither logger may be left with no handlers, because a PdsLogger with none
+    does not go quiet -- it prints every record to stdout, whatever its level.
+    The main logger has no sinks of its own in a cloud task, and the image
+    logger has none between one image's section and the next, so both are bound
+    to the null handler and the call sites that remain are inert instead.
+
+    Both loggers otherwise propagate to the root logger, and cloud_tasks calls
+    ``logging.basicConfig`` inside each worker subprocess, which puts a handler
+    there.  Every record would be emitted a second time on stderr, formatted by
+    the root handler rather than by pdslogger.  Turning propagation off ends
+    the record at our own handlers.
+
+    Call before anything is logged, and inside the task rather than in the
+    parent: workers are spawned rather than forked, so a worker does not
+    inherit what the parent configured.
+    """
+    # Imported here rather than at module level: log_scope imports this module
+    # for the levels a section is opened at, so importing it back would close a
+    # cycle.
+    from .log_scope import IMAGE_LOGGER
+
+    # Detached but not closed by remove_all_handlers, so anything real is
+    # closed first; NULL_HANDLER is a process-wide singleton this module does
+    # not own.
+    for existing in list(MAIN_LOGGER.handlers):
+        if existing is not pdslogger.NULL_HANDLER:
+            existing.close()
+    MAIN_LOGGER.remove_all_handlers()
+    MAIN_LOGGER.add_handler(pdslogger.NULL_HANDLER)
+    MAIN_LOGGER.propagate = False
+
+    # The image logger keeps whatever an open section attached; this is the
+    # floor under it, for the stretches when no section is open.
+    IMAGE_LOGGER.add_handler(pdslogger.NULL_HANDLER)
+    IMAGE_LOGGER.propagate = False
+
+
+def build_cloud_task_logging(
+    program_name: str,
+    arguments: argparse.Namespace,
+    config: 'Config',
+    *,
+    fallback_log_root: str | Path | FCPath | None = None,
+) -> RunLogging:
+    """Resolve logging for one cloud task, isolated from the worker's console.
+
+    The cloud-task counterpart to :func:`build_run_logging`: levels resolve
+    identically, so an image's log reads the same whichever driver produced it,
+    but no main logger is built and the image logger cannot reach the console
+    however it was configured.  Isolation is applied first, so that even a
+    failure to resolve the log root is reported into the null sink rather than
+    printed.
+
+    Call inside the task rather than once in the parent; see
+    :func:`isolate_cloud_task_logging`.
+
+    Parameters:
+        program_name: The program's identity, which selects its configuration
+            block.
+        arguments: Parsed command-line arguments.
+        config: The loaded configuration.
+        fallback_log_root: Where to put log files when nothing else names a log
+            root.
+
+    Returns:
+        The resolved :class:`RunLogging`, whose sinks name no console.
+    """
+    isolate_cloud_task_logging()
+    run_logging = build_run_logging(
+        program_name,
+        arguments,
+        config,
+        build_main=False,
+        fallback_log_root=fallback_log_root,
+    )
+    # Forced rather than defaulted: --log-image-to-console is a reasonable
+    # request of an interactive driver and an impossible one here, and a
+    # configuration file is shared between the two.
+    return replace(
+        run_logging,
+        sinks=replace(run_logging.sinks, main_console=False, main_file=False, image_console=False),
+    )

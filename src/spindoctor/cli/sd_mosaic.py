@@ -76,13 +76,24 @@ PROGRAM_NAME = SD_MOSAIC
 
 
 def _log_main_exception(msg: str, *args: object) -> None:
-    """Log an exception with full traceback (frames plus final error line).
+    """Log a run-level exception with full traceback.
 
     ``PdsLogger.exception()`` records only ``traceback.format_tb``, which omits
     the ``SomeError: ...`` line at the end. Pass ``traceback.format_exc()`` as
     ``more=`` and disable the default partial stack to avoid duplicating frames.
     """
     MAIN_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
+
+
+def _log_image_exception(msg: str, *args: object) -> None:
+    """Log an exception about one image, into that image's log.
+
+    The counterpart of :func:`_log_main_exception` for a failure that belongs
+    to a single image rather than to the run.  Reprojecting an image is allowed
+    to fail without stopping the pass, so this record is the only account of
+    what happened to it.
+    """
+    IMAGE_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
 
 
 def _run_reproject_pass(
@@ -168,10 +179,10 @@ def _run_reproject_pass(
                     if not args.no_write_output_files:
                         out_path.parent.mkdir(parents=True, exist_ok=True)
                         result.save(out_path)
-                        MAIN_LOGGER.info('Saved reproj: %s', out_path)
+                        IMAGE_LOGGER.info('Saved reproj: %s', out_path)
                     n_done += 1
                 except Exception:
-                    _log_main_exception('Error reprojecting %s', image_file.image_file_url)
+                    _log_image_exception('Error reprojecting %s', image_file.image_file_url)
                 finally:
                     if image_log_path is not None:
                         MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)

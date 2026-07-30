@@ -357,6 +357,26 @@ class ImageLoggerProxy:
         return self._configured().level
 
     @property
+    def propagate(self) -> Any:
+        """Whether records also reach the ancestors of the underlying logger."""
+        return self._configured().propagate
+
+    @propagate.setter
+    def propagate(self, value: Any) -> None:
+        """Set whether records also reach the ancestors of the underlying logger.
+
+        Propagation is a property of the logger rather than of a record, so it
+        is configuration and resolves like the rest of it.  Turning it off
+        matters where something outside SpinDoctor has attached a handler to
+        the root logger, which would otherwise re-emit every record a second
+        time on its own terms.
+
+        Parameters:
+            value: True to propagate to ancestor loggers, False to stop here.
+        """
+        self._configured().propagate = value
+
+    @property
     def handlers(self) -> Any:
         """The handlers of the logger being configured.
 

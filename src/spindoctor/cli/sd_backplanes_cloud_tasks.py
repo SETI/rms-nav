@@ -22,7 +22,7 @@ sys.path.insert(0, package_source_path)
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
 from spindoctor.config import (
     DEFAULT_CONFIG,
-    build_run_logging,
+    build_cloud_task_logging,
     get_backplane_results_root,
     get_nav_results_root,
     load_default_and_user_config,
@@ -93,14 +93,12 @@ def process_task(
         )
         image_files.append(image_file)
 
-    # No main logger here; see the cloud-task section of the plan.  Resolved
-    # the same way the interactive driver does, so the same backend's logs land
-    # in one tree whichever driver produced them.
-    run_logging = build_run_logging(
+    # Resolved the same way the interactive driver does, so the same backend's
+    # logs land in one tree whichever driver produced them.
+    run_logging = build_cloud_task_logging(
         PROGRAM_NAME,
         arguments,
         DEFAULT_CONFIG,
-        build_main=False,
         fallback_log_root=backplane_results_root / 'logs',
     )
 

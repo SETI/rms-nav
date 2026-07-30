@@ -619,11 +619,13 @@ with the `logging` section while both were read.
 
 ### Phase 7 — Cloud-task isolation
 
-For the three cloud-task drivers in scope: no main logger,
-`propagate = False` on both loggers, no console handler on the image logger,
-null sink for the main logger so surviving call sites are inert. Applied
-inside `process_task`, which is what runs in the worker subprocess —
-configuring in the parent does not carry across the process boundary.
+For the three cloud-task drivers in scope: no main logger, `propagate = False` on both loggers, no console handler on either logger, null sink so surviving call sites are inert. Applied inside `process_task`, which is what runs in the worker subprocess — configuring in the parent does not carry across the process boundary.
+
+`build_cloud_task_logging` is the entry point, wrapping `build_run_logging` with the isolation applied *first*, so that even a failure to resolve the log root is reported into the null sink rather than printed. The null sink covers the image logger as well as the main one: its section handlers are attached only for the duration of a section, and between one image and the next the handler-less `print()` fallback would otherwise apply.
+
+Isolation makes a record's binding consequential rather than cosmetic, because a main-logger record in a cloud task is discarded rather than merely misfiled. Three sites logged per-image facts to the main logger from inside an image scope and are rebound here — the twelve "using uncorrected pointing" warnings in `cli/reproj/offsets.py`, and `Saved reproj` and the reprojection exception in both mosaic drivers. The last of these was the load-bearing one: a reprojection failure does not fail its task, so that record is the only account of what happened to the image.
+
+Not addressed here, and filed instead: `sd_mosaic_cloud_tasks` returns `{'status': 'success'}` even when every image in the task failed to reproject.
 
 ### Phase 8 — Tests
 

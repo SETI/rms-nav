@@ -4,13 +4,44 @@ from collections.abc import Iterator
 
 import pytest
 
-from spindoctor.config import DEFAULT_CONFIG, set_log_levels, set_strict_scope
+from spindoctor.config import (
+    DEFAULT_CONFIG,
+    IMAGE_LOGGER,
+    MAIN_LOGGER,
+    set_log_levels,
+    set_strict_scope,
+)
 
 
 @pytest.fixture(autouse=True)
 def config_fixture() -> None:
     """Load bundled default config before each test if not already loaded."""
     DEFAULT_CONFIG.ensure_loaded()
+
+
+@pytest.fixture(autouse=True)
+def restore_loggers_fixture() -> Iterator[None]:
+    """Put both loggers back as they were found.
+
+    Configuring a logger changes process state, and a cloud task deliberately
+    reconfigures both of them for good -- a worker never un-isolates itself.
+    Without this, one test resolving a cloud task's logging would silence every
+    later test in the same worker, and the failures would land far from the
+    cause.
+    """
+    main_handlers = list(MAIN_LOGGER.handlers)
+    image_handlers = list(IMAGE_LOGGER.handlers)
+    main_propagate = MAIN_LOGGER.propagate
+    image_propagate = IMAGE_LOGGER.propagate
+    yield
+    MAIN_LOGGER.remove_all_handlers()
+    for handler in main_handlers:
+        MAIN_LOGGER.add_handler(handler)
+    IMAGE_LOGGER.remove_all_handlers()
+    for handler in image_handlers:
+        IMAGE_LOGGER.add_handler(handler)
+    MAIN_LOGGER.propagate = main_propagate
+    IMAGE_LOGGER.propagate = image_propagate
 
 
 @pytest.fixture(autouse=True)

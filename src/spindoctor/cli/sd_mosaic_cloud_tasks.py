@@ -41,8 +41,8 @@ from spindoctor.config import (
     DEFAULT_CONFIG,
     IMAGE_LOGGER,
     MAIN_LOGGER,
+    build_cloud_task_logging,
     build_image_log_handlers,
-    build_run_logging,
     get_nav_results_root,
     load_default_and_user_config,
 )
@@ -67,9 +67,15 @@ def _resolve_nav_results_root_fcpath(cli_args: argparse.Namespace) -> FCPath | N
     return FileCache(None).new_path(nav_results_root_str)
 
 
-def _log_main_exception(msg: str, *args: object) -> None:
-    """Log an exception with full traceback (frames plus final error line)."""
-    MAIN_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
+def _log_image_exception(msg: str, *args: object) -> None:
+    """Log an exception about one image, into that image's log.
+
+    Reprojecting an image is allowed to fail without failing the task, so this
+    record is the only account of what happened to it.  It belongs to the image
+    rather than to the run, which matters here: a cloud task has no main log,
+    so a failure reported there would be reported nowhere.
+    """
+    IMAGE_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
 
 
 def process_task(
@@ -159,15 +165,13 @@ def process_task(
     if not isinstance(output_dir_str, str):
         return False, {'status': 'error', 'status_error': 'invalid_output_dir_type'}
 
-    # No main logger here; see the cloud-task section of the plan.  The task's
-    # own output directory is the fallback log root, because a worker is not
-    # required to have a navigation results root and its logs should not
-    # disappear when it does not.
-    run_logging = build_run_logging(
+    # The task's own output directory is the fallback log root, because a
+    # worker is not required to have a navigation results root and its logs
+    # should not disappear when it does not.
+    run_logging = build_cloud_task_logging(
         PROGRAM_NAME,
         cli_args,
         DEFAULT_CONFIG,
-        build_main=False,
         fallback_log_root=FCPath(output_dir_str) / 'logs',
     )
 
@@ -227,7 +231,10 @@ def process_task(
             continue
 
         try:
-            local_handlers, image_log_path = build_image_log_handlers(
+            # The log path is not reported anywhere: a cloud task has no
+            # console to report it to, and naming the file inside itself tells
+            # a later reader nothing they did not have to know already.
+            local_handlers, _ = build_image_log_handlers(
                 'reproj',
                 f'{mosaic.body_name}/{image_file.results_path_stub}',
                 run_logging.sinks,
@@ -276,12 +283,9 @@ def process_task(
                     if not no_write_output_files:
                         out_path.parent.mkdir(parents=True, exist_ok=True)
                         result.save(out_path)
-                        MAIN_LOGGER.info('Saved reproj: %s', out_path)
+                        IMAGE_LOGGER.info('Saved reproj: %s', out_path)
                 except Exception:
-                    _log_main_exception('Error reprojecting %s', image_file.image_file_url)
-                finally:
-                    if image_log_path is not None:
-                        MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
+                    _log_image_exception('Error reprojecting %s', image_file.image_file_url)
         finally:
             for handler in local_handlers:
                 if handler is not pdslogger.NULL_HANDLER:
