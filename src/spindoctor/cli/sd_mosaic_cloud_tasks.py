@@ -110,9 +110,13 @@ def process_task(
             :class:`filecache.FCPath` for offset loading.
 
     Returns:
-        Tuple of ``(retry, result)``. ``retry`` is always ``False``. ``result`` is
-        ``{'status': 'success'}`` on success, or ``{'status': 'error', 'status_error': ...}``
-        (and optionally ``status_exception``) on failure.
+        Tuple of ``(retry, result)``. ``retry`` is always ``False``. ``result``
+        is ``{'status': 'error', 'status_error': ...}`` (and optionally
+        ``status_exception``) when the task itself could not run.  Otherwise it
+        is ``{'status': 'success'}`` with ``n_done``, ``n_skipped`` and
+        ``n_failed``: an individual image is allowed to fail without failing
+        the task, so the counts are what distinguish a task that reprojected
+        its images from one that failed every one of them.
     """
     if not isinstance(task_data, dict):
         return False, {'status': 'error', 'status_error': 'invalid_task_data_type'}
@@ -189,6 +193,13 @@ def process_task(
     else:
         mosaic = build_ring_mosaic(task_args)
 
+    # A task has no run log to report these to, so they are counted and
+    # returned: a task that skipped or failed every image would otherwise be
+    # indistinguishable from one that reprojected them all.
+    n_done = 0
+    n_skipped = 0
+    n_failed = 0
+
     for file in files:
         if not isinstance(file, dict):
             return False, {'status': 'error', 'status_error': 'invalid_file_entry_type'}
@@ -228,6 +239,7 @@ def process_task(
 
         if not overwrite and out_path.exists():
             MAIN_LOGGER.debug('Skipping (exists): %s', out_path)
+            n_skipped += 1
             continue
 
         try:
@@ -254,7 +266,7 @@ def process_task(
             with IMAGE_LOGGER.open(
                 f'REPROJECT {image_file.image_file_url}',
                 handler=local_handlers,
-                level=run_logging.levels.image.lower(),
+                level=run_logging.levels.image_section_level(),
             ):
                 try:
                     image_path = image_file.image_file_path.absolute()
@@ -284,14 +296,23 @@ def process_task(
                         out_path.parent.mkdir(parents=True, exist_ok=True)
                         result.save(out_path)
                         IMAGE_LOGGER.info('Saved reproj: %s', out_path)
+                    n_done += 1
                 except Exception:
                     _log_image_exception('Error reprojecting %s', image_file.image_file_url)
+                    n_failed += 1
         finally:
             for handler in local_handlers:
                 if handler is not pdslogger.NULL_HANDLER:
                     handler.close()
 
-    return False, {'status': 'success'}  # No retry under any circumstances
+    # No retry under any circumstances.  The status reports that the task ran,
+    # not that every image in it reprojected; the counts say which.
+    return False, {
+        'status': 'success',
+        'n_done': n_done,
+        'n_skipped': n_skipped,
+        'n_failed': n_failed,
+    }
 
 
 async def async_main() -> None:

@@ -146,6 +146,20 @@ class LogLevels:
         level = self.for_module(log_key)
         return SILENT_LEVEL if level == _OFF else level.lower()
 
+    def image_section_level(self) -> str | int:
+        """Return the value to pass as ``logger.open(level=...)`` for an image.
+
+        The counterpart of :meth:`section_level_for` for the section covering a
+        whole image rather than one module inside it.  pdslogger has no level
+        named ``NONE`` and rejects the name outright, so an image logger
+        configured off is expressed as :data:`SILENT_LEVEL` instead.
+
+        Returns:
+            A pdslogger level name, or :data:`SILENT_LEVEL` when the image
+            logger is configured ``NONE``.
+        """
+        return SILENT_LEVEL if self.image == _OFF else self.image.lower()
+
     def most_verbose_image_level(self) -> str:
         """Return the least severe level any image-scoped module can request.
 
@@ -800,7 +814,7 @@ def isolate_cloud_task_logging() -> None:
     cloud_tasks' configuration; per-image processing detail belongs in the
     per-image log file, not interleaved with it.  Two separate paths would put
     it on the console anyway, and closing one without the other leaves the
-    output there:
+    output there, so both are closed here.
 
     Neither logger may be left with no handlers, because a PdsLogger with none
     does not go quiet -- it prints every record to stdout, whatever its level.

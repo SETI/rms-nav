@@ -19,7 +19,8 @@ from spindoctor.cli import (
     sd_mosaic_cloud_tasks,
     sd_offset_cloud_tasks,
 )
-from spindoctor.config.logging_config import RunLogging
+from spindoctor.config.config import Config
+from spindoctor.config.logging_config import RunLogging, build_cloud_task_logging
 
 _DATASET = 'COISS_saturn'
 
@@ -50,6 +51,12 @@ def _worker_data(**kwargs: object) -> WorkerData:
     return cast(WorkerData, _StubWorkerData(**kwargs))
 
 
+class _StubMosaic:
+    """Stands in for a mosaic, which a wiring test does not need to build."""
+
+    body_name = 'SATURN'
+
+
 class _Recorder:
     """Records whether the cloud-task logging builder was called."""
 
@@ -72,22 +79,18 @@ class _Recorder:
         Returns:
             Logging resolved against the recorder's directory.
         """
-        from spindoctor.config.logging_config import build_cloud_task_logging
-
         self.called = True
         return build_cloud_task_logging(
             'sd_offset', argparse.Namespace(log_root=str(self._tmp_path)), _config()
         )
 
 
-def _config() -> Any:
+def _config() -> Config:
     """Build a Config carrying the shipped defaults.
 
     Returns:
         The loaded Config.
     """
-    from spindoctor.config.config import Config
-
     config = Config()
     config.read_config()
     return config
@@ -155,9 +158,3 @@ def test_the_mosaic_driver_isolates_its_logging(
         _worker_data(nav_results_root=str(tmp_path)),
     )
     assert recorder.called
-
-
-class _StubMosaic:
-    """Stands in for a mosaic, which a wiring test does not need to build."""
-
-    body_name = 'SATURN'

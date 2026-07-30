@@ -14,10 +14,12 @@ from spindoctor.config import IMAGE_LOGGER, MAIN_LOGGER, image_scope
 from spindoctor.config.config import Config
 from spindoctor.config.logging_config import (
     LogLevels,
+    LogSinks,
     RunLogging,
     build_cloud_task_logging,
     build_image_log_handlers,
     isolate_cloud_task_logging,
+    log_levels,
     resolve_log_levels,
 )
 from spindoctor.config.program_names import SD_OFFSET
@@ -287,8 +289,6 @@ def test_an_unresolvable_log_root_drops_the_image_file_sink(
 
 def test_the_levels_are_installed_for_components(tmp_path: Path) -> None:
     """Components read the same levels the handlers were built at."""
-    from spindoctor.config.logging_config import log_levels
-
     _task_logging(tmp_path, log_level=['body_limb=ERROR'])
     assert log_levels().for_module('body_limb') == 'ERROR'
 
@@ -299,3 +299,52 @@ def test_isolation_alone_does_not_disturb_resolved_levels() -> None:
     assert resolve_log_levels(SD_OFFSET, _args(), _config()) == LogLevels(
         main='INFO', image='INFO', modules={'annotate': 'ERROR'}
     )
+
+
+def test_the_image_logger_keeps_a_sink() -> None:
+    """The image logger is bound to a null sink too, not only the main one."""
+    isolate_cloud_task_logging()
+    assert IMAGE_LOGGER.handlers == [pdslogger.NULL_HANDLER]
+
+
+def test_isolating_twice_does_not_double_the_image_sink() -> None:
+    """Applying isolation per task does not accumulate image handlers either."""
+    isolate_cloud_task_logging()
+    isolate_cloud_task_logging()
+    assert IMAGE_LOGGER.handlers == [pdslogger.NULL_HANDLER]
+
+
+# ---------------------------------------------------------------------------
+# A logger configured off
+# ---------------------------------------------------------------------------
+
+
+def test_an_image_section_can_be_opened_when_the_image_logger_is_off() -> None:
+    """``NONE`` is a level the configuration accepts, so a section must take it.
+
+    pdslogger has no level of that name and rejects it outright, so the value
+    passed to ``open`` is the numeric silent level instead.
+    """
+    logger = pdslogger.PdsLogger.get_logger('cloud_task_none', lognames=False)
+    logger.add_handler(pdslogger.NULL_HANDLER)
+    with (
+        image_scope(logger),
+        IMAGE_LOGGER.open('IMAGE', level=LogLevels(image='NONE').image_section_level()),
+    ):
+        assert True
+
+
+def test_an_image_logger_configured_off_writes_nothing(tmp_path: Path) -> None:
+    """A section opened at the silent level emits none of its records."""
+    levels = LogLevels(image='NONE')
+    handlers, path = build_image_log_handlers(
+        'nav', 'vol/N1', LogSinks(log_root=FCPath(str(tmp_path))), levels, timestamp=_STAMP
+    )
+    try:
+        with IMAGE_LOGGER.open('IMAGE', handler=handlers, level=levels.image_section_level()):
+            IMAGE_LOGGER.critical('SILENCED-CANARY')
+    finally:
+        for handler in handlers:
+            if handler is not pdslogger.NULL_HANDLER:
+                handler.close()
+    assert path is None

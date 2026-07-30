@@ -30,7 +30,7 @@ def generate_backplanes_image_files(
     backplane_results_root: FCPath,
     write_output_files: bool = True,
     run_logging: RunLogging | None = None,
-) -> None:
+) -> dict[str, Any]:
     """Generate backplanes for a single image batch using prior offset metadata.
 
     Parameters:
@@ -44,7 +44,12 @@ def generate_backplanes_image_files(
             configuration's defaults against the backplane results root.
 
     Returns:
-        None.
+        ``{'status': 'success'}``, or ``{'status': 'skipped'}`` with the
+        navigation status that caused the skip.  An image can be skipped for a
+        reason its caller has no other way to learn: the reason is reported to
+        the run's log, and a cloud task has no run log, so returning it is what
+        keeps a batch that quietly skipped everything distinguishable from one
+        that processed it.
     """
 
     logger = IMAGE_LOGGER
@@ -70,13 +75,19 @@ def generate_backplanes_image_files(
 
     status = nav_metadata.get('status', None)
     if status != 'success':
+        nav_error = nav_metadata.get('status_error', 'unknown')
         MAIN_LOGGER.warning(
             'Skipping backplanes for "%s": status=%s error=%s',
             image_path,
             status,
-            nav_metadata.get('status_error', 'unknown'),
+            nav_error,
         )
-        return
+        return {
+            'status': 'skipped',
+            'status_error': 'nav_status_not_success',
+            'nav_status': status,
+            'nav_status_error': nav_error,
+        }
 
     local_handlers, image_log_path = build_image_log_handlers(
         'backplanes',
@@ -89,7 +100,7 @@ def generate_backplanes_image_files(
         with logger.open(
             f'Processing image: {image_path!s}',
             handler=local_handlers,
-            level=run_logging.levels.image.lower(),
+            level=run_logging.levels.image_section_level(),
         ):
             # Build observation in original FOV
             # TODO We only support snapshots for backplane generation for now
@@ -137,3 +148,5 @@ def generate_backplanes_image_files(
                 handler.close()
         if image_log_path is not None:
             MAIN_LOGGER.info('Wrote log to %s', image_log_path)
+
+    return {'status': 'success'}

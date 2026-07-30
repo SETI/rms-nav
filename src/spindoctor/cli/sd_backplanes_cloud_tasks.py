@@ -40,7 +40,19 @@ PROGRAM_NAME = SD_BACKPLANES
 def process_task(
     task_id: str, task_data: dict[str, Any], worker_data: WorkerData
 ) -> tuple[bool, Any]:
-    """Generate backplanes for a single batch of image files."""
+    """Generate backplanes for a single batch of image files.
+
+    Parameters:
+        task_id: The ID of the task.
+        task_data: The data for the task, carrying ``dataset_name`` and the
+            ``files`` to process.
+        worker_data: The data for the worker.
+
+    Returns:
+        Tuple of ``(retry, result)``.  ``retry`` is always False.  ``result``
+        names the error when the task could not run, and otherwise reports
+        whether the image was processed or skipped.
+    """
 
     arguments = cast(argparse.Namespace, worker_data.args)
     load_default_and_user_config(arguments, DEFAULT_CONFIG)
@@ -102,7 +114,7 @@ def process_task(
         fallback_log_root=backplane_results_root / 'logs',
     )
 
-    generate_backplanes_image_files(
+    result = generate_backplanes_image_files(
         obs_class,
         ImageFiles(image_files=image_files),
         nav_results_root=nav_results_root,
@@ -111,7 +123,9 @@ def process_task(
         run_logging=run_logging,
     )
 
-    return False, None  # No retry under any circumstances
+    # Returned rather than only logged: an image can be skipped because its
+    # navigation did not succeed, and a task has no run log to say so.
+    return False, result  # No retry under any circumstances
 
 
 async def async_main() -> None:
