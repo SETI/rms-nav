@@ -429,7 +429,7 @@ class TitanHazeNav(NavTechnique):
             covariance is the rank-deficient ``(3, 3)`` form, because a
             single quasi-circular feature carries no rotation evidence.
         """
-        with self.logger.open(f'TECHNIQUE: {self.name}'):
+        with self.log_section(f'TECHNIQUE: {self.name}'):
             eligible = _eligible_features(features)
             feature = eligible[0]
             geometry = feature.geometry

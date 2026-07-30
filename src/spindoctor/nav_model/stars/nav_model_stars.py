@@ -148,7 +148,7 @@ class NavModelStars(NavModel):
         self._metadata['start_time'] = start_time.isoformat()
         self._metadata['end_time'] = None
         self._metadata['elapsed_time_sec'] = None
-        with self._logger.open('CREATE STARS MODEL'):
+        with self.log_section('CREATE STARS MODEL'):
             self._stars = reduce_catalogs(self.obs, self._config)
             self._smear_vu = _compute_smear_for_obs(self.obs)
             mark_body_and_ring_conflicts(self.obs, self._config, self._stars)
@@ -196,7 +196,7 @@ class NavModelStars(NavModel):
         Returns:
             List of STAR ``NavFeature`` instances.
         """
-        with self._logger.open('EMIT STARS FEATURES'):
+        with self.log_section('EMIT STARS FEATURES'):
             return self._emit_features(context)
 
     def _emit_features(self, context: NavContext) -> list[NavFeature]:

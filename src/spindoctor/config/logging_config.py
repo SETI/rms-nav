@@ -66,9 +66,11 @@ __all__ = [
     'build_image_log_handlers',
     'build_main_logger',
     'image_log_path',
+    'log_levels',
     'main_log_path',
     'resolve_log_levels',
     'run_timestamp',
+    'set_log_levels',
     'sinks_from_arguments',
 ]
 
@@ -383,6 +385,43 @@ def _parse_log_level_arguments(
             if resolved is not None:
                 global_level = resolved
     return global_level, modules
+
+
+_active_levels: LogLevels | None = None
+
+
+def set_log_levels(levels: LogLevels | None) -> None:
+    """Install the levels every component resolves its own level from.
+
+    A driver resolves levels once at startup and installs them here, so a
+    component deep in the pipeline can ask for its own level without the
+    resolved set being threaded through every constructor.
+
+    Parameters:
+        levels: The resolved levels, or None to fall back to resolving the
+            configuration's global defaults on next use.
+    """
+    global _active_levels
+    _active_levels = levels
+
+
+def log_levels() -> LogLevels:
+    """Return the levels in force.
+
+    Falls back to the configuration's global defaults when no driver has
+    installed a resolved set, so a component consulted outside a configured
+    run still gets the shipped levels rather than nothing.  The fallback is
+    memoized; :func:`set_log_levels` with None discards it.
+
+    Returns:
+        The active :class:`LogLevels`.
+    """
+    global _active_levels
+    if _active_levels is None:
+        from .config import DEFAULT_CONFIG
+
+        _active_levels = resolve_log_levels('', None, DEFAULT_CONFIG)
+    return _active_levels
 
 
 def main_log_path(log_root: FCPath, program_name: str, *, timestamp: str) -> FCPath:

@@ -2,7 +2,15 @@ from typing import Any, ClassVar
 
 from pdslogger import PdsLogger
 
-from spindoctor.config import DEFAULT_CONFIG, IMAGE_LOGGER, MAIN_LOGGER, Config, LogRole
+from spindoctor.config import (
+    DEFAULT_CONFIG,
+    IMAGE_LOGGER,
+    MAIN_LOGGER,
+    Config,
+    LogRole,
+    log_key_for,
+    log_levels,
+)
 
 
 class NavBase:
@@ -17,14 +25,23 @@ class NavBase:
     enumerating a dataset, sets ``log_role = LogRole.MAIN`` so its records go
     to the run's log rather than into whichever image happens to be open.
 
+    A subclass opens its own section of the log with :meth:`log_section`,
+    which applies whatever level the configuration gives that component.  The
+    component is named by ``log_key``, which defaults to the snake_case form
+    of the class name.  Unlike ``log_role``, ``log_key`` is inherited
+    normally, so a family of classes that should share one key -- every
+    observation subclass, say -- declares it once on their base.
+
     Class attributes:
         log_role: Which logger this component's records belong to.
+        log_key: The name this component is configured under, or None to derive it.
 
     Parameters:
         config: Configuration object for this instance. Uses DEFAULT_CONFIG if not provided.
     """
 
     log_role: ClassVar[LogRole] = LogRole.IMAGE
+    log_key: ClassVar[str | None] = None
 
     def __init__(self, *, config: Config | None = None, **kwargs: Any) -> None:
         """Initializes a new NavBase instance.
@@ -46,3 +63,33 @@ class NavBase:
     def logger(self) -> PdsLogger:
         """Returns the logger instance associated with this object."""
         return self._logger
+
+    @property
+    def resolved_log_key(self) -> str:
+        """The name this component is configured under.
+
+        Returns:
+            The declared :attr:`log_key`, else the key derived from the class
+            name by :func:`spindoctor.config.log_key_for`.
+        """
+        return self.log_key if self.log_key is not None else log_key_for(type(self))
+
+    def log_section(self, title: str, *args: Any, **kwargs: Any) -> Any:
+        """Open a section of the log at this component's configured level.
+
+        The level comes from the ``logging`` configuration section, so one
+        component can be made verbose or quiet without affecting the rest.
+        Use this rather than ``self.logger.open`` so that the component's
+        configured level is actually applied.
+
+        Parameters:
+            title: Title of the section.
+            *args: Passed to ``PdsLogger.open``.
+            **kwargs: Passed to ``PdsLogger.open``.  An explicit ``level``
+                overrides the configured one.
+
+        Returns:
+            The context manager returned by ``PdsLogger.open``.
+        """
+        kwargs.setdefault('level', log_levels().section_level_for(self.resolved_log_key))
+        return self.logger.open(title, *args, **kwargs)

@@ -90,7 +90,7 @@ class NavModelStarsSimulated(NavModelStars):
         self._metadata['start_time'] = start_time.isoformat()
         self._metadata['end_time'] = None
         self._metadata['elapsed_time_sec'] = None
-        with self._logger.open('CREATE SIMULATED STARS MODEL'):
+        with self.log_section('CREATE SIMULATED STARS MODEL'):
             nav_params = getattr(self.obs, 'nav_params', None) or {}
             default_v = float(self.obs.data_shape_v) / 2.0
             default_u = float(self.obs.data_shape_u) / 2.0

@@ -390,9 +390,14 @@ def test_other_keys_name_no_dead_module() -> None:
     assert 'nav_correlate_all' not in OTHER_LOG_KEYS
 
 
-def test_other_keys_include_the_correlation_module() -> None:
-    """The correlation module is addressable by the name it actually has."""
-    assert 'correlate' in OTHER_LOG_KEYS
+def test_other_keys_include_the_annotation_module() -> None:
+    """Annotation opens its own section, so it is addressable."""
+    assert 'annotate' in OTHER_LOG_KEYS
+
+
+def test_other_keys_exclude_modules_that_open_no_section() -> None:
+    """A key naming a component that never opens a section would do nothing."""
+    assert OTHER_LOG_KEYS.isdisjoint({'ensemble', 'provenance', 'orchestrator', 'obs'})
 
 
 # ---------------------------------------------------------------------------

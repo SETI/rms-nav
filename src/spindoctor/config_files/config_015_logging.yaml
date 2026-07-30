@@ -36,9 +36,11 @@ logging:
   techniques: {}
   models: {}
 
-  # Image-scoped components that are neither a technique nor a model.  There is
-  # no key here for a per-image backend: a backend's verbosity is the "image"
-  # level of whichever program drives it.
+  # Image-scoped components that are neither a technique nor a model.  A
+  # component appears here only once it opens a section of its own, since that
+  # is where a level is applied; annotation is currently the only one.  There
+  # is no key for a per-image backend either: a backend's verbosity is the
+  # "image" level of whichever program drives it.
   other:
     annotate: ERROR
 

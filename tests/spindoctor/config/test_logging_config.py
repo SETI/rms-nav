@@ -715,11 +715,22 @@ def test_a_models_category_default_applies(tmp_path: Path) -> None:
     assert levels.for_module('rings') == 'DEBUG'
 
 
-def test_an_other_category_default_applies(tmp_path: Path) -> None:
-    """An other category default governs every module in that category."""
+def test_a_shipped_module_key_beats_an_other_category_default(tmp_path: Path) -> None:
+    """A module named in the category keeps its own level over the default.
+
+    The shipped configuration sets ``other.annotate`` explicitly, so adding a
+    category default must not override it.
+    """
     config = _config(tmp_path, '  other:\n    default: DEBUG\n')
     levels = resolve_log_levels(SD_OFFSET, None, config)
-    assert levels.for_module('ensemble') == 'DEBUG'
+    assert levels.for_module('annotate') == 'ERROR'
+
+
+def test_an_other_category_default_can_be_overridden_per_module(tmp_path: Path) -> None:
+    """Naming the module alongside the default takes the module's value."""
+    config = _config(tmp_path, '  other:\n    default: DEBUG\n    annotate: WARNING\n')
+    levels = resolve_log_levels(SD_OFFSET, None, config)
+    assert levels.for_module('annotate') == 'WARNING'
 
 
 def test_run_timestamp_matches_the_documented_format(tmp_path: Path) -> None:

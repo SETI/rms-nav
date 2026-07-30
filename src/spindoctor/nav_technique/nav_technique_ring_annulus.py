@@ -239,7 +239,7 @@ class RingAnnulusNav(NavTechnique):
               flows through the ensemble combine without contaminating
               other techniques' rotation slots.
         """
-        with self.logger.open(f'TECHNIQUE: {self.name}'):
+        with self.log_section(f'TECHNIQUE: {self.name}'):
             eligible = _filter_annulus_features(features)
             self.logger.info(
                 'Consuming %d RING_ANNULUS features (out of %d offered)',

@@ -445,7 +445,7 @@ class NavModelBody(NavModelBodyBase):
         self._metadata['end_time'] = None
         self._metadata['elapsed_time_sec'] = None
         self._metadata['body_name'] = self._body_name
-        with self._logger.open(f'CREATE BODY MODEL FOR: {self._body_name}'):
+        with self.log_section(f'CREATE BODY MODEL FOR: {self._body_name}'):
             self._render()
             self._log_geometry_summary()
             end_time = now_dt()
@@ -821,7 +821,7 @@ class NavModelBody(NavModelBodyBase):
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
         """Emit the body's NavFeatures per the design's gate rules."""
-        with self._logger.open(f'EMIT BODY FEATURES: {self._body_name}'):
+        with self.log_section(f'EMIT BODY FEATURES: {self._body_name}'):
             if self._body_mask is None:
                 self._logger.debug('body_mask is None — emitting no features')
                 return []

@@ -32,9 +32,11 @@ from .logging_config import (
     build_image_log_handlers,
     build_main_logger,
     image_log_path,
+    log_levels,
     main_log_path,
     resolve_log_levels,
     run_timestamp,
+    set_log_levels,
     sinks_from_arguments,
 )
 from .logging_keys import log_key_for, validate_logging_config
@@ -65,9 +67,11 @@ __all__ = [
     'image_scope_is_open',
     'load_default_and_user_config',
     'log_key_for',
+    'log_levels',
     'main_log_path',
     'resolve_log_levels',
     'run_timestamp',
+    'set_log_levels',
     'set_strict_scope',
     'setup_logging',
     'sinks_from_arguments',

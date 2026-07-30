@@ -220,7 +220,7 @@ class BodyLimbNav(NavTechnique):
               covariance shape is treated as a programmer error and
               raises ``RuntimeError``.
         """
-        with self.logger.open(f'TECHNIQUE: {self.name}'):
+        with self.log_section(f'TECHNIQUE: {self.name}'):
             if context.image_edge_dt_ext is None or context.image_gradient_vu_ext is None:
                 raise RuntimeError(
                     'BodyLimbNav requires NavContext.image_edge_dt_ext and '

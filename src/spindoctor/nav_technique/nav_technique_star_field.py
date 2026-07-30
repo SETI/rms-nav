@@ -783,7 +783,7 @@ class StarFieldFromCatalogNav(NavTechnique):
             covariance, calibrated confidence, and a populated
             :class:`StarFieldDiagnostics`.
         """
-        with self.logger.open(f'TECHNIQUE: {self.name}'):
+        with self.log_section(f'TECHNIQUE: {self.name}'):
             usable = usable_stars(features)
             self.logger.info(
                 'Consuming %d usable STAR feature(s) (out of %d offered)',
