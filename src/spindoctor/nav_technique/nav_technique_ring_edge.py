@@ -218,7 +218,7 @@ class RingEdgeNav(NavTechnique):
             calibrated confidence, and a populated
             :class:`RingEdgeDiagnostics`.
         """
-        with self.logger.open(f'TECHNIQUE: {self.name}'):
+        with self.log_section(f'TECHNIQUE: {self.name}'):
             if context.image_edge_dt_ext is None or context.image_gradient_vu_ext is None:
                 raise RuntimeError(
                     'RingEdgeNav requires NavContext.image_edge_dt_ext and '

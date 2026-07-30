@@ -770,7 +770,7 @@ class BodyBlobNav(NavTechnique):
               evidence); ``rotation_rad`` is ``0.0`` and
               ``sigma_rotation_rad`` is the unobservable sentinel.
         """
-        with self.logger.open(f'TECHNIQUE: {self.name}'):
+        with self.log_section(f'TECHNIQUE: {self.name}'):
             eligible = _eligible_blobs(features)
             self.logger.info(
                 'Consuming %d BODY_BLOB features (out of %d offered)',

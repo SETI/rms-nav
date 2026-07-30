@@ -16,7 +16,7 @@ import oops
 from filecache import FCPath
 from oops.observation.snapshot import Snapshot
 
-from spindoctor.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
+from spindoctor.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config, logged_section
 from spindoctor.obs.obs_snapshot_inst import ObsSnapshotInst
 from spindoctor.sim.instruments import resolve_extfov_margin, resolve_sim_inst_config
 from spindoctor.sim.render import render_combined_model
@@ -31,6 +31,7 @@ class ObsSim(ObsSnapshotInst):
         super().__init__(snapshot, **kwargs)
 
     @staticmethod
+    @logged_section('obs', 'LOAD IMAGE')
     def from_file(
         path: PathLike,
         *,

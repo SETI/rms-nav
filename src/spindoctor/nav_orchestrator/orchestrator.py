@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 
 from spindoctor.annotation import Annotations
-from spindoctor.config import Config
+from spindoctor.config import Config, logged_section
 from spindoctor.feature.feature import NavFeature
 from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.feature.reliability import FeatureReliabilityGate, GatedFeatureRecord
@@ -342,6 +342,7 @@ class NavOrchestrator(NavBase):
             annotations=self._collect_annotations(context, built_models),
         )
 
+    @logged_section('orchestrator', 'ORCHESTRATION')
     def navigate(self, obs: ObsSnapshotInst) -> NavResult:
         """Run the full pipeline on one observation.
 

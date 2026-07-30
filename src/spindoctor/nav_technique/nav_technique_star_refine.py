@@ -177,7 +177,7 @@ class StarRefineNav(NavTechnique):
             prior, a 2x2 covariance, calibrated confidence, and a
             populated :class:`StarRefineDiagnostics`.
         """
-        with self.logger.open(f'TECHNIQUE: {self.name}'):
+        with self.log_section(f'TECHNIQUE: {self.name}'):
             usable = usable_stars(features)
             self.logger.info(
                 'Consuming %d usable STAR feature(s) (out of %d offered)',

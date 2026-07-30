@@ -4,13 +4,24 @@ from collections.abc import Iterator
 
 import pytest
 
-from spindoctor.config import DEFAULT_CONFIG, set_strict_scope
+from spindoctor.config import DEFAULT_CONFIG, set_log_levels, set_strict_scope
 
 
 @pytest.fixture(autouse=True)
 def config_fixture() -> None:
     """Load bundled default config before each test if not already loaded."""
     DEFAULT_CONFIG.ensure_loaded()
+
+
+@pytest.fixture(autouse=True)
+def reset_log_levels_fixture() -> Iterator[None]:
+    """Discard any resolved levels a test installs.
+
+    The resolved set is process state, memoized on first use, so without this
+    one test's levels would govern every later test in the same worker.
+    """
+    yield
+    set_log_levels(None)
 
 
 @pytest.fixture

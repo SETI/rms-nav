@@ -151,7 +151,7 @@ class NavTechniqueManual(NavTechnique):
 
         from spindoctor.ui.manual_nav_dialog import ManualNavDialog
 
-        with self.logger.open('NAVIGATION PASS: MANUAL'):
+        with self.log_section('NAVIGATION PASS: MANUAL'):
             obs = context.obs
             shape = context.image_ext.shape
             model_img, model_mask = compose_dialog_overlay(

@@ -238,7 +238,7 @@ class StarUniqueMatchNav(NavTechnique):
               ``sigma_rotation_rad`` is the square root of the rotation
               diagonal.
         """
-        with self.logger.open(f'TECHNIQUE: {self.name}'):
+        with self.log_section(f'TECHNIQUE: {self.name}'):
             usable = usable_stars(features)
             self.logger.info(
                 'Consuming %d usable STAR feature(s) (out of %d offered)',

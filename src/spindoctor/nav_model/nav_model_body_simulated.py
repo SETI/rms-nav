@@ -372,7 +372,7 @@ class NavModelBodySimulated(NavModelBodyBase):
         metadata['body_name'] = self._body_name
         self._metadata.clear()
         self._metadata.update(metadata)
-        with self._logger.open(f'CREATE SIMULATED BODY MODEL FOR: {self._body_name}'):
+        with self.log_section(f'CREATE SIMULATED BODY MODEL FOR: {self._body_name}'):
             self._render()
         end_time = now_dt()
         self._metadata['end_time'] = end_time.isoformat()

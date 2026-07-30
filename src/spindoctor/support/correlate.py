@@ -7,7 +7,7 @@ from numpy.fft import fft2, fftfreq, ifft2, ifftshift
 from pdslogger import PdsLogger
 from scipy.ndimage import gaussian_filter, sobel
 
-from spindoctor.config import IMAGE_LOGGER
+from spindoctor.config import IMAGE_LOGGER, logged_section
 from spindoctor.support.image import crop_center, normalize_array, pad_top_left
 from spindoctor.support.misc import mad_std
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
@@ -877,6 +877,7 @@ def peak_to_runner_up_ratio(top_k_peaks: list[tuple[float, float, float]]) -> fl
     return min(winner_q / runner_q, _MAX_PEAK_RATIO)
 
 
+@logged_section('correlate', 'CORRELATE')
 def navigate_with_pyramid_kpeaks(
     image: NDArrayFloatType,
     model: NDArrayFloatType,

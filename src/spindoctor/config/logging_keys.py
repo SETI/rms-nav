@@ -73,6 +73,11 @@ OTHER_LOG_KEYS = frozenset(
 )
 """Image-scoped modules that are neither a technique nor a model.
 
+A module earns a key here only once it opens a section of its own, because a
+level is applied at ``logger.open()``; a key naming a component that never
+opens one would validate cleanly and then do nothing.  Every key listed here
+has one.
+
 A per-image backend has no key here.  Each program drives at most one backend,
 so that backend's verbosity is the program's ``image`` level.
 """
@@ -112,7 +117,9 @@ def log_key_for(cls: type) -> str:
     if declared is not None:
         return str(declared)
 
-    name = cls.__name__
+    # A leading underscore would otherwise survive the CamelCase split and
+    # double up, turning _StubNav into "__stub".
+    name = cls.__name__.lstrip('_')
     for prefix in _CLASS_NAME_PREFIXES:
         if name.startswith(prefix) and len(name) > len(prefix):
             name = name[len(prefix) :]

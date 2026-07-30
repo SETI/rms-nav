@@ -40,6 +40,7 @@ from typing import cast
 import numpy as np
 from scipy.ndimage import gaussian_filter, sobel
 
+from spindoctor.config import logged_section
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec, apply_filter
 from spindoctor.support.types import NDArrayFloatType
 
@@ -366,6 +367,7 @@ def compute_image_gradient_vu(
     return cast(NDArrayFloatType, out)
 
 
+@logged_section('image_derivatives', 'IMAGE DERIVATIVES')
 def compute_all_image_derivatives(
     image_ext: NDArrayFloatType,
     image_noise_sigma: float,

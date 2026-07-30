@@ -266,8 +266,7 @@ class NavModelRings(NavModelRingsBase):
         self._metadata['start_time'] = start_time.isoformat()
         self._metadata['end_time'] = None
         self._metadata['elapsed_time_sec'] = None
-        log_level = self._config.general.get('log_level_model_rings')
-        with self._logger.open('CREATE RINGS MODEL', level=log_level):
+        with self.log_section('CREATE RINGS MODEL'):
             self._render()
             self._log_render_summary()
             end_time = now_dt()
@@ -616,7 +615,7 @@ class NavModelRings(NavModelRingsBase):
     def to_features(self, context: NavContext) -> list[NavFeature]:
         """Emit RING_EDGE / RING_ANNULUS features per surviving render result."""
         del context
-        with self._logger.open('EMIT RINGS FEATURES'):
+        with self.log_section('EMIT RINGS FEATURES'):
             features: list[NavFeature] = []
             edge_count = 0
             straight_count = 0

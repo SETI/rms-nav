@@ -268,13 +268,25 @@ current class declares its key explicitly:
 |---|---|
 | `techniques` | `body_disc_correlate`, `body_blob`, `body_limb`, `body_terminator`, `ring_edge`, `ring_annulus`, `star_field_from_catalog`, `star_unique_match`, `star_refine`, `titan_haze`, `manual` |
 | `models` | `stars`, `body`, `rings`, `titan` |
-| `other` | `annotate`, `nav_correlate_all`, `ensemble`, `provenance`, `orchestrator`, `obs`, `image_derivatives` |
+| `other` | `annotate`, `correlate`, `ensemble`, `image_derivatives`, `obs`, `orchestrator`, `provenance` |
 
 `other` covers image-scoped components that are neither a model nor a
-technique. It carries no keys for the backends themselves: a backend's
-verbosity is the `image` level of whichever program drives it, per the note in
-the previous subsection. Main-scoped components likewise have no per-module
-keys; they log at the main level.
+technique. A component earns a key only once it opens a section of its own,
+because a level is applied at `logger.open()`; a key naming a component that
+never opens one would validate cleanly and then do nothing, which is the
+failure that left five `log_level_model_*` keys dead in the configuration this
+plan replaces. Every key listed here has a section, and a test asserts that
+correspondence rather than restating the list.
+
+Six of the seven are module-level functions rather than classes, so they take
+their section from the `logged_section` decorator rather than
+`NavBase.log_section`. Decorating avoids reshaping each function around a
+`with` block, and `ParamSpec` keeps the wrapped signature intact.
+
+`other` carries no keys for the backends either: a backend's verbosity is the
+`image` level of whichever program drives it, per the note in the previous
+subsection. Main-scoped components likewise have no per-module keys; they log
+at the main level.
 
 Every key is validated against the technique and model registries and against
 the fixed `other` enumeration at configuration load time, in the top-level
@@ -311,8 +323,9 @@ which only reads as "silent" because nothing in the library happens to log at
 `CRITICAL` — an incidental property, not a guarantee.
 
 The resolved level is applied at each component's existing `logger.open(...)`
-call as its `level=` argument. All 27 `open()` sites become level-aware;
-today only three are.
+call as its `level=` argument. The 22 component-owned `open()` sites become
+level-aware; before this work only three were. The driver-level per-image
+sections are converted with their drivers.
 
 ### 2.7 Command-line surface
 
@@ -544,16 +557,23 @@ section 2.1, together with the statistics programs and
 
 ### Phase 4 — Per-module levels at the `open()` sites
 
-Add the `log_key` class attribute to every technique and model. Add
-`NavBase.log_section(title, **kwargs)`, which looks up the component's
-resolved level and calls `self.logger.open(title, level=level, **kwargs)`.
-Convert all 27 `open()` call sites, including the per-image sections in the
-`backplane` and `reproj` backends. Delete the three ad-hoc
-`config.general.get('log_level_*')` reads.
+Add `NavBase.log_section(title, **kwargs)`, which looks up the component's
+resolved level and calls `self.logger.open(title, level=level, **kwargs)`, and
+`NavBase.log_key` for a component whose configured name is not the one derived
+from its class. Unlike `log_role`, `log_key` is inherited normally, so a family
+that shares one key declares it once on their base. Convert the 22
+component-owned `open()` sites and delete the three ad-hoc
+`config.general.get('log_level_*')` reads that this replaces.
 
-A module with no configured level passes `level=None`, which pdslogger
-already treats as "inherit the enclosing section", so the default path costs
-nothing.
+`set_log_levels` installs the resolved levels for a run, so a component deep in
+the pipeline can ask for its own level without the resolved set being threaded
+through every constructor. Until a driver installs one — the drivers are wired
+in Phases 5 through 7 — the configuration's global defaults are resolved
+lazily, so the mechanism works from this phase onward rather than waiting.
+
+The driver-level per-image sections in `navigate_image_files`, `sd_offset`,
+`sd_mosaic`, `backplanes` and `bundle_data` are not component-owned and are
+converted with their drivers in Phases 5 through 7.
 
 ### Phase 5 — Command-line surface, every program
 

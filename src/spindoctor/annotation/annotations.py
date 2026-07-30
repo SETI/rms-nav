@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import ClassVar, cast
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -19,6 +19,8 @@ class Annotations(NavBase):
     This class provides functionality to combine multiple annotations into a single
     overlay image and handle text placement.
     """
+
+    log_key: ClassVar[str] = 'annotate'
 
     def __init__(self, *, config: Config | None = None) -> None:
         """Initializes an empty annotations collection."""
@@ -84,8 +86,7 @@ class Annotations(NavBase):
             exist.
         """
 
-        log_level = self._config.general.get('log_level_annotate')
-        with self.logger.open('ANNOTATE IMAGE', level=log_level):
+        with self.log_section('ANNOTATE IMAGE'):
             if len(self.annotations) == 0:
                 self.logger.info('No annotations to annotate')
                 return None

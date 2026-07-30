@@ -15,8 +15,3 @@ general:
   log_level_main_file: INFO
   log_level_image_console: INFO
   log_level_image_file: INFO
-  log_level_model_stars: INFO
-  log_level_model_bodies: INFO
-  log_level_model_rings: INFO
-  log_level_model_titan: INFO
-  log_level_annotate: ERROR

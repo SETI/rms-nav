@@ -36,9 +36,12 @@ logging:
   techniques: {}
   models: {}
 
-  # Image-scoped components that are neither a technique nor a model.  There is
-  # no key here for a per-image backend: a backend's verbosity is the "image"
-  # level of whichever program drives it.
+  # Image-scoped components that are neither a technique nor a model:
+  # annotate, correlate, ensemble, image_derivatives, obs, orchestrator and
+  # provenance.  A component appears here only once it opens a section of its
+  # own, since that is where a level is applied.  There is no key for a
+  # per-image backend: a backend's verbosity is the "image" level of whichever
+  # program drives it.
   other:
     annotate: ERROR
 

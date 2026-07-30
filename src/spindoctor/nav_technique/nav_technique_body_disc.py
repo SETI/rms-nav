@@ -288,7 +288,7 @@ class BodyDiscCorrelateNav(NavTechnique):
             3x3 covariance, calibrated confidence, and a populated
             :class:`BodyDiscDiagnostics`.
         """
-        with self.logger.open(f'TECHNIQUE: {self.name}'):
+        with self.log_section(f'TECHNIQUE: {self.name}'):
             eligible = _filter_disc_features(features)
             self.logger.info(
                 'Consuming %d BODY_DISC features (out of %d offered)',

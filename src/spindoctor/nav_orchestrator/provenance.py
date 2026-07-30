@@ -26,7 +26,7 @@ from types import MappingProxyType
 
 from ruamel.yaml.error import YAMLError
 
-from spindoctor.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
+from spindoctor.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config, logged_section
 
 __all__ = [
     'Provenance',
@@ -312,6 +312,7 @@ def _resolve_star_catalogs(config: Config) -> Mapping[str, str]:
     return MappingProxyType(dict(sorted(resolved.items())))
 
 
+@logged_section('provenance', 'PROVENANCE')
 def collect_provenance_metadata(config: Config | None = None) -> ProvenanceMetadata:
     """Gather process-wide provenance metadata at navigate time.
 

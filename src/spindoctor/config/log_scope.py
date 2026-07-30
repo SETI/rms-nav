@@ -23,12 +23,13 @@ than a mode to support.  Every occurrence found while this was written was
 either correctly scoped or a component bound to the wrong logger.
 """
 
+import functools
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from enum import Enum
-from typing import Any
+from typing import Any, ParamSpec, TypeVar
 
 import pdslogger
 from pdslogger import PdsLogger
@@ -40,12 +41,18 @@ __all__ = [
     'ImageLoggerProxy',
     'LogRole',
     'LogScopeError',
+    'image_log_section',
     'image_scope',
     'image_scope_is_open',
+    'logged_section',
     'set_strict_scope',
     'strict_scope',
     'strict_scope_override',
 ]
+
+
+_P = ParamSpec('_P')
+_R = TypeVar('_R')
 
 
 class LogRole(Enum):
@@ -202,6 +209,58 @@ def image_scope(logger: PdsLogger | None = None) -> Iterator[PdsLogger]:
         yield target
     finally:
         _ACTIVE_IMAGE_LOGGER.reset(token)
+
+
+def image_log_section(log_key: str, title: str, **kwargs: Any) -> Any:
+    """Open an image-log section at the level configured for ``log_key``.
+
+    The counterpart to :meth:`spindoctor.support.nav_base.NavBase.log_section`
+    for components that are module-level functions rather than classes.  A
+    component needs a section of its own to be independently configurable at
+    all, because a level is applied when a section is opened; without one its
+    records take the level of whatever section encloses them.
+
+    Parameters:
+        log_key: The component's snake_case configuration key.
+        title: Title of the section.
+        **kwargs: Passed to ``PdsLogger.open``.  An explicit ``level``
+            overrides the configured one.
+
+    Returns:
+        The context manager returned by ``PdsLogger.open``.
+    """
+    from .logging_config import log_levels
+
+    if 'level' not in kwargs:
+        kwargs['level'] = log_levels().section_level_for(log_key)
+    return IMAGE_LOGGER.open(title, **kwargs)
+
+
+def logged_section(log_key: str, title: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    """Wrap a function so its records land in a section of its own.
+
+    A component is only independently configurable if it opens a section,
+    because that is where a level is applied.  This decorator gives one to a
+    component that is a module-level function rather than a class, without
+    reshaping the function around a ``with`` block.
+
+    Parameters:
+        log_key: The component's snake_case configuration key.
+        title: Title of the section.
+
+    Returns:
+        A decorator opening the section around each call.
+    """
+
+    def decorate(func: Callable[_P, _R]) -> Callable[_P, _R]:
+        @functools.wraps(func)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with image_log_section(log_key, title):
+                return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorate
 
 
 class ImageLoggerProxy:

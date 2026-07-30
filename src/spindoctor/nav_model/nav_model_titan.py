@@ -519,7 +519,7 @@ class NavModelTitan(NavModel):
         """Evaluate the haze geometry and record it in ``metadata``."""
         self._metadata.clear()
         self._metadata['body'] = TITAN_BODY_NAME
-        with self._logger.open('TITAN MODEL'):
+        with self.log_section('TITAN MODEL'):
             geometry = self.geometry_inputs
             self._metadata['predicted_center_vu'] = list(geometry.predicted_center_vu)
             self._metadata['km_per_pixel'] = geometry.km_per_px
