@@ -198,5 +198,5 @@ def load_default_and_user_config(arguments: argparse.Namespace, config: Config) 
         except FileNotFoundError:
             pass
     validate_logging_config(config)
-    for message in superseded_level_conflicts('', config):
+    for message in superseded_level_conflicts(config):
         MAIN_LOGGER.warning('%s', message)

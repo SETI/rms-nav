@@ -396,7 +396,7 @@ _SUPERSEDED_GENERAL_KEYS = {
 }
 
 
-def superseded_level_conflicts(program_name: str, config: 'Config') -> list[str]:
+def superseded_level_conflicts(config: 'Config') -> list[str]:
     """Report ``general.log_level_*`` keys that disagree with the ``logging`` section.
 
     Both spellings are still read while the older one remains wired to part of
@@ -409,27 +409,36 @@ def superseded_level_conflicts(program_name: str, config: 'Config') -> list[str]
     Agreement is silent.  Only a genuine disagreement is worth a word, because
     that is the only case where the value someone set fails to take effect.
 
+    Every configured program is checked, not only the global block: a program
+    raising its own ``image`` level while an older key stays low conflicts just
+    as a global one does, and the warning has to name the program for the
+    reader to find it.
+
     Parameters:
-        program_name: The program's identity, for resolving its levels.
         config: The loaded configuration.
 
     Returns:
         One message per conflicting key, empty when the two agree.
     """
     general = dict(config.general)
-    levels = resolve_log_levels(program_name, None, config)
+    programs = dict(config.logging).get(_PROGRAMS_KEY) or {}
+    scopes: list[tuple[str, str]] = [('', '')]
+    scopes += [(name, f' for program "{name}"') for name in sorted(programs)]
+
     messages = []
-    for key, (replacement, target) in sorted(_SUPERSEDED_GENERAL_KEYS.items()):
-        if key not in general:
-            continue
-        old = normalize_level(str(general[key]))
-        new = levels.main if target == 'main' else levels.for_module(target)
-        if old != new:
-            messages.append(
-                f'Configuration sets "general.{key}" to {old} but resolves '
-                f'"{replacement}" to {new}. The two are read separately, so the '
-                f'former will not take effect; set {replacement} instead.'
-            )
+    for program_name, where in scopes:
+        levels = resolve_log_levels(program_name, None, config)
+        for key, (replacement, target) in sorted(_SUPERSEDED_GENERAL_KEYS.items()):
+            if key not in general:
+                continue
+            old = normalize_level(str(general[key]))
+            new = levels.main if target == 'main' else levels.for_module(target)
+            if old != new:
+                messages.append(
+                    f'Configuration sets "general.{key}" to {old} but resolves '
+                    f'"{replacement}"{where} to {new}. The two are read separately, '
+                    f'so the former will not take effect; set {replacement} instead.'
+                )
     return messages
 
 
