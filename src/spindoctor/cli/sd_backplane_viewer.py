@@ -46,6 +46,7 @@ from spindoctor.config import (
     Config,
     get_backplane_results_root,
     get_nav_results_root,
+    image_scope,
     load_default_and_user_config,
 )
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
@@ -655,9 +656,13 @@ class NavBackplaneViewer(QDialog):
         self._current_image_name = image_path.name
         self.setWindowTitle(f'Backplane Viewer - {self._current_image_name}')
 
-        # Load observation (science image)
+        # Load observation (science image).  The observation classes are
+        # image-scoped library code and log while reading, so the load runs
+        # inside an image scope even though the viewer itself keeps no logger;
+        # without one every load would report a scope violation per record.
         try:
-            snapshot = self._obs_class.from_file(image_path)
+            with image_scope():
+                snapshot = self._obs_class.from_file(image_path)
             if not isinstance(snapshot, ObsSnapshot):
                 raise ValueError('Expected ObsSnapshot')
         except Exception as e:

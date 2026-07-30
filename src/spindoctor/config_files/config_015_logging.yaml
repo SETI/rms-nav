@@ -13,9 +13,9 @@
 logging:
 
   # Raise, rather than warn, when a component scoped to one image logs while no
-  # image scope is open.  That situation is a programming error either way; the
-  # test suite turns this on so a new occurrence fails rather than being routed
-  # quietly to the main log.
+  # image scope is open.  That situation is a programming error either way;
+  # warning keeps one mis-scoped call from aborting a batch over a log line.
+  # Turn this on to make such a call fail loudly instead.
   strict_scope: false
 
   # Global default for each logger.

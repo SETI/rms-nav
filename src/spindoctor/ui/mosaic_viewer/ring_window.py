@@ -42,6 +42,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from spindoctor.config import image_scope
 from spindoctor.support.time import et_to_utc
 from spindoctor.ui.common import build_stretch_controls
 from spindoctor.ui.mosaic_viewer.common import (
@@ -332,8 +333,11 @@ class RingMosaicWindow(QMainWindow):
             pass
         try:
             c.draw()
-        except RuntimeError as e:
-            print(f'radial canvas draw failed: {e}', file=sys.stderr)
+        except RuntimeError:
+            # Repaint failures here are recoverable and were filed at DEBUG;
+            # with no logger to file them under, printing every one would turn
+            # a silent diagnostic into permanent noise on a repaint loop.
+            pass
 
     # ------------------------------------------------------------------
     #  UI
@@ -1175,7 +1179,8 @@ class RingMosaicWindow(QMainWindow):
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
         try:
             try:
-                dd = load_ring_file(path)
+                with image_scope():
+                    dd = load_ring_file(path)
             except Exception as exc:
                 print(f'Error loading {path}', file=sys.stderr)
                 traceback.print_exc()

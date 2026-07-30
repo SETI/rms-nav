@@ -40,8 +40,11 @@ class DataSet(ABC, NavBase):
 
 Logging through `IMAGE_LOGGER` with no image scope open is a defect, not a
 mode. The record is routed to `MAIN_LOGGER` and the call site is reported once;
-under `logging.strict_scope`, which the test suite enables, it raises
-`LogScopeError` instead. If a component trips this, it is bound to the wrong
+under `logging.strict_scope` it raises `LogScopeError` instead. That is off by
+default; a test that drives a real pipeline turns it on with the
+`strict_log_scope` fixture. It is deliberately not enabled suite-wide, because
+a unit test exercising a model or technique in isolation calls it outside any
+image scope by design. If a component trips this, it is bound to the wrong
 logger — give it `LogRole.MAIN`.
 
 **Programs that carry no logger.** The statistics programs (`sd_stats_ingest`,
@@ -98,6 +101,6 @@ Per the `filecache` rule, `image_log_path` is an `FCPath`; never
 |------|---------|
 | Import loggers | `from spindoctor.config import MAIN_LOGGER, IMAGE_LOGGER` |
 | Top-level events | `MAIN_LOGGER.info(...)` |
-| Per-image events | `self._logger.info(...)` (`self._logger` is `IMAGE_LOGGER`) |
+| Per-image events | `self._logger.info(...)` (follows the class's `log_role`) |
 | Set up `MAIN_LOGGER` | `setup_logging(arguments, config, results_root)` once in `main()` |
 | Per-image handlers | `image_log_handlers(path, arguments, config)` passed to `open()` |

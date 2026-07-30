@@ -1,5 +1,6 @@
 """Tests for image-scope routing, logger roles, and scope enforcement."""
 
+import logging
 from collections.abc import Iterator
 
 import pdslogger
@@ -7,6 +8,7 @@ import pytest
 
 from spindoctor.config import IMAGE_LOGGER, MAIN_LOGGER, LogRole, LogScopeError
 from spindoctor.config.log_scope import (
+    _DEFAULT_IMAGE_LOGGER,
     _reset_reported_call_sites,
     image_scope,
     image_scope_is_open,
@@ -284,3 +286,136 @@ def test_no_logger_survives_in_a_print_only_module(module_name: str) -> None:
         if getattr(module, name, None) is not None
     ]
     assert offenders == []
+
+
+# ---------------------------------------------------------------------------
+# Configuring the image logger is not logging to it
+# ---------------------------------------------------------------------------
+
+
+def test_set_level_reaches_the_image_logger() -> None:
+    """A level set outside any scope configures the image logger, not the main one."""
+    IMAGE_LOGGER.set_level('WARNING')
+    try:
+        assert _DEFAULT_IMAGE_LOGGER.level == logging.WARNING
+    finally:
+        IMAGE_LOGGER.set_level('INFO')
+
+
+def test_set_level_outside_a_scope_does_not_warn(capsys: pytest.CaptureFixture[str]) -> None:
+    """Preparing the image logger before any image is open is not a violation."""
+    set_strict_scope(False)
+    IMAGE_LOGGER.set_level('INFO')
+    assert 'no image scope open' not in capsys.readouterr().out
+
+
+def test_set_level_outside_a_scope_does_not_raise(strict_log_scope: None) -> None:
+    """Configuration is allowed even under strict scope."""
+    IMAGE_LOGGER.set_level('INFO')
+
+
+def test_handlers_can_be_attached_outside_a_scope() -> None:
+    """A worker silencing the image logger at startup can do so before any image."""
+    IMAGE_LOGGER.add_handler(pdslogger.NULL_HANDLER)
+    try:
+        assert pdslogger.NULL_HANDLER in IMAGE_LOGGER.handlers
+    finally:
+        IMAGE_LOGGER.remove_all_handlers()
+
+
+def test_reading_handlers_does_not_raise_under_strict_scope(strict_log_scope: None) -> None:
+    """Introspection must not be able to crash the program."""
+    assert IMAGE_LOGGER.handlers == []
+
+
+def test_an_unimplemented_member_names_itself() -> None:
+    """A PdsLogger member the proxy lacks fails with an explanatory error."""
+    with pytest.raises(AttributeError, match='summarize'):
+        IMAGE_LOGGER.summarize()
+
+
+# ---------------------------------------------------------------------------
+# The remaining forwarding methods
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('method', ['debug', 'info', 'warning', 'error', 'critical'])
+def test_each_level_method_reaches_the_scope_logger(
+    recording_logger: tuple[pdslogger.PdsLogger, list[str]], method: str
+) -> None:
+    """Every level method forwards to the scope's logger."""
+    logger, records = recording_logger
+    logger.set_level('debug')
+    with image_scope(logger):
+        getattr(IMAGE_LOGGER, method)(f'{method} record')
+    assert any(f'{method} record' in record for record in records)
+
+
+def test_log_forwards_an_explicit_level(
+    recording_logger: tuple[pdslogger.PdsLogger, list[str]],
+) -> None:
+    """The generic log method forwards like the named ones."""
+    logger, records = recording_logger
+    with image_scope(logger):
+        IMAGE_LOGGER.log('info', 'explicit level record')
+    assert any('explicit level record' in record for record in records)
+
+
+def test_an_out_of_scope_exception_reaches_the_main_logger(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A routed exception carries its message, not only the scope warning."""
+    set_strict_scope(False)
+    try:
+        raise ValueError('the original failure')
+    except ValueError:
+        IMAGE_LOGGER.exception('while doing the thing')
+    assert 'while doing the thing' in capsys.readouterr().out
+
+
+def test_an_out_of_scope_exception_keeps_its_traceback(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Routing preserves the traceback frames, so the stack is not lost.
+
+    pdslogger records ``traceback.format_tb``, which carries the frames but
+    omits the trailing ``ValueError: ...`` line; the assertion is on a frame
+    rather than the exception text for that reason.
+    """
+    set_strict_scope(False)
+    try:
+        raise ValueError('the original failure')
+    except ValueError:
+        IMAGE_LOGGER.exception('while doing the thing')
+    assert 'test_log_scope.py' in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# The configuration key governs behavior
+# ---------------------------------------------------------------------------
+
+
+def test_the_config_key_enables_strict_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    """logging.strict_scope is read, not merely shipped and validated."""
+    from spindoctor.config import DEFAULT_CONFIG
+
+    DEFAULT_CONFIG.ensure_loaded()
+    monkeypatch.setitem(DEFAULT_CONFIG.logging, 'strict_scope', True)
+    set_strict_scope(None)
+    assert strict_scope() is True
+
+
+def test_the_config_key_can_disable_strict_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The configured value governs in both directions."""
+    from spindoctor.config import DEFAULT_CONFIG
+
+    DEFAULT_CONFIG.ensure_loaded()
+    monkeypatch.setitem(DEFAULT_CONFIG.logging, 'strict_scope', False)
+    set_strict_scope(None)
+    assert strict_scope() is False
+
+
+def test_an_override_beats_the_config_key() -> None:
+    """An explicit override takes precedence over the configured value."""
+    set_strict_scope(False)
+    assert strict_scope() is False

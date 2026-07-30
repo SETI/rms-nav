@@ -3,7 +3,7 @@ Developer Guide: Logging
 ========================
 
 The autonomous-navigation pipeline routes every per-image log line
-through ``pdslogger`` (``spindoctor.config.logger.IMAGE_LOGGER``). The standard
+through ``pdslogger`` (``spindoctor.config.log_scope.IMAGE_LOGGER``). The standard
 library ``logging`` module is intentionally **not used** anywhere in the
 ``spindoctor.feature``, ``spindoctor.nav_model``, ``spindoctor.nav_orchestrator``,
 ``spindoctor.nav_technique``, or ``spindoctor.support`` packages.

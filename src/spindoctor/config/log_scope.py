@@ -9,8 +9,14 @@ a logger.  Opening a section on it enters an image scope; while that scope is
 open the proxy forwards to the real logger underneath, and every nested
 section, model and technique writes into the same per-image log.  Outside any
 scope there is nothing sensible to forward to, so the proxy routes the record
-to the main logger, warns once about the call site, and -- with strict scope
-enabled, as the test suite does -- raises instead.
+to the main logger and warns once about the call site.  With
+``logging.strict_scope`` enabled it raises instead; that is off by default,
+because one mis-scoped call should not abort a batch over a log line.
+
+Configuring the image logger -- setting a level, attaching a handler -- is not
+the same as logging to it, and is a reasonable thing to do before any image is
+open.  Those calls reach the image logger directly and never report a
+violation.
 
 Logging from an image-scoped component with no image open is a defect rather
 than a mode to support.  Every occurrence found while this was written was
@@ -61,31 +67,43 @@ _ACTIVE_IMAGE_LOGGER: ContextVar[PdsLogger | None] = ContextVar(
 
 _DEFAULT_IMAGE_LOGGER = pdslogger.PdsLogger('nav_image', lognames=False, digits=3)
 
-_strict_scope = False
+_strict_scope_override: bool | None = None
 _reported_call_sites: set[tuple[str, str, int]] = set()
 
 
-def set_strict_scope(enabled: bool) -> None:
-    """Choose whether an out-of-scope image log raises or only warns.
+def set_strict_scope(enabled: bool | None) -> None:
+    """Override whether an out-of-scope image log raises or only warns.
 
     Production warns, so one mis-scoped call cannot abort a batch over a log
-    line.  The test suite raises, so a newly introduced one fails rather than
-    appearing quietly in a main log.
+    line.  A caller that wants the stricter behavior for a bounded stretch --
+    a test driving a real pipeline, say -- turns it on here.
 
     Parameters:
-        enabled: True to raise on an out-of-scope image log.
+        enabled: True to raise, False to warn, or None to defer to
+            ``logging.strict_scope`` in the configuration.
     """
-    global _strict_scope
-    _strict_scope = enabled
+    global _strict_scope_override
+    _strict_scope_override = enabled
 
 
 def strict_scope() -> bool:
     """Whether an out-of-scope image log currently raises.
 
+    Falls back to ``logging.strict_scope`` in the configuration when no
+    override is in force, so the shipped key is what actually governs
+    behavior rather than being a setting nothing reads.
+
     Returns:
         True when strict scope is enabled.
     """
-    return _strict_scope
+    if _strict_scope_override is not None:
+        return _strict_scope_override
+    from .config import DEFAULT_CONFIG
+
+    try:
+        return bool(DEFAULT_CONFIG.logging.get('strict_scope', False))
+    except (AttributeError, KeyError):  # pragma: no cover - config always loads
+        return False
 
 
 def image_scope_is_open() -> bool:
@@ -120,7 +138,7 @@ def _report_out_of_scope() -> None:
     """
     module, function, line = _caller_site()
     where = f'{module}.{function} (line {line})'
-    if _strict_scope:
+    if strict_scope():
         raise LogScopeError(
             f'{where} logged to the image logger with no image scope open. '
             f'A component scoped to one image must log inside an image scope; '
@@ -193,6 +211,22 @@ class ImageLoggerProxy:
         _report_out_of_scope()
         return MAIN_LOGGER
 
+    def _configured(self) -> PdsLogger:
+        """Return the logger that configuration should act on.
+
+        Configuring the image logger is not the same as logging to it.  A
+        caller adjusting a level or attaching a handler is preparing the image
+        logger, which is a sensible thing to do before any image is open, so
+        this resolves to the default image logger rather than reporting a
+        scope violation and redirecting the change onto the main logger --
+        where it would silently fail to have the intended effect.
+
+        Returns:
+            The scope's logger if one is open, else the default image logger.
+        """
+        active = _ACTIVE_IMAGE_LOGGER.get()
+        return active if active is not None else _DEFAULT_IMAGE_LOGGER
+
     def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
         """Log at DEBUG. See :meth:`pdslogger.PdsLogger.debug`."""
         self._target().debug(message, *args, **kwargs)
@@ -226,12 +260,56 @@ class ImageLoggerProxy:
 
     def set_level(self, level: Any) -> None:
         """Set the level of the current tier. See ``PdsLogger.set_level``."""
-        self._target().set_level(level)
+        self._configured().set_level(level)
+
+    def add_handler(self, *handlers: Any, **kwargs: Any) -> None:
+        """Attach handlers. See ``PdsLogger.add_handler``."""
+        self._configured().add_handler(*handlers, **kwargs)
+
+    def remove_handler(self, *handlers: Any) -> None:
+        """Detach handlers. See ``PdsLogger.remove_handler``."""
+        self._configured().remove_handler(*handlers)
+
+    def remove_all_handlers(self) -> None:
+        """Detach every handler. See ``PdsLogger.remove_all_handlers``."""
+        self._configured().remove_all_handlers()
+
+    def replace_handler(self, *handlers: Any, **kwargs: Any) -> None:
+        """Replace the attached handlers. See ``PdsLogger.replace_handler``."""
+        self._configured().replace_handler(*handlers, **kwargs)
+
+    @property
+    def level(self) -> Any:
+        """The minimum level of the logger being configured."""
+        return self._configured().level
 
     @property
     def handlers(self) -> Any:
-        """The handlers of the logger records currently reach."""
-        return self._target().handlers
+        """The handlers of the logger being configured.
+
+        Reading this is introspection rather than logging, so it does not
+        report a scope violation; a diagnostic must not be able to raise.
+        """
+        return self._configured().handlers
+
+    def __getattr__(self, name: str) -> Any:
+        """Reject a PdsLogger member this proxy does not implement.
+
+        The proxy covers the interface SpinDoctor uses rather than all of
+        ``PdsLogger``.  Failing here names the missing member and says why,
+        instead of surfacing a bare AttributeError from an unexpected place.
+
+        Parameters:
+            name: The attribute that was requested.
+
+        Raises:
+            AttributeError: Always.
+        """
+        raise AttributeError(
+            f'{type(self).__name__} does not implement {name!r}. The image logger is a '
+            f'proxy over whichever image scope is open, and forwards only the interface '
+            f'SpinDoctor uses; add {name!r} to it if it is genuinely needed.'
+        )
 
     @contextmanager
     def open(self, title: str, *args: Any, **kwargs: Any) -> Iterator[Any]:

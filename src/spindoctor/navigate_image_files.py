@@ -136,7 +136,9 @@ def navigate_image_files(
     run_start = datetime.now(UTC)
 
     if len(image_files.image_files) != 1:
-        logger.error(
+        # A malformed batch is a caller error, reported before any image scope
+        # exists and belonging to no image, so it goes to the run's log.
+        MAIN_LOGGER.error(
             'Expected exactly one image per batch; got %d',
             len(image_files.image_files),
         )

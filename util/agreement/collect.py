@@ -399,7 +399,7 @@ def _init_worker() -> None:
     """
     import pdslogger
 
-    from spindoctor.config.logger import IMAGE_LOGGER, MAIN_LOGGER
+    from spindoctor.config import IMAGE_LOGGER, MAIN_LOGGER
 
     null_handler = pdslogger.NULL_HANDLER
     for logger in (IMAGE_LOGGER, MAIN_LOGGER):

@@ -23,7 +23,10 @@ def strict_log_scope() -> Iterator[None]:
     it for the whole suite would fail hundreds of legitimate tests.  Request it
     from a test that drives a real pipeline, where a scope genuinely should be
     open.
+
+    Clears the override on exit rather than forcing it off, so behavior returns
+    to whatever the configuration says.
     """
     set_strict_scope(True)
     yield
-    set_strict_scope(False)
+    set_strict_scope(None)
