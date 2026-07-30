@@ -23,7 +23,7 @@ _LEVEL_CHOICES = ', '.join(sorted(LOG_LEVEL_NAMES))
 
 def add_logging_arguments(
     parser: argparse.ArgumentParser, *, has_image_logger: bool = True
-) -> argparse._ArgumentGroup:
+) -> None:
     """Add the shared logging arguments to ``parser``.
 
     Parameters:
@@ -32,8 +32,6 @@ def add_logging_arguments(
             False omits the image-logger flags, so passing one is an error
             naming the flag rather than a silently ignored request.
 
-    Returns:
-        The argument group the flags were added to, so a caller can extend it.
     """
     group = parser.add_argument_group('Logging')
 
@@ -101,5 +99,3 @@ def add_logging_arguments(
             metavar='LEVEL',
             help='Level for the image loggers, overriding a bare --log-level.',
         )
-
-    return group

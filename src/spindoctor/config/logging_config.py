@@ -38,7 +38,7 @@ stdout regardless of level.
 
 import argparse
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -707,6 +707,31 @@ class RunLogging:
     main_log_path: FCPath | None
 
 
+def run_logging_for_root(log_root: FCPath, program_name: str = '') -> RunLogging:
+    """Resolve logging against an explicit log root, with no arguments.
+
+    For a library caller that already knows where its results go and has no
+    command line to consult.  Levels come from the configuration alone.
+
+    Parameters:
+        log_root: Root directory for this run's log files.
+        program_name: The program's identity, for selecting its configuration
+            block.  Empty selects the global block only.
+
+    Returns:
+        The resolved :class:`RunLogging`, with no main logger built.
+    """
+    from .config import DEFAULT_CONFIG
+
+    levels = resolve_log_levels(program_name, None, DEFAULT_CONFIG)
+    return RunLogging(
+        levels=levels,
+        sinks=sinks_from_arguments(None, log_root),
+        timestamp=run_timestamp(),
+        main_log_path=None,
+    )
+
+
 def build_run_logging(
     program_name: str,
     arguments: argparse.Namespace,
@@ -736,8 +761,26 @@ def build_run_logging(
     # so importing it back at module level would close a cycle.
     from .config_helper import get_log_root
 
-    log_root = FCPath(get_log_root(arguments, config))
     levels = resolve_log_levels(program_name, arguments, config)
+    try:
+        log_root = FCPath(get_log_root(arguments, config))
+    except ValueError as exc:
+        # A program with no results root of its own -- bundle summary, say --
+        # has nowhere to put log files.  That is not worth refusing to run
+        # over: drop the file sinks, say so, and carry on.
+        log_root = FCPath('.')
+        sinks = sinks_from_arguments(arguments, log_root)
+        sinks = replace(sinks, main_file=False, image_file=False)
+        set_log_levels(levels)
+        timestamp = run_timestamp()
+        if build_main:
+            build_main_logger(MAIN_LOGGER, program_name, sinks, levels, timestamp=timestamp)
+            MAIN_LOGGER.warning(
+                'No log root could be determined (%s); logging to the terminal only. '
+                'Pass --log-root to write log files.',
+                exc,
+            )
+        return RunLogging(levels=levels, sinks=sinks, timestamp=timestamp, main_log_path=None)
     sinks = sinks_from_arguments(arguments, log_root)
     set_log_levels(levels)
     timestamp = run_timestamp()
@@ -746,4 +789,10 @@ def build_run_logging(
         main_log_path = build_main_logger(
             MAIN_LOGGER, program_name, sinks, levels, timestamp=timestamp
         )
+    if build_main:
+        # Reported here rather than at configuration load, so the warning is
+        # subject to the sinks and level the run actually configured instead of
+        # going to a logger that has none.
+        for message in superseded_level_conflicts(config):
+            MAIN_LOGGER.warning('%s', message)
     return RunLogging(levels=levels, sinks=sinks, timestamp=timestamp, main_log_path=main_log_path)

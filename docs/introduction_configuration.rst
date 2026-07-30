@@ -211,23 +211,36 @@ Navigation Options
 Logging Options
 ---------------
 
-All four logging-level options override the corresponding ``general.*`` config
-key for that run. Each accepts a standard log-level string: ``DEBUG``, ``INFO``,
-``WARNING``, ``ERROR``, or ``CRITICAL``.
+Logging is configured by the ``logging`` section and by command-line options
+that override it. Levels are ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``,
+``CRITICAL`` and ``NONE``.
 
-* ``--log-level-main-console LEVEL``: Override ``general.log_level_main_console``
-  -- the level at which the main logger writes to stdout.
+.. code-block:: yaml
 
-* ``--log-level-main-file LEVEL``: Override ``general.log_level_main_file``
-  -- the level at which the main logger writes to its logfile under
-  ``$NAV_RESULTS_ROOT/logs/sd_offset/``.
+    logging:
+      main: INFO            # the run's logger
+      image: INFO           # per-image logs, and any component not named below
+      techniques:
+        titan_haze: DEBUG   # one technique
+      models:
+        rings: WARNING      # one model family
+      other:
+        annotate: ERROR
+      programs:
+        sd_mosaic:          # applies to that program only
+          main: WARNING
 
-* ``--log-level-image-console LEVEL``: Override ``general.log_level_image_console``
-  -- the level at which the image logger writes to stdout during image processing.
+A component named anywhere takes its own level; a category's ``default``
+applies to the rest of that category; otherwise the per-logger default
+applies. An unrecognized component or program name is rejected when the
+configuration loads, rather than being silently ignored.
 
-* ``--log-level-image-file LEVEL``: Override ``general.log_level_image_file``
-  -- the level at which the image logger writes to the per-image logfile under
-  ``$NAV_RESULTS_ROOT/logs/{results_path_stub}.log``.
+The command-line options are ``--log-root``, ``--log-level`` (bare for both
+loggers, or ``MODULE=LEVEL`` for one component, repeatable),
+``--log-level-main``, ``--log-level-image``, and the four sink switches
+``--log-main-to-console``, ``--log-main-to-file``, ``--log-image-to-console``
+and ``--log-image-to-file``, each with a ``--no-`` form. A program that does
+not process images individually accepts only the main-logger options.
 
 These command-line options provide the highest priority override mechanism,
 taking precedence over all configuration files, including those specified with

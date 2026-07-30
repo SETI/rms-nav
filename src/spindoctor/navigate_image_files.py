@@ -15,25 +15,23 @@ exception that crashes the worker process).
 
 from __future__ import annotations
 
-import argparse
 import sys
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
 
+import pdslogger
 from filecache import FCPath
 from PIL import Image
 
 from spindoctor.config import (
-    DEFAULT_CONFIG,
     IMAGE_LOGGER,
     MAIN_LOGGER,
     RunLogging,
     build_image_log_handlers,
-    build_run_logging,
+    run_logging_for_root,
 )
-from spindoctor.config.program_names import SD_OFFSET
 from spindoctor.dataset.dataset import ImageFiles
 from spindoctor.nav_model import build_models_for_obs
 from spindoctor.nav_orchestrator import (
@@ -172,9 +170,11 @@ def navigate_image_files(
     summary_png_file = nav_results_root / (image_file.results_path_stub + '_summary.png')
 
     if run_logging is None:
-        run_logging = build_run_logging(
-            SD_OFFSET, argparse.Namespace(), DEFAULT_CONFIG, build_main=False
-        )
+        # Derive the log root from the results root this call was given rather
+        # than re-resolving one: a caller that named its results root has
+        # already said where its output belongs, and resolving afresh both
+        # ignores that and fails outright when nothing else names a root.
+        run_logging = run_logging_for_root(nav_results_root / 'logs')
     local_handlers, image_log_path = build_image_log_handlers(
         'nav',
         image_file.results_path_stub,
@@ -201,7 +201,8 @@ def navigate_image_files(
                 )
                 if write_output_files:
                     public_metadata_file.write_text(json_as_string(metadata))
-                MAIN_LOGGER.info('Wrote log to %s', image_log_path)
+                if image_log_path is not None:
+                    MAIN_LOGGER.info('Wrote log to %s', image_log_path)
                 return False, metadata
             snapshot_inst = cast(ObsSnapshotInst, snapshot)
             orchestrator = NavOrchestrator(
@@ -224,11 +225,13 @@ def navigate_image_files(
                 logger.info('Writing metadata to %s', public_metadata_file)
                 public_metadata_file.write_text(json_as_string(metadata))
                 write_summary_png(snapshot_inst, nav_result, summary_png_file, logger)
-            MAIN_LOGGER.info('Wrote log to %s', image_log_path)
+            if image_log_path is not None:
+                MAIN_LOGGER.info('Wrote log to %s', image_log_path)
             return nav_result.status == 'success', metadata
     finally:
         for handler in local_handlers:
-            handler.close()
+            if handler is not pdslogger.NULL_HANDLER:
+                handler.close()
 
 
 def _metadata_for_load_error(

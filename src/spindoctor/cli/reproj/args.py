@@ -31,7 +31,8 @@ def add_common_env_args(parser: argparse.ArgumentParser) -> None:
     Side effects:
         Adds three groups (``Environment``, ``Logging``, ``Miscellaneous``) with
         flags ``--config-file`` (appendable), ``--pds3-holdings-root``,
-        ``--nav-results-root``, ``--log-level``, and ``--profile``. Defaults do not
+        ``--nav-results-root``, the shared logging options, and ``--profile``.
+        Defaults do not
         read the environment implicitly beyond what downstream nav code does when
         these flags are omitted. No files are read at parse time. Does not raise.
     """
@@ -58,7 +59,10 @@ def add_common_env_args(parser: argparse.ArgumentParser) -> None:
             '(or if an image has no success metadata), uncorrected pointing is used.'
         ),
     )
-    add_logging_arguments(parser)
+    # No image flags yet: per-image reprojection logging still goes through
+    # the setup being replaced, so offering them would accept a request this
+    # program cannot honor.
+    add_logging_arguments(parser, has_image_logger=False)
     misc = parser.add_argument_group('Miscellaneous')
     misc.add_argument(
         '--profile',

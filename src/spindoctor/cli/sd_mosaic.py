@@ -549,13 +549,15 @@ def main() -> None:
         nav_results_root_path = FileCache(None).new_path(nav_results_root_str)
 
     try:
-        # Per-image reprojection logs still go through the setup being
-        # replaced; routing them through this run's sinks happens with the
-        # reproj backend.
-        build_run_logging(PROGRAM_NAME, args, DEFAULT_CONFIG)
+        run_logging = build_run_logging(PROGRAM_NAME, args, DEFAULT_CONFIG)
     except (TypeError, ValueError) as exc:
         print(f'Invalid logging configuration: {exc}', file=sys.stderr)
         sys.exit(1)
+
+    # Per-image reprojection logging still goes through the setup being
+    # replaced, which the resolver does not reach, so the resolved image level
+    # is applied to the image logger directly until that backend is converted.
+    IMAGE_LOGGER.set_level(run_logging.levels.image.lower())
 
     start = time.time()
 

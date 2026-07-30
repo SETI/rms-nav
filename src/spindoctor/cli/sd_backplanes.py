@@ -129,7 +129,10 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     # Dataset selection
     DATASET.add_selection_arguments(cmdparser)
 
-    add_logging_arguments(cmdparser)
+    # No image flags yet: per-image backplane logging still goes through the
+    # setup being replaced, so offering them would accept a request this
+    # program cannot honor.
+    add_logging_arguments(cmdparser, has_image_logger=False)
 
     # Misc
     misc_group = cmdparser.add_argument_group('Miscellaneous')

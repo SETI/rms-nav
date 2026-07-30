@@ -15,6 +15,7 @@ import sys
 import time
 from typing import cast
 
+import pdslogger
 from filecache import FCPath, FileCache
 
 # Make CLI runnable from source tree with
@@ -221,8 +222,8 @@ def _run_manual_pass(
     The orchestrator's per-image log lines (image classifier verdict,
     NavModel build, feature extraction, manual-nav skip warnings) are
     routed through the same per-image ``IMAGE_LOGGER.open(...)`` context
-    that ``navigate_image_files`` uses, so the per-image stdout / file
-    handlers are attached during prepare + dialog.
+    that ``navigate_image_files`` uses, so this run's per-image handlers are
+    attached during prepare + dialog.
     """
     from datetime import UTC, datetime
     from itertools import islice
@@ -308,10 +309,12 @@ def _run_manual_pass(
                 IMAGE_LOGGER.info('Writing metadata to %s', public_metadata_file)
                 public_metadata_file.write_text(json_as_string(metadata))
                 write_summary_png(obs, result, summary_png_file, IMAGE_LOGGER)
-            MAIN_LOGGER.info('Wrote log to %s', image_log_path)
+            if image_log_path is not None:
+                MAIN_LOGGER.info('Wrote log to %s', image_log_path)
     finally:
         for handler in local_handlers:
-            handler.close()
+            if handler is not pdslogger.NULL_HANDLER:
+                handler.close()
     # The dv / du print statements are the CLI's machine-parsable contract;
     # they go to stdout regardless of the per-image log routing.
     print(f'offset_dv_px={dv:.4f}')
