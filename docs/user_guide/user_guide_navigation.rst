@@ -193,25 +193,42 @@ Miscellaneous
 Logging options
 ^^^^^^^^^^^^^^^
 
-All four options accept a standard log-level string (``DEBUG``, ``INFO``, ``WARNING``,
-``ERROR``, or ``CRITICAL``) and override the corresponding ``general.*`` configuration
-key for that run. For full details and the config-file equivalents see
+Two loggers write during a run. The main logger reports what the program is
+doing at the top level and writes to the terminal and to a file. The image
+logger carries the detail of processing one image and writes to a file by
+default, though it can write to the console as well.
+Both sinks of a logger always share a level, so there is one level to set per
+component rather than one per sink.
+
+Levels are ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``, ``CRITICAL`` and
+``NONE``. For the configuration-file equivalents see
 :doc:`/introduction_configuration`.
 
-* ``--log-level-main-console LEVEL``: stdout level for the main logger (overrides
-  ``general.log_level_main_console``; default ``INFO``).
+* ``--log-root PATH``: where this run's log files go. Defaults to a ``logs``
+  directory under the navigation results root. The main log is written to
+  ``{log_root}/sd_offset/main_{timestamp}.log`` and each image's log to
+  ``{log_root}/nav/{results_path_stub}_{timestamp}.log``, with one UTC
+  timestamp shared by every file a run produces.
 
-* ``--log-level-main-file LEVEL``: logfile level for the main logger written to
-  ``$NAV_RESULTS_ROOT/logs/sd_offset/`` (overrides ``general.log_level_main_file``;
-  default ``INFO``).
+* ``--log-level LEVEL``: the default level for both loggers.
 
-* ``--log-level-image-console LEVEL``: stdout level for the image logger, active
-  only while each image is being processed (overrides
-  ``general.log_level_image_console``; default ``INFO``).
+* ``--log-level MODULE=LEVEL``: the level for one component, repeatable. For
+  example ``--log-level WARNING --log-level titan_haze=DEBUG`` quiets the run
+  but keeps the haze technique verbose. Components are named by the technique
+  or model they are, in snake_case: ``titan_haze``, ``body_limb``, ``rings``,
+  ``stars``, and so on, plus ``annotate``, ``correlate``, ``ensemble``,
+  ``image_derivatives``, ``obs``, ``orchestrator`` and ``provenance``. An
+  unrecognized name is rejected at startup rather than ignored.
 
-* ``--log-level-image-file LEVEL``: level for the per-image logfile written to
-  ``$NAV_RESULTS_ROOT/logs/{results_path_stub}.log`` (overrides
-  ``general.log_level_image_file``; default ``INFO``).
+* ``--log-level-main LEVEL`` and ``--log-level-image LEVEL``: the level for one
+  logger, taking precedence over a bare ``--log-level``.
+
+* ``--log-main-to-console`` / ``--no-log-main-to-console`` (default on),
+  ``--log-main-to-file`` / ``--no-log-main-to-file`` (default on),
+  ``--log-image-to-console`` / ``--no-log-image-to-console`` (default off),
+  ``--log-image-to-file`` / ``--no-log-image-to-file`` (default on): which
+  sinks each logger writes to. Turning every sink off produces no output at
+  all rather than falling back to the terminal.
 
 Example Commands
 ----------------

@@ -38,14 +38,16 @@ stdout regardless of level.
 
 import argparse
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pdslogger
 from filecache import FCPath
 from pdslogger import PdsLogger
 
+from .logger import MAIN_LOGGER
 from .logging_keys import (
     CATEGORY_KEYS,
     LOG_LEVEL_NAMES,
@@ -63,8 +65,10 @@ __all__ = [
     'SILENT_LEVEL',
     'LogLevels',
     'LogSinks',
+    'RunLogging',
     'build_image_log_handlers',
     'build_main_logger',
+    'build_run_logging',
     'image_log_path',
     'log_levels',
     'main_log_path',
@@ -684,3 +688,123 @@ def sinks_from_arguments(arguments: argparse.Namespace | None, log_root: FCPath)
         image_console=flag('log_image_to_console', defaults.image_console),
         image_file=flag('log_image_to_file', defaults.image_file),
     )
+
+
+@dataclass(frozen=True)
+class RunLogging:
+    """What a run's logging resolved to, for the driver to pass on.
+
+    Parameters:
+        levels: The resolved levels, already installed for components to read.
+        sinks: Which sinks are enabled, and the log root.
+        timestamp: One stamp for the whole run, so a run's log files share it.
+        main_log_path: Where the main log is being written, or None when the
+            main logger has no file sink.
+    """
+
+    levels: LogLevels
+    sinks: LogSinks
+    timestamp: str
+    main_log_path: FCPath | None
+
+
+def run_logging_for_root(log_root: str | Path | FCPath, program_name: str = '') -> RunLogging:
+    """Resolve logging against an explicit log root, with no arguments.
+
+    For a library caller that already knows where its results go and has no
+    command line to consult.  Levels come from the configuration alone, and
+    are installed so that the sections a component opens are floored at the
+    same levels the handlers were built at; leaving them uninstalled would let
+    the two disagree, which silently drops records that the handlers would
+    have accepted.
+
+    Parameters:
+        log_root: Root directory for this run's log files.
+        program_name: The program's identity, for selecting its configuration
+            block.  Empty selects the global block only.
+
+    Returns:
+        The resolved :class:`RunLogging`, with no main logger built.
+    """
+    from .config import DEFAULT_CONFIG
+
+    levels = resolve_log_levels(program_name, None, DEFAULT_CONFIG)
+    set_log_levels(levels)
+    return RunLogging(
+        levels=levels,
+        sinks=sinks_from_arguments(None, FCPath(log_root)),
+        timestamp=run_timestamp(),
+        main_log_path=None,
+    )
+
+
+def build_run_logging(
+    program_name: str,
+    arguments: argparse.Namespace,
+    config: 'Config',
+    *,
+    build_main: bool = True,
+) -> RunLogging:
+    """Resolve this run's logging and configure the main logger.
+
+    Call once at startup, after the configuration has been loaded, before
+    anything is logged.  The resolved levels are installed globally so a
+    component deep in the pipeline can read its own level; the returned value
+    carries what a driver needs to open per-image logs.
+
+    Parameters:
+        program_name: The program's identity, which selects its configuration
+            block and names its main log directory.
+        arguments: Parsed command-line arguments.
+        config: The loaded configuration.
+        build_main: False for a program that has no main logger of its own, so
+            that levels and sinks are still resolved for its image logs.
+
+    Returns:
+        The resolved :class:`RunLogging`.
+
+    Raises:
+        ValueError: If a level named on the command line or in the
+            configuration is not a known level, or a module named on the
+            command line is not a known component.
+        TypeError: If a configured level is not a string.
+    """
+    # Local import: config_helper imports this module for the conflict check,
+    # so importing it back at module level would close a cycle.
+    from .config_helper import get_log_root
+
+    levels = resolve_log_levels(program_name, arguments, config)
+    try:
+        log_root = FCPath(get_log_root(arguments, config))
+    except ValueError as exc:
+        # A program with no results root of its own -- bundle summary, say --
+        # has nowhere to put log files.  That is not worth refusing to run
+        # over: drop the file sinks, say so, and carry on.
+        log_root = FCPath('.')
+        sinks = sinks_from_arguments(arguments, log_root)
+        sinks = replace(sinks, main_file=False, image_file=False)
+        set_log_levels(levels)
+        timestamp = run_timestamp()
+        if build_main:
+            build_main_logger(MAIN_LOGGER, program_name, sinks, levels, timestamp=timestamp)
+            MAIN_LOGGER.warning(
+                'No log root could be determined (%s); logging to the terminal only. '
+                'Pass --log-root to write log files.',
+                exc,
+            )
+        return RunLogging(levels=levels, sinks=sinks, timestamp=timestamp, main_log_path=None)
+    sinks = sinks_from_arguments(arguments, log_root)
+    set_log_levels(levels)
+    timestamp = run_timestamp()
+    main_log_path = None
+    if build_main:
+        main_log_path = build_main_logger(
+            MAIN_LOGGER, program_name, sinks, levels, timestamp=timestamp
+        )
+    if build_main:
+        # Reported here rather than at configuration load, so the warning is
+        # subject to the sinks and level the run actually configured instead of
+        # going to a logger that has none.
+        for message in superseded_level_conflicts(config):
+            MAIN_LOGGER.warning('%s', message)
+    return RunLogging(levels=levels, sinks=sinks, timestamp=timestamp, main_log_path=main_log_path)

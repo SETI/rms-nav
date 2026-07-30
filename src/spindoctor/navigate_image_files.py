@@ -15,17 +15,23 @@ exception that crashes the worker process).
 
 from __future__ import annotations
 
-import argparse
 import sys
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
 
+import pdslogger
 from filecache import FCPath
 from PIL import Image
 
-from spindoctor.config import DEFAULT_CONFIG, IMAGE_LOGGER, MAIN_LOGGER, image_log_handlers
+from spindoctor.config import (
+    IMAGE_LOGGER,
+    MAIN_LOGGER,
+    RunLogging,
+    build_image_log_handlers,
+    run_logging_for_root,
+)
 from spindoctor.dataset.dataset import ImageFiles
 from spindoctor.nav_model import build_models_for_obs
 from spindoctor.nav_orchestrator import (
@@ -99,7 +105,7 @@ def navigate_image_files(
     nav_models: list[str] | None = None,
     nav_techniques: list[str] | None = None,
     write_output_files: bool = True,
-    log_arguments: argparse.Namespace | None = None,
+    run_logging: RunLogging | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Navigate one image batch and optionally write the result files.
 
@@ -123,9 +129,9 @@ def navigate_image_files(
         write_output_files: When True, write the metadata JSON and summary
             PNG; when False, perform a dry run and return the metadata
             dict only.
-        log_arguments: Parsed CLI arguments used to resolve the per-image
-            log-file level.  ``None`` defaults to the configured INFO
-            level.
+        run_logging: This run's resolved logging, giving the level and sinks
+            the per-image log is written with.  ``None`` resolves the
+            configuration's defaults, for a caller outside a configured run.
 
     Returns:
         Tuple ``(success, metadata)`` where ``success`` is True for an
@@ -163,11 +169,19 @@ def navigate_image_files(
     public_metadata_file = nav_results_root / (image_file.results_path_stub + '_metadata.json')
     summary_png_file = nav_results_root / (image_file.results_path_stub + '_summary.png')
 
-    timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
-    image_log_path = (
-        nav_results_root / 'logs' / (image_file.results_path_stub + '_' + timestamp + '.log')
+    if run_logging is None:
+        # Derive the log root from the results root this call was given rather
+        # than re-resolving one: a caller that named its results root has
+        # already said where its output belongs, and resolving afresh both
+        # ignores that and fails outright when nothing else names a root.
+        run_logging = run_logging_for_root(nav_results_root / 'logs')
+    local_handlers, image_log_path = build_image_log_handlers(
+        'nav',
+        image_file.results_path_stub,
+        run_logging.sinks,
+        run_logging.levels,
+        timestamp=run_logging.timestamp,
     )
-    local_handlers = image_log_handlers(image_log_path, log_arguments, DEFAULT_CONFIG)
 
     try:
         with logger.open(str(image_url), handler=local_handlers):
@@ -187,7 +201,8 @@ def navigate_image_files(
                 )
                 if write_output_files:
                     public_metadata_file.write_text(json_as_string(metadata))
-                MAIN_LOGGER.info('Wrote log to %s', image_log_path)
+                if image_log_path is not None:
+                    MAIN_LOGGER.info('Wrote log to %s', image_log_path)
                 return False, metadata
             snapshot_inst = cast(ObsSnapshotInst, snapshot)
             orchestrator = NavOrchestrator(
@@ -210,11 +225,13 @@ def navigate_image_files(
                 logger.info('Writing metadata to %s', public_metadata_file)
                 public_metadata_file.write_text(json_as_string(metadata))
                 write_summary_png(snapshot_inst, nav_result, summary_png_file, logger)
-            MAIN_LOGGER.info('Wrote log to %s', image_log_path)
+            if image_log_path is not None:
+                MAIN_LOGGER.info('Wrote log to %s', image_log_path)
             return nav_result.status == 'success', metadata
     finally:
         for handler in local_handlers:
-            handler.close()
+            if handler is not pdslogger.NULL_HANDLER:
+                handler.close()
 
 
 def _metadata_for_load_error(
