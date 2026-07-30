@@ -355,6 +355,15 @@ def _run_body(
     nav_results_root_path: FCPath | None,
     run_logging: RunLogging,
 ) -> None:
+    """Run the body workflow: reproject each selected image, then mosaic them.
+
+    Parameters:
+        args: Parsed CLI namespace.
+        nav_results_root_path: Root holding ``sd_offset`` metadata, from which
+            each image's offset is read; None leaves pointing uncorrected.
+        run_logging: This run's resolved logging, giving the sinks and levels
+            each per-image reprojection log is written with.
+    """
     assert DATASET is not None
 
     inst_name = dataset_name_to_inst_name(DATASET_NAME)  # type: ignore[arg-type]  # DATASET_NAME is set at runtime from argv; dataset_name_to_inst_name is typed for a Literal union of known dataset keys only (false-positive arg-type).
@@ -454,6 +463,15 @@ def _run_rings(
     nav_results_root_path: FCPath | None,
     run_logging: RunLogging,
 ) -> None:
+    """Run the rings workflow: reproject each selected image, then mosaic them.
+
+    Parameters:
+        args: Parsed CLI namespace.
+        nav_results_root_path: Root holding ``sd_offset`` metadata, from which
+            each image's offset is read; None leaves pointing uncorrected.
+        run_logging: This run's resolved logging, giving the sinks and levels
+            each per-image reprojection log is written with.
+    """
     assert DATASET is not None
 
     inst_name = dataset_name_to_inst_name(DATASET_NAME)  # type: ignore[arg-type]  # DATASET_NAME is set at runtime from argv; dataset_name_to_inst_name is typed for a Literal union of known dataset keys only (false-positive arg-type).

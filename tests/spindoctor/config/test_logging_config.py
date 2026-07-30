@@ -822,7 +822,14 @@ def test_a_silenced_logger_stays_silent_after_a_rebuild(
 
 @pytest.mark.parametrize(
     'stub',
-    ['../../../escaped/evil', 'a/../../../evil', '/etc/passwd', '', 'has\x00null'],
+    [
+        '../../../escaped/evil',
+        'a/../../../evil',
+        '/etc/passwd',
+        '',
+        'has\x00null',
+        '..\\..\\evil',
+    ],
 )
 def test_a_stub_leaving_the_log_root_is_rejected(tmp_path: Path, stub: str) -> None:
     """A stub that would put the log outside the log root is refused.

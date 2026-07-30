@@ -226,13 +226,22 @@ def process_task(
             MAIN_LOGGER.debug('Skipping (exists): %s', out_path)
             continue
 
-        local_handlers, image_log_path = build_image_log_handlers(
-            'reproj',
-            f'{mosaic.body_name}/{image_file.results_path_stub}',
-            run_logging.sinks,
-            run_logging.levels,
-            timestamp=run_logging.timestamp,
-        )
+        try:
+            local_handlers, image_log_path = build_image_log_handlers(
+                'reproj',
+                f'{mosaic.body_name}/{image_file.results_path_stub}',
+                run_logging.sinks,
+                run_logging.levels,
+                timestamp=run_logging.timestamp,
+            )
+        except ValueError as exc:
+            # results_path_stub comes from task data; a stub that would put the
+            # log outside the log root is a bad task, not a retryable failure.
+            return False, {
+                'status': 'error',
+                'status_error': 'invalid_results_path_stub',
+                'status_exception': str(exc),
+            }
 
         try:
             with IMAGE_LOGGER.open(

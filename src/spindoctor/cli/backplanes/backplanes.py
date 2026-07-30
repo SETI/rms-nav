@@ -102,7 +102,7 @@ def generate_backplanes_image_files(
             if 'offset' not in nav_metadata:
                 raise ValueError(f'{image_path}: "offset" field not found in metadata')
             if nav_metadata['offset'] is None:
-                logger.warning(f'{image_path}: "offset" field is None, using (0, 0)')
+                logger.warning('%s: "offset" field is None, using (0, 0)', image_path)
                 dv, du = 0, 0
             else:
                 dv, du = nav_metadata['offset']
