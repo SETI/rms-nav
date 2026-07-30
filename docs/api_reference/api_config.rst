@@ -18,6 +18,11 @@ spindoctor.config
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.config.log_scope
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.config.logging_config
    :members:
    :undoc-members:

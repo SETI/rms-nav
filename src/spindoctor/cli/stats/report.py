@@ -38,7 +38,6 @@ from spindoctor.cli.stats.report_sections import (
     write_csv_export,
 )
 from spindoctor.cli.stats.schema import open_stats_db
-from spindoctor.config import MAIN_LOGGER
 
 __all__ = ['build_report', 'main_report']
 
@@ -779,5 +778,5 @@ def main_report(cmdline: list[str] | None = None) -> int:
         parser.error(str(exc))
     finally:
         conn.close()
-    MAIN_LOGGER.info('Wrote %s', report_path)
+    print(f'Wrote {report_path}')
     return 0

@@ -19,15 +19,40 @@ project config system and imported from `spindoctor.config`:
 from spindoctor.config import MAIN_LOGGER, IMAGE_LOGGER
 ```
 
-| Logger | Name | Purpose |
-|--------|------|---------|
-| `MAIN_LOGGER` | `"sd_offset"` | Top-level program events; stdout + timestamped file handler attached at startup via `setup_logging()` |
-| `IMAGE_LOGGER` | `"nav_image"` | Per-image events; handlers are attached only inside an `IMAGE_LOGGER.open()` context via `image_log_handlers()` |
+| Logger | Purpose |
+|--------|---------|
+| `MAIN_LOGGER` | One per program run: top-level events, per-image progress, totals |
+| `IMAGE_LOGGER` | One image inside one backend: models, techniques, reprojection, annotation |
 
-Navigation components (subclasses of `NavBase`) receive `IMAGE_LOGGER` via
-`self._logger`. The main driver modules use `MAIN_LOGGER` directly. Log levels
-for both loggers come from the config system (CLI arguments override config
-keys override the `"INFO"` default).
+`IMAGE_LOGGER` is a proxy, not a logger. Opening a section on it enters an
+image scope; while that scope is open every nested section resolves to the same
+real logger, so one image's records land in one file.
+
+**A component declares which logger it belongs to.** `NavBase` subclasses carry
+`log_role`, defaulting to `LogRole.IMAGE`. A component whose work spans a run
+rather than an image sets `LogRole.MAIN` — `DataSet` does, because enumeration
+belongs to no single image:
+
+```python
+class DataSet(ABC, NavBase):
+    log_role: ClassVar[LogRole] = LogRole.MAIN
+```
+
+Logging through `IMAGE_LOGGER` with no image scope open is a defect, not a
+mode. The record is routed to `MAIN_LOGGER` and the call site is reported once;
+under `logging.strict_scope`, which the test suite enables, it raises
+`LogScopeError` instead. If a component trips this, it is bound to the wrong
+logger — give it `LogRole.MAIN`.
+
+**Programs that carry no logger.** The statistics programs (`sd_stats_ingest`,
+`sd_stats_report`) and the graphical programs (`sd_backplane_viewer`,
+`sd_mosaic_display`, `sd_create_simulated_image`) write to the terminal with
+`print()` and take no logging configuration. Neither is a batch pipeline, and a
+GUI surfaces problems through dialogs. This is the one documented exception to
+"never bare `print()` in library code", and it extends to the
+`spindoctor.ui.mosaic_viewer` widgets those programs drive. Where a converted
+call previously used `logger.exception`, follow the `print()` with
+`traceback.print_exc()` so the stack trace is not silently lost.
 
 ## 2. Setting Up `MAIN_LOGGER`
 

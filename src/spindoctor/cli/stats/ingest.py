@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import sqlite3
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
@@ -12,7 +13,6 @@ from filecache import FCPath
 
 from spindoctor.cli.stats.classify import date_from_image_et
 from spindoctor.cli.stats.schema import open_stats_db, upsert_image
-from spindoctor.config import MAIN_LOGGER
 
 __all__ = ['ingest_metadata_files', 'main_ingest', 'rows_from_metadata']
 
@@ -233,7 +233,7 @@ def ingest_metadata_files(
                         metadata, source_file=source
                     )
                 except (OSError, ValueError) as exc:
-                    MAIN_LOGGER.warning('Skipping %s: %s', source, exc)
+                    print(f'Skipping {source}: {exc}', file=sys.stderr)
                     n_errors += 1
                     continue
                 upsert_image(
@@ -273,10 +273,5 @@ def main_ingest(cmdline: list[str] | None = None) -> int:
         n_ingested, n_errors = ingest_metadata_files(conn, arguments.roots)
     finally:
         conn.close()
-    MAIN_LOGGER.info(
-        'Ingested %d metadata file(s) into %s (%d error(s))',
-        n_ingested,
-        arguments.db,
-        n_errors,
-    )
+    print(f'Ingested {n_ingested} metadata file(s) into {arguments.db} ({n_errors} error(s))')
     return 0 if n_ingested > 0 else 1

@@ -6,6 +6,8 @@ Info grid and Color By controls in the lower strip, and status-bar readouts.
 """
 
 import math
+import sys
+import traceback
 from pathlib import Path
 from typing import Any, cast
 
@@ -40,7 +42,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from spindoctor.config import IMAGE_LOGGER
 from spindoctor.support.time import et_to_utc
 from spindoctor.ui.common import build_stretch_controls
 from spindoctor.ui.mosaic_viewer.common import (
@@ -55,8 +56,6 @@ from spindoctor.ui.mosaic_viewer.photometric_display import compute_ring_display
 from spindoctor.ui.mosaic_viewer.tiled_image_widget import (
     TiledImageWidget,
 )
-
-logger = IMAGE_LOGGER
 
 EW_PROFILE_LEFT_GUTTER_PX = 58
 
@@ -334,7 +333,7 @@ class RingMosaicWindow(QMainWindow):
         try:
             c.draw()
         except RuntimeError as e:
-            logger.debug('radial canvas draw failed: %s', e)
+            print(f'radial canvas draw failed: {e}', file=sys.stderr)
 
     # ------------------------------------------------------------------
     #  UI
@@ -1178,7 +1177,8 @@ class RingMosaicWindow(QMainWindow):
             try:
                 dd = load_ring_file(path)
             except Exception as exc:
-                logger.exception('Error loading %s', path)
+                print(f'Error loading {path}', file=sys.stderr)
+                traceback.print_exc()
                 self.statusBar().showMessage(f'Error loading {path}: {exc}', 5000)
                 return
 

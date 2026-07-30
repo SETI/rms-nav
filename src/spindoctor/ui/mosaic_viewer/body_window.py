@@ -1,6 +1,8 @@
 """BodyMosaicWindow: PyQt6 window for browsing body reprojections and mosaics."""
 
 import math
+import sys
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +35,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from spindoctor.config import IMAGE_LOGGER
 from spindoctor.support.time import et_to_utc
 from spindoctor.ui.common import build_stretch_controls
 from spindoctor.ui.mosaic_viewer.common import (
@@ -48,8 +49,6 @@ from spindoctor.ui.mosaic_viewer.projections import ProjectionKind
 from spindoctor.ui.mosaic_viewer.tiled_image_widget import (
     TiledImageWidget,
 )
-
-logger = IMAGE_LOGGER
 
 _STATUS_HINTS: dict[ProjectionKind, str] = {
     ProjectionKind.RECT: (
@@ -696,7 +695,8 @@ class BodyMosaicWindow(QMainWindow):
         try:
             dd = load_body_file(path)
         except Exception as exc:
-            logger.exception('Error loading %s', path)
+            print(f'Error loading {path}', file=sys.stderr)
+            traceback.print_exc()
             self.statusBar().showMessage(f'Error loading {path}: {exc}', 5000)
             return
 

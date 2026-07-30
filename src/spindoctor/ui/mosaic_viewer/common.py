@@ -7,6 +7,7 @@ reprojection / mosaic dataclasses (``RingReprojResult``, ``RingMosaicData``,
 """
 
 import math
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,14 +19,11 @@ import numpy.ma as ma
 from filecache import FCPath
 from PyQt6.QtWidgets import QLineEdit, QSlider
 
-from spindoctor.config import IMAGE_LOGGER
 from spindoctor.reproj._serialization import infer_format
 from spindoctor.reproj.bodies import BodyMosaicData, BodyReprojResult
 from spindoctor.reproj.ring_orbit_model import RingOrbitModel, get_orbit_model_by_name
 from spindoctor.reproj.rings import RingMosaicData, RingReprojResult
 from spindoctor.ui.mosaic_viewer.tiled_image_widget import slider_to_zoom, zoom_to_slider
-
-logger = IMAGE_LOGGER
 
 
 class _SyncedSlider:
@@ -199,11 +197,11 @@ def _ring_longitude_column_origin_and_extent_hi_deg(
         return 0.0, float(n_cols * lon_res_deg), None
     global_bins = np.flatnonzero(longitude_antimask)
     if global_bins.size != n_cols:
-        logger.warning(
-            'Ring longitude antimask length %s does not match image columns %s; '
-            'assuming longitudes start at 0 deg for display.',
-            int(global_bins.size),
-            int(n_cols),
+        print(
+            f'Ring longitude antimask length {int(global_bins.size)} does not match '
+            f'image columns {int(n_cols)}; assuming longitudes start at 0 deg for '
+            f'display.',
+            file=sys.stderr,
         )
         return 0.0, float(n_cols * lon_res_deg), None
     # Check for contiguous bins: diff should be all-ones.

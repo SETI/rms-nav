@@ -6,8 +6,17 @@ from .config_helper import (
     get_pds4_bundle_results_root,
     load_default_and_user_config,
 )
-from .logger import (
+from .log_scope import (
     IMAGE_LOGGER,
+    ImageLoggerProxy,
+    LogRole,
+    LogScopeError,
+    image_scope,
+    image_scope_is_open,
+    set_strict_scope,
+    strict_scope,
+)
+from .logger import (
     MAIN_LOGGER,
     image_log_handlers,
     setup_logging,
@@ -38,7 +47,10 @@ __all__ = [
     'MAIN_LOGGER',
     'SILENT_LEVEL',
     'Config',
+    'ImageLoggerProxy',
     'LogLevels',
+    'LogRole',
+    'LogScopeError',
     'LogSinks',
     'build_image_log_handlers',
     'build_main_logger',
@@ -48,12 +60,16 @@ __all__ = [
     'get_pds4_bundle_results_root',
     'image_log_handlers',
     'image_log_path',
+    'image_scope',
+    'image_scope_is_open',
     'load_default_and_user_config',
     'log_key_for',
     'main_log_path',
     'resolve_log_levels',
     'run_timestamp',
+    'set_strict_scope',
     'setup_logging',
     'sinks_from_arguments',
+    'strict_scope',
     'validate_logging_config',
 ]
