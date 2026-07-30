@@ -26,10 +26,15 @@ from spindoctor.config import (
     get_nav_results_root,
     load_default_and_user_config,
 )
+from spindoctor.config.program_names import SD_BACKPLANES
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from spindoctor.dataset.dataset import DataSet
 from spindoctor.obs import inst_name_to_obs_class
 from spindoctor.support.file import json_as_string
+
+PROGRAM_NAME = SD_BACKPLANES
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None

@@ -45,11 +45,16 @@ from spindoctor.config import (
     image_log_handlers,
     load_default_and_user_config,
 )
+from spindoctor.config.program_names import SD_MOSAIC
 from spindoctor.dataset import dataset_name_to_inst_name
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class
 from spindoctor.reproj.bodies import BodyMosaic, BodyReprojResult
 from spindoctor.reproj.rings import RingMosaic, RingReprojResult
+
+PROGRAM_NAME = SD_MOSAIC
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 
 def _resolve_nav_results_root_fcpath(cli_args: argparse.Namespace) -> FCPath | None:

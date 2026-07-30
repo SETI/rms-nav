@@ -25,10 +25,15 @@ from spindoctor.config import (
     get_nav_results_root,
     load_default_and_user_config,
 )
+from spindoctor.config.program_names import SD_OFFSET
 from spindoctor.dataset import dataset_name_to_inst_name
 from spindoctor.dataset.dataset import ImageFile, ImageFiles
 from spindoctor.navigate_image_files import navigate_image_files
 from spindoctor.obs import inst_name_to_obs_class
+
+PROGRAM_NAME = SD_OFFSET
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 
 def process_task(

@@ -17,3 +17,13 @@ spindoctor.config
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. automodule:: spindoctor.config.logging_keys
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.config.program_names
+   :members:
+   :undoc-members:
+   :show-inheritance:

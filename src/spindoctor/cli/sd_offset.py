@@ -29,12 +29,17 @@ from spindoctor.config import (
     load_default_and_user_config,
     setup_logging,
 )
+from spindoctor.config.program_names import SD_OFFSET
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from spindoctor.dataset.dataset import DataSet
 from spindoctor.navigate_image_files import navigate_image_files
 from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class, obs_class_to_inst_name
 from spindoctor.support.file import json_as_string
 from spindoctor.support.misc import log_run_environment
+
+PROGRAM_NAME = SD_OFFSET
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None

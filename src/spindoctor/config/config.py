@@ -132,6 +132,7 @@ class Config:
         self._override_paths: list[str] = []
         self._config_environment: dict[str, Any] = AttrDict({})
         self._config_general: dict[str, Any] = AttrDict({})
+        self._config_logging: dict[str, Any] = AttrDict({})
         self._config_offset: dict[str, Any] = AttrDict({})
         self._config_bodies: dict[str, Any] = AttrDict({})
         self._config_body_shape: dict[str, Any] = AttrDict({})
@@ -170,6 +171,7 @@ class Config:
         self._category_cache = {}
         self._config_environment = AttrDict(self._config_dict.get('environment', {}))
         self._config_general = AttrDict(self._config_dict.get('general', {}))
+        self._config_logging = AttrDict(self._config_dict.get('logging', {}))
         self._config_offset = AttrDict(self._config_dict.get('offset', {}))
         self._config_bodies = AttrDict(self._config_dict.get('bodies', {}))
         self._config_body_shape = AttrDict(self._config_dict.get('body_shape', {}))
@@ -306,7 +308,16 @@ class Config:
         new_config = self._load_yaml(config_path)
         for key in new_config:
             if key in self._config_dict and isinstance(self._config_dict[key], dict):
-                self._config_dict[key] = _deep_merge(self._config_dict[key], new_config[key])
+                overlay = new_config[key]
+                if not isinstance(overlay, dict):
+                    # A section written with no body parses to None, which would
+                    # otherwise surface as an AttributeError from inside the merge.
+                    kind = 'empty' if overlay is None else type(overlay).__name__
+                    raise ValueError(
+                        f'Config "{config_path}" section "{key}" is {kind}; expected a '
+                        f'mapping because "{key}" is a mapping in the merged configuration'
+                    )
+                self._config_dict[key] = _deep_merge(self._config_dict[key], overlay)
             else:
                 self._config_dict[key] = new_config[key]
         if read_default:
@@ -385,6 +396,20 @@ class Config:
 
         self.read_config()
         return self._config_environment
+
+    @property
+    def logging(self) -> Any:
+        """Returns the logging configuration settings.
+
+        Holds the per-logger defaults (``main``, ``image``), the per-module
+        override categories (``techniques``, ``models``, ``other``), the
+        ``strict_scope`` switch, and per-program overrides under ``programs``.
+        See :func:`spindoctor.config.logging_keys.validate_logging_config` for
+        the accepted keys.
+        """
+
+        self.read_config()
+        return self._config_logging
 
     @property
     def planets(self) -> list[str]:

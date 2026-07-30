@@ -28,9 +28,14 @@ from spindoctor.config import (
     load_default_and_user_config,
     setup_logging,
 )
+from spindoctor.config.program_names import SD_CONSOLIDATE_METADATA
 from spindoctor.dataset import dataset_name_to_class, dataset_names
 from spindoctor.dataset.dataset import DataSet
 from spindoctor.support.misc import log_run_environment
+
+PROGRAM_NAME = SD_CONSOLIDATE_METADATA
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None

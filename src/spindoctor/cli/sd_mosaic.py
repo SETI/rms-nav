@@ -61,6 +61,7 @@ from spindoctor.config import (
     load_default_and_user_config,
     setup_logging,
 )
+from spindoctor.config.program_names import SD_MOSAIC
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from spindoctor.dataset.dataset import DataSet, ImageFile
 from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class
@@ -68,6 +69,10 @@ from spindoctor.reproj.bodies import USE_MOSAIC_LIMITS, BodyMosaicData, BodyRepr
 from spindoctor.reproj.rings import RingMosaicData, RingReprojResult
 from spindoctor.support.file import json_as_string
 from spindoctor.support.misc import log_run_environment
+
+PROGRAM_NAME = SD_MOSAIC
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 
 def _reproject_image_log_handlers(
