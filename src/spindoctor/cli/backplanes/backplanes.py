@@ -62,6 +62,22 @@ def generate_backplanes_image_files(
     metadata_file = nav_results_root / (image_file.results_path_stub + '_metadata.json')
     fits_file_path = backplane_results_root / (image_file.results_path_stub + '_backplanes.fits')
 
+    # Decide whether there is work before opening a log for it, so a skipped
+    # image does not leave behind a file containing only its own header.  This
+    # raises if the metadata is missing or unreadable; the caller reports that.
+    metadata_text = metadata_file.read_text()
+    nav_metadata = cast(dict[str, Any], json.loads(metadata_text))
+
+    status = nav_metadata.get('status', None)
+    if status != 'success':
+        MAIN_LOGGER.warning(
+            'Skipping backplanes for "%s": status=%s error=%s',
+            image_path,
+            status,
+            nav_metadata.get('status_error', 'unknown'),
+        )
+        return
+
     local_handlers, image_log_path = build_image_log_handlers(
         'backplanes',
         image_file.results_path_stub,
@@ -70,21 +86,11 @@ def generate_backplanes_image_files(
         timestamp=run_logging.timestamp,
     )
     try:
-        with logger.open(f'Processing image: {image_path!s}', handler=local_handlers):
-            # This will raise an exception if the metadata file is not found or not valid JSON
-            metadata_text = metadata_file.read_text()
-            nav_metadata = cast(dict[str, Any], json.loads(metadata_text))
-
-            status = nav_metadata.get('status', None)
-            if status != 'success':
-                logger.warning(
-                    'Skipping backplanes for "%s": status=%s error=%s',
-                    image_path,
-                    status,
-                    nav_metadata.get('status_error', 'unknown'),
-                )
-                return
-
+        with logger.open(
+            f'Processing image: {image_path!s}',
+            handler=local_handlers,
+            level=run_logging.levels.image.lower(),
+        ):
             # Build observation in original FOV
             # TODO We only support snapshots for backplane generation for now
             obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))

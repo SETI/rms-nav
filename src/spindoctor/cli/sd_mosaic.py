@@ -33,6 +33,7 @@ import traceback
 from collections.abc import Callable
 from typing import cast
 
+import pdslogger
 from filecache import FCPath, FileCache
 
 # Allow running directly from the source tree:
@@ -137,7 +138,7 @@ def _run_reproject_pass(
 
         local_handlers, image_log_path = build_image_log_handlers(
             'reproj',
-            image_file.results_path_stub,
+            f'{subject_name}/{image_file.results_path_stub}',
             run_logging.sinks,
             run_logging.levels,
             timestamp=run_logging.timestamp,
@@ -146,6 +147,7 @@ def _run_reproject_pass(
             with IMAGE_LOGGER.open(
                 f'REPROJECT {image_file.image_file_url}',
                 handler=local_handlers,
+                level=run_logging.levels.image.lower(),
             ):
                 try:
                     image_path = image_file.image_file_path.absolute()
@@ -171,11 +173,12 @@ def _run_reproject_pass(
                 except Exception:
                     _log_main_exception('Error reprojecting %s', image_file.image_file_url)
                 finally:
-                    if local_handlers:
+                    if image_log_path is not None:
                         MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
         finally:
             for handler in local_handlers:
-                handler.close()
+                if handler is not pdslogger.NULL_HANDLER:
+                    handler.close()
 
     return n_done, n_skipped
 

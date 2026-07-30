@@ -24,6 +24,7 @@ import sys
 import traceback
 from typing import Any, cast
 
+import pdslogger
 from cloud_tasks.worker import Worker, WorkerData
 from filecache import FCPath, FileCache
 
@@ -69,20 +70,6 @@ def _resolve_nav_results_root_fcpath(cli_args: argparse.Namespace) -> FCPath | N
 def _log_main_exception(msg: str, *args: object) -> None:
     """Log an exception with full traceback (frames plus final error line)."""
     MAIN_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
-
-
-def _safe_stub_for_image_log(results_path_stub: object, *, default: str = 'image') -> str:
-    """Reduce ``results_path_stub`` to one filename-safe segment (no directory components)."""
-    if not isinstance(results_path_stub, str):
-        return default
-    if '\x00' in results_path_stub:
-        return default
-    base = os.path.basename(results_path_stub.replace('\\', '/'))
-    if not base:
-        return default
-    safe = ''.join(ch if (ch.isalnum() or ch in '._-') else '_' for ch in base)
-    safe = safe.strip('._') or default
-    return safe[:200]
 
 
 def process_task(
@@ -136,8 +123,6 @@ def process_task(
 
     cli_args = cast(argparse.Namespace, worker_data.args)
     load_default_and_user_config(cli_args, DEFAULT_CONFIG)
-    # No main logger here; see the cloud-task section of the plan.
-    run_logging = build_run_logging(PROGRAM_NAME, cli_args, DEFAULT_CONFIG, build_main=False)
 
     nav_results_root_path = cast(FCPath | None, getattr(worker_data, 'nav_results_root_path', None))
 
@@ -173,6 +158,18 @@ def process_task(
         return False, {'status': 'error', 'status_error': 'no_output_dir'}
     if not isinstance(output_dir_str, str):
         return False, {'status': 'error', 'status_error': 'invalid_output_dir_type'}
+
+    # No main logger here; see the cloud-task section of the plan.  The task's
+    # own output directory is the fallback log root, because a worker is not
+    # required to have a navigation results root and its logs should not
+    # disappear when it does not.
+    run_logging = build_run_logging(
+        PROGRAM_NAME,
+        cli_args,
+        DEFAULT_CONFIG,
+        build_main=False,
+        fallback_log_root=FCPath(output_dir_str) / 'logs',
+    )
 
     prefix: str = task_arguments.get('prefix', '')
     fmt: str = task_arguments.get('format', 'fits')
@@ -231,7 +228,7 @@ def process_task(
 
         local_handlers, image_log_path = build_image_log_handlers(
             'reproj',
-            image_file.results_path_stub,
+            f'{mosaic.body_name}/{image_file.results_path_stub}',
             run_logging.sinks,
             run_logging.levels,
             timestamp=run_logging.timestamp,
@@ -241,6 +238,7 @@ def process_task(
             with IMAGE_LOGGER.open(
                 f'REPROJECT {image_file.image_file_url}',
                 handler=local_handlers,
+                level=run_logging.levels.image.lower(),
             ):
                 try:
                     image_path = image_file.image_file_path.absolute()
@@ -273,10 +271,12 @@ def process_task(
                 except Exception:
                     _log_main_exception('Error reprojecting %s', image_file.image_file_url)
                 finally:
-                    MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
+                    if image_log_path is not None:
+                        MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
         finally:
             for handler in local_handlers:
-                handler.close()
+                if handler is not pdslogger.NULL_HANDLER:
+                    handler.close()
 
     return False, {'status': 'success'}  # No retry under any circumstances
 

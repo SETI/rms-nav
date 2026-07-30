@@ -506,7 +506,7 @@ under ``<output-dir>``; the only subdirectory used is ``logs/`` for per-image
 reprojection logs from pass 1:
 
 - Per-image reprojection: ``<output-dir>/<prefix>_<body_or_planet>_<image_stem>_reproj.<fmt>``
-- Per-image reprojection log: ``<output-dir>/logs/<results_path_stub>_<timestamp>.log``
+- Per-image reprojection log: ``{log_root}/reproj/<results_path_stub>_<timestamp>.log``
 - Final mosaic: ``<output-dir>/<prefix>_<body_or_planet>_mosaic.<fmt>``
 
 If ``--prefix`` is empty (the default), the leading underscore is omitted.

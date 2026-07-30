@@ -40,7 +40,7 @@ import argparse
 import logging
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 import pdslogger
@@ -447,6 +447,37 @@ def main_log_path(log_root: FCPath, program_name: str, *, timestamp: str) -> FCP
     return log_root / program_name / f'main_{timestamp}.log'
 
 
+def _validated_stub(results_path_stub: str) -> str:
+    """Return ``results_path_stub`` if it names a location inside the log root.
+
+    A stub reaches this from task data on the cloud-task path, so it is not
+    necessarily trustworthy.  Subdirectories are legitimate -- a stub is
+    normally ``{volume}/{filespec}`` -- but a stub that climbs out of the log
+    root, names an absolute path, or carries a null byte is not, and would put
+    a log file somewhere the caller never asked for.
+
+    Parameters:
+        results_path_stub: The image's results path stub.
+
+    Returns:
+        The stub, unchanged.
+
+    Raises:
+        ValueError: If the stub is absolute, empty, contains a null byte, or
+            has any parent-directory component.
+    """
+    if not results_path_stub or '\x00' in results_path_stub:
+        raise ValueError(f'Invalid results path stub for a log file: {results_path_stub!r}')
+    normalized = results_path_stub.replace('\\', '/')
+    if normalized.startswith('/') or PurePosixPath(normalized).is_absolute():
+        raise ValueError(f'Results path stub must be relative, got {results_path_stub!r}')
+    if any(part == '..' for part in PurePosixPath(normalized).parts):
+        raise ValueError(
+            f'Results path stub must stay within the log root, got {results_path_stub!r}'
+        )
+    return results_path_stub
+
+
 def image_log_path(
     log_root: FCPath, backend: str, results_path_stub: str, *, timestamp: str
 ) -> FCPath:
@@ -469,7 +500,7 @@ def image_log_path(
     """
     if backend not in BACKEND_NAMES:
         raise ValueError(f'Unknown backend {backend!r}; expected one of {sorted(BACKEND_NAMES)}')
-    return log_root / backend / f'{results_path_stub}_{timestamp}.log'
+    return log_root / backend / f'{_validated_stub(results_path_stub)}_{timestamp}.log'
 
 
 def run_timestamp() -> str:
@@ -689,6 +720,7 @@ def build_run_logging(
     config: 'Config',
     *,
     build_main: bool = True,
+    fallback_log_root: str | Path | FCPath | None = None,
 ) -> RunLogging:
     """Resolve this run's logging and configure the main logger.
 
@@ -704,6 +736,10 @@ def build_run_logging(
         config: The loaded configuration.
         build_main: False for a program that has no main logger of its own, so
             that levels and sinks are still resolved for its image logs.
+        fallback_log_root: Where to put log files when nothing else names a log
+            root.  For a driver that has somewhere sensible of its own -- a
+            cloud task knows its output directory -- this keeps its logs rather
+            than dropping them.
 
     Returns:
         The resolved :class:`RunLogging`.
@@ -714,30 +750,36 @@ def build_run_logging(
             command line is not a known component.
         TypeError: If a configured level is not a string.
     """
-    # Local import: config_helper imports this module for the conflict check,
-    # so importing it back at module level would close a cycle.
+    # Local import: config_helper imports this module, so importing it back at
+    # module level would close a cycle.
     from .config_helper import get_log_root
 
     levels = resolve_log_levels(program_name, arguments, config)
     try:
         log_root = FCPath(get_log_root(arguments, config))
     except ValueError as exc:
-        # A program with no results root of its own -- bundle summary, say --
-        # has nowhere to put log files.  That is not worth refusing to run
-        # over: drop the file sinks, say so, and carry on.
-        log_root = FCPath('.')
-        sinks = sinks_from_arguments(arguments, log_root)
-        sinks = replace(sinks, main_file=False, image_file=False)
-        set_log_levels(levels)
-        timestamp = run_timestamp()
-        if build_main:
-            build_main_logger(MAIN_LOGGER, program_name, sinks, levels, timestamp=timestamp)
+        if fallback_log_root is None:
+            # A program with no results root of its own -- bundle summary, say
+            # -- has nowhere to put log files.  That is not worth refusing to
+            # run over: drop the file sinks, say so, and carry on.
+            sinks = replace(
+                sinks_from_arguments(arguments, FCPath('.')),
+                main_file=False,
+                image_file=False,
+            )
+            set_log_levels(levels)
+            timestamp = run_timestamp()
+            if build_main:
+                build_main_logger(MAIN_LOGGER, program_name, sinks, levels, timestamp=timestamp)
+            # Warned whether or not a main logger was built: a driver without
+            # one still needs to know its image logs are going nowhere.
             MAIN_LOGGER.warning(
                 'No log root could be determined (%s); logging to the terminal only. '
                 'Pass --log-root to write log files.',
                 exc,
             )
-        return RunLogging(levels=levels, sinks=sinks, timestamp=timestamp, main_log_path=None)
+            return RunLogging(levels=levels, sinks=sinks, timestamp=timestamp, main_log_path=None)
+        log_root = FCPath(fallback_log_root)
     sinks = sinks_from_arguments(arguments, log_root)
     set_log_levels(levels)
     timestamp = run_timestamp()
