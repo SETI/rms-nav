@@ -281,7 +281,11 @@ def _run_manual_pass(
     )
 
     try:
-        with IMAGE_LOGGER.open(str(image_url), handler=local_handlers):
+        with IMAGE_LOGGER.open(
+            str(image_url),
+            handler=local_handlers,
+            level=run_logging.levels.image_section_level(),
+        ):
             run_start = datetime.now(UTC)
             obs = cast(ObsSnapshotInst, obs_class.from_file(image_url, **extra_params))
             result = run_manual_nav(obs, config=DEFAULT_CONFIG)

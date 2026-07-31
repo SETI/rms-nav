@@ -12,8 +12,9 @@ Two-pass workflow
 1. Reprojection pass: for each image in the dataset, load the observation,
    optionally apply a navigation offset from ``--nav-results-root``, call
    ``BodyMosaic.reproject()`` / ``RingMosaic.reproject()``, and save the result.
-   Per-image logs are written under ``<output-dir>/logs/``. Existing files are
-   skipped unless ``--overwrite`` is given.
+   Per-image logs are written under the log root, not beside the products:
+   ``{log_root}/reproj/<subject>/<results_path_stub>_<timestamp>.log``.
+   Existing files are skipped unless ``--overwrite`` is given.
 
 2. Mosaic pass: re-iterate the same image list, load each reprojection file
    that exists, call ``mosaic.add()`` (body mode passes resolution merge

@@ -146,6 +146,19 @@ class LogLevels:
         level = self.for_module(log_key)
         return SILENT_LEVEL if level == _OFF else level.lower()
 
+    def main_section_level(self) -> str | int:
+        """Return the value to pass as ``logger.open(level=...)`` for the run.
+
+        The main-logger counterpart of :meth:`image_section_level`.  ``NONE`` is
+        a level the configuration accepts and pdslogger rejects by name, so it
+        is expressed as :data:`SILENT_LEVEL` here too.
+
+        Returns:
+            A pdslogger level name, or :data:`SILENT_LEVEL` when the main
+            logger is configured ``NONE``.
+        """
+        return SILENT_LEVEL if self.main == _OFF else self.main.lower()
+
     def image_section_level(self) -> str | int:
         """Return the value to pass as ``logger.open(level=...)`` for an image.
 

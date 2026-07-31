@@ -184,7 +184,11 @@ def navigate_image_files(
     )
 
     try:
-        with logger.open(str(image_url), handler=local_handlers):
+        with logger.open(
+            str(image_url),
+            handler=local_handlers,
+            level=run_logging.levels.image_section_level(),
+        ):
             log_run_environment(logger, sys.argv[1:])
             try:
                 snapshot = obs_class.from_file(image_url, **extra_params)

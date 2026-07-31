@@ -101,7 +101,7 @@ class NavBase:
             # apart.
             levels = log_levels()
             kwargs['level'] = (
-                levels.main
+                levels.main_section_level()
                 if self.log_role is LogRole.MAIN
                 else levels.section_level_for(self.resolved_log_key)
             )

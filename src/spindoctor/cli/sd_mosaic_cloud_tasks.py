@@ -120,7 +120,9 @@ def process_task(
         is ``{'status': 'success'}`` with ``n_done``, ``n_skipped`` and
         ``n_failed``: an individual image is allowed to fail without failing
         the task, so the counts are what distinguish a task that reprojected
-        its images from one that failed every one of them.
+        its images from one that failed every one of them.  An image whose
+        ``results_path_stub`` was refused is additionally named under
+        ``rejected_stubs``, since no log could be opened to record it.
     """
     if not isinstance(task_data, dict):
         return False, {'status': 'error', 'status_error': 'invalid_task_data_type'}
@@ -203,6 +205,7 @@ def process_task(
     n_done = 0
     n_skipped = 0
     n_failed = 0
+    rejected_stubs: list[dict[str, str]] = []
 
     for file in files:
         if not isinstance(file, dict):
@@ -259,12 +262,15 @@ def process_task(
             )
         except ValueError as exc:
             # results_path_stub comes from task data; a stub that would put the
-            # log outside the log root is a bad task, not a retryable failure.
-            return False, {
-                'status': 'error',
-                'status_error': 'invalid_results_path_stub',
-                'status_exception': str(exc),
-            }
+            # log outside the log root is a bad entry rather than a retryable
+            # failure.  It fails its own image and the task carries on, because
+            # abandoning the batch would discard the images already reprojected
+            # and let one malformed entry cost the whole task.  Reported in the
+            # result rather than logged: the reason there is nowhere to write
+            # this image's log is precisely that its log path was refused.
+            rejected_stubs.append({'results_path_stub': results_path_stub, 'reason': str(exc)})
+            n_failed += 1
+            continue
 
         try:
             with IMAGE_LOGGER.open(
@@ -311,12 +317,15 @@ def process_task(
 
     # No retry under any circumstances.  The status reports that the task ran,
     # not that every image in it reprojected; the counts say which.
-    return False, {
+    task_result: dict[str, Any] = {
         'status': 'success',
         'n_done': n_done,
         'n_skipped': n_skipped,
         'n_failed': n_failed,
     }
+    if rejected_stubs:
+        task_result['rejected_stubs'] = rejected_stubs
+    return False, task_result
 
 
 async def async_main() -> None:
