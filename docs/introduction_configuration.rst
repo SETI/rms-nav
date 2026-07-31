@@ -211,9 +211,15 @@ and ``--log-image-to-file``, each with a ``--no-`` form. A program that does
 not process images individually accepts only the main-logger options, and the
 cloud-task drivers accept none: see :doc:`/user_guide/user_guide_logging`.
 
-These command-line options provide the highest priority override mechanism,
-taking precedence over all configuration files, including those specified with
-``--config-file``.
+The sink switches and ``--log-root`` take precedence over every configuration
+file, including one named with ``--config-file``.
+
+The level options are ranked by how specifically they name their target, not
+by being on the command line, so the order above governs them: ``--log-level
+MODULE=LEVEL`` outranks everything, but a component named in a configuration
+file outranks a bare ``--log-level``, which says nothing about that component.
+``--log-level DEBUG`` therefore does not lift a component the configuration
+pinned; name it, as in ``--log-level titan_haze=DEBUG``.
 
 Example: Combining Configuration Methods
 ========================================

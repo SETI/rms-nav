@@ -22,6 +22,7 @@ from spindoctor.config.logging_keys import (
     validate_logging_config,
 )
 from spindoctor.config.program_names import PROGRAM_NAMES, SD_MOSAIC, SD_OFFSET
+from spindoctor.support.nav_base import NavBase
 
 
 def _config_with_logging(tmp_path: Path, body: str) -> Config:
@@ -85,11 +86,22 @@ def test_log_key_honors_a_declared_override() -> None:
     assert log_key_for(cls) == 'chosen_name'
 
 
-def test_log_key_ignores_an_inherited_override() -> None:
-    """A subclass derives from its own name rather than inheriting a parent key."""
+def test_log_key_honors_an_inherited_override() -> None:
+    """A family sharing one key declares it once on their base."""
     parent = type('ParentNav', (), {'log_key': 'parent_key'})
     child = type('BodyLimbNav', (parent,), {})
-    assert log_key_for(child) == 'body_limb'
+    assert log_key_for(child) == 'parent_key'
+
+
+def test_the_config_key_matches_what_the_component_reads() -> None:
+    """The configuration namespace and the runtime lookup cannot disagree.
+
+    A key honored at run time but not here would name a component the
+    configuration rejects, while the key it did accept governed nothing.
+    """
+    parent = type('FamilyBaseNav', (NavBase,), {'log_key': 'family'})
+    child = type('MemberOneNav', (parent,), {})
+    assert log_key_for(child) == child().resolved_log_key
 
 
 # ---------------------------------------------------------------------------

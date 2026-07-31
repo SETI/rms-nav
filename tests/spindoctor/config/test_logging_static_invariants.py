@@ -25,6 +25,8 @@ _SRC = FCPath(Path(__file__).resolve().parents[3]) / 'src' / 'spindoctor'
 # with print(): neither is a batch pipeline, and both are read as they run.
 _PRINT_ONLY = [
     'cli/stats',
+    'cli/sd_stats_ingest.py',
+    'cli/sd_stats_report.py',
     'cli/sd_backplane_viewer.py',
     'cli/sd_create_simulated_image.py',
     'cli/sim_editor',
@@ -76,10 +78,36 @@ def _imported_names(path: FCPath) -> set[str]:
         if isinstance(node, ast.ImportFrom):
             names.update(alias.name for alias in node.names)
             if node.module is not None:
-                names.add(node.module)
+                names.update(_dotted_prefixes(node.module))
         elif isinstance(node, ast.Import):
-            names.update(alias.name for alias in node.names)
+            for alias in node.names:
+                names.update(_dotted_prefixes(alias.name))
+                # An aliased module hides the real name behind the alias, and
+                # what it is later used for is an attribute access rather than
+                # an import, so the alias is recorded as well.
+                if alias.asname is not None:
+                    names.add(alias.asname)
+        elif isinstance(node, ast.Attribute):
+            # "from spindoctor import config" then "config.MAIN_LOGGER" never
+            # imports the logger by name; the attribute is where it surfaces.
+            names.add(node.attr)
     return names
+
+
+def _dotted_prefixes(dotted: str) -> set[str]:
+    """Return a dotted module name and every package leading to it.
+
+    ``import logging.handlers`` records only the full dotted name, so a check
+    for ``logging`` would miss it.
+
+    Parameters:
+        dotted: A possibly dotted module name.
+
+    Returns:
+        The name and each of its prefixes.
+    """
+    parts = dotted.split('.')
+    return {'.'.join(parts[: index + 1]) for index in range(len(parts))}
 
 
 @pytest.mark.parametrize('relative', _PRINT_ONLY + _NO_STDLIB_LOGGING)

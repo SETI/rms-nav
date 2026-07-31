@@ -19,7 +19,7 @@ package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
-from spindoctor.cli.logging_args import add_logging_arguments
+from spindoctor.cli.logging_args import add_logging_arguments, reporting_logging_errors
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
@@ -146,12 +146,10 @@ def main() -> None:
     arguments = parse_args(command_list)
 
     # Read configuration files
-    load_default_and_user_config(arguments, DEFAULT_CONFIG)
-    try:
+    with reporting_logging_errors():
+        load_default_and_user_config(arguments, DEFAULT_CONFIG)
+    with reporting_logging_errors():
         run_logging = build_run_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
-    except (TypeError, ValueError) as exc:
-        print(f'Invalid logging configuration: {exc}', file=sys.stderr)
-        sys.exit(1)
 
     # Derive roots
     nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)

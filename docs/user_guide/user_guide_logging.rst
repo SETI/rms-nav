@@ -112,9 +112,8 @@ reprojected onto more than one body::
 
 .. note::
 
-   Reprojection logs live under the log root, not under the mosaic output
-   directory. If you have a script or a habit that reads them from
-   ``<output-dir>/logs``, it needs updating.
+   Reprojection logs live under the log root, alongside every other stage's,
+   rather than under the mosaic output directory with the products.
 
 What appears on the terminal
 ============================
@@ -245,6 +244,14 @@ The most specific setting wins:
      > logging.main / logging.image
      > INFO
 
+Note that a component named in a configuration file outranks a bare
+``--log-level``, which says nothing about that component. The shipped
+configuration names one: ``other.annotate: ERROR``. So ``--log-level NONE``
+does not produce silence -- annotation stays at ERROR, which keeps a file sink
+open and writes a log per image. To get silence, either name it
+(``--log-level NONE --log-level annotate=NONE``) or turn the sink off with
+``--no-log-image-to-file``, which is what you probably wanted.
+
 A ``programs`` block applies to that program alone and is merged key by key
 with the settings above it, so a program can override one value while
 inheriting the rest.
@@ -286,8 +293,15 @@ they can all append to sensibly.
 
 These drivers accept no logging command-line options, because every one of them
 configures a logger they do not have or a terminal they must not write to. Set
-their levels in the configuration instead -- with a ``programs`` block if they
-should differ from an interactive run.
+their levels in the configuration instead.
+
+A cloud-task driver shares its interactive sibling's identity: ``sd_offset``
+for ``sd_offset_cloud_tasks``, and so on. So a ``programs`` block covers both
+forms of a program and cannot distinguish them -- ``logging.programs.sd_offset``
+governs the interactive driver and the worker alike, and there is no
+``logging.programs.sd_offset_cloud_tasks``. That is deliberate: an image's log
+should read the same whichever driver produced it, which is the same reason the
+two write into one tree.
 
 Because a cloud task has no main log, an outcome that an interactive run would
 report there is returned in the task result instead. A backplanes task reports

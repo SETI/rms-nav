@@ -122,14 +122,23 @@ A component that is a module-level function rather than a class gets the same
 treatment from the :func:`~spindoctor.config.log_scope.logged_section`
 decorator, which is what makes it independently configurable at all.
 
-The name a component is configured under is its ``log_key``, defaulting to the
-snake_case form of the class name with the ``Nav`` prefix and suffix stripped
-(``TitanHazeNav`` becomes ``titan_haze``). A family that should share one key
--- every body model, say -- declares it once on their base, since ``log_key``
-is inherited normally. Adding a technique or model therefore adds a
-configuration key automatically; adding a function-shaped component means
-adding its key to ``OTHER_LOG_KEYS`` in
-:mod:`spindoctor.config.logging_keys`, or the configuration will reject it.
+The name a component is configured under is its ``log_key``. Left undeclared,
+it is derived from the class name: a ``NavTechnique`` or ``NavModel`` prefix
+comes off, then a trailing ``Simulated`` and a trailing ``Nav``, and what is
+left becomes snake_case. So ``TitanHazeNav`` is ``titan_haze``,
+``NavTechniqueManual`` is ``manual``, and ``NavModelRingsSimulated`` is
+``rings`` -- a simulated model shares its sibling's key, being one component
+differing only in where its inputs come from. Note that a bare ``Nav`` prefix
+is not stripped: ``NavFoo`` derives ``nav_foo``.
+
+A class whose derived key would be wrong declares ``log_key`` instead, and a
+family that should share one key declares it once on their base;
+``log_key`` is inherited, both at run time and in the set of keys the
+configuration will accept.
+
+Adding a technique or model therefore adds a configuration key automatically.
+Adding a function-shaped component means adding its key to ``OTHER_LOG_KEYS``
+in :mod:`spindoctor.config.logging_keys`, or the configuration will reject it.
 
 Every dispatch module that has a logger declares ``PROGRAM_NAME`` from
 :mod:`spindoctor.config.program_names`. It names the program's main log

@@ -162,12 +162,86 @@ def test_no_nav_root_loads_nothing(tmp_path: Path) -> None:
     assert load_offset_if_any(None, _image_file()) is None
 
 
-def test_a_traversing_stub_is_refused(tmp_path: Path) -> None:
-    """A stub resolving outside the results root does not load an offset."""
-    escaping = ImageFile(
+def _escaping_image_file(stub: str) -> ImageFile:
+    """Build an image file whose stub points outside the results root.
+
+    Parameters:
+        stub: The results path stub to use.
+
+    Returns:
+        The image file.
+    """
+    return ImageFile(
         image_file_url=FCPath('/nowhere/N1234567890_1.IMG'),
         label_file_url=FCPath('/nowhere/N1234567890_1.LBL'),
-        results_path_stub='../../escaped/N1234567890_1',
+        results_path_stub=stub,
         index_file_row={},
     )
-    assert load_offset_if_any(FCPath(tmp_path), escaping) is None
+
+
+def _plant_loadable_metadata(path: FCPath) -> None:
+    """Write metadata that would load successfully if it were reached.
+
+    A stub naming a file that does not exist yields no offset whether or not
+    anything refused it, so a test for the refusal has to put a real, valid,
+    loadable file at the far end.  Then the only thing between the loader and
+    an offset from outside the results root is the guard under test.
+
+    Parameters:
+        path: Where to write the metadata.
+    """
+    Path(path.as_posix()).parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({'status': 'success', 'offset': [9.0, 9.0]}))
+
+
+def test_a_traversing_stub_does_not_load_an_offset_from_outside_the_root(
+    tmp_path: Path,
+) -> None:
+    """A stub climbing out of the results root is refused, not followed.
+
+    The planted file is valid and would load: without the guard this returns
+    ``(9.0, 9.0)`` read from outside the root the caller named.
+    """
+    nav_root = FCPath(tmp_path) / 'nav'
+    Path((nav_root).as_posix()).mkdir(parents=True, exist_ok=True)
+    _plant_loadable_metadata(FCPath(tmp_path) / 'evil' / 'N1234567890_1_metadata.json')
+    assert load_offset_if_any(nav_root, _escaping_image_file('../evil/N1234567890_1')) is None
+
+
+def test_an_absolute_stub_does_not_load_an_offset_from_outside_the_root(
+    tmp_path: Path,
+) -> None:
+    """Nor does one naming an absolute path, which would ignore the root."""
+    nav_root = FCPath(tmp_path) / 'nav'
+    Path(nav_root.as_posix()).mkdir(parents=True, exist_ok=True)
+    planted = FCPath(tmp_path) / 'elsewhere' / 'N1234567890_1_metadata.json'
+    _plant_loadable_metadata(planted)
+    stub = planted.as_posix().removesuffix('_metadata.json')
+    assert load_offset_if_any(nav_root, _escaping_image_file(stub)) is None
+
+
+def test_the_refusal_is_reported_to_the_image_log(tmp_path: Path) -> None:
+    """And says why, naming the stub as the thing to look at."""
+    nav_root = FCPath(tmp_path) / 'nav'
+    Path(nav_root.as_posix()).mkdir(parents=True, exist_ok=True)
+    _plant_loadable_metadata(FCPath(tmp_path) / 'evil' / 'N1234567890_1_metadata.json')
+    handlers, path = build_image_log_handlers(
+        'reproj', _STUB, LogSinks(log_root=FCPath(tmp_path) / 'logs'), LogLevels(), timestamp=_STAMP
+    )
+    try:
+        with IMAGE_LOGGER.open('REPROJECT', handler=handlers):
+            load_offset_if_any(nav_root, _escaping_image_file('../evil/N1234567890_1'))
+    finally:
+        for handler in handlers:
+            if handler is not pdslogger.NULL_HANDLER:
+                handler.close()
+    assert path is not None
+    with path.open('r') as stream:
+        assert 'path traversal' in stream.read()
+
+
+def test_a_stub_with_a_null_byte_is_refused(tmp_path: Path) -> None:
+    """A null byte cannot reach the filesystem call at all."""
+    nav_root = FCPath(tmp_path) / 'nav'
+    Path(nav_root.as_posix()).mkdir(parents=True, exist_ok=True)
+    assert load_offset_if_any(nav_root, _escaping_image_file('N123\x001')) is None

@@ -103,9 +103,12 @@ def log_key_for(cls: type) -> str:
     and ``NavModelRingsSimulated`` become ``rings``.
 
     A class whose derived key would be wrong may declare a ``log_key`` class
-    attribute instead.  Only a key declared on ``cls`` itself is honored; an
-    inherited one is ignored, so a subclass always gets a key derived from its
-    own name unless it declares one.
+    attribute instead.  An inherited one counts, so a family that should share
+    a key declares it once on their base -- which is what
+    :attr:`~spindoctor.support.nav_base.NavBase.resolved_log_key` reads at run
+    time.  The two have to agree: a key honored at run time but not here would
+    name a component that the configuration rejects, while the key the
+    configuration did accept silently governed nothing.
 
     Parameters:
         cls: The technique or model class to name.
@@ -113,7 +116,7 @@ def log_key_for(cls: type) -> str:
     Returns:
         The snake_case configuration key for ``cls``.
     """
-    declared = cls.__dict__.get('log_key')
+    declared = getattr(cls, 'log_key', None)
     if declared is not None:
         return str(declared)
 

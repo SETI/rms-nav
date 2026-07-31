@@ -23,7 +23,7 @@ from filecache import FCPath, FileCache
 package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, package_source_path)
 
-from spindoctor.cli.logging_args import add_logging_arguments
+from spindoctor.cli.logging_args import add_logging_arguments, reporting_logging_errors
 from spindoctor.config import (
     DEFAULT_CONFIG,
     IMAGE_LOGGER,
@@ -341,17 +341,15 @@ def main() -> None:
         pr = cProfile.Profile()
         pr.enable()
 
-    load_default_and_user_config(arguments, DEFAULT_CONFIG)
+    with reporting_logging_errors():
+        load_default_and_user_config(arguments, DEFAULT_CONFIG)
 
     # Derive the results root
     nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)
     nav_results_root = FileCache(None).new_path(nav_results_root_str)
 
-    try:
+    with reporting_logging_errors():
         run_logging = build_run_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
-    except (TypeError, ValueError) as exc:
-        print(f'Invalid logging configuration: {exc}', file=sys.stderr)
-        sys.exit(1)
 
     global START_TIME, NUM_FILES_PROCESSED, NUM_FILES_SKIPPED, NUM_FILES_COMPLETED
     START_TIME = time.time()

@@ -11,7 +11,9 @@ from spindoctor.config import (
     MAIN_LOGGER,
     set_log_levels,
     set_strict_scope,
+    strict_scope_override,
 )
+from spindoctor.config.log_scope import _reset_reported_call_sites
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +36,9 @@ def restore_loggers_fixture() -> Iterator[None]:
     image_handlers = list(IMAGE_LOGGER.handlers)
     main_propagate = MAIN_LOGGER.propagate
     image_propagate = IMAGE_LOGGER.propagate
+    main_level = MAIN_LOGGER.level
+    image_level = IMAGE_LOGGER.level
+    strict_override = strict_scope_override()
     yield
     for logger, baseline in ((MAIN_LOGGER, main_handlers), (IMAGE_LOGGER, image_handlers)):
         # remove_all_handlers only detaches, so a handler the test attached
@@ -48,6 +53,18 @@ def restore_loggers_fixture() -> Iterator[None]:
             logger.add_handler(handler)
     MAIN_LOGGER.propagate = main_propagate
     IMAGE_LOGGER.propagate = image_propagate
+    # Restored to what was found rather than to a level named here: a test that
+    # sets one and puts back what it assumed the default was pins that
+    # assumption on every test after it.
+    MAIN_LOGGER.set_level(main_level)
+    IMAGE_LOGGER.set_level(image_level)
+    # The override, not the resolved value: saving the resolved boolean would
+    # pin it and lose the deferral to the configuration.
+    set_strict_scope(strict_override)
+    # A test that logs out of scope otherwise leaves its call site in the
+    # process-wide dedup set, so a later test asserting on that warning sees
+    # nothing and fails somewhere unrelated to the cause.
+    _reset_reported_call_sites()
 
 
 @pytest.fixture(autouse=True)

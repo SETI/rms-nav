@@ -12,9 +12,11 @@ actually meets rather than a reconstruction of it.
 """
 
 import argparse
+import asyncio
 import contextlib
 import importlib
 import io
+import re
 import sys
 from pathlib import Path
 
@@ -57,12 +59,16 @@ _WITH_ANY_LOGGER = _WITH_IMAGE_LOGGER + _WITHOUT_IMAGE_LOGGER
 # are checked by source rather than by running them: the GUI programs import
 # PyQt6 at module scope, and importing it to prove a program has no logging
 # flags is a poor trade.
+# Program, and the argv that reaches the parser the program actually runs
+# with.  sd_mosaic_display prints a dispatch parser's help when given no mode,
+# so asking it without one would inspect the wrong parser.
 _WITHOUT_LOGGER = [
-    'sd_stats_ingest',
-    'sd_stats_report',
-    'sd_create_simulated_image',
-    'sd_backplane_viewer',
-    'sd_mosaic_display',
+    ('sd_stats_ingest', []),
+    ('sd_stats_report', []),
+    ('sd_create_simulated_image', []),
+    ('sd_backplane_viewer', []),
+    ('sd_mosaic_display', ['rings']),
+    ('sd_mosaic_display', ['body']),
 ]
 
 # The cloud-task drivers deliberately have no logging surface: every flag here
@@ -96,6 +102,58 @@ def _help_text(program: str, argv: list[str]) -> str:
     finally:
         sys.argv = saved
     return buffer.getvalue()
+
+
+def _cloud_task_parser(program: str) -> argparse.ArgumentParser:
+    """Return the parser a cloud-task driver builds for itself.
+
+    A cloud-task driver builds its parser inside ``async_main`` and hands it
+    straight to the worker, so the worker is intercepted to capture it rather
+    than started.
+
+    Parameters:
+        program: Dispatch module name under ``spindoctor.cli``.
+
+    Returns:
+        The parser the driver would have run with.
+    """
+    module = importlib.import_module(f'spindoctor.cli.{program}')
+    captured: dict[str, argparse.ArgumentParser] = {}
+
+    class _CapturedError(Exception):
+        """Raised to stop the driver once its parser has been seen."""
+
+    def _intercept(*args: object, **kwargs: object) -> None:
+        parser = kwargs.get('argparser')
+        assert isinstance(parser, argparse.ArgumentParser)
+        captured['parser'] = parser
+        raise _CapturedError
+
+    real_worker = module.Worker
+    module.Worker = _intercept  # type: ignore[attr-defined]
+    try:
+        with contextlib.suppress(_CapturedError):
+            asyncio.run(module.async_main())
+    finally:
+        module.Worker = real_worker  # type: ignore[attr-defined]
+    return captured['parser']
+
+
+def _logging_options_of(parser: argparse.ArgumentParser) -> list[str]:
+    """Return every logging option a parser accepts.
+
+    Parameters:
+        parser: The parser to inspect.
+
+    Returns:
+        The option strings beginning with ``--log``.
+    """
+    return sorted(
+        option
+        for action in parser._actions
+        for option in action.option_strings
+        if option.startswith('--log')
+    )
 
 
 def _source(program: str) -> str:
@@ -182,10 +240,16 @@ def test_turning_a_sink_off_is_distinguishable_from_saying_nothing(flag: str) ->
     assert getattr(parser.parse_args([f'--no-{flag.removeprefix("--")}']), destination) is False
 
 
-@pytest.mark.parametrize('program', _WITHOUT_LOGGER)
-def test_a_program_with_no_logger_has_no_logging_flags(program: str) -> None:
-    """The statistics and GUI programs take none of the logging surface."""
-    assert 'add_logging_arguments' not in _source(program)
+@pytest.mark.parametrize(('program', 'argv'), _WITHOUT_LOGGER)
+def test_a_program_with_no_logger_has_no_logging_flags(program: str, argv: list[str]) -> None:
+    """The statistics and GUI programs take none of the logging surface.
+
+    Read off the built parser rather than the module's own text: these flags
+    are added by a shared helper, and a program acquires the whole set by
+    calling any helper that calls it -- which is exactly how ``sd_mosaic``
+    gets them.  Grepping the dispatch module would not see that.
+    """
+    assert '--log-' not in _help_text(program, argv)
 
 
 @pytest.mark.parametrize('program', _CLOUD_TASK_DRIVERS)
@@ -195,4 +259,37 @@ def test_a_cloud_task_driver_has_no_logging_flags(program: str) -> None:
     Every flag configures a main logger a cloud task must not have, or a
     console it must not write to.
     """
-    assert 'add_logging_arguments' not in _source(program)
+    assert _logging_options_of(_cloud_task_parser(program)) == []
+
+
+# ---------------------------------------------------------------------------
+# A bad setting is reported, not raised
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('program', [program for program, _ in _WITH_ANY_LOGGER])
+def test_a_driver_reports_a_bad_logging_config(program: str) -> None:
+    """A driver reports an invalid logging setting rather than raising.
+
+    The configuration file and the command line raise the same way and each
+    names the offending key, so both should reach the operator the same way.
+    Reaching them as a stack trace reads as a crash rather than as the thing
+    they typed.
+    """
+    source = _source(program)
+    assert 'reporting_logging_errors' in source
+
+
+@pytest.mark.parametrize('program', [program for program, _ in _WITH_ANY_LOGGER])
+def test_a_driver_guards_the_config_load_itself(program: str) -> None:
+    """The guard covers the config load, which is what validates the section.
+
+    Guarding only the logger construction leaves the configuration-file half
+    of the surface -- the half this design advertises -- reaching the terminal
+    as a traceback.
+    """
+    source = _source(program)
+    guarded = re.search(
+        r'with reporting_logging_errors\(\):\n\s+load_default_and_user_config', source
+    )
+    assert guarded is not None

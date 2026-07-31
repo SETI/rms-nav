@@ -13,10 +13,38 @@ resolved from these arguments and the configuration together.
 """
 
 import argparse
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from spindoctor.config.logging_keys import LOG_LEVEL_NAMES
 
-__all__ = ['add_logging_arguments']
+__all__ = ['add_logging_arguments', 'reporting_logging_errors']
+
+
+@contextmanager
+def reporting_logging_errors() -> Iterator[None]:
+    """Report a bad logging setting as a message rather than a traceback.
+
+    Both halves of the surface raise the same way -- an unknown component in a
+    configuration file and an unknown level on the command line each name the
+    offending key -- so both should be presented the same way.  Without this
+    the configuration-file half reaches the terminal as a stack trace, which
+    reads as a crash rather than as the thing the operator typed.
+
+    Wrap only the calls that read logging settings.  Deriving a results root
+    also raises ValueError, and reporting that as a logging problem would send
+    the reader to the wrong place.
+
+    Yields:
+        None.
+    """
+    try:
+        yield
+    except (TypeError, ValueError) as exc:
+        print(f'Invalid logging configuration: {exc}', file=sys.stderr)
+        sys.exit(1)
+
 
 _LEVEL_CHOICES = ', '.join(sorted(LOG_LEVEL_NAMES))
 
