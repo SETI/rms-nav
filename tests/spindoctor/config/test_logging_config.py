@@ -1,6 +1,7 @@
 """Tests for logging level resolution, sink selection, and logger construction."""
 
 import argparse
+import itertools
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +10,7 @@ import pdslogger
 import pytest
 from filecache import FCPath
 
+from spindoctor.config import IMAGE_LOGGER
 from spindoctor.config.config import Config
 from spindoctor.config.logging_config import (
     BACKEND_NAMES,
@@ -911,3 +913,98 @@ def test_without_a_fallback_the_file_sinks_are_dropped(
         SD_OFFSET, argparse.Namespace(), _config(tmp_path), build_main=False
     )
     assert (run_logging.sinks.main_file, run_logging.sinks.image_file) == (False, False)
+
+
+# ---------------------------------------------------------------------------
+# No logger can reach the print fallback
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ('main_console', 'main_file', 'image_console', 'image_file'),
+    list(itertools.product([True, False], repeat=4)),
+)
+@pytest.mark.parametrize('level', ['DEBUG', 'INFO', 'NONE'])
+def test_image_handlers_are_never_empty(
+    tmp_path: Path,
+    main_console: bool,
+    main_file: bool,
+    image_console: bool,
+    image_file: bool,
+    level: str,
+) -> None:
+    """No combination of sinks and levels leaves a logger with no handlers.
+
+    A PdsLogger with an empty handler list does not go quiet: it prints every
+    record to stdout regardless of level.  Asking for no output must therefore
+    produce the null handler rather than nothing, and that has to hold for
+    every combination rather than the ones a driver happens to use.
+    """
+    sinks = LogSinks(
+        log_root=FCPath(tmp_path),
+        main_console=main_console,
+        main_file=main_file,
+        image_console=image_console,
+        image_file=image_file,
+    )
+    handlers, _ = build_image_log_handlers(
+        'nav',
+        f'vol/{main_console}{main_file}{image_console}{image_file}{level}',
+        sinks,
+        LogLevels(main=level, image=level),
+        timestamp=_STAMP,
+    )
+    try:
+        assert handlers != []
+    finally:
+        _close(handlers)
+
+
+@pytest.mark.parametrize(
+    ('main_console', 'main_file'), list(itertools.product([True, False], repeat=2))
+)
+@pytest.mark.parametrize('level', ['DEBUG', 'INFO', 'NONE'])
+def test_the_main_logger_is_never_left_empty(
+    tmp_path: Path, main_console: bool, main_file: bool, level: str
+) -> None:
+    """The same holds for the main logger, however its sinks and level are set.
+
+    ``NONE`` is the case worth having here: it creates no real sink even when a
+    file sink was asked for, so it reaches the null handler by a different route
+    than turning the sinks off does.
+    """
+    logger = pdslogger.PdsLogger.get_logger(
+        f'never_empty_{main_console}_{main_file}_{level}', lognames=False
+    )
+    sinks = LogSinks(log_root=FCPath(tmp_path), main_console=main_console, main_file=main_file)
+    build_main_logger(logger, SD_OFFSET, sinks, LogLevels(main=level), timestamp=_STAMP)
+    try:
+        assert logger.handlers != []
+    finally:
+        _close(list(logger.handlers))
+        logger.remove_all_handlers()
+
+
+# ---------------------------------------------------------------------------
+# The logger registry does not grow with the batch
+# ---------------------------------------------------------------------------
+
+
+def test_the_registry_does_not_grow_with_the_image_count(tmp_path: Path) -> None:
+    """Navigating many images leaves the logger registry the size it was.
+
+    pdslogger keeps every logger it is asked for in a process-wide table and
+    never frees one, so a logger per image would leak for the length of a
+    batch.  One image logger is reused with its handlers swapped instead.
+    """
+    before = len(pdslogger._LOOKUP)
+    for index in range(50):
+        handlers, _ = build_image_log_handlers(
+            'nav', f'vol/N{index}', _sinks(tmp_path), LogLevels(), timestamp=_STAMP
+        )
+        try:
+            with IMAGE_LOGGER.open(f'IMAGE {index}', handler=handlers):
+                IMAGE_LOGGER.info('processing')
+        finally:
+            _close(handlers)
+    assert len(pdslogger._LOOKUP) == before

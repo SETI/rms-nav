@@ -512,6 +512,9 @@ of its own falls back to ``<output-dir>/logs``:
 
 If ``--prefix`` is empty (the default), the leading underscore is omitted.
 
+``sd_mosaic`` accepts the same logging options as every other pipeline
+program; see :doc:`user_guide_logging`.
+
 Cloud-tasks entry point
 ^^^^^^^^^^^^^^^^^^^^^^^
 
