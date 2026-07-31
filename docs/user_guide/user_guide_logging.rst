@@ -71,10 +71,17 @@ run rather than afterwards.
 Where the files go
 ==================
 
-Both kinds live under one log root. By default that is a ``logs`` directory
-under the navigation results root; ``--log-root`` overrides it, as do the
-``environment.log_root`` configuration variable and the ``NAV_LOG_ROOT``
-environment variable.
+Both kinds live under one log root, named by ``--log-root``, the
+``environment.log_root`` configuration variable or the ``NAV_LOG_ROOT``
+environment variable, in that order of precedence.
+
+With none of those set, the root is derived: a ``logs`` directory under the
+navigation results root. A cloud-task worker is not required to have a
+navigation results root, so each falls back to a ``logs`` directory under the
+root it does have -- the backplane results root for
+``sd_backplanes_cloud_tasks``, and the task's own output directory for
+``sd_mosaic_cloud_tasks`` -- rather than dropping its logs for want of a
+setting that does not apply to it.
 
 .. code-block:: text
 
@@ -134,10 +141,11 @@ the terminal.
 Command-line options
 ====================
 
-Every program that has a logger accepts the same options, so what you learn for
+Every program you run yourself accepts the same options, so what you learn for
 one works for the next. A program with no image log accepts only the
 main-logger options, and rejects the image ones by name rather than accepting
-and ignoring them.
+and ignoring them. The ``_cloud_tasks`` drivers accept none of these and are
+configured through the configuration file alone; see `Cloud tasks`_ below.
 
 ``--log-root PATH``
     Where this run's log files go.

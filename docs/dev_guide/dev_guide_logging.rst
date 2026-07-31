@@ -28,7 +28,7 @@ Every navigation produces a top-level INFO line per per-image phase
 plus a final ``status_reason``-keyed verdict:
 
 * **Per technique.** Each technique opens a section with
-  ``with self.logger.open(f'TECHNIQUE: {self.name}'):`` so per-image
+  ``with self.log_section(f'TECHNIQUE: {self.name}'):`` so per-image
   logs delimit each technique's contribution unambiguously.
 * **Per status reason.** The orchestrator emits one INFO line per item
   in :data:`spindoctor.nav_orchestrator.status_reason_info.STATUS_REASON_INFO_TEMPLATE`
@@ -104,9 +104,10 @@ Writing a component that logs
 =============================
 
 Which logger a class writes to is declared, not inferred. Most components work
-on one image and keep the default :attr:`LogRole.IMAGE
-<spindoctor.config.log_scope.LogRole>`; one whose work spans a run -- enumerating a
-dataset, tallying totals -- sets ``log_role = LogRole.MAIN`` on the class, and
+on one image and keep the default
+:attr:`~spindoctor.config.log_scope.LogRole.IMAGE`; one whose work spans a run
+-- enumerating a dataset, tallying totals -- sets ``log_role = LogRole.MAIN``
+on the class, and
 :class:`~spindoctor.support.nav_base.NavBase` binds ``self.logger`` accordingly.
 
 Open sections with :meth:`~spindoctor.support.nav_base.NavBase.log_section`
@@ -190,9 +191,9 @@ Conventions
 * Never ``import logging`` in ``nav.*`` core code.
 * Never ``print(...)`` in library code; route through ``self.logger``.
 * Every :meth:`~spindoctor.nav_technique.nav_technique.NavTechnique.navigate` body
-  wraps its work in
-  ``with self.logger.open(f'TECHNIQUE: {self.name}'):`` for log
-  scoping.
+  wraps its work in ``with self.log_section(f'TECHNIQUE: {self.name}'):``
+  for log scoping. Not ``self.logger.open``, which would skip the level
+  configured for that technique; see `Writing a component that logs`_.
 * The orchestrator captures every per-technique exception and emits an
   ``EXCEPTION``-level pdslogger line via ``self._logger.exception(...)``;
   the technique's failure surfaces on the returned

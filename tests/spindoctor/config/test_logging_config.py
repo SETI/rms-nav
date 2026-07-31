@@ -963,15 +963,21 @@ def test_image_handlers_are_never_empty(
 @pytest.mark.parametrize(
     ('main_console', 'main_file'), list(itertools.product([True, False], repeat=2))
 )
+@pytest.mark.parametrize('level', ['DEBUG', 'INFO', 'NONE'])
 def test_the_main_logger_is_never_left_empty(
-    tmp_path: Path, main_console: bool, main_file: bool
+    tmp_path: Path, main_console: bool, main_file: bool, level: str
 ) -> None:
-    """The same holds for the main logger, however its sinks are set."""
+    """The same holds for the main logger, however its sinks and level are set.
+
+    ``NONE`` is the case worth having here: it creates no real sink even when a
+    file sink was asked for, so it reaches the null handler by a different route
+    than turning the sinks off does.
+    """
     logger = pdslogger.PdsLogger.get_logger(
-        f'never_empty_{main_console}_{main_file}', lognames=False
+        f'never_empty_{main_console}_{main_file}_{level}', lognames=False
     )
     sinks = LogSinks(log_root=FCPath(tmp_path), main_console=main_console, main_file=main_file)
-    build_main_logger(logger, SD_OFFSET, sinks, LogLevels(), timestamp=_STAMP)
+    build_main_logger(logger, SD_OFFSET, sinks, LogLevels(main=level), timestamp=_STAMP)
     try:
         assert logger.handlers != []
     finally:

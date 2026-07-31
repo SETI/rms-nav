@@ -711,8 +711,11 @@ Every factual claim on the page was checked against the code rather than against
 7. Each of the four sink toggles independently controls its sink, and
    disabling every sink produces no output at all.
 8. No PdsLogger anywhere in the codebase can reach the `print()` fallback.
-   Enforced by a test over all sixteen sink combinations at three levels,
-   asserting a non-empty handler list for each.
+   Enforced by tests over every sink combination at three levels, for both
+   loggers, asserting a non-empty handler list for each. `NONE` is the case
+   worth having: it creates no real sink even where a file sink was asked
+   for, reaching the null handler by a different route than turning the
+   sinks off does.
 9. No image-role component logs outside an image scope in production code.
    **Revised**: the original wording said "anywhere in the suite, enforced by
    strict scope being on in tests", which does not survive contact with the

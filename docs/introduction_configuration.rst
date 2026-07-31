@@ -79,7 +79,7 @@ the image logger, covering one image inside one processing stage. A component
 can be given its own level, so one technique or model can be made verbose or
 quiet without affecting the rest. For the full component list, where the log
 files are written, and the precedence between the configuration and the
-command line, see :doc:`user_guide/user_guide_logging`.
+command line, see :doc:`/user_guide/user_guide_logging`.
 
 Example -- enable verbose output for star and ring models while keeping other
 components at the default level:
@@ -209,7 +209,7 @@ loggers, or ``MODULE=LEVEL`` for one component, repeatable),
 ``--log-main-to-console``, ``--log-main-to-file``, ``--log-image-to-console``
 and ``--log-image-to-file``, each with a ``--no-`` form. A program that does
 not process images individually accepts only the main-logger options, and the
-cloud-task drivers accept none: see :doc:`user_guide/user_guide_logging`.
+cloud-task drivers accept none: see :doc:`/user_guide/user_guide_logging`.
 
 These command-line options provide the highest priority override mechanism,
 taking precedence over all configuration files, including those specified with
