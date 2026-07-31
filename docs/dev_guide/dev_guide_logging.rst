@@ -190,15 +190,23 @@ changing anything here:
 
 Because a cloud task has no main log, a record about one image must be logged
 to :data:`~spindoctor.config.log_scope.IMAGE_LOGGER` rather than to
-:data:`~spindoctor.config.logger.MAIN_LOGGER`. A per-image failure reported to
-the main logger is reported nowhere at all: the task carries on to the next
-image, and nothing is left to say what happened to that one.
+:data:`~spindoctor.config.logger.MAIN_LOGGER`, which in a task is bound to a
+null sink and discards what it is given.
+
+That covers anything happening *inside* an image's section. An outcome
+decided before one is open -- an image skipped for want of a successful
+navigation, a results path stub refused -- has no image log to go in either,
+and belongs in the value ``process_task`` returns. The task result is the one
+channel a worker always has.
 
 Conventions
 ===========
 
 * Never ``import logging`` in ``nav.*`` core code.
-* Never ``print(...)`` in library code; route through ``self.logger``.
+* Never ``print(...)`` in the navigation core or in any program that has a
+  logger; route through ``self.logger``. The statistics and GUI programs are
+  the deliberate exception -- they carry no logger and report with ``print()``
+  by design.
 * Every :meth:`~spindoctor.nav_technique.nav_technique.NavTechnique.navigate` body
   wraps its work in ``with self.log_section(f'TECHNIQUE: {self.name}'):``
   for log scoping. Not ``self.logger.open``, which would skip the level

@@ -1,7 +1,6 @@
 """Tests for per-component log sections and the keys that configure them."""
 
 import logging
-from collections.abc import Iterator
 from pathlib import Path
 
 import pdslogger
@@ -20,6 +19,7 @@ from spindoctor.config import (
     logged_section,
     set_log_levels,
 )
+from spindoctor.config.logging_keys import OTHER_LOG_KEYS
 from spindoctor.nav_model.nav_model_body import NavModelBody
 from spindoctor.nav_model.nav_model_rings import NavModelRings
 from spindoctor.nav_model.nav_model_rings_simulated import NavModelRingsSimulated
@@ -29,12 +29,9 @@ from spindoctor.support.nav_base import NavBase
 
 _STAMP = '2026-07-29T12-00-00'
 
-
-@pytest.fixture(autouse=True)
-def _restore_levels() -> Iterator[None]:
-    """Discard any levels a test installs, so the next one resolves afresh."""
-    yield
-    set_log_levels(None)
+# Every "other" component except annotation, which is a class with a declared
+# log_key rather than a decorated function and is covered separately.
+_DECORATED_OTHER_KEYS = sorted(OTHER_LOG_KEYS - {'annotate'})
 
 
 def _emit(root: FCPath, levels: LogLevels, component: NavBase, method: str, message: str) -> str:
@@ -190,7 +187,7 @@ def test_an_explicit_level_overrides_the_configured_one() -> None:
     logger.add_handler(pdslogger.NULL_HANDLER)
     technique = BodyLimbNav()
     with image_scope(logger), technique.log_section('COMPONENT', level='debug'):
-        assert logger.level == 10
+        assert logger.level == logging.DEBUG
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +284,7 @@ def _emit_in_decorated(root: FCPath, levels: LogLevels, log_key: str, message: s
 
 @pytest.mark.parametrize(
     'log_key',
-    ['correlate', 'ensemble', 'image_derivatives', 'obs', 'orchestrator', 'provenance'],
+    _DECORATED_OTHER_KEYS,
 )
 def test_a_function_component_can_be_raised(tmp_path: Path, log_key: str) -> None:
     """Each function-shaped component can be made verbose on its own."""
@@ -297,7 +294,7 @@ def test_a_function_component_can_be_raised(tmp_path: Path, log_key: str) -> Non
 
 @pytest.mark.parametrize(
     'log_key',
-    ['correlate', 'ensemble', 'image_derivatives', 'obs', 'orchestrator', 'provenance'],
+    _DECORATED_OTHER_KEYS,
 )
 def test_a_function_component_can_be_silenced(tmp_path: Path, log_key: str) -> None:
     """Each function-shaped component can be silenced on its own."""

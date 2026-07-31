@@ -839,7 +839,9 @@ def test_a_stub_leaving_the_log_root_is_rejected(tmp_path: Path, stub: str) -> N
     Cloud-task drivers take this value from task data, so it is not
     necessarily trustworthy.
     """
-    with pytest.raises(ValueError):
+    # Matched on the message: without it the test passes on any ValueError,
+    # including one raised for a reason that has nothing to do with the stub.
+    with pytest.raises(ValueError, match=r'[Rr]esults path stub'):
         image_log_path(FCPath(str(tmp_path)), 'nav', stub, timestamp=_STAMP)
 
 

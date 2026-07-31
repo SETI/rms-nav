@@ -159,9 +159,12 @@ configuration / environment precedence as every other root in
 Layout underneath it:
 
 ```text
-{log_root}/{program}/main_{datetime}.log                 # main logger
-{log_root}/{backend}/{results_path_stub}_{datetime}.log  # image logger
+{log_root}/{program}/main_{datetime}.log                            # main logger
+{log_root}/{backend}/{results_path_stub}_{datetime}.log             # image logger
+{log_root}/reproj/{subject}/{results_path_stub}_{datetime}.log      # reprojection
 ```
+
+Reprojection keys its image logs by mosaic subject as well, since one image may be reprojected onto more than one body. The user guide states the same three forms.
 
 `{datetime}` is `%Y-%m-%dT%H-%M-%S` **in UTC**, applied to main logs as well
 as image logs. The format matches the existing per-image convention; the
@@ -330,11 +333,7 @@ sections are converted with their drivers.
 ### 2.7 Command-line surface
 
 One shared `add_logging_arguments(parser)` helper, used by every program in
-section 2.1 that carries a logger — eight dispatch modules. The same flags mean
-the same thing everywhere; programs without an image logger reject the
-image-specific flags with a clear message rather than accepting and ignoring
-them. The statistics and GUI programs take none of these flags, since they
-have no loggers to configure.
+section 2.1 that carries a logger *and is run directly* — the interactive dispatch modules. The same flags mean the same thing everywhere; programs without an image logger reject the image-specific flags with a clear message rather than accepting and ignoring them. The statistics and GUI programs take none of these flags, since they have no loggers to configure, and neither do the cloud-task drivers: every one of these flags configures a main logger a task must not have or a console it must not write to, so their levels come from the configuration alone (section 2.8).
 
 | Argument | Effect |
 |---|---|

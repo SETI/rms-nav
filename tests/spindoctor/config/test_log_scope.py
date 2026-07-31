@@ -419,7 +419,13 @@ def test_the_config_key_can_disable_strict_scope(monkeypatch: pytest.MonkeyPatch
     assert strict_scope() is False
 
 
-def test_an_override_beats_the_config_key() -> None:
-    """An explicit override takes precedence over the configured value."""
+def test_an_override_beats_the_config_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit override takes precedence over the configured value.
+
+    Set against a configuration saying the opposite, so that agreeing with the
+    shipped default is not enough to pass.
+    """
+    DEFAULT_CONFIG.ensure_loaded()
+    monkeypatch.setitem(DEFAULT_CONFIG.logging, 'strict_scope', True)
     set_strict_scope(False)
     assert strict_scope() is False

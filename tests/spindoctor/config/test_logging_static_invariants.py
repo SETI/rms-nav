@@ -176,6 +176,42 @@ def test_the_loggers_are_the_only_two() -> None:
     constructed = sorted(
         path.relative_to(_SRC).as_posix()
         for path in _SRC.rglob('*.py')
-        if 'PdsLogger(' in path.read_text()
+        if _constructs_a_logger(path)
     )
     assert constructed == ['config/log_scope.py', 'config/logger.py']
+
+
+def _constructs_a_logger(path: FCPath) -> bool:
+    """Whether a module calls the PdsLogger constructor.
+
+    Matched in the AST rather than the text: a docstring mentioning the call
+    is not one, and an aliased import (``import pdslogger as _pl``) is.
+
+    Parameters:
+        path: The module to read.
+
+    Returns:
+        True when the module constructs a logger.
+    """
+    tree = ast.parse(path.read_text())
+    aliases = {'pdslogger'} | {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name == 'pdslogger'
+    }
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id == 'PdsLogger':
+            return True
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr == 'PdsLogger'
+            and isinstance(func.value, ast.Name)
+            and func.value.id in aliases
+        ):
+            return True
+    return False

@@ -13,7 +13,6 @@ more than they should, which reads as a verbose run rather than as a defect.
 """
 
 import ast
-import re
 from pathlib import Path
 
 import pdslogger
@@ -97,22 +96,61 @@ def test_every_backend_passes_a_level_to_its_image_section(relative: str, backen
     because a new backend should be caught by being added to the list rather
     than by someone remembering this rule.
     """
-    tree = ast.parse((_SRC / relative).read_text())
     unfloored = [
         node.lineno
+        for node in _image_section_opens(relative)
+        if not any(keyword.arg == 'level' for keyword in node.keywords)
+    ]
+    assert unfloored == []
+
+
+def _image_section_opens(relative: str) -> list[ast.Call]:
+    """Return every ``open(handler=...)`` call in a module.
+
+    Parameters:
+        relative: Path of the module under the package.
+
+    Returns:
+        The calls that open a section with handlers attached.
+    """
+    tree = ast.parse((_SRC / relative).read_text())
+    return [
+        node
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == 'open'
         and any(keyword.arg == 'handler' for keyword in node.keywords)
-        and not any(keyword.arg == 'level' for keyword in node.keywords)
     ]
-    assert unfloored == []
 
 
 @pytest.mark.parametrize(('relative', 'backend'), _IMAGE_SECTION_SITES)
 def test_every_backend_floors_at_the_image_level(relative: str, backend: str) -> None:
-    """And the level it passes is the image level, not something of its own."""
-    text = str((_SRC / relative).read_text())
-    opens = re.findall(r'\.open\((?:[^()]|\([^()]*\))*?handler=(?:[^()]|\([^()]*\))*?\)', text)
-    assert [call for call in opens if 'image_section_level()' not in call] == []
+    """And the level it passes is the image level, not something of its own.
+
+    Read from the AST rather than matched in the call's text, so that
+    reformatting the argument list cannot change what this checks.
+    """
+    wrong = [
+        node.lineno
+        for node in _image_section_opens(relative)
+        for keyword in node.keywords
+        if keyword.arg == 'level' and not _is_image_section_level(keyword.value)
+    ]
+    assert wrong == []
+
+
+def _is_image_section_level(value: ast.expr) -> bool:
+    """Whether an argument expression is a call to ``image_section_level()``.
+
+    Parameters:
+        value: The expression passed as ``level``.
+
+    Returns:
+        True when it is that call.
+    """
+    return (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Attribute)
+        and value.func.attr == 'image_section_level'
+    )

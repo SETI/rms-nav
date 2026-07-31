@@ -75,6 +75,7 @@ __all__ = [
     'log_levels',
     'main_log_path',
     'resolve_log_levels',
+    'run_logging_for_root',
     'run_timestamp',
     'set_log_levels',
     'sinks_from_arguments',

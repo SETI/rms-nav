@@ -163,13 +163,20 @@ def _run_reproject_pass(
             )
             continue
 
-        local_handlers, image_log_path = build_image_log_handlers(
-            'reproj',
-            f'{subject_name}/{image_file.results_path_stub}',
-            run_logging.sinks,
-            run_logging.levels,
-            timestamp=run_logging.timestamp,
-        )
+        try:
+            local_handlers, image_log_path = build_image_log_handlers(
+                'reproj',
+                f'{subject_name}/{image_file.results_path_stub}',
+                run_logging.sinks,
+                run_logging.levels,
+                timestamp=run_logging.timestamp,
+            )
+        except ValueError as exc:
+            # A stub that would put the log outside the log root fails its own
+            # image; ending the pass would discard everything already done.
+            MAIN_LOGGER.error('Refusing to reproject %s: %s', image_file.image_file_url, exc)
+            n_failed += 1
+            continue
         try:
             with IMAGE_LOGGER.open(
                 f'REPROJECT {image_file.image_file_url}',

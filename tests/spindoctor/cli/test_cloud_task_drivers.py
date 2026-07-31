@@ -22,6 +22,7 @@ from spindoctor.cli import (
 )
 from spindoctor.config.config import Config
 from spindoctor.config.logging_config import RunLogging, build_cloud_task_logging
+from spindoctor.config.program_names import SD_BACKPLANES, SD_MOSAIC
 
 _DATASET = 'COISS_saturn'
 
@@ -68,19 +69,28 @@ class _Recorder:
             log_root: Directory to use as the log root.
         """
         self.called = False
+        self.program_name: str | None = None
+        self.fallback_log_root: Any = None
         self._log_root = log_root
 
     def __call__(self, *args: Any, **kwargs: Any) -> RunLogging:
-        """Record the call and resolve logging with the terminal withheld.
+        """Record what the driver asked for, and resolve with no terminal.
+
+        The arguments are kept rather than discarded: which program identity a
+        driver claims decides which ``logging.programs`` block governs it, and
+        its fallback log root is where its logs go when nothing else names
+        one.  A recorder that only noted the call would pass with both wrong.
 
         Parameters:
-            *args: Passed through by the driver; ignored.
-            **kwargs: Passed through by the driver; ignored.
+            *args: The driver's positional arguments.
+            **kwargs: The driver's keyword arguments.
 
         Returns:
             Logging resolved against the recorder's directory.
         """
         self.called = True
+        self.program_name = args[0] if args else None
+        self.fallback_log_root = kwargs.get('fallback_log_root')
         return build_cloud_task_logging(
             'sd_offset', argparse.Namespace(log_root=self._log_root.as_posix()), _config()
         )
@@ -129,7 +139,12 @@ def test_the_offset_driver_isolates_its_logging(
 def test_the_backplanes_driver_isolates_its_logging(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """sd_backplanes_cloud_tasks resolves logging through the cloud-task builder."""
+    """sd_backplanes_cloud_tasks resolves logging through the cloud-task builder.
+
+    Its identity and its fallback root are both asserted: the first decides
+    which ``logging.programs`` block governs the worker, the second where its
+    logs go when nothing else names a root.
+    """
     recorder = _Recorder(FCPath(tmp_path))
     monkeypatch.setattr(sd_backplanes_cloud_tasks, 'build_cloud_task_logging', recorder)
     monkeypatch.setattr(
@@ -143,13 +158,17 @@ def test_the_backplanes_driver_isolates_its_logging(
             backplane_results_root=FCPath(tmp_path).as_posix(),
         ),
     )
-    assert recorder.called
+    assert recorder.program_name == SD_BACKPLANES
 
 
 def test_the_mosaic_driver_isolates_its_logging(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """sd_mosaic_cloud_tasks resolves logging through the cloud-task builder."""
+    """sd_mosaic_cloud_tasks resolves logging through the cloud-task builder.
+
+    A reprojection worker is not required to have a navigation results root,
+    so it falls back to the task's own output directory.
+    """
     recorder = _Recorder(FCPath(tmp_path))
     monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_cloud_task_logging', recorder)
     monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_ring_mosaic', lambda *a, **k: _StubMosaic())
@@ -163,7 +182,49 @@ def test_the_mosaic_driver_isolates_its_logging(
         },
         _worker_data(nav_results_root=FCPath(tmp_path).as_posix()),
     )
-    assert recorder.called
+    assert recorder.program_name == SD_MOSAIC
+
+
+def test_the_backplanes_driver_falls_back_to_its_own_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its logs go under the backplane results root, not the navigation one."""
+    recorder = _Recorder(FCPath(tmp_path))
+    monkeypatch.setattr(sd_backplanes_cloud_tasks, 'build_cloud_task_logging', recorder)
+    monkeypatch.setattr(
+        sd_backplanes_cloud_tasks, 'generate_backplanes_image_files', lambda *a, **k: None
+    )
+    backplane_root = FCPath(tmp_path) / 'bp'
+    sd_backplanes_cloud_tasks.process_task(
+        'task-1',
+        {'dataset_name': _DATASET, 'files': [_image_entry(FCPath(tmp_path))]},
+        _worker_data(
+            nav_results_root=FCPath(tmp_path).as_posix(),
+            backplane_results_root=backplane_root.as_posix(),
+        ),
+    )
+    assert str(recorder.fallback_log_root).endswith('bp/logs')
+
+
+def test_the_mosaic_driver_falls_back_to_the_task_output_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reprojection worker need not have a navigation results root at all."""
+    recorder = _Recorder(FCPath(tmp_path))
+    monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_cloud_task_logging', recorder)
+    monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_ring_mosaic', lambda *a, **k: _StubMosaic())
+    output_dir = FCPath(tmp_path) / 'out'
+    sd_mosaic_cloud_tasks.process_task(
+        'task-1',
+        {
+            'mode': 'rings',
+            'dataset_name': _DATASET,
+            'files': [],
+            'arguments': {'output_dir': output_dir.as_posix()},
+        },
+        _worker_data(nav_results_root=FCPath(tmp_path).as_posix()),
+    )
+    assert str(recorder.fallback_log_root).endswith('out/logs')
 
 
 # ---------------------------------------------------------------------------

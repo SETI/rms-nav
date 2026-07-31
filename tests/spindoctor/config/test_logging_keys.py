@@ -368,7 +368,7 @@ def test_nesting_cannot_smuggle_past_an_unknown_key(tmp_path: Path) -> None:
         f'  programs:\n    {SD_OFFSET}:\n      programs:\n        {SD_OFFSET}:\n'
         f'          wibble: NOT_A_LEVEL\n',
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='programs'):
         validate_logging_config(config)
 
 

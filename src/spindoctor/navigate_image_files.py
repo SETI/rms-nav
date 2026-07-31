@@ -212,13 +212,27 @@ def navigate_image_files(
         # already said where its output belongs, and resolving afresh both
         # ignores that and fails outright when nothing else names a root.
         run_logging = run_logging_for_root(nav_results_root / 'logs')
-    local_handlers, image_log_path = build_image_log_handlers(
-        'nav',
-        image_file.results_path_stub,
-        run_logging.sinks,
-        run_logging.levels,
-        timestamp=run_logging.timestamp,
-    )
+    try:
+        local_handlers, image_log_path = build_image_log_handlers(
+            'nav',
+            image_file.results_path_stub,
+            run_logging.sinks,
+            run_logging.levels,
+            timestamp=run_logging.timestamp,
+        )
+    except ValueError as exc:
+        # A stub that would put the log outside the log root is a bad image
+        # entry.  It fails its own image and returns like any other per-image
+        # error, rather than raising through the driver and taking the rest of
+        # the batch with it.
+        MAIN_LOGGER.error('Refusing to navigate %s: %s', image_url, exc)
+        return False, {
+            'status': 'error',
+            'status_error': 'invalid_results_path_stub',
+            'status_exception': str(exc),
+            'observation': {'instrument': instrument},
+            'timing': build_timing_section(run_start, datetime.now(UTC)),
+        }
 
     try:
         with logger.open(
