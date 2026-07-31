@@ -10,9 +10,9 @@ The two loggers
 ===============
 
 **The main log** covers one run of one program. It reports what the program is
-doing at the top level: which image it is about to process, counts and totals,
-elapsed time, and the path of each image log it wrote. There is one for the
-life of the run.
+doing at the top level: which image it is about to process, one line for each
+image's answer, counts and totals, elapsed time, and the path of each image log
+it wrote. There is one for the life of the run.
 
 **An image log** covers one image inside one processing stage. It carries the
 detail of that image's processing -- which models were built, which techniques
@@ -140,6 +140,16 @@ to a file only.
    An interactive run therefore shows top-level progress rather than
    per-component detail. The detail is not lost -- it is in the per-image log
    file. Pass ``--log-image-to-console`` to see it on screen as well.
+
+   ``sd_offset`` summarizes each image's answer to the main log regardless, so
+   the offset, status and confidence stay on the terminal without asking for
+   the whole per-image narrative::
+
+      N1234567890_1.IMG: status=success, offset (dv, du) = (1.500, -2.500) px,
+      confidence 0.750 (medium)
+
+   The sigmas, the confidence rank's inputs and the per-technique breakdown
+   remain in that image's log.
 
 Turning every sink off produces no output at all, rather than falling back to
 the terminal.

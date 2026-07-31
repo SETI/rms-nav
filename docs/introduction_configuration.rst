@@ -74,6 +74,11 @@ Logging Configuration
 
 Logging is configured by the top-level ``logging`` section, described under
 `Logging Options`_ below, together with command-line options that override it.
+It is the one section excluded from the provenance configuration digest
+recorded with each navigation result: what a run wrote down about itself
+cannot change what it concluded, so two results differing only in logging were
+produced by the same configuration and compare as such.
+
 Two loggers write during a run: the main logger, covering one program run, and
 the image logger, covering one image inside one processing stage. A component
 can be given its own level, so one technique or model can be made verbose or

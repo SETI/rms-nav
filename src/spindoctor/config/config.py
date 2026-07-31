@@ -70,6 +70,22 @@ def _deep_merge(base: dict[Any, Any], overlay: dict[Any, Any]) -> dict[Any, Any]
     return merged
 
 
+HASH_EXCLUDED_SECTIONS = frozenset({'logging'})
+"""Sections left out of :meth:`Config.resolved_config_hash`.
+
+A configuration section belongs here when it cannot change what the pipeline
+computes.  ``logging`` decides what is written down about a run, never what
+the run concludes, so two results that differ only in it were produced by the
+same configuration and should compare as such.
+
+Named explicitly rather than inferred, so that a section added later has to be
+a deliberate choice rather than inheriting one.  Adding a section here changes
+every future digest, and results either side of that change compare as
+differently configured -- which is the cost this set exists to stop paying
+repeatedly.
+"""
+
+
 def _stringify_keys(value: Any) -> Any:
     """Recursively coerce every mapping key to ``str``.
 
@@ -354,13 +370,25 @@ class Config:
         digests regardless of load order or comment/whitespace changes in
         the source YAML files.
 
+        Sections in :data:`HASH_EXCLUDED_SECTIONS` are left out, because this
+        digest answers "was this result produced by the same configuration",
+        and a setting that cannot change a result would answer it wrongly.
+        Raising one component's log level to look into a technique would
+        otherwise re-stamp every result in that run as differently
+        configured, and it compares against an archive.
+
         Returns:
             64-character sha256 hex digest of the resolved config content.
         """
 
         self.read_config()
+        hashed = {
+            key: value
+            for key, value in self._config_dict.items()
+            if key not in HASH_EXCLUDED_SECTIONS
+        }
         canonical = json.dumps(
-            _stringify_keys(self._config_dict),
+            _stringify_keys(hashed),
             sort_keys=True,
             separators=(',', ':'),
             default=str,

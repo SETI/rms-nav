@@ -50,6 +50,7 @@ from spindoctor.support.summary_png import (
 __all__ = [
     'build_metadata_from_result',
     'build_timing_section',
+    'log_final_result_to_run',
     'navigate_image_files',
     'write_summary_png',
 ]
@@ -72,6 +73,42 @@ def _iso8601_utc(moment: datetime) -> str:
         The moment rendered in UTC as ``YYYY-MM-DDTHH:MM:SS.ffffffZ``.
     """
     return moment.astimezone(UTC).isoformat().replace('+00:00', 'Z')
+
+
+def log_final_result_to_run(image_name: str, nav_result: NavResult) -> None:
+    """Report one image's answer to the run's log, in a single line.
+
+    The detail of how the answer was reached belongs to the image and stays in
+    the image's log, which is where the orchestrator writes it.  What the
+    answer *was* is the run's business too: it is the thing an operator
+    watching a batch is waiting for, and following a run otherwise means
+    opening a file per image to find out whether any of them worked.
+
+    Deliberately one line, and deliberately a summary rather than a move of
+    the orchestrator's records -- the per-image log keeps the offset, the
+    sigmas, the confidence rank and the per-technique breakdown in full.
+
+    Parameters:
+        image_name: The image's file name, which names the line.
+        nav_result: The navigation result to report.
+    """
+    if nav_result.offset_px is None:
+        MAIN_LOGGER.info(
+            '%s: status=%s, no offset (%s)',
+            image_name,
+            nav_result.status,
+            nav_result.status_reason,
+        )
+        return
+    MAIN_LOGGER.info(
+        '%s: status=%s, offset (dv, du) = (%.3f, %.3f) px, confidence %.3f (%s)',
+        image_name,
+        nav_result.status,
+        nav_result.offset_px[0],
+        nav_result.offset_px[1],
+        nav_result.confidence,
+        nav_result.confidence_rank,
+    )
 
 
 def build_timing_section(start: datetime, end: datetime) -> dict[str, Any]:
@@ -229,6 +266,7 @@ def navigate_image_files(
                 logger.info('Writing metadata to %s', public_metadata_file)
                 public_metadata_file.write_text(json_as_string(metadata))
                 write_summary_png(snapshot_inst, nav_result, summary_png_file, logger)
+            log_final_result_to_run(image_name, nav_result)
             if image_log_path is not None:
                 MAIN_LOGGER.info('Wrote log to %s', image_log_path)
             return nav_result.status == 'success', metadata
