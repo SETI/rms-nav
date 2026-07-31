@@ -637,9 +637,15 @@ Left open and filed as #418: whether a task's `status` should reflect its per-im
 
 ### Phase 8 — Tests
 
-New `tests/spindoctor/config/test_logger.py` plus additions to the CLI tests.
+Most of this list arrived with the phase that introduced the behavior, which is where a test belongs: level resolution, sinks, paths, validation and `--log-level` parsing in `test_logging_config.py` and `test_logging_keys.py`; role binding and scope enforcement in `test_log_scope.py` and `test_nav_base_log_section.py`; program identity in `test_logging_keys.py`; cloud-task isolation in `test_cloud_task_logging.py`. Phase 8 is what none of them could cover from inside a single phase:
+
+- **Argument-surface consistency** (`tests/spindoctor/cli/test_logging_argument_surface.py`), which is a claim about the whole set of programs rather than any one of them. Each program's parser is driven the way the program builds it, by running `main` with `--help`, so what is asserted is the surface a user meets rather than a reconstruction of it.
+- **Static invariants** (`tests/spindoctor/config/test_logging_static_invariants.py`), because what this design guarantees for the print-only programs is an *absence*, and an absence is not observable by exercising the code. Reading the source covers whole packages, so a file added to one tomorrow is covered without being named, and covers the GUI packages without importing PyQt6. Includes a guard that every path these search actually exists — every assertion is that a search came back empty, so a moved target would pass by finding nothing.
+- **Cloud-task silence at the file-descriptor level** (`tests/spindoctor/cli/test_cloud_task_silence.py`), in a real subprocess with `logging.basicConfig` installed as a worker installs it. The rest of the suite uses `capsys`, which replaces `sys.stdout` inside the test process; the guarantee is about the descriptors a worker's terminal actually is.
+
 Per `CLAUDE.md`, pdslogger writes through its own stream handler, so tests
-capture with `capsys`, not `caplog`. Coverage:
+capture with `capsys`, not `caplog`. The original coverage list, now spread
+across the phases above:
 
 - Level precedence at each of the six tiers in section 2.6, and the
   top-level / `programs` merge, including a program block overriding one key
@@ -655,7 +661,9 @@ capture with `capsys`, not `caplog`. Coverage:
 - Role binding: a main-role component's output lands in the main log and not
   the image log, and the reverse.
 - Scope enforcement: out-of-scope image logging warns once per call site and
-  raises under strict scope; the suite runs with strict scope on.
+  raises under strict scope. Strict scope is opt-in per test rather than on
+  suite-wide; see section 2.9 for why that premise did not survive contact
+  with the suite.
 - Argument-surface consistency: a parametrized test asserting every
   logger-carrying program in section 2.1 accepts the same logging flags with
   the same defaults, and that the statistics and GUI programs accept none
