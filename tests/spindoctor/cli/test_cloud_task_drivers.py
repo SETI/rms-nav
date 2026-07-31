@@ -164,3 +164,101 @@ def test_the_mosaic_driver_isolates_its_logging(
         _worker_data(nav_results_root=FCPath(tmp_path).as_posix()),
     )
     assert recorder.called
+
+
+# ---------------------------------------------------------------------------
+# Reprojecting without an offset is counted, not passed over
+# ---------------------------------------------------------------------------
+
+
+class _StubReprojResult:
+    """Stands in for a reprojection, which this test does not need to compute."""
+
+    def save(self, path: Any) -> None:
+        """Pretend to write the product.
+
+        Parameters:
+            path: Ignored.
+        """
+
+
+class _StubObsClass:
+    """Observation class whose images always load."""
+
+    @classmethod
+    def from_file(cls, path: Any, **kwargs: Any) -> object:
+        """Return a placeholder observation.
+
+        Parameters:
+            path: Ignored.
+            **kwargs: Ignored.
+
+        Returns:
+            A bare object; nothing downstream inspects it here.
+        """
+        return object()
+
+
+def _reproject_task_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, nav_root: FCPath | None
+) -> dict[str, Any]:
+    """Run one reprojection task far enough to reach the offset lookup.
+
+    Parameters:
+        tmp_path: Directory used for output and logs.
+        monkeypatch: Fixture used to stub the image load and reprojection.
+        nav_root: Navigation results root handed to the task, or None.
+
+    Returns:
+        The task result.
+    """
+    monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_ring_mosaic', lambda *a, **k: _StubMosaic())
+    monkeypatch.setattr(sd_mosaic_cloud_tasks, 'inst_name_to_obs_class', lambda _: _StubObsClass)
+    monkeypatch.setattr(
+        sd_mosaic_cloud_tasks, 'reproject_one_ring', lambda *a, **k: _StubReprojResult()
+    )
+    worker = _worker_data(nav_results_root=FCPath(tmp_path).as_posix())
+    worker.nav_results_root_path = nav_root  # type: ignore[attr-defined]
+    _, result = sd_mosaic_cloud_tasks.process_task(
+        'task-1',
+        {
+            'mode': 'rings',
+            'dataset_name': _DATASET,
+            'files': [_image_entry(FCPath(tmp_path))],
+            'arguments': {'output_dir': FCPath(tmp_path).as_posix(), 'no_write_output_files': True},
+        },
+        worker,
+    )
+    return cast(dict[str, Any], result)
+
+
+def test_an_image_reprojected_without_an_offset_is_counted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A task has no run log, so the count is what carries this out.
+
+    A batch registered entirely on uncorrected pointing otherwise looks
+    exactly like one that applied every offset it was given.
+    """
+    result = _reproject_task_result(tmp_path, monkeypatch, nav_root=FCPath(tmp_path) / 'nav')
+    assert result['n_uncorrected'] == 1
+
+
+def test_the_count_comes_with_the_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A wrong results root and a genuinely unnavigated image are not the same."""
+    result = _reproject_task_result(tmp_path, monkeypatch, nav_root=FCPath(tmp_path) / 'nav')
+    assert result['uncorrected_reasons'] == {'no_metadata': 1}
+
+
+def test_the_image_is_still_reprojected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Uncorrected pointing produces a product, so it counts as done too."""
+    result = _reproject_task_result(tmp_path, monkeypatch, nav_root=FCPath(tmp_path) / 'nav')
+    assert result['n_done'] == 1
+
+
+def test_asking_for_no_offsets_counts_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run that never asked for offsets reports no shortfall."""
+    result = _reproject_task_result(tmp_path, monkeypatch, nav_root=None)
+    assert result['n_uncorrected'] == 0

@@ -117,7 +117,7 @@ def _run_reproject_pass(
     subject_name: str,
     obs_class: type[ObsSnapshotInst],
     reproject_fn: Callable[[ObsSnapshotInst, str], BodyReprojResult | RingReprojResult],
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     """Reproject each selected image: path checks, per-image logs, offset, save.
 
     Parameters:
@@ -134,14 +134,18 @@ def _run_reproject_pass(
             reprojection result with ``save()``.
 
     Returns:
-        ``(n_done, n_skipped, n_failed)`` counts for the pass (dry-run does not
-        increment ``n_done``; skipped-existing increments ``n_skipped``; an
-        image whose reprojection raised increments ``n_failed``).
+        ``(n_done, n_skipped, n_failed, n_uncorrected)`` counts for the pass
+        (dry-run does not increment ``n_done``; skipped-existing increments
+        ``n_skipped``; an image whose reprojection raised increments
+        ``n_failed``; an image reprojected without a navigation offset
+        increments ``n_uncorrected``, and is counted in ``n_done`` as well
+        because it did produce a product).
     """
     assert DATASET is not None
     n_done = 0
     n_skipped = 0
     n_failed = 0
+    n_uncorrected = 0
     for imagefiles in DATASET.yield_image_files_from_arguments(args):
         image_file = imagefiles.image_files[0]
         out_path = per_image_output_path(
@@ -176,9 +180,21 @@ def _run_reproject_pass(
                     image_path = image_file.image_file_path.absolute()
                     obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
 
-                    offset = load_offset_if_any(nav_results_root_path, image_file)
-                    if offset is not None:
-                        apply_offset_to_obs(cast(ObsSnapshotInst, obs), offset[0], offset[1])
+                    lookup = load_offset_if_any(nav_results_root_path, image_file)
+                    if lookup.offset is not None:
+                        apply_offset_to_obs(
+                            cast(ObsSnapshotInst, obs), lookup.offset[0], lookup.offset[1]
+                        )
+                    elif lookup.reason is not None:
+                        # The detailed account stays in the image's log; the
+                        # run needs to know the product is registered on
+                        # uncorrected pointing, which is not visible in it.
+                        n_uncorrected += 1
+                        MAIN_LOGGER.warning(
+                            '%s: reprojecting with uncorrected pointing (%s)',
+                            image_file.image_file_url,
+                            lookup.reason,
+                        )
 
                     img_label = (
                         args.image_name
@@ -212,7 +228,7 @@ def _run_reproject_pass(
                 if handler is not pdslogger.NULL_HANDLER:
                     handler.close()
 
-    return n_done, n_skipped, n_failed
+    return n_done, n_skipped, n_failed, n_uncorrected
 
 
 DATASET: DataSet | None = None
@@ -409,7 +425,7 @@ def _run_body(
     # ---- Pass 1: reprojection ------------------------------------------------
     if not args.skip_reproject:
         MAIN_LOGGER.info('=== Reprojection pass (body=%s) ===', mosaic.body_name)
-        n_done, n_skipped, n_failed = _run_reproject_pass(
+        n_done, n_skipped, n_failed, n_uncorrected = _run_reproject_pass(
             run_logging,
             args=args,
             nav_results_root_path=nav_results_root_path,
@@ -423,10 +439,12 @@ def _run_body(
             ),
         )
         MAIN_LOGGER.info(
-            'Reprojection pass complete: %d done, %d skipped, %d failed.',
+            'Reprojection pass complete: %d done, %d skipped, %d failed, '
+            '%d with uncorrected pointing.',
             n_done,
             n_skipped,
             n_failed,
+            n_uncorrected,
         )
 
     # ---- Pass 2: mosaic ------------------------------------------------------
@@ -522,7 +540,7 @@ def _run_rings(
     # ---- Pass 1: reprojection ------------------------------------------------
     if not args.skip_reproject:
         MAIN_LOGGER.info('=== Reprojection pass (rings, planet=%s) ===', mosaic.body_name)
-        n_done, n_skipped, n_failed = _run_reproject_pass(
+        n_done, n_skipped, n_failed, n_uncorrected = _run_reproject_pass(
             run_logging,
             args=args,
             nav_results_root_path=nav_results_root_path,
@@ -536,10 +554,12 @@ def _run_rings(
             ),
         )
         MAIN_LOGGER.info(
-            'Reprojection pass complete: %d done, %d skipped, %d failed.',
+            'Reprojection pass complete: %d done, %d skipped, %d failed, '
+            '%d with uncorrected pointing.',
             n_done,
             n_skipped,
             n_failed,
+            n_uncorrected,
         )
 
     # ---- Pass 2: mosaic ------------------------------------------------------

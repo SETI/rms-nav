@@ -120,7 +120,11 @@ def process_task(
         is ``{'status': 'success'}`` with ``n_done``, ``n_skipped`` and
         ``n_failed``: an individual image is allowed to fail without failing
         the task, so the counts are what distinguish a task that reprojected
-        its images from one that failed every one of them.  An image whose
+        its images from one that failed every one of them.  ``n_uncorrected``
+        counts images reprojected without a navigation offset, tallied by
+        reason under ``uncorrected_reasons``: those images do produce a
+        product, and a batch registered entirely on uncorrected pointing is
+        otherwise indistinguishable from a good one.  An image whose
         ``results_path_stub`` was refused is additionally named under
         ``rejected_stubs``, since no log could be opened to record it.
     """
@@ -205,6 +209,8 @@ def process_task(
     n_done = 0
     n_skipped = 0
     n_failed = 0
+    n_uncorrected = 0
+    uncorrected_reasons: dict[str, int] = {}
     rejected_stubs: list[dict[str, str]] = []
 
     for file in files:
@@ -282,9 +288,19 @@ def process_task(
                     image_path = image_file.image_file_path.absolute()
                     obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
 
-                    offset = load_offset_if_any(nav_results_root_path, image_file)
-                    if offset is not None:
-                        apply_offset_to_obs(cast(ObsSnapshotInst, obs), offset[0], offset[1])
+                    lookup = load_offset_if_any(nav_results_root_path, image_file)
+                    if lookup.offset is not None:
+                        apply_offset_to_obs(
+                            cast(ObsSnapshotInst, obs), lookup.offset[0], lookup.offset[1]
+                        )
+                    elif lookup.reason is not None:
+                        # A task has no run log, so the count is what carries
+                        # this out: a batch reprojected entirely on uncorrected
+                        # pointing looks exactly like a good one otherwise.
+                        n_uncorrected += 1
+                        uncorrected_reasons[lookup.reason] = (
+                            uncorrected_reasons.get(lookup.reason, 0) + 1
+                        )
 
                     img_label = (
                         image_name_override
@@ -322,7 +338,10 @@ def process_task(
         'n_done': n_done,
         'n_skipped': n_skipped,
         'n_failed': n_failed,
+        'n_uncorrected': n_uncorrected,
     }
+    if uncorrected_reasons:
+        task_result['uncorrected_reasons'] = uncorrected_reasons
     if rejected_stubs:
         task_result['rejected_stubs'] = rejected_stubs
     return False, task_result
