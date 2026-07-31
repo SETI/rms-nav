@@ -98,6 +98,13 @@ Every file from one run shares a single timestamp, in UTC and in
 chronologically and can be compared across machines, which matters when a
 batch is spread over workers in different time zones.
 
+.. note::
+
+   The timestamp in the file *name* is UTC; the timestamps on the records
+   *inside* are local. A log named ``..._2026-07-31T02-36-04.log`` can open
+   with ``2026-07-30 19:36:04``. Match a log to a wall-clock time by its
+   contents rather than its name, and glob by name only in UTC terms.
+
 Reprojection logs are keyed by mosaic subject as well, since one image may be
 reprojected onto more than one body::
 
