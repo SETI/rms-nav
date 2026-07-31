@@ -193,42 +193,29 @@ Miscellaneous
 Logging options
 ^^^^^^^^^^^^^^^
 
-Two loggers write during a run. The main logger reports what the program is
-doing at the top level and writes to the terminal and to a file. The image
-logger carries the detail of processing one image and writes to a file by
-default, though it can write to the console as well.
-Both sinks of a logger always share a level, so there is one level to set per
-component rather than one per sink.
+``sd_offset`` writes a main log reporting what the run is doing, and one log
+per image carrying the detail of navigating it:
 
-Levels are ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``, ``CRITICAL`` and
-``NONE``. For the configuration-file equivalents see
-:doc:`/introduction_configuration`.
+.. code-block:: text
 
-* ``--log-root PATH``: where this run's log files go. Defaults to a ``logs``
-  directory under the navigation results root. The main log is written to
-  ``{log_root}/sd_offset/main_{timestamp}.log`` and each image's log to
-  ``{log_root}/nav/{results_path_stub}_{timestamp}.log``, with one UTC
-  timestamp shared by every file a run produces.
+   {log_root}/sd_offset/main_{timestamp}.log
+   {log_root}/nav/{results_path_stub}_{timestamp}.log
 
-* ``--log-level LEVEL``: the default level for both loggers.
+``--log-root`` says where those go, defaulting to a ``logs`` directory under
+the navigation results root. The main log goes to the terminal as well as a
+file; image logs go to a file only, so the per-technique detail is on disk
+rather than on screen unless ``--log-image-to-console`` asks for it.
 
-* ``--log-level MODULE=LEVEL``: the level for one component, repeatable. For
-  example ``--log-level WARNING --log-level titan_haze=DEBUG`` quiets the run
-  but keeps the haze technique verbose. Components are named by the technique
-  or model they are, in snake_case: ``titan_haze``, ``body_limb``, ``rings``,
-  ``stars``, and so on, plus ``annotate``, ``correlate``, ``ensemble``,
-  ``image_derivatives``, ``obs``, ``orchestrator`` and ``provenance``. An
-  unrecognized name is rejected at startup rather than ignored.
+The level of any one component can be raised or lowered on its own, which is
+the usual way to investigate a single technique across many images:
 
-* ``--log-level-main LEVEL`` and ``--log-level-image LEVEL``: the level for one
-  logger, taking precedence over a bare ``--log-level``.
+.. code-block:: bash
 
-* ``--log-main-to-console`` / ``--no-log-main-to-console`` (default on),
-  ``--log-main-to-file`` / ``--no-log-main-to-file`` (default on),
-  ``--log-image-to-console`` / ``--no-log-image-to-console`` (default off),
-  ``--log-image-to-file`` / ``--no-log-image-to-file`` (default on): which
-  sinks each logger writes to. Turning every sink off produces no output at
-  all rather than falling back to the terminal.
+   sd_offset coiss_saturn --volumes COISS_2001 \
+       --log-level WARNING --log-level titan_haze=DEBUG
+
+The full set of options, the component names, the configuration-file
+equivalents and the precedence between them are in :doc:`user_guide_logging`.
 
 Example Commands
 ----------------

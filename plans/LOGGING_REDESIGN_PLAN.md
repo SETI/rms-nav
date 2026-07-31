@@ -680,15 +680,13 @@ across the phases above:
 
 ### Phase 9 — Documentation
 
-New `docs/user_guide/user_guide_logging.rst`, referenced from
-`docs/user_guide.rst`, covering the two loggers and what belongs in each, the
-sink defaults, log file locations and naming for all three backends, the
-`logging` section schema including `programs` and the full module key table,
-the precedence order, the command-line arguments with worked examples, and
-cloud-task behavior. Update `docs/introduction_configuration.rst` for the new
-section, the per-program user-guide pages for the flags, and the developer
-guide for `PROGRAM_NAME`, `log_key`, `NavBase.log_section`, and the scope
-rule.
+New `docs/user_guide/user_guide_logging.rst`, in the `docs/user_guide/user_guide.rst` toctree, covering the two loggers and what belongs in each, the sink defaults, log file locations and naming for all three backends, the `logging` section schema including `programs` and the full module key table, the precedence order, the command-line arguments with worked examples, and cloud-task behavior. It carries the two operator-visible changes flagged in section 6 as notes: image detail no longer reaching the console by default, and reprojection logs moving out of `{output_dir}/logs/`.
+
+The page is the single place these are written down. The per-program guides keep only what is specific to that program — its backend, its log paths, one worked example — and link here for the rest, rather than repeating a flag table four times and letting the copies drift.
+
+`docs/introduction_configuration.rst` gains cross-references from both its logging sections. The developer guide gains `PROGRAM_NAME`, `log_key`, `NavBase.log_section` and the scope rule, under a "writing a component that logs" section, since those are the four things a contributor adding a technique or model has to get right.
+
+Every factual claim on the page was checked against the code rather than against the plan: the log paths from `main_log_path` and `image_log_path`, the sink defaults from `LogSinks`, the component names from the key registries, the precedence from `resolve_log_levels`, the `programs` isolation, and the three startup rejections. That found one broken example — `--image-full-path` does not exist — which the guide's own idiom, a bare positional image name, replaced.
 
 ---
 
@@ -713,14 +711,19 @@ rule.
 7. Each of the four sink toggles independently controls its sink, and
    disabling every sink produces no output at all.
 8. No PdsLogger anywhere in the codebase can reach the `print()` fallback.
-   Enforced by a test that walks every logger the builders produce and
-   asserts a non-empty handler list.
-9. No image-role component logs outside an image scope anywhere in the suite,
-   enforced by strict scope being on in tests.
+   Enforced by a test over all sixteen sink combinations at three levels,
+   asserting a non-empty handler list for each.
+9. No image-role component logs outside an image scope in production code.
+   **Revised**: the original wording said "anywhere in the suite, enforced by
+   strict scope being on in tests", which does not survive contact with the
+   suite — see section 2.9. Enforcement is the `strict_log_scope` fixture in
+   tests that drive a real pipeline, and the deduplicated warning in
+   production.
 10. An unknown module key, program name, or level name in the configuration
    fails at startup with a message naming the offending key.
 11. No `_LOOKUP` growth proportional to image count: a run over N images
-    leaves the registry size unchanged from a run over one.
+    leaves the registry size unchanged from a run over one. Enforced by a
+    test over fifty images.
 12. `ruff check`, `ruff format --check`, `mypy --strict`, `sphinx-build -W`,
     and `pymarkdown scan` all pass; suite coverage stays at or above 90%.
 
