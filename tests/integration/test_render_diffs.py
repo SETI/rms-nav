@@ -54,17 +54,31 @@ def test_every_scene_has_a_current_render() -> None:
     review the sheet before committing.
     """
     stale: list[str] = []
+    examined = 0
     for path in _scene_paths():
+        examined += 1
         committed = _CURRENT_DIR / f'{path.stem}.png'
         img, _ = render_combined_model(load_sim_scene(path))
         fresh = encode_current_png(stretch_to_uint8(img))
         if not committed.is_file() or committed.read_bytes() != fresh:
             stale.append(path.stem)
+    assert examined > 0, 'no scenes were examined; the catalog is empty or unreachable'
     assert not stale, (
         f'{len(stale)} committed current render(s) missing or no longer matching a '
         f'fresh render: {stale}; regenerate with `{_REGEN_COMMAND}` and review the '
         f'sheets before committing'
     )
+
+
+def test_the_scene_catalog_is_not_empty() -> None:
+    """The catalog these checks iterate actually contains scenes.
+
+    Every check here reports what it found wrong while walking the catalog, so
+    a catalog that yields nothing satisfies several of them without examining
+    anything.  A moved or renamed scene root would otherwise turn the render
+    guards off silently rather than failing.
+    """
+    assert _scene_paths() != []
 
 
 def test_no_orphaned_current_renders() -> None:
@@ -85,6 +99,7 @@ def test_every_scene_class_has_a_sheet() -> None:
     is not meaningful for sheets).
     """
     classes = {scene_class_for_path(path) for path in _scene_paths()}
+    assert classes, 'no scene classes were found; the catalog is empty or unreachable'
     missing = sorted(
         scene_class
         for scene_class in classes

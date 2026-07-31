@@ -28,6 +28,7 @@ from spindoctor.config.logging_config import (
     run_timestamp,
     sinks_from_arguments,
 )
+from spindoctor.config.logging_keys import log_key_for, technique_log_keys
 from spindoctor.config.program_names import SD_MOSAIC, SD_OFFSET
 
 _STAMP = '2026-07-29T12-00-00'
@@ -759,11 +760,43 @@ def test_resolving_one_program_does_not_leak_into_another(tmp_path: Path) -> Non
 
 
 def test_module_keys_exclude_test_registered_classes(tmp_path: Path) -> None:
-    """Stub classes other tests register do not enter the resolved key set."""
-    config = _config(tmp_path, '  techniques:\n    default: DEBUG\n')
-    levels = resolve_log_levels(SD_OFFSET, None, config)
-    offenders = [key for key in levels.modules if key.startswith('_')]
-    assert offenders == []
+    """A class a test registers does not enter the resolved key set.
+
+    The registries are process-global and test modules add their own
+    subclasses, so the key namespace would otherwise depend on which tests had
+    been imported -- and a configuration valid under one selection would be
+    rejected under another.
+
+    Asserted against a class registered here, since the derived key for a stub
+    is an ordinary snake_case name indistinguishable from a shipped one: an
+    earlier version of this test looked for a leading underscore, which
+    ``log_key_for`` strips, so it could not have failed.
+    """
+    from spindoctor.nav_technique.nav_technique import NavTechnique
+
+    # Restored on the way out: the registry is process-global, and a class left
+    # in it breaks the confidence-config validation every later configuration
+    # load performs -- which is a sharper version of the same problem this
+    # filter exists to solve.
+    before = list(NavTechnique._registry)
+    try:
+
+        class _RegisteredByThisTestNav(NavTechnique):
+            """A technique defined outside the package, as a test's would be."""
+
+        assert _RegisteredByThisTestNav in NavTechnique._registry
+        assert log_key_for(_RegisteredByThisTestNav) not in technique_log_keys()
+    finally:
+        NavTechnique._registry[:] = before
+
+
+def test_a_shipped_technique_is_in_the_key_set() -> None:
+    """The filter keeps what ships, rather than emptying the set.
+
+    The counterpart to the exclusion above: a filter that excluded everything
+    would satisfy it just as well.
+    """
+    assert 'titan_haze' in technique_log_keys()
 
 
 def test_a_cloud_log_root_is_not_mkdired(monkeypatch: pytest.MonkeyPatch) -> None:

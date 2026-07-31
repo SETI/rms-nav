@@ -51,12 +51,17 @@ def test_committed_gallery_images_are_current(regenerated_dirs: dict[str, Path])
     committed galleries; rerun the generator and review the image diff.
     """
     stale: list[str] = []
+    examined = 0
     for gallery, fresh_dir in regenerated_dirs.items():
         committed_dir = _COMMITTED_DIRS[gallery]
         for fresh in sorted(fresh_dir.glob('*.png')):
+            examined += 1
             committed = committed_dir / fresh.name
             if not committed.is_file() or committed.read_bytes() != fresh.read_bytes():
                 stale.append(str(committed.relative_to(_DOCS.parent)))
+    # A generator that wrote nothing would leave every committed image
+    # unchallenged rather than reported stale.
+    assert examined > 0, 'the generator produced no images to compare against'
     assert not stale, (
         f'{len(stale)} committed doc image(s) no longer match a fresh render: '
         f'{stale}; regenerate with `{_REGEN_COMMAND}` and review the diff before committing'
