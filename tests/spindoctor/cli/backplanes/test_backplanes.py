@@ -18,6 +18,7 @@ from typing import Any, ClassVar, cast
 import cspyce
 import numpy as np
 import oops
+import pdslogger
 import pytest
 from astropy.io import fits
 from filecache import FCPath
@@ -25,7 +26,16 @@ from oops.backplane import Backplane
 
 from spindoctor.cli.backplanes import backplanes as backplanes_mod
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
-from spindoctor.config import DEFAULT_CONFIG, Config
+from spindoctor.config import (
+    DEFAULT_CONFIG,
+    MAIN_LOGGER,
+    Config,
+    LogLevels,
+    LogSinks,
+    build_main_logger,
+    set_log_levels,
+)
+from spindoctor.config.program_names import SD_BACKPLANES
 from spindoctor.dataset.dataset import ImageFile, ImageFiles
 from spindoctor.obs import Obs, ObsSnapshotInst
 from spindoctor.support.types import PathLike
@@ -595,3 +605,97 @@ def test_end_to_end_simulated_image_writes_sidecar(tmp_path: Path) -> None:
     assert set(body['backplanes']) == {e['name'] for e in _config_entries('bodies')}
     assert body['center_uv'] == [3.5, 4.5]
     assert body['center_range'] == 500000.0
+
+
+# ---------------------------------------------------------------------------
+# Backplanes computed on uncorrected pointing
+# ---------------------------------------------------------------------------
+
+
+def _run_with_null_offset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[dict[str, Any], str]:
+    """Generate backplanes for an image whose navigation recorded no offset.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        The driver's result and the text written to the run's log.
+    """
+    _stub_pipeline(monkeypatch)
+    root = FCPath(tmp_path)
+    nav_root, bp_root = _roots(root)
+    _write_nav_metadata(nav_root, 'IMG1', {'status': 'success', 'offset': None})
+    obs_class, _ = _obs_class_for(make_snapshot(shape_vu=SHAPE_VU, simulated=True))
+
+    levels = LogLevels()
+    set_log_levels(levels)
+    log_path = build_main_logger(
+        MAIN_LOGGER,
+        SD_BACKPLANES,
+        LogSinks(log_root=root / 'runlog', main_console=False),
+        levels,
+        timestamp='2026-07-29T12-00-00',
+    )
+    try:
+        result = generate_backplanes_image_files(
+            obs_class,
+            _image_files(root, 'IMG1'),
+            nav_results_root=nav_root,
+            backplane_results_root=bp_root,
+            write_output_files=False,
+        )
+    finally:
+        for handler in list(MAIN_LOGGER.handlers):
+            if handler is not pdslogger.NULL_HANDLER:
+                handler.close()
+    assert log_path is not None
+    with log_path.open('r') as stream:
+        return result, str(stream.read())
+
+
+def test_uncorrected_pointing_reaches_the_run_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Backplanes built on uncorrected pointing say so where a run is watched.
+
+    The product carries no sign of it, so someone following a batch would
+    otherwise have to open every image's log to find out.
+    """
+    _, log_text = _run_with_null_offset(tmp_path, monkeypatch)
+    assert 'uncorrected pointing' in log_text
+
+
+def test_uncorrected_pointing_names_the_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And says which image, since a batch has many."""
+    _, log_text = _run_with_null_offset(tmp_path, monkeypatch)
+    assert 'IMG1' in log_text
+
+
+def test_uncorrected_pointing_is_returned_to_the_caller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cloud task has no run log, so the result is how the fact leaves it."""
+    result, _ = _run_with_null_offset(tmp_path, monkeypatch)
+    assert result['uncorrected_pointing'] is True
+
+
+def test_a_navigated_image_is_not_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An image with a real offset carries no such flag."""
+    _stub_pipeline(monkeypatch)
+    root = FCPath(tmp_path)
+    nav_root, bp_root = _roots(root)
+    _write_nav_metadata(nav_root, 'IMG1', {'status': 'success', 'offset': [1.5, -2.5]})
+    obs_class, _ = _obs_class_for(make_snapshot(shape_vu=SHAPE_VU, simulated=True))
+    result = generate_backplanes_image_files(
+        obs_class,
+        _image_files(root, 'IMG1'),
+        nav_results_root=nav_root,
+        backplane_results_root=bp_root,
+        write_output_files=False,
+    )
+    assert 'uncorrected_pointing' not in result

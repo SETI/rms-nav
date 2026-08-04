@@ -3,12 +3,22 @@
 Read the ``_metadata.json`` file for an image and apply the stored ``(dv, du)``
 offset to the observation's FOV via ``oops.fov.OffsetFOV``.
 
-Every reason an offset could not be loaded describes one image, so it is
-reported to that image's log rather than to the run's.  These are the records
-that say a reprojection used uncorrected pointing, which is the difference
-between a product being what it claims and being quietly misregistered; they
-belong with the image they qualify, where they are still there to be found once
-the run that produced them is over.
+Failing to load an offset does not stop the reprojection; it proceeds on the
+camera's uncorrected pointing, and the product it writes carries no sign of
+that.  So the fact is reported in both places, and the two say different
+things.
+
+The *detailed* account -- which file was missing, what the navigation status
+was, what the malformed offset field contained -- belongs to the image, and is
+written to its log with the rest of that image's processing.  This module
+writes those.
+
+That the image was reprojected uncorrected at all belongs to the run, and its
+caller writes that: one line naming the image and the short reason from
+:attr:`OffsetLookup.reason`, plus a count in the pass summary.  Someone
+watching a batch would otherwise have to open every image's log to discover
+that any of it happened.  A cloud-task worker has no run log, so its caller
+returns the count and a per-reason tally in the task result instead.
 """
 
 import json

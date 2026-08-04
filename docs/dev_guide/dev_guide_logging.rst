@@ -146,6 +146,36 @@ directory and selects its block under ``logging.programs``, so a program
 without one has no way to be configured separately and no place to put its
 main log.
 
+Anything that degrades a result goes to both
+============================================
+
+A record that says a product is less trustworthy than it looks is not
+per-image detail, even though it is about one image. Reprojecting on
+uncorrected pointing, computing backplanes from a navigation that recorded no
+offset, falling back to a default where a measurement was expected -- each
+writes a file that looks exactly like a good one, and the only sign is a line
+in a log nobody has a reason to open.
+
+Report those twice, and say different things:
+
+* **To the image's log, the account.** Which file was missing, what the status
+  was, what the malformed field contained. This is where someone who has been
+  told to look will look, and it belongs with the rest of that image's
+  processing.
+
+* **To the run's log, the fact.** One line naming the image and the short
+  reason, plus a count in whatever summary the program prints. Someone
+  following a batch should not have to open every image's log to discover
+  that a tenth of it was reprojected uncorrected.
+
+A cloud task has no run log, so the second half becomes a field in the value
+``process_task`` returns -- a count, a per-reason tally, or a flag. The task
+result is the only channel a worker always has.
+
+Ordinary progress does not get this treatment. The distinction is whether a
+reader who never opens the image log would draw a wrong conclusion about the
+product: that is what earns a line in the run's log.
+
 The scope rule
 ==============
 

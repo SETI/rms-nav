@@ -44,7 +44,9 @@ def generate_backplanes_image_files(
             configuration's defaults against the backplane results root.
 
     Returns:
-        ``{'status': 'success'}``, or ``{'status': 'skipped'}`` with the
+        ``{'status': 'success'}`` -- carrying ``uncorrected_pointing`` when
+        navigation recorded no offset and the backplanes were computed on the
+        camera's uncorrected pointing -- or ``{'status': 'skipped'}`` with the
         navigation status that caused the skip.  An image can be skipped for a
         reason its caller has no other way to learn: the reason is reported to
         the run's log, and a cloud task has no run log, so returning it is what
@@ -89,6 +91,7 @@ def generate_backplanes_image_files(
             'nav_status_error': nav_error,
         }
 
+    uncorrected = False
     local_handlers, image_log_path = build_image_log_handlers(
         'backplanes',
         image_file.results_path_stub,
@@ -113,7 +116,18 @@ def generate_backplanes_image_files(
             if 'offset' not in nav_metadata:
                 raise ValueError(f'{image_path}: "offset" field not found in metadata')
             if nav_metadata['offset'] is None:
+                # Backplanes computed on uncorrected pointing are geometry for
+                # a place the camera was not quite looking, and the product
+                # carries no sign of it.  The image's log gets the account; the
+                # run's gets told it happened, because someone watching a batch
+                # would otherwise have to open every log to find out.
                 logger.warning('%s: "offset" field is None, using (0, 0)', image_path)
+                MAIN_LOGGER.warning(
+                    '%s: computing backplanes on uncorrected pointing '
+                    '(navigation recorded no offset)',
+                    image_path,
+                )
+                uncorrected = True
                 dv, du = 0, 0
             else:
                 dv, du = nav_metadata['offset']
@@ -149,4 +163,9 @@ def generate_backplanes_image_files(
         if image_log_path is not None:
             MAIN_LOGGER.info('Wrote log to %s', image_log_path)
 
-    return {'status': 'success'}
+    result: dict[str, Any] = {'status': 'success'}
+    if uncorrected:
+        # Returned as well as logged: a cloud task has no run log, so this is
+        # the only way the fact leaves the worker.
+        result['uncorrected_pointing'] = True
+    return result
