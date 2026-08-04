@@ -5,12 +5,13 @@ import itertools
 import logging
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 import pdslogger
 import pytest
 from filecache import FCPath
 
-from spindoctor.config import IMAGE_LOGGER
+from spindoctor.config import IMAGE_LOGGER, logging_config
 from spindoctor.config.config import Config
 from spindoctor.config.logging_config import (
     BACKEND_NAMES,
@@ -19,6 +20,7 @@ from spindoctor.config.logging_config import (
     SILENT_LEVEL,
     LogLevels,
     LogSinks,
+    build_cloud_task_logging,
     build_image_log_handlers,
     build_main_logger,
     build_run_logging,
@@ -1127,15 +1129,63 @@ def test_the_shipped_defaults_are_unchanged(tmp_path: Path) -> None:
     assert (sinks.main_console, sinks.image_console) == (True, False)
 
 
-def test_a_file_sink_is_still_command_line_only(tmp_path: Path) -> None:
-    """Whether a log file is written is inseparable from where it goes.
+def test_there_is_no_configuration_key_for_a_file_sink(tmp_path: Path) -> None:
+    """``image_file`` is not a setting, and writing it says so.
 
-    Pinned so the asymmetry with the console keys is a decision rather than an
-    oversight: a configuration naming a file sink is rejected outright, which
-    is the check just above this one in spirit.
+    Whether a log file is written is command-line only, being inseparable from
+    where the file goes.  Someone who has just seen ``image_console`` will
+    reasonably try ``image_file`` next; the point of this test is that the
+    attempt is an error naming the key, rather than a line that sits in the
+    configuration looking effective and doing nothing.
     """
     from spindoctor.config.logging_keys import validate_logging_config
 
     config = _config(tmp_path, '  image_file: false\n')
     with pytest.raises(ValueError, match='not a known logging key'):
         validate_logging_config(config)
+
+
+# ---------------------------------------------------------------------------
+# What one timestamp groups
+# ---------------------------------------------------------------------------
+
+
+def test_one_run_stamps_every_file_it_writes_alike(tmp_path: Path) -> None:
+    """A program stamps once at startup, so its files carry one timestamp.
+
+    That is what makes a run identifiable afterwards: the logs of one pass
+    over many images sort together and are distinguishable from the pass
+    before it.
+    """
+    run_logging = build_run_logging(
+        SD_OFFSET, _args(log_root=str(tmp_path)), _config(tmp_path), build_main=False
+    )
+    first, _ = build_image_log_handlers(
+        'nav', 'vol/N1', run_logging.sinks, run_logging.levels, timestamp=run_logging.timestamp
+    )
+    second, _ = build_image_log_handlers(
+        'nav', 'vol/N2', run_logging.sinks, run_logging.levels, timestamp=run_logging.timestamp
+    )
+    _close(first)
+    _close(second)
+    assert image_log_path(
+        FCPath(tmp_path), 'nav', 'vol/N1', timestamp=run_logging.timestamp
+    ).name.endswith(f'{run_logging.timestamp}.log')
+
+
+def test_a_cloud_task_stamps_itself(tmp_path: Path) -> None:
+    """A worker stamps per task, because that is where logging is set up.
+
+    There is no run-wide moment for tasks to share: they are handed to
+    whichever workers are free, on machines that started at different times and
+    may not have been running when the batch began.  Each image's log carries
+    the time its own task was picked up, and UTC is what keeps those
+    comparable across machines.
+    """
+    config = _config(tmp_path)
+    first = build_cloud_task_logging(SD_OFFSET, _args(log_root=str(tmp_path)), config).timestamp
+    with mock.patch.object(logging_config, 'run_timestamp', return_value='2099-01-01T00-00-00'):
+        second = build_cloud_task_logging(
+            SD_OFFSET, _args(log_root=str(tmp_path)), config
+        ).timestamp
+    assert first != second

@@ -93,10 +93,26 @@ under the *stage* rather than the program, so an image's navigation log sits
 beside every other navigation log whether an interactive run or a cloud task
 produced it. The three stages are ``nav``, ``backplanes`` and ``reproj``.
 
-Every file from one run shares a single timestamp, in UTC and in
-``YYYY-MM-DDTHH-MM-SS`` form. UTC rather than local time so the names sort
-chronologically and can be compared across machines, which matters when a
-batch is spread over workers in different time zones.
+The timestamp is UTC, in ``YYYY-MM-DDTHH-MM-SS`` form, and is taken once when
+logging is set up rather than once per file. What that groups depends on which
+driver is running:
+
+* **A program you run yourself** stamps once at startup, so every file it
+  writes -- its main log and every image log -- carries the same timestamp.
+  That is what makes a run identifiable after the fact: the logs of one
+  ``sd_offset`` pass over five hundred images sort together and are
+  distinguishable from the pass before it.
+
+* **A cloud-task worker** stamps once per task, because that is where logging
+  is set up. There is no run-wide moment to share: tasks are handed out to
+  whatever workers are free, on machines that started at different times and
+  may not have been running at all when the batch began. Each image's log
+  therefore carries the time its own task was picked up.
+
+UTC rather than local time is what makes the two comparable. Workers may sit
+in different zones, and a local-time name would be ambiguous across a
+daylight-saving fall-back; in UTC the names of an interactive run and of every
+worker in a batch sort into one order.
 
 .. note::
 
@@ -114,6 +130,13 @@ reprojected onto more than one body::
 
    Reprojection logs live under the log root, alongside every other stage's,
    rather than under the mosaic output directory with the products.
+
+.. note::
+
+   Because a worker stamps per task, an image processed twice -- a retried
+   task, or a batch submitted twice -- normally leaves two log files, one per
+   attempt. The exception is two attempts landing in the same UTC second,
+   which resolve to one name and append into a single file.
 
 What appears on the terminal
 ============================
@@ -197,27 +220,31 @@ set per component rather than one per sink.
 Worked examples
 ---------------
 
-Quiet the run but keep one technique verbose, which is the usual shape of
-investigating a single technique across many images:
+Quiet the run but keep one technique verbose -- the usual shape of
+investigating one technique across many images:
 
 .. code-block:: bash
 
    sd_offset coiss_saturn --volumes COISS_2001 \
        --log-level WARNING --log-level titan_haze=DEBUG
 
-Watch one image's detail on screen instead of opening its file:
+Follow one image's processing as it happens. The same detail is written to
+that image's log file either way; this puts it on the terminal too, which is
+what you want when working on a single image rather than reading the file
+afterwards:
 
 .. code-block:: bash
 
    sd_offset coiss N1234567890 --log-image-to-console --log-level DEBUG
 
-Keep the terminal clean and the files complete, for a long batch:
+Keep the terminal quiet while the files stay complete, for a long batch left
+running:
 
 .. code-block:: bash
 
    sd_offset coiss_saturn --no-log-main-to-console --log-level-image DEBUG
 
-Silence one noisy component without lowering anything else:
+Silence one noisy component without quieting anything else:
 
 .. code-block:: bash
 
@@ -227,9 +254,15 @@ Configuring levels
 ==================
 
 Every level is settable in the configuration, under the top-level ``logging``
-section, as is whether each logger reaches the terminal. Whether a logger
-writes to a *file* is command-line only, being inseparable from where that file
-goes, and so is ``--log-root`` itself.
+section, as is whether each logger reaches the terminal -- ``main_console`` and
+``image_console``.
+
+There are no configuration keys for the file sinks or the log root. Whether a
+log file is written is inseparable from where it goes, and that is chosen per
+run with ``--log-root``, so ``--log-main-to-file`` and ``--log-image-to-file``
+are command-line only. Writing ``main_file`` or ``image_file`` in the
+configuration is an error naming the key, not a setting that quietly does
+nothing.
 
 .. code-block:: yaml
 

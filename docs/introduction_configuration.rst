@@ -221,8 +221,12 @@ cloud-task drivers accept none: see :doc:`/user_guide/user_guide_logging`.
 ``--log-root`` takes precedence over every configuration file, including one
 named with ``--config-file``, and over the ``NAV_LOG_ROOT`` environment
 variable. So do ``--log-main-to-console`` and ``--log-image-to-console``, over
-the ``main_console`` and ``image_console`` keys. The two file switches have no
-configuration equivalent, being inseparable from where the file goes.
+the ``main_console`` and ``image_console`` keys.
+
+``--log-main-to-file`` and ``--log-image-to-file`` have no configuration
+equivalent: whether a log file is written is inseparable from where it goes,
+and that is chosen per run. There is no ``main_file`` or ``image_file``
+setting, and writing one is an error rather than a line that does nothing.
 
 The level options are ranked by how specifically they name their target, not
 by being on the command line, so the order above governs them: ``--log-level
