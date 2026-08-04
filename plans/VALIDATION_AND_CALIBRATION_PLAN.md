@@ -87,10 +87,10 @@ carry the methodology and acceptance criteria):
 | WS-0 | #358, #359, #360, #361 | Estimator proven on sims (identifiability + bias-independence); residual is the real-frame reliability-vs-error coupling and PSF-coupling probes feeding WS-1. |
 | WS-1 | #225 | The agreement study. The statistics system reports metadata statistics and consumes WS-1's per-frame disagreement metric; it is not the agreement study. |
 | WS-1b | #226 | Reprojection consistency. |
-| WS-2 | #227 (+ #223, #309, #341, #377) | De-circularization done; #227 open only for the realism residual (realism-anchored calibration #309, terminator verdict #223, sim-fidelity gaps). |
+| WS-2 | #227 (+ #223, #309, #341, #377, #409) | De-circularization done; #227 open only for the realism residual (realism-anchored calibration #309, terminator verdict #223, sim-fidelity gaps, and the scene-coordinate convention split #409 where stars are the outlier). |
 | WS-17 | #355 | Distortion measured from star fields; residual is the per-camera Voyager sim split. |
 | WS-3 | #172, #174, #235 | 47-image stage first (#172), then the >=120 growth target (#235); discovery/review workflow in `plans/COHORT_CURATION_PLAN.md`. |
-| WS-4 | #229 | CI integration tiers. |
+| WS-4 | #229, #426 | CI integration tiers. |
 | WS-5 | #230, #176 | Real-anchored recalibration once WS-1 anchors exist. |
 | WS-6 | #231 | Capability matrix. |
 | WS-7 | #397, #398, #399, #400, #401, #402, #403, #404, #405, #407 | Titan haze navigation delivered and validated; open items are the deferred refinements and the operator ratification bundle (#407). |
@@ -678,6 +678,11 @@ nothing real is exercised automatically.
  tolerance band.
 - Add an **accuracy-regression gate**: compare per-technique median/95th error
  against a committed baseline; fail if it degrades beyond threshold.
+- Cover the committed sim renders. `test_render_diffs.py` is
+ integration-marked, so nothing checks the committed `current/` gallery on a
+ default run — and one of those renders is already stale on `main` without
+ anyone noticing (#426). Fix the stale render, then decide which tier owns
+ that check; it needs no network, so the per-PR sim tier can carry it.
 
 **Acceptance criteria.**
 - Every PR runs at least the `integration_fast` tier with real images.
@@ -982,15 +987,19 @@ error is on the pointing-kernel side. Ranked fixes: (1) fit a photometric
 limb (predict the limb-darkened-disc-convolved-with-PSF brightness profile
 and match it) rather than aligning a geometric edge to the gradient ridge
 (#150); (2) a matched-filter edge estimator to remove the interpolation
-ripple (#282); (3) gate low-phase (<~15 deg) fits (#281); (4) a minor
+ripple (#282); (3) gate low-phase (<~15 deg) fits (#281, shipped: a
+`BodyLimbNav` coarse-seed mis-lock below 15 deg phase is flagged spurious by
+an unconverged-at-trust-boundary gate); (4) a minor
 pixel-centre-convention audit (#283). Harness and full report:
 `util/calibration/limb_bias/limb_navigation_bias_diagnosis.md`.
 
 **Tasks.**
-- Implement the diagnosis's ranked fixes, in order: the photometric-limb fit
+- Implement the diagnosis's remaining ranked fixes, in order: the
+ photometric-limb fit
  (#150 — the dominant, illumination-tracking term), the matched-filter
- sub-pixel edge estimator (#282), the low-phase gate (#281), and the
- pixel-centre-convention audit (#283). The earlier candidate fixes (modeling
+ sub-pixel edge estimator (#282), and the
+ pixel-centre-convention audit (#283). The low-phase gate (#281) is
+ already shipped. The earlier candidate fixes (modeling
  a PSF-inward offset in `nav_model_body.py`; a continuous sub-pixel DT) are
  superseded: the diagnosis showed the dominant term is the photometric
  roll-off, not DT quantization.

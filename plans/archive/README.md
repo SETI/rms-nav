@@ -5,7 +5,8 @@ parent `plans/` directory: `PROGRAM_PLAN.md` is the top-level plan of record;
 `VALIDATION_AND_CALIBRATION_PLAN.md` (Track A science detail),
 `ENGINEERING_PLAN.md` (Tracks B-F implementation detail), and
 `COHORT_CURATION_PLAN.md` (image-library growth playbook) are its detail
-layers. Archived documents may reference each other and pre-archive paths
+layers, and `OPERATOR_PLAYBOOK.md` is the operator's dispatch sheet over all
+of them. Archived documents may reference each other and pre-archive paths
 (e.g. `plans/ROADMAP.md`, `plans/PHASE10_CURATION.md`); resolve such
 references against the dated filenames in this directory.
 
@@ -28,6 +29,53 @@ references against the dated filenames in this directory.
   and the independent assessment in
   `critiques/SIM_REALISM_CRITIQUE_2026-07-18.md`; follow-up work moved to
   GitHub issues (#301, #309, #310, #311).
+- `TITAN_NAV_PLAN_2026-07-25.md` — the haze solar-symmetry navigation design
+  (the French method), revision 12, fully executed 2026-07-25 to 2026-07-29:
+  all six phases (A-F) merged through the `rf_titan_nav` branch as PR #408,
+  closing #60, with every acceptance criterion in its Section 8 met. Titan
+  frames navigate autonomously to a published bound of 1 px cross-track and
+  3 px along-track, validated on an 82-frame Cassini cohort and a 700-scene
+  planted-truth campaign. The as-built system is documented in
+  `docs/dev_guide/dev_guide_techniques_titan_haze.rst` and the two
+  `dev_guide_navigation_models_titan*.rst` pages; the method analysis that
+  selected the approach is frozen at
+  `critiques/TITAN_NAV_CONCEPT_2026-07-25.md` and the seven review rounds at
+  `critiques/TITAN_NAV_PLAN_CRITIQUE_2026-07-25*.md` and
+  `critiques/TITAN_NAV_COLLATERAL_SWEEP_2026-07-25.md`. Its Section 9
+  deferred work is filed as issues (#397, #398, #399, #400, #401, #402,
+  #403, #404, #405), with the operator ratification bundle on #407.
+- `LOGGING_REDESIGN_PLAN_2026-08-04.md` — the two-logger design: one main
+  logger per program run and one image logger per image, a single per-module
+  level system, a top-level `logging` configuration section with per-program
+  overrides, and one identical command-line surface across every pipeline
+  program. Fully executed through the `rf_logging_redesign` integration
+  branch and merged 2026-08-04 as PR #425 (commit `ac690ea`), all nine
+  phases plus a whole-branch adversarial review, every acceptance criterion
+  in its Section 5 met — including cloud-task drivers writing zero bytes to
+  the worker terminal and no PdsLogger anywhere able to reach pdslogger's
+  `print()` fallback. The as-built system is documented in
+  `docs/user_guide/user_guide_logging.rst` and
+  `docs/dev_guide/dev_guide_logging.rst`. Its Section 7 follow-ups are filed
+  as issues (#424, #427, #428, #429), with the defects the work surfaced on
+  #418, #423 and #426.
+- `CK_KERNEL_DESIGN_NOTE_2026-07-30.md` — the pre-decision design analysis
+  for corrected-pointing C-kernels: six candidate designs ranked, the
+  cross-cutting problems, and the decision record that adopted the overlay
+  type-3 design. Superseded by `plans/CK_KERNEL_PLAN.md`, which carries the
+  decided design forward as an implementation plan; this note remains the
+  record of the alternatives considered and why they lost. One caution for
+  a future reader: its offset-to-rotation sketch predates the discovery
+  that the oops observation frames differ from the SPICE camera frames by
+  constant flips, which the live plan's frame handling addresses.
+- `RESULTS_DB_REUSE_NOTE_2026-07-31.md` — the pre-decision analysis for
+  reusing the statistics database as a shared results index: the consumer
+  survey, the gaps in the schema as it stood, four reuse designs, and the
+  backend-selection options with the decision record. Superseded by
+  `plans/RESULTS_DB_PLAN.md`, which carries the decided design (rebuildable
+  index, JSON authoritative, SQLAlchemy Core with SQLite/PostgreSQL)
+  forward as an implementation plan; this note remains the record of the
+  alternatives and the operational trade-offs (ship-the-file vs server)
+  behind them.
 - `ROADMAP_2026-07-12.md` — the issue-ordered, Cassini-first pipeline
   build-out that served as the plan of record until 2026-07-12; consolidated
   into `plans/PROGRAM_PLAN.md` together with the post-stack task inventory.

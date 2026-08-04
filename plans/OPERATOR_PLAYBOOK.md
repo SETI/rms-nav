@@ -2,7 +2,7 @@
 
 *Explicit operator instructions — commands to run, files to modify, and
 prompts to hand to agent sessions — for every next step in
-`plans/PROGRAM_PLAN.md` as of 2026-07-22. Work through Section 0 first;
+`plans/PROGRAM_PLAN.md` as of 2026-08-04. Work through Section 0 first;
 everything after it can be dispatched in parallel as agent sessions.
 Environment for every command below: `source /seti/newnav/setup.sh` from
 `/seti/newnav/rms-nav` (the venv is `venv/`).*
@@ -29,7 +29,6 @@ Each is a scope commitment the downstream work waits on:
   nominations with draft sidecars under `util/titan_cohort/nominations/`, and
   a recommendation to add a `titan_haze` scene class. The issue enumerates
   each one.
-- **#188 CK kernels as a delivered product**: yes / no / defer.
 - **#338 highly-irregular terminator fit (N1853392805)**: accept the
   2-px-class ground truth, keep TERMINATOR_ARC for SPICE-known synchronous
   rotators, or wait for shape models (#23).
@@ -37,7 +36,6 @@ Each is a scope commitment the downstream work waits on:
 ```bash
 gh issue comment 316 --body "Decision: <ship default | ratchet fraction | wander decomposition>"
 gh issue comment 407 --body "Decisions: <per the enumerated list>"
-gh issue comment 188 --body "Decision: <ship | defer>"
 gh issue comment 338 --body "Decision: <accept 2px GT | keep TERMINATOR_ARC | shape models>"
 ```
 
@@ -164,11 +162,13 @@ gates from the estimator findings above:
   tier into every-PR CI and the full suite on a schedule, per WS-4." Related:
   the data-independent sim suites still never run in Actions (#336) and there
   is no canonical environment for the committed sim baselines (#335).
-- **#230 / WS-5** — re-anchor confidence on real evidence. **Handle #317
-  first or explicitly:** the calibration tooling fits tier boundaries from
-  the fused confidence scalar, and correlated ring witnesses emit
-  high-confidence/large-error rows that push the high-tier boundary the
-  wrong way; settle #316 before reading the Keeler tiers. Then: "Re-run the
+- **#230 / WS-5** — re-anchor confidence on real evidence. The correlated
+  ring-witness fix (#317) is done, so the calibration no longer trains
+  against rows where two ring techniques on one catalog were fused as
+  independent witnesses. **Still settle #316 before reading the Keeler
+  tiers:** the tooling fits tier boundaries from the fused confidence
+  scalar, and the orbit-uncertainty severity call moves five
+  operator-verified frames across a boundary. Then: "Re-run the
   calibration tooling against the agreement study's measurements per WS-5;
   retire the confidence_provisional marker where the evidence supports it;
   re-bless tiers with the operator." This is where the terminator's
@@ -183,9 +183,11 @@ Copy the line as the session prompt, prepending: "Work in
 /seti/newnav/rms-nav. Read CLAUDE.md and the named issue first.
 Independent review before done; all CI gates; one PR."
 
-- **Ring ensemble follow-ups**: #317 (correlated ring witnesses fused as
-  independent — sequence before #230); #319 (no library coverage for
-  opposed-ansae geometry, so the conditioning guard is unvalidated). #316 is
+- **Ring ensemble follow-ups**: #319 (no library coverage for
+  opposed-ansae geometry, so the conditioning guard is unvalidated); #380
+  (fit an explicit per-family cross-covariance instead of collapsing
+  correlated witnesses to a representative — gated on real-frame rho
+  measurements from #225). #316 is
   an operator decision (Section 0.1), reversible by config either way.
 - **#150/#128 (photometric limb redesign)** *(Fable-required — see 3b;
   the physics is subtle enough that a wrong premise survives review)*:
@@ -200,13 +202,27 @@ Independent review before done; all CI gates; one PR."
   wrong-lock datapoints from #346."
 - **#130**: "Calibrate the star limiting-magnitude model against real
   fields per #130."
-- **Star-matcher robustness**: #337 (triplet canonicalization seed lottery),
-  #376 (widened saturation captures the wrong bright reference), #367
-  (single-detectable-star wide offset). Each issue body is self-contained.
-- **Confident-wrong vetoes** (sequence with #230/WS-5): #328 (haze crescent
-  ~30 px wrong, Essential), #339 (scattered-light correlated disc/limb),
-  #291 (disc locks at extreme shape mismatch), #326/#327 (body-body
-  occlusion ignored by the disc template and the visible-arc report).
+- **#394 (shape-lock veto residual)**: the veto is suppressed when a trusted
+  star fix agrees with the geometric consensus, which leaves the corner
+  where the star fix is itself wrong-locked — a safe `conflicted` becomes a
+  confident-wrong `success`. Sequence with #230/WS-5.
+- **#188 (CK kernels, with #50)**: decided -- ship. Implement
+  `plans/CK_KERNEL_PLAN.md`; the plan is the specification and its
+  section 8 is the session protocol (per-phase implementer + adversarial
+  reviewer, both Opus-class). Ready to dispatch as written.
+- **#430 (results index)**: implement `plans/RESULTS_DB_PLAN.md` -- the
+  plan is the specification and its section 8 is the session protocol
+  (per-phase implementer + adversarial reviewer, both Opus-class). Ready to
+  dispatch as written.
+- **Logging follow-ups** (small, independent, no sequencing): #424 (remove
+  `sd_create_bundle_cloud_tasks` — it is unwired and leaks to the worker
+  terminal); #418 (decide whether a mosaic cloud task's `status` should
+  reflect its per-image failures, not only its counts — a policy question
+  before it is a coding one); #423 (the GUI viewers print library log
+  records to stdout; about ten tests capture that fallback and need their
+  capture strategy changed first); #429 (give the `util/` tooling the same
+  logging surface). #427 (reorganize the config namespace) is larger and
+  should precede #118.
 - **Sim realism residual (#227)**: the de-circularization is done and on
   main; #227 stays open only for the realism proof and closes at the
   operator's realism-verdict gate, itself gated on #309. #309
@@ -240,7 +256,7 @@ else. Applied to the open items:
   catches new leak shapes).
 - **Mid-tier or below suffices:** library growth, the agreement study's
   bulk execution (once WS-0 hands it a proven estimator), #229, #311, #373,
-  #130, the star-matcher items (#337, #376, #367), and the
+  #130, the logging follow-ups (#418, #423, #424, #429), and the
   documentation/engineering items.
 
 ## 3c. Tracking-issue register
@@ -251,19 +267,14 @@ with assignee rfrenchseti.
 
 **Confident-wrong / ensemble honesty (sequence with #230/WS-5):**
 
-- **#328** high-phase haze crescent returns a gate-passing success ~30 px
-  wrong and nothing vetoes it (Essential)
-- **#339** scattered-light correlated disc/limb errors fused as independent
-  at the 0.99 confidence cap
 - **#346** three library frames lock confidently onto the wrong ring feature
   (owns the N1492091163 / N1867601758 / N1867602424 red pins)
-- **#317** ring techniques observing one catalog model are fused as
-  independent witnesses (sequence before #230)
-- **#291** BodyDiscCorrelateNav locks on confidently at extreme shape mismatch
-- **#326** BODY_DISC correlation template ignores body-body occlusion at deep
-  mutual-event overlap
-- **#327** NavModelBody reports full visible_arc_fraction for limbs occluded
-  by a nearer body
+- **#394** shape-lock veto suppression trusts a star fix that could itself be
+  wrong-locked, turning a safe `conflicted` into a confident-wrong `success`
+- **#380** correlated-witness fusion collapses to a representative at rho=1;
+  fit an explicit cross-covariance once #225 measures real-frame rho
+- **#400** the ensemble merge and tier logic have never been exercised on the
+  strongly anisotropic covariance the Titan haze fit reports
 
 **Simulator fidelity gaps (feed #309 and the sim follow-ups in Section 3):**
 
@@ -297,15 +308,35 @@ with assignee rfrenchseti.
   (relates to #229/WS-4)
 - **#340** library_crosscheck records only a yes/no primary-technique flag,
   not the winning technique
+- **#426** a committed sim render is stale on `main` and the test that would
+  say so is integration-marked, so nothing catches it per PR
 
-**Star navigation:**
+**Titan haze refinements (the method ships; these are measured limits):**
 
-- **#337** star-field matcher triplet canonicalization is a seed lottery on
-  equal-brightness fields
-- **#376** widened saturation match can capture the wrong bright reference in a
-  crowded field
-- **#367** autonomous star nav cannot lock a wide offset from a single
-  detectable star
+- **#403** the arc ray reach is sized by the search window rather than by
+  where the limb can be, costing rays on large well-framed frames
+- **#404** the flat arc-residual cap behaves as a size-dependent gate, and
+  the measurements say it must not simply be raised
+- **#401** the extreme-phase (> 150 deg) edge of the working range is
+  uncharacterized
+- **#402** the main rings are masked opaque, refusing frames visible through
+  the C ring or the gaps
+- **#397** a self-calibrated haze-radius table would remove the dominant
+  along-track error; **#398** CB3 cartographic refinement; **#399** a
+  Voyager validation cohort; **#405** library growth through the standard
+  curation pipeline
+
+**Logging follow-ups (all small and independent; Section 3):**
+
+- **#418** a mosaic cloud task reports success when every image in it failed
+  (policy decision first)
+- **#423** the GUI viewers print library log records to stdout through
+  pdslogger's handler-less fallback
+- **#424** remove `sd_create_bundle_cloud_tasks`
+- **#427** the config namespace is organized on no stated axis; sequence
+  before #118
+- **#428** upstream registry-eviction request to `rms-pdslogger`
+- **#429** give the `util/` tooling the same logging surface
 
 **Library-frame reds and decisions (Section 1):**
 
@@ -313,6 +344,8 @@ with assignee rfrenchseti.
   on N1853392805 (decision)
 - **#350** two resolved-body frames miss offset tolerance by ~2 px
   (N1484593951, N1686349893)
+- **#406** two pre-existing reds (N1487595731_1, N1633925572_1) that fail
+  identically on `main` and were not in the pinned table
 
 **Agreement estimator real-frame follow-ups (sequence with #225/WS-1 and
 #230/WS-5):**
@@ -358,7 +391,7 @@ with assignee rfrenchseti.
 ## 5. Sequencing summary
 
 ```text
-0.1 decisions (#316, #407, #188, #338) -> 0.2 adopt transfer watch (#334)  (operator, minutes)
+0.1 decisions (#316, #407, #338) -> 0.2 adopt transfer watch (#334)  (operator, minutes)
 2.1 library growth (batch-006 + continued)   (agent session; your votes gate it)
 2.2 agreement study bulk   (after 2.1 cohorts; you approve frames)
 2.3 CI tier, re-anchor confidence, accuracy tail (after 2.2)

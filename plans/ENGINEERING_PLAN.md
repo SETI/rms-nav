@@ -244,14 +244,37 @@ by a strict xfail in `tests/spindoctor/cli/backplanes/`:
   bounding boxes, an observation metadata block); couples to the
   #55/#57 decisions.
 
-### CK kernels (#188, prerequisite #50)
+### CK kernels (#188, with #50)
 
 The headline "updated pointing" deliverable: write SPICE C-kernels
-carrying the navigated attitude. #50 (switch to using the C matrix)
-comes first and is small; #188 needs a design note (kernel granularity,
-segment metadata, provenance linkage to `_metadata.json`) the operator
-should see. Validation: round-trip a written kernel through oops and
-confirm the reprojected geometry matches the navigated offset.
+carrying the navigated attitude, so any SPICE-based tool loads navigated
+pointing with a `furnsh` and no SpinDoctor code. Design is settled and
+detailed in `plans/CK_KERNEL_PLAN.md`, which is self-contained and
+executable on its own: the navigator records a corrected camera C-matrix
+in each image's metadata beside the pixel offset, and a cspyce-only
+`sd_create_ck` writes one type-3 segment per navigated exposure into
+files that mirror the originals they correct. Validation is a closed
+loop: navigate, generate a kernel, furnish it, re-navigate, and confirm
+the second offset is approximately zero and the C-matrix matches.
+
+That plan delivers the writing half of #50 -- the C-matrix appears in the
+metadata, computed in SpinDoctor now and replaceable by an oops call when
+one exists. It deliberately does not deliver #50's other half: the pixel
+offset stays, and every consumer keeps reading it. Switching the
+backplane and reprojection readers from the offset to the C-matrix is
+what remains under #50, and it wants the offset and the matrix to have
+been shown to agree on real frames first, which the CK round-trip
+provides.
+
+### The results index (#430)
+
+An optional, rebuildable database index over the results tree, so that
+programs needing a few fields per image stop reading one JSON document
+each -- one paid cloud round trip per image per program today, at order
+400,000 images for a Cassini-scale run. Design is settled and detailed in
+`plans/RESULTS_DB_PLAN.md`, which is self-contained. The JSON documents
+stay authoritative, no program ever requires the index, and the
+file-reading paths remain the default.
 
 ### Capability matrix (#231)
 
@@ -265,7 +288,44 @@ asserts the generated half matches the registries.
 ### Cloud and scale
 
 - **#108** — audit every `sd_*` CLI for logging, cloud operation, and
-  working `cloud_tasks` variants; fix what the audit finds.
+  working `cloud_tasks` variants; fix what the audit finds. The logging
+  third is done: every pipeline program takes the same flags with the same
+  defaults, resolves per-module levels the same way, and writes a main log
+  plus per-image logs to the same path scheme, with the statistics and GUI
+  programs deliberately excluded and on `print()`. What the audit found and
+  did not fix is now three issues — #418, #423, #424 below — and what
+  remains under #108 itself is the cloud-operation half: whether each
+  driver's cloud path actually works end to end, which is untested for
+  several of them.
+- **#418** — a `sd_mosaic_cloud_tasks` task returns `status: success` no
+  matter how many of its images failed. The counts are in the result now
+  (`n_uncorrected`, `uncorrected_reasons`, `rejected_stubs`), so the
+  information exists; the question the issue records is whether `status`
+  should reflect it, given that a queue keys retry off `status` and
+  "retry the whole task because one image had no offset file" is usually
+  the wrong response. Decide the policy before coding it.
+- **#423** — the mosaic and backplane GUI viewers import library code that
+  logs, but construct no handlers, so pdslogger's handler-less fallback
+  prints those records to stdout at every level. Pre-existing, and the fix
+  is small (bind the null handler, or give the viewers a real logger); the
+  cost is that about ten tests currently capture that fallback's output via
+  `capsys` and would need their capture strategy changed first. Do that
+  first, then the fix.
+- **#424** — remove `sd_create_bundle_cloud_tasks` and its `pyproject.toml`
+  entry point. Bundle assembly is a packaging step over an
+  already-processed collection, not per-image work suited to a task queue;
+  the module is unwired for logging and leaks to the worker terminal, and
+  fixing it would be maintaining something that should not exist.
+- **#411** — migrate the technique config keys to snake_case, so the
+  configuration spells component names the way `log_key_for` and the rest
+  of the config system already do.
+- **#427** — the config top-level namespace mixes domain objects, pipeline
+  stages, instruments, output products, and infrastructure on no stated
+  axis, with `general` as the catch-all. Lifting `logging` out of `general`
+  fixed the worst instance and left the pattern. Sequence this **before**
+  #118 (config validation): a schema per section is easier to write and to
+  keep honest once the sections are organized, and doing it the other way
+  freezes the current grouping into a schema.
 - **#141 / #142** — dedup the CLI driver preamble and cloud-task loop;
   fix the dropped `extra_params` and the ImageFiles cardinality
   disagreement.
@@ -327,6 +387,24 @@ asserts the generated half matches the registries.
   modules (follow the existing PyQt6-safe autodoc pattern).
 - **#245** — self-contained language pass over `util/cohort_curation/`
   (drop the internal phase codenames; point at the committed docs).
+- **#431** — a documentation chapter specifying the per-image metadata
+  JSON exactly: every key, type, meaning, and presence rule across the
+  three document shapes (navigated, load-error, early-return), with
+  annotated examples and a test asserting the documented key set matches
+  what the writers emit. The file is read by six programs and by external
+  users, and its format currently exists only in the code that writes it.
+  Includes the `pointing` and `times` blocks once the corrected-pointing
+  metadata extension lands.
+- **#429** — give the `util/` tooling the logging surface the pipeline
+  programs have. Several of these programs run for hours over hundreds of
+  images and report through bare `print()`: no level control, no file
+  record of a campaign, no way to raise one component's verbosity. Not all
+  of them qualify — a script that prints four lines does not need a logger.
+  Scope to settle when picked up: which programs qualify, whether they
+  declare program names alongside the shipped drivers (they are not `sd_*`
+  entry points, so `logging.programs` would gain non-shipped keys), and
+  where their log files belong, since `util/` output does not live under a
+  results root.
 - **#391** — pin the lint tools (`ruff`, `mypy`, `pymarkdownlnt`) in the
   `dev` group, or move linting to pinned `pre-commit` hooks, so a new
   release cannot turn `main` red without a deliberate code change. A ruff
@@ -390,4 +468,7 @@ the full `where_in_front` depth test for siblings whose predicted bbox
 does not overlap, avoiding the O(bodies^2) grid pass in busy frames),
 #212 xdist worker nondeterminism
 (software-only scope; the faulty CPU cores are permanently offlined and
-nothing gates on hardware).
+nothing gates on hardware), #428 the upstream `rms-pdslogger`
+registry-eviction request (nothing in this repo depends on it; the
+constraint is worth recording where the next person to reach for a
+logger-per-image design will find it).
