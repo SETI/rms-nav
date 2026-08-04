@@ -3,7 +3,7 @@ Developer Guide: Logging
 ========================
 
 The autonomous-navigation pipeline routes every per-image log line
-through ``pdslogger`` (``spindoctor.config.logger.IMAGE_LOGGER``). The standard
+through ``pdslogger`` (:data:`~spindoctor.config.log_scope.IMAGE_LOGGER`). The standard
 library ``logging`` module is intentionally **not used** anywhere in the
 ``spindoctor.feature``, ``spindoctor.nav_model``, ``spindoctor.nav_orchestrator``,
 ``spindoctor.nav_technique``, or ``spindoctor.support`` packages.
@@ -28,7 +28,7 @@ Every navigation produces a top-level INFO line per per-image phase
 plus a final ``status_reason``-keyed verdict:
 
 * **Per technique.** Each technique opens a section with
-  ``with self.logger.open(f'TECHNIQUE: {self.name}'):`` so per-image
+  ``with self.log_section(f'TECHNIQUE: {self.name}'):`` so per-image
   logs delimit each technique's contribution unambiguously.
 * **Per status reason.** The orchestrator emits one INFO line per item
   in :data:`spindoctor.nav_orchestrator.status_reason_info.STATUS_REASON_INFO_TEMPLATE`
@@ -100,15 +100,147 @@ audience and the consequence of the line, not the call site's depth:
   un-importable extension) that abort the whole run before any image is processed.
   Reserve for setup errors that no per-image fallback can recover from.
 
+Writing a component that logs
+=============================
+
+Which logger a class writes to is declared, not inferred. Most components work
+on one image and keep the default
+:attr:`~spindoctor.config.log_scope.LogRole.IMAGE`; one whose work spans a run
+-- enumerating a dataset, tallying totals -- sets ``log_role = LogRole.MAIN``
+on the class, and
+:class:`~spindoctor.support.nav_base.NavBase` binds ``self.logger`` accordingly.
+
+Open sections with :meth:`~spindoctor.support.nav_base.NavBase.log_section`
+rather than ``self.logger.open``. A level is applied when a section is opened,
+so the section is where a component's configured level takes effect; calling
+``open`` directly silently ignores it::
+
+    with self.log_section(f'TECHNIQUE: {self.name}'):
+        ...
+
+A component that is a module-level function rather than a class gets the same
+treatment from the :func:`~spindoctor.config.log_scope.logged_section`
+decorator, which is what makes it independently configurable at all.
+
+The name a component is configured under is its ``log_key``. Left undeclared,
+it is derived from the class name: a ``NavTechnique`` or ``NavModel`` prefix
+comes off, then a trailing ``Simulated`` and a trailing ``Nav``, and what is
+left becomes snake_case. So ``TitanHazeNav`` is ``titan_haze``,
+``NavTechniqueManual`` is ``manual``, and ``NavModelRingsSimulated`` is
+``rings`` -- a simulated model shares its sibling's key, being one component
+differing only in where its inputs come from. Note that a bare ``Nav`` prefix
+is not stripped: ``NavFoo`` derives ``nav_foo``.
+
+A class whose derived key would be wrong declares ``log_key`` instead, and a
+family that should share one key declares it once on their base;
+``log_key`` is inherited, both at run time and in the set of keys the
+configuration will accept.
+
+Adding a technique or model therefore adds a configuration key automatically.
+Adding a function-shaped component means adding its key to ``OTHER_LOG_KEYS``
+in :mod:`spindoctor.config.logging_keys`, or the configuration will reject it.
+
+Every dispatch module that has a logger declares ``PROGRAM_NAME`` from
+:mod:`spindoctor.config.program_names`. It names the program's main log
+directory and selects its block under ``logging.programs``, so a program
+without one has no way to be configured separately and no place to put its
+main log.
+
+Anything that degrades a result goes to both
+============================================
+
+A record that says a product is less trustworthy than it looks is not
+per-image detail, even though it is about one image. Reprojecting on
+uncorrected pointing, computing backplanes from a navigation that recorded no
+offset, falling back to a default where a measurement was expected -- each
+writes a file that looks exactly like a good one, and the only sign is a line
+in a log nobody has a reason to open.
+
+Report those twice, and say different things:
+
+* **To the image's log, the account.** Which file was missing, what the status
+  was, what the malformed field contained. This is where someone who has been
+  told to look will look, and it belongs with the rest of that image's
+  processing.
+
+* **To the run's log, the fact.** One line naming the image and the short
+  reason, plus a count in whatever summary the program prints. Someone
+  following a batch should not have to open every image's log to discover
+  that a tenth of it was reprojected uncorrected.
+
+A cloud task has no run log, so the second half becomes a field in the value
+``process_task`` returns -- a count, a per-reason tally, or a flag. The task
+result is the only channel a worker always has.
+
+Ordinary progress does not get this treatment. The distinction is whether a
+reader who never opens the image log would draw a wrong conclusion about the
+product: that is what earns a line in the run's log.
+
+The scope rule
+==============
+
+An image-role component that logs when no image scope is open is a bug. The
+record is routed to the main logger so it is never lost, and a warning names
+the call site, deduplicated so a loop cannot flood the log. Under
+``logging.strict_scope`` it raises instead.
+
+There is no legitimate case for it in production code: a component logging
+about one image should be running inside that image's section, and one whose
+work spans the run belongs on the main logger. Strict scope is opt-in per test
+rather than on suite-wide, because a unit test that drives a model or technique
+directly is correct isolation testing, not a mis-binding -- request the
+``strict_log_scope`` fixture from a test that drives a real pipeline.
+
+Cloud tasks
+===========
+
+``sd_offset_cloud_tasks``, ``sd_backplanes_cloud_tasks`` and
+``sd_mosaic_cloud_tasks`` write nothing to the terminal. A worker's console
+belongs to ``cloud_tasks``, which reports task progress there under its own
+configuration; per-image processing detail goes to the per-image log file,
+under the same ``{log_root}/{backend}/`` tree the interactive driver writes
+to. Levels resolve identically, so an image's log reads the same whichever
+driver produced it.
+
+:func:`~spindoctor.config.logging_config.build_cloud_task_logging` is what a
+task calls in place of
+:func:`~spindoctor.config.logging_config.build_run_logging`. It builds no main
+logger, and it refuses a console for either logger however the configuration
+or the command line asked for one. Two details are worth knowing before
+changing anything here:
+
+* It is called **inside** each worker's task handler, not once at startup.
+  Workers are spawned rather than forked, so a worker process does not inherit
+  what the parent configured.
+* Both loggers are bound to ``pdslogger.NULL_HANDLER`` and have
+  ``propagate`` turned off. Neither is redundant: a ``PdsLogger`` with no
+  handlers at all prints every record to stdout regardless of level, and one
+  that propagates reaches the root handler ``logging.basicConfig`` installs in
+  each worker, which re-emits every line a second time on stderr.
+
+Because a cloud task has no main log, a record about one image must be logged
+to :data:`~spindoctor.config.log_scope.IMAGE_LOGGER` rather than to
+:data:`~spindoctor.config.MAIN_LOGGER`, which in a task is bound to a
+null sink and discards what it is given.
+
+That covers anything happening *inside* an image's section. An outcome
+decided before one is open -- an image skipped for want of a successful
+navigation, a results path stub refused -- has no image log to go in either,
+and belongs in the value ``process_task`` returns. The task result is the one
+channel a worker always has.
+
 Conventions
 ===========
 
 * Never ``import logging`` in ``nav.*`` core code.
-* Never ``print(...)`` in library code; route through ``self.logger``.
+* Never ``print(...)`` in the navigation core or in any program that has a
+  logger; route through ``self.logger``. The statistics and GUI programs are
+  the deliberate exception -- they carry no logger and report with ``print()``
+  by design.
 * Every :meth:`~spindoctor.nav_technique.nav_technique.NavTechnique.navigate` body
-  wraps its work in
-  ``with self.logger.open(f'TECHNIQUE: {self.name}'):`` for log
-  scoping.
+  wraps its work in ``with self.log_section(f'TECHNIQUE: {self.name}'):``
+  for log scoping. Not ``self.logger.open``, which would skip the level
+  configured for that technique; see `Writing a component that logs`_.
 * The orchestrator captures every per-technique exception and emits an
   ``EXCEPTION``-level pdslogger line via ``self._logger.exception(...)``;
   the technique's failure surfaces on the returned

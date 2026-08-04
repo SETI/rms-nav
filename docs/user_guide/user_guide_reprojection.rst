@@ -502,14 +502,32 @@ Output format
 
 The default output format is FITS (``.fits``). Pass ``--format npz`` to use
 compressed NumPy archives instead. Reprojection and mosaic files live directly
-under ``<output-dir>``; the only subdirectory used is ``logs/`` for per-image
-reprojection logs from pass 1:
+under ``<output-dir>``. Per-image logs are written under the configured log
+root rather than beside the products; a cloud-tasks worker with no results root
+of its own falls back to ``<output-dir>/logs``:
 
 - Per-image reprojection: ``<output-dir>/<prefix>_<body_or_planet>_<image_stem>_reproj.<fmt>``
-- Per-image reprojection log: ``<output-dir>/logs/<results_path_stub>_<timestamp>.log``
+- Per-image reprojection log: ``{log_root}/reproj/<subject>/<results_path_stub>_<timestamp>.log``
 - Final mosaic: ``<output-dir>/<prefix>_<body_or_planet>_mosaic.<fmt>``
 
 If ``--prefix`` is empty (the default), the leading underscore is omitted.
+
+``sd_mosaic`` accepts the same logging options as every other pipeline
+program; see :doc:`user_guide_logging`.
+
+An image with no usable navigation offset is still reprojected, on
+uncorrected pointing. Because the product looks the same either way, each one
+is reported to the run's log with the reason, and the pass summary counts
+them::
+
+   Reprojection pass complete: 143 done, 0 skipped, 0 failed, 12 with
+   uncorrected pointing.
+
+A cloud-task worker has no run log, so it returns the same information in the
+task result instead, as ``n_uncorrected`` with a per-reason tally under
+``uncorrected_reasons``. The full explanation for any one image is in that
+image's log. A run given no ``--nav-results-root`` at all is not counted:
+nothing was asked for, so nothing is missing.
 
 Cloud-tasks entry point
 ^^^^^^^^^^^^^^^^^^^^^^^

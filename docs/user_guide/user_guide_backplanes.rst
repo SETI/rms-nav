@@ -142,6 +142,16 @@ For each processed image, ``sd_backplanes`` writes two files under
   inventory information and per-backplane ``min``/``max`` statistics
   (consumed by ``sd_create_bundle`` when generating PDS4 labels).
 
+Logs are written under the log root rather than beside these products: the
+run's own log to ``{log_root}/sd_backplanes/main_{timestamp}.log`` and one per
+image to ``{log_root}/backplanes/{results_path_stub}_{timestamp}.log``.
+``sd_backplanes`` accepts the same logging options as every other pipeline
+program; see :doc:`user_guide_logging`.
+
+An image whose navigation did not succeed is skipped and gets no backplanes.
+The run's log says which images those were, and reports the navigation status
+that caused each skip.
+
 Backplane Viewer GUI
 ====================
 

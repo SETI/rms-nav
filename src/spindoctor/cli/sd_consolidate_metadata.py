@@ -21,16 +21,22 @@ from filecache import FCPath, FileCache
 package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, package_source_path)
 
+from spindoctor.cli.logging_args import add_logging_arguments, reporting_logging_errors
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
+    build_run_logging,
     get_nav_results_root,
     load_default_and_user_config,
-    setup_logging,
 )
+from spindoctor.config.program_names import SD_CONSOLIDATE_METADATA
 from spindoctor.dataset import dataset_name_to_class, dataset_names
 from spindoctor.dataset.dataset import DataSet
 from spindoctor.support.misc import log_run_environment
+
+PROGRAM_NAME = SD_CONSOLIDATE_METADATA
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None
@@ -153,25 +159,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     # Add all the arguments related to selecting files
     DATASET.add_selection_arguments(cmdparser)
 
-    # Logging arguments
-    logging_group = cmdparser.add_argument_group('Logging')
-    logging_group.add_argument(
-        '--log-level-main-console',
-        type=str,
-        default=None,
-        metavar='LEVEL',
-        help="""Log level for main logger console output to stdout (DEBUG, INFO, WARNING,
-        ERROR, CRITICAL). Defaults to config general.log_level_main_console or INFO.""",
-    )
-    logging_group.add_argument(
-        '--log-level-main-file',
-        type=str,
-        default=None,
-        metavar='LEVEL',
-        help="""Log level for the main logfile written to
-        ${NAV_RESULTS_ROOT}/logs/sd_consolidate_metadata/ (DEBUG, INFO, WARNING, ERROR,
-        CRITICAL).  Defaults to config general.log_level_main_file or INFO.""",
-    )
+    add_logging_arguments(cmdparser, has_image_logger=False)
 
     arguments = cmdparser.parse_args(command_list[1:])
 
@@ -245,7 +233,8 @@ def main() -> None:
     command_list = sys.argv[1:]
     arguments = parse_args(command_list)
 
-    load_default_and_user_config(arguments, DEFAULT_CONFIG)
+    with reporting_logging_errors():
+        load_default_and_user_config(arguments, DEFAULT_CONFIG)
 
     nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)
     nav_results_root = FileCache(None).new_path(nav_results_root_str)
@@ -253,11 +242,8 @@ def main() -> None:
     # parent directories on first write.
     dest_root = FileCache(None).new_path(arguments.dest_dir)
 
-    try:
-        setup_logging(arguments, DEFAULT_CONFIG, nav_results_root_str)
-    except (TypeError, ValueError) as exc:
-        print(f'Invalid logging configuration: {exc}', file=sys.stderr)
-        sys.exit(1)
+    with reporting_logging_errors():
+        build_run_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
 
     global START_TIME, NUM_FILES_COPIED, NUM_FILES_MISSING
     START_TIME = time.time()

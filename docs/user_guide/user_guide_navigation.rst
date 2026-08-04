@@ -193,25 +193,29 @@ Miscellaneous
 Logging options
 ^^^^^^^^^^^^^^^
 
-All four options accept a standard log-level string (``DEBUG``, ``INFO``, ``WARNING``,
-``ERROR``, or ``CRITICAL``) and override the corresponding ``general.*`` configuration
-key for that run. For full details and the config-file equivalents see
-:doc:`/introduction_configuration`.
+``sd_offset`` writes a main log reporting what the run is doing, and one log
+per image carrying the detail of navigating it:
 
-* ``--log-level-main-console LEVEL``: stdout level for the main logger (overrides
-  ``general.log_level_main_console``; default ``INFO``).
+.. code-block:: text
 
-* ``--log-level-main-file LEVEL``: logfile level for the main logger written to
-  ``$NAV_RESULTS_ROOT/logs/sd_offset/`` (overrides ``general.log_level_main_file``;
-  default ``INFO``).
+   {log_root}/sd_offset/main_{timestamp}.log
+   {log_root}/nav/{results_path_stub}_{timestamp}.log
 
-* ``--log-level-image-console LEVEL``: stdout level for the image logger, active
-  only while each image is being processed (overrides
-  ``general.log_level_image_console``; default ``INFO``).
+``--log-root`` says where those go, defaulting to a ``logs`` directory under
+the navigation results root. The main log goes to the terminal as well as a
+file; image logs go to a file only, so the per-technique detail is on disk
+rather than on screen unless ``--log-image-to-console`` asks for it.
 
-* ``--log-level-image-file LEVEL``: level for the per-image logfile written to
-  ``$NAV_RESULTS_ROOT/logs/{results_path_stub}.log`` (overrides
-  ``general.log_level_image_file``; default ``INFO``).
+The level of any one component can be raised or lowered on its own, which is
+the usual way to investigate a single technique across many images:
+
+.. code-block:: bash
+
+   sd_offset coiss_saturn --volumes COISS_2001 \
+       --log-level WARNING --log-level titan_haze=DEBUG
+
+The full set of options, the component names, the configuration-file
+equivalents and the precedence between them are in :doc:`user_guide_logging`.
 
 Example Commands
 ----------------

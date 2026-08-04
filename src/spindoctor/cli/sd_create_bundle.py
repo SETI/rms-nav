@@ -19,6 +19,7 @@ from filecache import FileCache
 package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, package_source_path)
 
+from spindoctor.cli.logging_args import add_logging_arguments, reporting_logging_errors
 from spindoctor.cli.pds4.bundle_data import generate_bundle_data_files
 from spindoctor.cli.pds4.collections import (
     generate_collection_files,
@@ -27,13 +28,19 @@ from spindoctor.cli.pds4.collections import (
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
+    build_run_logging,
     get_backplane_results_root,
     get_nav_results_root,
     get_pds4_bundle_results_root,
     load_default_and_user_config,
 )
+from spindoctor.config.program_names import SD_CREATE_BUNDLE
 from spindoctor.dataset import dataset_name_to_class, dataset_names
 from spindoctor.dataset.dataset import DataSet
+
+PROGRAM_NAME = SD_CREATE_BUNDLE
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None
@@ -45,6 +52,7 @@ def add_common_arguments(parser: argparse.ArgumentParser, *, for_labels: bool = 
     Parameters:
         parser: The argument parser to add arguments to.
     """
+    add_logging_arguments(parser, has_image_logger=False)
     environment_group = parser.add_argument_group('Environment')
     environment_group.add_argument(
         '--config-file',
@@ -162,7 +170,11 @@ def main_labels() -> None:
     arguments = parse_args_labels(command_list)
 
     # Read configuration files
-    load_default_and_user_config(arguments, DEFAULT_CONFIG)
+    with reporting_logging_errors():
+        load_default_and_user_config(arguments, DEFAULT_CONFIG)
+
+    with reporting_logging_errors():
+        build_run_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
 
     # Derive roots
     nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)
@@ -209,7 +221,11 @@ def main_summary() -> None:
 
     # Read configuration files via the shared loader (single source of truth
     # for config / CLI / env precedence), matching main_labels.
-    load_default_and_user_config(arguments, DEFAULT_CONFIG)
+    with reporting_logging_errors():
+        load_default_and_user_config(arguments, DEFAULT_CONFIG)
+
+    with reporting_logging_errors():
+        build_run_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
 
     bundle_results_root_str = get_pds4_bundle_results_root(arguments, DEFAULT_CONFIG)
     bundle_results_root = FileCache(None).new_path(bundle_results_root_str)

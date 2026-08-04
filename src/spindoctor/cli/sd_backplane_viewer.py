@@ -2,6 +2,7 @@
 import argparse
 import os
 import sys
+import traceback
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -42,10 +43,10 @@ from matplotlib import colormaps as mpl_colormaps
 
 from spindoctor.config import (
     DEFAULT_CONFIG,
-    MAIN_LOGGER,
     Config,
     get_backplane_results_root,
     get_nav_results_root,
+    image_scope,
     load_default_and_user_config,
 )
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
@@ -206,7 +207,6 @@ class NavBackplaneViewer(QDialog):
         self._nav_results_root = nav_results_root
         self._backplane_results_root = backplane_results_root
         self._config = config or DEFAULT_CONFIG
-        self._logger = MAIN_LOGGER
 
         self._obs_class = inst_name_to_obs_class(inst_name)
 
@@ -645,7 +645,10 @@ class NavBackplaneViewer(QDialog):
             return
         group = self._image_groups[index]
         if len(group.image_files) != 1:
-            self._logger.error('Expected single image per group; got %d', len(group.image_files))
+            print(
+                f'Expected single image per group; got {len(group.image_files)}',
+                file=sys.stderr,
+            )
             return
         image_file = group.image_files[0]
         image_path = image_file.image_file_path.absolute()
@@ -653,13 +656,18 @@ class NavBackplaneViewer(QDialog):
         self._current_image_name = image_path.name
         self.setWindowTitle(f'Backplane Viewer - {self._current_image_name}')
 
-        # Load observation (science image)
+        # Load observation (science image).  The observation classes are
+        # image-scoped library code and log while reading, so the load runs
+        # inside an image scope even though the viewer itself keeps no logger;
+        # without one every load would report a scope violation per record.
         try:
-            snapshot = self._obs_class.from_file(image_path)
+            with image_scope():
+                snapshot = self._obs_class.from_file(image_path)
             if not isinstance(snapshot, ObsSnapshot):
                 raise ValueError('Expected ObsSnapshot')
         except Exception as e:
-            self._logger.exception('Failed to read image %s', image_path)
+            print(f'Failed to read image {image_path}', file=sys.stderr)
+            traceback.print_exc()
             self._status_label.setText(f'Image read error: {e}')
             return
 
@@ -704,14 +712,17 @@ class NavBackplaneViewer(QDialog):
                     rgba = im.convert('RGBA')
                     self._summary_rgba = np.array(rgba)
                 if self._summary_rgba is not None:
-                    self._logger.info(
-                        'Loaded summary overlay "%s" size=%dx%d',
-                        png_local,
-                        self._summary_rgba.shape[1],
-                        self._summary_rgba.shape[0],
+                    print(
+                        f'Loaded summary overlay "{png_local}" '
+                        f'size={self._summary_rgba.shape[1]}x'
+                        f'{self._summary_rgba.shape[0]}'
                     )
             except Exception:
-                self._logger.exception('Failed to load summary overlay from %s', summary_png_file)
+                print(
+                    f'Failed to load summary overlay from {summary_png_file}',
+                    file=sys.stderr,
+                )
+                traceback.print_exc()
                 self._summary_rgba = None
         # Enable/disable summary checkbox based on availability
         has_summary = self._summary_rgba is not None
@@ -729,10 +740,8 @@ class NavBackplaneViewer(QDialog):
             local_path = cast(str, fits_file.get_local_path())
             with fits.open(local_path) as hdul:
                 self._fits_hdus = list(hdul)
-                self._logger.info(
-                    'Opened backplanes FITS file "%s" with %d HDUs',
-                    local_path,
-                    len(self._fits_hdus),
+                print(
+                    f'Opened backplanes FITS file "{local_path}" with {len(self._fits_hdus)} HDUs'
                 )
                 # Parse HDUs: locate BODY_ID_MAP and backplanes
                 for hdu in self._fits_hdus[1:]:
@@ -741,18 +750,22 @@ class NavBackplaneViewer(QDialog):
                         try:
                             self._body_id_map = np.asarray(hdu.data, dtype=np.int32)
                         except Exception:
-                            self._logger.exception(
-                                f'Failed to parse BODY_ID_MAP from HDU for {fits_file}'
+                            print(
+                                f'Failed to parse BODY_ID_MAP from HDU for {fits_file}',
+                                file=sys.stderr,
                             )
+                            traceback.print_exc()
                             self._body_id_map = None
                     else:
                         arr: np.ndarray | None = None
                         try:
                             arr = np.asarray(hdu.data, dtype=np.float64)
                         except Exception:
-                            self._logger.exception(
-                                f'Failed to parse {name} from HDU for {fits_file}'
+                            print(
+                                f'Failed to parse {name} from HDU for {fits_file}',
+                                file=sys.stderr,
                             )
+                            traceback.print_exc()
                             arr = None
                         if arr is None:
                             continue
@@ -769,13 +782,14 @@ class NavBackplaneViewer(QDialog):
                 f'Backplane FITS file not found:\n{fits_file}\n\n'
                 'All backplane data will be unavailable.',
             )
-            self._logger.warning('FITS file not found: %s', fits_file)
+            print(f'FITS file not found: {fits_file}', file=sys.stderr)
             self._fits_hdus = []
             self._bp_body_map.clear()
             self._bp_ring_map.clear()
             self._body_id_map = None
         except Exception:
-            self._logger.exception('Failed to read FITS backplane file')
+            print('Failed to read FITS backplane file', file=sys.stderr)
+            traceback.print_exc()
             self._fits_hdus = []
             self._bp_body_map.clear()
             self._bp_ring_map.clear()

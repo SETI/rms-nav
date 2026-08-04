@@ -4,7 +4,7 @@ from typing import Any, cast
 import numpy as np
 from filecache import FCPath
 
-from spindoctor.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
+from spindoctor.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config, logged_section
 from spindoctor.support.time import et_to_utc
 from spindoctor.support.types import PathLike
 
@@ -81,6 +81,7 @@ class ObsVoyagerISS(ObsSnapshotInst):
     """
 
     @staticmethod
+    @logged_section('obs', 'LOAD IMAGE')
     def from_file(
         path: PathLike,
         *,

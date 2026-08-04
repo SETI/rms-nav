@@ -19,17 +19,24 @@ package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
+from spindoctor.cli.logging_args import add_logging_arguments, reporting_logging_errors
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
+    build_run_logging,
     get_backplane_results_root,
     get_nav_results_root,
     load_default_and_user_config,
 )
+from spindoctor.config.program_names import SD_BACKPLANES
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from spindoctor.dataset.dataset import DataSet
 from spindoctor.obs import inst_name_to_obs_class
 from spindoctor.support.file import json_as_string
+
+PROGRAM_NAME = SD_BACKPLANES
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None
@@ -122,6 +129,8 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     # Dataset selection
     DATASET.add_selection_arguments(cmdparser)
 
+    add_logging_arguments(cmdparser)
+
     # Misc
     misc_group = cmdparser.add_argument_group('Miscellaneous')
     misc_group.add_argument(
@@ -137,7 +146,10 @@ def main() -> None:
     arguments = parse_args(command_list)
 
     # Read configuration files
-    load_default_and_user_config(arguments, DEFAULT_CONFIG)
+    with reporting_logging_errors():
+        load_default_and_user_config(arguments, DEFAULT_CONFIG)
+    with reporting_logging_errors():
+        run_logging = build_run_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
 
     # Derive roots
     nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)
@@ -205,6 +217,7 @@ def main() -> None:
                 nav_results_root=nav_results_root,
                 backplane_results_root=backplane_results_root,
                 write_output_files=not arguments.no_write_output_files,
+                run_logging=run_logging,
             )
         except FileNotFoundError as e:
             MAIN_LOGGER.error(

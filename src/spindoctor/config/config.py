@@ -70,6 +70,22 @@ def _deep_merge(base: dict[Any, Any], overlay: dict[Any, Any]) -> dict[Any, Any]
     return merged
 
 
+HASH_EXCLUDED_SECTIONS = frozenset({'logging'})
+"""Sections left out of :meth:`Config.resolved_config_hash`.
+
+A configuration section belongs here when it cannot change what the pipeline
+computes.  ``logging`` decides what is written down about a run, never what
+the run concludes, so two results that differ only in it were produced by the
+same configuration and should compare as such.
+
+Named explicitly rather than inferred, so that a section added later has to be
+a deliberate choice rather than inheriting one.  Adding a section here changes
+every future digest, and results either side of that change compare as
+differently configured -- which is the cost this set exists to stop paying
+repeatedly.
+"""
+
+
 def _stringify_keys(value: Any) -> Any:
     """Recursively coerce every mapping key to ``str``.
 
@@ -132,6 +148,7 @@ class Config:
         self._override_paths: list[str] = []
         self._config_environment: dict[str, Any] = AttrDict({})
         self._config_general: dict[str, Any] = AttrDict({})
+        self._config_logging: dict[str, Any] = AttrDict({})
         self._config_offset: dict[str, Any] = AttrDict({})
         self._config_bodies: dict[str, Any] = AttrDict({})
         self._config_body_shape: dict[str, Any] = AttrDict({})
@@ -170,6 +187,7 @@ class Config:
         self._category_cache = {}
         self._config_environment = AttrDict(self._config_dict.get('environment', {}))
         self._config_general = AttrDict(self._config_dict.get('general', {}))
+        self._config_logging = AttrDict(self._config_dict.get('logging', {}))
         self._config_offset = AttrDict(self._config_dict.get('offset', {}))
         self._config_bodies = AttrDict(self._config_dict.get('bodies', {}))
         self._config_body_shape = AttrDict(self._config_dict.get('body_shape', {}))
@@ -306,7 +324,16 @@ class Config:
         new_config = self._load_yaml(config_path)
         for key in new_config:
             if key in self._config_dict and isinstance(self._config_dict[key], dict):
-                self._config_dict[key] = _deep_merge(self._config_dict[key], new_config[key])
+                overlay = new_config[key]
+                if not isinstance(overlay, dict):
+                    # A section written with no body parses to None, which would
+                    # otherwise surface as an AttributeError from inside the merge.
+                    kind = 'empty' if overlay is None else type(overlay).__name__
+                    raise ValueError(
+                        f'Config "{config_path}" section "{key}" is {kind}; expected a '
+                        f'mapping because "{key}" is a mapping in the merged configuration'
+                    )
+                self._config_dict[key] = _deep_merge(self._config_dict[key], overlay)
             else:
                 self._config_dict[key] = new_config[key]
         if read_default:
@@ -343,13 +370,25 @@ class Config:
         digests regardless of load order or comment/whitespace changes in
         the source YAML files.
 
+        Sections in :data:`HASH_EXCLUDED_SECTIONS` are left out, because this
+        digest answers "was this result produced by the same configuration",
+        and a setting that cannot change a result would answer it wrongly.
+        Raising one component's log level to look into a technique would
+        otherwise re-stamp every result in that run as differently
+        configured, and it compares against an archive.
+
         Returns:
             64-character sha256 hex digest of the resolved config content.
         """
 
         self.read_config()
+        hashed = {
+            key: value
+            for key, value in self._config_dict.items()
+            if key not in HASH_EXCLUDED_SECTIONS
+        }
         canonical = json.dumps(
-            _stringify_keys(self._config_dict),
+            _stringify_keys(hashed),
             sort_keys=True,
             separators=(',', ':'),
             default=str,
@@ -385,6 +424,20 @@ class Config:
 
         self.read_config()
         return self._config_environment
+
+    @property
+    def logging(self) -> Any:
+        """Returns the logging configuration settings.
+
+        Holds the per-logger defaults (``main``, ``image``), the per-module
+        override categories (``techniques``, ``models``, ``other``), the
+        ``strict_scope`` switch, and per-program overrides under ``programs``.
+        See :func:`spindoctor.config.logging_keys.validate_logging_config` for
+        the accepted keys.
+        """
+
+        self.read_config()
+        return self._config_logging
 
     @property
     def planets(self) -> list[str]:

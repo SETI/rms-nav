@@ -19,53 +19,97 @@ project config system and imported from `spindoctor.config`:
 from spindoctor.config import MAIN_LOGGER, IMAGE_LOGGER
 ```
 
-| Logger | Name | Purpose |
-|--------|------|---------|
-| `MAIN_LOGGER` | `"sd_offset"` | Top-level program events; stdout + timestamped file handler attached at startup via `setup_logging()` |
-| `IMAGE_LOGGER` | `"nav_image"` | Per-image events; handlers are attached only inside an `IMAGE_LOGGER.open()` context via `image_log_handlers()` |
+| Logger | Purpose |
+|--------|---------|
+| `MAIN_LOGGER` | One per program run: top-level events, per-image progress, totals |
+| `IMAGE_LOGGER` | One image inside one backend: models, techniques, reprojection, annotation |
 
-Navigation components (subclasses of `NavBase`) receive `IMAGE_LOGGER` via
-`self._logger`. The main driver modules use `MAIN_LOGGER` directly. Log levels
-for both loggers come from the config system (CLI arguments override config
-keys override the `"INFO"` default).
+`IMAGE_LOGGER` is a proxy, not a logger. Opening a section on it enters an
+image scope; while that scope is open every nested section resolves to the same
+real logger, so one image's records land in one file.
 
-## 2. Setting Up `MAIN_LOGGER`
-
-Call `setup_logging()` once from `main()` after resolving the results root. It
-attaches a stdout stream handler and a rotating timestamped file handler to
-`MAIN_LOGGER`:
+**A component declares which logger it belongs to.** `NavBase` subclasses carry
+`log_role`, defaulting to `LogRole.IMAGE`. A component whose work spans a run
+rather than an image sets `LogRole.MAIN` — `DataSet` does, because enumeration
+belongs to no single image:
 
 ```python
-from spindoctor.config import setup_logging, MAIN_LOGGER
-
-setup_logging(arguments, config, nav_results_root_str)
-# `setup_logging` attaches both the stdout stream handler and the
-# timestamped file handler under {nav_results_root}/logs/sd_offset/
-# to MAIN_LOGGER; do not call `MAIN_LOGGER.add_handler` again or the
-# stdout console will see every line twice.
+class DataSet(ABC, NavBase):
+    log_role: ClassVar[LogRole] = LogRole.MAIN
 ```
 
-## 3. Setting Up `IMAGE_LOGGER`
+Logging through `IMAGE_LOGGER` with no image scope open is a defect, not a
+mode. The record is routed to `MAIN_LOGGER` and the call site is reported once;
+under `logging.strict_scope` it raises `LogScopeError` instead. That is off by
+default; a test that drives a real pipeline turns it on with the
+`strict_log_scope` fixture. It is deliberately not enabled suite-wide, because
+a unit test exercising a model or technique in isolation calls it outside any
+image scope by design. If a component trips this, it is bound to the wrong
+logger — give it `LogRole.MAIN`.
 
-For `IMAGE_LOGGER`, create per-image handlers with `image_log_handlers()` and
-pass them to `logger.open()` -- never attach them permanently to the logger:
+**Programs that carry no logger.** The statistics programs (`sd_stats_ingest`,
+`sd_stats_report`) and the graphical programs (`sd_backplane_viewer`,
+`sd_mosaic_display`, `sd_create_simulated_image`) write to the terminal with
+`print()` and take no logging configuration. Neither is a batch pipeline, and a
+GUI surfaces problems through dialogs. This is the one documented exception to
+"never bare `print()` in library code", and it extends to the
+`spindoctor.ui.mosaic_viewer` widgets those programs drive. Where a converted
+call previously used `logger.exception`, follow the `print()` with
+`traceback.print_exc()` so the stack trace is not silently lost.
+
+## 2. Configuring a Run
+
+A driver calls `add_logging_arguments(parser)` when building its parser and
+`build_run_logging()` once in `main()`, after the configuration is loaded and
+before anything is logged. That resolves the levels, installs them so any
+component can read its own, builds the main logger, and stamps one timestamp
+for the whole run:
 
 ```python
-from spindoctor.config import IMAGE_LOGGER, image_log_handlers
+from spindoctor.cli.logging_args import add_logging_arguments
+from spindoctor.config import build_run_logging
 
-local_handlers = image_log_handlers(image_log_path, arguments, config)
-with IMAGE_LOGGER.open(str(image_url), handler=local_handlers):
-    log_run_environment(IMAGE_LOGGER, sys.argv[1:])
-    # ... process image ...
+add_logging_arguments(cmdparser)                   # in the parser builder
+...
+run_logging = build_run_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
 ```
 
-The outermost `open()` at the image level carries `handler=local_handlers` so
-that per-image console and file handlers are active only for that image's
-processing window. `image_log_handlers()` returns one `stream_handler` and one
-`file_handler`; their levels are resolved from CLI args -> config -> `"INFO"`.
+Pass `has_image_logger=False` for a program that does not process images
+individually, so it rejects the image-logger flags rather than accepting and
+ignoring them.
 
-Per the `filecache` rule, `image_log_path` is an `FCPath`; never
-`mkdir` the log directory yourself.
+## 3. Per-Image Logs
+
+Build the handlers for one image with `build_image_log_handlers()` and pass
+them to the outermost `open()`, so they are active only for that image and are
+removed when it is done. The caller closes them.
+
+```python
+from spindoctor.config import IMAGE_LOGGER, build_image_log_handlers
+
+handlers, log_path = build_image_log_handlers(
+    'nav', image_file.results_path_stub, run_logging.sinks, run_logging.levels,
+    timestamp=run_logging.timestamp,
+)
+with IMAGE_LOGGER.open(str(image_url), handler=handlers):
+    ...  # process the image
+```
+
+The backend name selects the log subtree, so an image's log for a given stage
+is in one place whichever driver produced it. `log_path` is None when the file
+sink is disabled; do not report a path that was never written.
+
+Per the `filecache` rule the path is an `FCPath`, and you never `mkdir` the log
+directory: the handler factory creates it, and `FCPath.mkdir` fails on a remote
+root anyway.
+
+## 3a. Opening a Component's Own Section
+
+A component gets its own configurable level only by opening a section. A
+`NavBase` subclass uses `self.log_section(title)`; a module-level function uses
+the `logged_section(log_key, title)` decorator. Without one, a component's
+records take the level of whatever section encloses them, and a configuration
+key naming it would do nothing.
 
 ## 4. Quick Reference
 
@@ -73,6 +117,7 @@ Per the `filecache` rule, `image_log_path` is an `FCPath`; never
 |------|---------|
 | Import loggers | `from spindoctor.config import MAIN_LOGGER, IMAGE_LOGGER` |
 | Top-level events | `MAIN_LOGGER.info(...)` |
-| Per-image events | `self._logger.info(...)` (`self._logger` is `IMAGE_LOGGER`) |
-| Set up `MAIN_LOGGER` | `setup_logging(arguments, config, results_root)` once in `main()` |
-| Per-image handlers | `image_log_handlers(path, arguments, config)` passed to `open()` |
+| Per-image events | `self._logger.info(...)` (follows the class's `log_role`) |
+| Configure a run | `build_run_logging(PROGRAM_NAME, arguments, config)` once in `main()` |
+| Per-image handlers | `build_image_log_handlers(backend, stub, sinks, levels)` passed to `open()` |
+| A component's section | `self.log_section(title)`, or `@logged_section(key, title)` |

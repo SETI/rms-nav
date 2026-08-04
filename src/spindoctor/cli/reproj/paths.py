@@ -8,8 +8,9 @@ Per-image reprojection file:
 ``subject`` is the mosaic body/planet name (e.g. ``MIMAS``, ``SATURN``), with
 spaces, colons, and slashes replaced by underscores for safe filenames.
 
-Per-image reprojection log (``sd_mosaic`` pass 1):
-    <output_dir>/logs/<results_path_stub>_<timestamp>.log
+Per-image reprojection log (``sd_mosaic`` pass 1), built by
+:func:`spindoctor.config.logging_config.image_log_path` rather than here:
+    <log_root>/reproj/<subject>/<results_path_stub>_<timestamp>.log
 
 Final mosaic file:
     <output_dir>/<prefix>_<subject>_mosaic.<ext>

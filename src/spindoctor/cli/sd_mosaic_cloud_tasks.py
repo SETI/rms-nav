@@ -22,9 +22,9 @@ import asyncio
 import os
 import sys
 import traceback
-from datetime import datetime
 from typing import Any, cast
 
+import pdslogger
 from cloud_tasks.worker import Worker, WorkerData
 from filecache import FCPath, FileCache
 
@@ -41,15 +41,21 @@ from spindoctor.config import (
     DEFAULT_CONFIG,
     IMAGE_LOGGER,
     MAIN_LOGGER,
+    build_cloud_task_logging,
+    build_image_log_handlers,
     get_nav_results_root,
-    image_log_handlers,
     load_default_and_user_config,
 )
+from spindoctor.config.program_names import SD_MOSAIC
 from spindoctor.dataset import dataset_name_to_inst_name
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class
 from spindoctor.reproj.bodies import BodyMosaic, BodyReprojResult
 from spindoctor.reproj.rings import RingMosaic, RingReprojResult
+
+PROGRAM_NAME = SD_MOSAIC
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 
 def _resolve_nav_results_root_fcpath(cli_args: argparse.Namespace) -> FCPath | None:
@@ -61,38 +67,19 @@ def _resolve_nav_results_root_fcpath(cli_args: argparse.Namespace) -> FCPath | N
     return FileCache(None).new_path(nav_results_root_str)
 
 
-def _log_main_exception(msg: str, *args: object) -> None:
-    """Log an exception with full traceback (frames plus final error line)."""
-    MAIN_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
+def _log_image_exception(msg: str, *args: object) -> None:
+    """Log an exception about one image, into that image's log.
 
+    Reprojecting an image is allowed to fail without failing the task, so this
+    record is the only account of what happened to it.  It belongs to the image
+    rather than to the run, which matters here: a cloud task has no main log,
+    so a failure reported there would be reported nowhere.
 
-def _safe_stub_for_image_log(results_path_stub: object, *, default: str = 'image') -> str:
-    """Reduce ``results_path_stub`` to one filename-safe segment (no directory components)."""
-    if not isinstance(results_path_stub, str):
-        return default
-    if '\x00' in results_path_stub:
-        return default
-    base = os.path.basename(results_path_stub.replace('\\', '/'))
-    if not base:
-        return default
-    safe = ''.join(ch if (ch.isalnum() or ch in '._-') else '_' for ch in base)
-    safe = safe.strip('._') or default
-    return safe[:200]
-
-
-def _resolved_image_log_path(
-    output_dir: FCPath, results_path_stub: object, timestamp: str
-) -> FCPath:
-    """Resolve ``<output_dir>/logs/<stub>_<timestamp>.log`` and ensure it stays under ``logs``."""
-    logs_dir = (output_dir / 'logs').resolve()
-    for stub in (
-        _safe_stub_for_image_log(results_path_stub),
-        _safe_stub_for_image_log('', default='image'),
-    ):
-        candidate = (output_dir / 'logs' / f'{stub}_{timestamp}.log').resolve()
-        if candidate.is_relative_to(logs_dir):
-            return candidate
-    raise ValueError(f'Refusing image log path outside output_dir/logs (root={logs_dir!r})')
+    Parameters:
+        msg: Message template, with pdslogger-style ``%s`` placeholders.
+        *args: Values substituted into ``msg``.
+    """
+    IMAGE_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
 
 
 def process_task(
@@ -127,9 +114,19 @@ def process_task(
             :class:`filecache.FCPath` for offset loading.
 
     Returns:
-        Tuple of ``(retry, result)``. ``retry`` is always ``False``. ``result`` is
-        ``{'status': 'success'}`` on success, or ``{'status': 'error', 'status_error': ...}``
-        (and optionally ``status_exception``) on failure.
+        Tuple of ``(retry, result)``. ``retry`` is always ``False``. ``result``
+        is ``{'status': 'error', 'status_error': ...}`` (and optionally
+        ``status_exception``) when the task itself could not run.  Otherwise it
+        is ``{'status': 'success'}`` with ``n_done``, ``n_skipped`` and
+        ``n_failed``: an individual image is allowed to fail without failing
+        the task, so the counts are what distinguish a task that reprojected
+        its images from one that failed every one of them.  ``n_uncorrected``
+        counts images reprojected without a navigation offset, tallied by
+        reason under ``uncorrected_reasons``: those images do produce a
+        product, and a batch registered entirely on uncorrected pointing is
+        otherwise indistinguishable from a good one.  An image whose
+        ``results_path_stub`` was refused is additionally named under
+        ``rejected_stubs``, since no log could be opened to record it.
     """
     if not isinstance(task_data, dict):
         return False, {'status': 'error', 'status_error': 'invalid_task_data_type'}
@@ -182,6 +179,16 @@ def process_task(
     if not isinstance(output_dir_str, str):
         return False, {'status': 'error', 'status_error': 'invalid_output_dir_type'}
 
+    # The task's own output directory is the fallback log root, because a
+    # worker is not required to have a navigation results root and its logs
+    # should not disappear when it does not.
+    run_logging = build_cloud_task_logging(
+        PROGRAM_NAME,
+        cli_args,
+        DEFAULT_CONFIG,
+        fallback_log_root=FCPath(output_dir_str) / 'logs',
+    )
+
     prefix: str = task_arguments.get('prefix', '')
     fmt: str = task_arguments.get('format', 'fits')
     overwrite: bool = task_arguments.get('overwrite', False)
@@ -195,6 +202,16 @@ def process_task(
         mosaic = build_body_mosaic(task_args)
     else:
         mosaic = build_ring_mosaic(task_args)
+
+    # A task has no run log to report these to, so they are counted and
+    # returned: a task that skipped or failed every image would otherwise be
+    # indistinguishable from one that reprojected them all.
+    n_done = 0
+    n_skipped = 0
+    n_failed = 0
+    n_uncorrected = 0
+    uncorrected_reasons: dict[str, int] = {}
+    rejected_stubs: list[dict[str, str]] = []
 
     for file in files:
         if not isinstance(file, dict):
@@ -235,34 +252,55 @@ def process_task(
 
         if not overwrite and out_path.exists():
             MAIN_LOGGER.debug('Skipping (exists): %s', out_path)
+            n_skipped += 1
             continue
 
-        timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
         try:
-            image_log_path = _resolved_image_log_path(
-                output_dir, image_file.results_path_stub, timestamp
+            # The log path is not reported anywhere: a cloud task has no
+            # console to report it to, and naming the file inside itself tells
+            # a later reader nothing they did not have to know already.
+            local_handlers, _ = build_image_log_handlers(
+                'reproj',
+                f'{mosaic.body_name}/{image_file.results_path_stub}',
+                run_logging.sinks,
+                run_logging.levels,
+                timestamp=run_logging.timestamp,
             )
         except ValueError as exc:
-            return False, {
-                'status': 'error',
-                'status_error': 'invalid_image_log_path',
-                'status_exception': str(exc),
-            }
-        image_log_path.parent.mkdir(parents=True, exist_ok=True)
-        local_handlers = image_log_handlers(image_log_path, cli_args, DEFAULT_CONFIG)
+            # results_path_stub comes from task data; a stub that would put the
+            # log outside the log root is a bad entry rather than a retryable
+            # failure.  It fails its own image and the task carries on, because
+            # abandoning the batch would discard the images already reprojected
+            # and let one malformed entry cost the whole task.  Reported in the
+            # result rather than logged: the reason there is nowhere to write
+            # this image's log is precisely that its log path was refused.
+            rejected_stubs.append({'results_path_stub': results_path_stub, 'reason': str(exc)})
+            n_failed += 1
+            continue
 
         try:
             with IMAGE_LOGGER.open(
                 f'REPROJECT {image_file.image_file_url}',
                 handler=local_handlers,
+                level=run_logging.levels.image_section_level(),
             ):
                 try:
                     image_path = image_file.image_file_path.absolute()
                     obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
 
-                    offset = load_offset_if_any(nav_results_root_path, image_file)
-                    if offset is not None:
-                        apply_offset_to_obs(cast(ObsSnapshotInst, obs), offset[0], offset[1])
+                    lookup = load_offset_if_any(nav_results_root_path, image_file)
+                    if lookup.offset is not None:
+                        apply_offset_to_obs(
+                            cast(ObsSnapshotInst, obs), lookup.offset[0], lookup.offset[1]
+                        )
+                    elif lookup.reason is not None:
+                        # A task has no run log, so the count is what carries
+                        # this out: a batch reprojected entirely on uncorrected
+                        # pointing looks exactly like a good one otherwise.
+                        n_uncorrected += 1
+                        uncorrected_reasons[lookup.reason] = (
+                            uncorrected_reasons.get(lookup.reason, 0) + 1
+                        )
 
                     img_label = (
                         image_name_override
@@ -283,16 +321,30 @@ def process_task(
                     if not no_write_output_files:
                         out_path.parent.mkdir(parents=True, exist_ok=True)
                         result.save(out_path)
-                        MAIN_LOGGER.info('Saved reproj: %s', out_path)
+                        IMAGE_LOGGER.info('Saved reproj: %s', out_path)
+                    n_done += 1
                 except Exception:
-                    _log_main_exception('Error reprojecting %s', image_file.image_file_url)
-                finally:
-                    MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
+                    _log_image_exception('Error reprojecting %s', image_file.image_file_url)
+                    n_failed += 1
         finally:
             for handler in local_handlers:
-                handler.close()
+                if handler is not pdslogger.NULL_HANDLER:
+                    handler.close()
 
-    return False, {'status': 'success'}  # No retry under any circumstances
+    # No retry under any circumstances.  The status reports that the task ran,
+    # not that every image in it reprojected; the counts say which.
+    task_result: dict[str, Any] = {
+        'status': 'success',
+        'n_done': n_done,
+        'n_skipped': n_skipped,
+        'n_failed': n_failed,
+        'n_uncorrected': n_uncorrected,
+    }
+    if uncorrected_reasons:
+        task_result['uncorrected_reasons'] = uncorrected_reasons
+    if rejected_stubs:
+        task_result['rejected_stubs'] = rejected_stubs
+    return False, task_result
 
 
 async def async_main() -> None:

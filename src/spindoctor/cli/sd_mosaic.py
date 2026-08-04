@@ -12,8 +12,9 @@ Two-pass workflow
 1. Reprojection pass: for each image in the dataset, load the observation,
    optionally apply a navigation offset from ``--nav-results-root``, call
    ``BodyMosaic.reproject()`` / ``RingMosaic.reproject()``, and save the result.
-   Per-image logs are written under ``<output-dir>/logs/``. Existing files are
-   skipped unless ``--overwrite`` is given.
+   Per-image logs are written under the log root, not beside the products:
+   ``{log_root}/reproj/<subject>/<results_path_stub>_<timestamp>.log``.
+   Existing files are skipped unless ``--overwrite`` is given.
 
 2. Mosaic pass: re-iterate the same image list, load each reprojection file
    that exists, call ``mosaic.add()`` (body mode passes resolution merge
@@ -25,16 +26,15 @@ Either pass may be skipped with ``--skip-reproject`` / ``--skip-mosaic``.
 
 import argparse
 import cProfile
-import logging
 import math
 import os
 import sys
 import time
 import traceback
 from collections.abc import Callable
-from datetime import datetime
 from typing import cast
 
+import pdslogger
 from filecache import FCPath, FileCache
 
 # Allow running directly from the source tree:
@@ -42,6 +42,7 @@ from filecache import FCPath, FileCache
 package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, package_source_path)
 
+from spindoctor.cli.logging_args import reporting_logging_errors
 from spindoctor.cli.reproj.args import (
     add_body_args,
     add_common_env_args,
@@ -56,50 +57,57 @@ from spindoctor.config import (
     DEFAULT_CONFIG,
     IMAGE_LOGGER,
     MAIN_LOGGER,
+    RunLogging,
+    build_image_log_handlers,
+    build_run_logging,
     get_nav_results_root,
-    image_log_handlers,
     load_default_and_user_config,
-    setup_logging,
 )
+from spindoctor.config.program_names import SD_MOSAIC
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
-from spindoctor.dataset.dataset import DataSet, ImageFile
+from spindoctor.dataset.dataset import DataSet
 from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class
 from spindoctor.reproj.bodies import USE_MOSAIC_LIMITS, BodyMosaicData, BodyReprojResult
 from spindoctor.reproj.rings import RingMosaicData, RingReprojResult
 from spindoctor.support.file import json_as_string
 from spindoctor.support.misc import log_run_environment
 
-
-def _reproject_image_log_handlers(
-    output_dir: FCPath,
-    image_file: ImageFile,
-    args: argparse.Namespace,
-) -> tuple[list[logging.Handler], FCPath]:
-    """Return ``(handlers, log_path)`` for per-image reprojection logs.
-
-    Writes a timestamped file next to the npz/fits products, under
-    ``<output_dir>/logs/``, using the same ``output_dir`` as
-    :func:`spindoctor.cli.reproj.paths.per_image_output_path`.
-    """
-    timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
-    image_log_path = (
-        FCPath(output_dir) / 'logs' / (image_file.results_path_stub + '_' + timestamp + '.log')
-    )
-    image_log_path.parent.mkdir(parents=True, exist_ok=True)
-    return image_log_handlers(image_log_path, args, DEFAULT_CONFIG), image_log_path
+PROGRAM_NAME = SD_MOSAIC
+"""Program identity: names the main log directory and the
+``logging.programs`` configuration block for this program."""
 
 
 def _log_main_exception(msg: str, *args: object) -> None:
-    """Log an exception with full traceback (frames plus final error line).
+    """Log a run-level exception with full traceback.
 
     ``PdsLogger.exception()`` records only ``traceback.format_tb``, which omits
     the ``SomeError: ...`` line at the end. Pass ``traceback.format_exc()`` as
     ``more=`` and disable the default partial stack to avoid duplicating frames.
+
+    Parameters:
+        msg: Message template, with pdslogger-style ``%s`` placeholders.
+        *args: Values substituted into ``msg``.
     """
     MAIN_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
 
 
+def _log_image_exception(msg: str, *args: object) -> None:
+    """Log an exception about one image, into that image's log.
+
+    The counterpart of :func:`_log_main_exception` for a failure that belongs
+    to a single image rather than to the run.  Reprojecting an image is allowed
+    to fail without stopping the pass, so this record is the only account of
+    what happened to it.
+
+    Parameters:
+        msg: Message template, with pdslogger-style ``%s`` placeholders.
+        *args: Values substituted into ``msg``.
+    """
+    IMAGE_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
+
+
 def _run_reproject_pass(
+    run_logging: RunLogging,
     *,
     args: argparse.Namespace,
     nav_results_root_path: FCPath | None,
@@ -109,10 +117,12 @@ def _run_reproject_pass(
     subject_name: str,
     obs_class: type[ObsSnapshotInst],
     reproject_fn: Callable[[ObsSnapshotInst, str], BodyReprojResult | RingReprojResult],
-) -> tuple[int, int]:
+) -> tuple[int, int, int, int]:
     """Reproject each selected image: path checks, per-image logs, offset, save.
 
     Parameters:
+        run_logging: This run's resolved logging, giving the sinks and levels
+            each per-image log is written with.
         args: Parsed CLI namespace.
         nav_results_root_path: Optional root for ``sd_offset`` metadata (offsets).
         output_dir: Mosaic / per-image output directory.
@@ -124,12 +134,18 @@ def _run_reproject_pass(
             reprojection result with ``save()``.
 
     Returns:
-        ``(n_done, n_skipped)`` counts for the pass (dry-run does not increment
-        ``n_done``; skipped-existing increments ``n_skipped``).
+        ``(n_done, n_skipped, n_failed, n_uncorrected)`` counts for the pass
+        (dry-run does not increment ``n_done``; skipped-existing increments
+        ``n_skipped``; an image whose reprojection raised increments
+        ``n_failed``; an image reprojected without a navigation offset
+        increments ``n_uncorrected``, and is counted in ``n_done`` as well
+        because it did produce a product).
     """
     assert DATASET is not None
     n_done = 0
     n_skipped = 0
+    n_failed = 0
+    n_uncorrected = 0
     for imagefiles in DATASET.yield_image_files_from_arguments(args):
         image_file = imagefiles.image_files[0]
         out_path = per_image_output_path(
@@ -147,19 +163,45 @@ def _run_reproject_pass(
             )
             continue
 
-        local_handlers, image_log_path = _reproject_image_log_handlers(output_dir, image_file, args)
+        try:
+            local_handlers, image_log_path = build_image_log_handlers(
+                'reproj',
+                f'{subject_name}/{image_file.results_path_stub}',
+                run_logging.sinks,
+                run_logging.levels,
+                timestamp=run_logging.timestamp,
+            )
+        except ValueError as exc:
+            # A stub that would put the log outside the log root fails its own
+            # image; ending the pass would discard everything already done.
+            MAIN_LOGGER.error('Refusing to reproject %s: %s', image_file.image_file_url, exc)
+            n_failed += 1
+            continue
         try:
             with IMAGE_LOGGER.open(
                 f'REPROJECT {image_file.image_file_url}',
                 handler=local_handlers,
+                level=run_logging.levels.image_section_level(),
             ):
                 try:
                     image_path = image_file.image_file_path.absolute()
                     obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
 
-                    offset = load_offset_if_any(nav_results_root_path, image_file)
-                    if offset is not None:
-                        apply_offset_to_obs(cast(ObsSnapshotInst, obs), offset[0], offset[1])
+                    lookup = load_offset_if_any(nav_results_root_path, image_file)
+                    if lookup.offset is not None:
+                        apply_offset_to_obs(
+                            cast(ObsSnapshotInst, obs), lookup.offset[0], lookup.offset[1]
+                        )
+                    elif lookup.reason is not None:
+                        # The detailed account stays in the image's log; the
+                        # run needs to know the product is registered on
+                        # uncorrected pointing, which is not visible in it.
+                        n_uncorrected += 1
+                        MAIN_LOGGER.warning(
+                            '%s: reprojecting with uncorrected pointing (%s)',
+                            image_file.image_file_url,
+                            lookup.reason,
+                        )
 
                     img_label = (
                         args.image_name
@@ -172,18 +214,28 @@ def _run_reproject_pass(
                     if not args.no_write_output_files:
                         out_path.parent.mkdir(parents=True, exist_ok=True)
                         result.save(out_path)
-                        MAIN_LOGGER.info('Saved reproj: %s', out_path)
+                        IMAGE_LOGGER.info('Saved reproj: %s', out_path)
                     n_done += 1
                 except Exception:
-                    _log_main_exception('Error reprojecting %s', image_file.image_file_url)
+                    _log_image_exception('Error reprojecting %s', image_file.image_file_url)
+                    n_failed += 1
+                    # The traceback belongs to the image and stays in its log;
+                    # the run's log still has to say that an image failed, or
+                    # the only sign of it is a total that does not add up.
+                    MAIN_LOGGER.error(
+                        'Failed to reproject %s; see %s',
+                        image_file.image_file_url,
+                        image_log_path if image_log_path is not None else 'the image log',
+                    )
                 finally:
-                    if local_handlers:
+                    if image_log_path is not None:
                         MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
         finally:
             for handler in local_handlers:
-                handler.close()
+                if handler is not pdslogger.NULL_HANDLER:
+                    handler.close()
 
-    return n_done, n_skipped
+    return n_done, n_skipped, n_failed, n_uncorrected
 
 
 DATASET: DataSet | None = None
@@ -353,7 +405,20 @@ def parse_args(command_list: list[str]) -> tuple[str, argparse.Namespace]:
 # ---------------------------------------------------------------------------
 
 
-def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) -> None:
+def _run_body(
+    args: argparse.Namespace,
+    nav_results_root_path: FCPath | None,
+    run_logging: RunLogging,
+) -> None:
+    """Run the body workflow: reproject each selected image, then mosaic them.
+
+    Parameters:
+        args: Parsed CLI namespace.
+        nav_results_root_path: Root holding ``sd_offset`` metadata, from which
+            each image's offset is read; None leaves pointing uncorrected.
+        run_logging: This run's resolved logging, giving the sinks and levels
+            each per-image reprojection log is written with.
+    """
     assert DATASET is not None
 
     inst_name = dataset_name_to_inst_name(DATASET_NAME)  # type: ignore[arg-type]  # DATASET_NAME is set at runtime from argv; dataset_name_to_inst_name is typed for a Literal union of known dataset keys only (false-positive arg-type).
@@ -367,7 +432,8 @@ def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) ->
     # ---- Pass 1: reprojection ------------------------------------------------
     if not args.skip_reproject:
         MAIN_LOGGER.info('=== Reprojection pass (body=%s) ===', mosaic.body_name)
-        n_done, n_skipped = _run_reproject_pass(
+        n_done, n_skipped, n_failed, n_uncorrected = _run_reproject_pass(
+            run_logging,
             args=args,
             nav_results_root_path=nav_results_root_path,
             output_dir=output_dir,
@@ -379,7 +445,14 @@ def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) ->
                 obs, mosaic, image_name=image_name
             ),
         )
-        MAIN_LOGGER.info('Reprojection pass complete: %d done, %d skipped.', n_done, n_skipped)
+        MAIN_LOGGER.info(
+            'Reprojection pass complete: %d done, %d skipped, %d failed, '
+            '%d with uncorrected pointing.',
+            n_done,
+            n_skipped,
+            n_failed,
+            n_uncorrected,
+        )
 
     # ---- Pass 2: mosaic ------------------------------------------------------
     if not args.skip_mosaic:
@@ -447,7 +520,20 @@ def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) ->
 # ---------------------------------------------------------------------------
 
 
-def _run_rings(args: argparse.Namespace, nav_results_root_path: FCPath | None) -> None:
+def _run_rings(
+    args: argparse.Namespace,
+    nav_results_root_path: FCPath | None,
+    run_logging: RunLogging,
+) -> None:
+    """Run the rings workflow: reproject each selected image, then mosaic them.
+
+    Parameters:
+        args: Parsed CLI namespace.
+        nav_results_root_path: Root holding ``sd_offset`` metadata, from which
+            each image's offset is read; None leaves pointing uncorrected.
+        run_logging: This run's resolved logging, giving the sinks and levels
+            each per-image reprojection log is written with.
+    """
     assert DATASET is not None
 
     inst_name = dataset_name_to_inst_name(DATASET_NAME)  # type: ignore[arg-type]  # DATASET_NAME is set at runtime from argv; dataset_name_to_inst_name is typed for a Literal union of known dataset keys only (false-positive arg-type).
@@ -461,7 +547,8 @@ def _run_rings(args: argparse.Namespace, nav_results_root_path: FCPath | None) -
     # ---- Pass 1: reprojection ------------------------------------------------
     if not args.skip_reproject:
         MAIN_LOGGER.info('=== Reprojection pass (rings, planet=%s) ===', mosaic.body_name)
-        n_done, n_skipped = _run_reproject_pass(
+        n_done, n_skipped, n_failed, n_uncorrected = _run_reproject_pass(
+            run_logging,
             args=args,
             nav_results_root_path=nav_results_root_path,
             output_dir=output_dir,
@@ -473,7 +560,14 @@ def _run_rings(args: argparse.Namespace, nav_results_root_path: FCPath | None) -
                 obs, args, mosaic, image_name=image_name
             ),
         )
-        MAIN_LOGGER.info('Reprojection pass complete: %d done, %d skipped.', n_done, n_skipped)
+        MAIN_LOGGER.info(
+            'Reprojection pass complete: %d done, %d skipped, %d failed, '
+            '%d with uncorrected pointing.',
+            n_done,
+            n_skipped,
+            n_failed,
+            n_uncorrected,
+        )
 
     # ---- Pass 2: mosaic ------------------------------------------------------
     if not args.skip_mosaic:
@@ -531,7 +625,8 @@ def main() -> None:
         pr = cProfile.Profile()
         pr.enable()
 
-    load_default_and_user_config(args, DEFAULT_CONFIG)
+    with reporting_logging_errors():
+        load_default_and_user_config(args, DEFAULT_CONFIG)
 
     nav_results_root_str: str | None = None
     if args.nav_results_root is not None:
@@ -543,22 +638,11 @@ def main() -> None:
     if nav_results_root_str is not None:
         nav_results_root_path = FileCache(None).new_path(nav_results_root_str)
 
-    try:
-        setup_logging(args, DEFAULT_CONFIG, nav_results_root_str or '')
-    except (TypeError, ValueError) as exc:
-        print(f'Invalid logging configuration: {exc}', file=sys.stderr)
-        sys.exit(1)
-
-    # Apply the --log-level console override to the program loggers directly.
-    # PdsLogger.set_level accepts a level-name string, so there is no need to
-    # reach through the stdlib root logger (which would also re-level every
-    # third-party library) to honour the flag.
-    log_level = args.log_level
-    if log_level is not None and isinstance(log_level, str):
-        MAIN_LOGGER.set_level(log_level.upper())
-        IMAGE_LOGGER.set_level(log_level.upper())
+    with reporting_logging_errors():
+        run_logging = build_run_logging(PROGRAM_NAME, args, DEFAULT_CONFIG)
 
     start = time.time()
+
     log_run_environment(MAIN_LOGGER, sys.argv[1:])
 
     if args.output_cloud_tasks_file:
@@ -572,9 +656,9 @@ def main() -> None:
 
     try:
         if mode == 'body':
-            _run_body(args, nav_results_root_path)
+            _run_body(args, nav_results_root_path, run_logging)
         else:
-            _run_rings(args, nav_results_root_path)
+            _run_rings(args, nav_results_root_path, run_logging)
     finally:
         if args.profile:
             pr.disable()

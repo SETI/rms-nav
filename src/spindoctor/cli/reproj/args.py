@@ -11,6 +11,8 @@ Functions:
 
 import argparse
 
+from spindoctor.cli.logging_args import add_logging_arguments
+
 # Defaults for :func:`add_body_args` (single source of truth for CLI literals).
 DEFAULT_LAT_RESOLUTION: float = 0.1
 DEFAULT_LON_RESOLUTION: float = 0.1
@@ -29,7 +31,8 @@ def add_common_env_args(parser: argparse.ArgumentParser) -> None:
     Side effects:
         Adds three groups (``Environment``, ``Logging``, ``Miscellaneous``) with
         flags ``--config-file`` (appendable), ``--pds3-holdings-root``,
-        ``--nav-results-root``, ``--log-level``, and ``--profile``. Defaults do not
+        ``--nav-results-root``, the shared logging options, and ``--profile``.
+        Defaults do not
         read the environment implicitly beyond what downstream nav code does when
         these flags are omitted. No files are read at parse time. Does not raise.
     """
@@ -56,14 +59,7 @@ def add_common_env_args(parser: argparse.ArgumentParser) -> None:
             '(or if an image has no success metadata), uncorrected pointing is used.'
         ),
     )
-    log = parser.add_argument_group('Logging')
-    log.add_argument(
-        '--log-level',
-        type=str,
-        default=None,
-        metavar='LEVEL',
-        help='Console log level (DEBUG, INFO, WARNING, ERROR, CRITICAL). Default: INFO.',
-    )
+    add_logging_arguments(parser)
     misc = parser.add_argument_group('Miscellaneous')
     misc.add_argument(
         '--profile',

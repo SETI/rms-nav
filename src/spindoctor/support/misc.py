@@ -193,9 +193,10 @@ def get_local_host_name() -> str:
 def log_run_environment(logger: pdslogger.PdsLogger, command_list: list[str]) -> None:
     """Log host, git, and command-line context to the given logger.
 
-    Call once at process startup on the main logger (e.g. ``sd_mosaic`` after
-    ``setup_logging``). Per-image loggers may omit this to avoid duplicating the
-    same block on the console when handlers mirror output to ``MAIN_LOGGER``.
+    Call once at process startup on the main logger, after the run's logging
+    has been configured. Per-image loggers may omit this to avoid duplicating
+    the same block on the console when handlers mirror output to
+    ``MAIN_LOGGER``.
 
     Parameters:
         logger: The logger to write to.

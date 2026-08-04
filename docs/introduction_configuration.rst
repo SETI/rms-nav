@@ -53,9 +53,10 @@ Configuration files use YAML format and are organized into sections:
      nav_results_root: /path/to/results
      pds3_holdings_root: /path/to/pds3
 
-   general:
-     log_level_model_stars: DEBUG
-     log_level_model_rings: DEBUG
+   logging:
+     models:
+       stars: DEBUG
+       rings: DEBUG
 
    offset:
      correlation_fft_upsample_factor: 128
@@ -71,57 +72,29 @@ define the same setting, the value from the last file loaded takes precedence.
 Logging Configuration
 ---------------------
 
-All logging levels live in the ``general`` configuration section. Each key accepts
-a standard log-level string: ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``, or
-``CRITICAL``. Set them in your ``nav_default_config.yaml`` or a ``--config-file``
-to override the built-in defaults shown below.
+Logging is configured by the top-level ``logging`` section, described under
+`Logging Options`_ below, together with command-line options that override it.
+It is the one section excluded from the provenance configuration digest
+recorded with each navigation result: what a run wrote down about itself
+cannot change what it concluded, so two results differing only in logging were
+produced by the same configuration and compare as such.
 
-**Main logger** (``sd_offset`` -- top-level program events):
-
-* ``general.log_level_main_console`` (default: ``INFO``): Level for output written
-  to stdout while the program runs.
-* ``general.log_level_main_file`` (default: ``INFO``): Level for the timestamped
-  logfile written to ``$NAV_RESULTS_ROOT/logs/sd_offset/``.
-
-**Image logger** (``nav_image`` -- per-image processing events, active only while
-an image is being processed):
-
-* ``general.log_level_image_console`` (default: ``INFO``): Level for output written
-  to stdout during image processing.
-* ``general.log_level_image_file`` (default: ``INFO``): Level for the per-image
-  logfile written to ``$NAV_RESULTS_ROOT/logs/{results_path_stub}.log``.
-
-**Navigation model loggers**:
-
-* ``general.log_level_model_bodies`` (default: ``INFO``): Logging level for the
-  body (planet and moon) navigation model.
-* ``general.log_level_model_stars`` (default: ``INFO``): Logging level for the
-  star navigation model.
-* ``general.log_level_model_rings`` (default: ``INFO``): Logging level for the
-  ring navigation model.
-* ``general.log_level_model_titan`` (default: ``INFO``): Logging level for the
-  Titan navigation model.
-
-**Navigation technique loggers**:
-
-The autonomous-navigation pipeline routes every per-image technique line
-through ``IMAGE_LOGGER``; there is no per-technique log-level knob.  Each
-technique opens a ``with self.logger.open(f'TECHNIQUE: {self.name}')``
-section so the per-image log file delimits each technique's contribution.
-
-**Annotation**:
-
-* ``general.log_level_annotate`` (default: ``ERROR``): Logging level for the
-  image annotation step.
+Two loggers write during a run: the main logger, covering one program run, and
+the image logger, covering one image inside one processing stage. A component
+can be given its own level, so one technique or model can be made verbose or
+quiet without affecting the rest. For the full component list, where the log
+files are written, and the precedence between the configuration and the
+command line, see :doc:`/user_guide/user_guide_logging`.
 
 Example -- enable verbose output for star and ring models while keeping other
 components at the default level:
 
 .. code-block:: yaml
 
-   general:
-     log_level_model_stars: DEBUG
-     log_level_model_rings: DEBUG
+   logging:
+     models:
+       stars: DEBUG
+       rings: DEBUG
 
 Creating a User Configuration File
 ===================================
@@ -211,27 +184,56 @@ Navigation Options
 Logging Options
 ---------------
 
-All four logging-level options override the corresponding ``general.*`` config
-key for that run. Each accepts a standard log-level string: ``DEBUG``, ``INFO``,
-``WARNING``, ``ERROR``, or ``CRITICAL``.
+Logging is configured by the ``logging`` section and by command-line options
+that override it. Levels are ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``,
+``CRITICAL`` and ``NONE``.
 
-* ``--log-level-main-console LEVEL``: Override ``general.log_level_main_console``
-  -- the level at which the main logger writes to stdout.
+.. code-block:: yaml
 
-* ``--log-level-main-file LEVEL``: Override ``general.log_level_main_file``
-  -- the level at which the main logger writes to its logfile under
-  ``$NAV_RESULTS_ROOT/logs/sd_offset/``.
+    logging:
+      main: INFO            # the run's logger
+      image: INFO           # per-image logs, and any component not named below
+      main_console: true    # whether the run's log reaches the terminal
+      image_console: false  # whether per-image logs do
+      techniques:
+        titan_haze: DEBUG   # one technique
+      models:
+        rings: WARNING      # one model family
+      other:
+        annotate: ERROR
+      programs:
+        sd_mosaic:          # applies to that program only
+          main: WARNING
 
-* ``--log-level-image-console LEVEL``: Override ``general.log_level_image_console``
-  -- the level at which the image logger writes to stdout during image processing.
+A component named anywhere takes its own level; a category's ``default``
+applies to the rest of that category; otherwise the per-logger default
+applies. An unrecognized component or program name is rejected when the
+configuration loads, rather than being silently ignored.
 
-* ``--log-level-image-file LEVEL``: Override ``general.log_level_image_file``
-  -- the level at which the image logger writes to the per-image logfile under
-  ``$NAV_RESULTS_ROOT/logs/{results_path_stub}.log``.
+The command-line options are ``--log-root``, ``--log-level`` (bare for both
+loggers, or ``MODULE=LEVEL`` for one component, repeatable),
+``--log-level-main``, ``--log-level-image``, and the four sink switches
+``--log-main-to-console``, ``--log-main-to-file``, ``--log-image-to-console``
+and ``--log-image-to-file``, each with a ``--no-`` form. A program that does
+not process images individually accepts only the main-logger options, and the
+cloud-task drivers accept none: see :doc:`/user_guide/user_guide_logging`.
 
-These command-line options provide the highest priority override mechanism,
-taking precedence over all configuration files, including those specified with
-``--config-file``.
+``--log-root`` takes precedence over every configuration file, including one
+named with ``--config-file``, and over the ``NAV_LOG_ROOT`` environment
+variable. So do ``--log-main-to-console`` and ``--log-image-to-console``, over
+the ``main_console`` and ``image_console`` keys.
+
+``--log-main-to-file`` and ``--log-image-to-file`` have no configuration
+equivalent: whether a log file is written is inseparable from where it goes,
+and that is chosen per run. There is no ``main_file`` or ``image_file``
+setting, and writing one is an error rather than a line that does nothing.
+
+The level options are ranked by how specifically they name their target, not
+by being on the command line, so the order above governs them: ``--log-level
+MODULE=LEVEL`` outranks everything, but a component named in a configuration
+file outranks a bare ``--log-level``, which says nothing about that component.
+``--log-level DEBUG`` therefore does not lift a component the configuration
+pinned; name it, as in ``--log-level titan_haze=DEBUG``.
 
 Example: Combining Configuration Methods
 ========================================

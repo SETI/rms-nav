@@ -175,11 +175,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
         metadata['elapsed_time_sec'] = None
         self._metadata.clear()
         self._metadata.update(metadata)
-        log_level = self._config.general.get('log_level_model_rings')
-        with self._logger.open(
-            f'CREATE SIMULATED RINGS MODEL FOR: {self._feature_name}',
-            level=log_level,
-        ):
+        with self.log_section(f'CREATE SIMULATED RINGS MODEL FOR: {self._feature_name}'):
             self._render()
         end_time = now_dt()
         self._metadata['end_time'] = end_time.isoformat()

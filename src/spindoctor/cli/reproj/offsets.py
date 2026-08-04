@@ -1,21 +1,55 @@
 """Helpers for loading pre-computed navigation offsets from sd_offset results.
 
-The pattern mirrors ``src/backplanes/backplanes.py`` lines 71-79:
-read the ``_metadata.json`` file for an image and apply the stored
-``(dv, du)`` offset to the observation's FOV via ``oops.fov.OffsetFOV``.
+Read the ``_metadata.json`` file for an image and apply the stored ``(dv, du)``
+offset to the observation's FOV via ``oops.fov.OffsetFOV``.
+
+Failing to load an offset does not stop the reprojection; it proceeds on the
+camera's uncorrected pointing, and the product it writes carries no sign of
+that.  So the fact is reported in both places, and the two say different
+things.
+
+The *detailed* account -- which file was missing, what the navigation status
+was, what the malformed offset field contained -- belongs to the image, and is
+written to its log with the rest of that image's processing.  This module
+writes those.
+
+That the image was reprojected uncorrected at all belongs to the run, and its
+caller writes that: one line naming the image and the short reason from
+:attr:`OffsetLookup.reason`, plus a count in the pass summary.  Someone
+watching a batch would otherwise have to open every image's log to discover
+that any of it happened.  A cloud-task worker has no run log, so its caller
+returns the count and a per-reason tally in the task result instead.
 """
 
 import json
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import oops
 from filecache import FCPath
 
-from spindoctor.config import MAIN_LOGGER
+from spindoctor.config import IMAGE_LOGGER
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.obs import ObsSnapshotInst
+
+
+@dataclass(frozen=True)
+class OffsetLookup:
+    """The outcome of looking for one image's navigation offset.
+
+    Parameters:
+        offset: The ``(dv, du)`` offset in pixels, or None when none was
+            loaded.
+        reason: Why no offset was loaded, or None when one was -- and also
+            None when none was asked for, since an offset nobody wanted is
+            not missing.  The detailed account is in the image's log; this is
+            the short form a run-level report and count can use.
+    """
+
+    offset: tuple[float, float] | None
+    reason: str | None
 
 
 def _resolved_nav_metadata_path(
@@ -29,13 +63,13 @@ def _resolved_nav_metadata_path(
     """
     rel_name = f'{image_file.results_path_stub}_metadata.json'
     if '\x00' in rel_name:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'nav_results_root: metadata path contains null byte; refusing offset load for %s.',
             image_file.image_file_url,
         )
         return None
     if Path(rel_name).is_absolute():
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'nav_results_root: metadata path fragment is absolute; refusing offset load for %s.',
             image_file.image_file_url,
         )
@@ -43,7 +77,7 @@ def _resolved_nav_metadata_path(
     root = FCPath(nav_results_root).expanduser().resolve()
     candidate = (root / rel_name).resolve()
     if not candidate.is_relative_to(root):
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'nav_results_root: resolved metadata path %s is outside root %s; refusing '
             'offset load for %s (check results_path_stub for path traversal).',
             candidate,
@@ -90,103 +124,108 @@ def _parse_nav_offset_pair(offset: object) -> tuple[float, float] | None:
 def load_offset_if_any(
     nav_results_root: str | FCPath | None,
     image_file: ImageFile,
-) -> tuple[float, float] | None:
+) -> OffsetLookup:
     """Return the ``(dv, du)`` offset from a sd_offset metadata file, if available.
 
     Parameters:
         nav_results_root: Root directory written by ``sd_offset``.  If ``None``,
-            returns ``None`` immediately.
+            no offset is looked for and none is reported missing.
         image_file: The image to look up.
 
     Returns:
-        ``(dv, du)`` as floats when the metadata file exists, is valid JSON,
-        and has ``status == 'success'`` with a non-null ``offset`` field.
-        Returns ``None`` (with a warning) in all other cases, including when
-        ``results_path_stub`` would resolve outside ``nav_results_root``.
+        An :class:`OffsetLookup` carrying the ``(dv, du)`` offset when the
+        metadata file exists, is valid JSON, and has ``status == 'success'``
+        with a non-null ``offset`` field.  In every other case -- including a
+        ``results_path_stub`` that would resolve outside ``nav_results_root``
+        -- it carries no offset and the reason there is none, which the caller
+        reports to the run and counts.  Reprojecting with uncorrected pointing
+        is not an error, but it is the difference between a product being
+        registered and only looking registered, so it is not silent either.
     """
     if nav_results_root is None:
-        return None
+        # Nothing was asked for, so nothing is missing.
+        return OffsetLookup(offset=None, reason=None)
 
     metadata_path = _resolved_nav_metadata_path(nav_results_root, image_file)
     if metadata_path is None:
-        return None
+        return OffsetLookup(offset=None, reason='unusable_metadata_path')
 
     try:
         text = metadata_path.read_text()
     except FileNotFoundError:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'nav_results_root provided but no metadata found for %s; using uncorrected pointing.',
             image_file.image_file_url,
         )
-        return None
+        return OffsetLookup(offset=None, reason='no_metadata')
     except (OSError, UnicodeDecodeError) as exc:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Could not read metadata for %s (%s); using uncorrected pointing.',
             image_file.image_file_url,
             exc,
         )
-        return None
+        return OffsetLookup(offset=None, reason='unreadable_metadata')
 
     try:
         nav_metadata = json.loads(text)
     except json.JSONDecodeError as exc:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Invalid JSON in metadata for %s (%s); using uncorrected pointing.',
             image_file.image_file_url,
             exc,
         )
-        return None
+        return OffsetLookup(offset=None, reason='invalid_json')
 
     if not isinstance(nav_metadata, dict):
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Nav metadata for %s is not a JSON object '
             '(type=%s, value=%r); using uncorrected pointing.',
             image_file.image_file_url,
             type(nav_metadata).__name__,
             nav_metadata,
         )
-        return None
+        return OffsetLookup(offset=None, reason='metadata_not_an_object')
 
     status = nav_metadata.get('status')
     if status != 'success':
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Nav metadata for %s has status=%r; using uncorrected pointing.',
             image_file.image_file_url,
             status,
         )
-        return None
+        return OffsetLookup(offset=None, reason='navigation_did_not_succeed')
 
     offset = nav_metadata.get('offset')
     if offset is None:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Nav metadata for %s has null offset; using uncorrected pointing.',
             image_file.image_file_url,
         )
-        return None
+        return OffsetLookup(offset=None, reason='null_offset')
 
     try:
         parsed = _parse_nav_offset_pair(offset)
     except TypeError as exc:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Nav metadata for %s has invalid offset type (%s); using uncorrected pointing.',
             image_file.image_file_url,
             exc,
         )
-        return None
+        return OffsetLookup(offset=None, reason='invalid_offset_type')
     except ValueError as exc:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Nav metadata for %s has non-finite offset (%s); using uncorrected pointing.',
             image_file.image_file_url,
             exc,
         )
-        return None
+        return OffsetLookup(offset=None, reason='non_finite_offset')
     if parsed is None:
-        MAIN_LOGGER.warning(
+        IMAGE_LOGGER.warning(
             'Nav metadata for %s has malformed offset field; using uncorrected pointing.',
             image_file.image_file_url,
         )
-        return None
-    return parsed
+        return OffsetLookup(offset=None, reason='malformed_offset')
+    return OffsetLookup(offset=parsed, reason=None)
 
 
 def apply_offset_to_obs(obs: ObsSnapshotInst, dv: float, du: float) -> None:
