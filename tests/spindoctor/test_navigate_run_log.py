@@ -11,6 +11,7 @@ from typing import Any, cast
 
 import numpy as np
 import pdslogger
+import pytest
 from filecache import FCPath
 
 from spindoctor.config import (
@@ -55,6 +56,21 @@ class _StubResult:
         self.confidence = confidence
         self.confidence_rank = confidence_rank
         self.status_reason = status_reason
+
+
+@pytest.fixture(autouse=True)
+def _fakes_report_as_simulated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Report this module's fake observations as simulated.
+
+    ``obs_class_to_inst_name`` cannot identify a test fake and returns
+    ``'unknown'``, which the orchestrator treats as a build defect and
+    warns about.  These fakes stand in for an observation carrying no SPICE
+    camera frame, which is exactly what a simulated image is, so they report
+    that instead of shaping the production set around the test suite.
+    """
+    monkeypatch.setattr(
+        'spindoctor.nav_orchestrator.orchestrator.obs_class_to_inst_name', lambda cls: 'sim'
+    )
 
 
 def _main_log_of(tmp_path: Path, report: Any) -> str:
@@ -166,6 +182,7 @@ class _FakeSnapshot:
         self.extdata = self.data
         self.midtime = 100.0
         self.camera = 'NAC'
+        self.shutter_mode: str | None = None
 
     def extfov_data_sensor_mask(self) -> np.ndarray:
         """Return the sensor mask.

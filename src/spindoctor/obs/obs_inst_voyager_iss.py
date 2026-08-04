@@ -192,6 +192,23 @@ class ObsVoyagerISS(ObsSnapshotInst):
         """
         return str(self.detector)
 
+    @property
+    def spacecraft_digit(self) -> str:
+        """Which Voyager took this observation.
+
+        Read from the VICAR ``LAB02`` record, whose 5th character is the
+        spacecraft digit.  SPICE frame, kernel and clock identifiers are all
+        keyed per spacecraft, so consumers that must name one derive it here.
+
+        Returns:
+            ``'1'`` for Voyager 1 or ``'2'`` for Voyager 2.
+
+        Raises:
+            ValueError: If ``LAB02`` is missing, too short, or names neither
+                spacecraft.
+        """
+        return _voyager_spacecraft_digit(self.dict.get('LAB02', None))
+
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for Voyager ISS.
 
@@ -202,7 +219,7 @@ class ObsVoyagerISS(ObsSnapshotInst):
         # scet_start = float(obs.dict["SPACECRAFT_CLOCK_START_COUNT"])
         # scet_end = float(obs.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
 
-        spacecraft = _voyager_spacecraft_digit(self.dict.get('LAB02', None))
+        spacecraft = self.spacecraft_digit
 
         # The instrument LID and `camera` field encode the camera as iss{n,w};
         # guard against an unexpected detector so a malformed LID never reaches

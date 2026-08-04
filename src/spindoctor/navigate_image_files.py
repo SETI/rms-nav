@@ -273,6 +273,7 @@ def navigate_image_files(
                 image_name,
                 instrument=instrument,
                 camera=snapshot_inst.camera,
+                shutter_mode=snapshot_inst.shutter_mode,
                 image_shape=(int(data_shape[0]), int(data_shape[1])),
                 timing=build_timing_section(run_start, datetime.now(UTC)),
             )
@@ -340,6 +341,7 @@ def build_metadata_from_result(
     *,
     instrument: str,
     camera: str | None = None,
+    shutter_mode: str | None = None,
     image_shape: tuple[int, int] | None = None,
     timing: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -360,6 +362,9 @@ def build_metadata_from_result(
         camera: The camera that took the image (``ObsInst.camera``, e.g.
             ``'NAC'``); written to the ``observation.camera`` field.  None
             omits the field.
+        shutter_mode: The shutter mode the image was taken in
+            (``ObsInst.shutter_mode``, e.g. ``'BOTSIM'``); written to the
+            ``observation.shutter_mode`` field.  None omits the field.
         image_shape: ``(v, u)`` pixel dimensions of the loaded image data;
             written to the ``observation.image_shape`` field.  None omits
             the field.
@@ -374,6 +379,8 @@ def build_metadata_from_result(
     }
     if camera is not None:
         observation['camera'] = camera
+    if shutter_mode is not None:
+        observation['shutter_mode'] = shutter_mode
     if image_shape is not None:
         observation['image_shape'] = [int(image_shape[0]), int(image_shape[1])]
     metadata: dict[str, Any] = {

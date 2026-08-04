@@ -14,6 +14,8 @@ import dataclasses
 import math
 from typing import Any
 
+import numpy as np
+
 from spindoctor.feature.constants import JSON_INF_SENTINEL
 from spindoctor.feature.feature import NavReliabilityBreakdown
 from spindoctor.nav_orchestrator.feature_summary import NavFeatureSummary
@@ -21,6 +23,8 @@ from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifi
 from spindoctor.nav_orchestrator.nav_result import NavResult
 from spindoctor.nav_orchestrator.provenance import Provenance
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
+from spindoctor.support.cmatrix import AttitudeBaseline, PointingSolution
+from spindoctor.support.types import NDArrayFloatType
 
 __all__ = [
     'assert_diagnostic_fields_present',
@@ -214,6 +218,50 @@ def _curate_provenance(provenance: Provenance) -> dict[str, Any]:
     }
 
 
+def _flatten_rotation(matrix: NDArrayFloatType) -> list[float]:
+    """Flatten a 3x3 rotation into nine row-major floats.
+
+    Deliberately unrounded: a C-kernel writer identifies the baseline kernel
+    an image navigated against by reproducing this matrix to within a
+    nanoradian, and rounding would put the recorded value outside that bound.
+    """
+    return [float(v) for v in np.asarray(matrix, np.float64).reshape(9)]
+
+
+def _curate_pointing(solution: PointingSolution) -> dict[str, Any]:
+    """Return a JSON-friendly entry for a corrected-attitude solution.
+
+    ``cmatrix`` is present only when one was computed; ``cmatrix_original``
+    and the frame identities are always present.
+    """
+    baseline = solution.baseline
+    out: dict[str, Any] = {}
+    if solution.cmatrix is not None:
+        out['cmatrix'] = _flatten_rotation(solution.cmatrix)
+    out['cmatrix_original'] = _flatten_rotation(baseline.cmatrix_original)
+    out['camera_frame'] = baseline.camera_frame
+    out['camera_frame_id'] = baseline.camera_frame_id
+    out['ck_frame_id'] = baseline.ck_frame_id
+    return out
+
+
+def _curate_times(baseline: AttitudeBaseline) -> dict[str, Any]:
+    """Return a JSON-friendly entry for an observation's exposure times.
+
+    Deliberately unrounded, for the same reason as the C-matrices: the epochs
+    define a C-kernel segment's interpolation interval exactly.
+    """
+    return {
+        'start_et': baseline.start_et,
+        'stop_et': baseline.stop_et,
+        'midtime_et': baseline.midtime_et,
+        'exposure_s': baseline.exposure_s,
+        'sclk_start': baseline.sclk_start,
+        'sclk_midtime': baseline.sclk_midtime,
+        'sclk_stop': baseline.sclk_stop,
+    }
+
+
 def build_metadata_dict(result: NavResult) -> dict[str, Any]:
     """Build the additive ``navigation_result`` metadata block.
 
@@ -275,4 +323,7 @@ def build_metadata_dict(result: NavResult) -> dict[str, Any]:
         out['sigma_rotation_deg'] = _round_float(
             math.degrees(result.sigma_rotation_rad), CONFIDENCE_DECIMALS
         )
+    if result.pointing is not None:
+        out['pointing'] = _curate_pointing(result.pointing)
+        out['times'] = _curate_times(result.pointing.baseline)
     return out

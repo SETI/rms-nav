@@ -150,7 +150,7 @@ M . d = los_from_xy(xy_from_uv(uv_los))
 
 **Step 2 -- construct `M`.** `M` is the minimal rotation taking `d` to the
 boresight direction `b = los_from_xy(xy_from_uv(uv_los))`: axis
-`d x b` normalized, angle `arccos(d . b)`, realized with
+`d x b` normalized, angle `arctan2(|d x b|, d . b)`, realized with
 `cspyce.axisar(axis, angle)` -- which is the **active** vector rotation
 (`M . d = b`); `cspyce.rotate` is the frame rotation and gives the
 transpose. Guard: when `|d x b| < 1e-12` (a zero or sub-nanoradian offset),
@@ -158,11 +158,60 @@ transpose. Guard: when `|d x b| < 1e-12` (a zero or sub-nanoradian offset),
 `rotation_deg` on the result means no `cmatrix` is computed at all (section
 1); there is no twist term in `M`.
 
+The angle is `arctan2(|d x b|, d . b)` and not the mathematically
+equivalent `arccos(d . b)` this plan first specified, because for unit
+vectors `arccos` loses all relative precision as the angle goes to zero,
+which is exactly the regime a sub-pixel offset lives in. Measured against a
+Cassini NAC pixel scale of 6e-6 rad/px: at 0.01 px `arccos` returns
+5.9605e-08 rad against a true 6.0000e-08 (0.7% low), and at 0.001 px it
+returns **exactly 0.0** -- `cos` of 6e-9 rad rounds to 1.0 in float64, so
+the correction would be silently dropped altogether. `arctan2` returns the
+true angle in every one of those cases. This is a correction of a defect in
+the formula, not a change of method: the two forms agree wherever `arccos`
+has any precision left.
+
 An exact rigid rotation is not exactly a uniform tangent-plane shift; the
-difference is second order in field angle -- about 1e-9 radians on a
-Cassini NAC and at most ~0.04 px at the corner of a WAC for a 50 px offset,
-measured. This bounds what the round trip in Phase D can be expected to
-recover and is part of its error budget.
+difference is second order in field angle. Measured over a 17x17 pixel grid
+across each full frame, worst case over eight offset directions, for **50
+pixels of total boresight displacement**, comparing `M` applied to oops's
+own `OffsetFOV` line of sight against the unmodified FOV:
+
+| Instrument | worst residual (rad) | in tangent-plane px | in pixel space |
+|---|---|---|---|
+| Cassini NAC | 6.01e-9 | 1.00e-3 px | 1.24e-3 px |
+| Cassini WAC | 5.91e-6 | 9.89e-2 px | 7.86e-2 px |
+| New Horizons LORRI | 1.62e-8 | 8.15e-4 px | 1.23e-3 px |
+| Galileo SSI | 1.82e-8 | 1.79e-3 px | 1.79e-3 px |
+| Voyager 2 NAC | 1.29e-8 | 1.64e-3 px | 1.64e-3 px |
+
+These replace this plan's earlier figures of "about 1e-9 radians on a
+Cassini NAC" and "at most ~0.04 px at the corner of a WAC", which were low
+by roughly 6x and 2.5x respectively; the 0.04 px figure corresponds to an
+offset closer to 20 px than to 50.
+
+**The residual is essentially linear in the offset**, not quadratic.
+Measured across 12.5 / 25 / 50 / 100 px of total displacement, each
+doubling multiplies it by 2.034, 2.067, 2.129 -- on both the NAC and the
+WAC, identically. The two figures above confirm it independently: 8.72e-9
+rad at 70.71 px against 6.01e-9 at 50 px is a ratio of 1.452, where linear
+predicts 1.414 and quadratic 2.000. The term is second order in *field
+angle* and first order in the offset -- it goes as offset times field angle
+squared -- and an earlier revision of this plan conflated the two
+variables. Quoting the residual without the offset it was measured at is
+still meaningless, but halving the offset only halves the residual.
+
+**The WAC case sits essentially at Phase D's 0.1 px decision boundary.**
+9.89e-2 px of total displacement at a 50 px total offset, against a target
+stated as 0.1 px *per axis* -- so the comparison is conservative (a total
+displacement is at most sqrt(2) times the larger per-axis component), but
+the two are not in the same units and Phase D must convert before deciding.
+That is a fact to confront with the rule as written, not a reason to move
+the bound: a WAC round trip at a 50 px offset should be expected to consume
+nearly the whole budget from this term alone. Because the term is linear,
+buying headroom costs proportionally more offset than a quadratic rule
+would suggest: a Phase D WAC frame at about 10 px of total offset lands
+near a fifth of budget, where a quadratic reading would have promised that
+at ~22 px.
 
 **Step 3 -- express both attitudes in the SPICE convention.** With
 `C_oops` the observation frame's J2000-to-camera matrix at midtime
@@ -179,7 +228,7 @@ cmatrix          = (R^T . M . R) . cmatrix_original
 instrument, and asserted epoch-independent by recomputing at `start_et` and
 `stop_et`; a violation raises rather than being absorbed. For **Voyager**,
 oops builds the observation frame as
-`P . ckgp(ck_id, sce2c(scid, et_mid), 800 + texp/48, 'J2000')` with
+`P . ckgp(ck_id, sce2t(scid, et_mid), 800 + texp/48, 'J2000')` with
 `P = pxform('VGn_SCAN_PLATFORM', camera_frame, 0)` -- frozen,
 time-independent, and tolerance-snapped, so `pxform` at midtime does not
 reproduce it. For Voyager, `cmatrix_original = C_oops` itself (already the
@@ -188,9 +237,25 @@ construction, and the writer must reproduce the baseline with the same
 snapped `ckgp` call (section 3.3) -- which is why `exposure_s` is a
 recorded field.
 
-Sanity check on the result: `|det(cmatrix) - 1| < 1e-9` and
-`max|cmatrix . cmatrix^T - I| < 1e-9`, both raising on violation -- a
-non-proper rotation here is a defect, not something to repair.
+The tick conversion is `sce2t`, not the `sce2c` this plan first named:
+`oops/hosts/voyager/iss.py` calls `cspyce.sce2t(scid, tstart + texp/2.)`.
+The two differ. On `C1205021_GEOMED` (Voyager 2, texp 0.48 s), `sce2t`
+returns 6349696766.0 and `sce2c` returns 6349696766.186253 -- 0.19 ticks
+apart against a tolerance of 800.01, so on this frame both find the same
+pointing record (found tick 6349696815.0). It is nonetheless the wrong
+call, and section 3.3's reproduction step must use `sce2t` to be sure of
+matching oops on every frame.
+
+Sanity check on the result: `|det(cmatrix) - 1| < 1e-9`,
+`max|cmatrix . cmatrix^T - I| < 1e-9`, and every element finite, all three
+raising on violation -- a non-proper rotation here is a defect, not
+something to repair. The finiteness check is not redundant with the other
+two: `NaN` fails every inequality, so a `NaN` matrix passes both tolerance
+guards silently, and the metadata writer emits the C-matrices and epochs
+unrounded (they must reproduce to 1e-9 rad, which rounding would break),
+bypassing the rounding helper that maps non-finite floats onto the JSON
+sentinel. An unchecked `NaN` therefore reaches the file as a bare `NaN`
+token, which is not valid JSON and which the results-index ingest rejects.
 
 ### 2.3 Metadata fields
 
@@ -246,13 +311,53 @@ interface stays. A `#` comment records that intent.
 
 `NavResult` is constructed inside the ensemble, which never sees the
 observation, and it is a frozen dataclass -- so the wiring is: `NavResult`
-gains an optional `pointing` field (default None), populated in
-`_navigate_pipeline` in `nav_orchestrator/orchestrator.py` via
-`dataclasses.replace` at the point where `context.obs` is in hand (the same
-neighborhood that builds provenance from `obs.midtime`), and
-`curator.build_metadata_dict` serializes it. Phase A states this as the
-insertion point so the implementer does not go looking for an `obs`
-argument inside `ensemble()` that does not exist.
+gains an optional `pointing` field (default None), populated via
+`dataclasses.replace` where the observation is in hand, and
+`curator.build_metadata_dict` serializes it. This is stated explicitly so
+the implementer does not go looking for an `obs` argument inside
+`ensemble()` that does not exist.
+
+The stamping site is `NavOrchestrator.navigate` in
+`nav_orchestrator/orchestrator.py`, not `_navigate_pipeline` as this plan
+first said. `_navigate_pipeline` has five early failure returns and
+`navigate` has two more of its own -- the hard-failure image-class
+short-circuit, which never enters the pipeline at all, and the
+`NavContractError` path -- so stamping the pipeline's final return alone
+would leave the uncorrected matrix and the times off every failed result,
+against this section's own "whenever a `NavResult` exists". `navigate`
+routes all three of its returns through one `with_pointing(result, obs)`
+method instead.
+
+That method is **public**, because the manual-navigation driver needs it:
+`run_manual_nav` in `nav_technique/nav_technique_manual.py` builds its
+`NavResult` directly from the operator's pick and never calls `navigate`,
+so it calls `with_pointing` itself. Operator-ratified offsets are the
+highest-quality pointing in the corpus; leaving them unstamped would make
+them the one subset excluded from every generated kernel.
+
+`with_pointing` never raises. `navigate` is documented never to raise
+through to its caller, and a pointing solution is recorded metadata rather
+than the navigation itself, so a failure is reported and the field is left
+unset -- no wrong C-matrix is ever recorded, which is the property the
+raises in section 2.2 exist to guarantee. Two constraints on how it
+absorbs:
+
+- The caught set is only what the computation can legitimately raise: its
+  own `ValueError` guards, plus the `LookupError` / `OSError` /
+  `RuntimeError` / `ValueError` family cspyce raises for a missing frame,
+  an unreadable kernel, or a SPICE error. A `TypeError` or `AttributeError`
+  from a defect in the computation itself is deliberately **not** caught,
+  so a broken build fails on the first image instead of quietly dropping
+  pointing from a 50,000-image batch while every image still reports
+  `status=success`.
+- Anything that degrades or omits a solution goes to **both** logs: detail
+  to the image log, one line to the run log. An operator watching a batch
+  must not have to open every per-image log to learn that pointing stopped
+  being recorded. The same applies to a registered instrument that reaches
+  navigation with no entry in the frame table (section 2.1): that is a
+  build defect and warns to both logs, where a simulated image, which has
+  no spacecraft and no furnished camera frame, is expected and logs at
+  debug.
 
 ---
 
@@ -347,6 +452,23 @@ silently). The SCLK kernel furnished must be the one navigation used,
 resolved from `provenance.spice_kernels`; a different SCLK is a silent
 time-tag error.
 
+**`ckmeta` will not catch a wrong CK id either.** It computes rather than
+validates: `ckmeta(-999999, 'SCLK')` returns `-999` and `ckmeta(-12345,
+'SCLK')` returns `-12`, neither raising. A `ck_frame_id` that is wrong for
+any reason therefore yields a plausible-looking clock id, a successful
+`sce2c`, and silently wrong time tags on every record. Validate the
+resolved `sclk_id` against the expected set for the mission rather than
+trusting the round trip.
+
+**Both attitudes are evaluated at the exposure midtime**, and Phase A's
+integration tier pins that against a moving attitude on LORRI alone -- the
+only frame in the cohort with an exposure (5 s) long enough for the
+attitude to move measurably between start and midtime. That is adequate but
+thin. It matters most here: a midtime/start mix-up in the reproduction step
+would fail every baseline at the 1e-9 rad bound, so an unexplained
+across-the-board `no_reproducing_baseline` should be checked against this
+first.
+
 **Angular velocity: copied unchanged, never rotated.** CK angular velocity
 is expressed in the segment's **base reference frame** (J2000), per the CK
 Required Reading, and the corrected frame differs from the original by a
@@ -383,8 +505,9 @@ accumulates kernels from earlier images -- a superset. So:
    per group, not per image): furnish the supporting kernels (LSK, SCLK,
    FK) plus one candidate CK at a time, evaluate the original attitude at
    midtime -- for Voyager via the snapped
-   `ckgp(ck_id, sce2c(scid, mid), 800 + exposure_s/48, 'J2000')`, composed
-   with `P`, matching section 2.2; otherwise via `pxform` -- and keep
+   `ckgp(ck_id, sce2t(scid, mid), 800 + exposure_s/48, 'J2000')`, composed
+   with `P`, matching section 2.2 (`sce2t`, not `sce2c`; see the evidence
+   there); otherwise via `pxform` -- and keep
    candidates that reproduce the recorded `cmatrix_original` to within
    **1e-9 radians** (an angular tolerance on the rotation between the two
    matrices; this is a reproduction bound, far tighter than any navigation
@@ -401,6 +524,19 @@ accumulates kernels from earlier images -- a superset. So:
    the kernel set changed since navigation, reproduction fails and the
    image is refused rather than corrected against a baseline that no
    longer exists.
+
+**Voyager has a second tolerance to try.** When the snapped `ckgp` above
+raises `LookupError`, `oops/hosts/voyager/iss.py` does not fail the image:
+it warns and falls back to the FK-registered frame
+`VOYAGER<n>_ISS_<NAC|WAC>`, which chains on
+`SpiceType1Frame('VG<n>_SCAN_PLATFORM', -3<n>, TOL_TICKS)` with
+`TOL_TICKS = 80000.` (raised from 800 in oops "to deal with very long
+exposures"). The recorded `cmatrix_original` is the observation frame's
+attitude at midtime either way, so Phase A needs no special case, but a
+Voyager image navigated through that fallback is reproduced only at the
+80000-tick tolerance. The reproduction step should try `800 + exposure_s/48`
+first and 80000 second; an image that reproduces under neither is a genuine
+`no_reproducing_baseline`.
 
 **Omission reasons**, the complete set: `not_eligible`, `botsim_loser`,
 `rotation_unsupported`, `no_reproducing_baseline`, `degenerate_exposure`
@@ -471,7 +607,7 @@ and shared with oops; the writer assumes the exceptions regime
 ### Phase A — C-matrix in the metadata
 
 `spindoctor/support/cmatrix.py` per section 2.2; the `NavResult.pointing`
-field and the `_navigate_pipeline` wiring per section 2.4; curator
+field and the `navigate` / `run_manual_nav` wiring per section 2.4; curator
 serialization of `pointing`, `times`, and `observation.shutter_mode` per
 section 2.3.
 
@@ -480,20 +616,62 @@ Hermetic tests (synthetic FOV and frames):
 - A planted offset produces a `cmatrix` whose correction, inverted,
   recovers that offset; the test fails if the sign of `xy_offset` flips.
 - A zero offset produces `cmatrix == cmatrix_original` exactly, through
-  the `M = I` guard.
+  the `M = I` guard. **This holds only for a FOV whose boresight pixel maps
+  to `xy` exactly `(0, 0)`**, which a synthetic `FlatFOV` does, and which
+  Galileo SSI and Voyager ISS also do. It does not hold on a real
+  `PolynomialFOV`: `oops.fov.OffsetFOV(fov, uv_offset=(0, 0))` is itself
+  not the identity there, because its `xy_offset` is `fov.xy_from_uv(
+  fov.uv_los)` rather than zero. Measured `|xy_from_uv(uv_los)|`, which is
+  exactly the residual correction angle a zero offset produces, each
+  converted at its own frame's pixel scale:
+
+  | Frame | scale (rad/px) | residual (rad) | in px |
+  |---|---|---|---|
+  | Cassini WAC, 1024x1024 | 5.977e-5 | 5.427585e-08 | 9.08e-4 |
+  | LORRI, 256x256 (4x4 binned) | 1.986e-5 | 6.842953e-10 | 3.45e-5 |
+  | Cassini NAC, 1024x1024 | 5.992e-6 | 1.149029e-10 | 1.92e-5 |
+  | Galileo SSI | 1.015e-5 | exactly 0 | 0 |
+  | Voyager 2 NAC | 7.842e-6 | exactly 0 | 0 |
+
+  The WAC is the worst case by a factor of ~470 over the NAC and must not
+  be left off this list. The LORRI conversion uses the binned scale of the
+  actual test frame; quoting it at the unbinned 4.96e-6 rad/px understates
+  it by 4x. The non-zero cases are faithful, not a defect -- the recorded
+  attitude reproduces what a consumer applying the offset through
+  `OffsetFOV` actually sees -- but Phase D must not assume `offset == 0`
+  implies `cmatrix == cmatrix_original` on a real frame.
+- A small-but-real offset (0.05 px) still produces a non-identity
+  correction that recovers that offset, so the `|d x b| < 1e-12` guard is
+  pinned from below as well as above.
 - The Cassini-style flip: with a synthetic `R = diag(-1,-1,1)` between the
   "oops" and "SPICE" frames, the recorded `cmatrix` reproduces the offset
   in the SPICE convention; the test fails if the `R` conjugation is
   dropped (the un-conjugated result negates both tangent components).
+- The conjugation **direction** with a synthetic non-involutory `R` (a
+  quarter turn about Z). Every `R` in the section 2.1 table is diagonal
+  and therefore its own inverse, so `R^T M R` and `R M R^T` agree on all
+  real data and no real-frame test can tell them apart.
 - A result carrying a fitted rotation records `cmatrix_original` but no
   `cmatrix`.
-- Determinant/orthonormality violations raise.
+- Determinant, orthonormality and finiteness violations raise.
+- A measured flip that is not the instrument's constant raises.
 
 Integration tests (real frames, marked `integration`): for one Cassini
 NAC, one Cassini WAC, one LORRI, and one Galileo frame, the measured `R`
 equals the section 2.1 constant to 1e-9 and is identical at start, mid and
 stop; for one Voyager frame, `cmatrix_original` equals the frozen oops
 attitude.
+
+Every one of those frames must additionally recover its planted `(dv, du)`
+**exactly**, by inverting the recorded `cmatrix` back through the recorded
+flip on the instrument's own distorted FOV. A magnitude check -- the
+rotation angle of `cmatrix . cmatrix_original^T` against the offset's field
+angle -- is **not** sufficient and must not be substituted: a rotation
+magnitude is invariant under a sign flip, an `R` conjugation, and a
+reversed composition, so such a test passes unchanged against every
+directional error this section exists to catch. The recovery tolerance
+follows from the step-2 error budget above; 1e-2 px is comfortable at a
+~19 px offset, and a directional error is off by twice the offset.
 
 ### Phase B — Writer core, one image
 
@@ -558,8 +736,12 @@ pixel scale. Decision rule: when the measured residual is at or below
 0.1 px, pin the test at measured-plus-margin; when it is above, **stop and
 diagnose** -- a larger residual is a defect (most likely a section 2
 convention error), never a tolerance to raise. The section 2.2
-rotation-vs-shift bound (~0.04 px worst case, WAC corner) is part of the
-budget.
+rotation-vs-shift bound is part of the budget, and on a WAC it very nearly
+**is** the budget: 9.89e-2 px of total displacement, worst case across the
+frame, at a 50 px total offset, against a 0.1 px per-axis target -- convert
+before comparing. Choose the WAC cohort frame accordingly, remembering the
+bound is **linear** in the offset, not quadratic: about 10 px of total
+offset buys a fifth of budget.
 
 Cohort: one star-navigated Cassini NAC frame (best-constrained truth), one
 Cassini WAC frame, and one frame from each other instrument that has a

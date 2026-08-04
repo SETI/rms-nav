@@ -12,6 +12,9 @@ Modules:
     ``image``
         Two-dimensional array helpers: shifting, padding, cropping, normalization,
         and FFT-related image operations.
+    ``cmatrix``
+        ``compute_pointing`` and its supporting types: the corrected and uncorrected
+        C-matrices a navigated offset implies, in the SPICE camera-frame convention.
     ``correlate``
         Fourier-domain and template-matching utilities (e.g. normalized
         cross-correlation) built on ``image`` and ``misc``.
@@ -55,6 +58,7 @@ Modules:
 
 __all__ = [
     'attrdict',
+    'cmatrix',
     'constants',
     'correlate',
     'distance_transform',
