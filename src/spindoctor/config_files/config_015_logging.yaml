@@ -4,9 +4,11 @@
 # the program is doing at the top level.  The image logger covers one image
 # inside one per-image backend and carries that image's processing detail.
 #
-# Each logger writes to a console sink, a file sink, or both, selected by
-# command-line flags.  Both sinks always share a level, so one level per module
-# governs whatever sinks happen to be enabled.
+# Each logger writes to a console sink, a file sink, or both.  Both sinks
+# always share a level, so one level per module governs whatever sinks happen
+# to be enabled.  Whether a logger reaches the terminal is settable here and on
+# the command line, which wins; whether it writes a file is command-line only,
+# being inseparable from where that file goes.
 #
 # Levels are DEBUG, INFO, WARNING, ERROR, CRITICAL, and NONE.
 
@@ -21,6 +23,16 @@ logging:
   # Global default for each logger.
   main: INFO
   image: INFO
+
+  # Whether each logger reaches the terminal.  The main log carries what the
+  # run is doing and is worth watching; an image log carries one image's
+  # detail, which is usually wanted in a file rather than interleaved on
+  # screen, so it is off by default.  --log-main-to-console and
+  # --log-image-to-console (and their --no- forms) override these per run.
+  #
+  # A cloud-task worker ignores both: its console belongs to the queue.
+  main_console: true
+  image_console: false
 
   # Per-module overrides.  A module with no entry here follows the "image"
   # level above, so nothing is listed that would only restate it: writing
@@ -53,4 +65,5 @@ logging:
   #     sd_mosaic:
   #       main: WARNING
   #       image: DEBUG
+  #       image_console: true
   programs: {}

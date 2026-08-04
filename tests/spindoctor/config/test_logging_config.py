@@ -1043,3 +1043,99 @@ def test_the_registry_does_not_grow_with_the_image_count(tmp_path: Path) -> None
         finally:
             _close(handlers)
     assert len(pdslogger._LOOKUP) == before
+
+
+def test_a_sink_is_not_settable_from_the_configuration(tmp_path: Path) -> None:
+    """A sink key in the configuration is not silently honored.
+
+    The sinks are a property of one invocation, so they are command-line only.
+    Reading one here would make the documentation wrong in the other
+    direction; this pins which way it is, so the question is answered by a
+    test rather than by trying it.
+    """
+    _config(tmp_path, '  image: DEBUG\n')
+    assert sinks_from_arguments(_args(), FCPath(tmp_path)).image_console is False
+
+
+# ---------------------------------------------------------------------------
+# Console selection from the configuration
+# ---------------------------------------------------------------------------
+
+
+def _console_sinks(tmp_path: Path, body: str, **arguments: object) -> LogSinks:
+    """Resolve sinks for sd_offset from a logging override and any arguments.
+
+    Parameters:
+        tmp_path: Directory used as the log root and for the override file.
+        body: YAML placed under ``logging:``.
+        **arguments: Command-line arguments to supply.
+
+    Returns:
+        The resolved sinks.
+    """
+    return sinks_from_arguments(
+        _args(**arguments),
+        FCPath(tmp_path),
+        program_name=SD_OFFSET,
+        config=_config(tmp_path, body),
+    )
+
+
+def test_the_image_console_can_be_turned_on_from_the_configuration(tmp_path: Path) -> None:
+    """An operator who always wants image detail on screen can say so once."""
+    assert _console_sinks(tmp_path, '  image_console: true\n').image_console is True
+
+
+def test_the_main_console_can_be_turned_off_from_the_configuration(tmp_path: Path) -> None:
+    """And a machine that should never chatter can say that once."""
+    assert _console_sinks(tmp_path, '  main_console: false\n').main_console is False
+
+
+def test_the_command_line_beats_the_configured_image_console(tmp_path: Path) -> None:
+    """The flag is the more specific statement, so it wins for that run."""
+    sinks = _console_sinks(tmp_path, '  image_console: true\n', log_image_to_console=False)
+    assert sinks.image_console is False
+
+
+def test_the_command_line_beats_the_configured_main_console(tmp_path: Path) -> None:
+    """In the other direction too."""
+    sinks = _console_sinks(tmp_path, '  main_console: false\n', log_main_to_console=True)
+    assert sinks.main_console is True
+
+
+def test_a_program_block_scopes_the_console_to_that_program(tmp_path: Path) -> None:
+    """A console set for one program is not set for another."""
+    body = f'  programs:\n    {SD_MOSAIC}:\n      image_console: true\n'
+    config = _config(tmp_path, body)
+    mosaic = sinks_from_arguments(_args(), FCPath(tmp_path), program_name=SD_MOSAIC, config=config)
+    assert mosaic.image_console is True
+
+
+def test_a_program_block_leaves_another_program_alone(tmp_path: Path) -> None:
+    """The counterpart: the program that was not named keeps the default."""
+    body = f'  programs:\n    {SD_MOSAIC}:\n      image_console: true\n'
+    config = _config(tmp_path, body)
+    offset = sinks_from_arguments(_args(), FCPath(tmp_path), program_name=SD_OFFSET, config=config)
+    assert offset.image_console is False
+
+
+def test_the_shipped_defaults_are_unchanged(tmp_path: Path) -> None:
+    """Adding the keys did not change what a run does without them."""
+    sinks = sinks_from_arguments(
+        _args(), FCPath(tmp_path), program_name=SD_OFFSET, config=_config(tmp_path)
+    )
+    assert (sinks.main_console, sinks.image_console) == (True, False)
+
+
+def test_a_file_sink_is_still_command_line_only(tmp_path: Path) -> None:
+    """Whether a log file is written is inseparable from where it goes.
+
+    Pinned so the asymmetry with the console keys is a decision rather than an
+    oversight: a configuration naming a file sink is rejected outright, which
+    is the check just above this one in spirit.
+    """
+    from spindoctor.config.logging_keys import validate_logging_config
+
+    config = _config(tmp_path, '  image_file: false\n')
+    with pytest.raises(ValueError, match='not a known logging key'):
+        validate_logging_config(config)

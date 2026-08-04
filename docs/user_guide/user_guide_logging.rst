@@ -139,7 +139,8 @@ to a file only.
 
    An interactive run therefore shows top-level progress rather than
    per-component detail. The detail is not lost -- it is in the per-image log
-   file. Pass ``--log-image-to-console`` to see it on screen as well.
+   file. Pass ``--log-image-to-console`` to see it on screen as well, or set
+   ``logging.image_console: true`` to see it on every run.
 
    ``sd_offset`` summarizes each image's answer to the main log regardless, so
    the offset, status and confidence stay on the terminal without asking for
@@ -176,13 +177,15 @@ configured through the configuration file alone; see `Cloud tasks`_ below.
     The level for one logger, taking precedence over a bare ``--log-level``.
 
 ``--log-main-to-console`` / ``--no-log-main-to-console``
-    Whether the main log reaches the terminal. Default on.
+    Whether the main log reaches the terminal. Default on; set
+    ``logging.main_console`` to change the default for every run.
 
 ``--log-main-to-file`` / ``--no-log-main-to-file``
     Whether the main log is written to a file. Default on.
 
 ``--log-image-to-console`` / ``--no-log-image-to-console``
-    Whether image logs reach the terminal. Default off.
+    Whether image logs reach the terminal. Default off; set
+    ``logging.image_console`` to change the default for every run.
 
 ``--log-image-to-file`` / ``--no-log-image-to-file``
     Whether image logs are written to files. Default on.
@@ -223,14 +226,18 @@ Silence one noisy component without lowering anything else:
 Configuring levels
 ==================
 
-Anything settable on the command line is settable in the configuration, under
-the top-level ``logging`` section:
+Every level is settable in the configuration, under the top-level ``logging``
+section, as is whether each logger reaches the terminal. Whether a logger
+writes to a *file* is command-line only, being inseparable from where that file
+goes, and so is ``--log-root`` itself.
 
 .. code-block:: yaml
 
    logging:
      main: INFO            # the run's logger
      image: INFO           # image logs, and any component not named below
+     main_console: true    # whether the run's log reaches the terminal
+     image_console: false  # whether image logs do
      techniques:
        titan_haze: DEBUG   # one technique
        default: WARNING    # every other technique
@@ -303,7 +310,9 @@ they can all append to sensibly.
 
 These drivers accept no logging command-line options, because every one of them
 configures a logger they do not have or a terminal they must not write to. Set
-their levels in the configuration instead.
+their levels in the configuration instead. ``main_console`` and
+``image_console`` have no effect on them either: a worker's terminal is not
+theirs to write to however it is configured.
 
 A cloud-task driver shares its interactive sibling's identity: ``sd_offset``
 for ``sd_offset_cloud_tasks``, and so on. So a ``programs`` block covers both

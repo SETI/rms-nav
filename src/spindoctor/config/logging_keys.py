@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     'CATEGORY_KEYS',
+    'CONSOLE_KEYS',
     'LOGGER_KEYS',
     'LOG_LEVEL_NAMES',
     'LOG_LEVEL_VALUES',
@@ -58,6 +59,15 @@ LOGGER_KEYS = frozenset({'main', 'image'})
 """The two per-logger global defaults."""
 
 CATEGORY_KEYS = frozenset({'techniques', 'models', 'other'})
+
+CONSOLE_KEYS = frozenset({'main_console', 'image_console'})
+"""Keys choosing whether each logger writes to the terminal.
+
+Booleans rather than levels, and the only sink selection the configuration
+carries: whether a log is *written to a file* is bound up with where the file
+goes, which is a per-run decision, while whether it appears on the terminal is
+the kind of preference a machine or an operator keeps.
+"""
 """Categories that group per-module overrides."""
 
 OTHER_LOG_KEYS = frozenset(
@@ -286,10 +296,15 @@ def _validate_block(block: dict[str, Any], location: str, *, is_top_level: bool)
                 )
         elif key in LOGGER_KEYS:
             _validate_level(value, f'{location}.{key}')
+        elif key in CONSOLE_KEYS:
+            if not isinstance(value, bool):
+                raise ValueError(
+                    f'{location}.{key} must be true or false, got {type(value).__name__}'
+                )
         elif key in CATEGORY_KEYS:
             _validate_category(value, key, categories[key], f'{location}.{key}')
         else:
-            allowed = sorted(LOGGER_KEYS | CATEGORY_KEYS)
+            allowed = sorted(LOGGER_KEYS | CONSOLE_KEYS | CATEGORY_KEYS)
             raise ValueError(
                 f'{location}.{key} is not a known logging key; expected one of {allowed}'
             )

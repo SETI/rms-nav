@@ -193,6 +193,8 @@ that override it. Levels are ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``,
     logging:
       main: INFO            # the run's logger
       image: INFO           # per-image logs, and any component not named below
+      main_console: true    # whether the run's log reaches the terminal
+      image_console: false  # whether per-image logs do
       techniques:
         titan_haze: DEBUG   # one technique
       models:
@@ -216,8 +218,11 @@ and ``--log-image-to-file``, each with a ``--no-`` form. A program that does
 not process images individually accepts only the main-logger options, and the
 cloud-task drivers accept none: see :doc:`/user_guide/user_guide_logging`.
 
-The sink switches and ``--log-root`` take precedence over every configuration
-file, including one named with ``--config-file``.
+``--log-root`` takes precedence over every configuration file, including one
+named with ``--config-file``, and over the ``NAV_LOG_ROOT`` environment
+variable. So do ``--log-main-to-console`` and ``--log-image-to-console``, over
+the ``main_console`` and ``image_console`` keys. The two file switches have no
+configuration equivalent, being inseparable from where the file goes.
 
 The level options are ranked by how specifically they name their target, not
 by being on the command line, so the order above governs them: ``--log-level

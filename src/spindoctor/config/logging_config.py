@@ -669,19 +669,45 @@ def build_image_log_handlers(
     return handlers, path
 
 
-def sinks_from_arguments(arguments: argparse.Namespace | None, log_root: FCPath) -> LogSinks:
-    """Build the sink selection from command-line arguments.
+def sinks_from_arguments(
+    arguments: argparse.Namespace | None,
+    log_root: FCPath,
+    *,
+    program_name: str = '',
+    config: 'Config | None' = None,
+) -> LogSinks:
+    """Build the sink selection from the command line and the configuration.
 
-    Each sink keeps its default unless the corresponding flag was given.
+    Whether each logger reaches the terminal is settable in both places, so
+    that a machine which should never chatter, or an operator who always wants
+    to watch, can say so once.  The command line wins, being the more specific
+    statement of the two; between the configuration's own levels, a
+    ``programs`` block wins over the top-level value exactly as it does for a
+    level.
+
+    Whether each logger writes to a *file* is command-line only, because it is
+    inseparable from where the file goes, and that is a per-run decision.
 
     Parameters:
         arguments: Parsed command-line arguments, or None for the defaults.
         log_root: Resolved log root for this run.
+        program_name: The program's identity, for selecting its block under
+            ``logging.programs``.  Empty selects the global block only.
+        config: The loaded configuration, or None to consult the command line
+            and the built-in defaults alone.
 
     Returns:
         The resolved :class:`LogSinks`.
     """
     defaults = LogSinks(log_root=log_root)
+    block = _merged_logging_block(program_name, config) if config is not None else {}
+
+    def console(argument_name: str, config_key: str, default: bool) -> bool:
+        from_arguments = getattr(arguments, argument_name, None)
+        if from_arguments is not None:
+            return bool(from_arguments)
+        configured = block.get(config_key)
+        return default if configured is None else bool(configured)
 
     def flag(name: str, default: bool) -> bool:
         value = getattr(arguments, name, None)
@@ -689,9 +715,9 @@ def sinks_from_arguments(arguments: argparse.Namespace | None, log_root: FCPath)
 
     return LogSinks(
         log_root=log_root,
-        main_console=flag('log_main_to_console', defaults.main_console),
+        main_console=console('log_main_to_console', 'main_console', defaults.main_console),
         main_file=flag('log_main_to_file', defaults.main_file),
-        image_console=flag('log_image_to_console', defaults.image_console),
+        image_console=console('log_image_to_console', 'image_console', defaults.image_console),
         image_file=flag('log_image_to_file', defaults.image_file),
     )
 
@@ -738,7 +764,9 @@ def run_logging_for_root(log_root: str | Path | FCPath, program_name: str = '') 
     set_log_levels(levels)
     return RunLogging(
         levels=levels,
-        sinks=sinks_from_arguments(None, FCPath(log_root)),
+        sinks=sinks_from_arguments(
+            None, FCPath(log_root), program_name=program_name, config=DEFAULT_CONFIG
+        ),
         timestamp=run_timestamp(),
         main_log_path=None,
     )
@@ -793,7 +821,9 @@ def build_run_logging(
             # -- has nowhere to put log files.  That is not worth refusing to
             # run over: drop the file sinks, say so, and carry on.
             sinks = replace(
-                sinks_from_arguments(arguments, FCPath('.')),
+                sinks_from_arguments(
+                    arguments, FCPath('.'), program_name=program_name, config=config
+                ),
                 main_file=False,
                 image_file=False,
             )
@@ -810,7 +840,7 @@ def build_run_logging(
             )
             return RunLogging(levels=levels, sinks=sinks, timestamp=timestamp, main_log_path=None)
         log_root = FCPath(fallback_log_root)
-    sinks = sinks_from_arguments(arguments, log_root)
+    sinks = sinks_from_arguments(arguments, log_root, program_name=program_name, config=config)
     set_log_levels(levels)
     timestamp = run_timestamp()
     main_log_path = None
