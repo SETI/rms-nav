@@ -55,13 +55,12 @@ _WITHOUT_IMAGE_LOGGER = [
 
 _WITH_ANY_LOGGER = _WITH_IMAGE_LOGGER + _WITHOUT_IMAGE_LOGGER
 
-# Programs that carry no logger and write to the terminal with print().  These
-# are checked by source rather than by running them: the GUI programs import
-# PyQt6 at module scope, and importing it to prove a program has no logging
-# flags is a poor trade.
-# Program, and the argv that reaches the parser the program actually runs
-# with.  sd_mosaic_display prints a dispatch parser's help when given no mode,
-# so asking it without one would inspect the wrong parser.
+# Programs that carry no logger and write to the terminal with print(), and the
+# argv that reaches the parser each actually runs with.  Checked by building
+# that parser rather than by reading the module's text: the flags come from a
+# shared helper, so a program acquires the whole set by calling anything that
+# calls it.  sd_mosaic_display prints a dispatch parser's help when given no
+# mode, so asking it without one would inspect the wrong parser.
 _WITHOUT_LOGGER = [
     ('sd_stats_ingest', []),
     ('sd_stats_report', []),

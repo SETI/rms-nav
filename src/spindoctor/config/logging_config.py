@@ -930,6 +930,13 @@ def build_cloud_task_logging(
 
     Returns:
         The resolved :class:`RunLogging`, whose sinks name no console.
+
+    Raises:
+        ValueError: If a level named in the configuration is not a known
+            level, or a module or program named there is not known.  Isolation
+            is already applied when this propagates, so a driver reporting it
+            does so without reaching the worker's terminal.
+        TypeError: If a configured level is not a string.
     """
     isolate_cloud_task_logging()
     run_logging = build_run_logging(

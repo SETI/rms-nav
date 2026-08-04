@@ -271,7 +271,9 @@ def test_a_bad_stub_fails_its_own_image_not_the_batch(tmp_path: Path) -> None:
     """A stub that would put the log outside the log root is a per-image error.
 
     Raising through the driver would end the batch and discard the images
-    already navigated, for one malformed entry.
+    already navigated, for one malformed entry.  Both halves of "failed this
+    image" are asserted from one navigation: the reason it gives, and that it
+    reports failure rather than a navigated image.
     """
     image = tmp_path / 'fake_image.IMG'
     image.write_bytes(b'\x00')
@@ -286,34 +288,11 @@ def test_a_bad_stub_fails_its_own_image_not_the_batch(tmp_path: Path) -> None:
             )
         ]
     )
-    _, metadata = navigate_image_files(
+    success, metadata = navigate_image_files(
         cast(Any, _FakeObsClass),
         batch,
         FCPath(str(tmp_path / 'results')),
         write_output_files=False,
     )
     assert metadata['status_error'] == 'invalid_results_path_stub'
-
-
-def test_a_bad_stub_reports_failure_rather_than_success(tmp_path: Path) -> None:
-    """And the driver reports it as a failure, not a navigated image."""
-    image = tmp_path / 'fake_image.IMG'
-    image.write_bytes(b'\x00')
-    label = tmp_path / 'fake_image.LBL'
-    label.write_bytes(b'\x00')
-    batch = ImageFiles(
-        image_files=[
-            ImageFile(
-                image_file_url=FCPath(str(image)),
-                label_file_url=FCPath(str(label)),
-                results_path_stub='../../escaped/fake_image',
-            )
-        ]
-    )
-    success, _ = navigate_image_files(
-        cast(Any, _FakeObsClass),
-        batch,
-        FCPath(str(tmp_path / 'results')),
-        write_output_files=False,
-    )
     assert success is False
