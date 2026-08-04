@@ -760,13 +760,12 @@ def run_logging_for_root(log_root: str | Path | FCPath, program_name: str = '') 
     """
     from .config import DEFAULT_CONFIG
 
+    root = FCPath(log_root)
     levels = resolve_log_levels(program_name, None, DEFAULT_CONFIG)
     set_log_levels(levels)
     return RunLogging(
         levels=levels,
-        sinks=sinks_from_arguments(
-            None, FCPath(log_root), program_name=program_name, config=DEFAULT_CONFIG
-        ),
+        sinks=sinks_from_arguments(None, root, program_name=program_name, config=DEFAULT_CONFIG),
         timestamp=run_timestamp(),
         main_log_path=None,
     )
@@ -812,11 +811,12 @@ def build_run_logging(
     # module level would close a cycle.
     from .config_helper import get_log_root
 
+    fallback = FCPath(fallback_log_root) if fallback_log_root is not None else None
     levels = resolve_log_levels(program_name, arguments, config)
     try:
         log_root = FCPath(get_log_root(arguments, config))
     except ValueError as exc:
-        if fallback_log_root is None:
+        if fallback is None:
             # A program with no results root of its own -- bundle summary, say
             # -- has nowhere to put log files.  That is not worth refusing to
             # run over: drop the file sinks, say so, and carry on.
@@ -839,7 +839,7 @@ def build_run_logging(
                 exc,
             )
             return RunLogging(levels=levels, sinks=sinks, timestamp=timestamp, main_log_path=None)
-        log_root = FCPath(fallback_log_root)
+        log_root = fallback
     sinks = sinks_from_arguments(arguments, log_root, program_name=program_name, config=config)
     set_log_levels(levels)
     timestamp = run_timestamp()

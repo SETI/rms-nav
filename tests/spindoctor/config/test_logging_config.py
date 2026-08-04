@@ -34,6 +34,7 @@ from spindoctor.config.logging_keys import log_key_for, technique_log_keys
 from spindoctor.config.program_names import SD_MOSAIC, SD_OFFSET
 
 _STAMP = '2026-07-29T12-00-00'
+_RUN_STAMP = '2099-12-31T23-59-59'
 
 
 def _config(tmp_path: Path, body: str = '') -> Config:
@@ -1047,13 +1048,12 @@ def test_the_registry_does_not_grow_with_the_image_count(tmp_path: Path) -> None
     assert len(pdslogger._LOOKUP) == before
 
 
-def test_a_sink_is_not_settable_from_the_configuration(tmp_path: Path) -> None:
-    """A sink key in the configuration is not silently honored.
+def test_an_image_level_does_not_enable_the_image_console(tmp_path: Path) -> None:
+    """Setting the image *level* does not also turn the image console on.
 
-    The sinks are a property of one invocation, so they are command-line only.
-    Reading one here would make the documentation wrong in the other
-    direction; this pins which way it is, so the question is answered by a
-    test rather than by trying it.
+    The two are separate questions -- how much to log, and where it goes --
+    and a level key that reached sink selection would quietly answer the
+    second.
     """
     _config(tmp_path, '  image: DEBUG\n')
     assert sinks_from_arguments(_args(), FCPath(tmp_path)).image_console is False
@@ -1064,11 +1064,11 @@ def test_a_sink_is_not_settable_from_the_configuration(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _console_sinks(tmp_path: Path, body: str, **arguments: object) -> LogSinks:
+def _console_sinks(root: FCPath, body: str, **arguments: object) -> LogSinks:
     """Resolve sinks for sd_offset from a logging override and any arguments.
 
     Parameters:
-        tmp_path: Directory used as the log root and for the override file.
+        root: Directory used as the log root and for the override file.
         body: YAML placed under ``logging:``.
         **arguments: Command-line arguments to supply.
 
@@ -1077,31 +1077,31 @@ def _console_sinks(tmp_path: Path, body: str, **arguments: object) -> LogSinks:
     """
     return sinks_from_arguments(
         _args(**arguments),
-        FCPath(tmp_path),
+        root,
         program_name=SD_OFFSET,
-        config=_config(tmp_path, body),
+        config=_config(Path(root.as_posix()), body),
     )
 
 
 def test_the_image_console_can_be_turned_on_from_the_configuration(tmp_path: Path) -> None:
     """An operator who always wants image detail on screen can say so once."""
-    assert _console_sinks(tmp_path, '  image_console: true\n').image_console is True
+    assert _console_sinks(FCPath(tmp_path), '  image_console: true\n').image_console is True
 
 
 def test_the_main_console_can_be_turned_off_from_the_configuration(tmp_path: Path) -> None:
     """And a machine that should never chatter can say that once."""
-    assert _console_sinks(tmp_path, '  main_console: false\n').main_console is False
+    assert _console_sinks(FCPath(tmp_path), '  main_console: false\n').main_console is False
 
 
 def test_the_command_line_beats_the_configured_image_console(tmp_path: Path) -> None:
     """The flag is the more specific statement, so it wins for that run."""
-    sinks = _console_sinks(tmp_path, '  image_console: true\n', log_image_to_console=False)
+    sinks = _console_sinks(FCPath(tmp_path), '  image_console: true\n', log_image_to_console=False)
     assert sinks.image_console is False
 
 
 def test_the_command_line_beats_the_configured_main_console(tmp_path: Path) -> None:
     """In the other direction too."""
-    sinks = _console_sinks(tmp_path, '  main_console: false\n', log_main_to_console=True)
+    sinks = _console_sinks(FCPath(tmp_path), '  main_console: false\n', log_main_to_console=True)
     assert sinks.main_console is True
 
 
@@ -1157,20 +1157,27 @@ def test_one_run_stamps_every_file_it_writes_alike(tmp_path: Path) -> None:
     over many images sort together and are distinguishable from the pass
     before it.
     """
-    run_logging = build_run_logging(
-        SD_OFFSET, _args(log_root=str(tmp_path)), _config(tmp_path), build_main=False
-    )
-    first, _ = build_image_log_handlers(
+    # The run's stamp is a sentinel that cannot coincide with "now": a builder
+    # that ignored it and stamped itself would otherwise still match, because
+    # both would fall in the same second.
+    with mock.patch.object(logging_config, 'run_timestamp', return_value=_RUN_STAMP):
+        run_logging = build_run_logging(
+            SD_OFFSET, _args(log_root=str(tmp_path)), _config(tmp_path), build_main=False
+        )
+    first_handlers, first_path = build_image_log_handlers(
         'nav', 'vol/N1', run_logging.sinks, run_logging.levels, timestamp=run_logging.timestamp
     )
-    second, _ = build_image_log_handlers(
+    second_handlers, second_path = build_image_log_handlers(
         'nav', 'vol/N2', run_logging.sinks, run_logging.levels, timestamp=run_logging.timestamp
     )
-    _close(first)
-    _close(second)
-    assert image_log_path(
-        FCPath(tmp_path), 'nav', 'vol/N1', timestamp=run_logging.timestamp
-    ).name.endswith(f'{run_logging.timestamp}.log')
+    _close(first_handlers)
+    _close(second_handlers)
+    assert first_path is not None
+    assert second_path is not None
+    # The builder's own paths, not ones rebuilt here from the stamp that was
+    # passed in -- that would only show image_log_path appends what it is given.
+    assert first_path.name.endswith(f'{_RUN_STAMP}.log')
+    assert second_path.name.endswith(f'{_RUN_STAMP}.log')
 
 
 def test_a_cloud_task_stamps_itself(tmp_path: Path) -> None:
