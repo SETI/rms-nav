@@ -194,24 +194,34 @@ def _constructs_a_logger(path: FCPath) -> bool:
         True when the module constructs a logger.
     """
     tree = ast.parse(path.read_text())
-    aliases = {'pdslogger'} | {
+    # ``import pdslogger as p`` then ``p.PdsLogger(...)``.
+    module_aliases = {'pdslogger'} | {
         alias.asname or alias.name
         for node in ast.walk(tree)
         if isinstance(node, ast.Import)
         for alias in node.names
         if alias.name == 'pdslogger'
     }
+    # ``from pdslogger import PdsLogger as P`` then ``P(...)``: the name the
+    # constructor is called by is whatever the import bound it to.
+    constructor_names = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == 'pdslogger'
+        for alias in node.names
+        if alias.name == 'PdsLogger'
+    }
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if isinstance(func, ast.Name) and func.id == 'PdsLogger':
+        if isinstance(func, ast.Name) and func.id in constructor_names:
             return True
         if (
             isinstance(func, ast.Attribute)
             and func.attr == 'PdsLogger'
             and isinstance(func.value, ast.Name)
-            and func.value.id in aliases
+            and func.value.id in module_aliases
         ):
             return True
     return False

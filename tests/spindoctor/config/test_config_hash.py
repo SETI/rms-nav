@@ -7,7 +7,6 @@ still changes the digest makes every result of a run compare as differently
 configured against the archive it belongs to.
 """
 
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -15,10 +14,11 @@ import pytest
 from spindoctor.config.config import HASH_EXCLUDED_SECTIONS, Config
 
 
-def _hash(body: str = '') -> str:
+def _hash(tmp_path: Path, body: str = '') -> str:
     """Return the resolved digest of the shipped configuration plus an override.
 
     Parameters:
+        tmp_path: Directory the override file is written into.
         body: YAML text applied as an override; empty for the defaults alone.
 
     Returns:
@@ -27,7 +27,7 @@ def _hash(body: str = '') -> str:
     config = Config()
     config.read_config()
     if body:
-        override = Path(tempfile.mkdtemp()) / 'override.yaml'
+        override = tmp_path / 'override.yaml'
         override.write_text(body)
         config.update_config(str(override))
     return str(config.resolved_config_hash())
@@ -45,23 +45,23 @@ def _hash(body: str = '') -> str:
         'logging:\n  strict_scope: true\n',
     ],
 )
-def test_a_logging_setting_does_not_change_the_digest(body: str) -> None:
+def test_a_logging_setting_does_not_change_the_digest(tmp_path: Path, body: str) -> None:
     """Looking harder at a run does not make its results differently configured.
 
     Raising one component's level is an everyday thing to do while
     investigating, and it would otherwise re-stamp every result of that run.
     """
-    assert _hash(body) == _hash()
+    assert _hash(tmp_path, body) == _hash(tmp_path)
 
 
-def test_a_setting_that_can_change_a_result_does_change_the_digest() -> None:
+def test_a_setting_that_can_change_a_result_does_change_the_digest(tmp_path: Path) -> None:
     """The exclusion is narrow: anything the pipeline reads still counts."""
-    assert _hash('offset:\n  correlation_fft_upsample_factor: 256\n') != _hash()
+    assert _hash(tmp_path, 'offset:\n  correlation_fft_upsample_factor: 256\n') != _hash(tmp_path)
 
 
-def test_the_digest_is_stable_across_repeated_resolution() -> None:
+def test_the_digest_is_stable_across_repeated_resolution(tmp_path: Path) -> None:
     """The same configuration resolves to the same digest every time."""
-    assert _hash() == _hash()
+    assert _hash(tmp_path) == _hash(tmp_path)
 
 
 def test_only_logging_is_excluded() -> None:

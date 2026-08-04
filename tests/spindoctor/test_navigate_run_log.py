@@ -261,32 +261,10 @@ def test_the_image_log_keeps_its_own_detail(tmp_path: Path) -> None:
     assert path is not None
     with path.open('r') as stream:
         text = stream.read()
-    # Records the run's one-line summary deliberately does not carry.
+    # Both records the run's one-line summary deliberately does not carry,
+    # asserted from one navigation rather than two identical ones.
     assert 'Image classifier:' in text
-
-
-def test_the_image_log_keeps_the_final_verdict(tmp_path: Path) -> None:
-    """Including the orchestrator's own final line, which is not the summary."""
-    levels = LogLevels()
-    set_log_levels(levels)
-    handlers, path = build_image_log_handlers(
-        'nav', 'fake_image', LogSinks(log_root=FCPath(tmp_path)), levels, timestamp=_STAMP
-    )
-    try:
-        with IMAGE_LOGGER.open('IMAGE', handler=handlers, level=levels.image_section_level()):
-            navigate_image_files(
-                cast(Any, _FakeObsClass),
-                _image_files(tmp_path),
-                FCPath(str(tmp_path / 'results')),
-                write_output_files=False,
-            )
-    finally:
-        for handler in handlers:
-            if handler is not pdslogger.NULL_HANDLER:
-                handler.close()
-    assert path is not None
-    with path.open('r') as stream:
-        assert 'Final: status=' in stream.read()
+    assert 'Final: status=' in text
 
 
 def test_a_bad_stub_fails_its_own_image_not_the_batch(tmp_path: Path) -> None:

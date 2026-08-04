@@ -203,7 +203,7 @@ def test_the_backplanes_driver_falls_back_to_its_own_root(
             backplane_results_root=backplane_root.as_posix(),
         ),
     )
-    assert str(recorder.fallback_log_root).endswith('bp/logs')
+    assert recorder.fallback_log_root == backplane_root / 'logs'
 
 
 def test_the_mosaic_driver_falls_back_to_the_task_output_directory(
@@ -224,7 +224,7 @@ def test_the_mosaic_driver_falls_back_to_the_task_output_directory(
         },
         _worker_data(nav_results_root=FCPath(tmp_path).as_posix()),
     )
-    assert str(recorder.fallback_log_root).endswith('out/logs')
+    assert recorder.fallback_log_root == output_dir / 'logs'
 
 
 # ---------------------------------------------------------------------------

@@ -190,7 +190,7 @@ changing anything here:
 
 Because a cloud task has no main log, a record about one image must be logged
 to :data:`~spindoctor.config.log_scope.IMAGE_LOGGER` rather than to
-:data:`~spindoctor.config.logger.MAIN_LOGGER`, which in a task is bound to a
+:data:`~spindoctor.config.MAIN_LOGGER`, which in a task is bound to a
 null sink and discards what it is given.
 
 That covers anything happening *inside* an image's section. An outcome
