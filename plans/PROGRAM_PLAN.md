@@ -3,7 +3,7 @@
 *The top-level plan of record for all remaining work. It is written to be
 readable without knowledge of the code internals or the statistical
 methodology; the detail lives in the three sub-plans it points to. Last
-reconciled 2026-07-23.*
+reconciled 2026-08-04.*
 
 **Document map** (what to read for what):
 
@@ -13,7 +13,10 @@ reconciled 2026-07-23.*
 | `plans/VALIDATION_AND_CALIBRATION_PLAN.md` | Full methodology for Track A (the science): what "validated" and "calibrated" mean, the statistical machinery, acceptance criteria per workstream. Binding where it overlaps anything else. |
 | `plans/ENGINEERING_PLAN.md` | Full implementation detail for Tracks B-F: per-item context, file pointers, constraints, and acceptance criteria sufficient to hand any item to a developer (human or model) cold. |
 | `plans/COHORT_CURATION_PLAN.md` | The operational playbook for growing the curated image library: metadata-driven discovery, operator review votes, sidecar generation. |
-| `plans/archive/` | Superseded plans, kept as historical records with dates in their filenames. Nothing in there is current. |
+| `plans/OPERATOR_PLAYBOOK.md` | The operator's dispatch sheet: which decisions are pending, which sessions to launch, and in what order. |
+| `plans/CK_KERNEL_PLAN.md` | Implementation plan for recording each navigated image's corrected attitude as a C-matrix and generating SPICE C-kernels from it. Self-contained; executable without the plans above. |
+| `plans/RESULTS_DB_PLAN.md` | Implementation plan for the optional, rebuildable index over the navigation results tree. Self-contained; executable without the plans above. |
+| `plans/archive/` | Superseded and fully-executed plans, kept as historical records with dates in their filenames. Nothing in there is current work, though the executed designs remain the reference for what shipped. |
 
 ---
 
@@ -169,8 +172,10 @@ its section names):
    only the finer per-technique separation.
 6. **Wire real images into CI** (#229; WS-4) — a small cached tier on
    every PR, the full suite on a schedule. Related: the data-independent
-   simulator suites still never run in Actions (#336), and there is no
-   canonical environment for the committed sim baselines (#335).
+   simulator suites still never run in Actions (#336), there is no
+   canonical environment for the committed sim baselines (#335), and a
+   committed sim render is already stale on `main` without anyone noticing
+   (#426) — which is what a deselected integration tier costs.
 7. **Re-anchor confidence on real evidence** (#230; WS-5) — re-run the
    existing calibration tooling against the agreement study's
    measurements; retire the provisional marker. The correlated-ring-witness
@@ -290,12 +295,34 @@ along-track error and answer the wavelength-dependent-haze-top question
 (#397), and methane surface-window (CB3) cartographic correlation as a
 refinement stage (#398).
 
+Logging is delivered across every pipeline program: one main logger per
+program run and one image logger per image, per-module levels, four
+independently-controlled sinks, and one identical flag set whose defaults
+also live in the configuration file, so learning the logging surface for one
+program teaches it for all of them. Cloud-task workers are silent at the
+terminal and complete in their log files. Three defects the work surfaced are
+open: a mosaic cloud task still reports success when every image in it failed
+(#418), the GUI viewers print library log records to stdout through
+pdslogger's handler-less fallback (#423), and `sd_create_bundle_cloud_tasks`
+is unwired and should be removed rather than fixed (#424). Three follow-ups
+the design deferred are also open: the config namespace that `logging` was
+lifted out of is still organized on no stated axis (#427), an upstream
+registry-eviction request to `rms-pdslogger` (#428), and extending the same
+surface to the `util/` tooling (#429).
+
 Some items start with an operator decision, because each is a scope
 commitment:
 
+Two capability items are decided and have self-contained implementation
+plans of their own, each executable without reading anything above it:
+`plans/CK_KERNEL_PLAN.md` (record the corrected attitude as a C-matrix,
+then ship updated-pointing SPICE C-kernels as a delivered product — the
+headline deliverable; #188 with #50) and `plans/RESULTS_DB_PLAN.md` (an
+optional, rebuildable index over the results tree, so programs stop
+reading one JSON document per image on a cloud root; #430).
+
 | Decision | Then the work is |
 |---|---|
-| **CK kernels** (#188, prerequisite #50): ship updated-pointing SPICE kernels as a product? | The kernel writer and its validation — a headline deliverable either way. |
 | **Backplane content** (#28 family): finalize the backplane set and formats | #55, #54, #57, #77, then the generator hardening (including the product-correctness defects #251, #252, #253 found by the #241 test suite). |
 
 **PDS4 output bundles are required for all four instruments** — not a
@@ -315,9 +342,12 @@ creation is external development outside our control, and input support is
 replaces the PDS3 source for that instrument.
 
 Plus, not gated on decisions: the capability matrix itself (#231),
-cloud-operation audit (#108, #67, #141, #142), performance and safe
+cloud-operation audit (#108, #67, #141, #142, and the cloud-task items the
+logging work left open, #418 and #424), performance and safe
 parallelism for campaign scale (#236, #103, #134, #126), config
-validation (#118), and the user-guide completion items (#93, #70).
+validation (#118, which should follow the namespace reorganization #427
+rather than freeze the current grouping into a schema), and the user-guide
+completion items (#93, #70).
 
 **Parallelism:** decisions can be made any time; the resulting work is
 independent of Tracks A-B except that #232 (end-product accuracy) wants
@@ -338,7 +368,12 @@ cannot follow.
 - Docs: missing dev-guide pages (#178), instrument appendices (#93, with
   Track D), API-reference gaps (#244), Sphinx nitpicky-clean CI (#129),
   terminator-doc verification (#122), curation-tooling language pass
-  (#245).
+  (#245), and the metadata-JSON format chapter -- every key of the
+  per-image `_metadata.json`, its meaning and presence rules, with
+  examples and a staleness-guard test (#431).
+- Tooling parity: give the `util/` programs the logging surface the
+  pipeline programs now have (#429) — several run for hours and report
+  through bare `print()`.
 
 **Parallelism:** entirely parallel with everything; good filler between
 larger items. #241/#242 should precede any serious PDS4/backplane work in
@@ -363,7 +398,7 @@ enhancement backlog and code-quality tail are burned down.
   chaotic-rotator poses (#187), manual-nav dialog redesign (#186),
   gated-feature PNG styling (#185), stop-after-features flag (#182),
   body shape models (#23), sim polish (#84, #78, #151, #152, #157, #158).
-- **Hardening/cleanup** (any time, mostly small): #13, #15, #21, #38, #39, #43, #65, #92, #96-#105, #109, #110, #119, #135, #137, #140, #143, #144, #147, #155, #212.
+- **Hardening/cleanup** (any time, mostly small): #13, #15, #21, #38, #39, #43, #65, #92, #96-#105, #109, #110, #119, #135, #137, #140, #143, #144, #147, #155, #212, plus the GUI viewers printing library log records to stdout (#423) and the upstream `rms-pdslogger` registry-eviction request (#428).
 
 **Parallelism:** hardening is permanent filler. Instrument work waits for
 Track A's Cassini verdict only in the sense that there is no point
@@ -410,15 +445,14 @@ library votes and the decision gates, not by any implementation.
    evidence argues with, and three staged curation artifacts (an overlay
    review batch, six library nominations, and a `titan_haze` scene-class
    recommendation).
-3. **CK kernels as a delivered product (#188).**
-4. **Highly-irregular terminator fit (#338)** — choose among accepting the
+3. **Highly-irregular terminator fit (#338)** — choose among accepting the
    2-px-class ground truth for resolved highly-irregular bodies, keeping
    TERMINATOR_ARC for SPICE-known synchronous rotators, or shape models
    (#23), then a session implements the choice on N1853392805.
-5. **Simulator realism verdict (#227)** — close #227 once the calibration is
+4. **Simulator realism verdict (#227)** — close #227 once the calibration is
    fitted on the realism-anchored renderer configuration (#309) and the
    realism evidence underwrites the shipped calibration; gated on #309.
-6. Recurring: library batch votes; agreement-study frame selection; tier
+5. Recurring: library batch votes; agreement-study frame selection; tier
    re-blessing after #230.
 
 ## 7. Issue index (open work by track)
@@ -427,12 +461,12 @@ Every open issue, listed once by the track that owns it.
 
 | Track | Issues |
 |---|---|
-| A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #340, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377, #380, #399, #405, #407 |
+| A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #340, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377, #380, #399, #405, #407, #409, #426 |
 | B — navigation correctness | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #373, #394, #400, #401, #402, #403, #404, #406 |
 | C — statistics & QA | #240 (plus the standing cross-check and campaign-report practice) |
-| D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #141, #142, #188, #231, #236, #251, #252, #253, #265, #397, #398 |
-| E — test & docs debt | #122, #129, #177, #178, #241, #242, #243, #244, #245, #288, #379, #391 |
-| F — instruments, features, hardening | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #81, #82, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212, #388 |
+| D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #141, #142, #188, #231, #236, #251, #252, #253, #265, #397, #398, #411, #418, #424, #427, #430 |
+| E — test & docs debt | #122, #129, #177, #178, #241, #242, #243, #244, #245, #288, #379, #391, #429, #431 |
+| F — instruments, features, hardening | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #81, #82, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212, #388, #423, #428 |
 
 Cross-listed items (listed once above, noted here): #150/#128 serve both
 Track A's limb-bias workstream and Track B's redesign; the
