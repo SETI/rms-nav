@@ -366,3 +366,18 @@ def test_from_metadata_refuses_an_empty_camera_frame() -> None:
     """A frame with no name cannot be looked up, and says so here rather than in SPICE."""
     with pytest.raises(ValueError, match='camera_frame is empty'):
         ImagePointing.from_metadata(_metadata(camera_frame=''))
+
+
+@pytest.mark.parametrize('cmatrix', [5, None], ids=['number', 'null'])
+def test_from_metadata_refuses_a_matrix_that_is_not_a_sequence(cmatrix: Any) -> None:
+    """A recorded matrix that is not a matrix is reported for its shape.
+
+    The element check walks only the shapes the schema writes and leaves
+    anything else to the shape check, which names what was recorded rather
+    than complaining about one element of it.
+
+    Parameters:
+        cmatrix: A recorded value that holds no elements at all.
+    """
+    with pytest.raises(ValueError, match='cmatrix must be nine row-major floats'):
+        ImagePointing.from_metadata(_metadata(cmatrix=cmatrix))
