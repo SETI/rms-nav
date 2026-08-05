@@ -203,12 +203,16 @@ def _reject_non_finite(values: NDArrayFloatType, label: str) -> None:
 def resolve_sclk_id(ck_frame_id: int) -> int:
     """Return the spacecraft clock a CK object's time tags are encoded against.
 
-    The id comes from ``cspyce.ckmeta`` and is then checked against the clock
-    recorded for the object, because ``ckmeta`` computes rather than validates:
-    it answers for objects that do not exist, so an unnoticed wrong CK id would
-    produce a wrong clock, a successful encoding, and silently wrong time tags.
-    The recorded clocks are the ones the attitude computation checks against
-    too, so the two cannot drift apart.
+    The id comes from the recorded CK-object-to-clock mapping, and
+    ``cspyce.ckmeta`` is then required to agree with it.  It is deliberately
+    that way round rather than the reverse, because ``ckmeta`` computes rather
+    than validates: it answers for objects that do not exist, so taking its
+    word would turn an unnoticed wrong CK id into a wrong clock, a successful
+    encoding, and silently wrong time tags.  The returned value is the
+    recorded one even though the check has just proved the two equal, so that
+    weakening the check later cannot quietly make ``ckmeta`` the source.  The
+    recorded clocks are the ones the attitude computation checks against too,
+    so the two cannot drift apart.
 
     Parameters:
         ck_frame_id: SPICE id of the object a corrected C-kernel targets.
