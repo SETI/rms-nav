@@ -34,10 +34,16 @@ from spindoctor.cli.ck.pointing import ImagePointing, read_field, read_section, 
 # not because it is trusted; nothing else navigated.
 ELIGIBLE_STATUSES = frozenset({'success', 'conflicted'})
 
-# Cassini's label value for an exposure taken on both cameras at once, and the
-# camera whose correction is kept when two such frames are paired.
+# Cassini's label value for an exposure taken on both cameras at once, the two
+# cameras that take one, and the one whose correction is kept when they are
+# paired.  Both cameras are named rather than treating everything that is not
+# the winner as the loser: the rule is about these two sharing a bus attitude,
+# and any other camera reaching it would be reported as yielding to a pair it
+# was never part of.
 BOTSIM_SHUTTER_MODE = 'BOTSIM'
 BOTSIM_WINNING_CAMERA = 'NAC'
+BOTSIM_YIELDING_CAMERA = 'WAC'
+BOTSIM_CAMERAS = frozenset({BOTSIM_WINNING_CAMERA, BOTSIM_YIELDING_CAMERA})
 
 # Two exposures this far apart or closer, taken in the shutter mode above on
 # opposite cameras, are the same event seen twice.
@@ -271,12 +277,14 @@ def botsim_losers(entries: Sequence[ImageEntry]) -> frozenset[str]:
 
     Two Cassini frames exposed together share one bus attitude, and a corrected
     kernel describes that bus: it cannot carry both corrections.  Two eligible
-    images pair when both record the ``BOTSIM`` shutter mode, both correct the
-    same CK object, their cameras differ, and their exposures start within one
-    second of each other.  The narrow angle camera keeps its correction and the
-    other yields, so an image pairing with any eligible narrow angle frame is
-    named here.  A wide angle frame whose narrow angle partner did not navigate
-    pairs with nothing and keeps its own correction.
+    images pair when both record the ``BOTSIM`` shutter mode, one was taken by
+    the narrow angle camera and the other by the wide angle camera, both
+    correct the same CK object, and their exposures start within one second of
+    each other.  The narrow angle camera keeps its correction, so a wide angle
+    frame pairing with any eligible narrow angle frame is named here.  A wide
+    angle frame whose narrow angle partner did not navigate pairs with nothing
+    and keeps its own correction, and a frame from any other instrument is not
+    part of this rule at all.
 
     Parameters:
         entries: The images the run considered, in any order.
@@ -294,7 +302,7 @@ def botsim_losers(entries: Sequence[ImageEntry]) -> frozenset[str]:
         starts.sort()
     losers: set[str] = set()
     for entry, pointing in members:
-        if entry.camera == BOTSIM_WINNING_CAMERA:
+        if entry.camera != BOTSIM_YIELDING_CAMERA:
             continue
         starts = winners.get(pointing.ck_frame_id, [])
         if _has_start_within(starts, pointing.start_et, BOTSIM_WINDOW_S):
@@ -309,19 +317,17 @@ def _botsim_members(entries: Sequence[ImageEntry]) -> list[tuple[ImageEntry, Ima
         entries: The images the run considered.
 
     Returns:
-        Each eligible image that records the simultaneous shutter mode and
-        names the camera that took it, paired with its pointing.  An image
-        whose camera is absent or empty is left out and keeps its own
-        correction: the pairing turns on which camera took the frame, and a
-        camera that names nothing is not the one that wins.
+        Each eligible image that records the simultaneous shutter mode and was
+        taken by one of the two cameras that share a bus attitude, paired with
+        its pointing.  An image whose camera is absent, empty, or anything
+        else is left out and keeps its own correction.
     """
     return [
         (entry, entry.pointing)
         for entry in entries
         if entry.pointing is not None
         and entry.shutter_mode == BOTSIM_SHUTTER_MODE
-        and entry.camera is not None
-        and len(entry.camera) > 0
+        and entry.camera in BOTSIM_CAMERAS
     ]
 
 

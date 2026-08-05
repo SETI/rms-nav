@@ -404,3 +404,16 @@ def test_a_frame_with_an_empty_camera_does_not_pair() -> None:
         _botsim_entry('W1484573295_1.IMG', '', ET0 + 0.1),
     ]
     assert botsim_losers(entries) == frozenset()
+
+
+def test_a_frame_from_another_instrument_does_not_yield() -> None:
+    """The rule is about the two cameras that share a bus attitude, not everything else.
+
+    Reported as a loser, a frame from any other instrument would be omitted
+    for yielding to a pair it was never part of.
+    """
+    entries = [
+        _botsim_entry('N1484573295_1.IMG', 'NAC', ET0),
+        _botsim_entry('U1484573295_1.IMG', 'UVIS', ET0 + 0.1),
+    ]
+    assert botsim_losers(entries) == frozenset()
