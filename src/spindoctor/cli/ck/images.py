@@ -212,7 +212,13 @@ def _kernel_basenames(result: dict[str, Any]) -> tuple[str, ...]:
         images needed, so it is a superset of the ones this image used.
 
     Raises:
-        ValueError: if the provenance block or its kernel list is absent.
+        ValueError: if the provenance block or its kernel list is absent, or
+            if the list is empty.  An image carrying a corrected attitude was
+            navigated against kernels, so a record naming none of them is a
+            defect in the record, and it is refused exactly as a missing
+            provenance block is: routing it into the report instead would say
+            the image's baseline had drifted, which is the one thing that
+            report is meant to mean.
         TypeError: if the kernel list is not a list, or holds anything but
             text.
     """
@@ -228,6 +234,11 @@ def _kernel_basenames(result: dict[str, Any]) -> tuple[str, ...]:
                 f"provenance field 'spice_kernels' holds a {type(kernel).__name__}, not a "
                 f'string: {kernel!r}'
             )
+    if len(kernels) == 0:
+        raise ValueError(
+            "provenance field 'spice_kernels' is empty; an image with a corrected attitude was "
+            'navigated against kernels, so recording none of them is a defect in the record'
+        )
     return tuple(kernels)
 
 
@@ -299,9 +310,10 @@ def _botsim_members(entries: Sequence[ImageEntry]) -> list[tuple[ImageEntry, Ima
 
     Returns:
         Each eligible image that records the simultaneous shutter mode and
-        names the camera that took it, paired with its pointing.  An image with
-        no camera recorded is left out, since the pairing turns on which camera
-        it is.
+        names the camera that took it, paired with its pointing.  An image
+        whose camera is absent or empty is left out and keeps its own
+        correction: the pairing turns on which camera took the frame, and a
+        camera that names nothing is not the one that wins.
     """
     return [
         (entry, entry.pointing)
@@ -309,6 +321,7 @@ def _botsim_members(entries: Sequence[ImageEntry]) -> list[tuple[ImageEntry, Ima
         if entry.pointing is not None
         and entry.shutter_mode == BOTSIM_SHUTTER_MODE
         and entry.camera is not None
+        and len(entry.camera) > 0
     ]
 
 

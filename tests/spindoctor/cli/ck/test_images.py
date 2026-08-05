@@ -215,14 +215,15 @@ def test_a_null_in_the_kernel_list_is_refused() -> None:
         ImageEntry.from_metadata(metadata)
 
 
-def test_an_empty_kernel_list_is_accepted() -> None:
-    """An image that recorded no kernels is eligible and reproduces nothing.
+def test_an_empty_kernel_list_is_refused() -> None:
+    """An image with a corrected attitude was navigated against kernels.
 
-    Refusing it here would turn a recoverable omission -- reported as having
-    no reproducing baseline -- into a failure of the whole run.
+    Recording none of them is a defect in the record, and it is refused as a
+    missing provenance block is: reporting it instead would say the image's
+    baseline had drifted, which is what that report is for.
     """
-    entry = _entry(kernels=())
-    assert entry.kernel_basenames == ()
+    with pytest.raises(ValueError, match="'spice_kernels' is empty"):
+        _entry(kernels=())
 
 
 def test_an_entry_cannot_be_both_eligible_and_not() -> None:
@@ -385,3 +386,21 @@ def test_two_wide_angle_frames_around_one_narrow_angle_frame_both_yield() -> Non
         _botsim_entry('W1484573296_1.IMG', 'WAC', ET0 + 0.5),
     ]
     assert botsim_losers(entries) == frozenset({'W1484573295_1.IMG', 'W1484573296_1.IMG'})
+
+
+def test_a_pair_whose_winner_starts_last_still_pairs() -> None:
+    """The window is inclusive on both sides of the frame that yields."""
+    entries = [
+        _botsim_entry('N1484573295_1.IMG', 'NAC', ET0 + 1.0),
+        _botsim_entry('W1484573295_1.IMG', 'WAC', ET0),
+    ]
+    assert botsim_losers(entries) == frozenset({'W1484573295_1.IMG'})
+
+
+def test_a_frame_with_an_empty_camera_does_not_pair() -> None:
+    """A camera that names nothing cannot be the one that yields."""
+    entries = [
+        _botsim_entry('N1484573295_1.IMG', 'NAC', ET0),
+        _botsim_entry('W1484573295_1.IMG', '', ET0 + 0.1),
+    ]
+    assert botsim_losers(entries) == frozenset()
