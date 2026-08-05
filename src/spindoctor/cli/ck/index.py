@@ -151,6 +151,10 @@ class CoverageInterval:
         """
         if ck_frame_id != self.ck_frame_id:
             return False
+        # Deliberately redundant with the finite endpoints enforced above,
+        # which already leave every comparison against a non-finite epoch
+        # False: this states the method's own contract, so it holds however
+        # the interval was built rather than only because it was built here.
         if not math.isfinite(et):
             return False
         return bool(self.start_et <= et <= self.stop_et)

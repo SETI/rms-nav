@@ -401,35 +401,41 @@ def assign_images(entries: Sequence[ImageEntry], index: CkIndex) -> tuple[Assign
         raise ValueError('two images have the same name; their assignments cannot be told apart')
     _require_no_furnished_ck()
     losers = botsim_losers(entries)
-    testable: list[ImageEntry] = []
-    reasons: dict[str, OmissionReason] = {}
-    for entry in entries:
-        if entry.ineligibility_reason is not None:
-            reasons[entry.image_name] = entry.ineligibility_reason
-        elif entry.image_name in losers:
-            reasons[entry.image_name] = OmissionReason.BOTSIM_LOSER
-        else:
-            testable.append(entry)
+    testable = [
+        entry for entry in entries if entry.pointing is not None and entry.image_name not in losers
+    ]
     baselines = _reproducing_baselines(testable, index)
-    assignments: list[Assignment] = []
-    for entry in entries:
-        if entry.image_name in reasons:
-            assignments.append(
-                Assignment(entry=entry, baseline=None, omission_reason=reasons[entry.image_name])
-            )
-            continue
-        candidates = baselines[entry.image_name]
-        if len(candidates) == 0:
-            assignments.append(
-                Assignment(
-                    entry=entry,
-                    baseline=None,
-                    omission_reason=OmissionReason.NO_REPRODUCING_BASELINE,
-                )
-            )
-            continue
-        assignments.append(Assignment(entry=entry, baseline=candidates[0], omission_reason=None))
-    return tuple(assignments)
+    return tuple(_assignment_for(entry, losers, baselines) for entry in entries)
+
+
+def _assignment_for(
+    entry: ImageEntry, losers: frozenset[str], baselines: dict[str, tuple[CkFile, ...]]
+) -> Assignment:
+    """Decide one image's disposition from what the run has established.
+
+    Parameters:
+        entry: The image.
+        losers: The images that yielded to a simultaneous exposure.
+        baselines: The reproducing candidates of every image that was tested.
+
+    Returns:
+        The image's assignment.
+
+    Raises:
+        KeyError: if an image that is eligible and did not yield was never
+            tested, which cannot happen for the test set the assignment step
+            builds from these same two facts.
+    """
+    if entry.ineligibility_reason is not None:
+        return Assignment(entry=entry, baseline=None, omission_reason=entry.ineligibility_reason)
+    if entry.image_name in losers:
+        return Assignment(entry=entry, baseline=None, omission_reason=OmissionReason.BOTSIM_LOSER)
+    candidates = baselines[entry.image_name]
+    if len(candidates) == 0:
+        return Assignment(
+            entry=entry, baseline=None, omission_reason=OmissionReason.NO_REPRODUCING_BASELINE
+        )
+    return Assignment(entry=entry, baseline=candidates[0], omission_reason=None)
 
 
 def _reproducing_baselines(
@@ -438,24 +444,23 @@ def _reproducing_baselines(
     """Find, for each eligible image, every candidate that reproduces its baseline.
 
     Parameters:
-        entries: The eligible images.
+        entries: The eligible images.  An image carrying no pointing is not
+            tested and does not appear in the result.
         index: The pre-indexed C-kernels.
 
     Returns:
-        One entry per image, holding its reproducing candidates in preference
-        order, so the first is the one to use and an empty tuple means no
-        candidate reproduced.
+        One entry per tested image, holding its reproducing candidates in
+        preference order, so the first is the one to use and an empty tuple
+        means no candidate reproduced.
 
     Raises:
         OSError: if a candidate kernel cannot be furnished.
     """
-    groups: dict[tuple[Path, ...], list[ImageEntry]] = {}
+    tested = [(entry, entry.pointing) for entry in entries if entry.pointing is not None]
+    groups: dict[tuple[Path, ...], list[tuple[ImageEntry, ImagePointing]]] = {}
     candidates_by_key: dict[tuple[Path, ...], tuple[CkFile, ...]] = {}
     reproducing: dict[str, list[CkFile]] = {}
-    for entry in entries:
-        pointing = entry.pointing
-        if pointing is None:  # pragma: no cover - only eligible entries reach here
-            continue
+    for entry, pointing in tested:
         candidates = index.candidates(
             basenames=entry.kernel_basenames,
             ck_frame_id=pointing.ck_frame_id,
@@ -463,14 +468,13 @@ def _reproducing_baselines(
         )
         key = tuple(candidate.path for candidate in candidates)
         candidates_by_key[key] = candidates
-        groups.setdefault(key, []).append(entry)
+        groups.setdefault(key, []).append((entry, pointing))
         reproducing[entry.image_name] = []
     for key, group in groups.items():
         for candidate in candidates_by_key[key]:
             with _furnished(candidate.path):
-                for entry in group:
-                    pointing = entry.pointing
-                    if pointing is not None and reproduces_baseline(pointing):
+                for entry, pointing in group:
+                    if reproduces_baseline(pointing):
                         reproducing[entry.image_name].append(candidate)
     return {name: tuple(found) for name, found in reproducing.items()}
 
