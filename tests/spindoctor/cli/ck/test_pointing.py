@@ -163,6 +163,34 @@ def test_from_metadata_refuses_a_non_finite_exposure(exposure_s: float) -> None:
 
 
 @pytest.mark.parametrize(
+    'cmatrix',
+    [
+        [[float(v) for v in _QUARTER_TURN]],
+        [[[float(v)] for v in _QUARTER_TURN[0:3]]] * 3,
+        [float(v) for v in _QUARTER_TURN][:8],
+    ],
+    ids=['nested-1x9', 'nested-3x3x1', 'eight-values'],
+)
+def test_from_metadata_refuses_a_misshapen_cmatrix(cmatrix: list[Any]) -> None:
+    """A nine-value array of the wrong shape is refused, not reshaped.
+
+    ``reshape(3, 3)`` accepts every nine-element array, so a document nested
+    one level too deep would otherwise be read as if it were well formed.
+
+    Parameters:
+        cmatrix: A recorded C-matrix whose shape the schema does not write.
+    """
+    with pytest.raises(ValueError, match='cmatrix must be nine row-major floats'):
+        ImagePointing.from_metadata(_metadata(cmatrix=cmatrix))
+
+
+def test_from_metadata_reads_a_flat_nine_value_cmatrix() -> None:
+    """The canonical flat form the curator writes is read as a 3x3."""
+    pointing = ImagePointing.from_metadata(_metadata())
+    assert pointing.cmatrix.shape == (3, 3)
+
+
+@pytest.mark.parametrize(
     'field', ['image_name', 'camera_frame'], ids=['image-name', 'camera-frame']
 )
 def test_from_metadata_refuses_a_null_text_field(field: str) -> None:

@@ -623,7 +623,12 @@ def _sclk_id(identity: _FrameIdentity) -> int:
             f'{identity.sclk_id} the {identity.camera_frame} camera is tagged against; every '
             f'clock string built from it would encode the wrong spacecraft'
         )
-    return resolved
+    # The recorded id is returned, not the one ``ckmeta`` computed, even though
+    # the check above has just proved them equal.  ``ckmeta`` answers for
+    # objects that do not exist, so it is a cross-check here and never the
+    # source: if this check is ever weakened, the clock strings still come from
+    # the recorded table rather than from whatever ``ckmeta`` returned.
+    return identity.sclk_id
 
 
 def _sclk_string(sclk_id: int, et: float) -> str:

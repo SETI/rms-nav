@@ -128,9 +128,7 @@ class ImagePointing:
         times = _section(navigation_result, 'times', 'navigation_result')
         return cls(
             image_name=_text(observation, 'image_name', 'observation'),
-            cmatrix=np.asarray(_field(pointing, 'cmatrix', 'pointing'), dtype=np.float64).reshape(
-                3, 3
-            ),
+            cmatrix=_rotation_from_metadata(_field(pointing, 'cmatrix', 'pointing')),
             camera_frame=_text(pointing, 'camera_frame', 'pointing'),
             ck_frame_id=int(_field(pointing, 'ck_frame_id', 'pointing')),
             start_et=float(_field(times, 'start_et', 'times')),
@@ -138,6 +136,34 @@ class ImagePointing:
             midtime_et=float(_field(times, 'midtime_et', 'times')),
             exposure_s=float(_field(times, 'exposure_s', 'times')),
         )
+
+
+def _rotation_from_metadata(value: Any) -> NDArrayFloatType:
+    """Read a recorded C-matrix, accepting only the shapes the schema writes.
+
+    The metadata records a C-matrix as nine row-major floats, so a flat
+    nine-element sequence is the canonical form and a 3x3 nesting is accepted
+    as the obvious equivalent.  Reshaping whatever arrives is deliberately not
+    done: ``(1, 9)`` and ``(3, 3, 1)`` also hold nine values and would reshape
+    silently, so a document malformed in a way worth knowing about would be
+    read as if it were well formed.
+
+    Parameters:
+        value: The recorded ``cmatrix`` value, as read from the metadata.
+
+    Returns:
+        The 3x3 rotation.
+
+    Raises:
+        ValueError: if the value does not hold nine numbers as a flat
+            sequence or a 3x3 nesting.
+    """
+    array = np.asarray(value, dtype=np.float64)
+    if array.shape not in ((9,), (3, 3)):
+        raise ValueError(
+            f'cmatrix must be nine row-major floats or a 3x3 nesting; got shape {array.shape}'
+        )
+    return array.reshape(3, 3)
 
 
 def _text(section: dict[str, Any], key: str, where: str) -> str:

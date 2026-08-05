@@ -232,7 +232,12 @@ def resolve_sclk_id(ck_frame_id: int) -> int:
             f'CK object {ck_frame_id} resolves to spacecraft clock {sclk_id}, not the expected '
             f'{expected}'
         )
-    return sclk_id
+    # The recorded id is returned, not the one ``ckmeta`` computed, even though
+    # the check above has just proved them equal.  ``ckmeta`` answers for
+    # objects that do not exist, so it is a cross-check here and never the
+    # source: if this check is ever weakened, the time tags still come from the
+    # recorded table rather than from whatever ``ckmeta`` returned.
+    return expected
 
 
 def build_segment(pointing: ImagePointing) -> CkSegment:

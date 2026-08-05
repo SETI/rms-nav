@@ -489,21 +489,26 @@ stays, because the file should say what it means, but the test guarding it
 must assert on the written records; no read-back assertion can see the
 difference.
 
-**Clocks.** Encoded SCLK comes from `cspyce.sce2c(sclk_id, et)` where
-`sclk_id = cspyce.ckmeta(ck_frame_id, 'SCLK')` -- the spacecraft clock ID
-(-82, -31, -77, -98), which is **not** derivable from the CK object id by
-integer division (`-31100 // 1000` is -32 in Python: wrong spacecraft,
-silently). The SCLK kernel furnished must be the one navigation used,
-resolved from `provenance.spice_kernels`; a different SCLK is a silent
+**Clocks.** Encoded SCLK comes from `cspyce.sce2c(sclk_id, et)`. The
+spacecraft clock ID (-82, -31, -77, -98) is **not** derivable from the CK
+object id by integer division (`-31100 // 1000` is -32 in Python: wrong
+spacecraft, silently). The SCLK kernel furnished must be the one navigation
+used, resolved from `provenance.spice_kernels`; a different SCLK is a silent
 time-tag error.
 
-**`ckmeta` will not catch a wrong CK id either.** It computes rather than
-validates: `ckmeta(-999999, 'SCLK')` returns `-999` and `ckmeta(-12345,
-'SCLK')` returns `-12`, neither raising. A `ck_frame_id` that is wrong for
-any reason therefore yields a plausible-looking clock id, a successful
-`sce2c`, and silently wrong time tags on every record. Validate the
-resolved `sclk_id` against the expected set for the mission rather than
-trusting the round trip.
+**The shared table is the resolver; `ckmeta` is only the cross-check.**
+`sclk_id` comes from the CK-object-to-clock mapping in
+`spindoctor/spice_ids.py` (section 3.6), and `cspyce.ckmeta(ck_frame_id,
+'SCLK')` is then required to agree with it. It is deliberately not the
+other way round, because `ckmeta` computes rather than validates:
+`ckmeta(-999999, 'SCLK')` returns `-999` and `ckmeta(-12345, 'SCLK')`
+returns `-12`, neither raising. A `ck_frame_id` that is wrong for any
+reason would otherwise yield a plausible-looking clock id, a successful
+`sce2c`, and silently wrong time tags on every record. Both call sites --
+the writer's `resolve_sclk_id` and the attitude computation's own resolver
+-- return the **recorded** id rather than the one `ckmeta` computed, even
+though the check has just proved them equal, so that weakening the check
+later cannot quietly promote `ckmeta` back to being the source.
 
 **Both attitudes are evaluated at the exposure midtime**, and Phase A's
 integration tier pins that against a moving attitude on LORRI alone -- the
