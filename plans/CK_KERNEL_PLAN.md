@@ -796,6 +796,18 @@ kernel pool, and a mid-process `furnsh` is not guaranteed to take effect:
    when both runs commit the same winning technique set; the test records
    both sets and fails as *inconclusive-mismatch* (not as a pass) when
    they differ.
+5. Assert the corrected attitude at **interior** epochs of the exposure as
+   well as at start, midtime and stop. A corrected segment carries records
+   at exactly those three epochs, so they are reproduced exactly by
+   construction, and a validation that samples only them is structurally
+   unable to observe interior resampling loss. Measured on a real Cassini
+   reconstructed kernel, the interior loss reaches **0.290 px** maximum on
+   a 2 s exposure with 8.2% of samples over 0.1 px, and **0.445 px** on a
+   10 s exposure with 4.2% over; a 60 s exposure written at the 1 s cadence
+   still loses **0.643 px** at the median. The loss is attributable rather
+   than noise: a zero-correction run shows the same error, and the cause is
+   a rate discontinuity in the baseline inside the window that the segment
+   interpolates across.
 
 Tolerances: the target is at or below **0.1 px per axis**, and the
 C-matrix target is that offset's angular equivalent at the instrument's
@@ -809,6 +821,19 @@ frame, at a 50 px total offset, against a 0.1 px per-axis target -- convert
 before comparing. Choose the WAC cohort frame accordingly, remembering the
 bound is **linear** in the offset, not quadratic: about 10 px of total
 offset buys a fifth of budget.
+
+Interior tolerance: the interior bound is a **separate quantity** from the
+midtime bound and is stated separately. The 0.1 px per-axis midtime target
+and its decision rule above are unchanged by it. An interior residual above
+that target is **not** automatically a convention defect, because this loss
+is characterized and attributable: the validation records the measured
+interior residual, pins it at measured-plus-margin, and names issue #440 as
+the reason the bound sits where it does, so a later change to the record
+scheme can ratchet it down. A convention error has the opposite signature
+-- a near-uniform displacement across the whole frame of roughly twice the
+navigated offset, present at every epoch including the record epochs -- so
+the assertion must distinguish the two rather than collapsing them into one
+threshold.
 
 Cohort: one star-navigated Cassini NAC frame (best-constrained truth), one
 Cassini WAC frame, and one frame from each other instrument that has a
