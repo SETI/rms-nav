@@ -442,10 +442,27 @@ One **type 3** segment per eligible image, interpolation interval exactly
 `[start_et, stop_et]`.
 
 **Records.** At exposure start, midtime, and stop. When `exposure_s`
-exceeds 10 s, additional records at a 1 s cadence. (SPICE offers no API to
-enumerate a type-3 segment's interior records, so the earlier idea of
-copying the original's record times is dropped; at typical exposure lengths
-the window contains no interior records anyway.) Time tags must be
+exceeds 10 s, additional records at a 1 s cadence.
+
+Those cadence records earn their place, and it is worth saying how, because
+nothing asserts them. The segment declares one interpolation interval
+spanning `[start_et, stop_et]`, so SPICE interpolates between bracketing
+records for **every** epoch in the window -- an epoch between records is
+interpolated, not fallen through to the original kernels, which happens
+only outside the window. Each added record therefore shortens every
+interpolation span it touches and improves accuracy continuously across the
+window rather than at instants. Measured on a real Cassini reconstructed
+kernel, a 60 s exposure carrying only the three mandatory records has a
+worst interior error of 25.98 px; at the 1 s cadence it is 1.07 px. The
+cadence reduces interior error by more than twenty-fold and **bounds
+nothing** -- 1.07 px is still well outside any tolerance this plan states,
+which is why a consumer is told (Phase D's interior note) that only the
+record epochs are claimed. Replacing this fixed cadence with an adaptive
+one that does bound the error is #444.
+
+(SPICE offers no API to enumerate a type-3 segment's interior records, so
+the earlier idea of copying the original's record times is dropped.) Time
+tags must be
 **strictly increasing in encoded SCLK**; an exposure so short that start,
 mid and stop collapse to one tick produces a single-record segment at
 midtime, which type 3 permits and Phase B tests. Records are quaternions
