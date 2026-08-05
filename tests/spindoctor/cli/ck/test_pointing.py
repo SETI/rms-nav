@@ -163,6 +163,23 @@ def test_from_metadata_refuses_a_non_finite_exposure(exposure_s: float) -> None:
 
 
 @pytest.mark.parametrize(
+    'field', ['image_name', 'camera_frame'], ids=['image-name', 'camera-frame']
+)
+def test_from_metadata_refuses_a_null_text_field(field: str) -> None:
+    """A null where text belongs is refused rather than coerced.
+
+    ``str(None)`` is the text ``'None'``, which is neither empty nor
+    obviously wrong, so a null image name would otherwise identify a written
+    segment and pass every downstream check.
+
+    Parameters:
+        field: Name of the text field set to a JSON null.
+    """
+    with pytest.raises(TypeError, match=f'{field!r} is NoneType, not a string'):
+        ImagePointing.from_metadata(_metadata(**{field: None}))
+
+
+@pytest.mark.parametrize(
     'field', ['start_et', 'stop_et', 'midtime_et'], ids=['start', 'stop', 'midtime']
 )
 def test_from_metadata_refuses_a_non_finite_epoch(field: str) -> None:

@@ -114,27 +114,56 @@ class ImagePointing:
                 corrected ``cmatrix`` is absent for every image that navigated
                 without an offset or with a fitted camera rotation, and such an
                 image cannot be given a segment.
-            TypeError: if a field is present but holds a value no number can
-                be read from, such as a JSON ``null``.  That is a malformed
-                document rather than an image without a solution, so it fails
-                loudly instead of being reported as an omission.
+            TypeError: if a field is present but holds a value of the wrong
+                kind -- a JSON ``null`` where a number belongs, or anything
+                but text where ``image_name`` or ``camera_frame`` belongs.
+                That is a malformed document rather than an image without a
+                solution, so it fails loudly instead of being reported as an
+                omission.  Text is never coerced: ``str(None)`` is ``'None'``,
+                which would name a written segment.
         """
         observation = _section(metadata, 'observation', 'metadata')
         navigation_result = _section(metadata, 'navigation_result', 'metadata')
         pointing = _section(navigation_result, 'pointing', 'navigation_result')
         times = _section(navigation_result, 'times', 'navigation_result')
         return cls(
-            image_name=str(_field(observation, 'image_name', 'observation')),
+            image_name=_text(observation, 'image_name', 'observation'),
             cmatrix=np.asarray(_field(pointing, 'cmatrix', 'pointing'), dtype=np.float64).reshape(
                 3, 3
             ),
-            camera_frame=str(_field(pointing, 'camera_frame', 'pointing')),
+            camera_frame=_text(pointing, 'camera_frame', 'pointing'),
             ck_frame_id=int(_field(pointing, 'ck_frame_id', 'pointing')),
             start_et=float(_field(times, 'start_et', 'times')),
             stop_et=float(_field(times, 'stop_et', 'times')),
             midtime_et=float(_field(times, 'midtime_et', 'times')),
             exposure_s=float(_field(times, 'exposure_s', 'times')),
         )
+
+
+def _text(section: dict[str, Any], key: str, where: str) -> str:
+    """Return one required metadata value that must already be a string.
+
+    ``str()`` is deliberately not used to coerce.  A JSON ``null`` coerces to
+    the text ``'None'``, which is neither empty nor obviously wrong, so an
+    image whose name is null would otherwise be given a segment identified as
+    ``None`` and pass every check downstream of it.
+
+    Parameters:
+        section: The dict to read.
+        key: The key that must be present.
+        where: Name of the section, used in the exception message.
+
+    Returns:
+        The value stored under ``key``.
+
+    Raises:
+        ValueError: if ``key`` is absent.
+        TypeError: if the value present is not a string.
+    """
+    value = _field(section, key, where)
+    if not isinstance(value, str):
+        raise TypeError(f'{where} field {key!r} is {type(value).__name__}, not a string: {value!r}')
+    return value
 
 
 def _field(section: dict[str, Any], key: str, where: str) -> Any:

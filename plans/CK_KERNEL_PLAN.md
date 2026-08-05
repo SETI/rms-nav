@@ -400,10 +400,12 @@ C_ck_corrected(t) = delta . C_ck_original(t)      for t in [start, stop]
 That is the physical model -- the spacecraft is pointed slightly wrong and
 the error turns with it -- so the *correction* is right at every epoch in
 the window. What the segment reproduces between its records is a separate
-question: it carries records only at start, midtime and stop, and
-interpolates between them, so smear geometry is right only to the fidelity
-of that interpolation, which is measured and bounded in Phase D's interior
-note and deferred to #444. **Exception: Voyager.** The
+question: it carries records at start, midtime and stop, plus a 1 s cadence
+above 10 s of exposure (section 3.3), and interpolates between them, so
+smear geometry is right only to the fidelity of that interpolation. That
+fidelity is measured in Phase D's interior note and is weaker than this
+paragraph once claimed; bounding it needs a denser, adaptive cadence
+(#444). **Exception: Voyager.** The
 navigated model assumed a constant, tolerance-snapped attitude (section
 2.2), so a Voyager segment carries that single corrected attitude,
 constant across its window; writing time-varying pointing there would
@@ -801,11 +803,16 @@ kernel pool, and a mid-process `furnsh` is not guaranteed to take effect:
    both sets and fails as *inconclusive-mismatch* (not as a pass) when
    they differ.
 5. Assert the corrected attitude at **start, midtime and stop only**.
-   Those are the epochs a segment carries records at, and they are the
-   epochs this plan claims. Interior epochs are deliberately **not**
-   asserted, because the record scheme does not currently bound them (see
-   the limitation below); testing them would pin a number this plan does
-   not undertake to hold.
+   Those three are the records every segment carries, and they are the
+   epochs this plan claims. A segment for an exposure longer than 10 s
+   additionally carries records at a 1 s cadence (section 3.3); those are
+   reproduced exactly too, but they are deliberately **not** asserted,
+   because they exist only on long exposures and asserting them would make
+   the validation's coverage depend on the cohort's exposure lengths.
+   Interior epochs -- anything between records -- are not asserted either,
+   because the record scheme does not bound them (see the limitation
+   below); testing them would pin a number this plan does not undertake to
+   hold.
 
 Tolerances: the target is at or below **0.1 px per axis**, and the
 C-matrix target is that offset's angular equivalent at the instrument's
