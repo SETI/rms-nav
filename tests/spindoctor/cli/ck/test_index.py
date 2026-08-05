@@ -320,10 +320,19 @@ def test_coverage_refuses_a_window_that_ends_before_it_starts() -> None:
         ('CK-gapfill', KernelClass.GAPFILL),
         ('CK-predicted', KernelClass.PREDICTED),
         ('CK-predicted-v02', KernelClass.PREDICTED),
+        ('CK-RECONSTRUCTED', KernelClass.RECONSTRUCTED),
         ('CK', KernelClass.UNCLASSIFIED),
         ('CK-cruise', KernelClass.UNCLASSIFIED),
     ],
-    ids=['reconstructed', 'gapfill', 'predicted', 'predicted-v02', 'bare', 'cruise'],
+    ids=[
+        'reconstructed',
+        'gapfill',
+        'predicted',
+        'predicted-v02',
+        'upper-case',
+        'bare',
+        'cruise',
+    ],
 )
 def test_kernel_class_for_directory(name: str, expected: KernelClass) -> None:
     """Real holdings directory names classify as their names say.
