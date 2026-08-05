@@ -25,12 +25,14 @@ from tests.spindoctor.cli.ck.conftest import (
     baseline_attitude,
     image_metadata,
     write_baseline_ck,
+    write_type1_ck,
 )
 
 from spindoctor.cli.ck.assignment import (
     Assignment,
     assign_images,
     attitudes_reproduce,
+    baseline_attitudes,
     group_for_output,
     output_basename,
     reproduces_baseline,
@@ -272,12 +274,14 @@ def test_a_candidate_not_covering_the_midtime_is_not_assigned(
     assert assignments[0].omission_reason is OmissionReason.NO_REPRODUCING_BASELINE
 
 
-def test_an_image_naming_no_kernels_is_not_assigned(pool: KernelPool, tmp_path: Path) -> None:
-    """A recorded kernel list with nothing in it resolves to no candidate."""
+def test_an_image_naming_no_indexed_kernel_is_not_assigned(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """A kernel list naming nothing the index holds resolves to no candidate."""
     root = tmp_path / 'CK-reconstructed'
     _write_candidate(root, _TRUE_NAME)
     index = build_ck_index([root])
-    entry = _entry(cmatrix_original=_cassini_recorded(pool), kernels=())
+    entry = _entry(cmatrix_original=_cassini_recorded(pool), kernels=('naif0012.tls',))
     assignments = assign_images([entry], index)
     assert assignments[0].omission_reason is OmissionReason.NO_REPRODUCING_BASELINE
 
@@ -778,3 +782,207 @@ def test_rotation_angle_refuses_a_matrix_of_the_wrong_shape(shape: tuple[int, ..
     """
     with pytest.raises(ValueError, match='is not a 3x3 matrix'):
         rotation_angle_rad(np.ones(shape), np.eye(3))
+
+
+# A discrete baseline holds pointing only at its records, so a lookup answers
+# only within its tolerance of one.  These offsets place the single record
+# where each tolerance can be told apart: inside the base tolerance, and just
+# outside it but inside the term the exposure adds.
+_INSIDE_BASE_TOLERANCE_TICKS = 100.0
+_JUST_OUTSIDE_BASE_TOLERANCE_TICKS = 800.2
+
+# 800.2 ticks needs 0.2 ticks of exposure term to be reached, which is an
+# exposure of 9.6 s; a Voyager frame's own 0.48 s adds only 0.01.
+_LONG_ENOUGH_EXPOSURE_S = 15.0
+_TOO_SHORT_EXPOSURE_S = 0.48
+
+_VOYAGER_KERNEL_NAME = 'vg1_sat_version1_type1_iss_sedr.bc'
+
+
+def _write_discrete_candidate(
+    directory: Path, name: str, *, offset_ticks: float, midtime_et: float
+) -> Path:
+    """Write a discrete baseline holding one record near an epoch.
+
+    Parameters:
+        directory: Directory to write into.
+        name: Basename of the kernel.
+        offset_ticks: How far after the midtime's whole tick the record sits.
+        midtime_et: The exposure midtime the record is placed relative to.
+
+    Returns:
+        The path written.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    tick = float(cspyce.sce2t(_VOYAGER_SCLK_ID, midtime_et)) + offset_ticks
+    write_type1_ck(
+        path,
+        ck_frame_id=VOYAGER_CK_FRAME_ID,
+        ticks=[tick],
+        attitude=baseline_attitude,
+        sclk_id=_VOYAGER_SCLK_ID,
+    )
+    return path
+
+
+def _discrete_entry(offset_ticks: float, *, exposure_s: float = _EXPOSURE_S) -> ImageEntry:
+    """Build the entry for an image whose baseline holds one nearby record.
+
+    Parameters:
+        offset_ticks: How far after the midtime's whole tick the record sits.
+        exposure_s: The recorded exposure, which widens the lookup tolerance.
+
+    Returns:
+        The entry, recording the attitude at the record's own epoch.
+    """
+    midtime = _VOYAGER_MIDTIME_ET
+    tick = float(cspyce.sce2t(_VOYAGER_SCLK_ID, midtime)) + offset_ticks
+    record_et = float(cspyce.sct2e(_VOYAGER_SCLK_ID, tick))
+    start = midtime - exposure_s / 2.0
+    return _entry(
+        cmatrix_original=_voyager_recorded(record_et),
+        kernels=(_VOYAGER_KERNEL_NAME,),
+        image_name='C1205021_CALIB.IMG',
+        ck_frame_id=VOYAGER_CK_FRAME_ID,
+        camera_frame=VOYAGER_CAMERA_FRAME,
+        start_et=start,
+        stop_et=start + exposure_s,
+        midtime_et=midtime,
+        exposure_s=exposure_s,
+    )
+
+
+def test_a_discrete_baseline_answers_only_within_a_tolerance(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """A record a hundred ticks away is out of reach with no tolerance at all.
+
+    This is the premise of the two tests below, and the difference between a
+    discrete baseline and every other kernel these tests write: an
+    interpolating baseline answers any epoch inside its window whatever
+    tolerance is asked for, so nothing about a tolerance can be measured on
+    one.
+    """
+    path = _write_discrete_candidate(
+        tmp_path / 'CK',
+        _VOYAGER_KERNEL_NAME,
+        offset_ticks=_INSIDE_BASE_TOLERANCE_TICKS,
+        midtime_et=_VOYAGER_MIDTIME_ET,
+    )
+    pool.furnish(path)
+    tick = float(cspyce.sce2t(_VOYAGER_SCLK_ID, _VOYAGER_MIDTIME_ET))
+    with pytest.raises(OSError, match='CKINSUFFDATA'):
+        cspyce.ckgp(VOYAGER_CK_FRAME_ID, tick, 0.0, 'J2000')
+
+
+def test_a_discrete_baseline_reproduces_within_the_base_tolerance(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """A Voyager image is paired with the discrete baseline its lookup reaches."""
+    root = tmp_path / 'CK'
+    _write_discrete_candidate(
+        root,
+        _VOYAGER_KERNEL_NAME,
+        offset_ticks=_INSIDE_BASE_TOLERANCE_TICKS,
+        midtime_et=_VOYAGER_MIDTIME_ET,
+    )
+    index = build_ck_index([root])
+    assignments = assign_images([_discrete_entry(_INSIDE_BASE_TOLERANCE_TICKS)], index)
+    assert assignments[0].baseline is not None
+
+
+def test_the_snapped_lookup_reaches_a_record_within_its_base_tolerance(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """The first of the two lookups answers, not just the wider fallback.
+
+    Both lookups find the same record on a discrete baseline, so which of them
+    reached it is visible only in how many attitudes come back.
+    """
+    path = _write_discrete_candidate(
+        tmp_path / 'CK',
+        _VOYAGER_KERNEL_NAME,
+        offset_ticks=_INSIDE_BASE_TOLERANCE_TICKS,
+        midtime_et=_VOYAGER_MIDTIME_ET,
+    )
+    pool.furnish(path)
+    entry = _discrete_entry(_INSIDE_BASE_TOLERANCE_TICKS)
+    assert entry.pointing is not None
+    assert len(baseline_attitudes(entry.pointing)) == 2
+
+
+@pytest.mark.parametrize(
+    ('exposure_s', 'expected_lookups'),
+    [(_LONG_ENOUGH_EXPOSURE_S, 2), (_TOO_SHORT_EXPOSURE_S, 1)],
+    ids=['long-exposure', 'short-exposure'],
+)
+def test_the_snapped_tolerance_grows_with_the_exposure(
+    pool: KernelPool, tmp_path: Path, exposure_s: float, expected_lookups: int
+) -> None:
+    """The exposure term is what reaches a record just beyond the base tolerance.
+
+    The record sits 800.2 ticks from the midtime's whole tick.  A 15 s exposure
+    adds 0.3125 ticks of tolerance and the first lookup reaches it; a 0.48 s
+    exposure adds 0.01 and only the wider fallback does.
+
+    Parameters:
+        exposure_s: The recorded exposure duration.
+        expected_lookups: How many of the two lookups answer.
+    """
+    path = _write_discrete_candidate(
+        tmp_path / 'CK',
+        _VOYAGER_KERNEL_NAME,
+        offset_ticks=_JUST_OUTSIDE_BASE_TOLERANCE_TICKS,
+        midtime_et=_VOYAGER_MIDTIME_ET,
+    )
+    pool.furnish(path)
+    entry = _discrete_entry(_JUST_OUTSIDE_BASE_TOLERANCE_TICKS, exposure_s=exposure_s)
+    assert entry.pointing is not None
+    assert len(baseline_attitudes(entry.pointing)) == expected_lookups
+
+
+def test_a_chain_evaluated_object_has_one_lookup(pool: KernelPool, tmp_path: Path) -> None:
+    """An object read by evaluating a frame chain is asked once, not twice."""
+    path = _write_candidate(tmp_path / 'CK-reconstructed', _TRUE_NAME)
+    pool.furnish(path)
+    entry = _entry(cmatrix_original=_cassini_recorded(pool), kernels=(_TRUE_NAME,))
+    assert entry.pointing is not None
+    assert len(baseline_attitudes(entry.pointing)) == 1
+
+
+def test_baseline_attitudes_is_empty_when_nothing_answers(pool: KernelPool) -> None:
+    """A candidate that answers no lookup contributes no attitude to compare."""
+    entry = _entry(cmatrix_original=_cassini_recorded(pool), kernels=(_TRUE_NAME,))
+    assert entry.pointing is not None
+    assert baseline_attitudes(entry.pointing) == ()
+
+
+def test_assign_refuses_an_undefined_camera_frame(pool: KernelPool, tmp_path: Path) -> None:
+    """A frame kernel that was never furnished is not a baseline that drifted.
+
+    Reported as drift it would empty a whole run and blame the holdings, so it
+    is refused once, before any candidate is tried.
+    """
+    root = tmp_path / 'CK-reconstructed'
+    _write_candidate(root, _TRUE_NAME)
+    index = build_ck_index([root])
+    entry = _entry(cmatrix_original=_cassini_recorded(pool), kernels=(_TRUE_NAME,))
+    pool.unload(pool.root / 'test.tf')
+    with pytest.raises(ValueError, match='is not defined by the furnished kernels'):
+        assign_images([entry], index)
+
+
+def test_assign_refuses_an_undefined_ck_object_frame(pool: KernelPool, tmp_path: Path) -> None:
+    """The object a corrected kernel targets has to be a frame the pool knows."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_candidate(root, _TRUE_NAME)
+    index = build_ck_index([root])
+    entry = _entry(
+        cmatrix_original=_cassini_recorded(pool),
+        kernels=(_TRUE_NAME,),
+        ck_frame_id=-98000,
+        camera_frame=CASSINI_CAMERA_FRAME,
+    )
+    with pytest.raises(ValueError, match='has no frame name in the furnished kernels'):
+        assign_images([entry], index)

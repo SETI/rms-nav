@@ -41,7 +41,7 @@ import cspyce
 import numpy as np
 
 from spindoctor.cli.ck.images import ImageEntry, OmissionReason, botsim_losers
-from spindoctor.cli.ck.index import CK_SUFFIXES, CkFile, CkIndex
+from spindoctor.cli.ck.index import CK_SUFFIXES, OUTPUT_NAME_MARKER, CkFile, CkIndex
 from spindoctor.cli.ck.pointing import ImagePointing, NDArrayFloatType
 from spindoctor.cli.ck.segment import BASE_FRAME, FROZEN_ATTITUDE_CK_IDS, resolve_sclk_id
 
@@ -59,6 +59,13 @@ _SNAPPED_TOL_TICKS = 800.0
 _SNAPPED_TOL_EXPOSURE_DIVISOR = 48.0
 _SNAPPED_FALLBACK_TOL_TICKS = 80000.0
 
+# The wider tolerance is 4799.995 s of Voyager clock, measured, and the frame
+# that uses it caches its answer for that long: two Voyager images navigated
+# through the fallback within eighty minutes of each other in one process share
+# one attitude.  The second then records an attitude no lookup at its own
+# midtime reproduces, and is honestly refused rather than corrected against a
+# baseline it did not use.
+
 # The fixed rotation from a frozen-attitude object's frame to the camera frame
 # is read at this epoch, as oops reads it: the frame kernel defines it as a
 # constant, so the epoch only has to match.
@@ -70,10 +77,6 @@ _FIXED_ROTATION_ET = 0.0
 # RuntimeError or a ValueError.  A candidate that cannot answer is a candidate
 # that did not supply the baseline, which is an ordinary outcome of asking.
 _SPICE_LOOKUP_FAILURES = (LookupError, OSError, RuntimeError, ValueError)
-
-# What a corrected file's name carries beyond the original's, before the
-# extension.
-OUTPUT_NAME_MARKER = '_nav'
 
 
 @dataclass(frozen=True)
@@ -247,13 +250,8 @@ def reproduces_baseline(pointing: ImagePointing) -> bool:
     kernels; this asks it for the uncorrected attitude the image navigated
     against and compares it against the recorded one.
 
-    A frozen-attitude object is asked the way its navigated frame was built: a
-    pointing lookup at the truncated clock tick of the exposure midtime, with
-    the tolerance that lookup used, composed with the fixed rotation from the
-    object's frame to the camera frame.  When that finds nothing the wider
-    tolerance of the frame oops falls back to is tried, since an image
-    navigated through that fallback reproduces only there.  Every other object
-    is asked for the camera frame's attitude at the midtime directly.
+    The attitudes it is compared against are the ones
+    :func:`baseline_attitudes` gives, and any of them reproducing it is enough.
 
     Parameters:
         pointing: The image's recorded pointing.
@@ -271,42 +269,59 @@ def reproduces_baseline(pointing: ImagePointing) -> bool:
             furnished kernels, which is a missing frame kernel rather than a
             candidate that does not reproduce.
     """
-    for evaluated in _baseline_attitudes(pointing):
-        if attitudes_reproduce(pointing.cmatrix_original, evaluated):
-            return True
-    return False
+    return any(
+        attitudes_reproduce(pointing.cmatrix_original, evaluated)
+        for evaluated in baseline_attitudes(pointing)
+    )
 
 
-def _baseline_attitudes(pointing: ImagePointing) -> Iterator[NDArrayFloatType]:
-    """Yield the attitudes the furnished kernels give for one image's baseline.
+def baseline_attitudes(pointing: ImagePointing) -> tuple[NDArrayFloatType, ...]:
+    """Return the attitudes the furnished kernels give for one image's baseline.
+
+    There is one per way the navigated observation frame could have been built,
+    in the order oops would have built them, and a way the furnished kernels
+    cannot answer contributes nothing rather than raising -- so an empty result
+    means this candidate answered no lookup at all.
+
+    Most instruments evaluate a frame chain at the exposure midtime, which is
+    one way and therefore at most one attitude.  A frozen-attitude object has
+    two: a pointing lookup at the whole clock tick of the midtime with the
+    tolerance that lookup used, and, since oops falls back to a frame
+    registered at a far wider tolerance when that finds nothing, a second
+    lookup at that tolerance and at the continuously encoded tick.  Both are
+    composed with the fixed rotation from the object's frame to the camera
+    frame.  On a baseline that interpolates between its records the two answer
+    differently, because a whole tick and a fractional one are different
+    epochs; on a discrete baseline the tolerance is what decides whether
+    either answers at all.
 
     Parameters:
         pointing: The image's recorded pointing.
 
-    Yields:
-        One attitude per way the navigated frame could have been built: one for
-        an evaluated frame chain, and for a frozen-attitude object one per
-        lookup tolerance, in the order oops would have tried them.  A lookup
-        the kernels cannot answer yields nothing rather than raising.
+    Returns:
+        The attitudes, in the order oops would have tried them.
+
+    Raises:
+        ValueError: if the CK object is not one this writer knows, or if the
+            spacecraft clock resolved for it is not the expected one.
+        KeyError: if a frozen-attitude object has no frame name in the
+            furnished kernels.
     """
     if pointing.ck_frame_id not in FROZEN_ATTITUDE_CK_IDS:
         chained = _evaluated_attitude(pointing.camera_frame, pointing.midtime_et)
-        if chained is not None:
-            yield chained
-        return
+        return () if chained is None else (chained,)
     sclk_id = resolve_sclk_id(pointing.ck_frame_id)
     snapped_tol = _SNAPPED_TOL_TICKS + pointing.exposure_s / _SNAPPED_TOL_EXPOSURE_DIVISOR
     # oops encodes the midtime as a whole tick for the primary lookup and
     # continuously for the wider fallback, so each is reproduced as it is
     # made: a whole tick and a fractional one land on different attitudes
     # wherever the baseline interpolates between its records.
-    for tick, tolerance in (
+    attempts = (
         (float(cspyce.sce2t(sclk_id, pointing.midtime_et)), snapped_tol),
         (float(cspyce.sce2c(sclk_id, pointing.midtime_et)), _SNAPPED_FALLBACK_TOL_TICKS),
-    ):
-        snapped = _snapped_attitude(pointing, tick, tolerance)
-        if snapped is not None:
-            yield snapped
+    )
+    snapped = [_snapped_attitude(pointing, tick, tolerance) for tick, tolerance in attempts]
+    return tuple(attitude for attitude in snapped if attitude is not None)
 
 
 def _evaluated_attitude(camera_frame: str, et: float) -> NDArrayFloatType | None:
@@ -392,15 +407,18 @@ def assign_images(entries: Sequence[ImageEntry], index: CkIndex) -> tuple[Assign
 
     Raises:
         ValueError: if two entries name the same image, whose assignments
-            could not then be told apart, or if a C-kernel is already
-            furnished, which would answer the reproduction lookups alongside
-            the candidate under test.
+            could not then be told apart; if a C-kernel is already furnished,
+            which would answer the reproduction lookups alongside the candidate
+            under test; or if a frame an image needs is not defined in the
+            furnished kernels, which is a missing frame kernel and not a
+            baseline that has drifted.
         OSError: if a candidate kernel cannot be furnished.
     """
     names = [entry.image_name for entry in entries]
     if len(set(names)) != len(names):
         raise ValueError('two images have the same name; their assignments cannot be told apart')
     _require_no_furnished_ck()
+    _require_frames_defined(entries)
     losers = botsim_losers(entries)
     testable = [
         entry for entry in entries if entry.pointing is not None and entry.image_name not in losers
@@ -478,6 +496,50 @@ def _reproducing_baselines(
                     if reproduces_baseline(pointing):
                         reproducing[entry.image_name].append(candidate)
     return {name: tuple(found) for name, found in reproducing.items()}
+
+
+def _require_frames_defined(entries: Sequence[ImageEntry]) -> None:
+    """Refuse to run when a frame the images need is not defined.
+
+    A candidate that cannot answer a lookup is reported as not reproducing,
+    which is how a baseline that has drifted since navigation is detected.  A
+    frame kernel that was never furnished defeats the same lookup for every
+    image alike, so it would empty a whole run and report it as drift.  It is
+    checked once, before any candidate is furnished, against the frames the
+    images themselves name.
+
+    Parameters:
+        entries: The images the run considered.  Those carrying no pointing
+            name no frames and are skipped.
+
+    Raises:
+        ValueError: if a camera frame or a CK object frame is not defined in
+            the furnished kernels.
+    """
+    needed = sorted(
+        {
+            (entry.pointing.camera_frame, entry.pointing.ck_frame_id)
+            for entry in entries
+            if entry.pointing is not None
+        }
+    )
+    for camera_frame, ck_frame_id in needed:
+        try:
+            cspyce.namfrm(camera_frame)
+        except LookupError as exc:
+            raise ValueError(
+                f'the camera frame {camera_frame} is not defined by the furnished kernels; the '
+                f'frame kernel that defines it has to be furnished before an image can be '
+                f'matched to the baseline it navigated against'
+            ) from exc
+        try:
+            cspyce.frmnam(ck_frame_id)
+        except LookupError as exc:
+            raise ValueError(
+                f'CK object {ck_frame_id} has no frame name in the furnished kernels; the frame '
+                f'kernel that names it has to be furnished before an image can be matched to the '
+                f'baseline it navigated against'
+            ) from exc
 
 
 def _require_no_furnished_ck() -> None:

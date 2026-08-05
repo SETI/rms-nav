@@ -304,6 +304,54 @@ def baseline_segment(
     )
 
 
+def write_type1_ck(
+    path: Path,
+    *,
+    ck_frame_id: int,
+    ticks: Sequence[float],
+    attitude: Callable[[float], NDArrayFloatType],
+    sclk_id: int,
+) -> None:
+    """Write a discrete (type 1) C-kernel holding pointing at given time tags.
+
+    Every other kernel these tests write is type 3, which interpolates and
+    therefore answers any epoch inside its window whatever tolerance is asked
+    for.  A type 1 kernel answers only within a tolerance of a record it
+    actually holds, which is what the real Voyager ISS baselines are and what
+    makes a lookup tolerance decide anything at all.
+
+    Parameters:
+        path: File to create.
+        ck_frame_id: SPICE id of the object the segment describes.
+        ticks: Encoded SCLK time tags of the records, strictly increasing.
+        attitude: The J2000-to-CK-object rotation at an epoch.
+        sclk_id: Spacecraft clock the time tags are encoded against, used to
+            turn each tag back into the epoch the attitude is taken at.
+    """
+    quats = np.vstack(
+        [
+            np.asarray(cspyce.m2q(attitude(float(cspyce.sct2e(sclk_id, tick)))), dtype=np.float64)
+            for tick in ticks
+        ]
+    )
+    handle = cspyce.ckopn(str(path), 'baseline', 0)
+    try:
+        cspyce.ckw01(
+            handle,
+            float(ticks[0]),
+            float(ticks[-1]),
+            ck_frame_id,
+            'J2000',
+            False,
+            'discrete-baseline',
+            np.asarray(ticks, dtype=np.float64),
+            quats,
+            np.zeros((len(ticks), 3), dtype=np.float64),
+        )
+    finally:
+        cspyce.ckcls(handle)
+
+
 def write_ck(path: Path, segments: Sequence[CkSegment]) -> None:
     """Write segments to a new C-kernel.
 
