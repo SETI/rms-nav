@@ -336,3 +336,33 @@ def test_from_metadata_refuses_a_matrix_off_orthonormality_by_a_microradian() ->
     nearly = [1.0, 1e-6, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
     with pytest.raises(ValueError, match='cmatrix is not orthonormal'):
         ImagePointing.from_metadata(_metadata(cmatrix=nearly))
+
+
+@pytest.mark.parametrize(
+    'cmatrix',
+    [
+        [True, False, False, False, True, False, False, False, True],
+        [[True, False, False], [False, True, False], [False, False, True]],
+        ['1.0', '0.0', '0.0', '0.0', '1.0', '0.0', '0.0', '0.0', '1.0'],
+        [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, None],
+    ],
+    ids=['flat-booleans', 'nested-booleans', 'numeric-strings', 'null-element'],
+)
+def test_from_metadata_refuses_a_matrix_of_the_wrong_kind(cmatrix: list[Any]) -> None:
+    """A matrix element is never coerced into being a number.
+
+    Nine booleans convert to a flawless identity, and nine numeric strings to
+    whatever they spell, so both would satisfy the determinant, orthonormality
+    and finiteness guards and be written into a kernel.
+
+    Parameters:
+        cmatrix: A recorded matrix whose elements are not numbers.
+    """
+    with pytest.raises(TypeError, match='cmatrix holds a'):
+        ImagePointing.from_metadata(_metadata(cmatrix=cmatrix))
+
+
+def test_from_metadata_refuses_an_empty_camera_frame() -> None:
+    """A frame with no name cannot be looked up, and says so here rather than in SPICE."""
+    with pytest.raises(ValueError, match='camera_frame is empty'):
+        ImagePointing.from_metadata(_metadata(camera_frame=''))

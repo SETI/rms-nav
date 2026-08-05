@@ -53,9 +53,9 @@ class ImagePointing:
         exposure_s: Exposure duration in seconds.
 
     Raises:
-        ValueError: if ``image_name`` is empty, if either C-matrix is not a
-            3x3 proper orthonormal rotation, if any epoch or ``exposure_s`` is
-            not finite, if the three epochs are not ordered
+        ValueError: if ``image_name`` or ``camera_frame`` is empty, if either
+            C-matrix is not a 3x3 proper orthonormal rotation, if any epoch or
+            ``exposure_s`` is not finite, if the three epochs are not ordered
             ``start <= midtime <= stop``, or if ``exposure_s`` is negative.
     """
 
@@ -77,6 +77,11 @@ class ImagePointing:
         )
         if len(self.image_name) == 0:
             raise ValueError('image_name is empty; a segment must name the image it corrects')
+        if len(self.camera_frame) == 0:
+            raise ValueError(
+                f'camera_frame is empty for {self.image_name}; the rotation from the CK object to '
+                f'the camera is read from the furnished kernels by that name'
+            )
         # Checked before the comparisons below, which a NaN would answer with
         # False rather than refuse, and which an infinite epoch would satisfy
         # outright.  Every one of these values reaches a clock encoding or a
@@ -163,6 +168,12 @@ def _rotation_from_metadata(value: Any, label: str) -> NDArrayFloatType:
     silently, so a document malformed in a way worth knowing about would be
     read as if it were well formed.
 
+    The elements are checked before conversion for the same reason the scalar
+    fields are: ``np.asarray(..., dtype=np.float64)`` converts text and
+    booleans without complaint, so a matrix of nine ``true`` and ``false``
+    values becomes a flawless identity that satisfies every rotation guard
+    there is.
+
     Parameters:
         value: The recorded matrix value, as read from the metadata.
         label: Name of the field, used in the exception message.
@@ -173,13 +184,51 @@ def _rotation_from_metadata(value: Any, label: str) -> NDArrayFloatType:
     Raises:
         ValueError: if the value does not hold nine numbers as a flat
             sequence or a 3x3 nesting.
+        TypeError: if any element is not a real number.
     """
-    array = np.asarray(value, dtype=np.float64)
+    array = np.asarray(_rotation_elements(value, label), dtype=np.float64)
     if array.shape not in ((9,), (3, 3)):
         raise ValueError(
             f'{label} must be nine row-major floats or a 3x3 nesting; got shape {array.shape}'
         )
     return array.reshape(3, 3)
+
+
+def _rotation_elements(value: Any, label: str) -> Any:
+    """Check that a recorded matrix holds real numbers, and return it unchanged.
+
+    Only the shapes the schema writes are walked -- a flat sequence and one
+    level of nesting -- because anything else is refused for its shape a moment
+    later, and a value that is not a sequence at all is left for the shape
+    check to report.
+
+    Parameters:
+        value: The recorded matrix value, as read from the metadata.
+        label: Name of the field, used in the exception message.
+
+    Returns:
+        ``value`` itself.
+
+    Raises:
+        TypeError: if an element is text, a boolean, or anything else that is
+            not a real number.  ``bool`` is refused although Python counts it
+            as an ``int``: a matrix of JSON ``true`` and ``false`` values
+            converts to a valid rotation.
+    """
+    if not isinstance(value, list | tuple):
+        return value
+    for row in value:
+        elements = row if isinstance(row, list | tuple) else [row]
+        for element in elements:
+            if isinstance(element, list | tuple):
+                # Nested deeper than the schema writes; the shape check reports
+                # that, and reports it better than an element check could.
+                continue
+            if isinstance(element, bool) or not isinstance(element, int | float):
+                raise TypeError(
+                    f'{label} holds a {type(element).__name__}, not a number: {element!r}'
+                )
+    return value
 
 
 def read_text(section: dict[str, Any], key: str, where: str) -> str:
