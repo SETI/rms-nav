@@ -32,7 +32,6 @@ if 'PDS3_HOLDINGS_DIR' not in os.environ:
     )
 
 import cspyce  # noqa: E402  (guarded import)
-import oops  # noqa: E402  (guarded import)
 
 from spindoctor.obs import (  # noqa: E402
     ObsCassiniISS,
@@ -43,8 +42,15 @@ from spindoctor.obs import (  # noqa: E402
 )
 from spindoctor.support.cmatrix import (  # noqa: E402
     _attitude_baseline,
+    _frame_identity,
     _FrameIdentity,
+    _sclk_id,
     compute_pointing,
+)
+from spindoctor.support.exceptions import NavPointingError  # noqa: E402  (guarded import)
+from tests.cmatrix_helpers import (  # noqa: E402  (guarded import)
+    observation_attitude,
+    offset_from_correction,
 )
 
 _CASSINI_NAC = 'calibrated/COISS_2xxx/COISS_2038/data/1572094226_1572114418/N1572105349_1_CALIB.IMG'
@@ -87,38 +93,11 @@ def _load(obs_class: type[ObsSnapshotInst], relative: str) -> ObsSnapshotInst:
     return cast(ObsSnapshotInst, obs_class.from_file(_url(relative)))
 
 
-def _observation_attitude(obs: ObsSnapshotInst, et: float) -> np.ndarray:
-    """Read the oops observation frame's J2000-to-frame rotation at one epoch."""
-    transform = obs.frame.wrt(oops.frame.Frame.J2000).transform_at_time(et)
-    return np.asarray(transform.matrix.vals, np.float64).reshape(3, 3)
-
-
 def _measured_flip(obs: ObsSnapshotInst, camera_frame: str, et: float) -> np.ndarray:
     """Measure ``R = C_oops . C_spice^T`` directly from SPICE at one epoch."""
     spice = np.asarray(cspyce.pxform('J2000', camera_frame, et), np.float64)
-    flip: np.ndarray = _observation_attitude(obs, et) @ spice.T
+    flip: np.ndarray = observation_attitude(obs, et) @ spice.T
     return flip
-
-
-def _offset_from_correction(fov: oops.fov.FOV, correction: np.ndarray) -> tuple[float, float]:
-    """Recover the ``(dv, du)`` offset an oops-frame correction rotation encodes.
-
-    The independent inverse of the production forward model: it maps the
-    corrected boresight direction back through the rotation, reads off the
-    tangent-plane point that direction came from, and converts the implied
-    ``xy_offset`` back into pixels.  Derived from the offset model rather than
-    from the forward code, so it does not reproduce a sign error the forward
-    code might contain.
-    """
-    xy_los = fov.xy_from_uv(fov.uv_los)
-    corrected = np.asarray(fov.los_from_xy(xy_los).unit().vals, np.float64)
-    uncorrected = np.asarray(correction, np.float64).T @ corrected
-    xy_uncorrected = oops.Pair((uncorrected[0] / uncorrected[2], uncorrected[1] / uncorrected[2]))
-    uv = fov.uv_from_xy(xy_los - xy_uncorrected)
-    return (
-        float(uv.vals[1] - fov.uv_los.vals[1]),
-        float(uv.vals[0] - fov.uv_los.vals[0]),
-    )
 
 
 def _rotation_about_z(angle_rad: float) -> np.ndarray:
@@ -132,6 +111,7 @@ def _cassini_nac_identity() -> _FrameIdentity:
     return _FrameIdentity(
         camera_frame='CASSINI_ISS_NAC',
         ck_frame_id=-82000,
+        sclk_id=-82,
         oops_from_spice=_CASSINI_FLIP_ARRAY,
         frozen_oops_attitude=False,
     )
@@ -236,7 +216,7 @@ def test_voyager_records_the_frozen_oops_attitude() -> None:
     obs = _load(ObsVoyagerISS, _VOYAGER_NAC)
     solution = compute_pointing(obs, offset_px=_OFFSET, rotation_fitted=False)
     assert solution is not None
-    frozen = _observation_attitude(obs, float(obs.midtime))
+    frozen = observation_attitude(obs, float(obs.midtime))
     recorded = np.asarray(solution.baseline.cmatrix_original, np.float64)
     assert float(np.max(np.abs(recorded - frozen))) == 0.0
 
@@ -319,6 +299,33 @@ def test_recorded_clock_strings_are_distinct_and_ordered(
 
 
 @pytest.mark.parametrize(
+    ('obs_class', 'relative', 'sclk_id'),
+    [
+        (ObsCassiniISS, _CASSINI_NAC, -82),
+        (ObsNewHorizonsLORRI, _LORRI, -98),
+        (ObsGalileoSSI, _GALILEO_SSI, -77),
+        (ObsVoyagerISS, _VOYAGER_NAC, -32),
+    ],
+    ids=['cassini_nac', 'lorri', 'galileo_ssi', 'voyager_nac'],
+)
+def test_the_recorded_ck_object_resolves_to_the_missions_clock(
+    obs_class: type[ObsSnapshotInst], relative: str, sclk_id: int
+) -> None:
+    """Each mission's CK object resolves to the spacecraft clock it expects.
+
+    ``ckmeta`` computes a clock id from a CK object id instead of validating
+    it, so a wrong CK object would yield a plausible clock and clock strings
+    encoding another spacecraft's time.  This pins the pair per mission
+    against what SPICE actually resolves.
+    """
+    obs = _load(obs_class, relative)
+    identity = _frame_identity(obs)
+    assert identity is not None
+    assert identity.sclk_id == sclk_id
+    assert _sclk_id(identity) == sclk_id
+
+
+@pytest.mark.parametrize(
     ('obs_class', 'relative'),
     [
         (ObsCassiniISS, _CASSINI_NAC),
@@ -347,7 +354,7 @@ def test_recorded_cmatrix_recovers_the_planted_offset(
     flip = np.asarray(solution.baseline.oops_from_spice, np.float64)
     corrected_oops = flip @ np.asarray(solution.cmatrix, np.float64)
     original_oops = flip @ np.asarray(solution.baseline.cmatrix_original, np.float64)
-    recovered = _offset_from_correction(obs.fov, corrected_oops @ original_oops.T)
+    recovered = offset_from_correction(obs.fov, corrected_oops @ original_oops.T)
     assert recovered[0] == pytest.approx(_OFFSET[0], abs=_RECOVERY_TOL_PX)
     assert recovered[1] == pytest.approx(_OFFSET[1], abs=_RECOVERY_TOL_PX)
 
@@ -379,7 +386,7 @@ def test_recorded_cmatrix_recovers_a_sub_pixel_offset(
     flip = np.asarray(solution.baseline.oops_from_spice, np.float64)
     corrected_oops = flip @ np.asarray(solution.cmatrix, np.float64)
     original_oops = flip @ np.asarray(solution.baseline.cmatrix_original, np.float64)
-    recovered = _offset_from_correction(obs.fov, corrected_oops @ original_oops.T)
+    recovered = offset_from_correction(obs.fov, corrected_oops @ original_oops.T)
     assert recovered[0] == pytest.approx(_SMALL_OFFSET[0], abs=_RECOVERY_TOL_PX)
     assert recovered[1] == pytest.approx(_SMALL_OFFSET[1], abs=_RECOVERY_TOL_PX)
 
@@ -403,7 +410,7 @@ def test_epoch_varying_flip_is_refused() -> None:
         return product
 
     stub = cast(ObsSnapshotInst, _StubObs(attitude, obs))
-    with pytest.raises(ValueError, match='is not constant across the exposure'):
+    with pytest.raises(NavPointingError, match='is not constant across the exposure'):
         _attitude_baseline(stub, _cassini_nac_identity())
 
 
@@ -421,5 +428,5 @@ def test_a_wrong_flip_measured_from_the_frame_is_refused() -> None:
         return spice
 
     stub = cast(ObsSnapshotInst, _StubObs(attitude, obs))
-    with pytest.raises(ValueError, match='differs from the expected'):
+    with pytest.raises(NavPointingError, match='differs from the expected'):
         _attitude_baseline(stub, _cassini_nac_identity())

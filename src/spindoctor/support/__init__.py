@@ -31,6 +31,8 @@ Modules:
         Common mathematical constants (e.g. ``PI``, ``HALFPI``).
     ``exceptions``
         ``NavContractError`` — typed exception for internal contract violations.
+        ``NavPointingError`` names the failures the corrected-attitude computation
+        expects, so a caller can absorb exactly those.
     ``nav_base``
         ``NavBase``, a small base class wiring ``Config`` and ``PdsLogger`` for nav
         objects.

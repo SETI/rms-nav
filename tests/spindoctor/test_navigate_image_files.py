@@ -46,6 +46,16 @@ class _FakeSnapshot:
     def __init__(
         self, *, blank: bool = False, midtime: float = 100.0, shutter_mode: str | None = None
     ) -> None:
+        """Build a fake snapshot carrying one deterministic 32x32 image.
+
+        Parameters:
+            blank: True for an all-zero image, which the orchestrator's image
+                classifier rejects as carrying no data; False for a fixed-seed
+                noise field around a mean of 100, which it accepts.
+            midtime: The observation midtime in TDB seconds past J2000.
+            shutter_mode: The shutter mode the image was taken in, or ``None``
+                for a host whose labels carry no such field.
+        """
         rng = np.random.default_rng(seed=99)
         if blank:
             self.data = np.zeros((32, 32), np.float64)
@@ -64,6 +74,12 @@ class _FakeSnapshot:
         self.shutter_mode = shutter_mode
 
     def extfov_data_sensor_mask(self) -> np.ndarray:
+        """Report every pixel of the extended FOV as live sensor.
+
+        Returns:
+            A boolean array of ``extdata``'s shape, all True: this fake uses
+            zero extfov margin, so no pixel falls outside the detector.
+        """
         return self._sensor_mask
 
 
@@ -90,17 +106,46 @@ def _make_fake_obs_class(
 ) -> type:
     """Build a fresh per-test ``obs_class`` shim with controllable behavior.
 
-    Each call returns a brand-new class with the requested behavior baked in
-    as class-level constants (read-only).  The previous design used a single
-    shared `_FakeObsClass` whose mutable state raced under pytest-xdist.
+    Each call returns a brand-new class that closes over the requested
+    behavior, so nothing is shared between tests and the shims are safe under
+    parallel execution.
+
+    Parameters:
+        blank: True for a class whose images are all zero, so the driver takes
+            its no-data path.
+        raise_on_load: An exception ``from_file`` raises instead of returning a
+            snapshot, so the driver takes its image-load-failure path; ``None``
+            to load successfully.
+        shutter_mode: The shutter mode every loaded snapshot reports, or
+            ``None`` for a host whose labels carry no such field.
+
+    Returns:
+        A class exposing the one classmethod the driver calls, ``from_file``,
+        which takes a path and returns a ``_FakeSnapshot``.
     """
     captured_blank = blank
     captured_raise = raise_on_load
     captured_shutter_mode = shutter_mode
 
     class _FakeObsClass:
+        """The observation class the driver loads each image through."""
+
         @classmethod
         def from_file(cls, path: Any, **kwargs: Any) -> _FakeSnapshot:
+            """Return the configured fake snapshot, ignoring the path.
+
+            Parameters:
+                path: The image path the driver resolved; unread, since the
+                    snapshot's contents are fixed at class-construction time.
+                kwargs: Any further loader options the driver passes; unread.
+
+            Returns:
+                A ``_FakeSnapshot`` built with this class's captured settings.
+
+            Raises:
+                BaseException: whatever ``raise_on_load`` supplied, when the
+                    class was built to fail on load.
+            """
             if captured_raise is not None:
                 raise captured_raise
             return _FakeSnapshot(blank=captured_blank, shutter_mode=captured_shutter_mode)
