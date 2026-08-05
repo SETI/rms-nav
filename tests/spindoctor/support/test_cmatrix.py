@@ -17,6 +17,7 @@ from typing import cast
 import numpy as np
 import oops
 import pytest
+from tests.cmatrix_helpers import offset_from_correction
 
 from spindoctor.obs import ObsSnapshotInst
 from spindoctor.support.cmatrix import (
@@ -101,27 +102,6 @@ def _baseline(
     )
 
 
-def _offset_from_correction(fov: oops.fov.FOV, correction: np.ndarray) -> tuple[float, float]:
-    """Recover the ``(dv, du)`` offset a correction rotation encodes.
-
-    The independent inverse of :func:`_oops_correction_matrix`: it maps the
-    corrected boresight direction back through the rotation, reads off the
-    tangent-plane point that direction came from, and converts the implied
-    ``xy_offset`` back into pixels.  Written from the offset model rather
-    than from the forward implementation, so it does not reproduce a sign
-    error the forward code might contain.
-    """
-    xy_los = fov.xy_from_uv(fov.uv_los)
-    corrected = np.asarray(fov.los_from_xy(xy_los).unit().vals, np.float64)
-    uncorrected = np.asarray(correction, np.float64).T @ corrected
-    xy_uncorrected = oops.Pair((uncorrected[0] / uncorrected[2], uncorrected[1] / uncorrected[2]))
-    uv = fov.uv_from_xy(xy_los - xy_uncorrected)
-    return (
-        float(uv.vals[1] - fov.uv_los.vals[1]),
-        float(uv.vals[0] - fov.uv_los.vals[0]),
-    )
-
-
 def test_correction_maps_the_uncorrected_boresight_onto_the_corrected_one() -> None:
     """``M . d`` is the direction the unmodified FOV assigns to the boresight."""
     fov = _fov()
@@ -156,7 +136,7 @@ def test_planted_offset_is_recovered_from_the_recorded_cmatrix() -> None:
     )
     assert solution.cmatrix is not None
     correction = np.asarray(solution.cmatrix, np.float64) @ original.T
-    recovered = _offset_from_correction(fov, correction)
+    recovered = offset_from_correction(fov, correction)
     assert recovered[0] == pytest.approx(_PLANTED_OFFSET[0], abs=1e-9)
     assert recovered[1] == pytest.approx(_PLANTED_OFFSET[1], abs=1e-9)
 
@@ -193,7 +173,7 @@ def test_cassini_style_flip_reproduces_the_offset_in_the_spice_convention() -> N
     assert solution.cmatrix is not None
     corrected_oops = _CASSINI_FLIP @ np.asarray(solution.cmatrix, np.float64)
     original_oops = _CASSINI_FLIP @ original
-    recovered = _offset_from_correction(fov, corrected_oops @ original_oops.T)
+    recovered = offset_from_correction(fov, corrected_oops @ original_oops.T)
     assert recovered[0] == pytest.approx(_PLANTED_OFFSET[0], abs=1e-9)
     assert recovered[1] == pytest.approx(_PLANTED_OFFSET[1], abs=1e-9)
 
@@ -294,7 +274,7 @@ def test_a_sub_pixel_offset_still_produces_a_real_correction() -> None:
     small = (0.05, -0.02)
     correction = _oops_correction_matrix(fov, small)
     assert not np.array_equal(correction, _IDENTITY)
-    recovered = _offset_from_correction(fov, correction)
+    recovered = offset_from_correction(fov, correction)
     assert recovered[0] == pytest.approx(small[0], abs=1e-9)
     assert recovered[1] == pytest.approx(small[1], abs=1e-9)
 
@@ -318,7 +298,7 @@ def test_conjugation_direction_is_pinned_by_a_non_involutory_flip() -> None:
         _baseline(original, flip), fov, offset_px=_PLANTED_OFFSET, rotation_fitted=False
     )
     assert solution.cmatrix is not None
-    recovered = _offset_from_correction(
+    recovered = offset_from_correction(
         fov, (flip @ np.asarray(solution.cmatrix, np.float64)) @ (flip @ original).T
     )
     assert recovered[0] == pytest.approx(_PLANTED_OFFSET[0], abs=1e-9)
