@@ -278,3 +278,50 @@ def test_refuses_a_matrix_of_the_wrong_shape() -> None:
             midtime_et=_START_ET + _EXPOSURE_S / 2.0,
             exposure_s=_EXPOSURE_S,
         )
+
+
+@pytest.mark.parametrize(
+    'ck_frame_id',
+    ['-82000', -82000.0, -82000.9, True, None],
+    ids=['text', 'whole-float', 'truncating-float', 'boolean', 'null'],
+)
+def test_from_metadata_refuses_a_ck_object_that_is_not_an_integer(ck_frame_id: Any) -> None:
+    """An object id is never coerced into being one.
+
+    ``int('-82000')`` and ``int(-82000.9)`` both produce a valid Cassini bus
+    id, the second by truncating a value that was never that id, and
+    ``int(True)`` produces 1.  Each would resolve a clock, encode time tags,
+    and write a segment against an object the metadata never recorded.
+
+    Parameters:
+        ck_frame_id: A recorded object id of the wrong kind.
+    """
+    with pytest.raises(TypeError, match=r"'ck_frame_id' is \w+, not an integer"):
+        ImagePointing.from_metadata(_metadata(ck_frame_id=ck_frame_id))
+
+
+@pytest.mark.parametrize(
+    'field',
+    ['start_et', 'stop_et', 'midtime_et', 'exposure_s'],
+    ids=['start', 'stop', 'mid', 'exp'],
+)
+@pytest.mark.parametrize('value', ['0.0', True, None], ids=['text', 'boolean', 'null'])
+def test_from_metadata_refuses_an_epoch_that_is_not_a_number(field: str, value: Any) -> None:
+    """An epoch is never coerced into being one.
+
+    ``float('0.0')`` and ``float(True)`` both succeed, so an epoch recorded as
+    text or as a JSON ``true`` would reach a clock encoding as a plausible
+    number.
+
+    Parameters:
+        field: Name of the time field set to the wrong kind of value.
+        value: A recorded value that is not a number.
+    """
+    with pytest.raises(TypeError, match=f'{field!r} is .*, not a number'):
+        ImagePointing.from_metadata(_metadata(**{field: value}))
+
+
+def test_from_metadata_accepts_a_whole_number_epoch() -> None:
+    """JSON writes an exact epoch without a decimal point, and it is widened."""
+    pointing = ImagePointing.from_metadata(_metadata(exposure_s=2))
+    assert pointing.exposure_s == 2.0

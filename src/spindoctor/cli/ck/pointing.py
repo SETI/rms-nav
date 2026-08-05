@@ -124,12 +124,15 @@ class ImagePointing:
                 without an offset or with a fitted camera rotation, and such an
                 image cannot be given a segment.
             TypeError: if a field is present but holds a value of the wrong
-                kind -- a JSON ``null`` where a number belongs, or anything
-                but text where ``image_name`` or ``camera_frame`` belongs.
-                That is a malformed document rather than an image without a
-                solution, so it fails loudly instead of being reported as an
-                omission.  Text is never coerced: ``str(None)`` is ``'None'``,
-                which would name a written segment.
+                kind: anything but text where ``image_name`` or
+                ``camera_frame`` belongs, anything but a whole number where
+                ``ck_frame_id`` belongs, or anything but a number where an
+                epoch belongs.  That is a malformed document rather than an
+                image without a solution, so it fails loudly instead of being
+                reported as an omission.  Nothing is coerced: ``str(None)`` is
+                ``'None'``, which would name a written segment, and
+                ``int(-82000.9)`` is a valid Cassini bus id that the metadata
+                never recorded.
         """
         observation = read_section(metadata, 'observation', 'metadata')
         navigation_result = read_section(metadata, 'navigation_result', 'metadata')
@@ -142,11 +145,11 @@ class ImagePointing:
                 read_field(pointing, 'cmatrix_original', 'pointing'), 'cmatrix_original'
             ),
             camera_frame=read_text(pointing, 'camera_frame', 'pointing'),
-            ck_frame_id=int(read_field(pointing, 'ck_frame_id', 'pointing')),
-            start_et=float(read_field(times, 'start_et', 'times')),
-            stop_et=float(read_field(times, 'stop_et', 'times')),
-            midtime_et=float(read_field(times, 'midtime_et', 'times')),
-            exposure_s=float(read_field(times, 'exposure_s', 'times')),
+            ck_frame_id=read_int(pointing, 'ck_frame_id', 'pointing'),
+            start_et=read_number(times, 'start_et', 'times'),
+            stop_et=read_number(times, 'stop_et', 'times'),
+            midtime_et=read_number(times, 'midtime_et', 'times'),
+            exposure_s=read_number(times, 'exposure_s', 'times'),
         )
 
 
@@ -203,6 +206,67 @@ def read_text(section: dict[str, Any], key: str, where: str) -> str:
     if not isinstance(value, str):
         raise TypeError(f'{where} field {key!r} is {type(value).__name__}, not a string: {value!r}')
     return value
+
+
+def read_int(section: dict[str, Any], key: str, where: str) -> int:
+    """Return one required metadata value that must already be a whole number.
+
+    ``int()`` is deliberately not used to coerce, for the same reason
+    :func:`read_text` does not use ``str()``.  ``int('-82000')`` and
+    ``int(-82000.9)`` both produce a valid Cassini bus id, the second by
+    truncating a value that was never that id, and ``int(True)`` produces 1.
+    Every one of those would resolve a spacecraft clock, encode time tags and
+    write a segment against an object the metadata never named.
+
+    Parameters:
+        section: The dict to read.
+        key: The key that must be present.
+        where: Name of the section, used in the exception message.
+
+    Returns:
+        The value stored under ``key``.
+
+    Raises:
+        ValueError: if ``key`` is absent.
+        TypeError: if the value present is not an integer.  ``bool`` is
+            refused although Python counts it as one, since a JSON ``true`` is
+            not an object id.
+    """
+    value = read_field(section, key, where)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(
+            f'{where} field {key!r} is {type(value).__name__}, not an integer: {value!r}'
+        )
+    # Narrowed to int above; restated so the annotation is checkable rather
+    # than inferred from a dict of Any.
+    return int(value)
+
+
+def read_number(section: dict[str, Any], key: str, where: str) -> float:
+    """Return one required metadata value that must already be a number.
+
+    ``float()`` is deliberately not used to coerce, for the same reason
+    :func:`read_text` does not use ``str()``: ``float('0.0')`` and
+    ``float(True)`` both succeed, so an epoch recorded as text or as a JSON
+    ``true`` would reach a clock encoding as a plausible number.  A whole
+    number is accepted and widened, since JSON writes an exact epoch that way.
+
+    Parameters:
+        section: The dict to read.
+        key: The key that must be present.
+        where: Name of the section, used in the exception message.
+
+    Returns:
+        The value stored under ``key``, as a float.
+
+    Raises:
+        ValueError: if ``key`` is absent.
+        TypeError: if the value present is not a real number.
+    """
+    value = read_field(section, key, where)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError(f'{where} field {key!r} is {type(value).__name__}, not a number: {value!r}')
+    return float(value)
 
 
 def read_field(section: dict[str, Any], key: str, where: str) -> Any:
