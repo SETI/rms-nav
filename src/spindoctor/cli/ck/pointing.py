@@ -114,6 +114,10 @@ class ImagePointing:
                 corrected ``cmatrix`` is absent for every image that navigated
                 without an offset or with a fitted camera rotation, and such an
                 image cannot be given a segment.
+            TypeError: if a field is present but holds a value no number can
+                be read from, such as a JSON ``null``.  That is a malformed
+                document rather than an image without a solution, so it fails
+                loudly instead of being reported as an omission.
         """
         observation = _section(metadata, 'observation', 'metadata')
         navigation_result = _section(metadata, 'navigation_result', 'metadata')
