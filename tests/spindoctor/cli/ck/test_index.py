@@ -1,0 +1,399 @@
+"""Hermetic tests for ``spindoctor.cli.ck.index``.
+
+Every kernel here is written by the suite into directories named the way the
+holdings name theirs, so the classification, the coverage read-back and the
+candidate filter are exercised against real SPICE files without touching the
+holdings.
+"""
+
+from collections.abc import Callable
+from pathlib import Path
+
+import numpy as np
+import pytest
+from tests.spindoctor.cli.ck.conftest import (
+    CASSINI_CK_FRAME_ID,
+    ET0,
+    VOYAGER_CK_FRAME_ID,
+    KernelPool,
+    baseline_attitude,
+    write_baseline_ck,
+)
+
+from spindoctor.cli.ck.index import (
+    CkFile,
+    CkIndex,
+    CoverageInterval,
+    KernelClass,
+    build_ck_index,
+    kernel_class_for_directory,
+)
+from spindoctor.cli.ck.pointing import NDArrayFloatType
+
+# The clocks the two test objects are tagged against, matching the test SCLK.
+_CASSINI_SCLK_ID = -82
+_VOYAGER_SCLK_ID = -31
+
+# The baseline kernels the index reads cover four seconds from ET0, at
+# half-second records.
+_COVERAGE_S = 4.0
+_RECORD_STEP_S = 0.5
+
+# Real reconstructed and gapfill names from the Cassini holdings, so the
+# index is exercised on the shapes it will actually meet.
+_RECONSTRUCTED_NAME = '03236_04002ra.bc'
+_GAPFILL_NAME = '03001_04001pa_gapfill_v01.bc'
+_PREDICTED_NAME = '04009_04051px.bc'
+
+
+def _write_ck(
+    directory: Path,
+    name: str,
+    *,
+    ck_frame_id: int = CASSINI_CK_FRAME_ID,
+    sclk_id: int = _CASSINI_SCLK_ID,
+    start_et: float = ET0,
+    attitude: Callable[[float], NDArrayFloatType] = baseline_attitude,
+) -> Path:
+    """Write one baseline C-kernel into a directory, creating the directory.
+
+    Parameters:
+        directory: Directory to write into.
+        name: Basename of the kernel.
+        ck_frame_id: SPICE id of the object the kernel describes.
+        sclk_id: The spacecraft clock its time tags are encoded against.
+        start_et: First record epoch, TDB seconds past J2000.
+        attitude: The J2000-to-CK-object rotation at an epoch.
+
+    Returns:
+        The path written.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    records = int(_COVERAGE_S / _RECORD_STEP_S) + 1
+    write_baseline_ck(
+        path,
+        ck_frame_id=ck_frame_id,
+        sclk_id=sclk_id,
+        epochs=[start_et + step * _RECORD_STEP_S for step in range(records)],
+        attitude=attitude,
+        angular_velocity=None,
+    )
+    return path
+
+
+def test_build_ck_index_records_the_object_and_its_coverage(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """A scanned kernel reports which object it describes and over what epochs."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    index = build_ck_index([root])
+    assert len(index.files) == 1
+    assert index.files[0].coverage[0].ck_frame_id == CASSINI_CK_FRAME_ID
+    assert index.files[0].coverage[0].start_et == pytest.approx(ET0, abs=1e-6)
+    assert index.files[0].coverage[0].stop_et == pytest.approx(ET0 + _COVERAGE_S, abs=1e-6)
+
+
+def test_build_ck_index_takes_the_class_from_the_directory(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """Each root is classified by its own name, not by the files in it."""
+    reconstructed = tmp_path / 'CK-reconstructed'
+    gapfill = tmp_path / 'CK-gapfill'
+    _write_ck(reconstructed, _RECONSTRUCTED_NAME)
+    _write_ck(gapfill, _GAPFILL_NAME)
+    index = build_ck_index([reconstructed, gapfill])
+    classes = {ck_file.basename: ck_file.kernel_class for ck_file in index.files}
+    assert classes[_RECONSTRUCTED_NAME] is KernelClass.RECONSTRUCTED
+    assert classes[_GAPFILL_NAME] is KernelClass.GAPFILL
+
+
+def test_build_ck_index_indexes_the_other_kernel_extension(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """A C-kernel stored under the .ck extension is indexed like a .bc one."""
+    root = tmp_path / 'CK'
+    _write_ck(root, 'V1SAT_VERSION2_TYPE3_UVS_SEDR.ck')
+    index = build_ck_index([root])
+    assert index.files[0].basename == 'V1SAT_VERSION2_TYPE3_UVS_SEDR.ck'
+
+
+def test_build_ck_index_skips_files_that_are_not_kernels(pool: KernelPool, tmp_path: Path) -> None:
+    """The label files sitting beside the binaries are not C-kernels."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    (root / '03236_04002ra.lbl').write_text('PDS_VERSION_ID = PDS3\n')
+    index = build_ck_index([root])
+    assert [ck_file.basename for ck_file in index.files] == [_RECONSTRUCTED_NAME]
+
+
+def test_candidates_keep_a_file_covering_the_midtime(pool: KernelPool, tmp_path: Path) -> None:
+    """A kernel named by the metadata that covers the epoch is a candidate."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    index = build_ck_index([root])
+    candidates = index.candidates(
+        basenames=[_RECONSTRUCTED_NAME], ck_frame_id=CASSINI_CK_FRAME_ID, et=ET0 + 2.0
+    )
+    assert [ck_file.basename for ck_file in candidates] == [_RECONSTRUCTED_NAME]
+
+
+def test_candidates_drop_a_file_that_does_not_cover_the_midtime(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """Coverage is checked before any kernel is furnished."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    index = build_ck_index([root])
+    candidates = index.candidates(
+        basenames=[_RECONSTRUCTED_NAME],
+        ck_frame_id=CASSINI_CK_FRAME_ID,
+        et=ET0 + _COVERAGE_S + 100.0,
+    )
+    assert candidates == ()
+
+
+def test_candidates_drop_a_file_describing_another_object(pool: KernelPool, tmp_path: Path) -> None:
+    """A kernel for a different spacecraft cannot have supplied the baseline."""
+    root = tmp_path / 'CK'
+    _write_ck(root, 'vgr1_super.bc', ck_frame_id=VOYAGER_CK_FRAME_ID, sclk_id=_VOYAGER_SCLK_ID)
+    index = build_ck_index([root])
+    candidates = index.candidates(
+        basenames=['vgr1_super.bc'], ck_frame_id=CASSINI_CK_FRAME_ID, et=ET0 + 2.0
+    )
+    assert candidates == ()
+
+
+def test_candidates_ignore_a_basename_the_metadata_never_named(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """The metadata's kernel list is what limits the candidates."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    index = build_ck_index([root])
+    candidates = index.candidates(
+        basenames=['04002_04009ra.bc'], ck_frame_id=CASSINI_CK_FRAME_ID, et=ET0 + 2.0
+    )
+    assert candidates == ()
+
+
+def test_candidates_offer_each_directory_holding_the_same_basename(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """One name in two directories is two candidates; only reproduction tells them apart."""
+    first = tmp_path / 'CK-reconstructed'
+    second = tmp_path / 'CK-gapfill'
+    _write_ck(first, _RECONSTRUCTED_NAME)
+    _write_ck(second, _RECONSTRUCTED_NAME)
+    index = build_ck_index([first, second])
+    candidates = index.candidates(
+        basenames=[_RECONSTRUCTED_NAME], ck_frame_id=CASSINI_CK_FRAME_ID, et=ET0 + 2.0
+    )
+    assert [ck_file.path for ck_file in candidates] == [
+        first / _RECONSTRUCTED_NAME,
+        second / _RECONSTRUCTED_NAME,
+    ]
+
+
+def test_candidates_are_ordered_by_kernel_class(pool: KernelPool, tmp_path: Path) -> None:
+    """Reconstructed pointing is offered before gapfill before predicted."""
+    reconstructed = tmp_path / 'CK-reconstructed'
+    gapfill = tmp_path / 'CK-gapfill'
+    predicted = tmp_path / 'CK-predicted'
+    for directory, name in (
+        (predicted, _PREDICTED_NAME),
+        (gapfill, _GAPFILL_NAME),
+        (reconstructed, _RECONSTRUCTED_NAME),
+    ):
+        _write_ck(directory, name)
+    index = build_ck_index([predicted, gapfill, reconstructed])
+    candidates = index.candidates(
+        basenames=[_PREDICTED_NAME, _GAPFILL_NAME, _RECONSTRUCTED_NAME],
+        ck_frame_id=CASSINI_CK_FRAME_ID,
+        et=ET0 + 2.0,
+    )
+    assert [ck_file.basename for ck_file in candidates] == [
+        _RECONSTRUCTED_NAME,
+        _GAPFILL_NAME,
+        _PREDICTED_NAME,
+    ]
+
+
+def test_candidates_of_one_class_are_ordered_by_greatest_basename(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """Within a class the lexicographically greatest name comes first."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, '04002_04009ra.bc')
+    _write_ck(root, '03236_04002ra.bc')
+    index = build_ck_index([root])
+    candidates = index.candidates(
+        basenames=['03236_04002ra.bc', '04002_04009ra.bc'],
+        ck_frame_id=CASSINI_CK_FRAME_ID,
+        et=ET0 + 2.0,
+    )
+    assert [ck_file.basename for ck_file in candidates] == ['04002_04009ra.bc', '03236_04002ra.bc']
+
+
+def test_frozen_object_coverage_admits_an_epoch_the_snapped_lookup_reaches(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """A scan platform's coverage is widened by the tolerance its lookup used.
+
+    An image whose midtime falls outside a Voyager segment can still have
+    navigated against it, because the pointing lookup that froze its frame
+    answers with a record up to its tolerance away.
+    """
+    root = tmp_path / 'CK'
+    _write_ck(
+        root,
+        'vg1_sat_version1_type1_iss_sedr.bc',
+        ck_frame_id=VOYAGER_CK_FRAME_ID,
+        sclk_id=_VOYAGER_SCLK_ID,
+        start_et=ET0 + 100.0,
+    )
+    index = build_ck_index([root])
+    assert index.files[0].covers(VOYAGER_CK_FRAME_ID, ET0) is True
+
+
+def test_evaluated_object_coverage_stops_at_the_segment_window(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """An object read by evaluating a frame chain is covered only where it is covered."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME, start_et=ET0 + 100.0)
+    index = build_ck_index([root])
+    assert index.files[0].covers(CASSINI_CK_FRAME_ID, ET0) is False
+
+
+@pytest.mark.parametrize(
+    'et', [float('nan'), float('inf'), float('-inf')], ids=['nan', 'inf', 'negative-inf']
+)
+def test_coverage_excludes_a_non_finite_epoch(et: float) -> None:
+    """No interval contains an epoch that is not a number.
+
+    A NaN answers every comparison with False, so it would fall outside by
+    accident rather than by test; an infinity compares equal to itself and
+    would sit inside any window reaching that far.
+
+    Parameters:
+        et: The non-finite epoch asked about.
+    """
+    interval = CoverageInterval(ck_frame_id=CASSINI_CK_FRAME_ID, start_et=-1e300, stop_et=1e300)
+    assert interval.contains(CASSINI_CK_FRAME_ID, et) is False
+
+
+def test_coverage_includes_its_endpoints() -> None:
+    """An epoch exactly at the end of a window is covered."""
+    interval = CoverageInterval(ck_frame_id=CASSINI_CK_FRAME_ID, start_et=1.0, stop_et=2.0)
+    assert interval.contains(CASSINI_CK_FRAME_ID, 2.0) is True
+
+
+@pytest.mark.parametrize(
+    'endpoints',
+    [(np.nan, 1.0), (1.0, np.nan), (-np.inf, 1.0), (1.0, np.inf)],
+    ids=['nan-start', 'nan-stop', 'infinite-start', 'infinite-stop'],
+)
+def test_coverage_refuses_a_non_finite_window(endpoints: tuple[float, float]) -> None:
+    """A window that is not a pair of epochs is refused where it is built.
+
+    Parameters:
+        endpoints: The window's start and stop.
+    """
+    with pytest.raises(ValueError, match='is not finite'):
+        CoverageInterval(
+            ck_frame_id=CASSINI_CK_FRAME_ID, start_et=endpoints[0], stop_et=endpoints[1]
+        )
+
+
+def test_coverage_refuses_a_window_that_ends_before_it_starts() -> None:
+    """A backwards window would cover nothing while looking like a window."""
+    with pytest.raises(ValueError, match=r'ends at 1\.0 before it starts at 2\.0'):
+        CoverageInterval(ck_frame_id=CASSINI_CK_FRAME_ID, start_et=2.0, stop_et=1.0)
+
+
+@pytest.mark.parametrize(
+    ('name', 'expected'),
+    [
+        ('CK-reconstructed', KernelClass.RECONSTRUCTED),
+        ('CK-gapfill', KernelClass.GAPFILL),
+        ('CK-predicted', KernelClass.PREDICTED),
+        ('CK-predicted-v02', KernelClass.PREDICTED),
+        ('CK', KernelClass.UNCLASSIFIED),
+        ('CK-cruise', KernelClass.UNCLASSIFIED),
+    ],
+    ids=['reconstructed', 'gapfill', 'predicted', 'predicted-v02', 'bare', 'cruise'],
+)
+def test_kernel_class_for_directory(name: str, expected: KernelClass) -> None:
+    """Real holdings directory names classify as their names say.
+
+    Parameters:
+        name: The directory name.
+        expected: The class it declares.
+    """
+    assert kernel_class_for_directory(Path('/holdings/Cassini') / name) is expected
+
+
+def test_kernel_class_refuses_a_name_declaring_two_classes() -> None:
+    """A name matching two classes is ambiguous, not resolved by test order."""
+    with pytest.raises(ValueError, match='names more than one kernel class'):
+        kernel_class_for_directory(Path('/holdings/CK-gapfill-reconstructed'))
+
+
+@pytest.mark.parametrize('root', ['.', '/'], ids=['dot', 'separator'])
+def test_kernel_class_refuses_a_path_with_no_name(root: str) -> None:
+    """A path with no final component names no class.
+
+    Parameters:
+        root: A path whose final component is empty.
+    """
+    with pytest.raises(ValueError, match='has no name to classify'):
+        kernel_class_for_directory(Path(root))
+
+
+def test_build_ck_index_refuses_no_directories() -> None:
+    """Scanning nothing would report every image as unreproducible."""
+    with pytest.raises(ValueError, match='no kernel directory to scan'):
+        build_ck_index([])
+
+
+def test_build_ck_index_refuses_a_repeated_directory(tmp_path: Path) -> None:
+    """One directory named twice would offer every file in it twice."""
+    root = tmp_path / 'CK-reconstructed'
+    root.mkdir()
+    with pytest.raises(ValueError, match='named more than once'):
+        build_ck_index([root, root])
+
+
+def test_build_ck_index_refuses_a_missing_directory(tmp_path: Path) -> None:
+    """A mistyped kernel root is refused rather than silently indexed as empty."""
+    with pytest.raises(ValueError, match='does not exist or is not a directory'):
+        build_ck_index([tmp_path / 'CK-reconstructed'])
+
+
+def test_build_ck_index_refuses_a_file_named_as_a_directory(tmp_path: Path) -> None:
+    """A path that is not a directory cannot be scanned."""
+    path = tmp_path / 'CK-reconstructed'
+    path.write_text('not a directory')
+    with pytest.raises(ValueError, match='does not exist or is not a directory'):
+        build_ck_index([path])
+
+
+def test_build_ck_index_refuses_finding_no_kernels(tmp_path: Path) -> None:
+    """An empty index is indistinguishable from every baseline having drifted."""
+    root = tmp_path / 'CK-reconstructed'
+    root.mkdir()
+    with pytest.raises(ValueError, match='no C-kernel found under'):
+        build_ck_index([root])
+
+
+def test_ck_index_refuses_the_same_path_twice() -> None:
+    """One file offered twice would be tried twice and could tie with itself."""
+    ck_file = CkFile(
+        path=Path('/holdings/CK-reconstructed') / _RECONSTRUCTED_NAME,
+        kernel_class=KernelClass.RECONSTRUCTED,
+        coverage=(),
+    )
+    with pytest.raises(ValueError, match='the same path more than once'):
+        CkIndex(files=(ck_file, ck_file))

@@ -78,6 +78,33 @@ def test_from_metadata_reads_the_recorded_block() -> None:
     assert np.array_equal(pointing.cmatrix, np.asarray(_QUARTER_TURN).reshape(3, 3))
 
 
+def test_from_metadata_reads_the_uncorrected_matrix() -> None:
+    """The uncorrected attitude is carried too; it identifies the baseline kernel."""
+    pointing = ImagePointing.from_metadata(_metadata())
+    assert np.array_equal(pointing.cmatrix_original, np.asarray(_QUARTER_TURN).reshape(3, 3))
+
+
+def test_from_metadata_refuses_a_missing_uncorrected_matrix() -> None:
+    """Without it no candidate kernel can be tested against the image."""
+    metadata = _metadata()
+    del metadata['navigation_result']['pointing']['cmatrix_original']
+    with pytest.raises(ValueError, match="pointing has no 'cmatrix_original' field"):
+        ImagePointing.from_metadata(metadata)
+
+
+def test_from_metadata_refuses_a_misshapen_uncorrected_matrix() -> None:
+    """The refusal names the field it read, not the other one."""
+    with pytest.raises(ValueError, match='cmatrix_original must be nine row-major floats'):
+        ImagePointing.from_metadata(_metadata(cmatrix_original=[[float(v)] for v in _QUARTER_TURN]))
+
+
+def test_from_metadata_refuses_an_uncorrected_matrix_that_is_not_a_rotation() -> None:
+    """A baseline that is not an attitude cannot have been one."""
+    scaled = [value * 1.5 for value in _QUARTER_TURN]
+    with pytest.raises(ValueError, match='cmatrix_original is not a proper rotation'):
+        ImagePointing.from_metadata(_metadata(cmatrix_original=scaled))
+
+
 def test_from_metadata_stores_the_matrix_read_only() -> None:
     """The stored C-matrix cannot be mutated behind the writer's back."""
     pointing = ImagePointing.from_metadata(_metadata())
@@ -243,6 +270,7 @@ def test_refuses_a_matrix_of_the_wrong_shape() -> None:
         ImagePointing(
             image_name='N1484573295_1.IMG',
             cmatrix=np.eye(2),
+            cmatrix_original=np.eye(3),
             camera_frame='CASSINI_ISS_NAC',
             ck_frame_id=-82000,
             start_et=_START_ET,

@@ -52,12 +52,14 @@ from spindoctor.spice_ids import CK_OBJECT_SCLK_ID
 
 # The CK objects whose navigated attitude was a frozen, tolerance-snapped
 # lookup rather than an evaluated frame chain.  Their segments carry one
-# constant attitude across the exposure.
-_FROZEN_ATTITUDE_CK_IDS = frozenset({-31100, -32100})
+# constant attitude across the exposure, and the step that identifies which
+# baseline kernel an image navigated against has to make the same snapped
+# lookup rather than evaluating a frame chain, so it reads this set too.
+FROZEN_ATTITUDE_CK_IDS = frozenset({-31100, -32100})
 
 # Every segment is written relative to J2000, which is what the recorded
 # C-matrices are referenced to.
-_BASE_FRAME = 'J2000'
+BASE_FRAME = 'J2000'
 
 # Records go at the exposure start, midtime and stop.  An exposure longer than
 # this gets additional records at the cadence below, so that a long exposure's
@@ -284,7 +286,7 @@ def build_segment(pointing: ImagePointing) -> CkSegment:
     corrected_midtime = _corrected_attitude_at_midtime(pointing)
     attitudes: list[NDArrayFloatType]
     avvs: NDArrayFloatType | None
-    if pointing.ck_frame_id in _FROZEN_ATTITUDE_CK_IDS:
+    if pointing.ck_frame_id in FROZEN_ATTITUDE_CK_IDS:
         # The navigated model assumed one snapped attitude across the whole
         # exposure, so the segment says exactly that.  It carries no angular
         # velocity: a constant attitude has none, and the rigid-attachment
@@ -337,7 +339,7 @@ def write_segment(handle: int, segment: CkSegment) -> None:
         segment.begtim,
         segment.endtim,
         segment.ck_frame_id,
-        _BASE_FRAME,
+        BASE_FRAME,
         segment.has_angular_velocity,
         segment.segid,
         np.asarray(segment.sclkdp, dtype=np.float64),
@@ -446,7 +448,7 @@ def _baseline_attitude(ck_frame_id: int, tick: float) -> NDArrayFloatType:
     Raises:
         OSError: if the furnished kernels provide no pointing there.
     """
-    cmat, _clkout = cspyce.ckgp(ck_frame_id, tick, _LOOKUP_TOL_TICKS, _BASE_FRAME)
+    cmat, _clkout = cspyce.ckgp(ck_frame_id, tick, _LOOKUP_TOL_TICKS, BASE_FRAME)
     return np.asarray(cmat, dtype=np.float64)
 
 
@@ -465,7 +467,7 @@ def _baseline_has_angular_velocity(ck_frame_id: int, tick: float) -> bool:
         True when angular velocity is available there.
     """
     try:
-        cspyce.ckgpav(ck_frame_id, tick, _LOOKUP_TOL_TICKS, _BASE_FRAME)
+        cspyce.ckgpav(ck_frame_id, tick, _LOOKUP_TOL_TICKS, BASE_FRAME)
     except OSError:
         # SPICE reports "this segment carries no angular velocity" and "no
         # pointing here at all" as the same insufficient-data error, so the two
@@ -496,7 +498,7 @@ def _sample_with_angular_velocity(
     velocities: list[NDArrayFloatType] = []
     for tick in ticks:
         try:
-            cmat, av, _clkout = cspyce.ckgpav(ck_frame_id, tick, _LOOKUP_TOL_TICKS, _BASE_FRAME)
+            cmat, av, _clkout = cspyce.ckgpav(ck_frame_id, tick, _LOOKUP_TOL_TICKS, BASE_FRAME)
         except OSError:
             return None
         attitudes.append(np.asarray(cmat, dtype=np.float64))

@@ -583,7 +583,15 @@ accumulates kernels from earlier images -- a superset. So:
    candidates are filtered by CK object and midtime coverage before any
    furnishing. Basenames from provenance resolve against this index; a
    basename found in more than one directory contributes each file as a
-   candidate.
+   candidate. Coverage for a **frozen-attitude (Voyager) object is read
+   with `ckcov`'s tolerance set to the widest tolerance its navigated
+   lookup could have used (80000 ticks)**, which lengthens each interval by
+   that much at both ends: the snapped lookup answers with a record up to
+   its tolerance away from the epoch asked for, so an image navigated
+   through the fallback tolerance has a midtime outside the segment window
+   by construction, and a tol-zero filter would drop the only candidate
+   that reproduces it. The filter is only a filter -- reproduction decides
+   -- so it is widened rather than tightened.
 2. **Per image** (grouped by candidate set so the kernel pool is switched
    per group, not per image): furnish the supporting kernels (LSK, SCLK,
    FK) plus one candidate CK at a time, evaluate the original attitude at
@@ -619,7 +627,15 @@ attitude at midtime either way, so Phase A needs no special case, but a
 Voyager image navigated through that fallback is reproduced only at the
 80000-tick tolerance. The reproduction step should try `800 + exposure_s/48`
 first and 80000 second; an image that reproduces under neither is a genuine
-`no_reproducing_baseline`.
+`no_reproducing_baseline`. **Each attempt encodes the epoch the way the call
+it reproduces encodes it**: `sce2t` (a whole tick) for the first, because
+that is what `voyager/iss.py` calls, and `sce2c` (a fractional tick) for the
+second, because `SpiceType1Frame.transform_at_time` calls `sce2c`. The two
+are not interchangeable on a baseline that interpolates between records --
+measured on a 1/256 s clock, a midtime 3 ms off a tick boundary reads two
+attitudes 2.7e-6 rad apart, three orders above the reproduction bound -- and
+on a type 1 baseline, which is what the real Voyager kernels are, they
+usually find the same record.
 
 **Omission reasons**, the complete set: `not_eligible`, `botsim_loser`,
 `rotation_unsupported`, `no_reproducing_baseline`, `degenerate_exposure`
@@ -688,11 +704,15 @@ validates against it. Both keep their own error type and message.
 
 The `cspyce` surface the writer needs, all present in the installed 2.3.6:
 `furnsh`, `unload`, `kclear`, `pxform`, `frmnam`, `namfrm`, `ckmeta`,
-`sce2c`, `sce2s`, `ckobj`, `ckcov`, `ckgp`, `ckgpav`, `m2q`, `ckopn`,
-`ckw03`, `ckcls`, `dafopw`, `dafac`, `dafcls`, `dafopr`, `dafec`. One
+`sce2c`, `sce2t`, `sce2s`, `ckobj`, `ckcov`, `ckgp`, `ckgpav`, `ktotal`,
+`m2q`, `ckopn`, `ckw03`, `ckcls`, `dafopw`, `dafac`, `dafcls`, `dafopr`,
+`dafec`. One
 global to respect: `cspyce.use_errors()` / `use_flags()` is process-wide
 and shared with oops; the writer assumes the exceptions regime
-(`use_errors`, the package default) and must never flip it.
+(`use_errors`, the package default) and must never flip it. `ktotal('CK')`
+is how the assignment step refuses to run with a stray C-kernel furnished,
+which would answer the reproduction lookups alongside the candidate under
+test.
 
 ---
 

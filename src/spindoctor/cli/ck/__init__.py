@@ -33,6 +33,25 @@ process-wide and shared with oops.  This package assumes the exceptions regime
 (``use_errors``, the package default) and never flips it.
 """
 
+from spindoctor.cli.ck.assignment import (
+    Assignment,
+    OutputGroup,
+    assign_images,
+    attitudes_reproduce,
+    group_for_output,
+    output_basename,
+    reproduces_baseline,
+    rotation_angle_rad,
+)
+from spindoctor.cli.ck.images import ImageEntry, OmissionReason, botsim_losers
+from spindoctor.cli.ck.index import (
+    CkFile,
+    CkIndex,
+    CoverageInterval,
+    KernelClass,
+    build_ck_index,
+    kernel_class_for_directory,
+)
 from spindoctor.cli.ck.pointing import ImagePointing
 from spindoctor.cli.ck.segment import (
     CkSegment,
@@ -42,9 +61,26 @@ from spindoctor.cli.ck.segment import (
 )
 
 __all__ = [
+    'Assignment',
+    'CkFile',
+    'CkIndex',
     'CkSegment',
+    'CoverageInterval',
+    'ImageEntry',
     'ImagePointing',
+    'KernelClass',
+    'OmissionReason',
+    'OutputGroup',
+    'assign_images',
+    'attitudes_reproduce',
+    'botsim_losers',
+    'build_ck_index',
     'build_segment',
+    'group_for_output',
+    'kernel_class_for_directory',
+    'output_basename',
+    'reproduces_baseline',
     'resolve_sclk_id',
+    'rotation_angle_rad',
     'write_segment',
 ]
