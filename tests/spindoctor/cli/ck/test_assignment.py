@@ -43,6 +43,8 @@ from spindoctor.cli.ck.images import ImageEntry, OmissionReason
 from spindoctor.cli.ck.index import (
     SNAPPED_LOOKUP_TOL_TICKS,
     CkFile,
+    CkIndex,
+    CoverageInterval,
     KernelClass,
     build_ck_index,
 )
@@ -1031,4 +1033,34 @@ def test_an_image_at_the_edge_of_the_snapped_lookup_is_still_assigned(
     )
     index = build_ck_index([root])
     assignments = assign_images([_discrete_entry(offset_ticks)], index)
+    assert assignments[0].baseline is not None
+
+
+def test_a_candidate_named_by_a_url_is_fetched_before_it_is_furnished(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """SPICE furnishes a kernel by local name, so a kernel named by a URL is fetched.
+
+    A kernel tree can live somewhere SPICE cannot open, which is how the
+    holdings are named in continuous integration.  Handing the name through
+    unchanged furnishes nothing, and every image is then reported as having no
+    reproducing baseline.
+    """
+    root = tmp_path / 'CK-reconstructed'
+    path = _write_candidate(root, _TRUE_NAME)
+    index = CkIndex(
+        files=(
+            CkFile(
+                path=FCPath(f'file://{path}'),
+                kernel_class=KernelClass.RECONSTRUCTED,
+                coverage=(
+                    CoverageInterval(
+                        ck_frame_id=CASSINI_CK_FRAME_ID, start_et=ET0, stop_et=ET0 + 4.0
+                    ),
+                ),
+            ),
+        )
+    )
+    entry = _entry(cmatrix_original=_cassini_recorded(pool), kernels=(_TRUE_NAME,))
+    assignments = assign_images([entry], index)
     assert assignments[0].baseline is not None

@@ -302,7 +302,9 @@ def botsim_losers(entries: Sequence[ImageEntry]) -> frozenset[str]:
         starts.sort()
     losers: set[str] = set()
     for entry, pointing in members:
-        if entry.camera != BOTSIM_YIELDING_CAMERA:
+        # Every member is one of the two cameras, so not the winner is the one
+        # that yields; nothing else reaches this loop.
+        if entry.camera == BOTSIM_WINNING_CAMERA:
             continue
         starts = winners.get(pointing.ck_frame_id, [])
         if _has_start_within(starts, pointing.start_et, BOTSIM_WINDOW_S):
