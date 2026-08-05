@@ -441,6 +441,11 @@ class NavOrchestrator(NavBase):
         Returns:
             ``result`` with its ``pointing`` field populated, or ``result``
             unchanged when no attitude could be computed.
+
+        Raises:
+            Exception: Anything other than ``NavPointingError`` raised by the
+                attitude computation propagates unchanged, so that a defect
+                there surfaces instead of being absorbed.
         """
         instrument = obs_class_to_inst_name(type(obs))
         try:
@@ -885,12 +890,23 @@ class NavOrchestrator(NavBase):
         technique X run on image Y" from the log alone.
 
         A misbehaving NavTechnique is logged with a full traceback and
-        treated as if it produced no result.  Catching every exception is
-        intentional for the same reason as ``_extract_features``: no
-        image-data problem raises through to the caller, failures land on
-        the returned ``NavResult``.  ``NavContractError`` is exempt (see
-        ``_extract_features``): it is logged at error level and re-raised
-        for :meth:`navigate` to convert into a failed ``NavResult``.
+        omitted from the returned list, exactly as if it had produced no
+        result; the other techniques still contribute, so the navigation
+        can still succeed on their evidence.  Catching every exception is
+        intentional for the same reason as ``_extract_features``: one
+        technique's defect must not fail the image.  ``NavContractError``
+        is exempt (see ``_extract_features``): it is logged at error level
+        and re-raised for :meth:`navigate` to convert into a failed
+        ``NavResult``.
+
+        Returns:
+            One entry per technique that ran and produced a result, in
+            registry order.  A skipped, infeasible, or failed technique
+            contributes no entry, so the list may be empty.
+
+        Raises:
+            NavContractError: Propagated from a technique that violated an
+                internal invariant, for :meth:`navigate` to convert.
         """
         results: list[NavTechniqueResult] = []
         names = [
