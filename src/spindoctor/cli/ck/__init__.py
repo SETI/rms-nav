@@ -21,6 +21,13 @@ library.  That table is the check against ``ckmeta`` computing a clock id
 rather than validating one, so a second copy of it here would be a silent way
 for the check to rot on one side while it kept passing on the other.
 
+This package is part of the ``spindoctor.cli`` tree, which holds the command
+line programs and the helpers only they use; the importable library API is the
+rest of ``spindoctor``.  Its names are therefore reachable and documented in
+place, but they are not published API and have no page in the API reference,
+which covers the library packages -- the same footing as every other
+``spindoctor.cli`` subpackage.
+
 One global to respect: ``cspyce.use_errors()`` / ``cspyce.use_flags()`` is
 process-wide and shared with oops.  This package assumes the exceptions regime
 (``use_errors``, the package default) and never flips it.

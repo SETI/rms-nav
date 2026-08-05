@@ -143,6 +143,36 @@ def test_from_metadata_refuses_a_negative_exposure() -> None:
         ImagePointing.from_metadata(_metadata(exposure_s=-1.0))
 
 
+@pytest.mark.parametrize(
+    'exposure_s',
+    [float('nan'), float('inf'), float('-inf')],
+    ids=['nan', 'inf', 'negative-inf'],
+)
+def test_from_metadata_refuses_a_non_finite_exposure(exposure_s: float) -> None:
+    """A non-finite duration is refused rather than carried into the cadence.
+
+    A NaN in particular passes a negativity test, since every comparison
+    against it is False, and would reach the record-cadence arithmetic
+    unnoticed.
+    """
+    with pytest.raises(ValueError, match='exposure_s is not finite'):
+        ImagePointing.from_metadata(_metadata(exposure_s=exposure_s))
+
+
+@pytest.mark.parametrize(
+    'field', ['start_et', 'stop_et', 'midtime_et'], ids=['start', 'stop', 'midtime']
+)
+def test_from_metadata_refuses_a_non_finite_epoch(field: str) -> None:
+    """A non-finite epoch is refused before it reaches a clock encoding.
+
+    The ordering check catches a NaN epoch only as a side effect of every
+    comparison against NaN being False; an infinite one satisfies the ordering
+    outright.
+    """
+    with pytest.raises(ValueError, match=f'{field} is not finite'):
+        ImagePointing.from_metadata(_metadata(**{field: float('inf')}))
+
+
 def test_from_metadata_refuses_an_empty_image_name() -> None:
     """A segment must name the image it corrects."""
     with pytest.raises(ValueError, match='image_name is empty'):

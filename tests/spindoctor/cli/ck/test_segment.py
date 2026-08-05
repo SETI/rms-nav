@@ -11,6 +11,7 @@ sign flip alike.
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import cspyce
 import numpy as np
@@ -34,7 +35,7 @@ from tests.spindoctor.cli.ck.conftest import (
 )
 
 from spindoctor.cli.ck.pointing import ImagePointing, NDArrayFloatType
-from spindoctor.cli.ck.segment import CkSegment, build_segment, resolve_sclk_id, write_segment
+from spindoctor.cli.ck.segment import CkSegment, build_segment, resolve_sclk_id
 
 # The correction the tests plant, expressed in the CK object's own frame.  It is
 # far larger than a navigated correction ever is and turns about an axis shared
@@ -146,9 +147,7 @@ def _build_case(
     )
     segment = build_segment(pointing)
     corrected_path = pool.root / 'corrected.bc'
-    handle = cspyce.ckopn(str(corrected_path), 'corrected', 0)
-    write_segment(handle, segment)
-    cspyce.ckcls(handle)
+    write_ck(corrected_path, [segment])
     return _Case(
         pointing=pointing,
         segment=segment,
@@ -565,6 +564,24 @@ def test_segment_refuses_an_angular_velocity_count_mismatch() -> None:
             sclkdp=np.array([1.0, 2.0]),
             quats=quats,
             avvs=np.zeros((1, 3)),
+        )
+
+
+@pytest.mark.parametrize('sclkdp', [np.float64(1.0), 1.0], ids=['numpy-scalar', 'python-float'])
+def test_segment_refuses_a_scalar_time_tag(sclkdp: object) -> None:
+    """A scalar where the record array belongs is refused, and by the documented type.
+
+    A zero-dimensional array has no length to read, so the shape guard has to
+    run before anything indexes it; otherwise the failure is an ``IndexError``
+    from inside the guard's own arithmetic.
+    """
+    with pytest.raises(ValueError, match=r'sclkdp must hold at least one time tag; got shape \(\)'):
+        CkSegment(
+            ck_frame_id=CASSINI_CK_FRAME_ID,
+            segid='scalar',
+            sclkdp=cast(NDArrayFloatType, sclkdp),
+            quats=np.vstack([cspyce.m2q(np.eye(3))]),
+            avvs=None,
         )
 
 

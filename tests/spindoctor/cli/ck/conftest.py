@@ -306,14 +306,21 @@ def baseline_segment(
 def write_ck(path: Path, segments: Sequence[CkSegment]) -> None:
     """Write segments to a new C-kernel.
 
+    The handle is closed even when a write raises.  SPICE caps the number of
+    DAF files open at once, so a handle leaked by a test that exercises a
+    failure path would go on to break an unrelated ``ckopn`` later in the same
+    worker, with an error naming neither the leak nor its cause.
+
     Parameters:
         path: File to create.
         segments: The segments to add, in order.
     """
     handle = cspyce.ckopn(str(path), 'baseline', 0)
-    for segment in segments:
-        write_segment(handle, segment)
-    cspyce.ckcls(handle)
+    try:
+        for segment in segments:
+            write_segment(handle, segment)
+    finally:
+        cspyce.ckcls(handle)
 
 
 def write_baseline_ck(

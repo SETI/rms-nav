@@ -12,6 +12,7 @@ oops, and a kernel writer that imports oops defeats the point of writing
 kernels.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -49,7 +50,8 @@ class ImagePointing:
 
     Raises:
         ValueError: if ``image_name`` is empty, if ``cmatrix`` is not a 3x3
-            proper orthonormal rotation, if the three epochs are not ordered
+            proper orthonormal rotation, if any epoch or ``exposure_s`` is not
+            finite, if the three epochs are not ordered
             ``start <= midtime <= stop``, or if ``exposure_s`` is negative.
     """
 
@@ -67,6 +69,18 @@ class ImagePointing:
         object.__setattr__(self, 'cmatrix', _as_rotation(self.cmatrix, 'cmatrix'))
         if len(self.image_name) == 0:
             raise ValueError('image_name is empty; a segment must name the image it corrects')
+        # Checked before the comparisons below, which a NaN would answer with
+        # False rather than refuse, and which an infinite epoch would satisfy
+        # outright.  Every one of these values reaches a clock encoding or a
+        # record cadence, where a non-finite value stops being attributable.
+        for field, value in (
+            ('start_et', self.start_et),
+            ('stop_et', self.stop_et),
+            ('midtime_et', self.midtime_et),
+            ('exposure_s', self.exposure_s),
+        ):
+            if not math.isfinite(value):
+                raise ValueError(f'{field} is not finite for {self.image_name}: {value!r}')
         if not self.start_et <= self.midtime_et <= self.stop_et:
             raise ValueError(
                 f'exposure epochs are out of order for {self.image_name}: start {self.start_et!r}, '

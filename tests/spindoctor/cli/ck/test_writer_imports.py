@@ -12,6 +12,12 @@ import json
 import subprocess
 import sys
 
+import pytest
+
+# An import that hangs -- a module blocking on a network resource, say -- would
+# otherwise stall the run with no failure to read.
+_PROBE_TIMEOUT_S = 120.0
+
 _PROBE = """
 import json
 import sys
@@ -27,8 +33,14 @@ print(json.dumps({'forbidden': forbidden, 'loaded': sorted(sys.modules)}))
 """
 
 
-def _probe_modules() -> dict[str, list[str]]:
+@pytest.fixture(scope='module')
+def probed_modules() -> dict[str, list[str]]:
     """Import the writer package in a fresh interpreter and report sys.modules.
+
+    The interpreter is a real subprocess, which is the whole point: the
+    guarantee is about what an import does from nothing, and this process has
+    already imported oops for other tests.  What is reused across the two tests
+    below is only the answer that one subprocess gave.
 
     Returns:
         A dict with the forbidden modules that loaded and every module that
@@ -39,18 +51,20 @@ def _probe_modules() -> dict[str, list[str]]:
         capture_output=True,
         text=True,
         check=True,
+        timeout=_PROBE_TIMEOUT_S,
     )
     result: dict[str, list[str]] = json.loads(completed.stdout)
     return result
 
 
-def test_writer_package_loads_no_oops_and_no_support() -> None:
+def test_writer_package_loads_no_oops_and_no_support(
+    probed_modules: dict[str, list[str]],
+) -> None:
     """Importing the writer pulls in neither oops nor spindoctor.support."""
-    assert _probe_modules()['forbidden'] == []
+    assert probed_modules['forbidden'] == []
 
 
-def test_writer_package_really_imported() -> None:
+def test_writer_package_really_imported(probed_modules: dict[str, list[str]]) -> None:
     """The probe proves its own point only if the writer actually loaded."""
-    loaded = _probe_modules()['loaded']
-    assert 'spindoctor.cli.ck.segment' in loaded
-    assert 'cspyce' in loaded
+    assert 'spindoctor.cli.ck.segment' in probed_modules['loaded']
+    assert 'cspyce' in probed_modules['loaded']

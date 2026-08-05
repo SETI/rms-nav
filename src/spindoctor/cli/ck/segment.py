@@ -112,9 +112,9 @@ class CkSegment:
         """
         sclkdp = np.array(self.sclkdp, dtype=np.float64)
         quats = np.array(self.quats, dtype=np.float64)
-        count = sclkdp.shape[0]
-        if sclkdp.ndim != 1 or count == 0:
+        if sclkdp.ndim != 1 or sclkdp.size == 0:
             raise ValueError(f'sclkdp must hold at least one time tag; got shape {sclkdp.shape}')
+        count = sclkdp.shape[0]
         if quats.shape != (count, 4):
             raise ValueError(f'quats must have shape {(count, 4)}; got {quats.shape}')
         avvs = None if self.avvs is None else np.array(self.avvs, dtype=np.float64)
@@ -282,8 +282,10 @@ def write_segment(handle: int, segment: CkSegment) -> None:
         segment: The segment to add.
 
     Raises:
-        ValueError: if SPICE refuses the record set, for example because the
-            time tags are not strictly increasing.
+        OSError: if SPICE refuses the write, for example because the handle is
+            not open for writing or the file cannot be extended.  The record
+            set itself is already valid: ``CkSegment`` enforces the count,
+            width and strictly-increasing invariants when it is constructed.
     """
     avvs = segment.avvs
     if avvs is None:
