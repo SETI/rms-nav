@@ -45,6 +45,21 @@ class ObsInst(ABC):
         """
         ...
 
+    @property
+    def shutter_mode(self) -> str | None:
+        """The shutter mode this observation was taken in.
+
+        Instruments that can expose more than one camera at once name the
+        mode here, because two cameras exposed simultaneously share one
+        spacecraft attitude and a consumer cannot tell that from the times
+        alone.  Instruments whose labels carry no such field return None.
+
+        Returns:
+            The instrument's shutter mode string, or None when the host
+            exposes none.
+        """
+        return None
+
     @staticmethod
     @abstractmethod
     def from_file(

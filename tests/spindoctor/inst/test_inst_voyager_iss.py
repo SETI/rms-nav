@@ -138,3 +138,9 @@ def test_star_max_usable_vmag_non_positive_exposure_returns_anchor() -> None:
     """A non-positive exposure falls back to the anchor magnitude."""
     obs = _make_obs('NAC', 0.0)
     assert obs.star_max_usable_vmag() == pytest.approx(_VOYAGER_NAC_ANCHOR, abs=1e-6)
+
+
+def test_voyager_iss_reports_spacecraft_digit() -> None:
+    """The spacecraft digit is read from the image label."""
+    obs = obstvgiss.ObsVoyagerISS.from_file(URL_VOYAGER_ISS_IO_01)
+    assert obs.spacecraft_digit == '2'

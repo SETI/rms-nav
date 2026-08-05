@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 from filecache import FCPath
 from PIL import Image
 
@@ -42,7 +43,9 @@ from spindoctor.support.summary_png import (
 class _FakeSnapshot:
     """Minimal stand-in for ObsSnapshotInst used by the driver tests."""
 
-    def __init__(self, *, blank: bool = False, midtime: float = 100.0) -> None:
+    def __init__(
+        self, *, blank: bool = False, midtime: float = 100.0, shutter_mode: str | None = None
+    ) -> None:
         rng = np.random.default_rng(seed=99)
         if blank:
             self.data = np.zeros((32, 32), np.float64)
@@ -56,15 +59,34 @@ class _FakeSnapshot:
         self.midtime = midtime
         # Stands in for ObsInst.camera, written to observation.camera.
         self.camera = 'NAC'
+        # Stands in for ObsInst.shutter_mode, written to
+        # observation.shutter_mode when the host exposes one.
+        self.shutter_mode = shutter_mode
 
     def extfov_data_sensor_mask(self) -> np.ndarray:
         return self._sensor_mask
+
+
+@pytest.fixture(autouse=True)
+def _fakes_report_as_simulated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Report this module's fake observations as simulated.
+
+    ``obs_class_to_inst_name`` cannot identify a test fake and returns
+    ``'unknown'``, which the orchestrator treats as a build defect and
+    warns about.  These fakes stand in for an observation carrying no SPICE
+    camera frame, which is exactly what a simulated image is, so they report
+    that instead of shaping the production set around the test suite.
+    """
+    monkeypatch.setattr(
+        'spindoctor.nav_orchestrator.orchestrator.obs_class_to_inst_name', lambda cls: 'sim'
+    )
 
 
 def _make_fake_obs_class(
     *,
     blank: bool = False,
     raise_on_load: BaseException | None = None,
+    shutter_mode: str | None = None,
 ) -> type:
     """Build a fresh per-test ``obs_class`` shim with controllable behavior.
 
@@ -74,13 +96,14 @@ def _make_fake_obs_class(
     """
     captured_blank = blank
     captured_raise = raise_on_load
+    captured_shutter_mode = shutter_mode
 
     class _FakeObsClass:
         @classmethod
         def from_file(cls, path: Any, **kwargs: Any) -> _FakeSnapshot:
             if captured_raise is not None:
                 raise captured_raise
-            return _FakeSnapshot(blank=captured_blank)
+            return _FakeSnapshot(blank=captured_blank, shutter_mode=captured_shutter_mode)
 
     return _FakeObsClass
 
@@ -167,6 +190,32 @@ def test_navigate_image_files_records_camera(tmp_path: Path) -> None:
         write_output_files=False,
     )
     assert metadata['observation']['camera'] == 'NAC'
+
+
+def test_navigate_image_files_records_shutter_mode(tmp_path: Path) -> None:
+    """A host that exposes a shutter mode writes observation.shutter_mode."""
+    obs_class = _make_fake_obs_class(shutter_mode='BOTSIM')
+    image_files = _make_image_files(tmp_path)
+    _success, metadata = navigate_image_files(
+        obs_class,
+        image_files,
+        FCPath(str(tmp_path / 'results')),
+        write_output_files=False,
+    )
+    assert metadata['observation']['shutter_mode'] == 'BOTSIM'
+
+
+def test_navigate_image_files_omits_absent_shutter_mode(tmp_path: Path) -> None:
+    """A host that exposes no shutter mode leaves the field out entirely."""
+    obs_class = _make_fake_obs_class()
+    image_files = _make_image_files(tmp_path)
+    _success, metadata = navigate_image_files(
+        obs_class,
+        image_files,
+        FCPath(str(tmp_path / 'results')),
+        write_output_files=False,
+    )
+    assert 'shutter_mode' not in metadata['observation']
 
 
 def test_navigate_image_files_load_error_records_index_epoch_and_camera(tmp_path: Path) -> None:

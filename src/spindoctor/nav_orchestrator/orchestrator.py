@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 
 from spindoctor.annotation import Annotations
-from spindoctor.config import Config, logged_section
+from spindoctor.config import MAIN_LOGGER, Config, logged_section
 from spindoctor.feature.feature import NavFeature
 from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.feature.reliability import FeatureReliabilityGate, GatedFeatureRecord
@@ -62,6 +62,8 @@ from spindoctor.nav_technique.nav_technique import (
     technique_tier,
 )
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
+from spindoctor.obs import obs_class_to_inst_name
+from spindoctor.support.cmatrix import compute_pointing
 from spindoctor.support.exceptions import NavContractError
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec, apply_filter
 from spindoctor.support.image_quality import cosmic_ray_mask, saturation_mask
@@ -131,6 +133,17 @@ _HARD_FAILURE_TO_REASON: dict[ImageClass, NavStatusReason] = {
 Maps each hard-failure ``ImageClass`` to the matching ``NavStatusReason``
 returned by the orchestrator's preflight.  Reading from this dict is the
 sole admission test for the hard-failure short-circuit.
+"""
+
+_INSTRUMENTS_WITHOUT_SPICE_FRAMES = frozenset({'sim'})
+"""Instruments that are expected to record no corrected attitude.
+
+A simulated image has no spacecraft and no furnished camera frame, so it is
+the one case where recording no attitude is the right outcome.  Everything
+else reaching the same path is missing its frame mapping, which is a build
+defect and is reported as such rather than passing silently -- including an
+observation class the registry cannot identify at all, which carries the
+least information of any case and is the last one that should be silenced.
 """
 
 
@@ -346,11 +359,14 @@ class NavOrchestrator(NavBase):
     def navigate(self, obs: ObsSnapshotInst) -> NavResult:
         """Run the full pipeline on one observation.
 
-        Never raises through to the caller: plugin failures are sandboxed
-        (see ``_extract_features`` / ``_run_pass``), and a
+        No image-data problem raises through to the caller: plugin failures
+        are sandboxed (see ``_extract_features`` / ``_run_pass``), and a
         ``NavContractError`` (an internal invariant violated by upstream
         code) is logged at error level and converted into a failed
         ``NavResult`` with ``NavStatusReason.CONTRACT_VIOLATION``.
+
+        A programming error inside :meth:`with_pointing`'s attitude
+        computation does propagate, by design: see that method.
 
         Parameters:
             obs: The observation snapshot to navigate.
@@ -362,13 +378,16 @@ class NavOrchestrator(NavBase):
         context, image_classifier = self._make_context(obs, provenance)
         self._log_classifier_verdict(image_classifier)
         if image_classifier.image_class in _HARD_FAILURE_TO_REASON:
-            return self._fail(
-                status_reason=_HARD_FAILURE_TO_REASON[image_classifier.image_class],
-                image_classifier=image_classifier,
-                provenance=provenance,
+            return self.with_pointing(
+                self._fail(
+                    status_reason=_HARD_FAILURE_TO_REASON[image_classifier.image_class],
+                    image_classifier=image_classifier,
+                    provenance=provenance,
+                ),
+                obs,
             )
         try:
-            return self._navigate_pipeline(
+            result = self._navigate_pipeline(
                 context=context,
                 image_classifier=image_classifier,
                 provenance=provenance,
@@ -380,11 +399,94 @@ class NavOrchestrator(NavBase):
                 'failing this image with status_reason=contract_violation',
                 str(exc),
             )
-            return self._fail(
+            result = self._fail(
                 status_reason=NavStatusReason.CONTRACT_VIOLATION,
                 image_classifier=image_classifier,
                 provenance=provenance,
             )
+        return self.with_pointing(result, obs)
+
+    def with_pointing(self, result: NavResult, obs: ObsSnapshotInst) -> NavResult:
+        """Stamp a result with the corrected-attitude solution for its image.
+
+        :meth:`navigate` applies this to every result it returns.  The
+        manual-navigation driver, which builds its own ``NavResult`` outside
+        the autonomous pipeline, calls it directly so an operator-picked
+        offset carries the same recorded attitude.
+
+        The uncorrected attitude, frame identities and exposure times are
+        recorded for every result; a corrected C-matrix additionally requires
+        an offset and no fitted camera rotation.
+
+        A host with no SPICE camera frame this build knows records nothing:
+        that is expected for a simulated image, and reported as a warning for
+        any other instrument, which means the instrument was added without
+        its frame mapping.
+
+        A pointing solution is recorded metadata rather than the navigation
+        itself, so an attitude the environment cannot supply is reported to
+        both logs and simply not recorded, and no wrong C-matrix ever
+        reaches a kernel.  The absorbed set is ``LookupError``, ``OSError``,
+        ``RuntimeError`` and ``ValueError`` -- the computation's own guards
+        plus what cspyce raises for a missing frame, an unreadable kernel or
+        a SPICE error.  Anything else, an ``AttributeError`` or
+        ``TypeError`` from a defect in the computation itself, propagates by
+        design, so a broken build fails on the first image rather than
+        silently dropping pointing from a whole batch.
+
+        Parameters:
+            result: The result to stamp.
+            obs: The observation it was produced from.
+
+        Returns:
+            ``result`` with its ``pointing`` field populated, or ``result``
+            unchanged when no attitude could be computed.
+        """
+        instrument = obs_class_to_inst_name(type(obs))
+        try:
+            pointing = compute_pointing(
+                obs,
+                offset_px=result.offset_px,
+                rotation_fitted=result.rotation_rad is not None,
+            )
+        except (LookupError, OSError, RuntimeError, ValueError) as exc:
+            # The exception set is exactly what the computation can legitimately
+            # raise: its own ValueError guards, and the LookupError / OSError /
+            # RuntimeError / ValueError family cspyce raises for a missing
+            # frame, an unreadable kernel or a SPICE error.  A TypeError or
+            # AttributeError from a defect in the computation itself is
+            # deliberately not caught, so a broken build fails loudly on the
+            # first image instead of quietly dropping pointing from a whole
+            # batch.
+            self._logger.exception('Could not compute the corrected pointing: %s', exc)
+            MAIN_LOGGER.error(
+                'Corrected pointing not recorded for this %s image: %s', instrument, exc
+            )
+            return result
+        if pointing is None:
+            if instrument in _INSTRUMENTS_WITHOUT_SPICE_FRAMES:
+                self._logger.debug(
+                    'Instrument %s has no SPICE camera frame; pointing not recorded', instrument
+                )
+            else:
+                self._logger.warning(
+                    'No SPICE camera frame is mapped for instrument %s; pointing not recorded',
+                    instrument,
+                )
+                MAIN_LOGGER.warning(
+                    'No SPICE camera frame is mapped for instrument %s; no image of it can '
+                    'carry a corrected attitude',
+                    instrument,
+                )
+            return result
+        self._logger.info(
+            'Recorded pointing: camera frame %s (%d), CK object %d, corrected cmatrix %s',
+            pointing.baseline.camera_frame,
+            pointing.baseline.camera_frame_id,
+            pointing.baseline.ck_frame_id,
+            'present' if pointing.cmatrix is not None else 'withheld',
+        )
+        return dataclasses.replace(result, pointing=pointing)
 
     def _navigate_pipeline(
         self,

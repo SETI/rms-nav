@@ -34,6 +34,28 @@ The constants are chosen tighter than the per-image tolerance budget so the JSON
 is byte-identical across runs of the same input — a regression-baseline comparator can
 diff the JSON directly.
 
+Corrected pointing
+------------------
+
+When the orchestrator could determine the observation's attitude, the
+:class:`~spindoctor.nav_orchestrator.nav_result.NavResult` carries a
+:class:`~spindoctor.support.cmatrix.PointingSolution` and the curator emits two further
+blocks under ``navigation_result``:
+
+- ``pointing`` — ``cmatrix_original`` (the uncorrected J2000-to-camera rotation the
+  furnished kernels gave at navigation time), ``cmatrix`` (the same rotation corrected
+  by the navigated offset), ``camera_frame``, ``camera_frame_id`` and ``ck_frame_id``.
+  Both matrices are nine row-major floats in the SPICE camera-frame convention at the
+  exposure midtime. ``cmatrix`` is present only when the navigation produced an offset
+  and fitted no camera rotation.
+- ``times`` — ``start_et``, ``stop_et``, ``midtime_et``, ``exposure_s`` and the three
+  spacecraft-clock strings ``sclk_start``, ``sclk_midtime`` and ``sclk_stop``.
+
+Both blocks are written unrounded, against the policy above. A consumer identifies the
+kernel an image navigated against by reproducing ``cmatrix_original`` to within a
+nanoradian and defines a segment interval from the exact exposure epochs, and rounding
+would put the recorded values outside those bounds.
+
 Allow-list discipline
 ---------------------
 

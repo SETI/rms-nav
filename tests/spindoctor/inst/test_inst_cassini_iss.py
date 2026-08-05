@@ -30,3 +30,13 @@ def test_cassini_iss_calib_filename_selects_calib_inst_config() -> None:
     assert 'saturation_threshold_if' not in iqt
     assert 'blank_max_if' in iqt
     assert 'noisy_threshold_if' in iqt
+
+
+def test_cassini_iss_reports_shutter_mode() -> None:
+    """The shutter mode is read from the image label.
+
+    The Rhea test frame was taken with both cameras exposed at once, so it
+    reports the simultaneous mode rather than a single-camera one.
+    """
+    obs = obstcoiss.ObsCassiniISS.from_file(URL_CASSINI_ISS_RHEA_01)
+    assert obs.shutter_mode == 'BOTSIM'
