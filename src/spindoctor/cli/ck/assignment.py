@@ -20,8 +20,10 @@ How the attitude is asked for follows how it was navigated.  Most instruments
 evaluate a frame chain at the exposure midtime, which ``pxform`` reproduces.
 Voyager does not: its observation frame is frozen from a single
 tolerance-snapped pointing lookup, so reproducing it means making the same
-lookup, at the same whole clock tick, with the same tolerance, and composing
-the same fixed platform-to-camera rotation on top.
+lookup, at the same clock tick, with the same tolerance, and composing the same
+fixed platform-to-camera rotation on top.  There are two such lookups to try,
+because oops falls back to a second, far wider tolerance when the first finds
+nothing, and each encodes the epoch its own way.
 
 The caller owns the kernel pool.  The supporting kernels -- leapseconds, the
 spacecraft clock navigation used, and the frame kernel defining the camera and
@@ -54,7 +56,7 @@ REPRODUCTION_TOL_RAD = 1e-9
 # term in the exposure.  When that lookup finds nothing, oops falls back to a
 # frame registered at a far wider tolerance, so a baseline is tried at both.
 _SNAPPED_TOL_TICKS = 800.0
-_SNAPPED_TOL_TICKS_PER_EXPOSURE_S = 1.0 / 48.0
+_SNAPPED_TOL_EXPOSURE_DIVISOR = 48.0
 _SNAPPED_FALLBACK_TOL_TICKS = 80000.0
 
 # The fixed rotation from a frozen-attitude object's frame to the camera frame
@@ -293,11 +295,11 @@ def _baseline_attitudes(pointing: ImagePointing) -> Iterator[NDArrayFloatType]:
             yield chained
         return
     sclk_id = resolve_sclk_id(pointing.ck_frame_id)
-    snapped_tol = _SNAPPED_TOL_TICKS + pointing.exposure_s * _SNAPPED_TOL_TICKS_PER_EXPOSURE_S
+    snapped_tol = _SNAPPED_TOL_TICKS + pointing.exposure_s / _SNAPPED_TOL_EXPOSURE_DIVISOR
     # oops encodes the midtime as a whole tick for the primary lookup and
-    # continuously for the wider fallback; both are reproduced as
-    # they are made, since a truncated tick and a fractional one can land on
-    # different pointing records.
+    # continuously for the wider fallback, so each is reproduced as it is
+    # made: a whole tick and a fractional one land on different attitudes
+    # wherever the baseline interpolates between its records.
     for tick, tolerance in (
         (float(cspyce.sce2t(sclk_id, pointing.midtime_et)), snapped_tol),
         (float(cspyce.sce2c(sclk_id, pointing.midtime_et)), _SNAPPED_FALLBACK_TOL_TICKS),
