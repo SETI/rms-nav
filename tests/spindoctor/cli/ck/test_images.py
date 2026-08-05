@@ -124,6 +124,18 @@ def test_a_result_without_a_corrected_matrix_is_not_eligible() -> None:
     assert entry.ineligibility_reason is OmissionReason.NOT_ELIGIBLE
 
 
+def test_a_navigated_image_with_no_pointing_block_is_not_eligible() -> None:
+    """A run whose attitude computation failed records a result and no pointing.
+
+    The pipeline reports that failure and leaves the block out rather than
+    recording a wrong attitude, so the image navigated but cannot be written.
+    """
+    metadata = _metadata()
+    del metadata['navigation_result']['pointing']
+    entry = ImageEntry.from_metadata(metadata)
+    assert entry.ineligibility_reason is OmissionReason.NOT_ELIGIBLE
+
+
 def test_a_load_error_document_is_not_eligible() -> None:
     """An image that never loaded has no navigation result at all."""
     metadata = _metadata()

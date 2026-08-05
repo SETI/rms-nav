@@ -150,10 +150,11 @@ def output_basename(basename: str) -> str:
 
     Raises:
         ValueError: if the name is not a bare C-kernel basename -- if it is
-            empty, carries a directory component, has no name before its
-            extension, or does not end in a C-kernel extension -- or if it is
-            already a corrected file's name, which would otherwise correct a
-            correction and write it to a third name.
+            empty, carries a directory component, or does not end in a
+            C-kernel extension, which a name that is nothing but an extension
+            does not either -- or if it is already a corrected file's name,
+            which would otherwise correct a correction and write it to a third
+            name.
     """
     path = Path(basename)
     if len(path.parts) != 1 or basename in ('.', '..'):
@@ -164,8 +165,6 @@ def output_basename(basename: str) -> str:
             f'{sorted(CK_SUFFIXES)}'
         )
     stem = path.stem
-    if len(stem) == 0:
-        raise ValueError(f'{basename!r} has no name before its extension')
     if stem.endswith(OUTPUT_NAME_MARKER):
         raise ValueError(
             f'{basename!r} is already a corrected kernel; correcting it again would measure a '

@@ -640,6 +640,28 @@ def test_output_basename_refuses_correcting_a_correction() -> None:
         output_basename('03236_04002ra_nav.bc')
 
 
+def test_an_assignment_names_the_file_its_segment_goes_into(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """An assigned image reports the corrected file that will carry it."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_candidate(root, _TRUE_NAME)
+    index = build_ck_index([root])
+    entry = _entry(cmatrix_original=_cassini_recorded(pool), kernels=(_TRUE_NAME,))
+    assignments = assign_images([entry], index)
+    assert assignments[0].output_name == '03236_04002ra_nav.bc'
+
+
+def test_an_omitted_image_names_no_file(pool: KernelPool, tmp_path: Path) -> None:
+    """An image with no baseline goes into no corrected file at all."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_candidate(root, _DECOY_NAME, attitude=_turned(_WRONG_RAD))
+    index = build_ck_index([root])
+    entry = _entry(cmatrix_original=_cassini_recorded(pool), kernels=(_DECOY_NAME,))
+    assignments = assign_images([entry], index)
+    assert assignments[0].output_name is None
+
+
 def test_group_for_output_carries_every_image_of_one_baseline(
     pool: KernelPool, tmp_path: Path
 ) -> None:
