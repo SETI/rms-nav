@@ -631,6 +631,17 @@ would drag oops in transitively. The guarantee is asserted on `sys.modules`
 after importing the writer package in a fresh interpreter, not by scanning
 source text.
 
+The one fact the writer and the attitude computation must agree on -- which
+spacecraft clock each CK object's time tags are encoded against -- therefore
+lives in `spindoctor/spice_ids.py`, a top-level constants module importing
+only the standard library, which both sides read. It is deliberately not
+under `spindoctor/support/`, which the writer may not import at all. That
+mapping is the check against `ckmeta` computing a clock id rather than
+validating one, so a second copy of it would be a silent way for the check
+to rot on one side while it kept passing on the other; `cmatrix` derives
+each instrument's clock from it, and the writer's `resolve_sclk_id`
+validates against it. Both keep their own error type and message.
+
 The `cspyce` surface the writer needs, all present in the installed 2.3.6:
 `furnsh`, `unload`, `kclear`, `pxform`, `frmnam`, `namfrm`, `ckmeta`,
 `sce2c`, `sce2s`, `ckobj`, `ckcov`, `ckgp`, `ckgpav`, `m2q`, `ckopn`,

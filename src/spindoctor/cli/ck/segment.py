@@ -48,22 +48,7 @@ import cspyce
 import numpy as np
 
 from spindoctor.cli.ck.pointing import ImagePointing, NDArrayFloatType
-
-# The CK objects whose corrected pointing this writer can express, each mapped
-# to the spacecraft clock its time tags must be encoded against.  ``ckmeta``
-# computes this mapping rather than validating it -- it answers -999 for the
-# nonexistent object -999999 without raising -- so a wrong CK id would yield a
-# plausible clock, a successful encoding, and silently wrong time tags on every
-# record.  The resolved id is therefore checked against this table.  Note that
-# the clock is not derivable from the CK object by integer division either:
-# ``-31100 // 1000`` is -32 in Python, which is the other spacecraft.
-_EXPECTED_SCLK_ID: dict[int, int] = {
-    -82000: -82,  # Cassini bus
-    -77001: -77,  # Galileo scan platform
-    -98000: -98,  # New Horizons spacecraft
-    -31100: -31,  # Voyager 1 scan platform
-    -32100: -32,  # Voyager 2 scan platform
-}
+from spindoctor.spice_ids import CK_OBJECT_SCLK_ID
 
 # The CK objects whose navigated attitude was a frozen, tolerance-snapped
 # lookup rather than an evaluated frame chain.  Their segments carry one
@@ -186,10 +171,12 @@ class CkSegment:
 def resolve_sclk_id(ck_frame_id: int) -> int:
     """Return the spacecraft clock a CK object's time tags are encoded against.
 
-    The id comes from ``cspyce.ckmeta`` and is then checked against the value
-    expected for the object, because ``ckmeta`` computes rather than validates:
+    The id comes from ``cspyce.ckmeta`` and is then checked against the clock
+    recorded for the object, because ``ckmeta`` computes rather than validates:
     it answers for objects that do not exist, so an unnoticed wrong CK id would
     produce a wrong clock, a successful encoding, and silently wrong time tags.
+    The recorded clocks are the ones the attitude computation checks against
+    too, so the two cannot drift apart.
 
     Parameters:
         ck_frame_id: SPICE id of the object a corrected C-kernel targets.
@@ -201,12 +188,12 @@ def resolve_sclk_id(ck_frame_id: int) -> int:
         ValueError: if the object is not one this writer knows, or if the id
             ``ckmeta`` resolves is not the one expected for it.
     """
-    if ck_frame_id not in _EXPECTED_SCLK_ID:
+    if ck_frame_id not in CK_OBJECT_SCLK_ID:
         raise ValueError(
             f'CK object {ck_frame_id} is not one this writer knows; expected one of '
-            f'{sorted(_EXPECTED_SCLK_ID)}'
+            f'{sorted(CK_OBJECT_SCLK_ID)}'
         )
-    expected = _EXPECTED_SCLK_ID[ck_frame_id]
+    expected = CK_OBJECT_SCLK_ID[ck_frame_id]
     sclk_id = int(cspyce.ckmeta(ck_frame_id, 'SCLK'))
     if sclk_id != expected:
         raise ValueError(

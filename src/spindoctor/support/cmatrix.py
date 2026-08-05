@@ -62,6 +62,7 @@ from spindoctor.obs import (
     ObsSnapshotInst,
     ObsVoyagerISS,
 )
+from spindoctor.spice_ids import CK_OBJECT_SCLK_ID
 from spindoctor.support.exceptions import NavPointingError
 from spindoctor.support.types import NDArrayFloatType
 
@@ -83,15 +84,6 @@ __all__ = [
 _CASSINI_CK_FRAME_ID = -82000
 _GALILEO_CK_FRAME_ID = -77001
 _LORRI_CK_FRAME_ID = -98000
-
-# The spacecraft clock each mission's time tags are encoded against.  It is
-# not derivable from the CK object id by arithmetic -- Python's -31100 // 1000
-# is -32, a different spacecraft, silently -- so each mission states its own
-# and the resolved value is checked against it.  Voyager's is derived per
-# spacecraft alongside its CK object.
-_CASSINI_SCLK_ID = -82
-_GALILEO_SCLK_ID = -77
-_LORRI_SCLK_ID = -98
 
 # What cspyce raises when the furnished kernels cannot answer: a missing frame
 # or an unresolvable clock arrives as a LookupError, an unreadable kernel as
@@ -436,6 +428,30 @@ def compute_pointing(
     )
 
 
+def _ck_object_sclk_id(ck_frame_id: int) -> int:
+    """Return the spacecraft clock a CK object's time tags are encoded against.
+
+    The value is read from the shared mapping the C-kernel writer reads too,
+    so that the clock a correction is timed with and the clock it is written
+    with cannot disagree.
+
+    Parameters:
+        ck_frame_id: SPICE id of the object a corrected C-kernel targets.
+
+    Returns:
+        The spacecraft clock id recorded for that object.
+
+    Raises:
+        NavPointingError: if no clock is recorded for the object.
+    """
+    if ck_frame_id not in CK_OBJECT_SCLK_ID:
+        raise NavPointingError(
+            f'CK object {ck_frame_id} has no recorded spacecraft clock; expected one of '
+            f'{sorted(CK_OBJECT_SCLK_ID)}'
+        )
+    return CK_OBJECT_SCLK_ID[ck_frame_id]
+
+
 def _frame_identity(obs: ObsSnapshotInst) -> _FrameIdentity | None:
     """Return the SPICE frame facts for an observation's instrument.
 
@@ -445,12 +461,16 @@ def _frame_identity(obs: ObsSnapshotInst) -> _FrameIdentity | None:
     Returns:
         The instrument's ``_FrameIdentity``, or ``None`` for a host with no
         SPICE camera frame this module knows.
+
+    Raises:
+        NavPointingError: if the instrument's CK object has no recorded
+            spacecraft clock.
     """
     if isinstance(obs, ObsCassiniISS):
         return _FrameIdentity(
             camera_frame=f'CASSINI_ISS_{obs.camera}',
             ck_frame_id=_CASSINI_CK_FRAME_ID,
-            sclk_id=_CASSINI_SCLK_ID,
+            sclk_id=_ck_object_sclk_id(_CASSINI_CK_FRAME_ID),
             oops_from_spice=_CASSINI_OOPS_FROM_SPICE,
             frozen_oops_attitude=False,
         )
@@ -458,7 +478,7 @@ def _frame_identity(obs: ObsSnapshotInst) -> _FrameIdentity | None:
         return _FrameIdentity(
             camera_frame='GLL_SCAN_PLATFORM',
             ck_frame_id=_GALILEO_CK_FRAME_ID,
-            sclk_id=_GALILEO_SCLK_ID,
+            sclk_id=_ck_object_sclk_id(_GALILEO_CK_FRAME_ID),
             oops_from_spice=_IDENTITY,
             frozen_oops_attitude=False,
         )
@@ -466,21 +486,23 @@ def _frame_identity(obs: ObsSnapshotInst) -> _FrameIdentity | None:
         return _FrameIdentity(
             camera_frame='NH_LORRI',
             ck_frame_id=_LORRI_CK_FRAME_ID,
-            sclk_id=_LORRI_SCLK_ID,
+            sclk_id=_ck_object_sclk_id(_LORRI_CK_FRAME_ID),
             oops_from_spice=_LORRI_OOPS_FROM_SPICE,
             frozen_oops_attitude=False,
         )
     if isinstance(obs, ObsVoyagerISS):
         digit = obs.spacecraft_digit
-        # One instrument key serves two spacecraft, so the CK object and the
-        # spacecraft clock are both derived from which spacecraft this is.
-        spacecraft_id = -(30 + int(digit))
+        # One instrument key serves two spacecraft, so the CK object is derived
+        # from which spacecraft this is; its clock then follows from the object
+        # rather than from the same digit, so a wrong derivation is refused
+        # instead of producing a self-consistent wrong pair.
+        ck_frame_id = -(30 + int(digit)) * 1000 - 100
         # The Voyager FK spells the cameras ISSNA and ISSWA, so the oops
         # detector names NAC and WAC contribute only their first letter.
         return _FrameIdentity(
             camera_frame=f'VG{digit}_ISS{obs.camera[0]}A',
-            ck_frame_id=spacecraft_id * 1000 - 100,
-            sclk_id=spacecraft_id,
+            ck_frame_id=ck_frame_id,
+            sclk_id=_ck_object_sclk_id(ck_frame_id),
             oops_from_spice=_IDENTITY,
             frozen_oops_attitude=True,
         )
