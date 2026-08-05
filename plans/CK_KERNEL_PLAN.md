@@ -583,7 +583,13 @@ accumulates kernels from earlier images -- a superset. So:
    candidates are filtered by CK object and midtime coverage before any
    furnishing. Basenames from provenance resolve against this index; a
    basename found in more than one directory contributes each file as a
-   candidate. Coverage for a **frozen-attitude (Voyager) object is read
+   candidate. A basename whose stem ends in `_nav` is **not** indexed:
+   writing the corrections back beside the originals is the natural
+   workflow, a corrected kernel reproduces its own baseline exactly
+   wherever the correction was the identity (which the section 2.2 `M = I`
+   guard makes bit-exact for a zero-offset image), and its name sorts after
+   the original's, so it would win the tie-break and then abort the run at
+   output naming. Coverage for a **frozen-attitude (Voyager) object is read
    with `ckcov`'s tolerance set to the widest tolerance its navigated
    lookup could have used (80000 ticks)**, which lengthens each interval by
    that much at both ends: the snapped lookup answers with a record up to
@@ -609,12 +615,22 @@ accumulates kernels from earlier images -- a superset. So:
    directory name -- reconstructed over gapfill over predicted -- then the
    lexicographically greatest basename. The reproducing candidates agree on
    the attitude by construction, so the choice affects only which output
-   file carries the segment; it must merely be deterministic.
+   file carries the segment; it must merely be deterministic. A directory
+   naming no class ranks last, which puts the 95 Cassini kernels in
+   `CK-cruise` and `CK-jup` below predicted although they hold
+   reconstructed pointing. That is inert -- their epochs (1999-2001) do not
+   overlap the directories that do name a class (2003 onward) -- and it
+   decides filing rather than attitude either way.
 4. An eligible image **no** candidate reproduces gets no segment, reason
    `no_reproducing_baseline`. This is also the baseline-drift detector: if
    the kernel set changed since navigation, reproduction fails and the
    image is refused rather than corrected against a baseline that no
-   longer exists.
+   longer exists. **Which is why a frame the images name but the pool does
+   not define is refused before any candidate is tried**, rather than
+   arriving as a failed `pxform` and being reported as drift: a frame
+   kernel that was never furnished defeats the same lookup for every image
+   alike, so a run that forgot it would write nothing, blame the holdings,
+   and say so 50,000 times.
 
 **Voyager has a second tolerance to try.** When the snapped `ckgp` above
 raises `LookupError`, `oops/hosts/voyager/iss.py` does not fail the image:
@@ -636,6 +652,26 @@ measured on a 1/256 s clock, a midtime 3 ms off a tick boundary reads two
 attitudes 2.7e-6 rad apart, three orders above the reproduction bound -- and
 on a type 1 baseline, which is what the real Voyager kernels are, they
 usually find the same record.
+
+**Type 1 is why the tolerance exists at all, and a type 3 test cannot see
+it.** A type 3 segment interpolates, so it answers any epoch inside its
+window whatever tolerance is asked for; a type 1 segment answers only
+within the tolerance of a record it holds. Measured on
+`vg2_sat_version1_type1_iss_sedr.bc` over 200 epochs spread across its
+window, a lookup finds pointing at tolerance 0 from 2 of them, at 800 from
+25, and at 80000 from 130 -- and the records do not sit on whole clock
+ticks, so tolerance 0 misses a record even when asked at that record's own
+epoch. Any hermetic test of the tolerances therefore has to write a type 1
+baseline (`ckw01`), and the two attempts have to be observable
+individually: the wider one subsumes the narrower, so no reproduce-or-not
+outcome can tell them apart.
+
+One consequence of the fallback frame to know rather than to fix:
+`SpiceType1Frame` caches its transform for `tick_tolerance` converted to
+seconds, measured at 4799.995 s for Voyager. Two Voyager images navigated
+through the fallback within eighty minutes of each other in one process
+share one attitude, and the second then records an attitude no lookup at
+its own midtime reproduces, so it is honestly refused.
 
 **Omission reasons**, the complete set: `not_eligible`, `botsim_loser`,
 `rotation_unsupported`, `no_reproducing_baseline`, `degenerate_exposure`
