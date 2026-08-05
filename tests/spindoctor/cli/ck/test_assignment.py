@@ -14,6 +14,7 @@ from typing import Any
 import cspyce
 import numpy as np
 import pytest
+from filecache import FCPath
 from tests.spindoctor.cli.ck.conftest import (
     CASSINI_CAMERA_FRAME,
     CASSINI_CK_FRAME_ID,
@@ -39,7 +40,12 @@ from spindoctor.cli.ck.assignment import (
     rotation_angle_rad,
 )
 from spindoctor.cli.ck.images import ImageEntry, OmissionReason
-from spindoctor.cli.ck.index import CkFile, KernelClass, build_ck_index
+from spindoctor.cli.ck.index import (
+    SNAPPED_LOOKUP_TOL_TICKS,
+    CkFile,
+    KernelClass,
+    build_ck_index,
+)
 from spindoctor.cli.ck.pointing import NDArrayFloatType
 
 # The clocks the two test objects are tagged against, matching the test SCLK.
@@ -736,7 +742,7 @@ def test_an_assignment_cannot_write_an_image_with_no_pointing(pool: KernelPool) 
         status='failed',
     )
     ck_file = CkFile(
-        path=Path('/holdings/CK-reconstructed') / _TRUE_NAME,
+        path=FCPath('/holdings/CK-reconstructed') / _TRUE_NAME,
         kernel_class=KernelClass.RECONSTRUCTED,
         coverage=(),
     )
@@ -999,3 +1005,30 @@ def test_assign_refuses_an_undefined_ck_object_frame(pool: KernelPool, tmp_path:
     )
     with pytest.raises(ValueError, match='has no frame name in the furnished kernels'):
         assign_images([entry], index)
+
+
+def test_an_image_at_the_edge_of_the_snapped_lookup_is_still_assigned(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """The coverage filter and the lookup reach as far as each other.
+
+    The record sits a tick inside the widest snapped tolerance, which is
+    nearly the furthest a navigated Voyager frame can have been frozen from.
+    The image has to survive the coverage filter and then reproduce; if the two
+    tolerances ever stopped being one value, it would be dropped before any
+    kernel was furnished and reported as having no baseline.  The last tick is
+    left out because the filter measures from the exposure midtime and the
+    lookup from that midtime rounded to a whole tick, so the two agree only to
+    within half a tick of the extreme edge.
+    """
+    offset_ticks = SNAPPED_LOOKUP_TOL_TICKS - 1.0
+    root = tmp_path / 'CK'
+    _write_discrete_candidate(
+        root,
+        _VOYAGER_KERNEL_NAME,
+        offset_ticks=offset_ticks,
+        midtime_et=_VOYAGER_MIDTIME_ET,
+    )
+    index = build_ck_index([root])
+    assignments = assign_images([_discrete_entry(offset_ticks)], index)
+    assert assignments[0].baseline is not None

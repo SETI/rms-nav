@@ -15,7 +15,8 @@ The scan uses ``ckobj`` and ``ckcov`` at segment level in TDB.  Both read a
 file by name, so no C-kernel has to be furnished to be indexed, but the
 leapseconds kernel and the spacecraft clock kernel of every object encountered
 must be, since that is what converts a coverage window from clock ticks into
-TDB.
+TDB.  Both also need a real local file, so a kernel tree that lives remotely is
+fetched as it is scanned; for a tree that is already local nothing is copied.
 
 Coverage is read with a tolerance for the objects whose attitude was navigated
 through a tolerance-snapped pointing lookup.  Such a lookup answers with a
@@ -30,8 +31,10 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import cast
 
 import cspyce
+from filecache import FCPath
 
 from spindoctor.cli.ck.segment import FROZEN_ATTITUDE_CK_IDS
 
@@ -53,13 +56,24 @@ _COVERAGE_LEVEL = 'SEGMENT'
 _COVERAGE_TIME_SYSTEM = 'TDB'
 _COVERAGE_NEEDS_ANGULAR_VELOCITY = False
 
-# Coverage tolerance in spacecraft clock ticks.  Zero for an object whose
-# attitude is read by evaluating a frame chain at the epoch itself; for a
-# frozen-attitude object it is the widest tolerance the navigated lookup could
-# have used, so that an image the baseline serves only through that tolerance
-# still reaches the reproduction step.
+# The widest tolerance, in spacecraft clock ticks, that a snapped pointing
+# lookup can be made at: the value oops registers its fallback Voyager frame
+# with.  It is declared once and read twice, because the two uses have to
+# agree.  The reproduction step asks for pointing this far from an exposure
+# midtime, and the scan below widens a frozen-attitude object's coverage by
+# the same amount so that every image that lookup can serve survives the
+# coverage filter and reaches the reproduction step at all.  Widening by less
+# than the lookup reaches drops the only candidate that reproduces and reports
+# the image as having no baseline.  The two agree to within half a tick at the
+# extreme edge, because the filter measures from the exposure midtime while
+# the lookup measures from that midtime rounded to a whole tick; an image that
+# far from any pointing record is refused rather than corrected, which is the
+# safe direction.
+SNAPPED_LOOKUP_TOL_TICKS = 80000.0
+
+# Coverage tolerance for an object whose attitude is read by evaluating a
+# frame chain at the epoch itself, which reaches exactly as far as it is asked.
 _COVERAGE_TOL_TICKS = 0.0
-SNAPPED_COVERAGE_TOL_TICKS = 80000.0
 
 
 class KernelClass(Enum):
@@ -169,14 +183,14 @@ class CkFile:
     """One C-kernel file the index found, and what it covers.
 
     Parameters:
-        path: Path to the file.
+        path: Path to the file, local or remote.
         kernel_class: How its producer described its pointing, taken from the
             name of the directory it was found in.
         coverage: One interval per object per segment window, in the order
             SPICE reported them.
     """
 
-    path: Path
+    path: FCPath
     kernel_class: KernelClass
     coverage: tuple[CoverageInterval, ...]
 
@@ -218,7 +232,7 @@ class CkIndex:
 
     def __post_init__(self) -> None:
         """Group the files by basename, which is how metadata names them."""
-        paths = [ck_file.path for ck_file in self.files]
+        paths = [ck_file.path.as_posix() for ck_file in self.files]
         if len(set(paths)) != len(paths):
             raise ValueError('the index holds the same path more than once')
         grouped: dict[str, list[CkFile]] = {}
@@ -282,10 +296,14 @@ def preference_key(ck_file: CkFile) -> tuple[int, str, str]:
         full path, so two directories holding the same basename in the same
         class still resolve the same way on every run.
     """
-    return (-ck_file.kernel_class.preference_rank, ck_file.basename, str(ck_file.path))
+    return (
+        -ck_file.kernel_class.preference_rank,
+        ck_file.basename,
+        ck_file.path.as_posix(),
+    )
 
 
-def kernel_class_for_directory(directory: Path) -> KernelClass:
+def kernel_class_for_directory(directory: str | Path | FCPath) -> KernelClass:
     """Classify a kernel directory from its name.
 
     Parameters:
@@ -301,10 +319,11 @@ def kernel_class_for_directory(directory: Path) -> KernelClass:
             and which would otherwise be settled silently by the order the
             names happen to be tested in.
     """
-    name = directory.name
-    if len(name) == 0:
+    root = FCPath(directory)
+    name = root.name
+    if len(name) == 0 or name in ('.', '..'):
         raise ValueError(
-            f'kernel directory {str(directory)!r} has no name to classify; name the directory '
+            f'kernel directory {root.as_posix()!r} has no name to classify; name the directory '
             f'itself rather than a path ending in a separator or a dot'
         )
     lowered = name.lower()
@@ -319,7 +338,7 @@ def kernel_class_for_directory(directory: Path) -> KernelClass:
     return matched[0]
 
 
-def build_ck_index(roots: Sequence[Path]) -> CkIndex:
+def build_ck_index(roots: Sequence[str | Path | FCPath]) -> CkIndex:
     """Scan the kernel directories of a run and index every C-kernel in them.
 
     Each directory is listed without recursion, so a subdirectory of kernels is
@@ -352,34 +371,60 @@ def build_ck_index(roots: Sequence[Path]) -> CkIndex:
     """
     if len(roots) == 0:
         raise ValueError('no kernel directory to scan; the index would hold nothing')
+    directories = [FCPath(root) for root in roots]
     # Resolved for the duplicate test only.  The class comes from the name as
     # given, since resolving a symbolic link can replace the very component
     # that names the class.
-    resolved = [root.resolve() for root in roots]
+    resolved = [root.resolve().as_posix() for root in directories]
     if len(set(resolved)) != len(resolved):
         raise ValueError(
-            f'a kernel directory is named more than once: {[str(root) for root in roots]}'
+            f'a kernel directory is named more than once: '
+            f'{[root.as_posix() for root in directories]}'
         )
     files: list[CkFile] = []
-    for root in roots:
+    for root in directories:
         kernel_class = kernel_class_for_directory(root)
-        if not root.is_dir():
-            raise ValueError(f'kernel directory {str(root)!r} does not exist or is not a directory')
-        for path in sorted(root.iterdir()):
-            if path.suffix.lower() not in CK_SUFFIXES or not path.is_file():
-                continue
-            if path.stem.endswith(OUTPUT_NAME_MARKER):
-                continue
-            files.append(_index_one_file(path, kernel_class))
+        files.extend(_index_one_file(path, kernel_class) for path in _kernel_files(root))
     if len(files) == 0:
         raise ValueError(
-            f'no C-kernel found under {[str(root) for root in roots]}; every image would be '
-            f'reported as having no reproducing baseline'
+            f'no C-kernel found under {[root.as_posix() for root in directories]}; every image '
+            f'would be reported as having no reproducing baseline'
         )
     return CkIndex(files=tuple(files))
 
 
-def _index_one_file(path: Path, kernel_class: KernelClass) -> CkFile:
+def _kernel_files(root: FCPath) -> list[FCPath]:
+    """List the C-kernels of one directory, in a stable order.
+
+    The directory is listed rather than probed first: for a remote tree an
+    existence check is a round trip of its own, and the listing answers the
+    same question as a side effect.
+
+    Parameters:
+        root: The directory to list.
+
+    Returns:
+        The C-kernels it holds, excluding corrected kernels, ordered by path.
+
+    Raises:
+        ValueError: if the directory does not exist or is not a directory.
+    """
+    try:
+        entries = sorted(root.iterdir(), key=lambda entry: entry.as_posix())
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise ValueError(
+            f'kernel directory {root.as_posix()!r} does not exist or is not a directory'
+        ) from exc
+    return [
+        entry
+        for entry in entries
+        if entry.suffix.lower() in CK_SUFFIXES
+        and not entry.stem.endswith(OUTPUT_NAME_MARKER)
+        and entry.is_file()
+    ]
+
+
+def _index_one_file(path: FCPath, kernel_class: KernelClass) -> CkFile:
     """Read one C-kernel's objects and their coverage.
 
     Parameters:
@@ -394,17 +439,20 @@ def _index_one_file(path: Path, kernel_class: KernelClass) -> CkFile:
         KeyError: if the spacecraft clock of an object the file describes is
             not furnished, so its coverage cannot be expressed in TDB.
     """
+    # SPICE reads a C-kernel by name from the local filesystem, so a remote one
+    # is fetched first.  This is a no-op for a kernel that is already local.
+    local = str(cast(Path, path.retrieve()))
     coverage: list[CoverageInterval] = []
-    for ck_frame_id in sorted(int(value) for value in cspyce.ckobj(str(path))):
+    for ck_frame_id in sorted(int(value) for value in cspyce.ckobj(local)):
         tolerance = (
-            SNAPPED_COVERAGE_TOL_TICKS
+            SNAPPED_LOOKUP_TOL_TICKS
             if ck_frame_id in FROZEN_ATTITUDE_CK_IDS
             else _COVERAGE_TOL_TICKS
         )
         window = [
             float(value)
             for value in cspyce.ckcov(
-                str(path),
+                local,
                 ck_frame_id,
                 _COVERAGE_NEEDS_ANGULAR_VELOCITY,
                 _COVERAGE_LEVEL,

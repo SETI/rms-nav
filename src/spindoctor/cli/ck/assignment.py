@@ -36,12 +36,20 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import cspyce
 import numpy as np
+from filecache import FCPath
 
 from spindoctor.cli.ck.images import ImageEntry, OmissionReason, botsim_losers
-from spindoctor.cli.ck.index import CK_SUFFIXES, OUTPUT_NAME_MARKER, CkFile, CkIndex
+from spindoctor.cli.ck.index import (
+    CK_SUFFIXES,
+    OUTPUT_NAME_MARKER,
+    SNAPPED_LOOKUP_TOL_TICKS,
+    CkFile,
+    CkIndex,
+)
 from spindoctor.cli.ck.pointing import ImagePointing, NDArrayFloatType
 from spindoctor.cli.ck.segment import BASE_FRAME, FROZEN_ATTITUDE_CK_IDS, resolve_sclk_id
 
@@ -55,9 +63,12 @@ REPRODUCTION_TOL_RAD = 1e-9
 # Voyager observation frame, in spacecraft clock ticks: a fixed part plus a
 # term in the exposure.  When that lookup finds nothing, oops falls back to a
 # frame registered at a far wider tolerance, so a baseline is tried at both.
+# That wider one is ``SNAPPED_LOOKUP_TOL_TICKS``, read from the index rather
+# than restated here: the index widens a frozen-attitude object's coverage by
+# the same tolerance, and an image this lookup can serve but that widening
+# does not admit never reaches this code at all.
 _SNAPPED_TOL_TICKS = 800.0
 _SNAPPED_TOL_EXPOSURE_DIVISOR = 48.0
-_SNAPPED_FALLBACK_TOL_TICKS = 80000.0
 
 # The wider tolerance is 4799.995 s of Voyager clock, measured, and the frame
 # that uses it caches its answer for that long: two Voyager images navigated
@@ -318,7 +329,7 @@ def baseline_attitudes(pointing: ImagePointing) -> tuple[NDArrayFloatType, ...]:
     # wherever the baseline interpolates between its records.
     attempts = (
         (float(cspyce.sce2t(sclk_id, pointing.midtime_et)), snapped_tol),
-        (float(cspyce.sce2c(sclk_id, pointing.midtime_et)), _SNAPPED_FALLBACK_TOL_TICKS),
+        (float(cspyce.sce2c(sclk_id, pointing.midtime_et)), SNAPPED_LOOKUP_TOL_TICKS),
     )
     snapped = [_snapped_attitude(pointing, tick, tolerance) for tick, tolerance in attempts]
     return tuple(attitude for attitude in snapped if attitude is not None)
@@ -373,20 +384,26 @@ def _snapped_attitude(
 
 
 @contextmanager
-def _furnished(path: Path) -> Iterator[None]:
+def _furnished(path: FCPath) -> Iterator[None]:
     """Furnish one kernel for the duration of a block and unload it after.
 
+    SPICE furnishes a kernel by name from the local filesystem, so a remote one
+    is fetched first; that is a no-op for a kernel that is already local.  The
+    same local name is unloaded, since SPICE knows the kernel by the name it
+    was given.
+
     Parameters:
-        path: The kernel to furnish.
+        path: The kernel to furnish, local or remote.
 
     Yields:
         Nothing; the kernel is furnished for the body of the block.
     """
-    cspyce.furnsh(str(path))
+    local = str(cast(Path, path.retrieve()))
+    cspyce.furnsh(local)
     try:
         yield
     finally:
-        cspyce.unload(str(path))
+        cspyce.unload(local)
 
 
 def assign_images(entries: Sequence[ImageEntry], index: CkIndex) -> tuple[Assignment, ...]:
@@ -476,8 +493,8 @@ def _reproducing_baselines(
         OSError: if a candidate kernel cannot be furnished.
     """
     tested = [(entry, entry.pointing) for entry in entries if entry.pointing is not None]
-    groups: dict[tuple[Path, ...], list[tuple[ImageEntry, ImagePointing]]] = {}
-    candidates_by_key: dict[tuple[Path, ...], tuple[CkFile, ...]] = {}
+    groups: dict[tuple[str, ...], list[tuple[ImageEntry, ImagePointing]]] = {}
+    candidates_by_key: dict[tuple[str, ...], tuple[CkFile, ...]] = {}
     reproducing: dict[str, list[CkFile]] = {}
     for entry, pointing in tested:
         candidates = index.candidates(
@@ -485,7 +502,7 @@ def _reproducing_baselines(
             ck_frame_id=pointing.ck_frame_id,
             et=pointing.midtime_et,
         )
-        key = tuple(candidate.path for candidate in candidates)
+        key = tuple(candidate.path.as_posix() for candidate in candidates)
         candidates_by_key[key] = candidates
         groups.setdefault(key, []).append((entry, pointing))
         reproducing[entry.image_name] = []

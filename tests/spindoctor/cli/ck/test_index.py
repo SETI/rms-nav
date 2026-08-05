@@ -8,9 +8,12 @@ holdings.
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
+import cspyce
 import numpy as np
 import pytest
+from filecache import FCPath
 from tests.spindoctor.cli.ck.conftest import (
     CASSINI_CK_FRAME_ID,
     ET0,
@@ -18,9 +21,11 @@ from tests.spindoctor.cli.ck.conftest import (
     KernelPool,
     baseline_attitude,
     write_baseline_ck,
+    write_type1_ck,
 )
 
 from spindoctor.cli.ck.index import (
+    SNAPPED_LOOKUP_TOL_TICKS,
     CkFile,
     CkIndex,
     CoverageInterval,
@@ -190,9 +195,9 @@ def test_candidates_offer_each_directory_holding_the_same_basename(
     candidates = index.candidates(
         basenames=[_RECONSTRUCTED_NAME], ck_frame_id=CASSINI_CK_FRAME_ID, et=ET0 + 2.0
     )
-    assert [ck_file.path for ck_file in candidates] == [
-        first / _RECONSTRUCTED_NAME,
-        second / _RECONSTRUCTED_NAME,
+    assert [ck_file.path.as_posix() for ck_file in candidates] == [
+        (first / _RECONSTRUCTED_NAME).as_posix(),
+        (second / _RECONSTRUCTED_NAME).as_posix(),
     ]
 
 
@@ -405,7 +410,7 @@ def test_build_ck_index_refuses_finding_no_kernels(tmp_path: Path) -> None:
 def test_ck_index_refuses_the_same_path_twice() -> None:
     """One file offered twice would be tried twice and could tie with itself."""
     ck_file = CkFile(
-        path=Path('/holdings/CK-reconstructed') / _RECONSTRUCTED_NAME,
+        path=FCPath('/holdings/CK-reconstructed') / _RECONSTRUCTED_NAME,
         kernel_class=KernelClass.RECONSTRUCTED,
         coverage=(),
     )
@@ -502,7 +507,62 @@ def test_one_basename_in_two_directories_of_a_class_is_ordered_by_path(
     candidates = index.candidates(
         basenames=[_RECONSTRUCTED_NAME], ck_frame_id=CASSINI_CK_FRAME_ID, et=ET0 + 2.0
     )
-    assert [ck_file.path for ck_file in candidates] == [
-        second / _RECONSTRUCTED_NAME,
-        first / _RECONSTRUCTED_NAME,
+    assert [ck_file.path.as_posix() for ck_file in candidates] == [
+        (second / _RECONSTRUCTED_NAME).as_posix(),
+        (first / _RECONSTRUCTED_NAME).as_posix(),
     ]
+
+
+@pytest.mark.parametrize('as_type', [str, Path, FCPath], ids=['str', 'path', 'fcpath'])
+def test_build_ck_index_normalizes_the_root_it_is_given(
+    pool: KernelPool, tmp_path: Path, as_type: Callable[[str], Any]
+) -> None:
+    """A root may arrive as text, a local path, or a path that may be remote.
+
+    Parameters:
+        as_type: How the caller spells the directory.
+    """
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    index = build_ck_index([as_type(str(root))])
+    assert index.files[0].basename == _RECONSTRUCTED_NAME
+
+
+def test_an_indexed_file_keeps_a_path_that_can_be_remote(pool: KernelPool, tmp_path: Path) -> None:
+    """The index stores the kind of path that survives a remote kernel tree.
+
+    Casting to a local path would discard where a remote kernel came from, and
+    the scan would then be the only thing that could ever have read it.
+    """
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    index = build_ck_index([root])
+    assert isinstance(index.files[0].path, FCPath)
+
+
+def test_the_coverage_filter_admits_every_epoch_the_snapped_lookup_reaches(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """The widening and the lookup are one tolerance, and this is why they must be.
+
+    A discrete baseline is written with one record.  An exposure the widest
+    snapped lookup can still serve -- exactly that tolerance away from the
+    record -- has to survive the coverage filter, or the only candidate that
+    reproduces it is dropped before anything is furnished and the image is
+    reported as having no baseline at all.
+    """
+    root = tmp_path / 'CK'
+    root.mkdir()
+    path = root / 'vg1_sat_version1_type1_iss_sedr.bc'
+    record_et = ET0 + 1.0
+    tick = float(cspyce.sce2c(_VOYAGER_SCLK_ID, record_et))
+    write_type1_ck(
+        path,
+        ck_frame_id=VOYAGER_CK_FRAME_ID,
+        ticks=[tick],
+        attitude=baseline_attitude,
+        sclk_id=_VOYAGER_SCLK_ID,
+    )
+    index = build_ck_index([root])
+    furthest_et = float(cspyce.sct2e(_VOYAGER_SCLK_ID, tick + SNAPPED_LOOKUP_TOL_TICKS))
+    assert index.files[0].covers(VOYAGER_CK_FRAME_ID, furthest_et) is True
