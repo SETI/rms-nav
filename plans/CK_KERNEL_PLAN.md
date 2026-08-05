@@ -738,6 +738,15 @@ to rot on one side while it kept passing on the other; `cmatrix` derives
 each instrument's clock from it, and the writer's `resolve_sclk_id`
 validates against it. Both keep their own error type and message.
 
+The same rule covers the widest snapped lookup tolerance (80000 ticks),
+for the same reason: the index widens a frozen-attitude object's coverage
+by exactly what that lookup reaches, so the two are one declared constant
+read twice rather than two constants that agree today. They agree to
+within half a tick at the extreme edge, because the filter measures from
+the exposure midtime and the lookup from that midtime rounded to a whole
+tick; an image that far from any pointing record is refused rather than
+corrected, which is the safe direction.
+
 The `cspyce` surface the writer needs, all present in the installed 2.3.6:
 `furnsh`, `unload`, `kclear`, `pxform`, `frmnam`, `namfrm`, `ckmeta`,
 `sce2c`, `sce2t`, `sce2s`, `ckobj`, `ckcov`, `ckgp`, `ckgpav`, `ktotal`,

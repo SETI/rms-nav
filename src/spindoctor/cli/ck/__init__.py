@@ -23,10 +23,14 @@ for the check to rot on one side while it kept passing on the other.
 
 This package is part of the ``spindoctor.cli`` tree, which holds the command
 line programs and the helpers only they use; the importable library API is the
-rest of ``spindoctor``.  Its names are therefore reachable and documented in
-place, but they are not published API and have no page in the API reference,
-which covers the library packages -- the same footing as every other
-``spindoctor.cli`` subpackage.
+rest of ``spindoctor``.  The ``__all__`` below is therefore the surface the
+kernel-generating program imports from its own package -- what the modules
+here offer each other and the driver, gathered in one place so that a reader
+can see the shape of the writer without opening five files.  It is not
+published library API: nothing outside ``spindoctor.cli`` imports it, it
+carries no stability promise, and it has no page in the API reference, which
+covers the library packages.  Every other ``spindoctor.cli`` subpackage stands
+the same way.
 
 One global to respect: ``cspyce.use_errors()`` / ``cspyce.use_flags()`` is
 process-wide and shared with oops.  This package assumes the exceptions regime
@@ -61,6 +65,7 @@ from spindoctor.cli.ck.segment import (
     write_segment,
 )
 
+# The package's own surface, not published API: see the module docstring.
 __all__ = [
     'Assignment',
     'CkFile',
