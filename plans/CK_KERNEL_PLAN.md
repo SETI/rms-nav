@@ -444,9 +444,23 @@ the window contains no interior records anyway.) Time tags must be
 mid and stop collapse to one tick produces a single-record segment at
 midtime, which type 3 permits and Phase B tests. Records are quaternions
 from `cspyce.m2q` with **sign continuity enforced**: `m2q` fixes the scalar
-component non-negative, which can flip sign between adjacent records and
-corrupt the interpolation; each record is negated as needed to keep a
-non-negative dot product with its predecessor.
+component non-negative, which flips the sign between adjacent records
+whenever the attitude's rotation angle passes 180 degrees; each record is
+negated as needed to keep a non-negative dot product with its predecessor.
+
+Phase B measured two things about that paragraph. First, `sce2c` returns
+*continuous* encoded SCLK -- a tick with a fractional part -- so the
+single-record collapse happens only when the three epochs are
+indistinguishable as doubles (a nanosecond exposure near ET 5e8), not
+merely when the exposure is shorter than one tick; and when it does happen
+the midtime record is bit-identical to the start record, so "at midtime" is
+a statement of intent rather than an observable. Second, SPICE's own type-3
+reader restores quaternion sign on the way out: a segment written with a
+sign-discontinuous sequence reads back attitudes identical to a repaired
+one (0.0 rad difference at an interior epoch, measured). The enforcement
+stays, because the file should say what it means, but the test guarding it
+must assert on the written records; no read-back assertion can see the
+difference.
 
 **Clocks.** Encoded SCLK comes from `cspyce.sce2c(sclk_id, et)` where
 `sclk_id = cspyce.ckmeta(ck_frame_id, 'SCLK')` -- the spacecraft clock ID
@@ -484,6 +498,20 @@ same vectors bit-identically and `avflag = 1`; when the original has none
 corrected segment writes `avflag = 0` and queries fall back to `ckgp`.
 Rotating AV through `delta` -- superficially the "thorough" treatment -- is
 the wrong-frame error, and Phase B's test must fail if it is introduced.
+
+Two refinements from Phase B. The want-of-AV failure is `OSError`
+`SPICE(CKINSUFFDATA)` -- the same class and short message as pointing that
+is not covered at all -- so the two are not distinguishable from the
+exception. The writer therefore probes `ckgpav` once at the first record
+and, if it raises, reads the whole segment with `ckgp`; a genuine coverage
+gap still surfaces rather than being demoted to a missing-AV segment,
+because those `ckgp` lookups raise on it. And a **frozen (Voyager) segment
+writes `avflag = 0` whatever its baseline carries**: the segment's attitude
+is constant, so its angular velocity is zero, and the rigid-attachment
+argument that licenses copying the baseline's vectors does not hold for a
+segment that deliberately drops the baseline's time variation. Voyager
+baselines carry no AV in any case, so the rule changes nothing on real
+data.
 
 **Files mirror the originals.** Each output `.bc` corresponds to exactly
 one original CK file and carries the segments of the images whose corrected
@@ -683,8 +711,10 @@ The type-3 segment writer for a single image: `F` and `delta` per section
 3.1, records, SCLK, quaternion sign continuity, AV policy, the
 single-record degenerate path.
 
-Tests are hermetic: the suite writes its own minimal LSK and SCLK text
-kernels (small text files `furnsh` accepts), plus an original CK produced
+Tests are hermetic: the suite writes its own minimal LSK, SCLK and FK text
+kernels (small text files `furnsh` accepts) -- the FK because `F` is
+`pxform(frmnam(ck_frame_id), camera_frame, mid)` and both of those frames
+have to be defined for the call to resolve -- plus an original CK produced
 by the writer's own primitives, so no holdings are needed. Write a kernel
 from a constructed attitude history and correction, furnish, query back
 with `ckgpav` at `tol = 0`:
@@ -694,8 +724,10 @@ with `ckgpav` at `tol = 0`:
 - AV is bit-identical to the original's; the test **fails if AV is rotated
   through `delta`**.
 - An AV-less original yields `avflag = 0` and a working `ckgp` fallback.
-- A sign-discontinuous quaternion sequence is repaired; interpolated
-  attitude mid-record stays continuous.
+- A sign-discontinuous quaternion sequence is repaired, asserted on the
+  written records rather than on a read-back attitude (section 3.3: SPICE
+  restores the sign when it interpolates, so the read-back cannot see it);
+  interpolated attitude mid-record stays continuous.
 - A sub-tick exposure produces a valid single-record segment.
 - Sub-spacecraft-clock ids come from `ckmeta`, asserted for all four CK
   objects.
