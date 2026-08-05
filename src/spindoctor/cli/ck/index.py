@@ -40,6 +40,12 @@ from spindoctor.cli.ck.segment import FROZEN_ATTITUDE_CK_IDS
 # carry their own extensions, so an extension test is enough to enumerate them.
 CK_SUFFIXES = frozenset({'.bc', '.ck'})
 
+# What a corrected file's name carries beyond the original's, before the
+# extension.  It lives here because it is a fact about kernel filenames that
+# the scan needs: a corrected kernel written back beside its original must not
+# be indexed as a candidate for the next run.
+OUTPUT_NAME_MARKER = '_nav'
+
 # ``ckcov`` reads coverage at segment level -- the window each segment's
 # descriptor advertises -- and reports it in TDB seconds, matching the epochs
 # the metadata records.
@@ -85,7 +91,11 @@ class KernelClass(Enum):
 # Reconstructed pointing is measured, gapfill fills what reconstruction did not
 # cover, and predicted pointing is a plan.  A directory whose name says nothing
 # about which of those it holds is preferred last, so a kernel that does say is
-# always chosen over one that does not.
+# always chosen over one that does not.  That ranks the Cassini cruise
+# directories below predicted even though they hold reconstructed pointing,
+# which is inert only because their epochs do not overlap the directories that
+# do name a class; the ranking decides which output file carries a segment and
+# never which attitude it carries, so it is a filing question either way.
 _CLASS_PREFERENCE: tuple[KernelClass, ...] = (
     KernelClass.RECONSTRUCTED,
     KernelClass.GAPFILL,
@@ -144,18 +154,12 @@ class CoverageInterval:
 
         Returns:
             True when the object matches and the epoch lies within the
-            interval, endpoints included.  False for a non-finite epoch: NaN
-            answers every comparison with False and an infinity would sit
-            inside any window reaching to the same infinity, so neither is
-            left to the comparisons to decide.
+            interval, endpoints included.  False for a non-finite epoch: both
+            endpoints are finite, refused at construction otherwise, so an
+            infinity falls outside the window and a NaN answers every
+            comparison with False.
         """
         if ck_frame_id != self.ck_frame_id:
-            return False
-        # Deliberately redundant with the finite endpoints enforced above,
-        # which already leave every comparison against a non-finite epoch
-        # False: this states the method's own contract, so it holds however
-        # the interval was built rather than only because it was built here.
-        if not math.isfinite(et):
             return False
         return bool(self.start_et <= et <= self.stop_et)
 
@@ -324,6 +328,11 @@ def build_ck_index(roots: Sequence[Path]) -> CkIndex:
     mission whose kernels are scanned, since coverage is reported in TDB and
     converting a clock tick to TDB needs both.
 
+    A corrected kernel is never indexed.  Writing the corrections back beside
+    the originals is the natural thing to do, and a corrected kernel reproduces
+    its own baseline exactly wherever the correction was the identity, so
+    indexing one would offer a correction as the baseline for the next run.
+
     Parameters:
         roots: The directories to scan.  Each is classified by its own name, so
             the reconstructed, gapfill and predicted directories of a mission
@@ -333,26 +342,35 @@ def build_ck_index(roots: Sequence[Path]) -> CkIndex:
         The index.
 
     Raises:
-        ValueError: if no directory is given, if one is named twice, if one
-            does not exist or is not a directory, if a directory name declares
-            more than one kernel class, or if no C-kernel is found under any of
-            them -- an empty index would report every image as having no
-            reproducing baseline, which is indistinguishable from a genuine
-            baseline drift.
+        ValueError: if no directory is given, if one names the same directory
+            as another once symbolic links and ``..`` are resolved, if one does
+            not exist or is not a directory, if a directory name declares more
+            than one kernel class, or if no C-kernel is found under any of them
+            -- an empty index would report every image as having no reproducing
+            baseline, which is indistinguishable from a genuine baseline drift.
         OSError: if a file with a C-kernel extension cannot be read as one.
     """
     if len(roots) == 0:
         raise ValueError('no kernel directory to scan; the index would hold nothing')
-    if len(set(roots)) != len(roots):
-        raise ValueError(f'a kernel directory is named more than once: {[str(r) for r in roots]}')
+    # Resolved for the duplicate test only.  The class comes from the name as
+    # given, since resolving a symbolic link can replace the very component
+    # that names the class.
+    resolved = [root.resolve() for root in roots]
+    if len(set(resolved)) != len(resolved):
+        raise ValueError(
+            f'a kernel directory is named more than once: {[str(root) for root in roots]}'
+        )
     files: list[CkFile] = []
     for root in roots:
         kernel_class = kernel_class_for_directory(root)
         if not root.is_dir():
             raise ValueError(f'kernel directory {str(root)!r} does not exist or is not a directory')
         for path in sorted(root.iterdir()):
-            if path.suffix.lower() in CK_SUFFIXES and path.is_file():
-                files.append(_index_one_file(path, kernel_class))
+            if path.suffix.lower() not in CK_SUFFIXES or not path.is_file():
+                continue
+            if path.stem.endswith(OUTPUT_NAME_MARKER):
+                continue
+            files.append(_index_one_file(path, kernel_class))
     if len(files) == 0:
         raise ValueError(
             f'no C-kernel found under {[str(root) for root in roots]}; every image would be '

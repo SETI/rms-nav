@@ -406,3 +406,54 @@ def test_ck_index_refuses_the_same_path_twice() -> None:
     )
     with pytest.raises(ValueError, match='the same path more than once'):
         CkIndex(files=(ck_file, ck_file))
+
+
+def test_build_ck_index_skips_a_corrected_kernel(pool: KernelPool, tmp_path: Path) -> None:
+    """A correction written back beside its original is not a candidate for the next run.
+
+    A corrected kernel reproduces its own baseline exactly wherever the
+    correction was the identity, and its name sorts after the original's, so
+    indexing one would let a correction win the tie-break and be corrected
+    again.
+    """
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    _write_ck(root, '03236_04002ra_nav.bc')
+    index = build_ck_index([root])
+    assert [ck_file.basename for ck_file in index.files] == [_RECONSTRUCTED_NAME]
+
+
+def test_build_ck_index_refuses_a_directory_named_twice_by_different_paths(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """One directory spelled two ways is still one directory."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    with pytest.raises(ValueError, match='named more than once'):
+        build_ck_index([root, tmp_path / 'CK-reconstructed' / '..' / 'CK-reconstructed'])
+
+
+def test_build_ck_index_refuses_a_symlinked_duplicate(pool: KernelPool, tmp_path: Path) -> None:
+    """A symbolic link to a scanned directory would index every file in it twice."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    link = tmp_path / 'CK-reconstructed-link'
+    link.symlink_to(root, target_is_directory=True)
+    with pytest.raises(ValueError, match='named more than once'):
+        build_ck_index([root, link])
+
+
+def test_build_ck_index_classifies_a_symlink_by_the_name_given(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """Resolving a link must not replace the component that names the class.
+
+    The duplicate test resolves paths; the classification does not, because a
+    link named for its class can point at a directory that is not.
+    """
+    actual = tmp_path / 'ck_files'
+    _write_ck(actual, _RECONSTRUCTED_NAME)
+    link = tmp_path / 'CK-reconstructed'
+    link.symlink_to(actual, target_is_directory=True)
+    index = build_ck_index([link])
+    assert index.files[0].kernel_class is KernelClass.RECONSTRUCTED
