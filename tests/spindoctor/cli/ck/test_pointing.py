@@ -154,6 +154,9 @@ def test_from_metadata_refuses_a_non_finite_exposure(exposure_s: float) -> None:
     A NaN in particular passes a negativity test, since every comparison
     against it is False, and would reach the record-cadence arithmetic
     unnoticed.
+
+    Parameters:
+        exposure_s: Non-finite duration recorded in the metadata.
     """
     with pytest.raises(ValueError, match='exposure_s is not finite'):
         ImagePointing.from_metadata(_metadata(exposure_s=exposure_s))
@@ -168,6 +171,9 @@ def test_from_metadata_refuses_a_non_finite_epoch(field: str) -> None:
     The ordering check catches a NaN epoch only as a side effect of every
     comparison against NaN being False; an infinite one satisfies the ordering
     outright.
+
+    Parameters:
+        field: Name of the exposure epoch set to infinity.
     """
     with pytest.raises(ValueError, match=f'{field} is not finite'):
         ImagePointing.from_metadata(_metadata(**{field: float('inf')}))

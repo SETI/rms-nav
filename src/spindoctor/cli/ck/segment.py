@@ -92,8 +92,8 @@ class CkSegment:
 
     Raises:
         ValueError: if the arrays disagree on the record count, have the wrong
-            width, hold no records, or if the time tags are not strictly
-            increasing.
+            width, hold no records, hold a non-finite value, or if the time
+            tags are not strictly increasing.
     """
 
     ck_frame_id: int
@@ -125,6 +125,15 @@ class CkSegment:
                 f'segment id {self.segid!r} is longer than the {_SEGID_MAX_CHARS} characters '
                 f'SPICE stores'
             )
+        # Before the ordering check below, which a non-finite value defeats
+        # rather than fails: every comparison against a NaN is False, so a NaN
+        # time tag would read as strictly increasing, and an infinite one
+        # satisfies the ordering outright.  Both would then reach ckw03 as
+        # record data.
+        _reject_non_finite(sclkdp, 'sclkdp')
+        _reject_non_finite(quats, 'quats')
+        if avvs is not None:
+            _reject_non_finite(avvs, 'avvs')
         gaps = np.diff(sclkdp)
         if count > 1 and float(np.min(gaps)) <= 0.0:
             raise ValueError(
@@ -166,6 +175,29 @@ class CkSegment:
         coverage after it.
         """
         return float(self.sclkdp[-1])
+
+
+def _reject_non_finite(values: NDArrayFloatType, label: str) -> None:
+    """Raise unless every value in a record array is finite.
+
+    A non-finite record is not something SPICE reports back: ``ckw03`` stores
+    what it is handed, and a NaN quaternion or time tag becomes a kernel that
+    answers nonsense to every consumer that furnishes it.  It also cannot be
+    caught by the comparisons that validate ordering, since a NaN answers False
+    to all of them.
+
+    Parameters:
+        values: The record array to check.
+        label: Name of the array, used in the exception message.
+
+    Raises:
+        ValueError: if any value is not finite, naming the first such index.
+    """
+    offenders = np.argwhere(~np.isfinite(values))
+    if offenders.shape[0] == 0:
+        return
+    index = tuple(int(position) for position in offenders[0])
+    raise ValueError(f'{label} holds a non-finite value at index {index}: {float(values[index])!r}')
 
 
 def resolve_sclk_id(ck_frame_id: int) -> int:

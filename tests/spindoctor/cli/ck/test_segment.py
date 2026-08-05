@@ -202,7 +202,12 @@ def _attitude_from_pool(ck_frame_id: int, sclk_id: int, et: float) -> NDArrayFlo
     ids=['start', 'midtime', 'stop', 'interior'],
 )
 def test_corrected_attitude_matches_composed_truth(pool: KernelPool, query_et: float) -> None:
-    """The written attitude is the planted correction on the baseline history."""
+    """The written attitude is the planted correction on the baseline history.
+
+    Parameters:
+        query_et: Epoch the corrected kernel is queried at, TDB seconds past
+            J2000.
+    """
     case = _build_case(pool)
     _swap_to_corrected(pool, case)
     read = _attitude_from_pool(CASSINI_CK_FRAME_ID, -82, query_et)
@@ -453,7 +458,12 @@ def test_a_sub_tick_exposure_still_yields_three_records(pool: KernelPool) -> Non
 def test_record_count_follows_the_cadence(
     pool: KernelPool, exposure_s: float, expected_records: int
 ) -> None:
-    """Long exposures get a one-second cadence; short ones get three records."""
+    """Long exposures get a one-second cadence; short ones get three records.
+
+    Parameters:
+        exposure_s: Exposure duration under test, in seconds.
+        expected_records: Records the segment should hold for that duration.
+    """
     start_et = ET0 + 1.0
     stop_et = start_et + exposure_s
     case = _build_case(
@@ -471,7 +481,12 @@ def test_record_count_follows_the_cadence(
 def test_frozen_attitude_object_is_constant_across_the_exposure(
     pool: KernelPool, query_et: float
 ) -> None:
-    """A frozen-attitude object carries one attitude, not the baseline history."""
+    """A frozen-attitude object carries one attitude, not the baseline history.
+
+    Parameters:
+        query_et: Epoch the corrected kernel is queried at, TDB seconds past
+            J2000.
+    """
     case = _build_case(pool, ck_frame_id=VOYAGER_CK_FRAME_ID, camera_frame=VOYAGER_CAMERA_FRAME)
     _swap_to_corrected(pool, case)
     read = _attitude_from_pool(VOYAGER_CK_FRAME_ID, -31, query_et)
@@ -507,6 +522,10 @@ def test_resolve_sclk_id(ck_frame_id: int, sclk_id: int) -> None:
 
     Voyager 1 is the case integer division gets wrong: ``-31100 // 1000`` is
     -32 in Python, which is the other spacecraft.
+
+    Parameters:
+        ck_frame_id: SPICE id of the object a corrected kernel targets.
+        sclk_id: Spacecraft clock that object's time tags are encoded against.
     """
     assert resolve_sclk_id(ck_frame_id) == sclk_id
 
@@ -574,6 +593,9 @@ def test_segment_refuses_a_scalar_time_tag(sclkdp: object) -> None:
     A zero-dimensional array has no length to read, so the shape guard has to
     run before anything indexes it; otherwise the failure is an ``IndexError``
     from inside the guard's own arithmetic.
+
+    Parameters:
+        sclkdp: Scalar passed where the time tag array belongs.
     """
     with pytest.raises(ValueError, match=r'sclkdp must hold at least one time tag; got shape \(\)'):
         CkSegment(
@@ -582,6 +604,67 @@ def test_segment_refuses_a_scalar_time_tag(sclkdp: object) -> None:
             sclkdp=cast(NDArrayFloatType, sclkdp),
             quats=np.vstack([cspyce.m2q(np.eye(3))]),
             avvs=None,
+        )
+
+
+@pytest.mark.parametrize('bad', [float('nan'), float('inf')], ids=['nan', 'inf'])
+def test_segment_refuses_a_non_finite_time_tag(bad: float) -> None:
+    """A non-finite time tag is refused rather than handed to ckw03.
+
+    The ordering check is no defense: a NaN reads as strictly increasing
+    because every comparison against it is False, and an infinity satisfies
+    the ordering outright.
+
+    Parameters:
+        bad: Non-finite value planted in the second time tag.
+    """
+    quats = np.vstack([cspyce.m2q(np.eye(3))] * 2)
+    with pytest.raises(ValueError, match=r'sclkdp holds a non-finite value at index \(1,\)'):
+        CkSegment(
+            ck_frame_id=CASSINI_CK_FRAME_ID,
+            segid='non-finite',
+            sclkdp=np.array([1.0, bad]),
+            quats=quats,
+            avvs=None,
+        )
+
+
+@pytest.mark.parametrize('bad', [float('nan'), float('inf')], ids=['nan', 'inf'])
+def test_segment_refuses_a_non_finite_quaternion(bad: float) -> None:
+    """A non-finite quaternion component is refused, naming where it sits.
+
+    Parameters:
+        bad: Non-finite value planted in the second record's third component.
+    """
+    quats = np.vstack([cspyce.m2q(np.eye(3))] * 2)
+    quats[1, 2] = bad
+    with pytest.raises(ValueError, match=r'quats holds a non-finite value at index \(1, 2\)'):
+        CkSegment(
+            ck_frame_id=CASSINI_CK_FRAME_ID,
+            segid='non-finite',
+            sclkdp=np.array([1.0, 2.0]),
+            quats=quats,
+            avvs=None,
+        )
+
+
+@pytest.mark.parametrize('bad', [float('nan'), float('inf')], ids=['nan', 'inf'])
+def test_segment_refuses_a_non_finite_angular_velocity(bad: float) -> None:
+    """A non-finite angular velocity component is refused, naming where it sits.
+
+    Parameters:
+        bad: Non-finite value planted in the first record's second component.
+    """
+    quats = np.vstack([cspyce.m2q(np.eye(3))] * 2)
+    avvs = np.zeros((2, 3))
+    avvs[0, 1] = bad
+    with pytest.raises(ValueError, match=r'avvs holds a non-finite value at index \(0, 1\)'):
+        CkSegment(
+            ck_frame_id=CASSINI_CK_FRAME_ID,
+            segid='non-finite',
+            sclkdp=np.array([1.0, 2.0]),
+            quats=quats,
+            avvs=avvs,
         )
 
 
