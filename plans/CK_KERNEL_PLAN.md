@@ -398,8 +398,12 @@ C_ck_corrected(t) = delta . C_ck_original(t)      for t in [start, stop]
 ```
 
 That is the physical model -- the spacecraft is pointed slightly wrong and
-the error turns with it -- so attitude still varies correctly within the
-exposure and smear geometry stays right. **Exception: Voyager.** The
+the error turns with it -- so the *correction* is right at every epoch in
+the window. What the segment reproduces between its records is a separate
+question: it carries records only at start, midtime and stop, and
+interpolates between them, so smear geometry is right only to the fidelity
+of that interpolation, which is measured and bounded in Phase D's interior
+note and deferred to #444. **Exception: Voyager.** The
 navigated model assumed a constant, tolerance-snapped attitude (section
 2.2), so a Voyager segment carries that single corrected attitude,
 constant across its window; writing time-varying pointing there would
@@ -796,18 +800,12 @@ kernel pool, and a mid-process `furnsh` is not guaranteed to take effect:
    when both runs commit the same winning technique set; the test records
    both sets and fails as *inconclusive-mismatch* (not as a pass) when
    they differ.
-5. Assert the corrected attitude at **interior** epochs of the exposure as
-   well as at start, midtime and stop. A corrected segment carries records
-   at exactly those three epochs, so they are reproduced exactly by
-   construction, and a validation that samples only them is structurally
-   unable to observe interior resampling loss. Measured on a real Cassini
-   reconstructed kernel, the interior loss reaches **0.290 px** maximum on
-   a 2 s exposure with 8.2% of samples over 0.1 px, and **0.445 px** on a
-   10 s exposure with 4.2% over; a 60 s exposure written at the 1 s cadence
-   still loses **0.643 px** at the median. The loss is attributable rather
-   than noise: a zero-correction run shows the same error, and the cause is
-   a rate discontinuity in the baseline inside the window that the segment
-   interpolates across.
+5. Assert the corrected attitude at **start, midtime and stop only**.
+   Those are the epochs a segment carries records at, and they are the
+   epochs this plan claims. Interior epochs are deliberately **not**
+   asserted, because the record scheme does not currently bound them (see
+   the limitation below); testing them would pin a number this plan does
+   not undertake to hold.
 
 Tolerances: the target is at or below **0.1 px per axis**, and the
 C-matrix target is that offset's angular equivalent at the instrument's
@@ -822,18 +820,26 @@ before comparing. Choose the WAC cohort frame accordingly, remembering the
 bound is **linear** in the offset, not quadratic: about 10 px of total
 offset buys a fifth of budget.
 
-Interior tolerance: the interior bound is a **separate quantity** from the
-midtime bound and is stated separately. The 0.1 px per-axis midtime target
-and its decision rule above are unchanged by it. An interior residual above
-that target is **not** automatically a convention defect, because this loss
-is characterized and attributable: the validation records the measured
-interior residual, pins it at measured-plus-margin, and names issue #440 as
-the reason the bound sits where it does, so a later change to the record
-scheme can ratchet it down. A convention error has the opposite signature
--- a near-uniform displacement across the whole frame of roughly twice the
-navigated offset, present at every epoch including the record epochs -- so
-the assertion must distinguish the two rather than collapsing them into one
-threshold.
+**Interior epochs are outside what this plan claims, and that is a
+measured limitation rather than an oversight.** A segment reproduces its
+record epochs exactly and interpolates between them, so an epoch inside
+the exposure carries the reconstruction error of that interpolation.
+Measured on a real Cassini reconstructed kernel against its own attitude,
+in NAC pixels, sampled across the window: a 2 s exposure reaches 0.708 px
+worst case with 42.9% of samples over 0.1 px; a 10 s exposure at the 1 s
+cadence reaches 0.699 px with 24.6% over; a 60 s exposure reaches 1.071 px
+with 19.5% over, and 25.983 px if the cadence does not apply. The loss is
+attributable rather than noise -- a zero-correction run shows the same
+error -- and it comes from rate structure in the baseline that the segment
+interpolates across.
+
+Bounding it is deferred to a denser, adaptive record cadence (#444). Until
+that lands, the round trip asserts the three record epochs and nothing
+between them, and the user guide states the limitation plainly rather than
+implying interior fidelity the kernels do not provide. A consumer that
+evaluates geometry at the midtime -- which is what the backplane and
+reprojection stages do -- is unaffected and exact; the cost falls only on a
+consumer integrating smear across the exposure.
 
 Cohort: one star-navigated Cassini NAC frame (best-constrained truth), one
 Cassini WAC frame, and one frame from each other instrument that has a
