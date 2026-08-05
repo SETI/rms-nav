@@ -262,6 +262,60 @@ def baseline_angular_velocity(et: float) -> NDArrayFloatType:
     return velocity
 
 
+def baseline_segment(
+    *,
+    ck_frame_id: int,
+    sclk_id: int,
+    epochs: Sequence[float],
+    attitude: Callable[[float], NDArrayFloatType],
+    angular_velocity: Callable[[float], NDArrayFloatType] | None,
+    segid: str = 'baseline',
+) -> CkSegment:
+    """Build one baseline segment from an attitude history.
+
+    The quaternions come straight from ``cspyce.m2q`` rather than through the
+    writer's sign-continuity helper, so a baseline is exactly what a real
+    kernel is: whatever the producer stored.
+
+    Parameters:
+        ck_frame_id: SPICE id of the object the segment describes.
+        sclk_id: Spacecraft clock the time tags are encoded against.
+        epochs: Record epochs, TDB seconds past J2000, strictly increasing.
+        attitude: The J2000-to-CK-object rotation at an epoch.
+        angular_velocity: The angular velocity at an epoch, or None for a
+            segment carrying none.
+        segid: Segment identifier.
+
+    Returns:
+        The segment.
+    """
+    ticks = [float(cspyce.sce2c(sclk_id, et)) for et in epochs]
+    quats = np.vstack([np.asarray(cspyce.m2q(attitude(et)), dtype=np.float64) for et in epochs])
+    avvs = None
+    if angular_velocity is not None:
+        avvs = np.vstack([angular_velocity(et) for et in epochs])
+    return CkSegment(
+        ck_frame_id=ck_frame_id,
+        segid=segid,
+        sclkdp=np.asarray(ticks, dtype=np.float64),
+        quats=quats,
+        avvs=avvs,
+    )
+
+
+def write_ck(path: Path, segments: Sequence[CkSegment]) -> None:
+    """Write segments to a new C-kernel.
+
+    Parameters:
+        path: File to create.
+        segments: The segments to add, in order.
+    """
+    handle = cspyce.ckopn(str(path), 'baseline', 0)
+    for segment in segments:
+        write_segment(handle, segment)
+    cspyce.ckcls(handle)
+
+
 def write_baseline_ck(
     path: Path,
     *,
@@ -273,10 +327,6 @@ def write_baseline_ck(
 ) -> None:
     """Write the baseline C-kernel a corrected segment is measured against.
 
-    The quaternions come straight from ``cspyce.m2q`` rather than through the
-    writer's sign-continuity helper, so a baseline is exactly what a real
-    kernel is: whatever the producer stored.
-
     Parameters:
         path: File to create.
         ck_frame_id: SPICE id of the object the segment describes.
@@ -286,21 +336,18 @@ def write_baseline_ck(
         angular_velocity: The angular velocity at an epoch, or None to write a
             segment carrying none.
     """
-    ticks = [float(cspyce.sce2c(sclk_id, et)) for et in epochs]
-    quats = np.vstack([np.asarray(cspyce.m2q(attitude(et)), dtype=np.float64) for et in epochs])
-    avvs = None
-    if angular_velocity is not None:
-        avvs = np.vstack([angular_velocity(et) for et in epochs])
-    segment = CkSegment(
-        ck_frame_id=ck_frame_id,
-        segid='baseline',
-        sclkdp=np.asarray(ticks, dtype=np.float64),
-        quats=quats,
-        avvs=avvs,
+    write_ck(
+        path,
+        [
+            baseline_segment(
+                ck_frame_id=ck_frame_id,
+                sclk_id=sclk_id,
+                epochs=epochs,
+                attitude=attitude,
+                angular_velocity=angular_velocity,
+            )
+        ],
     )
-    handle = cspyce.ckopn(str(path), 'baseline', 0)
-    write_segment(handle, segment)
-    cspyce.ckcls(handle)
 
 
 def rotation_angle_between(first: NDArrayFloatType, second: NDArrayFloatType) -> float:

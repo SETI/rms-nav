@@ -452,9 +452,13 @@ Phase B measured two things about that paragraph. First, `sce2c` returns
 *continuous* encoded SCLK -- a tick with a fractional part -- so the
 single-record collapse happens only when the three epochs are
 indistinguishable as doubles (a nanosecond exposure near ET 5e8), not
-merely when the exposure is shorter than one tick; and when it does happen
-the midtime record is bit-identical to the start record, so "at midtime" is
-a statement of intent rather than an observable. Second, SPICE's own type-3
+merely when the exposure is shorter than one tick: measured against a
+1/256 s clock, a 1 ms exposure is 0.256 ticks and still produces three
+records. **The single-record path is therefore unreachable for any real
+exposure** -- the shortest Cassini ISS exposure is 5 ms -- and it exists as
+a guard, not as a case the corpus contains. When it does fire the midtime
+record is bit-identical to the start record, so "at midtime" is a statement
+of intent rather than an observable. Second, SPICE's own type-3
 reader restores quaternion sign on the way out: a segment written with a
 sign-discontinuous sequence reads back attitudes identical to a repaired
 one (0.0 rad difference at an interior epoch, measured). The enforcement
@@ -502,12 +506,15 @@ the wrong-frame error, and Phase B's test must fail if it is introduced.
 Two refinements from Phase B. The want-of-AV failure is `OSError`
 `SPICE(CKINSUFFDATA)` -- the same class and short message as pointing that
 is not covered at all -- so the two are not distinguishable from the
-exception. The writer therefore probes `ckgpav` once at the first record
-and, if it raises, reads the whole segment with `ckgp`; a genuine coverage
-gap still surfaces rather than being demoted to a missing-AV segment,
-because those `ckgp` lookups raise on it. And a **frozen (Voyager) segment
-writes `avflag = 0` whatever its baseline carries**: the segment's attitude
-is constant, so its angular velocity is zero, and the rigid-attachment
+exception. The rule the writer applies is therefore **all records or
+none**: it probes `ckgpav` at the first record as a fast path, but the
+sampling pass over every record is what decides, so an exposure straddling
+one original segment that carries AV and one that does not writes
+`avflag = 0` rather than failing. A genuine coverage gap still surfaces
+rather than being demoted to a missing-AV segment, because the `ckgp`
+lookups that then read the attitude raise on it. And a **frozen (Voyager)
+segment writes `avflag = 0` whatever its baseline carries**: the segment's
+attitude is constant, so its angular velocity is zero, and the rigid-attachment
 argument that licenses copying the baseline's vectors does not hold for a
 segment that deliberately drops the baseline's time variation. Voyager
 baselines carry no AV in any case, so the rule changes nothing on real
@@ -723,12 +730,25 @@ with `ckgpav` at `tol = 0`:
   truth within 1e-9 radians.
 - AV is bit-identical to the original's; the test **fails if AV is rotated
   through `delta`**.
-- An AV-less original yields `avflag = 0` and a working `ckgp` fallback.
+- An AV-less original yields `avflag = 0` and a working `ckgp` fallback,
+  and so does an exposure straddling one original segment that carries AV
+  and one that does not: a segment has one flag for all its records, so it
+  claims none rather than inventing vectors for the records that lack them.
 - A sign-discontinuous quaternion sequence is repaired, asserted on the
   written records rather than on a read-back attitude (section 3.3: SPICE
   restores the sign when it interpolates, so the read-back cannot see it);
   interpolated attitude mid-record stays continuous.
-- A sub-tick exposure produces a valid single-record segment.
+- Exposure epochs that collapse to a single encoded tick produce a valid
+  single-record segment. Per section 3.3 that needs three epochs equal as
+  doubles, which no real exposure produces, so a second test pins the
+  reachable neighbour: a sub-tick (1 ms) exposure still produces three
+  records.
+- The written file's `ckcov` window is exactly `[start_et, stop_et]` in
+  encoded SCLK. Asserting on the record array instead cannot see a segment
+  descriptor that advertises coverage the records do not have.
+- Baseline pointing is read at the record epoch with tolerance zero: an
+  exposure the original does not cover is refused rather than corrected
+  against the nearest attitude within some tolerance.
 - Sub-spacecraft-clock ids come from `ckmeta`, asserted for all four CK
   objects.
 

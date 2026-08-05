@@ -29,8 +29,11 @@ Angular velocity is copied unchanged and never rotated.  CK angular velocity is
 expressed in the segment's base reference frame (J2000), and two frames rigidly
 attached to each other have identical angular velocity in that frame, so
 rotating it through ``delta`` -- superficially the thorough treatment -- writes
-a vector in no frame at all.  A baseline that carries no angular velocity
-yields a segment that carries none, and consumers fall back to ``ckgp``.
+a vector in no frame at all.  A segment carries one angular velocity flag for
+all of its records, so a baseline that lacks angular velocity at any record --
+including an exposure straddling one baseline segment that has it and one that
+does not -- yields a segment that carries none, and consumers fall back to
+``ckgp``.
 
 The caller owns the kernel pool: the supporting kernels (LSK, SCLK, FK) and the
 one baseline C-kernel whose attitude the image was navigated against must be
@@ -115,18 +118,23 @@ class CkSegment:
     avvs: NDArrayFloatType | None
 
     def __post_init__(self) -> None:
-        """Refuse a record set SPICE would reject or a consumer would misread."""
-        sclkdp = np.asarray(self.sclkdp, dtype=np.float64)
-        quats = np.asarray(self.quats, dtype=np.float64)
+        """Refuse a record set SPICE would reject, and store it read-only.
+
+        The arrays are stored as read-only float64 copies, so the invariants
+        checked here still hold when the segment is written: a caller that
+        keeps a reference to the array it passed in cannot edit the records
+        out from under them.
+        """
+        sclkdp = np.array(self.sclkdp, dtype=np.float64)
+        quats = np.array(self.quats, dtype=np.float64)
         count = sclkdp.shape[0]
         if sclkdp.ndim != 1 or count == 0:
             raise ValueError(f'sclkdp must hold at least one time tag; got shape {sclkdp.shape}')
         if quats.shape != (count, 4):
             raise ValueError(f'quats must have shape {(count, 4)}; got {quats.shape}')
-        if self.avvs is not None and np.asarray(self.avvs).shape != (count, 3):
-            raise ValueError(
-                f'avvs must have shape {(count, 3)}; got {np.asarray(self.avvs).shape}'
-            )
+        avvs = None if self.avvs is None else np.array(self.avvs, dtype=np.float64)
+        if avvs is not None and avvs.shape != (count, 3):
+            raise ValueError(f'avvs must have shape {(count, 3)}; got {avvs.shape}')
         if len(self.segid) > _SEGID_MAX_CHARS:
             raise ValueError(
                 f'segment id {self.segid!r} is longer than the {_SEGID_MAX_CHARS} characters '
@@ -138,11 +146,18 @@ class CkSegment:
                 f'encoded SCLK time tags are not strictly increasing: smallest step is '
                 f'{float(np.min(gaps))!r}'
             )
+        sclkdp.setflags(write=False)
+        quats.setflags(write=False)
+        object.__setattr__(self, 'sclkdp', sclkdp)
+        object.__setattr__(self, 'quats', quats)
+        if avvs is not None:
+            avvs.setflags(write=False)
+            object.__setattr__(self, 'avvs', avvs)
 
     @property
     def record_count(self) -> int:
         """Number of records in the segment."""
-        return int(np.asarray(self.sclkdp).shape[0])
+        return int(self.sclkdp.shape[0])
 
     @property
     def has_angular_velocity(self) -> bool:
@@ -151,13 +166,21 @@ class CkSegment:
 
     @property
     def begtim(self) -> float:
-        """Encoded SCLK at which the segment's coverage begins."""
-        return float(np.asarray(self.sclkdp)[0])
+        """Encoded SCLK at which the segment's coverage begins.
+
+        This is the first record's time tag, and the segment advertises no
+        coverage before it.
+        """
+        return float(self.sclkdp[0])
 
     @property
     def endtim(self) -> float:
-        """Encoded SCLK at which the segment's coverage ends."""
-        return float(np.asarray(self.sclkdp)[-1])
+        """Encoded SCLK at which the segment's coverage ends.
+
+        This is the last record's time tag, and the segment advertises no
+        coverage after it.
+        """
+        return float(self.sclkdp[-1])
 
 
 def resolve_sclk_id(ck_frame_id: int) -> int:
@@ -196,22 +219,28 @@ def resolve_sclk_id(ck_frame_id: int) -> int:
 def build_segment(pointing: ImagePointing) -> CkSegment:
     """Build the corrected type-3 segment for one navigated image.
 
-    The caller must already have furnished the supporting kernels and the one
-    baseline C-kernel the image navigated against; the baseline attitude is
-    read from the pool at the exposure midtime and at every record epoch.
+    The caller must already have furnished the supporting kernels: the
+    spacecraft clock navigation used, and the frame kernel defining the CK
+    object's frame and the camera frame.  Every object but a frozen-attitude
+    one also needs the baseline C-kernel the image navigated against, read at
+    the exposure midtime and at every record epoch; a frozen-attitude object's
+    segment carries one constant attitude and never reads the baseline.
 
     Records go at the exposure start, midtime and stop, plus a 1 s cadence when
     the exposure is longer than 10 s, each encoded with ``cspyce.sce2c``.  Time
-    tags that do not strictly increase are dropped, and an exposure short enough
-    that all three epochs encode to one tick yields a single record at the
-    midtime.
+    tags that do not strictly increase are dropped, and epochs that all encode
+    to one tick yield a single record at the midtime.  Since ``sce2c`` encodes
+    a fractional tick, that happens only for an exposure whose start, midtime
+    and stop are one floating-point value, not merely for an exposure shorter
+    than a tick.
 
     Parameters:
         pointing: The image's recorded corrected pointing.
 
     Returns:
         The segment to write, carrying the baseline's angular velocity
-        unchanged when the baseline has any and none when it does not.
+        unchanged when the baseline has it at every record, and none when the
+        baseline lacks it anywhere.
 
     Raises:
         ValueError: if the CK object is not one this writer knows, if the
@@ -254,9 +283,12 @@ def build_segment(pointing: ImagePointing) -> CkSegment:
 def write_segment(handle: int, segment: CkSegment) -> None:
     """Add one type-3 segment to an open C-kernel.
 
-    The segment's interpolation interval spans its records exactly, so a
-    consumer is never handed interpolated pointing outside the exposure the
-    correction was measured over.
+    The segment is descriptor-bounded and interpolation-bounded by its own
+    records: its begin and end times are the first and last time tag, and its
+    one interpolation interval starts at the first.  A consumer asking
+    ``ckcov`` what the file covers is therefore told exactly the exposure, and
+    is never handed interpolated pointing outside the window the correction was
+    measured over.
 
     Parameters:
         handle: Handle of a C-kernel opened for writing, from ``cspyce.ckopn``.
@@ -389,7 +421,11 @@ def _baseline_attitude(ck_frame_id: int, tick: float) -> NDArrayFloatType:
 
 
 def _baseline_has_angular_velocity(ck_frame_id: int, tick: float) -> bool:
-    """Report whether the furnished baseline carries angular velocity.
+    """Probe whether the furnished baseline carries angular velocity.
+
+    This is the fast path only.  It answers for one time tag, and a segment's
+    flag has to hold for every record, so ``_baseline_history`` samples all of
+    them and its result, not this probe, decides what the segment claims.
 
     Parameters:
         ck_frame_id: SPICE id of the object.
@@ -411,6 +447,61 @@ def _baseline_has_angular_velocity(ck_frame_id: int, tick: float) -> bool:
     return True
 
 
+def _sample_with_angular_velocity(
+    ck_frame_id: int, ticks: list[float]
+) -> tuple[list[NDArrayFloatType], NDArrayFloatType] | None:
+    """Sample the baseline attitude and angular velocity at every record.
+
+    Parameters:
+        ck_frame_id: SPICE id of the object.
+        ticks: The encoded SCLK time tags to sample.
+
+    Returns:
+        The attitudes and angular velocity vectors, or ``None`` when any
+        record has no angular velocity available.  ``None`` also comes back
+        when a record has no pointing at all, which the attitude-only pass
+        then raises on.
+    """
+    attitudes: list[NDArrayFloatType] = []
+    velocities: list[NDArrayFloatType] = []
+    for tick in ticks:
+        try:
+            cmat, av, _clkout = cspyce.ckgpav(ck_frame_id, tick, _LOOKUP_TOL_TICKS, _BASE_FRAME)
+        except OSError:
+            return None
+        attitudes.append(np.asarray(cmat, dtype=np.float64))
+        velocities.append(np.asarray(av, dtype=np.float64))
+    return attitudes, np.vstack(velocities)
+
+
+def _baseline_history(
+    ck_frame_id: int, ticks: list[float]
+) -> tuple[list[NDArrayFloatType], NDArrayFloatType | None]:
+    """Sample the baseline attitude at each record, with angular velocity if all have it.
+
+    A segment carries one angular velocity flag for all of its records, so an
+    exposure straddling a baseline segment that has angular velocity and one
+    that does not cannot claim it: the corrected segment then carries none at
+    all rather than inventing vectors for the records that lack them.
+
+    Parameters:
+        ck_frame_id: SPICE id of the object.
+        ticks: The encoded SCLK time tags to sample.
+
+    Returns:
+        The baseline attitudes and its angular velocity vectors, or ``None``
+        for the angular velocity when any record has none.
+
+    Raises:
+        OSError: if the furnished kernels provide no pointing at a record.
+    """
+    if _baseline_has_angular_velocity(ck_frame_id, ticks[0]):
+        sampled = _sample_with_angular_velocity(ck_frame_id, ticks)
+        if sampled is not None:
+            return sampled
+    return [_baseline_attitude(ck_frame_id, tick) for tick in ticks], None
+
+
 def _corrected_history(
     ck_frame_id: int, ticks: list[float], delta: NDArrayFloatType
 ) -> tuple[list[NDArrayFloatType], NDArrayFloatType | None]:
@@ -423,27 +514,17 @@ def _corrected_history(
 
     Returns:
         The corrected attitudes and the baseline's angular velocity vectors,
-        or ``None`` for the angular velocity when the baseline carries none.
+        or ``None`` for the angular velocity when the baseline does not carry
+        it at every record.
 
     Raises:
         OSError: if the furnished kernels provide no pointing at a record.
     """
-    with_av = _baseline_has_angular_velocity(ck_frame_id, ticks[0])
-    attitudes: list[NDArrayFloatType] = []
-    sampled_av: list[NDArrayFloatType] = []
-    for tick in ticks:
-        if with_av:
-            cmat, av, _clkout = cspyce.ckgpav(ck_frame_id, tick, _LOOKUP_TOL_TICKS, _BASE_FRAME)
-            # Copied, never rotated through delta: angular velocity is
-            # expressed in the segment's base frame, which the correction does
-            # not touch, and two frames rigidly attached to each other share it.
-            sampled_av.append(np.asarray(av, dtype=np.float64))
-        else:
-            cmat = _baseline_attitude(ck_frame_id, tick)
-        attitudes.append(delta @ np.asarray(cmat, dtype=np.float64))
-    if not with_av:
-        return attitudes, None
-    return attitudes, np.vstack(sampled_av)
+    attitudes, velocities = _baseline_history(ck_frame_id, ticks)
+    # The angular velocity is passed through untouched: it is expressed in the
+    # segment's base frame, which the correction does not rotate, and two
+    # frames rigidly attached to each other share it.
+    return [delta @ attitude for attitude in attitudes], velocities
 
 
 def _quaternion_sequence(attitudes: list[NDArrayFloatType]) -> NDArrayFloatType:

@@ -19,15 +19,18 @@ from tests.spindoctor.cli.ck.conftest import (
     CASSINI_CAMERA_FRAME,
     CASSINI_CK_FRAME_ID,
     ET0,
+    TICKS_PER_SECOND,
     VOYAGER_CAMERA_FRAME,
     VOYAGER_CK_FRAME_ID,
     KernelPool,
     axis_rotation,
     baseline_angular_velocity,
     baseline_attitude,
+    baseline_segment,
     rotation_angle_between,
     sweeping_attitude,
     write_baseline_ck,
+    write_ck,
 )
 
 from spindoctor.cli.ck.pointing import ImagePointing, NDArrayFloatType
@@ -236,6 +239,31 @@ def test_angular_velocity_is_copied_unchanged(pool: KernelPool) -> None:
     assert np.array_equal(corrected_av[2], baseline_av[2])
 
 
+def test_written_coverage_is_exactly_the_exposure(pool: KernelPool) -> None:
+    """The file advertises the exposure and not one tick more.
+
+    ``ckcov`` reports what the segment descriptor claims, which is what a
+    consumer and the file-mirroring step both read; it is independent of the
+    records the segment actually holds, so a descriptor widened beyond them
+    would go unnoticed by any assertion made on the record array.
+    """
+    case = _build_case(pool)
+    cover = cspyce.ckcov(
+        str(case.corrected_path), CASSINI_CK_FRAME_ID, False, 'SEGMENT', 0.0, 'SCLK'
+    )
+    assert len(cover) == 2
+    assert float(cover[0]) == _tick(-82, _START_ET)
+    assert float(cover[1]) == _tick(-82, _STOP_ET)
+
+
+def test_pointing_outside_the_written_window_falls_through(pool: KernelPool) -> None:
+    """A consumer gets nothing from the corrected kernel outside the exposure."""
+    case = _build_case(pool)
+    _swap_to_corrected(pool, case)
+    with pytest.raises(OSError, match='CKINSUFFDATA'):
+        cspyce.ckgp(CASSINI_CK_FRAME_ID, _tick(-82, _STOP_ET + 0.25), 0.0, 'J2000')
+
+
 def test_angular_velocity_absent_from_baseline_stays_absent(pool: KernelPool) -> None:
     """A baseline without angular velocity yields a segment without it."""
     case = _build_case(pool, with_angular_velocity=False)
@@ -248,6 +276,104 @@ def test_angular_velocity_absent_from_baseline_stays_absent(pool: KernelPool) ->
     read = _attitude_from_pool(CASSINI_CK_FRAME_ID, -82, midtime)
     truth = case.correction @ baseline_attitude(midtime)
     assert rotation_angle_between(read, truth) < _ANGLE_TOL_RAD
+
+
+def test_angular_velocity_missing_from_part_of_the_exposure_is_not_claimed(
+    pool: KernelPool,
+) -> None:
+    """An exposure straddling a baseline that loses angular velocity claims none.
+
+    One flag covers the whole segment, so a segment cannot say that half its
+    records have angular velocity.  It must not fail either: the pointing is
+    all there.
+    """
+    sclk_id = resolve_sclk_id(CASSINI_CK_FRAME_ID)
+    baseline_path = pool.root / 'baseline.bc'
+    write_ck(
+        baseline_path,
+        [
+            baseline_segment(
+                ck_frame_id=CASSINI_CK_FRAME_ID,
+                sclk_id=sclk_id,
+                epochs=[ET0 + step * 0.5 for step in range(5)],
+                attitude=baseline_attitude,
+                angular_velocity=baseline_angular_velocity,
+                segid='with-av',
+            ),
+            baseline_segment(
+                ck_frame_id=CASSINI_CK_FRAME_ID,
+                sclk_id=sclk_id,
+                epochs=[ET0 + 2.5 + step * 0.5 for step in range(5)],
+                attitude=baseline_attitude,
+                angular_velocity=None,
+                segid='without-av',
+            ),
+        ],
+    )
+    pool.furnish(baseline_path)
+    correction = axis_rotation(_CORRECTION_AXIS, _CORRECTION_RAD)
+    midtime = (_START_ET + _STOP_ET) / 2.0
+    camera_from_ck = np.asarray(
+        cspyce.pxform(str(cspyce.frmnam(CASSINI_CK_FRAME_ID)), CASSINI_CAMERA_FRAME, midtime),
+        dtype=np.float64,
+    )
+    pointing = ImagePointing(
+        image_name=_IMAGE_NAME,
+        cmatrix=camera_from_ck @ correction @ baseline_attitude(midtime),
+        camera_frame=CASSINI_CAMERA_FRAME,
+        ck_frame_id=CASSINI_CK_FRAME_ID,
+        start_et=_START_ET,
+        stop_et=_STOP_ET,
+        midtime_et=midtime,
+        exposure_s=_STOP_ET - _START_ET,
+    )
+    segment = build_segment(pointing)
+    # The premise: angular velocity at the first record, none at the last.
+    cspyce.ckgpav(CASSINI_CK_FRAME_ID, _tick(sclk_id, _START_ET), 0.0, 'J2000')
+    with pytest.raises(OSError, match='CKINSUFFDATA'):
+        cspyce.ckgpav(CASSINI_CK_FRAME_ID, _tick(sclk_id, _STOP_ET), 0.0, 'J2000')
+    assert segment.avvs is None
+    assert segment.record_count == 3
+    truth = correction @ baseline_attitude(_STOP_ET)
+    written = np.asarray(cspyce.q2m(segment.quats[-1]), dtype=np.float64)
+    assert rotation_angle_between(written, truth) < _ANGLE_TOL_RAD
+
+
+def test_a_record_outside_the_baseline_coverage_is_refused(pool: KernelPool) -> None:
+    """Baseline pointing is read at the record epoch, never snapped to a distant one.
+
+    The lookup tolerance is zero, so an exposure the baseline does not cover
+    fails instead of being corrected against whatever attitude happens to be
+    nearest.
+    """
+    with pytest.raises(OSError, match='CKINSUFFDATA'):
+        _build_case(pool, start_et=ET0 + 10.0, stop_et=ET0 + 12.0)
+
+
+def test_a_ck_object_with_no_frame_name_is_refused(pool: KernelPool) -> None:
+    """Without the frame kernel there is no rotation to the camera, and no guess at one."""
+    pointing = ImagePointing(
+        image_name=_IMAGE_NAME,
+        cmatrix=np.eye(3),
+        camera_frame=CASSINI_CAMERA_FRAME,
+        ck_frame_id=CASSINI_CK_FRAME_ID,
+        start_et=_START_ET,
+        stop_et=_STOP_ET,
+        midtime_et=(_START_ET + _STOP_ET) / 2.0,
+        exposure_s=_STOP_ET - _START_ET,
+    )
+    pool.unload(pool.root / 'test.tf')
+    with pytest.raises(KeyError, match='FRAMEIDNOTFOUND'):
+        build_segment(pointing)
+
+
+def test_segment_stores_its_records_read_only(pool: KernelPool) -> None:
+    """A caller cannot edit a validated record set after the fact."""
+    case = _build_case(pool)
+    assert case.segment.sclkdp.flags.writeable is False
+    assert case.segment.quats.flags.writeable is False
+    assert case.segment.avvs is not None
+    assert case.segment.avvs.flags.writeable is False
 
 
 def test_quaternion_records_are_sign_continuous(pool: KernelPool) -> None:
@@ -269,24 +395,55 @@ def test_quaternion_records_are_sign_continuous(pool: KernelPool) -> None:
     assert rotation_angle_between(read, truth) < _ANGLE_TOL_RAD
 
 
-def test_sub_tick_exposure_yields_one_record(pool: KernelPool) -> None:
-    """An exposure below the resolution of an epoch collapses to one record."""
+def test_coincident_exposure_epochs_yield_one_record(pool: KernelPool) -> None:
+    """Three epochs that are one floating-point value yield one valid record.
+
+    This is the only way the single-record path is reached.  ``sce2c`` encodes
+    a fractional tick, so an exposure merely shorter than a tick still encodes
+    to three distinct time tags: with the test clock's 1/256 s tick, a 1 ms
+    exposure is 0.256 ticks and produces three records.  Only epochs that do
+    not differ as doubles collapse, which no real exposure produces -- the
+    shortest Cassini ISS exposure is 5 ms.
+    """
     start_et = ET0 + 2.0
     stop_et = start_et + 1.0e-9
+    midtime_et = start_et + 5.0e-10
     case = _build_case(
         pool,
         start_et=start_et,
         stop_et=stop_et,
-        midtime_et=start_et + 5.0e-10,
+        midtime_et=midtime_et,
         exposure_s=1.0e-9,
     )
     _swap_to_corrected(pool, case)
     read = _attitude_from_pool(CASSINI_CK_FRAME_ID, -82, start_et)
     truth = case.correction @ baseline_attitude(case.pointing.midtime_et)
     assert stop_et == start_et
+    assert midtime_et == start_et
     assert case.segment.record_count == 1
     assert case.segment.begtim == case.segment.endtim
     assert rotation_angle_between(read, truth) < _ANGLE_TOL_RAD
+
+
+def test_a_sub_tick_exposure_still_yields_three_records(pool: KernelPool) -> None:
+    """An exposure shorter than a clock tick is not degenerate.
+
+    The encoded time tags differ in their fractional part, so the ordinary
+    three-record path applies.
+    """
+    start_et = ET0 + 2.0
+    exposure_s = 1.0e-3
+    case = _build_case(
+        pool,
+        start_et=start_et,
+        stop_et=start_et + exposure_s,
+        midtime_et=start_et + exposure_s / 2.0,
+        exposure_s=exposure_s,
+    )
+    ticks = np.asarray(case.segment.sclkdp, dtype=np.float64)
+    assert exposure_s * TICKS_PER_SECOND < 1.0
+    assert case.segment.record_count == 3
+    assert float(np.min(np.diff(ticks))) > 0.0
 
 
 @pytest.mark.parametrize(
@@ -324,7 +481,9 @@ def test_frozen_attitude_object_is_constant_across_the_exposure(
 
 
 def test_frozen_attitude_object_carries_no_angular_velocity(pool: KernelPool) -> None:
-    """A constant-attitude segment claims no angular velocity, whatever the baseline had."""
+    """A constant-attitude segment claims no angular velocity, whatever the
+    baseline had.
+    """
     case = _build_case(pool, ck_frame_id=VOYAGER_CK_FRAME_ID, camera_frame=VOYAGER_CAMERA_FRAME)
     assert case.segment.avvs is None
     assert case.segment.has_angular_velocity is False
