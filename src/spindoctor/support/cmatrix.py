@@ -62,6 +62,7 @@ from spindoctor.obs import (
     ObsSnapshotInst,
     ObsVoyagerISS,
 )
+from spindoctor.support.exceptions import NavPointingError
 from spindoctor.support.types import NDArrayFloatType
 
 # The offset-to-attitude conversion is deliberately behind one public
@@ -82,6 +83,22 @@ __all__ = [
 _CASSINI_CK_FRAME_ID = -82000
 _GALILEO_CK_FRAME_ID = -77001
 _LORRI_CK_FRAME_ID = -98000
+
+# The spacecraft clock each mission's time tags are encoded against.  It is
+# not derivable from the CK object id by arithmetic -- Python's -31100 // 1000
+# is -32, a different spacecraft, silently -- so each mission states its own
+# and the resolved value is checked against it.  Voyager's is derived per
+# spacecraft alongside its CK object.
+_CASSINI_SCLK_ID = -82
+_GALILEO_SCLK_ID = -77
+_LORRI_SCLK_ID = -98
+
+# What cspyce raises when the furnished kernels cannot answer: a missing frame
+# or an unresolvable clock arrives as a LookupError, an unreadable kernel as
+# an OSError, and a SPICE error as a RuntimeError or a ValueError.  Each is an
+# environment failure rather than a defect, so it is converted to a
+# NavPointingError at the call site that made it.
+_SPICE_FAILURES = (LookupError, OSError, RuntimeError, ValueError)
 
 _IDENTITY: NDArrayFloatType = np.eye(3)
 _IDENTITY.setflags(write=False)
@@ -117,6 +134,8 @@ class _FrameIdentity:
         camera_frame: SPICE name of the frame the observation's boresight is
             expressed in.
         ck_frame_id: SPICE id of the object a corrected C-kernel targets.
+        sclk_id: SPICE id of the spacecraft clock that object's time tags are
+            encoded against.
         oops_from_spice: The constant rotation ``R`` relating the oops
             observation frame to the SPICE camera frame.
         frozen_oops_attitude: True when oops freezes the observation frame
@@ -126,6 +145,7 @@ class _FrameIdentity:
 
     camera_frame: str
     ck_frame_id: int
+    sclk_id: int
     oops_from_spice: NDArrayFloatType
     frozen_oops_attitude: bool
 
@@ -201,11 +221,11 @@ def _as_readonly_3x3(matrix: NDArrayFloatType) -> NDArrayFloatType:
         A read-only float64 copy.
 
     Raises:
-        ValueError: if the input is not 3x3.
+        NavPointingError: if the input is not 3x3.
     """
     out = np.array(matrix, dtype=np.float64)
     if out.shape != (3, 3):
-        raise ValueError(f'expected a 3x3 matrix; got shape {out.shape}')
+        raise NavPointingError(f'expected a 3x3 matrix; got shape {out.shape}')
     out.setflags(write=False)
     return out
 
@@ -218,7 +238,7 @@ def _validate_rotation(matrix: NDArrayFloatType, label: str) -> None:
         label: Name used in the exception message.
 
     Raises:
-        ValueError: if the matrix holds a non-finite value, or if its
+        NavPointingError: if the matrix holds a non-finite value, or if its
             determinant differs from 1, or it is not orthonormal, by more than
             the tolerance.
     """
@@ -227,16 +247,16 @@ def _validate_rotation(matrix: NDArrayFloatType, label: str) -> None:
     # is written as a bare NaN / Infinity token that strict JSON parsers
     # reject.  Reject it here, where the defect is still attributable.
     if not bool(np.all(np.isfinite(matrix))):
-        raise ValueError(f'{label} holds a non-finite value: {np.asarray(matrix).tolist()!r}')
+        raise NavPointingError(f'{label} holds a non-finite value: {np.asarray(matrix).tolist()!r}')
     det = float(np.linalg.det(matrix))
     if abs(det - 1.0) > _ROTATION_TOL:
-        raise ValueError(
+        raise NavPointingError(
             f'{label} is not a proper rotation: determinant {det!r} differs from 1 by more '
             f'than {_ROTATION_TOL}'
         )
     residual = float(np.max(np.abs(matrix @ matrix.T - np.eye(3))))
     if residual > _ROTATION_TOL:
-        raise ValueError(
+        raise NavPointingError(
             f'{label} is not orthonormal: max|C C^T - I| = {residual!r} exceeds {_ROTATION_TOL}'
         )
 
@@ -315,8 +335,8 @@ def _spice_cmatrix(
         the identity, since no correction must mean no change.
 
     Raises:
-        ValueError: if ``cmatrix_original`` or the corrected result is not a
-            proper orthonormal rotation.
+        NavPointingError: if ``cmatrix_original`` or the corrected result is
+            not a proper orthonormal rotation.
     """
     original = np.asarray(cmatrix_original, dtype=np.float64)
     _validate_rotation(original, 'cmatrix_original')
@@ -357,8 +377,8 @@ def _build_pointing_solution(
         supplied with no fitted rotation.
 
     Raises:
-        ValueError: if the baseline or the corrected matrix is not a proper
-            orthonormal rotation.
+        NavPointingError: if the baseline or the corrected matrix is not a
+            proper orthonormal rotation.
     """
     if offset_px is None or rotation_fitted:
         _validate_rotation(np.asarray(baseline.cmatrix_original, np.float64), 'cmatrix_original')
@@ -383,6 +403,11 @@ def compute_pointing(
     both attitudes in the SPICE convention along with the frame identities and
     the exposure times a C-kernel writer needs.
 
+    Every expected failure is reported as a ``NavPointingError``, so a caller
+    that must survive an attitude the environment cannot supply absorbs that
+    one exception and nothing else: any other exception escaping this function
+    is a defect in it.
+
     Parameters:
         obs: The navigated observation.
         offset_px: The navigated ``(dv, du)`` offset, or ``None``.
@@ -394,10 +419,13 @@ def compute_pointing(
         whose SPICE frames this module knows (a simulated image, for example).
 
     Raises:
-        ValueError: if the measured flip between the oops and SPICE frames
-            differs from the constant expected for the instrument, varies
-            across the exposure, or if either C-matrix is not a proper
-            orthonormal rotation.
+        NavPointingError: if the furnished kernels cannot supply the attitude,
+            the camera frame or the spacecraft clock; if the resolved
+            spacecraft clock is not the one expected for the mission; if the
+            measured flip between the oops and SPICE frames differs from the
+            constant expected for the instrument or varies across the
+            exposure; or if either C-matrix is not a proper orthonormal
+            rotation.
     """
     identity = _frame_identity(obs)
     if identity is None:
@@ -422,6 +450,7 @@ def _frame_identity(obs: ObsSnapshotInst) -> _FrameIdentity | None:
         return _FrameIdentity(
             camera_frame=f'CASSINI_ISS_{obs.camera}',
             ck_frame_id=_CASSINI_CK_FRAME_ID,
+            sclk_id=_CASSINI_SCLK_ID,
             oops_from_spice=_CASSINI_OOPS_FROM_SPICE,
             frozen_oops_attitude=False,
         )
@@ -429,6 +458,7 @@ def _frame_identity(obs: ObsSnapshotInst) -> _FrameIdentity | None:
         return _FrameIdentity(
             camera_frame='GLL_SCAN_PLATFORM',
             ck_frame_id=_GALILEO_CK_FRAME_ID,
+            sclk_id=_GALILEO_SCLK_ID,
             oops_from_spice=_IDENTITY,
             frozen_oops_attitude=False,
         )
@@ -436,17 +466,21 @@ def _frame_identity(obs: ObsSnapshotInst) -> _FrameIdentity | None:
         return _FrameIdentity(
             camera_frame='NH_LORRI',
             ck_frame_id=_LORRI_CK_FRAME_ID,
+            sclk_id=_LORRI_SCLK_ID,
             oops_from_spice=_LORRI_OOPS_FROM_SPICE,
             frozen_oops_attitude=False,
         )
     if isinstance(obs, ObsVoyagerISS):
         digit = obs.spacecraft_digit
+        # One instrument key serves two spacecraft, so the CK object and the
+        # spacecraft clock are both derived from which spacecraft this is.
         spacecraft_id = -(30 + int(digit))
         # The Voyager FK spells the cameras ISSNA and ISSWA, so the oops
         # detector names NAC and WAC contribute only their first letter.
         return _FrameIdentity(
             camera_frame=f'VG{digit}_ISS{obs.camera[0]}A',
             ck_frame_id=spacecraft_id * 1000 - 100,
+            sclk_id=spacecraft_id,
             oops_from_spice=_IDENTITY,
             frozen_oops_attitude=True,
         )
@@ -462,8 +496,17 @@ def _observation_attitude(obs: ObsSnapshotInst, et: float) -> NDArrayFloatType:
 
     Returns:
         The 3x3 rotation in the oops observation frame convention.
+
+    Raises:
+        NavPointingError: if the furnished kernels cannot place the frame at
+            this epoch.
     """
-    transform = obs.frame.wrt(oops.frame.Frame.J2000).transform_at_time(et)
+    try:
+        transform = obs.frame.wrt(oops.frame.Frame.J2000).transform_at_time(et)
+    except _SPICE_FAILURES as exc:
+        raise NavPointingError(
+            f'the observation frame has no attitude at et {et!r}: {exc}'
+        ) from exc
     return np.asarray(transform.matrix.vals, dtype=np.float64).reshape(3, 3)
 
 
@@ -478,9 +521,12 @@ def _attitude_baseline(obs: ObsSnapshotInst, identity: _FrameIdentity) -> Attitu
         The observation's AttitudeBaseline.
 
     Raises:
-        ValueError: if the measured flip between the oops observation frame
-            and the SPICE camera frame differs from the instrument's expected
-            constant or varies across the exposure.
+        NavPointingError: if the furnished kernels cannot supply the attitude,
+            the camera frame id or the clock strings; if the resolved
+            spacecraft clock is not the instrument's; or if the measured flip
+            between the oops observation frame and the SPICE camera frame
+            differs from the instrument's expected constant or varies across
+            the exposure.
     """
     start_et = float(obs.time[0])
     stop_et = float(obs.time[1])
@@ -498,27 +544,103 @@ def _attitude_baseline(obs: ObsSnapshotInst, identity: _FrameIdentity) -> Attitu
         for et in (start_et, stop_et):
             at_epoch = _observation_attitude(obs, et) @ _pxform(identity.camera_frame, et).T
             if not np.allclose(at_epoch, oops_from_spice, rtol=0.0, atol=_FLIP_TOL):
-                raise ValueError(
+                raise NavPointingError(
                     f'the rotation between the oops and SPICE {identity.camera_frame} frames '
                     f'is not constant across the exposure: it differs by up to '
                     f'{float(np.max(np.abs(at_epoch - oops_from_spice)))!r} between et {et!r} '
                     f'and the midtime {midtime_et!r}'
                 )
-    sclk_id = int(cspyce.ckmeta(identity.ck_frame_id, 'SCLK'))
+    sclk_id = _sclk_id(identity)
     return AttitudeBaseline(
         cmatrix_original=cmatrix_original,
         oops_from_spice=oops_from_spice,
         camera_frame=identity.camera_frame,
-        camera_frame_id=int(cspyce.namfrm(identity.camera_frame)),
+        camera_frame_id=_camera_frame_id(identity.camera_frame),
         ck_frame_id=identity.ck_frame_id,
         start_et=start_et,
         stop_et=stop_et,
         midtime_et=midtime_et,
         exposure_s=float(obs.texp),
-        sclk_start=str(cspyce.sce2s(sclk_id, start_et)),
-        sclk_midtime=str(cspyce.sce2s(sclk_id, midtime_et)),
-        sclk_stop=str(cspyce.sce2s(sclk_id, stop_et)),
+        sclk_start=_sclk_string(sclk_id, start_et),
+        sclk_midtime=_sclk_string(sclk_id, midtime_et),
+        sclk_stop=_sclk_string(sclk_id, stop_et),
     )
+
+
+def _sclk_id(identity: _FrameIdentity) -> int:
+    """Resolve the spacecraft clock for a CK object and check it is the right one.
+
+    ``cspyce.ckmeta`` computes a clock id from a CK object id rather than
+    validating it: it answers ``-999`` for the nonexistent object ``-999999``
+    and ``-12`` for ``-12345``, raising for neither.  A CK object that is
+    wrong for any reason therefore yields a plausible clock id, and every
+    clock string built from it encodes the wrong spacecraft's time while
+    ``sce2s`` reports success.  The resolved id is checked against the one the
+    mission actually uses before any clock string is built.
+
+    Parameters:
+        identity: The instrument's frame facts, carrying both the CK object
+            and the spacecraft clock expected for it.
+
+    Returns:
+        The resolved spacecraft clock id, equal to ``identity.sclk_id``.
+
+    Raises:
+        NavPointingError: if no clock resolves for the CK object, or if the
+            one that resolves is not the instrument's.
+    """
+    try:
+        resolved = int(cspyce.ckmeta(identity.ck_frame_id, 'SCLK'))
+    except _SPICE_FAILURES as exc:
+        raise NavPointingError(
+            f'no spacecraft clock resolves for CK object {identity.ck_frame_id}: {exc}'
+        ) from exc
+    if resolved != identity.sclk_id:
+        raise NavPointingError(
+            f'CK object {identity.ck_frame_id} resolves to spacecraft clock {resolved}, not the '
+            f'{identity.sclk_id} the {identity.camera_frame} camera is tagged against; every '
+            f'clock string built from it would encode the wrong spacecraft'
+        )
+    return resolved
+
+
+def _sclk_string(sclk_id: int, et: float) -> str:
+    """Encode one epoch as a spacecraft clock string.
+
+    Parameters:
+        sclk_id: SPICE id of the spacecraft clock.
+        et: TDB seconds past J2000.
+
+    Returns:
+        The clock string ``sce2s`` produces for that epoch.
+
+    Raises:
+        NavPointingError: if the furnished kernels cannot encode the epoch.
+    """
+    try:
+        return str(cspyce.sce2s(sclk_id, et))
+    except _SPICE_FAILURES as exc:
+        raise NavPointingError(
+            f'spacecraft clock {sclk_id} cannot encode et {et!r}: {exc}'
+        ) from exc
+
+
+def _camera_frame_id(camera_frame: str) -> int:
+    """Look up the SPICE id of a named frame.
+
+    Parameters:
+        camera_frame: SPICE name of the camera frame.
+
+    Returns:
+        The frame's SPICE id.
+
+    Raises:
+        NavPointingError: if the name resolves to no id in the kernel pool.
+    """
+    try:
+        return int(cspyce.namfrm(camera_frame))
+    except _SPICE_FAILURES as exc:
+        raise NavPointingError(f'the frame {camera_frame} has no SPICE id: {exc}') from exc
 
 
 def _pxform(camera_frame: str, et: float) -> NDArrayFloatType:
@@ -530,8 +652,19 @@ def _pxform(camera_frame: str, et: float) -> NDArrayFloatType:
 
     Returns:
         The 3x3 rotation ``pxform('J2000', camera_frame, et)`` as float64.
+
+    Raises:
+        NavPointingError: if the furnished kernels cannot supply the rotation
+            at this epoch.
     """
-    return np.asarray(cspyce.pxform('J2000', camera_frame, et), dtype=np.float64)
+    try:
+        matrix = cspyce.pxform('J2000', camera_frame, et)
+    except _SPICE_FAILURES as exc:
+        raise NavPointingError(
+            f'the furnished kernels cannot supply the J2000 to {camera_frame} rotation at '
+            f'et {et!r}: {exc}'
+        ) from exc
+    return np.asarray(matrix, dtype=np.float64)
 
 
 def _check_flip(measured: NDArrayFloatType, identity: _FrameIdentity) -> None:
@@ -542,11 +675,11 @@ def _check_flip(measured: NDArrayFloatType, identity: _FrameIdentity) -> None:
         identity: The instrument's frame facts, carrying the expected ``R``.
 
     Raises:
-        ValueError: if the two differ by more than ``_FLIP_TOL``.
+        NavPointingError: if the two differ by more than ``_FLIP_TOL``.
     """
     expected = np.asarray(identity.oops_from_spice, dtype=np.float64)
     if not np.allclose(measured, expected, rtol=0.0, atol=_FLIP_TOL):
-        raise ValueError(
+        raise NavPointingError(
             f'the rotation between the oops observation frame and the SPICE '
             f'{identity.camera_frame} frame is {measured.tolist()!r}, which differs from the '
             f'expected {expected.tolist()!r} by up to '

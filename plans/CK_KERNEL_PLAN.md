@@ -342,14 +342,16 @@ unset -- no wrong C-matrix is ever recorded, which is the property the
 raises in section 2.2 exist to guarantee. Two constraints on how it
 absorbs:
 
-- The caught set is only what the computation can legitimately raise: its
-  own `ValueError` guards, plus the `LookupError` / `OSError` /
-  `RuntimeError` / `ValueError` family cspyce raises for a missing frame,
-  an unreadable kernel, or a SPICE error. A `TypeError` or `AttributeError`
-  from a defect in the computation itself is deliberately **not** caught,
-  so a broken build fails on the first image instead of quietly dropping
-  pointing from a 50,000-image batch while every image still reports
-  `status=success`.
+- The caught set is exactly `NavPointingError`, the typed exception in
+  `support/exceptions.py` that the computation raises for every failure it
+  expects: its own guards, and the frame, kernel and clock lookups SPICE
+  cannot answer, each converted at the call site with `raise ... from` so
+  the original traceback survives. Everything else propagates. Catching the
+  untyped `LookupError` / `OSError` / `RuntimeError` / `ValueError` family
+  instead would make a `ValueError` or `RuntimeError` from a defect inside
+  the computation indistinguishable from an expected SPICE failure, and
+  quietly drop pointing from a 50,000-image batch while every image still
+  reports `status=success`.
 - Anything that degrades or omits a solution goes to **both** logs: detail
   to the image log, one line to the run log. An operator watching a batch
   must not have to open every per-image log to learn that pointing stopped

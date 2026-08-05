@@ -42,9 +42,12 @@ from spindoctor.obs import (  # noqa: E402
 )
 from spindoctor.support.cmatrix import (  # noqa: E402
     _attitude_baseline,
+    _frame_identity,
     _FrameIdentity,
+    _sclk_id,
     compute_pointing,
 )
+from spindoctor.support.exceptions import NavPointingError  # noqa: E402  (guarded import)
 from tests.cmatrix_helpers import (  # noqa: E402  (guarded import)
     observation_attitude,
     offset_from_correction,
@@ -108,6 +111,7 @@ def _cassini_nac_identity() -> _FrameIdentity:
     return _FrameIdentity(
         camera_frame='CASSINI_ISS_NAC',
         ck_frame_id=-82000,
+        sclk_id=-82,
         oops_from_spice=_CASSINI_FLIP_ARRAY,
         frozen_oops_attitude=False,
     )
@@ -295,6 +299,33 @@ def test_recorded_clock_strings_are_distinct_and_ordered(
 
 
 @pytest.mark.parametrize(
+    ('obs_class', 'relative', 'sclk_id'),
+    [
+        (ObsCassiniISS, _CASSINI_NAC, -82),
+        (ObsNewHorizonsLORRI, _LORRI, -98),
+        (ObsGalileoSSI, _GALILEO_SSI, -77),
+        (ObsVoyagerISS, _VOYAGER_NAC, -32),
+    ],
+    ids=['cassini_nac', 'lorri', 'galileo_ssi', 'voyager_nac'],
+)
+def test_the_recorded_ck_object_resolves_to_the_missions_clock(
+    obs_class: type[ObsSnapshotInst], relative: str, sclk_id: int
+) -> None:
+    """Each mission's CK object resolves to the spacecraft clock it expects.
+
+    ``ckmeta`` computes a clock id from a CK object id instead of validating
+    it, so a wrong CK object would yield a plausible clock and clock strings
+    encoding another spacecraft's time.  This pins the pair per mission
+    against what SPICE actually resolves.
+    """
+    obs = _load(obs_class, relative)
+    identity = _frame_identity(obs)
+    assert identity is not None
+    assert identity.sclk_id == sclk_id
+    assert _sclk_id(identity) == sclk_id
+
+
+@pytest.mark.parametrize(
     ('obs_class', 'relative'),
     [
         (ObsCassiniISS, _CASSINI_NAC),
@@ -379,7 +410,7 @@ def test_epoch_varying_flip_is_refused() -> None:
         return product
 
     stub = cast(ObsSnapshotInst, _StubObs(attitude, obs))
-    with pytest.raises(ValueError, match='is not constant across the exposure'):
+    with pytest.raises(NavPointingError, match='is not constant across the exposure'):
         _attitude_baseline(stub, _cassini_nac_identity())
 
 
@@ -397,5 +428,5 @@ def test_a_wrong_flip_measured_from_the_frame_is_refused() -> None:
         return spice
 
     stub = cast(ObsSnapshotInst, _StubObs(attitude, obs))
-    with pytest.raises(ValueError, match='differs from the expected'):
+    with pytest.raises(NavPointingError, match='differs from the expected'):
         _attitude_baseline(stub, _cassini_nac_identity())

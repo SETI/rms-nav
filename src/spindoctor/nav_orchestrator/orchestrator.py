@@ -64,7 +64,7 @@ from spindoctor.nav_technique.nav_technique import (
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.obs import obs_class_to_inst_name
 from spindoctor.support.cmatrix import compute_pointing
-from spindoctor.support.exceptions import NavContractError
+from spindoctor.support.exceptions import NavContractError, NavPointingError
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec, apply_filter
 from spindoctor.support.image_quality import cosmic_ray_mask, saturation_mask
 from spindoctor.support.nav_base import NavBase
@@ -426,13 +426,13 @@ class NavOrchestrator(NavBase):
         A pointing solution is recorded metadata rather than the navigation
         itself, so an attitude the environment cannot supply is reported to
         both logs and simply not recorded, and no wrong C-matrix ever
-        reaches a kernel.  The absorbed set is ``LookupError``, ``OSError``,
-        ``RuntimeError`` and ``ValueError`` -- the computation's own guards
-        plus what cspyce raises for a missing frame, an unreadable kernel or
-        a SPICE error.  Anything else, an ``AttributeError`` or
-        ``TypeError`` from a defect in the computation itself, propagates by
-        design, so a broken build fails on the first image rather than
-        silently dropping pointing from a whole batch.
+        reaches a kernel.  The absorbed set is exactly
+        ``NavPointingError``, which the computation raises for every failure
+        it expects: its own guards, and the kernel and frame lookups SPICE
+        cannot answer.  Every other exception propagates by design, so a
+        defect in the computation fails on the first image rather than
+        silently dropping pointing from a whole batch while every image
+        still reports success.
 
         Parameters:
             result: The result to stamp.
@@ -449,16 +449,17 @@ class NavOrchestrator(NavBase):
                 offset_px=result.offset_px,
                 rotation_fitted=result.rotation_rad is not None,
             )
-        except (LookupError, OSError, RuntimeError, ValueError) as exc:
-            # The exception set is exactly what the computation can legitimately
-            # raise: its own ValueError guards, and the LookupError / OSError /
-            # RuntimeError / ValueError family cspyce raises for a missing
-            # frame, an unreadable kernel or a SPICE error.  A TypeError or
-            # AttributeError from a defect in the computation itself is
-            # deliberately not caught, so a broken build fails loudly on the
-            # first image instead of quietly dropping pointing from a whole
-            # batch.
+        except NavPointingError as exc:
+            # NavPointingError names the failures the computation expects, so
+            # catching it and nothing else keeps a defect inside that
+            # computation distinguishable: it raises a plain ValueError or
+            # AttributeError, which propagates and fails the run on its first
+            # image instead of quietly dropping pointing from a whole batch
+            # while every image still reports success.
             self._logger.exception('Could not compute the corrected pointing: %s', exc)
+            # The traceback goes to the per-image log and one line to the run
+            # log, so an operator watching a batch sees one line per affected
+            # image rather than a traceback per image.
             MAIN_LOGGER.error(
                 'Corrected pointing not recorded for this %s image: %s', instrument, exc
             )

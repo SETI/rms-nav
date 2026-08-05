@@ -33,7 +33,7 @@ from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import NavTechnique
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.support.cmatrix import AttitudeBaseline, PointingSolution
-from spindoctor.support.exceptions import NavContractError
+from spindoctor.support.exceptions import NavContractError, NavPointingError
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
 from spindoctor.support.status_reason import NavStatusReason
 
@@ -1360,7 +1360,7 @@ def test_orchestrator_reports_but_survives_a_failed_pointing_computation(
     """A pointing computation that raises is logged and leaves the result usable."""
 
     def _boom(obs: Any, *, offset_px: Any, rotation_fitted: bool) -> None:
-        raise ValueError('cmatrix is not a proper rotation')
+        raise NavPointingError('cmatrix is not a proper rotation')
 
     monkeypatch.setattr('spindoctor.nav_orchestrator.orchestrator.compute_pointing', _boom)
     obs = fake_obs
@@ -1382,7 +1382,7 @@ def test_orchestrator_reports_a_failed_pointing_to_the_run_log(
     """
 
     def _boom(obs: Any, *, offset_px: Any, rotation_fitted: bool) -> None:
-        raise RuntimeError('SPICE(NOFRAMECONNECT)')
+        raise NavPointingError('the furnished kernels cannot supply the rotation')
 
     monkeypatch.setattr('spindoctor.nav_orchestrator.orchestrator.compute_pointing', _boom)
     obs = fake_obs
@@ -1409,6 +1409,35 @@ def test_orchestrator_does_not_swallow_a_defect_in_the_pointing_computation(
     model = _FakeStarModel(obs, feature_count=3)
     orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
     with pytest.raises(AttributeError, match='has no attribute'):
+        orch.navigate(obs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    'defect',
+    [ValueError, RuntimeError, LookupError, OSError],
+    ids=['value_error', 'runtime_error', 'lookup_error', 'os_error'],
+)
+def test_orchestrator_does_not_swallow_an_ordinary_exception_from_the_pointing_computation(
+    fake_obs: _FakeObs, monkeypatch: pytest.MonkeyPatch, defect: type[Exception]
+) -> None:
+    """Only the computation's own typed failure is absorbed.
+
+    A defect inside the computation raises an ordinary exception type, and
+    the types SPICE failures arrive as are the same ones ordinary defects
+    raise.  Absorbing that family would make the two indistinguishable and
+    drop pointing from a whole batch while every image reported success, so
+    the computation reports what it expects as a ``NavPointingError`` and
+    everything else propagates.
+    """
+
+    def _defective(obs: Any, *, offset_px: Any, rotation_fitted: bool) -> None:
+        raise defect('index 3 is out of bounds for axis 0 with size 3')
+
+    monkeypatch.setattr('spindoctor.nav_orchestrator.orchestrator.compute_pointing', _defective)
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    with pytest.raises(defect, match='out of bounds'):
         orch.navigate(obs)  # type: ignore[arg-type]
 
 
