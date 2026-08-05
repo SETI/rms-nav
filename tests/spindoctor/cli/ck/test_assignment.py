@@ -1045,6 +1045,11 @@ def test_a_candidate_named_by_a_url_is_fetched_before_it_is_furnished(
     holdings are named in continuous integration.  Handing the name through
     unchanged furnishes nothing, and every image is then reported as having no
     reproducing baseline.
+
+    The URL is spelled rather than mocked deliberately.  A ``file://`` path is
+    local to the file cache, so this reaches no network and creates no cache
+    state, and faking the fetch would assert only that it was called rather
+    than that a URL-spelled name resolves to something SPICE can open.
     """
     root = tmp_path / 'CK-reconstructed'
     path = _write_candidate(root, _TRUE_NAME)
