@@ -335,12 +335,14 @@ so it calls `with_pointing` itself. Operator-ratified offsets are the
 highest-quality pointing in the corpus; leaving them unstamped would make
 them the one subset excluded from every generated kernel.
 
-`with_pointing` never raises. `navigate` is documented never to raise
-through to its caller, and a pointing solution is recorded metadata rather
-than the navigation itself, so a failure is reported and the field is left
+`with_pointing` absorbs only `NavPointingError`; everything else
+propagates. A pointing solution is recorded metadata rather than the
+navigation itself, so an expected failure is reported and the field is left
 unset -- no wrong C-matrix is ever recorded, which is the property the
-raises in section 2.2 exist to guarantee. Two constraints on how it
-absorbs:
+raises in section 2.2 exist to guarantee. That absorption is the one
+qualification on `navigate`'s otherwise unconditional guarantee not to
+raise through to its caller: a defect beneath the attitude computation
+does reach the caller, deliberately. Two constraints on how it absorbs:
 
 - The caught set is exactly `NavPointingError`, the typed exception in
   `support/exceptions.py` that the computation raises for every failure it

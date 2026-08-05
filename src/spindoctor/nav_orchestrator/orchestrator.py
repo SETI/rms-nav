@@ -886,8 +886,8 @@ class NavOrchestrator(NavBase):
 
         A misbehaving NavTechnique is logged with a full traceback and
         treated as if it produced no result.  Catching every exception is
-        intentional for the same reason as ``_extract_features``: the
-        orchestrator never raises through to its caller, failures land on
+        intentional for the same reason as ``_extract_features``: no
+        image-data problem raises through to the caller, failures land on
         the returned ``NavResult``.  ``NavContractError`` is exempt (see
         ``_extract_features``): it is logged at error level and re-raised
         for :meth:`navigate` to convert into a failed ``NavResult``.
