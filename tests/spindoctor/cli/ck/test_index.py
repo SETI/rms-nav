@@ -284,10 +284,15 @@ def test_coverage_excludes_a_non_finite_epoch(et: float) -> None:
     assert interval.contains(CASSINI_CK_FRAME_ID, et) is False
 
 
-def test_coverage_includes_its_endpoints() -> None:
-    """An epoch exactly at the end of a window is covered."""
+@pytest.mark.parametrize('et', [1.0, 2.0], ids=['start', 'stop'])
+def test_coverage_includes_its_endpoints(et: float) -> None:
+    """An epoch exactly at either end of a window is covered.
+
+    Parameters:
+        et: The endpoint asked about.
+    """
     interval = CoverageInterval(ck_frame_id=CASSINI_CK_FRAME_ID, start_et=1.0, stop_et=2.0)
-    assert interval.contains(CASSINI_CK_FRAME_ID, 2.0) is True
+    assert interval.contains(CASSINI_CK_FRAME_ID, et) is True
 
 
 @pytest.mark.parametrize(
@@ -457,3 +462,47 @@ def test_build_ck_index_classifies_a_symlink_by_the_name_given(
     link.symlink_to(actual, target_is_directory=True)
     index = build_ck_index([link])
     assert index.files[0].kernel_class is KernelClass.RECONSTRUCTED
+
+
+def test_a_directory_naming_no_class_is_offered_last(pool: KernelPool, tmp_path: Path) -> None:
+    """A kernel that says nothing about its own pointing is the last resort.
+
+    The Cassini cruise directories hold reconstructed pointing under a name
+    that does not say so, and they must not outrank a directory that does.
+    """
+    predicted = tmp_path / 'CK-predicted'
+    unclassified = tmp_path / 'CK'
+    _write_ck(predicted, _PREDICTED_NAME)
+    _write_ck(unclassified, 'zz00001_00092rc.bc')
+    index = build_ck_index([unclassified, predicted])
+    candidates = index.candidates(
+        basenames=[_PREDICTED_NAME, 'zz00001_00092rc.bc'],
+        ck_frame_id=CASSINI_CK_FRAME_ID,
+        et=ET0 + 2.0,
+    )
+    assert [ck_file.basename for ck_file in candidates] == [_PREDICTED_NAME, 'zz00001_00092rc.bc']
+
+
+def test_one_basename_in_two_directories_of_a_class_is_ordered_by_path(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """The path is the last resort of the tie-break, and it is never a tie.
+
+    Two directories of one class can hold the same basename, which leaves the
+    class and the name alike; the ordering then has to come from somewhere
+    that cannot repeat, or it would follow whatever order the roots were
+    given in.  They are given here in the order the path key reverses, so
+    that following the roots and following the key are different answers.
+    """
+    first = tmp_path / 'a-CK-reconstructed'
+    second = tmp_path / 'b-CK-reconstructed'
+    _write_ck(first, _RECONSTRUCTED_NAME)
+    _write_ck(second, _RECONSTRUCTED_NAME)
+    index = build_ck_index([first, second])
+    candidates = index.candidates(
+        basenames=[_RECONSTRUCTED_NAME], ck_frame_id=CASSINI_CK_FRAME_ID, et=ET0 + 2.0
+    )
+    assert [ck_file.path for ck_file in candidates] == [
+        second / _RECONSTRUCTED_NAME,
+        first / _RECONSTRUCTED_NAME,
+    ]

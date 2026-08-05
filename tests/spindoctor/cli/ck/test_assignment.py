@@ -791,6 +791,9 @@ def test_rotation_angle_refuses_a_matrix_of_the_wrong_shape(shape: tuple[int, ..
 _INSIDE_BASE_TOLERANCE_TICKS = 100.0
 _JUST_OUTSIDE_BASE_TOLERANCE_TICKS = 800.2
 
+# Beyond the base tolerance and beyond the term a long exposure adds to it.
+_BEYOND_THE_EXPOSURE_TERM_TICKS = 801.0
+
 # 800.2 ticks needs 0.2 ticks of exposure term to be reached, which is an
 # exposure of 9.6 s; a Voyager frame's own 0.48 s adds only 0.01.
 _LONG_ENOUGH_EXPOSURE_S = 15.0
@@ -913,31 +916,41 @@ def test_the_snapped_lookup_reaches_a_record_within_its_base_tolerance(
 
 
 @pytest.mark.parametrize(
-    ('exposure_s', 'expected_lookups'),
-    [(_LONG_ENOUGH_EXPOSURE_S, 2), (_TOO_SHORT_EXPOSURE_S, 1)],
-    ids=['long-exposure', 'short-exposure'],
+    ('offset_ticks', 'exposure_s', 'expected_lookups'),
+    [
+        (_JUST_OUTSIDE_BASE_TOLERANCE_TICKS, _LONG_ENOUGH_EXPOSURE_S, 2),
+        (_JUST_OUTSIDE_BASE_TOLERANCE_TICKS, _TOO_SHORT_EXPOSURE_S, 1),
+        (_BEYOND_THE_EXPOSURE_TERM_TICKS, _LONG_ENOUGH_EXPOSURE_S, 1),
+    ],
+    ids=['term-reaches-it', 'term-too-small', 'term-is-not-larger'],
 )
 def test_the_snapped_tolerance_grows_with_the_exposure(
-    pool: KernelPool, tmp_path: Path, exposure_s: float, expected_lookups: int
+    pool: KernelPool,
+    tmp_path: Path,
+    offset_ticks: float,
+    exposure_s: float,
+    expected_lookups: int,
 ) -> None:
     """The exposure term is what reaches a record just beyond the base tolerance.
 
-    The record sits 800.2 ticks from the midtime's whole tick.  A 15 s exposure
-    adds 0.3125 ticks of tolerance and the first lookup reaches it; a 0.48 s
-    exposure adds 0.01 and only the wider fallback does.
+    A 15 s exposure adds 0.3125 ticks of tolerance, which reaches a record
+    800.2 ticks away and not one 801 ticks away; a 0.48 s exposure adds 0.01
+    and reaches neither.  The third case is what pins the size of the term
+    rather than its presence.
 
     Parameters:
+        offset_ticks: How far past the midtime's whole tick the record sits.
         exposure_s: The recorded exposure duration.
         expected_lookups: How many of the two lookups answer.
     """
     path = _write_discrete_candidate(
         tmp_path / 'CK',
         _VOYAGER_KERNEL_NAME,
-        offset_ticks=_JUST_OUTSIDE_BASE_TOLERANCE_TICKS,
+        offset_ticks=offset_ticks,
         midtime_et=_VOYAGER_MIDTIME_ET,
     )
     pool.furnish(path)
-    entry = _discrete_entry(_JUST_OUTSIDE_BASE_TOLERANCE_TICKS, exposure_s=exposure_s)
+    entry = _discrete_entry(offset_ticks, exposure_s=exposure_s)
     assert entry.pointing is not None
     assert len(baseline_attitudes(entry.pointing)) == expected_lookups
 

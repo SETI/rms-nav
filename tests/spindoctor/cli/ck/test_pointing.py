@@ -325,3 +325,14 @@ def test_from_metadata_accepts_a_whole_number_epoch() -> None:
     """JSON writes an exact epoch without a decimal point, and it is widened."""
     pointing = ImagePointing.from_metadata(_metadata(exposure_s=2))
     assert pointing.exposure_s == 2.0
+
+
+def test_from_metadata_refuses_a_matrix_off_orthonormality_by_a_microradian() -> None:
+    """The rotation bound is a nanoradian, not something a defect can hide under.
+
+    A shear a thousand times smaller than a pixel of any camera here is still
+    not an attitude, and it would be written into a kernel other tools trust.
+    """
+    nearly = [1.0, 1e-6, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    with pytest.raises(ValueError, match='cmatrix is not orthonormal'):
+        ImagePointing.from_metadata(_metadata(cmatrix=nearly))
