@@ -13,6 +13,7 @@
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -307,7 +308,11 @@ def _midtime_of(document: Document) -> float | None:
 
     Returns:
         The midtime in TDB seconds past J2000, or ``None`` when the document
-        records none or records something that is not a finite number.
+        records none or records something that is not a finite number.  A
+        non-finite value is read as none rather than passed on, because every
+        comparison against a NaN is False: a NaN midtime would fall inside
+        every time range at once, and an infinite one would fall inside a
+        half-bounded range it can have no business in.
     """
     result = document.metadata.get('navigation_result')
     if not isinstance(result, dict):
@@ -317,6 +322,8 @@ def _midtime_of(document: Document) -> float | None:
         return None
     midtime = times.get('midtime_et')
     if isinstance(midtime, bool) or not isinstance(midtime, int | float):
+        return None
+    if not math.isfinite(midtime):
         return None
     return float(midtime)
 
@@ -589,7 +596,7 @@ def write_output_files(
             sclk_basename=sclk_basenames[_clock_of(group.assignments[0])],
             images=images,
         )
-        write_ck_file(_local_output(output), segments, build_comment_lines(area))
+        write_ck_file(local_output_path(output), segments, build_comment_lines(area))
         MAIN_LOGGER.info(
             'Wrote %s: %d segment(s) correcting %s',
             output.as_posix(),
@@ -600,7 +607,7 @@ def write_output_files(
     return written
 
 
-def _local_output(path: FCPath) -> Path:
+def local_output_path(path: FCPath) -> Path:
     """Return the local path SPICE writes a kernel to.
 
     Parameters:

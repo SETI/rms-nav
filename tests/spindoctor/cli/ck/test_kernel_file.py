@@ -182,3 +182,19 @@ def test_the_kernel_reads_with_no_writer_code_present(pool: KernelPool) -> None:
     pool.furnish(path)
     cmat, _clkout = cspyce.ckgp(CASSINI_CK_FRAME_ID, (ET0 + 1.0) * TICKS_PER_SECOND, 0.0, 'J2000')
     assert np.allclose(np.asarray(cmat), np.eye(3))
+
+
+def test_a_name_exactly_as_long_as_the_field_is_accepted(tmp_path: Path) -> None:
+    """The bound is the last name SPICE stores whole, not the first it truncates."""
+    path = tmp_path / ('n' * 53 + '_nav.bc')
+    assert len(path.name) == 60
+    write_ck_file(path, [_segment()], _COMMENT_LINES)
+    assert path.exists()
+
+
+def test_a_name_one_character_longer_is_refused(tmp_path: Path) -> None:
+    """And the first it truncates is one character beyond that."""
+    path = tmp_path / ('n' * 54 + '_nav.bc')
+    assert len(path.name) == 61
+    with pytest.raises(ValueError, match='internal name'):
+        write_ck_file(path, [_segment()], _COMMENT_LINES)

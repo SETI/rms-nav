@@ -454,3 +454,43 @@ def test_write_report_writes_what_report_text_renders(pool: KernelPool, tmp_path
     path = FCPath(str(tmp_path / 'report.csv'))
     write_report(path, rows)
     assert path.read_text() == report_text(rows)
+
+
+def test_a_boolean_confidence_is_refused(pool: KernelPool) -> None:
+    """JSON ``true`` counts as an int in Python and is not a measurement."""
+    assert pool is not None
+    metadata = _metadata()
+    metadata['confidence'] = True
+    with pytest.raises(TypeError, match='not a number'):
+        read_image_facts(metadata)
+
+
+def test_an_empty_offset_list_is_refused(pool: KernelPool) -> None:
+    """An empty list is not a pair, and neither axis would be reported."""
+    assert pool is not None
+    with pytest.raises(ValueError, match='not two'):
+        read_image_facts(_metadata(offset=()))
+
+
+def test_an_offset_of_nested_lists_is_refused(pool: KernelPool) -> None:
+    """Two values of the right count and the wrong rank."""
+    assert pool is not None
+    metadata = _metadata()
+    metadata['offset'] = [[1.0], [2.0]]
+    with pytest.raises(TypeError, match='not a number'):
+        read_image_facts(metadata)
+
+
+def test_an_offset_that_is_text_is_refused(pool: KernelPool) -> None:
+    """A string is a sequence of length two often enough to matter."""
+    assert pool is not None
+    metadata = _metadata()
+    metadata['offset'] = 'ab'
+    with pytest.raises(TypeError, match='not a pair'):
+        read_image_facts(metadata)
+
+
+def test_a_report_with_no_rows_is_its_header(pool: KernelPool) -> None:
+    """An empty report is a file that says what it would have held."""
+    assert pool is not None
+    assert report_text([]) == ','.join(REPORT_COLUMNS) + '\n'

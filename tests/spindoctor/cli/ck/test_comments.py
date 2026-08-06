@@ -302,3 +302,12 @@ def test_the_reservation_covers_the_text_it_was_measured_from() -> None:
 def test_the_reservation_of_nothing_is_still_positive() -> None:
     """An empty comment still reserves the slack a later append would need."""
     assert reserved_comment_chars(()) > 0
+
+
+def test_a_blank_comment_line_survives_the_round_trip(pool: KernelPool) -> None:
+    """The layout uses blank lines, so they have to come back as blank lines."""
+    path = pool.root / 'blanks.bc'
+    lines = ('first', '', 'third')
+    _written_ck(path, reserved_comment_chars(lines))
+    write_comment_area(path, lines)
+    assert read_comment_area(path) == lines
