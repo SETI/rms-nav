@@ -598,6 +598,21 @@ accumulates kernels from earlier images -- a superset. So:
    by construction, and a tol-zero filter would drop the only candidate
    that reproduces it. The filter is only a filter -- reproduction decides
    -- so it is widened rather than tightened.
+
+   **An object whose spacecraft clock no kernel defines is recorded as
+   unreadable rather than stopping the scan.** `ckcov` reports coverage in
+   TDB, which needs that clock, and a real kernel can name an object that
+   has none: `nh_scispi_2015_recon.bc` in the New Horizons holdings
+   describes object **-1** beside -98000, `ckmeta` computes its clock as 0,
+   and no SCLK kernel supplies one, so `ckcov` raises
+   `SPICE(KERNELVARNOTFOUND)`. Refusing the scan there makes the whole
+   mission unindexable for the sake of an object no image will ever ask
+   about -- the defect Phase D hit on the first LORRI frame it ran. Such an
+   object contributes no coverage and is therefore never offered as a
+   candidate; an image that *does* correct one is refused before any
+   candidate is tried, naming the missing clock, exactly as a missing frame
+   kernel is (item 4 below), rather than being reported as a baseline that
+   drifted.
 2. **Per image** (grouped by candidate set so the kernel pool is switched
    per group, not per image): furnish the supporting kernels (LSK, SCLK,
    FK) plus one candidate CK at a time, evaluate the original attitude at
@@ -956,6 +971,61 @@ Cassini WAC frame, and one frame from each other instrument that has a
 navigated library frame. This is where acceptance criterion 2's
 per-instrument claim is earned. Local-only (needs local binary kernels);
 marked `integration`.
+
+**Galileo SSI cannot be in that cohort, and the reason is the plan's own
+rule rather than an omission.** `config_410_inst_gossi.yaml` sets
+`fit_camera_rotation: true`, and both Galileo library frames that navigate
+successfully fit a real rotation -- `C0059894800R` reports -0.432 deg and
+`C0059899900R` -0.431 deg -- so by section 1 they record `cmatrix_original`
+and no `cmatrix`, and the generator omits them as `rotation_unsupported`.
+The library's other six Galileo frames are `negative_cases` that do not
+navigate at all. There is therefore no Galileo image anywhere in the corpus
+that a corrected kernel can be written for, and the round-trip cohort is
+Cassini NAC, Cassini WAC, Voyager and LORRI. Phase D pins that as a
+measurement rather than leaving it implied: it navigates a Galileo frame and
+asserts the fitted rotation, the absent `cmatrix`, the present
+`cmatrix_original` and the `rotation_unsupported` omission, so the day twist
+support (section 7) lands, the test says so. Acceptance criterion 3 is
+consequently claimed for four instruments, not five; criterion 2's Galileo
+claim stands on Phase A's planted-offset recovery on a real Galileo frame,
+which does not need a `cmatrix` in a result to be measured.
+
+**What the round-trip residual is made of, measured.** The end-to-end
+residual has two independent parts, and only the first belongs to this plan:
+
+| Part | Measured over eleven real frames |
+|---|---|
+| The pointing chain: offset to `cmatrix` to segment to kernel to readback | 0 to 5.6e-17 rad against what the segment says; 1.5e-15 rad against the recorded `cmatrix`; the pool's pointing moves by the measured offset to within 0.0004 px |
+| The navigation re-measuring a nearly-zero offset | 0.0001 to 0.4853 px per axis, depending on which techniques carry the ensemble |
+
+The first is floating-point noise: a corrected kernel gives back the
+recorded attitude bit for bit, on every frame tried. The second is what the
+0.1 px target actually spends, and it is a property of the navigation
+techniques rather than of any instrument or of the size of the offset. A
+frame whose ensemble is carried by star centroids lands within 0.017 px of
+zero (measured: 0.0001 to 0.0170 px per axis over seven such frames, on all
+four instruments, at offsets from 1.86 to 49.2 px). A frame whose ensemble
+is carried by the correlation and distance-transform body techniques does
+not: `W1637520502_1_CALIB` (Cassini WAC, 1.86 px offset) leaves **0.1022 px**
+on `dv`, and `C3446143_GEOMED` (Voyager 1 WA, 28.8 px offset) leaves
+**0.4853 px** on `du`. Both are above the target and neither is a pointing
+defect -- on those two frames the pool's attitude reads back exact to
+8.8e-16 and 1.7e-16 rad and moves by 1.8636 px against a measured 1.8638 px
+and by 28.8355 px against a measured 28.8355 px. What is left is
+`BodyDiscCorrelateNav`, which the ensemble weights at 0.73 to 0.84 on those
+frames and which reports `du` on a coarse grid: it answers exactly -0.5 px
+in both runs of `W1637520502_1_CALIB` whether the truth is 0.14 px or zero.
+The techniques are not exactly shift-equivariant, and re-measuring after a
+shift does not return exactly the negative of that shift.
+
+The decision rule stands as written. What these measurements add is how to
+tell its two outcomes apart: a section 2 convention error leaves about
+*twice* the original offset (3.7 to 98 px on these frames) **and** a
+readback that disagrees, where technique non-equivariance leaves a fraction
+of a pixel and a readback that is exact to floating point. The round trip
+therefore asserts the chain on a body-navigated frame as well as on the
+star-navigated cohort, and pins the end-to-end offset only where the
+measurement is a pointing measurement.
 
 ### Phase E — Comment area, meta-kernel, report, driver
 

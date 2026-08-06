@@ -79,6 +79,11 @@ _DECOY_NAME = 'zz04002_04009ra.bc'
 
 _IMAGE_NAME = 'N1484573295_1.IMG'
 
+# An object whose clock id SPICE computes as 0, which no SCLK kernel defines,
+# so a real kernel naming it beside the spacecraft leaves its coverage
+# unreadable.  No image corrects it.
+_CLOCKLESS_OBJECT_ID = -1
+
 
 def _turned(angle_rad: float) -> Callable[[float], NDArrayFloatType]:
     """Return an attitude history turned from the baseline by a fixed rotation.
@@ -427,6 +432,55 @@ def test_assign_refuses_a_pool_that_already_holds_a_kernel(
     pool.furnish(path)
     with pytest.raises(ValueError, match='already furnished'):
         assign_images([entry], index)
+
+
+def test_assign_refuses_an_object_whose_coverage_the_index_could_not_read(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """A clock kernel the index needed and did not have is named, not blamed on drift.
+
+    An object whose coverage could not be expressed in TDB offers no candidate
+    at all, so every image correcting it would otherwise be reported as having
+    no reproducing baseline -- which is the report reserved for holdings that
+    changed since navigation ran.
+    """
+    root = tmp_path / 'CK-reconstructed'
+    path = _write_candidate(root, _TRUE_NAME)
+    index = CkIndex(
+        files=(
+            CkFile(
+                path=FCPath(path),
+                kernel_class=KernelClass.RECONSTRUCTED,
+                coverage=(),
+                unreadable_objects=(CASSINI_CK_FRAME_ID,),
+            ),
+        )
+    )
+    entry = _entry(cmatrix_original=_cassini_recorded(pool), kernels=(_TRUE_NAME,))
+    with pytest.raises(ValueError, match='could not read the coverage'):
+        assign_images([entry], index)
+
+
+def test_assign_ignores_an_unreadable_object_no_image_needs(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """An object nothing corrects does not stop a run, however unreadable it is."""
+    root = tmp_path / 'CK-reconstructed'
+    path = _write_candidate(root, _TRUE_NAME)
+    covering = build_ck_index([root]).files[0].coverage
+    index = CkIndex(
+        files=(
+            CkFile(
+                path=FCPath(path),
+                kernel_class=KernelClass.RECONSTRUCTED,
+                coverage=covering,
+                unreadable_objects=(_CLOCKLESS_OBJECT_ID,),
+            ),
+        )
+    )
+    entry = _entry(cmatrix_original=_cassini_recorded(pool), kernels=(_TRUE_NAME,))
+    assignments = assign_images([entry], index)
+    assert assignments[0].baseline is not None
 
 
 def test_the_candidate_pool_is_left_as_it_was_found(pool: KernelPool, tmp_path: Path) -> None:

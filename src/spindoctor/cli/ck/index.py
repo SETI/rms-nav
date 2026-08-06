@@ -15,8 +15,13 @@ The scan uses ``ckobj`` and ``ckcov`` at segment level in TDB.  Both read a
 file by name, so no C-kernel has to be furnished to be indexed, but the
 leapseconds kernel and the spacecraft clock kernel of every object encountered
 must be, since that is what converts a coverage window from clock ticks into
-TDB.  Both also need a real local file, so a kernel tree that lives remotely is
-fetched as it is scanned; for a tree that is already local nothing is copied.
+TDB.  An object whose clock is not furnished contributes no coverage and is
+recorded as unreadable instead, because a real kernel can name an object no
+clock kernel describes and no run should be stopped by an object none of its
+images asks about; an image that does ask about one is refused by the
+assignment step.  Both calls also need a real local file, so a kernel tree that
+lives remotely is fetched as it is scanned; for a tree that is already local
+nothing is copied.
 
 Coverage is read with a tolerance for the objects whose attitude was navigated
 through a tolerance-snapped pointing lookup.  Such a lookup answers with a
@@ -188,11 +193,18 @@ class CkFile:
             name of the directory it was found in.
         coverage: One interval per object per segment window, in the order
             SPICE reported them.
+        unreadable_objects: The objects the file describes whose coverage
+            could not be expressed in TDB, because no furnished kernel defines
+            the spacecraft clock their time tags are encoded against.  The file
+            offers no coverage for them, so it is never a candidate for one,
+            and an image that needs one is refused by the assignment step
+            rather than being told its baseline has drifted.
     """
 
     path: FCPath
     kernel_class: KernelClass
     coverage: tuple[CoverageInterval, ...]
+    unreadable_objects: tuple[int, ...] = ()
 
     @property
     def basename(self) -> str:
@@ -240,6 +252,21 @@ class CkIndex:
             grouped.setdefault(ck_file.basename, []).append(ck_file)
         object.__setattr__(
             self, '_by_basename', {name: tuple(found) for name, found in grouped.items()}
+        )
+
+    @property
+    def unreadable_objects(self) -> frozenset[int]:
+        """The objects whose coverage no indexed file could express in TDB.
+
+        An object appears here when the spacecraft clock its time tags are
+        encoded against is not furnished, so its coverage window cannot be
+        converted.  Nothing in the index offers coverage for such an object,
+        which makes it invisible to :meth:`candidates`; the assignment step
+        reads this so an image that needs one is refused for the reason it
+        actually has.
+        """
+        return frozenset(
+            ck_frame_id for ck_file in self.files for ck_frame_id in ck_file.unreadable_objects
         )
 
     def candidates(
@@ -432,36 +459,54 @@ def _index_one_file(path: FCPath, kernel_class: KernelClass) -> CkFile:
         kernel_class: The class its directory declares.
 
     Returns:
-        The indexed file.
+        The indexed file, carrying the coverage of every object whose clock is
+        furnished and the ids of the objects whose clock is not.
 
     Raises:
         OSError: if the file cannot be read as a C-kernel.
-        KeyError: if the spacecraft clock of an object the file describes is
-            not furnished, so its coverage cannot be expressed in TDB.
     """
     # SPICE reads a C-kernel by name from the local filesystem, so a remote one
     # is fetched first.  This is a no-op for a kernel that is already local.
     local = str(cast(Path, path.retrieve()))
     coverage: list[CoverageInterval] = []
+    unreadable: list[int] = []
     for ck_frame_id in sorted(int(value) for value in cspyce.ckobj(local)):
         tolerance = (
             SNAPPED_LOOKUP_TOL_TICKS
             if ck_frame_id in FROZEN_ATTITUDE_CK_IDS
             else _COVERAGE_TOL_TICKS
         )
-        window = [
-            float(value)
-            for value in cspyce.ckcov(
-                local,
-                ck_frame_id,
-                _COVERAGE_NEEDS_ANGULAR_VELOCITY,
-                _COVERAGE_LEVEL,
-                tolerance,
-                _COVERAGE_TIME_SYSTEM,
-            )
-        ]
+        try:
+            window = [
+                float(value)
+                for value in cspyce.ckcov(
+                    local,
+                    ck_frame_id,
+                    _COVERAGE_NEEDS_ANGULAR_VELOCITY,
+                    _COVERAGE_LEVEL,
+                    tolerance,
+                    _COVERAGE_TIME_SYSTEM,
+                )
+            ]
+        except LookupError:
+            # A real kernel can describe an object whose spacecraft clock no
+            # kernel defines: a merged New Horizons pointing file names object
+            # -1 beside the spacecraft, and the clock id SPICE computes for it
+            # is 0, which no SCLK kernel supplies.  Converting that object's
+            # coverage to TDB is impossible, and refusing the whole scan over
+            # it would make every New Horizons directory unindexable for the
+            # sake of an object no image will ever ask about.  The object is
+            # recorded instead, and an image that does ask about one is refused
+            # before any candidate is tried.
+            unreadable.append(ck_frame_id)
+            continue
         coverage.extend(
             CoverageInterval(ck_frame_id=ck_frame_id, start_et=window[at], stop_et=window[at + 1])
             for at in range(0, len(window), 2)
         )
-    return CkFile(path=path, kernel_class=kernel_class, coverage=tuple(coverage))
+    return CkFile(
+        path=path,
+        kernel_class=kernel_class,
+        coverage=tuple(coverage),
+        unreadable_objects=tuple(unreadable),
+    )

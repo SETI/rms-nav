@@ -426,9 +426,11 @@ def assign_images(entries: Sequence[ImageEntry], index: CkIndex) -> tuple[Assign
         ValueError: if two entries name the same image, whose assignments
             could not then be told apart; if a C-kernel is already furnished,
             which would answer the reproduction lookups alongside the candidate
-            under test; or if a frame an image needs is not defined in the
+            under test; if a frame an image needs is not defined in the
             furnished kernels, which is a missing frame kernel and not a
-            baseline that has drifted.
+            baseline that has drifted; or if the index could not read the
+            coverage of an object an image needs, which is a missing clock
+            kernel and likewise not drift.
         OSError: if a candidate kernel cannot be furnished.
     """
     names = [entry.image_name for entry in entries]
@@ -436,6 +438,7 @@ def assign_images(entries: Sequence[ImageEntry], index: CkIndex) -> tuple[Assign
         raise ValueError('two images have the same name; their assignments cannot be told apart')
     _require_no_furnished_ck()
     _require_frames_defined(entries)
+    _require_coverage_readable(entries, index)
     losers = botsim_losers(entries)
     testable = [
         entry for entry in entries if entry.pointing is not None and entry.image_name not in losers
@@ -557,6 +560,44 @@ def _require_frames_defined(entries: Sequence[ImageEntry]) -> None:
                 f'kernel that names it has to be furnished before an image can be matched to the '
                 f'baseline it navigated against'
             ) from exc
+
+
+def _require_coverage_readable(entries: Sequence[ImageEntry], index: CkIndex) -> None:
+    """Refuse to run when the index could not read an object the images need.
+
+    The index expresses each file's coverage in TDB, which needs the clock the
+    object's time tags are encoded against; an object whose clock is not
+    furnished is recorded as unreadable and offers no coverage at all.  Its
+    candidates are then invisible to the coverage filter, so every image
+    correcting that object would be reported as having no reproducing
+    baseline -- the report that is meant to mean the holdings have changed
+    since navigation ran.  The missing clock is named here instead, before any
+    candidate is tried, exactly as a missing frame kernel is.
+
+    Parameters:
+        entries: The images the run considered.  Those carrying no pointing
+            correct no object and are skipped.
+        index: The pre-indexed C-kernels.
+
+    Raises:
+        ValueError: if any image corrects an object the index could not read.
+    """
+    unreadable = index.unreadable_objects
+    if len(unreadable) == 0:
+        return
+    blocked = sorted(
+        {
+            entry.pointing.ck_frame_id
+            for entry in entries
+            if entry.pointing is not None and entry.pointing.ck_frame_id in unreadable
+        }
+    )
+    if len(blocked) > 0:
+        raise ValueError(
+            f'the index could not read the coverage of CK object(s) {blocked}; the spacecraft '
+            f'clock kernel that encodes their time tags has to be furnished before an image can '
+            f'be matched to the baseline it navigated against'
+        )
 
 
 def _require_no_furnished_ck() -> None:
