@@ -984,8 +984,8 @@ that a corrected kernel can be written for, and the round-trip cohort is
 Cassini NAC, Cassini WAC, Voyager and LORRI. Phase D pins that as a
 measurement rather than leaving it implied: it navigates a Galileo frame and
 asserts the fitted rotation, the absent `cmatrix`, the present
-`cmatrix_original` and the `rotation_unsupported` omission, so the day twist
-support (section 7) lands, the test says so. Acceptance criterion 3 is
+`cmatrix_original` and the `rotation_unsupported` omission, so that on the
+day twist support (section 7) lands, the test says so. Acceptance criterion 3 is
 consequently claimed for four instruments, not five; criterion 2's Galileo
 claim stands on Phase A's planted-offset recovery on a real Galileo frame,
 which does not need a `cmatrix` in a result to be measured.
@@ -995,28 +995,32 @@ residual has two independent parts, and only the first belongs to this plan:
 
 | Part | Measured over eleven real frames |
 |---|---|
-| The pointing chain: offset to `cmatrix` to segment to kernel to readback | 0 to 5.6e-17 rad against what the segment says; 1.5e-15 rad against the recorded `cmatrix`; the pool's pointing moves by the measured offset to within 0.0004 px |
+| The pointing chain: offset to `cmatrix` to segment to kernel to readback | 0 to 5.6e-17 rad against what the segment says; at most 1.5e-15 rad against the recorded `cmatrix`; the pool's pointing moves by the measured offset to within 1.2e-3 px |
 | The navigation re-measuring a nearly-zero offset | 0.0001 to 0.4853 px per axis, depending on which techniques carry the ensemble |
 
 The first is floating-point noise: a corrected kernel gives back the
 recorded attitude bit for bit, on every frame tried. The second is what the
 0.1 px target actually spends, and it is a property of the navigation
 techniques rather than of any instrument or of the size of the offset. A
-frame whose ensemble is carried by star centroids lands within 0.017 px of
-zero (measured: 0.0001 to 0.0170 px per axis over seven such frames, on all
-four instruments, at offsets from 1.86 to 49.2 px). A frame whose ensemble
-is carried by the correlation and distance-transform body techniques does
-not: `W1637520502_1_CALIB` (Cassini WAC, 1.86 px offset) leaves **0.1022 px**
-on `dv`, and `C3446143_GEOMED` (Voyager 1 WA, 28.8 px offset) leaves
+frame navigated by the star techniques alone lands within 0.017 px of zero
+(measured: 0.0001 to 0.0170 px per axis over seven such frames, on all four
+instruments, at offsets from 1.86 to 49.2 px). A frame whose ensemble is
+carried by the correlation and distance-transform body techniques does not:
+`W1637520502_1_CALIB` (Cassini WAC, 1.86 px offset) leaves **0.1022 px** on
+`dv`, and `C3446143_GEOMED` (Voyager 1 WA, 28.8 px offset) leaves
 **0.4853 px** on `du`. Both are above the target and neither is a pointing
-defect -- on those two frames the pool's attitude reads back exact to
-8.8e-16 and 1.7e-16 rad and moves by 1.8636 px against a measured 1.8638 px
-and by 28.8355 px against a measured 28.8355 px. What is left is
-`BodyDiscCorrelateNav`, which the ensemble weights at 0.73 to 0.84 on those
-frames and which reports `du` on a coarse grid: it answers exactly -0.5 px
-in both runs of `W1637520502_1_CALIB` whether the truth is 0.14 px or zero.
-The techniques are not exactly shift-equivariant, and re-measuring after a
-shift does not return exactly the negative of that shift.
+defect -- on those two frames the record epochs read back to 2.6e-17 and
+0 rad, the midtime reads back the recorded `cmatrix` to 8.8e-16 and
+1.7e-16 rad, and the pool's pointing moves by the measured offset to within
+5.7e-5 and 5.1e-5 px. What is left is that those techniques do not return
+the shift they were given. Measured as the difference between a technique's
+two answers against the correction actually applied: `BodyLimbNav` falls
+0.139 px short on `W1637520502_1_CALIB`, and `BodyDiscCorrelateNav` falls
+0.504 px short on `C3446143_GEOMED`, where it answers `du` on a 0.25 px grid
+(-5.75 px in the first run and -0.5 px in the second) and the ensemble
+weights it at 0.73. The techniques are not exactly shift-equivariant, and
+re-measuring after a shift does not return exactly the negative of that
+shift.
 
 The decision rule stands as written. What these measurements add is how to
 tell its two outcomes apart: a section 2 convention error leaves about

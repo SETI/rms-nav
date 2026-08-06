@@ -32,10 +32,11 @@ What is asserted, and why in these units:
   techniques re-measure rather than recompute.  A convention error anywhere in
   the chain would leave roughly twice the original offset here, which is
   several pixels on every frame in the cohort.
-- **Both runs committed the same techniques.**  The comparison above is only
-  meaningful when the same measurement was repeated; a run that committed a
-  different set has not been shown to agree or to disagree, so the test fails
-  as inconclusive rather than passing.
+- **Both runs committed the same techniques, and the same ones carried
+  weight.**  The comparison above is only meaningful when the same measurement
+  was repeated; a run that committed a different set, or in which a technique's
+  confidence collapsed, has not been shown to agree or to disagree, so the test
+  fails as inconclusive rather than passing.
 
 The cohort is one star-navigated Cassini NAC frame, one Cassini WAC frame, one
 Voyager frame and one New Horizons LORRI frame, and a fifth frame -- a Cassini
@@ -112,12 +113,13 @@ COHORT = (_CASSINI_NAC, _CASSINI_WAC, _VOYAGER_NAC, _LORRI)
 # centroids.  Its pointing chain is asserted exactly like the cohort's, and its
 # re-navigated offset deliberately is not: the techniques are not exactly
 # shift-equivariant, and re-measuring this frame after the correction leaves
-# 0.1022 px on dv, of which 0.5 px of du comes from BodyDiscCorrelateNav
-# answering on a coarse grid in both runs alike.  Pinning that number would
+# 0.1022 px on dv, most of it BodyLimbNav's answers differing by 1.720 px
+# where the correction moved the model by 1.858.  Pinning that number would
 # pin a property of the navigation techniques in a test about pointing; the
-# frame is here because the part this plan owns is exact on it -- the pool's
-# attitude reads back to 8.8e-16 rad and moves by 1.8636 px against a measured
-# 1.8638 px -- and a convention error would still leave several pixels.
+# frame is here because the part this plan owns is exact on it -- the record
+# epochs read back to 2.6e-17 rad, the midtime to 8.8e-16 rad, and the pool's
+# pointing moves by the measured offset to within 5.7e-5 px -- and a
+# convention error would still leave several pixels.
 _CASSINI_WAC_BODY = 'W1637520502_1_CALIB'
 
 # A Galileo SSI frame the library records as navigating successfully.  Galileo
@@ -136,11 +138,12 @@ _GALILEO_SSI = 'C0059894800R'
 OFFSET_TOL_PX = 0.02
 
 # How far a corrected attitude read back from the kernel pool may sit from the
-# attitude it should be, in radians.  The measured disagreements are 0 to
-# 3.8e-17 rad for a record read back against what the segment says and 1.5e-15
-# rad for the midtime read back against the recorded corrected C-matrix -- both
-# floating-point noise.  The pin is three orders above the largest of them and
-# still six orders inside a thousandth of a Cassini NAC pixel.
+# attitude it should be, in radians.  Measured over eleven real frames, the
+# disagreements are 0 to 5.6e-17 rad for a record read back against what the
+# segment says and at most 1.5e-15 rad for the midtime read back against the
+# recorded corrected C-matrix -- both floating-point noise.  The pin is nearly
+# three orders above the largest of them and still six orders inside a
+# thousandth of a Cassini NAC pixel.
 ATTITUDE_TOL_RAD = 1e-12
 
 # Each step gets its own generous ceiling so a hung navigation fails the test
@@ -285,6 +288,28 @@ def committed_techniques(block: dict[str, Any]) -> set[str]:
     return set(block['techniques_used']) - set(block['excluded_from_consensus'])
 
 
+def contributing_techniques(block: dict[str, Any]) -> set[str]:
+    """Return the techniques that carried any weight in a navigation.
+
+    A technique that ran and answered with no confidence is in the committed
+    set above but contributed nothing to the offset, so the two sets are not
+    the same statement: a run where a technique's confidence collapsed
+    measured something different even though it ran the same techniques.
+
+    Parameters:
+        block: One run's ``navigation_result`` metadata block.
+
+    Returns:
+        The committed techniques whose confidence is above zero.
+    """
+    committed = committed_techniques(block)
+    return {
+        entry['technique_name']
+        for entry in block['per_technique']
+        if entry['technique_name'] in committed and float(entry['confidence']) > 0.0
+    }
+
+
 @pytest.fixture(scope='module')
 def round_trips() -> dict[str, RoundTrip]:
     """Hold each frame's findings, so a frame two fixtures ask for runs once.
@@ -391,7 +416,10 @@ def test_both_runs_committed_the_same_techniques(round_trip: RoundTrip) -> None:
 
     Comparing offsets across runs that committed different techniques would
     compare two different measurements, so a mismatch is reported as
-    inconclusive rather than as agreement or disagreement.
+    inconclusive rather than as agreement or disagreement.  Both which
+    techniques ran and which of them carried any weight have to match: a
+    technique whose confidence collapsed between the runs contributed to one
+    offset and not to the other.
     """
     first = committed_techniques(round_trip.navigated)
     second = committed_techniques(round_trip.renavigated)
@@ -399,6 +427,13 @@ def test_both_runs_committed_the_same_techniques(round_trip: RoundTrip) -> None:
         f'inconclusive-mismatch for {round_trip.image_id}: the first run committed '
         f'{sorted(first)} and the re-navigation committed {sorted(second)}, so the two offsets '
         f'are not measurements of the same thing'
+    )
+    weighted_first = contributing_techniques(round_trip.navigated)
+    weighted_second = contributing_techniques(round_trip.renavigated)
+    assert weighted_second == weighted_first, (
+        f'inconclusive-mismatch for {round_trip.image_id}: {sorted(weighted_first)} carried '
+        f'weight in the first run and {sorted(weighted_second)} in the re-navigation, so the two '
+        f'offsets are not measurements of the same thing'
     )
 
 

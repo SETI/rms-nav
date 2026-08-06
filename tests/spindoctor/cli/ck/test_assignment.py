@@ -483,6 +483,36 @@ def test_assign_ignores_an_unreadable_object_no_image_needs(
     assert assignments[0].baseline is not None
 
 
+def test_an_image_with_no_pointing_names_no_object_to_read(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """An image that did not navigate corrects nothing, unreadable or otherwise.
+
+    It carries no pointing at all, so it names no CK object, and an index that
+    could not read some object's coverage does not turn it into a refusal.
+    """
+    root = tmp_path / 'CK-reconstructed'
+    path = _write_candidate(root, _TRUE_NAME)
+    index = CkIndex(
+        files=(
+            CkFile(
+                path=FCPath(path),
+                kernel_class=KernelClass.RECONSTRUCTED,
+                coverage=(),
+                unreadable_objects=(CASSINI_CK_FRAME_ID,),
+            ),
+        )
+    )
+    entry = _entry(
+        cmatrix_original=_cassini_recorded(pool),
+        kernels=(_TRUE_NAME,),
+        cmatrix=None,
+        status='failed',
+    )
+    assignments = assign_images([entry], index)
+    assert assignments[0].omission_reason is OmissionReason.NOT_ELIGIBLE
+
+
 def test_the_candidate_pool_is_left_as_it_was_found(pool: KernelPool, tmp_path: Path) -> None:
     """Every candidate furnished for a test is unloaded again."""
     root = tmp_path / 'CK-reconstructed'
