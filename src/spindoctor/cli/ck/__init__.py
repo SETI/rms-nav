@@ -23,16 +23,40 @@ for the check to rot on one side while it kept passing on the other.
 
 This package is part of the ``spindoctor.cli`` tree, which holds the command
 line programs and the helpers only they use; the importable library API is the
-rest of ``spindoctor``.  Its names are therefore reachable and documented in
-place, but they are not published API and have no page in the API reference,
-which covers the library packages -- the same footing as every other
-``spindoctor.cli`` subpackage.
+rest of ``spindoctor``.  The ``__all__`` below is therefore the surface the
+kernel-generating program imports from its own package -- what the modules
+here offer each other and the driver, gathered in one place so that a reader
+can see the shape of the writer without opening five files.  It is not
+published library API: nothing outside ``spindoctor.cli`` imports it, it
+carries no stability promise, and it has no page in the API reference, which
+covers the library packages.  Every other ``spindoctor.cli`` subpackage stands
+the same way.
 
 One global to respect: ``cspyce.use_errors()`` / ``cspyce.use_flags()`` is
 process-wide and shared with oops.  This package assumes the exceptions regime
 (``use_errors``, the package default) and never flips it.
 """
 
+from spindoctor.cli.ck.assignment import (
+    Assignment,
+    OutputGroup,
+    assign_images,
+    attitudes_reproduce,
+    baseline_attitudes,
+    group_for_output,
+    output_basename,
+    reproduces_baseline,
+    rotation_angle_rad,
+)
+from spindoctor.cli.ck.images import ImageEntry, OmissionReason, botsim_losers
+from spindoctor.cli.ck.index import (
+    CkFile,
+    CkIndex,
+    CoverageInterval,
+    KernelClass,
+    build_ck_index,
+    kernel_class_for_directory,
+)
 from spindoctor.cli.ck.pointing import ImagePointing
 from spindoctor.cli.ck.segment import (
     CkSegment,
@@ -41,10 +65,29 @@ from spindoctor.cli.ck.segment import (
     write_segment,
 )
 
+# The package's own surface, not published API: see the module docstring.
 __all__ = [
+    'Assignment',
+    'CkFile',
+    'CkIndex',
     'CkSegment',
+    'CoverageInterval',
+    'ImageEntry',
     'ImagePointing',
+    'KernelClass',
+    'OmissionReason',
+    'OutputGroup',
+    'assign_images',
+    'attitudes_reproduce',
+    'baseline_attitudes',
+    'botsim_losers',
+    'build_ck_index',
     'build_segment',
+    'group_for_output',
+    'kernel_class_for_directory',
+    'output_basename',
+    'reproduces_baseline',
     'resolve_sclk_id',
+    'rotation_angle_rad',
     'write_segment',
 ]

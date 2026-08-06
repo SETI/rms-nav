@@ -38,6 +38,10 @@ class ImagePointing:
             written for the image.
         cmatrix: Corrected J2000-to-camera rotation at the exposure midtime,
             in the SPICE camera frame convention (``v_camera = C . v_J2000``).
+        cmatrix_original: The same rotation before the correction, as the
+            kernels furnished at navigation time gave it.  It identifies the
+            baseline kernel the image navigated against: a candidate kernel
+            belongs to this image only if it reproduces this matrix.
         camera_frame: SPICE name of the camera frame ``cmatrix`` is expressed
             in, for example ``'CASSINI_ISS_NAC'``.
         ck_frame_id: SPICE id of the object a corrected C-kernel targets --
@@ -49,14 +53,15 @@ class ImagePointing:
         exposure_s: Exposure duration in seconds.
 
     Raises:
-        ValueError: if ``image_name`` is empty, if ``cmatrix`` is not a 3x3
-            proper orthonormal rotation, if any epoch or ``exposure_s`` is not
-            finite, if the three epochs are not ordered
+        ValueError: if ``image_name`` or ``camera_frame`` is empty, if either
+            C-matrix is not a 3x3 proper orthonormal rotation, if any epoch or
+            ``exposure_s`` is not finite, if the three epochs are not ordered
             ``start <= midtime <= stop``, or if ``exposure_s`` is negative.
     """
 
     image_name: str
     cmatrix: NDArrayFloatType
+    cmatrix_original: NDArrayFloatType
     camera_frame: str
     ck_frame_id: int
     start_et: float
@@ -65,10 +70,18 @@ class ImagePointing:
     exposure_s: float
 
     def __post_init__(self) -> None:
-        """Store the C-matrix read-only and refuse anything unusable."""
+        """Store the C-matrices read-only and refuse anything unusable."""
         object.__setattr__(self, 'cmatrix', _as_rotation(self.cmatrix, 'cmatrix'))
+        object.__setattr__(
+            self, 'cmatrix_original', _as_rotation(self.cmatrix_original, 'cmatrix_original')
+        )
         if len(self.image_name) == 0:
             raise ValueError('image_name is empty; a segment must name the image it corrects')
+        if len(self.camera_frame) == 0:
+            raise ValueError(
+                f'camera_frame is empty for {self.image_name}; the rotation from the CK object to '
+                f'the camera is read from the furnished kernels by that name'
+            )
         # Checked before the comparisons below, which a NaN would answer with
         # False rather than refuse, and which an infinite epoch would satisfy
         # outright.  Every one of these values reaches a clock encoding or a
@@ -95,12 +108,13 @@ class ImagePointing:
 
         The metadata is the per-image ``_metadata.json`` dict the navigation
         pipeline writes.  The fields read are ``observation.image_name``, the
-        ``navigation_result.pointing`` block (``cmatrix``, ``camera_frame``,
-        ``ck_frame_id``) and the ``navigation_result.times`` block
-        (``start_et``, ``stop_et``, ``midtime_et``, ``exposure_s``).  Nothing
-        else is consulted, and no eligibility rule is applied here: an image
-        whose pointing this constructor accepts is one the writer can express,
-        not necessarily one that should be written.
+        ``navigation_result.pointing`` block (``cmatrix``,
+        ``cmatrix_original``, ``camera_frame``, ``ck_frame_id``) and the
+        ``navigation_result.times`` block (``start_et``, ``stop_et``,
+        ``midtime_et``, ``exposure_s``).  Nothing else is consulted, and no
+        eligibility rule is applied here: an image whose pointing this
+        constructor accepts is one the writer can express, not necessarily one
+        that should be written.
 
         Parameters:
             metadata: The image's full navigation metadata dict.
@@ -115,30 +129,36 @@ class ImagePointing:
                 without an offset or with a fitted camera rotation, and such an
                 image cannot be given a segment.
             TypeError: if a field is present but holds a value of the wrong
-                kind -- a JSON ``null`` where a number belongs, or anything
-                but text where ``image_name`` or ``camera_frame`` belongs.
-                That is a malformed document rather than an image without a
-                solution, so it fails loudly instead of being reported as an
-                omission.  Text is never coerced: ``str(None)`` is ``'None'``,
-                which would name a written segment.
+                kind: anything but text where ``image_name`` or
+                ``camera_frame`` belongs, anything but a whole number where
+                ``ck_frame_id`` belongs, or anything but a number where an
+                epoch belongs.  That is a malformed document rather than an
+                image without a solution, so it fails loudly instead of being
+                reported as an omission.  Nothing is coerced: ``str(None)`` is
+                ``'None'``, which would name a written segment, and
+                ``int(-82000.9)`` is a valid Cassini bus id that the metadata
+                never recorded.
         """
-        observation = _section(metadata, 'observation', 'metadata')
-        navigation_result = _section(metadata, 'navigation_result', 'metadata')
-        pointing = _section(navigation_result, 'pointing', 'navigation_result')
-        times = _section(navigation_result, 'times', 'navigation_result')
+        observation = read_section(metadata, 'observation', 'metadata')
+        navigation_result = read_section(metadata, 'navigation_result', 'metadata')
+        pointing = read_section(navigation_result, 'pointing', 'navigation_result')
+        times = read_section(navigation_result, 'times', 'navigation_result')
         return cls(
-            image_name=_text(observation, 'image_name', 'observation'),
-            cmatrix=_rotation_from_metadata(_field(pointing, 'cmatrix', 'pointing')),
-            camera_frame=_text(pointing, 'camera_frame', 'pointing'),
-            ck_frame_id=int(_field(pointing, 'ck_frame_id', 'pointing')),
-            start_et=float(_field(times, 'start_et', 'times')),
-            stop_et=float(_field(times, 'stop_et', 'times')),
-            midtime_et=float(_field(times, 'midtime_et', 'times')),
-            exposure_s=float(_field(times, 'exposure_s', 'times')),
+            image_name=read_text(observation, 'image_name', 'observation'),
+            cmatrix=_rotation_from_metadata(read_field(pointing, 'cmatrix', 'pointing'), 'cmatrix'),
+            cmatrix_original=_rotation_from_metadata(
+                read_field(pointing, 'cmatrix_original', 'pointing'), 'cmatrix_original'
+            ),
+            camera_frame=read_text(pointing, 'camera_frame', 'pointing'),
+            ck_frame_id=read_int(pointing, 'ck_frame_id', 'pointing'),
+            start_et=read_number(times, 'start_et', 'times'),
+            stop_et=read_number(times, 'stop_et', 'times'),
+            midtime_et=read_number(times, 'midtime_et', 'times'),
+            exposure_s=read_number(times, 'exposure_s', 'times'),
         )
 
 
-def _rotation_from_metadata(value: Any) -> NDArrayFloatType:
+def _rotation_from_metadata(value: Any, label: str) -> NDArrayFloatType:
     """Read a recorded C-matrix, accepting only the shapes the schema writes.
 
     The metadata records a C-matrix as nine row-major floats, so a flat
@@ -148,8 +168,15 @@ def _rotation_from_metadata(value: Any) -> NDArrayFloatType:
     silently, so a document malformed in a way worth knowing about would be
     read as if it were well formed.
 
+    The elements are checked before conversion for the same reason the scalar
+    fields are: ``np.asarray(..., dtype=np.float64)`` converts text and
+    booleans without complaint, so a matrix of nine ``true`` and ``false``
+    values becomes a flawless identity that satisfies every rotation guard
+    there is.
+
     Parameters:
-        value: The recorded ``cmatrix`` value, as read from the metadata.
+        value: The recorded matrix value, as read from the metadata.
+        label: Name of the field, used in the exception message.
 
     Returns:
         The 3x3 rotation.
@@ -157,16 +184,54 @@ def _rotation_from_metadata(value: Any) -> NDArrayFloatType:
     Raises:
         ValueError: if the value does not hold nine numbers as a flat
             sequence or a 3x3 nesting.
+        TypeError: if any element is not a real number.
     """
-    array = np.asarray(value, dtype=np.float64)
+    array = np.asarray(_rotation_elements(value, label), dtype=np.float64)
     if array.shape not in ((9,), (3, 3)):
         raise ValueError(
-            f'cmatrix must be nine row-major floats or a 3x3 nesting; got shape {array.shape}'
+            f'{label} must be nine row-major floats or a 3x3 nesting; got shape {array.shape}'
         )
     return array.reshape(3, 3)
 
 
-def _text(section: dict[str, Any], key: str, where: str) -> str:
+def _rotation_elements(value: Any, label: str) -> Any:
+    """Check that a recorded matrix holds real numbers, and return it unchanged.
+
+    Only the shapes the schema writes are walked -- a flat sequence and one
+    level of nesting -- because anything else is refused for its shape a moment
+    later, and a value that is not a sequence at all is left for the shape
+    check to report.
+
+    Parameters:
+        value: The recorded matrix value, as read from the metadata.
+        label: Name of the field, used in the exception message.
+
+    Returns:
+        ``value`` itself.
+
+    Raises:
+        TypeError: if an element is text, a boolean, or anything else that is
+            not a real number.  ``bool`` is refused although Python counts it
+            as an ``int``: a matrix of JSON ``true`` and ``false`` values
+            converts to a valid rotation.
+    """
+    if not isinstance(value, list | tuple):
+        return value
+    for row in value:
+        elements = row if isinstance(row, list | tuple) else [row]
+        for element in elements:
+            if isinstance(element, list | tuple):
+                # Nested deeper than the schema writes; the shape check reports
+                # that, and reports it better than an element check could.
+                continue
+            if isinstance(element, bool) or not isinstance(element, int | float):
+                raise TypeError(
+                    f'{label} holds a {type(element).__name__}, not a number: {element!r}'
+                )
+    return value
+
+
+def read_text(section: dict[str, Any], key: str, where: str) -> str:
     """Return one required metadata value that must already be a string.
 
     ``str()`` is deliberately not used to coerce.  A JSON ``null`` coerces to
@@ -186,13 +251,74 @@ def _text(section: dict[str, Any], key: str, where: str) -> str:
         ValueError: if ``key`` is absent.
         TypeError: if the value present is not a string.
     """
-    value = _field(section, key, where)
+    value = read_field(section, key, where)
     if not isinstance(value, str):
         raise TypeError(f'{where} field {key!r} is {type(value).__name__}, not a string: {value!r}')
     return value
 
 
-def _field(section: dict[str, Any], key: str, where: str) -> Any:
+def read_int(section: dict[str, Any], key: str, where: str) -> int:
+    """Return one required metadata value that must already be a whole number.
+
+    ``int()`` is deliberately not used to coerce, for the same reason
+    :func:`read_text` does not use ``str()``.  ``int('-82000')`` and
+    ``int(-82000.9)`` both produce a valid Cassini bus id, the second by
+    truncating a value that was never that id, and ``int(True)`` produces 1.
+    Every one of those would resolve a spacecraft clock, encode time tags and
+    write a segment against an object the metadata never named.
+
+    Parameters:
+        section: The dict to read.
+        key: The key that must be present.
+        where: Name of the section, used in the exception message.
+
+    Returns:
+        The value stored under ``key``.
+
+    Raises:
+        ValueError: if ``key`` is absent.
+        TypeError: if the value present is not an integer.  ``bool`` is
+            refused although Python counts it as one, since a JSON ``true`` is
+            not an object id.
+    """
+    value = read_field(section, key, where)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(
+            f'{where} field {key!r} is {type(value).__name__}, not an integer: {value!r}'
+        )
+    # Narrowed to int above; restated so the annotation is checkable rather
+    # than inferred from a dict of Any.
+    return int(value)
+
+
+def read_number(section: dict[str, Any], key: str, where: str) -> float:
+    """Return one required metadata value that must already be a number.
+
+    ``float()`` is deliberately not used to coerce, for the same reason
+    :func:`read_text` does not use ``str()``: ``float('0.0')`` and
+    ``float(True)`` both succeed, so an epoch recorded as text or as a JSON
+    ``true`` would reach a clock encoding as a plausible number.  A whole
+    number is accepted and widened, since JSON writes an exact epoch that way.
+
+    Parameters:
+        section: The dict to read.
+        key: The key that must be present.
+        where: Name of the section, used in the exception message.
+
+    Returns:
+        The value stored under ``key``, as a float.
+
+    Raises:
+        ValueError: if ``key`` is absent.
+        TypeError: if the value present is not a real number.
+    """
+    value = read_field(section, key, where)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError(f'{where} field {key!r} is {type(value).__name__}, not a number: {value!r}')
+    return float(value)
+
+
+def read_field(section: dict[str, Any], key: str, where: str) -> Any:
     """Return one required metadata value.
 
     Parameters:
@@ -211,7 +337,7 @@ def _field(section: dict[str, Any], key: str, where: str) -> Any:
     return section[key]
 
 
-def _section(metadata: dict[str, Any], key: str, where: str) -> dict[str, Any]:
+def read_section(metadata: dict[str, Any], key: str, where: str) -> dict[str, Any]:
     """Return one required metadata sub-dict.
 
     Parameters:
@@ -225,7 +351,7 @@ def _section(metadata: dict[str, Any], key: str, where: str) -> dict[str, Any]:
     Raises:
         ValueError: if ``key`` is absent or does not hold a dict.
     """
-    value = _field(metadata, key, where)
+    value = read_field(metadata, key, where)
     if not isinstance(value, dict):
         raise ValueError(f'{where}.{key} is {type(value).__name__}, not a section')
     return value

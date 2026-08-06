@@ -15,6 +15,7 @@ whatever an unrelated test furnished earlier in the same worker.
 
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
+from typing import Any
 
 import cspyce
 import numpy as np
@@ -303,6 +304,54 @@ def baseline_segment(
     )
 
 
+def write_type1_ck(
+    path: Path,
+    *,
+    ck_frame_id: int,
+    ticks: Sequence[float],
+    attitude: Callable[[float], NDArrayFloatType],
+    sclk_id: int,
+) -> None:
+    """Write a discrete (type 1) C-kernel holding pointing at given time tags.
+
+    Every other kernel these tests write is type 3, which interpolates and
+    therefore answers any epoch inside its window whatever tolerance is asked
+    for.  A type 1 kernel answers only within a tolerance of a record it
+    actually holds, which is what the real Voyager ISS baselines are and what
+    makes a lookup tolerance decide anything at all.
+
+    Parameters:
+        path: File to create.
+        ck_frame_id: SPICE id of the object the segment describes.
+        ticks: Encoded SCLK time tags of the records, strictly increasing.
+        attitude: The J2000-to-CK-object rotation at an epoch.
+        sclk_id: Spacecraft clock the time tags are encoded against, used to
+            turn each tag back into the epoch the attitude is taken at.
+    """
+    quats = np.vstack(
+        [
+            np.asarray(cspyce.m2q(attitude(float(cspyce.sct2e(sclk_id, tick)))), dtype=np.float64)
+            for tick in ticks
+        ]
+    )
+    handle = cspyce.ckopn(str(path), 'baseline', 0)
+    try:
+        cspyce.ckw01(
+            handle,
+            float(ticks[0]),
+            float(ticks[-1]),
+            ck_frame_id,
+            'J2000',
+            False,
+            'discrete-baseline',
+            np.asarray(ticks, dtype=np.float64),
+            quats,
+            np.zeros((len(ticks), 3), dtype=np.float64),
+        )
+    finally:
+        cspyce.ckcls(handle)
+
+
 def write_ck(path: Path, segments: Sequence[CkSegment]) -> None:
     """Write segments to a new C-kernel.
 
@@ -355,6 +404,85 @@ def write_baseline_ck(
             )
         ],
     )
+
+
+def image_metadata(
+    *,
+    image_name: str,
+    cmatrix: NDArrayFloatType | None,
+    cmatrix_original: NDArrayFloatType,
+    camera_frame: str,
+    ck_frame_id: int,
+    start_et: float,
+    stop_et: float,
+    midtime_et: float | None = None,
+    exposure_s: float | None = None,
+    status: str = 'success',
+    camera: str | None = None,
+    shutter_mode: str | None = None,
+    kernels: Sequence[str] | None = (),
+    rotation_deg: float | None = None,
+) -> dict[str, Any]:
+    """Build a per-image metadata document shaped like the pipeline's own.
+
+    Only the fields the generator reads are populated; the rest of the schema
+    is irrelevant to it and would only make a test harder to read.
+
+    Parameters:
+        image_name: Basename recorded for the image.
+        cmatrix: The corrected C-matrix, or None to omit it, which is what an
+            image that navigated without one records.
+        cmatrix_original: The uncorrected C-matrix.
+        camera_frame: SPICE name of the camera frame.
+        ck_frame_id: SPICE id of the object a corrected kernel targets.
+        start_et: Exposure start, TDB seconds past J2000.
+        stop_et: Exposure stop, TDB seconds past J2000.
+        midtime_et: Exposure midtime; the arithmetic midpoint when None.
+        exposure_s: Exposure duration; ``stop_et - start_et`` when None.
+        status: The navigation status.
+        camera: The camera that took the image; the field is omitted when
+            None.
+        shutter_mode: The shutter mode; the field is omitted when None.
+        kernels: The SPICE kernel basenames recorded in the provenance block;
+            the provenance block itself is omitted when None.
+        rotation_deg: A fitted camera rotation; the field is omitted when
+            None.
+
+    Returns:
+        The metadata dict.
+    """
+    pointing: dict[str, Any] = {}
+    if cmatrix is not None:
+        pointing['cmatrix'] = [float(value) for value in np.asarray(cmatrix).reshape(9)]
+    pointing['cmatrix_original'] = [
+        float(value) for value in np.asarray(cmatrix_original).reshape(9)
+    ]
+    pointing['camera_frame'] = camera_frame
+    pointing['ck_frame_id'] = ck_frame_id
+    midtime = (start_et + stop_et) / 2.0 if midtime_et is None else midtime_et
+    navigation_result: dict[str, Any] = {
+        'pointing': pointing,
+        'times': {
+            'start_et': start_et,
+            'stop_et': stop_et,
+            'midtime_et': midtime,
+            'exposure_s': stop_et - start_et if exposure_s is None else exposure_s,
+        },
+    }
+    if kernels is not None:
+        navigation_result['provenance'] = {'spice_kernels': list(kernels)}
+    if rotation_deg is not None:
+        navigation_result['rotation_deg'] = rotation_deg
+    observation: dict[str, Any] = {'image_name': image_name}
+    if camera is not None:
+        observation['camera'] = camera
+    if shutter_mode is not None:
+        observation['shutter_mode'] = shutter_mode
+    return {
+        'status': status,
+        'observation': observation,
+        'navigation_result': navigation_result,
+    }
 
 
 def rotation_angle_between(first: NDArrayFloatType, second: NDArrayFloatType) -> float:

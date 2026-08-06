@@ -85,6 +85,13 @@ _CASSINI_CK_FRAME_ID = -82000
 _GALILEO_CK_FRAME_ID = -77001
 _LORRI_CK_FRAME_ID = -98000
 
+# Voyager needs one per spacecraft under a single instrument key, named here
+# for the same reason the others are named: the object is the one fact a
+# corrected kernel is written against, and computing it from the spacecraft
+# digit hides both values behind arithmetic that no reader can check at a
+# glance.
+_VOYAGER_CK_FRAME_ID = {'1': -31100, '2': -32100}
+
 # What cspyce raises when the furnished kernels cannot answer: a missing frame
 # or an unresolvable clock arrives as a LookupError, an unreadable kernel as
 # an OSError, and a SPICE error as a RuntimeError or a ValueError.  Each is an
@@ -465,6 +472,8 @@ def _frame_identity(obs: ObsSnapshotInst) -> _FrameIdentity | None:
     Raises:
         NavPointingError: if the instrument's CK object has no recorded
             spacecraft clock.
+        KeyError: if a Voyager observation reports a spacecraft that is
+            neither, which the host refuses when it reads the label.
     """
     if isinstance(obs, ObsCassiniISS):
         return _FrameIdentity(
@@ -492,11 +501,13 @@ def _frame_identity(obs: ObsSnapshotInst) -> _FrameIdentity | None:
         )
     if isinstance(obs, ObsVoyagerISS):
         digit = obs.spacecraft_digit
-        # One instrument key serves two spacecraft, so the CK object is derived
-        # from which spacecraft this is; its clock then follows from the object
-        # rather than from the same digit, so a wrong derivation is refused
-        # instead of producing a self-consistent wrong pair.
-        ck_frame_id = -(30 + int(digit)) * 1000 - 100
+        # One instrument key serves two spacecraft, so the CK object is the one
+        # recorded for this spacecraft; its clock then follows from the object
+        # rather than from the same digit, so a wrong pairing is refused
+        # instead of producing a self-consistent wrong one.  The host validates
+        # the digit when it reads the label, so a key error here would mean
+        # that stopped being true.
+        ck_frame_id = _VOYAGER_CK_FRAME_ID[digit]
         # The Voyager FK spells the cameras ISSNA and ISSWA, so the oops
         # detector names NAC and WAC contribute only their first letter.
         return _FrameIdentity(

@@ -78,6 +78,33 @@ def test_from_metadata_reads_the_recorded_block() -> None:
     assert np.array_equal(pointing.cmatrix, np.asarray(_QUARTER_TURN).reshape(3, 3))
 
 
+def test_from_metadata_reads_the_uncorrected_matrix() -> None:
+    """The uncorrected attitude is carried too; it identifies the baseline kernel."""
+    pointing = ImagePointing.from_metadata(_metadata())
+    assert np.array_equal(pointing.cmatrix_original, np.asarray(_QUARTER_TURN).reshape(3, 3))
+
+
+def test_from_metadata_refuses_a_missing_uncorrected_matrix() -> None:
+    """Without it no candidate kernel can be tested against the image."""
+    metadata = _metadata()
+    del metadata['navigation_result']['pointing']['cmatrix_original']
+    with pytest.raises(ValueError, match="pointing has no 'cmatrix_original' field"):
+        ImagePointing.from_metadata(metadata)
+
+
+def test_from_metadata_refuses_a_misshapen_uncorrected_matrix() -> None:
+    """The refusal names the field it read, not the other one."""
+    with pytest.raises(ValueError, match='cmatrix_original must be nine row-major floats'):
+        ImagePointing.from_metadata(_metadata(cmatrix_original=[[float(v)] for v in _QUARTER_TURN]))
+
+
+def test_from_metadata_refuses_an_uncorrected_matrix_that_is_not_a_rotation() -> None:
+    """A baseline that is not an attitude cannot have been one."""
+    scaled = [value * 1.5 for value in _QUARTER_TURN]
+    with pytest.raises(ValueError, match='cmatrix_original is not a proper rotation'):
+        ImagePointing.from_metadata(_metadata(cmatrix_original=scaled))
+
+
 def test_from_metadata_stores_the_matrix_read_only() -> None:
     """The stored C-matrix cannot be mutated behind the writer's back."""
     pointing = ImagePointing.from_metadata(_metadata())
@@ -243,6 +270,7 @@ def test_refuses_a_matrix_of_the_wrong_shape() -> None:
         ImagePointing(
             image_name='N1484573295_1.IMG',
             cmatrix=np.eye(2),
+            cmatrix_original=np.eye(3),
             camera_frame='CASSINI_ISS_NAC',
             ck_frame_id=-82000,
             start_et=_START_ET,
@@ -250,3 +278,106 @@ def test_refuses_a_matrix_of_the_wrong_shape() -> None:
             midtime_et=_START_ET + _EXPOSURE_S / 2.0,
             exposure_s=_EXPOSURE_S,
         )
+
+
+@pytest.mark.parametrize(
+    'ck_frame_id',
+    ['-82000', -82000.0, -82000.9, True, None],
+    ids=['text', 'whole-float', 'truncating-float', 'boolean', 'null'],
+)
+def test_from_metadata_refuses_a_ck_object_that_is_not_an_integer(ck_frame_id: Any) -> None:
+    """An object id is never coerced into being one.
+
+    ``int('-82000')`` and ``int(-82000.9)`` both produce a valid Cassini bus
+    id, the second by truncating a value that was never that id, and
+    ``int(True)`` produces 1.  Each would resolve a clock, encode time tags,
+    and write a segment against an object the metadata never recorded.
+
+    Parameters:
+        ck_frame_id: A recorded object id of the wrong kind.
+    """
+    with pytest.raises(TypeError, match=r"'ck_frame_id' is \w+, not an integer"):
+        ImagePointing.from_metadata(_metadata(ck_frame_id=ck_frame_id))
+
+
+@pytest.mark.parametrize(
+    'field',
+    ['start_et', 'stop_et', 'midtime_et', 'exposure_s'],
+    ids=['start', 'stop', 'mid', 'exp'],
+)
+@pytest.mark.parametrize('value', ['0.0', True, None], ids=['text', 'boolean', 'null'])
+def test_from_metadata_refuses_an_epoch_that_is_not_a_number(field: str, value: Any) -> None:
+    """An epoch is never coerced into being one.
+
+    ``float('0.0')`` and ``float(True)`` both succeed, so an epoch recorded as
+    text or as a JSON ``true`` would reach a clock encoding as a plausible
+    number.
+
+    Parameters:
+        field: Name of the time field set to the wrong kind of value.
+        value: A recorded value that is not a number.
+    """
+    with pytest.raises(TypeError, match=f'{field!r} is .*, not a number'):
+        ImagePointing.from_metadata(_metadata(**{field: value}))
+
+
+def test_from_metadata_accepts_a_whole_number_epoch() -> None:
+    """JSON writes an exact epoch without a decimal point, and it is widened."""
+    pointing = ImagePointing.from_metadata(_metadata(exposure_s=2))
+    assert pointing.exposure_s == 2.0
+
+
+def test_from_metadata_refuses_a_matrix_off_orthonormality_by_a_microradian() -> None:
+    """The rotation bound is a nanoradian, not something a defect can hide under.
+
+    A shear a thousand times smaller than a pixel of any camera here is still
+    not an attitude, and it would be written into a kernel other tools trust.
+    """
+    nearly = [1.0, 1e-6, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    with pytest.raises(ValueError, match='cmatrix is not orthonormal'):
+        ImagePointing.from_metadata(_metadata(cmatrix=nearly))
+
+
+@pytest.mark.parametrize(
+    'cmatrix',
+    [
+        [True, False, False, False, True, False, False, False, True],
+        [[True, False, False], [False, True, False], [False, False, True]],
+        ['1.0', '0.0', '0.0', '0.0', '1.0', '0.0', '0.0', '0.0', '1.0'],
+        [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, None],
+    ],
+    ids=['flat-booleans', 'nested-booleans', 'numeric-strings', 'null-element'],
+)
+def test_from_metadata_refuses_a_matrix_of_the_wrong_kind(cmatrix: list[Any]) -> None:
+    """A matrix element is never coerced into being a number.
+
+    Nine booleans convert to a flawless identity, and nine numeric strings to
+    whatever they spell, so both would satisfy the determinant, orthonormality
+    and finiteness guards and be written into a kernel.
+
+    Parameters:
+        cmatrix: A recorded matrix whose elements are not numbers.
+    """
+    with pytest.raises(TypeError, match='cmatrix holds a'):
+        ImagePointing.from_metadata(_metadata(cmatrix=cmatrix))
+
+
+def test_from_metadata_refuses_an_empty_camera_frame() -> None:
+    """A frame with no name cannot be looked up, and says so here rather than in SPICE."""
+    with pytest.raises(ValueError, match='camera_frame is empty'):
+        ImagePointing.from_metadata(_metadata(camera_frame=''))
+
+
+@pytest.mark.parametrize('cmatrix', [5, None], ids=['number', 'null'])
+def test_from_metadata_refuses_a_matrix_that_is_not_a_sequence(cmatrix: Any) -> None:
+    """A recorded matrix that is not a matrix is reported for its shape.
+
+    The element check walks only the shapes the schema writes and leaves
+    anything else to the shape check, which names what was recorded rather
+    than complaining about one element of it.
+
+    Parameters:
+        cmatrix: A recorded value that holds no elements at all.
+    """
+    with pytest.raises(ValueError, match='cmatrix must be nine row-major floats'):
+        ImagePointing.from_metadata(_metadata(cmatrix=cmatrix))

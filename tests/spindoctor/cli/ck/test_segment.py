@@ -138,6 +138,7 @@ def _build_case(
     pointing = ImagePointing(
         image_name=image_name,
         cmatrix=camera_from_ck @ correction @ attitude(midtime),
+        cmatrix_original=camera_from_ck @ attitude(midtime),
         camera_frame=camera_frame,
         ck_frame_id=ck_frame_id,
         start_et=start_et,
@@ -324,6 +325,7 @@ def test_angular_velocity_missing_from_part_of_the_exposure_is_not_claimed(
     pointing = ImagePointing(
         image_name=_IMAGE_NAME,
         cmatrix=camera_from_ck @ correction @ baseline_attitude(midtime),
+        cmatrix_original=camera_from_ck @ baseline_attitude(midtime),
         camera_frame=CASSINI_CAMERA_FRAME,
         ck_frame_id=CASSINI_CK_FRAME_ID,
         start_et=_START_ET,
@@ -359,6 +361,7 @@ def test_a_ck_object_with_no_frame_name_is_refused(pool: KernelPool) -> None:
     pointing = ImagePointing(
         image_name=_IMAGE_NAME,
         cmatrix=np.eye(3),
+        cmatrix_original=np.eye(3),
         camera_frame=CASSINI_CAMERA_FRAME,
         ck_frame_id=CASSINI_CK_FRAME_ID,
         start_et=_START_ET,
