@@ -496,11 +496,27 @@ spacecraft, silently). The SCLK kernel furnished must be the one navigation
 used, resolved from `provenance.spice_kernels`; a different SCLK is a silent
 time-tag error.
 
+**How that resolution works, since `spice_kernels` does not answer it
+directly.** The list is sorted basenames with no load order, and in a batch
+run it accumulates every kernel earlier images furnished, so it can hold
+several clock kernels -- more than one for the same spacecraft, and others
+for spacecraft this image has nothing to do with. The driver that furnishes
+the pool (section 3.5) therefore filters the list to the clock kernels of
+the image's own resolved `sclk_id` and requires **exactly one** to survive.
+Zero means the recorded provenance cannot name the clock the time tags were
+encoded against, and several means it names more than one and cannot say
+which; both refuse the image rather than picking one, because either guess
+writes time tags that are wrong by whatever the two clock kernels disagree
+by, and a wrong time tag is not visible in the written kernel. This is the
+same discipline the clock id itself gets just below: the recorded value
+decides, and anything ambiguous is refused rather than resolved by
+preference.
+
 **The shared table is the resolver; `ckmeta` is only the cross-check.**
 `sclk_id` comes from the CK-object-to-clock mapping in
 `spindoctor/spice_ids.py` (section 3.6), and `cspyce.ckmeta(ck_frame_id,
 'SCLK')` is then required to agree with it. It is deliberately not the
-other way round, because `ckmeta` computes rather than validates:
+other way around, because `ckmeta` computes rather than validates:
 `ckmeta(-999999, 'SCLK')` returns `-999` and `ckmeta(-12345, 'SCLK')`
 returns `-12`, neither raising. A `ck_frame_id` that is wrong for any
 reason would otherwise yield a plausible-looking clock id, a successful
