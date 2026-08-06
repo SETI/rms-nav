@@ -14,24 +14,20 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import cast
 
-import cspyce
 import numpy as np
 import oops
 import pytest
 from tests.cmatrix_helpers import offset_from_correction
 
 from spindoctor.obs import ObsSnapshotInst
+from spindoctor.spice_ids import CK_OBJECT_SCLK_ID
 from spindoctor.support.cmatrix import (
     _CASSINI_CK_FRAME_ID,
-    _CASSINI_SCLK_ID,
-    _GALILEO_CK_FRAME_ID,
-    _GALILEO_SCLK_ID,
-    _LORRI_CK_FRAME_ID,
-    _LORRI_SCLK_ID,
     AttitudeBaseline,
     _build_pointing_solution,
     _camera_frame_id,
     _check_flip,
+    _ck_object_sclk_id,
     _FrameIdentity,
     _oops_correction_matrix,
     _pxform,
@@ -369,7 +365,7 @@ def _cassini_identity() -> _FrameIdentity:
     return _FrameIdentity(
         camera_frame='CASSINI_ISS_NAC',
         ck_frame_id=_CASSINI_CK_FRAME_ID,
-        sclk_id=_CASSINI_SCLK_ID,
+        sclk_id=CK_OBJECT_SCLK_ID[_CASSINI_CK_FRAME_ID],
         oops_from_spice=_CASSINI_FLIP,
         frozen_oops_attitude=False,
     )
@@ -402,13 +398,19 @@ def test_a_flip_just_outside_tolerance_is_refused() -> None:
 
 
 def test_the_missions_own_clock_resolves_and_is_accepted() -> None:
-    """The clock SPICE resolves for a mission's CK object is the expected one.
+    """The clock SPICE resolves for a mission's CK object is the recorded one.
 
-    Pins the expected constant against what ``ckmeta`` actually computes: a
-    typo in either the CK object or the clock id fails here rather than
-    producing time strings from a plausible-looking wrong clock.
+    Pins the recorded clock against what ``ckmeta`` actually computes: a typo
+    in either the CK object or the clock id fails here rather than producing
+    time strings from a plausible-looking wrong clock.
     """
-    assert _sclk_id(_cassini_identity()) == _CASSINI_SCLK_ID
+    assert _sclk_id(_cassini_identity()) == CK_OBJECT_SCLK_ID[_CASSINI_CK_FRAME_ID]
+
+
+def test_a_ck_object_with_no_recorded_clock_is_a_pointing_failure() -> None:
+    """An object outside the recorded set is refused rather than looked up."""
+    with pytest.raises(NavPointingError, match='has no recorded spacecraft clock'):
+        _ck_object_sclk_id(_NONEXISTENT_CK_FRAME_ID)
 
 
 def _voyager2_identity_with_the_voyager1_ck_object() -> _FrameIdentity:
@@ -436,37 +438,6 @@ def test_the_refused_clock_message_names_the_expected_clock() -> None:
     """The refusal says which clock was expected, so it is attributable."""
     with pytest.raises(NavPointingError, match='not the -32'):
         _sclk_id(_voyager2_identity_with_the_voyager1_ck_object())
-
-
-def test_ckmeta_computes_a_clock_for_a_ck_object_that_does_not_exist() -> None:
-    """``ckmeta`` computes rather than validates, which is why the check exists.
-
-    A nonexistent CK object still yields a plausible clock id and no error,
-    so trusting the round trip would write time strings from the wrong clock
-    while every call reported success.
-    """
-    assert int(cspyce.ckmeta(_NONEXISTENT_CK_FRAME_ID, 'SCLK')) == -999
-
-
-@pytest.mark.parametrize(
-    ('ck_frame_id', 'sclk_id'),
-    [
-        (_CASSINI_CK_FRAME_ID, _CASSINI_SCLK_ID),
-        (_GALILEO_CK_FRAME_ID, _GALILEO_SCLK_ID),
-        (_LORRI_CK_FRAME_ID, _LORRI_SCLK_ID),
-    ],
-    ids=['cassini', 'galileo', 'lorri'],
-)
-def test_each_recorded_ck_object_and_clock_pair_agrees_with_spice(
-    ck_frame_id: int, sclk_id: int
-) -> None:
-    """Every mission's CK object resolves to the clock recorded beside it.
-
-    ``ckmeta`` needs no kernels, so the pairing is checkable here as well as
-    on real frames.  A typo in either half of a pair would otherwise only
-    surface as time strings encoding another spacecraft's clock.
-    """
-    assert int(cspyce.ckmeta(ck_frame_id, 'SCLK')) == sclk_id
 
 
 def test_a_frame_the_kernel_pool_does_not_know_is_a_pointing_failure() -> None:

@@ -398,8 +398,14 @@ C_ck_corrected(t) = delta . C_ck_original(t)      for t in [start, stop]
 ```
 
 That is the physical model -- the spacecraft is pointed slightly wrong and
-the error turns with it -- so attitude still varies correctly within the
-exposure and smear geometry stays right. **Exception: Voyager.** The
+the error turns with it -- so the *correction* is right at every epoch in
+the window. What the segment reproduces between its records is a separate
+question: it carries records at start, midtime and stop, plus a 1 s cadence
+above 10 s of exposure (section 3.3), and interpolates between them, so
+smear geometry is right only to the fidelity of that interpolation. That
+fidelity is measured in Phase D's interior note and is weaker than this
+paragraph once claimed; bounding it needs a denser, adaptive cadence
+(#444). **Exception: Voyager.** The
 navigated model assumed a constant, tolerance-snapped attitude (section
 2.2), so a Voyager segment carries that single corrected attitude,
 constant across its window; writing time-varying pointing there would
@@ -436,33 +442,89 @@ One **type 3** segment per eligible image, interpolation interval exactly
 `[start_et, stop_et]`.
 
 **Records.** At exposure start, midtime, and stop. When `exposure_s`
-exceeds 10 s, additional records at a 1 s cadence. (SPICE offers no API to
-enumerate a type-3 segment's interior records, so the earlier idea of
-copying the original's record times is dropped; at typical exposure lengths
-the window contains no interior records anyway.) Time tags must be
+exceeds 10 s, additional records at a 1 s cadence.
+
+Those cadence records earn their place, and it is worth saying how, because
+nothing asserts them. The segment declares one interpolation interval
+spanning `[start_et, stop_et]`, so SPICE interpolates between bracketing
+records for **every** epoch in the window -- an epoch between records is
+interpolated, not fallen through to the original kernels, which happens
+only outside the window. Each added record therefore shortens every
+interpolation span it touches and improves accuracy continuously across the
+window rather than at instants. Measured on a real Cassini reconstructed
+kernel, a 60 s exposure carrying only the three mandatory records has a
+worst interior error of 25.98 px; at the 1 s cadence it is 1.07 px. The
+cadence reduces interior error by more than twenty-fold and **bounds
+nothing** -- 1.07 px is still well outside any tolerance this plan states,
+which is why a consumer is told (Phase D's interior note) that only the
+record epochs are claimed. Replacing this fixed cadence with an adaptive
+one that does bound the error is #444.
+
+(SPICE offers no API to enumerate a type-3 segment's interior records, so
+the earlier idea of copying the original's record times is dropped.) Time
+tags must be
 **strictly increasing in encoded SCLK**; an exposure so short that start,
 mid and stop collapse to one tick produces a single-record segment at
 midtime, which type 3 permits and Phase B tests. Records are quaternions
 from `cspyce.m2q` with **sign continuity enforced**: `m2q` fixes the scalar
-component non-negative, which can flip sign between adjacent records and
-corrupt the interpolation; each record is negated as needed to keep a
-non-negative dot product with its predecessor.
+component non-negative, which flips the sign between adjacent records
+whenever the attitude's rotation angle passes 180 degrees; each record is
+negated as needed to keep a non-negative dot product with its predecessor.
 
-**Clocks.** Encoded SCLK comes from `cspyce.sce2c(sclk_id, et)` where
-`sclk_id = cspyce.ckmeta(ck_frame_id, 'SCLK')` -- the spacecraft clock ID
-(-82, -31, -77, -98), which is **not** derivable from the CK object id by
-integer division (`-31100 // 1000` is -32 in Python: wrong spacecraft,
-silently). The SCLK kernel furnished must be the one navigation used,
-resolved from `provenance.spice_kernels`; a different SCLK is a silent
+Phase B measured two things about that paragraph. First, `sce2c` returns
+*continuous* encoded SCLK -- a tick with a fractional part -- so the
+single-record collapse happens only when the three epochs are
+indistinguishable as doubles (a nanosecond exposure near ET 5e8), not
+merely when the exposure is shorter than one tick: measured against a
+1/256 s clock, a 1 ms exposure is 0.256 ticks and still produces three
+records. **The single-record path is therefore unreachable for any real
+exposure** -- the shortest Cassini ISS exposure is 5 ms -- and it exists as
+a guard, not as a case the corpus contains. When it does fire the midtime
+record is bit-identical to the start record, so "at midtime" is a statement
+of intent rather than an observable. Second, SPICE's own type-3
+reader restores quaternion sign on the way out: a segment written with a
+sign-discontinuous sequence reads back attitudes identical to a repaired
+one (0.0 rad difference at an interior epoch, measured). The enforcement
+stays, because the file should say what it means, but the test guarding it
+must assert on the written records; no read-back assertion can see the
+difference.
+
+**Clocks.** Encoded SCLK comes from `cspyce.sce2c(sclk_id, et)`. The
+spacecraft clock ID (-82, -31, -77, -98) is **not** derivable from the CK
+object id by integer division (`-31100 // 1000` is -32 in Python: wrong
+spacecraft, silently). The SCLK kernel furnished must be the one navigation
+used, resolved from `provenance.spice_kernels`; a different SCLK is a silent
 time-tag error.
 
-**`ckmeta` will not catch a wrong CK id either.** It computes rather than
-validates: `ckmeta(-999999, 'SCLK')` returns `-999` and `ckmeta(-12345,
-'SCLK')` returns `-12`, neither raising. A `ck_frame_id` that is wrong for
-any reason therefore yields a plausible-looking clock id, a successful
-`sce2c`, and silently wrong time tags on every record. Validate the
-resolved `sclk_id` against the expected set for the mission rather than
-trusting the round trip.
+**How that resolution works, since `spice_kernels` does not answer it
+directly.** The list is sorted basenames with no load order, and in a batch
+run it accumulates every kernel earlier images furnished, so it can hold
+several clock kernels -- more than one for the same spacecraft, and others
+for spacecraft this image has nothing to do with. The driver that furnishes
+the pool (section 3.5) therefore filters the list to the clock kernels of
+the image's own resolved `sclk_id` and requires **exactly one** to survive.
+Zero means the recorded provenance cannot name the clock the time tags were
+encoded against, and several means it names more than one and cannot say
+which; both refuse the image rather than picking one, because either guess
+writes time tags that are wrong by whatever the two clock kernels disagree
+by, and a wrong time tag is not visible in the written kernel. This is the
+same discipline the clock id itself gets just below: the recorded value
+decides, and anything ambiguous is refused rather than resolved by
+preference.
+
+**The shared table is the resolver; `ckmeta` is only the cross-check.**
+`sclk_id` comes from the CK-object-to-clock mapping in
+`spindoctor/spice_ids.py` (section 3.6), and `cspyce.ckmeta(ck_frame_id,
+'SCLK')` is then required to agree with it. It is deliberately not the
+other way around, because `ckmeta` computes rather than validates:
+`ckmeta(-999999, 'SCLK')` returns `-999` and `ckmeta(-12345, 'SCLK')`
+returns `-12`, neither raising. A `ck_frame_id` that is wrong for any
+reason would otherwise yield a plausible-looking clock id, a successful
+`sce2c`, and silently wrong time tags on every record. Both call sites --
+the writer's `resolve_sclk_id` and the attitude computation's own resolver
+-- return the **recorded** id rather than the one `ckmeta` computed, even
+though the check has just proved them equal, so that weakening the check
+later cannot quietly promote `ckmeta` back to being the source.
 
 **Both attitudes are evaluated at the exposure midtime**, and Phase A's
 integration tier pins that against a moving attitude on LORRI alone -- the
@@ -484,6 +546,23 @@ same vectors bit-identically and `avflag = 1`; when the original has none
 corrected segment writes `avflag = 0` and queries fall back to `ckgp`.
 Rotating AV through `delta` -- superficially the "thorough" treatment -- is
 the wrong-frame error, and Phase B's test must fail if it is introduced.
+
+Two refinements from Phase B. The want-of-AV failure is `OSError`
+`SPICE(CKINSUFFDATA)` -- the same class and short message as pointing that
+is not covered at all -- so the two are not distinguishable from the
+exception. The rule the writer applies is therefore **all records or
+none**: it probes `ckgpav` at the first record as a fast path, but the
+sampling pass over every record is what decides, so an exposure straddling
+one original segment that carries AV and one that does not writes
+`avflag = 0` rather than failing. A genuine coverage gap still surfaces
+rather than being demoted to a missing-AV segment, because the `ckgp`
+lookups that then read the attitude raise on it. And a **frozen (Voyager)
+segment writes `avflag = 0` whatever its baseline carries**: the segment's
+attitude is constant, so its angular velocity is zero, and the rigid-attachment
+argument that licenses copying the baseline's vectors does not hold for a
+segment that deliberately drops the baseline's time variation. Voyager
+baselines carry no AV in any case, so the rule changes nothing on real
+data.
 
 **Files mirror the originals.** Each output `.bc` corresponds to exactly
 one original CK file and carries the segments of the images whose corrected
@@ -596,6 +675,17 @@ would drag oops in transitively. The guarantee is asserted on `sys.modules`
 after importing the writer package in a fresh interpreter, not by scanning
 source text.
 
+The one fact the writer and the attitude computation must agree on -- which
+spacecraft clock each CK object's time tags are encoded against -- therefore
+lives in `spindoctor/spice_ids.py`, a top-level constants module importing
+only the standard library, which both sides read. It is deliberately not
+under `spindoctor/support/`, which the writer may not import at all. That
+mapping is the check against `ckmeta` computing a clock id rather than
+validating one, so a second copy of it would be a silent way for the check
+to rot on one side while it kept passing on the other; `cmatrix` derives
+each instrument's clock from it, and the writer's `resolve_sclk_id`
+validates against it. Both keep their own error type and message.
+
 The `cspyce` surface the writer needs, all present in the installed 2.3.6:
 `furnsh`, `unload`, `kclear`, `pxform`, `frmnam`, `namfrm`, `ckmeta`,
 `sce2c`, `sce2s`, `ckobj`, `ckcov`, `ckgp`, `ckgpav`, `m2q`, `ckopn`,
@@ -683,8 +773,10 @@ The type-3 segment writer for a single image: `F` and `delta` per section
 3.1, records, SCLK, quaternion sign continuity, AV policy, the
 single-record degenerate path.
 
-Tests are hermetic: the suite writes its own minimal LSK and SCLK text
-kernels (small text files `furnsh` accepts), plus an original CK produced
+Tests are hermetic: the suite writes its own minimal LSK, SCLK and FK text
+kernels (small text files `furnsh` accepts) -- the FK because `F` is
+`pxform(frmnam(ck_frame_id), camera_frame, mid)` and both of those frames
+have to be defined for the call to resolve -- plus an original CK produced
 by the writer's own primitives, so no holdings are needed. Write a kernel
 from a constructed attitude history and correction, furnish, query back
 with `ckgpav` at `tol = 0`:
@@ -693,10 +785,25 @@ with `ckgpav` at `tol = 0`:
   truth within 1e-9 radians.
 - AV is bit-identical to the original's; the test **fails if AV is rotated
   through `delta`**.
-- An AV-less original yields `avflag = 0` and a working `ckgp` fallback.
-- A sign-discontinuous quaternion sequence is repaired; interpolated
-  attitude mid-record stays continuous.
-- A sub-tick exposure produces a valid single-record segment.
+- An AV-less original yields `avflag = 0` and a working `ckgp` fallback,
+  and so does an exposure straddling one original segment that carries AV
+  and one that does not: a segment has one flag for all its records, so it
+  claims none rather than inventing vectors for the records that lack them.
+- A sign-discontinuous quaternion sequence is repaired, asserted on the
+  written records rather than on a read-back attitude (section 3.3: SPICE
+  restores the sign when it interpolates, so the read-back cannot see it);
+  interpolated attitude mid-record stays continuous.
+- Exposure epochs that collapse to a single encoded tick produce a valid
+  single-record segment. Per section 3.3 that needs three epochs equal as
+  doubles, which no real exposure produces, so a second test pins the
+  reachable neighbour: a sub-tick (1 ms) exposure still produces three
+  records.
+- The written file's `ckcov` window is exactly `[start_et, stop_et]` in
+  encoded SCLK. Asserting on the record array instead cannot see a segment
+  descriptor that advertises coverage the records do not have.
+- Baseline pointing is read at the record epoch with tolerance zero: an
+  exposure the original does not cover is refused rather than corrected
+  against the nearest attitude within some tolerance.
 - Sub-spacecraft-clock ids come from `ckmeta`, asserted for all four CK
   objects.
 
@@ -733,6 +840,17 @@ kernel pool, and a mid-process `furnsh` is not guaranteed to take effect:
    when both runs commit the same winning technique set; the test records
    both sets and fails as *inconclusive-mismatch* (not as a pass) when
    they differ.
+5. Assert the corrected attitude at **start, midtime and stop only**.
+   Those three are the records every segment carries, and they are the
+   epochs this plan claims. A segment for an exposure longer than 10 s
+   additionally carries records at a 1 s cadence (section 3.3); those are
+   reproduced exactly too, but they are deliberately **not** asserted,
+   because they exist only on long exposures and asserting them would make
+   the validation's coverage depend on the cohort's exposure lengths.
+   Interior epochs -- anything between records -- are not asserted either,
+   because the record scheme does not bound them (see the limitation
+   below); testing them would pin a number this plan does not undertake to
+   hold.
 
 Tolerances: the target is at or below **0.1 px per axis**, and the
 C-matrix target is that offset's angular equivalent at the instrument's
@@ -746,6 +864,27 @@ frame, at a 50 px total offset, against a 0.1 px per-axis target -- convert
 before comparing. Choose the WAC cohort frame accordingly, remembering the
 bound is **linear** in the offset, not quadratic: about 10 px of total
 offset buys a fifth of budget.
+
+**Interior epochs are outside what this plan claims, and that is a
+measured limitation rather than an oversight.** A segment reproduces its
+record epochs exactly and interpolates between them, so an epoch inside
+the exposure carries the reconstruction error of that interpolation.
+Measured on a real Cassini reconstructed kernel against its own attitude,
+in NAC pixels, sampled across the window: a 2 s exposure reaches 0.708 px
+worst case with 42.9% of samples over 0.1 px; a 10 s exposure at the 1 s
+cadence reaches 0.699 px with 24.6% over; a 60 s exposure reaches 1.071 px
+with 19.5% over, and 25.983 px if the cadence does not apply. The loss is
+attributable rather than noise -- a zero-correction run shows the same
+error -- and it comes from rate structure in the baseline that the segment
+interpolates across.
+
+Bounding it is deferred to a denser, adaptive record cadence (#444). Until
+that lands, the round trip asserts the three record epochs and nothing
+between them, and the user guide states the limitation plainly rather than
+implying interior fidelity the kernels do not provide. A consumer that
+evaluates geometry at the midtime -- which is what the backplane and
+reprojection stages do -- is unaffected and exact; the cost falls only on a
+consumer integrating smear across the exposure.
 
 Cohort: one star-navigated Cassini NAC frame (best-constrained truth), one
 Cassini WAC frame, and one frame from each other instrument that has a
