@@ -422,6 +422,12 @@ def image_metadata(
     shutter_mode: str | None = None,
     kernels: Sequence[str] | None = (),
     rotation_deg: float | None = None,
+    sclk_midtime: str | None = None,
+    offset: Sequence[float] | None = None,
+    sigma_px: Sequence[float] | None = None,
+    confidence: float | None = None,
+    confidence_rank: str | None = None,
+    status_reason: str | None = None,
 ) -> dict[str, Any]:
     """Build a per-image metadata document shaped like the pipeline's own.
 
@@ -447,6 +453,17 @@ def image_metadata(
             the provenance block itself is omitted when None.
         rotation_deg: A fitted camera rotation; the field is omitted when
             None.
+        sclk_midtime: The spacecraft clock string recorded for the midtime;
+            the field is omitted when None.
+        offset: The navigated ``[dv, du]`` offset; the top-level field is
+            omitted when None.
+        sigma_px: The recorded ``[dv, du]`` uncertainty; the field is omitted
+            when None.
+        confidence: The recorded confidence; the top-level field is omitted
+            when None.
+        confidence_rank: The recorded rank; the field is omitted when None.
+        status_reason: The recorded status reason; the field is omitted when
+            None.
 
     Returns:
         The metadata dict.
@@ -460,29 +477,40 @@ def image_metadata(
     pointing['camera_frame'] = camera_frame
     pointing['ck_frame_id'] = ck_frame_id
     midtime = (start_et + stop_et) / 2.0 if midtime_et is None else midtime_et
-    navigation_result: dict[str, Any] = {
-        'pointing': pointing,
-        'times': {
-            'start_et': start_et,
-            'stop_et': stop_et,
-            'midtime_et': midtime,
-            'exposure_s': stop_et - start_et if exposure_s is None else exposure_s,
-        },
+    times: dict[str, Any] = {
+        'start_et': start_et,
+        'stop_et': stop_et,
+        'midtime_et': midtime,
+        'exposure_s': stop_et - start_et if exposure_s is None else exposure_s,
     }
+    if sclk_midtime is not None:
+        times['sclk_midtime'] = sclk_midtime
+    navigation_result: dict[str, Any] = {'pointing': pointing, 'times': times}
     if kernels is not None:
         navigation_result['provenance'] = {'spice_kernels': list(kernels)}
     if rotation_deg is not None:
         navigation_result['rotation_deg'] = rotation_deg
+    if sigma_px is not None:
+        navigation_result['sigma_px'] = list(sigma_px)
+    if confidence_rank is not None:
+        navigation_result['confidence_rank'] = confidence_rank
+    if status_reason is not None:
+        navigation_result['status_reason'] = status_reason
     observation: dict[str, Any] = {'image_name': image_name}
     if camera is not None:
         observation['camera'] = camera
     if shutter_mode is not None:
         observation['shutter_mode'] = shutter_mode
-    return {
+    metadata: dict[str, Any] = {
         'status': status,
         'observation': observation,
         'navigation_result': navigation_result,
     }
+    if offset is not None:
+        metadata['offset'] = list(offset)
+    if confidence is not None:
+        metadata['confidence'] = confidence
+    return metadata
 
 
 def rotation_angle_between(first: NDArrayFloatType, second: NDArrayFloatType) -> float:

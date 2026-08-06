@@ -48,6 +48,14 @@ from spindoctor.cli.ck.assignment import (
     reproduces_baseline,
     rotation_angle_rad,
 )
+from spindoctor.cli.ck.clocks import clock_is_defined, select_sclk_kernel
+from spindoctor.cli.ck.comments import (
+    CommentArea,
+    build_comment_lines,
+    read_comment_area,
+    reserved_comment_chars,
+    write_comment_area,
+)
 from spindoctor.cli.ck.images import ImageEntry, OmissionReason, botsim_losers
 from spindoctor.cli.ck.index import (
     CkFile,
@@ -57,7 +65,18 @@ from spindoctor.cli.ck.index import (
     build_ck_index,
     kernel_class_for_directory,
 )
+from spindoctor.cli.ck.kernel_file import first_data_record, write_ck_file
+from spindoctor.cli.ck.metakernel import build_meta_kernel_lines, write_meta_kernel
 from spindoctor.cli.ck.pointing import ImagePointing
+from spindoctor.cli.ck.report import (
+    REPORT_COLUMNS,
+    ImageFacts,
+    ReportRow,
+    read_image_facts,
+    report_text,
+    utc_for_et,
+    write_report,
+)
 from spindoctor.cli.ck.segment import (
     CkSegment,
     build_segment,
@@ -67,27 +86,45 @@ from spindoctor.cli.ck.segment import (
 
 # The package's own surface, not published API: see the module docstring.
 __all__ = [
+    'REPORT_COLUMNS',
     'Assignment',
     'CkFile',
     'CkIndex',
     'CkSegment',
+    'CommentArea',
     'CoverageInterval',
     'ImageEntry',
+    'ImageFacts',
     'ImagePointing',
     'KernelClass',
     'OmissionReason',
     'OutputGroup',
+    'ReportRow',
     'assign_images',
     'attitudes_reproduce',
     'baseline_attitudes',
     'botsim_losers',
     'build_ck_index',
+    'build_comment_lines',
+    'build_meta_kernel_lines',
     'build_segment',
+    'clock_is_defined',
+    'first_data_record',
     'group_for_output',
     'kernel_class_for_directory',
     'output_basename',
+    'read_comment_area',
+    'read_image_facts',
+    'report_text',
     'reproduces_baseline',
+    'reserved_comment_chars',
     'resolve_sclk_id',
     'rotation_angle_rad',
+    'select_sclk_kernel',
+    'utc_for_et',
+    'write_ck_file',
+    'write_comment_area',
+    'write_meta_kernel',
+    'write_report',
     'write_segment',
 ]

@@ -27,7 +27,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from spindoctor.cli.ck.pointing import ImagePointing, read_field, read_section, read_text
+from spindoctor.cli.ck.pointing import (
+    ImagePointing,
+    read_field,
+    read_optional_text,
+    read_section,
+    read_text,
+)
 
 # The navigation statuses whose pointing is written into a kernel.  A
 # conflicted result is written because the conflict is reported alongside it,
@@ -148,8 +154,8 @@ class ImageEntry:
         observation = read_section(metadata, 'observation', 'metadata')
         image_name = read_text(observation, 'image_name', 'observation')
         status = read_text(metadata, 'status', 'metadata')
-        camera = _optional_text(observation, 'camera', 'observation')
-        shutter_mode = _optional_text(observation, 'shutter_mode', 'observation')
+        camera = read_optional_text(observation, 'camera', 'observation')
+        shutter_mode = read_optional_text(observation, 'shutter_mode', 'observation')
         navigation_result: dict[str, Any] = {}
         if 'navigation_result' in metadata:
             navigation_result = read_section(metadata, 'navigation_result', 'metadata')
@@ -246,30 +252,6 @@ def _kernel_basenames(result: dict[str, Any]) -> tuple[str, ...]:
             'navigated against kernels, so recording none of them is a defect in the record'
         )
     return tuple(kernels)
-
-
-def _optional_text(section: dict[str, Any], key: str, where: str) -> str | None:
-    """Return one optional metadata value that must be text when present.
-
-    ``str()`` is deliberately not used to coerce.  A JSON ``null`` coerces to
-    the text ``'None'``, which is neither empty nor obviously wrong, so a null
-    camera would pair with the opposite camera of a simultaneous exposure and
-    silently decide which of the two keeps its correction.
-
-    Parameters:
-        section: The dict to read.
-        key: The key to read.
-        where: Name of the section, used in the exception message.
-
-    Returns:
-        The value stored under ``key``, or ``None`` when the key is absent.
-
-    Raises:
-        TypeError: if the value present is not a string.
-    """
-    if key not in section:
-        return None
-    return read_text(section, key, where)
 
 
 def botsim_losers(entries: Sequence[ImageEntry]) -> frozenset[str]:

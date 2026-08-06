@@ -1,0 +1,114 @@
+"""Writing one corrected C-kernel: its segments and the comments about them.
+
+``ckopn`` reserves the comment area and ``ckw03`` writes segments, but nothing
+in the CK interface fills the comments; that is done through the plain DAF
+interface afterwards, on the file the CK interface has already closed.  This
+module runs the two halves in the one order that works, and reserves the room
+the comments need before the file is opened.
+
+Reserving matters.  A comment that does not fit what was reserved is still
+stored -- SPICE extends the area by shifting every data record in the file --
+so the failure is a rewritten file rather than a lost comment, and it is
+invisible unless the file is measured before and after.  It is measurable: the
+address of the first data record does not move when the reservation was enough
+and does when it was not.
+"""
+
+from collections.abc import Sequence
+from pathlib import Path
+
+import cspyce
+
+from spindoctor.cli.ck.comments import reserved_comment_chars, write_comment_area
+from spindoctor.cli.ck.segment import CkSegment, write_segment
+
+# The longest internal file name SPICE stores in a DAF file record.
+_IFNAME_MAX_CHARS = 60
+
+
+def write_ck_file(path: Path, segments: Sequence[CkSegment], comment_lines: Sequence[str]) -> None:
+    """Write one corrected C-kernel, comments and all.
+
+    Parameters:
+        path: The file to create.  It must not exist: SPICE refuses to open an
+            existing file for creation, and a corrected kernel is regenerated
+            by replacing it rather than by appending to it.
+        segments: The segments to write, in order.  At least one is required.
+        comment_lines: The comment area to attach.  At least one line is
+            required.
+
+    Raises:
+        ValueError: if no segment is given -- SPICE refuses to close a
+            C-kernel holding none, and the half-written file would be left
+            behind -- if no comment line is given, if a comment line is one
+            SPICE cannot read back, or if the file's own name is too long to
+            be its internal name.
+        RuntimeError: if SPICE refuses to create the file, which is what it
+            does when a file of that name already exists.
+    """
+    if len(segments) == 0:
+        raise ValueError(
+            f'no segments to write to {path.name}; a corrected kernel carrying none claims a '
+            f'correction it does not hold, and SPICE refuses to close it'
+        )
+    if len(comment_lines) == 0:
+        raise ValueError(f'no comment lines to write to {path.name}')
+    internal_name = _internal_name(path)
+    handle = int(cspyce.ckopn(str(path), internal_name, reserved_comment_chars(comment_lines)))
+    try:
+        for segment in segments:
+            write_segment(handle, segment)
+    finally:
+        # Closed even when a write raises, so the DAF handle is not leaked:
+        # SPICE caps how many files may be open at once, and a leaked handle
+        # breaks an unrelated open later with an error naming neither.
+        cspyce.ckcls(handle)
+    write_comment_area(path, comment_lines)
+
+
+def _internal_name(path: Path) -> str:
+    """Return the internal file name a corrected kernel records.
+
+    Parameters:
+        path: The file being written.
+
+    Returns:
+        The file's basename, which is what identifies it once it has been
+        copied somewhere else.
+
+    Raises:
+        ValueError: if the basename does not fit the field SPICE stores it in,
+            since a truncated internal name would identify a different file.
+    """
+    name = path.name
+    if len(name) > _IFNAME_MAX_CHARS:
+        raise ValueError(
+            f'{name!r} is longer than the {_IFNAME_MAX_CHARS} characters SPICE stores as a '
+            f"file's internal name"
+        )
+    return name
+
+
+def first_data_record(path: Path) -> int:
+    """Return the record number of a DAF file's first data record.
+
+    This is what the comment area's reservation buys: the comments sit between
+    the file record and the data, so a file whose reservation was large enough
+    has the same first data record before and after its comments are added, and
+    a file whose reservation was too small does not -- SPICE moved the data.
+
+    Parameters:
+        path: The file to measure.
+
+    Returns:
+        The record number of the first descriptor record.
+
+    Raises:
+        OSError: if the file cannot be opened for reading.
+    """
+    handle = int(cspyce.dafopr(str(path)))
+    try:
+        _nd, _ni, _ifname, fward, _bward, _free = cspyce.dafrfr(handle)
+        return int(fward)
+    finally:
+        cspyce.dafcls(handle)
