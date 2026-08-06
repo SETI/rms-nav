@@ -459,16 +459,17 @@ def clock_kernels(
 ) -> dict[int, str]:
     """Choose the clock kernel each spacecraft clock in the run is encoded with.
 
-    The choice is per image -- an image's own provenance names the kernels it
-    navigated against -- and the run then has to furnish one pool for all of
-    them, so the run's images must agree.  Two images of the same spacecraft
-    whose records point at different versions of its clock kernel cannot both
-    be encoded correctly by one pool, and encoding them both against one of the
-    two would shift the other's time tags with nothing to say so.
+    A run furnishes one pool for all of its images, so the candidates offered
+    are the union of what the run's images record -- and the requirement that
+    exactly one of them define a clock is then also the requirement that the
+    run's images agree about that clock.  Two images of one spacecraft whose
+    records name different versions of its clock kernel leave two candidates
+    defining it, and the run refuses rather than encoding one image's time tags
+    against the other's kernel, which nothing downstream would report.
 
     Parameters:
         entries: The images the run considered.  Those carrying no pointing
-            encode no time tags and are skipped.
+            encode no time tags and name no clock.
         basenames: Every kernel basename the run's documents record.
         paths: The indexed kernel directories.
 
@@ -477,9 +478,8 @@ def clock_kernels(
         the basename of the kernel that defines it.
 
     Raises:
-        ValueError: if an image's record names no clock kernel for its clock or
-            more than one, or if two images of one spacecraft name different
-            ones.
+        ValueError: if the run's records name no clock kernel for a clock its
+            images need, or name more than one.
         OSError: if a candidate kernel cannot be furnished for the probe.
     """
     candidates = {
@@ -487,15 +487,14 @@ def clock_kernels(
         for basename in basenames
         if Path(basename).suffix.lower() == SCLK_SUFFIX and basename in paths
     }
-    chosen: dict[int, str] = {}
-    for entry in entries:
-        if entry.pointing is None:
-            continue
-        sclk_id = resolve_sclk_id(entry.pointing.ck_frame_id)
-        if sclk_id in chosen:
-            continue
-        chosen[sclk_id] = select_sclk_kernel(candidates, sclk_id)
-    return chosen
+    needed = sorted(
+        {
+            resolve_sclk_id(entry.pointing.ck_frame_id)
+            for entry in entries
+            if entry.pointing is not None
+        }
+    )
+    return {sclk_id: select_sclk_kernel(candidates, sclk_id) for sclk_id in needed}
 
 
 @contextmanager
@@ -537,16 +536,15 @@ def report_rows(
         areas can carry the same numbers the report does.
 
     Raises:
-        ValueError: if a document holds a value the report cannot render.
-        KeyError: if an image has no assignment, which cannot happen for
-            assignments built from these same documents.
+        ValueError: if a document holds a value the report cannot render, or
+            if the two sequences are of different lengths -- the assignment
+            step answers one assignment per image in the order it was given
+            them, so a length mismatch means they are not the same images.
     """
-    by_name = {assignment.image_name: assignment for assignment in assignments}
     rows: list[ReportRow] = []
     facts_by_name: dict[str, ImageFacts] = {}
-    for document in documents:
+    for document, assignment in zip(documents, assignments, strict=True):
         facts = read_image_facts(document.metadata)
-        assignment = by_name[facts.image_name]
         facts_by_name[facts.image_name] = facts
         rows.append(
             ReportRow(
@@ -704,15 +702,13 @@ def log_dispositions(
     Returns:
         How many images each omission reason accounted for, with the images
         that received a segment counted under ``'corrected'``.
+
+    Raises:
+        ValueError: if the two sequences are of different lengths, which means
+            they are not the same images.
     """
-    by_name = {assignment.image_name: assignment for assignment in assignments}
     totals: Counter[str] = Counter()
-    for document in documents:
-        observation = document.metadata.get('observation')
-        name = observation.get('image_name') if isinstance(observation, dict) else None
-        assignment = by_name.get(str(name))
-        if assignment is None:
-            continue
+    for document, assignment in zip(documents, assignments, strict=True):
         totals[_disposition_of(assignment)] += 1
         _log_one_disposition(document, assignment, run_logging)
     return totals
@@ -828,8 +824,13 @@ def main() -> None:
         MAIN_LOGGER.error('Could not read %d metadata document(s)', unreadable)
 
     paths = kernel_paths(arguments.kernel_dir)
-    basenames = recorded_basenames(documents)
-    lsk = furnish_supporting_kernels(basenames, paths, _LSK_SUFFIXES)
+    # The leapseconds kernel is furnished before the time filter, because the
+    # filter's own bounds are UTC and there is nothing to convert them with
+    # until it is.  Its candidates are therefore the whole mission's, not the
+    # selection's; that is safe where a clock kernel would not be, since
+    # leap seconds are the same fact in every version of the kernel that
+    # states them.
+    lsk = furnish_supporting_kernels(recorded_basenames(documents), paths, _LSK_SUFFIXES)
     MAIN_LOGGER.info('Furnished leapseconds kernel(s): %s', ', '.join(lsk))
 
     documents, undated = select_by_time(
@@ -846,6 +847,10 @@ def main() -> None:
         sys.exit(0)
     MAIN_LOGGER.info('Selected %d image(s)', len(documents))
 
+    # Read from the selected images only.  A run restricted to a time range
+    # must not be refused for a disagreement between two kernel versions that
+    # only images outside that range recorded.
+    basenames = recorded_basenames(documents)
     frames = furnish_supporting_kernels(basenames, paths, _FK_SUFFIXES)
     MAIN_LOGGER.info('Furnished frame kernel(s): %s', ', '.join(frames))
 
