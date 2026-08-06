@@ -183,13 +183,33 @@ class KernelPool:
             self.unload(path)
 
 
+SUPPORT_KERNEL_NAMES = ('test.tls', 'test.tsc', 'test.tf')
+"""The hermetic leapseconds, spacecraft clock and frame kernels, in load order."""
+
+
+def write_support_kernels(root: Path) -> tuple[Path, ...]:
+    """Write the hermetic LSK, SCLK and FK into a directory.
+
+    Parameters:
+        root: Directory to write them into.
+
+    Returns:
+        Their paths, in the order they should be furnished.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for name, text in zip(SUPPORT_KERNEL_NAMES, (_LSK_TEXT, _SCLK_TEXT, _FK_TEXT), strict=True):
+        path = root / name
+        path.write_text(text)
+        written.append(path)
+    return tuple(written)
+
+
 @pytest.fixture
 def pool(tmp_path: Path) -> Iterator[KernelPool]:
     """Furnish the hermetic LSK, SCLK and FK, and unload them afterwards."""
     kernels = KernelPool(tmp_path)
-    for name, text in (('test.tls', _LSK_TEXT), ('test.tsc', _SCLK_TEXT), ('test.tf', _FK_TEXT)):
-        path = tmp_path / name
-        path.write_text(text)
+    for path in write_support_kernels(tmp_path):
         kernels.furnish(path)
     try:
         yield kernels
@@ -418,6 +438,7 @@ def image_metadata(
     midtime_et: float | None = None,
     exposure_s: float | None = None,
     status: str = 'success',
+    instrument: str | None = None,
     camera: str | None = None,
     shutter_mode: str | None = None,
     kernels: Sequence[str] | None = (),
@@ -446,6 +467,8 @@ def image_metadata(
         midtime_et: Exposure midtime; the arithmetic midpoint when None.
         exposure_s: Exposure duration; ``stop_et - start_et`` when None.
         status: The navigation status.
+        instrument: The registered instrument identity; the field is omitted
+            when None.
         camera: The camera that took the image; the field is omitted when
             None.
         shutter_mode: The shutter mode; the field is omitted when None.
@@ -497,6 +520,8 @@ def image_metadata(
     if status_reason is not None:
         navigation_result['status_reason'] = status_reason
     observation: dict[str, Any] = {'image_name': image_name}
+    if instrument is not None:
+        observation['instrument'] = instrument
     if camera is not None:
         observation['camera'] = camera
     if shutter_mode is not None:
