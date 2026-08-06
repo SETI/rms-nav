@@ -373,6 +373,17 @@ def test_the_comment_area_names_the_image_it_carries(
     assert not any(line.startswith('B_CALIB') for line in lines)
 
 
+def test_each_file_names_the_image_it_actually_carries(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Checked on the second file too, where taking the run's first image would
+    read as a plausible comment area on a file that does not hold that image."""
+    _run(run_tree, monkeypatch)
+    lines = read_comment_area(run_tree['output'] / 'orig_b_nav.bc')
+    assert any(line.startswith('B_CALIB') for line in lines)
+    assert not any(line.startswith('A_CALIB') for line in lines)
+
+
 def test_the_comment_area_names_the_generator_version(
     run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
 ) -> None:
