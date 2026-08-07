@@ -62,10 +62,17 @@ class OmissionReason(Enum):
     Every image appears in the report exactly once, with either the file
     carrying its segment or one of these reasons.  The set is closed: a new
     reason is a schema change for every consumer of the report, and every
-    member is one the generator emits, so a consumer that handles all four
+    member is one the generator emits, so a consumer that handles all five
     handles every report this tool writes.  A reason no run can produce would
     be worse than a missing one, since it asks every consumer to write dead
     code against a case that will never arrive.
+
+    Two of them are about the baseline and are not the same condition.
+    ``NO_REPRODUCING_BASELINE`` means no candidate kernel answers the attitude
+    the image navigated against, which is how a kernel set that changed since
+    navigation is detected.  ``BASELINE_COVERAGE_GAP`` is the opposite
+    situation: a baseline that did reproduce, at the exposure midtime, and then
+    supplied no pointing at one of the segment's other record epochs.
 
     An image whose pointing the writer cannot express as a segment at all --
     an exposure needing more records than a segment holds, or one whose
@@ -79,6 +86,7 @@ class OmissionReason(Enum):
     BOTSIM_LOSER = 'botsim_loser'
     ROTATION_UNSUPPORTED = 'rotation_unsupported'
     NO_REPRODUCING_BASELINE = 'no_reproducing_baseline'
+    BASELINE_COVERAGE_GAP = 'baseline_coverage_gap'
 
 
 @dataclass(frozen=True)

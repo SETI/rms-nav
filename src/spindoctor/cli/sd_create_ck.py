@@ -52,7 +52,12 @@ from spindoctor.cli.ck.kernel_file import write_ck_file
 from spindoctor.cli.ck.metakernel import write_meta_kernel
 from spindoctor.cli.ck.pointing import ImagePointing
 from spindoctor.cli.ck.report import ImageFacts, ReportRow, read_image_facts, write_report
-from spindoctor.cli.ck.segment import CkSegment, build_segment, resolve_sclk_id
+from spindoctor.cli.ck.segment import (
+    BaselineCoverageGapError,
+    CkSegment,
+    build_segment,
+    resolve_sclk_id,
+)
 from spindoctor.cli.logging_args import add_logging_arguments, reporting_logging_errors
 from spindoctor.config import (
     DEFAULT_CONFIG,
@@ -203,6 +208,21 @@ class PreparedFile:
     comment_lines: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class BuiltOutputs:
+    """Everything a run will write, and the images building it left out.
+
+    Parameters:
+        files: The corrected kernels, ready to write, ordered by name.
+        omissions: Why each image the build could not use receives no segment,
+            keyed by image name.  An image is in one of the files or in here,
+            never in both and never in neither.
+    """
+
+    files: tuple[PreparedFile, ...]
+    omissions: Mapping[str, OmissionReason]
+
+
 def image_facts(documents: Sequence[Document]) -> dict[str, ImageFacts]:
     """Read the facts the report and the comment areas both carry, by image name.
 
@@ -264,7 +284,7 @@ def build_output_files(
     *,
     sclk_basenames: Mapping[int, str],
     configuration_hash: str,
-) -> tuple[PreparedFile, ...]:
+) -> BuiltOutputs:
     """Build every corrected kernel a run will write, and write none of them.
 
     Nothing here reaches the filesystem, so a failure part way through leaves
@@ -272,6 +292,10 @@ def build_output_files(
     two phases: the alternative is a run that dies with some kernels written,
     no meta-kernel, and no report -- the one artifact that says what is in the
     files that did get written.
+
+    An image whose baseline supplies no pointing at one of its record epochs is
+    omitted here rather than ending the run, and an output file every one of
+    whose images was omitted is not built at all.
 
     Parameters:
         assignments: What became of each image the run considered.
@@ -281,7 +305,7 @@ def build_output_files(
         configuration_hash: Digest of the configuration this run used.
 
     Returns:
-        The files to write, ordered by name.
+        The files to write, ordered by name, and the images left out.
 
     Raises:
         ValueError: if a segment cannot be built: a baseline supplying angular
@@ -290,8 +314,7 @@ def build_output_files(
             pointing.
         KeyError: if a frame the correction is expressed between is not defined
             by the furnished kernels.
-        OSError: if a baseline kernel cannot be furnished, or supplies no
-            pointing at a record epoch.
+        OSError: if a baseline kernel cannot be furnished or read.
     """
     # Every segment of the run is resident at once, which is what buys the
     # separation.  Measured on this writer's own segments, one costs 678 bytes
@@ -303,25 +326,84 @@ def build_output_files(
     # would be a different story: 50,000 segments of 10,000 records each is
     # 32 GB, and no instrument commands such an exposure.
     prepared: list[PreparedFile] = []
+    omissions: dict[str, OmissionReason] = {}
     for group in group_for_output(assignments):
+        segments: list[CkSegment] = []
+        kept: list[Assignment] = []
         with furnished(group.baseline.path):
-            segments = tuple(_segment_for(assignment) for assignment in group.assignments)
+            for assignment in group.assignments:
+                segment = _segment_for(assignment)
+                if segment is None:
+                    omissions[assignment.image_name] = OmissionReason.BASELINE_COVERAGE_GAP
+                    continue
+                segments.append(segment)
+                kept.append(assignment)
+        if len(kept) == 0:
+            MAIN_LOGGER.warning(
+                'No image is left to correct %s; no corrected kernel is written for it',
+                group.baseline.basename,
+            )
+            continue
         area = CommentArea(
             generator_version=__version__,
             configuration_hash=configuration_hash,
             baseline_basenames=(group.baseline.basename,),
-            sclk_basename=sclk_basenames[_clock_of(group.assignments[0])],
-            images=tuple(facts_by_name[assignment.image_name] for assignment in group.assignments),
+            sclk_basename=sclk_basenames[_clock_of(kept[0])],
+            images=tuple(facts_by_name[assignment.image_name] for assignment in kept),
         )
         prepared.append(
             PreparedFile(
                 baseline=group.baseline,
                 output=output_dir / group.name,
-                segments=segments,
+                segments=tuple(segments),
                 comment_lines=tuple(build_comment_lines(area)),
             )
         )
-    return tuple(prepared)
+    return BuiltOutputs(files=tuple(prepared), omissions=omissions)
+
+
+def apply_build_omissions(
+    assignments: Sequence[Assignment], omissions: Mapping[str, OmissionReason]
+) -> tuple[Assignment, ...]:
+    """Report the images the build could not use as omitted.
+
+    An image the assignment step paired with a baseline can still end up with
+    no segment, because the pairing is made at the exposure midtime alone and
+    the baseline has to answer at every record epoch.  The report is written
+    from the assignments, so those images are given the reason here in place of
+    the baseline, which is what puts each of them in the report exactly once
+    with it.
+
+    Parameters:
+        assignments: The assignments as the assignment step made them.
+        omissions: Why each omitted image receives no segment, by image name.
+
+    Returns:
+        The assignments, in the order given, with the omitted images revised.
+
+    Raises:
+        ValueError: if an omission names an image these assignments do not
+            carry a baseline for -- an image of some other run, or one already
+            omitted for another reason -- since the reason would then reach no
+            row of the report and the image would be reported as corrected.
+    """
+    corrected = {
+        assignment.image_name for assignment in assignments if assignment.baseline is not None
+    }
+    unplaced = sorted(set(omissions) - corrected)
+    if len(unplaced) > 0:
+        raise ValueError(
+            f'the build omitted {unplaced}, which these assignments do not hold as corrected '
+            f'images; those omission reasons would reach no row of the report'
+        )
+    return tuple(
+        Assignment(
+            entry=assignment.entry, baseline=None, omission_reason=omissions[assignment.image_name]
+        )
+        if assignment.image_name in omissions
+        else assignment
+        for assignment in assignments
+    )
 
 
 def write_output_files(files: Sequence[PreparedFile]) -> list[tuple[FCPath, FCPath]]:
@@ -392,25 +474,36 @@ def local_output_path(path: FCPath) -> Path:
     return local
 
 
-def _segment_for(assignment: Assignment) -> CkSegment:
+def _segment_for(assignment: Assignment) -> CkSegment | None:
     """Build the corrected segment of one assigned image.
 
     Parameters:
         assignment: The image and the baseline it corrects.
 
     Returns:
-        The segment.
+        The segment, or ``None`` when the baseline supplies no pointing at one
+        of the record epochs, which omits this one image and lets the run
+        continue.
 
     Raises:
         ValueError: if the image carries no pointing, which an assignment with
             a baseline cannot; if the baseline supplies angular velocity at
             only some of the record epochs, which no segment can express; or if
             the recorded exposure would need more records than a segment holds.
-        OSError: if the baseline supplies no pointing at a record epoch.
+        KeyError: if a frame the correction is expressed between is not defined
+            by the furnished kernels.
+        OSError: if the baseline kernel cannot be read.
     """
     pointing = pointing_of(assignment)
     try:
         return build_segment(pointing)
+    except BaselineCoverageGapError as exc:
+        # Said here as well as by the reporting pass, which names the reason
+        # but not the epoch: the reason says the baseline could not answer
+        # somewhere inside the exposure, and this says where.  The run log
+        # only, for the same reason as below -- no image scope is open here.
+        MAIN_LOGGER.warning('%s: %s', assignment.image_name, exc)
+        return None
     except (OSError, KeyError, ValueError) as exc:
         # The run log only, deliberately.  This stops the run, and the image
         # log it would otherwise be written to is opened by the reporting pass
@@ -419,8 +512,8 @@ def _segment_for(assignment: Assignment) -> CkSegment:
         # strict_scope it would replace this error with a scope error and
         # demote the real one to a context.  It stops the run because the
         # reason set the report may use has no entry for an image whose
-        # baseline reproduced its attitude and then could not supply a record
-        # epoch or its angular velocity, and inventing one would be a schema
+        # baseline reproduced its attitude and then supplied angular velocity
+        # at only some of its records, and inventing one would be a schema
         # change for every consumer of the report.
         MAIN_LOGGER.exception(
             '%s: could not build the corrected segment: %s', assignment.image_name, exc
@@ -668,15 +761,16 @@ def main() -> None:
     # through the build then leaves the output directory untouched, rather than
     # some corrected kernels, no meta-kernel, and no report saying what is in
     # them.
-    prepared = build_output_files(
+    built = build_output_files(
         assignments,
         facts_by_name,
         output_dir,
         sclk_basenames=sclk_basenames,
         configuration_hash=DEFAULT_CONFIG.resolved_config_hash(),
     )
+    assignments = apply_build_omissions(assignments, built.omissions)
     rows = report_rows(assignments, facts_by_name)
-    written = write_output_files(prepared)
+    written = write_output_files(built.files)
 
     if len(written) > 0:
         meta_kernel = output_dir / f'{arguments.mission}{META_KERNEL_SUFFIX}'

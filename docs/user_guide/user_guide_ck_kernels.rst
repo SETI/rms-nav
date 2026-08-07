@@ -158,6 +158,13 @@ the corrected file carrying its segment or one of these reasons it has none:
        this image navigated against. Either the kernel set has changed since
        navigation, or the original the image used is not among the directories
        given.
+   * - ``baseline_coverage_gap``
+     - The original that reproduces this image's attitude supplies no pointing
+       at one of the segment's record epochs. The pairing is made at the
+       exposure midtime and a segment carries records at the exposure start and
+       stop as well, so an exposure straddling the end of an original's
+       coverage is reproduced and then cannot be written. It is ordinary near a
+       segment boundary and on a long exposure.
 
 The set is closed, and every member of it is one a run can produce: an image
 whose pointing the writer cannot express as a segment at all is not reported
@@ -173,6 +180,13 @@ reproducing the uncorrected attitude the navigation recorded, to within a
 nanoradian, rather than by trusting the kernel names in the metadata. A
 baseline that no longer produces that attitude is refused rather than corrected
 against a baseline the measurement was never made on.
+
+``baseline_coverage_gap`` is the opposite case and is deliberately a reason of
+its own, so that the detector above keeps meaning what it says. The original
+did reproduce the recorded attitude; it simply does not cover the whole
+exposure. A run reporting these is not a run whose holdings have drifted, and
+an image reported this way is one whose exposure ran past the end of a
+segment's window rather than one whose kernel is missing.
 
 Files a run writes
 ==================
@@ -191,7 +205,7 @@ One invocation covers one mission and writes everything into ``--output-dir``:
 before the extension, so the pairing is legible without opening either file:
 ``03236_04002ra.bc`` becomes ``03236_04002ra_nav.bc``. One file is written per
 original that some image navigated against; an original no image used produces
-no file. Each corrected file's size stays proportional to its original's, and
+no file, and so does one whose every image was omitted. Each corrected file's size stays proportional to its original's, and
 regenerating one original's corrections does not touch the others. No PDS label
 files are written.
 
@@ -458,7 +472,10 @@ Refusals worth knowing about
 
 A few conditions stop the run rather than being reported per image, because
 each of them would otherwise corrupt every image alike or force a silent
-choice:
+choice. A run that stops writes **nothing at all**: every segment of every
+output file is built before the first file is opened, so a refusal leaves no
+corrected kernels, no meta-kernel and no report, and the run can be repeated
+once its cause is fixed without first clearing a partial set out of the way.
 
 * **Two versions of one spacecraft clock kernel, or two frame kernels defining
   a frame the run's images name.** A text kernel's last assignment wins, so the
@@ -475,12 +492,13 @@ choice:
   remove or move the previous file first.
 
 * **A metadata document that cannot be read as a navigated image**; an image
-  whose baseline reproduced its attitude and then supplied no pointing at one of
-  its record epochs; an image whose baseline supplied pointing at every record
-  but angular velocity at only some of them; and an exposure whose window is so
-  long that the cadence would need more records than a segment holds, which
-  means the recorded epochs are not an exposure. None has an entry in the closed
-  set of omission reasons, so none is reported as one.
+  whose baseline supplied pointing at every record but angular velocity at only
+  some of them; and an exposure whose window is so long that the cadence would
+  need more records than a segment holds, which means the recorded epochs are
+  not an exposure. None has an entry in the closed set of omission reasons, so
+  none is reported as one. An exposure its baseline does not cover is not among
+  them: that one has a reason, ``baseline_coverage_gap``, and omits the one
+  image.
 
 Related chapters
 ================

@@ -24,6 +24,10 @@ them.  A ten-second window carrying only the three mandatory records
 reproduces a real Cassini baseline to a mean of 0.43 NAC pixels and a worst
 case of 9.9, so the in-exposure history is an approximation between records
 rather than an exact reproduction; the record epochs themselves are exact.
+The baseline has to answer at every one of them and not only at the midtime the
+image was paired with it on, so an exposure straddling the end of its baseline's
+coverage raises ``BaselineCoverageGapError`` rather than being corrected against
+an attitude read from somewhere else in the window.
 
 Voyager is the exception.  Its navigated attitude came from a frozen,
 tolerance-snapped pointing lookup rather than a time-varying frame chain, so a
@@ -100,6 +104,26 @@ _INTERVAL_COUNT = 1
 
 # SPICE segment identifiers hold at most this many characters.
 _SEGID_MAX_CHARS = 40
+
+
+class BaselineCoverageGapError(Exception):
+    """The furnished baseline supplies no pointing at one of the record epochs.
+
+    An image is paired with its baseline by reproducing the attitude recorded
+    at the exposure midtime, and a segment carries records at the exposure
+    start and stop as well, so an exposure straddling the end of its baseline's
+    coverage reproduces and then cannot be built.  That is ordinary near a
+    segment boundary and on a long exposure.  It is a property of one exposure
+    against one kernel rather than of the run, which is why it is raised as
+    itself: a caller that has other images to write omits this one and carries
+    on.
+
+    It deliberately derives from ``Exception`` and not from ``OSError``, which
+    is what SPICE raises for a kernel it cannot read, nor from ``LookupError``,
+    which the writer's SPICE calls raise for a frame the pool does not define.
+    Either would let a setup failure be caught as an image that fell off the
+    end of its baseline.
+    """
 
 
 @dataclass(frozen=True)
@@ -304,11 +328,13 @@ def build_segment(pointing: ImagePointing) -> CkSegment:
         ValueError: if the CK object is not one this writer knows, if the
             resolved spacecraft clock is not the expected one, if the image
             name does not fit a SPICE segment identifier, if the baseline
-            supplies angular velocity at only some of the record epochs, or if
-            a record epoch lies outside the furnished spacecraft clock's
-            coverage, which ``sce2c`` refuses rather than extrapolating.
-        OSError: if the furnished kernels provide no pointing for the CK object
-            at the exposure midtime or at a record epoch.
+            supplies angular velocity at only some of the record epochs, if a
+            record epoch lies outside the furnished spacecraft clock's
+            coverage, which ``sce2c`` refuses rather than extrapolating, or if
+            a record epoch does not encode to a finite time tag.
+        BaselineCoverageGapError: if the furnished baseline supplies no pointing for
+            the CK object at the exposure midtime or at a record epoch.
+        OSError: if no C-kernel is furnished at all, or one cannot be read.
         KeyError: if the furnished kernels do not define one of the two frames
             the correction is expressed between: the CK object has no frame
             name, or the recorded camera frame is not a frame SPICE knows.
@@ -499,8 +525,36 @@ def _corrected_attitude_at_midtime(pointing: ImagePointing) -> NDArrayFloatType:
     return corrected
 
 
+def _require_finite_tick(tick: float) -> None:
+    """Refuse a time tag SPICE answers as uncovered rather than as a bad value.
+
+    ``ckgp`` reports a non-finite time tag the same way it reports an epoch its
+    kernels do not cover -- ``found`` false, measured -- so such a tag would be
+    read as a baseline coverage gap and quietly omit the image.  A tag that is
+    not a time is a defect in the encoding rather than a property of the
+    kernels, so it is refused here, where the two are still distinguishable.
+
+    Parameters:
+        tick: Encoded SCLK time tag.
+
+    Raises:
+        ValueError: if the tag is not finite.
+    """
+    if not math.isfinite(tick):
+        raise ValueError(f'the encoded SCLK time tag {tick!r} is not a finite time')
+
+
 def _baseline_attitude(ck_frame_id: int, tick: float) -> NDArrayFloatType:
     """Read the baseline attitude of a CK object at one encoded SCLK time.
+
+    The lookup goes through the flag-returning form of ``ckgp`` rather than the
+    raising one, so that "the furnished kernels hold no pointing for this
+    object at this time" -- which is what ``found`` reports, and which is a
+    property of one exposure -- is told apart from every other way the lookup
+    can fail.  Those still raise, and still stop a run: no C-kernel furnished
+    at all, a reference frame the pool does not define, a kernel that cannot be
+    read.  Which form is called is chosen per call and does not touch the
+    process-wide ``use_errors`` regime.
 
     Parameters:
         ck_frame_id: SPICE id of the object.
@@ -510,9 +564,18 @@ def _baseline_attitude(ck_frame_id: int, tick: float) -> NDArrayFloatType:
         The 3x3 J2000-to-CK-object rotation the furnished kernels give.
 
     Raises:
-        OSError: if the furnished kernels provide no pointing there.
+        BaselineCoverageGapError: if the furnished baseline holds no pointing there.
+        ValueError: if the time tag is not finite.
+        OSError: if no C-kernel is furnished at all, or one cannot be read.
+        KeyError: if the base frame is not defined by the furnished kernels.
     """
-    cmat, _clkout = cspyce.ckgp(ck_frame_id, tick, _LOOKUP_TOL_TICKS, BASE_FRAME)
+    _require_finite_tick(tick)
+    cmat, _clkout, found = cspyce.ckgp.flag(ck_frame_id, tick, _LOOKUP_TOL_TICKS, BASE_FRAME)
+    if not found:
+        raise BaselineCoverageGapError(
+            f'the furnished baseline supplies no pointing for CK object {ck_frame_id} at encoded '
+            f'SCLK {tick!r}, which is a record epoch of this exposure'
+        )
     return np.asarray(cmat, dtype=np.float64)
 
 
@@ -530,13 +593,23 @@ def _sample_with_angular_velocity(
         record has no angular velocity available.  ``None`` also comes back
         when a record has no pointing at all, which the attitude-only pass
         then raises on.
+
+    Raises:
+        ValueError: if a time tag is not finite.
+        OSError: if no C-kernel is furnished at all, or one cannot be read.
+        KeyError: if the base frame is not defined by the furnished kernels.
     """
     attitudes: list[NDArrayFloatType] = []
     velocities: list[NDArrayFloatType] = []
     for tick in ticks:
-        try:
-            cmat, av, _clkout = cspyce.ckgpav(ck_frame_id, tick, _LOOKUP_TOL_TICKS, BASE_FRAME)
-        except OSError:
+        _require_finite_tick(tick)
+        # The flag-returning form for the same reason ``_baseline_attitude``
+        # uses it: what it reports is "nothing here", which is a question about
+        # this exposure, and everything else still raises.
+        cmat, av, _clkout, found = cspyce.ckgpav.flag(
+            ck_frame_id, tick, _LOOKUP_TOL_TICKS, BASE_FRAME
+        )
+        if not found:
             return None
         attitudes.append(np.asarray(cmat, dtype=np.float64))
         velocities.append(np.asarray(av, dtype=np.float64))
@@ -562,18 +635,20 @@ def _baseline_history(
         The baseline attitudes and its angular velocity vectors.
 
     Raises:
-        OSError: if the furnished kernels provide no pointing at a record.
-        ValueError: if they provide pointing at every record but angular
+        BaselineCoverageGapError: if the furnished baseline provides no pointing at
+            a record.
+        ValueError: if it provides pointing at every record but angular
             velocity at only some of them.
     """
     sampled = _sample_with_angular_velocity(ck_frame_id, ticks)
     if sampled is not None:
         return sampled
     # ``ckgpav`` reports "no angular velocity here" and "no pointing here at
-    # all" as one insufficient-data error, so which of the two happened is
-    # decided by reading the attitude alone: a coverage gap raises out of this
-    # loop as itself, and anything that survives it lacked only the angular
-    # velocity.
+    # all" the same way, so which of the two happened is decided by reading the
+    # attitude alone: a coverage gap raises out of this loop as itself, and
+    # anything that survives it lacked only the angular velocity.  The two
+    # answers are not interchangeable -- one omits an image and the other stops
+    # the run -- so the pass that tells them apart earns its second lookup.
     for tick in ticks:
         _baseline_attitude(ck_frame_id, tick)
     raise ValueError(
@@ -598,7 +673,8 @@ def _corrected_history(
         The corrected attitudes and the baseline's angular velocity vectors.
 
     Raises:
-        OSError: if the furnished kernels provide no pointing at a record.
+        BaselineCoverageGapError: if the furnished baseline provides no pointing at
+            a record.
         ValueError: if the baseline does not supply angular velocity at every
             record.
     """

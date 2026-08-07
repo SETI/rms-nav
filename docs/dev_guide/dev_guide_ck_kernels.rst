@@ -345,8 +345,18 @@ module per question:
 
 A run proceeds in that order: read the documents, filter by time, furnish the
 leapseconds, frame and clock kernels the documents name, index the candidate
-C-kernels, assign each image to a baseline, write one file per baseline, then
-the meta-kernel and the report.
+C-kernels, assign each image to a baseline, build every corrected file, and only
+then write them, followed by the meta-kernel and the report.
+
+**Building and writing are separate phases**, and nothing reaches the
+filesystem in the first. A refusal while building therefore leaves the output
+directory untouched, rather than some kernels written, no meta-kernel and no
+report -- the one artifact that says what is in the files that did get written,
+and whose absence leaves a partial set that the refusal to overwrite an existing
+corrected kernel then blocks a rerun on. The cost is that every segment of the
+run is resident at once: 678 bytes for the three records an ordinary exposure
+carries, measured on this writer's own segments, so about 34 MB for a
+50,000-image batch, against the per-image metadata such a batch already holds.
 
 Why the writer imports no oops and nothing from ``spindoctor.support``
 ----------------------------------------------------------------------
@@ -530,12 +540,19 @@ carries a rate, so those are immune; of Galileo -77001's 150 segments, 38 carry
 none; Voyager's nine carry none at all.
 
 So the writer applies **all records or none, and none means refuse**. A baseline
-that carries no rate raises ``SPICE(CKINSUFFDATA)`` from ``ckgpav`` -- the same
-class and message as pointing that is not covered at all, so the two are
-indistinguishable from the exception. The sampling pass over every record
-decides; when it comes back empty-handed, a second pass reads attitude alone, so
-a genuine coverage gap surfaces as itself and an exposure that lacked only its
-rate is refused with a :exc:`ValueError` naming that. Refusal rather than zeros
+that carries no rate is reported by ``ckgpav`` exactly as pointing that is not
+covered at all is -- ``found`` false, one answer for two conditions that mean
+opposite things here, since one refuses the run and the other omits an image.
+The sampling pass over every record decides; when it comes back empty-handed, a
+second pass reads attitude alone, so a genuine coverage gap surfaces as itself
+(:exc:`~spindoctor.cli.ck.segment.BaselineCoverageGapError`) and an exposure
+that lacked only its rate is refused with a :exc:`ValueError` naming that.
+Both lookups are made through the flag-returning form of the SPICE call rather
+than the raising one, so "nothing here", which is a question about one exposure,
+is told apart from a pool with no C-kernel furnished at all, an undefined
+reference frame, or a kernel that cannot be read, each of which still raises and
+still stops the run. Choosing the form per call does not touch the process-wide
+``use_errors`` regime. Refusal rather than zeros
 for the records that lack a rate: the attitude would be right, but a platform
 genuinely parks, so an invented zero is indistinguishable from a measured one,
 and the overlay would start answering ``sxform`` at epochs where the pool has no
@@ -617,11 +634,18 @@ Invariants
   Adding a reason is a schema change for every consumer of the report, and a
   reason no run can produce is worse than a missing one, since it asks every
   consumer to write dead code. So a failure with no reason of its own stops the
-  run instead: an unreadable navigated image, a baseline that reproduced and
-  then supplied no pointing at a record epoch, a baseline supplying angular
+  run instead: an unreadable navigated image, a baseline supplying angular
   velocity at only some records, and a window too long for a segment's records.
   Those report to the run log only -- they end the run, and the per-image log
   they would otherwise use is opened by the reporting pass that never runs.
+* **A baseline that reproduced and then could not answer is an omission, not a
+  refusal.** The pairing is made at the exposure midtime and the segment has
+  records at the exposure start and stop as well, so an exposure straddling the
+  end of a baseline's coverage is reachable and ordinary; it takes
+  ``baseline_coverage_gap``, a reason of its own, and not
+  ``no_reproducing_baseline``, whose whole value is that it means the holdings
+  changed since navigation ran. The image is left out of its file, the file is
+  written without it, and a file that loses every image is not written at all.
 
 Adding a mission
 ================

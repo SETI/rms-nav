@@ -97,6 +97,7 @@ from spindoctor.cli.ck.report import (
     write_report,
 )
 from spindoctor.cli.ck.segment import (
+    BaselineCoverageGapError,
     CkSegment,
     build_segment,
     resolve_sclk_id,
@@ -108,6 +109,7 @@ __all__ = [
     'FK_SUFFIXES',
     'REPORT_COLUMNS',
     'Assignment',
+    'BaselineCoverageGapError',
     'CkFile',
     'CkIndex',
     'CkSegment',

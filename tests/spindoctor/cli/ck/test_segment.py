@@ -35,7 +35,12 @@ from tests.spindoctor.cli.ck.conftest import (
 )
 
 from spindoctor.cli.ck.pointing import ImagePointing, NDArrayFloatType
-from spindoctor.cli.ck.segment import CkSegment, build_segment, resolve_sclk_id
+from spindoctor.cli.ck.segment import (
+    BaselineCoverageGapError,
+    CkSegment,
+    build_segment,
+    resolve_sclk_id,
+)
 
 # The correction the tests plant, expressed in the CK object's own frame.  It is
 # far larger than a navigated correction ever is and turns about an axis shared
@@ -405,8 +410,83 @@ def test_a_record_outside_the_baseline_coverage_is_refused(pool: KernelPool) -> 
     fails instead of being corrected against whatever attitude happens to be
     nearest.
     """
-    with pytest.raises(OSError, match='CKINSUFFDATA'):
+    with pytest.raises(BaselineCoverageGapError, match='supplies no pointing for CK object'):
         _build_case(pool, start_et=ET0 + 10.0, stop_et=ET0 + 12.0)
+
+
+def test_an_exposure_whose_midtime_alone_is_covered_is_refused(pool: KernelPool) -> None:
+    """The condition that reaches a run: the midtime paired the image with this baseline.
+
+    The exposure straddles the end of the baseline's coverage, so the lookup
+    that made the pairing succeeds and the one at the exposure stop does not.
+    """
+    covered_to = ET0 + (_BASELINE_RECORDS - 1) * _BASELINE_STEP_S
+    with pytest.raises(BaselineCoverageGapError, match='which is a record epoch of this exposure'):
+        _build_case(pool, start_et=covered_to - 1.0, stop_et=covered_to + 1.0)
+    # The premise: the midtime this image was paired on is covered, and the
+    # exposure stop is a second past the end of the same baseline.
+    midtime_lookup = cspyce.ckgp.flag(CASSINI_CK_FRAME_ID, _tick(-82, covered_to), 0.0, 'J2000')
+    assert bool(midtime_lookup[-1]) is True
+    stop_lookup = cspyce.ckgp.flag(CASSINI_CK_FRAME_ID, _tick(-82, covered_to + 1.0), 0.0, 'J2000')
+    assert bool(stop_lookup[-1]) is False
+
+
+def test_a_coverage_gap_is_not_reported_as_a_missing_angular_velocity(
+    pool: KernelPool,
+) -> None:
+    """The two arrive from SPICE the same way and mean opposite things.
+
+    One omits an image and the other stops the run, so a gap that came back as
+    the angular-velocity refusal would end a batch the report should have
+    carried on past.
+    """
+    with pytest.raises(BaselineCoverageGapError) as raised:
+        _build_case(pool, start_et=ET0 + 10.0, stop_et=ET0 + 12.0)
+    assert 'angular velocity' not in str(raised.value)
+
+
+def test_a_record_epoch_that_is_not_a_time_is_refused(
+    pool: KernelPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tag SPICE cannot answer for is not the same as an epoch it does not cover.
+
+    ``ckgp`` reports a non-finite time tag exactly as it reports an uncovered
+    epoch, so a tag that is not a time would otherwise be read as a coverage
+    gap and quietly omit the image.
+    """
+    sclk_id = resolve_sclk_id(CASSINI_CK_FRAME_ID)
+    baseline_path = pool.root / 'baseline.bc'
+    write_baseline_ck(
+        baseline_path,
+        ck_frame_id=CASSINI_CK_FRAME_ID,
+        sclk_id=sclk_id,
+        epochs=[ET0 + step * _BASELINE_STEP_S for step in range(_BASELINE_RECORDS)],
+        attitude=baseline_attitude,
+        angular_velocity=baseline_angular_velocity,
+    )
+    pool.furnish(baseline_path)
+    midtime = (_START_ET + _STOP_ET) / 2.0
+    camera_from_ck = np.asarray(
+        cspyce.pxform(str(cspyce.frmnam(CASSINI_CK_FRAME_ID)), CASSINI_CAMERA_FRAME, midtime),
+        dtype=np.float64,
+    )
+    pointing = ImagePointing(
+        image_name=_IMAGE_NAME,
+        cmatrix=camera_from_ck @ baseline_attitude(midtime),
+        cmatrix_original=camera_from_ck @ baseline_attitude(midtime),
+        camera_frame=CASSINI_CAMERA_FRAME,
+        ck_frame_id=CASSINI_CK_FRAME_ID,
+        start_et=_START_ET,
+        stop_et=_STOP_ET,
+        midtime_et=midtime,
+        exposure_s=_STOP_ET - _START_ET,
+    )
+    # The premise, measured rather than assumed: this baseline covers the
+    # exposure, and the lookup still comes back empty-handed for such a tag.
+    assert bool(cspyce.ckgp.flag(CASSINI_CK_FRAME_ID, float('nan'), 0.0, 'J2000')[-1]) is False
+    monkeypatch.setattr(cspyce, 'sce2c', lambda _sclk_id, _et: float('nan'))
+    with pytest.raises(ValueError, match='is not a finite time'):
+        build_segment(pointing)
 
 
 def test_a_ck_object_with_no_frame_name_is_refused(pool: KernelPool) -> None:

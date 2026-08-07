@@ -33,15 +33,13 @@ records the acceptance criteria and their status. What remains:
   gap is the GUI and other long-standing untested surfaces.
 - The follow-ups in section 7, none of which block use of the kernels.
 
-One known drift between this document and the code, left for the operator
-rather than resolved here: section 3.3 states the omission-reason set as
-five members, and the generator emits four. `DEGENERATE_EXPOSURE` was
-removed from the code on the ground that no run can produce it -- the
-degenerate exposure it named is written as a single-record segment rather
-than omitted -- and a published set with a member no run emits asks every
-consumer to write dead code against a case that never arrives. The user
-guide documents the four the generator emits. Settling which of the two is
-authoritative is a schema decision for the report's consumers.
+The omission-reason set is five members, in the code and in section 3.3
+alike. `DEGENERATE_EXPOSURE` never took the fifth place: the case it named
+is handled with a single-record segment and no run could emit it, and a
+published set with a member no run emits asks every consumer to write dead
+code against a case that never arrives. `BASELINE_COVERAGE_GAP` holds it
+instead, for an exposure whose baseline reproduced at the midtime and then
+supplied no pointing at another of its record epochs.
 
 ---
 
@@ -629,13 +627,20 @@ what else was in their pool. Exposure across the local baselines: Cassini
 those are immune today; **Galileo -77001 has 150 segments of which 38 carry
 none**; Voyager -31100/-32100 have 9 segments, none with AV.
 
-So the writer applies **all records or none, and none means refuse**. The
-want-of-AV failure is `OSError` `SPICE(CKINSUFFDATA)` -- the same class and
-short message as pointing that is not covered at all -- so the two are not
-distinguishable from the exception; the sampling pass over every record decides,
-and when it comes back empty-handed a second pass reads attitude alone, so a
-genuine coverage gap still surfaces as itself and an exposure that had only its
-AV missing is refused with a `ValueError` naming that. Refusal rather than zeros
+So the writer applies **all records or none, and none means refuse**. SPICE
+reports the want-of-AV failure exactly as it reports pointing that is not
+covered at all -- `found` false from `ckgpav`, one answer for two conditions
+that mean opposite things here, since one refuses the run and the other omits
+one image; the sampling pass over every record decides, and when it comes back
+empty-handed a second pass reads attitude alone, so a genuine coverage gap
+surfaces as itself (`BaselineCoverageGapError`) and an exposure that had only
+its AV missing is refused with a `ValueError` naming that. Both lookups use the
+flag-returning form of the SPICE call rather than the raising one, so "nothing
+here" is told apart from a pool with no C-kernel furnished, an undefined
+reference frame, or a kernel that cannot be read -- each of which still raises
+and still stops the run, and none of which may be read as a data condition.
+Choosing the form per call does not touch the process-wide `use_errors` regime.
+Refusal rather than zeros
 for the records that lack AV: the attitude would be right, but a scan platform
 genuinely parks, so an invented zero is indistinguishable from a measured one,
 and the overlay would start answering `sxform` at epochs where the pool has no
@@ -891,20 +896,30 @@ to the recorded exposure midtime, with an image that recorded none -- or
 recorded a non-finite one -- ignored whenever either bound is given, since
 it cannot be placed in time; and `--output-dir`.
 
-**Two failures deliberately stop the run rather than being reported as an
-omission**, because the omission-reason set is closed and neither has an
+**Some failures deliberately stop the run rather than being reported as an
+omission**, because the omission-reason set is closed and none of them has an
 entry in it: a metadata document that cannot be read as a navigated image at
-all, and an image whose baseline reproduced its attitude and then supplied no
-pointing at one of its record epochs. Both name the image in **the run log
-only** -- not in both, which the "anything that degrades or omits a result"
-rule above would otherwise ask for. That rule is about a result the run goes
-on to report; these two end the run, and the per-image log they would be
+all, a baseline supplying angular velocity at only some of an exposure's
+records, and a window too long for a segment's records. Each names the image in
+**the run log only** -- not in both, which the "anything that degrades or omits
+a result" rule above would otherwise ask for. That rule is about a result the
+run goes on to report; these end the run, and the per-image log they would be
 written to is opened by the reporting pass that then never runs. Logging
 through the image logger with no image scope open is a defect rather than a
 fallback, and under `logging.strict_scope` the `LogScopeError` it raises
 would *replace* the failure worth reading and demote it to a `__context__`
 nobody prints -- so a documented configuration setting would turn a
 diagnosable failure into a logging crash.
+
+**A run that stops writes nothing at all.** Every segment of every output file
+is built before the first file is opened, so a refusal leaves no corrected
+kernels, no meta-kernel and no report -- rather than a partial set with no
+report saying what is in it, which the refusal to overwrite an existing
+corrected kernel would then block a rerun on. The cost is that every segment of
+the run is resident at once: measured on this writer's own segments, 678 bytes
+for the three records an ordinary exposure carries and 1826 for the 21 a
+twenty-second one does, so about 34 MB for the 50,000-image batch this tool is
+sized for, against the per-image metadata such a batch already holds.
 
 A metadata *file* that is not readable as JSON is different again: it names
 no image, so there is nothing for the report to say about it and nothing an

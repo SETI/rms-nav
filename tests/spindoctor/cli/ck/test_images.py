@@ -268,7 +268,7 @@ def test_an_entry_needs_a_pointing_or_a_reason() -> None:
 
 
 def test_the_omission_reason_set_is_closed() -> None:
-    """The reasons a consumer must handle are exactly these four.
+    """The reasons a consumer must handle are exactly these five.
 
     The set is a published schema, so this exists to make adding a member a
     deliberate act rather than an accident of a refactor.
@@ -278,6 +278,7 @@ def test_the_omission_reason_set_is_closed() -> None:
         'botsim_loser',
         'rotation_unsupported',
         'no_reproducing_baseline',
+        'baseline_coverage_gap',
     }
 
 
