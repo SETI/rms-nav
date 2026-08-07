@@ -28,6 +28,12 @@ NDArrayFloatType = npt.NDArray[np.floating[Any]]
 # away, and it would be written into a kernel other tools trust.
 _ROTATION_TOL = 1e-9
 
+# The numpy dtype kinds a C-matrix may arrive as: signed and unsigned integers
+# and floats.  Booleans ('b') and text ('U', 'S') are excluded although both
+# convert to float64 without complaint, which is what would let nine ``True``
+# values pass as an identity rotation.
+_REAL_NUMBER_KINDS = frozenset({'i', 'u', 'f'})
+
 
 @dataclass(frozen=True)
 class ImagePointing:
@@ -53,6 +59,10 @@ class ImagePointing:
         exposure_s: Exposure duration in seconds.
 
     Raises:
+        TypeError: if either C-matrix holds values that are not real numbers.
+            Booleans and numeric text convert to float64 without complaint, so
+            a matrix of nine ``True`` values would otherwise be accepted as a
+            flawless identity rotation.
         ValueError: if ``image_name`` or ``camera_frame`` is empty, if either
             C-matrix is not a 3x3 proper orthonormal rotation, if any epoch or
             ``exposure_s`` is not finite, if the three epochs are not ordered
@@ -123,11 +133,12 @@ class ImagePointing:
             The image's ImagePointing.
 
         Raises:
-            ValueError: if any of those fields is absent, or if the values
-                present do not satisfy the ImagePointing invariants.  A
-                corrected ``cmatrix`` is absent for every image that navigated
-                without an offset or with a fitted camera rotation, and such an
-                image cannot be given a segment.
+            ValueError: if any of those fields is absent, if an epoch is a
+                whole number too large for a double, or if the values present
+                do not satisfy the ImagePointing invariants.  A corrected
+                ``cmatrix`` is absent for every image that navigated without an
+                offset or with a fitted camera rotation, and such an image
+                cannot be given a segment.
             TypeError: if a field is present but holds a value of the wrong
                 kind: anything but text where ``image_name`` or
                 ``camera_frame`` belongs, anything but a whole number where
@@ -309,13 +320,22 @@ def read_number(section: dict[str, Any], key: str, where: str) -> float:
         The value stored under ``key``, as a float.
 
     Raises:
-        ValueError: if ``key`` is absent.
+        ValueError: if ``key`` is absent, or if the value is a whole number too
+            large for a double.  JSON has no bound on an integer literal, so a
+            document can carry one no epoch could be; it is a malformed
+            document, reported as one, rather than the ``OverflowError`` the
+            widening raises, which no caller of this module expects.
         TypeError: if the value present is not a real number.
     """
     value = read_field(section, key, where)
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise TypeError(f'{where} field {key!r} is {type(value).__name__}, not a number: {value!r}')
-    return float(value)
+    try:
+        return float(value)
+    except OverflowError as exc:
+        raise ValueError(
+            f'{where} field {key!r} is a whole number too large to be a double: {value!r}'
+        ) from exc
 
 
 def read_optional_text(section: dict[str, Any], key: str, where: str) -> str | None:
@@ -465,10 +485,17 @@ def _as_rotation(matrix: NDArrayFloatType, label: str) -> NDArrayFloatType:
         A read-only float64 copy.
 
     Raises:
+        TypeError: if the values are not real numbers.  ``np.array(...,
+            dtype=np.float64)`` converts booleans and numeric text without
+            complaint, so nine ``True`` values would otherwise arrive here as a
+            flawless identity and satisfy every guard below.
         ValueError: if the input is not 3x3, holds a non-finite value, or is
             not a proper orthonormal rotation to within ``_ROTATION_TOL``.
     """
-    out = np.array(matrix, dtype=np.float64)
+    given = np.asarray(matrix)
+    if given.dtype.kind not in _REAL_NUMBER_KINDS:
+        raise TypeError(f'{label} holds {given.dtype} values, not real numbers: {given.tolist()!r}')
+    out = np.array(given, dtype=np.float64)
     if out.shape != (3, 3):
         raise ValueError(f'{label} is not a 3x3 matrix; got shape {out.shape}')
     # NaN fails every inequality below, so both tolerance guards would pass a
