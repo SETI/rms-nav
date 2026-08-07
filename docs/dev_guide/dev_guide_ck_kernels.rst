@@ -535,8 +535,8 @@ class and message as pointing that is not covered at all, so the two are
 indistinguishable from the exception. The sampling pass over every record
 decides; when it comes back empty-handed, a second pass reads attitude alone, so
 a genuine coverage gap surfaces as itself and an exposure that lacked only its
-rate is refused with a :exc:`ValueError` naming that. Refusal rather than zeros for
-the records that lack a rate: the attitude would be right, but a scan platform
+rate is refused with a :exc:`ValueError` naming that. Refusal rather than zeros
+for the records that lack a rate: the attitude would be right, but a platform
 genuinely parks, so an invented zero is indistinguishable from a measured one,
 and the overlay would start answering ``sxform`` at epochs where the pool has no
 answer at all.
