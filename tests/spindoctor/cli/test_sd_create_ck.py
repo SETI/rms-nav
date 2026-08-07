@@ -169,24 +169,32 @@ def _image(
     )
 
 
-@pytest.fixture
-def run_tree(tmp_path: Path) -> dict[str, Path]:
-    """Build a kernel directory, a results root and four images for one run.
+def _write_kernels(kernels: Path, *, angular_velocity_in_b: bool = True) -> tuple[Any, Any]:
+    """Write the hermetic kernels and the two baselines, and read what they give.
 
     The kernels have to be furnished to build the baselines and to read the
     attitudes the metadata records, and they are unloaded again before the
     driver runs: the driver refuses to identify a clock kernel while another
     already defines that clock, which is the whole point of that refusal.
+
+    Parameters:
+        kernels: The kernel directory to write into.
+        angular_velocity_in_b: Whether the second baseline carries angular
+            velocity.  Without it, an image assigned to that baseline
+            reproduces its attitude and then cannot be built into a segment.
+
+    Returns:
+        The uncorrected camera attitudes at the two exposure midtimes.
     """
-    kernels = tmp_path / 'kernels'
-    results = tmp_path / 'results'
-    output = tmp_path / 'output'
     support = write_support_kernels(kernels)
     for path in support:
         cspyce.furnsh(str(path))
     baselines = []
     try:
-        for name, centre in ((_BASELINE_A, _IMAGE_A_ET), (_BASELINE_B, _IMAGE_B_ET)):
+        for name, centre, with_av in (
+            (_BASELINE_A, _IMAGE_A_ET, True),
+            (_BASELINE_B, _IMAGE_B_ET, angular_velocity_in_b),
+        ):
             path = kernels / name
             write_baseline_ck(
                 path,
@@ -194,17 +202,25 @@ def run_tree(tmp_path: Path) -> dict[str, Path]:
                 sclk_id=_CASSINI_SCLK_ID,
                 epochs=[centre - 10.0, centre, centre + 10.0],
                 attitude=baseline_attitude,
-                angular_velocity=baseline_angular_velocity,
+                angular_velocity=baseline_angular_velocity if with_av else None,
             )
             baselines.append(path)
         cspyce.furnsh(str(baselines[0]))
         cspyce.furnsh(str(baselines[1]))
-        original_a = _camera_attitude(_IMAGE_A_ET)
-        original_b = _camera_attitude(_IMAGE_B_ET)
-        drifted = _corrected(original_a)
+        return _camera_attitude(_IMAGE_A_ET), _camera_attitude(_IMAGE_B_ET)
     finally:
         for path in reversed([*support, *baselines]):
             cspyce.unload(str(path))
+
+
+@pytest.fixture
+def run_tree(tmp_path: Path) -> dict[str, Path]:
+    """Build a kernel directory, a results root and four images for one run."""
+    kernels = tmp_path / 'kernels'
+    results = tmp_path / 'results'
+    output = tmp_path / 'output'
+    original_a, original_b = _write_kernels(kernels)
+    drifted = _corrected(original_a)
     _write_metadata(
         results,
         'vol/A_CALIB',
@@ -246,6 +262,36 @@ def run_tree(tmp_path: Path) -> dict[str, Path]:
             cmatrix=_corrected(drifted),
         ),
     )
+    return {'kernels': kernels, 'results': results, 'output': output}
+
+
+@pytest.fixture
+def refused_second_file_tree(tmp_path: Path) -> dict[str, Path]:
+    """Build a run whose second output file cannot be built at all.
+
+    Two images navigate against two baselines, and the second baseline carries
+    no angular velocity, which no segment can express.  The corrected files are
+    written in name order, so the first one is buildable and the second is the
+    refusal: a run that wrote as it went would leave the first file behind.
+    """
+    kernels = tmp_path / 'kernels'
+    results = tmp_path / 'results'
+    output = tmp_path / 'output'
+    original_a, original_b = _write_kernels(kernels, angular_velocity_in_b=False)
+    for stub, name, midtime, original in (
+        ('vol/A_CALIB', 'A_CALIB', _IMAGE_A_ET, original_a),
+        ('vol/B_CALIB', 'B_CALIB', _IMAGE_B_ET, original_b),
+    ):
+        _write_metadata(
+            results,
+            stub,
+            _image(
+                image_name=name,
+                midtime=midtime,
+                cmatrix_original=original,
+                cmatrix=_corrected(original),
+            ),
+        )
     return {'kernels': kernels, 'results': results, 'output': output}
 
 
@@ -864,6 +910,64 @@ def test_an_exposure_its_baseline_does_not_cover_is_named_in_the_run_log(
     with pytest.raises(OSError, match='SPICE'):
         sd_create_ck.main()
     assert 'G_CALIB: could not build the corrected segment' in _run_log(straddling_tree)
+
+
+def _run_refused(tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the driver over a tree whose second output file cannot be built.
+
+    Parameters:
+        tree: The directories the fixture built.
+        monkeypatch: Used to set the command line.
+    """
+    monkeypatch.setattr(
+        'sys.argv',
+        [
+            'sd_create_ck',
+            'coiss',
+            '--nav-results-root',
+            str(tree['results']),
+            '--kernel-dir',
+            str(tree['kernels']),
+            '--output-dir',
+            str(tree['output']),
+            '--log-root',
+            str(tree['output'] / 'logs'),
+        ],
+    )
+    with pytest.raises(ValueError, match='angular velocity at only some of them'):
+        sd_create_ck.main()
+
+
+def test_a_refusal_leaves_no_corrected_kernel_behind(
+    refused_second_file_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The first file was buildable; a run that wrote as it built would have written it."""
+    _run_refused(refused_second_file_tree, monkeypatch)
+    assert list(refused_second_file_tree['output'].glob('*.bc')) == []
+
+
+def test_a_refusal_leaves_no_meta_kernel_behind(
+    refused_second_file_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """A meta-kernel is written after the kernels, and there are none to name."""
+    _run_refused(refused_second_file_tree, monkeypatch)
+    assert not (refused_second_file_tree['output'] / 'coiss_nav.tm').exists()
+
+
+def test_a_refusal_leaves_no_report_behind(
+    refused_second_file_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Nothing is written, so nothing claims to say what was: the run is repeatable."""
+    _run_refused(refused_second_file_tree, monkeypatch)
+    assert not (refused_second_file_tree['output'] / 'coiss_ck_report.csv').exists()
+
+
+def test_a_refusal_names_the_image_it_could_not_build(
+    refused_second_file_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Named in the run log, which is the only record such a run leaves."""
+    _run_refused(refused_second_file_tree, monkeypatch)
+    assert 'B_CALIB: could not build the corrected segment' in _run_log(refused_second_file_tree)
 
 
 def test_an_image_with_no_pointing_has_no_segment_to_build() -> None:
