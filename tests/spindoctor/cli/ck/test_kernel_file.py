@@ -20,7 +20,11 @@ from tests.spindoctor.cli.ck.conftest import (
     KernelPool,
 )
 
-from spindoctor.cli.ck.comments import read_comment_area, reserved_comment_chars
+from spindoctor.cli.ck.comments import (
+    COMMENT_MAX_LINE_CHARS,
+    read_comment_area,
+    reserved_comment_chars,
+)
 from spindoctor.cli.ck.kernel_file import first_data_record, write_ck_file
 from spindoctor.cli.ck.segment import CkSegment
 
@@ -158,6 +162,36 @@ def test_a_file_with_no_comments_is_refused(tmp_path: Path) -> None:
     path = tmp_path / 'silent_nav.bc'
     with pytest.raises(ValueError, match='no comment lines'):
         write_ck_file(path, [_segment()], [])
+
+
+@pytest.mark.parametrize(
+    ('line', 'message'),
+    [
+        ('x' * (COMMENT_MAX_LINE_CHARS + 1), 'longer than the'),
+        ('trailing space ', 'ends in whitespace'),
+        ('embedded\ttab', 'non-printing character'),
+    ],
+    ids=['too-long', 'trailing-whitespace', 'embedded-tab'],
+)
+def test_an_unstorable_comment_line_is_refused_before_the_file_is_opened(
+    tmp_path: Path, line: str, message: str
+) -> None:
+    """A line SPICE cannot store stops the write, and leaves nothing behind.
+
+    The comment area is written after ``ckcls`` has already succeeded, so a
+    line judged there would leave a complete, furnishable kernel with the right
+    coverage and an empty comment area -- indistinguishable from a good product
+    except for the provenance record -- and the guard against overwriting an
+    existing kernel would then block the obvious re-run.
+
+    Parameters:
+        line: A comment line SPICE cannot store and read back unchanged.
+        message: Text the refusal must name.
+    """
+    path = tmp_path / 'orig_nav.bc'
+    with pytest.raises(ValueError, match=message):
+        write_ck_file(path, [_segment()], [*_COMMENT_LINES, line])
+    assert not path.exists()
 
 
 def test_a_name_too_long_to_be_the_internal_name_is_refused(tmp_path: Path) -> None:

@@ -19,6 +19,15 @@ received no segment raises in its own right and leaves the file open, so using
 it on the failure path would replace the error worth reading with one that is
 not *and* leak the handle; ``dafcls`` closes the file and has nothing to say
 about segments.
+
+That covers the segments, and it is why everything else is judged before the
+file is opened.  The comment area is the case that makes the ordering matter:
+it is written after ``ckcls`` has already succeeded, so a line SPICE cannot
+store, refused there, would leave behind a kernel that furnishes cleanly and
+covers exactly the right exposures with an empty comment area -- a file
+indistinguishable from a good product except for the provenance record the
+comment area exists to carry, and one the guard against overwriting an existing
+kernel then stops the operator from simply regenerating.
 """
 
 from collections.abc import Sequence
@@ -26,7 +35,11 @@ from pathlib import Path
 
 import cspyce
 
-from spindoctor.cli.ck.comments import reserved_comment_chars, write_comment_area
+from spindoctor.cli.ck.comments import (
+    check_comment_lines,
+    reserved_comment_chars,
+    write_comment_area,
+)
 from spindoctor.cli.ck.segment import CkSegment, write_segment
 
 # The longest internal file name SPICE stores in a DAF file record.
@@ -48,8 +61,14 @@ def write_ck_file(path: Path, segments: Sequence[CkSegment], comment_lines: Sequ
         ValueError: if no segment is given -- SPICE refuses to close a
             C-kernel holding none, and the half-written file would be left
             behind -- if no comment line is given, if a comment line is one
-            SPICE cannot read back, if the file's own name is too long to be
-            its internal name, or if a file of that name already exists.
+            SPICE cannot store and read back unchanged, if the file's own name
+            is too long to be its internal name, or if a file of that name
+            already exists.  Every one of these is judged before the file is
+            opened, so none of them leaves a file behind.
+        RuntimeError: if SPICE cannot create the file, for example because the
+            directory does not exist or cannot be written to.
+        OSError: if SPICE refuses a segment write once the file is open.  The
+            partly-written file is closed and removed before this propagates.
     """
     if len(segments) == 0:
         raise ValueError(
@@ -58,6 +77,12 @@ def write_ck_file(path: Path, segments: Sequence[CkSegment], comment_lines: Sequ
         )
     if len(comment_lines) == 0:
         raise ValueError(f'no comment lines to write to {path.name}')
+    # Before ``ckopn``, because the comment area is written after ``ckcls``:
+    # a line SPICE cannot store, judged there, would leave behind a complete
+    # and furnishable kernel whose comment area is empty -- and the guard on an
+    # existing file below would then block the obvious next step of fixing the
+    # line and running again.
+    check_comment_lines(comment_lines)
     if path.exists():
         # Said here rather than left to SPICE, which reports an operating
         # system status number and no reason at all.  A corrected kernel is
