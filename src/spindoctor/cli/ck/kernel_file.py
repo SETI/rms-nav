@@ -116,8 +116,8 @@ def check_output_paths(paths: Sequence[Path]) -> None:
         # symbolic link both give a second spelling of the same directory.  The
         # basename is deliberately left unresolved -- resolving it would follow
         # a link at the destination, which is the very thing refused below.
-        identity = (path.parent.resolve(), path.name)
-        if identity in seen:
+        identity = _identity_of(path)
+        if identity is not None and identity in seen:
             # A set-level refusal, and the one no per-file check can make: the
             # second write of a repeated path would replace the first file's
             # segments with the second's, silently.
@@ -125,7 +125,8 @@ def check_output_paths(paths: Sequence[Path]) -> None:
                 f'{path} is named twice; the second would replace the first rather than join it'
             )
             continue
-        seen.add(identity)
+        if identity is not None:
+            seen.add(identity)
         refusals.extend(_path_refusals(path))
     if len(refusals) > 0:
         raise ValueError(
@@ -218,6 +219,26 @@ def write_ck_file(path: Path, segments: Sequence[CkSegment], comment_lines: Sequ
         raise
     cspyce.ckcls(handle)
     write_comment_area(path, comment_lines)
+
+
+def _identity_of(path: Path) -> tuple[Path, str] | None:
+    """Return what decides whether two paths name one file, or ``None``.
+
+    Parameters:
+        path: The path to identify, already known to be spellable.
+
+    Returns:
+        The resolved directory and the unresolved basename, or ``None`` if the
+        directory cannot be resolved at all -- a symbolic link loop, or a path
+        longer than the operating system accepts.  Such a path is no other
+        path's second spelling, and the directory check names it for what it
+        is; answering ``None`` keeps a failure of the duplicate check from
+        becoming the whole call's answer.
+    """
+    try:
+        return (path.parent.resolve(), path.name)
+    except (OSError, RuntimeError):
+        return None
 
 
 def _path_refusals(path: Path) -> list[str]:

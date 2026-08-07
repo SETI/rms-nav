@@ -430,6 +430,26 @@ def test_two_files_under_one_linked_directory_are_accepted(tmp_path: Path) -> No
     check_output_paths([tmp_path / 'real' / 'orig_a_nav.bc', tmp_path / 'linked' / 'orig_b_nav.bc'])
 
 
+@pytest.mark.parametrize('links', [1, 2], ids=['self-loop', 'two-link-loop'])
+def test_a_looping_directory_link_is_refused_by_name(tmp_path: Path, links: int) -> None:
+    """Resolving it raises, and that must not become the whole call's answer.
+
+    An operator has to be told which output path failed and what about it, not
+    handed the exception the duplicate check happened to hit while deciding
+    whether two paths were the same file.
+
+    Parameters:
+        links: How many links the loop is made of.
+    """
+    if links == 1:
+        (tmp_path / 'loop').symlink_to(tmp_path / 'loop')
+    else:
+        (tmp_path / 'loop').symlink_to(tmp_path / 'other')
+        (tmp_path / 'other').symlink_to(tmp_path / 'loop')
+    with pytest.raises(ValueError, match='is not a directory'):
+        check_output_paths([tmp_path / 'loop' / 'orig_nav.bc'])
+
+
 def test_a_link_at_the_output_path_is_not_resolved_away(tmp_path: Path) -> None:
     """Only the directory is resolved; resolving the basename would follow the link.
 
