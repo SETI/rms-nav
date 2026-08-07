@@ -10,6 +10,53 @@ from spindoctor.support.types import PathLike
 
 from .obs_snapshot_inst import ObsSnapshotInst
 
+# Which Cassini kernel set the host has been told to furnish, or None before
+# the first image is loaded.  oops ignores every ``initialize`` call after the
+# first one, so the choice is made once per process and a later request for a
+# different set is a defect rather than a preference.
+_KERNEL_SET: str | None = None
+
+
+def _initialize_kernels(config: Config, logger: Any) -> None:
+    """Tell the Cassini host which kernel set to furnish, once per process.
+
+    The reconstructed C-kernels carry glitches and ripples and represent slew
+    rates less well than the predicted set, so navigation reads whichever set
+    ``cassini_iss.kernel_set`` names.  oops applies the choice when it defines
+    the mission and ignores it thereafter, which is why this runs before the
+    first image is loaded rather than for every image.
+
+    Parameters:
+        config: Configuration carrying the ``cassini_iss`` section.
+        logger: Logger to record the choice on, once.
+
+    Raises:
+        ValueError: if the configured set is not one oops accepts, or if a
+            different set was already established in this process.
+    """
+    global _KERNEL_SET
+    import oops.hosts.cassini.iss
+
+    wanted = str(config.category('cassini_iss').get('kernel_set', 'reconstructed'))
+    if wanted not in ('predicted', 'reconstructed', 'none'):
+        raise ValueError(
+            f"cassini_iss.kernel_set is {wanted!r}; expected 'predicted', 'reconstructed' or 'none'"
+        )
+    if _KERNEL_SET is not None:
+        if wanted != _KERNEL_SET:
+            raise ValueError(
+                f'Cassini kernels were already furnished as {_KERNEL_SET!r} in this '
+                f'process and cannot be changed to {wanted!r}; oops ignores every '
+                f'initialization after the first'
+            )
+        return
+    # Only the C-kernels change: the guidance is about pointing, and the
+    # predicted ephemeris does not cover the mission the way the
+    # reconstructed one does.
+    oops.hosts.cassini.iss.initialize(ck=wanted)
+    _KERNEL_SET = wanted
+    logger.info('Cassini kernels furnished from the %s set', wanted)
+
 
 class ObsCassiniISS(ObsSnapshotInst):
     """Implements an observation of a Cassini ISS image.
@@ -55,6 +102,7 @@ class ObsCassiniISS(ObsSnapshotInst):
         logger.debug(f'Reading Cassini ISS image {path}')
         logger.debug(f'  Fast distortion: {fast_distortion}')
         logger.debug(f'  Return all planets: {return_all_planets}')
+        _initialize_kernels(config, logger)
         obs = oops.hosts.cassini.iss.from_file(
             path, fast_distortion=fast_distortion, return_all_planets=return_all_planets
         )

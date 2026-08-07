@@ -5,6 +5,12 @@
 # guess. Calibration phase replaces every PLACEHOLDER value with a
 # fitted estimate.
 cassini_iss:
+  # Which Cassini C-kernel and SP-kernel set the host furnishes.  The
+  # reconstructed kernels carry glitches and ripples, and the predicted set
+  # represents slew rates better, so navigation reads the predicted set.
+  # oops ignores this after the first image is loaded in a process, so it is
+  # applied before the first load rather than per image.
+  kernel_set: predicted
   nac:
     data_units: raw_dn
     extfov_margin_vu:
