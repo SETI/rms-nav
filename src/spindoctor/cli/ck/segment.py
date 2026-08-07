@@ -16,8 +16,14 @@ Across the exposure the correction is held body-fixed::
     C_ck_corrected(t) = delta . C_ck_original(t)
 
 which is the physical model -- the spacecraft is pointed slightly wrong and the
-error turns with it -- so attitude still varies correctly inside the exposure
-and smear geometry stays right.
+error turns with it -- so the attitude inside the exposure varies as the
+baseline's does.  It varies as finely as the records resolve it and no finer:
+the segment holds the exposure start, midtime and stop, plus a one-second
+cadence once the exposure reaches ten seconds, and SPICE interpolates between
+them.  Three records over a ten-second exposure reproduce a real Cassini
+baseline to about 2 NAC pixels at the median and 15 at the worst, so the
+in-exposure history is an approximation at that cadence rather than an exact
+reproduction; the record epochs themselves are exact.
 
 Voyager is the exception.  Its navigated attitude came from a frozen,
 tolerance-snapped pointing lookup rather than a time-varying frame chain, so a
@@ -29,11 +35,21 @@ Angular velocity is copied unchanged and never rotated.  CK angular velocity is
 expressed in the segment's base reference frame (J2000), and two frames rigidly
 attached to each other have identical angular velocity in that frame, so
 rotating it through ``delta`` -- superficially the thorough treatment -- writes
-a vector in no frame at all.  A segment carries one angular velocity flag for
-all of its records, so a baseline that lacks angular velocity at any record --
-including an exposure straddling one baseline segment that has it and one that
-does not -- yields a segment that carries none, and consumers fall back to
-``ckgp``.
+a vector in no frame at all.
+
+Every segment written here carries angular velocity, because a segment that
+declares none is not read as a segment whose angular velocity is unknown.
+SPICE skips such a segment outright for ``ckgpav`` and for ``sxform`` and
+answers from the next loaded kernel that does carry angular velocity for the
+same object and epoch -- with that kernel's *uncorrected* attitude.  A
+corrected segment declaring no angular velocity would therefore deliver its
+correction to ``ckgp`` and ``pxform`` and silently withhold it from ``sxform``,
+which is the call oops makes.  So a frozen segment writes zeros, which is a
+constant attitude's true angular velocity, and an exposure whose baseline does
+not supply angular velocity at every record is refused rather than written
+without it: writing zeros there would claim a parked platform the baseline
+never measured, and a consumer cannot tell an invented zero from a measured
+one.
 
 The caller owns the kernel pool: the supporting kernels (LSK, SCLK, FK) and the
 one baseline C-kernel whose attitude the image was navigated against must be
@@ -89,8 +105,12 @@ class CkSegment:
         quats: SPICE quaternions of the attitude at each time tag, shape
             ``(n, 4)``, sign-continuous from one record to the next.
         avvs: Angular velocity at each time tag in the segment's base frame
-            (J2000), shape ``(n, 3)``, or ``None`` when the segment carries no
-            angular velocity.
+            (J2000), shape ``(n, 3)``, or ``None`` for a segment that declares
+            none.  Declaring none is not the same as declaring zero: SPICE
+            skips such a segment for ``ckgpav`` and ``sxform`` and answers
+            those from the next loaded kernel that does carry angular velocity
+            for the same object and epoch.  :func:`build_segment` therefore
+            never produces one.
 
     Raises:
         ValueError: if the arrays disagree on the record count, have the wrong
@@ -268,14 +288,15 @@ def build_segment(pointing: ImagePointing) -> CkSegment:
         pointing: The image's recorded corrected pointing.
 
     Returns:
-        The segment to write, carrying the baseline's angular velocity
-        unchanged when the baseline has it at every record, and none when the
-        baseline lacks it anywhere.
+        The segment to write.  It always carries angular velocity: the
+        baseline's own vectors unchanged, or zeros for a frozen-attitude
+        object, whose attitude is constant.
 
     Raises:
         ValueError: if the CK object is not one this writer knows, if the
-            resolved spacecraft clock is not the expected one, or if the image
-            name does not fit a SPICE segment identifier.
+            resolved spacecraft clock is not the expected one, if the image
+            name does not fit a SPICE segment identifier, or if the baseline
+            supplies angular velocity at only some of the record epochs.
         OSError: if the furnished kernels provide no pointing for the CK object
             at the exposure midtime or at a record epoch.
         KeyError: if the CK object has no frame name in the furnished kernels.
@@ -285,16 +306,20 @@ def build_segment(pointing: ImagePointing) -> CkSegment:
     ticks = _record_ticks(pointing, sclk_id)
     corrected_midtime = _corrected_attitude_at_midtime(pointing)
     attitudes: list[NDArrayFloatType]
-    avvs: NDArrayFloatType | None
+    avvs: NDArrayFloatType
     if pointing.ck_frame_id in FROZEN_ATTITUDE_CK_IDS:
         # The navigated model assumed one snapped attitude across the whole
-        # exposure, so the segment says exactly that.  It carries no angular
-        # velocity: a constant attitude has none, and the rigid-attachment
-        # argument that lets a body-fixed segment copy the baseline's angular
-        # velocity does not hold for a segment that deliberately drops the
-        # baseline's time variation.
+        # exposure, so the segment says exactly that, and its angular velocity
+        # is zero because that is what a constant attitude's angular velocity
+        # is.  Zeros rather than no angular velocity at all: SPICE skips a
+        # segment carrying none for ckgpav and sxform and answers from the next
+        # kernel that has some, so declaring none would hand an sxform caller
+        # another kernel's uncorrected attitude.  The baseline's own vectors
+        # are not copied here, since the rigid-attachment argument that
+        # licenses copying them does not hold for a segment that deliberately
+        # drops the baseline's time variation.
         attitudes = [corrected_midtime] * len(ticks)
-        avvs = None
+        avvs = np.zeros((len(ticks), 3), dtype=np.float64)
     else:
         baseline_midtime = _baseline_attitude(
             pointing.ck_frame_id, float(cspyce.sce2c(sclk_id, pointing.midtime_et))
@@ -333,6 +358,8 @@ def write_segment(handle: int, segment: CkSegment) -> None:
     avvs = segment.avvs
     if avvs is None:
         # ckw03 wants an array either way; with avflag false it is ignored.
+        # Only a segment built by hand reaches this, since build_segment always
+        # supplies angular velocity.
         avvs = np.zeros((segment.record_count, 3), dtype=np.float64)
     cspyce.ckw03(
         handle,
@@ -452,33 +479,6 @@ def _baseline_attitude(ck_frame_id: int, tick: float) -> NDArrayFloatType:
     return np.asarray(cmat, dtype=np.float64)
 
 
-def _baseline_has_angular_velocity(ck_frame_id: int, tick: float) -> bool:
-    """Probe whether the furnished baseline carries angular velocity.
-
-    This is the fast path only.  It answers for one time tag, and a segment's
-    flag has to hold for every record, so ``_baseline_history`` samples all of
-    them and its result, not this probe, decides what the segment claims.
-
-    Parameters:
-        ck_frame_id: SPICE id of the object.
-        tick: Encoded SCLK time tag to probe.
-
-    Returns:
-        True when angular velocity is available there.
-    """
-    try:
-        cspyce.ckgpav(ck_frame_id, tick, _LOOKUP_TOL_TICKS, BASE_FRAME)
-    except OSError:
-        # SPICE reports "this segment carries no angular velocity" and "no
-        # pointing here at all" as the same insufficient-data error, so the two
-        # are not distinguishable from the exception.  Demoting the second to a
-        # segment without angular velocity hides nothing: the attitude lookups
-        # that follow use ckgp at the same time tags and raise for pointing
-        # that genuinely is not there.
-        return False
-    return True
-
-
 def _sample_with_angular_velocity(
     ck_frame_id: int, ticks: list[float]
 ) -> tuple[list[NDArrayFloatType], NDArrayFloatType] | None:
@@ -508,35 +508,48 @@ def _sample_with_angular_velocity(
 
 def _baseline_history(
     ck_frame_id: int, ticks: list[float]
-) -> tuple[list[NDArrayFloatType], NDArrayFloatType | None]:
-    """Sample the baseline attitude at each record, with angular velocity if all have it.
+) -> tuple[list[NDArrayFloatType], NDArrayFloatType]:
+    """Sample the baseline attitude and angular velocity at every record.
 
     A segment carries one angular velocity flag for all of its records, so an
     exposure straddling a baseline segment that has angular velocity and one
-    that does not cannot claim it: the corrected segment then carries none at
-    all rather than inventing vectors for the records that lack them.
+    that does not cannot claim it -- and cannot decline it either, since a
+    segment declaring none is skipped by ``ckgpav`` and ``sxform`` in favor of
+    whatever other kernel answers there.  Such an exposure is refused.
 
     Parameters:
         ck_frame_id: SPICE id of the object.
         ticks: The encoded SCLK time tags to sample.
 
     Returns:
-        The baseline attitudes and its angular velocity vectors, or ``None``
-        for the angular velocity when any record has none.
+        The baseline attitudes and its angular velocity vectors.
 
     Raises:
         OSError: if the furnished kernels provide no pointing at a record.
+        ValueError: if they provide pointing at every record but angular
+            velocity at only some of them.
     """
-    if _baseline_has_angular_velocity(ck_frame_id, ticks[0]):
-        sampled = _sample_with_angular_velocity(ck_frame_id, ticks)
-        if sampled is not None:
-            return sampled
-    return [_baseline_attitude(ck_frame_id, tick) for tick in ticks], None
+    sampled = _sample_with_angular_velocity(ck_frame_id, ticks)
+    if sampled is not None:
+        return sampled
+    # ``ckgpav`` reports "no angular velocity here" and "no pointing here at
+    # all" as one insufficient-data error, so which of the two happened is
+    # decided by reading the attitude alone: a coverage gap raises out of this
+    # loop as itself, and anything that survives it lacked only the angular
+    # velocity.
+    for tick in ticks:
+        _baseline_attitude(ck_frame_id, tick)
+    raise ValueError(
+        f'the furnished baseline supplies pointing at every record of CK object {ck_frame_id} '
+        f'but angular velocity at only some of them; a segment carries one angular velocity flag '
+        f'for all of its records, and one declaring none would be skipped by ckgpav and sxform in '
+        f'favor of another kernel answering with an uncorrected attitude'
+    )
 
 
 def _corrected_history(
     ck_frame_id: int, ticks: list[float], delta: NDArrayFloatType
-) -> tuple[list[NDArrayFloatType], NDArrayFloatType | None]:
+) -> tuple[list[NDArrayFloatType], NDArrayFloatType]:
     """Apply a body-fixed correction to the baseline attitude at each record.
 
     Parameters:
@@ -545,12 +558,12 @@ def _corrected_history(
         delta: The correction in the CK object's own coordinates.
 
     Returns:
-        The corrected attitudes and the baseline's angular velocity vectors,
-        or ``None`` for the angular velocity when the baseline does not carry
-        it at every record.
+        The corrected attitudes and the baseline's angular velocity vectors.
 
     Raises:
         OSError: if the furnished kernels provide no pointing at a record.
+        ValueError: if the baseline does not supply angular velocity at every
+            record.
     """
     attitudes, velocities = _baseline_history(ck_frame_id, ticks)
     # The angular velocity is passed through untouched: it is expressed in the

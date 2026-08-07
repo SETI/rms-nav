@@ -555,34 +555,58 @@ would fail every baseline at the 1e-9 rad bound, so an unexplained
 across-the-board `no_reproducing_baseline` should be checked against this
 first.
 
-**Angular velocity: copied unchanged, never rotated.** CK angular velocity
-is expressed in the segment's **base reference frame** (J2000), per the CK
-Required Reading, and the corrected frame differs from the original by a
-constant body-fixed rotation -- two frames rigidly attached to each other
-have identical angular velocity in the base frame. So when the original
-segment carries AV (`ckgpav` succeeds), the corrected records carry the
-same vectors bit-identically and `avflag = 1`; when the original has none
-(`ckgpav` raises for want of AV -- Voyager and Galileo type 1), the
-corrected segment writes `avflag = 0` and queries fall back to `ckgp`.
-Rotating AV through `delta` -- superficially the "thorough" treatment -- is
-the wrong-frame error, and Phase B's test must fail if it is introduced.
+**Angular velocity: copied unchanged, never rotated, and never declared
+absent.** CK angular velocity is expressed in the segment's **base reference
+frame** (J2000), per the CK Required Reading, and the corrected frame differs
+from the original by a constant body-fixed rotation -- two frames rigidly
+attached to each other have identical angular velocity in the base frame. So
+when the original segment carries AV (`ckgpav` succeeds), the corrected records
+carry the same vectors bit-identically and `avflag = 1`. Rotating AV through
+`delta` -- superficially the "thorough" treatment -- is the wrong-frame error,
+and Phase B's test must fail if it is introduced.
 
-Two refinements from Phase B. The want-of-AV failure is `OSError`
-`SPICE(CKINSUFFDATA)` -- the same class and short message as pointing that
-is not covered at all -- so the two are not distinguishable from the
-exception. The rule the writer applies is therefore **all records or
-none**: it probes `ckgpav` at the first record as a fast path, but the
-sampling pass over every record is what decides, so an exposure straddling
-one original segment that carries AV and one that does not writes
-`avflag = 0` rather than failing. A genuine coverage gap still surfaces
-rather than being demoted to a missing-AV segment, because the `ckgp`
-lookups that then read the attitude raise on it. And a **frozen (Voyager)
-segment writes `avflag = 0` whatever its baseline carries**: the segment's
-attitude is constant, so its angular velocity is zero, and the rigid-attachment
-argument that licenses copying the baseline's vectors does not hold for a
-segment that deliberately drops the baseline's time variation. Voyager
-baselines carry no AV in any case, so the rule changes nothing on real
-data.
+**`avflag = 0` is never written.** A segment with `avflag = 0` is not a segment
+whose angular velocity is unknown: SPICE skips it entirely for `ckgpav` and for
+`sxform`, falling through to the next loaded kernel that does carry AV for that
+object and epoch and answering with **that kernel's uncorrected attitude**.
+Measured on a real reconstructed Cassini kernel (`04002_04009ra.bc`, all 2645
+local -82000 segments carry AV), holding everything but `avflag` constant with
+a 1.000e-04 rad correction applied:
+
+| corrected segment | `ckgp` vs `ckgpav` | `sxform` vs corrected |
+|---|---|---|
+| `avflag = 0` | 1.000e-04 rad | 1.000e-04 rad |
+| `avflag = 1` | 0.000e+00 rad | 0.000e+00 rad |
+
+That is decisive because oops reads pointing through `sxform`:
+`oops/frame/spiceframe.py` defaults `omega_type='tabulated'` and calls
+`cspyce.sxform` in that mode, and no oops host overrides it. An `avflag = 0`
+corrected segment would deliver its correction to `ckgp` and `pxform` and
+withhold it from `sxform`, with which of the two a consumer saw depending on
+what else was in their pool. Exposure across the local baselines: Cassini
+-82000 2645/2645 segments carry AV and New Horizons -98000 4346/4346 do, so
+those are immune today; **Galileo -77001 has 150 segments of which 38 carry
+none**; Voyager -31100/-32100 have 9 segments, none with AV.
+
+So the writer applies **all records or none, and none means refuse**. The
+want-of-AV failure is `OSError` `SPICE(CKINSUFFDATA)` -- the same class and
+short message as pointing that is not covered at all -- so the two are not
+distinguishable from the exception; the sampling pass over every record decides,
+and when it comes back empty-handed a second pass reads attitude alone, so a
+genuine coverage gap still surfaces as itself and an exposure that had only its
+AV missing is refused with a `ValueError` naming that. Refusal rather than zeros
+for the records that lack AV: the attitude would be right, but a scan platform
+genuinely parks, so an invented zero is indistinguishable from a measured one,
+and the overlay would start answering `sxform` at epochs where the pool has no
+answer at all (measured on Galileo: at an epoch covered only by an AV-less
+segment, `ckgp` and `pxform` succeed while `ckgpav` and `sxform` raise).
+
+A **frozen (Voyager) segment writes zeros with `avflag = 1`**: the segment's
+attitude is constant, so its angular velocity is zero -- a measurement, not an
+invention -- and writing it that way is what makes `sxform` return the corrected
+attitude. The baseline's own vectors are still not copied there, since the
+rigid-attachment argument does not hold for a segment that deliberately drops
+the baseline's time variation.
 
 **Files mirror the originals.** Each output `.bc` corresponds to exactly
 one original CK file and carries the segments of the images whose corrected
@@ -981,10 +1005,13 @@ with `ckgpav` at `tol = 0`:
   truth within 1e-9 radians.
 - AV is bit-identical to the original's; the test **fails if AV is rotated
   through `delta`**.
-- An AV-less original yields `avflag = 0` and a working `ckgp` fallback,
-  and so does an exposure straddling one original segment that carries AV
-  and one that does not: a segment has one flag for all its records, so it
-  claims none rather than inventing vectors for the records that lack them.
+- An AV-less original is refused, and so is an exposure straddling one
+  original segment that carries AV and one that does not: a segment has one
+  flag for all its records, and one declaring none would be skipped by
+  `ckgpav` and `sxform` in favor of another kernel's uncorrected attitude.
+- With the original still furnished underneath it, the corrected segment is
+  what `ckgp`, `ckgpav` **and** `sxform` all answer with. The `sxform` half
+  is the one that catches `avflag = 0`; the `ckgp` half alone does not.
 - A sign-discontinuous quaternion sequence is repaired, asserted on the
   written records rather than on a read-back attitude (section 3.3: SPICE
   restores the sign when it interpolates, so the read-back cannot see it);
@@ -1184,10 +1211,10 @@ updated; plan files reconciled.
    pointing-actually-changed assertion passing, and matching technique
    sets between runs.
 4. A kernel written by this tool loads in a plain `furnsh` session with no
-   SpinDoctor code present; `ckgp` returns the expected attitude inside a
-   navigated exposure and falls through to the original outside it;
-   `ckgpav` additionally returns the original's angular velocity wherever
-   `avflag = 1`, and the report records which files carry AV.
+   SpinDoctor code present; `ckgp`, `ckgpav`, `pxform` and `sxform` all
+   return the expected attitude inside a navigated exposure and fall through
+   to the original outside it; `ckgpav` returns the original's angular
+   velocity, which every written segment carries.
 5. Every image considered appears exactly once in its mission's CSV, with
    either a `source_bc` or an `omission_reason` from the section 3.3 set.
 6. No image whose recorded baseline no candidate kernel reproduces
