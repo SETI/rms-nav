@@ -20,10 +20,10 @@ error turns with it -- so the attitude inside the exposure varies as the
 baseline's does.  It varies as finely as the records resolve it and no finer:
 the segment holds the exposure start, midtime and stop, plus a one-second
 cadence once the exposure reaches ten seconds, and SPICE interpolates between
-them.  Three records over a ten-second exposure reproduce a real Cassini
-baseline to about 2 NAC pixels at the median and 15 at the worst, so the
-in-exposure history is an approximation at that cadence rather than an exact
-reproduction; the record epochs themselves are exact.
+them.  A ten-second window carrying only the three mandatory records
+reproduces a real Cassini baseline to a mean of 0.43 NAC pixels and a worst
+case of 9.9, so the in-exposure history is an approximation between records
+rather than an exact reproduction; the record epochs themselves are exact.
 
 Voyager is the exception.  Its navigated attitude came from a frozen,
 tolerance-snapped pointing lookup rather than a time-varying frame chain, so a
@@ -75,11 +75,12 @@ BASE_FRAME = 'J2000'
 # exposure's attitude history is not reduced to three points.  The bound is
 # inclusive because ten seconds exactly is an ordinary commanded ISS exposure
 # and it is where the three-record fidelity has already gone: measured over 40
-# random epochs on a reconstructed Cassini kernel, sampled across the window
-# and expressed in NAC pixels, a ten-second exposure at three records leaves a
-# mean error of 0.43 px, a 99th percentile of 5.2 px and a worst case of 9.9 px,
-# with 23% of samples beyond a tenth of a pixel; the same exposure at the
-# one-second cadence leaves 0.02 px, 0.44 px and 5.9 px, with 3% beyond a tenth.
+# random epochs on a reconstructed Cassini kernel, sampled across the window and
+# expressed in NAC pixels, a ten-second window carrying only the three mandatory
+# records leaves a mean error of 0.43 px, a 99th percentile of 5.2 px and a
+# worst case of 9.9 px, with 23% of samples beyond a tenth of a pixel; the same
+# window at this cadence leaves 0.02 px, 0.44 px and 5.9 px, with 3% beyond a
+# tenth.
 _LONG_EXPOSURE_S = 10.0
 _RECORD_CADENCE_S = 1.0
 
