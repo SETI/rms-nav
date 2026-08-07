@@ -294,6 +294,39 @@ def test_the_correction_reaches_every_lookup_over_a_furnished_baseline(
     assert rotation_angle_between(from_sxform, truth) < _ANGLE_TOL_RAD
 
 
+@pytest.mark.parametrize(
+    ('ck_frame_id', 'camera_frame'),
+    [
+        (CASSINI_CK_FRAME_ID, CASSINI_CAMERA_FRAME),
+        (VOYAGER_CK_FRAME_ID, VOYAGER_CAMERA_FRAME),
+    ],
+    ids=['evaluated-chain', 'frozen-attitude'],
+)
+def test_spice_answers_the_camera_frame_with_the_recorded_cmatrix(
+    pool: KernelPool, ck_frame_id: int, camera_frame: str
+) -> None:
+    """The one question a consumer asks, answered with the number that was recorded.
+
+    Everything the writer does is between the recorded C-matrix and this
+    lookup: the rotation from the camera to the CK object, the correction in
+    that object's coordinates, the quaternion conversion, the segment write,
+    and the frame chain back out to the camera.  A consumer makes none of those
+    steps -- it furnishes the file and asks for the camera frame -- so this is
+    the assertion that corresponds to their experience, and any of those steps
+    going wrong moves it.
+
+    Parameters:
+        ck_frame_id: SPICE id of the object under test.
+        camera_frame: SPICE name of the camera frame the C-matrix is in.
+    """
+    case = _build_case(pool, ck_frame_id=ck_frame_id, camera_frame=camera_frame)
+    pool.furnish(case.corrected_path)
+    read = np.asarray(
+        cspyce.pxform('J2000', camera_frame, case.pointing.midtime_et), dtype=np.float64
+    )
+    assert rotation_angle_between(read, case.pointing.cmatrix) < _ANGLE_TOL_RAD
+
+
 def test_a_baseline_without_angular_velocity_is_refused(pool: KernelPool) -> None:
     """An exposure whose baseline supplies no angular velocity gets no segment.
 
