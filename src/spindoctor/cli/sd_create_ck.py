@@ -319,7 +319,9 @@ def _segment_for(assignment: Assignment) -> CkSegment:
 
     Raises:
         ValueError: if the image carries no pointing, which an assignment with
-            a baseline cannot.
+            a baseline cannot; if the baseline supplies angular velocity at
+            only some of the record epochs, which no segment can express; or if
+            the recorded exposure would need more records than a segment holds.
         OSError: if the baseline supplies no pointing at a record epoch.
     """
     pointing = pointing_of(assignment)
@@ -334,8 +336,8 @@ def _segment_for(assignment: Assignment) -> CkSegment:
         # demote the real one to a context.  It stops the run because the
         # reason set the report may use has no entry for an image whose
         # baseline reproduced its attitude and then could not supply a record
-        # epoch, and inventing one would be a schema change for every consumer
-        # of the report.
+        # epoch or its angular velocity, and inventing one would be a schema
+        # change for every consumer of the report.
         MAIN_LOGGER.exception(
             '%s: could not build the corrected segment: %s', assignment.image_name, exc
         )
