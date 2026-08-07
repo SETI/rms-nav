@@ -450,12 +450,8 @@ def test_a_looping_directory_link_is_refused_by_name(tmp_path: Path, links: int)
         check_output_paths([tmp_path / 'loop' / 'orig_nav.bc'])
 
 
-def test_a_link_at_the_output_path_is_not_resolved_away(tmp_path: Path) -> None:
-    """Only the directory is resolved; resolving the basename would follow the link.
-
-    A link whose target is a free path would then look like a free path, and
-    the write through it would be exactly the harm the occupancy check refuses.
-    """
+def test_a_link_whose_target_is_free_is_still_refused(tmp_path: Path) -> None:
+    """Occupancy is judged on the path as written, never on where it points."""
     link = tmp_path / 'orig_nav.bc'
     link.symlink_to(tmp_path / 'free.bc')
     with pytest.raises(ValueError, match='is a symbolic link'):

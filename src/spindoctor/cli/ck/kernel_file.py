@@ -113,19 +113,17 @@ def check_output_paths(paths: Sequence[Path]) -> None:
             continue
         # Two paths name one file when they name one basename in one directory,
         # and the directory is what has to be resolved to decide it: '..' and a
-        # symbolic link both give a second spelling of the same directory.  The
-        # basename is deliberately left unresolved -- resolving it would follow
-        # a link at the destination, which is the very thing refused below.
+        # symbolic link both give a second spelling of the same directory.
         identity = _identity_of(path)
-        if identity is not None and identity in seen:
-            # A set-level refusal, and the one no per-file check can make: the
-            # second write of a repeated path would replace the first file's
-            # segments with the second's, silently.
-            refusals.append(
-                f'{path} is named twice; the second would replace the first rather than join it'
-            )
-            continue
         if identity is not None:
+            if identity in seen:
+                # A set-level refusal, and the one no per-file check can make:
+                # the second write of a repeated path would replace the first
+                # file's segments with the second's, silently.
+                refusals.append(
+                    f'{path} is named twice; the second would replace the first rather than join it'
+                )
+                continue
             seen.add(identity)
         refusals.extend(_path_refusals(path))
     if len(refusals) > 0:
@@ -234,6 +232,12 @@ def _identity_of(path: Path) -> tuple[Path, str] | None:
         path's second spelling, and the directory check names it for what it
         is; answering ``None`` keeps a failure of the duplicate check from
         becoming the whole call's answer.
+
+        The basename is left as it was written because that is the file being
+        created, whatever a link of that name would point at.  Nothing observes
+        the difference today, since a path that is a link is refused outright
+        rather than followed; it is the identity that is right either way, not
+        a guard against a reachable fault.
     """
     try:
         return (path.parent.resolve(), path.name)
