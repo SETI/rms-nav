@@ -311,3 +311,9 @@ def test_a_blank_comment_line_survives_the_round_trip(pool: KernelPool) -> None:
     _written_ck(path, reserved_comment_chars(lines))
     write_comment_area(path, lines)
     assert read_comment_area(path) == lines
+
+
+def test_an_empty_text_field_is_marked_rather_than_blank() -> None:
+    """An empty status reason is as unreadable in a column as a missing one."""
+    line = build_comment_lines(_area(images=(_facts(status_reason=''),)))[-1]
+    assert line.endswith('-')

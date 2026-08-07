@@ -35,10 +35,10 @@ from spindoctor.cli.ck.comments import CommentArea, build_comment_lines
 from spindoctor.cli.ck.images import ImageEntry, OmissionReason
 from spindoctor.cli.ck.index import build_ck_index
 from spindoctor.cli.ck.inputs import (
-    FK_SUFFIXES,
     LSK_SUFFIXES,
     Document,
     clock_kernels,
+    furnish_frame_kernels,
     furnish_supporting_kernels,
     furnished,
     kernel_paths,
@@ -49,6 +49,7 @@ from spindoctor.cli.ck.inputs import (
 )
 from spindoctor.cli.ck.kernel_file import write_ck_file
 from spindoctor.cli.ck.metakernel import write_meta_kernel
+from spindoctor.cli.ck.pointing import ImagePointing
 from spindoctor.cli.ck.report import ImageFacts, ReportRow, read_image_facts, write_report
 from spindoctor.cli.ck.segment import CkSegment, build_segment, resolve_sclk_id
 from spindoctor.cli.logging_args import add_logging_arguments, reporting_logging_errors
@@ -267,6 +268,23 @@ def write_output_files(
     return written
 
 
+def absolute_directory(directory: str) -> str:
+    """Return one directory named on the command line, resolved to absolute.
+
+    A remote directory is passed through: it is already absolute, and there is
+    no local working directory to resolve it against.
+
+    Parameters:
+        directory: The directory as it was typed.
+
+    Returns:
+        The same directory, absolute if it is local.
+    """
+    if '://' in directory:
+        return directory
+    return str(Path(directory).resolve())
+
+
 def local_output_path(path: FCPath) -> Path:
     """Return the local path SPICE writes a kernel to.
 
@@ -304,18 +322,21 @@ def _segment_for(assignment: Assignment) -> CkSegment:
             a baseline cannot.
         OSError: if the baseline supplies no pointing at a record epoch.
     """
-    pointing = assignment.entry.pointing
-    if pointing is None:
-        raise ValueError(f'{assignment.image_name} has a baseline and no pointing to write')
+    pointing = pointing_of(assignment)
     try:
         return build_segment(pointing)
     except (OSError, KeyError, ValueError) as exc:
-        # Reported to both logs before it stops the run: the reason set the
-        # report may use has no entry for an image whose baseline reproduced
-        # its attitude and then could not supply a record epoch, and inventing
-        # one would be a schema change for every consumer of the report.
-        IMAGE_LOGGER.error('Could not build the corrected segment: %s', exc)
-        MAIN_LOGGER.error(
+        # The run log only, deliberately.  This stops the run, and the image
+        # log it would otherwise be written to is opened by the reporting pass
+        # that never gets to run; logging through the image logger with no
+        # image scope open is a defect rather than a fallback, and under
+        # strict_scope it would replace this error with a scope error and
+        # demote the real one to a context.  It stops the run because the
+        # reason set the report may use has no entry for an image whose
+        # baseline reproduced its attitude and then could not supply a record
+        # epoch, and inventing one would be a schema change for every consumer
+        # of the report.
+        MAIN_LOGGER.exception(
             '%s: could not build the corrected segment: %s', assignment.image_name, exc
         )
         raise
@@ -333,10 +354,27 @@ def _clock_of(assignment: Assignment) -> int:
     Raises:
         ValueError: if the image carries no pointing.
     """
+    return resolve_sclk_id(pointing_of(assignment).ck_frame_id)
+
+
+def pointing_of(assignment: Assignment) -> ImagePointing:
+    """Return the recorded pointing of an image that is getting a segment.
+
+    Parameters:
+        assignment: The image and the baseline it corrects.
+
+    Returns:
+        Its recorded pointing.
+
+    Raises:
+        ValueError: if the image carries none.  An assignment that names a
+            baseline cannot, so this is the guard on a caller that passed one
+            that names none instead.
+    """
     pointing = assignment.entry.pointing
     if pointing is None:
-        raise ValueError(f'{assignment.image_name} has a baseline and no pointing to write')
-    return resolve_sclk_id(pointing.ck_frame_id)
+        raise ValueError(f'{assignment.image_name} has no pointing to write')
+    return pointing
 
 
 ################################################################################
@@ -463,7 +501,14 @@ def main() -> None:
         load_default_and_user_config(arguments, DEFAULT_CONFIG)
 
     nav_results_root = FileCache(None).new_path(get_nav_results_root(arguments, DEFAULT_CONFIG))
-    output_dir = FileCache(None).new_path(arguments.output_dir)
+    # Resolved to absolute, both of them, because the meta-kernel names the
+    # kernels it furnishes by these paths and SPICE resolves a relative name
+    # against the *consumer's* working directory.  A meta-kernel written with
+    # relative names works only from the directory that generated it, and
+    # elsewhere fails on the first correction -- after the originals have
+    # already loaded, so the pool is left uncorrected rather than empty.
+    output_dir = FileCache(None).new_path(absolute_directory(arguments.output_dir))
+    kernel_dirs = [absolute_directory(directory) for directory in arguments.kernel_dir]
 
     with reporting_logging_errors():
         run_logging = build_run_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
@@ -487,7 +532,7 @@ def main() -> None:
     if len(unreadable) > 0:
         MAIN_LOGGER.error('Could not read %d metadata file(s)', len(unreadable))
 
-    paths = kernel_paths(arguments.kernel_dir)
+    paths = kernel_paths(kernel_dirs)
     # The leapseconds kernel is furnished before the time filter, because the
     # filter's own bounds are UTC and there is nothing to convert them with
     # until it is.  Its candidates are therefore the whole mission's, not the
@@ -515,16 +560,19 @@ def main() -> None:
     # must not be refused for a disagreement between two kernel versions that
     # only images outside that range recorded.
     basenames = recorded_basenames(documents)
-    frames = furnish_supporting_kernels(basenames, paths, FK_SUFFIXES)
+    # The entries are read before any frame kernel is furnished, because they
+    # need no SPICE and they name the frames the frame kernels are checked
+    # against.
+    entries = [_entry_for(document) for document in documents]
+    frames = furnish_frame_kernels(entries, basenames, paths)
     MAIN_LOGGER.info('Furnished frame kernel(s): %s', ', '.join(frames))
 
-    entries = [_entry_for(document) for document in documents]
     sclk_basenames = clock_kernels(entries, basenames, paths)
     for sclk_id, basename in sorted(sclk_basenames.items()):
         MAIN_LOGGER.info('Spacecraft clock %d is encoded with %s', sclk_id, basename)
         cspyce.furnsh(str(cast(Path, resolve_one(basename, paths).retrieve())))
 
-    index = build_ck_index(arguments.kernel_dir)
+    index = build_ck_index(kernel_dirs)
     MAIN_LOGGER.info('Indexed %d candidate C-kernel(s)', len(index.files))
 
     assignments = assign_images(entries, index)
@@ -555,7 +603,11 @@ def main() -> None:
 
     log_totals(log_dispositions(documents, assignments, run_logging))
     MAIN_LOGGER.info('Total elapsed time %.2f sec', time.time() - start_time)
-    sys.exit(0)
+    # Non-zero when anything the run was pointed at could not be read, so a
+    # batch wrapper can tell a clean run from one that silently skipped its
+    # input.  An image the run considered and omitted for a reason is not that:
+    # it is in the report, which is the answer, and it exits zero.
+    sys.exit(1 if len(unreadable) > 0 else 0)
 
 
 def _entry_for(document: Document) -> ImageEntry:
@@ -574,7 +626,9 @@ def _entry_for(document: Document) -> ImageEntry:
     try:
         return ImageEntry.from_metadata(document.metadata)
     except (TypeError, ValueError) as exc:
-        MAIN_LOGGER.error(
+        # The run log only, for the same reason the segment failure reports
+        # there: this stops the run, and no image scope is open to write to.
+        MAIN_LOGGER.exception(
             '%s: cannot be read as a navigated image: %s', document.path.as_posix(), exc
         )
         raise

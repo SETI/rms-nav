@@ -114,3 +114,70 @@ def test_an_unusable_midtime_is_kept_when_no_bound_is_given() -> None:
     selected, undated = inputs.select_by_time([_timed(float('nan'))], None, None)
     assert len(selected) == 1
     assert undated == 0
+
+
+@pytest.mark.parametrize(
+    'metadata',
+    [
+        {},
+        {'navigation_result': 'later'},
+        {'navigation_result': {}},
+        {'navigation_result': {'times': 'later'}},
+    ],
+    ids=['no-result', 'result-not-a-block', 'no-times', 'times-not-a-block'],
+)
+def test_a_document_with_no_usable_times_cannot_be_placed_in_time(
+    metadata: dict[str, Any],
+) -> None:
+    """A load-error document records no exposure and satisfies no range."""
+    document = inputs.Document(path=FCPath('x_metadata.json'), stub='x', metadata=metadata)
+    selected, undated = inputs.select_by_time([document], 0.0, 1.0)
+    assert selected == []
+    assert undated == 1
+
+
+@pytest.mark.parametrize(
+    'metadata',
+    [
+        {},
+        {'navigation_result': 'later'},
+        {'navigation_result': {}},
+        {'navigation_result': {'provenance': 'later'}},
+        {'navigation_result': {'provenance': {}}},
+        {'navigation_result': {'provenance': {'spice_kernels': 'naif0012.tls'}}},
+        {'navigation_result': {'provenance': {'spice_kernels': [1, None]}}},
+    ],
+    ids=[
+        'no-result',
+        'result-not-a-block',
+        'no-provenance',
+        'provenance-not-a-block',
+        'no-kernel-list',
+        'list-is-text',
+        'list-holds-no-text',
+    ],
+)
+def test_a_document_recording_no_kernel_names_contributes_none(
+    metadata: dict[str, Any],
+) -> None:
+    """Gathering the run's kernels never fails on one document's record.
+
+    A document that cannot name kernels is refused where it is read as a
+    navigated image, by name; refusing it here would refuse it for the whole
+    run's pool instead, which says nothing about which document was at fault.
+    """
+    document = inputs.Document(path=FCPath('x_metadata.json'), stub='x', metadata=metadata)
+    assert inputs.recorded_basenames([document]) == ()
+
+
+def test_a_recorded_kernel_no_directory_holds_is_skipped(tmp_path: Path) -> None:
+    """Provenance names every kernel a batch ever furnished, not just this one's.
+
+    A kernel that is genuinely needed and genuinely missing is refused where it
+    is used -- an undefined frame is named by the assignment step -- so
+    skipping here loses nothing and lets a run proceed on a directory set that
+    holds only what this mission needs.
+    """
+    (tmp_path / 'present.tls').write_text('')
+    paths = inputs.kernel_paths([str(tmp_path)])
+    assert inputs.furnish_supporting_kernels(['absent.tls'], paths, frozenset({'.tls'})) == ()

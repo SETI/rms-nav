@@ -146,3 +146,56 @@ def test_a_path_of_exactly_the_string_limit_furnishes(tmp_path: Path) -> None:
     meta = FCPath(str(tmp_path / 'edge.tm'))
     write_meta_kernel(meta, originals=[original], corrections=[])
     assert _furnished_ck_order(tmp_path / 'edge.tm') == [str(original)]
+
+
+def test_a_path_ending_in_a_blank_is_refused() -> None:
+    """SPICE trims it, and then looks for a name one character shorter.
+
+    Measured through a real furnsh: a 119-character path whose last character
+    is a space loads a 118-character name, with no error of any kind.
+    """
+    with pytest.raises(ValueError, match='ends in a blank'):
+        build_meta_kernel_lines(['/kernels/orig.bc '], [])
+
+
+def _path_with_a_blank_at(tmp_path: Path, index: int, tail: str) -> Path:
+    """Return a path under ``tmp_path`` whose character at ``index`` is a space.
+
+    Parameters:
+        tmp_path: The directory the path lies under.
+        index: The absolute character position the space must land on.
+        tail: What follows the space.
+
+    Returns:
+        The path.
+    """
+    prefix = f'{tmp_path}/'
+    assert len(prefix) <= index
+    return tmp_path / ('x' * (index - len(prefix)) + ' ' + tail)
+
+
+def test_no_piece_ends_in_a_blank(tmp_path: Path) -> None:
+    """A join is walked back off a blank, so a name cannot lose one at a cut."""
+    spaced = _path_with_a_blank_at(tmp_path, 78, 'z' * 40 + '.bc')
+    assert str(spaced)[78] == ' '
+    lines = build_meta_kernel_lines([spaced], [])
+    quoted = [line.strip() for line in lines if line.strip().startswith("'")]
+    for piece in quoted:
+        assert not piece.rstrip("'+").endswith(' ')
+
+
+def test_a_path_with_a_blank_at_a_join_furnishes_unchanged(tmp_path: Path) -> None:
+    """And the path SPICE ends up with is the one that was asked for."""
+    directory = _path_with_a_blank_at(tmp_path, 78, 'z' * 30)
+    original = directory / 'orig.bc'
+    assert str(original)[78] == ' '
+    _write_ck(original)
+    meta = FCPath(str(tmp_path / 'blank.tm'))
+    write_meta_kernel(meta, originals=[original], corrections=[])
+    assert _furnished_ck_order(tmp_path / 'blank.tm') == [str(original)]
+
+
+def test_a_run_of_blanks_longer_than_a_piece_is_refused() -> None:
+    """There is no cut left to walk back to, so it is named rather than cut."""
+    with pytest.raises(ValueError, match='run of more than'):
+        build_meta_kernel_lines(['/kernels/' + ' ' * 100 + 'orig.bc'], [])

@@ -34,7 +34,10 @@ from tests.spindoctor.cli.ck.conftest import (
 )
 
 from spindoctor.cli import sd_create_ck
+from spindoctor.cli.ck import inputs
+from spindoctor.cli.ck.assignment import Assignment
 from spindoctor.cli.ck.comments import read_comment_area
+from spindoctor.cli.ck.images import ImageEntry, OmissionReason
 
 # The two exposures are far enough apart that no original kernel covers both,
 # so each image has exactly one candidate and the two land in different files.
@@ -246,13 +249,73 @@ def run_tree(tmp_path: Path) -> dict[str, Path]:
     return {'kernels': kernels, 'results': results, 'output': output}
 
 
-def _run(tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, *extra: str) -> None:
+@pytest.fixture
+def straddling_tree(tmp_path: Path) -> dict[str, Path]:
+    """Build a run whose one image outlasts the baseline that reproduces it.
+
+    The baseline covers a second either side of the exposure midtime and the
+    exposure runs for four, so the midtime reproduces -- which is what pairs
+    the image with this baseline -- and the segment's start and stop records
+    then have no pointing to read.
+    """
+    kernels = tmp_path / 'kernels'
+    results = tmp_path / 'results'
+    output = tmp_path / 'output'
+    support = write_support_kernels(kernels)
+    for path in support:
+        cspyce.furnsh(str(path))
+    baseline = kernels / _BASELINE_A
+    try:
+        write_baseline_ck(
+            baseline,
+            ck_frame_id=CASSINI_CK_FRAME_ID,
+            sclk_id=_CASSINI_SCLK_ID,
+            epochs=[_IMAGE_A_ET - 1.0, _IMAGE_A_ET, _IMAGE_A_ET + 1.0],
+            attitude=baseline_attitude,
+            angular_velocity=baseline_angular_velocity,
+        )
+        cspyce.furnsh(str(baseline))
+        original = _camera_attitude(_IMAGE_A_ET)
+    finally:
+        for path in reversed([*support, baseline]):
+            cspyce.unload(str(path))
+    metadata = image_metadata(
+        image_name='G_CALIB',
+        cmatrix=_corrected(original),
+        cmatrix_original=original,
+        camera_frame=CASSINI_CAMERA_FRAME,
+        ck_frame_id=CASSINI_CK_FRAME_ID,
+        start_et=_IMAGE_A_ET - 2.0,
+        stop_et=_IMAGE_A_ET + 2.0,
+        status='success',
+        instrument='coiss',
+        camera='NAC',
+        shutter_mode='NACONLY',
+        kernels=_KERNEL_NAMES,
+        sclk_midtime='1/1484573295.118',
+        offset=(-3.25, 1.125),
+        sigma_px=(0.0625, 0.0313),
+        confidence=0.8125,
+        confidence_rank='high',
+        status_reason='ensemble_agreement',
+    )
+    _write_metadata(results, 'vol/G_CALIB', metadata)
+    return {'kernels': kernels, 'results': results, 'output': output}
+
+
+def _run(
+    tree: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    *extra: str,
+    expected_exit: int = 0,
+) -> None:
     """Run the driver over a prepared tree.
 
     Parameters:
         tree: The directories the fixture built.
         monkeypatch: Used to set the command line.
         extra: Additional arguments.
+        expected_exit: The exit status the run should end with.
     """
     monkeypatch.setattr(
         'sys.argv',
@@ -272,7 +335,7 @@ def _run(tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, *extra: str) ->
     )
     with pytest.raises(SystemExit) as exit_info:
         sd_create_ck.main()
-    assert exit_info.value.code == 0
+    assert exit_info.value.code == expected_exit
 
 
 def _utc(tree: dict[str, Path], et: float) -> str:
@@ -581,3 +644,316 @@ def test_a_remote_output_directory_is_refused() -> None:
     """SPICE creates a kernel by name on the local filesystem and nowhere else."""
     with pytest.raises(ValueError, match='not a local directory'):
         sd_create_ck.local_output_path(FCPath('gs://bucket/out/orig_nav.bc'))
+
+
+# ---------------------------------------------------------------------------
+# What the run says when something goes wrong
+# ---------------------------------------------------------------------------
+
+
+def test_an_unreadable_metadata_file_is_named_in_the_run_log(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """It names no image, so the run log is the only place it can be reported."""
+    (run_tree['results'] / 'vol' / f'broken{inputs.METADATA_SUFFIX}').write_text('{not json')
+    _run(run_tree, monkeypatch, expected_exit=1)
+    log = _run_log(run_tree)
+    assert 'broken_metadata.json' in log
+    assert 'Could not read 1 metadata file(s)' in log
+
+
+def test_an_unreadable_metadata_file_makes_the_run_exit_non_zero(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """A batch wrapper cannot otherwise tell a clean run from a skipped one."""
+    (run_tree['results'] / 'vol' / f'broken{inputs.METADATA_SUFFIX}').write_text('[1, 2]')
+    _run(run_tree, monkeypatch, expected_exit=1)
+
+
+def test_the_run_still_writes_what_it_could_read(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """One unreadable file is reported, not a reason to abandon the others."""
+    (run_tree['results'] / 'vol' / f'broken{inputs.METADATA_SUFFIX}').write_text('{not json')
+    _run(run_tree, monkeypatch, expected_exit=1)
+    assert (run_tree['output'] / 'orig_a_nav.bc').exists()
+
+
+def test_an_image_that_cannot_be_placed_in_time_is_reported(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """A time range was asked for and this image cannot be shown to satisfy it."""
+    metadata = _image(
+        image_name='E_CALIB',
+        midtime=_IMAGE_A_ET,
+        cmatrix_original=np.eye(3),
+        cmatrix=np.eye(3),
+    )
+    del metadata['navigation_result']['times']['midtime_et']
+    _write_metadata(run_tree['results'], 'vol/E_CALIB', metadata)
+    _run(run_tree, monkeypatch, '--start-time', _utc(run_tree, _IMAGE_A_ET - 100.0))
+    assert 'Ignored 1 image(s) that recorded no exposure midtime' in _run_log(run_tree)
+
+
+def test_a_run_selecting_nothing_says_so_and_writes_nothing(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """A time range that excludes every image is not an error, and not silent."""
+    _run(run_tree, monkeypatch, '--start-time', _utc(run_tree, _IMAGE_B_ET + 10000.0))
+    assert 'No images selected; nothing to write' in _run_log(run_tree)
+    assert list(run_tree['output'].glob('*.bc')) == []
+
+
+def test_a_run_correcting_nothing_writes_no_meta_kernel(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """A meta-kernel naming no correction would furnish only the originals."""
+    for name in ('A_CALIB', 'B_CALIB', 'D_CALIB'):
+        (run_tree['results'] / 'vol' / f'{name}_metadata.json').unlink()
+    _run(run_tree, monkeypatch)
+    assert 'no meta-kernel written' in _run_log(run_tree)
+    assert not (run_tree['output'] / 'coiss_nav.tm').exists()
+
+
+def test_a_run_correcting_nothing_still_writes_the_report(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The report is the answer, and 'nothing was corrected' is an answer."""
+    for name in ('A_CALIB', 'B_CALIB', 'D_CALIB'):
+        (run_tree['results'] / 'vol' / f'{name}_metadata.json').unlink()
+    _run(run_tree, monkeypatch)
+    assert _report_rows(run_tree)['C_CALIB']['omission_reason'] == 'not_eligible'
+
+
+def test_a_document_that_is_not_a_navigated_image_stops_the_run(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The closed reason set has no entry for a record the reader cannot read."""
+    metadata = _image(
+        image_name='F_CALIB',
+        midtime=_IMAGE_A_ET,
+        cmatrix_original=np.eye(3),
+        cmatrix=np.eye(3),
+    )
+    metadata['navigation_result']['provenance']['spice_kernels'] = []
+    _write_metadata(run_tree['results'], 'vol/F_CALIB', metadata)
+    monkeypatch.setattr(
+        'sys.argv',
+        [
+            'sd_create_ck',
+            'coiss',
+            '--nav-results-root',
+            str(run_tree['results']),
+            '--kernel-dir',
+            str(run_tree['kernels']),
+            '--output-dir',
+            str(run_tree['output']),
+            '--log-root',
+            str(run_tree['output'] / 'logs'),
+        ],
+    )
+    with pytest.raises(ValueError, match='spice_kernels'):
+        sd_create_ck.main()
+
+
+def test_a_document_that_is_not_a_navigated_image_is_named_in_the_run_log(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Named before it propagates, so the operator knows which file to look at."""
+    metadata = _image(
+        image_name='F_CALIB',
+        midtime=_IMAGE_A_ET,
+        cmatrix_original=np.eye(3),
+        cmatrix=np.eye(3),
+    )
+    metadata['navigation_result']['provenance']['spice_kernels'] = []
+    _write_metadata(run_tree['results'], 'vol/F_CALIB', metadata)
+    monkeypatch.setattr(
+        'sys.argv',
+        [
+            'sd_create_ck',
+            'coiss',
+            '--nav-results-root',
+            str(run_tree['results']),
+            '--kernel-dir',
+            str(run_tree['kernels']),
+            '--output-dir',
+            str(run_tree['output']),
+            '--log-root',
+            str(run_tree['output'] / 'logs'),
+        ],
+    )
+    with pytest.raises(ValueError, match='spice_kernels'):
+        sd_create_ck.main()
+    assert 'F_CALIB_metadata.json: cannot be read as a navigated image' in _run_log(run_tree)
+
+
+def test_an_exposure_its_baseline_does_not_cover_stops_the_run(
+    straddling_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The reason set has no entry for a baseline that covers only the midtime."""
+    monkeypatch.setattr(
+        'sys.argv',
+        [
+            'sd_create_ck',
+            'coiss',
+            '--nav-results-root',
+            str(straddling_tree['results']),
+            '--kernel-dir',
+            str(straddling_tree['kernels']),
+            '--output-dir',
+            str(straddling_tree['output']),
+            '--log-root',
+            str(straddling_tree['output'] / 'logs'),
+        ],
+    )
+    with pytest.raises(OSError, match='SPICE'):
+        sd_create_ck.main()
+
+
+def test_an_exposure_its_baseline_does_not_cover_survives_strict_scope(
+    straddling_tree: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    pool_restored: None,
+    strict_log_scope: None,
+) -> None:
+    """The real error reaches the caller, not a scope error standing in for it.
+
+    Logging this through the image logger would raise ``LogScopeError`` under
+    this documented setting, and that error would *replace* the one worth
+    reading, demoting the SPICE failure to a context nobody prints.
+    """
+    monkeypatch.setattr(
+        'sys.argv',
+        [
+            'sd_create_ck',
+            'coiss',
+            '--nav-results-root',
+            str(straddling_tree['results']),
+            '--kernel-dir',
+            str(straddling_tree['kernels']),
+            '--output-dir',
+            str(straddling_tree['output']),
+            '--log-root',
+            str(straddling_tree['output'] / 'logs'),
+        ],
+    )
+    with pytest.raises(OSError, match='SPICE'):
+        sd_create_ck.main()
+
+
+def test_an_exposure_its_baseline_does_not_cover_is_named_in_the_run_log(
+    straddling_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Named in the run log only: no image scope is open for it to be in."""
+    monkeypatch.setattr(
+        'sys.argv',
+        [
+            'sd_create_ck',
+            'coiss',
+            '--nav-results-root',
+            str(straddling_tree['results']),
+            '--kernel-dir',
+            str(straddling_tree['kernels']),
+            '--output-dir',
+            str(straddling_tree['output']),
+            '--log-root',
+            str(straddling_tree['output'] / 'logs'),
+        ],
+    )
+    with pytest.raises(OSError, match='SPICE'):
+        sd_create_ck.main()
+    assert 'G_CALIB: could not build the corrected segment' in _run_log(straddling_tree)
+
+
+def test_an_image_with_no_pointing_has_no_segment_to_build() -> None:
+    """The guard on the one caller that could pass an omitted image.
+
+    An assignment that names a baseline always carries pointing, so this is
+    reachable only from an assignment that names a reason instead.
+    """
+    entry = ImageEntry(
+        image_name='H_CALIB',
+        status='failed',
+        camera=None,
+        shutter_mode=None,
+        rotation_fitted=False,
+        kernel_basenames=(),
+        pointing=None,
+        ineligibility_reason=OmissionReason.NOT_ELIGIBLE,
+    )
+    assignment = Assignment(entry=entry, baseline=None, omission_reason=OmissionReason.NOT_ELIGIBLE)
+    with pytest.raises(ValueError, match='no pointing to write'):
+        sd_create_ck.pointing_of(assignment)
+
+
+# ---------------------------------------------------------------------------
+# Paths a consumer has to be able to resolve
+# ---------------------------------------------------------------------------
+
+
+def test_the_meta_kernel_names_absolute_paths(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """SPICE resolves a relative name against the consumer's directory, not ours."""
+    monkeypatch.chdir(run_tree['output'].parent)
+    monkeypatch.setattr(
+        'sys.argv',
+        [
+            'sd_create_ck',
+            'coiss',
+            '--nav-results-root',
+            'results',
+            '--kernel-dir',
+            'kernels',
+            '--output-dir',
+            'output',
+            '--log-root',
+            'output/logs',
+        ],
+    )
+    with pytest.raises(SystemExit):
+        sd_create_ck.main()
+    meta = str(run_tree['output'] / 'coiss_nav.tm')
+    cspyce.furnsh(meta)
+    try:
+        named = [str(cspyce.kdata(at, 'CK')[0]) for at in range(int(cspyce.ktotal('CK')))]
+    finally:
+        cspyce.unload(meta)
+    assert [name for name in named if not name.startswith('/')] == []
+
+
+def test_a_meta_kernel_written_from_a_relative_run_still_furnishes(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None, tmp_path: Path
+) -> None:
+    """Furnished from somewhere else entirely, which is where a consumer is."""
+    monkeypatch.chdir(run_tree['output'].parent)
+    monkeypatch.setattr(
+        'sys.argv',
+        [
+            'sd_create_ck',
+            'coiss',
+            '--nav-results-root',
+            'results',
+            '--kernel-dir',
+            'kernels',
+            '--output-dir',
+            'output',
+            '--log-root',
+            'output/logs',
+        ],
+    )
+    with pytest.raises(SystemExit):
+        sd_create_ck.main()
+    monkeypatch.chdir(tmp_path.parent)
+    meta = str(run_tree['output'] / 'coiss_nav.tm')
+    cspyce.furnsh(meta)
+    try:
+        assert int(cspyce.ktotal('CK')) == 4
+    finally:
+        cspyce.unload(meta)
+
+
+def test_a_remote_directory_is_left_as_it_was_given() -> None:
+    """It is already absolute, and there is no local directory to resolve it against."""
+    assert sd_create_ck.absolute_directory('gs://bucket/kernels') == 'gs://bucket/kernels'

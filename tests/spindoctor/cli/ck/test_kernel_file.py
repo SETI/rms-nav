@@ -168,11 +168,25 @@ def test_a_name_too_long_to_be_the_internal_name_is_refused(tmp_path: Path) -> N
 
 
 def test_writing_over_an_existing_file_is_refused(tmp_path: Path) -> None:
-    """Regeneration replaces a corrected kernel; it never appends to one."""
+    """Regeneration replaces a corrected kernel; it never appends to one.
+
+    Said in words rather than left to SPICE, which reports only an operating
+    system status number for it.
+    """
     path = tmp_path / 'orig_nav.bc'
     write_ck_file(path, [_segment()], _COMMENT_LINES)
-    with pytest.raises(RuntimeError, match='FILEOPENFAIL'):
+    with pytest.raises(ValueError, match='already exists'):
         write_ck_file(path, [_segment()], _COMMENT_LINES)
+
+
+def test_a_refused_overwrite_leaves_the_existing_file_alone(tmp_path: Path) -> None:
+    """The refusal happens before anything is opened, so nothing is truncated."""
+    path = tmp_path / 'orig_nav.bc'
+    write_ck_file(path, [_segment()], _COMMENT_LINES)
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match='already exists'):
+        write_ck_file(path, [_segment()], _COMMENT_LINES)
+    assert path.read_bytes() == before
 
 
 def test_the_kernel_reads_with_no_writer_code_present(pool: KernelPool) -> None:
@@ -198,3 +212,44 @@ def test_a_name_one_character_longer_is_refused(tmp_path: Path) -> None:
     assert len(path.name) == 61
     with pytest.raises(ValueError, match='internal name'):
         write_ck_file(path, [_segment()], _COMMENT_LINES)
+
+
+def test_a_failed_segment_write_reports_its_own_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not the one closing a segment-less C-kernel raises on the way out.
+
+    ``write_segment`` is replaced rather than provoked: SPICE refuses a record
+    set this module's own dataclass refuses first, so there is no segment that
+    reaches ``ckw03`` and fails there.  What is under test is which of the two
+    errors the caller is left holding.
+    """
+
+    def _refuse(handle: int, segment: CkSegment) -> None:
+        """Fail the way a rejected record set would."""
+        raise ValueError('the record set was rejected')
+
+    monkeypatch.setattr('spindoctor.cli.ck.kernel_file.write_segment', _refuse)
+    with pytest.raises(ValueError, match='the record set was rejected'):
+        write_ck_file(tmp_path / 'broken_nav.bc', [_segment()], _COMMENT_LINES)
+
+
+def test_a_failed_segment_write_still_closes_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A leaked DAF handle breaks an unrelated open later, naming neither.
+
+    Measured by opening enough files afterwards to exhaust the cap a leak
+    would eat into; a successful write of another kernel is the observable.
+    """
+
+    def _refuse(handle: int, segment: CkSegment) -> None:
+        """Fail the way a rejected record set would."""
+        raise ValueError('the record set was rejected')
+
+    monkeypatch.setattr('spindoctor.cli.ck.kernel_file.write_segment', _refuse)
+    with pytest.raises(ValueError, match='the record set was rejected'):
+        write_ck_file(tmp_path / 'broken_nav.bc', [_segment()], _COMMENT_LINES)
+    monkeypatch.undo()
+    write_ck_file(tmp_path / 'later_nav.bc', [_segment()], _COMMENT_LINES)
+    assert (tmp_path / 'later_nav.bc').exists()

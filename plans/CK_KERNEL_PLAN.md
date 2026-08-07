@@ -509,6 +509,22 @@ about the very thing being encoded. The probe needs the clock not to be
 defined already, or a kernel furnished earlier would answer for every
 candidate alike, so that is checked rather than assumed.
 
+**The frame kernels get the same discipline, differently shaped.** A mission
+furnishes several frame kernels at once by design -- Cassini's dynamic, rocks
+and status kernels beside its main one -- so they are not resolved to one.
+What is refused is two of them defining a frame *this run's images name*: the
+camera frame the reproduction test asks through, or the frame naming a
+corrected object. A text kernel's last assignment wins, and two versions of a
+mission's frame kernel differ in exactly the assignment that fixes the camera
+to the spacecraft, so a corpus navigated across a frame kernel upgrade would
+be reproduced entirely against whichever version sorted last. Every image
+navigated under the other then fails to reproduce, the run writes nothing, and
+it reports the whole corpus as `no_reproducing_baseline` -- the drift verdict,
+for a pool the run built itself. That is the misdiagnosis item 4 below exists
+to prevent, arriving by a different route, and it is refused the same way:
+before any candidate is tried, naming the two kernels and the frame they
+disagree about.
+
 The choice is per image and the pool is per run, so the run's images must
 agree: two images of one spacecraft whose records name different versions of
 its clock kernel cannot both be encoded correctly by one pool, and the run
@@ -782,10 +798,31 @@ it cannot be placed in time; and `--output-dir`.
 omission**, because the omission-reason set is closed and neither has an
 entry in it: a metadata document that cannot be read as a navigated image at
 all, and an image whose baseline reproduced its attitude and then supplied no
-pointing at one of its record epochs. Both name the image in both logs before
-they propagate. A metadata *file* that is not readable as JSON is different:
-it names no image, so there is nothing for the report to say about it, and it
-is counted and reported to the run log rather than stopping the run.
+pointing at one of its record epochs. Both name the image in **the run log
+only** -- not in both, which the "anything that degrades or omits a result"
+rule above would otherwise ask for. That rule is about a result the run goes
+on to report; these two end the run, and the per-image log they would be
+written to is opened by the reporting pass that then never runs. Logging
+through the image logger with no image scope open is a defect rather than a
+fallback, and under `logging.strict_scope` the `LogScopeError` it raises
+would *replace* the failure worth reading and demote it to a `__context__`
+nobody prints -- so a documented configuration setting would turn a
+diagnosable failure into a logging crash.
+
+A metadata *file* that is not readable as JSON is different again: it names
+no image, so there is nothing for the report to say about it and nothing an
+omission reason could attach to. It is counted and named in the run log, the
+run continues on what it could read, and **the run exits non-zero**, so a
+batch wrapper can tell a clean run from one that silently skipped its input.
+
+**The output directory and the kernel directories are resolved to absolute
+paths** before anything is written. The meta-kernel names the kernels it
+furnishes by these paths and SPICE resolves a relative name against the
+*consumer's* working directory, so a meta-kernel written from a relative
+`--output-dir` would work only from the directory that generated it, and
+elsewhere would fail on the first correction -- after the originals had
+already loaded, leaving the consumer with an uncorrected pool rather than an
+empty one.
 
 ### 3.6 The writer's imports, and cspyce
 

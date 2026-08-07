@@ -23,6 +23,7 @@ import cspyce
 from filecache import FCPath
 
 from spindoctor.cli.ck.clocks import SCLK_SUFFIX, select_sclk_kernel
+from spindoctor.cli.ck.frames import FK_SUFFIXES, require_one_frame_kernel_per_frame
 from spindoctor.cli.ck.images import ImageEntry
 from spindoctor.cli.ck.segment import resolve_sclk_id
 
@@ -31,9 +32,6 @@ METADATA_SUFFIX = '_metadata.json'
 
 LSK_SUFFIXES = frozenset({'.tls'})
 """The extension a leapseconds kernel carries in the holdings."""
-
-FK_SUFFIXES = frozenset({'.tf', '.tk'})
-"""The extensions a frame kernel carries in the holdings."""
 
 
 @dataclass(frozen=True)
@@ -309,6 +307,49 @@ def furnish_supporting_kernels(
         cspyce.furnsh(local)
         furnished.append(basename)
     return tuple(furnished)
+
+
+def furnish_frame_kernels(
+    entries: Sequence[ImageEntry],
+    basenames: Sequence[str],
+    paths: Mapping[str, tuple[FCPath, ...]],
+) -> tuple[str, ...]:
+    """Furnish the run's frame kernels, refusing two that define one frame.
+
+    A mission furnishes several frame kernels at once by design, so they are
+    not resolved to one the way a clock kernel is.  What is refused is two of
+    them defining a frame this run's images actually name -- the camera frame
+    the reproduction test asks through, or the frame naming a corrected object
+    -- since the pool would answer with whichever was furnished last and every
+    image navigated through the other would be reported as having no baseline.
+
+    Parameters:
+        entries: The images the run considered.  Those carrying no pointing
+            name no frames.
+        basenames: Every kernel basename the run's documents record.
+        paths: The indexed kernel directories.
+
+    Returns:
+        The basenames furnished, in the order they were furnished.
+
+    Raises:
+        ValueError: if a basename resolves to more than one file, if a frame
+            the run needs is already defined by a furnished kernel, or if two
+            candidates define the same one.
+        OSError: if a kernel cannot be furnished.
+    """
+    candidates = {
+        basename: resolve_one(basename, paths)
+        for basename in basenames
+        if Path(basename).suffix.lower() in FK_SUFFIXES and basename in paths
+    }
+    pointings = [entry.pointing for entry in entries if entry.pointing is not None]
+    require_one_frame_kernel_per_frame(
+        candidates,
+        camera_frames={pointing.camera_frame for pointing in pointings},
+        ck_frame_ids={pointing.ck_frame_id for pointing in pointings},
+    )
+    return furnish_supporting_kernels(basenames, paths, FK_SUFFIXES)
 
 
 def clock_kernels(

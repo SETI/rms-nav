@@ -56,6 +56,13 @@ from spindoctor.cli.ck.comments import (
     reserved_comment_chars,
     write_comment_area,
 )
+from spindoctor.cli.ck.frames import (
+    FK_SUFFIXES,
+    camera_frame_is_defined,
+    frames_defined_by,
+    object_frame_is_defined,
+    require_one_frame_kernel_per_frame,
+)
 from spindoctor.cli.ck.images import ImageEntry, OmissionReason, botsim_losers
 from spindoctor.cli.ck.index import (
     CkFile,
@@ -68,6 +75,7 @@ from spindoctor.cli.ck.index import (
 from spindoctor.cli.ck.inputs import (
     Document,
     clock_kernels,
+    furnish_frame_kernels,
     furnish_supporting_kernels,
     furnished,
     kernel_paths,
@@ -97,6 +105,7 @@ from spindoctor.cli.ck.segment import (
 
 # The package's own surface, not published API: see the module docstring.
 __all__ = [
+    'FK_SUFFIXES',
     'REPORT_COLUMNS',
     'Assignment',
     'CkFile',
@@ -120,14 +129,18 @@ __all__ = [
     'build_comment_lines',
     'build_meta_kernel_lines',
     'build_segment',
+    'camera_frame_is_defined',
     'clock_is_defined',
     'clock_kernels',
     'first_data_record',
+    'frames_defined_by',
+    'furnish_frame_kernels',
     'furnish_supporting_kernels',
     'furnished',
     'group_for_output',
     'kernel_class_for_directory',
     'kernel_paths',
+    'object_frame_is_defined',
     'output_basename',
     'read_comment_area',
     'read_documents',
@@ -135,6 +148,7 @@ __all__ = [
     'recorded_basenames',
     'report_text',
     'reproduces_baseline',
+    'require_one_frame_kernel_per_frame',
     'reserved_comment_chars',
     'resolve_one',
     'resolve_sclk_id',

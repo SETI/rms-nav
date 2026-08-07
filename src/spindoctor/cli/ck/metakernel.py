@@ -19,6 +19,16 @@ SPICE's continuation mechanism is used instead: a value ending in ``+`` is
 joined to the one after it, so a long path is written as several strings.  A
 path that itself ends in ``+`` cannot be written that way at all, since its last
 character is indistinguishable from the marker, and it is refused by name.
+
+Blanks need the same care, and get less of it from SPICE.  A trailing blank is
+trimmed from a text kernel string, so a path whose last character is a blank
+comes back one character shorter than it went in -- measured through a real
+``furnsh``: a 119-character path whose last character is a space loads a
+118-character name, with no error.  Such a path is refused.  A blank *inside* a
+path survives on the toolkit installed here, at a join as anywhere else, but
+the joins are chosen to fall on non-blanks anyway: it costs nothing, the
+holdings tree holds names with spaces in them, and a name that lost a character
+in the middle would reach the consumer as a file it never asked for.
 """
 
 from collections.abc import Sequence
@@ -95,11 +105,14 @@ def _quoted_pieces(path: str) -> list[str]:
 
     Returns:
         One quoted string per piece, each at most 80 characters of content,
-        every piece but the last carrying the continuation marker.
+        every piece but the last carrying the continuation marker.  No piece
+        ends in a blank: SPICE trims a trailing blank from a string value, and
+        a piece that ended in one would lose a character out of the middle of
+        the joined path.
 
     Raises:
-        ValueError: if the path is empty, ends in the continuation character,
-            or holds a quote or a non-printing character.
+        ValueError: if the path is empty, ends in the continuation character
+            or in a blank, or holds a quote or a non-printing character.
     """
     if len(path) == 0:
         raise ValueError('a meta-kernel cannot name an empty path')
@@ -108,16 +121,57 @@ def _quoted_pieces(path: str) -> list[str]:
             f'{path!r} ends in {_CONTINUATION!r}, which a meta-kernel reads as a continuation '
             f'onto the next kernel rather than as part of this one'
         )
+    if path != path.rstrip():
+        raise ValueError(
+            f'{path!r} ends in a blank, which SPICE trims from a text kernel string; the name it '
+            f'would then look for is one character shorter than the one asked for'
+        )
     if "'" in path:
         raise ValueError(f'{path!r} holds a quote, which a text kernel string cannot carry')
     for character in path:
         if not character.isprintable():
             raise ValueError(f'{path!r} holds the non-printing character {character!r}')
-    pieces = [path[at : at + _MAX_PIECE_CHARS] for at in range(0, len(path), _MAX_PIECE_CHARS)]
+    pieces = _split_on_non_blanks(path)
     return [
         f"'{piece}{_CONTINUATION if at < len(pieces) - 1 else ''}'"
         for at, piece in enumerate(pieces)
     ]
+
+
+def _split_on_non_blanks(path: str) -> list[str]:
+    """Split a path into pieces none of which ends in a blank.
+
+    A path is cut at the widest piece the string limit allows, and then the cut
+    is walked back over any blank it landed on, so that a directory or file
+    name holding a space cannot lose it at a join.  The holdings tree does hold
+    such names, and the loss would be silent: the consumer is told a file it
+    never asked for is missing.
+
+    Parameters:
+        path: The path to split, already known to end in a non-blank.
+
+    Returns:
+        The pieces, in order, each at most ``_MAX_PIECE_CHARS`` long.
+
+    Raises:
+        ValueError: if the path holds a run of blanks longer than a piece,
+            which leaves no cut to walk back to.
+    """
+    pieces: list[str] = []
+    rest = path
+    while len(rest) > _MAX_PIECE_CHARS:
+        width = _MAX_PIECE_CHARS
+        while width > 0 and rest[width - 1].isspace():
+            width -= 1
+        if width == 0:
+            raise ValueError(
+                f'{path!r} holds a run of more than {_MAX_PIECE_CHARS} blanks, which cannot be '
+                f'written as text kernel strings without one of them falling at a join'
+            )
+        pieces.append(rest[:width])
+        rest = rest[width:]
+    pieces.append(rest)
+    return pieces
 
 
 def write_meta_kernel(
