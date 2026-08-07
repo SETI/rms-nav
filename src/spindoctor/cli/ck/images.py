@@ -61,14 +61,24 @@ class OmissionReason(Enum):
 
     Every image appears in the report exactly once, with either the file
     carrying its segment or one of these reasons.  The set is closed: a new
-    reason is a schema change for every consumer of the report.
+    reason is a schema change for every consumer of the report, and every
+    member is one the generator emits, so a consumer that handles all four
+    handles every report this tool writes.  A reason no run can produce would
+    be worse than a missing one, since it asks every consumer to write dead
+    code against a case that will never arrive.
+
+    An image whose pointing the writer cannot express as a segment at all --
+    an exposure needing more records than a segment holds, or one whose
+    baseline supplies angular velocity at only some of its records -- is not
+    one of these.  It stops the run, because the run has found something about
+    the kernels or the metadata that the operator has to see, and reporting it
+    as one image's omission would bury it.
     """
 
     NOT_ELIGIBLE = 'not_eligible'
     BOTSIM_LOSER = 'botsim_loser'
     ROTATION_UNSUPPORTED = 'rotation_unsupported'
     NO_REPRODUCING_BASELINE = 'no_reproducing_baseline'
-    DEGENERATE_EXPOSURE = 'degenerate_exposure'
 
 
 @dataclass(frozen=True)
