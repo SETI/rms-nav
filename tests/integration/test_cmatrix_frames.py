@@ -175,6 +175,13 @@ def test_measured_flip_matches_the_expected_constant(
 
     Also pins the frame name and CK object the solution records, since a
     correct flip against the wrong frame would be a silent mis-attribution.
+
+    Parameters:
+        obs_class: The instrument class the image is loaded through.
+        relative: Holdings-relative path of the image.
+        camera_frame: SPICE name of the frame the solution must record.
+        expected_flip: The instrument's documented constant flip.
+        ck_frame_id: SPICE id of the object the solution must record.
     """
     obs = _load(obs_class, relative)
     solution = compute_pointing(obs, offset_px=_OFFSET, rotation_fitted=False)
@@ -202,6 +209,11 @@ def test_measured_flip_is_identical_at_start_mid_and_stop(
 
     The correction is applied as a constant conjugation, which is only valid
     if the two frames really are rigidly attached to each other.
+
+    Parameters:
+        obs_class: The instrument class the image is loaded through.
+        relative: Holdings-relative path of the image.
+        camera_frame: SPICE name of the frame the flip is measured against.
     """
     obs = _load(obs_class, relative)
     at_mid = _measured_flip(obs, camera_frame, float(obs.midtime))
@@ -265,7 +277,12 @@ def test_voyager_flip_is_the_identity() -> None:
 def test_recorded_times_bracket_the_midtime(
     obs_class: type[ObsSnapshotInst], relative: str
 ) -> None:
-    """The recorded epochs are the observation's own exposure window."""
+    """The recorded epochs are the observation's own exposure window.
+
+    Parameters:
+        obs_class: The instrument class the image is loaded through.
+        relative: Holdings-relative path of the image.
+    """
     obs = _load(obs_class, relative)
     solution = compute_pointing(obs, offset_px=_OFFSET, rotation_fitted=False)
     assert solution is not None
@@ -289,7 +306,12 @@ def test_recorded_times_bracket_the_midtime(
 def test_recorded_clock_strings_are_distinct_and_ordered(
     obs_class: type[ObsSnapshotInst], relative: str
 ) -> None:
-    """Start, midtime and stop encode to three different clock readings."""
+    """Start, midtime and stop encode to three different clock readings.
+
+    Parameters:
+        obs_class: The instrument class the image is loaded through.
+        relative: Holdings-relative path of the image.
+    """
     obs = _load(obs_class, relative)
     solution = compute_pointing(obs, offset_px=_OFFSET, rotation_fitted=False)
     assert solution is not None
@@ -317,6 +339,11 @@ def test_the_recorded_ck_object_resolves_to_the_missions_clock(
     it, so a wrong CK object would yield a plausible clock and clock strings
     encoding another spacecraft's time.  This pins the pair per mission
     against what SPICE actually resolves.
+
+    Parameters:
+        obs_class: The instrument class the image is loaded through.
+        relative: Holdings-relative path of the image.
+        sclk_id: The spacecraft clock the mission's CK object must resolve to.
     """
     obs = _load(obs_class, relative)
     identity = _frame_identity(obs)
@@ -346,6 +373,10 @@ def test_recorded_cmatrix_recovers_the_planted_offset(
     pinned at once: a flipped ``xy_offset``, a transposed correction, a
     dropped or reversed ``R`` conjugation, and a reversed composition all
     return a different offset.
+
+    Parameters:
+        obs_class: The instrument class the image is loaded through.
+        relative: Holdings-relative path of the image.
     """
     obs = _load(obs_class, relative)
     solution = compute_pointing(obs, offset_px=_OFFSET, rotation_fitted=False)
@@ -378,6 +409,10 @@ def test_recorded_cmatrix_recovers_a_sub_pixel_offset(
     The degenerate-axis guard must not absorb a real measurement, and the
     second-order rotation-versus-shift difference is proportional to the
     offset, so a small offset recovers tighter than a large one.
+
+    Parameters:
+        obs_class: The instrument class the image is loaded through.
+        relative: Holdings-relative path of the image.
     """
     obs = _load(obs_class, relative)
     solution = compute_pointing(obs, offset_px=_SMALL_OFFSET, rotation_fitted=False)
