@@ -1354,6 +1354,33 @@ def test_orchestrator_passes_the_fitted_rotation_flag_through(
     assert seen['rotation_fitted'] is False
 
 
+def test_orchestrator_reports_a_fitted_rotation_to_the_pointing(
+    fake_obs: _FakeObs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A result carrying a fitted rotation is reported as one.
+
+    The rotation turns about a per-technique pivot that no result records, so
+    an attitude cannot express it and none is claimed.  Reporting such a result
+    as unrotated would publish a C-matrix computed from the translation alone,
+    with the rotation silently dropped -- and the metadata is a product in its
+    own right, whatever the kernel writer later does with it.
+    """
+    seen: dict[str, Any] = {}
+
+    def _record(obs: Any, *, offset_px: Any, rotation_fitted: bool) -> None:
+        seen['rotation_fitted'] = rotation_fitted
+        return None
+
+    monkeypatch.setattr('spindoctor.nav_orchestrator.orchestrator.compute_pointing', _record)
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    seen.clear()
+    orch.with_pointing(replace(result, rotation_rad=0.0035), obs)  # type: ignore[arg-type]
+    assert seen['rotation_fitted'] is True
+
+
 def test_orchestrator_reports_but_survives_a_failed_pointing_computation(
     fake_obs: _FakeObs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
