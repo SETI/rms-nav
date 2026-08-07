@@ -475,13 +475,17 @@ def test_a_sub_tick_exposure_still_yields_three_records(pool: KernelPool) -> Non
 
 @pytest.mark.parametrize(
     ('exposure_s', 'expected_records'),
-    [(2.0, 3), (10.0, 3), (25.0, 27)],
-    ids=['short', 'at-threshold', 'long'],
+    [(2.0, 3), (9.999, 3), (10.0, 11), (25.0, 27)],
+    ids=['short', 'just-under-threshold', 'at-threshold', 'long'],
 )
 def test_record_count_follows_the_cadence(
     pool: KernelPool, exposure_s: float, expected_records: int
 ) -> None:
     """Long exposures get a one-second cadence; short ones get three records.
+
+    Ten seconds exactly is on the cadence side of the boundary, because it is
+    an ordinary commanded exposure and three records over ten seconds have
+    already lost measurable fidelity.
 
     Parameters:
         exposure_s: Exposure duration under test, in seconds.
@@ -498,6 +502,20 @@ def test_record_count_follows_the_cadence(
     assert case.segment.record_count == expected_records
     assert case.segment.begtim == _tick(-82, start_et)
     assert case.segment.endtim == _tick(-82, stop_et)
+
+
+def test_an_exposure_needing_more_records_than_a_segment_holds_is_refused(
+    pool: KernelPool,
+) -> None:
+    """A span no instrument commands is refused rather than expanded.
+
+    The cadence arithmetic has no bound of its own: a span of ten million
+    seconds asks for ten million records, and a longer one exhausts memory
+    before anything can report why.
+    """
+    start_et = ET0 + 1.0
+    with pytest.raises(ValueError, match='more than the 10000 a segment may hold'):
+        _build_case(pool, start_et=start_et, stop_et=start_et + 1.0e7)
 
 
 @pytest.mark.parametrize('query_et', [_START_ET, _STOP_ET], ids=['start', 'stop'])

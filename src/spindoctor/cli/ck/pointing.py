@@ -34,6 +34,14 @@ _ROTATION_TOL = 1e-9
 # values pass as an identity rotation.
 _REAL_NUMBER_KINDS = frozenset({'i', 'u', 'f'})
 
+# How far the recorded exposure duration may sit from the start-to-stop span
+# before the two are treated as describing different exposures.  The pipeline
+# derives both from one cadence, so they differ only by the rounding of adding
+# a duration to an epoch -- a few nanoseconds at the epochs these missions
+# observe at, five orders of magnitude under this bound and three under the
+# shortest exposure any of them commands.
+_EXPOSURE_SPAN_TOL_S = 1.0e-3
+
 
 @dataclass(frozen=True)
 class ImagePointing:
@@ -66,7 +74,11 @@ class ImagePointing:
         ValueError: if ``image_name`` or ``camera_frame`` is empty, if either
             C-matrix is not a 3x3 proper orthonormal rotation, if any epoch or
             ``exposure_s`` is not finite, if the three epochs are not ordered
-            ``start <= midtime <= stop``, or if ``exposure_s`` is negative.
+            ``start <= midtime <= stop``, if ``exposure_s`` is negative, or if
+            ``exposure_s`` differs from ``stop_et - start_et`` by more than a
+            millisecond.  The two describe the same exposure and are used
+            interchangeably, so a disagreement is a defect in what was
+            recorded.
     """
 
     image_name: str
@@ -111,6 +123,16 @@ class ImagePointing:
             )
         if self.exposure_s < 0.0:
             raise ValueError(f'exposure_s is negative for {self.image_name}: {self.exposure_s!r}')
+        # The duration and the epochs come from different fields of the
+        # metadata and are used interchangeably downstream -- one decides
+        # whether a segment gets interior records, the other decides how many.
+        # Nothing else would notice them disagreeing.
+        span_s = self.stop_et - self.start_et
+        if abs(self.exposure_s - span_s) > _EXPOSURE_SPAN_TOL_S:
+            raise ValueError(
+                f'exposure_s disagrees with the recorded epochs for {self.image_name}: '
+                f'{self.exposure_s!r} s against a start-to-stop span of {span_s!r} s'
+            )
 
     @classmethod
     def from_metadata(cls, metadata: dict[str, Any]) -> 'ImagePointing':

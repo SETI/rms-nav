@@ -170,6 +170,24 @@ def test_from_metadata_refuses_a_negative_exposure() -> None:
         ImagePointing.from_metadata(_metadata(exposure_s=-1.0))
 
 
+def test_from_metadata_refuses_an_exposure_that_disagrees_with_the_epochs() -> None:
+    """The recorded duration and the recorded span describe one exposure.
+
+    They come from different fields and are used interchangeably by the record
+    layout -- one decides whether a segment gets interior records, the other
+    decides how many -- so nothing downstream would notice them disagreeing.
+    """
+    with pytest.raises(ValueError, match='exposure_s disagrees with the recorded epochs'):
+        ImagePointing.from_metadata(_metadata(exposure_s=_EXPOSURE_S + 1.0))
+
+
+def test_from_metadata_accepts_the_rounding_of_adding_a_duration_to_an_epoch() -> None:
+    """The pipeline derives both from one cadence, and they agree to nanoseconds."""
+    stop_et = _START_ET + _EXPOSURE_S
+    pointing = ImagePointing.from_metadata(_metadata(exposure_s=stop_et - _START_ET))
+    assert pointing.exposure_s == pytest.approx(_EXPOSURE_S, abs=1.0e-9)
+
+
 @pytest.mark.parametrize(
     'exposure_s',
     [float('nan'), float('inf'), float('-inf')],
