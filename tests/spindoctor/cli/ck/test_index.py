@@ -6,6 +6,7 @@ candidate filter are exercised against real SPICE files without touching the
 holdings.
 """
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ from tests.spindoctor.cli.ck.conftest import (
     write_type1_ck,
 )
 
+from spindoctor.cli.ck import index as index_module
 from spindoctor.cli.ck.index import (
     SNAPPED_LOOKUP_TOL_TICKS,
     CkFile,
@@ -33,7 +35,7 @@ from spindoctor.cli.ck.index import (
     CoverageInterval,
     KernelClass,
     build_ck_index,
-    kernel_class_for_directory,
+    kernel_class_for_basename,
 )
 from spindoctor.cli.ck.pointing import NDArrayFloatType
 from spindoctor.cli.ck.segment import CkSegment
@@ -57,6 +59,9 @@ _PREDICTED_NAME = '04009_04051px.bc'
 # A real merged New Horizons pointing file names this object beside the
 # spacecraft, so its coverage cannot be expressed in TDB.
 _CLOCKLESS_OBJECT_ID = -1
+
+# A name the Galileo holdings really hold, which declares no class.
+_UNCLASSIFIED_NAME = 'ckjabv3_plt.bc'
 
 
 def _write_ck(
@@ -108,18 +113,30 @@ def test_build_ck_index_records_the_object_and_its_coverage(
     assert index.files[0].coverage[0].stop_et == pytest.approx(ET0 + _COVERAGE_S, abs=1e-6)
 
 
-def test_build_ck_index_takes_the_class_from_the_directory(
-    pool: KernelPool, tmp_path: Path
-) -> None:
-    """Each root is classified by its own name, not by the files in it."""
-    reconstructed = tmp_path / 'CK-reconstructed'
-    gapfill = tmp_path / 'CK-gapfill'
-    _write_ck(reconstructed, _RECONSTRUCTED_NAME)
-    _write_ck(gapfill, _GAPFILL_NAME)
-    index = build_ck_index([reconstructed, gapfill])
+def test_build_ck_index_takes_the_class_from_the_basename(pool: KernelPool, tmp_path: Path) -> None:
+    """Each file is classified by its own name, whatever directory it sits in.
+
+    All three kernels share one directory whose name declares nothing, so only
+    the basenames can be supplying the three different classes.
+    """
+    root = tmp_path / 'CK'
+    for name in (_RECONSTRUCTED_NAME, _GAPFILL_NAME, _PREDICTED_NAME):
+        _write_ck(root, name)
+    index = build_ck_index([root])
     classes = {ck_file.basename: ck_file.kernel_class for ck_file in index.files}
     assert classes[_RECONSTRUCTED_NAME] is KernelClass.RECONSTRUCTED
     assert classes[_GAPFILL_NAME] is KernelClass.GAPFILL
+    assert classes[_PREDICTED_NAME] is KernelClass.PREDICTED
+
+
+def test_build_ck_index_ignores_a_directory_naming_another_class(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """A directory whose name contradicts the file in it does not decide the class."""
+    root = tmp_path / 'CK-predicted'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    index = build_ck_index([root])
+    assert index.files[0].kernel_class is KernelClass.RECONSTRUCTED
 
 
 def test_build_ck_index_indexes_the_other_kernel_extension(
@@ -210,17 +227,15 @@ def test_candidates_offer_each_directory_holding_the_same_basename(
 
 
 def test_candidates_are_ordered_by_kernel_class(pool: KernelPool, tmp_path: Path) -> None:
-    """Reconstructed pointing is offered before gapfill before predicted."""
-    reconstructed = tmp_path / 'CK-reconstructed'
-    gapfill = tmp_path / 'CK-gapfill'
-    predicted = tmp_path / 'CK-predicted'
-    for directory, name in (
-        (predicted, _PREDICTED_NAME),
-        (gapfill, _GAPFILL_NAME),
-        (reconstructed, _RECONSTRUCTED_NAME),
-    ):
-        _write_ck(directory, name)
-    index = build_ck_index([predicted, gapfill, reconstructed])
+    """Reconstructed pointing is offered before gapfill before predicted.
+
+    One directory holds all three, so the order can only come from the names.
+    Sorted by name alone the gapfill kernel would come last, not second.
+    """
+    root = tmp_path / 'CK'
+    for name in (_PREDICTED_NAME, _GAPFILL_NAME, _RECONSTRUCTED_NAME):
+        _write_ck(root, name)
+    index = build_ck_index([root])
     candidates = index.candidates(
         basenames=[_PREDICTED_NAME, _GAPFILL_NAME, _RECONSTRUCTED_NAME],
         ck_frame_id=CASSINI_CK_FRAME_ID,
@@ -332,51 +347,225 @@ def test_coverage_refuses_a_window_that_ends_before_it_starts() -> None:
 
 
 @pytest.mark.parametrize(
-    ('name', 'expected'),
+    ('basename', 'expected'),
     [
-        ('CK-reconstructed', KernelClass.RECONSTRUCTED),
-        ('CK-gapfill', KernelClass.GAPFILL),
-        ('CK-predicted', KernelClass.PREDICTED),
-        ('CK-predicted-v02', KernelClass.PREDICTED),
-        ('CK-RECONSTRUCTED', KernelClass.RECONSTRUCTED),
-        ('CK', KernelClass.UNCLASSIFIED),
-        ('CK-cruise', KernelClass.UNCLASSIFIED),
+        ('03236_04002ra.bc', KernelClass.RECONSTRUCTED),
+        ('04059_04066rb.bc', KernelClass.RECONSTRUCTED),
+        ('00001_00092rc.bc', KernelClass.RECONSTRUCTED),
+        ('001001_001004ra.bc', KernelClass.RECONSTRUCTED),
+        ('010109_010114rb.bc', KernelClass.RECONSTRUCTED),
+        ('001105_001108.bc', KernelClass.RECONSTRUCTED),
+        ('03001_04001pa_gapfill_v01.bc', KernelClass.GAPFILL),
+        ('07001_08001pa_gapfill_v14.bc', KernelClass.GAPFILL),
+        ('04009_04051px.bc', KernelClass.PREDICTED),
+        ('04051_04092ph_psiv2.bc', KernelClass.PREDICTED),
+        ('04135_04171pd_fsiv.bc', KernelClass.PREDICTED),
+        ('04009_04051py_as_flown.bc', KernelClass.PREDICTED),
+        ('05099_05134pg_fsiv_lmb.bc', KernelClass.PREDICTED),
+        ('nh_scispi_2015_recon.bc', KernelClass.RECONSTRUCTED),
+        ('nh_scispi_2015_pred.bc', KernelClass.PREDICTED),
+        ('merged_nhpc_2007_01_v006.bc', KernelClass.UNCLASSIFIED),
+        ('nhpc_haz_2015.bc', KernelClass.UNCLASSIFIED),
+        ('vg2_nep_version1_type1_iss_sedr.bc', KernelClass.UNCLASSIFIED),
+        ('vgr1_super.bc', KernelClass.UNCLASSIFIED),
+        ('V1SAT_VERSION2_TYPE3_UVS_SEDR.ck', KernelClass.UNCLASSIFIED),
+        ('ckjabv3_plt.bc', KernelClass.UNCLASSIFIED),
+        ('gll_plt_pre_1990_v00.bc', KernelClass.UNCLASSIFIED),
     ],
     ids=[
-        'reconstructed',
-        'gapfill',
-        'predicted',
-        'predicted-v02',
-        'upper-case',
-        'bare',
-        'cruise',
+        'cassini-tour-ra',
+        'cassini-tour-rb',
+        'cassini-cruise-rc',
+        'cassini-jupiter-ra',
+        'cassini-jupiter-rb',
+        'cassini-jupiter-no-release-code',
+        'cassini-gapfill-v01',
+        'cassini-gapfill-v14',
+        'cassini-predicted-bare',
+        'cassini-predicted-psiv',
+        'cassini-predicted-fsiv',
+        'cassini-as-flown',
+        'cassini-predicted-two-suffixes',
+        'new-horizons-recon',
+        'new-horizons-pred',
+        'new-horizons-merged',
+        'new-horizons-hazard',
+        'voyager-sedr',
+        'voyager-bus',
+        'voyager-upper-case',
+        'galileo-platform',
+        'galileo-predicted-platform',
     ],
 )
-def test_kernel_class_for_directory(name: str, expected: KernelClass) -> None:
-    """Real holdings directory names classify as their names say.
+def test_kernel_class_for_basename(basename: str, expected: KernelClass) -> None:
+    """Real holdings basenames classify as their own names declare.
 
     Parameters:
-        name: The directory name.
-        expected: The class it declares.
+        basename: The kernel basename, taken from the real holdings.
+        expected: The class that name declares.
     """
-    assert kernel_class_for_directory(Path('/holdings/Cassini') / name) is expected
+    assert kernel_class_for_basename(basename) is expected
 
 
-def test_kernel_class_refuses_a_name_declaring_two_classes() -> None:
-    """A name matching two classes is ambiguous, not resolved by test order."""
-    with pytest.raises(ValueError, match='names more than one kernel class'):
-        kernel_class_for_directory(Path('/holdings/CK-gapfill-reconstructed'))
+def test_kernel_class_reads_a_cassini_name_whatever_its_case() -> None:
+    """Case carries no meaning, and the holdings do not spell every name alike."""
+    assert kernel_class_for_basename('03236_04002RA.BC') is KernelClass.RECONSTRUCTED
 
 
-@pytest.mark.parametrize('root', ['.', '/'], ids=['dot', 'separator'])
-def test_kernel_class_refuses_a_path_with_no_name(root: str) -> None:
-    """A path with no final component names no class.
+def _put_rules_in_force(
+    monkeypatch: pytest.MonkeyPatch, rules: tuple[tuple[re.Pattern[str], KernelClass], ...]
+) -> None:
+    """Make one replacement mission table the only one in force.
 
     Parameters:
-        root: A path whose final component is empty.
+        monkeypatch: The fixture that restores the shipped table afterwards.
+        rules: The patterns the single mission in force declares.
     """
-    with pytest.raises(ValueError, match='has no name to classify'):
-        kernel_class_for_directory(Path(root))
+    monkeypatch.setattr(
+        index_module,
+        '_MISSION_NAME_RULES',
+        (index_module._MissionNameRules(mission='Cassini', rules=rules),),
+    )
+
+
+def test_kernel_class_puts_gapfill_ahead_of_predicted_without_relying_on_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A gapfill name is a ``pa`` name, and the predicted pattern excludes it itself.
+
+    Reversing the order the patterns are tested in must not be able to turn
+    this kernel into a predicted one.
+
+    Parameters:
+        monkeypatch: The fixture that puts the reversed table in force.
+    """
+    _put_rules_in_force(monkeypatch, tuple(reversed(index_module._CASSINI_NAME_RULES)))
+    assert kernel_class_for_basename(_GAPFILL_NAME) is KernelClass.GAPFILL
+
+
+def test_kernel_class_refuses_a_name_declaring_two_classes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A name matching two classes is ambiguous, not resolved by test order.
+
+    The shipped patterns are mutually exclusive, so the guard is reached here
+    by putting a deliberately overlapping table in force: it exists to catch a
+    later edit that makes two patterns overlap, which would otherwise be
+    settled silently by whichever was tested first.
+
+    Parameters:
+        monkeypatch: The fixture that puts the overlapping table in force.
+    """
+    _put_rules_in_force(
+        monkeypatch,
+        (
+            (re.compile(r'\d{5}_\d{5}r[a-z]\.bc'), KernelClass.RECONSTRUCTED),
+            (re.compile(r'\d{5}_\d{5}.*\.bc'), KernelClass.PREDICTED),
+        ),
+    )
+    with pytest.raises(ValueError, match='declares more than one kernel class'):
+        kernel_class_for_basename(_RECONSTRUCTED_NAME)
+
+
+def test_kernel_class_accepts_two_patterns_of_one_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two patterns agreeing on the class is not ambiguity.
+
+    Cassini's two date conventions both mean reconstructed, so matching more
+    than one pattern is only a refusal when the classes differ.
+
+    Parameters:
+        monkeypatch: The fixture that puts the agreeing table in force.
+    """
+    _put_rules_in_force(
+        monkeypatch,
+        (
+            (re.compile(r'\d{5}_\d{5}r[a-z]\.bc'), KernelClass.RECONSTRUCTED),
+            (re.compile(r'\d{5}_\d{5}.*\.bc'), KernelClass.RECONSTRUCTED),
+        ),
+    )
+    assert kernel_class_for_basename(_RECONSTRUCTED_NAME) is KernelClass.RECONSTRUCTED
+
+
+def test_no_shipped_pattern_pair_overlaps_on_a_real_basename() -> None:
+    """The shipped patterns are mutually exclusive on every name they classify.
+
+    Mutual exclusivity is what lets the refusal above stay unreached, so it is
+    asserted here rather than assumed: every real name that any rule matches is
+    matched by rules of exactly one class.
+    """
+    names = [
+        '03236_04002ra.bc',
+        '00001_00092rc.bc',
+        '001105_001108.bc',
+        '03001_04001pa_gapfill_v01.bc',
+        '04009_04051px.bc',
+        '04009_04051py_as_flown.bc',
+        'nh_scispi_2015_recon.bc',
+        'nh_scispi_2015_pred.bc',
+    ]
+    for name in names:
+        matched = {
+            kernel_class
+            for mission_rules in index_module._MISSION_NAME_RULES
+            for pattern, kernel_class in mission_rules.rules
+            if pattern.fullmatch(name.lower()) is not None
+        }
+        assert len(matched) == 1
+
+
+@pytest.mark.parametrize(
+    'basename',
+    ['', '.', '..', '/', 'CK-reconstructed/03236_04002ra.bc', '/holdings/03236_04002ra.bc'],
+    ids=['empty', 'dot', 'dot-dot', 'separator', 'relative-path', 'absolute-path'],
+)
+def test_kernel_class_refuses_something_that_is_not_a_basename(basename: str) -> None:
+    """A path is not a file's own name, and would classify as declaring nothing.
+
+    Parameters:
+        basename: A value that names no single file.
+    """
+    with pytest.raises(ValueError, match='is not a C-kernel basename'):
+        kernel_class_for_basename(basename)
+
+
+@pytest.mark.parametrize(
+    'basename',
+    ['03236_04002ra_nav.bc', '04009_04051px_nav.bc'],
+    ids=['reconstructed-corrected', 'predicted-corrected'],
+)
+def test_kernel_class_refuses_a_corrected_kernel(basename: str) -> None:
+    """A corrected kernel is this program's output and never a baseline candidate.
+
+    Left to the patterns the two names below would answer differently -- the
+    predicted pattern ends in a wildcard and would accept the marker, the
+    reconstructed one would not -- so classifying either is refused outright.
+
+    Parameters:
+        basename: A corrected kernel's name.
+    """
+    with pytest.raises(ValueError, match='names a corrected kernel'):
+        kernel_class_for_basename(basename)
+
+
+@pytest.mark.parametrize(
+    'basename',
+    ['03236_04002ra', '03236_04002ra.ck', '03236_04002ra.bc.lbl', ' 03236_04002ra.bc'],
+    ids=['no-extension', 'other-extension', 'label', 'leading-space'],
+)
+def test_kernel_class_declines_to_guess_at_a_name_off_the_convention(basename: str) -> None:
+    """A name that is not the convention declares nothing rather than nearly matching.
+
+    The conventions include the extension, so a stem, a label and a name under
+    another mission's extension all fall through -- as does a name that differs
+    from a real one only by a character the filesystem keeps, since that is a
+    different file.
+
+    Parameters:
+        basename: A name close to a real one but not the convention.
+    """
+    assert kernel_class_for_basename(basename) is KernelClass.UNCLASSIFIED
 
 
 def test_build_ck_index_refuses_no_directories() -> None:
@@ -461,39 +650,40 @@ def test_build_ck_index_refuses_a_symlinked_duplicate(pool: KernelPool, tmp_path
         build_ck_index([root, link])
 
 
-def test_build_ck_index_classifies_a_symlink_by_the_name_given(
+def test_build_ck_index_classifies_a_symlinked_directory_by_the_basenames(
     pool: KernelPool, tmp_path: Path
 ) -> None:
-    """Resolving a link must not replace the component that names the class.
+    """A link named for one class holds whatever its files say they are.
 
-    The duplicate test resolves paths; the classification does not, because a
-    link named for its class can point at a directory that is not.
+    The duplicate test resolves the roots it is given; the classification never
+    looks at them at all, so neither spelling of the directory can change what
+    a kernel is.
     """
     actual = tmp_path / 'ck_files'
-    _write_ck(actual, _RECONSTRUCTED_NAME)
+    _write_ck(actual, _GAPFILL_NAME)
     link = tmp_path / 'CK-reconstructed'
     link.symlink_to(actual, target_is_directory=True)
     index = build_ck_index([link])
-    assert index.files[0].kernel_class is KernelClass.RECONSTRUCTED
+    assert index.files[0].kernel_class is KernelClass.GAPFILL
 
 
-def test_a_directory_naming_no_class_is_offered_last(pool: KernelPool, tmp_path: Path) -> None:
+def test_a_kernel_naming_no_class_is_offered_last(pool: KernelPool, tmp_path: Path) -> None:
     """A kernel that says nothing about its own pointing is the last resort.
 
-    The Cassini cruise directories hold reconstructed pointing under a name
-    that does not say so, and they must not outrank a directory that does.
+    The Galileo holdings name no class anywhere, and such a kernel must not
+    outrank one that does -- not even a predicted one, whose name sorts before
+    it and which would therefore win on the basename key alone.
     """
-    predicted = tmp_path / 'CK-predicted'
-    unclassified = tmp_path / 'CK'
-    _write_ck(predicted, _PREDICTED_NAME)
-    _write_ck(unclassified, 'zz00001_00092rc.bc')
-    index = build_ck_index([unclassified, predicted])
+    root = tmp_path / 'CK'
+    _write_ck(root, _PREDICTED_NAME)
+    _write_ck(root, _UNCLASSIFIED_NAME)
+    index = build_ck_index([root])
     candidates = index.candidates(
-        basenames=[_PREDICTED_NAME, 'zz00001_00092rc.bc'],
+        basenames=[_PREDICTED_NAME, _UNCLASSIFIED_NAME],
         ck_frame_id=CASSINI_CK_FRAME_ID,
         et=ET0 + 2.0,
     )
-    assert [ck_file.basename for ck_file in candidates] == [_PREDICTED_NAME, 'zz00001_00092rc.bc']
+    assert [ck_file.basename for ck_file in candidates] == [_PREDICTED_NAME, _UNCLASSIFIED_NAME]
 
 
 def test_one_basename_in_two_directories_of_a_class_is_ordered_by_path(

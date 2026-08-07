@@ -32,6 +32,7 @@ The filter is only a filter: reproduction, not coverage, decides.
 """
 
 import math
+import re
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
@@ -84,10 +85,10 @@ _COVERAGE_TOL_TICKS = 0.0
 class KernelClass(Enum):
     """How the producer of a C-kernel described its pointing.
 
-    The holdings keep reconstructed, gapfill and predicted kernels in separate
-    directories with overlapping coverage, so an image can navigate against a
-    baseline that several files reproduce.  This is the first key of the
-    tie-break that then picks one of them.
+    The holdings carry reconstructed, gapfill and predicted kernels with
+    overlapping coverage, so an image can navigate against a baseline that
+    several files reproduce.  This is the first key of the tie-break that then
+    picks one of them.
     """
 
     RECONSTRUCTED = 'reconstructed'
@@ -101,20 +102,20 @@ class KernelClass(Enum):
 
         Returns:
             The class's position in the preference order: reconstructed
-            pointing before gapfill before predicted, and a directory naming no
-            class last of all.
+            pointing before gapfill before predicted, and a kernel whose name
+            declares no class last of all.
         """
         return _CLASS_PREFERENCE.index(self)
 
 
 # Reconstructed pointing is measured, gapfill fills what reconstruction did not
-# cover, and predicted pointing is a plan.  A directory whose name says nothing
-# about which of those it holds is preferred last, so a kernel that does say is
-# always chosen over one that does not.  That ranks the Cassini cruise
-# directories below predicted even though they hold reconstructed pointing,
-# which is inert only because their epochs do not overlap the directories that
-# do name a class; the ranking decides which output file carries a segment and
-# never which attitude it carries, so it is a filing question either way.
+# cover, and predicted pointing is a plan.  A kernel whose name declares none
+# of those is preferred last, so one that does declare a class is always chosen
+# over one that does not.  The ranking decides which output file carries a
+# segment and never which attitude it carries: every candidate it orders has
+# already reproduced the same recorded attitude.  A mission whose names declare
+# nothing therefore ties on this key for every candidate and falls through to
+# the basename, which is exactly what it did before any class existed.
 _CLASS_PREFERENCE: tuple[KernelClass, ...] = (
     KernelClass.RECONSTRUCTED,
     KernelClass.GAPFILL,
@@ -122,11 +123,66 @@ _CLASS_PREFERENCE: tuple[KernelClass, ...] = (
     KernelClass.UNCLASSIFIED,
 )
 
-# The token each class is recognized by in a directory name, lowercased.
-_CLASS_TOKENS: tuple[tuple[str, KernelClass], ...] = (
-    ('reconstructed', KernelClass.RECONSTRUCTED),
-    ('gapfill', KernelClass.GAPFILL),
-    ('predicted', KernelClass.PREDICTED),
+
+@dataclass(frozen=True)
+class _MissionNameRules:
+    """How one mission's C-kernel basenames declare a kernel class.
+
+    Parameters:
+        mission: The mission whose holdings the names come from.  It names the
+            source of each match in the message a two-class name is refused
+            with.
+        rules: One pattern per class the mission's names can declare, each
+            matched in full against the lowercased basename.  A mission whose
+            basenames declare no class carries no rules, which records that its
+            holdings were read and encode nothing rather than that nobody
+            looked.
+    """
+
+    mission: str
+    rules: tuple[tuple[re.Pattern[str], KernelClass], ...]
+
+
+# Cassini names the class in a release code that follows the two dates a
+# kernel's coverage spans: ``p`` for planned pointing, ``r`` for reconstructed,
+# plus a letter distinguishing successive releases of the same span.  Two
+# patterns carry the reconstructed class because two date conventions are in
+# use and the digit counts are what tell them apart: the Saturn tour and the
+# cruise stamp YYDOY_YYDOY, the Jupiter flyby stamps YYMMDD_YYMMDD, and the
+# earliest flyby release omits the code altogether.  The gapfill kernels are
+# ``pa`` names, so the predicted pattern excludes them itself instead of
+# relying on being tested second -- the patterns are mutually exclusive by
+# construction, not by order.  This is the convention rms-spyceman's Cassini
+# rules encode.
+_CASSINI_NAME_RULES: tuple[tuple[re.Pattern[str], KernelClass], ...] = (
+    (re.compile(r'\d{5}_\d{5}p[a-z]_gapfill_v\d+\.bc'), KernelClass.GAPFILL),
+    (re.compile(r'\d{5}_\d{5}p[a-z](?!_gapfill).*\.bc'), KernelClass.PREDICTED),
+    (re.compile(r'\d{5}_\d{5}r[a-z]\.bc'), KernelClass.RECONSTRUCTED),
+    (re.compile(r'\d{6}_\d{6}(?:r[a-z])?\.bc'), KernelClass.RECONSTRUCTED),
+)
+
+# New Horizons marks only the pair of kernels that exist in both forms, with a
+# trailing ``_recon`` or ``_pred`` on the mission's ``nh_`` prefix.  Every other
+# name in the holdings -- the merged pointing files and the hazard-search
+# kernels -- declares nothing, and is left declaring nothing rather than
+# guessed at from a prefix that says which product it is and not how its
+# pointing was made.
+_NEW_HORIZONS_NAME_RULES: tuple[tuple[re.Pattern[str], KernelClass], ...] = (
+    (re.compile(r'nh_.+_recon\.bc'), KernelClass.RECONSTRUCTED),
+    (re.compile(r'nh_.+_pred\.bc'), KernelClass.PREDICTED),
+)
+
+# The encoding is a property of each mission's naming convention, so it is
+# declared one mission at a time rather than as a single pattern set that would
+# be mission-specific only by the accident of matching one mission's names.
+# Voyager and Galileo are listed with no rules: each holds one kind of C-kernel
+# and neither names it anywhere in a basename, so ``UNCLASSIFIED`` is the
+# honest answer and the tie-break falls through to the basename for them.
+_MISSION_NAME_RULES: tuple[_MissionNameRules, ...] = (
+    _MissionNameRules(mission='Cassini', rules=_CASSINI_NAME_RULES),
+    _MissionNameRules(mission='New Horizons', rules=_NEW_HORIZONS_NAME_RULES),
+    _MissionNameRules(mission='Voyager', rules=()),
+    _MissionNameRules(mission='Galileo', rules=()),
 )
 
 
@@ -189,8 +245,8 @@ class CkFile:
 
     Parameters:
         path: Path to the file, local or remote.
-        kernel_class: How its producer described its pointing, taken from the
-            name of the directory it was found in.
+        kernel_class: How its producer described its pointing, declared by its
+            own basename.
         coverage: One interval per object per segment window, in the order
             SPICE reported them.
         unreadable_objects: The objects the file describes whose coverage
@@ -330,39 +386,66 @@ def preference_key(ck_file: CkFile) -> tuple[int, str, str]:
     )
 
 
-def kernel_class_for_directory(directory: str | Path | FCPath) -> KernelClass:
-    """Classify a kernel directory from its name.
+def kernel_class_for_basename(basename: str) -> KernelClass:
+    """Classify a C-kernel from its own basename.
+
+    The name is matched against the naming convention of every mission whose
+    C-kernels the scan reads.  Those conventions are disjoint, each anchored on
+    a shape only one mission's names have, so at most one class is ever
+    declared; a mission whose names encode no class contributes no pattern and
+    leaves its kernels ``UNCLASSIFIED``.
+
+    Pattern matching ignores case, since the holdings spell some kernel names
+    in upper case and a name's case says nothing about its class.  The
+    corrected-kernel marker below is tested on the name as spelled, which is
+    how the scan itself decides a file is a corrected kernel, so the two agree
+    on exactly which names those are.
 
     Parameters:
-        directory: The directory holding the kernels.
+        basename: The file's own name, extension included, spelled as the
+            holdings spell it and as image metadata records it.
 
     Returns:
-        The class its name declares, or ``UNCLASSIFIED`` when the name names
-        none.
+        The class the name declares, or ``UNCLASSIFIED`` when it declares none.
+        A name carrying no extension, or one under an extension its mission
+        does not use, declares none: the conventions include the extension.
 
     Raises:
-        ValueError: if the path has no final component to read, or if its name
-            declares more than one class, which no preference order can resolve
-            and which would otherwise be settled silently by the order the
-            names happen to be tested in.
+        ValueError: if the name is empty, is ``.`` or ``..``, or holds a path
+            separator, none of which is a file's own name and each of which
+            would otherwise be reported as declaring no class; if the name's
+            stem ends in the corrected-kernel marker, since a corrected kernel
+            is written by this program and is never a baseline candidate; or if
+            the name declares more than one class, which no preference order
+            can resolve and which would otherwise be settled silently by the
+            order the patterns happen to be tested in.
     """
-    root = FCPath(directory)
-    name = root.name
-    if len(name) == 0 or name in ('.', '..'):
+    if len(basename) == 0 or basename in ('.', '..') or '/' in basename:
         raise ValueError(
-            f'kernel directory {root.as_posix()!r} has no name to classify; name the directory '
-            f'itself rather than a path ending in a separator or a dot'
+            f'{basename!r} is not a C-kernel basename; classify the name of the file itself '
+            f'rather than a path or a fragment of one'
         )
-    lowered = name.lower()
-    matched = [kernel_class for token, kernel_class in _CLASS_TOKENS if token in lowered]
-    if len(matched) > 1:
+    if Path(basename).stem.endswith(OUTPUT_NAME_MARKER):
         raise ValueError(
-            f'kernel directory {name!r} names more than one kernel class: '
-            f'{[kernel_class.value for kernel_class in matched]}'
+            f'C-kernel basename {basename!r} names a corrected kernel, which this program '
+            f'writes and never classifies as a baseline candidate'
         )
-    if len(matched) == 0:
+    lowered = basename.lower()
+    matched = [
+        (mission_rules.mission, kernel_class)
+        for mission_rules in _MISSION_NAME_RULES
+        for pattern, kernel_class in mission_rules.rules
+        if pattern.fullmatch(lowered) is not None
+    ]
+    declared = {kernel_class for _, kernel_class in matched}
+    if len(declared) > 1:
+        raise ValueError(
+            f'C-kernel basename {basename!r} declares more than one kernel class: '
+            f'{sorted(f"{mission} {kernel_class.value}" for mission, kernel_class in matched)}'
+        )
+    if len(declared) == 0:
         return KernelClass.UNCLASSIFIED
-    return matched[0]
+    return matched[0][1]
 
 
 def build_ck_index(roots: Sequence[str | Path | FCPath]) -> CkIndex:
@@ -380,9 +463,9 @@ def build_ck_index(roots: Sequence[str | Path | FCPath]) -> CkIndex:
     indexing one would offer a correction as the baseline for the next run.
 
     Parameters:
-        roots: The directories to scan.  Each is classified by its own name, so
-            the reconstructed, gapfill and predicted directories of a mission
-            are listed separately.
+        roots: The directories to scan.  A directory is only where kernels are
+            found; each kernel is classified by its own basename, so how the
+            directories are named and split makes no difference to the index.
 
     Returns:
         The index.
@@ -390,18 +473,16 @@ def build_ck_index(roots: Sequence[str | Path | FCPath]) -> CkIndex:
     Raises:
         ValueError: if no directory is given, if one names the same directory
             as another once symbolic links and ``..`` are resolved, if one does
-            not exist or is not a directory, if a directory name declares more
-            than one kernel class, or if no C-kernel is found under any of them
-            -- an empty index would report every image as having no reproducing
-            baseline, which is indistinguishable from a genuine baseline drift.
+            not exist or is not a directory, if a kernel's basename declares
+            more than one kernel class, or if no C-kernel is found under any of
+            them -- an empty index would report every image as having no
+            reproducing baseline, which is indistinguishable from a genuine
+            baseline drift.
         OSError: if a file with a C-kernel extension cannot be read as one.
     """
     if len(roots) == 0:
         raise ValueError('no kernel directory to scan; the index would hold nothing')
     directories = [FCPath(root) for root in roots]
-    # Resolved for the duplicate test only.  The class comes from the name as
-    # given, since resolving a symbolic link can replace the very component
-    # that names the class.
     resolved = [root.resolve().as_posix() for root in directories]
     if len(set(resolved)) != len(resolved):
         raise ValueError(
@@ -410,8 +491,7 @@ def build_ck_index(roots: Sequence[str | Path | FCPath]) -> CkIndex:
         )
     files: list[CkFile] = []
     for root in directories:
-        kernel_class = kernel_class_for_directory(root)
-        files.extend(_index_one_file(path, kernel_class) for path in _kernel_files(root))
+        files.extend(_index_one_file(path) for path in _kernel_files(root))
     if len(files) == 0:
         raise ValueError(
             f'no C-kernel found under {[root.as_posix() for root in directories]}; every image '
@@ -451,20 +531,21 @@ def _kernel_files(root: FCPath) -> list[FCPath]:
     ]
 
 
-def _index_one_file(path: FCPath, kernel_class: KernelClass) -> CkFile:
-    """Read one C-kernel's objects and their coverage.
+def _index_one_file(path: FCPath) -> CkFile:
+    """Read one C-kernel's class, objects and coverage.
 
     Parameters:
         path: The file to read.
-        kernel_class: The class its directory declares.
 
     Returns:
         The indexed file, carrying the coverage of every object whose clock is
         furnished and the ids of the objects whose clock is not.
 
     Raises:
+        ValueError: if the file's basename declares more than one kernel class.
         OSError: if the file cannot be read as a C-kernel.
     """
+    kernel_class = kernel_class_for_basename(path.name)
     # SPICE reads a C-kernel by name from the local filesystem, so a remote one
     # is fetched first.  This is a no-op for a kernel that is already local.
     local = str(cast(Path, path.retrieve()))
