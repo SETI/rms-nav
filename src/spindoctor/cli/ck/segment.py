@@ -64,14 +64,7 @@ import cspyce
 import numpy as np
 
 from spindoctor.cli.ck.pointing import ImagePointing, NDArrayFloatType
-from spindoctor.spice_ids import CK_OBJECT_SCLK_ID
-
-# The CK objects whose navigated attitude was a frozen, tolerance-snapped
-# lookup rather than an evaluated frame chain.  Their segments carry one
-# constant attitude across the exposure, and the step that identifies which
-# baseline kernel an image navigated against has to make the same snapped
-# lookup rather than evaluating a frame chain, so it reads this set too.
-FROZEN_ATTITUDE_CK_IDS = frozenset({-31100, -32100})
+from spindoctor.spice_ids import CK_OBJECT_SCLK_ID, FROZEN_ATTITUDE_CK_IDS
 
 # Every segment is written relative to J2000, which is what the recorded
 # C-matrices are referenced to.
@@ -295,7 +288,7 @@ def build_segment(pointing: ImagePointing) -> CkSegment:
     Raises:
         ValueError: if the CK object is not one this writer knows, if the
             resolved spacecraft clock is not the expected one, if the image
-            name does not fit a SPICE segment identifier, or if the baseline
+            name does not fit a SPICE segment identifier, if the baseline
             supplies angular velocity at only some of the record epochs.
         OSError: if the furnished kernels provide no pointing for the CK object
             at the exposure midtime or at a record epoch.

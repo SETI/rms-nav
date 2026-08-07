@@ -42,7 +42,7 @@ from typing import cast
 import cspyce
 from filecache import FCPath
 
-from spindoctor.cli.ck.segment import FROZEN_ATTITUDE_CK_IDS
+from spindoctor.spice_ids import FROZEN_ATTITUDE_CK_IDS
 
 # The extensions a binary C-kernel is stored under in the holdings.  Text
 # kernels are never C-kernels, and the label files sitting beside the binaries

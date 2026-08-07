@@ -62,7 +62,7 @@ from spindoctor.obs import (
     ObsSnapshotInst,
     ObsVoyagerISS,
 )
-from spindoctor.spice_ids import CK_OBJECT_SCLK_ID
+from spindoctor.spice_ids import CK_OBJECT_SCLK_ID, VOYAGER_CK_OBJECT_ID
 from spindoctor.support.exceptions import NavPointingError
 from spindoctor.support.types import NDArrayFloatType
 
@@ -79,18 +79,13 @@ __all__ = [
 
 # The object each mission's C-kernels describe.  The correction is measured at
 # the camera but written at the bus or platform the existing kernels already
-# cover, so a corrected kernel targets one of these.  Voyager's is derived per
-# spacecraft instead, because one instrument key serves two spacecraft.
+# cover, so a corrected kernel targets one of these.  Voyager needs one per
+# spacecraft under a single instrument key, and its pair is read from
+# ``spindoctor.spice_ids`` because the kernel writer needs the same two ids to
+# recognize a frozen-attitude object.
 _CASSINI_CK_FRAME_ID = -82000
 _GALILEO_CK_FRAME_ID = -77001
 _LORRI_CK_FRAME_ID = -98000
-
-# Voyager needs one per spacecraft under a single instrument key, named here
-# for the same reason the others are named: the object is the one fact a
-# corrected kernel is written against, and computing it from the spacecraft
-# digit hides both values behind arithmetic that no reader can check at a
-# glance.
-_VOYAGER_CK_FRAME_ID = {'1': -31100, '2': -32100}
 
 # What cspyce raises when the furnished kernels cannot answer: a missing frame
 # or an unresolvable clock arrives as a LookupError, an unreadable kernel as
@@ -507,7 +502,7 @@ def _frame_identity(obs: ObsSnapshotInst) -> _FrameIdentity | None:
         # instead of producing a self-consistent wrong one.  The host validates
         # the digit when it reads the label, so a key error here would mean
         # that stopped being true.
-        ck_frame_id = _VOYAGER_CK_FRAME_ID[digit]
+        ck_frame_id = VOYAGER_CK_OBJECT_ID[digit]
         # The Voyager FK spells the cameras ISSNA and ISSWA, so the oops
         # detector names NAC and WAC contribute only their first letter.
         return _FrameIdentity(
