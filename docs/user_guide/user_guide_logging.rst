@@ -86,6 +86,11 @@ root it does have -- the backplane results root for
 ``sd_mosaic_cloud_tasks`` -- rather than dropping its logs for want of a
 setting that does not apply to it.
 
+A local root given as a relative path is resolved against the working directory
+once, at startup, and the absolute result is what every log file of that run is
+written under. A run therefore keeps writing to the same place even if
+something later changes the working directory.
+
 .. code-block:: text
 
    {log_root}/{program}/main_{timestamp}.log

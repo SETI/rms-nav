@@ -66,6 +66,7 @@ __all__ = [
     'LogLevels',
     'LogSinks',
     'RunLogging',
+    'absolute_log_root',
     'build_cloud_task_logging',
     'build_image_log_handlers',
     'build_main_logger',
@@ -669,6 +670,34 @@ def build_image_log_handlers(
     return handlers, path
 
 
+def absolute_log_root(log_root: FCPath) -> FCPath:
+    """Return a local log root pinned to the working directory it names.
+
+    A log root outlives the moment it is chosen: every per-image handler is
+    built from it, one at a time, for as long as the run lasts.  pdslogger
+    identifies an open log file by the absolute path its own working directory
+    gives, so a relative root that outlives a change of working directory names
+    one file when a handler is attached and another when it is detached -- and
+    the handler is then never let go, leaving the logger writing into a file
+    nobody is reading.  Resolving the root once, here, removes the dependence.
+
+    A remote root is returned unchanged: it is already absolute, and there is
+    no local working directory to resolve it against.
+
+    Parameters:
+        log_root: The log root as it was given.
+
+    Returns:
+        The same root, absolute if it is local.
+    """
+    if not log_root.is_local():
+        return log_root
+    # Path rather than FCPath.get_local_path: for a local path the latter
+    # creates the parent directory, and resolving a root must not write
+    # anything.
+    return FCPath(Path(log_root.as_posix()).expanduser().resolve())
+
+
 def sinks_from_arguments(
     arguments: argparse.Namespace | None,
     log_root: FCPath,
@@ -688,18 +717,23 @@ def sinks_from_arguments(
     Whether each logger writes to a *file* is command-line only, because it is
     inseparable from where the file goes, and that is a per-run decision.
 
+    This is where a log root becomes the one every handler is built from, so it
+    is also where a local one is made absolute; see :func:`absolute_log_root`.
+
     Parameters:
         arguments: Parsed command-line arguments, or None for the defaults.
-        log_root: Resolved log root for this run.
+        log_root: Resolved log root for this run, absolute or not.
         program_name: The program's identity, for selecting its block under
             ``logging.programs``.  Empty selects the global block only.
         config: The loaded configuration, or None to consult the command line
             and the built-in defaults alone.
 
     Returns:
-        The resolved :class:`LogSinks`.
+        The resolved :class:`LogSinks`, whose log root is absolute if it is
+        local.
     """
-    defaults = LogSinks(log_root=log_root)
+    root = absolute_log_root(log_root)
+    defaults = LogSinks(log_root=root)
     block = _merged_logging_block(program_name, config) if config is not None else {}
 
     def console(argument_name: str, config_key: str, default: bool) -> bool:
@@ -714,7 +748,7 @@ def sinks_from_arguments(
         return default if value is None else bool(value)
 
     return LogSinks(
-        log_root=log_root,
+        log_root=root,
         main_console=console('log_main_to_console', 'main_console', defaults.main_console),
         main_file=flag('log_main_to_file', defaults.main_file),
         image_console=console('log_image_to_console', 'image_console', defaults.image_console),
