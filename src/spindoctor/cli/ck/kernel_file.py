@@ -63,12 +63,17 @@ def write_ck_file(path: Path, segments: Sequence[CkSegment], comment_lines: Sequ
             behind -- if no comment line is given, if a comment line is one
             SPICE cannot store and read back unchanged, if the file's own name
             is too long to be its internal name, or if a file of that name
-            already exists.  Every one of these is judged before the file is
-            opened, so none of them leaves a file behind.
+            already exists.  Every one of those is judged before the file is
+            opened.  Also if SPICE refuses a segment once the file is open,
+            which it does for a segment identifier holding a non-printing
+            character or a quaternion of magnitude zero.
         RuntimeError: if SPICE cannot create the file, for example because the
             directory does not exist or cannot be written to.
-        OSError: if SPICE refuses a segment write once the file is open.  The
-            partly-written file is closed and removed before this propagates.
+        OSError: if SPICE refuses a segment write for an operating-system
+            reason once the file is open.
+
+    Whatever the failure, no file is left behind: the up-front refusals happen
+    before ``ckopn``, and a failure after it closes the file and removes it.
     """
     if len(segments) == 0:
         raise ValueError(
