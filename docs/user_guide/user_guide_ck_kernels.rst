@@ -472,10 +472,22 @@ Refusals worth knowing about
 
 A few conditions stop the run rather than being reported per image, because
 each of them would otherwise corrupt every image alike or force a silent
-choice. A run that stops writes **nothing at all**: every segment of every
-output file is built before the first file is opened, so a refusal leaves no
-corrected kernels, no meta-kernel and no report, and the run can be repeated
-once its cause is fixed without first clearing a partial set out of the way.
+choice. A run stopped by any of them writes **nothing at all**: every segment
+of every output file is built, and every destination judged, before the first
+file is opened, so such a refusal leaves no corrected kernels, no meta-kernel
+and no report, and the run can be repeated once its cause is fixed without
+first clearing a partial set out of the way.
+
+That covers everything the run can know before it starts writing, and it is not
+the same as a guarantee that writing cannot fail part way through. It can, for
+reasons no check made beforehand can see: the device filling up, a path or a
+permission changing between the check and the write, and a record set SPICE
+refuses only once a file is open. The file being written when that happens is
+removed, but the files already written are not, and neither the meta-kernel nor
+the report is written -- so a run that reports one of those failures is the one
+case where the output directory has to be cleared before it is repeated. The
+run log names the files it did write, and each of them is a complete, valid
+kernel.
 
 * **Two versions of one spacecraft clock kernel, or two frame kernels defining
   a frame the run's images name.** A text kernel's last assignment wins, so the
@@ -487,9 +499,16 @@ once its cause is fixed without first clearing a partial set out of the way.
   holds.** Named, rather than left to surface as an image whose baseline
   appears to have drifted.
 
-* **A corrected kernel that already exists in the output directory.**
-  Regeneration replaces a corrected kernel rather than appending to it, so
-  remove or move the previous file first.
+* **An output path the run cannot write.** Every destination is judged
+  together, before the first file is opened, and the refusal names every one
+  that failed and why, so a set is cleared in one pass rather than one rerun
+  per file. A path fails when something already occupies it -- regeneration
+  replaces a corrected kernel rather than appending to it, so remove or move
+  the previous file first -- when it is a symbolic link, which would put the
+  kernel wherever the link points rather than in the output directory, when its
+  name is longer than the 60 characters SPICE stores as a file's internal name,
+  or when the output directory does not exist and cannot be created, or exists
+  and cannot be written to.
 
 * **A metadata document that cannot be read as a navigated image**; an image
   whose baseline supplied pointing at every record but angular velocity at only

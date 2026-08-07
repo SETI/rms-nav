@@ -358,6 +358,34 @@ run is resident at once: 678 bytes for the three records an ordinary exposure
 carries, measured on this writer's own segments, so about 34 MB for a
 50,000-image batch, against the per-image metadata such a batch already holds.
 
+**The writing phase judges before it writes, and judges the whole set.**
+Separating the phases is not enough on its own: a destination the run cannot
+write is a property of the output directory, not of anything the build sees, so
+a run whose second output path is occupied would build cleanly and then refuse
+after the first file was already on disk -- the same partial set, reached a
+different way. So :func:`~spindoctor.cli.ck.kernel_file.check_output_paths`
+judges every destination together and
+:func:`~spindoctor.cli.ck.kernel_file.check_ck_file` judges each file's
+contents, both before the first ``ckopn``. The refusal names every path that
+failed rather than the first, so a set is cleared in one pass.
+
+The per-file refusals stay where they are. ``check_ck_file`` is what
+``write_ck_file`` itself calls, so a direct caller is held to the same rules and
+the two cannot drift; the set-level check adds only what no per-file check can
+see -- one path named twice, and a directory judged once for all of them.
+
+**None of this is atomicity, and neither the code nor this guide claims it.**
+What the checks establish is that nothing knowable in advance stops the writing
+part way through. Three things stay outside that, and no check made beforehand
+can reach them: space on the device, a path or a permission that changes
+between the check and the write, and a record set ``ckw03`` refuses once the
+file is open. A file failing that way is closed and removed; the files written
+before it are not, and the meta-kernel and the report are never reached. That
+residual window is recorded in
+:func:`~spindoctor.cli.sd_create_ck.write_output_files` and in the user guide,
+which tells an operator that this is the one failure needing the output
+directory cleared before a rerun.
+
 Why the writer imports no oops and nothing from ``spindoctor.support``
 ----------------------------------------------------------------------
 
@@ -646,6 +674,21 @@ Invariants
   ``no_reproducing_baseline``, whose whole value is that it means the holdings
   changed since navigation ran. The image is left out of its file, the file is
   written without it, and a file that loses every image is not written at all.
+* **A run writes every corrected kernel or none of them, for every reason it
+  can know in advance.** Adding a refusal that a write could hit means adding
+  it to ``check_output_paths`` or ``check_ck_file`` -- never to
+  ``write_ck_file`` alone, which by then has files behind it. The guarantee is
+  bounded on purpose: it says nothing about a write that fails for a reason
+  only the filesystem or ``ckw03`` knows at the moment of writing.
+* **"Is anything already there?" is not ``Path.exists``.** It follows symbolic
+  links, so a link with no target answers ``False`` and the write then creates
+  the target -- outside the output directory. A link that resolves in a loop
+  answers ``False`` for a different reason and behaves the same way. Both are
+  pinned as measurements in the writer's tests, so a rewrite back to ``exists``
+  fails rather than passes. For the same class of reason, a path holding a
+  non-printing character is refused rather than tested: ``os.path.lexists``
+  answers ``False`` for a name holding a null byte, and SPICE is handed the name
+  as a C string.
 
 Adding a mission
 ================

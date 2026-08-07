@@ -911,15 +911,31 @@ would *replace* the failure worth reading and demote it to a `__context__`
 nobody prints -- so a documented configuration setting would turn a
 diagnosable failure into a logging crash.
 
-**A run that stops writes nothing at all.** Every segment of every output file
-is built before the first file is opened, so a refusal leaves no corrected
-kernels, no meta-kernel and no report -- rather than a partial set with no
-report saying what is in it, which the refusal to overwrite an existing
-corrected kernel would then block a rerun on. The cost is that every segment of
-the run is resident at once: measured on this writer's own segments, 678 bytes
-for the three records an ordinary exposure carries and 1826 for the 21 a
-twenty-second one does, so about 34 MB for the 50,000-image batch this tool is
-sized for, against the per-image metadata such a batch already holds.
+**A run stopped for any reason it can know in advance writes nothing at all.**
+Every segment of every output file is built, and every destination judged,
+before the first file is opened, so such a refusal leaves no corrected kernels,
+no meta-kernel and no report -- rather than a partial set with no report saying
+what is in it, which the refusal to overwrite an existing corrected kernel
+would then block a rerun on. Judging the destinations is a second, separate
+thing from separating the phases: whether an output path can be written is a
+property of the output directory that the build never looks at, so a run whose
+second output path was occupied would otherwise build cleanly and then refuse
+with the first file already on disk. `check_output_paths` judges the whole set
+at once and names every path that failed; `check_ck_file` judges one file's
+contents and is what `write_ck_file` itself calls, so the per-file refusal
+cannot drift from the set-level one. The cost is that every segment of the run
+is resident at once: measured on this writer's own segments, 678 bytes for the
+three records an ordinary exposure carries and 1826 for the 21 a twenty-second
+one does, so about 34 MB for the 50,000-image batch this tool is sized for,
+against the per-image metadata such a batch already holds.
+
+**That is a bounded guarantee, not atomicity, and it is not written down as
+one.** What stays possible is what no check made beforehand can see: the device
+filling up, a path or a permission changing between the check and the write,
+and a record set `ckw03` refuses once the file is open. The file being written
+is removed; the files written before it are not, and the meta-kernel and the
+report are never reached. The user guide names that as the one failure that
+needs the output directory cleared before a rerun.
 
 A metadata *file* that is not readable as JSON is different again: it names
 no image, so there is nothing for the report to say about it and nothing an
