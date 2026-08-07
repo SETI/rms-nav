@@ -38,6 +38,8 @@ from spindoctor.cli.ck import inputs
 from spindoctor.cli.ck.assignment import Assignment
 from spindoctor.cli.ck.comments import read_comment_area
 from spindoctor.cli.ck.images import ImageEntry, OmissionReason
+from spindoctor.cli.ck.index import CkFile, KernelClass
+from spindoctor.cli.ck.pointing import ImagePointing
 
 # The two exposures are far enough apart that no original kernel covers both,
 # so each image has exactly one candidate and the two land in different files.
@@ -169,24 +171,32 @@ def _image(
     )
 
 
-@pytest.fixture
-def run_tree(tmp_path: Path) -> dict[str, Path]:
-    """Build a kernel directory, a results root and four images for one run.
+def _write_kernels(kernels: Path, *, angular_velocity_in_b: bool = True) -> tuple[Any, Any]:
+    """Write the hermetic kernels and the two baselines, and read what they give.
 
     The kernels have to be furnished to build the baselines and to read the
     attitudes the metadata records, and they are unloaded again before the
     driver runs: the driver refuses to identify a clock kernel while another
     already defines that clock, which is the whole point of that refusal.
+
+    Parameters:
+        kernels: The kernel directory to write into.
+        angular_velocity_in_b: Whether the second baseline carries angular
+            velocity.  Without it, an image assigned to that baseline
+            reproduces its attitude and then cannot be built into a segment.
+
+    Returns:
+        The uncorrected camera attitudes at the two exposure midtimes.
     """
-    kernels = tmp_path / 'kernels'
-    results = tmp_path / 'results'
-    output = tmp_path / 'output'
     support = write_support_kernels(kernels)
     for path in support:
         cspyce.furnsh(str(path))
     baselines = []
     try:
-        for name, centre in ((_BASELINE_A, _IMAGE_A_ET), (_BASELINE_B, _IMAGE_B_ET)):
+        for name, centre, with_av in (
+            (_BASELINE_A, _IMAGE_A_ET, True),
+            (_BASELINE_B, _IMAGE_B_ET, angular_velocity_in_b),
+        ):
             path = kernels / name
             write_baseline_ck(
                 path,
@@ -194,17 +204,25 @@ def run_tree(tmp_path: Path) -> dict[str, Path]:
                 sclk_id=_CASSINI_SCLK_ID,
                 epochs=[centre - 10.0, centre, centre + 10.0],
                 attitude=baseline_attitude,
-                angular_velocity=baseline_angular_velocity,
+                angular_velocity=baseline_angular_velocity if with_av else None,
             )
             baselines.append(path)
         cspyce.furnsh(str(baselines[0]))
         cspyce.furnsh(str(baselines[1]))
-        original_a = _camera_attitude(_IMAGE_A_ET)
-        original_b = _camera_attitude(_IMAGE_B_ET)
-        drifted = _corrected(original_a)
+        return _camera_attitude(_IMAGE_A_ET), _camera_attitude(_IMAGE_B_ET)
     finally:
         for path in reversed([*support, *baselines]):
             cspyce.unload(str(path))
+
+
+@pytest.fixture
+def run_tree(tmp_path: Path) -> dict[str, Path]:
+    """Build a kernel directory, a results root and four images for one run."""
+    kernels = tmp_path / 'kernels'
+    results = tmp_path / 'results'
+    output = tmp_path / 'output'
+    original_a, original_b = _write_kernels(kernels)
+    drifted = _corrected(original_a)
     _write_metadata(
         results,
         'vol/A_CALIB',
@@ -246,6 +264,36 @@ def run_tree(tmp_path: Path) -> dict[str, Path]:
             cmatrix=_corrected(drifted),
         ),
     )
+    return {'kernels': kernels, 'results': results, 'output': output}
+
+
+@pytest.fixture
+def refused_second_file_tree(tmp_path: Path) -> dict[str, Path]:
+    """Build a run whose second output file cannot be built at all.
+
+    Two images navigate against two baselines, and the second baseline carries
+    no angular velocity, which no segment can express.  The corrected files are
+    written in name order, so the first one is buildable and the second is the
+    refusal: a run that wrote as it went would leave the first file behind.
+    """
+    kernels = tmp_path / 'kernels'
+    results = tmp_path / 'results'
+    output = tmp_path / 'output'
+    original_a, original_b = _write_kernels(kernels, angular_velocity_in_b=False)
+    for stub, name, midtime, original in (
+        ('vol/A_CALIB', 'A_CALIB', _IMAGE_A_ET, original_a),
+        ('vol/B_CALIB', 'B_CALIB', _IMAGE_B_ET, original_b),
+    ):
+        _write_metadata(
+            results,
+            stub,
+            _image(
+                image_name=name,
+                midtime=midtime,
+                cmatrix_original=original,
+                cmatrix=_corrected(original),
+            ),
+        )
     return {'kernels': kernels, 'results': results, 'output': output}
 
 
@@ -788,27 +836,51 @@ def test_a_document_that_is_not_a_navigated_image_is_named_in_the_run_log(
     assert 'F_CALIB_metadata.json: cannot be read as a navigated image' in _run_log(run_tree)
 
 
-def test_an_exposure_its_baseline_does_not_cover_stops_the_run(
+def test_an_exposure_its_baseline_does_not_cover_is_reported(
     straddling_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
 ) -> None:
-    """The reason set has no entry for a baseline that covers only the midtime."""
-    monkeypatch.setattr(
-        'sys.argv',
-        [
-            'sd_create_ck',
-            'coiss',
-            '--nav-results-root',
-            str(straddling_tree['results']),
-            '--kernel-dir',
-            str(straddling_tree['kernels']),
-            '--output-dir',
-            str(straddling_tree['output']),
-            '--log-root',
-            str(straddling_tree['output'] / 'logs'),
-        ],
-    )
-    with pytest.raises(OSError, match='SPICE'):
-        sd_create_ck.main()
+    """The run finishes and the image is one row of the report, like any omission.
+
+    Not ``no_reproducing_baseline``: this baseline did reproduce, at the
+    midtime, which is what paired the image with it, and that reason is the
+    detector for holdings that changed since navigation ran.
+    """
+    _run(straddling_tree, monkeypatch)
+    assert _report_rows(straddling_tree)['G_CALIB']['omission_reason'] == 'baseline_coverage_gap'
+
+
+def test_an_exposure_its_baseline_does_not_cover_is_not_reported_as_drift(
+    straddling_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The drift detector stays clean, which is what makes it worth watching."""
+    _run(straddling_tree, monkeypatch)
+    assert 'Images omitted, no_reproducing_baseline: 0' in _run_log(straddling_tree)
+
+
+def test_an_exposure_its_baseline_does_not_cover_names_no_source_file(
+    straddling_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """It received no segment, so no file can be said to carry one."""
+    _run(straddling_tree, monkeypatch)
+    assert _report_rows(straddling_tree)['G_CALIB']['source_bc'] == ''
+
+
+def test_an_exposure_its_baseline_does_not_cover_appears_once(
+    straddling_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Every image considered appears exactly once, this one included."""
+    _run(straddling_tree, monkeypatch)
+    with (straddling_tree['output'] / 'coiss_ck_report.csv').open() as stream:
+        names = [row['image_name'] for row in csv.DictReader(stream)]
+    assert names == ['G_CALIB']
+
+
+def test_an_exposure_its_baseline_does_not_cover_writes_no_kernel(
+    straddling_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Its baseline is left with nothing to correct, and an empty file claims a correction."""
+    _run(straddling_tree, monkeypatch)
+    assert list(straddling_tree['output'].glob('*.bc')) == []
 
 
 def test_an_exposure_its_baseline_does_not_cover_survives_strict_scope(
@@ -817,11 +889,55 @@ def test_an_exposure_its_baseline_does_not_cover_survives_strict_scope(
     pool_restored: None,
     strict_log_scope: None,
 ) -> None:
-    """The real error reaches the caller, not a scope error standing in for it.
+    """The omission is logged where a scope is open for it, not while building.
 
-    Logging this through the image logger would raise ``LogScopeError`` under
-    this documented setting, and that error would *replace* the one worth
-    reading, demoting the SPICE failure to a context nobody prints.
+    Logging it through the image logger during the build would raise
+    ``LogScopeError`` under this documented setting, since no image scope is
+    open there; the reporting pass opens one per image and reports it from
+    inside.
+    """
+    _run(straddling_tree, monkeypatch)
+    logs = list((straddling_tree['output'] / 'logs').rglob('*G_CALIB*'))
+    assert len(logs) == 1
+    assert 'baseline_coverage_gap' in logs[0].read_text()
+
+
+def test_an_exposure_its_baseline_does_not_cover_is_named_in_the_run_log(
+    straddling_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """With the record epoch, which the reason itself does not carry."""
+    _run(straddling_tree, monkeypatch)
+    log = _run_log(straddling_tree)
+    assert 'G_CALIB: no corrected segment written (baseline_coverage_gap)' in log
+    assert 'G_CALIB: the furnished baseline supplies no pointing for CK object -82000' in log
+
+
+def test_an_exposure_its_baseline_does_not_cover_is_counted(
+    straddling_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The end-of-run counts carry the new reason like the other four."""
+    _run(straddling_tree, monkeypatch)
+    assert 'Images omitted, baseline_coverage_gap: 1' in _run_log(straddling_tree)
+
+
+def test_a_baseline_left_with_nothing_to_correct_says_so(
+    straddling_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """An operator sees why a baseline they expected to be mirrored was not."""
+    _run(straddling_tree, monkeypatch)
+    assert f'No image is left to correct {_BASELINE_A}' in _run_log(straddling_tree)
+
+
+def _run_stopped(tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, message: str) -> str:
+    """Run the driver over a tree it must refuse, and hold it to the reason.
+
+    Parameters:
+        tree: The directories the fixture built.
+        monkeypatch: Used to set the command line.
+        message: Text the refusal must name.
+
+    Returns:
+        The whole refusal, for a caller asserting on more of it.
     """
     monkeypatch.setattr(
         'sys.argv',
@@ -829,41 +945,308 @@ def test_an_exposure_its_baseline_does_not_cover_survives_strict_scope(
             'sd_create_ck',
             'coiss',
             '--nav-results-root',
-            str(straddling_tree['results']),
+            str(tree['results']),
             '--kernel-dir',
-            str(straddling_tree['kernels']),
+            str(tree['kernels']),
             '--output-dir',
-            str(straddling_tree['output']),
+            str(tree['output']),
             '--log-root',
-            str(straddling_tree['output'] / 'logs'),
+            str(tree['output'] / 'logs'),
         ],
     )
-    with pytest.raises(OSError, match='SPICE'):
+    with pytest.raises(ValueError, match=message) as refusal:
         sd_create_ck.main()
+    return str(refusal.value)
 
 
-def test_an_exposure_its_baseline_does_not_cover_is_named_in_the_run_log(
-    straddling_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+def _run_refused(tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the driver over a tree whose second output file cannot be built.
+
+    Parameters:
+        tree: The directories the fixture built.
+        monkeypatch: Used to set the command line.
+    """
+    _run_stopped(tree, monkeypatch, 'angular velocity at only some of them')
+
+
+def test_a_refusal_leaves_no_corrected_kernel_behind(
+    refused_second_file_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
 ) -> None:
-    """Named in the run log only: no image scope is open for it to be in."""
-    monkeypatch.setattr(
-        'sys.argv',
-        [
-            'sd_create_ck',
-            'coiss',
-            '--nav-results-root',
-            str(straddling_tree['results']),
-            '--kernel-dir',
-            str(straddling_tree['kernels']),
-            '--output-dir',
-            str(straddling_tree['output']),
-            '--log-root',
-            str(straddling_tree['output'] / 'logs'),
-        ],
+    """The first file was buildable; a run that wrote as it built would have written it."""
+    _run_refused(refused_second_file_tree, monkeypatch)
+    assert list(refused_second_file_tree['output'].glob('*.bc')) == []
+
+
+def test_a_refusal_leaves_no_meta_kernel_behind(
+    refused_second_file_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """A meta-kernel is written after the kernels, and there are none to name."""
+    _run_refused(refused_second_file_tree, monkeypatch)
+    assert not (refused_second_file_tree['output'] / 'coiss_nav.tm').exists()
+
+
+def test_a_refusal_leaves_no_report_behind(
+    refused_second_file_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Nothing is written, so nothing claims to say what was: the run is repeatable."""
+    _run_refused(refused_second_file_tree, monkeypatch)
+    assert not (refused_second_file_tree['output'] / 'coiss_ck_report.csv').exists()
+
+
+def test_a_refusal_names_the_image_it_could_not_build(
+    refused_second_file_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Named in the run log, which is the only record such a run leaves."""
+    _run_refused(refused_second_file_tree, monkeypatch)
+    assert 'B_CALIB: could not build the corrected segment' in _run_log(refused_second_file_tree)
+
+
+# ---------------------------------------------------------------------------
+# An output path the run cannot write
+#
+# The run writes orig_a_nav.bc and then orig_b_nav.bc, so blocking the second
+# is what tells a run that judges its destinations first from one that judges
+# each file as it reaches it.  The second would refuse either way; only the
+# first says whether anything was left behind when it did.
+# ---------------------------------------------------------------------------
+
+
+def _block_second_output(tree: dict[str, Path], *, with_link_to: Path | None = None) -> Path:
+    """Put something at the run's second output path, and return it.
+
+    Parameters:
+        tree: The directories the fixture built.
+        with_link_to: A target to make the blocker a symbolic link to, absent
+            itself.  Without it the blocker is an ordinary file.
+
+    Returns:
+        The blocked path.
+    """
+    path = tree['output'] / 'orig_b_nav.bc'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if with_link_to is None:
+        path.write_bytes(b'not a kernel')
+    else:
+        path.symlink_to(with_link_to)
+    return path
+
+
+def test_an_occupied_second_output_path_stops_the_run(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """And names it, since an operator has to know which file to move."""
+    _block_second_output(run_tree)
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc already exists')
+
+
+def test_an_occupied_second_output_path_leaves_the_first_unwritten(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The whole point: a run that judged each file as it reached it wrote this one."""
+    _block_second_output(run_tree)
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc already exists')
+    assert not (run_tree['output'] / 'orig_a_nav.bc').exists()
+
+
+def test_an_occupied_second_output_path_leaves_no_meta_kernel(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """A meta-kernel would name a corrected set that was never written."""
+    _block_second_output(run_tree)
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc already exists')
+    assert not (run_tree['output'] / 'coiss_nav.tm').exists()
+
+
+def test_an_occupied_second_output_path_leaves_no_report(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Nothing was written, so nothing claims to say what was: the run is repeatable."""
+    _block_second_output(run_tree)
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc already exists')
+    assert not (run_tree['output'] / 'coiss_ck_report.csv').exists()
+
+
+def test_an_occupied_second_output_path_is_left_alone(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The file the operator has to choose between is not the one that changed."""
+    blocked = _block_second_output(run_tree)
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc already exists')
+    assert blocked.read_bytes() == b'not a kernel'
+
+
+def test_a_run_names_every_output_path_it_cannot_write(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The set is cleared in one pass, not one rerun per occupied file.
+
+    This is what the whole set being judged buys over judging each file just
+    before it is written: both of those refuse before anything is on disk, but
+    only the set-level one reaches the second path to report it.
+    """
+    run_tree['output'].mkdir(parents=True, exist_ok=True)
+    (run_tree['output'] / 'orig_a_nav.bc').write_bytes(b'not a kernel')
+    _block_second_output(run_tree)
+    refusal = _run_stopped(run_tree, monkeypatch, r'orig_a_nav\.bc already exists')
+    assert 'orig_b_nav.bc already exists' in refusal
+
+
+def test_a_dangling_link_at_the_second_output_path_stops_the_run(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """``Path.exists`` follows the link and reports the absent target as absent."""
+    _block_second_output(run_tree, with_link_to=run_tree['output'] / 'elsewhere.bc')
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc is a symbolic link')
+
+
+def test_a_dangling_link_at_the_second_output_path_creates_no_target(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Which is the harm: the write would create a file the run never named."""
+    target = run_tree['output'] / 'elsewhere.bc'
+    _block_second_output(run_tree, with_link_to=target)
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc is a symbolic link')
+    assert not target.exists()
+
+
+def test_a_dangling_link_at_the_second_output_path_leaves_the_first_unwritten(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The set is judged before the first file, whatever occupies a later path."""
+    _block_second_output(run_tree, with_link_to=run_tree['output'] / 'elsewhere.bc')
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc is a symbolic link')
+    assert not (run_tree['output'] / 'orig_a_nav.bc').exists()
+
+
+# ---------------------------------------------------------------------------
+# Carrying a build-time omission into the report
+# ---------------------------------------------------------------------------
+
+
+def _entry(image_name: str, *, corrected: bool) -> ImageEntry:
+    """Build one image entry, with or without pointing to write.
+
+    Parameters:
+        image_name: Basename recorded for the image.
+        corrected: Whether it carries a pointing solution.
+
+    Returns:
+        The entry.
+    """
+    pointing = None
+    if corrected:
+        pointing = ImagePointing(
+            image_name=image_name,
+            cmatrix=np.eye(3),
+            cmatrix_original=np.eye(3),
+            camera_frame=CASSINI_CAMERA_FRAME,
+            ck_frame_id=CASSINI_CK_FRAME_ID,
+            start_et=_IMAGE_A_ET - 1.0,
+            stop_et=_IMAGE_A_ET + 1.0,
+            midtime_et=_IMAGE_A_ET,
+            exposure_s=2.0,
+        )
+    return ImageEntry(
+        image_name=image_name,
+        status='success' if corrected else 'failed',
+        camera='NAC',
+        shutter_mode='NACONLY',
+        rotation_fitted=False,
+        kernel_basenames=_KERNEL_NAMES if corrected else (),
+        pointing=pointing,
+        ineligibility_reason=None if corrected else OmissionReason.NOT_ELIGIBLE,
     )
-    with pytest.raises(OSError, match='SPICE'):
-        sd_create_ck.main()
-    assert 'G_CALIB: could not build the corrected segment' in _run_log(straddling_tree)
+
+
+def _assignment(image_name: str, *, corrected: bool) -> Assignment:
+    """Build one assignment, either carrying a baseline or a reason it has none.
+
+    Parameters:
+        image_name: Basename recorded for the image.
+        corrected: Whether the image was paired with a baseline.
+
+    Returns:
+        The assignment.
+    """
+    if not corrected:
+        return Assignment(
+            entry=_entry(image_name, corrected=False),
+            baseline=None,
+            omission_reason=OmissionReason.NOT_ELIGIBLE,
+        )
+    baseline = CkFile(
+        path=FCPath(f'/kernels/{_BASELINE_A}'),
+        kernel_class=KernelClass.RECONSTRUCTED,
+        coverage=(),
+    )
+    return Assignment(
+        entry=_entry(image_name, corrected=True), baseline=baseline, omission_reason=None
+    )
+
+
+def test_a_build_omission_replaces_that_image_s_baseline() -> None:
+    """The report is written from the assignments, so the reason has to reach them."""
+    assignments = (_assignment('A_CALIB', corrected=True), _assignment('B_CALIB', corrected=True))
+    revised = sd_create_ck.apply_build_omissions(
+        assignments, {'A_CALIB': OmissionReason.BASELINE_COVERAGE_GAP}
+    )
+    assert revised[0].omission_reason is OmissionReason.BASELINE_COVERAGE_GAP
+    assert revised[0].baseline is None
+
+
+def test_a_build_omission_leaves_the_other_images_alone() -> None:
+    """And leaves them in the order the report expects them in."""
+    assignments = (_assignment('A_CALIB', corrected=True), _assignment('B_CALIB', corrected=True))
+    revised = sd_create_ck.apply_build_omissions(
+        assignments, {'A_CALIB': OmissionReason.BASELINE_COVERAGE_GAP}
+    )
+    assert revised[1] is assignments[1]
+
+
+def test_no_build_omissions_changes_nothing() -> None:
+    """A run where every assigned image built is the ordinary one."""
+    assignments = (_assignment('A_CALIB', corrected=True),)
+    assert sd_create_ck.apply_build_omissions(assignments, {}) == assignments
+
+
+def test_a_build_omission_naming_an_unknown_image_is_refused() -> None:
+    """Its reason would reach no row, and the run would report nothing amiss."""
+    assignments = (_assignment('A_CALIB', corrected=True),)
+    with pytest.raises(ValueError, match='would reach no row of the report'):
+        sd_create_ck.apply_build_omissions(
+            assignments, {'Z_CALIB': OmissionReason.BASELINE_COVERAGE_GAP}
+        )
+
+
+def test_a_build_omission_naming_an_already_omitted_image_is_refused() -> None:
+    """No segment was built for it, so no build could have omitted it.
+
+    Overwriting the reason it already carries would replace the one the report
+    is meant to show with one the run did not measure.
+    """
+    assignments = (_assignment('C_CALIB', corrected=False),)
+    with pytest.raises(ValueError, match='C_CALIB'):
+        sd_create_ck.apply_build_omissions(
+            assignments, {'C_CALIB': OmissionReason.BASELINE_COVERAGE_GAP}
+        )
+
+
+def test_two_documents_naming_one_image_are_refused(tmp_path: Path) -> None:
+    """One set of facts would silently stand in for the other's.
+
+    The documents are the ones an image that failed to load leaves, which
+    record a name and a status and no epoch, so no leapseconds kernel is
+    needed to read them.
+    """
+    metadata: dict[str, Any] = {'status': 'failed', 'observation': {'image_name': 'A_CALIB'}}
+    documents = [
+        inputs.Document(
+            path=FCPath(str(tmp_path / f'{stub}_metadata.json')), stub=stub, metadata=metadata
+        )
+        for stub in ('vol/first', 'vol/second')
+    ]
+    with pytest.raises(ValueError, match='two documents name the image'):
+        sd_create_ck.image_facts(documents)
 
 
 def test_an_image_with_no_pointing_has_no_segment_to_build() -> None:

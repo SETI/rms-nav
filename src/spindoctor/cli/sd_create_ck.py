@@ -17,6 +17,7 @@ import sys
 import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -33,7 +34,7 @@ from spindoctor import __version__
 from spindoctor.cli.ck.assignment import Assignment, assign_images, group_for_output
 from spindoctor.cli.ck.comments import CommentArea, build_comment_lines
 from spindoctor.cli.ck.images import ImageEntry, OmissionReason
-from spindoctor.cli.ck.index import build_ck_index
+from spindoctor.cli.ck.index import CkFile, build_ck_index
 from spindoctor.cli.ck.inputs import (
     LSK_SUFFIXES,
     Document,
@@ -47,11 +48,16 @@ from spindoctor.cli.ck.inputs import (
     resolve_one,
     select_by_time,
 )
-from spindoctor.cli.ck.kernel_file import write_ck_file
+from spindoctor.cli.ck.kernel_file import check_ck_file, check_output_paths, write_ck_file
 from spindoctor.cli.ck.metakernel import write_meta_kernel
 from spindoctor.cli.ck.pointing import ImagePointing
 from spindoctor.cli.ck.report import ImageFacts, ReportRow, read_image_facts, write_report
-from spindoctor.cli.ck.segment import CkSegment, build_segment, resolve_sclk_id
+from spindoctor.cli.ck.segment import (
+    BaselineCoverageGapError,
+    CkSegment,
+    build_segment,
+    resolve_sclk_id,
+)
 from spindoctor.cli.logging_args import add_logging_arguments, reporting_logging_errors
 from spindoctor.config import (
     DEFAULT_CONFIG,
@@ -180,91 +186,273 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
 
 ################################################################################
 #
-# WRITING
+# BUILDING, THEN WRITING
 #
 ################################################################################
 
 
+@dataclass(frozen=True)
+class PreparedFile:
+    """One corrected C-kernel, built in memory and not yet written.
+
+    Parameters:
+        baseline: The original C-kernel this file mirrors.
+        output: Where the corrected file goes.
+        segments: Its segments, in the order the images were assigned.
+        comment_lines: The comment area to attach to it.
+    """
+
+    baseline: CkFile
+    output: FCPath
+    segments: tuple[CkSegment, ...]
+    comment_lines: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BuiltOutputs:
+    """Everything a run will write, and the images building it left out.
+
+    Parameters:
+        files: The corrected kernels, ready to write, ordered by name.
+        omissions: Why each image the build could not use receives no segment,
+            keyed by image name.  An image is in one of the files or in here,
+            never in both and never in neither.
+    """
+
+    files: tuple[PreparedFile, ...]
+    omissions: Mapping[str, OmissionReason]
+
+
+def image_facts(documents: Sequence[Document]) -> dict[str, ImageFacts]:
+    """Read the facts the report and the comment areas both carry, by image name.
+
+    Parameters:
+        documents: The documents the run considered.
+
+    Returns:
+        One entry per image, keyed by the name recorded for it.
+
+    Raises:
+        ValueError: if a document holds a value the report cannot render, or if
+            two documents name the same image, whose facts could not then be
+            told apart and one of which would silently replace the other in
+            whichever kernel's comment area carried it.
+    """
+    facts_by_name: dict[str, ImageFacts] = {}
+    for document in documents:
+        facts = read_image_facts(document.metadata)
+        if facts.image_name in facts_by_name:
+            raise ValueError(
+                f'two documents name the image {facts.image_name!r}; their reported facts cannot '
+                f'be told apart'
+            )
+        facts_by_name[facts.image_name] = facts
+    return facts_by_name
+
+
 def report_rows(
-    documents: Sequence[Document], assignments: Sequence[Assignment]
-) -> tuple[list[ReportRow], dict[str, ImageFacts]]:
+    assignments: Sequence[Assignment], facts_by_name: Mapping[str, ImageFacts]
+) -> list[ReportRow]:
     """Build the report, one row per image the run considered.
 
     Parameters:
-        documents: The documents the run considered, in report order.
-        assignments: What became of each of them.
+        assignments: What became of each image the run considered, in report
+            order.
+        facts_by_name: The reported facts of each image, by name.
 
     Returns:
-        The rows, and the facts of each image keyed by name so the comment
-        areas can carry the same numbers the report does.
+        The rows.
 
     Raises:
-        ValueError: if a document holds a value the report cannot render, or
-            if the two sequences are of different lengths -- the assignment
-            step answers one assignment per image in the order it was given
-            them, so a length mismatch means they are not the same images.
+        KeyError: if an assignment names an image the facts do not hold, which
+            means the two were read from different sets of documents.
     """
-    rows: list[ReportRow] = []
-    facts_by_name: dict[str, ImageFacts] = {}
-    for document, assignment in zip(documents, assignments, strict=True):
-        facts = read_image_facts(document.metadata)
-        facts_by_name[facts.image_name] = facts
-        rows.append(
-            ReportRow(
-                facts=facts,
-                source_bc=assignment.output_name,
-                omission_reason=assignment.omission_reason,
-            )
+    return [
+        ReportRow(
+            facts=facts_by_name[assignment.image_name],
+            source_bc=assignment.output_name,
+            omission_reason=assignment.omission_reason,
         )
-    return rows, facts_by_name
+        for assignment in assignments
+    ]
 
 
-def write_output_files(
+def build_output_files(
     assignments: Sequence[Assignment],
     facts_by_name: Mapping[str, ImageFacts],
     output_dir: FCPath,
     *,
     sclk_basenames: Mapping[int, str],
     configuration_hash: str,
-) -> list[tuple[FCPath, FCPath]]:
-    """Write one corrected kernel per original the run's images navigated against.
+) -> BuiltOutputs:
+    """Build every corrected kernel a run will write, and write none of them.
+
+    Nothing here reaches the filesystem, so a failure part way through leaves
+    the output directory as it found it.  That is the point of separating the
+    two phases: the alternative is a run that dies with some kernels written,
+    no meta-kernel, and no report -- the one artifact that says what is in the
+    files that did get written.
+
+    An image whose baseline supplies no pointing at one of its record epochs is
+    omitted here rather than ending the run, and an output file every one of
+    whose images was omitted is not built at all.
 
     Parameters:
         assignments: What became of each image the run considered.
         facts_by_name: The reported facts of each image, by name.
-        output_dir: Where the corrected kernels go.
+        output_dir: Where the corrected kernels will go.
         sclk_basenames: The clock kernel each spacecraft clock is encoded with.
         configuration_hash: Digest of the configuration this run used.
+
+    Returns:
+        The files to write, ordered by name, and the images left out.
+
+    Raises:
+        ValueError: if a segment cannot be built: a baseline supplying angular
+            velocity at only some of an exposure's records, an exposure needing
+            more records than a segment holds, or an image carrying no
+            pointing.
+        KeyError: if a frame the correction is expressed between is not defined
+            by the furnished kernels.
+        OSError: if a baseline kernel cannot be furnished or read.
+    """
+    # Every segment of the run is resident at once, which is what buys the
+    # separation.  Measured on this writer's own segments, one costs 678 bytes
+    # for the three records an ordinary exposure carries and 1826 bytes for the
+    # 21 a twenty-second one does, so the 50,000-image batch this tool is sized
+    # for holds about 34 MB of segments -- a few percent of the per-image
+    # metadata such a batch already has resident, and flat in the number of
+    # output files.  A batch of exposures long enough to hit the record cap
+    # would be a different story: 50,000 segments of 10,000 records each is
+    # 32 GB, and no instrument commands such an exposure.
+    prepared: list[PreparedFile] = []
+    omissions: dict[str, OmissionReason] = {}
+    for group in group_for_output(assignments):
+        segments: list[CkSegment] = []
+        kept: list[Assignment] = []
+        with furnished(group.baseline.path):
+            for assignment in group.assignments:
+                segment = _segment_for(assignment)
+                if segment is None:
+                    omissions[assignment.image_name] = OmissionReason.BASELINE_COVERAGE_GAP
+                    continue
+                segments.append(segment)
+                kept.append(assignment)
+        if len(kept) == 0:
+            MAIN_LOGGER.warning(
+                'No image is left to correct %s; no corrected kernel is written for it',
+                group.baseline.basename,
+            )
+            continue
+        area = CommentArea(
+            generator_version=__version__,
+            configuration_hash=configuration_hash,
+            baseline_basenames=(group.baseline.basename,),
+            sclk_basename=sclk_basenames[_clock_of(kept[0])],
+            images=tuple(facts_by_name[assignment.image_name] for assignment in kept),
+        )
+        prepared.append(
+            PreparedFile(
+                baseline=group.baseline,
+                output=output_dir / group.name,
+                segments=tuple(segments),
+                comment_lines=tuple(build_comment_lines(area)),
+            )
+        )
+    return BuiltOutputs(files=tuple(prepared), omissions=omissions)
+
+
+def apply_build_omissions(
+    assignments: Sequence[Assignment], omissions: Mapping[str, OmissionReason]
+) -> tuple[Assignment, ...]:
+    """Report the images the build could not use as omitted.
+
+    An image the assignment step paired with a baseline can still end up with
+    no segment, because the pairing is made at the exposure midtime alone and
+    the baseline has to answer at every record epoch.  The report is written
+    from the assignments, so those images are given the reason here in place of
+    the baseline, which is what puts each of them in the report exactly once
+    with it.
+
+    Parameters:
+        assignments: The assignments as the assignment step made them.
+        omissions: Why each omitted image receives no segment, by image name.
+
+    Returns:
+        The assignments, in the order given, with the omitted images revised.
+
+    Raises:
+        ValueError: if an omission names an image these assignments do not
+            carry a baseline for -- an image of some other run, or one already
+            omitted for another reason -- since the reason would then reach no
+            row of the report and the image would be reported as corrected.
+    """
+    corrected = {
+        assignment.image_name for assignment in assignments if assignment.baseline is not None
+    }
+    unplaced = sorted(set(omissions) - corrected)
+    if len(unplaced) > 0:
+        raise ValueError(
+            f'the build omitted {unplaced}, which these assignments do not hold as corrected '
+            f'images; those omission reasons would reach no row of the report'
+        )
+    return tuple(
+        Assignment(
+            entry=assignment.entry, baseline=None, omission_reason=omissions[assignment.image_name]
+        )
+        if assignment.image_name in omissions
+        else assignment
+        for assignment in assignments
+    )
+
+
+def write_output_files(files: Sequence[PreparedFile]) -> list[tuple[FCPath, FCPath]]:
+    """Write the corrected kernels a run has already built, all of them or none.
+
+    The whole set is judged before the first file is opened: every destination
+    together, then each file's own contents.  A run whose third output path is
+    already occupied therefore writes none of the three.  Judging as it goes
+    instead would leave the first two behind -- a partial set, with no
+    meta-kernel and no report to say what is in it, and one the refusal to
+    overwrite an existing corrected kernel then blocks the rerun on.
+
+    That is not atomicity, and it is not claimed.  What it establishes is that
+    nothing knowable in advance stops the writing part way through.  A residual
+    window remains and cannot be closed by any check made beforehand: the
+    device filling up, a path or a permission changing between the check and
+    the write, and a record set SPICE refuses once the file is open.  A file
+    that fails that way is removed, but the files written before it are not,
+    and this call raises with them on disk.
+
+    Parameters:
+        files: The built files, in the order they are to be written.
 
     Returns:
         One entry per file written, pairing the original with the correction.
 
     Raises:
-        OSError: if a baseline kernel supplies no pointing at a record epoch,
-            which is an image whose exposure its own baseline does not cover.
-        ValueError: if a segment cannot be built or a file cannot be written.
+        ValueError: if any output path cannot be written -- naming every one
+            that cannot, and why -- if any file's records or comment area is
+            one SPICE cannot store, or if SPICE refuses a segment once a file
+            is open.
+        RuntimeError: if SPICE cannot create a file.
+        OSError: if the output directory cannot be created, or if SPICE
+            refuses a write for an operating-system reason.
     """
+    paths = [local_output_path(prepared.output) for prepared in files]
+    check_output_paths(paths)
+    for prepared, path in zip(files, paths, strict=True):
+        check_ck_file(path, prepared.segments, prepared.comment_lines)
     written: list[tuple[FCPath, FCPath]] = []
-    for group in group_for_output(assignments):
-        output = output_dir / group.name
-        with furnished(group.baseline.path):
-            segments = [_segment_for(assignment) for assignment in group.assignments]
-        images = tuple(facts_by_name[assignment.image_name] for assignment in group.assignments)
-        area = CommentArea(
-            generator_version=__version__,
-            configuration_hash=configuration_hash,
-            baseline_basenames=(group.baseline.basename,),
-            sclk_basename=sclk_basenames[_clock_of(group.assignments[0])],
-            images=images,
-        )
-        write_ck_file(local_output_path(output), segments, build_comment_lines(area))
+    for prepared, path in zip(files, paths, strict=True):
+        write_ck_file(path, prepared.segments, prepared.comment_lines)
         MAIN_LOGGER.info(
             'Wrote %s: %d segment(s) correcting %s',
-            output.as_posix(),
-            len(segments),
-            group.baseline.basename,
+            prepared.output.as_posix(),
+            len(prepared.segments),
+            prepared.baseline.basename,
         )
-        written.append((group.baseline.path, output))
+        written.append((prepared.baseline.path, prepared.output))
     return written
 
 
@@ -286,7 +474,11 @@ def absolute_directory(directory: str) -> str:
 
 
 def local_output_path(path: FCPath) -> Path:
-    """Return the local path SPICE writes a kernel to.
+    """Return the local path SPICE writes a kernel to, creating its directory.
+
+    The directory is created here rather than at the write, so that a caller
+    judging a whole set of destinations before it writes any of them has a
+    directory to judge.
 
     Parameters:
         path: The output path.
@@ -297,6 +489,7 @@ def local_output_path(path: FCPath) -> Path:
     Raises:
         ValueError: if it is not local, since SPICE creates a file by name on
             the local filesystem and cannot write to a remote root.
+        OSError: if the directory does not exist and cannot be created.
     """
     local = Path(path.as_posix())
     if '://' in path.as_posix():
@@ -308,23 +501,36 @@ def local_output_path(path: FCPath) -> Path:
     return local
 
 
-def _segment_for(assignment: Assignment) -> CkSegment:
+def _segment_for(assignment: Assignment) -> CkSegment | None:
     """Build the corrected segment of one assigned image.
 
     Parameters:
         assignment: The image and the baseline it corrects.
 
     Returns:
-        The segment.
+        The segment, or ``None`` when the baseline supplies no pointing at one
+        of the record epochs, which omits this one image and lets the run
+        continue.
 
     Raises:
         ValueError: if the image carries no pointing, which an assignment with
-            a baseline cannot.
-        OSError: if the baseline supplies no pointing at a record epoch.
+            a baseline cannot; if the baseline supplies angular velocity at
+            only some of the record epochs, which no segment can express; or if
+            the recorded exposure would need more records than a segment holds.
+        KeyError: if a frame the correction is expressed between is not defined
+            by the furnished kernels.
+        OSError: if the baseline kernel cannot be read.
     """
     pointing = pointing_of(assignment)
     try:
         return build_segment(pointing)
+    except BaselineCoverageGapError as exc:
+        # Said here as well as by the reporting pass, which names the reason
+        # but not the epoch: the reason says the baseline could not answer
+        # somewhere inside the exposure, and this says where.  The run log
+        # only, for the same reason as below -- no image scope is open here.
+        MAIN_LOGGER.warning('%s: %s', assignment.image_name, exc)
+        return None
     except (OSError, KeyError, ValueError) as exc:
         # The run log only, deliberately.  This stops the run, and the image
         # log it would otherwise be written to is opened by the reporting pass
@@ -333,9 +539,9 @@ def _segment_for(assignment: Assignment) -> CkSegment:
         # strict_scope it would replace this error with a scope error and
         # demote the real one to a context.  It stops the run because the
         # reason set the report may use has no entry for an image whose
-        # baseline reproduced its attitude and then could not supply a record
-        # epoch, and inventing one would be a schema change for every consumer
-        # of the report.
+        # baseline reproduced its attitude and then supplied angular velocity
+        # at only some of its records, and inventing one would be a schema
+        # change for every consumer of the report.
         MAIN_LOGGER.exception(
             '%s: could not build the corrected segment: %s', assignment.image_name, exc
         )
@@ -576,15 +782,22 @@ def main() -> None:
     MAIN_LOGGER.info('Indexed %d candidate C-kernel(s)', len(index.files))
 
     assignments = assign_images(entries, index)
-    rows, facts_by_name = report_rows(documents, assignments)
+    facts_by_name = image_facts(documents)
 
-    written = write_output_files(
+    # Everything is built before anything is written.  A run that dies part way
+    # through the build then leaves the output directory untouched, rather than
+    # some corrected kernels, no meta-kernel, and no report saying what is in
+    # them.
+    built = build_output_files(
         assignments,
         facts_by_name,
         output_dir,
         sclk_basenames=sclk_basenames,
         configuration_hash=DEFAULT_CONFIG.resolved_config_hash(),
     )
+    assignments = apply_build_omissions(assignments, built.omissions)
+    rows = report_rows(assignments, facts_by_name)
+    written = write_output_files(built.files)
 
     if len(written) > 0:
         meta_kernel = output_dir / f'{arguments.mission}{META_KERNEL_SUFFIX}'

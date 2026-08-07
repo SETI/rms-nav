@@ -13,6 +13,13 @@ rotation for Voyager -- rather than by navigating an image, because loading one
 through oops furnishes C-kernels into the process, and assignment refuses to
 run with any furnished.  What is real here is the kernels, the epochs and the
 names; what is computed is the one number a navigation run would have recorded.
+
+Not navigating an image here is not enough on its own, because the kernel pool
+is process-global and nothing unloads what an earlier test furnished.  Every
+other test in the integration tier navigates a real image, so in a full run
+these would find dozens of C-kernels already in the pool and refuse to run at
+all.  The pool is therefore emptied for this module and furnished again
+afterwards, so what these tests measure is what they furnished.
 """
 
 import os
@@ -50,6 +57,7 @@ from spindoctor.cli.ck.index import (  # noqa: E402  (guarded import)
     build_ck_index,
 )
 from spindoctor.cli.ck.pointing import NDArrayFloatType  # noqa: E402  (guarded import)
+from tests.kernel_pool import isolated_kernel_pool  # noqa: E402  (guarded import)
 
 _CASSINI_CK_DIRS = (
     'CK-reconstructed',
@@ -124,6 +132,23 @@ def _furnish_all(paths: list[Path]) -> Iterator[None]:
     finally:
         for path in reversed(paths):
             cspyce.unload(str(path))
+
+
+@pytest.fixture(scope='module', autouse=True)
+def empty_kernel_pool() -> Iterator[None]:
+    """Run this module's tests against a pool holding nothing they did not furnish.
+
+    Assignment refuses to run with any C-kernel furnished, which is the point:
+    any other C-kernel answers the same lookups as the candidate under test.
+    That refusal is what a full integration run would hit here, since every
+    other test in the tier navigates a real image and leaves its kernels
+    behind.
+
+    Yields:
+        Nothing; the module's tests run against an empty pool.
+    """
+    with isolated_kernel_pool():
+        yield
 
 
 @pytest.fixture

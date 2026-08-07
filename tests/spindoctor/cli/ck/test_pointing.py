@@ -170,6 +170,24 @@ def test_from_metadata_refuses_a_negative_exposure() -> None:
         ImagePointing.from_metadata(_metadata(exposure_s=-1.0))
 
 
+def test_from_metadata_refuses_an_exposure_that_disagrees_with_the_epochs() -> None:
+    """The recorded duration and the recorded span describe one exposure.
+
+    They come from different fields and are used interchangeably by the record
+    layout -- one decides whether a segment gets interior records, the other
+    decides how many -- so nothing downstream would notice them disagreeing.
+    """
+    with pytest.raises(ValueError, match='exposure_s disagrees with the recorded epochs'):
+        ImagePointing.from_metadata(_metadata(exposure_s=_EXPOSURE_S + 1.0))
+
+
+def test_from_metadata_accepts_the_rounding_of_adding_a_duration_to_an_epoch() -> None:
+    """The pipeline derives both from one cadence, and they agree to nanoseconds."""
+    stop_et = _START_ET + _EXPOSURE_S
+    pointing = ImagePointing.from_metadata(_metadata(exposure_s=stop_et - _START_ET))
+    assert pointing.exposure_s == pytest.approx(_EXPOSURE_S, abs=1.0e-9)
+
+
 @pytest.mark.parametrize(
     'exposure_s',
     [float('nan'), float('inf'), float('-inf')],
@@ -325,6 +343,56 @@ def test_from_metadata_accepts_a_whole_number_epoch() -> None:
     """JSON writes an exact epoch without a decimal point, and it is widened."""
     pointing = ImagePointing.from_metadata(_metadata(exposure_s=2))
     assert pointing.exposure_s == 2.0
+
+
+@pytest.mark.parametrize(
+    'field',
+    ['start_et', 'stop_et', 'midtime_et', 'exposure_s'],
+    ids=['start', 'stop', 'mid', 'exp'],
+)
+def test_from_metadata_refuses_a_whole_number_too_large_for_a_double(field: str) -> None:
+    """JSON puts no bound on an integer literal; a double does.
+
+    Widening one raises ``OverflowError``, which is neither of the two
+    exceptions this constructor documents, so a caller that expected to name
+    the offending document would get a bare traceback instead.
+
+    Parameters:
+        field: Name of the time field holding the oversized whole number.
+    """
+    huge = int('9' * 400)
+    with pytest.raises(ValueError, match=f'{field!r} is a whole number too large'):
+        ImagePointing.from_metadata(_metadata(**{field: huge}))
+
+
+@pytest.mark.parametrize(
+    'dtype',
+    [bool, np.str_],
+    ids=['boolean', 'text'],
+)
+def test_refuses_a_matrix_whose_values_are_not_real_numbers(dtype: Any) -> None:
+    """The constructor refuses what the metadata reader refuses.
+
+    ``np.array(..., dtype=np.float64)`` converts booleans and numeric text
+    without complaint, so nine ``True`` values reach every rotation guard as a
+    flawless identity and satisfy all of them.
+
+    Parameters:
+        dtype: A numpy dtype that converts to float64 but is not a number.
+    """
+    identity = np.eye(3).astype(dtype)
+    with pytest.raises(TypeError, match=r'cmatrix holds .*, not real numbers'):
+        ImagePointing(
+            image_name='N1484573295_1.IMG',
+            cmatrix=identity,
+            cmatrix_original=np.eye(3),
+            camera_frame='CASSINI_ISS_NAC',
+            ck_frame_id=-82000,
+            start_et=_START_ET,
+            stop_et=_START_ET + _EXPOSURE_S,
+            midtime_et=_START_ET + _EXPOSURE_S / 2.0,
+            exposure_s=_EXPOSURE_S,
+        )
 
 
 def test_from_metadata_refuses_a_matrix_off_orthonormality_by_a_microradian() -> None:

@@ -163,6 +163,28 @@ def build_comment_lines(area: CommentArea) -> tuple[str, ...]:
     return tuple(lines)
 
 
+def check_comment_lines(lines: Sequence[str]) -> None:
+    """Refuse a comment area SPICE cannot store and read back unchanged.
+
+    This is the whole of what may be rejected about a comment area, gathered
+    into one call so that a caller can make the judgment before it opens a
+    file.  Doing it afterwards leaves a complete, furnishable kernel with an
+    empty comment area behind: the segments are written, ``ckcls`` succeeds,
+    and only then does the comment write refuse -- so the file is
+    indistinguishable from a good product except for the provenance record the
+    comment area exists to carry.
+
+    Parameters:
+        lines: The comment lines to check.
+
+    Raises:
+        ValueError: if a line is longer than :data:`COMMENT_MAX_LINE_CHARS`, if
+            it ends in whitespace, or if it holds a non-printing character.
+    """
+    for line in lines:
+        _check_line(line)
+
+
 def _check_line(line: str) -> None:
     """Refuse a comment line SPICE cannot store and read back unchanged.
 
@@ -294,8 +316,7 @@ def write_comment_area(path: Path, lines: Sequence[str]) -> None:
     """
     if len(lines) == 0:
         raise ValueError(f'no comment lines to write to {path}; SPICE refuses an empty comment')
-    for line in lines:
-        _check_line(line)
+    check_comment_lines(lines)
     handle = int(cspyce.dafopw(str(path)))
     try:
         cspyce.dafac(handle, list(lines))

@@ -35,7 +35,12 @@ from tests.spindoctor.cli.ck.conftest import (
 )
 
 from spindoctor.cli.ck.pointing import ImagePointing, NDArrayFloatType
-from spindoctor.cli.ck.segment import CkSegment, build_segment, resolve_sclk_id
+from spindoctor.cli.ck.segment import (
+    BaselineCoverageGapError,
+    CkSegment,
+    build_segment,
+    resolve_sclk_id,
+)
 
 # The correction the tests plant, expressed in the CK object's own frame.  It is
 # far larger than a navigated correction ever is and turns about an axis shared
@@ -269,28 +274,85 @@ def test_pointing_outside_the_written_window_falls_through(pool: KernelPool) -> 
         cspyce.ckgp(CASSINI_CK_FRAME_ID, _tick(-82, _STOP_ET + 0.25), 0.0, 'J2000')
 
 
-def test_angular_velocity_absent_from_baseline_stays_absent(pool: KernelPool) -> None:
-    """A baseline without angular velocity yields a segment without it."""
-    case = _build_case(pool, with_angular_velocity=False)
-    _swap_to_corrected(pool, case)
-    midtime = case.pointing.midtime_et
-    assert case.segment.has_angular_velocity is False
-    assert case.segment.avvs is None
-    with pytest.raises(OSError, match='CKINSUFFDATA'):
-        cspyce.ckgpav(CASSINI_CK_FRAME_ID, _tick(-82, midtime), 0.0, 'J2000')
-    read = _attitude_from_pool(CASSINI_CK_FRAME_ID, -82, midtime)
-    truth = case.correction @ baseline_attitude(midtime)
-    assert rotation_angle_between(read, truth) < _ANGLE_TOL_RAD
-
-
-def test_angular_velocity_missing_from_part_of_the_exposure_is_not_claimed(
+def test_the_correction_reaches_every_lookup_over_a_furnished_baseline(
     pool: KernelPool,
 ) -> None:
-    """An exposure straddling a baseline that loses angular velocity claims none.
+    """The overlay's attitude is what SPICE answers, through ckgp, ckgpav and sxform.
+
+    The baseline stays furnished, which is how these kernels are meant to be
+    used and the only arrangement in which a segment declaring no angular
+    velocity is visibly skipped: SPICE would then answer ``ckgpav`` and
+    ``sxform`` -- the call oops makes -- from the baseline underneath, with the
+    uncorrected attitude, while ``ckgp`` alone reported the correction.
+    """
+    case = _build_case(pool)
+    pool.furnish(case.corrected_path)
+    midtime = case.pointing.midtime_et
+    tick = _tick(-82, midtime)
+    truth = case.correction @ baseline_attitude(midtime)
+    from_ckgp = np.asarray(cspyce.ckgp(CASSINI_CK_FRAME_ID, tick, 0.0, 'J2000')[0], np.float64)
+    from_ckgpav = np.asarray(cspyce.ckgpav(CASSINI_CK_FRAME_ID, tick, 0.0, 'J2000')[0], np.float64)
+    ck_frame = str(cspyce.frmnam(CASSINI_CK_FRAME_ID))
+    from_sxform = np.asarray(cspyce.sxform('J2000', ck_frame, midtime), np.float64)[:3, :3]
+    assert rotation_angle_between(from_ckgp, truth) < _ANGLE_TOL_RAD
+    assert rotation_angle_between(from_ckgpav, truth) < _ANGLE_TOL_RAD
+    assert rotation_angle_between(from_sxform, truth) < _ANGLE_TOL_RAD
+
+
+@pytest.mark.parametrize(
+    ('ck_frame_id', 'camera_frame'),
+    [
+        (CASSINI_CK_FRAME_ID, CASSINI_CAMERA_FRAME),
+        (VOYAGER_CK_FRAME_ID, VOYAGER_CAMERA_FRAME),
+    ],
+    ids=['evaluated-chain', 'frozen-attitude'],
+)
+def test_spice_answers_the_camera_frame_with_the_recorded_cmatrix(
+    pool: KernelPool, ck_frame_id: int, camera_frame: str
+) -> None:
+    """The one question a consumer asks, answered with the number that was recorded.
+
+    Everything the writer does is between the recorded C-matrix and this
+    lookup: the rotation from the camera to the CK object, the correction in
+    that object's coordinates, the quaternion conversion, the segment write,
+    and the frame chain back out to the camera.  A consumer makes none of those
+    steps -- it furnishes the file and asks for the camera frame -- so this is
+    the assertion that corresponds to their experience, and any of those steps
+    going wrong moves it.
+
+    Parameters:
+        ck_frame_id: SPICE id of the object under test.
+        camera_frame: SPICE name of the camera frame the C-matrix is in.
+    """
+    case = _build_case(pool, ck_frame_id=ck_frame_id, camera_frame=camera_frame)
+    pool.furnish(case.corrected_path)
+    read = np.asarray(
+        cspyce.pxform('J2000', camera_frame, case.pointing.midtime_et), dtype=np.float64
+    )
+    assert rotation_angle_between(read, case.pointing.cmatrix) < _ANGLE_TOL_RAD
+
+
+def test_a_baseline_without_angular_velocity_is_refused(pool: KernelPool) -> None:
+    """An exposure whose baseline supplies no angular velocity gets no segment.
+
+    The alternative is a segment declaring none, which ``ckgpav`` and
+    ``sxform`` skip in favor of any other kernel covering the same object and
+    epoch -- so whether the correction is delivered would depend on what else
+    the consumer furnished.
+    """
+    with pytest.raises(ValueError, match='angular velocity at only some of them'):
+        _build_case(pool, with_angular_velocity=False)
+
+
+def test_angular_velocity_missing_from_part_of_the_exposure_is_refused(
+    pool: KernelPool,
+) -> None:
+    """An exposure straddling a baseline that loses angular velocity gets no segment.
 
     One flag covers the whole segment, so a segment cannot say that half its
-    records have angular velocity.  It must not fail either: the pointing is
-    all there.
+    records have angular velocity.  Zeros for the rest would claim a parked
+    platform the baseline never measured, and declaring none would withhold the
+    correction from ``sxform``, so the image is refused instead.
     """
     sclk_id = resolve_sclk_id(CASSINI_CK_FRAME_ID)
     baseline_path = pool.root / 'baseline.bc'
@@ -333,16 +395,12 @@ def test_angular_velocity_missing_from_part_of_the_exposure_is_not_claimed(
         midtime_et=midtime,
         exposure_s=_STOP_ET - _START_ET,
     )
-    segment = build_segment(pointing)
     # The premise: angular velocity at the first record, none at the last.
     cspyce.ckgpav(CASSINI_CK_FRAME_ID, _tick(sclk_id, _START_ET), 0.0, 'J2000')
     with pytest.raises(OSError, match='CKINSUFFDATA'):
         cspyce.ckgpav(CASSINI_CK_FRAME_ID, _tick(sclk_id, _STOP_ET), 0.0, 'J2000')
-    assert segment.avvs is None
-    assert segment.record_count == 3
-    truth = correction @ baseline_attitude(_STOP_ET)
-    written = np.asarray(cspyce.q2m(segment.quats[-1]), dtype=np.float64)
-    assert rotation_angle_between(written, truth) < _ANGLE_TOL_RAD
+    with pytest.raises(ValueError, match='angular velocity at only some of them'):
+        build_segment(pointing)
 
 
 def test_a_record_outside_the_baseline_coverage_is_refused(pool: KernelPool) -> None:
@@ -352,8 +410,105 @@ def test_a_record_outside_the_baseline_coverage_is_refused(pool: KernelPool) -> 
     fails instead of being corrected against whatever attitude happens to be
     nearest.
     """
-    with pytest.raises(OSError, match='CKINSUFFDATA'):
+    with pytest.raises(BaselineCoverageGapError, match='supplies no pointing for CK object'):
         _build_case(pool, start_et=ET0 + 10.0, stop_et=ET0 + 12.0)
+
+
+def test_an_exposure_whose_midtime_alone_is_covered_is_refused(pool: KernelPool) -> None:
+    """The condition that reaches a run: the midtime paired the image with this baseline.
+
+    The exposure straddles the end of the baseline's coverage, so the lookup
+    that made the pairing succeeds and the one at the exposure stop does not.
+    """
+    covered_to = ET0 + (_BASELINE_RECORDS - 1) * _BASELINE_STEP_S
+    with pytest.raises(BaselineCoverageGapError, match='which is a record epoch of this exposure'):
+        _build_case(pool, start_et=covered_to - 1.0, stop_et=covered_to + 1.0)
+    # The premise: the midtime this image was paired on is covered, and the
+    # exposure stop is a second past the end of the same baseline.
+    midtime_lookup = cspyce.ckgp.flag(CASSINI_CK_FRAME_ID, _tick(-82, covered_to), 0.0, 'J2000')
+    assert bool(midtime_lookup[-1]) is True
+    stop_lookup = cspyce.ckgp.flag(CASSINI_CK_FRAME_ID, _tick(-82, covered_to + 1.0), 0.0, 'J2000')
+    assert bool(stop_lookup[-1]) is False
+
+
+def test_a_coverage_gap_is_not_reported_as_a_missing_angular_velocity(
+    pool: KernelPool,
+) -> None:
+    """The two arrive from SPICE the same way and mean opposite things.
+
+    One omits an image and the other stops the run, so a gap that came back as
+    the angular-velocity refusal would end a batch the report should have
+    carried on past.
+    """
+    with pytest.raises(BaselineCoverageGapError) as raised:
+        _build_case(pool, start_et=ET0 + 10.0, stop_et=ET0 + 12.0)
+    assert 'angular velocity' not in str(raised.value)
+
+
+def test_a_record_epoch_that_is_not_a_time_is_refused(
+    pool: KernelPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tag SPICE cannot answer for is not the same as an epoch it does not cover.
+
+    ``ckgp`` reports a non-finite time tag exactly as it reports an uncovered
+    epoch, so a tag that is not a time would otherwise be read as a coverage
+    gap and quietly omit the image.
+    """
+    sclk_id = resolve_sclk_id(CASSINI_CK_FRAME_ID)
+    baseline_path = pool.root / 'baseline.bc'
+    write_baseline_ck(
+        baseline_path,
+        ck_frame_id=CASSINI_CK_FRAME_ID,
+        sclk_id=sclk_id,
+        epochs=[ET0 + step * _BASELINE_STEP_S for step in range(_BASELINE_RECORDS)],
+        attitude=baseline_attitude,
+        angular_velocity=baseline_angular_velocity,
+    )
+    pool.furnish(baseline_path)
+    midtime = (_START_ET + _STOP_ET) / 2.0
+    camera_from_ck = np.asarray(
+        cspyce.pxform(str(cspyce.frmnam(CASSINI_CK_FRAME_ID)), CASSINI_CAMERA_FRAME, midtime),
+        dtype=np.float64,
+    )
+    pointing = ImagePointing(
+        image_name=_IMAGE_NAME,
+        cmatrix=camera_from_ck @ baseline_attitude(midtime),
+        cmatrix_original=camera_from_ck @ baseline_attitude(midtime),
+        camera_frame=CASSINI_CAMERA_FRAME,
+        ck_frame_id=CASSINI_CK_FRAME_ID,
+        start_et=_START_ET,
+        stop_et=_STOP_ET,
+        midtime_et=midtime,
+        exposure_s=_STOP_ET - _START_ET,
+    )
+    # The premise, measured rather than assumed: this baseline covers the
+    # exposure, and the lookup still comes back empty-handed for such a tag.
+    assert bool(cspyce.ckgp.flag(CASSINI_CK_FRAME_ID, float('nan'), 0.0, 'J2000')[-1]) is False
+    monkeypatch.setattr(cspyce, 'sce2c', lambda _sclk_id, _et: float('nan'))
+    with pytest.raises(ValueError, match='is not a finite time'):
+        build_segment(pointing)
+
+
+def test_no_baseline_furnished_at_all_is_not_a_coverage_gap(pool: KernelPool) -> None:
+    """A pool without the kernel is a setup failure, not one exposure's condition.
+
+    It has to stay distinguishable, because a coverage gap omits one image and
+    carries on: a run furnishing no C-kernel would otherwise report every image
+    it considered as having outlasted its baseline.
+    """
+    pointing = ImagePointing(
+        image_name=_IMAGE_NAME,
+        cmatrix=np.eye(3),
+        cmatrix_original=np.eye(3),
+        camera_frame=CASSINI_CAMERA_FRAME,
+        ck_frame_id=CASSINI_CK_FRAME_ID,
+        start_et=_START_ET,
+        stop_et=_STOP_ET,
+        midtime_et=(_START_ET + _STOP_ET) / 2.0,
+        exposure_s=_STOP_ET - _START_ET,
+    )
+    with pytest.raises(OSError, match='NOLOADEDFILES'):
+        build_segment(pointing)
 
 
 def test_a_ck_object_with_no_frame_name_is_refused(pool: KernelPool) -> None:
@@ -455,13 +610,17 @@ def test_a_sub_tick_exposure_still_yields_three_records(pool: KernelPool) -> Non
 
 @pytest.mark.parametrize(
     ('exposure_s', 'expected_records'),
-    [(2.0, 3), (10.0, 3), (25.0, 27)],
-    ids=['short', 'at-threshold', 'long'],
+    [(2.0, 3), (9.999, 3), (10.0, 11), (25.0, 27)],
+    ids=['short', 'just-under-threshold', 'at-threshold', 'long'],
 )
 def test_record_count_follows_the_cadence(
     pool: KernelPool, exposure_s: float, expected_records: int
 ) -> None:
     """Long exposures get a one-second cadence; short ones get three records.
+
+    Ten seconds exactly is on the cadence side of the boundary, because it is
+    an ordinary commanded exposure and three records over ten seconds have
+    already lost measurable fidelity.
 
     Parameters:
         exposure_s: Exposure duration under test, in seconds.
@@ -478,6 +637,20 @@ def test_record_count_follows_the_cadence(
     assert case.segment.record_count == expected_records
     assert case.segment.begtim == _tick(-82, start_et)
     assert case.segment.endtim == _tick(-82, stop_et)
+
+
+def test_an_exposure_needing_more_records_than_a_segment_holds_is_refused(
+    pool: KernelPool,
+) -> None:
+    """A span no instrument commands is refused rather than expanded.
+
+    The cadence arithmetic has no bound of its own: a span of ten million
+    seconds asks for ten million records, and a longer one exhausts memory
+    before anything can report why.
+    """
+    start_et = ET0 + 1.0
+    with pytest.raises(ValueError, match='more than the 10000 a segment may hold'):
+        _build_case(pool, start_et=start_et, stop_et=start_et + 1.0e7)
 
 
 @pytest.mark.parametrize('query_et', [_START_ET, _STOP_ET], ids=['start', 'stop'])
@@ -497,13 +670,31 @@ def test_frozen_attitude_object_is_constant_across_the_exposure(
     assert rotation_angle_between(read, truth) < _ANGLE_TOL_RAD
 
 
-def test_frozen_attitude_object_carries_no_angular_velocity(pool: KernelPool) -> None:
-    """A constant-attitude segment claims no angular velocity, whatever the
-    baseline had.
+def test_frozen_attitude_object_carries_zero_angular_velocity(pool: KernelPool) -> None:
+    """A constant-attitude segment declares an angular velocity of zero.
+
+    Zero rather than none: an attitude that does not change has an angular
+    velocity, and it is zero.  A segment declaring none would be skipped by
+    ``ckgpav`` and ``sxform`` in favor of any other kernel covering the same
+    object and epoch, which would answer with the uncorrected attitude.
     """
     case = _build_case(pool, ck_frame_id=VOYAGER_CK_FRAME_ID, camera_frame=VOYAGER_CAMERA_FRAME)
-    assert case.segment.avvs is None
-    assert case.segment.has_angular_velocity is False
+    assert case.segment.has_angular_velocity is True
+    assert case.segment.avvs is not None
+    assert np.array_equal(case.segment.avvs, np.zeros((case.segment.record_count, 3)))
+
+
+def test_a_frozen_correction_reaches_sxform(pool: KernelPool) -> None:
+    """A frozen segment answers ``sxform`` with its own attitude and zero rate."""
+    case = _build_case(pool, ck_frame_id=VOYAGER_CK_FRAME_ID, camera_frame=VOYAGER_CAMERA_FRAME)
+    pool.furnish(case.corrected_path)
+    midtime = case.pointing.midtime_et
+    ck_frame = str(cspyce.frmnam(VOYAGER_CK_FRAME_ID))
+    xform = np.asarray(cspyce.sxform('J2000', ck_frame, midtime), np.float64)
+    truth = case.correction @ baseline_attitude(midtime)
+    _matrix, omega = cspyce.xf2rav(xform)
+    assert rotation_angle_between(xform[:3, :3], truth) < _ANGLE_TOL_RAD
+    assert np.array_equal(np.asarray(omega, np.float64), np.zeros(3))
 
 
 def test_frozen_attitude_ignores_the_baseline_time_variation(pool: KernelPool) -> None:

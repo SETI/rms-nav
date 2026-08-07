@@ -1,17 +1,45 @@
 # SpinDoctor Corrected-Pointing C-Kernel Plan
 
-*Implementation plan for recording each navigated image's corrected camera
+*The design of record for recording each navigated image's corrected camera
 attitude as a C-matrix in its metadata, and for generating SPICE C-kernels
 from those matrices so that any SPICE-based tool can load navigated pointing
-with a `furnsh`. Written to be executed by an implementing model with no
-briefing beyond `/seti/newnav/CLAUDE.md` and the repository itself.
-Conventions from `CLAUDE.md` and `.cursor/rules/` apply throughout: line
-length 100, mypy strict, pdslogger-only logging, Google-style docstrings
-with `Parameters:`, Conventional Commits, one logical change per commit,
-modules under 1000 lines, no issue numbers in docstrings or `.rst` files.*
+with a `furnsh`. Sections 1-3 are the as-built specification: they describe
+the system that exists, and a change to the code is a change to them.*
 
-Integration branch: `rf_ck_kernels`, cut from `main`. Each phase below lands
-as its own pull request targeting that branch.
+---
+
+## 0. Status
+
+The design in sections 1-3 is implemented and merged: the navigator records
+`cmatrix` / `cmatrix_original`, the frame identities and the exposure times
+in every image's metadata, and `sd_create_ck` writes one type-3 segment per
+navigated exposure into files mirroring the originals they correct, beside a
+meta-kernel and a per-mission CSV report. The as-built system is documented
+in `docs/user_guide/user_guide_ck_kernels.rst` (what the kernels claim, how
+to load them, the report columns, the program's arguments) and
+`docs/dev_guide/dev_guide_ck_kernels.rst` (the frame relations, the
+derivation, the angular-velocity rationale, the writer's structure).
+
+Section 4 records what each phase delivered and what it measured. Section 5
+records the acceptance criteria and their status. What remains:
+
+- **Suite coverage is below criterion 8's bound**, at 77% against the 90%
+  the criterion asks for. That is the project's standing figure rather than
+  a regression from this work: measured over the unit suite, every module in
+  `spindoctor/cli/ck/` is at 99-100% and `spindoctor/spice_ids.py` at 100%,
+  while `spindoctor/support/cmatrix.py` measures 80% there because its
+  SPICE-dependent paths are exercised by the integration tier that a plain
+  `pytest` skips. Nothing in this plan's scope raises the suite figure; the
+  gap is the GUI and other long-standing untested surfaces.
+- The follow-ups in section 7, none of which block use of the kernels.
+
+The omission-reason set is five members, in the code and in section 3.3
+alike. `DEGENERATE_EXPOSURE` never took the fifth place: the case it named
+is handled with a single-record segment and no run could emit it, and a
+published set with a member no run emits asks every consumer to write dead
+code against a case that never arrives. `BASELINE_COVERAGE_GAP` holds it
+instead, for an exposure whose baseline reproduced at the midtime and then
+supplied no pointing at another of its record epochs.
 
 ---
 
@@ -441,8 +469,19 @@ disagree with what was navigated.
 One **type 3** segment per eligible image, interpolation interval exactly
 `[start_et, stop_et]`.
 
-**Records.** At exposure start, midtime, and stop. When `exposure_s`
-exceeds 10 s, additional records at a 1 s cadence.
+**Records.** At exposure start, midtime, and stop. When the span from
+start to stop reaches 10 s, additional records at a 1 s cadence, capped at
+10,000 records for the segment. Both the cadence gate and the record count
+read that one span, and `ImagePointing` requires the recorded `exposure_s`
+to agree with it, so the two cannot answer for different exposures; the cap
+is there because the arithmetic that expands a span has no bound of its own,
+and a recorded span of 1e9 s exhausts memory rather than being recognized as
+epochs that are not an exposure. The boundary is inclusive because ten
+seconds exactly is an ordinary commanded ISS exposure: measured over 40
+random epochs on `04002_04009ra.bc` in NAC pixels, a 10.000 s exposure at
+three records leaves mean 0.43 px, p99 5.16 px, max 9.86 px and 23.0% of
+samples beyond 0.1 px, where 10.001 s at the 13-record cadence leaves 0.02,
+0.44 and 5.92 px and 3.0%.
 
 Those cadence records earn their place, and it is worth saying how, because
 nothing asserts them. The segment declares one interpolation interval
@@ -555,34 +594,65 @@ would fail every baseline at the 1e-9 rad bound, so an unexplained
 across-the-board `no_reproducing_baseline` should be checked against this
 first.
 
-**Angular velocity: copied unchanged, never rotated.** CK angular velocity
-is expressed in the segment's **base reference frame** (J2000), per the CK
-Required Reading, and the corrected frame differs from the original by a
-constant body-fixed rotation -- two frames rigidly attached to each other
-have identical angular velocity in the base frame. So when the original
-segment carries AV (`ckgpav` succeeds), the corrected records carry the
-same vectors bit-identically and `avflag = 1`; when the original has none
-(`ckgpav` raises for want of AV -- Voyager and Galileo type 1), the
-corrected segment writes `avflag = 0` and queries fall back to `ckgp`.
-Rotating AV through `delta` -- superficially the "thorough" treatment -- is
-the wrong-frame error, and Phase B's test must fail if it is introduced.
+**Angular velocity: copied unchanged, never rotated, and never declared
+absent.** CK angular velocity is expressed in the segment's **base reference
+frame** (J2000), per the CK Required Reading, and the corrected frame differs
+from the original by a constant body-fixed rotation -- two frames rigidly
+attached to each other have identical angular velocity in the base frame. So
+when the original segment carries AV (`ckgpav` succeeds), the corrected records
+carry the same vectors bit-identically and `avflag = 1`. Rotating AV through
+`delta` -- superficially the "thorough" treatment -- is the wrong-frame error,
+and Phase B's test must fail if it is introduced.
 
-Two refinements from Phase B. The want-of-AV failure is `OSError`
-`SPICE(CKINSUFFDATA)` -- the same class and short message as pointing that
-is not covered at all -- so the two are not distinguishable from the
-exception. The rule the writer applies is therefore **all records or
-none**: it probes `ckgpav` at the first record as a fast path, but the
-sampling pass over every record is what decides, so an exposure straddling
-one original segment that carries AV and one that does not writes
-`avflag = 0` rather than failing. A genuine coverage gap still surfaces
-rather than being demoted to a missing-AV segment, because the `ckgp`
-lookups that then read the attitude raise on it. And a **frozen (Voyager)
-segment writes `avflag = 0` whatever its baseline carries**: the segment's
-attitude is constant, so its angular velocity is zero, and the rigid-attachment
-argument that licenses copying the baseline's vectors does not hold for a
-segment that deliberately drops the baseline's time variation. Voyager
-baselines carry no AV in any case, so the rule changes nothing on real
-data.
+**`avflag = 0` is never written.** A segment with `avflag = 0` is not a segment
+whose angular velocity is unknown: SPICE skips it entirely for `ckgpav` and for
+`sxform`, falling through to the next loaded kernel that does carry AV for that
+object and epoch and answering with **that kernel's uncorrected attitude**.
+Measured on a real reconstructed Cassini kernel (`04002_04009ra.bc`, all 2645
+local -82000 segments carry AV), holding everything but `avflag` constant with
+a 1.000e-04 rad correction applied:
+
+| corrected segment | `ckgp` vs `ckgpav` | `sxform` vs corrected |
+|---|---|---|
+| `avflag = 0` | 1.000e-04 rad | 1.000e-04 rad |
+| `avflag = 1` | 0.000e+00 rad | 0.000e+00 rad |
+
+That is decisive because oops reads pointing through `sxform`:
+`oops/frame/spiceframe.py` defaults `omega_type='tabulated'` and calls
+`cspyce.sxform` in that mode, and no oops host overrides it. An `avflag = 0`
+corrected segment would deliver its correction to `ckgp` and `pxform` and
+withhold it from `sxform`, with which of the two a consumer saw depending on
+what else was in their pool. Exposure across the local baselines: Cassini
+-82000 2645/2645 segments carry AV and New Horizons -98000 4346/4346 do, so
+those are immune today; **Galileo -77001 has 150 segments of which 38 carry
+none**; Voyager -31100/-32100 have 9 segments, none with AV.
+
+So the writer applies **all records or none, and none means refuse**. SPICE
+reports the want-of-AV failure exactly as it reports pointing that is not
+covered at all -- `found` false from `ckgpav`, one answer for two conditions
+that mean opposite things here, since one refuses the run and the other omits
+one image; the sampling pass over every record decides, and when it comes back
+empty-handed a second pass reads attitude alone, so a genuine coverage gap
+surfaces as itself (`BaselineCoverageGapError`) and an exposure that had only
+its AV missing is refused with a `ValueError` naming that. Both lookups use the
+flag-returning form of the SPICE call rather than the raising one, so "nothing
+here" is told apart from a pool with no C-kernel furnished, an undefined
+reference frame, or a kernel that cannot be read -- each of which still raises
+and still stops the run, and none of which may be read as a data condition.
+Choosing the form per call does not touch the process-wide `use_errors` regime.
+Refusal rather than zeros
+for the records that lack AV: the attitude would be right, but a scan platform
+genuinely parks, so an invented zero is indistinguishable from a measured one,
+and the overlay would start answering `sxform` at epochs where the pool has no
+answer at all (measured on Galileo: at an epoch covered only by an AV-less
+segment, `ckgp` and `pxform` succeed while `ckgpav` and `sxform` raise).
+
+A **frozen (Voyager) segment writes zeros with `avflag = 1`**: the segment's
+attitude is constant, so its angular velocity is zero -- a measurement, not an
+invention -- and writing it that way is what makes `sxform` return the corrected
+attitude. The baseline's own vectors are still not copied there, since the
+rigid-attachment argument does not hold for a segment that deliberately drops
+the baseline's time variation.
 
 **Files mirror the originals.** Each output `.bc` corresponds to exactly
 one original CK file and carries the segments of the images whose corrected
@@ -720,9 +790,16 @@ share one attitude, and the second then records an attitude no lookup at
 its own midtime reproduces, so it is honestly refused.
 
 **Omission reasons**, the complete set: `not_eligible`, `botsim_loser`,
-`rotation_unsupported`, `no_reproducing_baseline`, `degenerate_exposure`
-(reserved for an exposure the single-record path cannot express, should
-that occur).
+`rotation_unsupported`, `no_reproducing_baseline`, `baseline_coverage_gap`.
+
+`degenerate_exposure` was declared and removed rather than kept in
+reserve. The case it named -- three epochs that encode to one tick -- is
+*handled*, with a single-record segment, and no path could ever emit it, so
+publishing it obliged every report consumer to handle a value that could
+not arrive. `baseline_coverage_gap` takes the fifth place for a case that
+does occur: an exposure whose midtime reproduces against a baseline, which
+is what paired the image with it, but one of whose record epochs the
+baseline cannot answer, which happens near a coverage gap.
 
 ### 3.4 Companion outputs
 
@@ -819,20 +896,46 @@ to the recorded exposure midtime, with an image that recorded none -- or
 recorded a non-finite one -- ignored whenever either bound is given, since
 it cannot be placed in time; and `--output-dir`.
 
-**Two failures deliberately stop the run rather than being reported as an
-omission**, because the omission-reason set is closed and neither has an
+**Some failures deliberately stop the run rather than being reported as an
+omission**, because the omission-reason set is closed and none of them has an
 entry in it: a metadata document that cannot be read as a navigated image at
-all, and an image whose baseline reproduced its attitude and then supplied no
-pointing at one of its record epochs. Both name the image in **the run log
-only** -- not in both, which the "anything that degrades or omits a result"
-rule above would otherwise ask for. That rule is about a result the run goes
-on to report; these two end the run, and the per-image log they would be
+all, a baseline supplying angular velocity at only some of an exposure's
+records, and a window too long for a segment's records. Each names the image in
+**the run log only** -- not in both, which the "anything that degrades or omits
+a result" rule above would otherwise ask for. That rule is about a result the
+run goes on to report; these end the run, and the per-image log they would be
 written to is opened by the reporting pass that then never runs. Logging
 through the image logger with no image scope open is a defect rather than a
 fallback, and under `logging.strict_scope` the `LogScopeError` it raises
 would *replace* the failure worth reading and demote it to a `__context__`
 nobody prints -- so a documented configuration setting would turn a
 diagnosable failure into a logging crash.
+
+**A run stopped for any reason it can know in advance writes nothing at all.**
+Every segment of every output file is built, and every destination judged,
+before the first file is opened, so such a refusal leaves no corrected kernels,
+no meta-kernel and no report -- rather than a partial set with no report saying
+what is in it, which the refusal to overwrite an existing corrected kernel
+would then block a rerun on. Judging the destinations is a second, separate
+thing from separating the phases: whether an output path can be written is a
+property of the output directory that the build never looks at, so a run whose
+second output path was occupied would otherwise build cleanly and then refuse
+with the first file already on disk. `check_output_paths` judges the whole set
+at once and names every path that failed; `check_ck_file` judges one file's
+contents and is what `write_ck_file` itself calls, so the per-file refusal
+cannot drift from the set-level one. The cost is that every segment of the run
+is resident at once: measured on this writer's own segments, 678 bytes for the
+three records an ordinary exposure carries and 1826 for the 21 a twenty-second
+one does, so about 34 MB for the 50,000-image batch this tool is sized for,
+against the per-image metadata such a batch already holds.
+
+**That is a bounded guarantee, not atomicity, and it is not written down as
+one.** What stays possible is what no check made beforehand can see: the device
+filling up, a path or a permission changing between the check and the write,
+and a record set `ckw03` refuses once the file is open. The file being written
+is removed; the files written before it are not, and the meta-kernel and the
+report are never reached. The user guide names that as the one failure that
+needs the output directory cleared before a rerun.
 
 A metadata *file* that is not readable as JSON is different again: it names
 no image, so there is nothing for the report to say about it and nothing an
@@ -892,7 +995,13 @@ test.
 
 ---
 
-## 4. Implementation phases
+## 4. What the phases delivered
+
+All six phases are implemented and merged. Each subsection below records
+what that phase delivered, the tests that guard it, and the measurements it
+produced; the measurements are the reason this section is kept rather than
+dropped, since several of them bound what the product may claim and would
+otherwise have to be made again.
 
 ### Phase A — C-matrix in the metadata
 
@@ -981,10 +1090,13 @@ with `ckgpav` at `tol = 0`:
   truth within 1e-9 radians.
 - AV is bit-identical to the original's; the test **fails if AV is rotated
   through `delta`**.
-- An AV-less original yields `avflag = 0` and a working `ckgp` fallback,
-  and so does an exposure straddling one original segment that carries AV
-  and one that does not: a segment has one flag for all its records, so it
-  claims none rather than inventing vectors for the records that lack them.
+- An AV-less original is refused, and so is an exposure straddling one
+  original segment that carries AV and one that does not: a segment has one
+  flag for all its records, and one declaring none would be skipped by
+  `ckgpav` and `sxform` in favor of another kernel's uncorrected attitude.
+- With the original still furnished underneath it, the corrected segment is
+  what `ckgp`, `ckgpav` **and** `sxform` all answer with. The `sxform` half
+  is the one that catches `avflag = 0`; the `ckgp` half alone does not.
 - A sign-discontinuous quaternion sequence is repaired, asserted on the
   written records rather than on a read-back attitude (section 3.3: SPICE
   restores the sign when it interpolates, so the read-back cannot see it);
@@ -1065,14 +1177,22 @@ offset buys a fifth of budget.
 measured limitation rather than an oversight.** A segment reproduces its
 record epochs exactly and interpolates between them, so an epoch inside
 the exposure carries the reconstruction error of that interpolation.
-Measured on a real Cassini reconstructed kernel against its own attitude,
-in NAC pixels, sampled across the window: a 2 s exposure reaches 0.708 px
-worst case with 42.9% of samples over 0.1 px; a 10 s exposure at the 1 s
-cadence reaches 0.699 px with 24.6% over; a 60 s exposure reaches 1.071 px
-with 19.5% over, and 25.983 px if the cadence does not apply. The loss is
-attributable rather than noise -- a zero-correction run shows the same
-error -- and it comes from rate structure in the baseline that the segment
-interpolates across.
+Its size is instrument-dependent and is deliberately **not** quoted here as
+a single figure. The error is an angle, and the same angle is a different
+number of pixels on each camera -- a Cassini WAC pixel subtends about ten
+times a NAC pixel -- so a figure measured on one camera does not transfer
+to another, and how much baseline rate structure a segment interpolates
+across differs by mission and by how the platform was slewing. Several
+measurements taken during execution disagreed by factors of two to six
+precisely because they used different kernels, sampling and statistics; a
+figure quoted without all three is not a bound. Characterizing it per
+instrument, with a stated sampling scheme, is #455.
+
+What is invariant is the shape: the error is zero at every record epoch,
+grows between them, is largest where the baseline's rate changes inside the
+window, shrinks as records are added, and is present at the same size when
+the correction is zero -- which is how it is known to be interpolation loss
+rather than an error in the correction.
 
 Bounding it is deferred to a denser, adaptive record cadence (#444). Until
 that lands, the round trip asserts the three record epochs and nothing
@@ -1159,13 +1279,21 @@ logging-surface assertions.
 
 ### Phase F — Documentation and reconciliation
 
-A user-guide page: what the kernels are, what they claim and do not claim
-(corrected only where an image was navigated; the originals remain
-required -- prominently, not as a footnote); loading with and without the
-meta-kernel; the naming convention; the report columns. A dev-guide page:
-the frame relations of section 2.1 including the oops-flip table, the
-derivation, the AV rationale, and the writer's structure. Sphinx toctrees
-updated; plan files reconciled.
+`docs/user_guide/user_guide_ck_kernels.rst`: what the kernels are, what they
+claim and do not claim -- corrected only inside a navigated exposure with the
+originals still required, exact at the record epochs and interpolated
+between them, and eligible without any confidence threshold, all three as
+sections of their own rather than as footnotes -- loading with and without
+the meta-kernel, the naming convention, the report columns, and every
+`sd_create_ck` argument.
+`docs/dev_guide/dev_guide_ck_kernels.rst`: the frame relations of section
+2.1 including the oops-flip table, the derivation of section 2.2, why
+angular velocity is copied verbatim, why the writer imports no oops and
+nothing from `spindoctor.support`, why assignment is by reproduction, and
+the writer's module structure. Both are in the Sphinx toctrees;
+`spindoctor.cli.ck` gets no API-reference page, matching every other
+`spindoctor.cli` subpackage, and is nitpick-ignored in `docs/conf.py` the
+same way.
 
 ---
 
@@ -1184,10 +1312,10 @@ updated; plan files reconciled.
    pointing-actually-changed assertion passing, and matching technique
    sets between runs.
 4. A kernel written by this tool loads in a plain `furnsh` session with no
-   SpinDoctor code present; `ckgp` returns the expected attitude inside a
-   navigated exposure and falls through to the original outside it;
-   `ckgpav` additionally returns the original's angular velocity wherever
-   `avflag = 1`, and the report records which files carry AV.
+   SpinDoctor code present; `ckgp`, `ckgpav`, `pxform` and `sxform` all
+   return the expected attitude inside a navigated exposure and fall through
+   to the original outside it; `ckgpav` returns the original's angular
+   velocity, which every written segment carries.
 5. Every image considered appears exactly once in its mission's CSV, with
    either a `source_bc` or an `omission_reason` from the section 3.3 set.
 6. No image whose recorded baseline no candidate kernel reproduces
@@ -1199,6 +1327,22 @@ updated; plan files reconciled.
    and `pymarkdown scan` all pass; suite coverage stays at or above 90%,
    with the writer core covered by the hermetic self-written-kernel tests
    of Phase B, not only by integration runs.
+
+### Status
+
+Criteria 1-7 are met, each by the tests named in section 4: 1 and 2 by
+Phase A's hermetic and per-instrument integration tests, 3 by the Phase D
+round trip on Cassini NAC, Cassini WAC, Voyager and LORRI (Galileo is
+excluded by this plan's own rotation rule, and Phase D pins that as a
+measurement), 4 by the Phase B lookup tests over a furnished baseline
+including the `sxform` half, 5 and 6 by the Phase C and E report and
+assignment tests, and 7 by the fresh-interpreter `sys.modules` probe.
+
+Criterion 8 is met except for its coverage bound: the lint, type, docs and
+markdown gates all pass, and the writer core is covered hermetically rather
+than only by integration runs, but suite coverage measures 77% against the
+90% asked for. Section 0 records what that figure is made of; the bound
+stands as written rather than being lowered to what was measured.
 
 ---
 
@@ -1240,29 +1384,29 @@ error itself changed; nothing available today measures that.
 
 ## 7. Follow-ups
 
-File as tracking issues alongside the implementation issue:
+Each is filed as a tracking issue; the number is given with the item. None
+blocks use of the kernels.
 
-- **Consumers switch from the offset to the C-matrix.** Once the Phase D
+- **Consumers switch from the offset to the C-matrix.** The Phase D
   round trip has shown, per instrument, that the recorded `cmatrix` means
-  what the offset means, every main program that today reads the metadata
+  what the offset means, so every main program that reads the metadata
   `offset` and builds an `OffsetFOV` -- backplanes, reprojection/mosaics,
-  and any later consumer -- moves to consuming `cmatrix` instead, and the
-  offset becomes a derived report value rather than the applied one. This
-  is the reading half of #50 (the plan itself delivers the writing half),
-  and it must not start before the round-trip evidence exists: the round
-  trip is the only end-to-end check that the two representations agree.
+  and any later consumer -- can move to consuming `cmatrix` instead, with
+  the offset becoming a derived report value rather than the applied one.
+  This is the reading half of #50; this plan delivered the writing half.
 - **Replace the C-matrix derivation with the oops API** when oops gains
-  one: `spindoctor/support/cmatrix.py` keeps its interface, its body goes.
-- **Fitted-twist support**: record the rotation pivot
+  one (#433): `spindoctor/support/cmatrix.py` keeps its interface, its body
+  goes.
+- **Fitted-twist support** (#434): record the rotation pivot
   (`rotation_pivot_vu`) on the technique result and through the ensemble,
   define the boresight-referenced conversion -- including the sign flip
   from the `(v, u)`-to-`(x, y)` axis swap, under which a positive
   image-plane rotation is a negative rotation about camera +Z -- and lift
   the `rotation_unsupported` omission. Costs only Galileo today.
-- **Static per-instrument twist** belongs in an FK/IK correction rather
-  than per-image CK records; the measured LORRI and SSI values are
+- **Static per-instrument twist** (#435) belongs in an FK/IK correction
+  rather than per-image CK records; the measured LORRI and SSI values are
   candidates.
-- **Adapt the CK writer when corrected instrument kernels exist.** If new
+- **Adapt the CK writer when corrected instrument kernels exist** (#436). If
   FK/IK kernels encoding the measured static rotations are produced (the
   previous item), the writer's world changes: `F` and the camera frame
   definitions come from the new kernels, corrections shrink by the static
@@ -1272,49 +1416,23 @@ File as tracking issues alongside the implementation issue:
   `cmatrix_original` reproduction means, so recorded metadata may need
   regeneration first), and regenerating the overlay set against the new
   kernels.
-- **SPICE database registration** for oops kernel selection, if wanted
-  before that database is replaced: rows and load priority for the
+- **SPICE database registration** for oops kernel selection (#437), if
+  wanted before that database is replaced: rows and load priority for the
   corrected kernels, plus the per-mission furnish-policy story. The
   meta-kernel path works without it.
+- **Bound the interior-epoch error** (#440) by choosing the record cadence
+  adaptively rather than at a fixed one second (#444). Until that lands,
+  only the record epochs are claimed, which is what the user guide says.
+- **Kernel-input handling**: classify kernels by basename rather than by
+  directory name (#449, with the New Horizons case that motivates it,
+  #452), locate C-kernel inputs through `spyceman` instead of a kernel
+  directory tree (#448), and cover the remote kernel-index path, which no
+  test exercises (#446).
 
-Filed already, because it is broader than this plan and blocks nothing:
-the documentation chapter specifying the metadata JSON format -- every
-key, its meaning, presence rules, and examples, including the `pointing`
-and `times` blocks this plan adds (#431).
-
----
-
-## 8. Execution protocol
-
-1. Branch `rf_ck_kernels` off current `main`; one commit series per phase.
-2. Per phase: dispatch an **implementer subagent** (Opus-class) whose
-   prompt embeds that phase's section of this plan verbatim plus sections
-   1-3, so the subagent needs no other briefing and does not have to
-   locate this file. Then dispatch an **independent, fresh-context
-   adversarial reviewer** (also Opus-class) with the diff, the same plan
-   sections, and instructions to (a) verify each normative statement of
-   sections 2 and 3 against the code line by line, (b) run the phase's
-   tests plus `ruff check src tests`, `ruff format --check src tests`, and
-   `mypy src tests`, (c) attack the sign and frame conventions
-   specifically -- including re-deriving `R`, `M`, `delta` and the AV
-   rule independently rather than trusting the plan's statement of them,
-   and (d) hunt for convention violations and unstated deviations. Fix
-   rounds until the review is clean; the controller, not the implementer,
-   judges cleanliness.
-3. The reviewer must verify each guarantee by **breaking the source and
-   confirming a test fails**. For this plan that means, at minimum:
-   flipping the `xy_offset` sign, swapping `axisar` for `rotate`, dropping
-   the `R` conjugation, reversing the `delta` composition, and rotating AV
-   through `delta` -- each in turn, each caught by a named test. A test
-   that passes against a deliberately broken implementation is a defect in
-   the test, and is reported as one.
-4. Deviations discovered mid-phase are recorded in the phase commit
-   message and reconciled into this plan file in the same commit, so the
-   document the next reviewer holds is never stale. Scope changes go to
-   the operator instead.
-5. Final sweep before the pull request to `main`:
-   `./scripts/run-all-checks.sh -i`, plus the Phase D round trip re-run on
-   the final revision with its measured residuals reported in the pull
-   request.
-6. One pull request to `main`: summary, phase map, evidence, `Closes` per
-   issue, and the plan and guide reconciliation included.
+Broader than this plan and blocking nothing: the documentation chapter
+specifying the metadata JSON format -- every key, its meaning, presence
+rules, and examples, including the `pointing` and `times` blocks this plan
+added (#431); and whether `spindoctor.cli` subpackages belong in the API
+reference at all (#443), which is what decides whether the writer package
+gets an autodoc page rather than the nitpick-ignore every other
+`spindoctor.cli` subpackage has.

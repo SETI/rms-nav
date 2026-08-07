@@ -122,7 +122,7 @@ the real-image measurement exists (Track A #225 provides it) — the current
 partial cancellation is accidental and a well-meaning "fix" can make real
 accuracy worse. On real frames the fitter contributes only ~0.1 px while
 spacecraft-position / ephemeris error dominates (0.4-1.7 px), so the
-higher-leverage target is the pointing-kernel side (#188/#50). #128 is the
+higher-leverage target is the pointing-kernel side (#50). #128 is the
 fuller redesign (all body types and illuminations) and starts with a design
 document, not code.
 
@@ -244,27 +244,37 @@ by a strict xfail in `tests/spindoctor/cli/backplanes/`:
   bounding boxes, an observation metadata block); couples to the
   #55/#57 decisions.
 
-### CK kernels (#188, with #50)
+### CK kernels: what remains after the deliverable (#50 and follow-ups)
 
-The headline "updated pointing" deliverable: write SPICE C-kernels
-carrying the navigated attitude, so any SPICE-based tool loads navigated
-pointing with a `furnsh` and no SpinDoctor code. Design is settled and
-detailed in `plans/CK_KERNEL_PLAN.md`, which is self-contained and
-executable on its own: the navigator records a corrected camera C-matrix
-in each image's metadata beside the pixel offset, and a cspyce-only
-`sd_create_ck` writes one type-3 segment per navigated exposure into
-files that mirror the originals they correct. Validation is a closed
-loop: navigate, generate a kernel, furnish it, re-navigate, and confirm
-the second offset is approximately zero and the C-matrix matches.
+The "updated pointing" deliverable is built. The navigator records a
+corrected camera C-matrix in each image's metadata beside the pixel offset,
+and a cspyce-only `sd_create_ck` writes one type-3 segment per navigated
+exposure into files that mirror the originals they correct, with a
+meta-kernel and a per-mission CSV report beside them. The design of record
+is `plans/CK_KERNEL_PLAN.md` (sections 1-3 are the as-built specification,
+section 0 the status); the consumer-facing and developer-facing
+documentation is `docs/user_guide/user_guide_ck_kernels.rst` and
+`docs/dev_guide/dev_guide_ck_kernels.rst`. Validation is a closed loop:
+navigate, generate a kernel, furnish it, re-navigate, and confirm the
+second offset is approximately zero and the C-matrix matches, which the
+round trip does on Cassini NAC, Cassini WAC, Voyager and LORRI.
 
-That plan delivers the writing half of #50 -- the C-matrix appears in the
-metadata, computed in SpinDoctor now and replaceable by an oops call when
-one exists. It deliberately does not deliver #50's other half: the pixel
-offset stays, and every consumer keeps reading it. Switching the
-backplane and reprojection readers from the offset to the C-matrix is
-what remains under #50, and it wants the offset and the matrix to have
-been shown to agree on real frames first, which the CK round-trip
-provides.
+That delivered the writing half of #50. The reading half is what remains:
+the pixel offset stays and every consumer keeps applying it, so switching
+the backplane and reprojection readers to the C-matrix is still open under
+#50. The round trip is the evidence it was waiting for -- the two
+representations agree on real frames, per instrument.
+
+The round trip also measured something that belongs to Track B rather than
+here: a technique re-measuring a corrected frame does not return exactly
+the negative of the shift it was given, which costs up to 0.49 px on frames
+carried by the correlation and distance-transform body techniques (#447).
+
+The plan's own follow-ups are filed: the oops API replacing the hand-derived
+derivation (#433), fitted-twist support (#434) with the static-twist FK/IK
+question behind it (#435, #436), SPICE database registration (#437), the
+interior-epoch fidelity bound through an adaptive record cadence (#440,
+#444), and the kernel-input handling items (#446, #448, #449, #452).
 
 ### The results index (#430)
 
