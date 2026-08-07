@@ -376,15 +376,26 @@ see -- one path named twice, and a directory judged once for all of them.
 
 **None of this is atomicity, and neither the code nor this guide claims it.**
 What the checks establish is that nothing knowable in advance stops the writing
-part way through. Three things stay outside that, and no check made beforehand
-can reach them: space on the device, a path or a permission that changes
-between the check and the write, and a record set ``ckw03`` refuses once the
-file is open. A file failing that way is closed and removed; the files written
-before it are not, and the meta-kernel and the report are never reached. That
-residual window is recorded in
+of the corrected kernels part way through. Three things stay outside that, and
+no check made beforehand can reach them: space on the device, a path or a
+permission that changes between the check and the write, and a record set
+``ckw03`` refuses once the file is open. A file failing that way is closed and
+removed; the files written before it are not, and the meta-kernel and the report
+are never reached. That residual window is recorded in
 :func:`~spindoctor.cli.sd_create_ck.write_output_files` and in the user guide,
-which tells an operator that this is the one failure needing the output
-directory cleared before a rerun.
+which tells an operator that this is the failure needing the output directory
+cleared before a rerun.
+
+The boundary is drawn at the corrected kernels on purpose. The meta-kernel's own
+rules -- no quote, no trailing ``+``, no trailing blank in a path -- are
+knowable in advance for the corrections, and are deliberately *not* checked with
+the output paths, because the meta-kernel also names every original, whose paths
+come from ``--kernel-dir`` and are not in the output set at all. Checking half
+of what it will refuse would read as having closed a window that is still open.
+So that failure keeps its own shape: it lands after every corrected kernel is
+written, leaves a complete and self-consistent set of them, and takes only the
+meta-kernel and the report with it. The user guide names it beside the three
+above.
 
 Why the writer imports no oops and nothing from ``spindoctor.support``
 ----------------------------------------------------------------------

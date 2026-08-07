@@ -482,12 +482,15 @@ That covers everything the run can know before it starts writing, and it is not
 the same as a guarantee that writing cannot fail part way through. It can, for
 reasons no check made beforehand can see: the device filling up, a path or a
 permission changing between the check and the write, and a record set SPICE
-refuses only once a file is open. The file being written when that happens is
-removed, but the files already written are not, and neither the meta-kernel nor
-the report is written -- so a run that reports one of those failures is the one
-case where the output directory has to be cleared before it is repeated. The
-run log names the files it did write, and each of them is a complete, valid
-kernel.
+refuses only once a file is open. One more failure lands after every kernel is
+written rather than during: a kernel path -- an original's as readily as a
+correction's -- that a text kernel cannot express, which the meta-kernel refuses
+when it is rendered.
+
+In all of those cases the corrected kernels already written stay on disk while
+the meta-kernel and the report do not, so these are the failures where the
+output directory has to be cleared before the run is repeated. The run log names
+every file it wrote, and each of them is a complete, valid kernel.
 
 * **Two versions of one spacecraft clock kernel, or two frame kernels defining
   a frame the run's images name.** A text kernel's last assignment wins, so the

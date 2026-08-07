@@ -76,18 +76,19 @@ def check_output_paths(paths: Sequence[Path]) -> None:
 
     What this establishes, for each path:
 
+    * It names a file and holds no character that cannot be written down.
     * Nothing already occupies it, a symbolic link with no target included.
     * Its basename fits the field SPICE stores as a file's internal name.
     * Its directory exists and its permission bits allow writing into it.
-    * It can be spelled: it names a file, and holds no character that a path
-      cannot carry through SPICE or through the meta-kernel that will name it.
-    * No other path in the set is spelled the same way.
+    * No other path in the set names the same file, however it is spelled.
 
     What it does not establish, and cannot: that the write will succeed.  Space
     on the device, a path or a permission changed after this returns, a
     directory reachable only through a symbolic link that moves, and everything
     SPICE decides once a file is open are all outside what any check made
-    beforehand can see.
+    beforehand can see.  Nor does it say anything about the meta-kernel written
+    afterwards, which also names the original kernels, whose paths are not in
+    this set and are judged when it is written.
 
     Parameters:
         paths: The corrected kernels the run intends to write, in any order.
@@ -98,11 +99,25 @@ def check_output_paths(paths: Sequence[Path]) -> None:
         ValueError: naming every path that cannot be written and why.  Nothing
             has been written when it is raised, and the caller is expected to
             write nothing.
+        OSError: if the operating system cannot answer for a path at all, which
+            it does for one longer than it will accept.
     """
     refusals: list[str] = []
-    seen: set[Path] = set()
+    seen: set[tuple[Path, str]] = set()
     for path in paths:
-        if path in seen:
+        # Spelled first: nothing below can be asked about a path holding a null
+        # byte, and both the answer and the refusal would be nonsense.
+        spelling = _spelling_refusal(path)
+        if spelling is not None:
+            refusals.append(spelling)
+            continue
+        # Two paths name one file when they name one basename in one directory,
+        # and the directory is what has to be resolved to decide it: '..' and a
+        # symbolic link both give a second spelling of the same directory.  The
+        # basename is deliberately left unresolved -- resolving it would follow
+        # a link at the destination, which is the very thing refused below.
+        identity = (path.parent.resolve(), path.name)
+        if identity in seen:
             # A set-level refusal, and the one no per-file check can make: the
             # second write of a repeated path would replace the first file's
             # segments with the second's, silently.
@@ -110,7 +125,7 @@ def check_output_paths(paths: Sequence[Path]) -> None:
                 f'{path} is named twice; the second would replace the first rather than join it'
             )
             continue
-        seen.add(path)
+        seen.add(identity)
         refusals.extend(_path_refusals(path))
     if len(refusals) > 0:
         raise ValueError(
@@ -209,18 +224,12 @@ def _path_refusals(path: Path) -> list[str]:
     """Return every reason one corrected kernel cannot be written to a path.
 
     Parameters:
-        path: The file that would be created.
+        path: The file that would be created, already known to be spellable.
 
     Returns:
         One message per reason, empty when nothing known in advance stops the
         write.
     """
-    spelling = _spelling_refusal(path)
-    if spelling is not None:
-        # The only thing worth saying about a path the operating system cannot
-        # be asked about at all.  ``os.path.lexists`` answers False for a name
-        # holding a null byte, which would read here as "nothing is there".
-        return [spelling]
     return [
         refusal
         for refusal in (
@@ -239,10 +248,15 @@ def _spelling_refusal(path: Path) -> str | None:
         path: The path to judge.
 
     Returns:
-        The reason, or ``None`` if the path names a file and every character of
-        it survives the two places it has to be written down: the file name
-        SPICE is given, which is a C string and ends at a null, and the
-        meta-kernel, whose text strings carry printing characters only.
+        The reason, or ``None`` if the path names a file and can be written
+        down.  The whole class of non-printing characters is refused rather
+        than the null alone, even though only the null truncates the C string
+        SPICE is handed: a corrected kernel's name is repeated back in the run
+        log, in the CSV report and in the meta-kernel, none of which carries a
+        control character through unchanged, so a name holding one would reach
+        a reader as a name that was never written.  Refusing the class also
+        keeps the null from reaching the occupancy check below, which answers
+        "nothing is there" for it rather than raising.
     """
     if len(path.name) == 0:
         return f'{path} names no file to write'
@@ -250,8 +264,8 @@ def _spelling_refusal(path: Path) -> str | None:
     for character in text:
         if not character.isprintable():
             return (
-                f'{text!r} holds the non-printing character {character!r}; SPICE is given a file '
-                f'name as a C string and the meta-kernel names it as text, and neither carries one'
+                f'{text!r} holds the non-printing character {character!r}, which neither the name '
+                f'SPICE is handed nor the log, report and meta-kernel naming it carry unchanged'
             )
     return None
 

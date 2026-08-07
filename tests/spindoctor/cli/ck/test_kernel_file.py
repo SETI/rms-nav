@@ -408,6 +408,40 @@ def test_a_path_named_twice_is_reported_once(tmp_path: Path) -> None:
     assert str(refusal.value).count('named twice') == 1
 
 
+def test_one_file_reached_two_ways_through_dot_dot_is_refused(tmp_path: Path) -> None:
+    """Comparing the spellings would miss it, and the second write would win."""
+    (tmp_path / 'inner').mkdir()
+    with pytest.raises(ValueError, match='named twice'):
+        check_output_paths([tmp_path / 'orig_nav.bc', tmp_path / 'inner' / '..' / 'orig_nav.bc'])
+
+
+def test_one_file_reached_through_a_linked_directory_is_refused(tmp_path: Path) -> None:
+    """A link at the directory is a second spelling too, and only a resolve sees it."""
+    (tmp_path / 'real').mkdir()
+    (tmp_path / 'linked').symlink_to(tmp_path / 'real')
+    with pytest.raises(ValueError, match='named twice'):
+        check_output_paths([tmp_path / 'real' / 'orig_nav.bc', tmp_path / 'linked' / 'orig_nav.bc'])
+
+
+def test_two_files_under_one_linked_directory_are_accepted(tmp_path: Path) -> None:
+    """Resolving the directory must not merge paths that name different files."""
+    (tmp_path / 'real').mkdir()
+    (tmp_path / 'linked').symlink_to(tmp_path / 'real')
+    check_output_paths([tmp_path / 'real' / 'orig_a_nav.bc', tmp_path / 'linked' / 'orig_b_nav.bc'])
+
+
+def test_a_link_at_the_output_path_is_not_resolved_away(tmp_path: Path) -> None:
+    """Only the directory is resolved; resolving the basename would follow the link.
+
+    A link whose target is a free path would then look like a free path, and
+    the write through it would be exactly the harm the occupancy check refuses.
+    """
+    link = tmp_path / 'orig_nav.bc'
+    link.symlink_to(tmp_path / 'free.bc')
+    with pytest.raises(ValueError, match='is a symbolic link'):
+        check_output_paths([link])
+
+
 def test_a_name_exactly_as_long_as_the_field_passes_the_set_check(tmp_path: Path) -> None:
     """The same bound the file writer applies, and the same last accepted name."""
     path = tmp_path / ('n' * 53 + '_nav.bc')

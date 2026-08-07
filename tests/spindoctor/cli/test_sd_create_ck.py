@@ -928,13 +928,16 @@ def test_a_baseline_left_with_nothing_to_correct_says_so(
     assert f'No image is left to correct {_BASELINE_A}' in _run_log(straddling_tree)
 
 
-def _run_stopped(tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, message: str) -> None:
+def _run_stopped(tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, message: str) -> str:
     """Run the driver over a tree it must refuse, and hold it to the reason.
 
     Parameters:
         tree: The directories the fixture built.
         monkeypatch: Used to set the command line.
         message: Text the refusal must name.
+
+    Returns:
+        The whole refusal, for a caller asserting on more of it.
     """
     monkeypatch.setattr(
         'sys.argv',
@@ -951,8 +954,9 @@ def _run_stopped(tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, message
             str(tree['output'] / 'logs'),
         ],
     )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError, match=message) as refusal:
         sd_create_ck.main()
+    return str(refusal.value)
 
 
 def _run_refused(tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1069,6 +1073,22 @@ def test_an_occupied_second_output_path_is_left_alone(
     blocked = _block_second_output(run_tree)
     _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc already exists')
     assert blocked.read_bytes() == b'not a kernel'
+
+
+def test_a_run_names_every_output_path_it_cannot_write(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The set is cleared in one pass, not one rerun per occupied file.
+
+    This is what the whole set being judged buys over judging each file just
+    before it is written: both of those refuse before anything is on disk, but
+    only the set-level one reaches the second path to report it.
+    """
+    run_tree['output'].mkdir(parents=True, exist_ok=True)
+    (run_tree['output'] / 'orig_a_nav.bc').write_bytes(b'not a kernel')
+    _block_second_output(run_tree)
+    refusal = _run_stopped(run_tree, monkeypatch, r'orig_a_nav\.bc already exists')
+    assert 'orig_b_nav.bc already exists' in refusal
 
 
 def test_a_dangling_link_at_the_second_output_path_stops_the_run(
