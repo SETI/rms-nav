@@ -20,7 +20,9 @@ from tests.spindoctor.cli.ck.conftest import (
     VOYAGER_CK_FRAME_ID,
     KernelPool,
     baseline_attitude,
+    baseline_segment,
     write_baseline_ck,
+    write_ck,
     write_type1_ck,
 )
 
@@ -34,6 +36,7 @@ from spindoctor.cli.ck.index import (
     kernel_class_for_directory,
 )
 from spindoctor.cli.ck.pointing import NDArrayFloatType
+from spindoctor.cli.ck.segment import CkSegment
 
 # The clocks the two test objects are tagged against, matching the test SCLK.
 _CASSINI_SCLK_ID = -82
@@ -49,6 +52,11 @@ _RECORD_STEP_S = 0.5
 _RECONSTRUCTED_NAME = '03236_04002ra.bc'
 _GAPFILL_NAME = '03001_04001pa_gapfill_v01.bc'
 _PREDICTED_NAME = '04009_04051px.bc'
+
+# An object whose clock id SPICE computes as 0, which no SCLK kernel defines.
+# A real merged New Horizons pointing file names this object beside the
+# spacecraft, so its coverage cannot be expressed in TDB.
+_CLOCKLESS_OBJECT_ID = -1
 
 
 def _write_ck(
@@ -566,3 +574,102 @@ def test_the_coverage_filter_admits_every_epoch_the_snapped_lookup_reaches(
     index = build_ck_index([root])
     furthest_et = float(cspyce.sct2e(_VOYAGER_SCLK_ID, tick + SNAPPED_LOOKUP_TOL_TICKS))
     assert index.files[0].covers(VOYAGER_CK_FRAME_ID, furthest_et) is True
+
+
+def _write_ck_naming_a_clockless_object(directory: Path, name: str) -> Path:
+    """Write a kernel describing the test bus and an object with no clock.
+
+    This is the shape a real merged New Horizons pointing file has: the
+    spacecraft, whose clock every mission kernel set furnishes, and a second
+    object whose clock id SPICE computes as 0, which no SCLK kernel defines.
+
+    Parameters:
+        directory: Directory to write into.
+        name: Basename of the kernel.
+
+    Returns:
+        The path written.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    epochs = [ET0 + step * _RECORD_STEP_S for step in range(3)]
+    ticks = [float(cspyce.sce2c(_CASSINI_SCLK_ID, et)) for et in epochs]
+    quats = np.vstack(
+        [np.asarray(cspyce.m2q(baseline_attitude(et)), dtype=np.float64) for et in epochs]
+    )
+    write_ck(
+        path,
+        [
+            baseline_segment(
+                ck_frame_id=CASSINI_CK_FRAME_ID,
+                sclk_id=_CASSINI_SCLK_ID,
+                epochs=epochs,
+                attitude=baseline_attitude,
+                angular_velocity=None,
+            ),
+            CkSegment(
+                ck_frame_id=_CLOCKLESS_OBJECT_ID,
+                segid='clockless',
+                sclkdp=np.asarray(ticks, dtype=np.float64),
+                quats=quats,
+                avvs=None,
+            ),
+        ],
+    )
+    return path
+
+
+def test_an_object_with_no_clock_is_recorded_rather_than_stopping_the_scan(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """A file naming an object no clock kernel describes still indexes.
+
+    The New Horizons holdings hold such a file, so refusing the scan over it
+    would make the whole mission unindexable for the sake of an object no
+    image ever asks about.
+    """
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck_naming_a_clockless_object(root, _RECONSTRUCTED_NAME)
+    index = build_ck_index([root])
+    assert index.files[0].unreadable_objects == (_CLOCKLESS_OBJECT_ID,)
+
+
+def test_the_readable_object_of_that_file_is_still_covered(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """The objects whose clock is furnished keep their coverage."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck_naming_a_clockless_object(root, _RECONSTRUCTED_NAME)
+    index = build_ck_index([root])
+    covered = {interval.ck_frame_id for interval in index.files[0].coverage}
+    assert covered == {CASSINI_CK_FRAME_ID}
+
+
+def test_an_unreadable_object_is_offered_as_no_candidate(pool: KernelPool, tmp_path: Path) -> None:
+    """A file offers no coverage for an object whose window it could not read."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck_naming_a_clockless_object(root, _RECONSTRUCTED_NAME)
+    index = build_ck_index([root])
+    candidates = index.candidates(
+        basenames=[_RECONSTRUCTED_NAME], ck_frame_id=_CLOCKLESS_OBJECT_ID, et=ET0
+    )
+    assert candidates == ()
+
+
+def test_the_index_gathers_every_unreadable_object_it_met(pool: KernelPool, tmp_path: Path) -> None:
+    """The index reports the unreadable objects of all its files together."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck_naming_a_clockless_object(root, _RECONSTRUCTED_NAME)
+    _write_ck(root, _GAPFILL_NAME)
+    index = build_ck_index([root])
+    assert index.unreadable_objects == frozenset({_CLOCKLESS_OBJECT_ID})
+
+
+def test_an_index_of_readable_files_reports_no_unreadable_object(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """Nothing is reported unreadable when every object's clock is furnished."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    index = build_ck_index([root])
+    assert index.unreadable_objects == frozenset()
