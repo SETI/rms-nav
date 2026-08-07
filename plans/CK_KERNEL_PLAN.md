@@ -1,17 +1,37 @@
 # SpinDoctor Corrected-Pointing C-Kernel Plan
 
-*Implementation plan for recording each navigated image's corrected camera
+*The design of record for recording each navigated image's corrected camera
 attitude as a C-matrix in its metadata, and for generating SPICE C-kernels
 from those matrices so that any SPICE-based tool can load navigated pointing
-with a `furnsh`. Written to be executed by an implementing model with no
-briefing beyond `/seti/newnav/CLAUDE.md` and the repository itself.
-Conventions from `CLAUDE.md` and `.cursor/rules/` apply throughout: line
-length 100, mypy strict, pdslogger-only logging, Google-style docstrings
-with `Parameters:`, Conventional Commits, one logical change per commit,
-modules under 1000 lines, no issue numbers in docstrings or `.rst` files.*
+with a `furnsh`. Sections 1-3 are the as-built specification: they describe
+the system that exists, and a change to the code is a change to them.*
 
-Integration branch: `rf_ck_kernels`, cut from `main`. Each phase below lands
-as its own pull request targeting that branch.
+---
+
+## 0. Status
+
+The design in sections 1-3 is implemented and merged: the navigator records
+`cmatrix` / `cmatrix_original`, the frame identities and the exposure times
+in every image's metadata, and `sd_create_ck` writes one type-3 segment per
+navigated exposure into files mirroring the originals they correct, beside a
+meta-kernel and a per-mission CSV report. The as-built system is documented
+in `docs/user_guide/user_guide_ck_kernels.rst` (what the kernels claim, how
+to load them, the report columns, the program's arguments) and
+`docs/dev_guide/dev_guide_ck_kernels.rst` (the frame relations, the
+derivation, the angular-velocity rationale, the writer's structure).
+
+Section 4 records what each phase delivered and what it measured. Section 5
+records the acceptance criteria and their status. What remains:
+
+- **Suite coverage is below criterion 8's bound**, at 77% against the 90%
+  the criterion asks for. That is the project's standing figure rather than
+  a regression from this work: measured over the unit suite, every module in
+  `spindoctor/cli/ck/` is at 99-100% and `spindoctor/spice_ids.py` at 100%,
+  while `spindoctor/support/cmatrix.py` measures 80% there because its
+  SPICE-dependent paths are exercised by the integration tier that a plain
+  `pytest` skips. Nothing in this plan's scope raises the suite figure; the
+  gap is the GUI and other long-standing untested surfaces.
+- The follow-ups in section 7, none of which block use of the kernels.
 
 ---
 
@@ -916,7 +936,13 @@ test.
 
 ---
 
-## 4. Implementation phases
+## 4. What the phases delivered
+
+All six phases are implemented and merged. Each subsection below records
+what that phase delivered, the tests that guard it, and the measurements it
+produced; the measurements are the reason this section is kept rather than
+dropped, since several of them bound what the product may claim and would
+otherwise have to be made again.
 
 ### Phase A — C-matrix in the metadata
 
@@ -1186,13 +1212,21 @@ logging-surface assertions.
 
 ### Phase F — Documentation and reconciliation
 
-A user-guide page: what the kernels are, what they claim and do not claim
-(corrected only where an image was navigated; the originals remain
-required -- prominently, not as a footnote); loading with and without the
-meta-kernel; the naming convention; the report columns. A dev-guide page:
-the frame relations of section 2.1 including the oops-flip table, the
-derivation, the AV rationale, and the writer's structure. Sphinx toctrees
-updated; plan files reconciled.
+`docs/user_guide/user_guide_ck_kernels.rst`: what the kernels are, what they
+claim and do not claim -- corrected only inside a navigated exposure with the
+originals still required, exact at the record epochs and interpolated
+between them, and eligible without any confidence threshold, all three as
+sections of their own rather than as footnotes -- loading with and without
+the meta-kernel, the naming convention, the report columns, and every
+`sd_create_ck` argument.
+`docs/dev_guide/dev_guide_ck_kernels.rst`: the frame relations of section
+2.1 including the oops-flip table, the derivation of section 2.2, why
+angular velocity is copied verbatim, why the writer imports no oops and
+nothing from `spindoctor.support`, why assignment is by reproduction, and
+the writer's module structure. Both are in the Sphinx toctrees;
+`spindoctor.cli.ck` gets no API-reference page, matching every other
+`spindoctor.cli` subpackage, and is nitpick-ignored in `docs/conf.py` the
+same way.
 
 ---
 
@@ -1226,6 +1260,22 @@ updated; plan files reconciled.
    and `pymarkdown scan` all pass; suite coverage stays at or above 90%,
    with the writer core covered by the hermetic self-written-kernel tests
    of Phase B, not only by integration runs.
+
+### Status
+
+Criteria 1-7 are met, each by the tests named in section 4: 1 and 2 by
+Phase A's hermetic and per-instrument integration tests, 3 by the Phase D
+round trip on Cassini NAC, Cassini WAC, Voyager and LORRI (Galileo is
+excluded by this plan's own rotation rule, and Phase D pins that as a
+measurement), 4 by the Phase B lookup tests over a furnished baseline
+including the `sxform` half, 5 and 6 by the Phase C and E report and
+assignment tests, and 7 by the fresh-interpreter `sys.modules` probe.
+
+Criterion 8 is met except for its coverage bound: the lint, type, docs and
+markdown gates all pass, and the writer core is covered hermetically rather
+than only by integration runs, but suite coverage measures 77% against the
+90% asked for. Section 0 records what that figure is made of; the bound
+stands as written rather than being lowered to what was measured.
 
 ---
 
@@ -1267,29 +1317,29 @@ error itself changed; nothing available today measures that.
 
 ## 7. Follow-ups
 
-File as tracking issues alongside the implementation issue:
+Each is filed as a tracking issue; the number is given with the item. None
+blocks use of the kernels.
 
-- **Consumers switch from the offset to the C-matrix.** Once the Phase D
+- **Consumers switch from the offset to the C-matrix.** The Phase D
   round trip has shown, per instrument, that the recorded `cmatrix` means
-  what the offset means, every main program that today reads the metadata
+  what the offset means, so every main program that reads the metadata
   `offset` and builds an `OffsetFOV` -- backplanes, reprojection/mosaics,
-  and any later consumer -- moves to consuming `cmatrix` instead, and the
-  offset becomes a derived report value rather than the applied one. This
-  is the reading half of #50 (the plan itself delivers the writing half),
-  and it must not start before the round-trip evidence exists: the round
-  trip is the only end-to-end check that the two representations agree.
+  and any later consumer -- can move to consuming `cmatrix` instead, with
+  the offset becoming a derived report value rather than the applied one.
+  This is the reading half of #50; this plan delivered the writing half.
 - **Replace the C-matrix derivation with the oops API** when oops gains
-  one: `spindoctor/support/cmatrix.py` keeps its interface, its body goes.
-- **Fitted-twist support**: record the rotation pivot
+  one (#433): `spindoctor/support/cmatrix.py` keeps its interface, its body
+  goes.
+- **Fitted-twist support** (#434): record the rotation pivot
   (`rotation_pivot_vu`) on the technique result and through the ensemble,
   define the boresight-referenced conversion -- including the sign flip
   from the `(v, u)`-to-`(x, y)` axis swap, under which a positive
   image-plane rotation is a negative rotation about camera +Z -- and lift
   the `rotation_unsupported` omission. Costs only Galileo today.
-- **Static per-instrument twist** belongs in an FK/IK correction rather
-  than per-image CK records; the measured LORRI and SSI values are
+- **Static per-instrument twist** (#435) belongs in an FK/IK correction
+  rather than per-image CK records; the measured LORRI and SSI values are
   candidates.
-- **Adapt the CK writer when corrected instrument kernels exist.** If new
+- **Adapt the CK writer when corrected instrument kernels exist** (#436). If
   FK/IK kernels encoding the measured static rotations are produced (the
   previous item), the writer's world changes: `F` and the camera frame
   definitions come from the new kernels, corrections shrink by the static
@@ -1299,49 +1349,23 @@ File as tracking issues alongside the implementation issue:
   `cmatrix_original` reproduction means, so recorded metadata may need
   regeneration first), and regenerating the overlay set against the new
   kernels.
-- **SPICE database registration** for oops kernel selection, if wanted
-  before that database is replaced: rows and load priority for the
+- **SPICE database registration** for oops kernel selection (#437), if
+  wanted before that database is replaced: rows and load priority for the
   corrected kernels, plus the per-mission furnish-policy story. The
   meta-kernel path works without it.
+- **Bound the interior-epoch error** (#440) by choosing the record cadence
+  adaptively rather than at a fixed one second (#444). Until that lands,
+  only the record epochs are claimed, which is what the user guide says.
+- **Kernel-input handling**: classify kernels by basename rather than by
+  directory name (#449, with the New Horizons case that motivates it,
+  #452), locate C-kernel inputs through `spyceman` instead of a kernel
+  directory tree (#448), and cover the remote kernel-index path, which no
+  test exercises (#446).
 
-Filed already, because it is broader than this plan and blocks nothing:
-the documentation chapter specifying the metadata JSON format -- every
-key, its meaning, presence rules, and examples, including the `pointing`
-and `times` blocks this plan adds (#431).
-
----
-
-## 8. Execution protocol
-
-1. Branch `rf_ck_kernels` off current `main`; one commit series per phase.
-2. Per phase: dispatch an **implementer subagent** (Opus-class) whose
-   prompt embeds that phase's section of this plan verbatim plus sections
-   1-3, so the subagent needs no other briefing and does not have to
-   locate this file. Then dispatch an **independent, fresh-context
-   adversarial reviewer** (also Opus-class) with the diff, the same plan
-   sections, and instructions to (a) verify each normative statement of
-   sections 2 and 3 against the code line by line, (b) run the phase's
-   tests plus `ruff check src tests`, `ruff format --check src tests`, and
-   `mypy src tests`, (c) attack the sign and frame conventions
-   specifically -- including re-deriving `R`, `M`, `delta` and the AV
-   rule independently rather than trusting the plan's statement of them,
-   and (d) hunt for convention violations and unstated deviations. Fix
-   rounds until the review is clean; the controller, not the implementer,
-   judges cleanliness.
-3. The reviewer must verify each guarantee by **breaking the source and
-   confirming a test fails**. For this plan that means, at minimum:
-   flipping the `xy_offset` sign, swapping `axisar` for `rotate`, dropping
-   the `R` conjugation, reversing the `delta` composition, and rotating AV
-   through `delta` -- each in turn, each caught by a named test. A test
-   that passes against a deliberately broken implementation is a defect in
-   the test, and is reported as one.
-4. Deviations discovered mid-phase are recorded in the phase commit
-   message and reconciled into this plan file in the same commit, so the
-   document the next reviewer holds is never stale. Scope changes go to
-   the operator instead.
-5. Final sweep before the pull request to `main`:
-   `./scripts/run-all-checks.sh -i`, plus the Phase D round trip re-run on
-   the final revision with its measured residuals reported in the pull
-   request.
-6. One pull request to `main`: summary, phase map, evidence, `Closes` per
-   issue, and the plan and guide reconciliation included.
+Broader than this plan and blocking nothing: the documentation chapter
+specifying the metadata JSON format -- every key, its meaning, presence
+rules, and examples, including the `pointing` and `times` blocks this plan
+added (#431); and whether `spindoctor.cli` subpackages belong in the API
+reference at all (#443), which is what decides whether the writer package
+gets an autodoc page rather than the nitpick-ignore every other
+`spindoctor.cli` subpackage has.
