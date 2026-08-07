@@ -489,6 +489,28 @@ def test_a_record_epoch_that_is_not_a_time_is_refused(
         build_segment(pointing)
 
 
+def test_no_baseline_furnished_at_all_is_not_a_coverage_gap(pool: KernelPool) -> None:
+    """A pool without the kernel is a setup failure, not one exposure's condition.
+
+    It has to stay distinguishable, because a coverage gap omits one image and
+    carries on: a run furnishing no C-kernel would otherwise report every image
+    it considered as having outlasted its baseline.
+    """
+    pointing = ImagePointing(
+        image_name=_IMAGE_NAME,
+        cmatrix=np.eye(3),
+        cmatrix_original=np.eye(3),
+        camera_frame=CASSINI_CAMERA_FRAME,
+        ck_frame_id=CASSINI_CK_FRAME_ID,
+        start_et=_START_ET,
+        stop_et=_STOP_ET,
+        midtime_et=(_START_ET + _STOP_ET) / 2.0,
+        exposure_s=_STOP_ET - _START_ET,
+    )
+    with pytest.raises(OSError, match='NOLOADEDFILES'):
+        build_segment(pointing)
+
+
 def test_a_ck_object_with_no_frame_name_is_refused(pool: KernelPool) -> None:
     """Without the frame kernel there is no rotation to the camera, and no guess at one."""
     pointing = ImagePointing(
