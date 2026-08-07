@@ -45,6 +45,7 @@ _WITH_IMAGE_LOGGER = [
     ('sd_backplanes', ['coiss_saturn']),
     ('sd_mosaic', ['rings', 'coiss_saturn']),
     ('sd_mosaic', ['body', 'coiss_saturn']),
+    ('sd_create_ck', ['coiss', '--kernel-dir', '.', '--output-dir', '.']),
 ]
 
 _WITHOUT_IMAGE_LOGGER = [

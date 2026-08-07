@@ -318,6 +318,103 @@ def read_number(section: dict[str, Any], key: str, where: str) -> float:
     return float(value)
 
 
+def read_optional_text(section: dict[str, Any], key: str, where: str) -> str | None:
+    """Return one optional metadata value that must be text when present.
+
+    An absent key means the metadata records no such value.  A key present but
+    holding a JSON ``null`` does not: nothing the pipeline writes as text is
+    ever written as null, so a null is a malformed document.  ``str()`` is
+    deliberately not used to coerce it either, since ``str(None)`` is
+    ``'None'``, which is neither empty nor obviously wrong -- a null camera
+    would pair with the opposite camera of a simultaneous exposure and silently
+    decide which of the two keeps its correction.
+
+    Parameters:
+        section: The dict to read.
+        key: The key to read.
+        where: Name of the section, used in the exception message.
+
+    Returns:
+        The value stored under ``key``, or ``None`` when the key is absent.
+
+    Raises:
+        TypeError: if the value present is not a string.
+    """
+    if key not in section:
+        return None
+    return read_text(section, key, where)
+
+
+def read_optional_number(section: dict[str, Any], key: str, where: str) -> float | None:
+    """Return one optional metadata value that must be a number when present.
+
+    An absent key means the metadata records no such value; a key holding a
+    JSON ``null`` is refused, for the same reason :func:`read_optional_text`
+    refuses one.
+
+    Parameters:
+        section: The dict to read.
+        key: The key to read.
+        where: Name of the section, used in the exception message.
+
+    Returns:
+        The value stored under ``key`` as a float, or ``None`` when the key is
+        absent.
+
+    Raises:
+        TypeError: if the value present is not a real number.
+        ValueError: if the number present is not finite.  The pipeline maps a
+            non-finite value onto a large finite sentinel before writing it, so
+            a bare ``NaN`` or infinity here is a hand-edited document rather
+            than a recorded measurement, and it would be reported as a number
+            no reader could attribute.
+    """
+    if key not in section:
+        return None
+    value = read_number(section, key, where)
+    if not math.isfinite(value):
+        raise ValueError(f'{where} field {key!r} is not finite: {value!r}')
+    return value
+
+
+def read_optional_pair(section: dict[str, Any], key: str, where: str) -> tuple[float, float] | None:
+    """Return one optional metadata value that must be two numbers when recorded.
+
+    The pipeline records an offset and a per-axis sigma as a two-element
+    ``[dv, du]`` list, and writes an explicit ``null`` for a sigma it has none
+    of -- which is why a null is read here as "not recorded" where every other
+    reader in this module refuses one.
+
+    Parameters:
+        section: The dict to read.
+        key: The key to read.
+        where: Name of the section, used in the exception message.
+
+    Returns:
+        The two values, or ``None`` when the key is absent or null.
+
+    Raises:
+        TypeError: if the value present is not a list or tuple, or if either
+            element is not a real number.
+        ValueError: if it does not hold exactly two elements, or if either is
+            not finite.
+    """
+    if key not in section or section[key] is None:
+        return None
+    value = read_field(section, key, where)
+    if not isinstance(value, list | tuple):
+        raise TypeError(
+            f'{where} field {key!r} is {type(value).__name__}, not a pair of numbers: {value!r}'
+        )
+    if len(value) != 2:
+        raise ValueError(f'{where} field {key!r} holds {len(value)} values, not two: {value!r}')
+    pair = tuple(read_number({'value': element}, 'value', where) for element in value)
+    for element in pair:
+        if not math.isfinite(element):
+            raise ValueError(f'{where} field {key!r} holds a non-finite value: {value!r}')
+    return (pair[0], pair[1])
+
+
 def read_field(section: dict[str, Any], key: str, where: str) -> Any:
     """Return one required metadata value.
 

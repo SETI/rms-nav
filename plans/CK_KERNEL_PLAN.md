@@ -496,21 +496,41 @@ spacecraft, silently). The SCLK kernel furnished must be the one navigation
 used, resolved from `provenance.spice_kernels`; a different SCLK is a silent
 time-tag error.
 
-**How that resolution works, since `spice_kernels` does not answer it
-directly.** The list is sorted basenames with no load order, and in a batch
-run it accumulates every kernel earlier images furnished, so it can hold
-several clock kernels -- more than one for the same spacecraft, and others
-for spacecraft this image has nothing to do with. The driver that furnishes
-the pool (section 3.5) therefore filters the list to the clock kernels of
-the image's own resolved `sclk_id` and requires **exactly one** to survive.
-Zero means the recorded provenance cannot name the clock the time tags were
-encoded against, and several means it names more than one and cannot say
-which; both refuse the image rather than picking one, because either guess
-writes time tags that are wrong by whatever the two clock kernels disagree
-by, and a wrong time tag is not visible in the written kernel. This is the
-same discipline the clock id itself gets just below: the recorded value
-decides, and anything ambiguous is refused rather than resolved by
-preference.
+**How it is resolved, exactly.** Not by name and not by version: the
+basenames say nothing (`cas00172.tsc`, `vg200022.tsc`,
+`new-horizons_1280.tsc`), and a Voyager run's provenance names both
+spacecraft's clock kernels. Each candidate the image's provenance names is
+furnished on its own and asked whether it defines the clock the image's own
+`ck_frame_id` resolves to -- the pool variables `SCLK_DATA_TYPE_<n>` and
+`SCLK_PARTITION_START_<n>`, either of which is enough, both present in every
+kernel in the holdings. Exactly one must; **zero and several are both refused
+rather than resolved by picking**, since two versions of one clock disagree
+about the very thing being encoded. The probe needs the clock not to be
+defined already, or a kernel furnished earlier would answer for every
+candidate alike, so that is checked rather than assumed.
+
+**The frame kernels get the same discipline, differently shaped.** A mission
+furnishes several frame kernels at once by design -- Cassini's dynamic, rocks
+and status kernels beside its main one -- so they are not resolved to one.
+What is refused is two of them defining a frame *this run's images name*: the
+camera frame the reproduction test asks through, or the frame naming a
+corrected object. A text kernel's last assignment wins, and two versions of a
+mission's frame kernel differ in exactly the assignment that fixes the camera
+to the spacecraft, so a corpus navigated across a frame kernel upgrade would
+be reproduced entirely against whichever version sorted last. Every image
+navigated under the other then fails to reproduce, the run writes nothing, and
+it reports the whole corpus as `no_reproducing_baseline` -- the drift verdict,
+for a pool the run built itself. That is the misdiagnosis item 4 below exists
+to prevent, arriving by a different route, and it is refused the same way:
+before any candidate is tried, naming the two kernels and the frame they
+disagree about.
+
+The choice is per image and the pool is per run, so the run's images must
+agree: two images of one spacecraft whose records name different versions of
+its clock kernel cannot both be encoded correctly by one pool, and the run
+refuses rather than encoding one of them against the other's kernel. (This
+run-level requirement is a consequence of the per-image rule, not a second
+rule; it is stated because it is a refusal an operator can meet.)
 
 **The shared table is the resolver; `ckmeta` is only the cross-check.**
 `sclk_id` comes from the CK-object-to-clock mapping in
@@ -703,9 +723,51 @@ that occur).
   with slack) / `ckw03` / `ckcls`; the comment text then goes in via
   `dafopw` / `dafac` / `dafcls`. Reading it back (acceptance) uses
   `dafopr` / `dafec`.
+
+  Three measurements against the installed toolkit (CSPICE N0067) shape
+  what that reservation buys and what a comment line may hold, and only
+  the first was expected. **The comment area is grown when it has to
+  be:** a `dafac` that overflows what `ncomch` reserved does not fail, and
+  does not truncate -- SPICE extends the area by shifting every data
+  record in the file, and the comments read back complete. Measured on a
+  one-segment kernel with 2130 characters of comment: reserving 2130 or
+  3130 leaves the first data record at 5 and 6 respectively and unmoved by
+  the write; reserving 1065 moves it from 4 to 5, and reserving 0 moves it
+  from 2 to 5. So the reservation buys a file that is not rewritten
+  rather than a comment that is not lost, the failure is silent either
+  way, and the only observable is that displacement -- which is what the
+  Phase E test asserts, since no read-back can see the difference.
+  **A comment line longer than 255 characters is stored and then cannot be
+  read back at all:** `dafec` reads into a 255-character buffer and raises
+  `SPICE(COMMENTTOOLONG)` on the first line that overflows it, which
+  loses the whole comment area rather than one line's tail. **Trailing
+  whitespace does not survive and a non-printing character is refused**
+  by `dafac` outright -- after the segments have been written, so the file
+  is left with a comment area it was meant to have and does not. All three
+  are refused before a file is opened.
 - **Meta-kernel** per file set, furnishing originals first and corrections
   after, so precedence is explicit rather than an ordering a user has to
-  know.
+  know. A SPICE text kernel holds at most 80 characters per string value
+  and **truncates a longer one silently** rather than refusing it, so a
+  kernel path over 80 characters -- which every path in the holdings tree
+  is -- is written through SPICE's `+` continuation, as several strings of
+  at most 79 characters each. The one path that cannot be expressed is one
+  ending in `+`, whose last character is indistinguishable from the marker
+  that would join it to the next kernel; it is refused by name.
+
+  Blanks need the same care and get less of it from SPICE. A **trailing**
+  blank is trimmed from a text kernel string, so a path whose last character
+  is a blank comes back one character shorter than it went in -- measured
+  through a real `furnsh`, a 119-character path ending in a space loads a
+  118-character name, with no error at all -- and such a path is refused. A
+  blank *inside* a path survives at a join on the toolkit installed here:
+  swept across every position of a 119-character path (two pieces) and a
+  200-character path (three pieces), the only position that loses its blank
+  is the last character of the path itself, and every piece boundary
+  round-trips exactly. The joins are nonetheless chosen to fall on
+  non-blanks, because it costs nothing, the holdings tree holds names with
+  spaces in them, and a name that lost a character in the middle would reach
+  the consumer as a file it never asked for.
 - **CSV report, one per mission.** Columns: `image_name`, `utc`, `et`,
   `sclk`, `offset_dv`, `offset_du`, `sigma_dv`, `sigma_du`, `confidence`,
   `confidence_rank`, `status`, `status_reason`, `source_bc`,
@@ -732,6 +794,49 @@ adjacency the logging test suite asserts. No entry is needed under
 `logging.programs` in `config_015_logging.yaml` (it ships empty and keys
 are optional). Anything that degrades or omits a result goes to both logs:
 per-image detail to the image log, one line plus a count to the run log.
+The per-image logs go under a `ck` backend, which is added to
+`BACKEND_NAMES` beside `nav`, `backplanes` and `reproj`.
+
+The arguments as built: a positional mission (`coiss`, `gossi`, `nhlorri`,
+`vgiss`, spelled in the driver rather than read from the observation
+registry, which is behind an oops import); `--nav-results-root`, whose tree
+is walked for `*_metadata.json` and filtered on `observation.instrument`;
+`--kernel-dir`, repeatable and required, which is both the set of
+directories indexed for candidate C-kernels and the set that resolves the
+basenames provenance records; `--start-time` / `--stop-time` as UTC, applied
+to the recorded exposure midtime, with an image that recorded none -- or
+recorded a non-finite one -- ignored whenever either bound is given, since
+it cannot be placed in time; and `--output-dir`.
+
+**Two failures deliberately stop the run rather than being reported as an
+omission**, because the omission-reason set is closed and neither has an
+entry in it: a metadata document that cannot be read as a navigated image at
+all, and an image whose baseline reproduced its attitude and then supplied no
+pointing at one of its record epochs. Both name the image in **the run log
+only** -- not in both, which the "anything that degrades or omits a result"
+rule above would otherwise ask for. That rule is about a result the run goes
+on to report; these two end the run, and the per-image log they would be
+written to is opened by the reporting pass that then never runs. Logging
+through the image logger with no image scope open is a defect rather than a
+fallback, and under `logging.strict_scope` the `LogScopeError` it raises
+would *replace* the failure worth reading and demote it to a `__context__`
+nobody prints -- so a documented configuration setting would turn a
+diagnosable failure into a logging crash.
+
+A metadata *file* that is not readable as JSON is different again: it names
+no image, so there is nothing for the report to say about it and nothing an
+omission reason could attach to. It is counted and named in the run log, the
+run continues on what it could read, and **the run exits non-zero**, so a
+batch wrapper can tell a clean run from one that silently skipped its input.
+
+**The output directory and the kernel directories are resolved to absolute
+paths** before anything is written. The meta-kernel names the kernels it
+furnishes by these paths and SPICE resolves a relative name against the
+*consumer's* working directory, so a meta-kernel written from a relative
+`--output-dir` would work only from the directory that generated it, and
+elsewhere would fail on the first correction -- after the originals had
+already loaded, leaving the consumer with an uncorrected pool rather than an
+empty one.
 
 ### 3.6 The writer's imports, and cspyce
 

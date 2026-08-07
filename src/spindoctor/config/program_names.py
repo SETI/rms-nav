@@ -18,6 +18,7 @@ here, because they have nothing to name.
 SD_BACKPLANES = 'sd_backplanes'
 SD_CONSOLIDATE_METADATA = 'sd_consolidate_metadata'
 SD_CREATE_BUNDLE = 'sd_create_bundle'
+SD_CREATE_CK = 'sd_create_ck'
 SD_MOSAIC = 'sd_mosaic'
 SD_OFFSET = 'sd_offset'
 
@@ -26,6 +27,7 @@ PROGRAM_NAMES = frozenset(
         SD_BACKPLANES,
         SD_CONSOLIDATE_METADATA,
         SD_CREATE_BUNDLE,
+        SD_CREATE_CK,
         SD_MOSAIC,
         SD_OFFSET,
     }
