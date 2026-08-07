@@ -71,7 +71,7 @@ The record epochs are exact; between them the segment interpolates
 ------------------------------------------------------------------
 
 A segment carries records at the exposure start, the midtime and the stop, plus
-a one-second cadence when the exposure is longer than ten seconds. It
+a one-second cadence once the exposure reaches ten seconds. It
 reproduces the corrected attitude at those epochs exactly. Every other epoch in
 the window is interpolated between the bracketing records, and the interior
 error that interpolation leaves is **not bounded by anything**.
@@ -170,8 +170,11 @@ the corrected file carrying its segment or one of these reasons it has none:
        this image navigated against. Either the kernel set has changed since
        navigation, or the original the image used is not among the directories
        given.
-   * - ``degenerate_exposure``
-     - Reserved for an exposure the writer cannot express as a segment.
+
+The set is closed, and every member of it is one a run can produce: an image
+whose pointing the writer cannot express as a segment at all is not reported
+here but stops the run, since a run that has found something wrong with the
+kernels or the metadata should not bury it in one image's row.
 
 An omitted image gets no segment and no uncorrected copy of one: its pointing
 falls through to the originals, exactly as an epoch between exposures does.
@@ -485,9 +488,11 @@ choice:
 
 * **A metadata document that cannot be read as a navigated image**; an image
   whose baseline reproduced its attitude and then supplied no pointing at one of
-  its record epochs; and an image whose baseline supplied pointing at every
-  record but angular velocity at only some of them. None of the three has an
-  entry in the closed set of omission reasons, so none is reported as one.
+  its record epochs; an image whose baseline supplied pointing at every record
+  but angular velocity at only some of them; and an exposure whose window is so
+  long that the cadence would need more records than a segment holds, which
+  means the recorded epochs are not an exposure. None has an entry in the closed
+  set of omission reasons, so none is reported as one.
 
 Related chapters
 ================

@@ -33,6 +33,16 @@ records the acceptance criteria and their status. What remains:
   gap is the GUI and other long-standing untested surfaces.
 - The follow-ups in section 7, none of which block use of the kernels.
 
+One known drift between this document and the code, left for the operator
+rather than resolved here: section 3.3 states the omission-reason set as
+five members, and the generator emits four. `DEGENERATE_EXPOSURE` was
+removed from the code on the ground that no run can produce it -- the
+degenerate exposure it named is written as a single-record segment rather
+than omitted -- and a published set with a member no run emits asks every
+consumer to write dead code against a case that never arrives. The user
+guide documents the four the generator emits. Settling which of the two is
+authoritative is a schema decision for the report's consumers.
+
 ---
 
 ## 1. Purpose and scope
@@ -461,8 +471,19 @@ disagree with what was navigated.
 One **type 3** segment per eligible image, interpolation interval exactly
 `[start_et, stop_et]`.
 
-**Records.** At exposure start, midtime, and stop. When `exposure_s`
-exceeds 10 s, additional records at a 1 s cadence.
+**Records.** At exposure start, midtime, and stop. When the span from
+start to stop reaches 10 s, additional records at a 1 s cadence, capped at
+10,000 records for the segment. Both the cadence gate and the record count
+read that one span, and `ImagePointing` requires the recorded `exposure_s`
+to agree with it, so the two cannot answer for different exposures; the cap
+is there because the arithmetic that expands a span has no bound of its own,
+and a recorded span of 1e9 s exhausts memory rather than being recognized as
+epochs that are not an exposure. The boundary is inclusive because ten
+seconds exactly is an ordinary commanded ISS exposure: measured over 40
+random epochs on `04002_04009ra.bc` in NAC pixels, a 10.000 s exposure at
+three records leaves mean 0.43 px, p99 5.16 px, max 9.86 px and 23.0% of
+samples beyond 0.1 px, where 10.001 s at the 13-record cadence leaves 0.02,
+0.44 and 5.92 px and 3.0%.
 
 Those cadence records earn their place, and it is worth saying how, because
 nothing asserts them. The segment declares one interpolation interval

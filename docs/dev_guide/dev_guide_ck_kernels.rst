@@ -453,7 +453,12 @@ carries the single corrected attitude, constant across the window; writing
 time-varying pointing there would disagree with what was navigated.
 
 Records go at the exposure start, midtime and stop, plus a one-second cadence
-above ten seconds of exposure, each encoded with ``sce2c``. Time tags must be
+once the window reaches ten seconds, each encoded with ``sce2c``. Both the
+decision to add interior records and their count are taken from the same
+quantity, the span from start to stop, so the two cannot answer for different
+exposures; the count is capped, because the arithmetic that expands a span has
+no bound of its own and a recorded span of 1e9 s would exhaust memory before
+anything noticed the epochs were not an exposure. Time tags must be
 strictly increasing in encoded SCLK; a tag that does not increase is dropped,
 and epochs that all encode to one tick yield a single record at the midtime.
 Because ``sce2c`` encodes a *fractional* tick, that last path needs three epochs
@@ -608,11 +613,14 @@ Invariants
 * **The cspyce error regime is process-wide.** ``cspyce.use_errors()`` /
   ``use_flags()`` is shared with ``oops``; the writer assumes the exceptions
   regime, which is the package default, and never flips it.
-* **The omission-reason set is closed.** Adding a reason is a schema change for
-  every consumer of the report, which is why the two run-stopping failures --
-  an unreadable navigated image, and a baseline that reproduced and then
-  supplied no pointing at a record epoch -- stop the run instead of inventing
-  one. Both report to the run log only: they end the run, and the per-image log
+* **The omission-reason set is closed, and every member is one a run emits.**
+  Adding a reason is a schema change for every consumer of the report, and a
+  reason no run can produce is worse than a missing one, since it asks every
+  consumer to write dead code. So a failure with no reason of its own stops the
+  run instead: an unreadable navigated image, a baseline that reproduced and
+  then supplied no pointing at a record epoch, a baseline supplying angular
+  velocity at only some records, and a window too long for a segment's records.
+  Those report to the run log only -- they end the run, and the per-image log
   they would otherwise use is opened by the reporting pass that never runs.
 
 Adding a mission
