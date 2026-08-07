@@ -234,22 +234,70 @@ def test_a_failed_segment_write_reports_its_own_failure(
         write_ck_file(tmp_path / 'broken_nav.bc', [_segment()], _COMMENT_LINES)
 
 
-def test_a_failed_segment_write_still_closes_the_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A leaked DAF handle breaks an unrelated open later, naming neither.
+def _fail_the_write(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Make the next segment write fail, and record the handle it opened.
 
-    Measured by opening enough files afterwards to exhaust the cap a leak
-    would eat into; a successful write of another kernel is the observable.
+    Parameters:
+        monkeypatch: Used to replace the two collaborators.
+
+    Returns:
+        The list the opened handle is appended to.
     """
+    opened: list[int] = []
+    real_ckopn = cspyce.ckopn
+
+    def _record(fname: str, ifname: str, ncomch: int) -> int:
+        """Open the file as usual and remember the handle."""
+        handle = int(real_ckopn(fname, ifname, ncomch))
+        opened.append(handle)
+        return handle
 
     def _refuse(handle: int, segment: CkSegment) -> None:
         """Fail the way a rejected record set would."""
         raise ValueError('the record set was rejected')
 
+    monkeypatch.setattr(cspyce, 'ckopn', _record)
     monkeypatch.setattr('spindoctor.cli.ck.kernel_file.write_segment', _refuse)
+    return opened
+
+
+def test_a_failed_segment_write_still_closes_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A leaked DAF handle breaks an unrelated open later, naming neither.
+
+    Asserted on the handle itself rather than on a symptom: SPICE answers
+    ``dafhsf`` for a handle it still has open and refuses it once the file is
+    closed.  Measured for the same reason: ``ckcls`` on a segment-less
+    C-kernel raises *and leaves the file open*, so the obvious cleanup does
+    not do this.
+    """
+    opened = _fail_the_write(monkeypatch)
     with pytest.raises(ValueError, match='the record set was rejected'):
         write_ck_file(tmp_path / 'broken_nav.bc', [_segment()], _COMMENT_LINES)
     monkeypatch.undo()
-    write_ck_file(tmp_path / 'later_nav.bc', [_segment()], _COMMENT_LINES)
-    assert (tmp_path / 'later_nav.bc').exists()
+    with pytest.raises(RuntimeError, match='DAFNOSUCHHANDLE'):
+        cspyce.dafhsf(opened[0])
+
+
+def test_a_failed_segment_write_leaves_no_file_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Otherwise the obvious next step -- run again -- fails on the leftover."""
+    _fail_the_write(monkeypatch)
+    with pytest.raises(ValueError, match='the record set was rejected'):
+        write_ck_file(tmp_path / 'broken_nav.bc', [_segment()], _COMMENT_LINES)
+    monkeypatch.undo()
+    assert not (tmp_path / 'broken_nav.bc').exists()
+
+
+def test_a_run_again_after_a_failed_write_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Which is the point of removing it."""
+    _fail_the_write(monkeypatch)
+    with pytest.raises(ValueError, match='the record set was rejected'):
+        write_ck_file(tmp_path / 'broken_nav.bc', [_segment()], _COMMENT_LINES)
+    monkeypatch.undo()
+    write_ck_file(tmp_path / 'broken_nav.bc', [_segment()], _COMMENT_LINES)
+    assert (tmp_path / 'broken_nav.bc').exists()

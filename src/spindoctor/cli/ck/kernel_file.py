@@ -12,10 +12,16 @@ so the failure is a rewritten file rather than a lost comment, and it is
 invisible unless the file is measured before and after.  It is measurable: the
 address of the first data record does not move when the reservation was enough
 and does when it was not.
+
+A write that fails part way through is closed with ``dafcls`` rather than
+``ckcls``, and the half-written file is removed.  ``ckcls`` on a C-kernel that
+received no segment raises in its own right and leaves the file open, so using
+it on the failure path would replace the error worth reading with one that is
+not *and* leak the handle; ``dafcls`` closes the file and has nothing to say
+about segments.
 """
 
 from collections.abc import Sequence
-from contextlib import suppress
 from pathlib import Path
 
 import cspyce
@@ -67,14 +73,18 @@ def write_ck_file(path: Path, segments: Sequence[CkSegment], comment_lines: Sequ
         for segment in segments:
             write_segment(handle, segment)
     except Exception:
-        # Closed so the DAF handle is not leaked -- SPICE caps how many files
-        # may be open at once, and a leaked handle breaks an unrelated open
-        # later with an error naming neither -- but its own failure is
-        # swallowed here, because closing a C-kernel that received no segment
-        # raises in its own right and would replace the failure that is worth
-        # reading with one that is not.
-        with suppress(Exception):
-            cspyce.ckcls(handle)
+        # Closed through the plain DAF interface rather than ``ckcls``, and
+        # measured rather than assumed: ``ckcls`` on a C-kernel that received
+        # no segment raises SPICE(NOSEGMENTSFOUND) *and leaves the file open*,
+        # so using it here would both replace the failure worth reading with
+        # one that is not and leak the handle anyway.  ``dafcls`` closes it and
+        # has nothing to say about segments.
+        cspyce.dafcls(handle)
+        # The file ``ckopn`` created is removed with it.  It holds no usable
+        # segment, and leaving it behind would make the obvious next step --
+        # fix the cause and run again -- fail on the refusal to write over an
+        # existing corrected kernel.
+        path.unlink(missing_ok=True)
         raise
     cspyce.ckcls(handle)
     write_comment_area(path, comment_lines)
