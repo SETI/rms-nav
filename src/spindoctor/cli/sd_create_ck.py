@@ -48,7 +48,7 @@ from spindoctor.cli.ck.inputs import (
     resolve_one,
     select_by_time,
 )
-from spindoctor.cli.ck.kernel_file import write_ck_file
+from spindoctor.cli.ck.kernel_file import check_ck_file, check_output_paths, write_ck_file
 from spindoctor.cli.ck.metakernel import write_meta_kernel
 from spindoctor.cli.ck.pointing import ImagePointing
 from spindoctor.cli.ck.report import ImageFacts, ReportRow, read_image_facts, write_report
@@ -407,7 +407,22 @@ def apply_build_omissions(
 
 
 def write_output_files(files: Sequence[PreparedFile]) -> list[tuple[FCPath, FCPath]]:
-    """Write the corrected kernels a run has already built.
+    """Write the corrected kernels a run has already built, all of them or none.
+
+    The whole set is judged before the first file is opened: every destination
+    together, then each file's own contents.  A run whose third output path is
+    already occupied therefore writes none of the three.  Judging as it goes
+    instead would leave the first two behind -- a partial set, with no
+    meta-kernel and no report to say what is in it, and one the refusal to
+    overwrite an existing corrected kernel then blocks the rerun on.
+
+    That is not atomicity, and it is not claimed.  What it establishes is that
+    nothing knowable in advance stops the writing part way through.  A residual
+    window remains and cannot be closed by any check made beforehand: the
+    device filling up, a path or a permission changing between the check and
+    the write, and a record set SPICE refuses once the file is open.  A file
+    that fails that way is removed, but the files written before it are not,
+    and this call raises with them on disk.
 
     Parameters:
         files: The built files, in the order they are to be written.
@@ -416,14 +431,21 @@ def write_output_files(files: Sequence[PreparedFile]) -> list[tuple[FCPath, FCPa
         One entry per file written, pairing the original with the correction.
 
     Raises:
-        ValueError: if SPICE refuses a file's records or its comment area, or
-            if a corrected kernel of that name already exists.
+        ValueError: if any output path cannot be written -- naming every one
+            that cannot, and why -- if any file's records or comment area is
+            one SPICE cannot store, or if SPICE refuses a segment once a file
+            is open.
         RuntimeError: if SPICE cannot create a file.
-        OSError: if SPICE refuses a write for an operating-system reason.
+        OSError: if the output directory cannot be created, or if SPICE
+            refuses a write for an operating-system reason.
     """
+    paths = [local_output_path(prepared.output) for prepared in files]
+    check_output_paths(paths)
+    for prepared, path in zip(files, paths, strict=True):
+        check_ck_file(path, prepared.segments, prepared.comment_lines)
     written: list[tuple[FCPath, FCPath]] = []
-    for prepared in files:
-        write_ck_file(local_output_path(prepared.output), prepared.segments, prepared.comment_lines)
+    for prepared, path in zip(files, paths, strict=True):
+        write_ck_file(path, prepared.segments, prepared.comment_lines)
         MAIN_LOGGER.info(
             'Wrote %s: %d segment(s) correcting %s',
             prepared.output.as_posix(),
@@ -452,7 +474,11 @@ def absolute_directory(directory: str) -> str:
 
 
 def local_output_path(path: FCPath) -> Path:
-    """Return the local path SPICE writes a kernel to.
+    """Return the local path SPICE writes a kernel to, creating its directory.
+
+    The directory is created here rather than at the write, so that a caller
+    judging a whole set of destinations before it writes any of them has a
+    directory to judge.
 
     Parameters:
         path: The output path.
@@ -463,6 +489,7 @@ def local_output_path(path: FCPath) -> Path:
     Raises:
         ValueError: if it is not local, since SPICE creates a file by name on
             the local filesystem and cannot write to a remote root.
+        OSError: if the directory does not exist and cannot be created.
     """
     local = Path(path.as_posix())
     if '://' in path.as_posix():

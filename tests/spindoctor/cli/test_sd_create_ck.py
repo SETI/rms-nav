@@ -928,12 +928,13 @@ def test_a_baseline_left_with_nothing_to_correct_says_so(
     assert f'No image is left to correct {_BASELINE_A}' in _run_log(straddling_tree)
 
 
-def _run_refused(tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run the driver over a tree whose second output file cannot be built.
+def _run_stopped(tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, message: str) -> None:
+    """Run the driver over a tree it must refuse, and hold it to the reason.
 
     Parameters:
         tree: The directories the fixture built.
         monkeypatch: Used to set the command line.
+        message: Text the refusal must name.
     """
     monkeypatch.setattr(
         'sys.argv',
@@ -950,8 +951,18 @@ def _run_refused(tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None
             str(tree['output'] / 'logs'),
         ],
     )
-    with pytest.raises(ValueError, match='angular velocity at only some of them'):
+    with pytest.raises(ValueError, match=message):
         sd_create_ck.main()
+
+
+def _run_refused(tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the driver over a tree whose second output file cannot be built.
+
+    Parameters:
+        tree: The directories the fixture built.
+        monkeypatch: Used to set the command line.
+    """
+    _run_stopped(tree, monkeypatch, 'angular velocity at only some of them')
 
 
 def test_a_refusal_leaves_no_corrected_kernel_behind(
@@ -984,6 +995,107 @@ def test_a_refusal_names_the_image_it_could_not_build(
     """Named in the run log, which is the only record such a run leaves."""
     _run_refused(refused_second_file_tree, monkeypatch)
     assert 'B_CALIB: could not build the corrected segment' in _run_log(refused_second_file_tree)
+
+
+# ---------------------------------------------------------------------------
+# An output path the run cannot write
+#
+# The run writes orig_a_nav.bc and then orig_b_nav.bc, so blocking the second
+# is what tells a run that judges its destinations first from one that judges
+# each file as it reaches it.  The second would refuse either way; only the
+# first says whether anything was left behind when it did.
+# ---------------------------------------------------------------------------
+
+
+def _block_second_output(tree: dict[str, Path], *, with_link_to: Path | None = None) -> Path:
+    """Put something at the run's second output path, and return it.
+
+    Parameters:
+        tree: The directories the fixture built.
+        with_link_to: A target to make the blocker a symbolic link to, absent
+            itself.  Without it the blocker is an ordinary file.
+
+    Returns:
+        The blocked path.
+    """
+    path = tree['output'] / 'orig_b_nav.bc'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if with_link_to is None:
+        path.write_bytes(b'not a kernel')
+    else:
+        path.symlink_to(with_link_to)
+    return path
+
+
+def test_an_occupied_second_output_path_stops_the_run(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """And names it, since an operator has to know which file to move."""
+    _block_second_output(run_tree)
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc already exists')
+
+
+def test_an_occupied_second_output_path_leaves_the_first_unwritten(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The whole point: a run that judged each file as it reached it wrote this one."""
+    _block_second_output(run_tree)
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc already exists')
+    assert not (run_tree['output'] / 'orig_a_nav.bc').exists()
+
+
+def test_an_occupied_second_output_path_leaves_no_meta_kernel(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """A meta-kernel would name a corrected set that was never written."""
+    _block_second_output(run_tree)
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc already exists')
+    assert not (run_tree['output'] / 'coiss_nav.tm').exists()
+
+
+def test_an_occupied_second_output_path_leaves_no_report(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Nothing was written, so nothing claims to say what was: the run is repeatable."""
+    _block_second_output(run_tree)
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc already exists')
+    assert not (run_tree['output'] / 'coiss_ck_report.csv').exists()
+
+
+def test_an_occupied_second_output_path_is_left_alone(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The file the operator has to choose between is not the one that changed."""
+    blocked = _block_second_output(run_tree)
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc already exists')
+    assert blocked.read_bytes() == b'not a kernel'
+
+
+def test_a_dangling_link_at_the_second_output_path_stops_the_run(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """``Path.exists`` follows the link and reports the absent target as absent."""
+    _block_second_output(run_tree, with_link_to=run_tree['output'] / 'elsewhere.bc')
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc is a symbolic link')
+
+
+def test_a_dangling_link_at_the_second_output_path_creates_no_target(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Which is the harm: the write would create a file the run never named."""
+    target = run_tree['output'] / 'elsewhere.bc'
+    _block_second_output(run_tree, with_link_to=target)
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc is a symbolic link')
+    assert not target.exists()
+
+
+def test_a_dangling_link_at_the_second_output_path_leaves_the_first_unwritten(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The set is judged before the first file, whatever occupies a later path."""
+    _block_second_output(run_tree, with_link_to=run_tree['output'] / 'elsewhere.bc')
+    _run_stopped(run_tree, monkeypatch, r'orig_b_nav\.bc is a symbolic link')
+    assert not (run_tree['output'] / 'orig_a_nav.bc').exists()
 
 
 # ---------------------------------------------------------------------------

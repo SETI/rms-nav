@@ -84,7 +84,12 @@ from spindoctor.cli.ck.inputs import (
     resolve_one,
     select_by_time,
 )
-from spindoctor.cli.ck.kernel_file import first_data_record, write_ck_file
+from spindoctor.cli.ck.kernel_file import (
+    check_ck_file,
+    check_output_paths,
+    first_data_record,
+    write_ck_file,
+)
 from spindoctor.cli.ck.metakernel import build_meta_kernel_lines, write_meta_kernel
 from spindoctor.cli.ck.pointing import ImagePointing
 from spindoctor.cli.ck.report import (
@@ -132,6 +137,8 @@ __all__ = [
     'build_meta_kernel_lines',
     'build_segment',
     'camera_frame_is_defined',
+    'check_ck_file',
+    'check_output_paths',
     'clock_is_defined',
     'clock_kernels',
     'first_data_record',

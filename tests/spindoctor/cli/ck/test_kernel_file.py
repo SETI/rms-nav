@@ -6,8 +6,15 @@ is opened.  The reservation is what these tests work hardest on, because SPICE
 does not report a reservation that was too small: it silently rewrites the file
 instead, moving every data record to make room.  What is measurable is that the
 first data record does not move, and that is asserted directly.
+
+The third job is judging a whole run's destinations before any of them is
+written, and its tests work hardest on the paths that answer ``False`` to
+:meth:`~pathlib.Path.exists` while something is nevertheless there.  Those are
+pinned as measurements of their own, because they are the reason the check is
+not written as ``exists``.
 """
 
+import os
 from pathlib import Path
 
 import cspyce
@@ -25,7 +32,12 @@ from spindoctor.cli.ck.comments import (
     read_comment_area,
     reserved_comment_chars,
 )
-from spindoctor.cli.ck.kernel_file import first_data_record, write_ck_file
+from spindoctor.cli.ck.kernel_file import (
+    check_ck_file,
+    check_output_paths,
+    first_data_record,
+    write_ck_file,
+)
 from spindoctor.cli.ck.segment import CkSegment
 
 # Enough comment to need more than one 1024-character record, so that an
@@ -246,6 +258,252 @@ def test_a_name_one_character_longer_is_refused(tmp_path: Path) -> None:
     assert len(path.name) == 61
     with pytest.raises(ValueError, match='internal name'):
         write_ck_file(path, [_segment()], _COMMENT_LINES)
+
+
+def test_writing_through_a_symbolic_link_is_refused(tmp_path: Path) -> None:
+    """The corrected kernel would land wherever the link points, not here."""
+    target = tmp_path / 'elsewhere.bc'
+    write_ck_file(target, [_segment()], _COMMENT_LINES)
+    link = tmp_path / 'orig_nav.bc'
+    link.symlink_to(target)
+    with pytest.raises(ValueError, match='is a symbolic link'):
+        write_ck_file(link, [_segment()], _COMMENT_LINES)
+
+
+def test_writing_through_a_dangling_symbolic_link_is_refused(tmp_path: Path) -> None:
+    """``Path.exists`` follows the link and reports the absent target as absent."""
+    link = tmp_path / 'orig_nav.bc'
+    link.symlink_to(tmp_path / 'never_written.bc')
+    with pytest.raises(ValueError, match='is a symbolic link'):
+        write_ck_file(link, [_segment()], _COMMENT_LINES)
+
+
+def test_a_refused_dangling_link_creates_no_target(tmp_path: Path) -> None:
+    """Which is the harm: the write would create a file outside the directory."""
+    target = tmp_path / 'never_written.bc'
+    link = tmp_path / 'orig_nav.bc'
+    link.symlink_to(target)
+    with pytest.raises(ValueError, match='is a symbolic link'):
+        write_ck_file(link, [_segment()], _COMMENT_LINES)
+    assert not target.exists()
+
+
+# ---------------------------------------------------------------------------
+# Judging a whole run's destinations before any of them is written
+# ---------------------------------------------------------------------------
+
+
+def test_a_clean_set_of_paths_is_accepted(tmp_path: Path) -> None:
+    """Nothing known in advance stops any of these three writes."""
+    check_output_paths([tmp_path / f'orig_{at}_nav.bc' for at in range(3)])
+
+
+def test_an_empty_set_of_paths_is_accepted() -> None:
+    """A run that corrects nothing writes no kernel and has nothing to refuse."""
+    check_output_paths([])
+
+
+def _occupied(tmp_path: Path, make: str) -> Path:
+    """Occupy one path in the way named, and return it.
+
+    Parameters:
+        tmp_path: The directory to work in.
+        make: What to put at the path.
+
+    Returns:
+        The occupied path.
+    """
+    path = tmp_path / 'orig_b_nav.bc'
+    if make == 'file':
+        path.write_bytes(b'not a kernel')
+    elif make == 'directory':
+        path.mkdir()
+    elif make == 'dangling-link':
+        path.symlink_to(tmp_path / 'no_such_file.bc')
+    elif make == 'link-to-file':
+        target = tmp_path / 'target.bc'
+        target.write_bytes(b'not a kernel')
+        path.symlink_to(target)
+    elif make == 'link-to-itself':
+        path.symlink_to(path)
+    elif make == 'fifo':
+        os.mkfifo(path)
+    else:
+        raise AssertionError(f'unknown occupant {make!r}')
+    return path
+
+
+@pytest.mark.parametrize(
+    ('make', 'message'),
+    [
+        ('file', 'already exists'),
+        ('directory', 'already exists'),
+        ('fifo', 'already exists'),
+        ('dangling-link', 'is a symbolic link'),
+        ('link-to-file', 'is a symbolic link'),
+        ('link-to-itself', 'is a symbolic link'),
+    ],
+    ids=['file', 'directory', 'fifo', 'dangling-link', 'link-to-file', 'link-to-itself'],
+)
+def test_an_occupied_path_is_refused(tmp_path: Path, make: str, message: str) -> None:
+    """Occupied is occupied however it got that way, and two of these fool ``exists``.
+
+    A dangling link and a link to itself both report ``False`` from
+    :meth:`~pathlib.Path.exists`, the first because the target is absent and
+    the second because resolving it loops.  A write through either would create
+    a file, in the first case outside the output directory entirely.
+
+    Parameters:
+        make: What to put at the path.
+        message: Text the refusal must name.
+    """
+    path = _occupied(tmp_path, make)
+    with pytest.raises(ValueError, match=message):
+        check_output_paths([tmp_path / 'orig_a_nav.bc', path])
+
+
+@pytest.mark.parametrize(
+    'make', ['dangling-link', 'link-to-itself'], ids=['dangling-link', 'link-to-itself']
+)
+def test_the_path_that_fools_exists_is_the_one_refused(tmp_path: Path, make: str) -> None:
+    """Pinned as a measurement, since it is why the check is not ``Path.exists``.
+
+    Parameters:
+        make: What to put at the path.
+    """
+    assert not _occupied(tmp_path, make).exists()
+
+
+def test_a_refusal_names_the_path_that_failed(tmp_path: Path) -> None:
+    """An operator has to know which file to move, not that one of them is there."""
+    occupied = _occupied(tmp_path, 'file')
+    with pytest.raises(ValueError, match=r'orig_b_nav\.bc'):
+        check_output_paths([tmp_path / 'orig_a_nav.bc', occupied])
+
+
+def test_a_refusal_names_every_path_that_failed(tmp_path: Path) -> None:
+    """Otherwise the set is cleared one rerun at a time."""
+    first = tmp_path / 'orig_a_nav.bc'
+    first.write_bytes(b'not a kernel')
+    second = tmp_path / 'orig_b_nav.bc'
+    second.write_bytes(b'not a kernel')
+    with pytest.raises(ValueError) as refusal:
+        check_output_paths([first, second])
+    assert 'orig_a_nav.bc' in str(refusal.value)
+    assert 'orig_b_nav.bc' in str(refusal.value)
+
+
+def test_a_path_named_twice_is_refused(tmp_path: Path) -> None:
+    """No per-file check can see it: the second write replaces the first file."""
+    path = tmp_path / 'orig_nav.bc'
+    with pytest.raises(ValueError, match='named twice'):
+        check_output_paths([path, path])
+
+
+def test_a_path_named_twice_is_reported_once(tmp_path: Path) -> None:
+    """The repeat is one fault, not one per repetition of an otherwise fine path."""
+    path = tmp_path / 'orig_nav.bc'
+    with pytest.raises(ValueError) as refusal:
+        check_output_paths([path, path])
+    assert str(refusal.value).count('named twice') == 1
+
+
+def test_a_name_exactly_as_long_as_the_field_passes_the_set_check(tmp_path: Path) -> None:
+    """The same bound the file writer applies, and the same last accepted name."""
+    path = tmp_path / ('n' * 53 + '_nav.bc')
+    assert len(path.name) == 60
+    check_output_paths([path])
+
+
+def test_a_name_one_character_longer_fails_the_set_check(tmp_path: Path) -> None:
+    """So a set holding one is refused before the shorter-named files are written."""
+    path = tmp_path / ('n' * 54 + '_nav.bc')
+    assert len(path.name) == 61
+    with pytest.raises(ValueError, match='internal name'):
+        check_output_paths([tmp_path / 'orig_a_nav.bc', path])
+
+
+def test_a_missing_directory_is_refused(tmp_path: Path) -> None:
+    """``ckopn`` reports an operating system status number and no reason at all."""
+    with pytest.raises(ValueError, match='is not a directory'):
+        check_output_paths([tmp_path / 'absent' / 'orig_nav.bc'])
+
+
+def test_a_file_where_the_directory_should_be_is_refused(tmp_path: Path) -> None:
+    """A path whose parent is a regular file names no file that can be created."""
+    blocker = tmp_path / 'blocker'
+    blocker.write_bytes(b'not a directory')
+    with pytest.raises(ValueError, match='is not a directory'):
+        check_output_paths([blocker / 'orig_nav.bc'])
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason='the superuser writes into a mode 0o500 directory')
+def test_an_unwritable_directory_is_refused(tmp_path: Path) -> None:
+    """The whole set fails, rather than the first file failing inside ``ckopn``."""
+    directory = tmp_path / 'readonly'
+    directory.mkdir(mode=0o500)
+    try:
+        with pytest.raises(ValueError, match='cannot be written to'):
+            check_output_paths([directory / 'orig_nav.bc'])
+    finally:
+        directory.chmod(0o700)
+
+
+@pytest.mark.parametrize(
+    'name', ['orig\x00nav.bc', 'orig\nnav.bc', 'orig\tnav.bc'], ids=['null', 'newline', 'tab']
+)
+def test_a_path_holding_a_non_printing_character_is_refused(tmp_path: Path, name: str) -> None:
+    """SPICE is handed the name as a C string and the meta-kernel writes it as text.
+
+    A null truncates the first and no non-printing character survives the
+    second, so such a path reaches the consumer as a file nobody asked for.
+
+    Parameters:
+        name: A basename holding one character that cannot be written down.
+    """
+    with pytest.raises(ValueError, match='non-printing character'):
+        check_output_paths([tmp_path / name])
+
+
+def test_a_null_in_a_path_is_not_reported_as_an_absent_file(tmp_path: Path) -> None:
+    """Pinned as a measurement: ``lexists`` answers False rather than raising."""
+    assert not os.path.lexists(tmp_path / 'orig\x00nav.bc')
+
+
+@pytest.mark.parametrize('spelling', ['/', '.', ''], ids=['root', 'here', 'empty'])
+def test_a_path_naming_no_file_is_refused(spelling: str) -> None:
+    """Every one of these has an empty basename, so none of them is a file to write.
+
+    Parameters:
+        spelling: A path that names a directory or nothing at all.
+    """
+    with pytest.raises(ValueError, match='names no file'):
+        check_output_paths([Path(spelling)])
+
+
+def test_a_relative_path_is_judged_against_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It is what the write would do, so it is what the check has to do.
+
+    Parameters:
+        tmp_path: Made the working directory for the duration.
+        monkeypatch: Used to change and restore the working directory.
+    """
+    (tmp_path / 'orig_nav.bc').write_bytes(b'not a kernel')
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match='already exists'):
+        check_output_paths([Path('orig_nav.bc')])
+
+
+def test_the_set_check_and_the_file_check_refuse_the_same_path(tmp_path: Path) -> None:
+    """The per-file refusal is the last line of defense, not a weaker one."""
+    link = tmp_path / 'orig_nav.bc'
+    link.symlink_to(tmp_path / 'no_such_file.bc')
+    with pytest.raises(ValueError, match='is a symbolic link'):
+        check_output_paths([link])
+    with pytest.raises(ValueError, match='is a symbolic link'):
+        check_ck_file(link, [_segment()], _COMMENT_LINES)
 
 
 def test_a_failed_segment_write_reports_its_own_failure(
