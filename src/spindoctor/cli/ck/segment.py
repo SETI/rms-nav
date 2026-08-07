@@ -289,10 +289,14 @@ def build_segment(pointing: ImagePointing) -> CkSegment:
         ValueError: if the CK object is not one this writer knows, if the
             resolved spacecraft clock is not the expected one, if the image
             name does not fit a SPICE segment identifier, if the baseline
-            supplies angular velocity at only some of the record epochs.
+            supplies angular velocity at only some of the record epochs, or if
+            a record epoch lies outside the furnished spacecraft clock's
+            coverage, which ``sce2c`` refuses rather than extrapolating.
         OSError: if the furnished kernels provide no pointing for the CK object
             at the exposure midtime or at a record epoch.
-        KeyError: if the CK object has no frame name in the furnished kernels.
+        KeyError: if the furnished kernels do not define one of the two frames
+            the correction is expressed between: the CK object has no frame
+            name, or the recorded camera frame is not a frame SPICE knows.
     """
     segid = _segment_id(pointing.image_name)
     sclk_id = resolve_sclk_id(pointing.ck_frame_id)
@@ -344,9 +348,12 @@ def write_segment(handle: int, segment: CkSegment) -> None:
 
     Raises:
         OSError: if SPICE refuses the write, for example because the handle is
-            not open for writing or the file cannot be extended.  The record
-            set itself is already valid: ``CkSegment`` enforces the count,
-            width and strictly-increasing invariants when it is constructed.
+            not open for writing or the file cannot be extended.
+        ValueError: if SPICE refuses the record set itself: a segment
+            identifier holding a non-printing character, or a quaternion of
+            magnitude zero.  ``CkSegment`` enforces the count, width,
+            finiteness and strictly-increasing invariants when it is
+            constructed, but not these two, which only ``ckw03`` knows about.
     """
     avvs = segment.avvs
     if avvs is None:
@@ -445,7 +452,8 @@ def _corrected_attitude_at_midtime(pointing: ImagePointing) -> NDArrayFloatType:
         The 3x3 J2000-to-CK-object rotation at the midtime.
 
     Raises:
-        KeyError: if the CK object has no frame name in the furnished kernels.
+        KeyError: if the CK object has no frame name in the furnished kernels,
+            or if the recorded camera frame is not one they define.
     """
     ck_frame = str(cspyce.frmnam(pointing.ck_frame_id))
     camera_from_ck = np.asarray(
