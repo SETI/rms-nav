@@ -76,35 +76,23 @@ reproduces the corrected attitude at those epochs exactly. Every other epoch in
 the window is interpolated between the bracketing records, and the interior
 error that interpolation leaves is **not bounded by anything**.
 
-Measured on a real Cassini reconstructed kernel against its own attitude,
-sampled across the exposure window and expressed in Cassini narrow angle
-pixels:
+How large that error is depends on the instrument and on how the spacecraft was
+moving during the exposure, so this guide does not quote a single figure for it.
+The interpolation error is an angle, and the same angle is a different number of
+pixels on every camera: a Cassini wide angle pixel subtends about ten times what
+a narrow angle pixel does, so an error that matters on one camera can be
+negligible on the other. How much attitude structure a segment interpolates
+across also differs by mission and by how the platform was slewing.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 34 23 43
-
-   * - Exposure and records
-     - Worst interior error
-     - Samples above 0.1 px
-   * - 2 s, three records
-     - 0.708 px
-     - 42.9%
-   * - 10 s, records every second
-     - 0.699 px
-     - 24.6%
-   * - 60 s, records every second
-     - 1.071 px
-     - 19.5%
-   * - 60 s, three records
-     - 25.983 px
-     - --
-
-The loss is attributable rather than noise -- a run whose correction is zero
-shows the same error -- and it comes from rate structure in the baseline
-attitude that a segment with few records interpolates across. The last row is
-what the one-second cadence buys, and it buys more than a factor of twenty
-without bounding anything.
+What is fixed is the shape of the effect rather than its size. The error is zero
+at every record epoch and grows between them; it is largest where the baseline's
+rate changes inside the window; it shrinks as records are added, which is what
+the one-second cadence buys on a long exposure; and it is present in the same
+size when the correction itself is zero, which is how it is known to be
+interpolation loss rather than an error in the correction. A per-instrument
+characterization belongs in the appendix for each instrument, and until those
+sections carry measured figures a consumer who needs a bound should measure it
+for the frames they care about.
 
 A consumer that evaluates geometry at the exposure midtime is unaffected and
 exact: the midtime is a record epoch. That is what the backplane and

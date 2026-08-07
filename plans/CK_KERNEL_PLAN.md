@@ -785,9 +785,16 @@ share one attitude, and the second then records an attitude no lookup at
 its own midtime reproduces, so it is honestly refused.
 
 **Omission reasons**, the complete set: `not_eligible`, `botsim_loser`,
-`rotation_unsupported`, `no_reproducing_baseline`, `degenerate_exposure`
-(reserved for an exposure the single-record path cannot express, should
-that occur).
+`rotation_unsupported`, `no_reproducing_baseline`, `baseline_coverage_gap`.
+
+`degenerate_exposure` was declared and removed rather than kept in
+reserve. The case it named -- three epochs that encode to one tick -- is
+*handled*, with a single-record segment, and no path could ever emit it, so
+publishing it obliged every report consumer to handle a value that could
+not arrive. `baseline_coverage_gap` takes the fifth place for a case that
+does occur: an exposure whose midtime reproduces against a baseline, which
+is what paired the image with it, but one of whose record epochs the
+baseline cannot answer, which happens near a coverage gap.
 
 ### 3.4 Companion outputs
 
@@ -1139,14 +1146,22 @@ offset buys a fifth of budget.
 measured limitation rather than an oversight.** A segment reproduces its
 record epochs exactly and interpolates between them, so an epoch inside
 the exposure carries the reconstruction error of that interpolation.
-Measured on a real Cassini reconstructed kernel against its own attitude,
-in NAC pixels, sampled across the window: a 2 s exposure reaches 0.708 px
-worst case with 42.9% of samples over 0.1 px; a 10 s exposure at the 1 s
-cadence reaches 0.699 px with 24.6% over; a 60 s exposure reaches 1.071 px
-with 19.5% over, and 25.983 px if the cadence does not apply. The loss is
-attributable rather than noise -- a zero-correction run shows the same
-error -- and it comes from rate structure in the baseline that the segment
-interpolates across.
+Its size is instrument-dependent and is deliberately **not** quoted here as
+a single figure. The error is an angle, and the same angle is a different
+number of pixels on each camera -- a Cassini WAC pixel subtends about ten
+times a NAC pixel -- so a figure measured on one camera does not transfer
+to another, and how much baseline rate structure a segment interpolates
+across differs by mission and by how the platform was slewing. Several
+measurements taken during execution disagreed by factors of two to six
+precisely because they used different kernels, sampling and statistics; a
+figure quoted without all three is not a bound. Characterizing it per
+instrument, with a stated sampling scheme, is #455.
+
+What is invariant is the shape: the error is zero at every record epoch,
+grows between them, is largest where the baseline's rate changes inside the
+window, shrinks as records are added, and is present at the same size when
+the correction is zero -- which is how it is known to be interpolation loss
+rather than an error in the correction.
 
 Bounding it is deferred to a denser, adaptive record cadence (#444). Until
 that lands, the round trip asserts the three record epochs and nothing
