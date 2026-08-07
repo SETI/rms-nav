@@ -754,6 +754,20 @@ that occur).
   at most 79 characters each. The one path that cannot be expressed is one
   ending in `+`, whose last character is indistinguishable from the marker
   that would join it to the next kernel; it is refused by name.
+
+  Blanks need the same care and get less of it from SPICE. A **trailing**
+  blank is trimmed from a text kernel string, so a path whose last character
+  is a blank comes back one character shorter than it went in -- measured
+  through a real `furnsh`, a 119-character path ending in a space loads a
+  118-character name, with no error at all -- and such a path is refused. A
+  blank *inside* a path survives at a join on the toolkit installed here:
+  swept across every position of a 119-character path (two pieces) and a
+  200-character path (three pieces), the only position that loses its blank
+  is the last character of the path itself, and every piece boundary
+  round-trips exactly. The joins are nonetheless chosen to fall on
+  non-blanks, because it costs nothing, the holdings tree holds names with
+  spaces in them, and a name that lost a character in the middle would reach
+  the consumer as a file it never asked for.
 - **CSV report, one per mission.** Columns: `image_name`, `utc`, `et`,
   `sclk`, `offset_dv`, `offset_du`, `sigma_dv`, `sigma_du`, `confidence`,
   `confidence_rank`, `status`, `status_reason`, `source_bc`,
