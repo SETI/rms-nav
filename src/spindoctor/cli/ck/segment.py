@@ -284,8 +284,8 @@ def build_segment(pointing: ImagePointing) -> CkSegment:
     the exposure midtime and at every record epoch; a frozen-attitude object's
     segment carries one constant attitude and never reads the baseline.
 
-    Records go at the exposure start, midtime and stop, plus a 1 s cadence when
-    the exposure is longer than 10 s, each encoded with ``cspyce.sce2c``.  Time
+    Records go at the exposure start, midtime and stop, plus a 1 s cadence once
+    the exposure reaches 10 s, each encoded with ``cspyce.sce2c``.  Time
     tags that do not strictly increase are dropped, and epochs that all encode
     to one tick yield a single record at the midtime.  Since ``sce2c`` encodes
     a fractional tick, that happens only for an exposure whose start, midtime
