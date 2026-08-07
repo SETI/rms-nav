@@ -646,16 +646,27 @@ accumulates kernels from earlier images -- a superset. So:
    tolerance).
 3. **Tie-break** when several reproduce (expected: the holdings carry
    reconstructed, gapfill and predicted sets with overlapping coverage, and
-   oops loads gapfill by default): prefer by kernel class from the
-   directory name -- reconstructed over gapfill over predicted -- then the
-   lexicographically greatest basename. The reproducing candidates agree on
-   the attitude by construction, so the choice affects only which output
-   file carries the segment; it must merely be deterministic. A directory
-   naming no class ranks last, which puts the 95 Cassini kernels in
-   `CK-cruise` and `CK-jup` below predicted although they hold
-   reconstructed pointing. That is inert -- their epochs (1999-2001) do not
-   overlap the directories that do name a class (2003 onward) -- and it
-   decides filing rather than attitude either way.
+   oops loads gapfill by default): prefer by kernel class **read from the
+   kernel's own basename** -- reconstructed over gapfill over predicted --
+   then the lexicographically greatest basename. The reproducing candidates
+   agree on the attitude by construction, so the choice affects only which
+   output file carries the segment; it must merely be deterministic. The
+   class comes from the basename rather than from the directory holding it
+   for three reasons. The directory is a redundant restatement of what the
+   name already says, so it can only ever agree or be wrong. Two of the six
+   real Cassini CK directories name no class while every basename in them
+   does -- `CK-cruise` and `CK-jup`, 95 reconstructed kernels that a
+   directory reading ranks below predicted. And the basename is the form
+   the eventual kernel manager works from, so classifying by name is the
+   same fact expressed once instead of twice. Measured over the holdings,
+   all 1316 Cassini kernels classify (1093 reconstructed, 15 gapfill, 208
+   predicted). The encoding is mission-specific and is declared one mission
+   at a time: New Horizons marks only the two kernels released in both
+   forms, with a trailing `_recon` or `_pred`; Voyager and Galileo encode
+   nothing, so every kernel of theirs is `UNCLASSIFIED`, the class rank
+   ties for every candidate and the tie-break falls through to the basename
+   exactly as before. A kernel whose name declares no class ranks last, so
+   a name that does say is always preferred over one that does not.
 4. An eligible image **no** candidate reproduces gets no segment, reason
    `no_reproducing_baseline`. This is also the baseline-drift detector: if
    the kernel set changed since navigation, reproduction fails and the

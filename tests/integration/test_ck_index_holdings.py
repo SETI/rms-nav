@@ -9,10 +9,19 @@ read from, so the object filter excludes them without any epoch reasoning.  The
 third is that a real kernel can name an object whose spacecraft clock no kernel
 defines, which the New Horizons holdings do and which the scan has to survive.
 
+The third is the classification itself.  A kernel's class comes from its own
+basename, and whether the patterns cover every name the holdings actually hold
+is a question only the holdings can answer -- a hand-written sample proves
+nothing about the 1200 names nobody typed out.  So every C-kernel of every
+mission is classified here and the totals are asserted per directory, which is
+also the one place the directory names appear: they are the grouping the counts
+are stated against, not an input to the answer.
+
 Everything else about the index is exercised hermetically.
 """
 
 import os
+from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -34,7 +43,13 @@ if len(_RESOURCES) == 0 or not _VOYAGER_CK_DIR.is_dir():
 
 import cspyce  # noqa: E402  (guarded import)
 
-from spindoctor.cli.ck.index import CkIndex, build_ck_index  # noqa: E402  (guarded import)
+from spindoctor.cli.ck.index import (  # noqa: E402  (guarded import)
+    CK_SUFFIXES,
+    CkIndex,
+    KernelClass,
+    build_ck_index,
+    kernel_class_for_basename,
+)
 
 # The Voyager 1 scan platform, which ISS pointing is read from, and the bus,
 # which the long-baseline kernels describe.
@@ -49,6 +64,43 @@ _BUS_KERNEL = 'vgr1_super.bc'
 _SPACECRAFT_ID = -98000
 _CLOCKLESS_OBJECT_ID = -1
 _CLOCKLESS_KERNEL = 'nh_scispi_2015_recon.bc'
+# Every C-kernel directory of every mission the pipeline navigates, with the
+# class every kernel in it must be found to declare.  The Cassini cruise and
+# Jupiter directories name no class and their kernels do, which is the whole
+# reason the class is read from the basename; New Horizons marks only the pair
+# of kernels that exist in both forms; Voyager and Galileo mark nothing at all.
+_CLASSIFIED_DIRS: tuple[tuple[str, dict[KernelClass, int]], ...] = (
+    ('Cassini/CK-reconstructed', {KernelClass.RECONSTRUCTED: 998}),
+    ('Cassini/CK-cruise', {KernelClass.RECONSTRUCTED: 31}),
+    ('Cassini/CK-jup', {KernelClass.RECONSTRUCTED: 64}),
+    ('Cassini/CK-gapfill', {KernelClass.GAPFILL: 15}),
+    ('Cassini/CK-predicted', {KernelClass.PREDICTED: 104}),
+    ('Cassini/CK-predicted-v02', {KernelClass.PREDICTED: 104}),
+    (
+        'New-Horizons/CK-reconstructed',
+        {KernelClass.RECONSTRUCTED: 1, KernelClass.UNCLASSIFIED: 29},
+    ),
+    ('New-Horizons/CK-predicted', {KernelClass.PREDICTED: 1, KernelClass.UNCLASSIFIED: 1}),
+    ('Voyager/CK', {KernelClass.UNCLASSIFIED: 10}),
+    ('Galileo/CK', {KernelClass.UNCLASSIFIED: 52}),
+)
+
+
+def _holdings_basenames(directory: str) -> list[str]:
+    """List the C-kernel basenames one holdings directory holds.
+
+    Parameters:
+        directory: The directory's path below the SPICE root.
+
+    Returns:
+        The basenames, sorted, of every file with a C-kernel extension.
+    """
+    root = _SPICE_ROOT / directory
+    return sorted(
+        entry.name
+        for entry in root.iterdir()
+        if entry.is_file() and entry.suffix.lower() in CK_SUFFIXES
+    )
 
 
 @pytest.fixture
@@ -176,3 +228,71 @@ def test_that_file_still_covers_the_spacecraft(new_horizons_index: CkIndex) -> N
 def test_the_spacecraft_is_not_reported_unreadable(new_horizons_index: CkIndex) -> None:
     """Nothing an image needs is among the objects the index could not read."""
     assert _SPACECRAFT_ID not in new_horizons_index.unreadable_objects
+
+
+@pytest.mark.parametrize(
+    ('directory', 'expected'),
+    _CLASSIFIED_DIRS,
+    ids=[directory for directory, _ in _CLASSIFIED_DIRS],
+)
+def test_every_kernel_in_a_holdings_directory_classifies(
+    directory: str, expected: dict[KernelClass, int]
+) -> None:
+    """Every C-kernel a real directory holds declares the class it should.
+
+    Parameters:
+        directory: The directory's path below the SPICE root.
+        expected: How many of its kernels each class must account for.
+    """
+    counts = Counter(kernel_class_for_basename(name) for name in _holdings_basenames(directory))
+    assert dict(counts) == expected
+
+
+def test_the_cassini_holdings_classify_every_kernel_but_none_as_unclassified() -> None:
+    """Cassini names a class on all 1316 of its kernels, in six directories.
+
+    Two of those directories name no class at all, so this is the measurement
+    the change was made for: reading the directory leaves 95 reconstructed
+    kernels ranked below predicted, and reading the basename leaves none.
+    """
+    cassini = [
+        name
+        for directory, _ in _CLASSIFIED_DIRS
+        if directory.startswith('Cassini/')
+        for name in _holdings_basenames(directory)
+    ]
+    counts = Counter(kernel_class_for_basename(name) for name in cassini)
+    assert dict(counts) == {
+        KernelClass.RECONSTRUCTED: 1093,
+        KernelClass.GAPFILL: 15,
+        KernelClass.PREDICTED: 208,
+    }
+
+
+@pytest.mark.parametrize('directory', ['Voyager/CK', 'Galileo/CK'], ids=['voyager', 'galileo'])
+def test_a_mission_encoding_no_class_gets_none_invented_for_it(directory: str) -> None:
+    """Voyager and Galileo hold one kind of C-kernel and name it nowhere.
+
+    Every one of their kernels must be unclassified, so the class rank ties for
+    every candidate and the tie-break falls through to the basename.
+
+    Parameters:
+        directory: The mission's C-kernel directory below the SPICE root.
+    """
+    classes = {kernel_class_for_basename(name) for name in _holdings_basenames(directory)}
+    assert classes == {KernelClass.UNCLASSIFIED}
+
+
+def test_no_holdings_basename_declares_two_classes() -> None:
+    """The shipped patterns are mutually exclusive over every name in the holdings.
+
+    A name matching two patterns of different classes is refused, so a rule set
+    that overlapped anywhere in the holdings would abort the scan.  Classifying
+    every name without a refusal is the assertion.
+    """
+    classified = [
+        kernel_class_for_basename(name)
+        for directory, _ in _CLASSIFIED_DIRS
+        for name in _holdings_basenames(directory)
+    ]
+    assert len(classified) == 1410

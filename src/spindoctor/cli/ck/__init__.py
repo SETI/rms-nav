@@ -70,7 +70,7 @@ from spindoctor.cli.ck.index import (
     CoverageInterval,
     KernelClass,
     build_ck_index,
-    kernel_class_for_directory,
+    kernel_class_for_basename,
 )
 from spindoctor.cli.ck.inputs import (
     Document,
@@ -138,7 +138,7 @@ __all__ = [
     'furnish_supporting_kernels',
     'furnished',
     'group_for_output',
-    'kernel_class_for_directory',
+    'kernel_class_for_basename',
     'kernel_paths',
     'object_frame_is_defined',
     'output_basename',
