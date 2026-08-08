@@ -53,10 +53,10 @@ and the graphical programs (`sd_backplane_viewer`, `sd_mosaic_display`,
 logging configuration. A report's output *is* terminal text for a person
 reading it, and a GUI surfaces problems through dialogs. `sd_stats_ingest` is
 not one of them: it is infrastructure other programs depend on, so it carries a
-main logger and a partial or failed pass appears in a run log. This is the one documented exception to
-"never bare `print()` in library code", and it extends to the
-`spindoctor.ui.mosaic_viewer` widgets those programs drive. Where a converted
-call previously used `logger.exception`, follow the `print()` with
+main logger and a partial or failed pass appears in a run log. This is the one
+documented exception to "never bare `print()` in library code", and it extends
+to the `spindoctor.ui.mosaic_viewer` widgets those programs drive. Where a
+converted call previously used `logger.exception`, follow the `print()` with
 `traceback.print_exc()` so the stack trace is not silently lost.
 
 ## 2. Configuring a Run

@@ -62,15 +62,30 @@ identifiers no consumer's lookup can match.
 
 **Ingestion is incremental.** One recursive listing per root collects both the
 metadata documents and the summary PNGs beside them, and carries each file's
-size and modification time along with it. A document whose recorded size and
-modification time still match the listing is not read at all, so a second pass
-over an unchanged root costs one listing and nothing else. ``--force`` re-reads
-everything; so does a storage backend whose listing reports neither size nor
-modification time, which ingest warns about rather than silently skipping.
+size and modification time along with it. A file whose recorded size and
+modification time still match the listing, and beside which the walk sees the
+summary PNG the index already recorded, is not read at all, so a second pass
+over an unchanged root costs one listing and nothing else. This holds for
+files that could not be ingested as well: a file that is not a navigation
+document is recorded as such, with the same two metrics, and is skipped for as
+long as it does not change. ``--force`` re-reads everything; so does a storage
+backend whose listing reports neither size nor modification time, which ingest
+warns about rather than silently skipping.
 
 **Ingestion is idempotent.** The index holds one row per image, and re-ingesting
 the same or an updated document replaces that image's row and its child rows
 rather than duplicating them.
+
+**A document that leaves the tree takes its row with it.** No row for an image
+is what every consumer reads as "this image was never navigated", so a row is
+only allowed to survive while the document behind it does. Each pass deletes
+the rows of one root whose documents the walk no longer found, and reports how
+many. That is done on the strength of a complete listing of the root and no
+other: a root the walk could not list at all -- a mistyped path, an unmounted
+share -- has nothing removed, and its ingest run is deliberately left
+unfinished, so every consumer reports it as a root nobody has ingested rather
+than answering "not navigated" for every image under it. A root that exists and
+is empty completes normally.
 
 **Ingestion is never automatic.** No batch driver runs it as a side effect. The
 index is a snapshot of the tree as of the last ingest: there is no staleness
@@ -78,12 +93,14 @@ detection and no automatic refresh, so an operator who navigates more images and
 wants them visible runs ingest again.
 
 Every ingestible document must carry ``observation.image_name`` and
-``observation.instrument`` (the pipeline records both in every metadata document
-it writes). A results tree also holds ``*_metadata.json`` files that are not
+``observation.instrument``, and every container it declares -- ``observation``,
+``navigation_result`` and the objects and lists inside it, ``timing`` -- must
+hold what the schema says (the pipeline writes all of this in every metadata
+document). A results tree also holds ``*_metadata.json`` files that are not
 per-image navigation documents at all; each is counted as an error for its own
-file, the run continues, and the closing summary tallies the failures by reason,
-so several hundred files that were never navigation results read as exactly that
-rather than as a broken ingest.
+file, the run continues, and the closing summary tallies the failures by
+reason and names one file per reason, so several hundred files that were never
+navigation results read as exactly that rather than as a broken ingest.
 
 The index is disposable, and there is no schema migration. It carries the column
 set version that wrote it, and opening one stamped with a different version
@@ -96,7 +113,7 @@ Index schema
 
 Opening the index directly is a supported way to answer questions the standard
 report does not: the ``sqlite3`` command-line shell or ``psql``, Python's
-``sqlite3`` module or ``psycopg``, pandas, or a GUI browser. Five tables hold
+:mod:`sqlite3` module or ``psycopg``, pandas, or a GUI browser. Six tables hold
 the data.
 
 An image is identified by the pair ``(root_url, results_path_stub)``:
@@ -258,6 +275,10 @@ pair with ``ON DELETE CASCADE``.
      - JSON
      - Corrected and as-flown camera attitude, nine floats row-major.
        ``cmatrix`` is absent where the navigation fitted a camera rotation.
+       Absent means SQL NULL here and in every JSON column, so
+       ``WHERE cmatrix IS NOT NULL`` selects the images that carry one; an
+       empty list or object, where one appears, is a value rather than an
+       absence.
    * - ``source_file``
      - TEXT
      - Path or URL of the ingested metadata document.
@@ -323,8 +344,8 @@ pair with ``ON DELETE CASCADE``.
      - Feature type (e.g. ``BODY_DISC``, ``STAR``, ``RING_EDGE``).
    * - ``source_model``
      - TEXT
-     - NavModel family that produced the features (``body``, ``rings``,
-       ``stars``, ``titan``).
+     - :class:`~spindoctor.nav_model.NavModel` family that produced the
+       features (``body``, ``rings``, ``stars``, ``titan``).
    * - ``source_name``
      - TEXT
      - Body, ring, or catalog name (e.g. ``IAPETUS``, ``UCAC4``).
@@ -337,10 +358,17 @@ pair with ``ON DELETE CASCADE``.
 
 ``ingest_runs`` records one row per ingest pass over one root: the root, when
 the pass started and finished (``finished_utc`` is NULL while it is running),
-how many files it saw, ingested, skipped as unchanged and could not read, and
-the schema version it wrote. A root whose newest row has no finish time, or
-which has no row at all, has not been fully ingested, and a consumer says so
-rather than reading absence of rows as "nothing was navigated".
+how many files it saw, ingested, skipped as unchanged, could not read and
+removed, and the schema version it wrote. A root whose newest row has no finish
+time, or which has no row at all, has not been fully ingested, and a consumer
+says so rather than reading absence of rows as "nothing was navigated".
+
+``failed_files`` records one row per file that is not a current-schema
+navigation document: the root and stub that identify it, the reason it was
+refused, and the size and modification time it had when it was read. It is what
+lets a second pass skip it. It is deliberately not an ``images`` row, because a
+file with no usable data must not answer the question ``images`` exists to
+answer.
 
 ``schema_meta`` holds a single row stamping the database with the column-set
 version that created it.
@@ -479,7 +507,9 @@ Three options control drill-down output:
   with every ``images`` column in schema order -- ``root_url`` and
   ``results_path_stub`` through ``mtime_ns`` and ``size_bytes`` -- plus
   ``n_technique_rows``, ``n_feature_sources``, ``n_features`` and ``n_gated``
-  aggregates, for pandas or spreadsheet analysis.
+  aggregates, for pandas or spreadsheet analysis. Rows end with a single
+  newline on every platform, and a JSON column that holds nothing is an empty
+  cell.
 
 The first two write *image names* rather than file names -- ``N1454725799``
 rather than ``N1454725799_1_CALIB.IMG`` -- because that is the token the

@@ -198,6 +198,17 @@ are `sqlalchemy.BigInteger`: a nanosecond epoch is far past the 32-bit range a
 dialect is free to give a plain `Integer`, and an image-numbering scheme is
 free to run past it too.
 
+**Absent is not empty, in every JSON column.** The JSON type is declared
+`none_as_null=True` (and its PostgreSQL variant likewise), so a Python `None`
+is stored as SQL NULL rather than as the JSON value `null`. Without that,
+`WHERE cmatrix IS NOT NULL` matches every row ever written and the CSV export
+carries the literal text `null` in the cell. Which columns are ever absent is
+a property of the mapping rather than of the type: `cmatrix` and
+`cmatrix_original` are, and are NULL. `excluded_from_consensus`, `source_names`
+and `diagnostics` are not -- an empty list or object there is a statement
+(nothing was excluded, the technique named no source, it reported no
+diagnostics), and is stored as the empty container.
+
 **Precision.** The top-level `offset` is stored as written, with no
 rounding. (It is written unrounded by `navigate_image_files`; the rounded
 `navigation_result.offset_px` is the curated display value and is not what
@@ -267,10 +278,21 @@ structurally instead, by a stated rule rather than by a pattern:
    name is kept, which is what reaches the `user@servername` login form of a
    managed server.
 3. `host:5432/path@name` is genuinely ambiguous -- a host with a port and a
-   path, or a user name with a slashed password. Digits decide it: a port is
-   digits and a password is not, and mangling a host, a port and half a
-   database name costs the identification these messages exist for.
+   path, or a user name with a password that carries a slash. It is read as
+   credentials, which is how the URL parser itself reads it: for the spelling
+   of that shape a parser accepts, this rule and `render_as_string()` hide the
+   same characters, and a test asserts that agreement over every shape both can
+   read. Reading it as a port instead -- deciding by whether the text before
+   the slash is digits -- leaves a password that opens with digits,
+   `123/secret`, visible in full, which is the failure this rule exists to
+   prevent; the cost of the reading taken is a mangled host and database name
+   in a message about a URL that was already unusable.
 4. Only the password is replaced. Nothing outside it is touched.
+
+The rule is a named function of the Core layer rather than a private helper of
+the opener, because a run log records the command line a program was given and
+one of those words can be a connection URL. `sd_stats_ingest` masks every root
+and every argument it logs through it.
 
 The engine factory is the only opener:
 
@@ -354,11 +376,19 @@ shared-memory index beside the database, and a writable file in a directory
 that permits nothing is still a database ingest cannot write. So:
 
 - `create=False` **accepts** a read-only database and reads it.
-- `create=True` refuses it before anything is opened, with a message naming
-  read-only -- of the file, or of its directory -- as the cause and saying to
-  ingest a writable copy, not the filesystem-locking message.
+- `create=True` asks the filesystem first, and a database or directory that
+  `os.access` reports unwritable is refused there, before an engine is built,
+  with a message naming read-only -- of the file, or of its directory -- as the
+  cause and saying to ingest a writable copy, not the filesystem-locking
+  message. A path the filesystem permits still passes through the engine build
+  and the open probe, and a refusal from either is diagnosed by what the driver
+  said, including the `SQLITE_READONLY*` a rollback-journal database gives to
+  the journal-mode selection.
 - A genuine `SQLITE_BUSY` or `SQLITE_IOERR` refuses in both modes, with the
-  filesystem-and-PostgreSQL message.
+  filesystem-and-PostgreSQL message. A refusal carrying no result code at all
+  is neither, and is reported as what SQLite said with no remedy prescribed for
+  it: the locking remedy is a deployment rebuild, and answering an
+  unclassifiable failure with one is a false diagnosis.
 
 The connect-time journal-mode selection still has to tolerate a refusal (any
 `SQLITE_READONLY*` result code), because every connection to a read-only
@@ -463,13 +493,48 @@ same listing entries. There is no per-file `stat` call and no per-file
 degrades to `--force` behavior for that root, with a logged warning.
 
 **Incremental.** A file whose `(mtime_ns, size_bytes)` matches the stored
-pair is skipped without being read. `--force` re-reads everything.
+pair, and beside which the walk saw the same summary PNG the row records, is
+skipped without being read. The summary flag is part of the comparison because
+it comes from the walk rather than from the document: a PNG written after the
+document was ingested changes the row that ought to be stored while changing
+nothing about the document. `--force` re-reads everything.
+
+**A refused file is bookkeeping, not a row.** A file that is not a
+current-schema navigation document is recorded in a `failed_files` table --
+`root_url`, `results_path_stub`, `reason`, `mtime_ns`, `size_bytes` -- and is
+skipped on the next pass on the same evidence as an ingested one, so a tree
+whose non-navigation files outnumber its results does not pay to download and
+parse every one of them on every run. It is a table of its own rather than a
+marked `images` row: absence of an `images` row is what every consumer reads as
+"this image was never navigated", and a file with no usable data must leave
+that answer alone. `--force` re-reads a refused file too. A document that
+ingested on an earlier pass and no longer reads has its `images` row deleted as
+the refusal is written, since a row nothing backs would answer for an image
+nothing produced; and a file that was refused and now reads has its refusal
+deleted as its rows are written.
+
+**A root the walk cannot list is not an empty root.** The walk reports whether
+the root itself could be listed. When it could not -- a mistyped root, an
+unmounted share -- the run's `ingest_runs` row keeps its NULL finish time, so
+every consumer treats the root as one nobody has ingested rather than one that
+holds nothing, and no row of it is touched. A root that exists and is genuinely
+empty completes normally.
+
+**Rows of documents that have left the tree are removed.** Presence has to mean
+what absence means, so the stubs recorded for a root that this walk did not
+find are deleted, and the count is reported and recorded in `ingest_runs` as
+`files_removed`. The delete cascades to the child tables. This is sound only on
+the evidence of a **complete listing of the root**: the prune reads the walk's
+own listing and refuses one that does not cover the whole root, which is the
+case whenever the root could not be listed or any directory under it could not.
+Section 2.8 states the consequence for a worker that covers a share of a root.
 
 **Per-root bookkeeping.** An `ingest_runs` table records, per root:
 `root_url`, `started_utc`, `finished_utc` (NULL while running),
-`files_seen` / `files_ingested` / `files_skipped` / `files_failed`, and
-`schema_version`, under a surrogate `run_id` primary key (a root legitimately
-has many runs, and a consumer reads the newest). The row is written at
+`files_seen` / `files_ingested` / `files_skipped` / `files_failed` /
+`files_removed`, and `schema_version`, under a surrogate `run_id` primary key
+(a root legitimately has many runs, and a consumer reads the newest). The row
+is written at
 start and updated at completion, in both the interactive and cloud paths. A
 consumer treats a root whose newest row has `finished_utc IS NULL` -- or no
 row at all -- as not ingested, and fails with a message saying so.
@@ -506,6 +571,15 @@ enqueuer aggregates.
 
 A task carries a list of metadata-file URLs or a stub prefix; the worker
 ingests its share.
+
+**A worker never prunes.** Removing the rows of documents that have left the
+tree (section 2.7) is licensed by a complete listing of the root, and a worker
+holding a share of one has no evidence about the stubs outside its share:
+pruning on it would delete its peers' rows. The prune takes the walk's listing
+and raises unless that listing covers the whole root, so the restriction is a
+property of the seam rather than a rule a worker has to remember. Whether the
+enqueuer -- which does list the whole root to fan the work out -- prunes at
+completion is decided with the rest of Phase 3.
 
 **Concurrency:**
 
@@ -814,7 +888,19 @@ Six details settled during execution, none of them a change of intent:
   tables as literal rows, one of them headed `total (s)`, which the `TOTAL(`
   pattern reads as the SQLite aggregate. Nothing beginning with a table
   separator is SQL, and a test pins that the exclusion does not reach a
-  statement.
+  statement -- against a widened exclusion as well as a blanked one, since a
+  pattern that still excludes something is what would quietly empty the scan.
+- **The column set changed twice more, so the schema version is 3.** The JSON
+  columns gained `none_as_null` (section 2.3), `ingest_runs` gained
+  `files_removed`, and `failed_files` was added (section 2.7). There are no
+  migrations, so this is one version bump covering all three.
+- **The CSV export states its line terminator.** `csv.writer` defaults to CRLF;
+  the export now names LF. The frozen `images.csv` blobs are LF, so what the
+  export writes matches them byte for byte, which the previous implementation's
+  output did not -- the blobs were normalized when they were frozen and the
+  commit that froze them did not say so. The regression comparisons read fields
+  rather than lines and would not notice either way, so the terminator has a
+  test of its own reading the file as bytes.
 
 ### Phase 3 — Cloud-task ingest
 
@@ -854,8 +940,10 @@ import per section 2.9.
 Tests: for every filter flag, both existing modes (walked and
 absence-only-batched) against the index-backed answer over a fixture tree;
 every contradictory-pair rejection unchanged; an import-time assertion that
-`import spindoctor.dataset` does not import `sqlalchemy` (this is the
-criterion 2 test).
+`import spindoctor.dataset` does not import `sqlalchemy`. **That assertion is
+criterion 2's only test and this phase owns it**: no earlier phase writes it,
+because the branch-local import it protects is added here, so it must not be
+assumed to exist already.
 
 ### Phase 6 — Documentation
 

@@ -28,7 +28,8 @@ alone:
   tier is runnable on any machine with a server and harmless on any machine
   without one. Each test creates and drops a PostgreSQL schema of its own, so
   repeat runs and parallel workers do not collide. CI has no service container
-  for it; run it locally before changing anything in ``spindoctor.results_index``
+  for it; run it locally before changing anything in
+  :mod:`spindoctor.results_index`
   or the statistics programs.
 
 The simulator (:doc:`dev_guide_simulator`) is the engine behind several tiers: it

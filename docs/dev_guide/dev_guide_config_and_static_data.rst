@@ -198,8 +198,8 @@ dataclass).
 Path resolution
 ---------------
 
-The ``environment`` block carries the four downstream output roots and the
-results index URL:
+The ``environment`` block carries the PDS3 holdings read root, three downstream
+output roots, and the results index URL:
 
 - ``pds3_holdings_root`` — read root for PDS3 holdings (default
   ``$PDS3_HOLDINGS_DIR``, falling back to
