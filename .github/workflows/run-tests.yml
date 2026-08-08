@@ -91,11 +91,17 @@ jobs:
           # loadfile keeps each test file on one xdist worker; PyQt6 + default load
           # scheduling has caused worker crashes when tests from the same file ran
           # in different processes.
-          # ``-m "not integration"`` skips the operator-curated image-library
-          # regression tests; those rely on real PDS3 holdings + SPICE kernels
-          # and are slow / flaky in CI.  Run the integration suite locally
-          # against a populated $PDS3_HOLDINGS_DIR before merging.
-          python -m pytest --cov --cov-report=xml -n auto --dist=loadfile -m "not integration"
+          # The marker expression restates the default from addopts, because a
+          # -m flag replaces addopts' own rather than adding to it.  It skips
+          # two tiers.  The integration tier is the operator-curated
+          # image-library regression tests; those rely on real PDS3 holdings +
+          # SPICE kernels and are slow / flaky in CI.  The postgres tier needs a
+          # PostgreSQL server named by SPINDOCTOR_TEST_POSTGRES_URL, and CI runs
+          # no service container for one.  Run both locally before merging: the
+          # integration tier against a populated $PDS3_HOLDINGS_DIR, the
+          # postgres tier against a local server.
+          python -m pytest --cov --cov-report=xml -n auto --dist=loadfile \
+            -m "not integration and not postgres"
 
       - name: Print coverage report
         run: |
