@@ -1434,10 +1434,10 @@ blocks use of the kernels.
   through `spyceman` instead of a kernel directory tree (#448), and cover
   the remote kernel-index path, which no test exercises (#446).
 
-Broader than this plan and blocking nothing: the documentation chapter
-specifying the metadata JSON format -- every key, its meaning, presence
-rules, and examples, including the `pointing` and `times` blocks this plan
-added (#431); and whether `spindoctor.cli` subpackages belong in the API
-reference at all (#443), which is what decides whether the writer package
-gets an autodoc page rather than the nitpick-ignore every other
-`spindoctor.cli` subpackage has.
+Broader than this plan and blocking nothing: whether `spindoctor.cli`
+subpackages belong in the API reference at all (#443), which is what
+decides whether the writer package gets an autodoc page rather than the
+nitpick-ignore every other `spindoctor.cli` subpackage has. The
+documentation chapter specifying the metadata JSON format -- including the
+`pointing` and `times` blocks this plan added -- is written
+(docs/user_guide/user_guide_metadata.rst).

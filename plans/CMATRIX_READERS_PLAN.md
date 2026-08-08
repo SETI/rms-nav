@@ -117,8 +117,9 @@ documentation and plan reconciliation.
   kernel writer: unchanged. The `offset` field stays recorded and
   reported exactly as it is; only which field the readers *apply*
   changes.
-- The results-index ingest (#430) and the metadata format chapter
-  (#431).
+- The results-index ingest (#430). The metadata format chapter is
+  written (docs/user_guide/user_guide_metadata.rst) and documents the
+  readers' precedence ladder.
 
 ---
 
@@ -643,5 +644,7 @@ measured-plus-margin per the section 4 decision rule.
   velocity, which the replacement frame carries as zero) across the
   exposure depend on the interior-epoch work (#440, #444, #455) and
   would consume the kernel, not the midtime matrix.
-- **The metadata format chapter** (#431) should document the readers'
-  precedence and fallback ladder when it is written.
+- **The metadata format chapter**
+  (docs/user_guide/user_guide_metadata.rst) documents the readers'
+  precedence and fallback ladder in its "How consumers apply the
+  record" section.
