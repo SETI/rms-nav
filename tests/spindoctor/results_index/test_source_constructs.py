@@ -1,4 +1,4 @@
-"""Tests that no SQLite-only construct survives in the results index source.
+"""Tests that no SQLite-only construct survives in the index query source.
 
 Four spellings work on SQLite and fail, or silently mean something else, on
 PostgreSQL: a Python function registered on the connection and then called from
@@ -8,7 +8,12 @@ found the first time somebody points the code at a server. These read the source
 so that the answer does not depend on which backend a test happened to run
 against.
 
-The scan reads the source rather than importing it, so a module added to the
+The scan covers every package that holds index queries: the Core layer itself,
+and the statistics programs, whose report issues most of the SQL in the system.
+A scan aimed at one package while the queries live in another reports green
+without reading them.
+
+It reads the source rather than importing it, so a module added to either
 package tomorrow is covered without being named here.
 """
 
@@ -22,7 +27,13 @@ from filecache import FCPath
 
 from spindoctor.results_index import METADATA
 
-_SOURCE_ROOT = FCPath(Path(__file__).resolve().parents[3]) / 'src' / 'spindoctor' / 'results_index'
+_SRC = FCPath(Path(__file__).resolve().parents[3]) / 'src' / 'spindoctor'
+
+_INDEX_ROOT = _SRC / 'results_index'
+"""The Core layer: the schema, the opener, and the root bookkeeping."""
+
+_SOURCE_ROOTS = (_INDEX_ROOT, _SRC / 'cli' / 'stats')
+"""Every package holding index queries."""
 
 # The connect-time events a PRAGMA may legitimately live inside.  A pragma in a
 # query reaches one connection out of however many the pool holds.
@@ -32,22 +43,41 @@ _PRAGMA_RE = re.compile(r'\bpragma\b', re.IGNORECASE)
 
 _TOTAL_RE = re.compile(r'\bTOTAL\s*\(', re.IGNORECASE)
 
+# A Markdown table row, which the report emits by the hundred and which is
+# never SQL.  One of them is a run-time table headed "total (s)", which the
+# aggregate pattern would otherwise read as the SQLite spelling of a sum.
+_MARKDOWN_ROW_RE = re.compile(r'^\s*\|')
+
 # Registering a Python callable as a SQL function, in either DBAPI's spelling.
 _UDF_REGISTRARS = frozenset({'create_function', 'register_function'})
 
 _SCRIPT_EXECUTORS = frozenset({'executescript'})
 
-_KNOWN_MODULES = frozenset({'__init__.py', 'engine.py', 'schema.py'})
-"""The modules the scan must reach, whatever else the package grows."""
+_KNOWN_MODULES = frozenset(
+    {
+        # The Core layer.
+        'engine.py',
+        'roots.py',
+        'schema.py',
+        # The statistics programs, where the report's queries live.
+        'classify.py',
+        'ingest.py',
+        'ingest_rows.py',
+        'report.py',
+        'report_common.py',
+        'report_sections.py',
+    }
+)
+"""The modules the scan must reach, whatever else either package grows."""
 
 
 def _source_files() -> list[FCPath]:
-    """Return every Python module of the package under scan.
+    """Return every Python module of the packages under scan.
 
     Returns:
         The modules, sorted by path.
     """
-    return sorted(_SOURCE_ROOT.rglob('*.py'))
+    return sorted(path for root in _SOURCE_ROOTS for path in root.rglob('*.py'))
 
 
 def _module_ids() -> list[str]:
@@ -73,6 +103,22 @@ def _string_constants(tree: ast.AST) -> list[ast.Constant]:
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     ]
+
+
+def _query_strings(tree: ast.AST) -> list[ast.Constant]:
+    """Return every string constant that could be part of a statement.
+
+    Markdown table rows are excluded.  The report writes tables as literal
+    rows, and a column headed "total (s)" reads exactly like the SQLite
+    aggregate; nothing beginning with a table separator is ever SQL.
+
+    Parameters:
+        tree: The parsed module.
+
+    Returns:
+        The string constant nodes, which carry line numbers.
+    """
+    return [node for node in _string_constants(tree) if not _MARKDOWN_ROW_RE.match(str(node.value))]
 
 
 def _call_argument_strings(tree: ast.AST) -> list[ast.Constant]:
@@ -232,7 +278,7 @@ def test_no_module_uses_the_total_aggregate(path: FCPath) -> None:
     """
     offenders = [
         node.value
-        for node in _string_constants(ast.parse(path.read_text()))
+        for node in _query_strings(ast.parse(path.read_text()))
         if _TOTAL_RE.search(str(node.value))
     ]
     assert offenders == []
@@ -283,7 +329,7 @@ def test_no_module_compares_a_boolean_column_against_an_integer(path: FCPath) ->
     ]
     offenders = [
         node.value
-        for node in _string_constants(ast.parse(path.read_text()))
+        for node in _query_strings(ast.parse(path.read_text()))
         if any(pattern.search(str(node.value)) for pattern in patterns)
     ]
     assert offenders == []
@@ -294,11 +340,32 @@ def test_the_scan_actually_reads_some_modules() -> None:
 
     A path that names nothing is indistinguishable from a package that is clean,
     so the scan's own reach is asserted.  It is asserted as a floor rather than
-    as an inventory, because the scan finds the package's modules for itself and
+    as an inventory, because the scan finds the packages' modules for itself and
     one added tomorrow is meant to be covered without being named here.
     """
     missing = sorted(_KNOWN_MODULES.difference(_module_ids()))
     assert missing == []
+
+
+def test_the_scan_reaches_the_statistics_programs() -> None:
+    """The report issues most of the SQL in the system, so it is scanned too.
+
+    Named as a directory rather than as a module list: a scan that had drifted
+    back to the Core layer alone would still find every module it named there.
+    """
+    reached = {path.as_posix() for path in _source_files()}
+    assert any('/cli/stats/' in path for path in reached)
+
+
+def test_the_markdown_exclusion_leaves_a_statement_alone() -> None:
+    """Only a table row is excused, and a statement is not one.
+
+    The exclusion exists for a run-time table headed "total (s)"; if it grew to
+    cover statements, every check that reads a string would quietly empty.
+    """
+    tree = ast.parse("x = ['| total (s) |', 'SELECT TOTAL(n) FROM t']")
+    kept = [str(node.value) for node in _query_strings(tree)]
+    assert kept == ['SELECT TOTAL(n) FROM t']
 
 
 def test_the_boolean_scan_knows_which_columns_are_boolean() -> None:
@@ -313,5 +380,5 @@ def test_the_pragma_scan_finds_the_connect_handler() -> None:
     rather than the check quietly passing -- but the reverse (a handler matched
     by accident, allowing pragmas anywhere) is what this pins.
     """
-    tree = ast.parse((_SOURCE_ROOT / 'engine.py').read_text())
+    tree = ast.parse((_INDEX_ROOT / 'engine.py').read_text())
     assert _connect_handler_names(tree) == {'_sqlite_on_connect'}

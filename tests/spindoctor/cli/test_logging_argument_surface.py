@@ -51,18 +51,21 @@ _WITHOUT_IMAGE_LOGGER = [
     ('sd_consolidate_metadata', ['coiss_saturn']),
     ('sd_create_bundle', ['labels', 'coiss_saturn']),
     ('sd_create_bundle', ['summary', 'coiss_saturn']),
+    # Ingest processes documents rather than images, but a partial or failed
+    # pass has to appear in a run log rather than only in an exit code.
+    ('sd_stats_ingest', []),
 ]
 
 _WITH_ANY_LOGGER = _WITH_IMAGE_LOGGER + _WITHOUT_IMAGE_LOGGER
 
 # Programs that carry no logger and write to the terminal with print(), and the
-# argv that reaches the parser each actually runs with.  Checked by building
+# argv that reaches the parser each actually runs with.  The statistics report
+# is one: its output is terminal text for a person reading a report.  Checked by building
 # that parser rather than by reading the module's text: the flags come from a
 # shared helper, so a program acquires the whole set by calling anything that
 # calls it.  sd_mosaic_display prints a dispatch parser's help when given no
 # mode, so asking it without one would inspect the wrong parser.
 _WITHOUT_LOGGER = [
-    ('sd_stats_ingest', []),
     ('sd_stats_report', []),
     ('sd_create_simulated_image', []),
     ('sd_backplane_viewer', []),

@@ -23,9 +23,9 @@ When you want to know what a run did, read the main log; when you want to know
 what happened to one image, read that image's log.
 
 Not every program has both. A program that does not process images
-individually has only a main log, and the statistics and GUI programs have
-neither -- they write to the terminal directly, because both are read as they
-run rather than afterwards.
+individually has only a main log; the statistics report and the GUI programs
+have neither -- they write to the terminal directly, because both are read as
+they run rather than afterwards.
 
 .. list-table::
    :header-rows: 1
@@ -58,7 +58,10 @@ run rather than afterwards.
    * - ``sd_mosaic_cloud_tasks``
      - no
      - ``reproj``
-   * - ``sd_stats_ingest``, ``sd_stats_report``
+   * - ``sd_stats_ingest``
+     - yes
+     - none
+   * - ``sd_stats_report``
      - no
      - none
    * - ``sd_create_simulated_image``

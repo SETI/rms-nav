@@ -21,9 +21,17 @@ Public API:
     SCHEMA_META      -- the single row stamping the schema version
     INGEST_RUNS      -- one row per ingest pass over one root
     open_index       -- the only opener, with the version gate
+    normalize_root_url    -- the one spelling of a results root
+    ingested_roots        -- the roots a completed ingest covered
+    require_ingested_roots -- refuse to read absence from a root nobody ingested
 """
 
 from spindoctor.results_index.engine import open_index
+from spindoctor.results_index.roots import (
+    ingested_roots,
+    normalize_root_url,
+    require_ingested_roots,
+)
 from spindoctor.results_index.schema import (
     FEATURE_SOURCES,
     IMAGES,
@@ -42,5 +50,8 @@ __all__ = [
     'SCHEMA_META',
     'SCHEMA_VERSION',
     'TECHNIQUES',
+    'ingested_roots',
+    'normalize_root_url',
     'open_index',
+    'require_ingested_roots',
 ]

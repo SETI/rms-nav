@@ -21,11 +21,16 @@ from filecache import FCPath
 
 _SRC = FCPath(Path(__file__).resolve().parents[3]) / 'src' / 'spindoctor'
 
-# The statistics and GUI programs carry no logger and write to the terminal
-# with print(): neither is a batch pipeline, and both are read as they run.
+# The statistics report and the GUI programs carry no logger and write to the
+# terminal with print(): a report's output is terminal text for a person reading
+# it, and a GUI is read as it runs.  Ingest is deliberately not among them --
+# it is infrastructure other programs depend on, so a partial or failed pass has
+# to appear in a run log rather than only in an exit code -- so the statistics
+# package is named by its report modules rather than as a whole.
 _PRINT_ONLY = [
-    'cli/stats',
-    'cli/sd_stats_ingest.py',
+    'cli/stats/report.py',
+    'cli/stats/report_common.py',
+    'cli/stats/report_sections.py',
     'cli/sd_stats_report.py',
     'cli/sd_backplane_viewer.py',
     'cli/sd_create_simulated_image.py',

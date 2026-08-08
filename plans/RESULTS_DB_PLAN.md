@@ -784,6 +784,38 @@ same fixture tree ingested by the old and new ingest, which is what proves
 the `COALESCE` rewrite; and a PostgreSQL run of the same assertions under
 the `postgres` marker.
 
+Six details settled during execution, none of them a change of intent:
+
+- **The root normalization lives in `spindoctor/results_index/roots.py`**,
+  alongside the `ingest_runs` reads that decide whether a root has been
+  ingested at all. Section 2.2 asks every consumer to spell a root the same
+  way and to refuse a root with no completed run; both are one function
+  there rather than one per consumer. `sd_stats_report` already uses the
+  refusal for `--root`; the pipeline consumers of Phase 4 use the same one.
+- **The old ingest's output is frozen rather than re-derived.** The
+  byte-identical comparison needs the previous implementation, which this
+  phase deletes, so the fixture tree and the `report.md` / `images.csv` the
+  previous implementation produced from it are committed as test data in
+  their own commit, ahead of the rewrite.
+- **The CSV's two feature-count aggregates become integers.** `TOTAL(...)`
+  always returned a float, including a `0.0` for an image with no features;
+  `COALESCE(SUM(...), 0)` returns the count. The regression test asserts the
+  numbers are equal rather than the text, and asserts it for those two
+  columns alone.
+- **The CSV's `status_reason` column no longer carries a fatal error.** That
+  is the merge the split columns exist to undo, and `status_error` is beside
+  it now. The regression test asserts that the pair reproduces what the one
+  column held.
+- **`sd_stats_ingest` and the statistics package leave the print-only list**
+  in `tests/spindoctor/config/test_logging_static_invariants.py`, which
+  section 2.10's collateral list does not name. The list is narrowed to the
+  report modules, which keep `print()`.
+- **The criterion-10 scan skips Markdown table rows.** The report writes its
+  tables as literal rows, one of them headed `total (s)`, which the `TOTAL(`
+  pattern reads as the SQLite aggregate. Nothing beginning with a table
+  separator is SQL, and a test pins that the exclusion does not reach a
+  statement.
+
 ### Phase 3 — Cloud-task ingest
 
 `sd_stats_ingest_cloud_tasks` per section 2.8, entry point in

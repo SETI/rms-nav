@@ -1,6 +1,7 @@
 """Report sections: failure taxonomy, suspect offsets, BOTSIM, run time, CSV export."""
 
 import csv
+import json
 import math
 import re
 import statistics
@@ -10,6 +11,7 @@ from typing import Any
 from filecache import FCPath
 
 from spindoctor.cli.stats.report_common import (
+    IMAGE_JOIN,
     ReportContext,
     add_drilldown,
     add_instrument_count_table,
@@ -17,14 +19,16 @@ from spindoctor.cli.stats.report_common import (
     count_pct,
     fmt,
     image_name_from_filename,
+    image_order,
     percentile,
     rows,
     write_stacked_value_hist,
 )
-from spindoctor.cli.stats.schema import IMAGE_COLUMNS
 from spindoctor.config import DEFAULT_CONFIG, Config
+from spindoctor.results_index import IMAGES
 
 __all__ = [
+    'IMAGE_COLUMNS',
     'add_botsim_section',
     'add_failure_taxonomy_section',
     'add_offset_by_group_section',
@@ -118,12 +122,12 @@ def add_suspect_offset_section(ctx: ReportContext) -> None:
     per-axis limit is listed for operator review.
     """
     image_rows = rows(
-        ctx.conn,
+        ctx.connection,
         f'SELECT image_name, instrument, offset_dv, offset_du, image_shape_v '
         f'FROM images{ctx.where}'
         + connector(ctx.where)
         + "status = 'success' AND offset_dv IS NOT NULL AND offset_du IS NOT NULL "
-        'ORDER BY image_name',
+        f'ORDER BY {image_order()}',
         ctx.params,
     )
     ctx.lines += [
@@ -213,10 +217,10 @@ def add_botsim_section(ctx: ReportContext) -> None:
     no ground truth.
     """
     image_rows = rows(
-        ctx.conn,
+        ctx.connection,
         f'SELECT image_name, status, offset_dv, offset_du FROM images{ctx.where}'
         + connector(ctx.where)
-        + "instrument = 'coiss' ORDER BY image_name",
+        + f"instrument = 'coiss' ORDER BY {image_order()}",
         ctx.params,
     )
     by_clock: dict[str, dict[str, tuple[str, str, Any, Any]]] = {}
@@ -329,25 +333,28 @@ def add_failure_taxonomy_section(ctx: ReportContext) -> None:
     modeling problem for that body rather than a pipeline-wide issue.
     """
     failed_rows = rows(
-        ctx.conn,
-        f'SELECT image_name, instrument, status_reason FROM images{ctx.where}'
+        ctx.connection,
+        'SELECT root_url, results_path_stub, image_name, instrument, '
+        f'COALESCE(status_reason, status_error) FROM images{ctx.where}'
         + connector(ctx.where)
-        + "status != 'success' ORDER BY image_name",
+        + f"status != 'success' ORDER BY {image_order()}",
         ctx.params,
     )
     if len(failed_rows) == 0:
         return
     source_rows = rows(
-        ctx.conn,
-        'SELECT i.image_name, i.instrument, i.status, s.source_model, s.source_name '
-        'FROM feature_sources s JOIN images i ON i.image_name = s.image_name'
+        ctx.connection,
+        'SELECT s.root_url, s.results_path_stub, i.image_name, i.instrument, i.status, '
+        's.source_model, s.source_name '
+        'FROM feature_sources s '
+        + IMAGE_JOIN.format(alias='s.')
         + ctx.where_i
-        + ' ORDER BY i.image_name, s.source_model, s.source_name',
+        + f' ORDER BY {image_order("i.")}, s.source_model, s.source_name',
         ctx.params_i,
     )
-    sources_by_image: dict[str, list[tuple[str, str]]] = {}
-    for image_name, _instrument, _status, source_model, source_name in source_rows:
-        sources_by_image.setdefault(str(image_name), []).append(
+    sources_by_image: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for root_url, stub, _image_name, _instrument, _status, source_model, source_name in source_rows:
+        sources_by_image.setdefault((str(root_url), str(stub)), []).append(
             (str(source_model), str(source_name))
         )
 
@@ -356,8 +363,8 @@ def add_failure_taxonomy_section(ctx: ReportContext) -> None:
     }
     category_counts: dict[str, dict[str, int]] = {category: {} for category in _CONTENT_CATEGORIES}
     reason_counts: dict[tuple[str, str], dict[str, int]] = {}
-    for image_name, instrument, status_reason in failed_rows:
-        category = _content_category(sources_by_image.get(str(image_name), []))
+    for root_url, stub, image_name, instrument, status_reason in failed_rows:
+        category = _content_category(sources_by_image.get((str(root_url), str(stub)), []))
         by_category[category].append((str(instrument), str(image_name)))
         counts = category_counts[category]
         counts[str(instrument)] = counts.get(str(instrument), 0) + 1
@@ -401,16 +408,19 @@ def add_failure_taxonomy_section(ctx: ReportContext) -> None:
         stub_prefix='failed_content',
     )
 
-    # Per-body failure shares over all images (successful and failed).
-    body_status: dict[tuple[str, str], dict[str, set[str]]] = {}
-    for image_name, instrument, status, source_model, source_name in source_rows:
+    # Per-body failure shares over all images (successful and failed).  An
+    # image can contribute several rows for one body, so each bucket holds the
+    # key that identifies an image rather than its name, which two volumes may
+    # share; the name rides along for the drill-down list.
+    body_status: dict[tuple[str, str], dict[str, set[tuple[str, str, str]]]] = {}
+    for root_url, stub, image_name, instrument, status, source_model, source_name in source_rows:
         if _source_kind(str(source_model)) != 'body' or str(source_name) == '(none)':
             continue
         buckets = body_status.setdefault(
             (str(source_name), str(instrument)), {'failed': set(), 'success': set()}
         )
         bucket = 'success' if str(status) == 'success' else 'failed'
-        buckets[bucket].add(str(image_name))
+        buckets[bucket].add((str(image_name), str(root_url), str(stub)))
     if len(body_status) > 0:
         ranked = sorted(
             body_status.items(),
@@ -442,7 +452,7 @@ def add_failure_taxonomy_section(ctx: ReportContext) -> None:
         by_body: dict[str, list[tuple[str, str]]] = {}
         for (body, instrument), buckets in ranked:
             by_body.setdefault(body, []).extend(
-                (instrument, name) for name in sorted(buckets['failed'])
+                (instrument, entry[0]) for entry in sorted(buckets['failed'])
             )
         add_drilldown(
             ctx,
@@ -460,10 +470,10 @@ def add_failure_taxonomy_section(ctx: ReportContext) -> None:
 def add_runtime_section(ctx: ReportContext) -> None:
     """Summarize per-image run times; skipped when no timing data exists."""
     timing_rows = rows(
-        ctx.conn,
+        ctx.connection,
         f'SELECT image_name, instrument, elapsed_s FROM images{ctx.where}'
         + connector(ctx.where)
-        + 'elapsed_s IS NOT NULL ORDER BY image_name',
+        + f'elapsed_s IS NOT NULL ORDER BY {image_order()}',
         ctx.params,
     )
     if len(timing_rows) == 0:
@@ -527,7 +537,7 @@ def add_runtime_section(ctx: ReportContext) -> None:
 def add_offset_by_group_section(ctx: ReportContext) -> None:
     """Break the fused-offset statistics down by (instrument, camera, image size)."""
     image_rows = rows(
-        ctx.conn,
+        ctx.connection,
         f'SELECT instrument, camera, image_shape_v, image_shape_u, offset_dv, offset_du '
         f'FROM images{ctx.where}'
         + connector(ctx.where)
@@ -570,6 +580,31 @@ def add_offset_by_group_section(ctx: ReportContext) -> None:
 # ---------------------------------------------------------------------------
 
 
+IMAGE_COLUMNS: tuple[str, ...] = tuple(IMAGES.columns.keys())
+"""Every ``images`` column, in schema order, as the CSV export lists them."""
+
+_CHILD_KEY = 'WHERE {alias}root_url = i.root_url AND {alias}results_path_stub = i.results_path_stub'
+"""How a correlated subquery finds one image's child rows."""
+
+
+def _csv_value(value: Any) -> Any:
+    """Render one column value for the CSV.
+
+    A JSON column arrives as the Python value the driver decoded, and a CSV
+    carrying a Python container's repr is a CSV nothing else can read back.  It
+    goes out as JSON text, which is what the column holds.
+
+    Parameters:
+        value: The value as the driver returned it.
+
+    Returns:
+        The value to write.
+    """
+    if isinstance(value, (list, dict)):
+        return json.dumps(value)
+    return value
+
+
 def write_csv_export(ctx: ReportContext) -> FCPath:
     """Write a flattened one-row-per-image CSV next to ``report.md``.
 
@@ -581,14 +616,16 @@ def write_csv_export(ctx: ReportContext) -> FCPath:
         The path of the written ``images.csv``.
     """
     columns = ', '.join(f'i.{column}' for column in IMAGE_COLUMNS)
+    technique_key = _CHILD_KEY.format(alias='t.')
+    source_key = _CHILD_KEY.format(alias='s.')
     csv_rows = rows(
-        ctx.conn,
+        ctx.connection,
         f'SELECT {columns}, '
-        '(SELECT COUNT(*) FROM techniques t WHERE t.image_name = i.image_name), '
-        '(SELECT COUNT(*) FROM feature_sources s WHERE s.image_name = i.image_name), '
-        '(SELECT TOTAL(s.n_features) FROM feature_sources s WHERE s.image_name = i.image_name), '
-        '(SELECT TOTAL(s.n_gated) FROM feature_sources s WHERE s.image_name = i.image_name) '
-        'FROM images i' + ctx.where_i + ' ORDER BY i.image_name',
+        f'(SELECT COUNT(*) FROM techniques t {technique_key}), '
+        f'(SELECT COUNT(*) FROM feature_sources s {source_key}), '
+        f'(SELECT COALESCE(SUM(s.n_features), 0) FROM feature_sources s {source_key}), '
+        f'(SELECT COALESCE(SUM(s.n_gated), 0) FROM feature_sources s {source_key}) '
+        'FROM images i' + ctx.where_i + f' ORDER BY {image_order("i.")}',
         ctx.params_i,
     )
     csv_path = ctx.output_dir / 'images.csv'
@@ -597,7 +634,7 @@ def write_csv_export(ctx: ReportContext) -> FCPath:
     writer.writerow(
         [*IMAGE_COLUMNS, 'n_technique_rows', 'n_feature_sources', 'n_features', 'n_gated']
     )
-    writer.writerows(csv_rows)
+    writer.writerows([_csv_value(value) for value in row] for row in csv_rows)
     csv_path.write_text(buffer.getvalue(), encoding='utf-8')
     ctx.lines += [
         '## CSV export',
