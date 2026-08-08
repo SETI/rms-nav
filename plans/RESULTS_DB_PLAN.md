@@ -223,6 +223,20 @@ that is down or misconfigured, would reach a consumer as a SQLAlchemy
 traceback naming neither the URL nor which of the three resolution levels
 supplied it.
 
+The translation is a catch-all rather than a list of expected types. A
+dialect coerces its own connect arguments and reports a bad one as a bare
+`ValueError` naming nothing: a non-numeric port, a non-numeric `timeout`. To
+a caller, such an escape is indistinguishable from the guarantee being
+broken, so everything that escapes the builder is translated, and only the
+messages this layer writes itself pass through untouched.
+
+**The URL a message names is rendered with its password masked.** These
+messages are written to run logs and pasted into bug reports, and a database
+password belongs in neither. Everything else about the URL survives, because
+naming the URL is what tells a reader which of the three resolution levels
+supplied the value. A URL the parser rejected cannot render itself, so its
+password is masked by pattern instead.
+
 The engine factory is the only opener:
 
 ```text
@@ -273,23 +287,55 @@ the C library directly. A SQLite URL whose path is on a filesystem that
 cannot honor its locking (probed at open with a `BEGIN IMMEDIATE` /
 rollback) is refused, naming PostgreSQL as the cross-machine option.
 
+That URL carries **no query string**. The driver derives the filename it
+opens from the whole URL, so `.../index.sqlite3?mode=ro` passes an existence
+check on `index.sqlite3` and then creates a second file whose name contains
+the query -- neither the database the operator named nor an index anything
+can read. Such a URL is refused, naming the URL and saying that a SQLite
+index URL is a plain local path.
+
 **A read-only database is a separate case from a locking failure**, and the
 two are told apart rather than merged. A read-only mount honors locking
 perfectly and a consumer cannot corrupt anything, so refusing one and
 blaming its filesystem is a false diagnosis of a deployment the index is
 meant to support -- an archived copy, or a file shipped to workers on
-read-only media. The two are distinguished at connect: selecting the journal
-mode writes the database header, so its refusal (any `SQLITE_READONLY*`
-result code) is the read-only answer, and it is recorded on the connection
-instead of raised. `BEGIN IMMEDIATE` cannot answer the question on its own,
-because a rollback-journal database SQLite will never write still grants the
-reserved lock it asks for. From that record:
+read-only media.
+
+**Whether ingest can write is asked of the filesystem, not of SQLite**:
+`os.access` on the file and on its parent directory, before the engine is
+built. SQLite does not answer the question at open. A write-ahead-logged
+database -- the shape this opener always leaves behind, having selected that
+journal mode -- accepts both the journal-mode selection, which its header
+already records, and the write lock `BEGIN IMMEDIATE` takes, on a file it
+will never write; it refuses only the first real write, in the middle of an
+ingest. A rollback-journal database refuses the journal-mode selection
+instead, so no single SQLite answer covers both shapes. The directory is
+asked about with the file, because SQLite writes the write-ahead log and its
+shared-memory index beside the database, and a writable file in a directory
+that permits nothing is still a database ingest cannot write. So:
 
 - `create=False` **accepts** a read-only database and reads it.
-- `create=True` refuses it, with a message naming read-only as the cause and
-  saying to ingest a writable copy -- not the filesystem-locking message.
+- `create=True` refuses it before anything is opened, with a message naming
+  read-only -- of the file, or of its directory -- as the cause and saying to
+  ingest a writable copy, not the filesystem-locking message.
 - A genuine `SQLITE_BUSY` or `SQLITE_IOERR` refuses in both modes, with the
   filesystem-and-PostgreSQL message.
+
+The connect-time journal-mode selection still has to tolerate a refusal (any
+`SQLITE_READONLY*` result code), because every connection to a read-only
+rollback-journal database would otherwise fail; the refusal is ignored rather
+than raised, and nothing is inferred from its absence.
+
+**A probe failure is classified by SQLite's own result code before a message
+is chosen.** One exception type covers several unrelated causes, and only one
+of them is a reason to move the index to a server. `SQLITE_NOTADB` says the
+file is not a SQLite database. `SQLITE_CANTOPEN` names the path and says
+which of its causes applies: a directory that does not exist, a path that is
+not a file, or a file this user cannot open -- prescribing PostgreSQL for an
+operator whose results directory has not been created yet is a wrong remedy
+for the most common first-run error there is. Only `SQLITE_BUSY`,
+`SQLITE_IOERR` and a code that names no cause at all keep the
+filesystem-and-PostgreSQL message.
 
 One read-only database cannot be read at all: SQLite reads a write-ahead-logged
 database through a shared-memory index it creates beside the file, so a
@@ -618,15 +664,26 @@ Tests: schema creation against SQLite; `create=False` raising on a missing
 database, a missing `schema_meta` row, and a version mismatch (each message
 asserted); a refused `create=True` open leaving the database unwritten; the
 `ValueError` guarantee on each route a driver exception takes (an absent
-driver, an unparseable URL, an unknown URL scheme, a server that refuses the
-connection), with the driver's exception kept as the `__cause__`; the
-missing-driver message, with the driver hidden by an import hook rather than
-by its happening to be absent from the environment; the read-only cases of
-section 2.5 (accepted by a consumer, refused by an ingest, and a
-write-ahead-logged copy that cannot be read) alongside a genuine lock failure
-in both modes; a refused open disposing the pool it built; Double-precision
-round-trip of a 15-significant-digit value; boolean round-trip; the
-config-hash exclusion.
+driver, an unparseable URL, an unknown URL scheme, a non-numeric port that
+reaches the caller as a bare `ValueError`, a server that refuses the
+connection, and an unexpected failure inside the engine factory), with the
+driver's exception kept as the `__cause__` on each; a password absent from
+every one of those messages while the rest of the URL survives, including on
+the `schema_meta` and version gates and against a server that rejects the
+password (`postgres` tier); the missing-driver message, with the driver
+hidden by an import hook rather than by its happening to be absent from the
+environment; the read-only cases of section 2.5 (accepted by a consumer,
+refused by an ingest, and a write-ahead-logged copy that cannot be read),
+each parametrized over both journal modes, plus an ingest into a read-only
+directory, alongside a genuine lock failure in both modes; the result-code
+classification of a probe failure (a file that is not a database, a path that
+is a directory, a directory that does not exist, a file this user cannot
+open, and an exception carrying no result code at all); a `sqlite:` URL with
+a query string refused without leaving a file behind; the connect-time
+settings read from a second connection held open beside the first, so a
+one-shot application fails the test; a refused open disposing the pool it
+built; Double-precision round-trip of a 15-significant-digit value; boolean
+round-trip; the config-hash exclusion.
 
 ### Phase 2 — Ingest and reporting onto the index
 
@@ -646,6 +703,14 @@ Reporting: move `sd_stats_report` onto the Core layer per sections 2.5 and
 2.9 -- named binds, composite-key joins, `COALESCE` for both the reason
 taxonomy and `TOTAL`, boolean spellings, the column-backed `image_number`,
 `--root`, and `--db` removed from both programs.
+
+The source scan that enforces criterion 10 reads only
+`src/spindoctor/results_index/`, which is the whole of the Core layer while
+that is all there is. The statistics programs move onto the Core layer here,
+so this phase widens the scan's `_SOURCE_ROOT` to cover
+`src/spindoctor/cli/stats/` as well, and updates the test that pins which
+modules the scan reaches. Left alone, criterion 10 would report green over a
+package that no longer holds the queries it exists to check.
 
 Tests: a two-volume tree with colliding basenames producing two rows; a
 bare-basename stub with NULL `volume`; the unrounded offset; the separated
@@ -755,7 +820,11 @@ add a column (increment the version). No issue numbers in any of it.
 10. No SQLite-only construct remains in any query: no UDF registration, no
     `TOTAL(`, no `executescript`, no `PRAGMA` outside a dialect event, no
     integer comparison or arithmetic against a Boolean column. Enforced by a
-    source-scanning test.
+    source-scanning test, whose root covers every package holding index
+    queries: `src/spindoctor/results_index/`, and from Phase 2 also
+    `src/spindoctor/cli/stats/`, where the report's queries live. A scan
+    aimed at one package while the queries live in another reports green
+    without reading them.
 11. The suite's index tests pass against PostgreSQL under a `postgres`
     marker: registered in `[tool.pytest.ini_options].markers`, excluded by
     default via `addopts` (`-m "not integration and not postgres"`), given a

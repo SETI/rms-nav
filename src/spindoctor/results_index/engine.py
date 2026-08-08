@@ -4,7 +4,9 @@
 connection URL, applies the SQLite settings the concurrency model depends on,
 and refuses a database whose schema version is not the one this code reads.
 Every refusal is a ``ValueError`` naming the URL, including the ones a database
-driver raises, so a caller that reports failures catches one type.
+driver raises, so a caller that reports failures catches one type.  The URL is
+named with its password masked: these messages are written to run logs and
+handed to operators, and a database password belongs in neither.
 
 Two URL forms are supported::
 
@@ -21,6 +23,8 @@ ships as an optional extra.
 """
 
 import datetime
+import os
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -49,8 +53,17 @@ _SQLITE_BACKEND = 'sqlite'
 _SQLITE_READONLY_PREFIX = 'SQLITE_READONLY'
 """Prefix shared by every SQLite result code meaning "this database is read-only"."""
 
-_SQLITE_READ_ONLY_KEY = 'spindoctor_sqlite_read_only'
-"""Key under which a connection records whether SQLite will write its database."""
+_SQLITE_NOT_A_DATABASE = 'SQLITE_NOTADB'
+"""Result code SQLite gives for a file that is not a database at all."""
+
+_SQLITE_CANNOT_OPEN = 'SQLITE_CANTOPEN'
+"""Result code SQLite gives for a path it cannot open, whatever the reason."""
+
+_HIDDEN_PASSWORD = '***'
+"""What a password is replaced by, matching what a parsed URL renders itself as."""
+
+_PASSWORD_IN_URL = re.compile(r'(?P<credentials>//[^/@]*?:)[^/@]*@')
+"""The password of a URL string that could not be parsed, as text."""
 
 _SUPPORTED_URL_FORMS = (
     'A results index is either a sqlite: URL naming a local path, or a '
@@ -58,24 +71,84 @@ _SUPPORTED_URL_FORMS = (
 )
 
 
-def _sqlite_refused_a_write(exc: BaseException | None) -> bool:
-    """Report whether a SQLite error says the database itself will not be written.
+class _IndexOpenError(ValueError):
+    """A failure this module has already diagnosed.
 
-    SQLite distinguishes a database it may never write -- a read-only file, or one
-    whose directory it cannot create its side files in -- from a write it could
-    not take at this moment, such as a busy lock or an I/O error.  Every result
-    code in the first group shares one name prefix, and only that group describes
-    a database a reader can still use.
+    :func:`open_index` turns whatever escapes the builder into a ``ValueError``
+    naming the URL, and that catch-all cannot tell a message this module wrote
+    from a bare ``ValueError`` a driver raised deep inside itself.  Raising this
+    subclass from the failures diagnosed here keeps a complete message from
+    being wrapped in a second one, while a caller still catches the
+    ``ValueError`` the contract promises.
+    """
+
+
+def _masked_url(url: str) -> str:
+    """Return a URL string with any password in it replaced.
+
+    Used for a URL whose parsing is what failed, since an unparsed URL cannot
+    render itself.  Everything else survives, because naming the URL is what
+    tells a reader which of the resolution levels supplied the bad value.
 
     Parameters:
-        exc: The driver exception to classify, or None.
+        url: The URL as the caller wrote it.
 
     Returns:
-        True when the error says the database is read-only.
+        The URL with its password, if any, masked.
     """
-    return isinstance(exc, sqlite3.Error) and exc.sqlite_errorname.startswith(
-        _SQLITE_READONLY_PREFIX
-    )
+    return _PASSWORD_IN_URL.sub(rf'\g<credentials>{_HIDDEN_PASSWORD}@', url)
+
+
+def _display_url(url: str) -> str:
+    """Return the form of a URL that messages name it by.
+
+    Parameters:
+        url: The URL as the caller wrote it.
+
+    Returns:
+        The parsed URL rendered with its password hidden, or the text form
+        masked by pattern when the URL is one the parser rejects.
+    """
+    try:
+        return sqlalchemy.engine.make_url(url).render_as_string()
+    except Exception:
+        # Any failure at all: this runs while reporting another failure, and a
+        # display string is never worth raising over.
+        return _masked_url(url)
+
+
+def _sqlite_error_name(exc: BaseException) -> str:
+    """Return the SQLite result-code name a driver exception carries.
+
+    Parameters:
+        exc: The exception to read, either a driver exception or the wrapper
+            SQLAlchemy raised around one.
+
+    Returns:
+        The result-code name, or an empty string when the exception carries
+        none -- an exception from another driver, or one whose original is
+        absent, which the caller diagnoses generically rather than crashing on.
+    """
+    original = getattr(exc, 'orig', exc)
+    name = getattr(original, 'sqlite_errorname', '')
+    return name if isinstance(name, str) else ''
+
+
+def _is_read_only_error(error_name: str) -> bool:
+    """Report whether a SQLite result code says the database will not be written.
+
+    SQLite distinguishes a database it may never write -- a read-only file, or
+    one whose directory it cannot create its side files in -- from a write it
+    could not take at this moment, such as a busy lock or an I/O error.  Every
+    result code in the first group shares one name prefix.
+
+    Parameters:
+        error_name: The result-code name to classify, possibly empty.
+
+    Returns:
+        True when the code says the database is read-only.
+    """
+    return error_name.startswith(_SQLITE_READONLY_PREFIX)
 
 
 def _sqlite_on_connect(dbapi_connection: Any, connection_record: Any) -> None:
@@ -90,18 +163,19 @@ def _sqlite_on_connect(dbapi_connection: Any, connection_record: Any) -> None:
     logging lets a reader and a writer work at the same time, and the busy
     timeout lets two writers queue instead of failing.
 
-    Selecting the journal mode writes the database header, so a read-only
-    database refuses it.  That refusal is the cheapest read-only test there is,
-    so it is recorded on the connection rather than raised: a database SQLite
-    will never write has no writers for a journal to protect, and
-    :func:`open_index` decides from the record whether this caller needed one.
+    Selecting the journal mode writes the database header, so a database SQLite
+    will never write refuses it.  That refusal is tolerated rather than raised,
+    because such a database has no writers for a journal to protect and a
+    consumer reading an archived copy is a deployment this index supports.
+    Nothing is inferred from its absence: whether this caller needed a writable
+    database is asked of the filesystem instead, in
+    :func:`_require_writable_sqlite_database`.
 
     Parameters:
         dbapi_connection: The freshly opened DBAPI connection.
-        connection_record: The pool's bookkeeping record, which carries the
-            read-only answer back to the opener.
+        connection_record: The pool's bookkeeping record, which these settings
+            do not use.
     """
-    read_only = False
     cursor = dbapi_connection.cursor()
     try:
         cursor.execute('PRAGMA foreign_keys = ON')
@@ -109,12 +183,10 @@ def _sqlite_on_connect(dbapi_connection: Any, connection_record: Any) -> None:
         try:
             cursor.execute('PRAGMA journal_mode = WAL')
         except sqlite3.Error as exc:
-            if not _sqlite_refused_a_write(exc):
+            if not _is_read_only_error(_sqlite_error_name(exc)):
                 raise
-            read_only = True
     finally:
         cursor.close()
-    connection_record.info[_SQLITE_READ_ONLY_KEY] = read_only
 
 
 def _sqlite_path(parsed: URL) -> Path | None:
@@ -139,7 +211,7 @@ def _make_engine(parsed: URL, url: str) -> Engine:
 
     Parameters:
         parsed: The parsed connection URL.
-        url: The URL as the caller wrote it, for error messages.
+        url: The URL as messages name it.
 
     Returns:
         The engine, not yet connected.
@@ -153,65 +225,173 @@ def _make_engine(parsed: URL, url: str) -> Engine:
         return sqlalchemy.create_engine(parsed)
     except ModuleNotFoundError as exc:
         if parsed.get_backend_name() == _POSTGRES_BACKEND:
-            raise ValueError(
+            raise _IndexOpenError(
                 f'{url}: the PostgreSQL driver is not installed. Install it with '
                 f'"pip install rms-spindoctor[postgres]", or use a sqlite: URL.'
             ) from exc
-        raise ValueError(
+        raise _IndexOpenError(
             f'{url}: the driver this URL names is not installed ({exc}), and SpinDoctor '
             f'ships no driver for that backend. {_SUPPORTED_URL_FORMS}'
         ) from exc
 
 
-def _probe_sqlite_access(engine: Engine, url: str, *, create: bool) -> None:
-    """Verify that a SQLite database can be locked, and written when it must be.
+def _read_only_refusal(url: str) -> _IndexOpenError:
+    """Return the refusal for a database ingest is never going to be able to write.
+
+    Parameters:
+        url: The URL as messages name it.
+
+    Returns:
+        The refusal to raise.
+    """
+    return _IndexOpenError(
+        f'{url}: this SQLite database is read-only, and ingest has to write it. '
+        f'Ingest a writable copy; a consumer reads this one as it is.'
+    )
+
+
+def _require_writable_sqlite_database(path: Path, url: str) -> None:
+    """Verify that ingest can write the SQLite database a URL names.
+
+    The question is put to the filesystem rather than to SQLite, because SQLite
+    does not answer it at open.  A write-ahead-logged database -- the shape this
+    opener always leaves behind, having selected that journal mode -- accepts
+    both the journal-mode selection, which its header already records, and the
+    write lock ``BEGIN IMMEDIATE`` takes, on a file it will never write.  It
+    refuses only the first real write, in the middle of an ingest.
+
+    The directory is asked about too: SQLite writes the write-ahead log and its
+    shared-memory index beside the database, so a writable file in a directory
+    that permits nothing is a database ingest still cannot write.
+
+    Parameters:
+        path: The database file's path.
+        url: The URL as messages name it.
+
+    Raises:
+        ValueError: If the file exists and cannot be written, or if its
+            directory exists and cannot be written.
+    """
+    if path.exists() and not os.access(path, os.W_OK):
+        raise _read_only_refusal(url)
+    directory = path.parent
+    if directory.is_dir() and not os.access(directory, os.W_OK):
+        raise _IndexOpenError(
+            f'{url}: the directory {directory} is read-only, and ingest has to write the '
+            f'write-ahead log beside the database. Ingest into a writable directory; a '
+            f'consumer reads this one as it is.'
+        )
+
+
+def _cannot_open_message(exc: sqlalchemy.exc.DBAPIError, url: str, path: Path | None) -> str:
+    """Return the message for a path SQLite could not open.
+
+    One result code covers a directory that was never created, a path naming
+    something that is not a file, and a file this user may not touch.  Each has
+    a different remedy, and none of them is PostgreSQL.
+
+    Parameters:
+        exc: The driver exception, for what SQLite itself said.
+        url: The URL as messages name it.
+        path: The database file's path, or None for an in-memory database.
+
+    Returns:
+        The message.
+    """
+    if path is None:
+        return f'{url}: SQLite could not open this database ({exc.orig}).'
+    directory = path.parent
+    if not directory.is_dir():
+        return (
+            f'{url}: the directory {directory} does not exist, so SQLite cannot open a '
+            f'database in it. Create the directory first, or name a path inside one that '
+            f'already exists.'
+        )
+    if path.exists() and not path.is_file():
+        return (
+            f'{url}: {path} is not a file, so it cannot be a SQLite database. Name the '
+            f'database file itself.'
+        )
+    return (
+        f'{url}: SQLite could not open {path} ({exc.orig}). Check that this user may read '
+        f'and write both that file and its directory.'
+    )
+
+
+def _sqlite_probe_failure(
+    exc: sqlalchemy.exc.DBAPIError, url: str, path: Path | None
+) -> _IndexOpenError:
+    """Return the refusal that fits what SQLite actually said.
+
+    One exception type covers a file that is not a database, a path that cannot
+    be opened at all, and a lock a filesystem would not grant.  Only the last is
+    a reason to move the index to a server, and prescribing that for the others
+    sends an operator to rebuild a deployment over a directory they had not
+    created yet.
+
+    Parameters:
+        exc: The driver exception the probe raised.
+        url: The URL as messages name it.
+        path: The database file's path, or None for an in-memory database.
+
+    Returns:
+        The refusal to raise.
+    """
+    error_name = _sqlite_error_name(exc)
+    if error_name == _SQLITE_NOT_A_DATABASE:
+        return _IndexOpenError(
+            f'{url}: this file is not a SQLite database ({exc.orig}). Check the path: an '
+            f'index is built by sd_stats_ingest, and this file holds something else.'
+        )
+    if error_name == _SQLITE_CANNOT_OPEN:
+        return _IndexOpenError(_cannot_open_message(exc, url, path))
+    return _IndexOpenError(
+        f'{url}: could not take a SQLite write lock ({exc.orig}). A SQLite index '
+        f'must live on a local filesystem that honors locking; use a '
+        f'postgresql+psycopg: URL to share one index across machines.'
+    )
+
+
+def _probe_sqlite_access(engine: Engine, url: str, path: Path | None, *, create: bool) -> None:
+    """Verify that a SQLite database can be locked, and read when that is all it is.
 
     Taking and releasing a write lock is the cheapest question that distinguishes
     a filesystem SQLite can be trusted on from one where concurrent writers
     silently corrupt the file.  Asking it at open turns a data-loss bug into a
     startup error.
 
-    Read-only is a different answer, and the connection carries it: the journal
-    mode :func:`_sqlite_on_connect` selects writes the database header, so its
-    refusal is the read-only test, and the answer is recorded there.  The lock
-    cannot be asked instead, because a rollback-journal database SQLite will
-    never write still grants the reserved lock ``BEGIN IMMEDIATE`` asks for.
-
-    Read-only is refused only when the caller means to write.  A consumer reads,
-    and an archived or read-only-mounted index serves it, so the refusal an
-    ingest deserves would be a false one here.
+    A read-only database answers this question in two ways depending on its
+    journal mode, so neither answer is read as a verdict on whether the caller
+    may write: that is settled from the filesystem before the engine is built.
+    What matters here is that a read-only refusal is not reported as a locking
+    failure, and that a database whose write-ahead logging makes it unreadable
+    says so rather than failing a consumer's first query.  A refusal that
+    reaches an ingest here is still reported as read-only, since a network
+    filesystem answers the permission question from mode bits it does not
+    itself enforce, and SQLite is the one that finds out.
 
     Parameters:
         engine: The engine to probe.
-        url: The URL as the caller wrote it, for error messages.
+        url: The URL as messages name it.
+        path: The database file's path, or None for an in-memory database.
         create: Whether the caller intends to write the database.
 
     Raises:
-        ValueError: If the write lock cannot be taken; if the database is
-            read-only and the caller means to write it; or if it is read-only and
-            cannot be read either.
+        ValueError: If the write lock cannot be taken, if the path is not a
+            database this code can open, if the database is read-only and the
+            caller means to write it, or if it is read-only and cannot be read
+            either.
     """
-    read_only = False
     try:
         with engine.connect() as connection:
-            read_only = bool(connection.info.get(_SQLITE_READ_ONLY_KEY))
-            if not read_only:
-                connection.exec_driver_sql('BEGIN IMMEDIATE')
-                connection.exec_driver_sql('ROLLBACK')
+            connection.exec_driver_sql('BEGIN IMMEDIATE')
+            connection.exec_driver_sql('ROLLBACK')
     except sqlalchemy.exc.DBAPIError as exc:
-        raise ValueError(
-            f'{url}: could not take a SQLite write lock ({exc.orig}). A SQLite index '
-            f'must live on a local filesystem that honors locking; use a '
-            f'postgresql+psycopg: URL to share one index across machines.'
-        ) from exc
-    if not read_only:
-        return
-    if create:
-        raise ValueError(
-            f'{url}: this SQLite database is read-only, and ingest has to write it. '
-            f'Ingest a writable copy; a consumer reads this one as it is.'
-        )
-    _require_sqlite_readable(engine, url)
+        if not _is_read_only_error(_sqlite_error_name(exc)):
+            raise _sqlite_probe_failure(exc, url, path) from exc
+        if create:
+            raise _read_only_refusal(url) from exc
+        _require_sqlite_readable(engine, url)
 
 
 def _require_sqlite_readable(engine: Engine, url: str) -> None:
@@ -224,7 +404,7 @@ def _require_sqlite_readable(engine: Engine, url: str) -> None:
 
     Parameters:
         engine: The engine to probe.
-        url: The URL as the caller wrote it, for error messages.
+        url: The URL as messages name it.
 
     Raises:
         ValueError: If the database cannot be read.
@@ -233,7 +413,7 @@ def _require_sqlite_readable(engine: Engine, url: str) -> None:
         with engine.connect() as connection:
             connection.exec_driver_sql('SELECT count(*) FROM sqlite_master')
     except sqlalchemy.exc.DBAPIError as exc:
-        raise ValueError(
+        raise _IndexOpenError(
             f'{url}: this SQLite database is read-only and cannot be read either '
             f'({exc.orig}). A write-ahead-logged database creates an index file beside '
             f'itself even to be read, so copy it somewhere writable.'
@@ -283,7 +463,7 @@ def _verify_schema_version(stamped: int | None, url: str) -> None:
     Parameters:
         stamped: The version read from the database, or None when it carries no
             ``schema_meta`` row.
-        url: The URL as the caller wrote it, for error messages.
+        url: The URL as messages name it.
 
     Raises:
         ValueError: If the database carries no ``schema_meta`` row, or one whose
@@ -291,16 +471,51 @@ def _verify_schema_version(stamped: int | None, url: str) -> None:
             :data:`~spindoctor.results_index.schema.SCHEMA_VERSION`.
     """
     if stamped is None:
-        raise ValueError(
+        raise _IndexOpenError(
             f'{url}: this is not a results index (it has no schema_meta row). '
             f'Run sd_stats_ingest first to build one.'
         )
     if stamped != SCHEMA_VERSION:
-        raise ValueError(
+        raise _IndexOpenError(
             f'{url}: results index schema version {stamped} is not the '
             f'version {SCHEMA_VERSION} this code reads. There are no migrations: delete '
             f'the database and re-run sd_stats_ingest.'
         )
+
+
+def _sqlite_target(parsed: URL, url: str, *, create: bool) -> Path | None:
+    """Return the local path a SQLite URL names, refusing one it cannot serve.
+
+    Parameters:
+        parsed: The parsed connection URL, whose backend is SQLite.
+        url: The URL as messages name it.
+        create: Whether the caller intends to write the database.
+
+    Returns:
+        The database file's path, or None for an in-memory database.
+
+    Raises:
+        ValueError: If the URL carries a query string; if the caller means to
+            write a database the filesystem will not let it write; or if the
+            caller means to read one that is not there.
+    """
+    if parsed.query:
+        carried = ', '.join(sorted(parsed.query))
+        raise _IndexOpenError(
+            f'{url}: a SQLite index URL is a plain local path, and this one carries a '
+            f'query string ({carried}). The driver would open a file named after the '
+            f'query rather than the one named here, so name the file alone.'
+        )
+    path = _sqlite_path(parsed)
+    if path is None:
+        return None
+    if create:
+        _require_writable_sqlite_database(path, url)
+    elif not path.exists():
+        raise _IndexOpenError(
+            f'{url}: there is no results index at {path}. Run sd_stats_ingest to build one.'
+        )
+    return path
 
 
 def _build_engine(url: str, *, create: bool) -> Engine:
@@ -321,28 +536,24 @@ def _build_engine(url: str, *, create: bool) -> Engine:
         ValueError: For the failures this module diagnoses itself.
     """
     parsed = sqlalchemy.engine.make_url(url)
+    safe_url = parsed.render_as_string()
     backend = parsed.get_backend_name()
-    if backend == _SQLITE_BACKEND and not create:
-        path = _sqlite_path(parsed)
-        if path is not None and not path.exists():
-            raise ValueError(
-                f'{url}: there is no results index at {path}. Run sd_stats_ingest to build one.'
-            )
-    engine = _make_engine(parsed, url)
+    path = _sqlite_target(parsed, safe_url, create=create) if backend == _SQLITE_BACKEND else None
+    engine = _make_engine(parsed, safe_url)
     try:
         if backend == _SQLITE_BACKEND:
             sqlalchemy.event.listen(engine, 'connect', _sqlite_on_connect)
-            _probe_sqlite_access(engine, url, create=create)
+            _probe_sqlite_access(engine, safe_url, path, create=create)
         # The stamped version is checked before anything is written: creating
         # this version's tables inside a database stamped with another version
         # would leave a mixture no single version number describes.
         stamped = _stamped_version(engine)
         if stamped is not None:
-            _verify_schema_version(stamped, url)
+            _verify_schema_version(stamped, safe_url)
         if create:
             _create_schema(engine)
             stamped = _stamped_version(engine)
-        _verify_schema_version(stamped, url)
+        _verify_schema_version(stamped, safe_url)
     except Exception:
         engine.dispose()
         raise
@@ -359,7 +570,9 @@ def open_index(url: str, *, create: bool = False) -> Engine:
     that carries no ``schema_meta`` row, is an error naming ``sd_stats_ingest``.
     A consumer pointed at a SQLite path that does not exist fails; it does not
     leave an empty database behind.  With ``create`` true -- the ingest programs
-    -- missing tables are created and the version row is written.
+    -- missing tables are created and the version row is written, and a database
+    the filesystem will not let this user write is refused before anything is
+    opened.
 
     Either way a database stamped with a different schema version is refused,
     naming both versions, because the index carries no migrations and rebuilding
@@ -369,7 +582,7 @@ def open_index(url: str, *, create: bool = False) -> Engine:
     Every failure is a ``ValueError`` naming the URL, including the ones a
     database driver raises: a consumer that wants to report the cause rather than
     crash catches one type, and the driver's own exception is kept as the
-    ``__cause__``.
+    ``__cause__``.  The URL is named with its password masked.
 
     Parameters:
         url: A ``sqlite:`` URL naming a local filesystem path, or a
@@ -381,21 +594,27 @@ def open_index(url: str, *, create: bool = False) -> Engine:
         and a busy timeout applied to every connection.
 
     Raises:
-        ValueError: If the URL cannot be parsed, names a backend with no driver
-            installed, or names a server that will not accept the connection; if
-            a SQLite file's filesystem cannot honor write locking, or the file is
-            read-only and ``create`` is true; if ``create`` is false and the
-            database or its ``schema_meta`` row does not exist; or if the stamped
-            schema version is not the one this code reads.
+        ValueError: If the URL cannot be parsed, carries a query string a SQLite
+            index may not have, names a backend with no driver installed, or
+            names a server that will not accept the connection; if a SQLite
+            file's filesystem cannot honor write locking, or the file cannot be
+            written and ``create`` is true; if ``create`` is false and the
+            database or its ``schema_meta`` row does not exist; or if the
+            stamped schema version is not the one this code reads.
     """
     try:
         return _build_engine(url, create=create)
+    except _IndexOpenError:
+        raise
     except sqlalchemy.exc.NoSuchModuleError as exc:
         raise ValueError(
-            f'{url}: there is no database driver for this URL scheme ({exc}). '
+            f'{_display_url(url)}: there is no database driver for this URL scheme ({exc}). '
             f'{_SUPPORTED_URL_FORMS}'
         ) from exc
-    except sqlalchemy.exc.SQLAlchemyError as exc:
+    except Exception as exc:
+        # Everything else, not only SQLAlchemy's own exceptions: a dialect
+        # reports a malformed port or an uncoercible connect argument as a bare
+        # ValueError naming neither the URL nor the setting that supplied it.
         raise ValueError(
-            f'{url}: could not open the results index ({type(exc).__name__}: {exc}).'
+            f'{_display_url(url)}: could not open the results index ({type(exc).__name__}: {exc}).'
         ) from exc

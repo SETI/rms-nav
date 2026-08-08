@@ -27,6 +27,52 @@ OTHER_STUB = 'COISS_2002/data/1295221349_1296000000/N1294561202_1_CALIB'
 
 FIFTEEN_DIGIT_OFFSET = -1234.56789012345
 
+BOGUS_PASSWORD = 'sup3rs3cr3t'
+"""A password distinctive enough that finding it anywhere is proof of a leak."""
+
+
+def _password_of(url: str) -> str:
+    """Return the password a URL carries.
+
+    Parameters:
+        url: The URL to read.
+
+    Returns:
+        The password, or an empty string when the URL carries none.
+    """
+    return sqlalchemy.engine.make_url(url).password or ''
+
+
+def _with_password(url: str, password: str) -> str:
+    """Return a URL carrying a different password.
+
+    Parameters:
+        url: The URL to rewrite.
+        password: The password to put in it.
+
+    Returns:
+        The rewritten URL, with the password in plain text as a caller writes it.
+    """
+    rewritten = sqlalchemy.engine.make_url(url).set(password=password)
+    return rewritten.render_as_string(hide_password=False)
+
+
+def _refusal_without_the_password(url: str, message: str) -> str:
+    """Open a URL, require the refusal it raises, and return that message.
+
+    Parameters:
+        url: The URL to open.
+        message: Pattern the refusal message must match.
+
+    Returns:
+        The refusal message.
+    """
+    if not _password_of(url):
+        pytest.skip('the configured server URL carries no password to mask')
+    with pytest.raises(ValueError, match=message) as excinfo:
+        open_index(url)
+    return str(excinfo.value)
+
 
 def test_creating_the_schema_creates_every_table(postgres_url: str) -> None:
     """The metadata emits DDL a server accepts, not just DDL SQLite accepts.
@@ -82,6 +128,49 @@ def test_the_version_message_says_to_delete_and_re_ingest(postgres_url: str) -> 
         connection.execute(SCHEMA_META.update().values(schema_version=SCHEMA_VERSION + 1))
     with pytest.raises(ValueError, match='delete the database and re-run sd_stats_ingest'):
         open_index(postgres_url)
+
+
+def test_the_not_an_index_refusal_does_not_repeat_the_password(postgres_url: str) -> None:
+    """A server URL is the one that carries a password, and this gate names it.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    message = _refusal_without_the_password(postgres_url, 'not a results index')
+    assert f':{_password_of(postgres_url)}@' not in message
+
+
+def test_the_version_refusal_does_not_repeat_the_password(postgres_url: str) -> None:
+    """Every route names the URL, so every route has to mask it.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    with opened(postgres_url, create=True) as engine, engine.begin() as connection:
+        connection.execute(SCHEMA_META.update().values(schema_version=SCHEMA_VERSION + 1))
+    message = _refusal_without_the_password(postgres_url, 'is not the version')
+    assert f':{_password_of(postgres_url)}@' not in message
+
+
+def test_a_masked_refusal_still_names_the_server(postgres_url: str) -> None:
+    """Masking must not cost the identification the message exists for.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    message = _refusal_without_the_password(postgres_url, 'not a results index')
+    assert str(sqlalchemy.engine.make_url(postgres_url).host) in message
+
+
+def test_a_rejected_password_is_not_repeated_in_the_refusal(postgres_server_url: str) -> None:
+    """The failure most likely to carry a password is the one that is about it.
+
+    Parameters:
+        postgres_server_url: URL of the server the tier runs against.
+    """
+    with pytest.raises(ValueError, match='could not open the results index') as excinfo:
+        open_index(_with_password(postgres_server_url, BOGUS_PASSWORD))
+    assert BOGUS_PASSWORD not in str(excinfo.value)
 
 
 def test_the_offset_round_trips_bit_for_bit(postgres_url: str) -> None:
