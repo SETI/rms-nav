@@ -12,7 +12,7 @@ import dataclasses
 import os
 import re
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +28,15 @@ from spindoctor.results_index import engine as engine_module
 PASSWORD = 'sup3rs3cr3t'
 """A password distinctive enough that finding it anywhere is proof of a leak."""
 
+SLASHED_PASSWORD = 'aB3/xY9z'
+"""A password carrying a slash, which a URL permits unescaped.
+
+The route that masks by pattern is the one that runs on a URL nothing could
+parse, so nothing there knows where the password ends except the ``@``. A
+pattern that stopped at a path separator would leave this one in the message
+whole.
+"""
+
 MISSING_DRIVER_URL = 'postgresql+psycopg://user@localhost:5432/spindoctor'
 
 UNSUPPORTED_BACKEND_URL = 'mysql+mysqldb://user@localhost/spindoctor'
@@ -37,6 +46,9 @@ UNKNOWN_BACKEND_URL = 'frobnicate://user@localhost/spindoctor'
 MALFORMED_URL = 'this is not a connection url :::'
 
 UNREACHABLE_SERVER_URL = 'postgresql+psycopg://spindoctor@127.0.0.1:1/spindoctor'
+
+EXPLODING_FACTORY_MESSAGE = 'the dialect exploded'
+"""What the stand-in engine factory raises, standing for any escape from one."""
 
 
 def _url_for(path: Path) -> str:
@@ -70,6 +82,64 @@ def _without_module(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
         return real_import(module_name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, '__import__', blocked)
+
+
+class _DriverError(Exception):
+    """A driver exception carrying the result code SQLite would have set on it.
+
+    The codes worth testing are the ones that are hard to provoke on demand: a
+    disk that filled during an ingest, a file that corrupted under a crash. The
+    classification reads the code off the driver's exception, so an exception
+    carrying the code is the whole of what it needs.
+
+    Attributes:
+        sqlite_errorname: The result-code name, under the attribute the SQLite
+            driver publishes it as.
+    """
+
+    def __init__(self, message: str, error_name: str) -> None:
+        """Build the refusal.
+
+        Parameters:
+            message: What the driver would have said.
+            error_name: The result-code name to carry.
+        """
+        super().__init__(message)
+        self.sqlite_errorname = error_name
+
+
+def _refusing_with(original: Exception) -> Callable[..., Any]:
+    """Return a statement executor that fails every statement with one error.
+
+    Parameters:
+        original: The driver exception to wrap, standing in for what SQLite
+            itself raised.
+
+    Returns:
+        A replacement for ``Connection.exec_driver_sql``.
+    """
+
+    def refusing(self: Any, statement: Any, *args: Any, **kwargs: Any) -> Any:
+        raise sqlalchemy.exc.OperationalError(str(statement), None, original)
+
+    return refusing
+
+
+def _exploding_factory(*args: Any, **kwargs: Any) -> Engine:
+    """Stand in for an engine factory that fails in a way nobody enumerated.
+
+    A dialect coerces its own connect arguments and reports a bad one as a bare
+    exception naming nothing, so the translation has to be a catch-all rather
+    than a list of types.
+
+    Parameters:
+        args: Whatever the caller passed, all of it ignored.
+        kwargs: Whatever the caller passed, all of it ignored.
+
+    Raises:
+        RuntimeError: Always.
+    """
+    raise RuntimeError(EXPLODING_FACTORY_MESSAGE)
 
 
 def _index_stamped_with_another_version(tmp_path: Path) -> Path:
@@ -135,13 +205,19 @@ def read_only_index(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[
     finally:
         connection.close()
     path.chmod(0o444)
-    if os.access(path, os.W_OK):
-        pytest.skip('this user can write a file whose mode forbids writing')
     try:
+        if os.access(path, os.W_OK):
+            pytest.skip('this user can write a file whose mode forbids writing')
         yield path
     finally:
-        # Restored so the temporary directory can be removed by a later run.
-        path.chmod(0o644)
+        # Every file the fixture is responsible for, not only the database:
+        # SQLite copies the database's mode onto the write-ahead log and the
+        # shared-memory index it creates beside it, so a test that reads this
+        # database leaves those behind read-only too. The skip is inside the
+        # try for the same reason: a run on a user who can write anything must
+        # still leave the directory as it found it.
+        for made_read_only in path.parent.glob(f'{path.name}*'):
+            made_read_only.chmod(0o644)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -154,16 +230,23 @@ class _Route:
         identifies: Text of the URL the message must keep, so a reader can tell
             which of the resolution levels supplied the value.
         cause: Exception type the refusal keeps as its ``__cause__``.
+        password: The password this route's URL carries, which its refusal may
+            not repeat.
         hidden_module: Module to make unimportable first, or None.
         needs_psycopg: Whether the route reaches the PostgreSQL driver itself.
+        breaks_the_factory: Whether the engine factory is replaced by one that
+            raises, standing for a failure inside a dialect that no enumeration
+            of exception types would have caught.
     """
 
     url: str
     message: str
     identifies: str
     cause: type[BaseException]
+    password: str = PASSWORD
     hidden_module: str | None = None
     needs_psycopg: bool = False
+    breaks_the_factory: bool = False
 
 
 REFUSAL_ROUTES = [
@@ -207,6 +290,21 @@ REFUSAL_ROUTES = [
     ),
     pytest.param(
         _Route(
+            # A stray space in the scheme, which is what a URL copied across two
+            # lines of a configuration file arrives as. Nothing parses it, so
+            # nothing can render it either: this is the route on which the
+            # password is masked by pattern, and the only one on which the
+            # pattern is what stands between the password and the run log.
+            url=f'postgresql psycopg://svc:{SLASHED_PASSWORD}@db.example/spindoctor',
+            message='could not open the results index',
+            identifies='db.example',
+            cause=sqlalchemy.exc.ArgumentError,
+            password=SLASHED_PASSWORD,
+        ),
+        id='unparseable-url',
+    ),
+    pytest.param(
+        _Route(
             url=f'postgresql+psycopg://spindoctor:{PASSWORD}@127.0.0.1:1/spindoctor',
             message='could not open the results index',
             identifies='127.0.0.1:1',
@@ -214,6 +312,16 @@ REFUSAL_ROUTES = [
             needs_psycopg=True,
         ),
         id='server-refuses-the-connection',
+    ),
+    pytest.param(
+        _Route(
+            url=f'postgresql+psycopg://user:{PASSWORD}@db.example:5432/spindoctor',
+            message=EXPLODING_FACTORY_MESSAGE,
+            identifies='db.example:5432',
+            cause=RuntimeError,
+            breaks_the_factory=True,
+        ),
+        id='failure-inside-the-engine-factory',
     ),
 ]
 """Every route by which a URL carrying a password reaches a refusal."""
@@ -233,6 +341,8 @@ def _refusal_of(route: _Route, monkeypatch: pytest.MonkeyPatch) -> ValueError:
         pytest.importorskip('psycopg')
     if route.hidden_module is not None:
         _without_module(monkeypatch, route.hidden_module)
+    if route.breaks_the_factory:
+        monkeypatch.setattr(sqlalchemy, 'create_engine', _exploding_factory)
     with pytest.raises(ValueError, match=route.message) as excinfo:
         open_index(route.url)
     return excinfo.value
@@ -506,7 +616,7 @@ def test_a_missing_driver_for_another_backend_is_not_disguised(
         monkeypatch: Fixture used to hide the driver.
     """
     _without_module(monkeypatch, 'MySQLdb')
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(ValueError, match='ships no driver for that backend') as excinfo:
         open_index(UNSUPPORTED_BACKEND_URL)
     assert 'rms-spindoctor[postgres]' not in str(excinfo.value)
 
@@ -576,7 +686,7 @@ def test_a_refusal_does_not_repeat_the_password(
         route: The refusal route under test.
         monkeypatch: Fixture the import hook is installed through.
     """
-    assert PASSWORD not in str(_refusal_of(route, monkeypatch))
+    assert route.password not in str(_refusal_of(route, monkeypatch))
 
 
 @pytest.mark.parametrize('route', REFUSAL_ROUTES)
@@ -595,6 +705,55 @@ def test_a_masked_refusal_still_names_the_rest_of_the_url(
     assert route.identifies in str(_refusal_of(route, monkeypatch))
 
 
+MASKING_CASES = [
+    pytest.param(
+        'postgresql+psycopg://svc:aB3/xY9z@db.example:5432x/spindoctor',
+        'postgresql+psycopg://svc:***@db.example:5432x/spindoctor',
+        id='a-password-carrying-a-slash',
+    ),
+    pytest.param(
+        'postgresql+psycopg:/svc:aB3xY9z@db.example/spindoctor',
+        'postgresql+psycopg:/svc:***@db.example/spindoctor',
+        id='one-slash-after-the-scheme',
+    ),
+    pytest.param('//user:pa/ss@h', '//user:***@h', id='no-scheme-at-all'),
+    pytest.param('//:pw@h', '//:***@h', id='no-user-name'),
+    pytest.param('/user:pw@h', '/user:***@h', id='one-slash-and-no-scheme'),
+    pytest.param(
+        'sqlite:////data/a:b/index.sqlite3',
+        'sqlite:////data/a:b/index.sqlite3',
+        id='a-local-path-carrying-a-colon',
+    ),
+    pytest.param(
+        'sqlite:////data/a:b/i@dex.sqlite3',
+        'sqlite:////data/a:b/i@dex.sqlite3',
+        id='a-local-path-carrying-a-colon-and-an-at-sign',
+    ),
+    pytest.param(
+        'postgresql+psycopg://user@host/spindoctor',
+        'postgresql+psycopg://user@host/spindoctor',
+        id='no-password-to-mask',
+    ),
+]
+"""URLs the pattern masks, and URLs it must leave exactly as they are."""
+
+
+@pytest.mark.parametrize(('url', 'expected'), MASKING_CASES)
+def test_the_pattern_masks_a_password_and_nothing_else(url: str, expected: str) -> None:
+    """The pattern is the only defense on the route where the URL did not parse.
+
+    It has to reach a password whatever the password contains -- a URL permits an
+    unescaped slash in one -- and it has to leave alone a local path that merely
+    happens to carry a colon and a later at-sign, since mangling the path costs
+    the identification these messages exist for.
+
+    Parameters:
+        url: The URL as a caller wrote it.
+        expected: What masking it must produce.
+    """
+    assert engine_module._masked_url(url) == expected
+
+
 def test_an_unexpected_failure_inside_the_driver_is_still_a_value_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -608,12 +767,8 @@ def test_an_unexpected_failure_inside_the_driver_is_still_a_value_error(
         tmp_path: Directory the database would have lived in.
         monkeypatch: Fixture the failing engine factory is installed through.
     """
-
-    def exploding(*args: Any, **kwargs: Any) -> Engine:
-        raise RuntimeError('the dialect exploded')
-
-    monkeypatch.setattr(sqlalchemy, 'create_engine', exploding)
-    with pytest.raises(ValueError, match='the dialect exploded'):
+    monkeypatch.setattr(sqlalchemy, 'create_engine', _exploding_factory)
+    with pytest.raises(ValueError, match=EXPLODING_FACTORY_MESSAGE):
         open_index(_url_for(tmp_path / 'index.sqlite3'), create=True)
 
 
@@ -626,13 +781,24 @@ def test_an_unexpected_failure_names_the_url(
         tmp_path: Directory the database would have lived in.
         monkeypatch: Fixture the failing engine factory is installed through.
     """
-
-    def exploding(*args: Any, **kwargs: Any) -> Engine:
-        raise RuntimeError('the dialect exploded')
-
-    monkeypatch.setattr(sqlalchemy, 'create_engine', exploding)
+    monkeypatch.setattr(sqlalchemy, 'create_engine', _exploding_factory)
     with pytest.raises(ValueError, match=re.escape(str(tmp_path / 'index.sqlite3'))):
         open_index(_url_for(tmp_path / 'index.sqlite3'), create=True)
+
+
+def test_an_unexpected_failure_keeps_the_factory_error_as_its_cause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A translated type that dropped the original leaves nothing to debug from.
+
+    Parameters:
+        tmp_path: Directory the database would have lived in.
+        monkeypatch: Fixture the failing engine factory is installed through.
+    """
+    monkeypatch.setattr(sqlalchemy, 'create_engine', _exploding_factory)
+    with pytest.raises(ValueError, match=EXPLODING_FACTORY_MESSAGE) as excinfo:
+        open_index(_url_for(tmp_path / 'index.sqlite3'), create=True)
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
 
 
 def test_engine_echo_is_off(tmp_path: Path) -> None:
@@ -659,7 +825,6 @@ def test_engine_echo_is_off(tmp_path: Path) -> None:
     [
         ('foreign_keys', 1),
         ('busy_timeout', engine_module.SQLITE_BUSY_TIMEOUT_MS),
-        ('journal_mode', 'wal'),
     ],
 )
 def test_every_sqlite_connection_carries_the_pragma(
@@ -668,8 +833,13 @@ def test_every_sqlite_connection_carries_the_pragma(
     """The settings are applied per connection, not once at open.
 
     A pool hands out connections opened long after the engine was built, and a
-    connection without these is a connection without the cascade, without
-    concurrent readers, and without the wait that keeps two writers from failing.
+    connection without these is a connection without the cascade and without the
+    wait that keeps two writers from failing. Both are per-connection state that
+    a connection the settings missed simply does not have, which is what makes
+    reading them back on a second connection a real test. The journal mode is
+    not: it is a property of the database file, so it reads back the same
+    whether or not this connection asked for it, and it is asserted separately
+    as the persistent thing it is.
 
     Parameters:
         tmp_path: Directory holding the database.
@@ -687,6 +857,27 @@ def test_every_sqlite_connection_carries_the_pragma(
         found = second.exec_driver_sql(f'PRAGMA {pragma}').scalar()
     assert reused is False
     assert found == expected
+
+
+def test_the_opener_leaves_the_database_write_ahead_logged(tmp_path: Path) -> None:
+    """Write-ahead logging is what lets a reader and a writer work at once.
+
+    The journal mode lives in the database header rather than in a connection,
+    so it is read back from the closed file with the standard library: that is
+    the state a later ingest, and every consumer, actually meets.
+
+    Parameters:
+        tmp_path: Directory holding the database.
+    """
+    path = tmp_path / 'index.sqlite3'
+    with opened(_url_for(path), create=True):
+        pass
+    connection = sqlite3.connect(path)
+    try:
+        (mode,) = connection.execute('PRAGMA journal_mode').fetchone()
+    finally:
+        connection.close()
+    assert mode == 'wal'
 
 
 def test_a_locked_database_file_is_refused_at_open(
@@ -800,7 +991,7 @@ def test_a_file_that_is_not_a_database_is_not_blamed_on_the_filesystem(tmp_path:
     """
     path = tmp_path / 'index.sqlite3'
     path.write_text('this is a note somebody left here\n')
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(ValueError, match='not a SQLite database') as excinfo:
         open_index(_url_for(path))
     assert 'honors locking' not in str(excinfo.value)
 
@@ -827,7 +1018,7 @@ def test_a_directory_that_does_not_exist_is_not_answered_with_postgresql(
         tmp_path: Directory the missing directory would have lived in.
     """
     path = tmp_path / 'results' / 'index.sqlite3'
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(ValueError, match='does not exist') as excinfo:
         open_index(_url_for(path), create=True)
     assert 'postgresql' not in str(excinfo.value)
 
@@ -863,13 +1054,88 @@ def test_a_driver_error_carrying_no_result_code_keeps_the_lock_message(
     path = tmp_path / 'index.sqlite3'
     with opened(_url_for(path), create=True):
         pass
-
-    def refusing(self: Any, statement: Any, *args: Any, **kwargs: Any) -> Any:
-        raise sqlalchemy.exc.OperationalError(str(statement), None, Exception('nothing to go on'))
-
+    refusing = _refusing_with(Exception('nothing to go on'))
     monkeypatch.setattr(Connection, 'exec_driver_sql', refusing)
     with pytest.raises(ValueError, match='could not take a SQLite write lock'):
         open_index(_url_for(path))
+
+
+@pytest.mark.parametrize(
+    ('error_name', 'detail'),
+    [
+        ('SQLITE_FULL', 'database or disk is full'),
+        ('SQLITE_CORRUPT', 'database disk image is malformed'),
+    ],
+)
+def test_an_unclassified_result_code_is_reported_as_what_sqlite_said(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_name: str, detail: str
+) -> None:
+    """A code with no classification gets SQLite's own words, not a guess.
+
+    Parameters:
+        tmp_path: Directory holding the database.
+        monkeypatch: Fixture the failing statement execution is installed through.
+        error_name: The result code SQLite reports.
+        detail: What the driver says alongside it.
+    """
+    path = tmp_path / 'index.sqlite3'
+    with opened(_url_for(path), create=True):
+        pass
+    monkeypatch.setattr(
+        Connection, 'exec_driver_sql', _refusing_with(_DriverError(detail, error_name))
+    )
+    with pytest.raises(ValueError, match=f'SQLite refused .*{error_name}'):
+        open_index(_url_for(path))
+
+
+@pytest.mark.parametrize(
+    ('error_name', 'detail'),
+    [
+        ('SQLITE_FULL', 'database or disk is full'),
+        ('SQLITE_CORRUPT', 'database disk image is malformed'),
+    ],
+)
+def test_an_unclassified_result_code_is_not_answered_with_postgresql(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_name: str, detail: str
+) -> None:
+    """A full disk and a corrupt file are not reasons to rebuild on a server.
+
+    That remedy belongs to a filesystem that will not honor locking, and to
+    nothing else; prescribing it for every unrecognized code is how an operator
+    ends up migrating a deployment over a disk that needed emptying.
+
+    Parameters:
+        tmp_path: Directory holding the database.
+        monkeypatch: Fixture the failing statement execution is installed through.
+        error_name: The result code SQLite reports.
+        detail: What the driver says alongside it.
+    """
+    path = tmp_path / 'index.sqlite3'
+    with opened(_url_for(path), create=True):
+        pass
+    monkeypatch.setattr(
+        Connection, 'exec_driver_sql', _refusing_with(_DriverError(detail, error_name))
+    )
+    with pytest.raises(ValueError, match='SQLite refused') as excinfo:
+        open_index(_url_for(path))
+    assert 'postgresql' not in str(excinfo.value)
+
+
+def test_an_in_memory_database_that_cannot_be_opened_says_only_that(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An in-memory URL names no path, so the message that names one cannot be used.
+
+    Parameters:
+        monkeypatch: Fixture the failing statement execution is installed through.
+    """
+    monkeypatch.setattr(
+        Connection,
+        'exec_driver_sql',
+        _refusing_with(_DriverError('unable to open database file', 'SQLITE_CANTOPEN')),
+    )
+    with pytest.raises(ValueError, match='could not open this database'):
+        open_index('sqlite://')
 
 
 # ---------------------------------------------------------------------------
@@ -946,7 +1212,7 @@ def test_a_read_only_index_is_refused_by_a_creating_open(read_only_index: Path) 
     Parameters:
         read_only_index: A database file this user cannot write.
     """
-    with pytest.raises(ValueError, match='this SQLite database is read-only'):
+    with pytest.raises(ValueError, match='read-only, and ingest has to write it'):
         open_index(_url_for(read_only_index), create=True)
 
 
@@ -959,7 +1225,7 @@ def test_the_read_only_refusal_does_not_blame_the_filesystem(read_only_index: Pa
     Parameters:
         read_only_index: A database file this user cannot write.
     """
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(ValueError, match='read-only, and ingest has to write it') as excinfo:
         open_index(_url_for(read_only_index), create=True)
     assert 'honors locking' not in str(excinfo.value)
 
@@ -974,7 +1240,7 @@ def test_a_read_only_index_is_refused_before_anything_is_opened(read_only_index:
     Parameters:
         read_only_index: A database file this user cannot write.
     """
-    with pytest.raises(ValueError, match='this SQLite database is read-only'):
+    with pytest.raises(ValueError, match='read-only, and ingest has to write it'):
         open_index(_url_for(read_only_index), create=True)
     assert sorted(path.name for path in read_only_index.parent.iterdir()) == ['index.sqlite3']
 
@@ -998,6 +1264,37 @@ def test_an_ingest_into_a_read_only_directory_is_refused(tmp_path: Path) -> None
         if os.access(directory, os.W_OK):
             pytest.skip('this user can write a directory whose mode forbids writing')
         with pytest.raises(ValueError, match='is read-only, and ingest has to write the'):
+            open_index(_url_for(path), create=True)
+    finally:
+        directory.chmod(0o755)
+
+
+def test_an_ingest_is_refused_by_sqlite_when_the_mode_bits_said_it_could_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A network filesystem answers from mode bits it does not itself enforce.
+
+    The filesystem check ahead of the engine is the ordinary diagnosis, and here
+    it is made to answer wrongly on purpose, because that is what an NFS or SMB
+    mount does: it reports a database this user may write, and SQLite is the one
+    that finds out otherwise. The refusal has to say read-only anyway, rather
+    than sending the operator to fix locking on a filesystem that locks fine.
+
+    Parameters:
+        tmp_path: Directory the read-only directory is created in.
+        monkeypatch: Fixture the lying access check is installed through.
+    """
+    directory = tmp_path / 'archive'
+    directory.mkdir()
+    path = directory / 'index.sqlite3'
+    with opened(_url_for(path), create=True):
+        pass
+    directory.chmod(0o555)
+    try:
+        if os.access(directory, os.W_OK):
+            pytest.skip('this user can write a directory whose mode forbids writing')
+        monkeypatch.setattr(os, 'access', lambda *args, **kwargs: True)
+        with pytest.raises(ValueError, match='read-only, and ingest has to write it'):
             open_index(_url_for(path), create=True)
     finally:
         directory.chmod(0o755)

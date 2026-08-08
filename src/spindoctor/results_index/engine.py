@@ -59,11 +59,27 @@ _SQLITE_NOT_A_DATABASE = 'SQLITE_NOTADB'
 _SQLITE_CANNOT_OPEN = 'SQLITE_CANTOPEN'
 """Result code SQLite gives for a path it cannot open, whatever the reason."""
 
+_SQLITE_LOCK_REFUSED_PREFIXES = ('SQLITE_BUSY', 'SQLITE_IOERR')
+"""Prefixes of the result codes that say the write lock itself was not granted.
+
+These are the codes a filesystem that cannot honor SQLite locking produces, and
+the only ones for which moving the index to a server is the remedy.
+"""
+
 _HIDDEN_PASSWORD = '***'
 """What a password is replaced by, matching what a parsed URL renders itself as."""
 
-_PASSWORD_IN_URL = re.compile(r'(?P<credentials>//[^/@]*?:)[^/@]*@')
-"""The password of a URL string that could not be parsed, as text."""
+_PASSWORD_IN_URL = re.compile(r'(?P<credentials>\A(?:[^/@]*:)?/{1,2}[^/@]*:)[^@]*@')
+"""The password of a URL string that could not be parsed, as text.
+
+A password is matched only where a URL keeps one: at the very start of the
+string, after an optional scheme and the one or two slashes that open the
+authority section, and after the colon that follows the user name.  The password
+itself runs to the ``@``, since a URL permits an unescaped ``/`` in one and a
+pattern that stopped at a separator would leak such a password whole.  Anchoring
+is what keeps a local path that merely happens to carry a colon and a later
+``@`` from being read as credentials and mangled.
+"""
 
 _SUPPORTED_URL_FORMS = (
     'A results index is either a sqlite: URL naming a local path, or a '
@@ -324,10 +340,16 @@ def _sqlite_probe_failure(
     """Return the refusal that fits what SQLite actually said.
 
     One exception type covers a file that is not a database, a path that cannot
-    be opened at all, and a lock a filesystem would not grant.  Only the last is
-    a reason to move the index to a server, and prescribing that for the others
-    sends an operator to rebuild a deployment over a directory they had not
-    created yet.
+    be opened at all, a lock a filesystem would not grant, and every other way a
+    database can refuse a write.  Only the lock is a reason to move the index to
+    a server, and prescribing that for the others sends an operator to rebuild a
+    deployment over a directory they had not created yet, or over a disk that is
+    merely full.  A code this classification does not know is reported as what
+    SQLite said, with no remedy invented for it.
+
+    Codes are matched by prefix, because SQLite refines several of them into
+    extended forms -- ``SQLITE_IOERR_WRITE``, ``SQLITE_CANTOPEN_ISDIR`` -- that
+    name the same cause more precisely.
 
     Parameters:
         exc: The driver exception the probe raised.
@@ -338,17 +360,22 @@ def _sqlite_probe_failure(
         The refusal to raise.
     """
     error_name = _sqlite_error_name(exc)
-    if error_name == _SQLITE_NOT_A_DATABASE:
+    if error_name.startswith(_SQLITE_NOT_A_DATABASE):
         return _IndexOpenError(
             f'{url}: this file is not a SQLite database ({exc.orig}). Check the path: an '
             f'index is built by sd_stats_ingest, and this file holds something else.'
         )
-    if error_name == _SQLITE_CANNOT_OPEN:
+    if error_name.startswith(_SQLITE_CANNOT_OPEN):
         return _IndexOpenError(_cannot_open_message(exc, url, path))
+    if error_name == '' or error_name.startswith(_SQLITE_LOCK_REFUSED_PREFIXES):
+        return _IndexOpenError(
+            f'{url}: could not take a SQLite write lock ({exc.orig}). A SQLite index '
+            f'must live on a local filesystem that honors locking; use a '
+            f'postgresql+psycopg: URL to share one index across machines.'
+        )
     return _IndexOpenError(
-        f'{url}: could not take a SQLite write lock ({exc.orig}). A SQLite index '
-        f'must live on a local filesystem that honors locking; use a '
-        f'postgresql+psycopg: URL to share one index across machines.'
+        f'{url}: SQLite refused {"this database" if path is None else path} '
+        f'({error_name}: {exc.orig}).'
     )
 
 
@@ -596,8 +623,9 @@ def open_index(url: str, *, create: bool = False) -> Engine:
     Raises:
         ValueError: If the URL cannot be parsed, carries a query string a SQLite
             index may not have, names a backend with no driver installed, or
-            names a server that will not accept the connection; if a SQLite
-            file's filesystem cannot honor write locking, or the file cannot be
+            names a server that will not accept the connection; if SQLite
+            refuses the file -- because its filesystem cannot honor write
+            locking, or for any other cause it reports -- or the file cannot be
             written and ``create`` is true; if ``create`` is false and the
             database or its ``schema_meta`` row does not exist; or if the
             stamped schema version is not the one this code reads.

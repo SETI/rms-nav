@@ -235,7 +235,11 @@ messages are written to run logs and pasted into bug reports, and a database
 password belongs in neither. Everything else about the URL survives, because
 naming the URL is what tells a reader which of the three resolution levels
 supplied the value. A URL the parser rejected cannot render itself, so its
-password is masked by pattern instead.
+password is masked by pattern instead. That pattern is anchored at the start
+of the URL and runs to the `@`, because a password may legally carry an
+unescaped `/`: one bounded by path separators leaves such a password in the
+message whole, and an unanchored one mangles a local path that happens to
+carry a colon and a later `@`.
 
 The engine factory is the only opener:
 
@@ -335,7 +339,12 @@ not a file, or a file this user cannot open -- prescribing PostgreSQL for an
 operator whose results directory has not been created yet is a wrong remedy
 for the most common first-run error there is. Only `SQLITE_BUSY`,
 `SQLITE_IOERR` and a code that names no cause at all keep the
-filesystem-and-PostgreSQL message.
+filesystem-and-PostgreSQL message. Every other code -- a full disk, a corrupt
+file -- is reported as what SQLite said, naming the path and the code and
+prescribing nothing, because inventing a remedy for an unclassified failure is
+exactly how the wrong one gets prescribed. Codes are matched by prefix, since
+SQLite refines several of them into extended forms naming the same cause more
+precisely.
 
 One read-only database cannot be read at all: SQLite reads a write-ahead-logged
 database through a shared-memory index it creates beside the file, so a
