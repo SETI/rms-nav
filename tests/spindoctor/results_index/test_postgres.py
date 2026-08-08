@@ -12,7 +12,10 @@ when ``SPINDOCTOR_TEST_POSTGRES_URL`` is unset, so a checkout with no server
 still runs a green suite.
 
 Each test gets a schema of its own from the ``postgres_url`` fixture, so a
-repeated run, or two workers of a parallel run, never share a table.
+repeated run, or two workers of a parallel run, never share a table.  A test
+that reads the server's catalog takes ``postgres_schema`` as well and filters on
+it: the catalog spans every schema on the server, so a lookup by table name
+alone answers from whichever schema happens to hold a table of that name.
 """
 
 import pytest
@@ -74,14 +77,19 @@ def _refusal_without_the_password(url: str, message: str) -> str:
     return str(excinfo.value)
 
 
-def test_creating_the_schema_creates_every_table(postgres_url: str) -> None:
+def test_creating_the_schema_creates_every_table(postgres_url: str, postgres_schema: str) -> None:
     """The metadata emits DDL a server accepts, not just DDL SQLite accepts.
+
+    The listing is scoped to this test's own schema rather than to whatever the
+    connection's search path resolves to, so a table another worker left in
+    ``public`` cannot answer for one this test was supposed to create.
 
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
+        postgres_schema: Name of that schema.
     """
     with opened(postgres_url, create=True) as engine:
-        found = sorted(sqlalchemy.inspect(engine).get_table_names())
+        found = sorted(sqlalchemy.inspect(engine).get_table_names(schema=postgres_schema))
     assert found == ['feature_sources', 'images', 'ingest_runs', 'schema_meta', 'techniques']
 
 
@@ -270,19 +278,26 @@ def test_a_json_column_round_trips_a_list(postgres_url: str) -> None:
     assert stored == ['ring_edge']
 
 
-def test_a_json_column_is_jsonb(postgres_url: str) -> None:
+def test_a_json_column_is_jsonb(postgres_url: str, postgres_schema: str) -> None:
     """A plain ``json`` column would reject ``jsonb_array_elements_text``.
+
+    The catalog is server-wide, so the lookup is scoped to this test's own
+    schema: filtered by table and column alone it would read whichever
+    ``images`` row the catalog returned first, which under parallel workers is
+    somebody else's.
 
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
+        postgres_schema: Name of that schema.
     """
     with opened(postgres_url, create=True) as engine, engine.connect() as connection:
         found = connection.execute(
             sqlalchemy.text(
                 'SELECT data_type FROM information_schema.columns '
-                'WHERE table_name = :table AND column_name = :column'
+                'WHERE table_schema = :schema AND table_name = :table '
+                'AND column_name = :column'
             ),
-            {'table': 'images', 'column': 'excluded_from_consensus'},
+            {'schema': postgres_schema, 'table': 'images', 'column': 'excluded_from_consensus'},
         ).scalar()
     assert found == 'jsonb'
 

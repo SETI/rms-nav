@@ -101,7 +101,22 @@ def postgres_server_url() -> str:
 
 
 @pytest.fixture
-def postgres_url(postgres_server_url: str) -> Iterator[str]:
+def postgres_schema() -> str:
+    """Return the name of the private schema this test's tables live in.
+
+    Requested alongside ``postgres_url`` by a test that reads the server's
+    catalog, where a query scoped by table name alone would answer from whatever
+    schema happened to hold a table of that name -- another worker's, or a
+    leftover in ``public``.
+
+    Returns:
+        A schema name no other test uses.
+    """
+    return f'ri_test_{uuid.uuid4().hex}'
+
+
+@pytest.fixture
+def postgres_url(postgres_server_url: str, postgres_schema: str) -> Iterator[str]:
     """Yield a PostgreSQL URL scoped to a schema of this test's own.
 
     The schema is created before the test and dropped after it, so repeated runs
@@ -109,11 +124,12 @@ def postgres_url(postgres_server_url: str) -> Iterator[str]:
 
     Parameters:
         postgres_server_url: The server URL the schema is created on.
+        postgres_schema: Name of the schema to create.
 
     Yields:
         A URL whose search path names the private schema.
     """
-    schema = f'ri_test_{uuid.uuid4().hex}'
+    schema = postgres_schema
     scoped = sqlalchemy.engine.make_url(postgres_server_url).update_query_dict(
         {'options': f'-csearch_path={schema}'}
     )
