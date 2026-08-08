@@ -210,8 +210,10 @@ results index URL:
   produced by ``sd_backplanes``.
 - ``bundle_results_root`` — write root for PDS4 bundles produced by
   ``sd_create_bundle``.
-- ``results_db`` — connection URL of the results index, a database built from
-  the navigation results tree by ``sd_stats_ingest``. A ``sqlite:`` URL names a
+- ``results_db`` — connection URL of the results index, a database derived from
+  the navigation results tree by a separate ingest step. It is not
+  authoritative: the per-image ``_metadata.json`` documents are, and the index
+  can be deleted and rebuilt from them. A ``sqlite:`` URL names a
   local filesystem path and nothing else: it carries no query string, because
   the driver would then open a file named after the query rather than the file
   named in the URL. A ``postgresql+psycopg:`` URL names a server. Leaving it
