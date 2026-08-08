@@ -1,12 +1,16 @@
 """Tests for :mod:`spindoctor.config.config_helper`.
 
-Covers the documented resolution order of the three results-root getters
-(explicit argument, then ``config.environment``, then environment variable)
-and the user-config loading behavior of ``load_default_and_user_config``
-(bundled defaults always; explicit ``--config-file`` paths when given;
-otherwise ``nav_default_config.yaml`` from the current directory).
+Covers the documented resolution order of the getters (explicit argument, then
+``config.environment``, then environment variable) and the user-config loading
+behavior of ``load_default_and_user_config`` (bundled defaults always; explicit
+``--config-file`` paths when given; otherwise ``nav_default_config.yaml`` from
+the current directory).
 
-The tests are hermetic: every test clears the three ``NAV_*_RESULTS_ROOT``
+The results-root getters and the results-index getter share that order and part
+ways at the end of it: an unresolved root is an error, while an unresolved index
+URL means "no index", which is every program's default mode.
+
+The tests are hermetic: every test clears the results-root and results-index
 environment variables via ``monkeypatch``, seeds ``Config`` instances
 directly (never the ``DEFAULT_CONFIG`` singleton), and changes into
 ``tmp_path`` before exercising the relative ``nav_default_config.yaml``
@@ -23,9 +27,11 @@ import pytest
 
 from spindoctor.config import Config
 from spindoctor.config.config_helper import (
+    RESULTS_DB_NONE,
     get_backplane_results_root,
     get_nav_results_root,
     get_pds4_bundle_results_root,
+    get_results_db_url,
     load_default_and_user_config,
 )
 
@@ -36,7 +42,12 @@ ALL_ENV_VARS = (
     'NAV_BACKPLANE_RESULTS_ROOT',
     'NAV_BUNDLE_RESULTS_ROOT',
     'BUNDLE_RESULTS_ROOT',
+    'NAV_RESULTS_DB',
 )
+
+SQLITE_URL = 'sqlite:////data/nav-results/index.sqlite3'
+
+POSTGRES_URL = 'postgresql+psycopg://user@host/spindoctor'
 
 # (getter, argparse attribute, environment-section key, env var, CLI flag)
 GETTER_CASES = [
@@ -69,7 +80,7 @@ GETTER_CASES = [
 
 @pytest.fixture(autouse=True)
 def _clear_root_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Remove every results-root environment variable before each test.
+    """Remove every results-root and results-index environment variable.
 
     Parameters:
         monkeypatch: Pytest fixture used to delete the environment variables
@@ -367,6 +378,154 @@ def test_bundle_getter_ignores_unprefixed_env_var(monkeypatch: pytest.MonkeyPatc
     config = _config_with_environment(None)
     with pytest.raises(ValueError, match='NAV_BUNDLE_RESULTS_ROOT'):
         get_pds4_bundle_results_root(argparse.Namespace(), config)
+
+
+# ---------------------------------------------------------------------------
+# get_results_db_url
+# ---------------------------------------------------------------------------
+
+
+def test_results_db_argument_wins_over_config_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The parsed-argument value takes precedence over config and env var.
+
+    Parameters:
+        monkeypatch: Pytest fixture for environment isolation.
+    """
+
+    monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
+    config = _config_with_environment({'results_db': 'sqlite:///from-config.sqlite3'})
+    arguments = argparse.Namespace(results_db=SQLITE_URL)
+    assert get_results_db_url(arguments, config) == SQLITE_URL
+
+
+def test_results_db_config_wins_over_env_when_argument_is_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the argument None, ``config.environment`` beats the env var.
+
+    Parameters:
+        monkeypatch: Pytest fixture for environment isolation.
+    """
+
+    monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
+    config = _config_with_environment({'results_db': SQLITE_URL})
+    assert get_results_db_url(argparse.Namespace(results_db=None), config) == SQLITE_URL
+
+
+def test_results_db_missing_argument_attribute_uses_config() -> None:
+    """A namespace without the attribute at all falls through to the config.
+
+    A program that has not yet grown the flag still honors the configuration key.
+    """
+
+    config = _config_with_environment({'results_db': SQLITE_URL})
+    assert get_results_db_url(argparse.Namespace(), config) == SQLITE_URL
+
+
+def test_results_db_env_var_used_when_argument_and_config_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The env var is the last place looked before answering "no index".
+
+    Parameters:
+        monkeypatch: Pytest fixture for environment isolation.
+    """
+
+    monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
+    config = _config_with_environment(None)
+    assert get_results_db_url(argparse.Namespace(), config) == POSTGRES_URL
+
+
+def test_results_db_config_key_none_falls_through_to_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A config key explicitly set to null is treated as unset, not as opted out.
+
+    Parameters:
+        monkeypatch: Pytest fixture for environment isolation.
+    """
+
+    monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
+    config = _config_with_environment({'results_db': None})
+    assert get_results_db_url(argparse.Namespace(), config) == POSTGRES_URL
+
+
+def test_results_db_unset_everywhere_is_not_an_error() -> None:
+    """No index is the default mode of every program, so absence is an answer.
+
+    This is the one way this getter differs from the results-root getters, which
+    raise when nothing is set.
+    """
+
+    config = _config_with_environment(None)
+    assert get_results_db_url(argparse.Namespace(results_db=None), config) is None
+
+
+def test_results_db_sentinel_on_the_command_line_overrides_the_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without the sentinel an exported variable would make file mode impossible.
+
+    Parameters:
+        monkeypatch: Pytest fixture for environment isolation.
+    """
+
+    monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
+    config = _config_with_environment(None)
+    arguments = argparse.Namespace(results_db=RESULTS_DB_NONE)
+    assert get_results_db_url(arguments, config) is None
+
+
+def test_results_db_sentinel_on_the_command_line_overrides_the_config_key() -> None:
+    """The sentinel outranks a configured URL for the same reason."""
+
+    config = _config_with_environment({'results_db': SQLITE_URL})
+    arguments = argparse.Namespace(results_db=RESULTS_DB_NONE)
+    assert get_results_db_url(arguments, config) is None
+
+
+def test_results_db_sentinel_in_the_config_opts_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sentinel is honored wherever the value came from, not only on argv.
+
+    Parameters:
+        monkeypatch: Pytest fixture for environment isolation.
+    """
+
+    monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
+    config = _config_with_environment({'results_db': RESULTS_DB_NONE})
+    assert get_results_db_url(argparse.Namespace(), config) is None
+
+
+def test_results_db_sentinel_in_the_env_var_opts_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exporting the sentinel is how a machine turns the index off by default.
+
+    Parameters:
+        monkeypatch: Pytest fixture for environment isolation.
+    """
+
+    monkeypatch.setenv('NAV_RESULTS_DB', RESULTS_DB_NONE)
+    config = _config_with_environment(None)
+    assert get_results_db_url(argparse.Namespace(), config) is None
+
+
+def test_results_db_sentinel_is_the_exact_literal() -> None:
+    """A URL that merely contains the word is a URL, not an opt-out."""
+
+    config = _config_with_environment(None)
+    arguments = argparse.Namespace(results_db='sqlite:///none.sqlite3')
+    assert get_results_db_url(arguments, config) == 'sqlite:///none.sqlite3'
+
+
+@pytest.mark.parametrize('url', [SQLITE_URL, POSTGRES_URL])
+def test_results_db_returns_the_url_verbatim(url: str) -> None:
+    """Both URL forms pass through unchanged; the opener parses them, not this.
+
+    Parameters:
+        url: The URL to round-trip.
+    """
+
+    config = _config_with_environment(None)
+    assert get_results_db_url(argparse.Namespace(results_db=url), config) == url
 
 
 # ---------------------------------------------------------------------------

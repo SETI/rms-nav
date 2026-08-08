@@ -25,7 +25,8 @@ dependencies = [
   "rms-oops>=0.1.3",
   "rms-starcat>=1.0.1",
   "ruamel.yaml",
-  "scipy"
+  "scipy",
+  "sqlalchemy>=2.0"
 ]
 license = {text = "Apache-2.0"}
 maintainers = [
@@ -61,6 +62,7 @@ dev = [
   "pytest-xdist",
   "ruff",
   "rms-spindoctor[docs]",
+  "rms-spindoctor[postgres]",
   "threadpoolctl",
 ]
 # Sphinx stack only. ``pip install -e ".[docs]"`` (ReadTheDocs: ``path: .`` +
@@ -70,6 +72,14 @@ docs = [
   "sphinx>=7.4.7",
   "sphinxcontrib-mermaid>=0.9.2",
   "sphinx-rtd-theme>=2.0.0",
+]
+# PostgreSQL driver for the results index. A SQLite index needs nothing beyond
+# the runtime dependencies; PostgreSQL is what a results index shared across
+# machines runs on. The ``dev`` extra pulls this in so that the postgres test
+# tier type-checks and runs from a development checkout; the tier still skips
+# itself unless ``SPINDOCTOR_TEST_POSTGRES_URL`` names a server.
+postgres = [
+  "psycopg[binary]>=3.1",
 ]
 
 [project.urls]
@@ -148,7 +158,7 @@ pythonpath = [
   "src"
 ]
 testpaths = ["tests"]
-addopts = ["--strict-markers", "--strict-config", "-m", "not integration"]
+addopts = ["--strict-markers", "--strict-config", "-m", "not integration and not postgres"]
 filterwarnings = [
   "error",
   # Astropy's FITS reader can leave a file handle open while the cache
@@ -173,6 +183,7 @@ filterwarnings = [
 ]
 markers = [
   "integration: requires PDS3_HOLDINGS_DIR (real holdings on disk or via filecache)",
+  "postgres: requires a PostgreSQL server named by SPINDOCTOR_TEST_POSTGRES_URL",
   "slow: per-image library regression test",
 ]
 

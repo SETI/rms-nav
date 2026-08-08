@@ -54,6 +54,26 @@ def test_a_logging_setting_does_not_change_the_digest(tmp_path: Path, body: str)
     assert _hash(tmp_path, body) == _hash(tmp_path)
 
 
+@pytest.mark.parametrize(
+    'body',
+    [
+        'environment:\n  nav_results_root: /somewhere/else\n',
+        'environment:\n  pds3_holdings_root: /mnt/other/holdings\n',
+        'environment:\n  results_db: sqlite:////data/nav-results/index.sqlite3\n',
+        'environment:\n  results_db: postgresql+psycopg://user@host/spindoctor\n',
+    ],
+)
+def test_an_environment_setting_does_not_change_the_digest(tmp_path: Path, body: str) -> None:
+    """Where a deployment keeps its files is not part of how it navigates.
+
+    Moving a results directory, pointing at a different holdings mirror, or
+    naming a database to index the results with cannot move an offset by a pixel,
+    so a digest that shifted would report every result of that run as differently
+    configured from the archive it belongs to.
+    """
+    assert _hash(tmp_path, body) == _hash(tmp_path)
+
+
 def test_a_setting_that_can_change_a_result_does_change_the_digest(tmp_path: Path) -> None:
     """The exclusion is narrow: anything the pipeline reads still counts."""
     assert _hash(tmp_path, 'offset:\n  correlation_fft_upsample_factor: 256\n') != _hash(tmp_path)
@@ -64,17 +84,18 @@ def test_the_digest_is_stable_across_repeated_resolution(tmp_path: Path) -> None
     assert _hash(tmp_path) == _hash(tmp_path)
 
 
-def test_only_logging_is_excluded() -> None:
+def test_only_the_two_argued_sections_are_excluded() -> None:
     """The excluded set is exactly what was argued for, not a growing list.
 
     Every section added to it stops being able to distinguish two results, so
     growth wants the same argument made again rather than a quiet append.
     """
-    assert sorted(HASH_EXCLUDED_SECTIONS) == ['logging']
+    assert sorted(HASH_EXCLUDED_SECTIONS) == ['environment', 'logging']
 
 
-def test_an_excluded_section_is_still_present_in_the_configuration() -> None:
+@pytest.mark.parametrize('section', ['environment', 'logging'])
+def test_an_excluded_section_is_still_present_in_the_configuration(section: str) -> None:
     """Excluding a section from the digest does not remove it from the config."""
     config = Config()
     config.read_config()
-    assert config.logging is not None
+    assert getattr(config, section) is not None

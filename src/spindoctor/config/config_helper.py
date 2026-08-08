@@ -6,6 +6,13 @@ from filecache import FCPath
 from .config import Config
 from .logging_keys import validate_logging_config
 
+RESULTS_DB_NONE = 'none'
+"""Value of the results index URL that explicitly selects no index.
+
+An exported NAV_RESULTS_DB would otherwise make a file-mode run impossible on that
+machine, and a program that resolves a URL never falls back to reading files.
+"""
+
 
 def get_backplane_results_root(arguments: argparse.Namespace, config: Config) -> str:
     """Get the backplane results root from the arguments, configuration, or environment.
@@ -157,6 +164,41 @@ def get_pds4_bundle_results_root(arguments: argparse.Namespace, config: Config) 
             'environment variable must be set'
         )
     return pds4_bundle_root_str
+
+
+def get_results_db_url(arguments: argparse.Namespace, config: Config) -> str | None:
+    """Get the results index URL from the arguments, configuration, or environment.
+
+    First look in arguments.results_db, then in config.environment.results_db, then in
+    the environment variable NAV_RESULTS_DB.
+
+    Unlike the results roots, absence is not an error: it means "no index", which is
+    the default mode of every program.  The literal value ``none`` also means "no
+    index", so a run on a machine that exports NAV_RESULTS_DB can still be told to
+    read files by passing ``--results-db none``.  The sentinel is honored wherever the
+    value came from, so a configuration file can opt out of an exported variable in
+    the same way, and it is matched as the exact string, so a URL that merely contains
+    the word is still a URL.
+
+    Parameters:
+        arguments: The parsed arguments.
+        config: The configuration possibly containing the environment section.
+
+    Returns:
+        The results index connection URL, or None when no index was named.
+    """
+    # Absence is the ordinary case at both levels -- most programs define no
+    # --results-db argument, and most configurations name no index -- so each is
+    # asked for the key rather than made to raise for it, which would also hide an
+    # AttributeError raised by something other than the lookup.
+    results_db_str = vars(arguments).get('results_db')
+    if results_db_str is None:
+        results_db_str = config.environment.get('results_db')
+    if results_db_str is None:
+        results_db_str = os.getenv('NAV_RESULTS_DB')
+    if results_db_str is None or results_db_str == RESULTS_DB_NONE:
+        return None
+    return str(results_db_str)
 
 
 def load_default_and_user_config(arguments: argparse.Namespace, config: Config) -> None:

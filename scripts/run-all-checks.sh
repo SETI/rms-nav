@@ -16,6 +16,8 @@
 #   -m, --markdown   Run only Markdown lint (PyMarkdown)
 #   -i, --integration Include integration tests (slow; require PDS3_HOLDINGS_DIR
 #                    + SPICE kernels).  Default: skipped.
+#   -P, --postgres   Include PostgreSQL results-index tests (require a server named
+#                    by SPINDOCTOR_TEST_POSTGRES_URL).  Default: skipped.
 #   -h, --help       Show this help message
 #
 # Environment:
@@ -53,6 +55,7 @@ RUN_DOCS=false
 RUN_MARKDOWN=false
 SCOPE_SPECIFIED=false
 RUN_INTEGRATION=false
+RUN_POSTGRES=false
 
 # Get script directory and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -167,6 +170,10 @@ while [[ $# -gt 0 ]]; do
             RUN_INTEGRATION=true
             shift
             ;;
+        -P|--postgres)
+            RUN_POSTGRES=true
+            shift
+            ;;
         -h|--help)
             show_usage
             exit 0
@@ -200,6 +207,21 @@ if [ "$RUN_INTEGRATION" = true ]; then
     print_info "Integration tests: ENABLED (will run; require PDS3_HOLDINGS_DIR + SPICE)"
 else
     print_info "Integration tests: SKIPPED (default; pass -i / --integration to include)"
+fi
+
+# An explicit -P with no server named would select the tier and then skip every
+# test in it, reporting a pass that ran no PostgreSQL coverage at all.  The
+# request is refused instead, because that is the one reading of -P nobody wants.
+if [ "$RUN_POSTGRES" = true ] && [ -z "${SPINDOCTOR_TEST_POSTGRES_URL:-}" ]; then
+    print_error "PostgreSQL tests were requested with -P / --postgres, but SPINDOCTOR_TEST_POSTGRES_URL is not set, so every test in that tier would skip."
+    print_info "Export it, for example: export SPINDOCTOR_TEST_POSTGRES_URL=postgresql+psycopg://USER@HOST:5432/spindoctor"
+    exit 1
+fi
+
+if [ "$RUN_POSTGRES" = true ]; then
+    print_info "PostgreSQL tests: ENABLED (SPINDOCTOR_TEST_POSTGRES_URL is set)"
+else
+    print_info "PostgreSQL tests: SKIPPED (default; pass -P / --postgres to include)"
 fi
 
 # Function to run code checks (ruff, mypy, pytest)
@@ -257,22 +279,36 @@ run_code_checks() {
         failed_checks="${failed_checks}Code - Mypy"$'\n'
     fi
 
-    # Pytest.  ``addopts = ["-m", "not integration"]`` in pyproject.toml
-    # excludes integration tests by default; with --integration / -i,
-    # override by passing ``-m ""`` so the marker filter accepts every
-    # test (including ones marked ``integration``).
+    # Pytest.  ``addopts = ["-m", "not integration and not postgres"]`` in
+    # pyproject.toml excludes both opt-in tiers by default; -i and -P each
+    # override that filter by dropping their own term from it, and opting into
+    # both leaves an empty filter that accepts every test.
     # The render performance budgets assert single-core CPU time; the
     # parallel battery's workers contend for memory bandwidth and inflate
     # CPU time past the budgets, so the perf file is excluded from the
     # parallel run and executed as its own serial step afterwards.
-    if [ "$RUN_INTEGRATION" = true ]; then
+    marker_expr=""
+    pytest_marker_args=()
+    if [ "$RUN_INTEGRATION" = true ] && [ "$RUN_POSTGRES" = true ]; then
+        print_info "Running pytest (with integration and PostgreSQL tests)..."
+    elif [ "$RUN_INTEGRATION" = true ]; then
         print_info "Running pytest (with integration tests)..."
-        pytest_marker_args=("-m" "" "--ignore=tests/integration/test_sim_perf.py")
+        marker_expr="not postgres"
+    elif [ "$RUN_POSTGRES" = true ]; then
+        print_info "Running pytest (with PostgreSQL tests)..."
+        marker_expr="not integration"
     else
-        print_info "Running pytest (integration tests skipped — pass -i to include)..."
-        pytest_marker_args=()
+        print_info "Running pytest (integration and PostgreSQL tests skipped — pass -i / -P to include)..."
     fi
-    if python -m pytest tests -q --cov -n auto "${pytest_marker_args[@]}"; then
+    if [ "$RUN_INTEGRATION" = true ] || [ "$RUN_POSTGRES" = true ]; then
+        pytest_marker_args=("-m" "$marker_expr")
+    fi
+    if [ "$RUN_INTEGRATION" = true ]; then
+        pytest_marker_args+=("--ignore=tests/integration/test_sim_perf.py")
+    fi
+    # loadfile keeps every test of one file on one worker; the default scheduling
+    # splits a file across processes and has crashed the PyQt6 workers.
+    if python -m pytest tests -q --cov -n auto --dist=loadfile "${pytest_marker_args[@]}"; then
         print_success "Pytest passed"
     else
         print_error "Pytest failed"
