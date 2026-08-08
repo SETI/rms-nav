@@ -46,6 +46,14 @@ _NO_STDLIB_LOGGING = [
     'support',
 ]
 
+# The results index is a data-access layer with no voice of its own: what it did
+# is reported by whichever program called it, in that program's log.  It is also
+# built on a third-party library that logs through the stdlib module, so a logger
+# here would be the one place those two ladders could be wired together.
+_NO_LOGGER_AT_ALL = [
+    'results_index',
+]
+
 
 def _python_files(relative: str) -> list[FCPath]:
     """Return the Python files a target names.
@@ -110,7 +118,7 @@ def _dotted_prefixes(dotted: str) -> set[str]:
     return {'.'.join(parts[: index + 1]) for index in range(len(parts))}
 
 
-@pytest.mark.parametrize('relative', _PRINT_ONLY + _NO_STDLIB_LOGGING)
+@pytest.mark.parametrize('relative', _PRINT_ONLY + _NO_STDLIB_LOGGING + _NO_LOGGER_AT_ALL)
 def test_every_target_of_these_checks_exists(relative: str) -> None:
     """A target that has moved would make its check pass by finding nothing.
 
@@ -163,6 +171,23 @@ def test_core_code_does_not_import_stdlib_logging(package: str) -> None:
     task it would reach the worker's terminal by a path isolation never sees.
     """
     offenders = [path.name for path in _python_files(package) if 'logging' in _imported_names(path)]
+    assert offenders == []
+
+
+@pytest.mark.parametrize('package', _NO_LOGGER_AT_ALL)
+def test_a_data_access_layer_holds_no_logger_of_any_kind(package: str) -> None:
+    """Neither of the two loggers, nor pdslogger, nor the stdlib module.
+
+    Reaching for any of the three would give a library layer a voice its caller
+    did not configure, and the stdlib one would additionally turn on whatever the
+    database library it sits over decided to say.
+    """
+    forbidden = _LOGGER_NAMES | {'logging', 'pdslogger'}
+    offenders = [
+        f'{path.name}:{sorted(forbidden & _imported_names(path))}'
+        for path in _python_files(package)
+        if forbidden & _imported_names(path)
+    ]
     assert offenders == []
 
 

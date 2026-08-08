@@ -5,18 +5,31 @@ Testing
 Overview
 ========
 
-The test suite has two tiers, separated by the ``integration`` marker:
+The test suite has three tiers, separated by the ``integration`` and
+``postgres`` markers. ``addopts`` in ``pyproject.toml`` carries ``-m "not
+integration and not postgres"``, so a plain ``pytest`` runs the default tier
+alone:
 
 - The **default tier** runs on a plain ``pytest``. Everything in it is fast and
   self-contained: it needs no spacecraft holdings, no SPICE kernels, and no
   network. Unit tests live here, and so do the in-process simulator tests --
   every simulated frame is rendered and navigated in memory, so the whole
   simulator-driven invariant and structural coverage runs without external data.
-- The **integration tier** is excluded by default (``addopts = ["-m", "not
-  integration"]`` in ``pyproject.toml``) and opted into with ``-m ""`` or ``-m
-  integration``. It holds the slow and the archive-backed tests: the real-image
+- The **integration tier** is opted into with ``-m ""`` or ``-m integration``.
+  It holds the slow and the archive-backed tests: the real-image
   regression cohort (which fetches PDS holdings and resolves SPICE geometry) and
   the heavier or jitter-prone in-process simulator tests.
+- The **postgres tier** is opted into with ``-m postgres`` (or ``-m ""``). It
+  re-asks the results-index questions against a real PostgreSQL server, because
+  SQLite accepts spellings a server rejects: an integer compared against a
+  boolean, a single-precision float where a double was meant, a foreign key that
+  is only enforced when asked. The tests read their connection URL from
+  ``SPINDOCTOR_TEST_POSTGRES_URL`` and skip themselves when it is unset, so the
+  tier is runnable on any machine with a server and harmless on any machine
+  without one. Each test creates and drops a PostgreSQL schema of its own, so
+  repeat runs and parallel workers do not collide. CI has no service container
+  for it; run it locally before changing anything in ``spindoctor.results_index``
+  or the statistics programs.
 
 The simulator (:doc:`dev_guide_simulator`) is the engine behind several tiers: it
 lets the suite grow algorithmic-invariant and sensitivity coverage on frames
@@ -29,8 +42,9 @@ Running the suite
 .. code-block:: bash
 
    pytest                              # default tier (fast, no holdings)
-   pytest -m ""                        # full suite, including integration
+   pytest -m ""                        # full suite, every tier
    pytest -m integration               # only the integration tier
+   pytest -m postgres                  # only the postgres tier
    pytest -n auto --dist=loadfile      # parallel, matching CI (loadfile avoids
                                        #   PyQt6 worker crashes)
    pytest tests/spindoctor/sim/test_sim_noise.py            # one file
@@ -39,6 +53,13 @@ Running the suite
 
    ./scripts/run-all-checks.sh         # ruff + mypy + pytest + docs + markdown
    ./scripts/run-all-checks.sh -i      # the same, including integration tests
+   ./scripts/run-all-checks.sh -P      # the same, including the postgres tier
+
+The postgres tier additionally needs a server to point at:
+
+.. code-block:: bash
+
+   export SPINDOCTOR_TEST_POSTGRES_URL=postgresql+psycopg://user:pw@host:5432/spindoctor
 
 ``pytest-xdist`` must run with ``--dist=loadfile``; the default scheduling
 crashes PyQt6 workers when tests from one file split across processes. Multi-test
@@ -75,6 +96,12 @@ tests need none of the archive environment above.
      - nothing
      - One component in isolation (config, feature, dataset, obs, model,
        technique, orchestrator, reproj, support).
+   * - Results index on a server
+       (``tests/spindoctor/results_index/test_postgres.py``)
+     - postgres
+     - PostgreSQL
+     - The schema, the version gate, and the type discipline against a backend
+       that enforces them, rather than against SQLite's permissive typing.
    * - Simulator unit tests (``tests/spindoctor/sim/**``)
      - default
      - nothing

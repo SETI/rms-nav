@@ -178,7 +178,10 @@ Types: every pixel, ET, covariance and sigma column is declared
 `sqlalchemy.Double` (not bare `Float`, which a dialect may map to single
 precision); booleans are `sqlalchemy.Boolean`; `excluded_from_consensus` and
 the child tables' `source_names` / `diagnostics` are `sqlalchemy.JSON`
-(SQLite TEXT, PostgreSQL `jsonb`).
+(SQLite TEXT, PostgreSQL `jsonb`). `mtime_ns`, `size_bytes` and `image_number`
+are `sqlalchemy.BigInteger`: a nanosecond epoch is far past the 32-bit range a
+dialect is free to give a plain `Integer`, and an image-numbering scheme is
+free to run past it too.
 
 **Precision.** The top-level `offset` is stored as written, with no
 rounding. (It is written unrounded by `navigate_image_files`; the rounded
@@ -204,7 +207,13 @@ inventory is aggregated, as today, by
 ### 2.4 Schema version, creation, and no migrations
 
 The database carries a `schema_meta` table with a single row holding
-`schema_version` (an integer) and `created_utc`.
+`schema_version` (an integer) and `created_utc`. The single row is enforced by
+a constant primary key (`singleton`) with a `CHECK (singleton = 1)`
+constraint, so a second row is a database error rather than an ambiguity the
+version gate has to resolve.
+
+Every failure `open_index` reports is a `ValueError` carrying the URL, so a
+consumer that wants to report the cause rather than crash catches one type.
 
 The engine factory is the only opener:
 
@@ -290,7 +299,15 @@ Every consuming program accepts `--results-db URL`, and also
 `--results-db none`: the literal sentinel `none` resolves to no index,
 overriding the configuration key and the environment variable. Without an
 explicit opt-out, an exported `NAV_RESULTS_DB` would make file-mode runs
-impossible on that machine.
+impossible on that machine. The sentinel is recognized at whichever level
+supplied the value, so a configuration file or an exported variable can opt out
+the same way; it is matched as the exact string, so a URL that merely contains
+the word is still a URL.
+
+There is no shared helper for the `--results-db` argument definition, because
+there is none for the results roots either: every program defines its own flag
+(the reprojection family shares `add_common_env_args` in
+`spindoctor/cli/reproj/args.py`, and that is the only grouping).
 
 A program that resolves a URL and cannot open it fails immediately with that
 error; it does not silently fall back to reading files. Falling back would
@@ -322,8 +339,10 @@ degrades to `--force` behavior for that root, with a logged warning.
 pair is skipped without being read. `--force` re-reads everything.
 
 **Per-root bookkeeping.** An `ingest_runs` table records, per root:
-`root_url`, `started_utc`, `finished_utc` (NULL while running), files seen /
-ingested / skipped / failed, and `schema_version`. The row is written at
+`root_url`, `started_utc`, `finished_utc` (NULL while running),
+`files_seen` / `files_ingested` / `files_skipped` / `files_failed`, and
+`schema_version`, under a surrogate `run_id` primary key (a root legitimately
+has many runs, and a consumer reads the newest). The row is written at
 start and updated at completion, in both the interactive and cloud paths. A
 consumer treats a root whose newest row has `finished_utc IS NULL` -- or no
 row at all -- as not ingested, and fails with a message saying so.
@@ -694,8 +713,9 @@ add a column (increment the version). No issue numbers in any of it.
 11. The suite's index tests pass against PostgreSQL under a `postgres`
     marker: registered in `[tool.pytest.ini_options].markers`, excluded by
     default via `addopts` (`-m "not integration and not postgres"`), given a
-    `scripts/run-all-checks.sh` flag alongside `-i`, and named in the dev
-    guide as a locally-runnable tier if CI has no service container.
+    `scripts/run-all-checks.sh` flag alongside `-i` (`-P` / `--postgres`), and
+    named in the dev guide as a locally-runnable tier if CI has no service
+    container.
 12. `ruff check`, `ruff format --check`, `mypy --strict`, `sphinx-build -W`
     and `pymarkdown scan` all pass; suite coverage stays at or above 90%.
 
