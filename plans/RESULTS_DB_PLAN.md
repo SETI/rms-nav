@@ -175,18 +175,19 @@ The `images` table:
 | `config_hash`, `git_sha`, `pipeline_run` | `navigation_result.provenance` | |
 | `image_number` | derived from `image_name` | replaces the SQL function (section 2.5) |
 | `has_summary_png` | the ingest walk (section 2.7) | Boolean |
-| `start_et`, `stop_et`, `exposure_s` | `navigation_result.times.*` | NULL until the producer lands (see below) |
-| `sclk_start`, `sclk_midtime`, `sclk_stop` | `navigation_result.times.*` | TEXT; NULL until the producer lands |
-| `camera_frame_id`, `ck_frame_id` | `navigation_result.pointing.*` | INTEGER; NULL until the producer lands |
-| `cmatrix`, `cmatrix_original` | `navigation_result.pointing.*` | JSON (nine floats, row-major); NULL until the producer lands |
+| `start_et`, `stop_et`, `exposure_s` | `navigation_result.times.*` | NULL for a document with no navigation result (see below) |
+| `sclk_start`, `sclk_midtime`, `sclk_stop` | `navigation_result.times.*` | TEXT |
+| `camera_frame_id`, `ck_frame_id` | `navigation_result.pointing.*` | INTEGER |
+| `cmatrix`, `cmatrix_original` | `navigation_result.pointing.*` | JSON (nine floats, row-major); `cmatrix` NULL where the navigation fitted a camera rotation |
 | `source_file` | the metadata file's URL | provenance |
 | `mtime_ns`, `size_bytes` | the metadata file's listing entry | incremental ingest (section 2.7) |
 
-The columns marked "NULL until the producer lands" are the fields the
-corrected-pointing metadata extension will write (`plans/CK_KERNEL_PLAN.md`
-section 2.3). They are declared now, matching that plan's names and shapes
-exactly, because a schema change costs every user a rebuild; when the
-producer lands, ingest picks them up with no schema change.
+The `times` and `pointing` columns are the corrected-attitude fields the
+navigator records (`plans/CK_KERNEL_PLAN.md` section 2.3), and they carry
+that section's names and shapes exactly. They are absent from a document
+that has no navigation result at all -- an image that failed to load -- and
+`cmatrix` is additionally absent where the navigation fitted a camera
+rotation, so both cases ingest as NULL.
 
 Types: every pixel, ET, covariance and sigma column is declared
 `sqlalchemy.Double` (not bare `Float`, which a dialect may map to single
@@ -919,9 +920,9 @@ programs and by `results_index` whether or not an index is used, and by
 nothing on the navigation critical path -- criterion 2 pins that.
 
 **Schema changes cost every user a rebuild.** That is the accepted trade for
-having no migration machinery, and the reason the corrected-pointing columns
-are declared now, with the shapes their producer has already specified,
-rather than when it lands.
+having no migration machinery, and the reason the schema carries the
+corrected-pointing columns in the shapes their producer writes rather than
+leaving them for a later migration.
 
 **The report is the regression surface.** Phase 2 touches every query the
 statistics user guide documents. The old-vs-new byte-identical report test
