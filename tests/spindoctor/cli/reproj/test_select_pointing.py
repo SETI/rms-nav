@@ -18,6 +18,7 @@ import numpy as np
 import oops
 import pdslogger
 import pytest
+from filecache import FCPath
 from oops.observation.snapshot import Snapshot
 from tests.cmatrix_helpers import (
     observation_attitude,
@@ -447,7 +448,7 @@ def test_a_none_selection_touches_nothing() -> None:
     assert obs.frame is frame_before
 
 
-def test_a_contradictory_selection_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_contradictory_selection_is_refused() -> None:
     """A CMATRIX selection without its values is a caller defect, not a record."""
     obs = _hermetic_obs()
     selection = PointingSelection(
@@ -511,8 +512,6 @@ def _apply_and_capture_logs(
         Tuple of the application outcome, the image log text, and the run
         log text.
     """
-    from filecache import FCPath
-
     root = FCPath(tmp_path_root)
     obs = _hermetic_obs()
     _inject_identity_flip(monkeypatch)
@@ -536,8 +535,12 @@ def _apply_and_capture_logs(
         for handler in handlers:
             if handler is not pdslogger.NULL_HANDLER:
                 handler.close()
+        # Detached before closing: a handler closed while still attached
+        # stays registered under its log path, the leaked-handler state the
+        # suite's conftest guards against.
         for handler in list(MAIN_LOGGER.handlers):
             if handler is not pdslogger.NULL_HANDLER:
+                MAIN_LOGGER.remove_handler(handler)
                 handler.close()
     assert image_log_path is not None
     assert main_log_path is not None
@@ -586,8 +589,6 @@ def test_the_pool_outcome_is_an_image_log_line_not_a_warning(
     """The already-corrected pool is a counted fact, not an alarm."""
     plain = _hermetic_obs()
     cmatrix = _recorded_cmatrix(plain)
-    from filecache import FCPath
-
     root = FCPath(str(tmp_path))
     obs = _hermetic_obs(frame=oops.frame.Cmatrix(cmatrix))
     _inject_identity_flip(monkeypatch)

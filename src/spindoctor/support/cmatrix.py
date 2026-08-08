@@ -69,10 +69,11 @@ from spindoctor.support.exceptions import NavPointingError
 from spindoctor.support.types import NDArrayFloatType
 
 # The offset-to-attitude conversion and its inverse are deliberately behind
-# two public functions: when oops grows its own corrected-attitude API this
-# module's body is replaced and only ``compute_pointing`` and
-# ``apply_cmatrix_to_obs`` have to survive the swap.  The helpers below them
-# are private for that reason, not because they are trivial.
+# two public functions -- plus the record validator the readers share -- so
+# that when oops grows its own corrected-attitude API this module's body is
+# replaced and only ``compute_pointing``, ``apply_cmatrix_to_obs`` and
+# ``validated_record_rotation`` have to survive the swap.  The helpers below
+# them are private for that reason, not because they are trivial.
 __all__ = [
     'CMATRIX_BASELINE_MISMATCH',
     'CMATRIX_FOREIGN_MIDTIME',
@@ -83,6 +84,7 @@ __all__ = [
     'PointingSolution',
     'apply_cmatrix_to_obs',
     'compute_pointing',
+    'validated_record_rotation',
 ]
 
 # The machine-readable classifications ``apply_cmatrix_to_obs`` stamps onto
@@ -519,7 +521,7 @@ def compute_pointing(
     )
 
 
-def _validated_record_rotation(matrix: NDArrayFloatType, label: str) -> NDArrayFloatType:
+def validated_record_rotation(matrix: NDArrayFloatType, label: str) -> NDArrayFloatType:
     """Validate one recorded C-matrix for the reader, refusing rather than coercing.
 
     Parameters:
@@ -625,8 +627,8 @@ def apply_cmatrix_to_obs(
             ``R_hat`` fails its gate for no known non-defect reason.  The
             observation is never mutated on a raise.
     """
-    corrected = _validated_record_rotation(cmatrix, 'cmatrix')
-    original = _validated_record_rotation(cmatrix_original, 'cmatrix_original')
+    corrected = validated_record_rotation(cmatrix, 'cmatrix')
+    original = validated_record_rotation(cmatrix_original, 'cmatrix_original')
     if isinstance(midtime_et, bool) or not isinstance(midtime_et, int | float):
         raise NavPointingError(
             f'the recorded midtime_et is not a real number: {midtime_et!r}',

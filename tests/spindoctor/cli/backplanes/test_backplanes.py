@@ -24,7 +24,9 @@ import pytest
 from astropy.io import fits
 from filecache import FCPath
 from oops.backplane import Backplane
+from tests.cmatrix_helpers import synthetic_frame_identity
 
+import spindoctor.support.cmatrix as cmatrix_module
 from spindoctor.cli.backplanes import backplanes as backplanes_mod
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
 from spindoctor.config import (
@@ -291,6 +293,35 @@ def _run(
         write_output_files=write_output_files,
     )
     return snapshot, from_file_calls, nav_root, bp_root
+
+
+def _result_for(
+    tmp_path: Path, metadata: dict[str, Any], *, obs: Any | None = None
+) -> tuple[dict[str, Any], Any]:
+    """Run the driver on one record, without writing, and return its result.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory, wrapped once into FCPath.
+        metadata: Nav metadata document to write for the image.
+        obs: Observation returned by from_file; defaults to a fresh simulated
+            HermeticObs.
+
+    Returns:
+        Tuple of the driver's result and the observation it was handed.
+    """
+    root = FCPath(tmp_path)
+    nav_root, bp_root = _roots(root)
+    _write_nav_metadata(nav_root, 'IMG1', metadata)
+    snapshot = obs if obs is not None else make_snapshot(shape_vu=SHAPE_VU, simulated=True)
+    obs_class, _ = _obs_class_for(snapshot)
+    result = generate_backplanes_image_files(
+        obs_class,
+        _image_files(root, 'IMG1'),
+        nav_results_root=nav_root,
+        backplane_results_root=bp_root,
+        write_output_files=False,
+    )
+    return result, snapshot
 
 
 # ---------------------------------------------------------------------------
@@ -646,8 +677,12 @@ def _run_with_null_offset(
             write_output_files=False,
         )
     finally:
+        # Detached before closing: a handler closed while still attached
+        # stays registered under its log path, the leaked-handler state the
+        # suite's conftest guards against.
         for handler in list(MAIN_LOGGER.handlers):
             if handler is not pdslogger.NULL_HANDLER:
+                MAIN_LOGGER.remove_handler(handler)
                 handler.close()
     assert log_path is not None
     with log_path.open('r') as stream:
@@ -685,17 +720,7 @@ def test_uncorrected_pointing_is_returned_to_the_caller(
 def test_a_navigated_image_is_not_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """An image with a real offset carries no such flag."""
     _stub_pipeline(monkeypatch)
-    root = FCPath(tmp_path)
-    nav_root, bp_root = _roots(root)
-    _write_nav_metadata(nav_root, 'IMG1', {'status': 'success', 'offset': [1.5, -2.5]})
-    obs_class, _ = _obs_class_for(make_snapshot(shape_vu=SHAPE_VU, simulated=True))
-    result = generate_backplanes_image_files(
-        obs_class,
-        _image_files(root, 'IMG1'),
-        nav_results_root=nav_root,
-        backplane_results_root=bp_root,
-        write_output_files=False,
-    )
+    result, _ = _result_for(tmp_path, {'status': 'success', 'offset': [1.5, -2.5]})
     assert 'uncorrected_pointing' not in result
 
 
@@ -735,21 +760,19 @@ def _pointing_metadata(midtime_et: float) -> dict[str, Any]:
 def test_the_result_names_the_offset_pointing_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A record with no pointing block reports the offset as the source."""
+    """A record with no pointing block reports the offset as the source.
+
+    The metadata (dv, du) of [1.5, -2.5] must arrive on the observation as an
+    OffsetFOV uv_offset of (du, dv) = (-2.5, 1.5), pinning that the reported
+    source is the pointing actually applied.
+    """
     _stub_pipeline(monkeypatch)
-    root = FCPath(tmp_path)
-    nav_root, bp_root = _roots(root)
-    _write_nav_metadata(nav_root, 'IMG1', {'status': 'success', 'offset': [1.5, -2.5]})
-    obs_class, _ = _obs_class_for(make_snapshot(shape_vu=SHAPE_VU, simulated=True))
-    result = generate_backplanes_image_files(
-        obs_class,
-        _image_files(root, 'IMG1'),
-        nav_results_root=nav_root,
-        backplane_results_root=bp_root,
-        write_output_files=False,
-    )
+    result, snapshot = _result_for(tmp_path, {'status': 'success', 'offset': [1.5, -2.5]})
     assert result['pointing_source'] == 'offset'
     assert result['pointing_reason'] == 'no_pointing_block'
+    assert isinstance(snapshot.fov, oops.fov.OffsetFOV)
+    assert snapshot.fov.uv_offset[0] == -2.5
+    assert snapshot.fov.uv_offset[1] == 1.5
 
 
 def test_the_result_names_the_cmatrix_pointing_source(
@@ -761,25 +784,10 @@ def test_the_result_names_the_cmatrix_pointing_source(
     midtime is 0.5; the instrument table lookup is injected exactly as the
     reader's own unit tests inject it.
     """
-    from tests.cmatrix_helpers import synthetic_frame_identity
-
-    import spindoctor.support.cmatrix as cmatrix_module
-
     identity = synthetic_frame_identity(np.eye(3))
     monkeypatch.setattr(cmatrix_module, '_frame_identity', lambda obs: identity)
     _stub_pipeline(monkeypatch)
-    root = FCPath(tmp_path)
-    nav_root, bp_root = _roots(root)
-    _write_nav_metadata(nav_root, 'IMG1', _pointing_metadata(midtime_et=0.5))
-    snapshot = make_snapshot(shape_vu=SHAPE_VU, simulated=True)
-    obs_class, _ = _obs_class_for(snapshot)
-    result = generate_backplanes_image_files(
-        obs_class,
-        _image_files(root, 'IMG1'),
-        nav_results_root=nav_root,
-        backplane_results_root=bp_root,
-        write_output_files=False,
-    )
+    result, snapshot = _result_for(tmp_path, _pointing_metadata(midtime_et=0.5))
     assert result['pointing_source'] == 'cmatrix'
     assert 'pointing_reason' not in result
     assert 'uncorrected_pointing' not in result
@@ -792,16 +800,6 @@ def test_an_uncorrected_product_names_the_none_source(
 ) -> None:
     """A record with no usable pointing reports 'none' beside the flag."""
     _stub_pipeline(monkeypatch)
-    root = FCPath(tmp_path)
-    nav_root, bp_root = _roots(root)
-    _write_nav_metadata(nav_root, 'IMG1', {'status': 'success', 'offset': None})
-    obs_class, _ = _obs_class_for(make_snapshot(shape_vu=SHAPE_VU, simulated=True))
-    result = generate_backplanes_image_files(
-        obs_class,
-        _image_files(root, 'IMG1'),
-        nav_results_root=nav_root,
-        backplane_results_root=bp_root,
-        write_output_files=False,
-    )
+    result, _ = _result_for(tmp_path, {'status': 'success', 'offset': None})
     assert result['pointing_source'] == 'none'
     assert result['uncorrected_pointing'] is True

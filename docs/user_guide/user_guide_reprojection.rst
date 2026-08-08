@@ -501,7 +501,7 @@ the pointing it records, preferring the exact form over its approximation:
   the pixel offset expressed exactly, and it is what a SPICE consumer of the
   corrected C-kernels sees for every image whose segment was written.
 * When there is no usable corrected attitude, the stored ``(dv, du)`` offset
-  is applied to the observation's FOV via ``oops.fov.OffsetFOV``, exactly as
+  is applied to the observation's FOV via :class:`oops.fov.OffsetFOV`, exactly as
   every offset-corrected product has always been built. The reasons this
   happens, each counted in the run summary: ``no_cmatrix_rotation_fitted``
   (the navigation fitted a camera rotation, which records no corrected

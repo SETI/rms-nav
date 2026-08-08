@@ -48,8 +48,8 @@ from spindoctor.support.cmatrix import (
     CMATRIX_BASELINE_MISMATCH,
     MALFORMED_POINTING,
     CmatrixApplication,
-    _validated_record_rotation,
     apply_cmatrix_to_obs,
+    validated_record_rotation,
 )
 from spindoctor.support.exceptions import NavPointingError
 from spindoctor.support.types import NDArrayFloatType
@@ -261,7 +261,7 @@ _OFFSET_REASON_MESSAGES = {
 
 def _parse_pointing_values(
     nav_metadata: dict[str, Any],
-) -> tuple[NDArrayFloatType, NDArrayFloatType, float] | str | None:
+) -> tuple[NDArrayFloatType, NDArrayFloatType, float] | str:
     """Read the ``pointing`` and ``times`` blocks the C-matrix mechanism needs.
 
     Parameters:
@@ -269,22 +269,24 @@ def _parse_pointing_values(
 
     Returns:
         The ``(cmatrix, cmatrix_original, midtime_et)`` triple when the record
-        carries a usable one; ``None`` when there is no ``cmatrix`` to apply
-        (no ``navigation_result``, no ``pointing`` block, or no ``cmatrix``
-        key -- the expected non-C-matrix record classes); or the string
-        ``'malformed'`` when a ``cmatrix`` is present but the block cannot be
-        used (a malformed matrix, an absent or malformed ``cmatrix_original``,
-        or an absent or non-finite ``times.midtime_et`` -- the gates cannot
-        run).
+        carries a usable one, or the selection reason that classifies why it
+        does not: :data:`NO_POINTING_BLOCK` when there is no
+        ``navigation_result`` or no ``pointing`` block at all,
+        :data:`NO_CMATRIX_ROTATION_FITTED` when the block exists with no
+        ``cmatrix`` key, and :data:`MALFORMED_POINTING` when a ``cmatrix`` is
+        present but the block cannot be used (a malformed matrix, an absent or
+        malformed ``cmatrix_original``, or an absent or non-finite
+        ``times.midtime_et`` -- the gates cannot run).  This function owns the
+        record-shape distinctions; the caller does not walk the record again.
     """
     nav_result = nav_metadata.get('navigation_result')
     if not isinstance(nav_result, dict):
-        return None
+        return NO_POINTING_BLOCK
     pointing = nav_result.get('pointing')
     if not isinstance(pointing, dict):
-        return None
+        return NO_POINTING_BLOCK
     if 'cmatrix' not in pointing:
-        return None
+        return NO_CMATRIX_ROTATION_FITTED
     times = nav_result.get('times')
     try:
         cmatrix = _parse_record_rotation(pointing['cmatrix'], 'cmatrix')
@@ -294,17 +296,17 @@ def _parse_pointing_values(
             )
         cmatrix_original = _parse_record_rotation(pointing['cmatrix_original'], 'cmatrix_original')
     except NavPointingError:
-        return 'malformed'
+        return MALFORMED_POINTING
     if not isinstance(times, dict) or 'midtime_et' not in times:
-        return 'malformed'
+        return MALFORMED_POINTING
     midtime = times['midtime_et']
     # ``float()`` is deliberately not used to coerce: it accepts text and
     # booleans, and a NaN midtime would defeat the reader's midtime gate in
     # both directions.
     if isinstance(midtime, bool) or not isinstance(midtime, int | float):
-        return 'malformed'
+        return MALFORMED_POINTING
     if not math.isfinite(float(midtime)):
-        return 'malformed'
+        return MALFORMED_POINTING
     return cmatrix, cmatrix_original, float(midtime)
 
 
@@ -332,7 +334,7 @@ def _parse_record_rotation(value: Any, label: str) -> NDArrayFloatType:
     array = np.asarray(value)
     if array.shape == (9,):
         array = array.reshape(3, 3)
-    return _validated_record_rotation(array, label)
+    return validated_record_rotation(array, label)
 
 
 def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> PointingSelection:
@@ -395,8 +397,8 @@ def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> Point
             offset_key_present=offset_key_present,
         )
 
-    if pointing_values == 'malformed':
-        reason = MALFORMED_POINTING
+    reason = pointing_values
+    if reason == MALFORMED_POINTING:
         IMAGE_LOGGER.warning(
             'Nav metadata for %s has a malformed pointing block; falling back to the offset path.',
             subject,
@@ -404,12 +406,6 @@ def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> Point
         MAIN_LOGGER.warning(
             '%s: malformed pointing block in nav metadata; using the offset path.', subject
         )
-    else:
-        nav_result = nav_metadata.get('navigation_result')
-        has_pointing_block = isinstance(nav_result, dict) and isinstance(
-            nav_result.get('pointing'), dict
-        )
-        reason = NO_CMATRIX_ROTATION_FITTED if has_pointing_block else NO_POINTING_BLOCK
 
     if offset is not None:
         if reason in (NO_CMATRIX_ROTATION_FITTED, NO_POINTING_BLOCK):

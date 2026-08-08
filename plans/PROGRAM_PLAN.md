@@ -319,8 +319,10 @@ The headline capability item is delivered in both halves:
 image's corrected attitude as a C-matrix and `sd_create_ck` ships
 updated-pointing SPICE C-kernels as a product, and
 `plans/CMATRIX_READERS_PLAN.md` is implemented, so the backplane and
-reprojection consumers apply the recorded C-matrix (with the pixel offset
-as the documented fallback), closing #50. What that leaves is the
+reprojection consumers apply the recorded C-matrix whenever a usable one
+exists (with the pixel offset as the documented fallback for
+fitted-rotation, offset-only and malformed records, and uncorrected
+pointing with the reason recorded when neither is usable), closing #50. What that leaves is the
 follow-ups in the CK plan's section 7. The remaining decided item with a
 self-contained plan of its own is `plans/RESULTS_DB_PLAN.md` (an optional,
 rebuildable index over the results tree, so programs stop reading one JSON

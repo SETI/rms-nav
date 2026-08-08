@@ -33,7 +33,10 @@ The pipeline preserves the navigated pointing. ``sd_backplanes`` reads the
 ``_metadata.json`` produced by ``sd_offset``, applies the recorded pointing
 to the :class:`~spindoctor.obs.obs_snapshot.ObsSnapshot` — the corrected
 C-matrix by frame replacement when the record carries a usable one, else the
-``(dv, du)`` offset via :class:`oops.fov.OffsetFOV` (see
+``(dv, du)`` offset via :class:`oops.fov.OffsetFOV`, and when the furnished
+kernel pool *already* answers the corrected attitude (corrected C-kernels
+furnished at load time) it deliberately applies nothing at all, since either
+mechanism would double-correct (see
 :doc:`dev_guide_ck_kernels` for the reader mechanism and its fallback
 ladder) — and *then* evaluates every backplane. Every output pixel is
 therefore the geometry that the navigation step says it is — not the
@@ -54,7 +57,8 @@ Per-image, the driver runs three phases:
    pointing via :func:`~spindoctor.cli.reproj.offsets.select_pointing` /
    :func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs` (the
    corrected C-matrix when usable, else the navigated offset via
-   :class:`oops.fov.OffsetFOV`), and stash it as ``snapshot``.
+   :class:`oops.fov.OffsetFOV`; an already-corrected kernel pool is left
+   alone), and stash it as ``snapshot``.
 2. **Evaluate per-source backplanes.**
    :func:`~spindoctor.cli.backplanes.backplanes_bodies.create_body_backplanes` walks
    every body in the per-image inventory and, for each, builds a clipped

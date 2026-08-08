@@ -20,6 +20,7 @@ import oops
 import pytest
 from oops.frame import Frame
 from tests.cmatrix_helpers import (
+    SYNTHETIC_MIDTIME_ET,
     observation_attitude,
     some_attitude,
     synthetic_baseline,
@@ -39,11 +40,11 @@ from spindoctor.support.cmatrix import (
 )
 from spindoctor.support.exceptions import NavPointingError
 
-# The planted offset and epoch shared by every test that navigates: two
-# distinct, non-zero, opposite-signed components so a sign flip or an axis
-# swap cannot go unnoticed, at the epoch the synthetic baseline records.
+# The planted offset shared by every test that navigates: two distinct,
+# non-zero, opposite-signed components so a sign flip or an axis swap cannot
+# go unnoticed.  Each application runs at SYNTHETIC_MIDTIME_ET, the epoch
+# the synthetic baseline records.
 _PLANTED_OFFSET = (8.68, -17.37)
-_MIDTIME_ET = 100.25
 
 # The 180-degree flip oops applies on top of the SPICE Cassini ISS frames.
 _CASSINI_FLIP = np.diag([-1.0, -1.0, 1.0])
@@ -56,7 +57,7 @@ class _FrameOnlyObs:
     observation to the instrument table lookup, which these tests inject.
     """
 
-    def __init__(self, c_oops: np.ndarray, *, midtime: float = _MIDTIME_ET) -> None:
+    def __init__(self, c_oops: np.ndarray, *, midtime: float = SYNTHETIC_MIDTIME_ET) -> None:
         """Build the stub around one constant observation-frame attitude.
 
         Parameters:
@@ -134,9 +135,11 @@ def test_the_reader_reproduces_the_offset_boresight(monkeypatch: pytest.MonkeyPa
     cmatrix, original, c_oops = _navigated_record(_CASSINI_FLIP)
     obs = _FrameOnlyObs(c_oops)
     _inject_identity(monkeypatch, _CASSINI_FLIP)
-    outcome = apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, _MIDTIME_ET)
+    outcome = apply_cmatrix_to_obs(
+        cast(ObsSnapshotInst, obs), cmatrix, original, SYNTHETIC_MIDTIME_ET
+    )
     assert outcome is CmatrixApplication.FRAME_REPLACED
-    corrected = observation_attitude(cast(ObsSnapshotInst, obs), _MIDTIME_ET)
+    corrected = observation_attitude(cast(ObsSnapshotInst, obs), SYNTHETIC_MIDTIME_ET)
     dv, du = _PLANTED_OFFSET
     offset_fov = oops.fov.OffsetFOV(fov, uv_offset=(du, dv))
     offset_los = c_oops.T @ np.asarray(offset_fov.los_from_uv(fov.uv_los).unit().vals, np.float64)
@@ -167,9 +170,9 @@ def test_skipping_the_conjugation_points_the_wrong_way(
     cmatrix, original, c_oops = _navigated_record(flip)
     obs = _FrameOnlyObs(c_oops)
     _inject_identity(monkeypatch, flip)
-    apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, _MIDTIME_ET)
+    apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, SYNTHETIC_MIDTIME_ET)
     corrected = np.asarray(
-        observation_attitude(cast(ObsSnapshotInst, obs), _MIDTIME_ET), np.float64
+        observation_attitude(cast(ObsSnapshotInst, obs), SYNTHETIC_MIDTIME_ET), np.float64
     )
     dv, du = _PLANTED_OFFSET
     offset_fov = oops.fov.OffsetFOV(fov, uv_offset=(du, dv))
@@ -201,10 +204,10 @@ def test_a_zero_correction_reproduces_the_observation_frame(
     obs = _FrameOnlyObs(c_oops)
     _inject_identity(monkeypatch, _CASSINI_FLIP)
     outcome = apply_cmatrix_to_obs(
-        cast(ObsSnapshotInst, obs), original.copy(), original.copy(), _MIDTIME_ET
+        cast(ObsSnapshotInst, obs), original.copy(), original.copy(), SYNTHETIC_MIDTIME_ET
     )
     assert outcome is CmatrixApplication.FRAME_REPLACED
-    corrected = observation_attitude(cast(ObsSnapshotInst, obs), _MIDTIME_ET)
+    corrected = observation_attitude(cast(ObsSnapshotInst, obs), SYNTHETIC_MIDTIME_ET)
     assert np.array_equal(np.asarray(corrected, np.float64), c_oops)
 
 
@@ -229,7 +232,9 @@ def test_a_transposed_record_fails_the_flip_gate(
     if which == 'record':
         cmatrix = cmatrix.T.copy()
     with pytest.raises(NavPointingError, match='differs from the expected') as info:
-        apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original.T.copy(), _MIDTIME_ET)
+        apply_cmatrix_to_obs(
+            cast(ObsSnapshotInst, obs), cmatrix, original.T.copy(), SYNTHETIC_MIDTIME_ET
+        )
     assert info.value.reason == CMATRIX_BASELINE_MISMATCH
 
 
@@ -243,10 +248,13 @@ def test_a_drifted_baseline_fails_the_gate(monkeypatch: pytest.MonkeyPatch) -> N
     drift = np.asarray(cspyce.axisar([1.0, 0.0, 0.0], 1.0e-5), np.float64)
     cmatrix, original, c_oops = _navigated_record(_CASSINI_FLIP)
     obs = _FrameOnlyObs(drift @ c_oops)
+    frame_before = obs.frame
     _inject_identity(monkeypatch, _CASSINI_FLIP)
     with pytest.raises(NavPointingError, match='differs from the expected') as info:
-        apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, _MIDTIME_ET)
+        apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, SYNTHETIC_MIDTIME_ET)
     assert info.value.reason == CMATRIX_BASELINE_MISMATCH
+    # The reader promises the observation is never mutated on a raise.
+    assert obs.frame is frame_before
 
 
 def test_an_already_corrected_pool_is_left_alone(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -262,7 +270,9 @@ def test_an_already_corrected_pool_is_left_alone(monkeypatch: pytest.MonkeyPatch
     obs = _FrameOnlyObs(_CASSINI_FLIP @ cmatrix)
     frame_before = obs.frame
     _inject_identity(monkeypatch, _CASSINI_FLIP)
-    outcome = apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, _MIDTIME_ET)
+    outcome = apply_cmatrix_to_obs(
+        cast(ObsSnapshotInst, obs), cmatrix, original, SYNTHETIC_MIDTIME_ET
+    )
     assert outcome is CmatrixApplication.POOL_ALREADY_CORRECTED
     assert obs.frame is frame_before
 
@@ -273,7 +283,9 @@ def test_a_foreign_midtime_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     obs = _FrameOnlyObs(c_oops)
     _inject_identity(monkeypatch, _CASSINI_FLIP)
     with pytest.raises(NavPointingError, match='belongs to a different observation') as info:
-        apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, _MIDTIME_ET + 1.0)
+        apply_cmatrix_to_obs(
+            cast(ObsSnapshotInst, obs), cmatrix, original, SYNTHETIC_MIDTIME_ET + 1.0
+        )
     assert info.value.reason == CMATRIX_FOREIGN_MIDTIME
 
 
@@ -287,7 +299,7 @@ def test_an_unmapped_host_is_refused() -> None:
     cmatrix, original, c_oops = _navigated_record(_CASSINI_FLIP)
     obs = _FrameOnlyObs(c_oops)
     with pytest.raises(NavPointingError, match='no SPICE camera frame') as info:
-        apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, _MIDTIME_ET)
+        apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, SYNTHETIC_MIDTIME_ET)
     assert info.value.reason == cmatrix_module.CMATRIX_UNKNOWN_HOST
 
 
@@ -347,7 +359,9 @@ def test_a_malformed_record_is_refused(
     elif mutate == 'absent_original':
         bad_original = None
     with pytest.raises(NavPointingError, match=match) as info:
-        apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), bad_cmatrix, bad_original, _MIDTIME_ET)
+        apply_cmatrix_to_obs(
+            cast(ObsSnapshotInst, obs), bad_cmatrix, bad_original, SYNTHETIC_MIDTIME_ET
+        )
     assert info.value.reason == MALFORMED_POINTING
 
 
@@ -389,10 +403,10 @@ def test_frame_replacement_registers_nothing(monkeypatch: pytest.MonkeyPatch) ->
     counter_before = int(Frame.TEMPORARY_FRAME_ID)
     for _ in range(2):
         obs = _FrameOnlyObs(c_oops)
-        apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, _MIDTIME_ET)
+        apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, SYNTHETIC_MIDTIME_ET)
     assert frame_cache_before == Frame.FRAME_CACHE
     assert wayframe_registry_before == Frame.WAYFRAME_REGISTRY
-    # Each Cmatrix construction takes a temporary id: three frames were built
-    # (two stub frames and two replacements share the two loop iterations'
-    # four constructions), so the counter moved and nothing else did.
-    assert int(Frame.TEMPORARY_FRAME_ID) > counter_before
+    # Each Cmatrix construction takes exactly one temporary id: each loop
+    # iteration builds one stub frame and one replacement, so four ids moved
+    # the counter and nothing else did.
+    assert int(Frame.TEMPORARY_FRAME_ID) == counter_before + 4

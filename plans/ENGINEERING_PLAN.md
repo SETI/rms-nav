@@ -247,9 +247,14 @@ by a strict xfail in `tests/spindoctor/cli/backplanes/`:
 ### CK kernels: what remains after the deliverable (follow-ups)
 
 The "updated pointing" deliverable is built, both halves. The navigator
-records a corrected camera C-matrix in each image's metadata beside the
-pixel offset, and a cspyce-only `sd_create_ck` writes one type-3 segment
-per navigated exposure into files that mirror the originals they correct,
+records a corrected camera C-matrix beside the pixel offset in the metadata
+of each eligible image (a fitted-rotation result records only the
+uncorrected attitude, and a simulated image records neither), and a
+cspyce-only `sd_create_ck` writes one type-3 segment
+per eligible navigated exposure into files that mirror the originals they
+correct -- an exposure whose baseline no candidate reproduces, or that
+yields to its simultaneous partner, is reported omitted rather than
+written --
 with a meta-kernel and a per-mission CSV report beside them. The designs of
 record are `plans/CK_KERNEL_PLAN.md` (the writing half) and
 `plans/CMATRIX_READERS_PLAN.md` (the reading half: the backplane and

@@ -664,6 +664,15 @@ def _body_agreement_for(metadata: dict[str, Any]) -> GridAgreement:
     lon_hi = max(result_cm.lon_idx_range[1], result_off.lon_idx_range[1])
 
     def _dense(result: Any) -> Any:
+        """Spread one body reprojection onto the union lat/lon index grid.
+
+        Parameters:
+            result: The BodyReprojResult.
+
+        Returns:
+            A masked array covering the union of both results' index ranges,
+            masked where this result holds no cell.
+        """
         shape = (lat_hi - lat_lo + 1, lon_hi - lon_lo + 1)
         dense = np.ma.MaskedArray(
             np.zeros(shape, dtype=np.float64), mask=np.ones(shape, dtype=bool)
@@ -767,7 +776,7 @@ def _run_backplanes(
 
 
 def _backplane_agreement_for(
-    metadata: dict[str, Any], work_cm: Path, work_off: Path
+    metadata: dict[str, Any], comparison: FrameComparison, work_cm: Path, work_off: Path
 ) -> BackplaneAgreement:
     """Generate backplanes for the body frame through both paths and compare.
 
@@ -779,13 +788,14 @@ def _backplane_agreement_for(
 
     Parameters:
         metadata: The body frame's navigation record.
+        comparison: The body frame's LOS-grid comparison, whose derived bound
+            sizes the per-pixel allowance.
         work_cm: A fresh directory for the C-matrix run.
         work_off: A fresh directory for the offset run.
 
     Returns:
         The agreement between the two FITS products.
     """
-    comparison = _compare_frame(_CASSINI_WAC_BODY, metadata)
     source_cm, planes_cm = _run_backplanes(_CASSINI_WAC_BODY, metadata, work_cm)
     source_off, planes_off = _run_backplanes(
         _CASSINI_WAC_BODY, _without_pointing(metadata), work_off
@@ -800,9 +810,10 @@ def _backplane_agreement_for(
     lon_off = planes_off['BODY_LONGITUDE']
     # Angular disagreement on the surface, in radians at the body center:
     # latitude difference plus longitude difference scaled to arc length.
-    angle = np.abs(lat_cm - lat_off) + np.abs(lon_cm - lon_off) * np.abs(
-        np.cos(0.5 * (lat_cm + lat_off))
-    )
+    # The longitude planes span 0..2pi, so their difference is wrapped onto
+    # (-pi, pi] first; a pixel straddling the seam otherwise scores as ~2pi.
+    lon_diff = np.abs(np.angle(np.exp(1j * (lon_cm - lon_off))))
+    angle = np.abs(lat_cm - lat_off) + lon_diff * np.abs(np.cos(0.5 * (lat_cm + lat_off)))
     # The allowance per pixel: the derived bound in image pixels, through the
     # pixel's own surface resolution, as an angle at the body center.  The
     # coarser of the two products' resolutions is used, since the shift can
@@ -823,20 +834,30 @@ def _backplane_agreement_for(
 
 @pytest.fixture(scope='module')
 def backplane_agreement(
-    navigations: dict[str, dict[str, Any]], tmp_path_factory: pytest.TempPathFactory
+    navigations: dict[str, dict[str, Any]],
+    frame_comparisons: dict[str, FrameComparison],
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> BackplaneAgreement:
     """Return the body frame's two-path end-to-end backplane agreement.
 
     Parameters:
         navigations: The cache of navigation metadata.
+        frame_comparisons: The cache of comparisons; the body frame's entry
+            is reused when present and computed into the cache when absent,
+            never recomputed beside it.
         tmp_path_factory: Where the navigation and the two runs write.
 
     Returns:
         The agreement.
     """
     metadata = _navigated(_CASSINI_WAC_BODY, navigations, tmp_path_factory)
+    if _CASSINI_WAC_BODY not in frame_comparisons:
+        frame_comparisons[_CASSINI_WAC_BODY] = _compare_frame(_CASSINI_WAC_BODY, metadata)
     return _backplane_agreement_for(
-        metadata, tmp_path_factory.mktemp('bp_cmatrix'), tmp_path_factory.mktemp('bp_offset')
+        metadata,
+        frame_comparisons[_CASSINI_WAC_BODY],
+        tmp_path_factory.mktemp('bp_cmatrix'),
+        tmp_path_factory.mktemp('bp_offset'),
     )
 
 

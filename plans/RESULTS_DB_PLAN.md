@@ -616,7 +616,7 @@ existing cloud-task silence tests do; the driver appears in
 
 ### Phase 4 — Backplanes and reprojection consume the index
 
-The `OffsetSource` protocol and both implementations; `--results-db` (and
+The `PointingSource` protocol and both implementations; `--results-db` (and
 the `none` sentinel) on `sd_backplanes`, `sd_mosaic`, and their cloud-task
 variants; the backplane single-row read with the missing-stub raise; the
 root-url comparison failure of section 2.2.

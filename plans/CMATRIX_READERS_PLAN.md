@@ -345,8 +345,10 @@ consumer sees for every image whose segment was written.
 Inside `apply_cmatrix_to_obs`, in order:
 
 1. Record validation: both matrices proper rotations, `midtime_et`
-   finite (else `malformed_pointing`, resolved by the caller before
-   this function is reached via `select_pointing`).
+   finite (else `malformed_pointing`). `select_pointing` classifies the
+   record first, but `apply_cmatrix_to_obs` remains the validation
+   boundary: a caller can hand it malformed values directly, and it
+   refuses them itself rather than trusting the selection to have run.
 2. Midtime gate: `|obs.midtime - midtime_et| <= 1e-6 s` -- the
    attitude belongs to that epoch; a mismatch means the record is not
    this observation's. Failure: `cmatrix_foreign_midtime`, offset
@@ -611,7 +613,9 @@ measured-plus-margin per the section 4 decision rule.
 4. Each directional mutation -- sign flip, transposed record, skipped
    or reversed conjugation, drifted baseline, removed identity
    short-circuit, removed `reset_all()` -- fails its named unit test.
-5. A gate violation degrades to the offset path with warnings in both
+5. A gate violation degrades to the offset path when the record carries
+   a usable offset, and otherwise to uncorrected pointing with the gate
+   reason recorded (section 3.3's no-offset row), with warnings in both
    logs and a per-reason count in the run summary / task result, with
    `cmatrix_foreign_midtime` and `cmatrix_baseline_mismatch` reported
    as distinct reasons; a pool that already answers the corrected

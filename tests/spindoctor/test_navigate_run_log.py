@@ -88,6 +88,9 @@ def _main_log_of(tmp_path: Path, report: Any) -> str:
     finally:
         for handler in list(MAIN_LOGGER.handlers):
             if handler is not pdslogger.NULL_HANDLER:
+                # Removed before closing: a closed handler left attached would
+                # swallow later tests' output through the module-level logger.
+                MAIN_LOGGER.remove_handler(handler)
                 handler.close()
     assert path is not None
     with path.open('r') as stream:

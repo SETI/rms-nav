@@ -207,8 +207,13 @@ def _run_reproject_pass(
                         pointing_reasons[applied.reason] = (
                             pointing_reasons.get(applied.reason, 0) + 1
                         )
-                        if applied.source == 'none':
-                            n_uncorrected += 1
+                    # Counted outside the reason branch: a run configured
+                    # with no nav results root corrects nothing and carries
+                    # no reason, and an entirely-uncorrected batch is
+                    # exactly what this count exists to make visible.
+                    if applied.source == 'none':
+                        n_uncorrected += 1
+                        if applied.reason is not None:
                             MAIN_LOGGER.warning(
                                 '%s: reprojecting with uncorrected pointing (%s)',
                                 image_file.image_file_url,

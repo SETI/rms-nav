@@ -68,6 +68,13 @@ def observation_attitude(obs: ObsSnapshotInst, et: float) -> np.ndarray:
 PIXEL_RAD = 6.0e-6
 SHAPE = (1024, 1024)
 
+# The synthetic exposure window every baseline built here records.  Tests
+# that hand the reader an epoch import these rather than repeating the
+# literals, so the record and the gate cannot drift apart.
+SYNTHETIC_START_ET = 100.0
+SYNTHETIC_MIDTIME_ET = 100.25
+SYNTHETIC_STOP_ET = 100.5
+
 
 def synthetic_fov() -> oops.fov.FOV:
     """Build the synthetic camera the hermetic C-matrix tests point."""
@@ -109,10 +116,10 @@ def synthetic_baseline(
         camera_frame='TEST_CAMERA',
         camera_frame_id=-999999,
         ck_frame_id=-999000,
-        start_et=100.0,
-        stop_et=100.5,
-        midtime_et=100.25,
-        exposure_s=0.5,
+        start_et=SYNTHETIC_START_ET,
+        stop_et=SYNTHETIC_STOP_ET,
+        midtime_et=SYNTHETIC_MIDTIME_ET,
+        exposure_s=SYNTHETIC_STOP_ET - SYNTHETIC_START_ET,
         sclk_start='1/100.000',
         sclk_midtime='1/100.250',
         sclk_stop='1/100.500',

@@ -368,9 +368,15 @@ def test_the_image_is_still_reprojected(tmp_path: Path, monkeypatch: pytest.Monk
     assert result['n_done'] == 1
 
 
-def test_asking_for_no_offsets_counts_nothing(
+def test_asking_for_no_offsets_still_counts_uncorrected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A run that never asked for offsets reports no shortfall."""
+    """A run that never asked for offsets is still an uncorrected run.
+
+    The count exists so a batch reprojected entirely on uncorrected pointing
+    is visible in the task result; deliberateness lives in the reason tally,
+    which stays empty because nothing was asked for and so nothing degraded.
+    """
     result = _reproject_task_result(tmp_path, monkeypatch, nav_root=None)
-    assert result['n_uncorrected'] == 0
+    assert result['n_uncorrected'] == 1
+    assert 'pointing_reasons' not in result

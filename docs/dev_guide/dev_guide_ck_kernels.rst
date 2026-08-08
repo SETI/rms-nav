@@ -28,7 +28,9 @@ attitude:
 
 The recorded matrices have a second consumer inside SpinDoctor itself: the
 backplane and reprojection stages apply them back onto observations through
-:func:`~spindoctor.support.cmatrix.apply_cmatrix_to_obs` (see `The readers`_),
+:func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs`, whose matrix
+mechanism is :func:`~spindoctor.support.cmatrix.apply_cmatrix_to_obs` (see
+`The readers`_),
 so the pipeline's own downstream products are built on the same attitude a
 kernel consumer sees.
 
@@ -310,9 +312,13 @@ The readers
 ===========
 
 The metadata readers -- the backplane stage and the mosaic drivers -- consume
-the recorded attitude through one public function beside
-:func:`~spindoctor.support.cmatrix.compute_pointing`:
-:func:`~spindoctor.support.cmatrix.apply_cmatrix_to_obs`. It inverts Step 3 of
+the recorded attitude through
+:func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs`, the consumer
+entry point that owns selection, the offset fallback, the pool no-op, reason
+reporting and cache clearing. The matrix mechanism beneath it is one public
+function beside :func:`~spindoctor.support.cmatrix.compute_pointing`:
+:func:`~spindoctor.support.cmatrix.apply_cmatrix_to_obs` -- calling it
+directly bypasses everything the consumer surface owns. It inverts Step 3 of
 the derivation above rather than re-deriving anything: the corrected frame is,
 by the writing half's own construction, *the frame in which the unmodified
 field of view holds*, so the reader replaces the observation's frame and

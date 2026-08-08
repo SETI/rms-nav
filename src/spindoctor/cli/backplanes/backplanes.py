@@ -46,7 +46,8 @@ def generate_backplanes_image_files(
     Returns:
         ``{'status': 'success'}`` -- carrying ``pointing_source`` (one of
         ``'cmatrix'``, ``'pool'``, ``'offset'``, ``'none'``) naming which
-        recorded pointing the product was built on, plus
+        recorded pointing the product was built on, plus ``pointing_reason``
+        when the outcome carries one, plus
         ``uncorrected_pointing`` when that source is ``'none'`` and the
         backplanes were computed on the camera's uncorrected pointing -- or
         ``{'status': 'skipped'}`` with the navigation status that caused the
