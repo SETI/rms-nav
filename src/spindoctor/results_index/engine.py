@@ -33,7 +33,7 @@ from sqlalchemy.engine import URL, Engine
 
 from spindoctor.results_index.schema import METADATA, SCHEMA_META, SCHEMA_VERSION
 
-__all__ = ['SQLITE_BUSY_TIMEOUT_MS', 'open_index']
+__all__ = ['SQLITE_BUSY_TIMEOUT_MS', 'masked_url', 'open_index']
 
 SQLITE_BUSY_TIMEOUT_MS = 30000
 """How long a SQLite connection waits for a competing writer before failing.
@@ -122,18 +122,6 @@ def _authority_start(url: str) -> int:
     return slash + 2 if url[slash + 1 : slash + 2] == '/' else slash + 1
 
 
-def _is_a_port(text: str) -> bool:
-    """Whether the text after a colon in an authority is a port and not a password.
-
-    Parameters:
-        text: The characters between the colon and the slash that follows it.
-
-    Returns:
-        True when every character is a digit, an empty run included.
-    """
-    return text == '' or text.isdigit()
-
-
 def _password_span(url: str) -> tuple[int, int] | None:
     """Return the half-open range of characters holding a URL's password.
 
@@ -145,10 +133,13 @@ def _password_span(url: str) -> tuple[int, int] | None:
     password written with an unescaped slash.
 
     One shape is genuinely ambiguous: ``host:5432/path@name`` reads equally as a
-    host with a port and a path, or as a user name with a slashed password.  The
-    digits decide it, because a port is digits and a password almost never is,
-    and mangling a host, a port and half a database name costs the very
-    identification these messages exist for.
+    host with a port and a path, or as a user name with a password that carries
+    a slash.  It is read as credentials, which is how the URL parser itself
+    reads it -- for the spelling of that shape a parser accepts, this rule and
+    ``render_as_string()`` hide the same characters.  Reading it as a port
+    instead would leave a password beginning with digits, ``123/secret``, in
+    every message; the cost of the reading taken is a mangled host and database
+    name in a message about a URL that was already unusable.
 
     Parameters:
         url: The URL as the caller wrote it.
@@ -170,22 +161,23 @@ def _password_span(url: str) -> tuple[int, int] | None:
     at = url.find('@', colon)
     if at < 0:
         return None
-    if 0 <= slash < at and _is_a_port(url[colon + 1 : slash]):
-        return None
     return colon + 1, at
 
 
-def _masked_url(url: str) -> str:
+def masked_url(url: str) -> str:
     """Return a URL string with any password in it replaced.
 
-    Used for a URL whose parsing is what failed, since an unparsed URL cannot
-    render itself.  Everything outside the password survives, because naming the
-    URL is what tells a reader which of the resolution levels supplied the bad
-    value.
+    Anything that puts a connection URL in front of a person -- a refusal whose
+    parsing is what failed, a run log recording the command line it was given --
+    calls this, so that one structural rule decides what a password is.
+    Everything outside the password survives, because naming the URL is what
+    tells a reader which of the resolution levels supplied the value.
 
     A ``sqlite:`` URL is returned exactly as it came.  It names a local
     filesystem path, which has no credentials at all, and a path is free to carry
-    the colons and at-signs that would otherwise read as credentials.
+    the colons and at-signs that would otherwise read as credentials.  So is any
+    string carrying no authority at all, which is what an ordinary command-line
+    word is.
 
     Parameters:
         url: The URL as the caller wrote it.
@@ -217,7 +209,7 @@ def _display_url(url: str) -> str:
     except Exception:
         # Any failure at all: this runs while reporting another failure, and a
         # display string is never worth raising over.
-        return _masked_url(url)
+        return masked_url(url)
 
 
 def _sqlite_error_name(exc: BaseException) -> str:
@@ -432,7 +424,9 @@ def _sqlite_probe_failure(
     a server, and prescribing that for the others sends an operator to rebuild a
     deployment over a directory they had not created yet, or over a disk that is
     merely full.  A code this classification does not know is reported as what
-    SQLite said, with no remedy invented for it.
+    SQLite said, with no remedy invented for it -- including an exception that
+    carries no result code at all, which says nothing about locking and must not
+    be answered as though it had.
 
     Codes are matched by prefix, because SQLite refines several of them into
     extended forms -- ``SQLITE_IOERR_WRITE``, ``SQLITE_CANTOPEN_ISDIR`` -- that
@@ -454,7 +448,7 @@ def _sqlite_probe_failure(
         )
     if error_name.startswith(_SQLITE_CANNOT_OPEN):
         return _IndexOpenError(_cannot_open_message(exc, url, path))
-    if error_name == '' or error_name.startswith(_SQLITE_LOCK_REFUSED_PREFIXES):
+    if error_name.startswith(_SQLITE_LOCK_REFUSED_PREFIXES):
         return _IndexOpenError(
             f'{url}: could not take a SQLite write lock ({exc.orig}). A SQLite index '
             f'must live on a local filesystem that honors locking; use a '
@@ -462,7 +456,7 @@ def _sqlite_probe_failure(
         )
     return _IndexOpenError(
         f'{url}: SQLite refused {"this database" if path is None else path} '
-        f'({error_name}: {exc.orig}).'
+        f'({error_name or "no result code"}: {exc.orig}).'
     )
 
 

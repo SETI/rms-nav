@@ -28,6 +28,7 @@ from spindoctor.config import DEFAULT_CONFIG, Config
 from spindoctor.results_index import IMAGES
 
 __all__ = [
+    'CSV_LINE_TERMINATOR',
     'IMAGE_COLUMNS',
     'add_botsim_section',
     'add_failure_taxonomy_section',
@@ -583,6 +584,9 @@ def add_offset_by_group_section(ctx: ReportContext) -> None:
 IMAGE_COLUMNS: tuple[str, ...] = tuple(IMAGES.columns.keys())
 """Every ``images`` column, in schema order, as the CSV export lists them."""
 
+CSV_LINE_TERMINATOR = '\n'
+"""What ends a row of the CSV export, on every platform."""
+
 _CHILD_KEY = 'WHERE {alias}root_url = i.root_url AND {alias}results_path_stub = i.results_path_stub'
 """How a correlated subquery finds one image's child rows."""
 
@@ -630,7 +634,11 @@ def write_csv_export(ctx: ReportContext) -> FCPath:
     )
     csv_path = ctx.output_dir / 'images.csv'
     buffer = StringIO()
-    writer = csv.writer(buffer)
+    # Stated rather than left to the module default, which is CRLF: this file is
+    # read back by the regression comparison and by whatever an operator points
+    # at it, and a line ending that changes with a library default is a diff
+    # nobody asked for.
+    writer = csv.writer(buffer, lineterminator=CSV_LINE_TERMINATOR)
     writer.writerow(
         [*IMAGE_COLUMNS, 'n_technique_rows', 'n_feature_sources', 'n_features', 'n_gated']
     )

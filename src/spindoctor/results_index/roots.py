@@ -29,9 +29,11 @@ __all__ = ['ingested_roots', 'normalize_root_url', 'require_ingested_roots']
 def normalize_root_url(root: str | Path | FCPath) -> str:
     """Return the form of a results root that the index stores and compares.
 
-    The rule is one absolute POSIX rendering with no trailing separator, so that
-    a root named relatively on one run and absolutely on the next, or named with
-    a trailing slash by one program and without by another, is one root.
+    The rule is one absolute POSIX rendering, so that a root named relatively on
+    one run and absolutely on the next, or named with a trailing slash by one
+    program and without by another, is one root.  That rendering carries no
+    trailing separator except on the filesystem root itself, whose separator is
+    its whole name.
 
     Parameters:
         root: The results root as its holder spelled it: a local path, an
@@ -40,11 +42,7 @@ def normalize_root_url(root: str | Path | FCPath) -> str:
     Returns:
         The normalized root URL.
     """
-    normalized = FCPath(root).absolute().as_posix()
-    stripped = normalized.rstrip('/')
-    # A root that is nothing but separators is the filesystem root, which is the
-    # one root whose trailing separator is the whole name.
-    return stripped or '/'
+    return FCPath(root).absolute().as_posix()
 
 
 def ingested_roots(connection: sqlalchemy.Connection) -> list[str]:

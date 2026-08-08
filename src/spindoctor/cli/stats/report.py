@@ -754,7 +754,14 @@ def main_report(cmdline: list[str] | None = None) -> int:
         cmdline: Argument list; None uses ``sys.argv``.
 
     Returns:
-        Process exit code (0 on success, 1 when the index cannot be read).
+        Process exit code: 0 on success, and 1 when no index was named or the
+        one that was cannot be read.
+
+    Raises:
+        SystemExit: With status 2, from the argument parser, for a command line
+            it will not accept -- an unknown flag, an unparseable bound, or a
+            root the index holds no completed ingest of, which is a value the
+            index rather than the parser rejects but is reported the same way.
     """
     parser = argparse.ArgumentParser(
         description='Generate a navigation statistics report from an ingested results index.'

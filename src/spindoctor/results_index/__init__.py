@@ -18,21 +18,24 @@ Public API:
     IMAGES           -- one row per image, keyed by (root_url, results_path_stub)
     TECHNIQUES       -- per-technique results for an image
     FEATURE_SOURCES  -- aggregated feature inventory for an image
+    FAILED_FILES     -- files that are not current-schema navigation documents
     SCHEMA_META      -- the single row stamping the schema version
     INGEST_RUNS      -- one row per ingest pass over one root
     open_index       -- the only opener, with the version gate
+    masked_url       -- a connection URL with any password in it hidden
     normalize_root_url    -- the one spelling of a results root
     ingested_roots        -- the roots a completed ingest covered
     require_ingested_roots -- refuse to read absence from a root nobody ingested
 """
 
-from spindoctor.results_index.engine import open_index
+from spindoctor.results_index.engine import masked_url, open_index
 from spindoctor.results_index.roots import (
     ingested_roots,
     normalize_root_url,
     require_ingested_roots,
 )
 from spindoctor.results_index.schema import (
+    FAILED_FILES,
     FEATURE_SOURCES,
     IMAGES,
     INGEST_RUNS,
@@ -43,6 +46,7 @@ from spindoctor.results_index.schema import (
 )
 
 __all__ = [
+    'FAILED_FILES',
     'FEATURE_SOURCES',
     'IMAGES',
     'INGEST_RUNS',
@@ -51,6 +55,7 @@ __all__ = [
     'SCHEMA_VERSION',
     'TECHNIQUES',
     'ingested_roots',
+    'masked_url',
     'normalize_root_url',
     'open_index',
     'require_ingested_roots',

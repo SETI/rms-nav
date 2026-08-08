@@ -16,11 +16,18 @@ instrument is not a per-image navigation document at all.  A results tree holds
 such files, so this refuses them by raising :class:`MetadataDocumentError`,
 which carries the reason apart from the file name; the caller counts them and
 goes on.
+
+Every container the document schema declares is checked before it is read.  A
+file whose ``observation`` is a string, or whose ``per_technique`` holds
+numbers, is a document of some other shape rather than a navigation result, and
+the refusal names which field said so.  Reading it without the check would raise
+an ``AttributeError`` out of the middle of a run and cost every other file in
+the tree, so the shape is part of what "current-schema" means here.
 """
 
 import math
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 from spindoctor.cli.stats.classify import date_from_image_et, image_number_from_name
 
@@ -30,6 +37,15 @@ __all__ = [
     'MetadataSource',
     'rows_from_metadata',
 ]
+
+NOT_A_NAVIGATION_DOCUMENT = 'not a current-schema navigation document'
+"""Opening of every refusal of a file that is some other kind of document.
+
+A results tree holds hundreds of ``*_metadata.json`` files that were never
+navigation results.  The tally an operator reads has to say that in as many
+words, because "no observation.instrument" on its own reads as a navigation
+result that failed to ingest.
+"""
 
 
 class MetadataDocumentError(ValueError):
@@ -90,6 +106,89 @@ class ImageRows:
     image: dict[str, Any]
     techniques: list[dict[str, Any]]
     feature_sources: list[dict[str, Any]]
+
+
+# ---------------------------------------------------------------------------
+# Shapes the document schema declares
+# ---------------------------------------------------------------------------
+
+
+def _refuse(detail: str, source: MetadataSource) -> NoReturn:
+    """Refuse a file that is not a current-schema navigation document.
+
+    Parameters:
+        detail: Which field said so, with nothing file-specific in it.
+        source: Where the document came from.
+
+    Raises:
+        MetadataDocumentError: Always.
+    """
+    raise MetadataDocumentError(
+        f'{NOT_A_NAVIGATION_DOCUMENT} ({detail})', source_file=source.source_file
+    )
+
+
+def _object(value: Any, name: str, source: MetadataSource) -> dict[str, Any]:
+    """Read a JSON object the schema declares, or an empty one when it is absent.
+
+    Parameters:
+        value: The value as it was parsed.
+        name: Dotted path of the field, for the refusal.
+        source: Where the document came from.
+
+    Returns:
+        The object, or an empty one when the field is absent.
+
+    Raises:
+        MetadataDocumentError: If the field is present and is not an object.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        _refuse(f'{name} is not an object', source)
+    return value
+
+
+def _array(value: Any, name: str, source: MetadataSource) -> list[Any]:
+    """Read a JSON array the schema declares, or an empty one when it is absent.
+
+    Parameters:
+        value: The value as it was parsed.
+        name: Dotted path of the field, for the refusal.
+        source: Where the document came from.
+
+    Returns:
+        The array, or an empty one when the field is absent.
+
+    Raises:
+        MetadataDocumentError: If the field is present and is not an array.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        _refuse(f'{name} is not a list', source)
+    return value
+
+
+def _array_of_objects(value: Any, name: str, source: MetadataSource) -> list[dict[str, Any]]:
+    """Read a JSON array of objects the schema declares.
+
+    Parameters:
+        value: The value as it was parsed.
+        name: Dotted path of the field, for the refusal.
+        source: Where the document came from.
+
+    Returns:
+        The entries, or an empty list when the field is absent.
+
+    Raises:
+        MetadataDocumentError: If the field is not an array, or holds an entry
+            that is not an object.
+    """
+    entries = _array(value, name, source)
+    if not all(isinstance(entry, dict) for entry in entries):
+        _refuse(f'{name} holds an entry that is not an object', source)
+    return cast(list[dict[str, Any]], entries)
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +322,7 @@ def _sigma_from_covariance(covariance: Any) -> tuple[float | None, float | None]
     try:
         var_dv = float(covariance[0][0])
         var_du = float(covariance[1][1])
-    except (TypeError, ValueError, IndexError):
+    except (TypeError, ValueError, IndexError, KeyError):
         return None, None
     sigma_dv = math.sqrt(var_dv) if var_dv >= 0.0 else None
     sigma_du = math.sqrt(var_du) if var_du >= 0.0 else None
@@ -286,7 +385,9 @@ def _volume_of(results_path_stub: str) -> str | None:
     return volume if separator else None
 
 
-def _technique_rows(source: MetadataSource, per_technique: Any) -> list[dict[str, Any]]:
+def _technique_rows(
+    source: MetadataSource, per_technique: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """Build the ``techniques`` rows of one document.
 
     Parameters:
@@ -295,6 +396,9 @@ def _technique_rows(source: MetadataSource, per_technique: Any) -> list[dict[str
 
     Returns:
         One row per technique that reported, in recorded order.
+
+    Raises:
+        MetadataDocumentError: If an entry's ``diagnostics`` is not an object.
     """
     rows: list[dict[str, Any]] = []
     for entry in per_technique:
@@ -304,7 +408,7 @@ def _technique_rows(source: MetadataSource, per_technique: Any) -> list[dict[str
             {
                 'root_url': source.root_url,
                 'results_path_stub': source.results_path_stub,
-                'technique_name': entry.get('technique_name', 'unknown'),
+                'technique_name': _str_or_none(entry.get('technique_name')) or 'unknown',
                 'offset_dv': offset_dv,
                 'offset_du': offset_du,
                 'sigma_dv': sigma_dv,
@@ -312,14 +416,22 @@ def _technique_rows(source: MetadataSource, per_technique: Any) -> list[dict[str
                 'confidence': _finite_or_none(entry.get('confidence')),
                 'spurious': bool(entry.get('spurious')),
                 'at_edge': bool(entry.get('at_edge')),
+                # An empty list is a statement: this technique named no source.
                 'source_names': _source_names_from_feature_ids(entry.get('feature_ids')),
-                'diagnostics': entry.get('diagnostics') or {},
+                # As is an empty object: it reported no diagnostics.
+                'diagnostics': _object(
+                    entry.get('diagnostics'),
+                    'navigation_result.per_technique[].diagnostics',
+                    source,
+                ),
             }
         )
     return rows
 
 
-def _feature_source_rows(source: MetadataSource, inventory: Any) -> list[dict[str, Any]]:
+def _feature_source_rows(
+    source: MetadataSource, inventory: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """Build the ``feature_sources`` rows of one document.
 
     The inventory is aggregated by ``(feature_type, source_model, source_name)``;
@@ -381,21 +493,22 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
 
     Raises:
         MetadataDocumentError: If the document lacks the observation image name
-            or the observation instrument, which is what a file that is not a
-            per-image navigation document looks like.
+            or the observation instrument, or if any container the schema
+            declares holds something of another shape.  That is what a file
+            which is not a per-image navigation document looks like.
     """
-    observation = metadata.get('observation') or {}
-    image_name = observation.get('image_name')
-    if not image_name or not isinstance(image_name, str):
-        raise MetadataDocumentError('no observation.image_name', source_file=source.source_file)
-    instrument = observation.get('instrument')
-    if not isinstance(instrument, str) or not instrument:
-        raise MetadataDocumentError('no observation.instrument', source_file=source.source_file)
-    nav = metadata.get('navigation_result') or {}
-    provenance = nav.get('provenance') or {}
-    classifier = nav.get('image_classifier') or {}
-    times = nav.get('times') or {}
-    pointing = nav.get('pointing') or {}
+    observation = _object(metadata.get('observation'), 'observation', source)
+    image_name = _str_or_none(observation.get('image_name'))
+    if image_name is None:
+        _refuse('no observation.image_name', source)
+    instrument = _str_or_none(observation.get('instrument'))
+    if instrument is None:
+        _refuse('no observation.instrument', source)
+    nav = _object(metadata.get('navigation_result'), 'navigation_result', source)
+    provenance = _object(nav.get('provenance'), 'navigation_result.provenance', source)
+    classifier = _object(nav.get('image_classifier'), 'navigation_result.image_classifier', source)
+    times = _object(nav.get('times'), 'navigation_result.times', source)
+    pointing = _object(nav.get('pointing'), 'navigation_result.pointing', source)
     # A navigated image's epoch comes from its observation (provenance); an
     # image that never loaded has no provenance, so the navigator records the
     # epoch it read from the index under ``observation.image_et``.  Either way
@@ -403,8 +516,20 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
     image_et = _finite_or_none(provenance.get('image_et'))
     if image_et is None:
         image_et = _finite_or_none(observation.get('image_et'))
-    per_technique = nav.get('per_technique') or []
-    timing = metadata.get('timing') or {}
+    per_technique = _array_of_objects(
+        nav.get('per_technique'), 'navigation_result.per_technique', source
+    )
+    inventory = _array_of_objects(
+        nav.get('feature_inventory'), 'navigation_result.feature_inventory', source
+    )
+    excluded = _array(
+        nav.get('excluded_from_consensus'), 'navigation_result.excluded_from_consensus', source
+    )
+    if not all(isinstance(name, str) for name in excluded):
+        _refuse(
+            'navigation_result.excluded_from_consensus holds a name that is not a string', source
+        )
+    timing = _object(metadata.get('timing'), 'timing', source)
     shape_v, shape_u = _image_shape(observation.get('image_shape'))
     offset_dv, offset_du = _pair(metadata.get('offset'))
     sigma_dv, sigma_du = _pair(nav.get('sigma_px'))
@@ -420,10 +545,12 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         # image that never loaded; NULL only when the dataset has no camera
         # column at all.  It is never inferred from the image name.
         'camera': _str_or_none(observation.get('camera')),
-        'image_path': observation.get('image_path'),
+        'image_path': _str_or_none(observation.get('image_path')),
         'image_et': image_et,
         'image_date': date_from_image_et(image_et),
-        'status': str(metadata.get('status') or nav.get('status') or 'unknown'),
+        'status': _str_or_none(metadata.get('status'))
+        or _str_or_none(nav.get('status'))
+        or 'unknown',
         'status_error': _str_or_none(metadata.get('status_error')),
         'status_reason': _str_or_none(nav.get('status_reason')),
         'offset_dv': offset_dv,
@@ -439,7 +566,8 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         'confidence': _finite_or_none(metadata.get('confidence')),
         'confidence_rank': _str_or_none(nav.get('confidence_rank')),
         'n_techniques': len(per_technique),
-        'excluded_from_consensus': sorted(nav.get('excluded_from_consensus') or []),
+        # An empty list is a statement: the ensemble excluded nothing.
+        'excluded_from_consensus': sorted(excluded),
         'image_class': _str_or_none(classifier.get('class')),
         'noise_sigma': _finite_or_none(classifier.get('noise_sigma')),
         'image_shape_v': shape_v,
@@ -469,5 +597,5 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
     return ImageRows(
         image=image_row,
         techniques=_technique_rows(source, per_technique),
-        feature_sources=_feature_source_rows(source, nav.get('feature_inventory') or []),
+        feature_sources=_feature_source_rows(source, inventory),
     )
