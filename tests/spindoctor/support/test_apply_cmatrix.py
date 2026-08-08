@@ -24,6 +24,7 @@ from tests.cmatrix_helpers import (
     some_attitude,
     synthetic_baseline,
     synthetic_fov,
+    synthetic_frame_identity,
 )
 
 import spindoctor.support.cmatrix as cmatrix_module
@@ -34,7 +35,6 @@ from spindoctor.support.cmatrix import (
     MALFORMED_POINTING,
     CmatrixApplication,
     _build_pointing_solution,
-    _FrameIdentity,
     apply_cmatrix_to_obs,
 )
 from spindoctor.support.exceptions import NavPointingError
@@ -67,24 +67,6 @@ class _FrameOnlyObs:
         self.midtime = midtime
 
 
-def _synthetic_identity(flip: np.ndarray) -> _FrameIdentity:
-    """Build an instrument identity around a synthetic oops-from-SPICE flip.
-
-    Parameters:
-        flip: The constant rotation ``R`` satisfying ``C_oops = R . C_spice``.
-
-    Returns:
-        The identity, with placeholder frame and clock ids.
-    """
-    return _FrameIdentity(
-        camera_frame='TEST_CAMERA',
-        ck_frame_id=-999000,
-        sclk_id=-999,
-        oops_from_spice=flip,
-        frozen_oops_attitude=False,
-    )
-
-
 def _inject_identity(monkeypatch: pytest.MonkeyPatch, flip: np.ndarray) -> None:
     """Make the reader see a synthetic instrument whose flip is ``flip``.
 
@@ -92,7 +74,7 @@ def _inject_identity(monkeypatch: pytest.MonkeyPatch, flip: np.ndarray) -> None:
         monkeypatch: The patcher.
         flip: The flip the injected instrument table reports.
     """
-    identity = _synthetic_identity(flip)
+    identity = synthetic_frame_identity(flip)
     monkeypatch.setattr(cmatrix_module, '_frame_identity', lambda obs: identity)
 
 

@@ -14,7 +14,7 @@ import numpy as np
 import oops
 
 from spindoctor.obs import ObsSnapshotInst
-from spindoctor.support.cmatrix import AttitudeBaseline
+from spindoctor.support.cmatrix import AttitudeBaseline, _FrameIdentity
 
 
 def offset_from_correction(fov: oops.fov.FOV, correction: np.ndarray) -> tuple[float, float]:
@@ -116,4 +116,26 @@ def synthetic_baseline(
         sclk_start='1/100.000',
         sclk_midtime='1/100.250',
         sclk_stop='1/100.500',
+    )
+
+
+def synthetic_frame_identity(flip: np.ndarray) -> _FrameIdentity:
+    """Build an instrument identity around a synthetic oops-from-SPICE flip.
+
+    Injected in place of the real instrument table so hermetic tests can gate
+    against any flip, including the non-involutory ones no real instrument
+    has.
+
+    Parameters:
+        flip: The constant rotation ``R`` satisfying ``C_oops = R . C_spice``.
+
+    Returns:
+        The identity, with placeholder frame and clock ids.
+    """
+    return _FrameIdentity(
+        camera_frame='TEST_CAMERA',
+        ck_frame_id=-999000,
+        sclk_id=-999,
+        oops_from_spice=flip,
+        frozen_oops_attitude=False,
     )

@@ -3,10 +3,11 @@
 Contract under test (docs/dev_guide/dev_guide_backplanes.rst "Pipeline overview" and
 "Restrictions and assumptions"): the driver reads the per-image navigation
 ``_metadata.json`` from the nav results root, refuses to proceed unless
-``status == 'success'``, builds the snapshot with a zero extended-FOV margin, wraps
-its FOV in an ``OffsetFOV`` carrying the navigated ``(dv, du)`` offset (``(0, 0)``
-with a warning when the offset is None), and hands the per-source results to the
-merge and the writer.  The configured backplane list in
+``status == 'success'``, builds the snapshot with a zero extended-FOV margin,
+applies the recorded pointing (the corrected C-matrix when the record carries a
+usable one, else the navigated ``(dv, du)`` offset via ``OffsetFOV``, else
+nothing, with a warning), and hands the per-source results to the merge and the
+writer.  The configured backplane list in
 ``config_900_backplanes.yaml`` must name real ``oops.Backplane`` methods and declare
 angle units in radians.
 """
@@ -389,10 +390,10 @@ def test_driver_requires_offset_field(tmp_path: Path, monkeypatch: pytest.Monkey
         _run(tmp_path, metadata={'status': 'success'})
 
 
-def test_driver_defaults_none_offset_to_zero(
+def test_driver_leaves_a_none_offset_uncorrected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A None offset falls back to (0, 0) and the pipeline still runs.
+    """A None offset leaves the pointing untouched and the pipeline still runs.
 
     Parameters:
         tmp_path: pytest-provided temporary directory.
@@ -400,9 +401,7 @@ def test_driver_defaults_none_offset_to_zero(
     """
     calls = _stub_pipeline(monkeypatch)
     snapshot, _, _, _ = _run(tmp_path, metadata={'status': 'success', 'offset': None})
-    assert isinstance(snapshot.fov, oops.fov.OffsetFOV)
-    assert snapshot.fov.uv_offset[0] == 0.0
-    assert snapshot.fov.uv_offset[1] == 0.0
+    assert not isinstance(snapshot.fov, oops.fov.OffsetFOV)
     assert len(calls['merge']) == 1
 
 
@@ -698,3 +697,111 @@ def test_a_navigated_image_is_not_flagged(tmp_path: Path, monkeypatch: pytest.Mo
         write_output_files=False,
     )
     assert 'uncorrected_pointing' not in result
+
+
+# ---------------------------------------------------------------------------
+# Which pointing the product was built on
+# ---------------------------------------------------------------------------
+
+
+def _small_rotation() -> np.ndarray:
+    """A one-milliradian rotation about X: a valid corrected attitude."""
+    return np.asarray(cspyce.axisar([1.0, 0.0, 0.0], 1.0e-3), np.float64)
+
+
+def _pointing_metadata(midtime_et: float) -> dict[str, Any]:
+    """Build a success record carrying a usable C-matrix pair and offset.
+
+    The baseline is the identity -- which is the hermetic observation's J2000
+    frame attitude -- so the record means for that observation what a real
+    record means for a real one.
+
+    Parameters:
+        midtime_et: The recorded exposure midtime.
+    """
+    return {
+        'status': 'success',
+        'offset': [1.0, -2.0],
+        'navigation_result': {
+            'pointing': {
+                'cmatrix': [float(v) for v in _small_rotation().reshape(9)],
+                'cmatrix_original': [float(v) for v in np.eye(3).reshape(9)],
+            },
+            'times': {'midtime_et': midtime_et},
+        },
+    }
+
+
+def test_the_result_names_the_offset_pointing_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record with no pointing block reports the offset as the source."""
+    _stub_pipeline(monkeypatch)
+    root = FCPath(tmp_path)
+    nav_root, bp_root = _roots(root)
+    _write_nav_metadata(nav_root, 'IMG1', {'status': 'success', 'offset': [1.5, -2.5]})
+    obs_class, _ = _obs_class_for(make_snapshot(shape_vu=SHAPE_VU, simulated=True))
+    result = generate_backplanes_image_files(
+        obs_class,
+        _image_files(root, 'IMG1'),
+        nav_results_root=nav_root,
+        backplane_results_root=bp_root,
+        write_output_files=False,
+    )
+    assert result['pointing_source'] == 'offset'
+    assert result['pointing_reason'] == 'no_pointing_block'
+
+
+def test_the_result_names_the_cmatrix_pointing_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record with a usable C-matrix reports it, and the FOV stays unwrapped.
+
+    The hermetic observation exposes from t=0 for 1 s, so the record's
+    midtime is 0.5; the instrument table lookup is injected exactly as the
+    reader's own unit tests inject it.
+    """
+    from tests.cmatrix_helpers import synthetic_frame_identity
+
+    import spindoctor.support.cmatrix as cmatrix_module
+
+    identity = synthetic_frame_identity(np.eye(3))
+    monkeypatch.setattr(cmatrix_module, '_frame_identity', lambda obs: identity)
+    _stub_pipeline(monkeypatch)
+    root = FCPath(tmp_path)
+    nav_root, bp_root = _roots(root)
+    _write_nav_metadata(nav_root, 'IMG1', _pointing_metadata(midtime_et=0.5))
+    snapshot = make_snapshot(shape_vu=SHAPE_VU, simulated=True)
+    obs_class, _ = _obs_class_for(snapshot)
+    result = generate_backplanes_image_files(
+        obs_class,
+        _image_files(root, 'IMG1'),
+        nav_results_root=nav_root,
+        backplane_results_root=bp_root,
+        write_output_files=False,
+    )
+    assert result['pointing_source'] == 'cmatrix'
+    assert 'pointing_reason' not in result
+    assert 'uncorrected_pointing' not in result
+    assert not isinstance(snapshot.fov, oops.fov.OffsetFOV)
+    assert isinstance(snapshot.frame, oops.frame.Cmatrix)
+
+
+def test_an_uncorrected_product_names_the_none_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record with no usable pointing reports 'none' beside the flag."""
+    _stub_pipeline(monkeypatch)
+    root = FCPath(tmp_path)
+    nav_root, bp_root = _roots(root)
+    _write_nav_metadata(nav_root, 'IMG1', {'status': 'success', 'offset': None})
+    obs_class, _ = _obs_class_for(make_snapshot(shape_vu=SHAPE_VU, simulated=True))
+    result = generate_backplanes_image_files(
+        obs_class,
+        _image_files(root, 'IMG1'),
+        nav_results_root=nav_root,
+        backplane_results_root=bp_root,
+        write_output_files=False,
+    )
+    assert result['pointing_source'] == 'none'
+    assert result['uncorrected_pointing'] is True

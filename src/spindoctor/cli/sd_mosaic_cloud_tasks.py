@@ -34,7 +34,7 @@ package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
 from spindoctor.cli.reproj.factories import build_body_mosaic, build_ring_mosaic
-from spindoctor.cli.reproj.offsets import apply_offset_to_obs, load_offset_if_any
+from spindoctor.cli.reproj.offsets import apply_pointing_to_obs, load_pointing_if_any
 from spindoctor.cli.reproj.paths import per_image_output_path
 from spindoctor.cli.reproj.reproject import reproject_one_body, reproject_one_ring
 from spindoctor.config import (
@@ -121,12 +121,14 @@ def process_task(
         ``n_failed``: an individual image is allowed to fail without failing
         the task, so the counts are what distinguish a task that reprojected
         its images from one that failed every one of them.  ``n_uncorrected``
-        counts images reprojected without a navigation offset, tallied by
-        reason under ``uncorrected_reasons``: those images do produce a
-        product, and a batch registered entirely on uncorrected pointing is
-        otherwise indistinguishable from a good one.  An image whose
-        ``results_path_stub`` was refused is additionally named under
-        ``rejected_stubs``, since no log could be opened to record it.
+        counts images reprojected with no pointing correction at all: those
+        images do produce a product, and a batch registered entirely on
+        uncorrected pointing is otherwise indistinguishable from a good one.
+        Every degraded pointing outcome -- an offset fallback, an
+        already-corrected pool, or no correction -- is tallied by reason
+        under ``pointing_reasons``.  An image whose ``results_path_stub`` was
+        refused is additionally named under ``rejected_stubs``, since no log
+        could be opened to record it.
     """
     if not isinstance(task_data, dict):
         return False, {'status': 'error', 'status_error': 'invalid_task_data_type'}
@@ -210,7 +212,7 @@ def process_task(
     n_skipped = 0
     n_failed = 0
     n_uncorrected = 0
-    uncorrected_reasons: dict[str, int] = {}
+    pointing_reasons: dict[str, int] = {}
     rejected_stubs: list[dict[str, str]] = []
 
     for file in files:
@@ -288,19 +290,21 @@ def process_task(
                     image_path = image_file.image_file_path.absolute()
                     obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
 
-                    lookup = load_offset_if_any(nav_results_root_path, image_file)
-                    if lookup.offset is not None:
-                        apply_offset_to_obs(
-                            cast(ObsSnapshotInst, obs), lookup.offset[0], lookup.offset[1]
-                        )
-                    elif lookup.reason is not None:
-                        # A task has no run log, so the count is what carries
-                        # this out: a batch reprojected entirely on uncorrected
+                    selection = load_pointing_if_any(nav_results_root_path, image_file)
+                    applied = apply_pointing_to_obs(
+                        cast(ObsSnapshotInst, obs),
+                        selection,
+                        subject=str(image_file.image_file_url),
+                    )
+                    if applied.reason is not None:
+                        # A task has no run log, so the tally is what carries
+                        # this out: a batch reprojected entirely on degraded
                         # pointing looks exactly like a good one otherwise.
-                        n_uncorrected += 1
-                        uncorrected_reasons[lookup.reason] = (
-                            uncorrected_reasons.get(lookup.reason, 0) + 1
+                        pointing_reasons[applied.reason] = (
+                            pointing_reasons.get(applied.reason, 0) + 1
                         )
+                        if applied.source == 'none':
+                            n_uncorrected += 1
 
                     img_label = (
                         image_name_override
@@ -340,8 +344,8 @@ def process_task(
         'n_failed': n_failed,
         'n_uncorrected': n_uncorrected,
     }
-    if uncorrected_reasons:
-        task_result['uncorrected_reasons'] = uncorrected_reasons
+    if pointing_reasons:
+        task_result['pointing_reasons'] = pointing_reasons
     if rejected_stubs:
         task_result['rejected_stubs'] = rejected_stubs
     return False, task_result
@@ -376,8 +380,9 @@ async def async_main() -> None:
         type=str,
         default=None,
         help=(
-            'Root directory of sd_offset results. When provided, pre-computed offsets '
-            'from _metadata.json files are applied before reprojection.'
+            "Root directory of sd_offset results. When provided, each image's recorded "
+            'pointing (the corrected C-matrix, or the pixel offset when no C-matrix is '
+            'usable) from _metadata.json is applied before reprojection.'
         ),
     )
 
