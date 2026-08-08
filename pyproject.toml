@@ -62,6 +62,7 @@ dev = [
   "pytest-xdist",
   "ruff",
   "rms-spindoctor[docs]",
+  "rms-spindoctor[postgres]",
   "threadpoolctl",
 ]
 # Sphinx stack only. ``pip install -e ".[docs]"`` (ReadTheDocs: ``path: .`` +
@@ -74,7 +75,9 @@ docs = [
 ]
 # PostgreSQL driver for the results index. A SQLite index needs nothing beyond
 # the runtime dependencies; PostgreSQL is what a results index shared across
-# machines runs on.
+# machines runs on. The ``dev`` extra pulls this in so that the postgres test
+# tier type-checks and runs from a development checkout; the tier still skips
+# itself unless ``SPINDOCTOR_TEST_POSTGRES_URL`` names a server.
 postgres = [
   "psycopg[binary]>=3.1",
 ]
