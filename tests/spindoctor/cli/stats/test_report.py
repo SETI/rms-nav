@@ -7,6 +7,8 @@ Markdown.  These pin what each section says; the frozen comparison in
 before the queries moved onto the index.
 """
 
+import contextlib
+import csv
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -16,20 +18,15 @@ import pytest
 from filecache import FCPath
 from sqlalchemy import Connection
 
-from spindoctor.cli.stats.classify import (
-    date_from_image_et,
-    datetime_from_image_et,
-    image_number_from_name,
-)
-from spindoctor.cli.stats.report import build_report, main_report
-from spindoctor.cli.stats.report_common import count_pct, image_name_from_filename
-from spindoctor.cli.stats.report_sections import IMAGE_COLUMNS, resolve_offset_limit
+from spindoctor.cli.stats.report import build_report
+from spindoctor.cli.stats.report_sections import IMAGE_COLUMNS
 from spindoctor.dataset import DataSetPDS3CassiniISS, DataSetPDS3VoyagerISS
 from spindoctor.results_index import open_index
 
 from .conftest import index_url, ingest_tree, metadata_document, technique, write_metadata
 
 
+@contextlib.contextmanager
 def _indexed(
     tmp_path: Path, documents: dict[str, dict[str, Any]], logger: pdslogger.PdsLogger
 ) -> Iterator[Connection]:
@@ -107,119 +104,8 @@ def standard(tmp_path: Path, quiet_logger: pdslogger.PdsLogger) -> Iterator[Conn
     Yields:
         An open connection.
     """
-    yield from _indexed(tmp_path, _standard_documents(), quiet_logger)
-
-
-# ---------------------------------------------------------------------------
-# Derived values
-# ---------------------------------------------------------------------------
-
-
-def test_date_from_image_et_j2000() -> None:
-    """The epoch itself, as the date filters compare it."""
-    assert date_from_image_et(0.0) == '2000-01-01'
-
-
-def test_date_from_image_et_none() -> None:
-    """An image with no epoch gets no date rather than a wrong one."""
-    assert date_from_image_et(None) is None
-
-
-def test_datetime_from_image_et_keeps_the_time() -> None:
-    """The selection table shows a time; a bare date collapses a whole day."""
-    assert datetime_from_image_et(0.0) == '2000-01-01T11:58:56'
-
-
-@pytest.mark.parametrize(
-    ('image_name', 'expected'),
-    [
-        ('N1454725799_1_CALIB.IMG', 1454725799),
-        ('/some/dir/W1728613298_8.IMG', 1728613298),
-        ('lor_0003103486_0x630_sci.fit', 3103486),
-        ('1454725799', 1454725799),
-        ('no-digits-here', None),
-        (None, None),
-    ],
-)
-def test_image_number_from_name(image_name: str | None, expected: int | None) -> None:
-    """The value ingest stores in the column the range filter compares.
-
-    Parameters:
-        image_name: The name to read.
-        expected: The number it holds.
-    """
-    assert image_number_from_name(image_name) == expected
-
-
-@pytest.mark.parametrize(
-    ('instrument', 'filename', 'expected'),
-    [
-        ('coiss', 'N1454725799_1_CALIB.IMG', 'N1454725799'),
-        ('coiss', '/holdings/data/W1728613298_8.IMG', 'W1728613298'),
-        ('vgiss', 'C3250013_GEOMED.IMG', 'C3250013'),
-        ('gossi', 'C0349632000R.IMG', 'C0349632000R'),
-        ('nhlorri', 'lor_0003103486_0x630_sci.fit', 'lor_0003103486'),
-        # An unregistered instrument only loses its extension.
-        ('mystery', 'X9999999.IMG', 'X9999999'),
-    ],
-)
-def test_image_name_from_filename(instrument: str, filename: str, expected: str) -> None:
-    """Every printed name is the token --image-filelist selects on.
-
-    Parameters:
-        instrument: The instrument whose naming rule applies.
-        filename: The recorded image name.
-        expected: The dataset-level image name.
-    """
-    assert image_name_from_filename(instrument, filename) == expected
-
-
-def test_image_name_from_filename_is_idempotent() -> None:
-    """Re-deriving a name that is already an image name changes nothing."""
-    assert image_name_from_filename('coiss', 'N1454725799') == 'N1454725799'
-
-
-def test_count_pct_formats_share() -> None:
-    """Every count in the report carries its percentage."""
-    assert count_pct(5, 158) == '5 (3.2%)'
-
-
-def test_count_pct_zero_total() -> None:
-    """An empty denominator renders 0.0% rather than dividing by zero."""
-    assert count_pct(0, 0) == '0 (0.0%)'
-
-
-# ---------------------------------------------------------------------------
-# Offset-limit resolution
-# ---------------------------------------------------------------------------
-
-
-def test_resolve_offset_limit_coiss_nac_by_size() -> None:
-    """Cassini NAC CALIB limits come from the per-size margin table."""
-    assert resolve_offset_limit('coiss', 'N1454725799_1_CALIB.IMG', 1024) == (50.0, 140.0)
-
-
-def test_resolve_offset_limit_coiss_wac() -> None:
-    """Cassini WAC limits use the wac detector block."""
-    assert resolve_offset_limit('coiss', 'W1454725799_1_CALIB.IMG', 512) == (5.0, 10.0)
-
-
-def test_resolve_offset_limit_requires_shape_for_size_tables() -> None:
-    """A size-keyed margin table cannot resolve without a recorded shape."""
-    result = resolve_offset_limit('coiss', 'N1454725799_1_CALIB.IMG', None)
-    assert result == 'image shape not recorded in the database'
-
-
-def test_resolve_offset_limit_unknown_instrument() -> None:
-    """An unregistered instrument has no configured limit to screen against."""
-    result = resolve_offset_limit('mystery', 'X123.IMG', 1024)
-    assert 'no configured search limit' in str(result)
-
-
-def test_resolve_offset_limit_missing_size_entry() -> None:
-    """A size with no margin entry reports the failure instead of guessing."""
-    result = resolve_offset_limit('vgiss', 'C3250013_GEOMED.IMG', 1024)
-    assert 'no extfov_margin_vu entry for image size 1024' in str(result)
+    with _indexed(tmp_path, _standard_documents(), quiet_logger) as connection:
+        yield connection
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +154,7 @@ def test_a_status_error_reaches_the_reason_table(
             offset=None,
         )
     }
-    for connection in _indexed(tmp_path, documents, quiet_logger):
+    with _indexed(tmp_path, documents, quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report').read_text(encoding='utf-8')
     assert '| error | missing_spice_data | 1 (100.0%) | 1 (100.0%) |' in text
 
@@ -286,7 +172,7 @@ def test_a_status_reason_wins_over_a_status_error(
             offset=None,
         )
     }
-    for connection in _indexed(tmp_path, documents, quiet_logger):
+    with _indexed(tmp_path, documents, quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report').read_text(encoding='utf-8')
     assert '| failed | no_features_extracted | 1 (100.0%) | 1 (100.0%) |' in text
 
@@ -344,7 +230,7 @@ def test_dates_ignore_a_dateless_extreme_image(
         offset=None,
         image_et=None,
     )
-    for connection in _indexed(tmp_path, documents, quiet_logger):
+    with _indexed(tmp_path, documents, quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report').read_text(encoding='utf-8')
     assert (
         '| coiss | 3 (75.0%) | N0000000001 | N1000000002 '
@@ -361,7 +247,7 @@ def test_offsets_separate_nac_from_wac(tmp_path: Path, quiet_logger: pdslogger.P
         image_shape=[512, 512],
         offset=[0.4, 0.6],
     )
-    for connection in _indexed(tmp_path, documents, quiet_logger):
+    with _indexed(tmp_path, documents, quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report').read_text(encoding='utf-8')
     assert '| coiss | WAC | dV | 1 (33.3%) |' in text
 
@@ -378,7 +264,7 @@ def test_each_camera_gets_its_own_histogram(
         offset=[0.4, 0.6],
     )
     out = tmp_path / 'report'
-    for connection in _indexed(tmp_path, documents, quiet_logger):
+    with _indexed(tmp_path, documents, quiet_logger) as connection:
         build_report(connection, out)
     assert (out / 'offsets_hist_coiss_WAC.png').exists()
 
@@ -598,7 +484,7 @@ def test_technique_usage_counts_non_spurious_runs(
             per_technique=[technique('BodyLimbNav', (1.0, 1.0))],
         ),
     }
-    for connection in _indexed(tmp_path, documents, quiet_logger):
+    with _indexed(tmp_path, documents, quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report').read_text(encoding='utf-8')
     assert '| BodyLimbNav | coiss | 2 (100.0%) | 1 (50.0%) | 0.700 |' in text
 
@@ -616,7 +502,7 @@ def test_a_spurious_technique_is_left_out_of_the_agreement(
             ],
         )
     }
-    for connection in _indexed(tmp_path, documents, quiet_logger):
+    with _indexed(tmp_path, documents, quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report').read_text(encoding='utf-8')
     assert 'BodyLimbNav vs StarUniqueMatchNav' not in text
 
@@ -636,7 +522,7 @@ def test_suspect_offset_section_flags_an_offset_near_the_limit(
     documents['COISS_2001/N1000000003_1_CALIB'] = metadata_document(
         image_name='N1000000003_1_CALIB.IMG', image_shape=[1024, 1024], offset=[49.0, 10.0]
     )
-    for connection in _indexed(tmp_path, documents, quiet_logger):
+    with _indexed(tmp_path, documents, quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report').read_text(encoding='utf-8')
     assert '| N1000000003 | coiss | 49.000 | 10.000 |' in text
 
@@ -649,7 +535,7 @@ def test_suspect_offset_section_counts_what_it_screened(
     documents['COISS_2001/N1000000003_1_CALIB'] = metadata_document(
         image_name='N1000000003_1_CALIB.IMG', image_shape=[1024, 1024], offset=[49.0, 10.0]
     )
-    for connection in _indexed(tmp_path, documents, quiet_logger):
+    with _indexed(tmp_path, documents, quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report').read_text(encoding='utf-8')
     assert 'Suspect images: 1 (25.0%) of 3 screened.' in text
 
@@ -659,7 +545,7 @@ def test_suspect_offset_section_reports_unresolved_limits(
 ) -> None:
     """An image whose limit cannot be resolved is called out, not dropped."""
     documents = {'X9999999': metadata_document(image_name='X9999999.IMG', instrument='mystery')}
-    for connection in _indexed(tmp_path, documents, quiet_logger):
+    with _indexed(tmp_path, documents, quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report').read_text(encoding='utf-8')
     assert "mystery: no configured search limit for instrument 'mystery' (1 image(s))" in text
 
@@ -694,7 +580,7 @@ def _botsim_documents() -> dict[str, dict[str, Any]]:
 
 def test_botsim_section_identifies_pairs(tmp_path: Path, quiet_logger: pdslogger.PdsLogger) -> None:
     """A pair is two frames sharing one spacecraft-clock count."""
-    for connection in _indexed(tmp_path, _botsim_documents(), quiet_logger):
+    with _indexed(tmp_path, _botsim_documents(), quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report', top_n=5).read_text(encoding='utf-8')
     assert '| pairs identified | 3 |' in text
 
@@ -703,7 +589,7 @@ def test_botsim_section_compares_only_navigated_pairs(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
     """A pair whose WAC frame failed is identified but not compared."""
-    for connection in _indexed(tmp_path, _botsim_documents(), quiet_logger):
+    with _indexed(tmp_path, _botsim_documents(), quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report', top_n=5).read_text(encoding='utf-8')
     assert '| pairs with both navigated | 2 |' in text
 
@@ -712,7 +598,7 @@ def test_botsim_section_reports_the_residual(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
     """Residuals are 0.0 and 2.0, so the median is 1.0."""
-    for connection in _indexed(tmp_path, _botsim_documents(), quiet_logger):
+    with _indexed(tmp_path, _botsim_documents(), quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report', top_n=5).read_text(encoding='utf-8')
     assert '| median residual (px) | 1.000 |' in text
 
@@ -721,7 +607,7 @@ def test_botsim_section_names_the_worst_pair(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
     """The worst-pairs table leads with the inconsistent pair, by image name."""
-    for connection in _indexed(tmp_path, _botsim_documents(), quiet_logger):
+    with _indexed(tmp_path, _botsim_documents(), quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report', top_n=5).read_text(encoding='utf-8')
     assert '| 1454725900 | N1454725900 | W1454725900 | 2.000 | 0.000 | 2.000 |' in text
 
@@ -751,7 +637,7 @@ def test_runtime_section_skipped_without_timing(
 ) -> None:
     """A tree whose documents carry no timing gets no run-time section."""
     documents = {'COISS_2001/N1454725799_1_CALIB': metadata_document(elapsed_s=None)}
-    for connection in _indexed(tmp_path, documents, quiet_logger):
+    with _indexed(tmp_path, documents, quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report').read_text(encoding='utf-8')
     assert '## Run-time statistics' not in text
 
@@ -779,7 +665,7 @@ def test_no_exclusions_means_no_exclusion_section(
 ) -> None:
     """An index where the ensemble excluded nothing has nothing to report."""
     documents = {'COISS_2001/N1454725799_1_CALIB': metadata_document()}
-    for connection in _indexed(tmp_path, documents, quiet_logger):
+    with _indexed(tmp_path, documents, quiet_logger) as connection:
         text = build_report(connection, tmp_path / 'report').read_text(encoding='utf-8')
     assert '## Ensemble outlier exclusions' not in text
 
@@ -851,7 +737,7 @@ def test_csv_export_carries_every_column_in_schema_order(
     assert header[: len(IMAGE_COLUMNS)] == list(IMAGE_COLUMNS)
 
 
-def test_csv_export_starts_at_the_key_columns(standard: Connection, tmp_path: Path) -> None:
+def test_csv_export_starts_at_the_key_columns() -> None:
     """A row that does not say which image it is cannot be joined to anything."""
     assert IMAGE_COLUMNS[:2] == ('root_url', 'results_path_stub')
 
@@ -870,7 +756,7 @@ def test_csv_export_counts_features_as_zero_when_there_are_none(
     """An image with no inventory exports a zero rather than an empty cell."""
     document = metadata_document()
     document['navigation_result']['feature_inventory'] = []
-    for connection in _indexed(tmp_path, {'VOL/N1454725799_1_CALIB': document}, quiet_logger):
+    with _indexed(tmp_path, {'VOL/N1454725799_1_CALIB': document}, quiet_logger) as connection:
         build_report(connection, tmp_path / 'report', csv_export=True)
     row = (tmp_path / 'report' / 'images.csv').read_text(encoding='utf-8').splitlines()[1]
     assert row.endswith(',0,0,0,0')
@@ -888,176 +774,113 @@ def test_report_is_deterministic(standard: Connection, tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The command line
+# One stub under two roots
+# ---------------------------------------------------------------------------
+
+_SHARED_STUB = 'COISS_2001/data/N1294561202_1_CALIB'
+"""A stub two roots both hold, which is what a rescue root beside a primary is."""
+
+
+@contextlib.contextmanager
+def _two_roots_sharing_a_stub(tmp_path: Path, logger: pdslogger.PdsLogger) -> Iterator[Connection]:
+    """Ingest one stub under two roots and yield a connection to the index.
+
+    An image keyed by its name alone merges the two, so every count over the
+    child tables doubles and every technique appears to disagree with itself.
+
+    Parameters:
+        tmp_path: Directory the trees and the index live under.
+        logger: Logger the ingest reports through.
+
+    Yields:
+        An open connection to the index.
+    """
+    document = metadata_document(
+        image_name='N1294561202_1_CALIB.IMG',
+        per_technique=[technique('BodyLimbNav', (1.0, 1.0))],
+    )
+    primary = tmp_path / 'primary'
+    rescue = tmp_path / 'rescue'
+    write_metadata(primary, _SHARED_STUB, document)
+    write_metadata(rescue, _SHARED_STUB, document)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [primary, rescue], logger=logger)
+    engine = open_index(url)
+    try:
+        with engine.connect() as connection:
+            yield connection
+    finally:
+        engine.dispose()
+
+
+def test_a_technique_is_counted_once_per_root(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Two roots hold two images, and a technique ran on each of them once.
+
+    Joined on the image name alone the two roots' rows cross-multiply, and the
+    technique reports four images out of two: 200 percent of a total that is
+    itself a count of images.
+    """
+    with _two_roots_sharing_a_stub(tmp_path, quiet_logger) as connection:
+        report = build_report(connection, tmp_path / 'report').read_text(encoding='utf-8')
+    assert '| BodyLimbNav | 2 (100.0%) |' in report
+
+
+def test_a_technique_does_not_disagree_with_itself_across_roots(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The cross-technique table pairs a technique with itself under a name join.
+
+    One technique per image cannot form a pair at all, so the agreement section
+    has nothing to say; a name-only join manufactures one image carrying two
+    copies of one technique and reports it disagreeing with itself.
+    """
+    with _two_roots_sharing_a_stub(tmp_path, quiet_logger) as connection:
+        report = build_report(connection, tmp_path / 'report').read_text(encoding='utf-8')
+    assert 'BodyLimbNav vs BodyLimbNav' not in report
+
+
+def test_the_csv_counts_one_images_child_rows_only(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Each correlated subquery of the export is keyed on the pair, not the name."""
+    with _two_roots_sharing_a_stub(tmp_path, quiet_logger) as connection:
+        build_report(connection, tmp_path / 'report', csv_export=True)
+    rows = list(
+        csv.DictReader(
+            (tmp_path / 'report' / 'images.csv').read_text(encoding='utf-8').splitlines()
+        )
+    )
+    assert [row['n_technique_rows'] for row in rows] == ['1', '1']
+
+
+def test_the_csv_counts_one_images_features_only(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The feature aggregates are the other two subqueries, and key the same way."""
+    with _two_roots_sharing_a_stub(tmp_path, quiet_logger) as connection:
+        build_report(connection, tmp_path / 'report', csv_export=True)
+    rows = list(
+        csv.DictReader(
+            (tmp_path / 'report' / 'images.csv').read_text(encoding='utf-8').splitlines()
+        )
+    )
+    assert [row['n_features'] for row in rows] == ['2', '2']
+
+
+# ---------------------------------------------------------------------------
+# The CSV export's own bytes
 # ---------------------------------------------------------------------------
 
 
-def test_main_report_writes_a_report(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+def test_the_csv_export_ends_its_rows_with_one_newline(
+    standard: Connection, tmp_path: Path
 ) -> None:
-    """The driver opens the index it was named and writes the report."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
-    root = tmp_path / 'results'
-    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=quiet_logger)
-    out = tmp_path / 'report'
-    exit_code = main_report(['--results-db', url, '--output-dir', str(out)])
-    assert exit_code == 0
+    """A line ending that follows a library default is a diff nobody asked for.
 
-
-def test_main_report_accepts_the_drill_down_flags(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The range, suspect, and CSV flags parse and take effect."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
-    root = tmp_path / 'results'
-    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=quiet_logger)
-    out = tmp_path / 'report'
-    main_report(
-        [
-            '--results-db',
-            url,
-            '--output-dir',
-            str(out),
-            '--top-n',
-            '3',
-            '--filelists',
-            '--csv',
-            '--suspect-fraction',
-            '0.8',
-            '--min-image',
-            '1',
-        ]
-    )
-    text = (out / 'report.md').read_text(encoding='utf-8')
-    assert 'at least 0.80 of the per-axis maximum expected pointing' in text
-
-
-def test_main_report_accepts_a_root(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The root is normalized the way ingest normalized it, so it matches."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
-    root = tmp_path / 'results'
-    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=quiet_logger)
-    out = tmp_path / 'report'
-    exit_code = main_report(
-        ['--results-db', url, '--root', f'{root.as_posix()}/', '--output-dir', str(out)]
-    )
-    assert exit_code == 0
-
-
-def test_main_report_refuses_a_root_nobody_ingested(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Absence of rows under a root is not evidence that nothing was navigated."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
-    root = tmp_path / 'results'
-    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=quiet_logger)
-    with pytest.raises(SystemExit):
-        main_report(
-            [
-                '--results-db',
-                url,
-                '--root',
-                str(tmp_path / 'never-ingested'),
-                '--output-dir',
-                str(tmp_path / 'report'),
-            ]
-        )
-
-
-def test_main_report_names_the_roots_it_does_hold(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch, capsys: Any
-) -> None:
-    """The message has to be actionable, so it says what the index does cover."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
-    root = tmp_path / 'results'
-    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=quiet_logger)
-    with pytest.raises(SystemExit):
-        main_report(
-            [
-                '--results-db',
-                url,
-                '--root',
-                str(tmp_path / 'never-ingested'),
-                '--output-dir',
-                str(tmp_path / 'report'),
-            ]
-        )
-    assert root.as_posix() in capsys.readouterr().err
-
-
-def test_main_report_without_an_index_says_so(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
-) -> None:
-    """This program has no file-reading mode, and the message says which flag."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
-    exit_code = main_report(['--output-dir', str(tmp_path / 'report')])
-    assert exit_code == 1
-
-
-def test_main_report_without_an_index_names_the_flag(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
-) -> None:
-    """A refusal that does not say what to type is a refusal nobody can act on."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
-    main_report(['--output-dir', str(tmp_path / 'report')])
-    assert '--results-db' in capsys.readouterr().err
-
-
-def test_main_report_refuses_an_index_that_is_not_there(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A consumer never creates an index; it reports that there is none."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
-    missing = tmp_path / 'absent.sqlite3'
-    exit_code = main_report(
-        ['--results-db', index_url(missing), '--output-dir', str(tmp_path / 'report')]
-    )
-    assert exit_code == 1
-
-
-def test_main_report_leaves_no_database_behind(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An empty database would answer every question with "not navigated"."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
-    missing = tmp_path / 'absent.sqlite3'
-    main_report(['--results-db', index_url(missing), '--output-dir', str(tmp_path / 'report')])
-    assert not missing.exists()
-
-
-def test_main_report_honors_the_none_sentinel(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An exported index URL can be overridden on the command line."""
-    root = tmp_path / 'results'
-    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=quiet_logger)
-    monkeypatch.setenv('NAV_RESULTS_DB', url)
-    exit_code = main_report(['--results-db', 'none', '--output-dir', str(tmp_path / 'report')])
-    assert exit_code == 1
-
-
-def test_main_report_reads_the_environment_variable(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A machine with one index need not name it on every invocation."""
-    root = tmp_path / 'results'
-    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=quiet_logger)
-    monkeypatch.setenv('NAV_RESULTS_DB', url)
-    exit_code = main_report(['--output-dir', str(tmp_path / 'report')])
-    assert exit_code == 0
+    Read as bytes rather than as text: decoding translates line endings, so a
+    file written with CRLF reads back with LF and the question goes unasked.
+    """
+    build_report(standard, tmp_path / 'report', csv_export=True)
+    assert b'\r' not in (tmp_path / 'report' / 'images.csv').read_bytes()

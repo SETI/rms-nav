@@ -25,20 +25,25 @@ in it, and each is asserted for rather than waved past:
 - The two feature-count aggregates come back as integers.  They are counts, and
   the aggregate that produced a floating-point zero for an image with no
   features was a SQLite spelling.
+
+One byte-level difference is disclosed rather than compared away.  The frozen
+``images.csv`` files carry LF line endings; the implementation that produced
+them left ``csv.writer`` at its CRLF default, and the committed blobs were
+normalized when they were frozen.  The export now states its line terminator
+instead of inheriting one, and states LF, so what it writes matches the frozen
+bytes.  The comparisons here read fields rather than lines and would not have
+noticed either way, so the terminator is pinned by a test of its own.
 """
 
 import csv
+import uuid
 from pathlib import Path
 from typing import Any
 
 import pdslogger
 import pytest
-from sqlalchemy import Connection
 
-from spindoctor.cli.stats.report import build_report
-from spindoctor.results_index import open_index
-
-from .conftest import GOLDEN_DIR, RESULTS_TREE, index_url, ingest_tree
+from .conftest import GOLDEN_DIR, RESULTS_TREE, index_url, report_from_tree
 
 _TREE_PLACEHOLDER = '{results_tree}'
 """What the frozen CSV holds in place of the tree's absolute path."""
@@ -62,39 +67,31 @@ _COUNT_COLUMNS = ('n_features', 'n_gated')
 """Aggregates the frozen CSV rendered as floating-point counts."""
 
 
-def _produced(tmp_path: Path, variant: str, logger: pdslogger.PdsLogger) -> Path:
-    """Ingest the fixture tree and write one report variant from the index.
+@pytest.fixture(scope='module', params=sorted(_VARIANTS))
+def report_variant(
+    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
+) -> tuple[str, Path]:
+    """Build one report variant once for the whole module.
+
+    Six comparisons are made against each variant and every one of them only
+    reads, so building the variant per test ingests the same tree twelve times
+    to produce two outputs.
 
     Parameters:
-        tmp_path: Directory the index and the output live under.
-        variant: Which entry of :data:`_VARIANTS` to build.
-        logger: Logger the ingest reports through.
+        request: The fixture request, carrying the variant name.
+        tmp_path_factory: Factory the index and the output live under.
 
     Returns:
-        The directory the report was written into.
+        The variant name and the directory its report was written into.
     """
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [RESULTS_TREE], logger=logger)
-    out = tmp_path / variant
-    out.mkdir()
-    engine = open_index(url)
-    try:
-        with engine.connect() as connection:
-            _build(connection, out, variant)
-    finally:
-        engine.dispose()
-    return out
-
-
-def _build(connection: Connection, out: Path, variant: str) -> None:
-    """Write one report variant.
-
-    Parameters:
-        connection: Open connection to the index.
-        out: Directory receiving the report.
-        variant: Which entry of :data:`_VARIANTS` to build.
-    """
-    build_report(connection, out, **_VARIANTS[variant])
+    variant = str(request.param)
+    logger = pdslogger.PdsLogger(f'stats_regression_{uuid.uuid4().hex}')
+    logger.set_level('ERROR')
+    root = tmp_path_factory.mktemp('regression')
+    out = report_from_tree(
+        index_url(root / 'index.sqlite3'), root / variant, logger=logger, **_VARIANTS[variant]
+    )
+    return variant, out
 
 
 def _csv_rows(path: Path) -> list[dict[str, str]]:
@@ -123,54 +120,39 @@ def _frozen_csv_rows(variant: str) -> list[dict[str, str]]:
     return list(csv.DictReader(text.splitlines()))
 
 
-@pytest.mark.parametrize('variant', sorted(_VARIANTS))
-def test_the_report_is_byte_identical(
-    variant: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
+def test_the_report_is_byte_identical(report_variant: tuple[str, Path]) -> None:
     """Every section, every number, every ordering, unchanged.
 
     Parameters:
-        variant: Which report invocation to compare.
-        tmp_path: Directory the index and the output live under.
-        quiet_logger: Logger the ingest reports through.
+        report_variant: The variant name and the report it wrote.
     """
-    out = _produced(tmp_path, variant, quiet_logger)
+    variant, out = report_variant
     frozen = (GOLDEN_DIR / variant / 'report.md').read_text(encoding='utf-8')
     assert (out / 'report.md').read_text(encoding='utf-8') == frozen
 
 
-@pytest.mark.parametrize('variant', sorted(_VARIANTS))
-def test_the_csv_holds_the_same_images(
-    variant: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
+def test_the_csv_holds_the_same_images(report_variant: tuple[str, Path]) -> None:
     """The export covers the same images in the same order.
 
     Parameters:
-        variant: Which report invocation to compare.
-        tmp_path: Directory the index and the output live under.
-        quiet_logger: Logger the ingest reports through.
+        report_variant: The variant name and the report it wrote.
     """
-    out = _produced(tmp_path, variant, quiet_logger)
+    variant, out = report_variant
     produced = [row['image_name'] for row in _csv_rows(out / 'images.csv')]
     frozen = [row['image_name'] for row in _frozen_csv_rows(variant)]
     assert produced == frozen
 
 
-@pytest.mark.parametrize('variant', sorted(_VARIANTS))
-def test_every_carried_over_csv_column_is_unchanged(
-    variant: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
+def test_every_carried_over_csv_column_is_unchanged(report_variant: tuple[str, Path]) -> None:
     """Every column the export already had holds what it held.
 
     The two documented exceptions are checked by the tests below rather than
     skipped: the merged reason column, and the two count aggregates.
 
     Parameters:
-        variant: Which report invocation to compare.
-        tmp_path: Directory the index and the output live under.
-        quiet_logger: Logger the ingest reports through.
+        report_variant: The variant name and the report it wrote.
     """
-    out = _produced(tmp_path, variant, quiet_logger)
+    variant, out = report_variant
     produced = _csv_rows(out / 'images.csv')
     frozen = _frozen_csv_rows(variant)
     differences = [
@@ -183,18 +165,15 @@ def test_every_carried_over_csv_column_is_unchanged(
     assert differences == []
 
 
-@pytest.mark.parametrize('variant', sorted(_VARIANTS))
 def test_the_merged_reason_column_is_reproduced_by_the_pair(
-    variant: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+    report_variant: tuple[str, Path],
 ) -> None:
     """The export split one column into two, and the pair says what one said.
 
     Parameters:
-        variant: Which report invocation to compare.
-        tmp_path: Directory the index and the output live under.
-        quiet_logger: Logger the ingest reports through.
+        report_variant: The variant name and the report it wrote.
     """
-    out = _produced(tmp_path, variant, quiet_logger)
+    variant, out = report_variant
     produced = _csv_rows(out / 'images.csv')
     frozen = _frozen_csv_rows(variant)
     differences = [
@@ -206,18 +185,13 @@ def test_the_merged_reason_column_is_reproduced_by_the_pair(
     assert differences == []
 
 
-@pytest.mark.parametrize('variant', sorted(_VARIANTS))
-def test_the_count_aggregates_are_the_same_numbers(
-    variant: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
+def test_the_count_aggregates_are_the_same_numbers(report_variant: tuple[str, Path]) -> None:
     """They are counts now rather than sums that could not be integers.
 
     Parameters:
-        variant: Which report invocation to compare.
-        tmp_path: Directory the index and the output live under.
-        quiet_logger: Logger the ingest reports through.
+        report_variant: The variant name and the report it wrote.
     """
-    out = _produced(tmp_path, variant, quiet_logger)
+    variant, out = report_variant
     produced = _csv_rows(out / 'images.csv')
     frozen = _frozen_csv_rows(variant)
     differences = [
@@ -229,30 +203,24 @@ def test_the_count_aggregates_are_the_same_numbers(
     assert differences == []
 
 
-def test_the_csv_gained_the_key_columns(tmp_path: Path, quiet_logger: pdslogger.PdsLogger) -> None:
+def test_the_csv_gained_the_key_columns(report_variant: tuple[str, Path]) -> None:
     """The export now says which root and which stub each row came from.
 
     Parameters:
-        tmp_path: Directory the index and the output live under.
-        quiet_logger: Logger the ingest reports through.
+        report_variant: The variant name and the report it wrote.
     """
-    out = _produced(tmp_path, 'full', quiet_logger)
+    _variant, out = report_variant
     header = (out / 'images.csv').read_text(encoding='utf-8').splitlines()[0].split(',')
     assert header[:2] == ['root_url', 'results_path_stub']
 
 
-@pytest.mark.parametrize('variant', sorted(_VARIANTS))
-def test_every_filelist_is_unchanged(
-    variant: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
+def test_every_filelist_is_unchanged(report_variant: tuple[str, Path]) -> None:
     """The drill-down lists feed back into re-runs, so their contents are a contract.
 
     Parameters:
-        variant: Which report invocation to compare.
-        tmp_path: Directory the index and the output live under.
-        quiet_logger: Logger the ingest reports through.
+        report_variant: The variant name and the report it wrote.
     """
-    out = _produced(tmp_path, variant, quiet_logger)
+    variant, out = report_variant
     frozen_lists = sorted((GOLDEN_DIR / variant).glob('filelists/*.txt'))
     differences = [
         path.name

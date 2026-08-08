@@ -8,7 +8,9 @@ the current directory).
 
 The results-root getters and the results-index getter share that order and part
 ways at the end of it: an unresolved root is an error, while an unresolved index
-URL means "no index", which is every program's default mode.
+URL is an answer -- no index was resolved -- and each caller decides for itself
+whether it can proceed without one. ``sd_stats_ingest`` and ``sd_stats_report``
+cannot, and both refuse; the pipeline programs read files instead.
 
 The tests are hermetic: every test clears the results-root and results-index
 environment variables via ``monkeypatch``, seeds ``Config`` instances
@@ -356,9 +358,6 @@ def test_bundle_getter_env_var_is_nav_prefixed(monkeypatch: pytest.MonkeyPatch) 
 
     The fallback environment variable carries the same ``NAV_`` prefix as the
     sibling getters; a value exported under the un-prefixed name is ignored.
-
-    Parameters:
-        monkeypatch: Pytest fixture for environment isolation.
     """
 
     monkeypatch.setenv('NAV_BUNDLE_RESULTS_ROOT', '/from/nav/env')
@@ -368,11 +367,7 @@ def test_bundle_getter_env_var_is_nav_prefixed(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_bundle_getter_ignores_unprefixed_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A value exported under the un-prefixed name does not resolve the root.
-
-    Parameters:
-        monkeypatch: Pytest fixture for environment isolation.
-    """
+    """A value exported under the un-prefixed name does not resolve the root."""
 
     monkeypatch.setenv('BUNDLE_RESULTS_ROOT', '/from/documented/env')
     config = _config_with_environment(None)
@@ -386,11 +381,7 @@ def test_bundle_getter_ignores_unprefixed_env_var(monkeypatch: pytest.MonkeyPatc
 
 
 def test_results_db_argument_wins_over_config_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The parsed-argument value takes precedence over config and env var.
-
-    Parameters:
-        monkeypatch: Pytest fixture for environment isolation.
-    """
+    """The parsed-argument value takes precedence over config and env var."""
 
     monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
     config = _config_with_environment({'results_db': 'sqlite:///from-config.sqlite3'})
@@ -401,11 +392,7 @@ def test_results_db_argument_wins_over_config_and_env(monkeypatch: pytest.Monkey
 def test_results_db_config_wins_over_env_when_argument_is_none(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With the argument None, ``config.environment`` beats the env var.
-
-    Parameters:
-        monkeypatch: Pytest fixture for environment isolation.
-    """
+    """With the argument None, ``config.environment`` beats the env var."""
 
     monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
     config = _config_with_environment({'results_db': SQLITE_URL})
@@ -425,11 +412,7 @@ def test_results_db_missing_argument_attribute_uses_config() -> None:
 def test_results_db_env_var_used_when_argument_and_config_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The env var is the last place looked before answering "no index".
-
-    Parameters:
-        monkeypatch: Pytest fixture for environment isolation.
-    """
+    """The env var is the last place looked before answering "no index"."""
 
     monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
     config = _config_with_environment(None)
@@ -439,11 +422,7 @@ def test_results_db_env_var_used_when_argument_and_config_unset(
 def test_results_db_config_key_none_falls_through_to_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A config key explicitly set to null is treated as unset, not as opted out.
-
-    Parameters:
-        monkeypatch: Pytest fixture for environment isolation.
-    """
+    """A config key explicitly set to null is treated as unset, not as opted out."""
 
     monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
     config = _config_with_environment({'results_db': None})
@@ -451,10 +430,12 @@ def test_results_db_config_key_none_falls_through_to_env(
 
 
 def test_results_db_unset_everywhere_is_not_an_error() -> None:
-    """No index is the default mode of every program, so absence is an answer.
+    """Absence is an answer here: no index was resolved.
 
     This is the one way this getter differs from the results-root getters, which
-    raise when nothing is set.
+    raise when nothing is set. What a caller does with the answer is the
+    caller's: the statistics programs refuse, and the pipeline programs read
+    files.
     """
 
     config = _config_with_environment(None)
@@ -464,11 +445,7 @@ def test_results_db_unset_everywhere_is_not_an_error() -> None:
 def test_results_db_sentinel_on_the_command_line_overrides_the_env_var(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Without the sentinel an exported variable would make file mode impossible.
-
-    Parameters:
-        monkeypatch: Pytest fixture for environment isolation.
-    """
+    """Without the sentinel an exported variable would make file mode impossible."""
 
     monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
     config = _config_with_environment(None)
@@ -485,11 +462,7 @@ def test_results_db_sentinel_on_the_command_line_overrides_the_config_key() -> N
 
 
 def test_results_db_sentinel_in_the_config_opts_out(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The sentinel is honored wherever the value came from, not only on argv.
-
-    Parameters:
-        monkeypatch: Pytest fixture for environment isolation.
-    """
+    """The sentinel is honored wherever the value came from, not only on argv."""
 
     monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
     config = _config_with_environment({'results_db': RESULTS_DB_NONE})
@@ -497,11 +470,7 @@ def test_results_db_sentinel_in_the_config_opts_out(monkeypatch: pytest.MonkeyPa
 
 
 def test_results_db_sentinel_in_the_env_var_opts_out(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Exporting the sentinel is how a machine turns the index off by default.
-
-    Parameters:
-        monkeypatch: Pytest fixture for environment isolation.
-    """
+    """Exporting the sentinel is how a machine turns the index off by default."""
 
     monkeypatch.setenv('NAV_RESULTS_DB', RESULTS_DB_NONE)
     config = _config_with_environment(None)

@@ -31,7 +31,13 @@ from spindoctor.cli.stats.ingest_rows import (
 )
 from spindoctor.results_index import IMAGES, INGEST_RUNS, TECHNIQUES, open_index
 
-from .conftest import index_url, ingest_tree, metadata_document, technique, write_metadata
+from .conftest import (
+    index_url,
+    ingest_tree,
+    metadata_document,
+    technique,
+    write_metadata,
+)
 
 SOURCE = MetadataSource(
     root_url='/data/nav-results',
@@ -301,7 +307,9 @@ def test_a_refusal_carries_the_reason_without_the_file() -> None:
     """The reason is tallied across files, so it may not carry a file name."""
     with pytest.raises(MetadataDocumentError) as caught:
         rows_from_metadata({'observation': {}}, SOURCE)
-    assert caught.value.reason == 'no observation.image_name'
+    assert caught.value.reason == (
+        'not a current-schema navigation document (no observation.image_name)'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -596,7 +604,10 @@ def test_failures_are_tallied_by_reason(tmp_path: Path, quiet_logger: pdslogger.
     (root / 'params_metadata.json').write_text('{"params": {}}', encoding='utf-8')
     (root / 'broken_metadata.json').write_text('not json at all', encoding='utf-8')
     counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
-    assert counts.failures_by_reason == {'no observation.image_name': 2, 'not valid JSON': 1}
+    assert counts.failures_by_reason == {
+        'not a current-schema navigation document (no observation.image_name)': 2,
+        'not valid JSON': 1,
+    }
 
 
 def test_a_document_that_is_not_an_object_is_counted(

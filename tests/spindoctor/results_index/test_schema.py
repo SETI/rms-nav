@@ -24,6 +24,7 @@ from tests.spindoctor.results_index.conftest import (
 )
 
 from spindoctor.results_index import (
+    FAILED_FILES,
     FEATURE_SOURCES,
     IMAGES,
     INGEST_RUNS,
@@ -124,7 +125,16 @@ INGEST_RUNS_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('files_ingested', sqlalchemy.Integer, True),
     ('files_skipped', sqlalchemy.Integer, True),
     ('files_failed', sqlalchemy.Integer, True),
+    ('files_removed', sqlalchemy.Integer, True),
     ('schema_version', sqlalchemy.Integer, False),
+)
+
+FAILED_FILES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
+    ('root_url', sqlalchemy.Text, False),
+    ('results_path_stub', sqlalchemy.Text, False),
+    ('reason', sqlalchemy.Text, False),
+    ('mtime_ns', sqlalchemy.BigInteger, True),
+    ('size_bytes', sqlalchemy.BigInteger, True),
 )
 
 SCHEMA_META_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
@@ -138,6 +148,7 @@ TABLE_CASES = [
     pytest.param(TECHNIQUES, TECHNIQUES_COLUMNS, id='techniques'),
     pytest.param(FEATURE_SOURCES, FEATURE_SOURCES_COLUMNS, id='feature_sources'),
     pytest.param(INGEST_RUNS, INGEST_RUNS_COLUMNS, id='ingest_runs'),
+    pytest.param(FAILED_FILES, FAILED_FILES_COLUMNS, id='failed_files'),
     pytest.param(SCHEMA_META, SCHEMA_META_COLUMNS, id='schema_meta'),
 ]
 
@@ -339,7 +350,14 @@ def test_creating_the_schema_creates_every_table(sqlite_url: str) -> None:
     """
     with opened(sqlite_url, create=True) as engine:
         found = sorted(sqlalchemy.inspect(engine).get_table_names())
-    assert found == ['feature_sources', 'images', 'ingest_runs', 'schema_meta', 'techniques']
+    assert found == [
+        'failed_files',
+        'feature_sources',
+        'images',
+        'ingest_runs',
+        'schema_meta',
+        'techniques',
+    ]
 
 
 def test_creating_the_schema_stamps_the_version(sqlite_url: str) -> None:

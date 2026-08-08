@@ -24,8 +24,7 @@ from tests.spindoctor.results_index.conftest import (
     without_module,
 )
 
-from spindoctor.results_index import engine as engine_module
-from spindoctor.results_index import open_index
+from spindoctor.results_index import masked_url, open_index
 
 PASSWORD = 'sup3rs3cr3t'
 """A password distinctive enough that finding it anywhere is proof of a leak."""
@@ -295,9 +294,15 @@ MASKING_CASES = [
         'aB3xY9z',
     ),
     _MaskingCase(
+        'a-digit-prefixed-slashed-password',
+        'postgresql+psycopg:/svc:123/xY9z@db.example/spindoctor',
+        'postgresql+psycopg:/svc:***@db.example/spindoctor',
+        '123/xY9z',
+    ),
+    _MaskingCase(
         'a-port-and-an-at-sign-in-the-database-name',
         'postgresql psycopg://host:5432/my@db',
-        'postgresql psycopg://host:5432/my@db',
+        'postgresql psycopg://host:***@db',
     ),
     _MaskingCase(
         'a-user-name-and-no-password',
@@ -344,16 +349,20 @@ def test_the_rule_masks_a_password_and_nothing_else(case: _MaskingCase) -> None:
     """The structural rule is the only defense where the URL did not parse.
 
     It has to reach a password whatever the password contains -- a URL permits an
-    unescaped slash in one -- and whatever the user name contains, since the
-    managed-server login form puts an at-sign in it. It has to leave alone a
-    local path that merely happens to carry a colon and a later at-sign, and a
-    server URL whose database name carries one, since mangling either costs the
-    identification these messages exist for.
+    unescaped slash in one, and one may open with digits -- and whatever the user
+    name contains, since the managed-server login form puts an at-sign in it. It
+    has to leave alone a local path that merely happens to carry a colon and a
+    later at-sign, since mangling that costs the identification these messages
+    exist for.
+
+    ``host:5432/my@db`` is the one shape that reads two ways, and it is read as
+    credentials: the alternative leaves a password opening with digits visible in
+    full, and the test below pins that this reading is the parser's own.
 
     Parameters:
         case: The URL under test and exactly what masking it must produce.
     """
-    assert engine_module._masked_url(case.url) == case.expected
+    assert masked_url(case.url) == case.expected
 
 
 @pytest.mark.parametrize(('url', 'expected', 'secret'), CREDENTIAL_PARAMS)
@@ -377,3 +386,31 @@ def test_the_opener_names_a_url_it_could_not_parse_by_its_masked_form(
         open_index(url)
     assert secret not in str(excinfo.value)
     assert expected in str(excinfo.value)
+
+
+PARSEABLE_URLS = [
+    'postgresql+psycopg://user:sup3rs3cr3t@host:5432/spindoctor',
+    'postgresql+psycopg://admin%40pgsrv:sup3rs3cr3t@host/spindoctor',
+    'postgresql+psycopg://user@host/spindoctor',
+    'postgresql+psycopg://host:5432/spindoctor',
+    'postgresql+psycopg://host:5432/path@name',
+    'postgresql+psycopg://user:123/xY9z@host/spindoctor',
+]
+"""URLs the parser accepts, which therefore have a second opinion about them."""
+
+
+@pytest.mark.parametrize('url', PARSEABLE_URLS)
+def test_the_rule_hides_what_the_parser_hides(url: str) -> None:
+    """The structural rule and the parser agree about where a password is.
+
+    The rule runs only where the parser failed, so nothing else can check its
+    reading against anything. Running it over URLs the parser does accept gives
+    the one comparison available: for every shape both can read, including the
+    ambiguous one, the same characters have to disappear. A rule that read a
+    password as a port would disagree here first.
+
+    Parameters:
+        url: A URL the parser accepts.
+    """
+    parsed = sqlalchemy.engine.make_url(url).render_as_string()
+    assert masked_url(url) == parsed

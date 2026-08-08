@@ -8,6 +8,7 @@ read a second time -- are properties of the walk and the writer together.
 """
 
 import json
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from tests.spindoctor.results_index.conftest import (
 )
 
 from spindoctor.cli.stats.ingest import IngestCounts, ingest_metadata_files
+from spindoctor.cli.stats.report import build_report
 from spindoctor.results_index import open_index
 
 # The statistics postgres tier runs against a schema of its own, exactly as the
@@ -57,8 +59,11 @@ def quiet_logger() -> pdslogger.PdsLogger:
 
     Returns:
         A logger of its own, so raising its level cannot affect another test.
+        The name carries a token that is unique for the life of the process:
+        an object's address is not, since the object it belonged to is already
+        collected and the next allocation is free to reuse it.
     """
-    logger = pdslogger.PdsLogger(f'stats_test_{id(object())}')
+    logger = pdslogger.PdsLogger(f'stats_test_{uuid.uuid4().hex}')
     logger.set_level('ERROR')
     return logger
 
@@ -281,3 +286,29 @@ def indexed_tree(
             yield connection
     finally:
         engine.dispose()
+
+
+def report_from_tree(url: str, out: Path, *, logger: pdslogger.PdsLogger, **options: Any) -> Path:
+    """Ingest the fixture tree into an index and write one report from it.
+
+    One definition of the whole cycle -- ingest, open, build, dispose -- so that
+    a change to the report's signature is made once rather than once per backend.
+
+    Parameters:
+        url: The index URL to create and ingest into.
+        out: Directory receiving the report.
+        logger: Logger the ingest reports through.
+        options: Report options, passed through to ``build_report``.
+
+    Returns:
+        The directory the report was written into.
+    """
+    ingest_tree(url, [RESULTS_TREE], logger=logger)
+    out.mkdir(parents=True, exist_ok=True)
+    engine = open_index(url)
+    try:
+        with engine.connect() as connection:
+            build_report(connection, out, **options)
+    finally:
+        engine.dispose()
+    return out

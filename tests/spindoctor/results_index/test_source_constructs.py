@@ -368,6 +368,20 @@ def test_the_markdown_exclusion_leaves_a_statement_alone() -> None:
     assert kept == ['SELECT TOTAL(n) FROM t']
 
 
+def test_the_markdown_exclusion_is_anchored_at_the_start_of_the_line() -> None:
+    """A widened exclusion is what would empty the scan, not a blanked one.
+
+    Blanking the pattern is caught by the test above and by every check that
+    reads a string. What is not caught that way is a pattern that still excludes
+    something -- one matching a pipe anywhere rather than a leading one -- which
+    would excuse a statement that merely happens to carry an alternation or a
+    bitwise operator.
+    """
+    tree = ast.parse("x = ['SELECT TOTAL(n) FROM t WHERE a | b']")
+    kept = [str(node.value) for node in _query_strings(tree)]
+    assert kept == ['SELECT TOTAL(n) FROM t WHERE a | b']
+
+
 def test_the_boolean_scan_knows_which_columns_are_boolean() -> None:
     """The boolean check is driven by the schema, so it cannot silently empty."""
     assert _boolean_column_names() == ['at_edge', 'has_summary_png', 'spurious']

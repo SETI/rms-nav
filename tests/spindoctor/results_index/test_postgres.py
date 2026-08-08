@@ -142,7 +142,14 @@ def test_creating_the_schema_creates_every_table(postgres_url: str, postgres_sch
     """
     with opened(postgres_url, create=True) as engine:
         found = sorted(sqlalchemy.inspect(engine).get_table_names(schema=postgres_schema))
-    assert found == ['feature_sources', 'images', 'ingest_runs', 'schema_meta', 'techniques']
+    assert found == [
+        'failed_files',
+        'feature_sources',
+        'images',
+        'ingest_runs',
+        'schema_meta',
+        'techniques',
+    ]
 
 
 def test_creating_the_schema_stamps_the_version(postgres_url: str) -> None:
