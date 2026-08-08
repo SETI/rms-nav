@@ -12,8 +12,10 @@ review batch:
   desired behavior; the PNG lets the operator confirm unnavigability)
 - needs_visual frames (scattered_light surrogates): promoted whenever the
   pipeline produced a summary PNG at all
-- star-class frames that fail are promoted flagged=manual_nav_queue (the
-  calibrated-CISS star gate is known-uncalibrated; PHASE10 workflow B)
+- star-class frames that fail are promoted flagged=manual_nav_queue: the
+  calibrated-Cassini star gate is known-uncalibrated, so a star-frame
+  failure is not evidence of unnavigability and the operator navigates the
+  frame by hand instead (plans/COHORT_CURATION_PLAN.md workflow)
 
 Writes triage_report.yaml next to the manifest.
 
@@ -140,9 +142,10 @@ def run_one(candidate: dict) -> dict:
 def _maybe_rescue(candidate: dict, rec: dict) -> dict:
     """Retry a navigation-failed frame with the relaxed rescue config.
 
-    The default pipeline gates carry uncalibrated placeholder values
-    (Phase 10 calibrates them); many navigable scenes fail only because
-    a confidence formula or spurious detector is conservative.  The
+    The default pipeline gates carry uncalibrated placeholder values,
+    whose calibration waits on the assembled image library; many
+    navigable scenes fail only because a confidence formula or spurious
+    detector is conservative.  The
     rescue pass re-runs the frame with rescue_config.yaml (relaxed
     alpha0 / spurious knobs); an offset produced this way is promoted
     with an explicit warning so the operator verifies the overlay.

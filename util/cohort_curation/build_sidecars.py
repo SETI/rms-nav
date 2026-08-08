@@ -41,8 +41,9 @@ HOLDINGS_PREFIX = '/mnt/ganymede/PDS/holdings/'
 
 DEFERRED_CLASSES = {'ring_only_flat'}   # rank-1 GT unsupported (#203/#204)
 
-# ground_truth.offset_uncertainty_px per class (PHASE10 rubric: 1.0 for
-# sharp limbs / bright stars, 2.0 for soft features or star-poor).
+# ground_truth.offset_uncertainty_px per class (sidecar rubric,
+# docs/dev_guide/dev_guide_image_library.rst: 1.0 for sharp limbs / bright
+# stars, 2.0 for soft features or star-poor).
 UNCERTAINTY = {
     'body_irregular': 2.0,
     'ring_plus_body': 1.0,
@@ -133,7 +134,8 @@ def filter_combo(image_path: str, mission: str) -> str:
 
 
 def primary_technique(rec: dict, meta: dict) -> str:
-    """Expected pass-1 winner for one frame per the PHASE10 rubric.
+    """Expected pass-1 winner for one frame per the sidecar rubric
+    (docs/dev_guide/dev_guide_image_library.rst).
 
     Parameters:
         rec: Triage-report record (scene_class).
