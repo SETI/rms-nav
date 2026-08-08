@@ -1,0 +1,41 @@
+{
+  "confidence": 0.0,
+  "navigation_result": {
+    "confidence": 0.0,
+    "confidence_rank": "failed",
+    "excluded_from_consensus": [],
+    "feature_inventory": [],
+    "image_classifier": {
+      "class": "clean",
+      "noise_sigma": 0.75
+    },
+    "offset_px": null,
+    "per_technique": [],
+    "provenance": {
+      "config_hash": "0f1e2d3c4b5a6978",
+      "image_et": -659999000.0,
+      "pipeline_run_iso8601": "2026-05-04T11:22:33",
+      "spindoctor_git_sha": "abc1234",
+      "spindoctor_version": "1.0.0"
+    },
+    "sigma_px": null,
+    "status": "failed",
+    "status_reason": "techniques_disagree"
+  },
+  "observation": {
+    "camera": "WAC",
+    "image_name": "C1385460_GEOMED.IMG",
+    "image_path": "/holdings/C1385460_GEOMED.IMG",
+    "image_shape": [
+      1024,
+      1024
+    ],
+    "instrument": "vgiss"
+  },
+  "status": "failed",
+  "timing": {
+    "elapsed_s": 8.25,
+    "end_iso8601": "2026-05-04T11:23:08",
+    "start_iso8601": "2026-05-04T11:23:00"
+  }
+}

@@ -1,0 +1,174 @@
+{
+  "confidence": 0.42,
+  "navigation_result": {
+    "confidence": 0.42,
+    "confidence_rank": "low",
+    "covariance_px2": [
+      [
+        0.0961,
+        0.0
+      ],
+      [
+        0.0,
+        0.0784
+      ]
+    ],
+    "excluded_from_consensus": [
+      "StarUniqueMatchNav"
+    ],
+    "feature_inventory": [
+      {
+        "feature_id": "body_disc:IAPETUS",
+        "feature_type": "BODY_DISC",
+        "gated": false,
+        "source_model": "body:IAPETUS"
+      },
+      {
+        "feature_id": "body_limb:IAPETUS",
+        "feature_type": "BODY_LIMB",
+        "gated": false,
+        "source_model": "body:IAPETUS"
+      },
+      {
+        "feature_id": "star:UCAC4:100000",
+        "feature_type": "STAR",
+        "gated": false,
+        "source_model": "stars:UCAC4"
+      },
+      {
+        "feature_id": "star:UCAC4:100001",
+        "feature_type": "STAR",
+        "gated": false,
+        "source_model": "stars:UCAC4"
+      },
+      {
+        "feature_id": "star:UCAC4:100002",
+        "feature_type": "STAR",
+        "gated": false,
+        "source_model": "stars:UCAC4"
+      },
+      {
+        "feature_id": "star:UCAC4:100003",
+        "feature_type": "STAR",
+        "gated": false,
+        "source_model": "stars:UCAC4"
+      },
+      {
+        "feature_id": "star:UCAC4:100004",
+        "feature_type": "STAR",
+        "gated": false,
+        "source_model": "stars:UCAC4"
+      },
+      {
+        "feature_id": "star:UCAC4:100005",
+        "feature_type": "STAR",
+        "gated": false,
+        "source_model": "stars:UCAC4"
+      },
+      {
+        "feature_id": "star:UCAC4:100099",
+        "feature_type": "STAR",
+        "gated": true,
+        "source_model": "stars:UCAC4"
+      }
+    ],
+    "image_classifier": {
+      "class": "clean",
+      "noise_sigma": 0.75
+    },
+    "offset_px": [
+      59.5,
+      -12.0
+    ],
+    "per_technique": [
+      {
+        "at_edge": false,
+        "confidence": 0.42,
+        "covariance_px2": [
+          [
+            0.25,
+            0.0
+          ],
+          [
+            0.0,
+            0.25
+          ]
+        ],
+        "diagnostics": {
+          "converged": true,
+          "n_iterations": 4
+        },
+        "feature_ids": [
+          "body_disc:IAPETUS"
+        ],
+        "offset_px": [
+          59.5,
+          -12.0
+        ],
+        "spurious": false,
+        "technique_name": "BodyDiscCorrelateNav"
+      },
+      {
+        "at_edge": true,
+        "confidence": 0.12,
+        "covariance_px2": [
+          [
+            0.25,
+            0.0
+          ],
+          [
+            0.0,
+            0.25
+          ]
+        ],
+        "diagnostics": {
+          "converged": true,
+          "n_iterations": 4
+        },
+        "feature_ids": [
+          "star:UCAC4:100001"
+        ],
+        "offset_px": [
+          -8.0,
+          44.0
+        ],
+        "spurious": true,
+        "technique_name": "StarUniqueMatchNav"
+      }
+    ],
+    "provenance": {
+      "config_hash": "0f1e2d3c4b5a6978",
+      "image_et": 170002800.0,
+      "pipeline_run_iso8601": "2026-05-04T11:22:33",
+      "spindoctor_git_sha": "abc1234",
+      "spindoctor_version": "1.0.0"
+    },
+    "sigma_along_unobservable_px": null,
+    "sigma_px": [
+      0.31,
+      0.28
+    ],
+    "status": "success",
+    "status_reason": "ok"
+  },
+  "observation": {
+    "camera": "NAC",
+    "image_name": "N1294564000_1_CALIB.IMG",
+    "image_path": "/holdings/N1294564000_1_CALIB.IMG",
+    "image_shape": [
+      1024,
+      1024
+    ],
+    "instrument": "coiss"
+  },
+  "offset": [
+    59.5,
+    -12.0
+  ],
+  "status": "success",
+  "timing": {
+    "elapsed_s": 31.75,
+    "end_iso8601": "2026-05-04T11:22:45",
+    "start_iso8601": "2026-05-04T11:22:33"
+  }
+}

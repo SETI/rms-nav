@@ -1,0 +1,17 @@
+{
+  "observation": {
+    "camera": "NAC",
+    "image_et": 170001800.0,
+    "image_name": "N1294563000_1_CALIB.IMG",
+    "image_path": "/holdings/N1294563000_1_CALIB.IMG",
+    "instrument": "coiss"
+  },
+  "status": "error",
+  "status_error": "missing_spice_data",
+  "status_exception": "SpiceError: missing_spice_data",
+  "timing": {
+    "elapsed_s": 1.5,
+    "end_iso8601": "2026-05-04T11:24:01",
+    "start_iso8601": "2026-05-04T11:24:00"
+  }
+}

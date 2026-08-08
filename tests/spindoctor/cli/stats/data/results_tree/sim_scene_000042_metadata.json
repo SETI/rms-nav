@@ -1,0 +1,97 @@
+{
+  "confidence": 0.88,
+  "navigation_result": {
+    "confidence": 0.88,
+    "confidence_rank": "high",
+    "covariance_px2": [
+      [
+        0.0961,
+        0.0
+      ],
+      [
+        0.0,
+        0.0784
+      ]
+    ],
+    "excluded_from_consensus": [],
+    "feature_inventory": [
+      {
+        "feature_id": "body_limb:MIMAS",
+        "feature_type": "BODY_LIMB",
+        "gated": false,
+        "source_model": "body:MIMAS"
+      }
+    ],
+    "image_classifier": {
+      "class": "clean",
+      "noise_sigma": 0.75
+    },
+    "offset_px": [
+      1.5,
+      0.5
+    ],
+    "per_technique": [
+      {
+        "at_edge": false,
+        "confidence": 0.88,
+        "covariance_px2": [
+          [
+            0.25,
+            0.0
+          ],
+          [
+            0.0,
+            0.25
+          ]
+        ],
+        "diagnostics": {
+          "converged": true,
+          "n_iterations": 4
+        },
+        "feature_ids": [
+          "body_limb:MIMAS"
+        ],
+        "offset_px": [
+          1.5,
+          0.5
+        ],
+        "spurious": false,
+        "technique_name": "BodyLimbNav"
+      }
+    ],
+    "provenance": {
+      "config_hash": "0f1e2d3c4b5a6978",
+      "image_et": 100.0,
+      "pipeline_run_iso8601": "2026-05-04T11:22:33",
+      "spindoctor_git_sha": "abc1234",
+      "spindoctor_version": "1.0.0"
+    },
+    "sigma_along_unobservable_px": null,
+    "sigma_px": [
+      0.31,
+      0.28
+    ],
+    "status": "success",
+    "status_reason": "ok"
+  },
+  "observation": {
+    "camera": "SIM",
+    "image_name": "sim_scene_000042.img",
+    "image_path": "/holdings/sim_scene_000042.img",
+    "image_shape": [
+      256,
+      256
+    ],
+    "instrument": "sim"
+  },
+  "offset": [
+    1.5,
+    0.5
+  ],
+  "status": "success",
+  "timing": {
+    "elapsed_s": 12.5,
+    "end_iso8601": "2026-05-04T11:22:45",
+    "start_iso8601": "2026-05-04T11:22:33"
+  }
+}
