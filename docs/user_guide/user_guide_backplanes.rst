@@ -8,9 +8,41 @@ Overview
 Backplanes are per-pixel geometry products (longitude, latitude, incidence
 angle, emission angle, phase angle, resolution, etc.) derived from a
 navigated image. The system reads prior navigation metadata to apply the
-image offset, then computes body and ring backplanes, merges them per-pixel
-by distance, and writes a multi-HDU FITS file along with a JSON metadata
-file.
+image's recorded pointing, then computes body and ring backplanes, merges
+them per-pixel by distance, and writes a multi-HDU FITS file along with a
+JSON metadata file.
+
+Which pointing a product is built on
+------------------------------------
+
+The driver prefers the exact recorded form over its approximation. When the
+navigation record carries a corrected camera attitude
+(``navigation_result.pointing.cmatrix``) that passes the reader's
+consistency gates, the observation's frame is replaced with that attitude —
+the same measurement as the pixel offset, expressed exactly, and what a
+SPICE consumer of the corrected C-kernels sees for every image whose segment
+was written. When there is no usable corrected attitude — a fitted-rotation
+result (``no_cmatrix_rotation_fitted``), a record with no pointing block
+(``no_pointing_block``), an unusable one (``malformed_pointing``), or a gate
+refusal (``cmatrix_foreign_midtime``, ``cmatrix_baseline_mismatch``, both
+warned to the run log) — the recorded ``(dv, du)`` offset is applied via
+``oops.fov.OffsetFOV`` instead; no product is ever built on a corrected
+attitude that failed a gate. A kernel pool that already answers the
+corrected attitude (corrected C-kernels furnished at load time) is left
+alone, counted as ``pool_already_corrected``, since applying anything again
+would double-correct. With no usable pointing of either kind the backplanes
+are computed on uncorrected pointing, with a warning in the run log.
+
+Each single-image result reports what happened: ``pointing_source`` is one
+of ``'cmatrix'``, ``'pool'``, ``'offset'``, or ``'none'``, joined by
+``pointing_reason`` when the source is degraded and by
+``uncorrected_pointing: true`` when it is ``'none'``. A success-status
+record with no ``offset`` key at all is defect-shaped and fails the task
+rather than degrading silently. For a result the kernel generator omitted
+from the corrected kernels (a BOTSIM-yielding WAC, or any image with an
+omission reason), the backplanes still carry that image's own recorded
+measurement — the authoritative product for it — while a kernel consumer
+sees the winning segment's attitude.
 
 Key properties:
 

@@ -122,9 +122,9 @@ the real-image measurement exists (Track A #225 provides it) — the current
 partial cancellation is accidental and a well-meaning "fix" can make real
 accuracy worse. On real frames the fitter contributes only ~0.1 px while
 spacecraft-position / ephemeris error dominates (0.4-1.7 px), so the
-higher-leverage target is the pointing-kernel side (#50). #128 is the
-fuller redesign (all body types and illuminations) and starts with a design
-document, not code.
+higher-leverage pointing-kernel side (#50) was built first and is
+delivered. #128 is the fuller redesign (all body types and illuminations)
+and starts with a design document, not code.
 
 ### Smaller Track B items
 
@@ -244,26 +244,24 @@ by a strict xfail in `tests/spindoctor/cli/backplanes/`:
   bounding boxes, an observation metadata block); couples to the
   #55/#57 decisions.
 
-### CK kernels: what remains after the deliverable (#50 and follow-ups)
+### CK kernels: what remains after the deliverable (follow-ups)
 
-The "updated pointing" deliverable is built. The navigator records a
-corrected camera C-matrix in each image's metadata beside the pixel offset,
-and a cspyce-only `sd_create_ck` writes one type-3 segment per navigated
-exposure into files that mirror the originals they correct, with a
-meta-kernel and a per-mission CSV report beside them. The design of record
-is `plans/CK_KERNEL_PLAN.md` (sections 1-3 are the as-built specification,
-section 0 the status); the consumer-facing and developer-facing
-documentation is `docs/user_guide/user_guide_ck_kernels.rst` and
-`docs/dev_guide/dev_guide_ck_kernels.rst`. Validation is a closed loop:
+The "updated pointing" deliverable is built, both halves. The navigator
+records a corrected camera C-matrix in each image's metadata beside the
+pixel offset, and a cspyce-only `sd_create_ck` writes one type-3 segment
+per navigated exposure into files that mirror the originals they correct,
+with a meta-kernel and a per-mission CSV report beside them. The designs of
+record are `plans/CK_KERNEL_PLAN.md` (the writing half) and
+`plans/CMATRIX_READERS_PLAN.md` (the reading half: the backplane and
+reprojection readers apply the recorded C-matrix by frame replacement, with
+the offset as the documented fallback); the consumer-facing and
+developer-facing documentation is `docs/user_guide/user_guide_ck_kernels.rst`
+and `docs/dev_guide/dev_guide_ck_kernels.rst`. Validation is a closed loop:
 navigate, generate a kernel, furnish it, re-navigate, and confirm the
 second offset is approximately zero and the C-matrix matches, which the
-round trip does on Cassini NAC, Cassini WAC, Voyager and LORRI.
-
-That delivered the writing half of #50. The reading half is what remains:
-the pixel offset stays and every consumer keeps applying it, so switching
-the backplane and reprojection readers to the C-matrix is still open under
-#50. The round trip is the evidence it was waiting for -- the two
-representations agree on real frames, per instrument.
+round trip does on Cassini NAC, Cassini WAC, Voyager and LORRI; the reader
+comparison (`tests/integration/test_cmatrix_readers.py`) holds the two
+consumption paths together through the switched consumers themselves.
 
 The round trip also measured something that belongs to Track B rather than
 here: a technique re-measuring a corrected frame does not return exactly

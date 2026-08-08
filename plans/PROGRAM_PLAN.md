@@ -235,7 +235,8 @@ The known open defects:
   on #150; #128 is the fuller redesign across all body types and
   illuminations. On real frames the fitter contributes only ~0.1 px while
   spacecraft-position / ephemeris error dominates (0.4-1.7 px), so the
-  higher-leverage target is the pointing-kernel side (Track D #50).
+  higher-leverage pointing-kernel side (Track D #50) was built first and is
+  delivered.
 - **#282** — a ~0.05 px, one-pixel-period sub-pixel ripple rides on top of
   the directional bias; a higher-order / matched-filter sub-pixel edge
   estimator would remove it. Precision refinement, secondary to #150.
@@ -313,15 +314,17 @@ surface to the `util/` tooling (#429).
 Some items start with an operator decision, because each is a scope
 commitment:
 
-The headline capability item is delivered: `plans/CK_KERNEL_PLAN.md` is
-implemented, so the navigator records each image's corrected attitude as a
-C-matrix and `sd_create_ck` ships updated-pointing SPICE C-kernels as a
-product. What that leaves is #50's reading half — the consumers that apply
-the pixel offset moving to the recorded C-matrix — and the follow-ups in
-that plan's section 7. The remaining decided item with a self-contained
-plan of its own is `plans/RESULTS_DB_PLAN.md` (an optional, rebuildable
-index over the results tree, so programs stop reading one JSON document per
-image on a cloud root; #430).
+The headline capability item is delivered in both halves:
+`plans/CK_KERNEL_PLAN.md` is implemented, so the navigator records each
+image's corrected attitude as a C-matrix and `sd_create_ck` ships
+updated-pointing SPICE C-kernels as a product, and
+`plans/CMATRIX_READERS_PLAN.md` is implemented, so the backplane and
+reprojection consumers apply the recorded C-matrix (with the pixel offset
+as the documented fallback), closing #50. What that leaves is the
+follow-ups in the CK plan's section 7. The remaining decided item with a
+self-contained plan of its own is `plans/RESULTS_DB_PLAN.md` (an optional,
+rebuildable index over the results tree, so programs stop reading one JSON
+document per image on a cloud root; #430).
 
 | Decision | Then the work is |
 |---|---|
@@ -466,7 +469,7 @@ Every open issue, listed once by the track that owns it.
 | A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #340, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377, #380, #399, #405, #407, #409, #426 |
 | B — navigation correctness | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #373, #394, #400, #401, #402, #403, #404, #406, #447 |
 | C — statistics & QA | #240 (plus the standing cross-check and campaign-report practice) |
-| D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #141, #142, #231, #236, #251, #252, #253, #265, #397, #398, #411, #418, #424, #427, #430, #433, #434, #435, #436, #437, #440, #444, #448, #452, #455, #459 |
+| D — capability completion | #28, #30, #47, #53, #54, #55, #57, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #141, #142, #231, #236, #251, #252, #253, #265, #397, #398, #411, #418, #424, #427, #430, #433, #434, #435, #436, #437, #440, #444, #448, #452, #455, #459 |
 | E — test & docs debt | #122, #129, #177, #178, #241, #242, #243, #244, #245, #288, #379, #391, #429, #431, #438, #443, #446 |
 | F — instruments, features, hardening | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #81, #82, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212, #388, #423, #428 |
 

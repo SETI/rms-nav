@@ -11,20 +11,50 @@ C-kernels from them -- is delivered and documented in
 
 ## 0. Status
 
-Design complete; not yet implemented. Adversarially reviewed 2026-08-07
+Implemented as designed (2026-08-07), one PR, four phases as section 5
+specifies. Adversarially reviewed before implementation
 (`critiques/CMATRIX_READERS_PLAN_CRITIQUE_2026-08-07.md`, verdict
 CONDITIONAL with the mechanism verified correct by execution); every
-finding is folded into the sections below, in particular the
-`pool_already_corrected` ladder row, the identity short-circuit, the
+finding was folded into the sections below before coding, in particular
+the `pool_already_corrected` ladder row, the identity short-circuit, the
 consumer-level acceptance evidence, the in-metric bound, the closed
 ladder gaps, and the `reset_all()` contract.
 
-The gate the playbook set for this work is met: the round trip in
-`tests/integration/test_ck_round_trip.py` shows, per instrument, that
-the recorded `cmatrix` means what the offset means -- the pointing chain
-reproduces the recorded attitude to at most 1.5e-15 rad, and a
-re-navigation against the corrected kernel lands within 0.0029 px per
-axis of zero across the cohort.
+As-built notes, where execution refined the letter of the sections
+below without changing the mechanism:
+
+- `apply_cmatrix_to_obs` returns a named outcome
+  (`CmatrixApplication.FRAME_REPLACED` / `POOL_ALREADY_CORRECTED`)
+  rather than signaling the already-corrected pool by exception, and
+  `NavPointingError` carries a machine-readable `reason` so the callers
+  tally degradations without parsing messages.
+- The in-metric measurement (section 4) differences *two* `uv_from_los`
+  inversions through the offset path's mapping rather than inverting
+  one path and comparing against the asked-about pixel: the distorted
+  WAC's inverse map is itself only self-consistent to 0.057 px at the
+  frame corners, and differencing through the same map cancels that
+  systematic error. Measured in that metric, `K_WAC = 0.100 px` at the
+  50 px reference (the writer's tabled 7.86e-2 px was a different grid
+  and metric), and every cohort frame sits inside its derived bound.
+- Phase 3's backplane comparison runs on the body-navigated WAC frame
+  and compares the `BODY_LATITUDE` / `BODY_LONGITUDE` planes through
+  each pixel's own surface resolution: the backplane product carries no
+  RA/dec planes (config_900_backplanes.yaml has body and ring planes
+  only), and the star-field NAC frame would produce an empty product.
+- The transposed-record gate test pins `cmatrix_original` transposed and
+  the whole record transposed (the serialization-defect class); a
+  transposed `cmatrix` *alone* is not detectable by the `R_hat` gate,
+  whose inequality contains only `cmatrix_original` -- section 3.4's
+  "transposing either matrix" overstates by that one sub-case, which no
+  single-serializer defect produces.
+
+The gate the playbook set for this work was met before it started: the
+round trip in `tests/integration/test_ck_round_trip.py` shows, per
+instrument, that the recorded `cmatrix` means what the offset means --
+the pointing chain reproduces the recorded attitude to at most 1.5e-15
+rad, and a re-navigation against the corrected kernel lands within
+0.0029 px per axis of zero across the cohort. The acceptance evidence
+this plan added is `tests/integration/test_cmatrix_readers.py`.
 
 ---
 

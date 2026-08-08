@@ -436,7 +436,7 @@ the single ``sd_mosaic`` program) reproject a dataset of images and combine
 them into a mosaic using a two-pass workflow:
 
 1. **Reprojection pass** — for each image in the dataset, load the observation,
-   optionally apply a pre-computed navigation offset, call
+   optionally apply its recorded navigation pointing, call
    ``BodyMosaic.reproject()`` / ``RingMosaic.reproject()`` (with ``image_name``
    set to that image's file stem, or to ``--image-name`` when that option is
    given), and save the result as
@@ -487,15 +487,47 @@ Body mosaics quick example::
         --output-dir /data/mosaics \
         --prefix mimas_2004
 
-Offset application
-^^^^^^^^^^^^^^^^^^
+Pointing application
+^^^^^^^^^^^^^^^^^^^^
 
 When ``--nav-results-root`` is provided, ``sd_mosaic`` looks up a
-``_metadata.json`` file for each image (written by ``sd_offset``). If the
-file exists and has ``status == 'success'``, the stored ``(dv, du)`` offset is
-applied to the observation's FOV via ``oops.fov.OffsetFOV`` before reprojection.
-If the file is absent, invalid JSON, or has a non-success status, a warning is
-logged and uncorrected pointing is used.
+``_metadata.json`` file for each image (written by ``sd_offset``) and applies
+the pointing it records, preferring the exact form over its approximation:
+
+* When the record carries a corrected camera attitude
+  (``navigation_result.pointing.cmatrix``) that passes the reader's
+  consistency gates, the observation's frame is replaced with that attitude
+  and the field of view is left untouched. This is the same measurement as
+  the pixel offset expressed exactly, and it is what a SPICE consumer of the
+  corrected C-kernels sees for every image whose segment was written.
+* When there is no usable corrected attitude, the stored ``(dv, du)`` offset
+  is applied to the observation's FOV via ``oops.fov.OffsetFOV``, exactly as
+  every offset-corrected product has always been built. The reasons this
+  happens, each counted in the run summary: ``no_cmatrix_rotation_fitted``
+  (the navigation fitted a camera rotation, which records no corrected
+  attitude), ``no_pointing_block`` (a simulated image, or a record predating
+  the pointing schema), ``malformed_pointing`` (the pointing block cannot be
+  used; also warned to the run log), and the gate refusals
+  ``cmatrix_foreign_midtime`` (the record belongs to a different
+  observation) and ``cmatrix_baseline_mismatch`` (the kernel pool, the
+  record, or the frame convention changed since navigation; both are warned
+  to the run log, and no product is ever built on a corrected attitude that
+  failed a gate).
+* When the reader finds the furnished kernel pool *already* answering the
+  corrected attitude — corrected C-kernels furnished at load time — it
+  applies nothing at all: the observation is already right, and applying
+  either mechanism again would double-correct. This outcome is counted under
+  ``pool_already_corrected``.
+* When neither mechanism is usable (the file is absent, invalid JSON, a
+  non-success status, or a null or malformed offset), a warning is logged
+  and uncorrected pointing is used.
+
+One consequence worth knowing: for a result the kernel generator deliberately
+omitted from the corrected kernels — the yielding WAC of a BOTSIM pair, or
+any image with an omission reason — the readers still apply that image's
+*own* recorded measurement, which is the better product for that image, while
+a consumer of the corrected kernels sees the attitude the winning segment
+implies. SpinDoctor's own products are authoritative for those images.
 
 Output format
 ^^^^^^^^^^^^^
@@ -515,7 +547,7 @@ If ``--prefix`` is empty (the default), the leading underscore is omitted.
 ``sd_mosaic`` accepts the same logging options as every other pipeline
 program; see :doc:`user_guide_logging`.
 
-An image with no usable navigation offset is still reprojected, on
+An image with no usable navigation pointing is still reprojected, on
 uncorrected pointing. Because the product looks the same either way, each one
 is reported to the run's log with the reason, and the pass summary counts
 them::
@@ -523,11 +555,18 @@ them::
    Reprojection pass complete: 143 done, 0 skipped, 0 failed, 12 with
    uncorrected pointing.
 
+Every degraded pointing outcome — an offset fallback, an already-corrected
+pool, or no correction at all — is additionally tallied per reason and the
+tally reported at the end of the pass::
+
+   Pointing degradations by reason: {'no_cmatrix_rotation_fitted': 12}
+
 A cloud-task worker has no run log, so it returns the same information in the
-task result instead, as ``n_uncorrected`` with a per-reason tally under
-``uncorrected_reasons``. The full explanation for any one image is in that
-image's log. A run given no ``--nav-results-root`` at all is not counted:
-nothing was asked for, so nothing is missing.
+task result instead, as ``n_uncorrected`` (images with no correction at all)
+with the per-reason tally under ``pointing_reasons``. The full explanation
+for any one image is in that image's log. A run given no
+``--nav-results-root`` at all is not counted: nothing was asked for, so
+nothing is missing.
 
 Cloud-tasks entry point
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -672,7 +711,7 @@ Common options reference
      - Skip the mosaic-building pass.
    * - ``--nav-results-root DIR``
      - ``None``
-     - Root written by ``sd_offset``; enables offset application.
+     - Root written by ``sd_offset``; enables pointing application.
    * - ``--dry-run``
      - ``False``
      - Print what would be done without writing files.
