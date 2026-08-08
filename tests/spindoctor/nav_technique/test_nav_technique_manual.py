@@ -118,18 +118,8 @@ def _patch_build_models(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _fakes_report_as_simulated(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Report this module's fake observations as simulated.
-
-    ``obs_class_to_inst_name`` cannot identify a test fake and returns
-    ``'unknown'``, which the orchestrator treats as a build defect and
-    warns about.  These fakes stand in for an observation carrying no SPICE
-    camera frame, which is exactly what a simulated image is, so they report
-    that instead of shaping the production set around the test suite.
-    """
-    monkeypatch.setattr(
-        'spindoctor.nav_orchestrator.orchestrator.obs_class_to_inst_name', lambda cls: 'sim'
-    )
+def _fakes_report_as_simulated(fakes_report_as_simulated: None) -> None:
+    """Apply the shared simulated-instrument report to every test in this module."""
 
 
 def _make_fake_dialog(

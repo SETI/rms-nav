@@ -15,7 +15,7 @@ import cspyce
 import numpy as np
 import pytest
 from filecache import FCPath
-from tests.spindoctor.cli.ck.conftest import (
+from tests.spindoctor.cli.ck.ck_helpers import (
     CASSINI_CK_FRAME_ID,
     ET0,
     VOYAGER_CK_FRAME_ID,
@@ -488,14 +488,9 @@ def test_kernel_class_accepts_two_patterns_of_one_class(
     assert kernel_class_for_basename(_RECONSTRUCTED_NAME) is KernelClass.RECONSTRUCTED
 
 
-def test_no_shipped_pattern_pair_overlaps_on_a_real_basename() -> None:
-    """The shipped patterns are mutually exclusive on every name they classify.
-
-    Mutual exclusivity is what lets the refusal above stay unreached, so it is
-    asserted here rather than assumed: every real name that any rule matches is
-    matched by rules of exactly one class.
-    """
-    names = [
+@pytest.mark.parametrize(
+    'name',
+    [
         '03236_04002ra.bc',
         '00001_00092rc.bc',
         '001105_001108.bc',
@@ -504,15 +499,35 @@ def test_no_shipped_pattern_pair_overlaps_on_a_real_basename() -> None:
         '04009_04051py_as_flown.bc',
         'nh_scispi_2015_recon.bc',
         'nh_scispi_2015_pred.bc',
-    ]
-    for name in names:
-        matched = {
-            kernel_class
-            for mission_rules in index_module._MISSION_NAME_RULES
-            for pattern, kernel_class in mission_rules.rules
-            if pattern.fullmatch(name.lower()) is not None
-        }
-        assert len(matched) == 1
+    ],
+    ids=[
+        'cassini-tour-ra',
+        'cassini-cruise-rc',
+        'cassini-jupiter-no-release-code',
+        'cassini-gapfill',
+        'cassini-predicted',
+        'cassini-as-flown',
+        'new-horizons-recon',
+        'new-horizons-pred',
+    ],
+)
+def test_no_shipped_pattern_pair_overlaps_on_a_real_basename(name: str) -> None:
+    """The shipped patterns are mutually exclusive on every name they classify.
+
+    Mutual exclusivity is what lets the two-class refusal stay unreached, so
+    it is asserted here rather than assumed: every real name that any rule
+    matches is matched by rules of exactly one class.
+
+    Parameters:
+        name: A real holdings basename that some shipped rule matches.
+    """
+    matched = {
+        kernel_class
+        for mission_rules in index_module._MISSION_NAME_RULES
+        for pattern, kernel_class in mission_rules.rules
+        if pattern.fullmatch(name.lower()) is not None
+    }
+    assert len(matched) == 1
 
 
 @pytest.mark.parametrize(
@@ -532,18 +547,25 @@ def test_kernel_class_refuses_something_that_is_not_a_basename(basename: str) ->
 
 @pytest.mark.parametrize(
     'basename',
-    ['03236_04002ra_nav.bc', '04009_04051px_nav.bc'],
-    ids=['reconstructed-corrected', 'predicted-corrected'],
+    ['03236_04002ra_nav.bc', '04009_04051px_nav.bc', '03236_04002RA_NAV.BC', 'X_NAV.bc'],
+    ids=[
+        'reconstructed-corrected',
+        'predicted-corrected',
+        'upper-case-marker',
+        'upper-case-marker-lower-extension',
+    ],
 )
 def test_kernel_class_refuses_a_corrected_kernel(basename: str) -> None:
     """A corrected kernel is this program's output and never a baseline candidate.
 
-    Left to the patterns the two names below would answer differently -- the
+    Left to the patterns the first two names would answer differently -- the
     predicted pattern ends in a wildcard and would accept the marker, the
     reconstructed one would not -- so classifying either is refused outright.
+    The marker is read case-blind: an upper-cased copy of a corrected kernel
+    is still a corrected kernel.
 
     Parameters:
-        basename: A corrected kernel's name.
+        basename: A corrected kernel's name, in either case.
     """
     with pytest.raises(ValueError, match='names a corrected kernel'):
         kernel_class_for_basename(basename)
@@ -628,6 +650,38 @@ def test_build_ck_index_skips_a_corrected_kernel(pool: KernelPool, tmp_path: Pat
     _write_ck(root, '03236_04002ra_nav.bc')
     index = build_ck_index([root])
     assert [ck_file.basename for ck_file in index.files] == [_RECONSTRUCTED_NAME]
+
+
+def test_build_ck_index_skips_an_upper_cased_corrected_kernel(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """The corrected-kernel marker is read case-blind by the scan too.
+
+    An upper-cased copy of a corrected kernel is still a corrected kernel, and
+    one that slipped past the scan would then be refused by the case-blind
+    classifier -- or worse, offered as a baseline candidate.
+    """
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    _write_ck(root, '03236_04002RA_NAV.BC')
+    index = build_ck_index([root])
+    assert [ck_file.basename for ck_file in index.files] == [_RECONSTRUCTED_NAME]
+
+
+def test_build_ck_index_refuses_a_file_that_is_not_a_kernel(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """A file wearing the extension and not the format stops the scan by name.
+
+    A text file named ``.bc`` is a corrupted or mislabeled holding, and
+    skipping it silently would drop a directory's kernels from the index with
+    nothing to say so.
+    """
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    (root / 'x.bc').write_text('this is not a kernel\n')
+    with pytest.raises(OSError, match='must be a binary CK file'):
+        build_ck_index([root])
 
 
 def test_build_ck_index_refuses_a_directory_named_twice_by_different_paths(

@@ -211,13 +211,13 @@ def test_a_frame_already_defined_is_refused(frame_root: Path) -> None:
         cspyce.unload(str(already))
 
 
-def test_no_candidate_at_all_is_accepted(frame_root: Path) -> None:
+@pytest.mark.usefixtures('frame_root')
+def test_no_candidate_at_all_is_accepted() -> None:
     """A missing frame kernel is the assignment step's refusal, not this one.
 
     That refusal names the frame; refusing here would say a run holds too many
     frame kernels when it holds none.
     """
-    assert frame_root is not None
     require_one_frame_kernel_per_frame({}, camera_frames=[CAMERA_FRAME], ck_frame_ids=[CK_FRAME_ID])
 
 
@@ -244,7 +244,7 @@ def test_a_kernel_reports_no_frame_it_does_not_define(frame_root: Path) -> None:
     )
 
 
-def test_an_undefined_object_frame_reads_as_undefined(frame_root: Path) -> None:
+@pytest.mark.usefixtures('frame_root')
+def test_an_undefined_object_frame_reads_as_undefined() -> None:
     """The probe answers False rather than raising for an unknown object."""
-    assert frame_root is not None
     assert object_frame_is_defined(-999999) is False

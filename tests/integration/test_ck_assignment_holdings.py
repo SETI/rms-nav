@@ -37,10 +37,14 @@ _SPICE_ROOT = Path(_RESOURCES) / 'SPICE'
 _CASSINI_ROOT = _SPICE_ROOT / 'Cassini'
 _VOYAGER_ROOT = _SPICE_ROOT / 'Voyager'
 
-if len(_RESOURCES) == 0 or not (_CASSINI_ROOT / 'CK-reconstructed').is_dir():
+if (
+    len(_RESOURCES) == 0
+    or not (_CASSINI_ROOT / 'CK-reconstructed').is_dir()
+    or not (_VOYAGER_ROOT / 'CK').is_dir()
+):
     pytest.skip(
-        'OOPS_RESOURCES does not name a local SPICE tree; skipping C-kernel assignment holdings '
-        'tests',
+        'OOPS_RESOURCES does not name a local SPICE tree holding the Cassini and Voyager '
+        'C-kernels; skipping C-kernel assignment holdings tests',
         allow_module_level=True,
     )
 

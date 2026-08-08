@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from tests.spindoctor.cli.ck.conftest import (
+from tests.spindoctor.cli.ck.ck_helpers import (
     CASSINI_CAMERA_FRAME,
     CASSINI_CK_FRAME_ID,
     ET0,
@@ -313,22 +313,52 @@ def test_a_simultaneous_pair_makes_the_wide_angle_frame_yield() -> None:
     assert botsim_losers(entries) == frozenset({'W1484573295_1.IMG'})
 
 
-def test_a_pair_exactly_at_the_window_edge_still_pairs() -> None:
-    """The window is inclusive of its bound."""
+def test_a_pair_whose_stops_sit_exactly_at_the_window_edge_still_pairs() -> None:
+    """The window is inclusive of its two-second bound, measured stop to stop."""
     entries = [
         _botsim_entry('N1484573295_1.IMG', 'NAC', ET0),
-        _botsim_entry('W1484573295_1.IMG', 'WAC', ET0 + 1.0),
+        _botsim_entry('W1484573295_1.IMG', 'WAC', ET0 + 2.0),
     ]
     assert botsim_losers(entries) == frozenset({'W1484573295_1.IMG'})
 
 
-def test_exposures_further_apart_than_the_window_do_not_pair() -> None:
-    """Two frames a second and a half apart are two events."""
+def test_stops_just_past_the_window_do_not_pair() -> None:
+    """Two shutters closing 2.0625 seconds apart are two events.
+
+    The separation sits just past the two-second bound and is exact in a
+    double, so a bound that quietly widened would pair these and fail here.
+    """
     entries = [
         _botsim_entry('N1484573295_1.IMG', 'NAC', ET0),
-        _botsim_entry('W1484573295_1.IMG', 'WAC', ET0 + 1.5),
+        _botsim_entry('W1484573295_1.IMG', 'WAC', ET0 + 2.0625),
     ]
     assert botsim_losers(entries) == frozenset()
+
+
+def test_a_pair_with_unequal_exposures_pairs_on_the_shutter_close() -> None:
+    """The commanded simultaneous event is the close, not the open.
+
+    The two cameras' exposure durations routinely differ, so the starts of a
+    genuine pair can sit whole seconds apart while the stops coincide; keying
+    on the start would read such a pair as two events.
+    """
+    entries = [
+        _entry(
+            image_name='N1484573295_1.IMG',
+            camera='NAC',
+            shutter_mode='BOTSIM',
+            start_et=ET0,
+            stop_et=ET0 + 10.0,
+        ),
+        _entry(
+            image_name='W1484573295_1.IMG',
+            camera='WAC',
+            shutter_mode='BOTSIM',
+            start_et=ET0 + 9.5,
+            stop_et=ET0 + 10.0,
+        ),
+    ]
+    assert botsim_losers(entries) == frozenset({'W1484573295_1.IMG'})
 
 
 def test_two_frames_from_the_same_camera_do_not_pair() -> None:

@@ -1,6 +1,6 @@
 """Real-holdings integration tests for ``spindoctor.cli.ck.index``.
 
-Three things about the pre-index cannot be settled by kernels the suite writes
+Four things about the pre-index cannot be settled by kernels the suite writes
 itself.  The first is that it survives a real kernel directory, which holds
 subdirectories, comment files and label files beside the binaries.  The second
 is the claim the assignment rules rest on: that Voyager's decades-spanning bus
@@ -9,7 +9,7 @@ read from, so the object filter excludes them without any epoch reasoning.  The
 third is that a real kernel can name an object whose spacecraft clock no kernel
 defines, which the New Horizons holdings do and which the scan has to survive.
 
-The third is the classification itself.  A kernel's class comes from its own
+The fourth is the classification itself.  A kernel's class comes from its own
 basename, and whether the patterns cover every name the holdings actually hold
 is a question only the holdings can answer -- a hand-written sample proves
 nothing about the 1200 names nobody typed out.  So every C-kernel of every
@@ -35,9 +35,28 @@ _VOYAGER_CK_DIR = _SPICE_ROOT / 'Voyager' / 'CK'
 _NEW_HORIZONS_ROOT = _SPICE_ROOT / 'New-Horizons'
 _NEW_HORIZONS_CK_DIR = _NEW_HORIZONS_ROOT / 'CK-reconstructed'
 
-if len(_RESOURCES) == 0 or not _VOYAGER_CK_DIR.is_dir():
+# Every C-kernel directory of every mission the pipeline navigates.  The
+# per-directory classification totals live in ``_CLASSIFIED_DIRS`` below, which
+# cannot be built until the guarded import supplies ``KernelClass``; the names
+# are stated here, ahead of the skip guard, because this module reads all of
+# them and a partial local tree must skip rather than error.
+_CLASSIFIED_DIR_NAMES: tuple[str, ...] = (
+    'Cassini/CK-reconstructed',
+    'Cassini/CK-cruise',
+    'Cassini/CK-jup',
+    'Cassini/CK-gapfill',
+    'Cassini/CK-predicted',
+    'Cassini/CK-predicted-v02',
+    'New-Horizons/CK-reconstructed',
+    'New-Horizons/CK-predicted',
+    'Voyager/CK',
+    'Galileo/CK',
+)
+
+if len(_RESOURCES) == 0 or any(not (_SPICE_ROOT / name).is_dir() for name in _CLASSIFIED_DIR_NAMES):
     pytest.skip(
-        'OOPS_RESOURCES does not name a local SPICE tree; skipping C-kernel index holdings tests',
+        'OOPS_RESOURCES does not name a local SPICE tree holding every classified C-kernel '
+        'directory; skipping C-kernel index holdings tests',
         allow_module_level=True,
     )
 
@@ -64,25 +83,28 @@ _BUS_KERNEL = 'vgr1_super.bc'
 _SPACECRAFT_ID = -98000
 _CLOCKLESS_OBJECT_ID = -1
 _CLOCKLESS_KERNEL = 'nh_scispi_2015_recon.bc'
-# Every C-kernel directory of every mission the pipeline navigates, with the
-# class every kernel in it must be found to declare.  The Cassini cruise and
+# Each classified directory with the class every kernel in it must be found to
+# declare, in the order of ``_CLASSIFIED_DIR_NAMES``.  The Cassini cruise and
 # Jupiter directories name no class and their kernels do, which is the whole
 # reason the class is read from the basename; New Horizons marks only the pair
 # of kernels that exist in both forms; Voyager and Galileo mark nothing at all.
-_CLASSIFIED_DIRS: tuple[tuple[str, dict[KernelClass, int]], ...] = (
-    ('Cassini/CK-reconstructed', {KernelClass.RECONSTRUCTED: 998}),
-    ('Cassini/CK-cruise', {KernelClass.RECONSTRUCTED: 31}),
-    ('Cassini/CK-jup', {KernelClass.RECONSTRUCTED: 64}),
-    ('Cassini/CK-gapfill', {KernelClass.GAPFILL: 15}),
-    ('Cassini/CK-predicted', {KernelClass.PREDICTED: 104}),
-    ('Cassini/CK-predicted-v02', {KernelClass.PREDICTED: 104}),
-    (
-        'New-Horizons/CK-reconstructed',
-        {KernelClass.RECONSTRUCTED: 1, KernelClass.UNCLASSIFIED: 29},
-    ),
-    ('New-Horizons/CK-predicted', {KernelClass.PREDICTED: 1, KernelClass.UNCLASSIFIED: 1}),
-    ('Voyager/CK', {KernelClass.UNCLASSIFIED: 10}),
-    ('Galileo/CK', {KernelClass.UNCLASSIFIED: 52}),
+_CLASSIFIED_DIRS: tuple[tuple[str, dict[KernelClass, int]], ...] = tuple(
+    zip(
+        _CLASSIFIED_DIR_NAMES,
+        (
+            {KernelClass.RECONSTRUCTED: 998},
+            {KernelClass.RECONSTRUCTED: 31},
+            {KernelClass.RECONSTRUCTED: 64},
+            {KernelClass.GAPFILL: 15},
+            {KernelClass.PREDICTED: 104},
+            {KernelClass.PREDICTED: 104},
+            {KernelClass.RECONSTRUCTED: 1, KernelClass.UNCLASSIFIED: 29},
+            {KernelClass.PREDICTED: 1, KernelClass.UNCLASSIFIED: 1},
+            {KernelClass.UNCLASSIFIED: 10},
+            {KernelClass.UNCLASSIFIED: 52},
+        ),
+        strict=True,
+    )
 )
 
 

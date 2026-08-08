@@ -372,9 +372,14 @@ def test_a_relative_log_root_is_made_absolute(
 
 
 def test_an_absolute_log_root_is_unchanged(tmp_path: Path) -> None:
-    """Resolving one that is already absolute does not move it."""
+    """Resolving one that is already absolute does not move it.
+
+    The expected value is built from ``tmp_path.resolve()`` because on macOS
+    ``tmp_path`` itself sits behind the ``/var`` symlink that resolution
+    removes.
+    """
     sinks = sinks_from_arguments(None, FCPath(str(tmp_path / 'logs')))
-    assert sinks.log_root.as_posix() == (tmp_path / 'logs').as_posix()
+    assert sinks.log_root.as_posix() == (tmp_path.resolve() / 'logs').as_posix()
 
 
 def test_a_remote_log_root_is_left_as_it_was_given() -> None:

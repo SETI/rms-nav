@@ -123,8 +123,46 @@ def test_a_path_holding_a_quote_is_refused() -> None:
 
 def test_a_path_holding_a_newline_is_refused() -> None:
     """A newline splits one value into two the parser cannot rejoin."""
-    with pytest.raises(ValueError, match='non-printing'):
+    with pytest.raises(ValueError, match='outside the printable ASCII'):
         build_meta_kernel_lines(['/kernels/orig\n.bc'], [])
+
+
+def test_a_path_holding_an_accented_character_is_refused() -> None:
+    """Printable to Python is not printable to SPICE: a text kernel carries only ASCII."""
+    with pytest.raises(ValueError, match='outside the printable ASCII'):
+        build_meta_kernel_lines(['/kernels/orizé.bc'], [])
+
+
+def _reassembled(lines: tuple[str, ...]) -> str:
+    """Join the quoted pieces of a meta-kernel back into the path they spell.
+
+    Parameters:
+        lines: The meta-kernel lines.
+
+    Returns:
+        The single path the continued strings describe.
+    """
+    quoted = [line.strip() for line in lines if line.strip().startswith("'")]
+    return ''.join(piece.strip("'").rstrip('+') for piece in quoted)
+
+
+def test_a_path_of_exactly_the_name_limit_is_accepted() -> None:
+    """The 255-character bound is the last length SPICE accepts, not the first refused."""
+    path = '/kernels/' + 'x' * (255 - len('/kernels/') - len('.bc')) + '.bc'
+    assert len(path) == 255
+    assert _reassembled(build_meta_kernel_lines([path], [])) == path
+
+
+def test_a_path_one_character_over_the_name_limit_is_refused() -> None:
+    """A longer name would be written and then refused by every consumer.
+
+    ``furnsh`` refuses it only after the kernels listed before it have already
+    loaded, which is the partially-loaded pool the writer exists to avoid.
+    """
+    path = '/kernels/' + 'x' * (256 - len('/kernels/') - len('.bc')) + '.bc'
+    assert len(path) == 256
+    with pytest.raises(ValueError, match='longer than the 255 SPICE accepts'):
+        build_meta_kernel_lines([path], [])
 
 
 def test_the_meta_kernel_declares_itself_a_meta_kernel(tmp_path: Path) -> None:
@@ -138,14 +176,24 @@ def test_the_meta_kernel_says_why_the_originals_are_there() -> None:
     assert any('rather than replaced' in line for line in lines)
 
 
-def test_a_path_of_exactly_the_string_limit_furnishes(tmp_path: Path) -> None:
-    """The boundary between one string and two is not a truncation point."""
-    padding = 80 - len(str(tmp_path / 'x.bc'))
-    original = tmp_path / ('x' * max(padding, 0) + 'x.bc')
+def test_a_path_of_exactly_the_string_limit_furnishes(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """The boundary between one string and two is not a truncation point.
+
+    The directory comes from the factory under a deliberately short name, so
+    that an 80-character path can always be built under it and the boundary is
+    pinned exactly rather than clamped away when the test's own temporary
+    directory runs long.
+    """
+    root = tmp_path_factory.mktemp('edge')
+    padding = 80 - len(str(root / 'x.bc'))
+    original = root / ('x' * padding + 'x.bc')
+    assert len(str(original)) == 80
     _write_ck(original)
-    meta = FCPath(str(tmp_path / 'edge.tm'))
+    meta = FCPath(str(root / 'edge.tm'))
     write_meta_kernel(meta, originals=[original], corrections=[])
-    assert _furnished_ck_order(tmp_path / 'edge.tm') == [str(original)]
+    assert _furnished_ck_order(root / 'edge.tm') == [str(original)]
 
 
 def test_a_path_ending_in_a_blank_is_refused() -> None:

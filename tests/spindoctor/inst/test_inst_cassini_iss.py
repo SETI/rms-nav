@@ -1,8 +1,26 @@
+"""Tests for ``spindoctor.obs.obs_inst_cassini_iss.ObsCassiniISS``."""
+
+from typing import Any
+
+import pytest
 from tests.config import REQUIRES_EXTERNAL_DATA, URL_CASSINI_ISS_RHEA_01
 
 import spindoctor.obs.obs_inst_cassini_iss as obstcoiss
+from spindoctor.obs.obs_inst_cassini_iss import ObsCassiniISS
 
 pytestmark = REQUIRES_EXTERNAL_DATA
+
+
+def _obs_with_label(label: dict[str, Any]) -> ObsCassiniISS:
+    """Build a bare ObsCassiniISS carrying only the given label dict.
+
+    ``shutter_mode`` is a pure function of ``self.dict``, so a fully
+    constructed observation (and an external image fetch) is unnecessary for
+    testing it.
+    """
+    obs = object.__new__(ObsCassiniISS)
+    obs.dict = label
+    return obs
 
 
 def test_cassini_iss_basic() -> None:
@@ -40,3 +58,23 @@ def test_cassini_iss_reports_shutter_mode() -> None:
     """
     obs = obstcoiss.ObsCassiniISS.from_file(URL_CASSINI_ISS_RHEA_01)
     assert obs.shutter_mode == 'BOTSIM'
+
+
+def test_shutter_mode_absent_from_the_label_reads_as_none() -> None:
+    """A label carrying no SHUTTER_MODE_ID reports no shutter mode."""
+    assert _obs_with_label({}).shutter_mode is None
+
+
+def test_shutter_mode_null_label_value_reads_as_none() -> None:
+    """A SHUTTER_MODE_ID present but null reports no shutter mode, not 'None'."""
+    assert _obs_with_label({'SHUTTER_MODE_ID': None}).shutter_mode is None
+
+
+def test_shutter_mode_non_text_label_value_is_refused() -> None:
+    """A non-string SHUTTER_MODE_ID raises rather than serializing the object.
+
+    ``str()`` would render any object without complaint, and the result would
+    pass downstream as a legible shutter mode.
+    """
+    with pytest.raises(ValueError, match='SHUTTER_MODE_ID is not text'):
+        _ = _obs_with_label({'SHUTTER_MODE_ID': 42}).shutter_mode

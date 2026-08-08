@@ -42,6 +42,7 @@ make it a real test rather than a formality:
 """
 
 import argparse
+import contextlib
 import json
 import math
 import os
@@ -317,9 +318,12 @@ def record_index_for_tick(ticks: Sequence[float], tick: float) -> int:
         raise ValueError(f'the encoded clock time is {tick!r}, not a finite tick')
     if len(ticks) == 0:
         raise ValueError('the segment holds no records')
+    # Every tag is validated before any is compared, so a non-finite tag is
+    # refused even when it sits after the record that would have matched.
     for at, value in enumerate(ticks):
         if not math.isfinite(value):
             raise ValueError(f'record {at} has a non-finite time tag: {value!r}')
+    for at, value in enumerate(ticks):
         if value == tick:
             return at
     raise ValueError(f'no record sits at encoded clock time {tick!r}; the tags are {list(ticks)!r}')
@@ -514,8 +518,19 @@ def step_generate(image_id: str, work: Path) -> None:
         cspyce.unload(local)
     output = work / output_basename(assignment.baseline.basename)
     handle = int(cspyce.ckopn(str(output), output.stem, _COMMENT_CHARS))
-    write_segment(handle, segment)
-    cspyce.ckcls(handle)
+    try:
+        write_segment(handle, segment)
+        cspyce.ckcls(handle)
+    except Exception:
+        # A failure between ckopn and ckcls leaves an open DAF handle and a
+        # partial kernel behind.  Mirror the production writer: close through
+        # the plain DAF interface (whose own failure is suppressed so the
+        # exception worth reading survives), remove the unusable file, and
+        # re-raise.
+        with contextlib.suppress(Exception):
+            cspyce.dafcls(handle)
+        output.unlink(missing_ok=True)
+        raise
     _write_json(
         step_path(work, image_id, GENERATE),
         {

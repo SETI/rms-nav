@@ -62,8 +62,14 @@ def restore_loggers_fixture() -> Iterator[None]:
         logger.remove_all_handlers()
         for handler in baseline:
             logger.add_handler(handler)
+        # NULL_HANDLER is excluded for the same reason the close loop above
+        # excludes it: pdslogger can reinstate the process-wide singleton on
+        # its own, and nobody here owns it, so finding it attached is not a
+        # test leaving state behind.
         left_behind += [
-            f'{name} logger: {handler!r}' for handler in logger.handlers if handler not in baseline
+            f'{name} logger: {handler!r}'
+            for handler in logger.handlers
+            if handler not in baseline and handler is not pdslogger.NULL_HANDLER
         ]
     MAIN_LOGGER.propagate = main_propagate
     IMAGE_LOGGER.propagate = image_propagate
@@ -79,14 +85,15 @@ def restore_loggers_fixture() -> Iterator[None]:
     # process-wide dedup set, so a later test asserting on that warning sees
     # nothing and fails somewhere unrelated to the cause.
     _reset_reported_call_sites()
-    if left_behind:
+    if len(left_behind) > 0:
         pytest.fail(
             'This test left a handler attached that could not be detached: '
             + '; '.join(left_behind)
-            + '. pdslogger identifies an open log file by the absolute path the working '
-            'directory gives, so a handler built from a relative path cannot be found '
-            'again once the working directory moves. Build log handlers from an absolute '
-            'path.'
+            + '. One known cause: pdslogger identifies an open log file by the absolute '
+            'path the working directory gives, so a handler built from a relative path '
+            'cannot be found again once the working directory moves; build log handlers '
+            'from an absolute path. A handler that was closed and then re-attached '
+            'produces the same symptom.'
         )
 
 

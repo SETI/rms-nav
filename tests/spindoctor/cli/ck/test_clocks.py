@@ -110,9 +110,9 @@ def test_no_kernel_defining_the_clock_is_refused(clock_root: Path) -> None:
         select_sclk_kernel(candidates, _CLOCK_ID)
 
 
-def test_an_empty_candidate_set_is_refused(clock_root: Path) -> None:
+@pytest.mark.usefixtures('clock_root')
+def test_an_empty_candidate_set_is_refused() -> None:
     """Naming no clock kernel at all is the same failure as naming wrong ones."""
-    assert clock_root is not None
     with pytest.raises(ValueError, match='none of the kernels'):
         select_sclk_kernel({}, _CLOCK_ID)
 
@@ -174,7 +174,7 @@ def test_a_file_that_defines_no_clock_is_not_a_candidate(clock_root: Path) -> No
         select_sclk_kernel({'broken.tsc': FCPath(str(path))}, _CLOCK_ID)
 
 
-def test_a_clock_no_kernel_defines_reads_as_undefined(clock_root: Path) -> None:
+@pytest.mark.usefixtures('clock_root')
+def test_a_clock_no_kernel_defines_reads_as_undefined() -> None:
     """The probe answers False rather than raising for an unknown clock."""
-    assert clock_root is not None
     assert clock_is_defined(-12345) is False

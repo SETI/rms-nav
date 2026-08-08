@@ -53,4 +53,9 @@ def observation_attitude(obs: ObsSnapshotInst, et: float) -> np.ndarray:
         The 3x3 rotation in the oops observation frame convention.
     """
     transform = obs.frame.wrt(oops.frame.Frame.J2000).transform_at_time(et)
-    return np.asarray(transform.matrix.vals, np.float64).reshape(3, 3)
+    matrix = np.asarray(transform.matrix.vals, np.float64)
+    # A shape assertion rather than a reshape: reshape would silently accept a
+    # flat nine-element array of any rank that a changed oops return could
+    # supply, and the helper must fail loudly instead.
+    assert matrix.shape == (3, 3)
+    return matrix

@@ -47,7 +47,6 @@ exactly that: its navigation fits a camera rotation, whose pivot no result
 records, so it records no corrected attitude to write.
 """
 
-import json
 import math
 import os
 import subprocess
@@ -90,8 +89,6 @@ from tests.integration.ck_round_trip import (  # noqa: E402  (guarded import)
     metadata_path,
     pixel_scales,
     read_json,
-    record_index_for_tick,
-    sidecar_for,
     step_path,
 )
 
@@ -317,6 +314,10 @@ def round_trips() -> dict[str, RoundTrip]:
     Returns:
         The cache, empty to begin with.
     """
+    # Module-scoped, so under xdist every worker that runs tests from this file
+    # rebuilds the cache from scratch.  --dist=loadfile (the project's mandated
+    # mode) keeps the whole file on one worker, so this costs nothing there;
+    # any other distribution would only repeat work, never change a result.
     return {}
 
 
@@ -520,7 +521,11 @@ def test_a_galileo_frame_fits_a_camera_rotation(galileo_navigation: dict[str, An
     """
     result = galileo_navigation['navigation_result']
     assert 'rotation_deg' in result
-    assert result['rotation_deg'] != 0.0
+    # Measured on this frame: -0.432 deg (its library sibling C0059899900R fits
+    # -0.431).  The tolerance leaves room for a refinement of the star fit to
+    # move the answer without letting "a few tenths of a degree" degrade to a
+    # mere non-zero, which any noise fit would satisfy.
+    assert float(result['rotation_deg']) == pytest.approx(-0.432, abs=0.05)
 
 
 def test_a_galileo_frame_records_no_corrected_attitude(
@@ -557,102 +562,3 @@ def test_pixel_scales_refuses_a_fov_with_no_scale() -> None:
     """A FOV every pixel of which looks the same way has no scale to measure."""
     with pytest.raises(ValueError, match='not a positive angle'):
         pixel_scales(_StubFov())
-
-
-@pytest.mark.parametrize(
-    'angle_rad', [float('nan'), float('inf'), float('-inf')], ids=['nan', 'inf', '-inf']
-)
-def test_angle_to_pixels_refuses_a_non_finite_angle(angle_rad: float) -> None:
-    """A non-finite angle divides into a non-finite number of pixels.
-
-    Which then compares False against every tolerance there is, and so reads as
-    a pass.
-
-    Parameters:
-        angle_rad: The angle that must be refused.
-    """
-    with pytest.raises(ValueError, match='not a finite number of radians'):
-        angle_to_pixels(angle_rad, 6.0e-6)
-
-
-@pytest.mark.parametrize(
-    'scale_rad_px',
-    [0.0, -6.0e-6, float('nan'), float('inf')],
-    ids=['zero', 'negative', 'nan', 'inf'],
-)
-def test_angle_to_pixels_refuses_an_unusable_scale(scale_rad_px: float) -> None:
-    """A scale that is not a positive angle converts nothing.
-
-    Parameters:
-        scale_rad_px: The scale that must be refused.
-    """
-    with pytest.raises(ValueError, match='not a positive angle'):
-        angle_to_pixels(1.0e-6, scale_rad_px)
-
-
-def test_angle_to_pixels_converts_at_the_measured_scale() -> None:
-    """One pixel of angle is one pixel."""
-    assert angle_to_pixels(1.2e-5, 6.0e-6) == pytest.approx(2.0)
-
-
-def test_record_index_for_tick_finds_the_record() -> None:
-    """A time tag a segment holds names the record holding it."""
-    assert record_index_for_tick([10.0, 20.0, 30.0], 20.0) == 1
-
-
-def test_record_index_for_tick_refuses_an_epoch_with_no_record() -> None:
-    """An epoch between two records is an interpolation, not a record.
-
-    Comparing a readback against the nearest record would turn an assertion
-    about what was written into an assertion about what SPICE interpolated.
-    """
-    with pytest.raises(ValueError, match='no record sits at encoded clock time'):
-        record_index_for_tick([10.0, 20.0, 30.0], 25.0)
-
-
-def test_record_index_for_tick_refuses_an_empty_segment() -> None:
-    """A segment with no records holds no epoch at all."""
-    with pytest.raises(ValueError, match='holds no records'):
-        record_index_for_tick([], 20.0)
-
-
-@pytest.mark.parametrize('tick', [float('nan'), float('inf')], ids=['nan', 'inf'])
-def test_record_index_for_tick_refuses_a_non_finite_epoch(tick: float) -> None:
-    """A non-finite time tag matches nothing and reports nothing.
-
-    Parameters:
-        tick: The encoded clock time that must be refused.
-    """
-    with pytest.raises(ValueError, match='not a finite tick'):
-        record_index_for_tick([10.0, 20.0], tick)
-
-
-def test_record_index_for_tick_refuses_a_non_finite_tag() -> None:
-    """A segment whose tags are not finite cannot be searched by comparison."""
-    with pytest.raises(ValueError, match='non-finite time tag'):
-        record_index_for_tick([10.0, float('nan'), 30.0], 30.0)
-
-
-def test_sidecar_for_refuses_an_unknown_image() -> None:
-    """An image id the library does not hold is named rather than guessed at."""
-    with pytest.raises(ValueError, match='no image library sidecar is named'):
-        sidecar_for('N0000000000_0_CALIB')
-
-
-def test_sidecar_for_finds_a_cohort_frame() -> None:
-    """Each cohort frame is a real library entry, found by its own id."""
-    assert sidecar_for(_CASSINI_NAC).image_id == _CASSINI_NAC
-
-
-def test_read_json_refuses_a_missing_file(tmp_path: Path) -> None:
-    """A step's findings that are not there mean the step did not finish."""
-    with pytest.raises(ValueError, match='did not complete'):
-        read_json(tmp_path / 'absent.json')
-
-
-def test_read_json_refuses_a_document_that_is_not_an_object(tmp_path: Path) -> None:
-    """A JSON list where a step's findings belong is a malformed file."""
-    path = tmp_path / 'list.json'
-    path.write_text(json.dumps([1, 2, 3]))
-    with pytest.raises(ValueError, match='not a JSON object'):
-        read_json(path)

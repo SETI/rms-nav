@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 import pytest
 from filecache import FCPath
-from tests.spindoctor.cli.ck.conftest import (
+from tests.spindoctor.cli.ck.ck_helpers import (
     CASSINI_CAMERA_FRAME,
     CASSINI_CK_FRAME_ID,
     ET0,

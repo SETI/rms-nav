@@ -10,7 +10,7 @@ from pathlib import Path
 import cspyce
 import numpy as np
 import pytest
-from tests.spindoctor.cli.ck.conftest import (
+from tests.spindoctor.cli.ck.ck_helpers import (
     CASSINI_CK_FRAME_ID,
     KernelPool,
 )
@@ -231,10 +231,15 @@ def test_an_empty_baseline_basename_is_refused() -> None:
         _area(baseline_basenames=('',))
 
 
-def test_a_line_longer_than_spice_can_read_back_is_refused() -> None:
-    """SPICE stores it and then cannot return the comment area at all."""
+def test_a_line_overflowing_a_fixed_column_is_refused() -> None:
+    """SPICE stores it and then cannot return the comment area at all.
+
+    The free-text reason is elided to fit, so only a fixed-column field can
+    still overflow the line: an image name far wider than its column pushes
+    the line past what SPICE reads back.
+    """
     with pytest.raises(ValueError, match='longer than the 255'):
-        build_comment_lines(_area(images=(_facts(status_reason='r' * 300),)))
+        build_comment_lines(_area(images=(_facts(image_name='n' * 300),)))
 
 
 def test_a_line_at_the_readable_limit_is_accepted() -> None:
@@ -245,23 +250,68 @@ def test_a_line_at_the_readable_limit_is_accepted() -> None:
 
 
 def test_a_line_one_character_over_the_limit_is_refused() -> None:
-    """And the first length it refuses is one character beyond that."""
-    measured = len(build_comment_lines(_area(images=(_facts(status_reason='r'),)))[-1])
-    padded = _facts(status_reason='r' * (COMMENT_MAX_LINE_CHARS - measured + 2))
+    """The first length refused is one character past the limit.
+
+    Measured through the image-name column, which nothing elides: with the
+    reason column already down to its one-character marker, each extra name
+    character lengthens the line by one.
+    """
+    name_column = 40
+    measured = len(
+        build_comment_lines(
+            _area(images=(_facts(image_name='n' * name_column, status_reason=''),))
+        )[-1]
+    )
+    over = _facts(
+        image_name='n' * (name_column + COMMENT_MAX_LINE_CHARS - measured + 1), status_reason=''
+    )
     with pytest.raises(ValueError, match='longer than the 255'):
-        build_comment_lines(_area(images=(padded,)))
+        build_comment_lines(_area(images=(over,)))
+
+
+def test_a_line_exactly_at_the_limit_through_a_fixed_column_is_accepted() -> None:
+    """A fixed-column field may widen the line right up to the limit."""
+    name_column = 40
+    measured = len(
+        build_comment_lines(
+            _area(images=(_facts(image_name='n' * name_column, status_reason=''),))
+        )[-1]
+    )
+    at_limit = _facts(
+        image_name='n' * (name_column + COMMENT_MAX_LINE_CHARS - measured), status_reason=''
+    )
+    line = build_comment_lines(_area(images=(at_limit,)))[-1]
+    assert len(line) == COMMENT_MAX_LINE_CHARS
 
 
 def test_a_tab_in_a_field_is_refused() -> None:
     """``dafac`` refuses a non-printing character after the segments are written."""
-    with pytest.raises(ValueError, match='non-printing'):
+    with pytest.raises(ValueError, match='outside the printable ASCII'):
         build_comment_lines(_area(images=(_facts(status_reason='a\tb'),)))
 
 
-def test_a_line_ending_in_whitespace_is_refused() -> None:
+def test_an_accented_character_in_a_field_is_refused() -> None:
+    """Printable to Python is not printable to SPICE: only ASCII survives ``dafac``."""
+    with pytest.raises(ValueError, match='outside the printable ASCII'):
+        build_comment_lines(_area(images=(_facts(status_reason='café'),)))
+
+
+def test_an_over_long_reason_is_elided_to_fit_the_line() -> None:
+    """A verbose free-text reason must not refuse the whole file.
+
+    The report carries the full value; the comment line keeps as much of it as
+    fits and marks the cut.
+    """
+    line = build_comment_lines(_area(images=(_facts(status_reason='r' * 300),)))[-1]
+    assert len(line) == COMMENT_MAX_LINE_CHARS
+    assert line.endswith('...')
+    assert 'rrrrrrrrrr' in line
+
+
+def test_a_line_ending_in_whitespace_is_refused(tmp_path: Path) -> None:
     """Trailing whitespace is silently dropped by the read back."""
     with pytest.raises(ValueError, match='ends in whitespace'):
-        write_comment_area(Path('unused.bc'), ['trailing  '])
+        write_comment_area(tmp_path / 'unused.bc', ['trailing  '])
 
 
 # ---------------------------------------------------------------------------
@@ -317,3 +367,9 @@ def test_an_empty_text_field_is_marked_rather_than_blank() -> None:
     """An empty status reason is as unreadable in a column as a missing one."""
     line = build_comment_lines(_area(images=(_facts(status_reason=''),)))[-1]
     assert line.endswith('-')
+
+
+def test_an_empty_status_is_marked_rather_than_blank() -> None:
+    """An empty status renders as the absence marker, not as a blank column."""
+    line = build_comment_lines(_area(images=(_facts(status=''),)))[-1]
+    assert line.split()[-2] == '-'

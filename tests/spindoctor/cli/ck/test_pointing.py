@@ -182,10 +182,23 @@ def test_from_metadata_refuses_an_exposure_that_disagrees_with_the_epochs() -> N
 
 
 def test_from_metadata_accepts_the_rounding_of_adding_a_duration_to_an_epoch() -> None:
-    """The pipeline derives both from one cadence, and they agree to nanoseconds."""
-    stop_et = _START_ET + _EXPOSURE_S
-    pointing = ImagePointing.from_metadata(_metadata(exposure_s=stop_et - _START_ET))
-    assert pointing.exposure_s == pytest.approx(_EXPOSURE_S, abs=1.0e-9)
+    """The pipeline derives both from one cadence, and they agree to nanoseconds.
+
+    The duration is one a double cannot add to the epoch exactly, so the
+    recorded span genuinely differs from the recorded duration and only the
+    tolerance can accept the pair.
+    """
+    exposure_s = 0.1
+    stop_et = _START_ET + exposure_s
+    assert stop_et - _START_ET != exposure_s
+    pointing = ImagePointing.from_metadata(
+        _metadata(
+            exposure_s=exposure_s,
+            stop_et=stop_et,
+            midtime_et=_START_ET + exposure_s / 2.0,
+        )
+    )
+    assert pointing.exposure_s == exposure_s
 
 
 @pytest.mark.parametrize(

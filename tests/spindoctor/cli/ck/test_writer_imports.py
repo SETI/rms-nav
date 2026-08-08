@@ -50,9 +50,12 @@ def probed_modules() -> dict[str, list[str]]:
         [sys.executable, '-c', _PROBE],
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
         timeout=_PROBE_TIMEOUT_S,
     )
+    # check=False so a failing probe reports its own stderr instead of a bare
+    # CalledProcessError that hides why the interpreter refused the import.
+    assert completed.returncode == 0, completed.stderr
     result: dict[str, list[str]] = json.loads(completed.stdout)
     return result
 

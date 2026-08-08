@@ -32,7 +32,7 @@ def test_a_kernel_directory_that_is_a_file_is_refused(tmp_path: Path) -> None:
         inputs.kernel_paths([str(path)])
 
 
-def test_a_basename_no_directory_holds_is_refused(tmp_path: Path) -> None:
+def test_a_basename_no_directory_holds_is_refused() -> None:
     """A kernel an image names and the run cannot find is named, not guessed at."""
     with pytest.raises(ValueError, match='is not in any of the kernel directories'):
         inputs.resolve_one('cas00172.tsc', {})
@@ -73,6 +73,41 @@ def test_a_document_from_another_mission_is_not_considered(tmp_path: Path) -> No
     documents, unreadable = inputs.read_documents(FCPath(str(tmp_path)), 'coiss')
     assert documents == []
     assert len(unreadable) == 0
+
+
+@pytest.mark.parametrize(
+    'document',
+    [
+        {'status': 'error'},
+        {'status': 'error', 'observation': 'later'},
+        {'status': 'error', 'observation': {'image_name': 'A_CALIB'}},
+        {'status': 'error', 'observation': {'instrument': None}},
+    ],
+    ids=['no-observation', 'observation-not-a-block', 'no-instrument', 'instrument-null'],
+)
+def test_a_document_naming_no_instrument_is_counted_as_unreadable(
+    tmp_path: Path, document: dict[str, Any]
+) -> None:
+    """Only a document that names a mission can be another mission's.
+
+    One with no readable instrument is unreadable, not foreign: skipping it
+    silently would let a truncated document vanish from every mission's run
+    without a trace.
+
+    Parameters:
+        document: A JSON object whose observation names no instrument.
+    """
+    (tmp_path / f'mute{inputs.METADATA_SUFFIX}').write_text(json.dumps(document))
+    documents, unreadable = inputs.read_documents(FCPath(str(tmp_path)), 'coiss')
+    assert documents == []
+    assert len(unreadable) == 1
+    assert unreadable[0][1] == 'names no instrument to attribute it to a mission'
+
+
+def test_an_inverted_time_range_is_refused() -> None:
+    """A swapped pair would select nothing and look like a clean run over a quiet span."""
+    with pytest.raises(ValueError, match='the time range is inverted'):
+        inputs.select_by_time([_timed(0.5)], 1.0, 0.0)
 
 
 def _timed(midtime: Any) -> inputs.Document:

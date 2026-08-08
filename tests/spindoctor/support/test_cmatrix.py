@@ -11,8 +11,9 @@ out of the recorded C-matrix with an independent inverse.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import oops
@@ -24,6 +25,8 @@ from spindoctor.spice_ids import CK_OBJECT_SCLK_ID
 from spindoctor.support.cmatrix import (
     _CASSINI_CK_FRAME_ID,
     AttitudeBaseline,
+    PointingSolution,
+    _attitude_baseline,
     _build_pointing_solution,
     _camera_frame_id,
     _check_flip,
@@ -441,16 +444,14 @@ def test_the_refused_clock_message_names_the_expected_clock() -> None:
 
 
 def test_a_frame_the_kernel_pool_does_not_know_is_a_pointing_failure() -> None:
-    """A rotation SPICE cannot supply is reported as the computation's own failure."""
-    with pytest.raises(NavPointingError, match='cannot supply the J2000 to NO_SUCH_FRAME'):
-        _pxform('NO_SUCH_FRAME', 0.0)
+    """A rotation SPICE cannot supply is reported as the computation's own failure.
 
-
-def test_the_spice_error_behind_a_pointing_failure_is_kept_as_the_cause() -> None:
-    """The original SPICE exception survives the conversion, so it stays debuggable."""
-    with pytest.raises(NavPointingError) as exc_info:
+    The original SPICE exception survives the conversion as the cause, so the
+    failure stays debuggable.
+    """
+    with pytest.raises(NavPointingError, match='cannot supply the J2000 to NO_SUCH_FRAME') as info:
         _pxform('NO_SUCH_FRAME', 0.0)
-    assert isinstance(exc_info.value.__cause__, LookupError)
+    assert isinstance(info.value.__cause__, LookupError)
 
 
 def test_a_frame_name_with_no_spice_id_is_a_pointing_failure() -> None:
@@ -514,3 +515,97 @@ def test_a_shear_just_outside_tolerance_is_refused() -> None:
     sheared = np.array([[1.0, 1e-8, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
     with pytest.raises(NavPointingError, match='is not orthonormal'):
         _validate_rotation(sheared, 'test matrix')
+
+
+@pytest.mark.parametrize('offset', [(), (1.0, 2.0, 3.0)], ids=['empty', 'triple'])
+def test_an_offset_that_is_not_a_pair_is_refused(offset: tuple[float, ...]) -> None:
+    """An offset without exactly two components is refused before anything else.
+
+    The guard runs before the instrument lookup, so even an observation with
+    no SPICE camera frame has its offset checked: a malformed offset is a
+    defect in the caller, never "nothing to record".
+    """
+    unmapped = cast(ObsSnapshotInst, object())
+    with pytest.raises(ValueError, match=r'must hold exactly \(dv, du\)'):
+        compute_pointing(unmapped, offset_px=cast(Any, offset), rotation_fitted=False)
+
+
+@pytest.mark.parametrize('offset', [(math.nan, 0.0), (0.0, math.inf)], ids=['nan', 'inf'])
+def test_a_non_finite_offset_is_refused(offset: tuple[float, float]) -> None:
+    """A NaN or infinite offset component is a ValueError, not a pointing failure.
+
+    A caller that absorbs ``NavPointingError`` per image must not absorb a
+    regressed technique emitting NaN offsets for a whole batch, so the guard
+    deliberately raises the un-absorbed type.
+    """
+    unmapped = cast(ObsSnapshotInst, object())
+    with pytest.raises(ValueError, match='holds a non-finite value'):
+        compute_pointing(unmapped, offset_px=offset, rotation_fitted=False)
+
+
+class _StubTimedObs:
+    """Times-only observation stub for the baseline's finiteness guard.
+
+    The guard runs before any SPICE lookup, so nothing beyond the four time
+    attributes is ever read.
+    """
+
+    def __init__(
+        self,
+        *,
+        start: float = 100.0,
+        stop: float = 100.5,
+        midtime: float = 100.25,
+        texp: float = 0.5,
+    ) -> None:
+        """Build the stub with any one value poisoned as the test requires."""
+        self.time = (start, stop)
+        self.midtime = midtime
+        self.texp = texp
+
+
+@pytest.mark.parametrize(
+    ('poisoned', 'label'),
+    [
+        ({'start': math.nan}, 'start'),
+        ({'stop': math.nan}, 'stop'),
+        ({'midtime': math.nan}, 'midtime'),
+        ({'texp': math.nan}, 'exposure duration'),
+        ({'texp': math.inf}, 'exposure duration'),
+    ],
+    ids=['nan-start', 'nan-stop', 'nan-midtime', 'nan-exposure', 'inf-exposure'],
+)
+def test_a_non_finite_observation_time_is_refused(poisoned: dict[str, float], label: str) -> None:
+    """A non-finite epoch or exposure never reaches SPICE or the metadata.
+
+    The exposure duration especially: the epochs would be refused by the
+    spacecraft clock conversion anyway, but ``texp`` passes through nothing
+    before serialization, so this guard is its only defense.
+    """
+    obs = cast(ObsSnapshotInst, _StubTimedObs(**poisoned))
+    with pytest.raises(NavPointingError, match=f'records a non-finite {label}'):
+        _attitude_baseline(obs, _cassini_identity())
+
+
+def test_attitude_baseline_refuses_a_nan_matrix_at_construction() -> None:
+    """Construction itself enforces finiteness rather than trusting callers."""
+    with pytest.raises(NavPointingError, match='cmatrix_original holds a non-finite value'):
+        _baseline(np.full((3, 3), np.nan))
+
+
+def test_attitude_baseline_refuses_a_non_rotation_flip_at_construction() -> None:
+    """The flip matrix is validated at construction alongside the attitude."""
+    with pytest.raises(NavPointingError, match='oops_from_spice is not a proper rotation'):
+        _baseline(_some_attitude(), np.diag([1.0, 1.0, 2.0]))
+
+
+def test_pointing_solution_refuses_a_nan_corrected_matrix_at_construction() -> None:
+    """A NaN corrected matrix is refused when the solution is built."""
+    with pytest.raises(NavPointingError, match='cmatrix holds a non-finite value'):
+        PointingSolution(baseline=_baseline(_some_attitude()), cmatrix=np.full((3, 3), np.nan))
+
+
+def test_pointing_solution_refuses_a_non_rotation_corrected_matrix_at_construction() -> None:
+    """A corrected matrix that is not a proper rotation is refused at construction."""
+    with pytest.raises(NavPointingError, match='cmatrix is not a proper rotation'):
+        PointingSolution(baseline=_baseline(_some_attitude()), cmatrix=np.diag([1.0, 1.0, 2.0]))

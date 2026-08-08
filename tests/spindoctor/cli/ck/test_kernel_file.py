@@ -20,7 +20,7 @@ from pathlib import Path
 import cspyce
 import numpy as np
 import pytest
-from tests.spindoctor.cli.ck.conftest import (
+from tests.spindoctor.cli.ck.ck_helpers import (
     CASSINI_CK_FRAME_ID,
     ET0,
     TICKS_PER_SECOND,
@@ -181,7 +181,7 @@ def test_a_file_with_no_comments_is_refused(tmp_path: Path) -> None:
     [
         ('x' * (COMMENT_MAX_LINE_CHARS + 1), 'longer than the'),
         ('trailing space ', 'ends in whitespace'),
-        ('embedded\ttab', 'non-printing character'),
+        ('embedded\ttab', 'outside the printable ASCII'),
     ],
     ids=['too-long', 'trailing-whitespace', 'embedded-tab'],
 )
@@ -500,18 +500,22 @@ def test_an_unwritable_directory_is_refused(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    'name', ['orig\x00nav.bc', 'orig\nnav.bc', 'orig\tnav.bc'], ids=['null', 'newline', 'tab']
+    'name',
+    ['orig\x00nav.bc', 'orig\nnav.bc', 'orig\tnav.bc', 'origé_nav.bc'],
+    ids=['null', 'newline', 'tab', 'accented'],
 )
-def test_a_path_holding_a_non_printing_character_is_refused(tmp_path: Path, name: str) -> None:
+def test_a_path_outside_printable_ascii_is_refused(tmp_path: Path, name: str) -> None:
     """SPICE is handed the name as a C string and the meta-kernel writes it as text.
 
-    A null truncates the first and no non-printing character survives the
-    second, so such a path reaches the consumer as a file nobody asked for.
+    A null truncates the first, no non-printing character survives the second,
+    and an accented letter -- printable to Python -- is refused by the SPICE
+    products that would have to repeat the name back, so such a path reaches
+    the consumer as a file nobody asked for.
 
     Parameters:
-        name: A basename holding one character that cannot be written down.
+        name: A basename holding one character outside printable ASCII.
     """
-    with pytest.raises(ValueError, match='non-printing character'):
+    with pytest.raises(ValueError, match='outside the printable ASCII'):
         check_output_paths([tmp_path / name])
 
 
@@ -643,3 +647,64 @@ def test_a_run_again_after_a_failed_write_succeeds(
     monkeypatch.undo()
     write_ck_file(tmp_path / 'broken_nav.bc', [_segment()], _COMMENT_LINES)
     assert (tmp_path / 'broken_nav.bc').exists()
+
+
+def _fail_the_close(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Make the closing ``ckcls`` fail after the segments wrote, recording the handle.
+
+    Parameters:
+        monkeypatch: Used to replace the two collaborators.
+
+    Returns:
+        The list the opened handle is appended to.
+    """
+    opened: list[int] = []
+    real_ckopn = cspyce.ckopn
+
+    def _record(fname: str, ifname: str, ncomch: int) -> int:
+        """Open the file as usual and remember the handle."""
+        handle = int(real_ckopn(fname, ifname, ncomch))
+        opened.append(handle)
+        return handle
+
+    def _refuse(handle: int) -> None:
+        """Fail the way a close that cannot flush the file would."""
+        raise RuntimeError('the close was refused')
+
+    monkeypatch.setattr(cspyce, 'ckopn', _record)
+    monkeypatch.setattr(cspyce, 'ckcls', _refuse)
+    return opened
+
+
+def test_a_failed_close_propagates_its_own_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A close that fails after every segment wrote is still the error reported."""
+    _fail_the_close(monkeypatch)
+    with pytest.raises(RuntimeError, match='the close was refused'):
+        write_ck_file(tmp_path / 'broken_nav.bc', [_segment()], _COMMENT_LINES)
+
+
+def test_a_failed_close_leaves_no_file_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The close is inside the guarded region, so its failure cleans up too."""
+    _fail_the_close(monkeypatch)
+    with pytest.raises(RuntimeError, match='the close was refused'):
+        write_ck_file(tmp_path / 'broken_nav.bc', [_segment()], _COMMENT_LINES)
+    monkeypatch.undo()
+    assert not (tmp_path / 'broken_nav.bc').exists()
+
+
+def test_a_failed_close_leaks_no_handle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The half-written file is closed through the plain DAF interface.
+
+    Asserted on the handle itself: SPICE answers ``dafhsf`` for a handle it
+    still has open and refuses it once the file is closed.
+    """
+    opened = _fail_the_close(monkeypatch)
+    with pytest.raises(RuntimeError, match='the close was refused'):
+        write_ck_file(tmp_path / 'broken_nav.bc', [_segment()], _COMMENT_LINES)
+    monkeypatch.undo()
+    with pytest.raises(RuntimeError, match='DAFNOSUCHHANDLE'):
+        cspyce.dafhsf(opened[0])
