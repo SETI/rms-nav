@@ -453,9 +453,13 @@ disagree with what was navigated.
 - **BOTSIM pairs** (simultaneous Cassini NAC and WAC exposures) would ask
   one bus attitude to honor two corrections at once. Pairing predicate: two
   eligible Cassini images with `observation.shutter_mode == 'BOTSIM'`,
-  opposite cameras, and `|start_et_a - start_et_b| <= 1.0 s`. One
-  correction per pair: NAC wins; WAC is used only when the NAC member is
-  not eligible. The loser is reported as `botsim_loser`.
+  opposite cameras, and `|stop_et_a - stop_et_b| <= 2.0 s` -- the shutter
+  close is the commanded simultaneous event, and unequal exposure
+  durations push the starts of a genuine pair whole seconds apart. One
+  correction per pair: NAC wins; WAC keeps its own correction when the NAC
+  member is not eligible or when no candidate kernel reproduces the NAC
+  baseline, since a winner that writes nothing suppresses nothing. The
+  loser is reported as `botsim_loser`.
 - **Voyager** corrected files pair only with the per-encounter SEDR
   platform kernels (the platform object is the only one Voyager ISS
   pointing reads; the decades-spanning bus kernels cover a different object
@@ -656,9 +660,9 @@ the baseline's time variation.
 
 **Files mirror the originals.** Each output `.bc` corresponds to exactly
 one original CK file and carries the segments of the images whose corrected
-attitude that original supplied. Output size stays proportional to the
-originals, the baseline pairing is legible from the filename, and
-regeneration is per original file. Naming: the original basename with
+attitude that original supplied. Output size grows with the images
+corrected, not with the originals' own size; the baseline pairing is
+legible from the filename; and regeneration is per original file. Naming: the original basename with
 `_nav` before the extension -- `03236_04002ra.bc` becomes
 `03236_04002ra_nav.bc` (a real reconstructed-kernel name; use real names in
 tests). No label files are written.
@@ -1314,8 +1318,9 @@ same way.
 4. A kernel written by this tool loads in a plain `furnsh` session with no
    SpinDoctor code present; `ckgp`, `ckgpav`, `pxform` and `sxform` all
    return the expected attitude inside a navigated exposure and fall through
-   to the original outside it; `ckgpav` returns the original's angular
-   velocity, which every written segment carries.
+   to the original outside it; every written segment carries angular
+   velocity for `ckgpav` to return -- the baseline's own vectors, or zeros
+   for a frozen-attitude segment, whose constant attitude that is.
 5. Every image considered appears exactly once in its mission's CSV, with
    either a `source_bc` or an `omission_reason` from the section 3.3 set.
 6. No image whose recorded baseline no candidate kernel reproduces
@@ -1421,13 +1426,13 @@ blocks use of the kernels.
   corrected kernels, plus the per-mission furnish-policy story. The
   meta-kernel path works without it.
 - **Bound the interior-epoch error** (#440) by choosing the record cadence
-  adaptively rather than at a fixed one second (#444). Until that lands,
-  only the record epochs are claimed, which is what the user guide says.
-- **Kernel-input handling**: classify kernels by basename rather than by
-  directory name (#449, with the New Horizons case that motivates it,
-  #452), locate C-kernel inputs through `spyceman` instead of a kernel
-  directory tree (#448), and cover the remote kernel-index path, which no
-  test exercises (#446).
+  adaptively rather than at a fixed one second (#444), with the error
+  characterized per instrument first (#455). Until that lands, only the
+  record epochs are claimed, which is what the user guide says.
+- **Kernel-input handling**: restore the New Horizons kernels that
+  basename classification cannot place (#452), locate C-kernel inputs
+  through `spyceman` instead of a kernel directory tree (#448), and cover
+  the remote kernel-index path, which no test exercises (#446).
 
 Broader than this plan and blocking nothing: the documentation chapter
 specifying the metadata JSON format -- every key, its meaning, presence

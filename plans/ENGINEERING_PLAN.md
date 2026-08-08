@@ -273,8 +273,9 @@ carried by the correlation and distance-transform body techniques (#447).
 The plan's own follow-ups are filed: the oops API replacing the hand-derived
 derivation (#433), fitted-twist support (#434) with the static-twist FK/IK
 question behind it (#435, #436), SPICE database registration (#437), the
-interior-epoch fidelity bound through an adaptive record cadence (#440,
-#444), and the kernel-input handling items (#446, #448, #449, #452).
+interior-epoch fidelity bound through an adaptive record cadence
+(#440, #444) with its per-instrument characterization (#455), and the
+kernel-input handling items (#446, #448, #452).
 
 ### The results index (#430)
 

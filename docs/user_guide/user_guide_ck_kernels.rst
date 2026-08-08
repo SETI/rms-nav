@@ -98,7 +98,7 @@ A consumer that evaluates geometry at the exposure midtime is unaffected and
 exact: the midtime is a record epoch. That is what the backplane and
 reprojection stages do, and what most single-epoch geometry does. A consumer
 integrating smear across the exposure, or sampling attitude at arbitrary
-interior epochs, is subject to the table above.
+interior epochs, is subject to the interpolation error described above.
 
 Voyager segments are a separate case: navigation reads a Voyager attitude from
 one tolerance-snapped pointing lookup that is constant across the exposure, so
@@ -152,7 +152,10 @@ the corrected file carrying its segment or one of these reasons it has none:
    * - ``botsim_loser``
      - A Cassini exposure taken on both cameras at once. One bus attitude
        cannot carry two different corrections, so the narrow angle member of
-       the pair keeps its correction and the wide angle member yields.
+       the pair keeps its correction and the wide angle member yields. A wide
+       angle frame yields only to a partner that actually writes: one whose
+       narrow angle partner is ineligible, or has no reproducing baseline,
+       keeps its own correction.
    * - ``no_reproducing_baseline``
      - No C-kernel under the run's kernel directories reproduces the attitude
        this image navigated against. Either the kernel set has changed since
@@ -205,7 +208,9 @@ One invocation covers one mission and writes everything into ``--output-dir``:
 before the extension, so the pairing is legible without opening either file:
 ``03236_04002ra.bc`` becomes ``03236_04002ra_nav.bc``. One file is written per
 original that some image navigated against; an original no image used produces
-no file, and so does one whose every image was omitted. Each corrected file's size stays proportional to its original's, and
+no file, and so does one whose every image was omitted. A corrected file's
+size grows with the number of images corrected against its original -- one
+small segment per exposure -- not with the original's own size, and
 regenerating one original's corrections does not touch the others. No PDS label
 files are written.
 
@@ -213,7 +218,9 @@ files are written.
 followed by every correction, by absolute path. It is written only when at
 least one corrected kernel was.
 
-**The report** is named ``<mission>_ck_report.csv``. It is always written, and
+**The report** is named ``<mission>_ck_report.csv``. It is written on every run
+that reaches the writing phase -- a run stopped by a refusal, or one that
+selected no images, writes none -- and
 it covers every image the run considered, including the images that received no
 segment.
 
@@ -462,10 +469,12 @@ Exit status
 The program exits 0 when every metadata file it was pointed at could be read,
 whether or not every image received a segment -- an image omitted for a reason
 is reported in the CSV, which is the answer. It exits 1 when any file under the
-navigation results root could not be read as JSON at all; those files are named
-in the run log and the run continues on what it could read, so a batch wrapper
-can tell a clean run from one that silently skipped its input. Selecting no
-images at all is not an error: the run says so and exits 0.
+navigation results root could not be read as a document naming its image and
+mission; those files are named in the run log and the run continues on what it
+could read, so a batch wrapper can tell a clean run from one that silently
+skipped its input. Selecting no images at all is not an error: the run says so,
+writes nothing, and exits 0 -- unless some of its input was unreadable, which
+still exits 1 even when nothing was selected.
 
 Refusals worth knowing about
 ----------------------------
@@ -505,13 +514,22 @@ every file it wrote, and each of them is a complete, valid kernel.
 * **An output path the run cannot write.** Every destination is judged
   together, before the first file is opened, and the refusal names every one
   that failed and why, so a set is cleared in one pass rather than one rerun
-  per file. A path fails when something already occupies it -- regeneration
-  replaces a corrected kernel rather than appending to it, so remove or move
-  the previous file first -- when it is a symbolic link, which would put the
+  per file. A path fails when something already occupies it -- a rerun writes
+  a fresh corrected kernel rather than appending to or overwriting the old
+  one, so remove or move the previous file first -- when it is a symbolic
+  link, which would put the
   kernel wherever the link points rather than in the output directory, when its
   name is longer than the 60 characters SPICE stores as a file's internal name,
+  when the full path is longer than the 255 characters SPICE accepts in a file
+  name -- a meta-kernel naming it would be written and then refused by every
+  consumer that furnishes it --
   or when the output directory does not exist and cannot be created, or exists
   and cannot be written to.
+
+* **A time range whose start is after its stop.** A swapped
+  ``--start-time``/``--stop-time`` pair would select nothing, and a run that
+  wrote nothing for that reason would be indistinguishable from a clean run
+  over a quiet span, so it is refused by name instead.
 
 * **A metadata document that cannot be read as a navigated image**; an image
   whose baseline supplied pointing at every record but angular velocity at only

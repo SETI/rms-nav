@@ -26,9 +26,13 @@ attitude:
    neither ``oops`` nor anything from :mod:`spindoctor.support`, and the
    guarantee is enforced by test rather than by convention.
 
-The split is the design, not an accident of layering. The writer exists so that
-a navigated attitude becomes a kernel without the geometry stack; a writer that
-pulled in ``oops`` would defeat the point of writing kernels at all.
+The split is the design, not an accident of layering. The writer package
+exists so that a navigated attitude becomes a kernel without the geometry
+stack; a writer that pulled in ``oops`` would defeat the point of writing
+kernels at all. The claim is scoped to the package: the ``sd_create_ck``
+program that drives it shares the pipeline's logging and configuration
+surface, which does import ``oops``, so it is the package, not the program,
+that carries the guarantee.
 
 The two halves share exactly one table -- which spacecraft clock each C-kernel
 object's time tags are encoded against -- and it lives in
@@ -72,7 +76,7 @@ frame:
      - ``oops/hosts/newhorizons/lorri.py``
    * - Galileo SSI
      - ``R = I``; ``oops`` uses ``GLL_SCAN_PLATFORM`` directly
-     - ``oops/hosts/galileo/ssi.py``
+     - ``oops/hosts/galileo/ssi/``
    * - Voyager ISS
      - no runtime relation: ``oops`` freezes a ``Cmatrix`` built from a
        tolerance-snapped ``ckgp``
@@ -260,14 +264,18 @@ and ``navigate`` has two more of its own -- the hard-failure image-class
 short-circuit, which never enters the pipeline at all, and the contract-error
 path -- so stamping the pipeline's final return alone would leave the
 uncorrected matrix and the exposure times off every failed result. All three of
-``navigate``'s returns route through
+:meth:`~spindoctor.nav_orchestrator.orchestrator.NavOrchestrator.navigate`'s
+returns route through
 :meth:`~spindoctor.nav_orchestrator.orchestrator.NavOrchestrator.with_pointing`
 instead.
 
 That method is public because the manual-navigation driver needs it.
 :func:`~spindoctor.nav_technique.nav_technique_manual.run_manual_nav` builds its
 :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` directly from the
-operator's pick and never calls ``navigate``, so it calls ``with_pointing``
+operator's pick and never calls
+:meth:`~spindoctor.nav_orchestrator.orchestrator.NavOrchestrator.navigate`, so
+it calls
+:meth:`~spindoctor.nav_orchestrator.orchestrator.NavOrchestrator.with_pointing`
 itself. Operator-ratified offsets are the highest-quality pointing in the
 corpus; leaving them unstamped would make them the one subset excluded from
 every generated kernel.
@@ -369,8 +377,10 @@ judges every destination together and
 contents, both before the first ``ckopn``. The refusal names every path that
 failed rather than the first, so a set is cleared in one pass.
 
-The per-file refusals stay where they are. ``check_ck_file`` is what
-``write_ck_file`` itself calls, so a direct caller is held to the same rules and
+The per-file refusals stay where they are.
+:func:`~spindoctor.cli.ck.kernel_file.check_ck_file` is what
+:func:`~spindoctor.cli.ck.kernel_file.write_ck_file` itself calls, so a direct
+caller is held to the same rules and
 the two cannot drift; the set-level check adds only what no per-file check can
 see -- one path named twice, and a directory judged once for all of them.
 
@@ -381,8 +391,8 @@ no check made beforehand can reach them: space on the device, a path or a
 permission that changes between the check and the write, and a record set
 ``ckw03`` refuses once the file is open. A file failing that way is closed and
 removed; the files written before it are not, and the meta-kernel and the report
-are never reached. That residual window is recorded in
-:func:`~spindoctor.cli.sd_create_ck.write_output_files` and in the user guide,
+are never reached. That residual window is recorded in the docstring of
+``write_output_files`` in ``sd_create_ck`` and in the user guide,
 which tells an operator that this is the failure needing the output directory
 cleared before a rerun.
 
@@ -463,7 +473,7 @@ is refused before any candidate is tried, naming what is missing:
 
 When several candidates reproduce -- which the holdings make ordinary, since
 reconstructed, gapfill and predicted sets overlap -- the tie-break prefers
-reconstructed over gapfill over predicted (read from the directory name), then
+reconstructed over gapfill over predicted (read from the kernel's basename), then
 the lexicographically greatest basename, then the greatest path. The reproducing
 candidates agree on the attitude by construction, so the tie-break decides only
 which output file carries the segment; all it has to be is deterministic.
@@ -626,9 +636,13 @@ installed toolkit shape what it may write:
   back at all.** ``dafec`` reads into a 255-character buffer and raises on the
   first line that overflows it, which loses the whole comment area rather than
   one line's tail.
-* **Trailing whitespace does not survive, and a non-printing character is
-  refused outright** -- after the segments have been written, leaving a file
-  with a comment area it was meant to have and does not.
+* **Trailing whitespace does not survive, and a character outside printable
+  ASCII is refused outright** -- ``dafac`` raises on it after the segments
+  have been written, leaving a file without the comment area it was meant to
+  have. Python's ``isprintable`` is not the test: an accented letter is
+  printable to Python and refused by SPICE all the same. The one free-length
+  field, the status reason, is elided to fit its line rather than allowed to
+  refuse the file.
 
 All three are refused before a file is opened. A write that fails part way
 through is closed with ``dafcls`` rather than ``ckcls`` and the half-written
@@ -643,7 +657,12 @@ SPICE's ``+`` continuation as several strings. A path ending in ``+`` cannot be
 expressed at all and is refused by name; so is a path ending in a blank, which a
 text kernel trims. Joins are chosen to fall on non-blanks, because the holdings
 tree holds names with spaces in them and a name that lost a character in the
-middle would reach the consumer as a file it never asked for.
+middle would reach the consumer as a file it never asked for. The joined path
+is bounded too: SPICE accepts at most 255 characters in a file name, and the
+continuation scheme could spell a longer one into the meta-kernel without
+complaint -- which every consumer's ``furnsh`` would then refuse, after the
+kernels listed before it had already loaded. A path over that limit is refused
+at writing time instead.
 
 Invariants
 ==========
@@ -687,8 +706,10 @@ Invariants
   written without it, and a file that loses every image is not written at all.
 * **A run writes every corrected kernel or none of them, for every reason it
   can know in advance.** Adding a refusal that a write could hit means adding
-  it to ``check_output_paths`` or ``check_ck_file`` -- never to
-  ``write_ck_file`` alone, which by then has files behind it. The guarantee is
+  it to :func:`~spindoctor.cli.ck.kernel_file.check_output_paths` or
+  :func:`~spindoctor.cli.ck.kernel_file.check_ck_file` -- never to
+  :func:`~spindoctor.cli.ck.kernel_file.write_ck_file` alone, which by then
+  has files behind it. The guarantee is
   bounded on purpose: it says nothing about a write that fails for a reason
   only the filesystem or ``ckw03`` knows at the moment of writing.
 * **"Is anything already there?" is not ``Path.exists``.** It follows symbolic
@@ -697,9 +718,10 @@ Invariants
   answers ``False`` for a different reason and behaves the same way. Both are
   pinned as measurements in the writer's tests, so a rewrite back to ``exists``
   fails rather than passes. For the same class of reason, a path holding a
-  non-printing character is refused rather than tested: ``os.path.lexists``
-  answers ``False`` for a name holding a null byte, and SPICE is handed the name
-  as a C string.
+  character outside printable ASCII is refused rather than tested:
+  ``os.path.lexists`` answers ``False`` for a name holding a null byte, SPICE
+  is handed the name as a C string, and the comment area and meta-kernel that
+  must repeat the name back accept only printable ASCII.
 
 Adding a mission
 ================
