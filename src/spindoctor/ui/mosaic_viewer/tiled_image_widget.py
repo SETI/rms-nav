@@ -254,14 +254,17 @@ class TiledImageWidget(QAbstractScrollArea):
     #  Signals                                                             #
     # ------------------------------------------------------------------ #
 
-    # (pixel_x, pixel_y, in_bounds)
     mouse_moved = pyqtSignal(float, float, bool)
-    # (x_zoom, y_zoom)
+    """Cursor motion signal carrying ``(pixel_x, pixel_y, in_bounds)``."""
+
     zoom_changed = pyqtSignal(float, float)
-    # right-click: (pixel_x, pixel_y)
+    """Zoom-factor change signal carrying ``(x_zoom, y_zoom)``."""
+
     right_clicked = pyqtSignal(float, float)
-    # Ctrl+left-click: (pixel_x, pixel_y)
+    """Right-click signal carrying ``(pixel_x, pixel_y)``."""
+
     ctrl_clicked = pyqtSignal(float, float)
+    """Ctrl+left-click signal carrying ``(pixel_x, pixel_y)``."""
 
     def horizontalScrollBar(self) -> QScrollBar:
         bar = super().horizontalScrollBar()

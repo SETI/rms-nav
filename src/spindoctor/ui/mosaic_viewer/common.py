@@ -260,7 +260,7 @@ def _peek_kind(path: str | FCPath) -> str:
 class RingDisplayData:
     """All display data extracted from a ring reprojection or mosaic file.
 
-    Attributes:
+    Parameters:
         title: Short title for the window bar (filename stem).
         image_ma: 2-D masked array (n_radius, n_longitude), row 0 = inner.
         longitude_resolution_deg: Column pitch in degrees.
@@ -484,7 +484,7 @@ def load_ring_file(path: str) -> RingDisplayData:
 class BodyDisplayData:
     """All display data extracted from a body reprojection or mosaic file.
 
-    Attributes:
+    Parameters:
         title: Short title for the window bar (filename stem).
         image_ma: 2-D masked array (n_lat, n_lon), row 0 = first latitude bin.
         lat_resolution_deg: Row pitch in degrees.
