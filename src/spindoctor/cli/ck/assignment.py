@@ -32,17 +32,19 @@ may be, since a stray one answers the same lookups and would make the
 reproduction test meaningless.
 """
 
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
 import cspyce
 import numpy as np
-from filecache import FCPath
 
-from spindoctor.cli.ck.images import ImageEntry, OmissionReason, botsim_losers
+from spindoctor.cli.ck.images import (
+    BOTSIM_WINNING_CAMERA,
+    ImageEntry,
+    OmissionReason,
+    botsim_losers,
+)
 from spindoctor.cli.ck.index import (
     CK_SUFFIXES,
     OUTPUT_NAME_MARKER,
@@ -51,6 +53,7 @@ from spindoctor.cli.ck.index import (
     CkIndex,
 )
 from spindoctor.cli.ck.pointing import ImagePointing, NDArrayFloatType
+from spindoctor.cli.ck.pool import furnished
 from spindoctor.cli.ck.segment import BASE_FRAME, resolve_sclk_id
 from spindoctor.spice_ids import FROZEN_ATTITUDE_CK_IDS
 
@@ -182,7 +185,9 @@ def output_basename(basename: str) -> str:
             f'{sorted(CK_SUFFIXES)}'
         )
     stem = path.stem
-    if stem.endswith(OUTPUT_NAME_MARKER):
+    # Case-blind, as the index tests it: an upper-cased copy of a corrected
+    # kernel is still a corrected kernel.
+    if stem.lower().endswith(OUTPUT_NAME_MARKER):
         raise ValueError(
             f'{basename!r} is already a corrected kernel; correcting it again would measure a '
             f'correction against a corrected baseline'
@@ -384,29 +389,6 @@ def _snapped_attitude(
     return attitude
 
 
-@contextmanager
-def _furnished(path: FCPath) -> Iterator[None]:
-    """Furnish one kernel for the duration of a block and unload it after.
-
-    SPICE furnishes a kernel by name from the local filesystem, so a remote one
-    is fetched first; that is a no-op for a kernel that is already local.  The
-    same local name is unloaded, since SPICE knows the kernel by the name it
-    was given.
-
-    Parameters:
-        path: The kernel to furnish, local or remote.
-
-    Yields:
-        Nothing; the kernel is furnished for the body of the block.
-    """
-    local = str(cast(Path, path.retrieve()))
-    cspyce.furnsh(local)
-    try:
-        yield
-    finally:
-        cspyce.unload(local)
-
-
 def assign_images(entries: Sequence[ImageEntry], index: CkIndex) -> tuple[Assignment, ...]:
     """Decide, for every image a run considered, what becomes of its pointing.
 
@@ -415,6 +397,12 @@ def assign_images(entries: Sequence[ImageEntry], index: CkIndex) -> tuple[Assign
     Candidates are tried one at a time with nothing else furnished, and images
     sharing a candidate set are tested together, so the kernel pool changes
     once per set rather than once per image.
+
+    Simultaneous exposures are settled after the reproduction test, not
+    before: a narrow angle frame suppresses its wide angle partner only when
+    its own baseline reproduced and it will actually write.  One that writes
+    nothing yields the bus to its partner, whose correction then conflicts
+    with nothing.
 
     Parameters:
         entries: The images the run considered.
@@ -436,15 +424,26 @@ def assign_images(entries: Sequence[ImageEntry], index: CkIndex) -> tuple[Assign
     """
     names = [entry.image_name for entry in entries]
     if len(set(names)) != len(names):
-        raise ValueError('two images have the same name; their assignments cannot be told apart')
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        raise ValueError(
+            f'these images are named more than once, so their assignments cannot be told '
+            f'apart: {", ".join(duplicates)}'
+        )
     _require_no_furnished_ck()
     _require_frames_defined(entries)
     _require_coverage_readable(entries, index)
-    losers = botsim_losers(entries)
-    testable = [
-        entry for entry in entries if entry.pointing is not None and entry.image_name not in losers
-    ]
-    baselines = _reproducing_baselines(testable, index)
+    pointed = [entry for entry in entries if entry.pointing is not None]
+    baselines = _reproducing_baselines(pointed, index)
+    # A winner that will write nothing suppresses nothing, so the pairing sees
+    # only the winners whose baselines reproduced; every potential loser stays
+    # in, since yielding does not depend on the loser's own baseline.
+    losers = botsim_losers(
+        [
+            entry
+            for entry in pointed
+            if entry.camera != BOTSIM_WINNING_CAMERA or len(baselines[entry.image_name]) > 0
+        ]
+    )
     return tuple(_assignment_for(entry, losers, baselines) for entry in entries)
 
 
@@ -462,9 +461,9 @@ def _assignment_for(
         The image's assignment.
 
     Raises:
-        KeyError: if an image that is eligible and did not yield was never
-            tested, which cannot happen for the test set the assignment step
-            builds from these same two facts.
+        KeyError: if an eligible image was never tested, which cannot happen:
+            the assignment step tests every image that carries a pointing,
+            the yielded ones included.
     """
     if entry.ineligibility_reason is not None:
         return Assignment(entry=entry, baseline=None, omission_reason=entry.ineligibility_reason)
@@ -512,7 +511,7 @@ def _reproducing_baselines(
         reproducing[entry.image_name] = []
     for key, group in groups.items():
         for candidate in candidates_by_key[key]:
-            with _furnished(candidate.path):
+            with furnished(candidate.path):
                 for entry, pointing in group:
                     if reproduces_baseline(pointing):
                         reproducing[entry.image_name].append(candidate)

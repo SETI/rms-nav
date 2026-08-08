@@ -77,7 +77,6 @@ from spindoctor.cli.ck.inputs import (
     clock_kernels,
     furnish_frame_kernels,
     furnish_supporting_kernels,
-    furnished,
     kernel_paths,
     read_documents,
     recorded_basenames,
@@ -92,6 +91,7 @@ from spindoctor.cli.ck.kernel_file import (
 )
 from spindoctor.cli.ck.metakernel import build_meta_kernel_lines, write_meta_kernel
 from spindoctor.cli.ck.pointing import ImagePointing
+from spindoctor.cli.ck.pool import furnished
 from spindoctor.cli.ck.report import (
     REPORT_COLUMNS,
     ImageFacts,

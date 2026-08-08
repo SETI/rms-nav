@@ -7,10 +7,14 @@ and writes the curated metadata (and a summary PNG when requested) to
 ``nav_results_root``.
 
 This is the function ``sd_offset`` and ``sd_offset_cloud_tasks`` invoke
-once per image.  Errors from image loading, missing SPICE coverage, or
-unexpected exceptions during navigation are captured into the output
-metadata so the driver always returns a structured result (never a raised
-exception that crashes the worker process).
+once per image.  Errors from image loading, missing SPICE coverage, and
+navigation contract violations are captured into the output metadata so
+the driver returns a structured result for them rather than crashing the
+worker process.  One class of exception deliberately propagates: a defect
+inside the corrected-pointing computation (anything it raises other than
+``NavPointingError``) fails the run on its first image, because absorbing
+it would silently drop pointing from a whole batch while every image
+still reported success.
 """
 
 from __future__ import annotations

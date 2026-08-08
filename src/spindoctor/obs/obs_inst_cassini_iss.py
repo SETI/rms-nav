@@ -153,11 +153,21 @@ class ObsCassiniISS(ObsSnapshotInst):
 
         Returns:
             The ``SHUTTER_MODE_ID`` label value, or None when the label
-            carries none.
+            carries none or carries a null.
+
+        Raises:
+            ValueError: if the label value is not text.  ``str()`` would
+                serialize any object without complaint, and the result would
+                pass downstream as a legible shutter mode.
         """
         if 'SHUTTER_MODE_ID' not in self.dict:
             return None
-        return str(self.dict['SHUTTER_MODE_ID'])
+        value = self.dict['SHUTTER_MODE_ID']
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError(f'SHUTTER_MODE_ID is not text: {value!r}')
+        return value
 
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for Cassini ISS.

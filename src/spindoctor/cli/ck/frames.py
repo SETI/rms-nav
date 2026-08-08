@@ -25,34 +25,15 @@ What is this run's business is the camera frame each image was navigated
 through and the frame naming the object its correction targets.
 """
 
-from collections.abc import Collection, Iterator, Mapping
-from contextlib import contextmanager
-from pathlib import Path
-from typing import cast
+from collections.abc import Collection, Mapping
 
 import cspyce
 from filecache import FCPath
 
+from spindoctor.cli.ck.pool import furnished
+
 # The extensions a frame kernel is stored under in the holdings.
 FK_SUFFIXES = frozenset({'.tf', '.tk'})
-
-
-@contextmanager
-def _furnished(path: FCPath) -> Iterator[None]:
-    """Furnish one kernel for the duration of a block and unload it after.
-
-    Parameters:
-        path: The kernel to furnish, local or remote.
-
-    Yields:
-        Nothing; the kernel is furnished for the body of the block.
-    """
-    local = str(cast(Path, path.retrieve()))
-    cspyce.furnsh(local)
-    try:
-        yield
-    finally:
-        cspyce.unload(local)
 
 
 def camera_frame_is_defined(camera_frame: str) -> bool:
@@ -105,15 +86,31 @@ def frames_defined_by(
     Raises:
         OSError: if the kernel cannot be furnished.
     """
-    defined: set[str] = set()
-    with _furnished(path):
-        defined.update(frame for frame in camera_frames if camera_frame_is_defined(frame))
-        defined.update(
-            f'object {ck_frame_id}'
-            for ck_frame_id in ck_frame_ids
-            if object_frame_is_defined(ck_frame_id)
-        )
-    return frozenset(defined)
+    with furnished(path):
+        return frozenset(_defined_frame_labels(camera_frames, ck_frame_ids))
+
+
+def _defined_frame_labels(
+    camera_frames: Collection[str], ck_frame_ids: Collection[int]
+) -> list[str]:
+    """Label the needed frames the currently furnished kernels define.
+
+    Camera frames are labeled by their own name and CK objects as
+    ``'object <id>'``.  Both callers compare their answers against each
+    other's, so the one spelling lives here.
+
+    Parameters:
+        camera_frames: The camera frames the run's images name.
+        ck_frame_ids: The CK objects the run's corrections target.
+
+    Returns:
+        The labels of the frames the pool defines, in no particular order.
+    """
+    return [frame for frame in camera_frames if camera_frame_is_defined(frame)] + [
+        f'object {ck_frame_id}'
+        for ck_frame_id in ck_frame_ids
+        if object_frame_is_defined(ck_frame_id)
+    ]
 
 
 def require_one_frame_kernel_per_frame(
@@ -142,14 +139,7 @@ def require_one_frame_kernel_per_frame(
             through the other would be reported as having no baseline.
         OSError: if a candidate cannot be furnished for the probe.
     """
-    already = sorted(
-        [frame for frame in camera_frames if camera_frame_is_defined(frame)]
-        + [
-            f'object {ck_frame_id}'
-            for ck_frame_id in ck_frame_ids
-            if object_frame_is_defined(ck_frame_id)
-        ]
-    )
+    already = sorted(_defined_frame_labels(camera_frames, ck_frame_ids))
     if len(already) > 0:
         raise ValueError(
             f'the frame(s) {already} are already defined by a furnished kernel; which frame kernel '

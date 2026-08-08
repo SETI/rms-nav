@@ -455,12 +455,8 @@ class NavOrchestrator(NavBase):
                 rotation_fitted=result.rotation_rad is not None,
             )
         except NavPointingError as exc:
-            # NavPointingError names the failures the computation expects, so
-            # catching it and nothing else keeps a defect inside that
-            # computation distinguishable: it raises a plain ValueError or
-            # AttributeError, which propagates and fails the run on its first
-            # image instead of quietly dropping pointing from a whole batch
-            # while every image still reports success.
+            # Only the expected class; the docstring above says why every
+            # other exception must propagate.
             self._logger.exception('Could not compute the corrected pointing: %s', exc)
             # The traceback goes to the per-image log and one line to the run
             # log, so an operator watching a batch sees one line per affected

@@ -49,6 +49,7 @@ when oops grows its own corrected-attitude API this module's body is replaced
 and its interface stays.
 """
 
+import math
 from dataclasses import dataclass
 
 import cspyce
@@ -179,9 +180,18 @@ class AttitudeBaseline:
     sclk_stop: str
 
     def __post_init__(self) -> None:
-        """Store both matrices as read-only 3x3 float arrays."""
+        """Store both matrices as read-only 3x3 float arrays and validate them.
+
+        Raises:
+            NavPointingError: if either matrix is not a proper orthonormal
+                rotation.  The class is public, so construction itself
+                enforces what the docstring promises rather than trusting
+                every caller to have validated first.
+        """
         object.__setattr__(self, 'cmatrix_original', _as_readonly_3x3(self.cmatrix_original))
         object.__setattr__(self, 'oops_from_spice', _as_readonly_3x3(self.oops_from_spice))
+        _validate_rotation(self.cmatrix_original, 'cmatrix_original')
+        _validate_rotation(self.oops_from_spice, 'oops_from_spice')
 
 
 @dataclass(frozen=True)
@@ -200,9 +210,15 @@ class PointingSolution:
     cmatrix: NDArrayFloatType | None
 
     def __post_init__(self) -> None:
-        """Store the corrected matrix as a read-only 3x3 float array."""
+        """Store the corrected matrix as a read-only 3x3 float array and validate it.
+
+        Raises:
+            NavPointingError: if the corrected matrix is present and is not a
+                proper orthonormal rotation.
+        """
         if self.cmatrix is not None:
             object.__setattr__(self, 'cmatrix', _as_readonly_3x3(self.cmatrix))
+            _validate_rotation(self.cmatrix, 'cmatrix')
 
 
 def _as_readonly_3x3(matrix: NDArrayFloatType) -> NDArrayFloatType:
@@ -281,8 +297,14 @@ def _oops_correction_matrix(fov: oops.fov.FOV, offset_px: tuple[float, float]) -
 
     Returns:
         The 3x3 rotation ``M`` in oops observation frame coordinates.  Exactly
-        the identity when the offset moves the boresight by less than a
-        sub-nanoradian.
+        the identity when the offset moves the boresight by less than about a
+        picoradian.
+
+    Raises:
+        ValueError: if the offset is antipodal -- the two boresight directions
+            oppose each other -- where the rotation axis is undefined.  A
+            navigated offset of half the sky is a defect in the caller's data,
+            not a pointing this module can express.
     """
     dv, du = float(offset_px[0]), float(offset_px[1])
     uv_los = fov.uv_los
@@ -292,12 +314,22 @@ def _oops_correction_matrix(fov: oops.fov.FOV, offset_px: tuple[float, float]) -
     corrected = np.asarray(fov.los_from_xy(xy_los).unit().vals, dtype=np.float64)
     axis = np.cross(uncorrected, corrected)
     axis_norm = float(np.linalg.norm(axis))
+    dot = float(np.dot(uncorrected, corrected))
     if axis_norm < _DEGENERATE_AXIS_NORM:
+        # A vanishing cross product is two directions aligned or two directions
+        # opposed.  Only the aligned case is a no-op correction; the opposed
+        # one has no minimal rotation at all, and treating it as the identity
+        # would silently claim an uncorrected attitude for a wildly wrong one.
+        if dot < 0.0:
+            raise ValueError(
+                f'the offset {(dv, du)!r} px turns the boresight antipodal; no minimal '
+                f'rotation expresses it'
+            )
         return _IDENTITY
     # arctan2(|d x b|, d . b) is the well-conditioned form of arccos(d . b)
     # for unit vectors: arccos loses relative precision as the angle goes to
     # zero, which is exactly the regime a sub-pixel offset lives in.
-    angle = float(np.arctan2(axis_norm, float(np.dot(uncorrected, corrected))))
+    angle = float(np.arctan2(axis_norm, dot))
     correction: NDArrayFloatType = np.asarray(
         cspyce.axisar(axis / axis_norm, angle), dtype=np.float64
     )
@@ -420,7 +452,20 @@ def compute_pointing(
             constant expected for the instrument or varies across the
             exposure; or if either C-matrix is not a proper orthonormal
             rotation.
+        ValueError: if ``offset_px`` is malformed -- not exactly two values,
+            or holding a non-finite one.  A malformed offset is a defect in
+            the caller, not an attitude the environment cannot supply, so it
+            is deliberately not a ``NavPointingError``: a caller absorbing
+            those per image must not absorb a regressed technique emitting
+            NaN offsets for a whole batch.  Also if a Voyager observation's
+            label names a spacecraft that is neither Voyager, which the host
+            refuses when it reads the label.
     """
+    if offset_px is not None:
+        if len(offset_px) != 2:
+            raise ValueError(f'offset_px must hold exactly (dv, du); got {offset_px!r}')
+        if not all(math.isfinite(float(value)) for value in offset_px):
+            raise ValueError(f'offset_px holds a non-finite value: {offset_px!r}')
     identity = _frame_identity(obs)
     if identity is None:
         return None
@@ -467,8 +512,9 @@ def _frame_identity(obs: ObsSnapshotInst) -> _FrameIdentity | None:
     Raises:
         NavPointingError: if the instrument's CK object has no recorded
             spacecraft clock.
-        KeyError: if a Voyager observation reports a spacecraft that is
-            neither, which the host refuses when it reads the label.
+        ValueError: if a Voyager observation's label names a spacecraft that
+            is neither Voyager, which the host refuses when it reads the
+            label, so reaching it here means that stopped being true.
     """
     if isinstance(obs, ObsCassiniISS):
         return _FrameIdentity(
@@ -535,7 +581,9 @@ def _observation_attitude(obs: ObsSnapshotInst, et: float) -> NDArrayFloatType:
         raise NavPointingError(
             f'the observation frame has no attitude at et {et!r}: {exc}'
         ) from exc
-    return np.asarray(transform.matrix.vals, dtype=np.float64).reshape(3, 3)
+    # A shape check rather than a reshape: a reshape would also accept a flat
+    # nine-element array of any rank that a changed oops return could supply.
+    return _as_readonly_3x3(transform.matrix.vals)
 
 
 def _attitude_baseline(obs: ObsSnapshotInst, identity: _FrameIdentity) -> AttitudeBaseline:
@@ -559,6 +607,20 @@ def _attitude_baseline(obs: ObsSnapshotInst, identity: _FrameIdentity) -> Attitu
     start_et = float(obs.time[0])
     stop_et = float(obs.time[1])
     midtime_et = float(obs.midtime)
+    exposure_s = float(obs.texp)
+    # The epochs pass through the spacecraft clock conversion, which refuses a
+    # non-finite value; the exposure duration passes through nothing before it
+    # is serialized, and a bare NaN token in the metadata fails every strict
+    # JSON reader long after the defect is attributable.  Refuse all four here,
+    # where the observation that carried them is still in hand.
+    for label, value in (
+        ('start', start_et),
+        ('stop', stop_et),
+        ('midtime', midtime_et),
+        ('exposure duration', exposure_s),
+    ):
+        if not math.isfinite(value):
+            raise NavPointingError(f'the observation records a non-finite {label}: {value!r}')
     if identity.frozen_oops_attitude:
         # oops froze this frame from a tolerance-snapped pointing lookup, so a
         # pxform at the midtime does not reproduce it; the observation frame
@@ -588,7 +650,7 @@ def _attitude_baseline(obs: ObsSnapshotInst, identity: _FrameIdentity) -> Attitu
         start_et=start_et,
         stop_et=stop_et,
         midtime_et=midtime_et,
-        exposure_s=float(obs.texp),
+        exposure_s=exposure_s,
         sclk_start=_sclk_string(sclk_id, start_et),
         sclk_midtime=_sclk_string(sclk_id, midtime_et),
         sclk_stop=_sclk_string(sclk_id, stop_et),

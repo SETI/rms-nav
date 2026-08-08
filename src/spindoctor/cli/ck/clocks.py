@@ -21,11 +21,11 @@ all look right.  That is checked rather than assumed.
 """
 
 from collections.abc import Mapping
-from pathlib import Path
-from typing import cast
 
 import cspyce
 from filecache import FCPath
+
+from spindoctor.cli.ck.pool import furnished
 
 # The extension a text spacecraft clock kernel carries in the holdings.
 SCLK_SUFFIX = '.tsc'
@@ -111,11 +111,5 @@ def _defines_clock(path: FCPath, sclk_id: int) -> bool:
     Raises:
         OSError: if the kernel cannot be furnished.
     """
-    # SPICE furnishes by name from the local filesystem, so a remote kernel is
-    # fetched first; that is a no-op for one that is already local.
-    local = str(cast(Path, path.retrieve()))
-    cspyce.furnsh(local)
-    try:
+    with furnished(path):
         return clock_is_defined(sclk_id)
-    finally:
-        cspyce.unload(local)

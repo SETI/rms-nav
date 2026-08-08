@@ -66,6 +66,9 @@ _STATUS_WIDTH = 12
 # than left blank so that a column of numbers with one gap in it is legible.
 _ABSENT = '-'
 
+# What marks a free-text field cut to fit its line.
+_ELISION = '...'
+
 _HEADER_TITLE = 'SpinDoctor corrected-pointing C-kernel'
 
 # Said in the file itself because a furnished kernel is the only thing many
@@ -140,9 +143,11 @@ def build_comment_lines(area: CommentArea) -> tuple[str, ...]:
         The lines, ready for :func:`write_comment_area`.
 
     Raises:
-        ValueError: if a rendered line would be longer than
-            :data:`COMMENT_MAX_LINE_CHARS`, which SPICE stores and then cannot
-            read back.
+        ValueError: for anything :func:`check_comment_lines` refuses -- a
+            rendered line longer than :data:`COMMENT_MAX_LINE_CHARS`, one
+            ending in whitespace, or one holding a character outside printable
+            ASCII.  A free-text reason is elided to fit, so only a field that
+            overflows its own column can reach the length refusal.
     """
     lines: list[str] = [
         _HEADER_TITLE,
@@ -179,7 +184,8 @@ def check_comment_lines(lines: Sequence[str]) -> None:
 
     Raises:
         ValueError: if a line is longer than :data:`COMMENT_MAX_LINE_CHARS`, if
-            it ends in whitespace, or if it holds a non-printing character.
+            it ends in whitespace, or if it holds a character outside printable
+            ASCII.
     """
     for line in lines:
         _check_line(line)
@@ -194,8 +200,8 @@ def _check_line(line: str) -> None:
     Raises:
         ValueError: if it is longer than :data:`COMMENT_MAX_LINE_CHARS`, if it
             ends in whitespace, which the read back silently drops, or if it
-            holds a non-printing character, which ``dafac`` refuses once the
-            segments have already been written.
+            holds a character outside printable ASCII, which ``dafac`` refuses
+            once the segments have already been written.
     """
     if len(line) > COMMENT_MAX_LINE_CHARS:
         raise ValueError(
@@ -206,10 +212,14 @@ def _check_line(line: str) -> None:
     if line != line.rstrip():
         raise ValueError(f'comment line ends in whitespace, which is not read back: {line!r}')
     for character in line:
-        if not character.isprintable():
+        # ``isprintable`` alone would pass accented letters and smart quotes,
+        # which are printable to Python and refused by ``dafac`` all the same:
+        # SPICE accepts only printable ASCII in a comment area.
+        if not (character.isascii() and character.isprintable()):
             raise ValueError(
-                f'comment line holds the non-printing character {character!r}, which SPICE '
-                f'refuses once the segments are written: {line!r}'
+                f'comment line holds the character {character!r}, which is outside the '
+                f'printable ASCII SPICE accepts and which it refuses once the segments are '
+                f'written: {line!r}'
             )
 
 
@@ -235,9 +245,13 @@ def _image_line(facts: ImageFacts) -> str:
         facts: What the image's metadata says about it.
 
     Returns:
-        The line, in the same columns as :func:`_image_header`.
+        The line, in the same columns as :func:`_image_header`.  The free-text
+        reason is elided to what the line can hold: it is the one field whose
+        length the pipeline does not bound, a comment area is read rather than
+        parsed, and the report carries the full value -- so a verbose reason
+        must not refuse the whole file.
     """
-    return (
+    prefix = (
         f'{facts.image_name:<{_NAME_WIDTH}} {_text(facts.utc):<{_UTC_WIDTH}} '
         f'{_number(facts.offset_dv):>{_NUMBER_WIDTH}} '
         f'{_number(facts.offset_du):>{_NUMBER_WIDTH}} '
@@ -245,8 +259,29 @@ def _image_line(facts: ImageFacts) -> str:
         f'{_number(facts.sigma_du):>{_NUMBER_WIDTH}} '
         f'{_number(facts.confidence):>{_NUMBER_WIDTH}} '
         f'{_text(facts.confidence_rank):<{_RANK_WIDTH}} '
-        f'{facts.status:<{_STATUS_WIDTH}} {_text(facts.status_reason)}'
-    ).rstrip()
+        f'{_text(facts.status):<{_STATUS_WIDTH}} '
+    )
+    reason = _elided(_text(facts.status_reason), COMMENT_MAX_LINE_CHARS - len(prefix))
+    return f'{prefix}{reason}'.rstrip()
+
+
+def _elided(text: str, room: int) -> str:
+    """Shorten free text to what its line has room for.
+
+    Parameters:
+        text: The text to place.
+        room: How many characters the line can still hold.
+
+    Returns:
+        The text unchanged when it fits, or cut to ``room`` with a trailing
+        :data:`_ELISION` marking the cut.  When ``room`` cannot even hold the
+        marker -- a fixed column overflowed its width, which only malformed
+        metadata produces -- the text is returned unchanged so the line-length
+        refusal reports the defect instead of this function hiding it.
+    """
+    if len(text) <= room or room < len(_ELISION):
+        return text
+    return text[: room - len(_ELISION)] + _ELISION
 
 
 def _number(value: float | None) -> str:

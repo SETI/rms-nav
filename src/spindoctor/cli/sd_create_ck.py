@@ -41,7 +41,6 @@ from spindoctor.cli.ck.inputs import (
     clock_kernels,
     furnish_frame_kernels,
     furnish_supporting_kernels,
-    furnished,
     kernel_paths,
     read_documents,
     recorded_basenames,
@@ -51,6 +50,7 @@ from spindoctor.cli.ck.inputs import (
 from spindoctor.cli.ck.kernel_file import check_ck_file, check_output_paths, write_ck_file
 from spindoctor.cli.ck.metakernel import write_meta_kernel
 from spindoctor.cli.ck.pointing import ImagePointing
+from spindoctor.cli.ck.pool import furnished
 from spindoctor.cli.ck.report import ImageFacts, ReportRow, read_image_facts, write_report
 from spindoctor.cli.ck.segment import (
     BaselineCoverageGapError,
@@ -83,10 +83,10 @@ MISSIONS = ('coiss', 'gossi', 'nhlorri', 'vgiss')
 """The instrument identities whose images have a C-kernel object to correct.
 
 Spelled here rather than read from the observation registry, which is the
-authority on the names: reading it would import oops into a program whose whole
-point is to write kernels without the geometry stack.  A mission whose images
-carry no corrected attitude at all -- simulated images -- is deliberately not
-offered.
+authority on the names: the registry would drag every host class into a
+program that needs only their names, and the writer package this program
+drives imports no oops at all.  A mission whose images carry no corrected
+attitude at all -- simulated images -- is deliberately not offered.
 """
 
 REPORT_SUFFIX = '_ck_report.csv'
@@ -658,10 +658,13 @@ def _log_one_disposition(
             level=run_logging.levels.image_section_level(),
         ):
             if assignment.omission_reason is None:
+                # A corrected assignment always names its baseline; the field
+                # is optional only for the omitted case in the other branch.
+                assert assignment.baseline is not None
                 IMAGE_LOGGER.info(
                     'Corrected in %s, from the baseline %s',
                     assignment.output_name,
-                    assignment.baseline.basename if assignment.baseline is not None else '',
+                    assignment.baseline.basename,
                 )
             else:
                 IMAGE_LOGGER.warning(
@@ -750,8 +753,8 @@ def main() -> None:
 
     documents, undated = select_by_time(
         documents,
-        None if arguments.start_time is None else float(cspyce.utc2et(arguments.start_time)),
-        None if arguments.stop_time is None else float(cspyce.utc2et(arguments.stop_time)),
+        _selection_et('--start-time', arguments.start_time),
+        _selection_et('--stop-time', arguments.stop_time),
     )
     if undated > 0:
         MAIN_LOGGER.warning(
@@ -759,7 +762,10 @@ def main() -> None:
         )
     if len(documents) == 0:
         MAIN_LOGGER.warning('No images selected; nothing to write')
-        sys.exit(0)
+        # The unreadable count still decides the exit status: a run whose
+        # selection is empty only because its metadata could not be read must
+        # not report itself clean.
+        sys.exit(1 if len(unreadable) > 0 else 0)
     MAIN_LOGGER.info('Selected %d image(s)', len(documents))
 
     # Read from the selected images only.  A run restricted to a time range
@@ -803,8 +809,8 @@ def main() -> None:
         meta_kernel = output_dir / f'{arguments.mission}{META_KERNEL_SUFFIX}'
         write_meta_kernel(
             meta_kernel,
-            originals=[str(original) for original, _correction in written],
-            corrections=[str(correction) for _original, correction in written],
+            originals=[original for original, _correction in written],
+            corrections=[correction for _original, correction in written],
         )
         MAIN_LOGGER.info('Wrote meta-kernel %s', meta_kernel.as_posix())
     else:
@@ -821,6 +827,29 @@ def main() -> None:
     # input.  An image the run considered and omitted for a reason is not that:
     # it is in the report, which is the answer, and it exits zero.
     sys.exit(1 if len(unreadable) > 0 else 0)
+
+
+def _selection_et(flag: str, value: str | None) -> float | None:
+    """Convert one selection bound to ET, naming its flag when refused.
+
+    Parameters:
+        flag: The command-line flag the value arrived on.
+        value: The UTC time string, or ``None`` when the flag was not given.
+
+    Returns:
+        TDB seconds past J2000, or ``None`` for an absent bound.
+
+    Raises:
+        ValueError: if SPICE cannot read the value as a UTC time.  Named for
+            the flag, so a mistyped bound reads as the argument refusal it is
+            rather than as a defect inside the run.
+    """
+    if value is None:
+        return None
+    try:
+        return float(cspyce.utc2et(value))
+    except ValueError as exc:
+        raise ValueError(f'{flag} {value!r} is not a UTC time SPICE can read: {exc}') from exc
 
 
 def _entry_for(document: Document) -> ImageEntry:

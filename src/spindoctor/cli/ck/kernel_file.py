@@ -45,6 +45,7 @@ comment area exists to carry, and one the guard against overwriting an existing
 kernel then stops the operator from simply regenerating.
 """
 
+import contextlib
 import os
 from collections.abc import Sequence
 from pathlib import Path
@@ -201,21 +202,26 @@ def write_ck_file(path: Path, segments: Sequence[CkSegment], comment_lines: Sequ
     try:
         for segment in segments:
             write_segment(handle, segment)
+        # Inside the guarded region: a close that fails leaves the same open
+        # handle and partial file behind as a segment write that fails.
+        cspyce.ckcls(handle)
     except Exception:
         # Closed through the plain DAF interface rather than ``ckcls``, and
         # measured rather than assumed: ``ckcls`` on a C-kernel that received
         # no segment raises SPICE(NOSEGMENTSFOUND) *and leaves the file open*,
         # so using it here would both replace the failure worth reading with
         # one that is not and leak the handle anyway.  ``dafcls`` closes it and
-        # has nothing to say about segments.
-        cspyce.dafcls(handle)
+        # has nothing to say about segments.  Its own failure is suppressed for
+        # the same reason: the exception worth reading is the one that brought
+        # us here, not a close that will not close.
+        with contextlib.suppress(Exception):
+            cspyce.dafcls(handle)
         # The file ``ckopn`` created is removed with it.  It holds no usable
         # segment, and leaving it behind would make the obvious next step --
         # fix the cause and run again -- fail on the refusal to write over an
         # existing corrected kernel.
         path.unlink(missing_ok=True)
         raise
-    cspyce.ckcls(handle)
     write_comment_area(path, comment_lines)
 
 
@@ -274,23 +280,24 @@ def _spelling_refusal(path: Path) -> str | None:
 
     Returns:
         The reason, or ``None`` if the path names a file and can be written
-        down.  The whole class of non-printing characters is refused rather
+        down.  The whole class outside printable ASCII is refused rather
         than the null alone, even though only the null truncates the C string
         SPICE is handed: a corrected kernel's name is repeated back in the run
-        log, in the CSV report and in the meta-kernel, none of which carries a
-        control character through unchanged, so a name holding one would reach
-        a reader as a name that was never written.  Refusing the class also
-        keeps the null from reaching the occupancy check below, which answers
-        "nothing is there" for it rather than raising.
+        log, in the CSV report, in the comment area and in the meta-kernel,
+        and the last two are SPICE products that accept only printable ASCII,
+        so a name outside that class would produce a kernel whose own
+        provenance record cannot name it.  Refusing the class also keeps the
+        null from reaching the occupancy check below, which answers "nothing
+        is there" for it rather than raising.
     """
     if len(path.name) == 0:
         return f'{path} names no file to write'
     text = str(path)
     for character in text:
-        if not character.isprintable():
+        if not (character.isascii() and character.isprintable()):
             return (
-                f'{text!r} holds the non-printing character {character!r}, which neither the name '
-                f'SPICE is handed nor the log, report and meta-kernel naming it carry unchanged'
+                f'{text!r} holds the character {character!r}, outside the printable ASCII that '
+                f'the comment area and meta-kernel naming this file can carry'
             )
     return None
 

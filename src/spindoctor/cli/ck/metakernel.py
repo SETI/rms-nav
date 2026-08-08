@@ -45,6 +45,13 @@ _MAX_STRING_CHARS = 80
 _CONTINUATION = '+'
 _MAX_PIECE_CHARS = _MAX_STRING_CHARS - len(_CONTINUATION)
 
+# The longest file name SPICE accepts (its FILSIZ).  The continuation scheme
+# above can spell a longer one into the meta-kernel without complaint, and
+# ``furnsh`` then refuses the joined name -- after the kernels listed before
+# it have already loaded, which is the partially-loaded pool this module's
+# docstring warns about.  Refused at writing time instead.
+_MAX_PATH_CHARS = 255
+
 _HEADER = (
     'KPL/MK',
     '',
@@ -74,11 +81,15 @@ def build_meta_kernel_lines(
 
     Raises:
         ValueError: if no kernel is named at all, if a path is empty, if a path
-            ends in the continuation character, or if a path holds a quote or a
-            non-printing character, none of which a text kernel can express
-            unambiguously.
+            ends in the continuation character, if a path holds a quote or a
+            character outside printable ASCII, none of which a text kernel can
+            express unambiguously, or if a path is longer than the 255
+            characters SPICE accepts in a file name.
     """
-    paths = [str(path) for path in (*originals, *corrections)]
+    # Normalized at the boundary: the meta-kernel is read by SPICE, an external
+    # consumer that needs a stable POSIX-style path whatever object the caller
+    # held.
+    paths = [FCPath(path).as_posix() for path in (*originals, *corrections)]
     if len(paths) == 0:
         raise ValueError('a meta-kernel that names no kernels furnishes nothing')
     values: list[str] = []
@@ -112,10 +123,17 @@ def _quoted_pieces(path: str) -> list[str]:
 
     Raises:
         ValueError: if the path is empty, ends in the continuation character
-            or in a blank, or holds a quote or a non-printing character.
+            or in a blank, holds a quote or a character outside printable
+            ASCII, or is longer than :data:`_MAX_PATH_CHARS`.
     """
     if len(path) == 0:
         raise ValueError('a meta-kernel cannot name an empty path')
+    if len(path) > _MAX_PATH_CHARS:
+        raise ValueError(
+            f'{path!r} is {len(path)} characters, longer than the {_MAX_PATH_CHARS} SPICE '
+            f'accepts in a file name; the meta-kernel would be written and then refused by '
+            f'every consumer that furnishes it'
+        )
     if path.endswith(_CONTINUATION):
         raise ValueError(
             f'{path!r} ends in {_CONTINUATION!r}, which a meta-kernel reads as a continuation '
@@ -129,8 +147,13 @@ def _quoted_pieces(path: str) -> list[str]:
     if "'" in path:
         raise ValueError(f'{path!r} holds a quote, which a text kernel string cannot carry')
     for character in path:
-        if not character.isprintable():
-            raise ValueError(f'{path!r} holds the non-printing character {character!r}')
+        # ``isprintable`` alone would pass accented letters and smart quotes;
+        # a text kernel carries only printable ASCII.
+        if not (character.isascii() and character.isprintable()):
+            raise ValueError(
+                f'{path!r} holds the character {character!r}, outside the printable ASCII a '
+                f'text kernel can carry'
+            )
     pieces = _split_on_non_blanks(path)
     return [
         f"'{piece}{_CONTINUATION if at < len(pieces) - 1 else ''}'"

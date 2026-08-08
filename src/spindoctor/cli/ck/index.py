@@ -397,9 +397,11 @@ def kernel_class_for_basename(basename: str) -> KernelClass:
 
     Pattern matching ignores case, since the holdings spell some kernel names
     in upper case and a name's case says nothing about its class.  The
-    corrected-kernel marker below is tested on the name as spelled, which is
-    how the scan itself decides a file is a corrected kernel, so the two agree
-    on exactly which names those are.
+    corrected-kernel marker below ignores case for the same reason, and the
+    scan tests it the same way, so the two agree on exactly which names those
+    are: an upper-cased copy of a corrected kernel must not slip past the
+    marker and then classify as a baseline candidate through the
+    case-blind patterns.
 
     Parameters:
         basename: The file's own name, extension included, spelled as the
@@ -425,7 +427,7 @@ def kernel_class_for_basename(basename: str) -> KernelClass:
             f'{basename!r} is not a C-kernel basename; classify the name of the file itself '
             f'rather than a path or a fragment of one'
         )
-    if Path(basename).stem.endswith(OUTPUT_NAME_MARKER):
+    if Path(basename).stem.lower().endswith(OUTPUT_NAME_MARKER):
         raise ValueError(
             f'C-kernel basename {basename!r} names a corrected kernel, which this program '
             f'writes and never classifies as a baseline candidate'
@@ -526,7 +528,7 @@ def _kernel_files(root: FCPath) -> list[FCPath]:
         entry
         for entry in entries
         if entry.suffix.lower() in CK_SUFFIXES
-        and not entry.stem.endswith(OUTPUT_NAME_MARKER)
+        and not entry.stem.lower().endswith(OUTPUT_NAME_MARKER)
         and entry.is_file()
     ]
 

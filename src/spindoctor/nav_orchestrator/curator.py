@@ -224,6 +224,12 @@ def _flatten_rotation(matrix: NDArrayFloatType) -> list[float]:
     Deliberately unrounded: a C-kernel writer identifies the baseline kernel
     an image navigated against by reproducing this matrix to within a
     nanoradian, and rounding would put the recorded value outside that bound.
+
+    Parameters:
+        matrix: The 3x3 rotation to flatten.
+
+    Returns:
+        Its nine elements in row-major order, as plain floats.
     """
     return [float(v) for v in np.asarray(matrix, np.float64).reshape(9)]
 
@@ -233,6 +239,12 @@ def _curate_pointing(solution: PointingSolution) -> dict[str, Any]:
 
     ``cmatrix`` is present only when one was computed; ``cmatrix_original``
     and the frame identities are always present.
+
+    Parameters:
+        solution: The image's pointing solution.
+
+    Returns:
+        The ``pointing`` metadata block.
     """
     baseline = solution.baseline
     out: dict[str, Any] = {}
@@ -250,6 +262,13 @@ def _curate_times(baseline: AttitudeBaseline) -> dict[str, Any]:
 
     Deliberately unrounded, for the same reason as the C-matrices: the epochs
     define a C-kernel segment's interpolation interval exactly.
+
+    Parameters:
+        baseline: The observation's attitude baseline, which carries its
+            exposure epochs and clock strings.
+
+    Returns:
+        The ``times`` metadata block.
     """
     return {
         'start_et': baseline.start_et,

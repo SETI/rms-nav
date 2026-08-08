@@ -51,9 +51,13 @@ BOTSIM_WINNING_CAMERA = 'NAC'
 BOTSIM_YIELDING_CAMERA = 'WAC'
 BOTSIM_CAMERAS = frozenset({BOTSIM_WINNING_CAMERA, BOTSIM_YIELDING_CAMERA})
 
-# Two exposures this far apart or closer, taken in the shutter mode above on
-# opposite cameras, are the same event seen twice.
-BOTSIM_WINDOW_S = 1.0
+# Two exposures whose shutters close this far apart or closer, taken in the
+# shutter mode above on opposite cameras, are the same event seen twice.  The
+# commanded simultaneous event is the shutter *close* -- Cassini's IMAGE_TIME
+# -- and the two cameras' exposure durations routinely differ, so the start
+# times of a genuine pair can sit several seconds apart.  The width matches
+# the dataset layer's IMAGE_TIME pairing tolerance.
+BOTSIM_WINDOW_S = 2.0
 
 
 class OmissionReason(Enum):
@@ -279,8 +283,12 @@ def botsim_losers(entries: Sequence[ImageEntry]) -> frozenset[str]:
     kernel describes that bus: it cannot carry both corrections.  Two eligible
     images pair when both record the ``BOTSIM`` shutter mode, one was taken by
     the narrow angle camera and the other by the wide angle camera, both
-    correct the same CK object, and their exposures start within one second of
-    each other.  The narrow angle camera keeps its correction, so a wide angle
+    correct the same CK object, and their shutters close within
+    :data:`BOTSIM_WINDOW_S` seconds of each other.  The shutter close is the
+    commanded simultaneous event; the starts of a genuine pair can sit whole
+    seconds apart when the two cameras' exposure durations differ, so the
+    close time is the one that identifies the pair.  The narrow angle camera
+    keeps its correction, so a wide angle
     frame pairing with any eligible narrow angle frame is named here.  A wide
     angle frame whose narrow angle partner did not navigate pairs with nothing
     and keeps its own correction, and a frame from any other instrument is not
@@ -297,17 +305,17 @@ def botsim_losers(entries: Sequence[ImageEntry]) -> frozenset[str]:
     winners: dict[int, list[float]] = {}
     for entry, pointing in members:
         if entry.camera == BOTSIM_WINNING_CAMERA:
-            winners.setdefault(pointing.ck_frame_id, []).append(pointing.start_et)
-    for starts in winners.values():
-        starts.sort()
+            winners.setdefault(pointing.ck_frame_id, []).append(pointing.stop_et)
+    for stops in winners.values():
+        stops.sort()
     losers: set[str] = set()
     for entry, pointing in members:
         # Every member is one of the two cameras, so not the winner is the one
         # that yields; nothing else reaches this loop.
         if entry.camera == BOTSIM_WINNING_CAMERA:
             continue
-        starts = winners.get(pointing.ck_frame_id, [])
-        if _has_start_within(starts, pointing.start_et, BOTSIM_WINDOW_S):
+        stops = winners.get(pointing.ck_frame_id, [])
+        if _has_epoch_within(stops, pointing.stop_et, BOTSIM_WINDOW_S):
             losers.add(entry.image_name)
     return frozenset(losers)
 
@@ -333,17 +341,17 @@ def _botsim_members(entries: Sequence[ImageEntry]) -> list[tuple[ImageEntry, Ima
     ]
 
 
-def _has_start_within(starts: Sequence[float], start_et: float, window_s: float) -> bool:
+def _has_epoch_within(epochs: Sequence[float], epoch_et: float, window_s: float) -> bool:
     """Report whether a sorted list of epochs holds one close to another epoch.
 
     Parameters:
-        starts: Exposure start epochs, sorted ascending.
-        start_et: The epoch to look near.
+        epochs: Epochs to search, sorted ascending.
+        epoch_et: The epoch to look near.
         window_s: The largest separation that still counts as simultaneous.
 
     Returns:
-        True when some entry of ``starts`` is within ``window_s`` of
-        ``start_et``, the separation itself included.
+        True when some entry of ``epochs`` is within ``window_s`` of
+        ``epoch_et``, the separation itself included.
     """
-    at = bisect_left(starts, start_et - window_s)
-    return at < len(starts) and starts[at] <= start_et + window_s
+    at = bisect_left(epochs, epoch_et - window_s)
+    return at < len(epochs) and epochs[at] <= epoch_et + window_s

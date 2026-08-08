@@ -13,8 +13,7 @@ anything from ``spindoctor.support``.
 
 import json
 import math
-from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -64,7 +63,10 @@ def read_documents(root: FCPath, mission: str) -> tuple[list[Document], list[tup
     names no image, so there is nothing for the report to say about it and
     nothing an omission reason could be recorded against.  A document of
     another mission is simply not this run's business and is passed over
-    silently.
+    silently -- but only a document that *names* a mission can be another
+    mission's.  One with no readable instrument at all is unreadable, not
+    foreign: skipping it silently would let a truncated or corrupted document
+    vanish from every mission's run without a trace.
 
     Parameters:
         root: The navigation results root.
@@ -84,7 +86,11 @@ def read_documents(root: FCPath, mission: str) -> tuple[list[Document], list[tup
             unreadable.append((path, str(exc)))
             continue
         observation = metadata.get('observation')
-        if not isinstance(observation, dict) or observation.get('instrument') != mission:
+        instrument = observation.get('instrument') if isinstance(observation, dict) else None
+        if not isinstance(instrument, str):
+            unreadable.append((path, 'names no instrument to attribute it to a mission'))
+            continue
+        if instrument != mission:
             continue
         documents.append(Document(path=path, stub=stub, metadata=metadata))
     return documents, unreadable
@@ -139,7 +145,17 @@ def select_by_time(
         The selected documents and how many were dropped for recording no
         midtime.  An image with no midtime is kept when no bound is given and
         dropped when either is, since it cannot be shown to satisfy one.
+
+    Raises:
+        ValueError: if both bounds are given with the start after the stop.  A
+            swapped pair would select nothing, and a run that writes nothing
+            for that reason would be indistinguishable from a clean run over a
+            quiet span.
     """
+    if start_et is not None and stop_et is not None and start_et > stop_et:
+        raise ValueError(
+            f'the time range is inverted: its start {start_et!r} is after its stop {stop_et!r}'
+        )
     if start_et is None and stop_et is None:
         return list(documents), 0
     selected: list[Document] = []
@@ -395,21 +411,3 @@ def clock_kernels(
         }
     )
     return {sclk_id: select_sclk_kernel(candidates, sclk_id) for sclk_id in needed}
-
-
-@contextmanager
-def furnished(path: FCPath) -> Iterator[None]:
-    """Furnish one kernel for the duration of a block and unload it after.
-
-    Parameters:
-        path: The kernel to furnish, local or remote.
-
-    Yields:
-        Nothing; the kernel is furnished for the body of the block.
-    """
-    local = str(cast(Path, path.retrieve()))
-    cspyce.furnsh(local)
-    try:
-        yield
-    finally:
-        cspyce.unload(local)
