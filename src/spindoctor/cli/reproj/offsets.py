@@ -374,6 +374,17 @@ def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> Point
 
     if isinstance(pointing_values, tuple):
         cmatrix, cmatrix_original, midtime_et = pointing_values
+        if offset is None and offset_reason is not None:
+            # The C-matrix path needs no offset, but a record defective in its
+            # offset field too is still a doubly-defective record, and this is
+            # the only place the second defect is visible: a later gate
+            # refusal would find no offset to fall back to and never say why.
+            IMAGE_LOGGER.info(
+                'Nav metadata for %s carries an unusable offset (%s); the C-matrix path needs '
+                'no fallback, but none exists if a gate refuses this record.',
+                subject,
+                offset_reason,
+            )
         return PointingSelection(
             mechanism=PointingMechanism.CMATRIX,
             cmatrix=cmatrix,

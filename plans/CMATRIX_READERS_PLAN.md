@@ -102,7 +102,10 @@ documentation and plan reconciliation.
   `from_file` at all. The metadata is already in hand at both call
   sites. (The ladder is nonetheless built so that a pool which already
   answers the corrected attitude -- the state #437 creates -- is
-  recognized and left alone rather than double-corrected; section 3.4.)
+  recognized and left alone rather than double-corrected; section 3.4.
+  That row is exercised hermetically today; when #437 lands, add one
+  integration case furnishing a real corrected kernel end to end, the
+  one state where a wrong probe tolerance would double-correct.)
 - Per-epoch attitude interpolation across the exposure, smear-aware
   consumers, and the interior-epoch error budget (#440, #444, #455).
 - A corrected attitude for fitted-rotation results (#434). Until the

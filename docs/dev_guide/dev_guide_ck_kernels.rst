@@ -342,16 +342,22 @@ itself.
 applied, in order:
 
 1. Both matrices must be proper rotations of real numbers, and the recorded
-   ``midtime_et`` finite (else ``malformed_pointing``).
+   ``midtime_et`` finite (else ``malformed_pointing``). The observation's
+   host must have a frame mapping to gate against (else
+   ``cmatrix_unknown_host`` -- unreachable for a record the writer produced,
+   since writing a pointing block required the mapping).
 2. The midtime gate: ``|obs.midtime - midtime_et| <= 1e-6 s``. A mismatch
    means the record is not this observation's
    (``cmatrix_foreign_midtime``).
 3. The flip gate: ``max|R_hat - R_expected| <= 1e-9``, with ``R_expected``
    the instrument's constant from the frame table. Because ``R_hat`` mixes
    the observation's *current* attitude with the *recorded* baseline, this
-   one inequality fails on a changed kernel pool, a transposed or swapped
-   record (a transposed rotation is still a proper rotation, so validation
-   alone cannot catch it), and a changed host convention alike.
+   one inequality fails on a changed kernel pool, a transposed
+   ``cmatrix_original`` or whole record (a transposed rotation is still a
+   proper rotation, so validation alone cannot catch it), and a changed host
+   convention alike. The one sub-case it cannot see is a transposed
+   ``cmatrix`` alone, which no single-serializer defect produces: the
+   inequality contains only ``cmatrix_original``.
 4. On flip-gate failure, one cheap probe before concluding corruption:
    ``max|C_oops(mid) - R_expected . cmatrix| <= 1e-9``. If it holds, the
    furnished pool **already answers the corrected attitude** -- corrected

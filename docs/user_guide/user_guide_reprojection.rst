@@ -509,10 +509,12 @@ the pointing it records, preferring the exact form over its approximation:
   the pointing schema), ``malformed_pointing`` (the pointing block cannot be
   used; also warned to the run log), and the gate refusals
   ``cmatrix_foreign_midtime`` (the record belongs to a different
-  observation) and ``cmatrix_baseline_mismatch`` (the kernel pool, the
-  record, or the frame convention changed since navigation; both are warned
-  to the run log, and no product is ever built on a corrected attitude that
-  failed a gate).
+  observation), ``cmatrix_baseline_mismatch`` (the kernel pool, the
+  record, or the frame convention changed since navigation), and
+  ``cmatrix_unknown_host`` (the observation's instrument has no frame
+  mapping to gate against, which a record carrying a pointing block should
+  never reach); the gate refusals are warned to the run log, and no product
+  is ever built on a corrected attitude that failed a gate.
 * When the reader finds the furnished kernel pool *already* answering the
   corrected attitude — corrected C-kernels furnished at load time — it
   applies nothing at all: the observation is already right, and applying

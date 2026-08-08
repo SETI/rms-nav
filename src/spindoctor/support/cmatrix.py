@@ -578,8 +578,11 @@ def apply_cmatrix_to_obs(
     3. ``R_hat`` must equal the instrument's constant oops-from-SPICE flip to
        the writer's own tolerance.  Because ``R_hat`` mixes the observation's
        *current* attitude with the *recorded* baseline, this one inequality
-       fails on a changed kernel pool, a transposed or swapped record, and a
-       changed host convention alike.
+       fails on a changed kernel pool, a transposed ``cmatrix_original`` or
+       whole record, and a changed host convention alike.  The one sub-case
+       it cannot see is a transposed ``cmatrix`` alone, which no
+       single-serializer defect produces: the inequality contains only
+       ``cmatrix_original``.
     4. When that gate fails, one probe distinguishes the known non-defect
        state: a pool that already answers the corrected attitude (corrected
        kernels furnished at load time).  There the observation is already
@@ -589,7 +592,12 @@ def apply_cmatrix_to_obs(
     global oops frame state, and it carries zero angular velocity where the
     original carried the spacecraft's -- no switched consumer reads frame
     omega, but a future velocity-aware one must not consume it from the
-    replaced frame.
+    replaced frame.  The observation's cached geometry is NOT cleared here:
+    a caller that has touched any derived geometry (a ``Backplane``, the
+    center scan ``from_file`` itself performs) must call ``obs.reset_all()``
+    after a replacement, or rebuild products on the stale cache --
+    :func:`spindoctor.cli.reproj.offsets.apply_pointing_to_obs` does exactly
+    that and is the entry point the pipeline's consumers use.
 
     Parameters:
         obs: The observation to point, mutated in place.

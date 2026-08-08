@@ -308,7 +308,7 @@ asserts the generated half matches the registries.
   several of them.
 - **#418** — a `sd_mosaic_cloud_tasks` task returns `status: success` no
   matter how many of its images failed. The counts are in the result now
-  (`n_uncorrected`, `uncorrected_reasons`, `rejected_stubs`), so the
+  (`n_uncorrected`, `pointing_reasons`, `rejected_stubs`), so the
   information exists; the question the issue records is whether `status`
   should reflect it, given that a queue keys retry off `status` and
   "retry the whole task because one image had no offset file" is usually

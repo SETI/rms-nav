@@ -24,7 +24,8 @@ SPICE consumer of the corrected C-kernels sees for every image whose segment
 was written. When there is no usable corrected attitude — a fitted-rotation
 result (``no_cmatrix_rotation_fitted``), a record with no pointing block
 (``no_pointing_block``), an unusable one (``malformed_pointing``), or a gate
-refusal (``cmatrix_foreign_midtime``, ``cmatrix_baseline_mismatch``, both
+refusal (``cmatrix_foreign_midtime``, ``cmatrix_baseline_mismatch``,
+``cmatrix_unknown_host``, each
 warned to the run log) — the recorded ``(dv, du)`` offset is applied via
 ``oops.fov.OffsetFOV`` instead; no product is ever built on a corrected
 attitude that failed a gate. A kernel pool that already answers the
