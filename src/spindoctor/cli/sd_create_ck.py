@@ -786,6 +786,18 @@ def main() -> None:
 
     index = build_ck_index(kernel_dirs)
     MAIN_LOGGER.info('Indexed %d candidate C-kernel(s)', len(index.files))
+    skipped = sorted(index.unreadable_objects)
+    if len(skipped) > 0:
+        # A real kernel can describe an object no furnished clock kernel can
+        # convert to TDB -- a merged New Horizons pointing file names object -1
+        # beside the spacecraft -- and the scan indexes the rest of the file
+        # rather than stopping.  The run says so once here; an image that
+        # actually corrects such an object is refused by the assignment step.
+        MAIN_LOGGER.warning(
+            'Skipped the coverage of CK object(s) %s: no furnished kernel defines their '
+            'spacecraft clock, so no indexed file offers them as a baseline',
+            ', '.join(str(ck_frame_id) for ck_frame_id in skipped),
+        )
 
     assignments = assign_images(entries, index)
     facts_by_name = image_facts(documents)

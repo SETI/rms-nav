@@ -706,7 +706,9 @@ accumulates kernels from earlier images -- a superset. So:
    candidate; an image that *does* correct one is refused before any
    candidate is tried, naming the missing clock, exactly as a missing frame
    kernel is (item 4 below), rather than being reported as a baseline that
-   drifted.
+   drifted. The driver warns once in its run log, naming the skipped
+   objects, so a kernel set missing a clock says so even when no image
+   needs it.
 2. **Per image** (grouped by candidate set so the kernel pool is switched
    per group, not per image): furnish the supporting kernels (LSK, SCLK,
    FK) plus one candidate CK at a time, evaluate the original attitude at
@@ -1429,10 +1431,13 @@ blocks use of the kernels.
   adaptively rather than at a fixed one second (#444), with the error
   characterized per instrument first (#455). Until that lands, only the
   record epochs are claimed, which is what the user guide says.
-- **Kernel-input handling**: restore the New Horizons kernels that
-  basename classification cannot place (#452), locate C-kernel inputs
-  through `spyceman` instead of a kernel directory tree (#448), and cover
-  the remote kernel-index path, which no test exercises (#446).
+- **Kernel-input handling**: decide whether the merged New Horizons
+  pointing family should be declared reconstructed on its comment-area
+  evidence rather than staying `UNCLASSIFIED` (#468) -- the scan itself
+  indexes all 32 New Horizons files, skipping and reporting the one
+  object it cannot clock -- locate C-kernel inputs through `spyceman`
+  instead of a kernel directory tree (#448), and cover the remote
+  kernel-index path, which no test exercises (#446).
 
 Broader than this plan and blocking nothing: the documentation chapter
 specifying the metadata JSON format -- every key, its meaning, presence

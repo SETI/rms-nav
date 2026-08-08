@@ -18,9 +18,10 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import cspyce
+import numpy as np
 import pytest
 from tests.kernel_pool import isolated_kernel_pool
-from tests.spindoctor.cli.ck.ck_helpers import CASSINI_CK_FRAME_ID
+from tests.spindoctor.cli.ck.ck_helpers import CASSINI_CK_FRAME_ID, write_ck
 from tests.spindoctor.cli.sd_create_ck_helpers import (
     BASELINE_A,
     BASELINE_B,
@@ -33,6 +34,7 @@ from tests.spindoctor.cli.sd_create_ck_helpers import (
 
 from spindoctor.cli import sd_create_ck
 from spindoctor.cli.ck.comments import read_comment_area
+from spindoctor.cli.ck.segment import CkSegment
 
 
 @pytest.fixture(scope='module', autouse=True)
@@ -280,6 +282,26 @@ def test_the_run_log_counts_the_images_corrected(
     """Against which the omissions can be read as a fraction of the batch."""
     run_driver(run_tree, monkeypatch)
     assert 'Images corrected 2' in run_log(run_tree)
+
+
+def test_the_run_log_names_an_object_whose_coverage_was_skipped(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The operator sees which objects the index could not clock, and the run goes on.
+
+    The kernel directory gains a file describing only an object with no
+    spacecraft clock, the shape a merged New Horizons pointing file has.  Its
+    coverage cannot be expressed in TDB, so the file can never supply a
+    baseline, and the run says so once instead of aborting the scan.
+    """
+    ticks = np.asarray([0.0, 1.0e6, 2.0e6], dtype=np.float64)
+    quats = np.tile(np.asarray([1.0, 0.0, 0.0, 0.0], dtype=np.float64), (3, 1))
+    write_ck(
+        run_tree['kernels'] / 'merged_clockless_v001.bc',
+        [CkSegment(ck_frame_id=-1, segid='clockless only', sclkdp=ticks, quats=quats, avvs=None)],
+    )
+    run_driver(run_tree, monkeypatch)
+    assert 'Skipped the coverage of CK object(s) -1' in run_log(run_tree)
 
 
 def test_an_omission_reaches_the_image_log(

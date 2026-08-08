@@ -917,3 +917,58 @@ def test_an_index_of_readable_files_reports_no_unreadable_object(
     _write_ck(root, _RECONSTRUCTED_NAME)
     index = build_ck_index([root])
     assert index.unreadable_objects == frozenset()
+
+
+def _write_ck_of_only_a_clockless_object(directory: Path, name: str) -> Path:
+    """Write a kernel describing nothing but an object with no clock.
+
+    Time tags for such an object are never decoded -- reading its coverage in
+    TDB is exactly what fails -- so arbitrary increasing ticks are enough.
+
+    Parameters:
+        directory: Directory to write into.
+        name: Basename of the kernel.
+
+    Returns:
+        The path written.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    ticks = np.asarray([0.0, 1.0e6, 2.0e6], dtype=np.float64)
+    quats = np.tile(np.asarray([1.0, 0.0, 0.0, 0.0], dtype=np.float64), (3, 1))
+    write_ck(
+        path,
+        [
+            CkSegment(
+                ck_frame_id=_CLOCKLESS_OBJECT_ID,
+                segid='clockless only',
+                sclkdp=ticks,
+                quats=quats,
+                avvs=None,
+            )
+        ],
+    )
+    return path
+
+
+def test_a_file_of_only_unclockable_objects_does_not_stop_the_scan(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """A kernel whose every object lacks a clock indexes beside its neighbours."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck(root, _RECONSTRUCTED_NAME)
+    _write_ck_of_only_a_clockless_object(root, 'merged_clockless_v001.bc')
+    index = build_ck_index([root])
+    found = sorted(ck_file.basename for ck_file in index.files)
+    assert found == [_RECONSTRUCTED_NAME, 'merged_clockless_v001.bc']
+
+
+def test_a_file_of_only_unclockable_objects_contributes_no_coverage(
+    pool: KernelPool, tmp_path: Path
+) -> None:
+    """It stays in the index but offers nothing, so it is never a baseline."""
+    root = tmp_path / 'CK-reconstructed'
+    _write_ck_of_only_a_clockless_object(root, 'merged_clockless_v001.bc')
+    index = build_ck_index([root])
+    assert index.files[0].coverage == ()
+    assert index.files[0].unreadable_objects == (_CLOCKLESS_OBJECT_ID,)
