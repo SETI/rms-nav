@@ -152,14 +152,18 @@ Quick smoke test:
 Running the test suite
 ======================
 
-Pytest defaults exclude integration tests; pass ``-m ""`` (empty marker filter) to
-include them. ``pyproject.toml`` sets ``addopts = ["-m", "not integration"]``.
+The suite has three tiers, separated by the ``integration`` and ``postgres``
+markers. ``pyproject.toml`` sets ``addopts = ["-m", "not integration and not
+postgres"]``, so a plain ``pytest`` runs the default tier alone; pass ``-m ""``
+(empty marker filter) to run every tier, or name one marker to run it by itself.
+:doc:`dev_guide_testing` describes what each tier holds and what it needs.
 
 .. code-block:: bash
 
-   pytest                                      # unit suite (fast)
-   pytest -m ""                                # full suite (incl. integration)
+   pytest                                      # default tier (fast)
+   pytest -m ""                                # full suite, every tier
    pytest -m integration                       # only integration
+   pytest -m postgres                          # only the postgres tier
    pytest -n auto --dist=loadfile              # parallel (matches CI)
    pytest tests/spindoctor/reproj/test_bodies.py      # one file
    pytest tests/spindoctor/reproj/test_bodies.py::test_foo  # one test
@@ -174,6 +178,11 @@ It needs the env vars listed above (in particular ``PDS3_HOLDINGS_DIR``,
 ``UCAC4_PATH``, ``YBSC_PATH``, ``OOPS_RESOURCES``) plus a ``SPICE_PATH``.
 ``scripts/run-all-checks.sh -i`` (or ``--integration``) flips the marker for the
 all-checks runner.
+
+The postgres tier re-asks the results-index questions against a real PostgreSQL
+server. It reads its connection URL from ``SPINDOCTOR_TEST_POSTGRES_URL`` and
+skips itself when that is unset. ``scripts/run-all-checks.sh -P`` (or
+``--postgres``) flips its marker.
 
 Test markers and layout
 -----------------------
