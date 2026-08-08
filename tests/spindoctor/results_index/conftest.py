@@ -9,10 +9,12 @@ run, or two runs against the same server, otherwise share one set of tables and
 see one another's rows.
 """
 
+import builtins
 import contextlib
 import os
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -26,6 +28,61 @@ POSTGRES_URL_ENV_VAR = 'SPINDOCTOR_TEST_POSTGRES_URL'
 ROOT_URL = 'file:///data/nav-results'
 
 STUB = 'COISS_2001/data/1294561143_1295221348/N1294561202_1_CALIB'
+
+EXPLODING_FACTORY_MESSAGE = 'the dialect exploded'
+"""What the stand-in engine factory raises, standing for any escape from one."""
+
+
+def sqlite_url_for(path: Path) -> str:
+    """Return the SQLite URL naming a filesystem path.
+
+    Parameters:
+        path: The database file's path.
+
+    Returns:
+        The URL.
+    """
+    # as_posix rather than str: SQLAlchemy takes a URL, and a Windows path
+    # separator in one is not a path separator.
+    return f'sqlite:///{path.as_posix()}'
+
+
+def without_module(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """Make one module unimportable, as it is on a machine without it installed.
+
+    Asserting on a driver that merely happens to be absent from the current
+    virtual environment is a test that stops testing the moment something pulls
+    that driver in as a transitive dependency.
+
+    Parameters:
+        monkeypatch: Fixture the import hook is installed through.
+        name: Dotted name of the module to hide, together with its submodules.
+    """
+    real_import = builtins.__import__
+
+    def blocked(module_name: str, *args: Any, **kwargs: Any) -> Any:
+        if module_name == name or module_name.startswith(f'{name}.'):
+            raise ModuleNotFoundError(f'No module named {name!r}', name=name)
+        return real_import(module_name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, '__import__', blocked)
+
+
+def exploding_factory(*args: Any, **kwargs: Any) -> Engine:
+    """Stand in for an engine factory that fails in a way nobody enumerated.
+
+    A dialect coerces its own connect arguments and reports a bad one as a bare
+    exception naming nothing, so the translation has to be a catch-all rather
+    than a list of types.
+
+    Parameters:
+        args: Whatever the caller passed, all of it ignored.
+        kwargs: Whatever the caller passed, all of it ignored.
+
+    Raises:
+        RuntimeError: Always.
+    """
+    raise RuntimeError(EXPLODING_FACTORY_MESSAGE)
 
 
 def image_row(**overrides: Any) -> dict[str, Any]:
@@ -64,6 +121,28 @@ def technique_row(**overrides: Any) -> dict[str, Any]:
         'technique_name': 'star_field_from_catalog',
         'spurious': False,
         'at_edge': False,
+    }
+    row.update(overrides)
+    return row
+
+
+def feature_source_row(**overrides: Any) -> dict[str, Any]:
+    """Return a minimally valid ``feature_sources`` row, with overrides applied.
+
+    Parameters:
+        overrides: Column values replacing (or adding to) the defaults.
+
+    Returns:
+        A mapping ready to pass to a ``feature_sources`` insert.
+    """
+    row: dict[str, Any] = {
+        'root_url': ROOT_URL,
+        'results_path_stub': STUB,
+        'feature_type': 'STAR',
+        'source_model': 'NavModelStars',
+        'source_name': 'UCAC4',
+        'n_features': 41,
+        'n_gated': 3,
     }
     row.update(overrides)
     return row

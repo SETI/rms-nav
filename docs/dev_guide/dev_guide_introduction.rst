@@ -254,14 +254,20 @@ GitHub Actions defines three workflows under ``.github/workflows/``:
 
   - **Lint** — Python 3.13. ``ruff check``, ``ruff format --check``, ``mypy``.
   - **Test** — matrix across Python 3.11 / 3.12 / 3.13 / 3.14 on Ubuntu. Runs
-    ``pytest -m "not integration" -n auto --dist=loadfile`` with the holdings /
-    catalog env vars exported. Uploads coverage to Codecov from the 3.13 job
-    on pushes (PRs from forks are excluded for secrets reasons).
+    ``pytest -m "not integration and not postgres" -n auto --dist=loadfile``
+    with the holdings / catalog env vars exported. Uploads coverage to Codecov
+    from the 3.13 job on pushes (PRs from forks are excluded for secrets
+    reasons).
   - **Docs** — ``sphinx-build -W`` against the ``[docs]`` extra.
 
-  Integration tests are skipped in CI (slow, holdings-dependent). Maintainers
-  run them locally before merging anything that could plausibly regress
-  navigation accuracy.
+  Both opt-in tiers are excluded in CI, and the marker expression restates the
+  exclusion that ``addopts`` already carries, because a ``-m`` flag replaces
+  that expression rather than adding to it. The integration tier — of which the
+  operator-curated image-library regression tests are one part — needs real
+  PDS3 holdings, SPICE kernels and the star catalogs, and is slow. The postgres
+  tier needs a server named by ``SPINDOCTOR_TEST_POSTGRES_URL``, and CI runs no
+  service container for one. Maintainers run both locally before merging
+  anything that could plausibly regress navigation accuracy or the index.
 
 - ``publish_to_test_pypi.yml`` — runs on pushes to ``main`` once tests pass.
   Builds a wheel + sdist and uploads to TestPyPI under the dev version stamped

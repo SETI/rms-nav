@@ -20,9 +20,22 @@ alone answers from whichever schema happens to hold a table of that name.
 
 import pytest
 import sqlalchemy
-from tests.spindoctor.results_index.conftest import STUB, image_row, opened, technique_row
+from tests.spindoctor.results_index.conftest import (
+    STUB,
+    feature_source_row,
+    image_row,
+    opened,
+    technique_row,
+)
 
-from spindoctor.results_index import IMAGES, SCHEMA_META, SCHEMA_VERSION, TECHNIQUES, open_index
+from spindoctor.results_index import (
+    FEATURE_SOURCES,
+    IMAGES,
+    SCHEMA_META,
+    SCHEMA_VERSION,
+    TECHNIQUES,
+    open_index,
+)
 
 pytestmark = pytest.mark.postgres
 
@@ -32,6 +45,12 @@ FIFTEEN_DIGIT_OFFSET = -1234.56789012345
 
 BOGUS_PASSWORD = 'sup3rs3cr3t'
 """A password distinctive enough that finding it anywhere is proof of a leak."""
+
+UNDEFINED_FUNCTION = '42883'
+"""SQLSTATE for an operator the server has no definition of.
+
+Stable across every server locale, which the message text is not.
+"""
 
 
 def _password_of(url: str) -> str:
@@ -60,7 +79,7 @@ def _with_password(url: str, password: str) -> str:
     return rewritten.render_as_string(hide_password=False)
 
 
-def _refusal_without_the_password(url: str, message: str) -> str:
+def _refusal_of(url: str, message: str) -> str:
     """Open a URL, require the refusal it raises, and return that message.
 
     Parameters:
@@ -70,11 +89,43 @@ def _refusal_without_the_password(url: str, message: str) -> str:
     Returns:
         The refusal message.
     """
-    if not _password_of(url):
-        pytest.skip('the configured server URL carries no password to mask')
     with pytest.raises(ValueError, match=message) as excinfo:
         open_index(url)
     return str(excinfo.value)
+
+
+def _extra_password_appearances(message: str, url: str) -> list[str]:
+    """Return the appearances of a URL's password a refusal does not account for.
+
+    The bare password is searched for, rather than the ``:password@`` form alone,
+    because a leak is a leak whatever shape it arrives in.  It is counted rather
+    than merely looked for, because the password a server is configured with is
+    also, on an ordinary local server, the role name and the database name, and
+    those the message names legitimately: what proves masking is that the
+    password appears no more often than the password-hiding rendering of the
+    same URL accounts for.
+
+    Parameters:
+        message: The refusal message to read.
+        url: The URL the refusal names.
+
+    Returns:
+        One entry per unaccounted appearance, empty when nothing leaked.
+    """
+    password = _password_of(url)
+    masked = sqlalchemy.engine.make_url(url).render_as_string()
+    extra = message.count(password) - masked.count(password)
+    return [password] * max(extra, 0)
+
+
+def _skip_without_a_password(url: str) -> None:
+    """Skip the calling test when the configured URL carries no password.
+
+    Parameters:
+        url: The URL the test drives.
+    """
+    if not _password_of(url):
+        pytest.skip('the configured server URL carries no password to mask')
 
 
 def test_creating_the_schema_creates_every_table(postgres_url: str, postgres_schema: str) -> None:
@@ -144,8 +195,9 @@ def test_the_not_an_index_refusal_does_not_repeat_the_password(postgres_url: str
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
     """
-    message = _refusal_without_the_password(postgres_url, 'not a results index')
-    assert f':{_password_of(postgres_url)}@' not in message
+    _skip_without_a_password(postgres_url)
+    message = _refusal_of(postgres_url, 'not a results index')
+    assert _extra_password_appearances(message, postgres_url) == []
 
 
 def test_the_version_refusal_does_not_repeat_the_password(postgres_url: str) -> None:
@@ -154,10 +206,11 @@ def test_the_version_refusal_does_not_repeat_the_password(postgres_url: str) -> 
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
     """
+    _skip_without_a_password(postgres_url)
     with opened(postgres_url, create=True) as engine, engine.begin() as connection:
         connection.execute(SCHEMA_META.update().values(schema_version=SCHEMA_VERSION + 1))
-    message = _refusal_without_the_password(postgres_url, 'is not the version')
-    assert f':{_password_of(postgres_url)}@' not in message
+    message = _refusal_of(postgres_url, 'is not the version')
+    assert _extra_password_appearances(message, postgres_url) == []
 
 
 def test_a_masked_refusal_still_names_the_server(postgres_url: str) -> None:
@@ -166,7 +219,7 @@ def test_a_masked_refusal_still_names_the_server(postgres_url: str) -> None:
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
     """
-    message = _refusal_without_the_password(postgres_url, 'not a results index')
+    message = _refusal_of(postgres_url, 'not a results index')
     assert str(sqlalchemy.engine.make_url(postgres_url).host) in message
 
 
@@ -217,13 +270,21 @@ def test_comparing_a_boolean_column_to_an_integer_is_an_error(postgres_url: str)
     kept the SQLite spelling would fail the moment an operator moved the index to
     a server.
 
+    The SQLSTATE is what is asserted, not the message: a server translates its
+    messages according to ``lc_messages``, so the word "boolean" is absent from
+    the text on a server configured for another language, and the test would then
+    fail for a reason that has nothing to do with the type discipline.
+
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
     """
     with opened(postgres_url, create=True) as engine:  # noqa: SIM117
-        with pytest.raises(sqlalchemy.exc.ProgrammingError, match='boolean'):
+        with pytest.raises(sqlalchemy.exc.ProgrammingError) as excinfo:
             with engine.connect() as connection:
                 connection.execute(sqlalchemy.text('SELECT * FROM techniques WHERE spurious = 0'))
+    # 42883 is "undefined function", which is how the server reports that no
+    # boolean-to-integer equality operator exists.
+    assert getattr(excinfo.value.orig, 'sqlstate', None) == UNDEFINED_FUNCTION
 
 
 def test_the_same_basename_in_two_volumes_produces_two_rows(postgres_url: str) -> None:
@@ -260,6 +321,36 @@ def test_deleting_an_image_deletes_its_technique_rows(postgres_url: str) -> None
                 sqlalchemy.select(sqlalchemy.func.count()).select_from(TECHNIQUES)
             ).scalar()
     assert remaining == 0
+
+
+def test_a_second_row_for_one_technique_of_one_image_is_refused(postgres_url: str) -> None:
+    """The uniqueness is a server constraint here, not a SQLite convention.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    with opened(postgres_url, create=True) as engine:
+        with engine.begin() as connection:
+            connection.execute(IMAGES.insert(), image_row())
+            connection.execute(TECHNIQUES.insert(), technique_row())
+        with pytest.raises(sqlalchemy.exc.IntegrityError, match='uq_techniques_image_technique'):  # noqa: SIM117
+            with engine.begin() as connection:
+                connection.execute(TECHNIQUES.insert(), technique_row(confidence=0.5))
+
+
+def test_a_second_row_for_one_feature_source_of_one_image_is_refused(postgres_url: str) -> None:
+    """And the wider tuple the feature inventory is aggregated by.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    with opened(postgres_url, create=True) as engine:
+        with engine.begin() as connection:
+            connection.execute(IMAGES.insert(), image_row())
+            connection.execute(FEATURE_SOURCES.insert(), feature_source_row())
+        with pytest.raises(sqlalchemy.exc.IntegrityError, match='uq_feature_sources_image_source'):  # noqa: SIM117
+            with engine.begin() as connection:
+                connection.execute(FEATURE_SOURCES.insert(), feature_source_row(n_features=7))
 
 
 def test_a_json_column_round_trips_a_list(postgres_url: str) -> None:

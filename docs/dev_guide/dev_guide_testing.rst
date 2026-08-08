@@ -59,7 +59,13 @@ The postgres tier additionally needs a server to point at:
 
 .. code-block:: bash
 
-   export SPINDOCTOR_TEST_POSTGRES_URL=postgresql+psycopg://user:pw@host:5432/spindoctor
+   export SPINDOCTOR_TEST_POSTGRES_URL=postgresql+psycopg://USER@HOST:5432/spindoctor
+
+Supply the credentials the way the server expects them -- a ``~/.pgpass`` entry,
+``PGPASSWORD``, or a peer-authenticated local socket -- rather than writing a
+password into a shell profile or a checked-in file. A password inside the URL
+works, and the tier masks it out of every message, but the URL itself is then a
+secret in the environment of every process the shell starts.
 
 ``pytest-xdist`` must run with ``--dist=loadfile``; the default scheduling
 crashes PyQt6 workers when tests from one file split across processes. Multi-test

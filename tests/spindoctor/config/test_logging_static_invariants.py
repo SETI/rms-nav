@@ -181,12 +181,15 @@ def test_a_data_access_layer_holds_no_logger_of_any_kind(package: str) -> None:
     Reaching for any of the three would give a library layer a voice its caller
     did not configure, and the stdlib one would additionally turn on whatever the
     database library it sits over decided to say.
+
+    Parameters:
+        package: Path, relative to the source root, of the package to scan.
     """
     forbidden = _LOGGER_NAMES | {'logging', 'pdslogger'}
     offenders = [
-        f'{path.name}:{sorted(forbidden & _imported_names(path))}'
+        f'{path.name}:{sorted(found)}'
         for path in _python_files(package)
-        if forbidden & _imported_names(path)
+        if (found := forbidden & _imported_names(path))
     ]
     assert offenders == []
 

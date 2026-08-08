@@ -24,7 +24,6 @@ ships as an optional extra.
 
 import datetime
 import os
-import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -69,18 +68,6 @@ the only ones for which moving the index to a server is the remedy.
 _HIDDEN_PASSWORD = '***'
 """What a password is replaced by, matching what a parsed URL renders itself as."""
 
-_PASSWORD_IN_URL = re.compile(r'(?P<credentials>\A(?:[^/@]*:)?/{1,2}[^/@]*:)[^@]*@')
-"""The password of a URL string that could not be parsed, as text.
-
-A password is matched only where a URL keeps one: at the very start of the
-string, after an optional scheme and the one or two slashes that open the
-authority section, and after the colon that follows the user name.  The password
-itself runs to the ``@``, since a URL permits an unescaped ``/`` in one and a
-pattern that stopped at a separator would leak such a password whole.  Anchoring
-is what keeps a local path that merely happens to carry a colon and a later
-``@`` from being read as credentials and mangled.
-"""
-
 _SUPPORTED_URL_FORMS = (
     'A results index is either a sqlite: URL naming a local path, or a '
     'postgresql+psycopg: URL naming a server.'
@@ -99,12 +86,106 @@ class _IndexOpenError(ValueError):
     """
 
 
+def _scheme_base(url: str) -> str:
+    """Return the backend a URL's scheme names, whatever driver it asks for.
+
+    Parameters:
+        url: The URL as the caller wrote it.
+
+    Returns:
+        The scheme with any ``+driver`` suffix and surrounding space removed and
+        lower cased, or an empty string when the string carries no scheme.
+    """
+    scheme, separator, _remainder = url.partition(':')
+    if not separator:
+        return ''
+    return scheme.strip().split('+', 1)[0].lower()
+
+
+def _authority_start(url: str) -> int:
+    """Return the index at which a URL's authority section begins.
+
+    The authority opens after the slashes that follow the scheme, and a URL
+    written with one slash instead of two is the shape a hand-edited setting
+    arrives in.
+
+    Parameters:
+        url: The URL as the caller wrote it.
+
+    Returns:
+        The index just past those slashes, or -1 when the string carries no
+        slash at all and so has no authority to read.
+    """
+    slash = url.find('/')
+    if slash < 0:
+        return -1
+    return slash + 2 if url[slash + 1 : slash + 2] == '/' else slash + 1
+
+
+def _is_a_port(text: str) -> bool:
+    """Whether the text after a colon in an authority is a port and not a password.
+
+    Parameters:
+        text: The characters between the colon and the slash that follows it.
+
+    Returns:
+        True when every character is a digit, an empty run included.
+    """
+    return text == '' or text.isdigit()
+
+
+def _password_span(url: str) -> tuple[int, int] | None:
+    """Return the half-open range of characters holding a URL's password.
+
+    The rule is the one a URL's own grammar states.  The user name runs from the
+    start of the authority to the first ``:`` or ``/``; only a ``:`` introduces a
+    password, and that password runs to the first ``@`` after it, since an ``@``
+    is what ends the credentials.  A ``/`` inside the span is therefore part of
+    the password rather than the end of the authority, which is what reaches a
+    password written with an unescaped slash.
+
+    One shape is genuinely ambiguous: ``host:5432/path@name`` reads equally as a
+    host with a port and a path, or as a user name with a slashed password.  The
+    digits decide it, because a port is digits and a password almost never is,
+    and mangling a host, a port and half a database name costs the very
+    identification these messages exist for.
+
+    Parameters:
+        url: The URL as the caller wrote it.
+
+    Returns:
+        The first and last-plus-one index of the password, or None when the URL
+        carries no password to hide.
+    """
+    start = _authority_start(url)
+    if start < 0:
+        return None
+    colon = url.find(':', start)
+    if colon < 0:
+        return None
+    slash = url.find('/', start)
+    if 0 <= slash < colon:
+        # The authority ended before any colon, so what follows is a path.
+        return None
+    at = url.find('@', colon)
+    if at < 0:
+        return None
+    if 0 <= slash < at and _is_a_port(url[colon + 1 : slash]):
+        return None
+    return colon + 1, at
+
+
 def _masked_url(url: str) -> str:
     """Return a URL string with any password in it replaced.
 
     Used for a URL whose parsing is what failed, since an unparsed URL cannot
-    render itself.  Everything else survives, because naming the URL is what
-    tells a reader which of the resolution levels supplied the bad value.
+    render itself.  Everything outside the password survives, because naming the
+    URL is what tells a reader which of the resolution levels supplied the bad
+    value.
+
+    A ``sqlite:`` URL is returned exactly as it came.  It names a local
+    filesystem path, which has no credentials at all, and a path is free to carry
+    the colons and at-signs that would otherwise read as credentials.
 
     Parameters:
         url: The URL as the caller wrote it.
@@ -112,7 +193,13 @@ def _masked_url(url: str) -> str:
     Returns:
         The URL with its password, if any, masked.
     """
-    return _PASSWORD_IN_URL.sub(rf'\g<credentials>{_HIDDEN_PASSWORD}@', url)
+    if _scheme_base(url) == _SQLITE_BACKEND:
+        return url
+    span = _password_span(url)
+    if span is None:
+        return url
+    first, past_last = span
+    return f'{url[:first]}{_HIDDEN_PASSWORD}{url[past_last:]}'
 
 
 def _display_url(url: str) -> str:
@@ -123,7 +210,7 @@ def _display_url(url: str) -> str:
 
     Returns:
         The parsed URL rendered with its password hidden, or the text form
-        masked by pattern when the URL is one the parser rejects.
+        masked structurally when the URL is one the parser rejects.
     """
     try:
         return sqlalchemy.engine.make_url(url).render_as_string()
@@ -580,6 +667,9 @@ def _build_engine(url: str, *, create: bool) -> Engine:
         if create:
             _create_schema(engine)
             stamped = _stamped_version(engine)
+        # The gate a non-creating open is refused by.  Reached after the create
+        # branch too, where it re-reads the row that branch has just written and
+        # so cannot fail; no test can observe that call refusing anything.
         _verify_schema_version(stamped, safe_url)
     except Exception:
         engine.dispose()
@@ -603,8 +693,8 @@ def open_index(url: str, *, create: bool = False) -> Engine:
 
     Either way a database stamped with a different schema version is refused,
     naming both versions, because the index carries no migrations and rebuilding
-    it is always available and always correct.  Nothing is written to a database
-    whose version is refused.
+    it is always available and always correct.  No table is created and no row is
+    written in a database whose version is refused.
 
     Every failure is a ``ValueError`` naming the URL, including the ones a
     database driver raises: a consumer that wants to report the cause rather than

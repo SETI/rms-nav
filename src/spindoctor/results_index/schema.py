@@ -17,9 +17,15 @@ identifier unique across volumes, because two volumes may hold images with the
 same basename.  ``root_url`` is the ingested results root in normalized form, so
 one database can serve several roots without a consumer seeing another root's
 rows.  The child tables ``techniques`` and ``feature_sources`` key on the same
-pair and cascade on delete, so re-ingesting an image replaces its children.
-``results_path_stub`` additionally carries a non-unique index of its own, for
-lookups that already know the root.
+pair and cascade on delete, so re-ingesting an image replaces its children.  Each
+of them also declares the tuple that identifies one of its rows -- the technique
+name, or the feature type and its source -- unique within an image, so a repeated
+or retried insert is refused rather than silently doubling every count read from
+it.
+
+``results_path_stub`` carries a non-unique index of its own, for lookups that
+already know the root, and ``image_date`` and ``instrument`` carry one each,
+because the report groups and filters on both across a whole root.
 
 Types
 -----
@@ -55,11 +61,12 @@ __all__ = [
     'TECHNIQUES',
 ]
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 """Column-set version of the index.
 
-Incremented by any change to the column set of any table.  A database stamped
-with a different version is refused rather than migrated.
+Incremented by any change to the column set of any table, and by any change to
+the constraints over it.  A database stamped with a different version is refused
+rather than migrated.
 """
 
 # TEXT on SQLite, jsonb on PostgreSQL.  jsonb is the type PostgreSQL's array and
@@ -200,7 +207,14 @@ TECHNIQUES = sqlalchemy.Table(
     sqlalchemy.Column('source_names', _JSON),
     sqlalchemy.Column('diagnostics', _JSON),
     _image_foreign_key(),
-    sqlalchemy.Index('ix_techniques_image', 'root_url', 'results_path_stub'),
+    # One row per technique per image, enforced rather than assumed: a technique
+    # reports once for an image, and a retried or duplicated ingest that inserted
+    # a second row would change every count and average read from this table
+    # without replacing anything.  The constraint's index also serves the lookup
+    # by image, whose columns are its leading pair.
+    sqlalchemy.UniqueConstraint(
+        'root_url', 'results_path_stub', 'technique_name', name='uq_techniques_image_technique'
+    ),
 )
 """One row per technique that produced a result for an image."""
 
@@ -214,7 +228,17 @@ FEATURE_SOURCES = sqlalchemy.Table(
     sqlalchemy.Column('n_features', sqlalchemy.Integer, nullable=False),
     sqlalchemy.Column('n_gated', sqlalchemy.Integer, nullable=False),
     _image_foreign_key(),
-    sqlalchemy.Index('ix_feature_sources_image', 'root_url', 'results_path_stub'),
+    # The inventory is aggregated by exactly this tuple, so a second row for one
+    # of them is a contradiction rather than more detail.  As on techniques, the
+    # constraint's index leads with the image key and serves the lookup by image.
+    sqlalchemy.UniqueConstraint(
+        'root_url',
+        'results_path_stub',
+        'feature_type',
+        'source_model',
+        'source_name',
+        name='uq_feature_sources_image_source',
+    ),
 )
 """Feature inventory of an image, aggregated per feature type and source."""
 

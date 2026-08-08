@@ -8,6 +8,7 @@ that an image is identified by its root and stub rather than its basename, and
 that a child row belongs to exactly one image.
 """
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -15,8 +16,10 @@ import sqlalchemy
 from tests.spindoctor.results_index.conftest import (
     ROOT_URL,
     STUB,
+    feature_source_row,
     image_row,
     opened,
+    sqlite_url_for,
     technique_row,
 )
 
@@ -144,7 +147,7 @@ FIFTEEN_DIGIT_OFFSET = -1234.56789012345
 
 
 @pytest.fixture
-def sqlite_url(tmp_path: Any) -> str:
+def sqlite_url(tmp_path: Path) -> str:
     """Return a SQLite URL for a database file of this test's own.
 
     Parameters:
@@ -153,7 +156,7 @@ def sqlite_url(tmp_path: Any) -> str:
     Returns:
         The URL.
     """
-    return f'sqlite:///{tmp_path / "index.sqlite3"}'
+    return sqlite_url_for(tmp_path / 'index.sqlite3')
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +283,49 @@ def test_the_stub_index_is_not_unique() -> None:
     assert stub_index.unique is False
 
 
+@pytest.mark.parametrize(
+    ('table', 'expected'),
+    [
+        pytest.param(
+            TECHNIQUES,
+            [['root_url', 'results_path_stub', 'technique_name']],
+            id='techniques',
+        ),
+        pytest.param(
+            FEATURE_SOURCES,
+            [
+                [
+                    'root_url',
+                    'results_path_stub',
+                    'feature_type',
+                    'source_model',
+                    'source_name',
+                ]
+            ],
+            id='sources',
+        ),
+    ],
+)
+def test_a_child_table_declares_one_row_per_logical_key(
+    table: sqlalchemy.Table, expected: list[list[str]]
+) -> None:
+    """A second row for one logical key is a contradiction, not more detail.
+
+    The tuple leads with the image key, so the constraint's own index is also
+    the index a lookup by image uses; a separate one would be redundant.
+
+    Parameters:
+        table: The child table under test.
+        expected: The column names of the unique constraints it must declare.
+    """
+    found = [
+        [column.name for column in constraint.columns]
+        for constraint in sorted(table.constraints, key=lambda one: str(one.name))
+        if isinstance(constraint, sqlalchemy.UniqueConstraint)
+    ]
+    assert found == expected
+
+
 # ---------------------------------------------------------------------------
 # Behavior against a real SQLite database
 # ---------------------------------------------------------------------------
@@ -376,6 +422,72 @@ def test_a_child_row_without_its_image_is_rejected(sqlite_url: str) -> None:
         with pytest.raises(sqlalchemy.exc.IntegrityError, match='FOREIGN KEY constraint failed'):
             with engine.begin() as connection:
                 connection.execute(TECHNIQUES.insert(), technique_row())
+
+
+def test_a_second_row_for_one_technique_of_one_image_is_refused(sqlite_url: str) -> None:
+    """A retried or duplicated ingest must not double what the table reports.
+
+    Parameters:
+        sqlite_url: URL of an empty database file.
+    """
+    with opened(sqlite_url, create=True) as engine:
+        with engine.begin() as connection:
+            connection.execute(IMAGES.insert(), image_row())
+            connection.execute(TECHNIQUES.insert(), technique_row())
+        with pytest.raises(sqlalchemy.exc.IntegrityError, match='UNIQUE constraint failed'):  # noqa: SIM117
+            with engine.begin() as connection:
+                connection.execute(TECHNIQUES.insert(), technique_row(confidence=0.5))
+
+
+def test_two_techniques_of_one_image_are_accepted(sqlite_url: str) -> None:
+    """The constraint binds the technique name, not the number of rows per image.
+
+    Parameters:
+        sqlite_url: URL of an empty database file.
+    """
+    with opened(sqlite_url, create=True) as engine:
+        with engine.begin() as connection:
+            connection.execute(IMAGES.insert(), image_row())
+            connection.execute(TECHNIQUES.insert(), technique_row())
+            connection.execute(TECHNIQUES.insert(), technique_row(technique_name='ring_edge'))
+        with engine.connect() as connection:
+            stored = connection.execute(
+                sqlalchemy.select(sqlalchemy.func.count()).select_from(TECHNIQUES)
+            ).scalar()
+    assert stored == 2
+
+
+def test_a_second_row_for_one_feature_source_of_one_image_is_refused(sqlite_url: str) -> None:
+    """The inventory is aggregated by this tuple, so it appears once.
+
+    Parameters:
+        sqlite_url: URL of an empty database file.
+    """
+    with opened(sqlite_url, create=True) as engine:
+        with engine.begin() as connection:
+            connection.execute(IMAGES.insert(), image_row())
+            connection.execute(FEATURE_SOURCES.insert(), feature_source_row())
+        with pytest.raises(sqlalchemy.exc.IntegrityError, match='UNIQUE constraint failed'):  # noqa: SIM117
+            with engine.begin() as connection:
+                connection.execute(FEATURE_SOURCES.insert(), feature_source_row(n_features=7))
+
+
+def test_two_feature_sources_of_one_image_are_accepted(sqlite_url: str) -> None:
+    """One image legitimately reports several sources of one feature type.
+
+    Parameters:
+        sqlite_url: URL of an empty database file.
+    """
+    with opened(sqlite_url, create=True) as engine:
+        with engine.begin() as connection:
+            connection.execute(IMAGES.insert(), image_row())
+            connection.execute(FEATURE_SOURCES.insert(), feature_source_row())
+            connection.execute(FEATURE_SOURCES.insert(), feature_source_row(source_name='YBSC'))
+        with engine.connect() as connection:
+            stored = connection.execute(
+                sqlalchemy.select(sqlalchemy.func.count()).select_from(FEATURE_SOURCES)
+            ).scalar()
+    assert stored == 2
 
 
 def test_the_offset_round_trips_at_fifteen_significant_digits(sqlite_url: str) -> None:

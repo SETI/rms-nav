@@ -37,6 +37,9 @@ _UDF_REGISTRARS = frozenset({'create_function', 'register_function'})
 
 _SCRIPT_EXECUTORS = frozenset({'executescript'})
 
+_KNOWN_MODULES = frozenset({'__init__.py', 'engine.py', 'schema.py'})
+"""The modules the scan must reach, whatever else the package grows."""
+
 
 def _source_files() -> list[FCPath]:
     """Return every Python module of the package under scan.
@@ -70,6 +73,29 @@ def _string_constants(tree: ast.AST) -> list[ast.Constant]:
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     ]
+
+
+def _call_argument_strings(tree: ast.AST) -> list[ast.Constant]:
+    """Return every string constant a parsed module passes to a call.
+
+    A pragma reaches a database only as the argument of an execute call, and the
+    word itself is ordinary English: scanning every constant would fail on a
+    docstring that merely described one.  Formatted strings are descended into,
+    since that is how a pragma carrying a value is written.
+
+    Parameters:
+        tree: The parsed module.
+
+    Returns:
+        The string constant nodes, which carry line numbers.
+    """
+    arguments = [
+        argument
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for argument in [*node.args, *(keyword.value for keyword in node.keywords)]
+    ]
+    return [node for argument in arguments for node in _string_constants(argument)]
 
 
 def _connect_handler_names(tree: ast.AST) -> set[str]:
@@ -234,7 +260,7 @@ def test_every_pragma_lives_inside_a_connect_event(path: FCPath) -> None:
     allowed = _connect_handler_line_ranges(tree)
     offenders = [
         node.value
-        for node in _string_constants(tree)
+        for node in _call_argument_strings(tree)
         if _PRAGMA_RE.search(str(node.value))
         and not any(node.lineno in line_range for line_range in allowed)
     ]
@@ -267,9 +293,12 @@ def test_the_scan_actually_reads_some_modules() -> None:
     """Every assertion above is that a search came back empty.
 
     A path that names nothing is indistinguishable from a package that is clean,
-    so the scan's own reach is asserted.
+    so the scan's own reach is asserted.  It is asserted as a floor rather than
+    as an inventory, because the scan finds the package's modules for itself and
+    one added tomorrow is meant to be covered without being named here.
     """
-    assert _module_ids() == ['__init__.py', 'engine.py', 'schema.py']
+    missing = sorted(_KNOWN_MODULES.difference(_module_ids()))
+    assert missing == []
 
 
 def test_the_boolean_scan_knows_which_columns_are_boolean() -> None:

@@ -131,7 +131,21 @@ carries a non-unique index. Every consumer lookup filters on
 (repeatable, default: all ingested roots), since a report legitimately spans
 roots where a pipeline lookup never does.
 
-The child tables key on the same pair.
+`images` carries two further non-unique indexes, `image_date` and
+`instrument`, which the statistics report groups and filters on across a whole
+root. They are carried over from the indexes `cli/stats/schema.py` already
+declares, so the report does not lose an index in the move.
+
+The child tables key on the same pair, and each additionally declares the tuple
+that identifies one of its rows unique within an image:
+`(root_url, results_path_stub, technique_name)` on `techniques` and
+`(root_url, results_path_stub, feature_type, source_model, source_name)` on
+`feature_sources`. A technique reports once for an image and the feature
+inventory is aggregated by exactly that tuple, so a second row is a
+contradiction rather than more detail, and a retried or duplicated ingest that
+inserted one would change every count and average read from the table without
+replacing anything. Each constraint's index leads with the image key, so it is
+also the index a lookup by image uses and no separate one is declared.
 
 ### 2.3 Columns
 
@@ -199,10 +213,10 @@ Phase 2) as `COALESCE(status_reason, status_error)`, which reproduces
 today's report exactly.
 
 The `techniques` and `feature_sources` child tables keep their current
-column sets, re-keyed on `(root_url, results_path_stub)`. The feature
-inventory is aggregated, as today, by
-`(feature_type, source_model, source_name)`; per-feature `feature_id` and
-`gated` detail is not retained.
+column sets, re-keyed on `(root_url, results_path_stub)` and constrained to
+one row per logical key (section 2.2). The feature inventory is aggregated, as
+today, by `(feature_type, source_model, source_name)`; per-feature `feature_id`
+and `gated` detail is not retained.
 
 ### 2.4 Schema version, creation, and no migrations
 
@@ -234,12 +248,28 @@ messages this layer writes itself pass through untouched.
 messages are written to run logs and pasted into bug reports, and a database
 password belongs in neither. Everything else about the URL survives, because
 naming the URL is what tells a reader which of the three resolution levels
-supplied the value. A URL the parser rejected cannot render itself, so its
-password is masked by pattern instead. That pattern is anchored at the start
-of the URL and runs to the `@`, because a password may legally carry an
-unescaped `/`: one bounded by path separators leaves such a password in the
-message whole, and an unanchored one mangles a local path that happens to
-carry a colon and a later `@`.
+supplied the value.
+
+A URL the parser rejected cannot render itself, so its password is found
+structurally instead, by a stated rule rather than by a pattern:
+
+1. If the scheme -- the text before the first `:`, with any `+driver` suffix
+   and surrounding space removed -- is `sqlite`, the string is returned
+   unchanged. A SQLite URL names a local path, which has no credentials and is
+   free to carry the colons and at-signs that would otherwise read as some.
+2. Otherwise the authority begins after the slashes that follow the scheme
+   (one or two, since a hand-edited setting arrives with either). The user name
+   runs to the first `:` or `/`; only a `:` introduces a password, and that
+   password runs to the first `@` after it, because an `@` is what ends the
+   credentials. A `/` inside that span is part of the password, which is what
+   reaches a password written with an unescaped slash; an `@` inside the user
+   name is kept, which is what reaches the `user@servername` login form of a
+   managed server.
+3. `host:5432/path@name` is genuinely ambiguous -- a host with a port and a
+   path, or a user name with a slashed password. Digits decide it: a port is
+   digits and a password is not, and mangling a host, a port and half a
+   database name costs the identification these messages exist for.
+4. Only the password is replaced. Nothing outside it is touched.
 
 The engine factory is the only opener:
 
@@ -258,16 +288,20 @@ open_index(url: str, *, create: bool = False) -> Engine
 - Either way, a `schema_version` that does not match the version the code
   was built for raises, naming both versions and instructing the reader to
   delete the database and re-ingest. The stamped version is read and checked
-  before anything is written, so a refused `create=True` open leaves the
-  database untouched; creating this version's tables inside a database
+  before anything is written, so a refused `create=True` open creates no table
+  and writes no row; creating this version's tables inside a database
   stamped with another version would leave a mixture no single version number
-  describes.
+  describes. (The database file is not literally untouched: the connect-time
+  journal-mode selection rewrites a rollback-journal database's header before
+  the gate is reached. What the gate guarantees is the schema and the rows,
+  which is what a rebuild would otherwise have to undo.)
 
 There are no migrations. Ingest is cheap relative to navigation and entirely
 reproducible from the tree, so rebuilding is always available and always
-correct. Any change to the column set increments `schema_version`. This
-replaces the current column-set comparison, which detects a changed column
-set but not a changed meaning of an unchanged column.
+correct. Any change to the column set, or to the constraints over it,
+increments `schema_version`. This replaces the current column-set comparison,
+which detects a changed column set but not a changed meaning of an unchanged
+column.
 
 ### 2.5 Backend selection
 
@@ -671,7 +705,7 @@ Declare `sqlalchemy` in `[project] dependencies` and the `postgres` extra in
 
 Tests: schema creation against SQLite; `create=False` raising on a missing
 database, a missing `schema_meta` row, and a version mismatch (each message
-asserted); a refused `create=True` open leaving the database unwritten; the
+asserted); a refused `create=True` open creating no table; the
 `ValueError` guarantee on each route a driver exception takes (an absent
 driver, an unparseable URL, an unknown URL scheme, a non-numeric port that
 reaches the caller as a bare `ValueError`, a server that refuses the
@@ -679,7 +713,13 @@ connection, and an unexpected failure inside the engine factory), with the
 driver's exception kept as the `__cause__` on each; a password absent from
 every one of those messages while the rest of the URL survives, including on
 the `schema_meta` and version gates and against a server that rejects the
-password (`postgres` tier); the missing-driver message, with the driver
+password (`postgres` tier); the structural masking rule as a table of URLs and
+exactly what masking each produces -- a slashed password, an at-sign in the
+user name, a leading space, a hyphenated scheme, a two-line copy, and the
+non-credential strings it must leave alone (a port with a later at-sign, a
+user name with no password, a SQLite path, a scheme alone, the empty string)
+-- with every credential-bearing row driven through `open_index` itself and
+not only through the helper; the missing-driver message, with the driver
 hidden by an import hook rather than by its happening to be absent from the
 environment; the read-only cases of section 2.5 (accepted by a consumer,
 refused by an ingest, and a write-ahead-logged copy that cannot be read),
@@ -687,12 +727,21 @@ each parametrized over both journal modes, plus an ingest into a read-only
 directory, alongside a genuine lock failure in both modes; the result-code
 classification of a probe failure (a file that is not a database, a path that
 is a directory, a directory that does not exist, a file this user cannot
-open, and an exception carrying no result code at all); a `sqlite:` URL with
+open, an exception carrying no result code at all, one carrying a code that is
+not text, and an extended form of each classified family, since matching by
+equality rather than by prefix loses the family's remedy); the connect handler
+re-raising a driver error that is not a read-only refusal; a `sqlite:` URL with
 a query string refused without leaving a file behind; the connect-time
 settings read from a second connection held open beside the first, so a
 one-shot application fails the test; a refused open disposing the pool it
 built; Double-precision round-trip of a 15-significant-digit value; boolean
-round-trip; the config-hash exclusion.
+round-trip; a duplicate child row refused on both backends; the config-hash
+exclusion.
+
+The engine tests are three files, because one would run past the 1000-line
+module cap: the opener's contract (`test_engine.py`), what it does with a
+SQLite file (`test_engine_sqlite.py`), and how it names a URL without naming
+its password (`test_engine_masking.py`).
 
 ### Phase 2 — Ingest and reporting onto the index
 
@@ -784,8 +833,9 @@ the SQLite-is-local rule; the ingest workflow, including that it is never
 automatic; root normalization and the not-ingested failure; the version gate
 and delete-and-re-ingest; which programs consume the index, that
 `sd_stats_report` requires it, and which programs deliberately do not use
-it. New `docs/api_reference/api_results_index.rst` in the api-reference
-toctree. Updates: `user_guide_statistics.rst` (per section 2.9),
+it. `docs/api_reference/api_results_index.rst` -- created with the package in
+Phase 1, so the branch never carries an undocumented public package -- gains
+the modules the later phases add. Updates: `user_guide_statistics.rst` (per section 2.9),
 `user_guide_logging.rst` (program table), `introduction_configuration.rst`
 (`environment.results_db`), and a dev-guide section covering the Core
 layer, the concurrency model, the branch-local import exception, and how to
@@ -902,6 +952,13 @@ File as tracking issues alongside the implementation issue:
 - **A `--since` selector for ingest.** The stat-pair skip makes a re-scan
   cheap in reads but not in listings; a time-bounded scan would cut the
   listing too.
+- **The lockability probe takes a write lock on a consumer's open.** Section
+  2.5 has it refuse in both modes, so a consumer opening a SQLite index while
+  an ingest holds a write transaction waits out the busy timeout and can then
+  fail with the filesystem-and-PostgreSQL message though nothing is wrong. It
+  is the plan's own rule and is left as written here; whether a `create=False`
+  open should probe with a read instead belongs with the concurrent-ingest work
+  of Phase 3, which is what makes the collision likely.
 
 ---
 

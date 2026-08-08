@@ -187,16 +187,13 @@ def get_results_db_url(arguments: argparse.Namespace, config: Config) -> str | N
     Returns:
         The results index connection URL, or None when no index was named.
     """
-    results_db_str = None
-    try:
-        results_db_str = arguments.results_db
-    except AttributeError:
-        pass
+    # Absence is the ordinary case at both levels -- most programs define no
+    # --results-db argument, and most configurations name no index -- so each is
+    # asked for the key rather than made to raise for it, which would also hide an
+    # AttributeError raised by something other than the lookup.
+    results_db_str = vars(arguments).get('results_db')
     if results_db_str is None:
-        try:
-            results_db_str = config.environment.results_db
-        except AttributeError:
-            pass
+        results_db_str = config.environment.get('results_db')
     if results_db_str is None:
         results_db_str = os.getenv('NAV_RESULTS_DB')
     if results_db_str is None or results_db_str == RESULTS_DB_NONE:

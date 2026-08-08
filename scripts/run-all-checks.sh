@@ -209,8 +209,17 @@ else
     print_info "Integration tests: SKIPPED (default; pass -i / --integration to include)"
 fi
 
+# An explicit -P with no server named would select the tier and then skip every
+# test in it, reporting a pass that ran no PostgreSQL coverage at all.  The
+# request is refused instead, because that is the one reading of -P nobody wants.
+if [ "$RUN_POSTGRES" = true ] && [ -z "${SPINDOCTOR_TEST_POSTGRES_URL:-}" ]; then
+    print_error "PostgreSQL tests were requested with -P / --postgres, but SPINDOCTOR_TEST_POSTGRES_URL is not set, so every test in that tier would skip."
+    print_info "Export it, for example: export SPINDOCTOR_TEST_POSTGRES_URL=postgresql+psycopg://USER@HOST:5432/spindoctor"
+    exit 1
+fi
+
 if [ "$RUN_POSTGRES" = true ]; then
-    print_info "PostgreSQL tests: ENABLED (require SPINDOCTOR_TEST_POSTGRES_URL)"
+    print_info "PostgreSQL tests: ENABLED (SPINDOCTOR_TEST_POSTGRES_URL is set)"
 else
     print_info "PostgreSQL tests: SKIPPED (default; pass -P / --postgres to include)"
 fi
@@ -297,7 +306,9 @@ run_code_checks() {
     if [ "$RUN_INTEGRATION" = true ]; then
         pytest_marker_args+=("--ignore=tests/integration/test_sim_perf.py")
     fi
-    if python -m pytest tests -q --cov -n auto "${pytest_marker_args[@]}"; then
+    # loadfile keeps every test of one file on one worker; the default scheduling
+    # splits a file across processes and has crashed the PyQt6 workers.
+    if python -m pytest tests -q --cov -n auto --dist=loadfile "${pytest_marker_args[@]}"; then
         print_success "Pytest passed"
     else
         print_error "Pytest failed"
