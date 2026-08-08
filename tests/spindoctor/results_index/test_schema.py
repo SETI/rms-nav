@@ -532,7 +532,7 @@ def test_schema_meta_refuses_a_second_row(sqlite_url: str) -> None:
         sqlite_url: URL of an empty database file.
     """
     with opened(sqlite_url, create=True) as engine:  # noqa: SIM117
-        with pytest.raises(sqlalchemy.exc.IntegrityError):
+        with pytest.raises(sqlalchemy.exc.IntegrityError, match='ck_schema_meta_singleton'):
             with engine.begin() as connection:
                 connection.execute(
                     SCHEMA_META.insert().values(

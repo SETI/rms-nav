@@ -214,6 +214,14 @@ version gate has to resolve.
 
 Every failure `open_index` reports is a `ValueError` carrying the URL, so a
 consumer that wants to report the cause rather than crash catches one type.
+The exceptions a database driver raises are translated into that one --
+an unparseable URL, an unknown URL scheme, an absent driver, and the ordinary
+operational failures of a server that will not accept the connection -- each
+keeping the driver's own exception as its `__cause__`. Without the
+translation the most common operational failure of all, a PostgreSQL server
+that is down or misconfigured, would reach a consumer as a SQLAlchemy
+traceback naming neither the URL nor which of the three resolution levels
+supplied it.
 
 The engine factory is the only opener:
 
@@ -231,7 +239,11 @@ open_index(url: str, *, create: bool = False) -> Engine
   from the current opener's silent-create behavior.
 - Either way, a `schema_version` that does not match the version the code
   was built for raises, naming both versions and instructing the reader to
-  delete the database and re-ingest.
+  delete the database and re-ingest. The stamped version is read and checked
+  before anything is written, so a refused `create=True` open leaves the
+  database untouched; creating this version's tables inside a database
+  stamped with another version would leave a mixture no single version number
+  describes.
 
 There are no migrations. Ingest is cheap relative to navigation and entirely
 reproducible from the tree, so rebuilding is always available and always
@@ -260,6 +272,31 @@ this system that does not go through `FCPath` -- SQLAlchemy opens it with
 the C library directly. A SQLite URL whose path is on a filesystem that
 cannot honor its locking (probed at open with a `BEGIN IMMEDIATE` /
 rollback) is refused, naming PostgreSQL as the cross-machine option.
+
+**A read-only database is a separate case from a locking failure**, and the
+two are told apart rather than merged. A read-only mount honors locking
+perfectly and a consumer cannot corrupt anything, so refusing one and
+blaming its filesystem is a false diagnosis of a deployment the index is
+meant to support -- an archived copy, or a file shipped to workers on
+read-only media. The two are distinguished at connect: selecting the journal
+mode writes the database header, so its refusal (any `SQLITE_READONLY*`
+result code) is the read-only answer, and it is recorded on the connection
+instead of raised. `BEGIN IMMEDIATE` cannot answer the question on its own,
+because a rollback-journal database SQLite will never write still grants the
+reserved lock it asks for. From that record:
+
+- `create=False` **accepts** a read-only database and reads it.
+- `create=True` refuses it, with a message naming read-only as the cause and
+  saying to ingest a writable copy -- not the filesystem-locking message.
+- A genuine `SQLITE_BUSY` or `SQLITE_IOERR` refuses in both modes, with the
+  filesystem-and-PostgreSQL message.
+
+One read-only database cannot be read at all: SQLite reads a write-ahead-logged
+database through a shared-memory index it creates beside the file, so a
+write-ahead-logged copy in a directory that permits no writes is unreadable
+by construction. That is refused with a message saying exactly that and to
+copy the file somewhere writable, rather than letting a consumer's first
+query fail with a write error on a read.
 
 `sqlalchemy` becomes a runtime dependency in `[project] dependencies`. The
 PostgreSQL driver ships as an optional extra, `rms-spindoctor[postgres]`,
@@ -304,10 +341,10 @@ supplied the value, so a configuration file or an exported variable can opt out
 the same way; it is matched as the exact string, so a URL that merely contains
 the word is still a URL.
 
-There is no shared helper for the `--results-db` argument definition, because
-there is none for the results roots either: every program defines its own flag
-(the reprojection family shares `add_common_env_args` in
-`spindoctor/cli/reproj/args.py`, and that is the only grouping).
+The codebase convention for an argument of this kind is that each program
+defines its own, as it does for the results roots: the reprojection family
+shares `add_common_env_args` in `spindoctor/cli/reproj/args.py`, and that is
+the only grouping.
 
 A program that resolves a URL and cannot open it fails immediately with that
 error; it does not silently fall back to reading files. Falling back would
@@ -579,8 +616,17 @@ Declare `sqlalchemy` in `[project] dependencies` and the `postgres` extra in
 
 Tests: schema creation against SQLite; `create=False` raising on a missing
 database, a missing `schema_meta` row, and a version mismatch (each message
-asserted); the missing-driver message; Double-precision round-trip of a
-15-significant-digit value; boolean round-trip; the config-hash exclusion.
+asserted); a refused `create=True` open leaving the database unwritten; the
+`ValueError` guarantee on each route a driver exception takes (an absent
+driver, an unparseable URL, an unknown URL scheme, a server that refuses the
+connection), with the driver's exception kept as the `__cause__`; the
+missing-driver message, with the driver hidden by an import hook rather than
+by its happening to be absent from the environment; the read-only cases of
+section 2.5 (accepted by a consumer, refused by an ingest, and a
+write-ahead-logged copy that cannot be read) alongside a genuine lock failure
+in both modes; a refused open disposing the pool it built; Double-precision
+round-trip of a 15-significant-digit value; boolean round-trip; the
+config-hash exclusion.
 
 ### Phase 2 — Ingest and reporting onto the index
 
