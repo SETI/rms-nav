@@ -18,6 +18,7 @@ it: the catalog spans every schema on the server, so a lookup by table name
 alone answers from whichever schema happens to hold a table of that name.
 """
 
+import psycopg
 import pytest
 import sqlalchemy
 from tests.spindoctor.results_index.conftest import (
@@ -282,9 +283,13 @@ def test_comparing_a_boolean_column_to_an_integer_is_an_error(postgres_url: str)
         with pytest.raises(sqlalchemy.exc.ProgrammingError) as excinfo:
             with engine.connect() as connection:
                 connection.execute(sqlalchemy.text('SELECT * FROM techniques WHERE spurious = 0'))
+    original = excinfo.value.orig
+    # SQLAlchemy types the wrapped exception as any exception at all, so the
+    # driver's own class is stated before its result code is read.
+    assert isinstance(original, psycopg.Error)
     # 42883 is "undefined function", which is how the server reports that no
     # boolean-to-integer equality operator exists.
-    assert getattr(excinfo.value.orig, 'sqlstate', None) == UNDEFINED_FUNCTION
+    assert original.sqlstate == UNDEFINED_FUNCTION
 
 
 def test_the_same_basename_in_two_volumes_produces_two_rows(postgres_url: str) -> None:

@@ -200,45 +200,26 @@ def _refusal_of(route: _Route, monkeypatch: pytest.MonkeyPatch) -> ValueError:
 
 
 @pytest.mark.parametrize('route', REFUSAL_ROUTES)
-def test_a_translated_failure_keeps_the_driver_error_as_its_cause(
+def test_every_refusal_route_masks_its_password_and_keeps_everything_else(
     route: _Route, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Translating the type must not throw away what the driver actually said.
+    """Three things are true of every refusal, and one open shows all three.
+
+    Translating the type must not throw away what the driver actually said, so
+    the driver's exception stays the cause. The password reaches neither a run
+    log nor an operator. And masking must not cost the identification the
+    message exists for: a program resolves its URL from a command line, a
+    configuration file or the environment, and the URL is what says which of
+    them supplied this one.
 
     Parameters:
         route: The refusal route under test.
         monkeypatch: Fixture the import hook is installed through.
     """
-    assert isinstance(_refusal_of(route, monkeypatch).__cause__, route.cause)
-
-
-@pytest.mark.parametrize('route', REFUSAL_ROUTES)
-def test_a_refusal_does_not_repeat_the_password(
-    route: _Route, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """These messages reach run logs and operators; a password reaches neither.
-
-    Parameters:
-        route: The refusal route under test.
-        monkeypatch: Fixture the import hook is installed through.
-    """
-    assert route.password not in str(_refusal_of(route, monkeypatch))
-
-
-@pytest.mark.parametrize('route', REFUSAL_ROUTES)
-def test_a_masked_refusal_still_names_the_rest_of_the_url(
-    route: _Route, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Masking a password must not cost the identification the message is for.
-
-    A program resolves its URL from a command line, a configuration file or the
-    environment, and the URL is what says which of them supplied this one.
-
-    Parameters:
-        route: The refusal route under test.
-        monkeypatch: Fixture the import hook is installed through.
-    """
-    assert route.identifies in str(_refusal_of(route, monkeypatch))
+    refusal = _refusal_of(route, monkeypatch)
+    assert isinstance(refusal.__cause__, route.cause)
+    assert route.password not in str(refusal)
+    assert route.identifies in str(refusal)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -376,34 +357,23 @@ def test_the_rule_masks_a_password_and_nothing_else(case: _MaskingCase) -> None:
 
 
 @pytest.mark.parametrize(('url', 'expected', 'secret'), CREDENTIAL_PARAMS)
-def test_the_opener_does_not_repeat_a_password_it_could_not_parse(
+def test_the_opener_names_a_url_it_could_not_parse_by_its_masked_form(
     url: str, expected: str, secret: str
 ) -> None:
     """The rule is only worth anything where the opener actually reaches it.
 
     Asserting on the helper alone leaves the opener free to name the URL by some
     other route, which is exactly how a leak survived three reviews of the
-    helper.
+    helper. Both directions are asserted on the one refusal: the password is
+    gone, and what is left is the whole URL, which is what would otherwise leave
+    the reader nothing to correct.
 
     Parameters:
         url: The URL under test, carrying a password.
-        expected: What masking it produces, which this test does not read.
+        expected: The masked form the refusal must name it by.
         secret: The password that must not survive into the refusal.
     """
     with pytest.raises(ValueError) as excinfo:
         open_index(url)
     assert secret not in str(excinfo.value)
-
-
-@pytest.mark.parametrize(('url', 'expected', 'secret'), CREDENTIAL_PARAMS)
-def test_the_opener_still_names_the_url_it_masked(url: str, expected: str, secret: str) -> None:
-    """A message that named no URL would leave the reader nothing to correct.
-
-    Parameters:
-        url: The URL under test, carrying a password.
-        expected: The masked form the refusal must name it by.
-        secret: The password it carries, which this test does not read.
-    """
-    with pytest.raises(ValueError) as excinfo:
-        open_index(url)
     assert expected in str(excinfo.value)
