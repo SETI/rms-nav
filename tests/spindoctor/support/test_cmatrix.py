@@ -18,13 +18,17 @@ from typing import Any, cast
 import numpy as np
 import oops
 import pytest
-from tests.cmatrix_helpers import offset_from_correction
+from tests.cmatrix_helpers import (
+    offset_from_correction,
+    some_attitude,
+    synthetic_baseline,
+    synthetic_fov,
+)
 
 from spindoctor.obs import ObsSnapshotInst
 from spindoctor.spice_ids import CK_OBJECT_SCLK_ID
 from spindoctor.support.cmatrix import (
     _CASSINI_CK_FRAME_ID,
-    AttitudeBaseline,
     PointingSolution,
     _attitude_baseline,
     _build_pointing_solution,
@@ -41,12 +45,6 @@ from spindoctor.support.cmatrix import (
     compute_pointing,
 )
 from spindoctor.support.exceptions import NavPointingError
-
-# A Cassini-NAC-like square camera: 1024 pixels at 6 microradians each.  A
-# FlatFOV maps its boresight pixel to xy exactly (0, 0), which is what makes
-# the zero-offset identity guard exercisable.
-_PIXEL_RAD = 6.0e-6
-_SHAPE = (1024, 1024)
 
 # A planted offset with two distinct, non-zero, opposite-signed components,
 # so a sign flip or an axis swap cannot go unnoticed.
@@ -69,27 +67,6 @@ _NONEXISTENT_SCLK_ID = -999
 _IDENTITY = np.eye(3)
 
 
-def _fov() -> oops.fov.FOV:
-    """Build the synthetic camera every test in this module points."""
-    return oops.fov.FlatFOV((_PIXEL_RAD, _PIXEL_RAD), _SHAPE)
-
-
-def _some_attitude() -> np.ndarray:
-    """Return an arbitrary, deliberately non-axis-aligned J2000-to-camera rotation."""
-    ra, dec, twist = 0.7, -0.4, 1.9
-    rot_z = np.array(
-        [[np.cos(ra), np.sin(ra), 0.0], [-np.sin(ra), np.cos(ra), 0.0], [0.0, 0.0, 1.0]]
-    )
-    rot_y = np.array(
-        [[np.cos(dec), 0.0, -np.sin(dec)], [0.0, 1.0, 0.0], [np.sin(dec), 0.0, np.cos(dec)]]
-    )
-    rot_x = np.array(
-        [[1.0, 0.0, 0.0], [0.0, np.cos(twist), np.sin(twist)], [0.0, -np.sin(twist), np.cos(twist)]]
-    )
-    attitude: np.ndarray = rot_x @ rot_y @ rot_z
-    return attitude
-
-
 def _outcome_of(check: Callable[[], None]) -> str:
     """Report whether a validator accepted or refused its input.
 
@@ -104,29 +81,9 @@ def _outcome_of(check: Callable[[], None]) -> str:
     return 'accepted'
 
 
-def _baseline(
-    cmatrix_original: np.ndarray, oops_from_spice: np.ndarray = _IDENTITY
-) -> AttitudeBaseline:
-    """Build a synthetic AttitudeBaseline around a given attitude and flip."""
-    return AttitudeBaseline(
-        cmatrix_original=cmatrix_original,
-        oops_from_spice=oops_from_spice,
-        camera_frame='TEST_CAMERA',
-        camera_frame_id=-999999,
-        ck_frame_id=-999000,
-        start_et=100.0,
-        stop_et=100.5,
-        midtime_et=100.25,
-        exposure_s=0.5,
-        sclk_start='1/100.000',
-        sclk_midtime='1/100.250',
-        sclk_stop='1/100.500',
-    )
-
-
 def test_correction_maps_the_uncorrected_boresight_onto_the_corrected_one() -> None:
     """``M . d`` is the direction the unmodified FOV assigns to the boresight."""
-    fov = _fov()
+    fov = synthetic_fov()
     correction = _oops_correction_matrix(fov, _PLANTED_OFFSET)
     xy_los = fov.xy_from_uv(fov.uv_los)
     uv_los = fov.uv_los
@@ -140,7 +97,7 @@ def test_correction_maps_the_uncorrected_boresight_onto_the_corrected_one() -> N
 
 def test_correction_is_a_proper_rotation() -> None:
     """The correction matrix has unit determinant."""
-    correction = _oops_correction_matrix(_fov(), _PLANTED_OFFSET)
+    correction = _oops_correction_matrix(synthetic_fov(), _PLANTED_OFFSET)
     assert float(np.linalg.det(correction)) == pytest.approx(1.0, abs=1e-14)
 
 
@@ -151,10 +108,10 @@ def test_planted_offset_is_recovered_from_the_recorded_cmatrix() -> None:
     correction must return the planted ``(dv, du)``.  A flipped ``xy_offset``
     sign, or a transposed correction, returns the negated offset instead.
     """
-    fov = _fov()
-    original = _some_attitude()
+    fov = synthetic_fov()
+    original = some_attitude()
     solution = _build_pointing_solution(
-        _baseline(original), fov, offset_px=_PLANTED_OFFSET, rotation_fitted=False
+        synthetic_baseline(original), fov, offset_px=_PLANTED_OFFSET, rotation_fitted=False
     )
     assert solution.cmatrix is not None
     correction = np.asarray(solution.cmatrix, np.float64) @ original.T
@@ -165,9 +122,9 @@ def test_planted_offset_is_recovered_from_the_recorded_cmatrix() -> None:
 
 def test_zero_offset_leaves_the_cmatrix_identical_to_the_original() -> None:
     """A zero offset takes the identity guard and changes nothing at all."""
-    original = _some_attitude()
+    original = some_attitude()
     solution = _build_pointing_solution(
-        _baseline(original), _fov(), offset_px=(0.0, 0.0), rotation_fitted=False
+        synthetic_baseline(original), synthetic_fov(), offset_px=(0.0, 0.0), rotation_fitted=False
     )
     assert solution.cmatrix is not None
     assert np.array_equal(solution.cmatrix, solution.baseline.cmatrix_original)
@@ -175,7 +132,7 @@ def test_zero_offset_leaves_the_cmatrix_identical_to_the_original() -> None:
 
 def test_zero_offset_correction_is_exactly_the_identity() -> None:
     """The correction for a zero offset is the identity matrix, bit for bit."""
-    assert np.array_equal(_oops_correction_matrix(_fov(), (0.0, 0.0)), _IDENTITY)
+    assert np.array_equal(_oops_correction_matrix(synthetic_fov(), (0.0, 0.0)), _IDENTITY)
 
 
 def test_cassini_style_flip_reproduces_the_offset_in_the_spice_convention() -> None:
@@ -187,10 +144,13 @@ def test_cassini_style_flip_reproduces_the_offset_in_the_spice_convention() -> N
     the ``R`` conjugation leaves a correction of the right magnitude whose
     tangent-plane components are both negated.
     """
-    fov = _fov()
-    original = _some_attitude()
+    fov = synthetic_fov()
+    original = some_attitude()
     solution = _build_pointing_solution(
-        _baseline(original, _CASSINI_FLIP), fov, offset_px=_PLANTED_OFFSET, rotation_fitted=False
+        synthetic_baseline(original, _CASSINI_FLIP),
+        fov,
+        offset_px=_PLANTED_OFFSET,
+        rotation_fitted=False,
     )
     assert solution.cmatrix is not None
     corrected_oops = _CASSINI_FLIP @ np.asarray(solution.cmatrix, np.float64)
@@ -206,8 +166,8 @@ def test_flip_conjugation_changes_the_recorded_cmatrix() -> None:
     Guards the test above: if ``R^T M R`` happened to equal ``M`` here, that
     test would pass with the conjugation dropped.
     """
-    fov = _fov()
-    original = _some_attitude()
+    fov = synthetic_fov()
+    original = some_attitude()
     correction = _oops_correction_matrix(fov, _PLANTED_OFFSET)
     conjugated = _spice_cmatrix(original, correction, _CASSINI_FLIP)
     unconjugated = correction @ original
@@ -216,9 +176,12 @@ def test_flip_conjugation_changes_the_recorded_cmatrix() -> None:
 
 def test_fitted_rotation_records_the_original_but_no_corrected_cmatrix() -> None:
     """A result carrying a fitted camera rotation gets no corrected attitude."""
-    original = _some_attitude()
+    original = some_attitude()
     solution = _build_pointing_solution(
-        _baseline(original), _fov(), offset_px=_PLANTED_OFFSET, rotation_fitted=True
+        synthetic_baseline(original),
+        synthetic_fov(),
+        offset_px=_PLANTED_OFFSET,
+        rotation_fitted=True,
     )
     assert solution.cmatrix is None
     assert np.array_equal(solution.baseline.cmatrix_original, original)
@@ -226,9 +189,9 @@ def test_fitted_rotation_records_the_original_but_no_corrected_cmatrix() -> None
 
 def test_missing_offset_records_the_original_but_no_corrected_cmatrix() -> None:
     """A result with no offset gets no corrected attitude."""
-    original = _some_attitude()
+    original = some_attitude()
     solution = _build_pointing_solution(
-        _baseline(original), _fov(), offset_px=None, rotation_fitted=False
+        synthetic_baseline(original), synthetic_fov(), offset_px=None, rotation_fitted=False
     )
     assert solution.cmatrix is None
     assert np.array_equal(solution.baseline.cmatrix_original, original)
@@ -236,11 +199,14 @@ def test_missing_offset_records_the_original_but_no_corrected_cmatrix() -> None:
 
 def test_baseline_with_a_bad_determinant_raises() -> None:
     """A baseline attitude that is not a proper rotation is refused."""
-    reflected = _some_attitude()
+    reflected = some_attitude()
     reflected[0] = -reflected[0]
     with pytest.raises(NavPointingError, match='cmatrix_original is not a proper rotation'):
         _build_pointing_solution(
-            _baseline(reflected), _fov(), offset_px=_PLANTED_OFFSET, rotation_fitted=False
+            synthetic_baseline(reflected),
+            synthetic_fov(),
+            offset_px=_PLANTED_OFFSET,
+            rotation_fitted=False,
         )
 
 
@@ -249,36 +215,42 @@ def test_baseline_that_is_not_orthonormal_raises() -> None:
     sheared = np.array([[1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
     with pytest.raises(NavPointingError, match='cmatrix_original is not orthonormal'):
         _build_pointing_solution(
-            _baseline(sheared), _fov(), offset_px=_PLANTED_OFFSET, rotation_fitted=False
+            synthetic_baseline(sheared),
+            synthetic_fov(),
+            offset_px=_PLANTED_OFFSET,
+            rotation_fitted=False,
         )
 
 
 def test_baseline_with_a_bad_determinant_raises_without_an_offset() -> None:
     """The baseline is checked even when no corrected attitude is produced."""
-    reflected = _some_attitude()
+    reflected = some_attitude()
     reflected[0] = -reflected[0]
     with pytest.raises(NavPointingError, match='cmatrix_original is not a proper rotation'):
         _build_pointing_solution(
-            _baseline(reflected), _fov(), offset_px=None, rotation_fitted=False
+            synthetic_baseline(reflected), synthetic_fov(), offset_px=None, rotation_fitted=False
         )
 
 
 def test_corrected_cmatrix_that_is_not_a_rotation_raises() -> None:
     """A correction that is not a rotation is refused by the result check."""
     with pytest.raises(NavPointingError, match='cmatrix is not a proper rotation'):
-        _spice_cmatrix(_some_attitude(), np.diag([1.0, 1.0, 2.0]), _IDENTITY)
+        _spice_cmatrix(some_attitude(), np.diag([1.0, 1.0, 2.0]), _IDENTITY)
 
 
 def test_attitude_baseline_rejects_a_matrix_of_the_wrong_shape() -> None:
     """A baseline built from a non-3x3 matrix is refused at construction."""
     with pytest.raises(NavPointingError, match='expected a 3x3 matrix'):
-        _baseline(np.eye(4))
+        synthetic_baseline(np.eye(4))
 
 
 def test_recorded_matrices_are_read_only() -> None:
     """Recorded C-matrices cannot be mutated through the returned solution."""
     solution = _build_pointing_solution(
-        _baseline(_some_attitude()), _fov(), offset_px=_PLANTED_OFFSET, rotation_fitted=False
+        synthetic_baseline(some_attitude()),
+        synthetic_fov(),
+        offset_px=_PLANTED_OFFSET,
+        rotation_fitted=False,
     )
     assert solution.cmatrix is not None
     with pytest.raises(ValueError, match='read-only'):
@@ -292,7 +264,7 @@ def test_a_sub_pixel_offset_still_produces_a_real_correction() -> None:
     absorb a real sub-pixel offset would silently record every such image as
     needing no correction at all.
     """
-    fov = _fov()
+    fov = synthetic_fov()
     small = (0.05, -0.02)
     correction = _oops_correction_matrix(fov, small)
     assert not np.array_equal(correction, _IDENTITY)
@@ -313,11 +285,11 @@ def test_conjugation_direction_is_pinned_by_a_non_involutory_flip() -> None:
     inverse, so the two orders agree on real data and no real-frame test can
     tell them apart.  A quarter turn about Z can.
     """
-    fov = _fov()
+    fov = synthetic_fov()
     flip = _quarter_turn_about_z()
-    original = _some_attitude()
+    original = some_attitude()
     solution = _build_pointing_solution(
-        _baseline(original, flip), fov, offset_px=_PLANTED_OFFSET, rotation_fitted=False
+        synthetic_baseline(original, flip), fov, offset_px=_PLANTED_OFFSET, rotation_fitted=False
     )
     assert solution.cmatrix is not None
     recovered = offset_from_correction(
@@ -330,7 +302,7 @@ def test_conjugation_direction_is_pinned_by_a_non_involutory_flip() -> None:
 def test_the_two_conjugation_orders_differ_under_a_non_involutory_flip() -> None:
     """Guards the test above: the quarter turn really does tell them apart."""
     flip = _quarter_turn_about_z()
-    correction = _oops_correction_matrix(_fov(), _PLANTED_OFFSET)
+    correction = _oops_correction_matrix(synthetic_fov(), _PLANTED_OFFSET)
     forward = flip.T @ correction @ flip
     reversed_order = flip @ correction @ flip.T
     assert float(np.max(np.abs(forward - reversed_order))) > 1e-6
@@ -338,21 +310,24 @@ def test_the_two_conjugation_orders_differ_under_a_non_involutory_flip() -> None
 
 def test_a_nan_baseline_is_rejected() -> None:
     """A NaN attitude is refused rather than serialized as an invalid JSON token."""
-    corrupted = _some_attitude()
+    corrupted = some_attitude()
     corrupted[1, 1] = np.nan
     with pytest.raises(NavPointingError, match='cmatrix_original holds a non-finite value'):
         _build_pointing_solution(
-            _baseline(corrupted), _fov(), offset_px=_PLANTED_OFFSET, rotation_fitted=False
+            synthetic_baseline(corrupted),
+            synthetic_fov(),
+            offset_px=_PLANTED_OFFSET,
+            rotation_fitted=False,
         )
 
 
 def test_an_infinite_baseline_is_rejected() -> None:
     """An infinite attitude entry is refused for the same reason."""
-    corrupted = _some_attitude()
+    corrupted = some_attitude()
     corrupted[0, 2] = np.inf
     with pytest.raises(NavPointingError, match='cmatrix_original holds a non-finite value'):
         _build_pointing_solution(
-            _baseline(corrupted), _fov(), offset_px=None, rotation_fitted=False
+            synthetic_baseline(corrupted), synthetic_fov(), offset_px=None, rotation_fitted=False
         )
 
 
@@ -360,7 +335,7 @@ def test_a_nan_correction_is_rejected_by_the_result_check() -> None:
     """A NaN reaching the corrected matrix is refused too."""
     corrupted = np.eye(3) * np.nan
     with pytest.raises(NavPointingError, match='cmatrix holds a non-finite value'):
-        _spice_cmatrix(_some_attitude(), corrupted, _IDENTITY)
+        _spice_cmatrix(some_attitude(), corrupted, _IDENTITY)
 
 
 def _cassini_identity() -> _FrameIdentity:
@@ -484,7 +459,7 @@ def test_a_determinant_just_inside_tolerance_is_accepted() -> None:
     ``1 + 1e-11`` moves its determinant by about ``3e-11``, comfortably
     inside the documented ``1e-9``.
     """
-    nearly = _some_attitude() * (1.0 + 1e-11)
+    nearly = some_attitude() * (1.0 + 1e-11)
     assert _outcome_of(lambda: _validate_rotation(nearly, 'test matrix')) == 'accepted'
 
 
@@ -496,7 +471,7 @@ def test_a_determinant_just_outside_tolerance_is_refused() -> None:
     documented ``1e-9``, so widening the tolerance fails this test.
     """
     with pytest.raises(NavPointingError, match='is not a proper rotation'):
-        _validate_rotation(_some_attitude() * (1.0 + 1e-8), 'test matrix')
+        _validate_rotation(some_attitude() * (1.0 + 1e-8), 'test matrix')
 
 
 def test_a_shear_just_inside_tolerance_is_accepted() -> None:
@@ -590,22 +565,26 @@ def test_a_non_finite_observation_time_is_refused(poisoned: dict[str, float], la
 def test_attitude_baseline_refuses_a_nan_matrix_at_construction() -> None:
     """Construction itself enforces finiteness rather than trusting callers."""
     with pytest.raises(NavPointingError, match='cmatrix_original holds a non-finite value'):
-        _baseline(np.full((3, 3), np.nan))
+        synthetic_baseline(np.full((3, 3), np.nan))
 
 
 def test_attitude_baseline_refuses_a_non_rotation_flip_at_construction() -> None:
     """The flip matrix is validated at construction alongside the attitude."""
     with pytest.raises(NavPointingError, match='oops_from_spice is not a proper rotation'):
-        _baseline(_some_attitude(), np.diag([1.0, 1.0, 2.0]))
+        synthetic_baseline(some_attitude(), np.diag([1.0, 1.0, 2.0]))
 
 
 def test_pointing_solution_refuses_a_nan_corrected_matrix_at_construction() -> None:
     """A NaN corrected matrix is refused when the solution is built."""
     with pytest.raises(NavPointingError, match='cmatrix holds a non-finite value'):
-        PointingSolution(baseline=_baseline(_some_attitude()), cmatrix=np.full((3, 3), np.nan))
+        PointingSolution(
+            baseline=synthetic_baseline(some_attitude()), cmatrix=np.full((3, 3), np.nan)
+        )
 
 
 def test_pointing_solution_refuses_a_non_rotation_corrected_matrix_at_construction() -> None:
     """A corrected matrix that is not a proper rotation is refused at construction."""
     with pytest.raises(NavPointingError, match='cmatrix is not a proper rotation'):
-        PointingSolution(baseline=_baseline(_some_attitude()), cmatrix=np.diag([1.0, 1.0, 2.0]))
+        PointingSolution(
+            baseline=synthetic_baseline(some_attitude()), cmatrix=np.diag([1.0, 1.0, 2.0])
+        )

@@ -49,6 +49,7 @@ when oops grows its own corrected-attitude API this module's body is replaced
 and its interface stays.
 """
 
+import enum
 import math
 from dataclasses import dataclass
 
@@ -67,15 +68,46 @@ from spindoctor.spice_ids import CK_OBJECT_SCLK_ID, VOYAGER_CK_OBJECT_ID
 from spindoctor.support.exceptions import NavPointingError
 from spindoctor.support.types import NDArrayFloatType
 
-# The offset-to-attitude conversion is deliberately behind one public
-# function: when oops grows its own corrected-attitude API this module's body
-# is replaced and only ``compute_pointing`` has to survive the swap.  The
-# helpers below it are private for that reason, not because they are trivial.
+# The offset-to-attitude conversion and its inverse are deliberately behind
+# two public functions: when oops grows its own corrected-attitude API this
+# module's body is replaced and only ``compute_pointing`` and
+# ``apply_cmatrix_to_obs`` have to survive the swap.  The helpers below them
+# are private for that reason, not because they are trivial.
 __all__ = [
+    'CMATRIX_BASELINE_MISMATCH',
+    'CMATRIX_FOREIGN_MIDTIME',
+    'CMATRIX_UNKNOWN_HOST',
+    'MALFORMED_POINTING',
     'AttitudeBaseline',
+    'CmatrixApplication',
     'PointingSolution',
+    'apply_cmatrix_to_obs',
     'compute_pointing',
 ]
+
+# The machine-readable classifications ``apply_cmatrix_to_obs`` stamps onto
+# the ``NavPointingError`` it raises, so a caller that degrades per image can
+# tally its degradations per reason without parsing messages.
+MALFORMED_POINTING = 'malformed_pointing'
+CMATRIX_FOREIGN_MIDTIME = 'cmatrix_foreign_midtime'
+CMATRIX_BASELINE_MISMATCH = 'cmatrix_baseline_mismatch'
+CMATRIX_UNKNOWN_HOST = 'cmatrix_unknown_host'
+
+
+class CmatrixApplication(enum.Enum):
+    """What ``apply_cmatrix_to_obs`` did to the observation.
+
+    ``FRAME_REPLACED`` is the ordinary outcome: the observation's frame now
+    carries the corrected attitude.  ``POOL_ALREADY_CORRECTED`` is the
+    distinguished no-op: the furnished kernel pool already answered the
+    corrected attitude, so the observation was left untouched -- it is
+    already right, and applying the correction again (or falling back to the
+    pixel offset) would corrupt it by roughly twice the navigated offset.
+    The member values are the short reason strings run-level accounting uses.
+    """
+
+    FRAME_REPLACED = 'cmatrix'
+    POOL_ALREADY_CORRECTED = 'pool_already_corrected'
 
 
 # The object each mission's C-kernels describe.  The correction is measured at
@@ -114,6 +146,18 @@ _FLIP_TOL = 1e-9
 # A C-matrix must be a proper rotation to this tolerance; anything looser is a
 # defect in the frame chain rather than something to orthonormalize away.
 _ROTATION_TOL = 1e-9
+
+# How far a recorded midtime may sit from the observation's own before the
+# record is judged to belong to a different observation.  The two are the
+# same float64 computation serialized unrounded, so they agree exactly; a
+# microsecond leaves room for nothing but representation noise.
+_MIDTIME_TOL_S = 1e-6
+
+# The numpy dtype kinds a recorded C-matrix may arrive as: signed and
+# unsigned integers and floats.  Booleans ('b') and text ('U', 'S') are
+# excluded although both convert to float64 without complaint, which is what
+# would let nine ``True`` values pass as an identity rotation.
+_REAL_NUMBER_KINDS = frozenset({'i', 'u', 'f'})
 
 # Below this cross-product norm the corrected and uncorrected boresights are
 # the same direction to sub-nanoradian precision and the correction is exactly
@@ -473,6 +517,162 @@ def compute_pointing(
     return _build_pointing_solution(
         baseline, obs.fov, offset_px=offset_px, rotation_fitted=rotation_fitted
     )
+
+
+def _validated_record_rotation(matrix: NDArrayFloatType, label: str) -> NDArrayFloatType:
+    """Validate one recorded C-matrix for the reader, refusing rather than coercing.
+
+    Parameters:
+        matrix: The recorded 3x3 rotation.
+        label: Name used in refusal messages.
+
+    Returns:
+        A read-only float64 copy.
+
+    Raises:
+        NavPointingError: with reason ``malformed_pointing`` if the value is
+            not a 3x3 array of real numbers forming a proper orthonormal
+            rotation.  Booleans are refused although they convert to float64
+            without complaint, since nine ``True`` values would otherwise
+            pass as an identity rotation.
+    """
+    given = np.asarray(matrix)
+    if given.dtype.kind not in _REAL_NUMBER_KINDS:
+        raise NavPointingError(
+            f'{label} holds values that are not real numbers (dtype {given.dtype})',
+            reason=MALFORMED_POINTING,
+        )
+    try:
+        out = _as_readonly_3x3(given)
+        _validate_rotation(out, label)
+    except NavPointingError as exc:
+        raise NavPointingError(str(exc), reason=MALFORMED_POINTING) from exc
+    return out
+
+
+def apply_cmatrix_to_obs(
+    obs: ObsSnapshotInst,
+    cmatrix: NDArrayFloatType,
+    cmatrix_original: NDArrayFloatType,
+    midtime_et: float,
+) -> CmatrixApplication:
+    """Point an observation at its recorded corrected attitude.
+
+    This is the reading half of :func:`compute_pointing`: it inverts the
+    writer's conjugation, replacing the observation's frame with one whose
+    midtime attitude is the recorded ``cmatrix``, while the field of view is
+    left untouched.  With ``C_oops`` the observation frame's own midtime
+    attitude, the replacement is ``R_hat . cmatrix`` where ``R_hat = C_oops .
+    cmatrix_original^T`` -- the observation's attitude composed with the
+    recorded correction.  A record whose correction is the identity
+    (``cmatrix`` equal to ``cmatrix_original`` as arrays) short-circuits to
+    ``C_oops`` itself, so no correction means exactly no change.
+
+    Before anything is applied, the record is gated:
+
+    1. Both matrices must be proper rotations of real numbers and
+       ``midtime_et`` finite.
+    2. ``midtime_et`` must equal the observation's own midtime to a
+       microsecond: the recorded attitude is a midtime attitude, so a record
+       from another observation is refused rather than applied.
+    3. ``R_hat`` must equal the instrument's constant oops-from-SPICE flip to
+       the writer's own tolerance.  Because ``R_hat`` mixes the observation's
+       *current* attitude with the *recorded* baseline, this one inequality
+       fails on a changed kernel pool, a transposed or swapped record, and a
+       changed host convention alike.
+    4. When that gate fails, one probe distinguishes the known non-defect
+       state: a pool that already answers the corrected attitude (corrected
+       kernels furnished at load time).  There the observation is already
+       right and nothing is applied.
+
+    The replacement frame is built unregistered, so batch loops pollute no
+    global oops frame state, and it carries zero angular velocity where the
+    original carried the spacecraft's -- no switched consumer reads frame
+    omega, but a future velocity-aware one must not consume it from the
+    replaced frame.
+
+    Parameters:
+        obs: The observation to point, mutated in place.
+        cmatrix: The recorded corrected J2000-to-camera rotation, SPICE
+            convention, at the exposure midtime.
+        cmatrix_original: The recorded uncorrected rotation, same convention
+            and epoch.
+        midtime_et: The recorded exposure midtime, TDB seconds past J2000.
+
+    Returns:
+        ``CmatrixApplication.FRAME_REPLACED`` when the observation's frame
+        was replaced with the corrected attitude, or
+        ``CmatrixApplication.POOL_ALREADY_CORRECTED`` when the furnished pool
+        already answered the corrected attitude and the observation was
+        deliberately left untouched -- the caller must then apply nothing
+        else, in particular not the pixel offset, which would double-correct.
+
+    Raises:
+        NavPointingError: for every expected failure, carrying a
+            machine-readable ``reason``: ``malformed_pointing`` when either
+            matrix or the midtime is unusable, ``cmatrix_unknown_host`` when
+            the observation's instrument has no frame mapping to gate
+            against, ``cmatrix_foreign_midtime`` when the record belongs to
+            another observation, and ``cmatrix_baseline_mismatch`` when
+            ``R_hat`` fails its gate for no known non-defect reason.  The
+            observation is never mutated on a raise.
+    """
+    corrected = _validated_record_rotation(cmatrix, 'cmatrix')
+    original = _validated_record_rotation(cmatrix_original, 'cmatrix_original')
+    if isinstance(midtime_et, bool) or not isinstance(midtime_et, int | float):
+        raise NavPointingError(
+            f'the recorded midtime_et is not a real number: {midtime_et!r}',
+            reason=MALFORMED_POINTING,
+        )
+    if not math.isfinite(float(midtime_et)):
+        # NaN in particular: it makes the midtime gate's inequality false in
+        # both directions, which would wave a foreign record through the one
+        # check that ties it to this observation.
+        raise NavPointingError(
+            f'the recorded midtime_et is not finite: {midtime_et!r}',
+            reason=MALFORMED_POINTING,
+        )
+    identity = _frame_identity(obs)
+    if identity is None:
+        raise NavPointingError(
+            f'the observation host {type(obs).__name__} has no SPICE camera frame mapping, '
+            f'so no expected oops-from-SPICE flip exists to gate the recorded attitude against',
+            reason=CMATRIX_UNKNOWN_HOST,
+        )
+    obs_midtime = float(obs.midtime)
+    if abs(obs_midtime - float(midtime_et)) > _MIDTIME_TOL_S:
+        raise NavPointingError(
+            f'the recorded midtime_et {float(midtime_et)!r} belongs to a different observation: '
+            f'this one exposes at midtime {obs_midtime!r}',
+            reason=CMATRIX_FOREIGN_MIDTIME,
+        )
+    c_oops = _observation_attitude(obs, obs_midtime)
+    if np.array_equal(corrected, original):
+        # Two float64 matrix products do not cancel to bit precision, so
+        # without this short-circuit "no correction means no change" would be
+        # false at the 1e-16 level; it mirrors the writer's identity guard.
+        c_oops_corrected: NDArrayFloatType = np.asarray(c_oops, dtype=np.float64)
+    else:
+        r_hat = np.asarray(c_oops, dtype=np.float64) @ original.T
+        expected = np.asarray(identity.oops_from_spice, dtype=np.float64)
+        if not np.allclose(r_hat, expected, rtol=0.0, atol=_FLIP_TOL):
+            if np.allclose(c_oops, expected @ corrected, rtol=0.0, atol=_FLIP_TOL):
+                # The pool already answers the corrected attitude -- corrected
+                # kernels furnished at load time.  The observation is already
+                # right; applying the correction again, or the offset, would
+                # move it by roughly twice the navigated offset.
+                return CmatrixApplication.POOL_ALREADY_CORRECTED
+            raise NavPointingError(
+                f'the rotation between the observation frame and the recorded '
+                f'{identity.camera_frame} baseline is {r_hat.tolist()!r}, which differs from the '
+                f'expected {expected.tolist()!r} by up to '
+                f'{float(np.max(np.abs(r_hat - expected)))!r}; the kernel pool, the record, or '
+                f'the host convention has changed since navigation',
+                reason=CMATRIX_BASELINE_MISMATCH,
+            )
+        c_oops_corrected = r_hat @ corrected
+    obs.frame = oops.frame.Cmatrix(c_oops_corrected)
+    return CmatrixApplication.FRAME_REPLACED
 
 
 def _ck_object_sclk_id(ck_frame_id: int) -> int:
