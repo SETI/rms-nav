@@ -10,8 +10,10 @@ sd_mosaic_body    -- equivalent to ``sd_mosaic body ...``
 Two-pass workflow
 -----------------
 1. Reprojection pass: for each image in the dataset, load the observation,
-   optionally apply a navigation offset from ``--nav-results-root``, call
-   ``BodyMosaic.reproject()`` / ``RingMosaic.reproject()``, and save the result.
+   optionally apply the recorded navigation pointing from ``--nav-results-root``
+   (the corrected C-matrix when the metadata carries one, else the pixel
+   offset), call ``BodyMosaic.reproject()`` / ``RingMosaic.reproject()``, and
+   save the result.
    Per-image logs are written under the log root, not beside the products:
    ``{log_root}/reproj/<subject>/<results_path_stub>_<timestamp>.log``.
    Existing files are skipped unless ``--overwrite`` is given.
@@ -50,7 +52,7 @@ from spindoctor.cli.reproj.args import (
     add_ring_args,
 )
 from spindoctor.cli.reproj.factories import build_body_mosaic, build_ring_mosaic
-from spindoctor.cli.reproj.offsets import apply_offset_to_obs, load_offset_if_any
+from spindoctor.cli.reproj.offsets import apply_pointing_to_obs, load_pointing_if_any
 from spindoctor.cli.reproj.paths import mosaic_output_path, per_image_output_path
 from spindoctor.cli.reproj.reproject import reproject_one_body, reproject_one_ring
 from spindoctor.config import (
@@ -137,15 +139,20 @@ def _run_reproject_pass(
         ``(n_done, n_skipped, n_failed, n_uncorrected)`` counts for the pass
         (dry-run does not increment ``n_done``; skipped-existing increments
         ``n_skipped``; an image whose reprojection raised increments
-        ``n_failed``; an image reprojected without a navigation offset
+        ``n_failed``; an image reprojected with no pointing correction at all
         increments ``n_uncorrected``, and is counted in ``n_done`` as well
-        because it did produce a product).
+        because it did produce a product).  Every degraded pointing outcome
+        is also tallied per reason and the tally reported to the run log at
+        the end of the pass, so a batch that quietly fell back -- to the
+        offset path, to an already-corrected pool, or to no correction --
+        says so in one place.
     """
     assert DATASET is not None
     n_done = 0
     n_skipped = 0
     n_failed = 0
     n_uncorrected = 0
+    pointing_reasons: dict[str, int] = {}
     for imagefiles in DATASET.yield_image_files_from_arguments(args):
         image_file = imagefiles.image_files[0]
         out_path = per_image_output_path(
@@ -187,21 +194,31 @@ def _run_reproject_pass(
                     image_path = image_file.image_file_path.absolute()
                     obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
 
-                    lookup = load_offset_if_any(nav_results_root_path, image_file)
-                    if lookup.offset is not None:
-                        apply_offset_to_obs(
-                            cast(ObsSnapshotInst, obs), lookup.offset[0], lookup.offset[1]
-                        )
-                    elif lookup.reason is not None:
+                    selection = load_pointing_if_any(nav_results_root_path, image_file)
+                    applied = apply_pointing_to_obs(
+                        cast(ObsSnapshotInst, obs),
+                        selection,
+                        subject=str(image_file.image_file_url),
+                    )
+                    if applied.reason is not None:
                         # The detailed account stays in the image's log; the
-                        # run needs to know the product is registered on
-                        # uncorrected pointing, which is not visible in it.
-                        n_uncorrected += 1
-                        MAIN_LOGGER.warning(
-                            '%s: reprojecting with uncorrected pointing (%s)',
-                            image_file.image_file_url,
-                            lookup.reason,
+                        # run needs the degradation counted per reason, which
+                        # is not visible in the product.
+                        pointing_reasons[applied.reason] = (
+                            pointing_reasons.get(applied.reason, 0) + 1
                         )
+                    # Counted outside the reason branch: a run configured
+                    # with no nav results root corrects nothing and carries
+                    # no reason, and an entirely-uncorrected batch is
+                    # exactly what this count exists to make visible.
+                    if applied.source == 'none':
+                        n_uncorrected += 1
+                        if applied.reason is not None:
+                            MAIN_LOGGER.warning(
+                                '%s: reprojecting with uncorrected pointing (%s)',
+                                image_file.image_file_url,
+                                applied.reason,
+                            )
 
                     img_label = (
                         args.image_name
@@ -235,6 +252,8 @@ def _run_reproject_pass(
                 if handler is not pdslogger.NULL_HANDLER:
                     handler.close()
 
+    if len(pointing_reasons) > 0:
+        MAIN_LOGGER.info('Pointing degradations by reason: %s', pointing_reasons)
     return n_done, n_skipped, n_failed, n_uncorrected
 
 
