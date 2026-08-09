@@ -30,6 +30,8 @@ from tests.spindoctor.cli.reproj.conftest import (
     FITTED_STUB,
     MALFORMED_OFFSET_STUB,
     MIDTIME_ET,
+    NAN_MIDTIME_STUB,
+    NESTED_CMATRIX_STUB,
     NO_MIDTIME_STUB,
     NO_OFFSET_KEY_STUB,
     NO_POINTING_STUB,
@@ -85,6 +87,7 @@ _SAME_REASON = [
     (NULL_OFFSET_STUB, 'null_offset'),
     (NO_MIDTIME_STUB, 'malformed_pointing'),
     (NOT_A_ROTATION_STUB, 'malformed_pointing'),
+    (NAN_MIDTIME_STUB, 'malformed_pointing'),
     (UNNAVIGATED_STUB, 'no_metadata'),
 ]
 
@@ -108,6 +111,7 @@ def test_both_paths_report_the_same_reason(
         (NULL_OFFSET_STUB, PointingMechanism.NONE),
         (NO_MIDTIME_STUB, PointingMechanism.OFFSET),
         (NOT_A_ROTATION_STUB, PointingMechanism.OFFSET),
+        (NAN_MIDTIME_STUB, PointingMechanism.OFFSET),
         (UNNAVIGATED_STUB, PointingMechanism.NONE),
     ],
 )
@@ -240,6 +244,28 @@ def test_neither_path_supplies_a_pointing_for_an_unusable_offset(
 ) -> None:
     """Which is what makes the differing reason a name rather than a product."""
     assert _selection(sources, 'index', stub).mechanism is PointingMechanism.NONE
+
+
+def test_the_classifier_accepts_a_rotation_written_as_a_nesting(
+    sources: dict[str, PointingSource],
+) -> None:
+    """A 3x3 nesting is a shape the classifier reads and the producer never writes."""
+    assert _selection(sources, 'file', NESTED_CMATRIX_STUB).mechanism is PointingMechanism.CMATRIX
+
+
+def test_the_index_cannot_store_a_rotation_written_as_a_nesting(
+    sources: dict[str, PointingSource],
+) -> None:
+    """And is the one record class whose product differs between the paths.
+
+    Ingest stores a rotation only in the nine row-major floats its producer
+    writes, so a nested one becomes a NULL ``cmatrix`` beside a stored
+    baseline, which the classifier then reads as a fitted rotation and answers
+    with the offset. Pinned rather than left to be discovered: no navigation
+    writes this shape, and one that started to would change what an
+    index-backed run built.
+    """
+    assert _selection(sources, 'index', NESTED_CMATRIX_STUB).mechanism is PointingMechanism.OFFSET
 
 
 def test_a_document_that_is_not_an_object_has_no_row_at_all(

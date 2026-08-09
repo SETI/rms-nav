@@ -817,19 +817,24 @@ The reason vocabulary maps as follows, and the mapping table belongs in the
 | `invalid_offset_type`, `non_finite_offset`, `malformed_offset` | unreachable: ingest coerces such an offset to NULL (surfaces as `null_offset`) |
 | `missing_offset_key` | unreachable: a rebuilt record always carries the key (surfaces as `null_offset`) |
 
-One further difference is not a row of that table, because it is the same
+Two further differences are not rows of that table, because each is the same
 record classified differently rather than a reason reached from a different
-one: a document whose `cmatrix` ingest could not store -- one that is not nine
-finite numbers, whether malformed or written in the nested 3x3 form the
-classifier also accepts -- is `malformed_pointing` via files and
-`no_cmatrix_rotation_fitted` via the index. Both fall back to the offset; they
-differ in what they call it.
+one. Both come of ingest storing a rotation only in the nine row-major floats
+its producer writes, so anything else becomes a NULL `cmatrix` beside a stored
+baseline, which is what a fitted-rotation result looks like. A `cmatrix` that is
+present and unusable is `malformed_pointing` via files and
+`no_cmatrix_rotation_fitted` via the index; both fall back to the offset and
+differ only in what they call it. A `cmatrix` written as a 3x3 nesting -- a
+shape the classifier accepts and the navigator never writes -- selects the
+C-matrix mechanism via files and the offset via the index, which is the one
+record class whose *product* differs, and it is a shape no navigation produces.
 
-The last rows are real behavioral differences between the paths, and the
-docstring states them rather than papering over them. Everything a product is
-built from -- the mechanism, the matrices, the midtime, the offset -- is
-identical in the two paths for every record ingest stored. The index path logs
-the same per-image `IMAGE_LOGGER` warnings, with the same message shapes.
+These are real behavioral differences between the paths, and the module
+docstring states them rather than papering over them. For every record the
+navigator wrote and ingest stored, everything a product is built from -- the
+mechanism, the matrices, the midtime, the offset -- is identical in the two
+paths. The index path logs the same per-image `IMAGE_LOGGER` warnings, with the
+same message shapes.
 
 **`ResultsFilter`.** When a URL is given, the presence, absence, and error
 filters become one query per enumeration instead of a walk per volume plus
@@ -1214,6 +1219,15 @@ Details settled during execution:
   the index, and with it the backplane stage's refusal of a success-status
   record carrying no `offset` field: through an index that record is processed
   on uncorrected pointing and counted, as the mosaic drivers already treat it.
+- **A rotation written as a 3x3 nesting is the one shape whose product
+  differs.** The classifier accepts both that and the flat nine floats; ingest
+  stores only the flat form, so a nested one becomes a NULL `cmatrix` beside a
+  stored baseline and the index answers with the offset where the file path
+  applies the C-matrix. Widening ingest to accept the nesting was considered and
+  not done: the navigator writes the flat form, ingest reads the current
+  document schema by design, and the leniency belongs to the classifier rather
+  than to the store. The behavior is pinned by a test so it cannot change
+  unnoticed.
 - **Reading a record refuses a document that is valid JSON and not an object.**
   The backplane stage cast the parsed document to a mapping and reached an
   attribute error from the middle of a batch run; the seam has to return a

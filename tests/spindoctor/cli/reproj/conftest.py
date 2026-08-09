@@ -117,6 +117,8 @@ NO_OFFSET_KEY_STUB = f'{VOLUME}/N107_1_CALIB'
 NON_FINITE_OFFSET_STUB = f'{VOLUME}/N108_1_CALIB'
 BOOLEAN_OFFSET_STUB = f'{VOLUME}/N109_1_CALIB'
 NOT_A_ROTATION_STUB = f'{VOLUME}/N110_1_CALIB'
+NAN_MIDTIME_STUB = f'{VOLUME}/N111_1_CALIB'
+NESTED_CMATRIX_STUB = f'{VOLUME}/N112_1_CALIB'
 UNNAVIGATED_STUB = f'{VOLUME}/N999_1_CALIB'
 """Stubs of the fixture tree; the last is deliberately never written."""
 
@@ -188,6 +190,25 @@ def _reason_tree() -> dict[str, dict[str, Any]]:
             offset=OFFSET,
             times=TIMES,
             pointing={**POINTING, 'cmatrix': [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]},
+        ),
+        # A midtime that is a number and is not one: NaN defeats every
+        # comparison, so a guard written as one does not hold it, and the gate
+        # it would reach ties a recorded attitude to its observation.
+        NAN_MIDTIME_STUB: document(
+            NAN_MIDTIME_STUB,
+            offset=OFFSET,
+            times={**TIMES, 'midtime_et': float('nan')},
+            pointing=POINTING,
+        ),
+        # A rotation written as a 3x3 nesting rather than as the nine row-major
+        # floats its producer writes.  The classifier accepts both shapes and
+        # ingest stores only the one the producer writes, which is the one
+        # record class whose product differs between the two paths.
+        NESTED_CMATRIX_STUB: document(
+            NESTED_CMATRIX_STUB,
+            offset=OFFSET,
+            times=TIMES,
+            pointing={**POINTING, 'cmatrix': [CMATRIX[0:3], CMATRIX[3:6], CMATRIX[6:9]]},
         ),
     }
     # The two shapes of "no usable offset on a successful record" are made here

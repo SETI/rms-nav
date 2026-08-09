@@ -71,17 +71,24 @@ whichever reason describes the row that ingest actually wrote:
 |                                       | offset surfaces as ``null_offset``       |
 +---------------------------------------+------------------------------------------+
 
-One further difference has no row of its own because it is not a reason the file
-path reports for a different record, but the same record classified differently:
-a document whose ``cmatrix`` is present and unusable is ``malformed_pointing``
-via files and ``no_cmatrix_rotation_fitted`` via the index, because ingest stores
-an unusable matrix as NULL and a NULL ``cmatrix`` beside a recorded baseline is
-what a fitted-rotation result looks like.  Both fall back to the offset; they
-differ in what they call it.
+Two further differences have no row of their own, because they are not one
+reason reported in place of another but the same record classified differently.
+Both come of ingest storing a rotation only in the nine row-major floats its
+producer writes, so anything else becomes a NULL ``cmatrix`` beside a stored
+baseline -- which is what a fitted-rotation result looks like:
+
+* A ``cmatrix`` that is present and unusable is ``malformed_pointing`` via files
+  and ``no_cmatrix_rotation_fitted`` via the index.  Both fall back to the
+  offset; they differ in what they call it.
+* A ``cmatrix`` written as a 3x3 nesting -- a shape this module's classifier
+  accepts and the navigator never writes -- selects the C-matrix mechanism via
+  files and the offset via the index.  This is the one record class whose
+  *product* differs between the two, and it is a shape no navigation produces.
 
 These are real behavioral differences and are stated rather than papered over.
-Everything a product is built from -- the mechanism, the matrices, the midtime,
-the offset -- is identical in the two paths for every record ingest stored.
+For every record the navigator wrote and ingest stored, everything a product is
+built from -- the mechanism, the matrices, the midtime, the offset -- is
+identical in the two paths.
 """
 
 import json
