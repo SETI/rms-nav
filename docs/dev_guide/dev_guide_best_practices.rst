@@ -43,15 +43,15 @@ Imports
   * :mod:`spindoctor.results_index.selection` in
     ``spindoctor/dataset/results_filter.py``, imported inside the branch that
     was given a results-index URL. Every navigation run imports
-    ``spindoctor.dataset``, and most name no index, so the top-level import
+    :mod:`spindoctor.dataset`, and most name no index, so the top-level import
     would put SQLAlchemy on the navigation critical path for all of them. A
-    test asserts in a subprocess that importing ``spindoctor.dataset`` imports
-    no ``sqlalchemy`` module.
+    test asserts in a subprocess that importing :mod:`spindoctor.dataset`
+    imports no ``sqlalchemy`` module.
   * :func:`spindoctor.results_index.masked_url` in
     ``spindoctor/support/command_line.py``, imported only when the command line
     being logged actually carries a connection URL. The run banner of every
-    program passes through that module, and ``spindoctor.support.misc`` is
-    itself reached from ``spindoctor.dataset``, so a top-level import there
+    program passes through that module, and :mod:`spindoctor.support.misc` is
+    itself reached from :mod:`spindoctor.dataset`, so a top-level import there
     would defeat the guarantee above as well. The same subprocess assertion
     covers it.
 
