@@ -33,7 +33,7 @@ Modules:
     ``constants``
         Common mathematical constants (e.g. ``PI``, ``HALFPI``).
     ``exceptions``
-        ``NavContractError`` — typed exception for internal contract violations.
+        ``NavContractError`` -- typed exception for internal contract violations.
         ``NavPointingError`` names the failures the corrected-attitude computation
         expects, so a caller can absorb exactly those.
     ``nav_base``
@@ -52,12 +52,12 @@ Modules:
     ``status_reason``
         ``NavStatusReason`` enum carried on every ``NavResult``.
     ``noise_estimate``
-        ``estimate_image_noise_sigma`` — robust per-image noise estimator.
+        ``estimate_image_noise_sigma`` -- robust per-image noise estimator.
     ``image_quality``
-        ``saturation_mask`` and ``cosmic_ray_mask`` — global image-quality
+        ``saturation_mask`` and ``cosmic_ray_mask`` -- global image-quality
         masks consumed by extractors.
     ``distance_transform``
-        ``apply_translation`` and ``sample_dt_bilinear`` — chamfer-matching
+        ``apply_translation`` and ``sample_dt_bilinear`` -- chamfer-matching
         helpers built on top of an externally-computed distance transform.
 """
 
