@@ -31,6 +31,7 @@ from tests.spindoctor.cli.stats.conftest import (
 )
 
 from spindoctor.cli.stats.ingest import (
+    TaskResult,
     complete_ingest_tasks,
     fan_out_ingest_tasks,
     ingest_task_share,
@@ -316,7 +317,13 @@ def test_the_shares_write_the_rows_a_single_pass_writes_on_postgresql(
         tasks = fan_out_ingest_tasks(
             engine, [root.as_posix()], share_size=2, logger=quiet_logger
         ).tasks
-        results = [ingest_task_share(engine, task['data'], logger=quiet_logger) for task in tasks]
+        results = [
+            TaskResult(
+                task_id=str(task['task_id']),
+                result=ingest_task_share(engine, task['data'], logger=quiet_logger),
+            )
+            for task in tasks
+        ]
         complete_ingest_tasks(engine, [root.as_posix()], results, logger=quiet_logger)
         with engine.connect() as connection:
             found = list(
@@ -344,7 +351,13 @@ def test_the_shares_are_added_into_the_run_on_postgresql(
         tasks = fan_out_ingest_tasks(
             engine, [root.as_posix()], share_size=2, logger=quiet_logger
         ).tasks
-        results = [ingest_task_share(engine, task['data'], logger=quiet_logger) for task in tasks]
+        results = [
+            TaskResult(
+                task_id=str(task['task_id']),
+                result=ingest_task_share(engine, task['data'], logger=quiet_logger),
+            )
+            for task in tasks
+        ]
         complete_ingest_tasks(engine, [root.as_posix()], results, logger=quiet_logger)
         with engine.connect() as connection:
             found = list(connection.execute(sqlalchemy.select(INGEST_RUNS.c.files_ingested)))
