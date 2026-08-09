@@ -15,6 +15,9 @@ Modules:
     ``cmatrix``
         ``compute_pointing`` and its supporting types: the corrected and uncorrected
         C-matrices a navigated offset implies, in the SPICE camera-frame convention.
+    ``command_line``
+        ``masked_command_line`` — the command line as a run log is allowed to record
+        it, with the value of every connection-URL option hidden.
     ``correlate``
         Fourier-domain and template-matching utilities (e.g. normalized
         cross-correlation) built on ``image`` and ``misc``.
@@ -61,6 +64,7 @@ Modules:
 __all__ = [
     'attrdict',
     'cmatrix',
+    'command_line',
     'constants',
     'correlate',
     'distance_transform',

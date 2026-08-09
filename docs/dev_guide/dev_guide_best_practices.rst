@@ -34,7 +34,7 @@ Imports
   of a module that only some callers reach: the GUI toolkit, the plotting and
   imaging libraries, the SPICE and array libraries a single function needs, and
   each instrument's ``oops`` host module.
-* Two of them protect a guarantee beyond their own module:
+* Three of them protect a guarantee beyond their own module:
 
   * PyQt6, imported where a dialog is opened rather than at the top of the
     module that opens it -- the manual navigation technique in
@@ -47,6 +47,13 @@ Imports
     would put SQLAlchemy on the navigation critical path for all of them. A
     test asserts in a subprocess that importing ``spindoctor.dataset`` imports
     no ``sqlalchemy`` module.
+  * :func:`spindoctor.results_index.masked_url` in
+    ``spindoctor/support/command_line.py``, imported only when the command line
+    being logged actually carries a connection URL. The run banner of every
+    program passes through that module, and ``spindoctor.support.misc`` is
+    itself reached from ``spindoctor.dataset``, so a top-level import there
+    would defeat the guarantee above as well. The same subprocess assertion
+    covers it.
 
 Linting and typing
 ------------------
