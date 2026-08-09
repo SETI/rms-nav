@@ -185,6 +185,12 @@ def _log_outcome(counts: IngestCounts) -> None:
             counts.failures_by_reason[reason],
             counts.example_by_reason.get(reason, '(none recorded)'),
         )
+    if counts.directories_missed:
+        MAIN_LOGGER.warning(
+            'Directories not listed, whose files were therefore never seen: %d. Absence of '
+            'a row under one of them is not evidence that its image was never navigated.',
+            counts.directories_missed,
+        )
     if counts.roots_unreadable:
         MAIN_LOGGER.error(
             'Roots that could not be listed and are therefore not ingested: %d',
@@ -250,6 +256,16 @@ def main() -> None:
         sys.exit(1)
     try:
         counts = ingest_metadata_files(engine, roots, force=arguments.force, logger=MAIN_LOGGER)
+    except Exception as exc:
+        # The pass enumerates every failure it expects and charges it to one
+        # file or one root.  Anything still escaping is a failure nobody
+        # enumerated, and a console entry point owes its caller a message and a
+        # status for one rather than a traceback: the run rows of the roots it
+        # did not reach keep their NULL finish times, so no consumer reads
+        # absence under them as an answer.
+        MAIN_LOGGER.fatal('Ingest could not complete (%s: %s)', type(exc).__name__, exc)
+        MAIN_LOGGER.exception(exc)
+        sys.exit(1)
     finally:
         engine.dispose()
     _log_outcome(counts)

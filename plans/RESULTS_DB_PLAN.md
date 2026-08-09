@@ -274,21 +274,31 @@ adopt its blind spot with it. The rule is stated rather than pattern-matched:
    free to carry the colons, at-signs and question marks that would otherwise
    read as some.
 2. The authority begins after the scheme's `:` **only when a `/` follows that
-   colon** (one or two, since a hand-edited setting arrives with either).
+   colon**, and then after **every** slash of that run, however many there are.
    Without that slash, `postgresql:svc:pw@host/db` and `svc:pw@host/db` are the
    same shape, and reading the leading word as a scheme leaves the second one's
    password visible; it is read as a user name in both, which hides the first
    one's user name along with its password. That is one word of a message about
    a URL no driver would have accepted; the other reading loses a working
-   password.
+   password. One slash and two are what a hand-edited setting arrives as, three
+   is `postgresql:///db` omitting the host to name a local socket, and a rule
+   that stopped counting at two left the authority start on a slash -- which
+   reads as a path beginning before any password and returns such a URL whole.
 3. Within the authority the user name runs to the first `:`; only a `:`
-   introduces a password. The credentials end at the **last** `@` before the
-   first `/` that follows the authority start -- last, because the
-   `user@servername` login form of a managed server puts an at-sign in the user
-   name -- and, when no `@` precedes that slash, at the first `@` after the
-   password's colon instead, because that is the case where the slash is inside
-   the password. If the first `/` precedes the first `:`, the authority ended
-   before any colon and there is no password.
+   introduces a password. The credentials end at the **last** `@` in the
+   string. A user name is free to carry one -- `user@servername` is the login
+   form of a managed server -- and so is a password: `p@ssword`, `p@ss/word`
+   and `pw:with@both` are all things an operator types. Every narrower bound
+   stops inside a password that carries the character it stops at: ending at
+   the `@` before the first `/` leaves the tail of `p@ss/word` in the message,
+   and ending at the last `@` before a `#` leaves the tail of `pw@part#rest`.
+   The last `@` is the only bound that cannot stop early, because the span it
+   produces contains every other candidate span. What it costs is over-masking
+   a URL whose credentials end sooner and whose tail carries an `@` -- a
+   fragment such as `...?password=x#note@host` is masked to its last character
+   -- which is a mangled message about a URL no driver accepts, against a
+   working password in a run log. If the first `/` precedes the first `:`, the
+   authority ended before any colon and there is no password.
 4. `host:5432/path@name` is genuinely ambiguous -- a host with a port and a
    path, or a user name with a password that carries a slash. It is read as
    credentials, which is how the URL parser itself reads it: for the spelling
@@ -306,14 +316,25 @@ adopt its blind spot with it. The rule is stated rather than pattern-matched:
    parameter its library knows, so the name is matched by what it contains
    rather than against a fixed list: over-hiding a setting whose name says
    credential costs a word of a message, and under-hiding one puts a working
-   password in a run log.
+   password in a run log. One parameter is separated from the next by `&` or by
+   `;`, both of which libpq and the drivers built on it accept, so both are
+   split on and each is put back as it was written.
 6. Only credential material is replaced. Nothing outside it is touched.
 
 The rule is asked about a **corpus** rather than a list of remembered shapes:
 every combination of scheme, of the slashes after it, of credentials, and of
 what a password may contain, asserted in both directions -- the secret is gone,
-and the result is exactly the URL with its credentials replaced. Four separate
-leaks reached review in shapes nobody had thought to list.
+and the result is exactly the URL with its credentials replaced.
+
+Each dimension of that corpus is **covered rather than sampled**, which is not
+the same thing and is where the leaks kept living. A corpus carrying no slash,
+one and two stopped one value short of the three-slash spelling; a corpus
+varying one special character of a password at a time could not reach a
+password carrying an at-sign *and* a slash. So the slash count runs from none
+to four, and the passwords carry every ordered pair of the characters that mean
+something to a URL -- order included, since `p@ss/word` and `pw/part@rest` stop
+a rule reading by eye at different places. Tests assert that the dimensions are
+still crossed, because a corpus quietly narrowed proves less than it says.
 
 The rule is a named function of the Core layer rather than a private helper of
 the opener, because a run log records the command line a program was given and
@@ -561,6 +582,29 @@ closing summary. A directory that could not be listed costs the files under it
 and nothing else; the pass continues over the rest of the root, and the prune is
 refused for that root because the listing no longer covers all of it.
 
+**A directory the walk did not list is counted, not merely logged.** The pass
+carries a `directories_missed` count, reports it in the closing summary, and
+records it on the `ingest_runs` row. Absence of an `images` row is the
+load-bearing claim of the whole design -- every consumer reads it as "this image
+was never navigated" -- and under a directory nobody enumerated that reading is
+simply false. A run that missed a directory still completes, because the rows it did
+write are as good as any other run's, so the count is the only place the gap
+shows; a consumer that means to read absence as an answer has it on the run row
+rather than in a log file nobody kept. A pass whose count is zero listed the
+whole root and absence means what it says everywhere under it.
+
+**A directory already walked is not walked again.** The walk records each local
+directory's device and inode as it enters it and skips one it has already
+listed. A link from a subdirectory back to an ancestor otherwise writes the same
+document under a new stub at every level, until the filesystem's own limit on
+link traversal stops it -- forty-one rows for one document, forty of them
+answering for images at paths no consumer will ask about, and the count of
+navigated images wrong by all of them. A directory skipped this way is counted
+as missed, since the walk did not enumerate it there, which is also what refuses
+the prune for that pass. The identity is taken only for a local directory: a
+cloud location has no links to go round in, and asking a bucket about a prefix
+is a paid round trip per directory per run.
+
 **Rows of documents that have left the tree are removed.** Presence has to mean
 what absence means, so the stubs recorded for a root that this walk did not
 find are deleted, and the count is reported and recorded in `ingest_runs` as
@@ -573,12 +617,20 @@ Section 2.8 states the consequence for a worker that covers a share of a root.
 **Per-root bookkeeping.** An `ingest_runs` table records, per root:
 `root_url`, `started_utc`, `finished_utc` (NULL while running),
 `files_seen` / `files_ingested` / `files_skipped` / `files_failed` /
-`files_removed`, and `schema_version`, under a surrogate `run_id` primary key
+`files_removed` / `directories_missed`, and `schema_version`, under a surrogate
+`run_id` primary key
 (a root legitimately has many runs, and a consumer reads the newest). The row
 is written at
 start and updated at completion, in both the interactive and cloud paths. A
 consumer treats a root whose newest row has `finished_utc IS NULL` -- or no
 row at all -- as not ingested, and fails with a message saying so.
+
+**The normalized root is what is walked.** `normalize_root_url` renders the
+root absolute once, and the walk and the retrievals are handed that rendering
+rather than the string as typed. A relative root is a documented spelling of
+the option, and the storage layer refuses a relative local URL outright; walking
+the typed form would also record a relative `source_file` beside an absolute
+`root_url` for the same file.
 
 **Batched retrieval.** Metadata files are retrieved in batches through
 `FCPath.retrieve()` with `exception_on_fail=False`, the pattern
@@ -626,7 +678,12 @@ and refused, and 1 when the run could not complete -- no index or no root
 resolvable, the index unopenable, or a root that could not be listed. A status
 read from a count of ingested documents flips between two passes over one
 unchanged tree, since what one pass ingests or refuses the next one skips, and a
-scheduled run would then see a failure once and never again.
+scheduled run would then see a failure once and never again. **The driver always
+exits rather than raising.** The pass charges every failure it enumerates to one
+file or one root; anything still escaping is a failure nobody enumerated, and a
+console entry point owes its caller a message and a status for one rather than a
+traceback. The roots such a run never reached keep their NULL finish times, so
+no consumer reads absence under them as an answer.
 
 ### 2.8 Cloud-task ingest
 
@@ -963,10 +1020,14 @@ Details settled during execution, none of them a change of intent:
   separator is SQL, and a test pins that the exclusion does not reach a
   statement -- against a widened exclusion as well as a blanked one, since a
   pattern that still excludes something is what would quietly empty the scan.
-- **The column set changed twice more, so the schema version is 3.** The JSON
-  columns gained `none_as_null` (section 2.3), `ingest_runs` gained
-  `files_removed`, and `failed_files` was added (section 2.7). There are no
-  migrations, so this is one version bump covering all three.
+- **The column set changed, so the schema version is 4.** The JSON columns
+  gained `none_as_null` (section 2.3), `ingest_runs` gained `files_removed` and
+  then `directories_missed`, and `failed_files` was added (section 2.7). There
+  are no migrations, so this is one version bump covering all four. The last of
+  them arrived after the version had already been raised once in this phase, and
+  it was raised again rather than reused: an index built from an earlier state
+  of this phase would otherwise pass the version gate and then fail on a column
+  that is not there, which is exactly what the gate exists to prevent.
 - **The CSV export states its line terminator.** `csv.writer` defaults to CRLF;
   the export now names LF. The frozen `images.csv` blobs are LF, so what the
   export writes matches them byte for byte, which the previous implementation's
@@ -982,6 +1043,23 @@ Details settled during execution, none of them a change of intent:
   `require_ingested_roots` masks the index URL itself, so a consumer cannot
   reintroduce the leak by forgetting; the roots in that message, and the results
   roots in the ingest driver's log, are printed exactly as they were given.
+- **Section 2.4 rule 4 decides the ambiguous shape the other way round.** The
+  base plan read `host:5432/path@name` by whether the text before the slash is
+  digits -- "a port is digits and a password is not". It is now read as
+  credentials outright. This is the one plan edit of this phase that reverses a
+  decision rather than adding or tightening a requirement, so it is listed here
+  on its own: digits-decide leaves a password that opens with digits,
+  `123/secret`, visible in full, and the cost of the reading taken -- a mangled
+  host and database name -- no longer reaches anything an operator needs, since
+  a results root is never passed through masking at all. The URL parser reads
+  that shape the same way, so for every spelling of it a parser accepts, this
+  rule and `render_as_string()` hide the same characters.
+- **The credentials end at the last `@` of the string** (section 2.4 rule 3),
+  not at the last one before the first `/` and not at the last one before a
+  `#`. Both narrower bounds stop inside a password that carries the character
+  they stop at, and each was a leak. The accepted cost is over-masking a URL
+  whose tail carries an at-sign after the real credentials, which is a fragment
+  on a connection URL and therefore a URL no driver would have taken.
 - **A failed write costs one file, not the run.** Section 2.7's isolation of a
   chunk whose write fails. SQLAlchemy savepoints were tried first and are not
   usable here: pysqlite's transaction handling commits a released savepoint
@@ -990,7 +1068,19 @@ Details settled during execution, none of them a change of intent:
   nothing when nothing fails.
 - **The ingest driver's exit status reports completion rather than counts**
   (section 2.7), because the count-based status flipped between two passes over
-  one unchanged tree.
+  one unchanged tree. It also always exits rather than raising, which is what
+  its own documented contract said and what a traceback out of a console entry
+  point breaks.
+- **The walk is handed the normalized root** (section 2.7). Absolutizing the
+  root for the key while walking the string as typed made a relative root -- a
+  documented spelling -- a traceback out of the driver, with the run row already
+  written and its finish time left NULL.
+- **A directory the walk did not list is counted** (section 2.7), reported in
+  the summary and recorded on the `ingest_runs` row, and the walk skips a
+  directory it has already listed rather than descending into it again. The
+  first is what keeps "absence means never navigated" honest for the consumers
+  of Phase 4; the second stops a link back into a tree from writing one
+  document as forty-one rows.
 
 ### Phase 3 — Cloud-task ingest
 

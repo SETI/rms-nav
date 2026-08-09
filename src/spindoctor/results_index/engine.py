@@ -24,6 +24,7 @@ ships as an optional extra.
 
 import datetime
 import os
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,14 @@ fixed list.  Over-hiding a setting whose name says credential costs a word of a
 message; under-hiding one puts a working password in a run log.
 """
 
+_QUERY_SEPARATOR = re.compile(r'([;&])')
+"""What separates one query parameter from the next, kept by the split.
+
+A connection URL's query is separated by ``&`` or by ``;``: libpq accepts
+either, and so does every driver built on it.  The separator is captured so
+that a masked query is rebuilt with the separators it was written with.
+"""
+
 _SUPPORTED_URL_FORMS = (
     'A results index is either a sqlite: URL naming a local path, or a '
     'postgresql+psycopg: URL naming a server.'
@@ -125,7 +134,13 @@ def _authority_start(url: str) -> int:
     of a message about a URL no driver would have accepted anyway; the other
     reading loses a working password.
 
-    One slash or two, because a hand-edited setting arrives with either.
+    Every slash of the run is consumed, however many there are.  Two is the
+    spelling a URL is defined with and one is what a hand-edited setting
+    arrives as, but three is an ordinary spelling too -- ``postgresql:///db``
+    omits the host to name a local socket, and ``sqlite:///path`` habituates
+    the form -- and a rule that stopped counting at two would leave the
+    authority start on a slash, which reads as a path beginning before any
+    password and returns the URL whole.
 
     Parameters:
         url: The URL as the caller wrote it.
@@ -142,38 +157,9 @@ def _authority_start(url: str) -> int:
         if '/' not in prefix and '@' not in prefix:
             start = colon + 1
     end = start
-    while end - start < 2 and url[end : end + 1] == '/':
+    while url[end : end + 1] == '/':
         end += 1
     return end
-
-
-def _credentials_end(url: str, start: int, colon: int) -> int:
-    """Return the index of the ``@`` that ends a URL's credentials.
-
-    An ``@`` is what ends the credentials, and a user name is free to carry one
-    -- ``user@servername`` is the login form of a managed server -- so the one
-    that ends them is the last, not the first.  Last within what, though: a
-    password may carry an unescaped ``/``, so the authority cannot simply be
-    taken to end at the first slash.  It is taken to end there when an ``@``
-    precedes that slash, and to run past it when none does, which is exactly the
-    case where the slash is inside the password.
-
-    Parameters:
-        url: The URL as the caller wrote it.
-        start: Index at which the authority begins.
-        colon: Index of the ``:`` that introduces the password.
-
-    Returns:
-        The index of that ``@``, or -1 when the URL carries no credentials.
-    """
-    slash = url.find('/', start)
-    region_end = len(url) if slash < 0 else slash
-    at = url.rfind('@', colon, region_end)
-    if at >= 0:
-        return at
-    # No at-sign before the slash, so the slash is inside the password and the
-    # credentials run past it.
-    return url.find('@', colon)
 
 
 def _password_span(url: str) -> tuple[int, int] | None:
@@ -182,6 +168,23 @@ def _password_span(url: str) -> tuple[int, int] | None:
     The rule is the one a URL's own grammar states.  The user name runs from the
     start of the authority to the first ``:``; only a ``:`` introduces a
     password, and that password runs to the ``@`` that ends the credentials.
+
+    Which ``@`` ends them is the whole question.  It is the **last** one in the
+    string.  A user name is free to carry one -- ``user@servername`` is the
+    login form of a managed server -- and so is a password: ``p@ssword``,
+    ``p@ss/word`` and ``pw:with@both`` are all things an operator types.  Every
+    narrower choice stops inside a password that carries the character it stops
+    at.  Ending at the ``@`` before the first ``/`` leaves the tail of
+    ``p@ss/word`` in the message; ending at the last ``@`` before a ``#``
+    leaves the tail of ``pw@part#rest``.  The last ``@`` is the only bound that
+    cannot stop early, because the span it produces contains every other
+    candidate span.
+
+    What that costs is over-masking a URL whose real credentials end sooner and
+    whose tail happens to carry an ``@`` -- a fragment such as
+    ``...?password=x#note@host`` is masked to its last character.  A connection
+    URL has no use for a fragment, so that is a mangled message about a URL no
+    driver would have accepted, against a working password in a run log.
 
     One shape is genuinely ambiguous: ``host:5432/path@name`` reads equally as a
     host with a port and a path, or as a user name with a password that carries
@@ -207,7 +210,7 @@ def _password_span(url: str) -> tuple[int, int] | None:
     if 0 <= slash < colon:
         # The authority ended before any colon, so what follows is a path.
         return None
-    at = _credentials_end(url, start, colon)
+    at = url.rfind('@', colon)
     if at < 0:
         return None
     return colon + 1, at
@@ -249,11 +252,17 @@ def _masked_query(url: str) -> str:
     end = url.find('#', start)
     if end < 0:
         end = len(url)
-    parameters = url[start + 1 : end].split('&')
-    masked = [_masked_parameter(parameter) for parameter in parameters]
-    if masked == parameters:
+    # Odd positions are the separators the split captured, and are put back
+    # exactly as they were written: a query is separated by '&' or by ';', both
+    # of which libpq and the drivers accept, and splitting on one alone leaves
+    # a parameter written with the other unexamined.
+    pieces = _QUERY_SEPARATOR.split(url[start + 1 : end])
+    masked = [
+        piece if index % 2 else _masked_parameter(piece) for index, piece in enumerate(pieces)
+    ]
+    if masked == pieces:
         return url
-    return f'{url[: start + 1]}{"&".join(masked)}{url[end:]}'
+    return f'{url[: start + 1]}{"".join(masked)}{url[end:]}'
 
 
 def masked_url(url: str) -> str:

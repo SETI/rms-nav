@@ -152,6 +152,11 @@ class IngestCounts:
             delivered, and the ones the database would not store.
         files_removed: Image rows deleted because the tree no longer holds the
             document they came from.
+        directories_missed: Directories under a root that this pass did not
+            list on their own account, so the files under them were never
+            seen.  Absence of a row for a stub beneath one of them says
+            nothing, which is why the number is reported rather than left in a
+            log line.
         roots_unreadable: Roots the walk could not list at all, whose ingest
             run is deliberately left unfinished.
         failures_by_reason: How many files failed for each distinct reason, so
@@ -166,6 +171,7 @@ class IngestCounts:
     files_skipped: int = 0
     files_failed: int = 0
     files_removed: int = 0
+    directories_missed: int = 0
     roots_unreadable: int = 0
     failures_by_reason: dict[str, int] = field(default_factory=dict)
     example_by_reason: dict[str, str] = field(default_factory=dict)
@@ -181,6 +187,7 @@ class IngestCounts:
         self.files_skipped += other.files_skipped
         self.files_failed += other.files_failed
         self.files_removed += other.files_removed
+        self.directories_missed += other.directories_missed
         self.roots_unreadable += other.roots_unreadable
         for reason, count in other.failures_by_reason.items():
             self.failures_by_reason[reason] = self.failures_by_reason.get(reason, 0) + count
@@ -227,16 +234,18 @@ class _RootListing:
         root_listed: Whether the root itself could be listed.  A root that is
             not there is a different thing from a root that is empty, and only
             the second one has been ingested when the walk ends.
-        directory_missed: Whether any directory under the root could not be
-            listed.  The walk then knows about some of the root rather than all
-            of it, which is not evidence that a stub it did not see is gone.
+        directories_missed: How many directories under the root this walk did
+            not list on their own account -- ones it could not list, and ones
+            it had already walked under another name.  The walk then knows
+            about some of the root rather than all of it, which is not evidence
+            that a stub it did not see is gone.
     """
 
     metadata_files: list[_ListedFile] = field(default_factory=list)
     summary_stubs: set[str] = field(default_factory=set)
     has_file_metrics: bool = True
     root_listed: bool = True
-    directory_missed: bool = False
+    directories_missed: int = 0
 
     @property
     def covers_whole_root(self) -> bool:
@@ -247,7 +256,7 @@ class _RootListing:
             listed.  Only such a listing is evidence that a recorded stub it
             does not hold has left the tree.
         """
-        return self.root_listed and not self.directory_missed
+        return self.root_listed and not self.directories_missed
 
 
 @dataclass(frozen=True)
@@ -319,7 +328,30 @@ def _is_directory(path: FCPath, entry_metadata: dict[str, Any] | None) -> bool:
         return False
 
 
-def _list_directory(directory: FCPath, prefix: str, listing: _RootListing) -> bool:
+def _directory_identity(directory: FCPath) -> tuple[int, int] | None:
+    """Return what makes one directory the same directory as another.
+
+    Parameters:
+        directory: The directory the walk is about to list.
+
+    Returns:
+        The device and inode numbers the filesystem gives it, or None when no
+        identity can be taken: a cloud location, which has no links for a walk
+        to go round in, or a directory the filesystem would not answer about,
+        which the listing itself is about to fail on anyway.
+    """
+    if not directory.is_local():
+        return None
+    try:
+        status = directory.stat()
+    except OSError:
+        return None
+    return status.st_dev, status.st_ino
+
+
+def _list_directory(
+    directory: FCPath, prefix: str, listing: _RootListing, visited: set[tuple[int, int]]
+) -> bool:
     """Collect one directory's result files and descend into its subdirectories.
 
     Parameters:
@@ -327,10 +359,25 @@ def _list_directory(directory: FCPath, prefix: str, listing: _RootListing) -> bo
         prefix: The path of that directory under the root, ending in ``/`` (or
             empty at the root itself).
         listing: Accumulator the walk fills in.
+        visited: Identities of the directories this walk has already listed,
+            which it adds this one to.
 
     Returns:
-        Whether the directory could be listed at all.
+        Whether the directory was listed on its own account.  False both for
+        one that could not be listed and for one already walked under another
+        name, because the caller's bookkeeping is the same either way: the walk
+        did not enumerate this directory here, so it must not act on what it
+        did not see.
     """
+    identity = _directory_identity(directory)
+    if identity is not None:
+        if identity in visited:
+            # A link back to a directory already walked.  Descending would
+            # write the same documents again under a second set of stubs --
+            # one row per document per level, until the filesystem stops the
+            # loop at its own link limit -- so the walk stops here instead.
+            return False
+        visited.add(identity)
     try:
         entries = list(directory.iterdir_metadata())
     except OSError:
@@ -346,8 +393,8 @@ def _list_directory(directory: FCPath, prefix: str, listing: _RootListing) -> bo
         relative = f'{prefix}{name}'
         is_dir = _is_directory(path, entry_metadata)
         if is_dir:
-            if not _list_directory(path, f'{relative}/', listing):
-                listing.directory_missed = True
+            if not _list_directory(path, f'{relative}/', listing, visited):
+                listing.directories_missed += 1
         elif name.endswith(METADATA_SUFFIX):
             mtime_ns, size_bytes = _metrics_of(entry_metadata)
             if mtime_ns is None or size_bytes is None:
@@ -375,7 +422,7 @@ def _walk_root(root: FCPath, *, logger: PdsLogger) -> _RootListing:
         What the walk found, with the metadata files in stub order.
     """
     listing = _RootListing()
-    listing.root_listed = _list_directory(root, '', listing)
+    listing.root_listed = _list_directory(root, '', listing, set())
     listing.metadata_files.sort(key=lambda listed: listed.results_path_stub)
     if not listing.root_listed:
         logger.error(
@@ -390,10 +437,12 @@ def _walk_root(root: FCPath, *, logger: PdsLogger) -> _RootListing:
         len(listing.summary_stubs),
         root.as_posix(),
     )
-    if listing.directory_missed:
+    if listing.directories_missed:
         logger.warning(
-            'Part of %s could not be listed, so this pass covers some of the root rather '
-            'than all of it and removes no row from it',
+            '%d director(ies) under %s were not listed, so this pass covers some of the '
+            'root rather than all of it and removes no row from it: absence of a row under '
+            'one of them is not evidence that its image was never navigated',
+            listing.directories_missed,
             root.as_posix(),
         )
     if not listing.has_file_metrics and listing.metadata_files:
@@ -816,6 +865,7 @@ def _finish_run(engine: sqlalchemy.Engine, run_id: int, counts: IngestCounts) ->
                 files_skipped=counts.files_skipped,
                 files_failed=counts.files_failed,
                 files_removed=counts.files_removed,
+                directories_missed=counts.directories_missed,
             )
         )
 
@@ -969,12 +1019,17 @@ def ingest_metadata_files(
     total = IngestCounts()
     for root_str in roots:
         root_url = normalize_root_url(root_str)
-        root = FCPath(root_str)
+        # The normalized form is what is walked, not the string as typed.  It
+        # is the same location, absolute and spelled once: walking the typed
+        # form would record a relative source_file beside an absolute root_url,
+        # and a relative local root is one the storage layer refuses outright.
+        root = FCPath(root_url)
         counts = IngestCounts()
         run_id = _start_run(engine, root_url)
         logger.info('Ingesting %s', root_url)
         listing = _walk_root(root, logger=logger)
         counts.files_seen = len(listing.metadata_files)
+        counts.directories_missed = listing.directories_missed
         if not listing.root_listed:
             # The run row keeps its NULL finish time, so every consumer treats
             # this root as one nobody has ingested rather than as one that

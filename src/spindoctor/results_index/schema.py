@@ -77,7 +77,7 @@ __all__ = [
     'TECHNIQUES',
 ]
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 """Column-set version of the index.
 
 Incremented by any change to the column set of any table, and by any change to
@@ -310,6 +310,10 @@ INGEST_RUNS = sqlalchemy.Table(
     sqlalchemy.Column('files_failed', sqlalchemy.Integer),
     # Rows whose document is no longer in the tree, deleted by this run.
     sqlalchemy.Column('files_removed', sqlalchemy.Integer),
+    # Directories the run did not list, whose files it therefore never saw.  A
+    # completed run with a nonzero count covers the root apart from those, so
+    # absence of a row under one of them says nothing about its image.
+    sqlalchemy.Column('directories_missed', sqlalchemy.Integer),
     sqlalchemy.Column('schema_version', sqlalchemy.Integer, nullable=False),
     sqlalchemy.Index('ix_ingest_runs_root_url', 'root_url'),
 )
