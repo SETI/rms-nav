@@ -726,6 +726,63 @@ def test_an_event_log_that_is_not_there_exits_one(
     assert status == 1
 
 
+def binary_event_log_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[int | None, list[str]]:
+    """Complete a fanned-out root against a file that is not text.
+
+    Parameters:
+        tmp_path: Directory the tree, the index and the tasks file live under.
+        monkeypatch: Fixture the driver is run through.
+
+    Returns:
+        The exit status, and one entry per line written to the main log.
+    """
+    url = fanned_out(tmp_path, monkeypatch)
+    (tmp_path / 'events.log.gz').write_bytes(b'\x1f\x8b\x08\x00\xff\xfe\x00\x00')
+    return run_driver(
+        [
+            '--results-db',
+            url,
+            '--nav-results-root',
+            (tmp_path / 'results').as_posix(),
+            '--complete-cloud-tasks-file',
+            str(tmp_path / 'events.log.gz'),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+
+
+def test_an_event_log_that_is_not_text_is_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A path naming a compressed log or a database is the same operator error.
+
+    It is a path that names the wrong thing, which the pass charges to the file,
+    and the decoding failure it raises is a ValueError rather than an OSError --
+    so a guard written for the missing-file case alone lets this one past.
+    """
+    _status, written = binary_event_log_run(tmp_path, monkeypatch)
+    assert any('Cannot read the task event log' in line for line in written)
+
+
+def test_an_event_log_that_is_not_text_is_not_an_unhandled_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The catch-all's message and traceback are what it must not produce."""
+    _status, written = binary_event_log_run(tmp_path, monkeypatch)
+    assert not any('Ingest could not complete' in line for line in written)
+
+
+def test_an_event_log_that_is_not_text_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And the run is not completed, since nothing was read to complete it with."""
+    status, _written = binary_event_log_run(tmp_path, monkeypatch)
+    assert status == 1
+
+
 def test_forcing_a_completion_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Nothing is read here, so --force could only ever be ignored.
 

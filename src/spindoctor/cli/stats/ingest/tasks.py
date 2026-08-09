@@ -599,6 +599,10 @@ def task_results_from_event_log(path: FCPath) -> TaskResults:
         OSError: If the log cannot be read.  A path that names no file is the
             caller's to report, since only the caller knows how the operator
             spelled it.
+        UnicodeDecodeError: If it is not text at all.  A gzipped log, a database
+            file or an image named by mistake is the same operator error as a
+            path that names nothing, and is charged to the file the same way
+            rather than escaping as a failure nobody enumerated.
     """
     found = TaskResults()
     with path.open('r', encoding='utf-8') as file:

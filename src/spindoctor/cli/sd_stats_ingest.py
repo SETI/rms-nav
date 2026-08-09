@@ -386,11 +386,14 @@ def _complete_cloud_tasks(engine: sqlalchemy.Engine, roots: list[str], *, path: 
     MAIN_LOGGER.info('Reading task results from %s', path)
     try:
         found = task_results_from_event_log(FCPath(path))
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         # An ordinary mistyped path, which the pass enumerates and charges to
-        # the file rather than letting out as a traceback.  Every named root
-        # keeps its unfinished run, so no consumer reads absence under one of
-        # them as an answer.
+        # the file rather than letting out as a traceback.  A path naming a file
+        # that is not text -- a gzipped log, a database, an image -- is the same
+        # error and is charged the same way; it raises a UnicodeDecodeError,
+        # which is a ValueError rather than an OSError.  Every named root keeps
+        # its unfinished run, so no consumer reads absence under one of them as
+        # an answer.
         MAIN_LOGGER.fatal('Cannot read the task event log %s: %s', path, exc)
         return 1
     MAIN_LOGGER.info('Task results read: %d', len(found.results))
