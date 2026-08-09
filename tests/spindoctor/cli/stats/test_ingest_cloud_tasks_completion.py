@@ -7,7 +7,8 @@ stamp is arithmetic: the listing found so many files, and this run's own shares
 must say what became of exactly that many.  Dividing the root up and ingesting
 one share are in ``test_ingest_cloud_tasks``; what a completion reads out of the
 workers' own results -- why their files were refused, and the event log they
-come back in -- is in ``test_ingest_cloud_tasks_reports``.
+come back in -- is in ``test_ingest_cloud_tasks_reports``; and which values are
+a share's tally at all is in ``test_ingest_cloud_tasks_tallies``.
 """
 
 from pathlib import Path
@@ -224,57 +225,6 @@ def test_a_worker_error_is_counted(tmp_path: Path, quiet_logger: pdslogger.PdsLo
         logger=quiet_logger,
     )
     assert outcome.results_failed == 1
-
-
-@pytest.mark.parametrize(
-    'result',
-    [
-        {'status': 'ok'},
-        {
-            'status': 'ok',
-            'run_id': True,
-            'files_ingested': 1,
-            'files_skipped': 0,
-            'files_failed': 0,
-        },
-        {
-            'status': 'ok',
-            'run_id': 1,
-            'files_ingested': 'many',
-            'files_skipped': 0,
-            'files_failed': 0,
-        },
-        {'status': 'ok', 'run_id': 1, 'files_ingested': 1.5, 'files_skipped': 0, 'files_failed': 0},
-        {
-            'status': 'ok',
-            'run_id': 1,
-            'files_ingested': True,
-            'files_skipped': 0,
-            'files_failed': 0,
-        },
-    ],
-    ids=[
-        'no-run-id',
-        'run-id-is-a-flag',
-        'count-is-text',
-        'count-is-fractional',
-        'count-is-a-flag',
-    ],
-)
-def test_a_result_of_another_shape_is_not_counted_as_a_share(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, result: dict[str, Any]
-) -> None:
-    """A value that says nothing usable must not be read as files accounted for.
-
-    A flag is a number to Python, so ``True`` would otherwise be counted as one
-    file ingested and one run identified.
-    """
-    root = tmp_path / 'results'
-    build_tree(root, 2)
-    url = index_url(tmp_path / 'index.sqlite3')
-    fan_out(url, [root], logger=quiet_logger)
-    outcome = complete(url, [root], [reported('ingest-1-000000', result)], logger=quiet_logger)
-    assert outcome.results_unreadable == 1
 
 
 def test_a_share_counted_twice_does_not_short_the_run(
@@ -657,63 +607,6 @@ def test_an_account_past_the_listing_names_its_root(
     assert any('1000000 of 4 file(s)' in named for named in outcome.roots_unaccounted)
 
 
-def test_a_count_too_large_for_the_run_row_is_not_a_share_tally(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
-    """A number no share could report is refused before it reaches the row.
-
-    What the shares reported is written to the run row on a shortfall, and a
-    count larger than that column holds fails the write -- ending the whole
-    completion in the driver's own error, for one corrupt or foreign line of a
-    concatenated event log.  Refused here it costs its own result, like every
-    other value of a shape a worker does not return.
-    """
-    root = tmp_path / 'results'
-    build_tree(root, 2)
-    url = index_url(tmp_path / 'index.sqlite3')
-    fan_out(url, [root], logger=quiet_logger)
-    enormous = reported(
-        'ingest-1-000000',
-        {
-            'status': 'ok',
-            'run_id': 1,
-            'root_url': normalize_root_url(root),
-            'files_ingested': 10**30,
-            'files_skipped': 0,
-            'files_failed': 0,
-        },
-    )
-    outcome = complete(url, [root], [enormous], logger=quiet_logger)
-    assert outcome.results_unreadable == 1
-
-
-def test_a_count_below_zero_is_not_a_share_tally(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
-    """A negative count is not a number of files, and it cancels a real one.
-
-    Read as an account it subtracts from the shares that did report, so a run
-    left short by one task is stamped by another claiming minus its files.
-    """
-    root = tmp_path / 'results'
-    build_tree(root, 2)
-    url = index_url(tmp_path / 'index.sqlite3')
-    fan_out(url, [root], logger=quiet_logger)
-    negative = reported(
-        'ingest-1-000000',
-        {
-            'status': 'ok',
-            'run_id': 1,
-            'root_url': normalize_root_url(root),
-            'files_ingested': -100,
-            'files_skipped': 0,
-            'files_failed': 0,
-        },
-    )
-    outcome = complete(url, [root], [negative], logger=quiet_logger)
-    assert outcome.results_unreadable == 1
-
-
 # ---------------------------------------------------------------------------
 # Shares written under another root
 # ---------------------------------------------------------------------------
@@ -814,26 +707,6 @@ def test_a_root_left_to_the_shares_of_another_stays_unreadable(
             require_ingested_roots(connection, [normalize_root_url(second)], url=url)
     finally:
         engine.dispose()
-
-
-def test_a_share_naming_no_root_is_not_counted_as_one(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
-    """A tally that names no root says nothing about which root was written.
-
-    The root is half the key of every row a share writes, so a value carrying
-    counts and a run number alone cannot be attributed to anything.
-    """
-    root = tmp_path / 'results'
-    build_tree(root, 2)
-    url = index_url(tmp_path / 'index.sqlite3')
-    fan_out(url, [root], logger=quiet_logger)
-    rootless = reported(
-        'ingest-1-000000',
-        {'status': 'ok', 'run_id': 1, 'files_ingested': 2, 'files_skipped': 0, 'files_failed': 0},
-    )
-    outcome = complete(url, [root], [rootless], logger=quiet_logger)
-    assert outcome.results_unreadable == 1
 
 
 # ---------------------------------------------------------------------------
