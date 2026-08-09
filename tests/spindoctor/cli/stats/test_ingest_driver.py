@@ -161,6 +161,24 @@ def test_an_index_url_joined_by_an_equals_sign_is_masked_too() -> None:
     assert masked == ['--results-db=postgresql+psycopg:/svc:***@db.example/spindoctor']
 
 
+def test_an_abbreviated_option_carries_the_same_url() -> None:
+    """argparse accepts any distinguishing prefix and consumes the URL after it."""
+    masked = sd_stats_ingest.masked_command_line(['--results-d', SERVER_URL])
+    assert masked == ['--results-d', 'postgresql+psycopg:/svc:***@db.example/spindoctor']
+
+
+def test_an_abbreviated_option_joined_by_an_equals_sign_carries_it_too() -> None:
+    """The two spellings multiply: an abbreviation joined to its value is a third."""
+    masked = sd_stats_ingest.masked_command_line([f'--results-d={SERVER_URL}'])
+    assert masked == ['--results-d=postgresql+psycopg:/svc:***@db.example/spindoctor']
+
+
+def test_the_argument_separator_does_not_swallow_the_word_after_it() -> None:
+    """Every long option starts with the separator, and it names none of them."""
+    masked = sd_stats_ingest.masked_command_line(['--', CREDENTIAL_SHAPED_ROOT])
+    assert masked == ['--', CREDENTIAL_SHAPED_ROOT]
+
+
 def test_a_root_that_is_not_there_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

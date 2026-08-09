@@ -305,12 +305,14 @@ def _is_directory(path: FCPath, entry_metadata: dict[str, Any] | None) -> bool:
 
     Returns:
         True when the entry is a directory.  A backend that reported no
-        metadata is asked, and one that cannot answer is treated as a file:
+        metadata for the entry, or metadata that does not say, is asked
+        directly; one that cannot answer either is treated as a file, since
         descending into something that is not there would only add a directory
         the walk could not list.
     """
-    if entry_metadata is not None:
-        return bool(entry_metadata['is_dir'])
+    is_dir = None if entry_metadata is None else entry_metadata.get('is_dir')
+    if is_dir is not None:
+        return bool(is_dir)
     try:
         return bool(path.is_dir())
     except OSError:

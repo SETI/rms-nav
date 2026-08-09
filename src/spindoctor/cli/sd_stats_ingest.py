@@ -50,6 +50,26 @@ corrupt the string and protect nothing.
 """
 
 
+def _names_a_url_option(word: str) -> bool:
+    """Whether a command-line word names an option whose value is a URL.
+
+    Any distinguishing prefix of a long option is the option: argparse accepts
+    ``--results-d`` for ``--results-db`` and consumes the URL after it just the
+    same, so matching the full spelling alone would leave the abbreviated
+    command line unmasked.  A prefix that argparse would have rejected never
+    reaches here, since parsing runs first and exits on one.
+
+    Parameters:
+        word: One word of the command line, without any ``=value`` part.
+
+    Returns:
+        True when the word names one of :data:`URL_OPTIONS`.
+    """
+    if not word.startswith('--') or word == '--':
+        return False
+    return any(option.startswith(word) for option in URL_OPTIONS)
+
+
 def parse_args(command_list: list[str]) -> argparse.Namespace:
     """Build the parser and read the command line.
 
@@ -113,8 +133,9 @@ def masked_command_line(command_list: list[str]) -> list[str]:
     The command line is logged because which of the command line, the
     configuration file and the environment supplied a value is exactly what a
     reader of a failed run needs to know, and one of its words can be a database
-    password.  Both spellings argparse accepts are covered: the value as a
-    separate word, and the value joined to the option by ``=``.
+    password.  Every spelling argparse accepts is covered: the value as a
+    separate word, the value joined to the option by ``=``, and either of those
+    under an abbreviation of the option's name.
 
     Parameters:
         command_list: The arguments, without the program name.
@@ -130,11 +151,11 @@ def masked_command_line(command_list: list[str]) -> list[str]:
             value_of_url_option = False
             continue
         option, separator, value = word.partition('=')
-        if separator and option in URL_OPTIONS:
+        if separator and _names_a_url_option(option):
             masked.append(f'{option}={masked_url(value)}')
             continue
         masked.append(word)
-        value_of_url_option = word in URL_OPTIONS
+        value_of_url_option = _names_a_url_option(word)
     return masked
 
 

@@ -443,6 +443,31 @@ def test_a_metric_less_listing_retrieves_every_document_again(
     assert [len(batch) for batch in retrievals] == [2]
 
 
+def test_a_listing_that_does_not_say_what_is_a_directory_is_asked(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A backend may report an entry's metrics and not whether it is a directory.
+
+    Reading the key as though it were always there ends the walk on a
+    ``KeyError``; reading a missing one as "not a directory" would silently drop
+    the whole subtree under it.  The entry is asked instead.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    real_iterdir = FCPath.iterdir_metadata
+
+    def without_the_kind(self: FCPath) -> Any:
+        for path, entry_metadata in real_iterdir(self):
+            reduced = None if entry_metadata is None else dict(entry_metadata)
+            if reduced is not None:
+                reduced.pop('is_dir', None)
+            yield path, reduced
+
+    monkeypatch.setattr(FCPath, 'iterdir_metadata', without_the_kind)
+    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    assert counts.files_ingested == 1
+
+
 def test_a_metric_less_listing_skips_nothing(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
