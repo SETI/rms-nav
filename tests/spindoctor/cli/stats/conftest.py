@@ -5,11 +5,15 @@ writes, so a test that cares about one field does not have to restate the
 surrounding document.  The index helpers build a real index over a real tree,
 because the ingest guarantees that matter -- what is keyed by what, what is
 read a second time -- are properties of the walk and the writer together.
+
+The cloud-task helpers run the same pass in its three separate stages -- divide
+a root into shares, ingest a share, add the shares up -- so that a test asserting
+on one of them does not have to restate the other two.
 """
 
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -22,9 +26,15 @@ from tests.spindoctor.results_index.conftest import (
     postgres_url,
 )
 
-from spindoctor.cli.stats.ingest import IngestCounts, ingest_metadata_files
+from spindoctor.cli.stats.ingest import (
+    IngestCounts,
+    complete_ingest_tasks,
+    fan_out_ingest_tasks,
+    ingest_metadata_files,
+    ingest_task_share,
+)
 from spindoctor.cli.stats.report import build_report
-from spindoctor.results_index import open_index
+from spindoctor.results_index import INGEST_RUNS, open_index
 
 # The statistics postgres tier runs against a schema of its own, exactly as the
 # results-index tier does; re-exporting rather than restating keeps one
@@ -312,3 +322,156 @@ def report_from_tree(url: str, out: Path, *, logger: pdslogger.PdsLogger, **opti
     finally:
         engine.dispose()
     return out
+
+
+FIRST_STUB = 'VOL/N1454725799_1_CALIB'
+"""The stub of the first document every fixture tree below writes."""
+
+
+def build_tree(root: Path, count: int) -> list[str]:
+    """Write a small results tree and return the stubs it holds.
+
+    Parameters:
+        root: The results root to write under.
+        count: How many documents to write.
+
+    Returns:
+        The stubs, in the order the walk will report them.
+    """
+    stubs = []
+    for index in range(count):
+        name = f'N{1454725799 + index}_1_CALIB'
+        write_metadata(root, f'VOL/{name}', metadata_document(image_name=f'{name}.IMG'))
+        stubs.append(f'VOL/{name}')
+    return sorted(stubs)
+
+
+def fan_out(
+    url: str, roots: list[Path], *, logger: pdslogger.PdsLogger, share_size: int = 2, **options: Any
+) -> list[dict[str, Any]]:
+    """Create an index and divide the given roots into tasks.
+
+    Parameters:
+        url: The index URL to create.
+        roots: The results roots to list.
+        logger: Logger the fan-out reports through.
+        share_size: How many files one task is handed.
+        options: Further keyword arguments for the fan-out.
+
+    Returns:
+        The task descriptions.
+    """
+    engine = open_index(url, create=True)
+    try:
+        return fan_out_ingest_tasks(
+            engine,
+            [root.as_posix() for root in roots],
+            share_size=share_size,
+            logger=logger,
+            **options,
+        ).tasks
+    finally:
+        engine.dispose()
+
+
+def run_shares(
+    url: str, tasks: Sequence[dict[str, Any]], *, logger: pdslogger.PdsLogger
+) -> list[dict[str, Any]]:
+    """Ingest every task's share, one after another, as one worker would.
+
+    Parameters:
+        url: The index URL, which must already carry the schema.
+        tasks: The task descriptions.
+        logger: Logger the shares report through.
+
+    Returns:
+        What each share returned, in task order.
+    """
+    engine = open_index(url)
+    try:
+        return [ingest_task_share(engine, task['data'], logger=logger) for task in tasks]
+    finally:
+        engine.dispose()
+
+
+def complete(
+    url: str, roots: list[Path], results: Sequence[dict[str, Any]], *, logger: pdslogger.PdsLogger
+) -> Any:
+    """Add up the shares of the given roots and stamp what they completed.
+
+    Parameters:
+        url: The index URL.
+        roots: The results roots whose runs are being completed.
+        results: What the shares returned.
+        logger: Logger the completion reports through.
+
+    Returns:
+        The completion outcome.
+    """
+    engine = open_index(url)
+    try:
+        return complete_ingest_tasks(
+            engine, [root.as_posix() for root in roots], results, logger=logger
+        )
+    finally:
+        engine.dispose()
+
+
+def rows_of(url: str, table: sqlalchemy.Table) -> list[tuple[Any, ...]]:
+    """Return every row of one table, in a stable order.
+
+    Parameters:
+        url: The index URL.
+        table: The table to read.
+
+    Returns:
+        The rows as tuples, ordered by their text columns so two indexes built
+        by different routes compare equal when they hold the same rows.
+    """
+    engine = open_index(url)
+    try:
+        with engine.connect() as connection:
+            found = [tuple(row) for row in connection.execute(sqlalchemy.select(table))]
+    finally:
+        engine.dispose()
+    return sorted(found, key=repr)
+
+
+def run_rows(url: str) -> list[Any]:
+    """Return every ingest run of an index, oldest first.
+
+    Parameters:
+        url: The index URL.
+
+    Returns:
+        The rows.
+    """
+    engine = open_index(url)
+    try:
+        with engine.connect() as connection:
+            return list(
+                connection.execute(sqlalchemy.select(INGEST_RUNS).order_by(INGEST_RUNS.c.run_id))
+            )
+    finally:
+        engine.dispose()
+
+
+def cycle(
+    tmp_path: Path, roots: list[Path], *, logger: pdslogger.PdsLogger, share_size: int = 2
+) -> str:
+    """Fan out, ingest every share, and complete, over the given roots.
+
+    Parameters:
+        tmp_path: Directory the index is written into.
+        roots: The results roots.
+        logger: Logger every stage reports through.
+        share_size: How many files one task is handed.
+
+    Returns:
+        The index URL.
+    """
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, roots, logger=logger, share_size=share_size)
+    results = run_shares(url, tasks, logger=logger)
+    complete(url, roots, results, logger=logger)
+    return url

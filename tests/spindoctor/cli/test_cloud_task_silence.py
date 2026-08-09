@@ -9,8 +9,11 @@ So this one runs a real subprocess, with ``logging.basicConfig`` installed
 exactly as a worker installs it, and measures the bytes on each descriptor.
 """
 
+import json
 import subprocess
 import sys
+from pathlib import Path
+from typing import Any
 
 import pytest
 from filecache import FCPath
@@ -149,3 +152,148 @@ def test_the_exception_keeps_its_traceback(task_output: tuple[str, str, str]) ->
 def test_the_traceback_names_the_failing_line(task_output: tuple[str, str, str]) -> None:
     """The frame carries the source line, not just the file it came from."""
     assert "raise RuntimeError('CANARY-EXCEPTION')" in task_output[2]
+
+
+# ---------------------------------------------------------------------------
+# The ingest worker, which has no per-image log to write into either
+# ---------------------------------------------------------------------------
+
+# An ingest worker logs where a navigation worker logs to an image file: its
+# per-file notes have no per-image scope to go in, and its own tally comes back
+# in the return value.  So the whole of what it says has to land nowhere, which
+# is a stronger claim than the one above and is measured the same way -- on the
+# descriptors, in a subprocess, with the root handler cloud_tasks installs.
+# The share ingests one document, refuses one, and skips one, so every level the
+# pass writes at is exercised.
+_INGEST_CHILD = """
+import json
+import logging
+import sys
+
+logging.basicConfig(level=logging.DEBUG)
+
+from pathlib import Path
+
+from spindoctor.cli import sd_stats_ingest_cloud_tasks
+from spindoctor.cli.stats.ingest import fan_out_ingest_tasks
+from spindoctor.results_index import open_index
+import argparse
+
+directory = Path(sys.argv[1])
+root = directory / 'results'
+(root / 'VOL').mkdir(parents=True)
+document = {
+    'status': 'success',
+    'offset': [1.5, -2.5],
+    'confidence': 0.8,
+    'observation': {'image_name': 'N1_CALIB.IMG', 'instrument': 'coiss', 'camera': 'NAC'},
+    'navigation_result': {'status': 'success', 'per_technique': [], 'feature_inventory': []},
+}
+(root / 'VOL' / 'N1_CALIB_metadata.json').write_text(json.dumps(document))
+(root / 'VOL' / 'other_metadata.json').write_text('{"edges": []}')
+
+url = 'sqlite:///' + (directory / 'index.sqlite3').as_posix()
+engine = open_index(url, create=True)
+
+
+class _Quiet:
+    def info(self, *args):
+        pass
+
+    warning = error = debug = exception = info
+
+
+tasks = fan_out_ingest_tasks(engine, [root.as_posix()], logger=_Quiet()).tasks
+engine.dispose()
+
+
+class _WorkerData:
+    def __init__(self):
+        self.args = argparse.Namespace(config_file=None, results_db=url)
+
+
+results = [
+    sd_stats_ingest_cloud_tasks.process_task(task['task_id'], task['data'], _WorkerData())[1]
+    for task in tasks
+]
+# The same share again, so the skip path logs too.
+results += [
+    sd_stats_ingest_cloud_tasks.process_task(task['task_id'], task['data'], _WorkerData())[1]
+    for task in tasks
+]
+Path(sys.argv[2]).write_text(json.dumps(results))
+"""
+
+
+@pytest.fixture(scope='module')
+def ingest_task_output(tmp_path_factory: pytest.TempPathFactory) -> tuple[str, str, list[Any]]:
+    """Run one ingest task in a worker-like subprocess.
+
+    Module-scoped for the same reason as the navigation one: the subprocess
+    costs a full interpreter start and every assertion below reads one run.
+
+    Parameters:
+        tmp_path_factory: Fixture used to make the run's directory.
+
+    Returns:
+        Tuple of the child's stdout, its stderr, and the task results it wrote.
+    """
+    directory = FCPath(tmp_path_factory.mktemp('ingest_task_silence'))
+    script = directory / 'child.py'
+    script.write_text(_INGEST_CHILD)
+    results_file = directory / 'results.json'
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            script.as_posix(),
+            (directory / 'run').as_posix(),
+            results_file.as_posix(),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return completed.stdout, completed.stderr, json.loads(results_file.read_text())
+
+
+def test_an_ingest_task_writes_nothing_to_stdout(
+    ingest_task_output: tuple[str, str, list[Any]],
+) -> None:
+    """Not one byte, though the pass logs a line per file it will not read."""
+    assert ingest_task_output[0] == ''
+
+
+def test_an_ingest_task_writes_nothing_to_stderr(
+    ingest_task_output: tuple[str, str, list[Any]],
+) -> None:
+    """Nor to stderr, where the root handler would otherwise re-emit it all."""
+    assert ingest_task_output[1] == ''
+
+
+def test_an_ingest_task_still_reports_what_it_ingested(
+    ingest_task_output: tuple[str, str, list[Any]],
+) -> None:
+    """Silence on the terminal must not be silence about the work.
+
+    An ingest worker has no log file to fall back on, so its return value is
+    the whole record: if isolation cost the tally, nothing would carry it.
+    """
+    assert ingest_task_output[2][0]['files_ingested'] == 1
+
+
+def test_an_ingest_task_still_names_what_it_refused(
+    ingest_task_output: tuple[str, str, list[Any]],
+) -> None:
+    """The file that is not a navigation document is named, not merely counted."""
+    named = [Path(name).name for name in ingest_task_output[2][0]['failed_files']]
+    assert named == ['other_metadata.json']
+
+
+def test_an_ingest_task_still_reports_what_it_skipped(
+    ingest_task_output: tuple[str, str, list[Any]],
+) -> None:
+    """The second run of the same share reads nothing and says so."""
+    assert ingest_task_output[2][1]['files_skipped'] == 2

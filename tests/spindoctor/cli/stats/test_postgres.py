@@ -30,8 +30,20 @@ from tests.spindoctor.cli.stats.conftest import (
     write_metadata,
 )
 
+from spindoctor.cli.stats.ingest import (
+    complete_ingest_tasks,
+    fan_out_ingest_tasks,
+    ingest_task_share,
+)
 from spindoctor.cli.stats.report import main_report
-from spindoctor.results_index import IMAGES, TECHNIQUES, open_index
+from spindoctor.results_index import (
+    IMAGES,
+    INGEST_RUNS,
+    TECHNIQUES,
+    normalize_root_url,
+    open_index,
+    require_ingested_roots,
+)
 
 pytestmark = pytest.mark.postgres
 
@@ -284,3 +296,78 @@ def test_a_document_the_server_refuses_costs_only_itself(
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     counts = ingest_tree(postgres_url, [root], logger=quiet_logger)
     assert (counts.files_ingested, counts.files_failed) == (1, 1)
+
+
+def test_the_shares_write_the_rows_a_single_pass_writes_on_postgresql(
+    postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Cross-machine ingest is the case this backend exists for.
+
+    A shared SQLite file is not an option there, so the workers connect to a
+    server as ordinary clients -- and the rows they write between them must be
+    the rows one process writes over the same tree.
+    """
+    root = tmp_path / 'results'
+    for index in range(6):
+        name = f'N{1454725799 + index}_1_CALIB'
+        write_metadata(root, f'VOL/{name}', metadata_document(image_name=f'{name}.IMG'))
+    engine = open_index(postgres_url, create=True)
+    try:
+        tasks = fan_out_ingest_tasks(
+            engine, [root.as_posix()], share_size=2, logger=quiet_logger
+        ).tasks
+        results = [ingest_task_share(engine, task['data'], logger=quiet_logger) for task in tasks]
+        complete_ingest_tasks(engine, [root.as_posix()], results, logger=quiet_logger)
+        with engine.connect() as connection:
+            found = list(
+                connection.execute(
+                    sqlalchemy.select(IMAGES.c.results_path_stub).order_by(
+                        IMAGES.c.results_path_stub
+                    )
+                )
+            )
+    finally:
+        engine.dispose()
+    assert len(found) == 6
+
+
+def test_the_shares_are_added_into_the_run_on_postgresql(
+    postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The run row is what makes absence of a row readable, on either backend."""
+    root = tmp_path / 'results'
+    for index in range(6):
+        name = f'N{1454725799 + index}_1_CALIB'
+        write_metadata(root, f'VOL/{name}', metadata_document(image_name=f'{name}.IMG'))
+    engine = open_index(postgres_url, create=True)
+    try:
+        tasks = fan_out_ingest_tasks(
+            engine, [root.as_posix()], share_size=2, logger=quiet_logger
+        ).tasks
+        results = [ingest_task_share(engine, task['data'], logger=quiet_logger) for task in tasks]
+        complete_ingest_tasks(engine, [root.as_posix()], results, logger=quiet_logger)
+        with engine.connect() as connection:
+            found = list(connection.execute(sqlalchemy.select(INGEST_RUNS.c.files_ingested)))
+    finally:
+        engine.dispose()
+    assert found[0][0] == 6
+
+
+def test_a_root_is_unreadable_until_its_shares_are_added_up_on_postgresql(
+    postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Workers on several machines write into one index at once.
+
+    Between the fan-out and the completion the index holds a part of the root,
+    and a consumer must be told nobody has ingested it rather than be handed
+    whatever has landed.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    engine = open_index(postgres_url, create=True)
+    try:
+        fan_out_ingest_tasks(engine, [root.as_posix()], share_size=2, logger=quiet_logger)
+        with engine.connect() as connection, pytest.raises(ValueError, match='no completed ingest'):
+            require_ingested_roots(connection, [normalize_root_url(root)], url=postgres_url)
+    finally:
+        engine.dispose()
