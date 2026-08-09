@@ -12,6 +12,7 @@ on one of them does not have to restate the other two.
 """
 
 import json
+import os
 import uuid
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -232,6 +233,44 @@ def write_metadata(root: Path, stub: str, document: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document), encoding='utf-8')
     return path
+
+
+PINNED_MTIME_NS = 1_700_000_000_000_000_000
+"""Modification time given to documents whose metrics must not vary.
+
+An arbitrary instant, in the past, with nanoseconds a filesystem storing whole
+seconds would round away to the same value for every file given it.
+"""
+
+
+def write_metadata_in_each(
+    roots: Sequence[Path], stub: str, document: dict[str, Any]
+) -> list[Path]:
+    """Write one document under several roots, indistinguishable but for its root.
+
+    The rows of two roots holding one stub are told apart by the root half of
+    the key alone, so a guard against a query that reads the stub alone has to
+    hold when the two files match in every other respect -- same bytes, same
+    size, same modification time.  Two writes microseconds apart usually do land
+    on the same filesystem timestamp and occasionally do not, and a guard that
+    depends on which is a guard that passes a root-blind lookup whenever the
+    clock ticks between them.  So the time is set here rather than left to the
+    clock.
+
+    Parameters:
+        roots: The results roots to write under.
+        stub: The stub each of them holds.
+        document: The document to write into each.
+
+    Returns:
+        The paths written.
+    """
+    written = []
+    for root in roots:
+        path = write_metadata(root, stub, document)
+        os.utime(path, ns=(PINNED_MTIME_NS, PINNED_MTIME_NS))
+        written.append(path)
+    return written
 
 
 def write_summary_png(root: Path, stub: str) -> Path:

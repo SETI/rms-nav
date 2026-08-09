@@ -45,6 +45,7 @@ from .conftest import (
     run_shares,
     technique,
     write_metadata,
+    write_metadata_in_each,
     write_summary_png,
 )
 
@@ -466,12 +467,13 @@ def test_a_share_reads_what_only_another_root_has_recorded(
     Both roots here hold the same stub, and the first is fully ingested.  A
     share of the second that asked about the stub alone would find a matching
     size and time, skip the file, and leave the second root with no row for an
-    image it holds -- which every consumer reads as never navigated.
+    image it holds -- which every consumer reads as never navigated.  The two
+    documents are given one modification time, so that "matching" holds whether
+    or not the clock ticked between the two writes.
     """
     first = tmp_path / 'first'
     second = tmp_path / 'second'
-    write_metadata(first, FIRST_STUB, metadata_document())
-    write_metadata(second, FIRST_STUB, metadata_document())
+    write_metadata_in_each([first, second], FIRST_STUB, metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
     cycle_tasks = fan_out(url, [first], logger=quiet_logger)
     run_shares(url, cycle_tasks, logger=quiet_logger)

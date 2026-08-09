@@ -262,14 +262,26 @@ def ingest_task_output(tmp_path_factory: pytest.TempPathFactory) -> tuple[str, s
 def test_an_ingest_task_writes_nothing_to_stdout(
     ingest_task_output: tuple[str, str, list[Any]],
 ) -> None:
-    """Not one byte, though the pass logs a line per file it will not read."""
+    """Not one byte, though the pass logs a line per file it will not read.
+
+    This is the half of the isolation that binds the null sink: a pdslogger left
+    with no handlers at all does not go quiet, it prints every record to stdout
+    whatever its level.
+    """
     assert ingest_task_output[0] == ''
 
 
 def test_an_ingest_task_writes_nothing_to_stderr(
     ingest_task_output: tuple[str, str, list[Any]],
 ) -> None:
-    """Nor to stderr, where the root handler would otherwise re-emit it all."""
+    """Nor to stderr, where the root handler would otherwise re-emit it all.
+
+    This is the other half, and it fails to a different break: a record that
+    still propagated would be emitted a second time by the handler
+    ``logging.basicConfig`` puts on the root logger, which the child installs
+    above exactly as a worker does -- and that handler writes to stderr rather
+    than stdout, so binding the null sink alone leaves this descriptor open.
+    """
     assert ingest_task_output[1] == ''
 
 
