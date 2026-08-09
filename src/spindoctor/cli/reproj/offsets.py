@@ -10,6 +10,13 @@ image, a malformed pointing block, or a record that fails the reader's
 gates).  This module serves both the mosaic drivers (``sd_mosaic`` and its
 cloud-task worker) and the backplane stage.
 
+:func:`select_pointing` is the whole classifier and takes a parsed record, so
+it is equally the classifier for a record that never was a file.  Which storage
+a program reads its records from is chosen by
+:mod:`spindoctor.cli.reproj.pointing_source`, and that module states the few
+places where a record rebuilt from an index row is classified differently from
+the document it was ingested from.
+
 Failing to load a pointing does not stop the product; it proceeds on the
 camera's uncorrected pointing, and the product it writes carries no sign of
 that.  So the fact is reported in both places, and the two say different
@@ -62,6 +69,18 @@ from spindoctor.support.types import NDArrayAnyType, NDArrayFloatType
 NO_CMATRIX_ROTATION_FITTED = 'no_cmatrix_rotation_fitted'
 NO_POINTING_BLOCK = 'no_pointing_block'
 MISSING_OFFSET_KEY = 'missing_offset_key'
+
+NO_METADATA = 'no_metadata'
+"""Nothing recorded this image at all, however the records are stored."""
+
+NO_METADATA_MESSAGE = (
+    'nav_results_root provided but no metadata found for %s; using uncorrected pointing.'
+)
+"""What an image's log says when nothing recorded it.
+
+Shared by every way of looking a record up, so an image with no record reads the
+same in its log whether the records were sought as documents or as index rows.
+"""
 
 
 class PointingMechanism(enum.Enum):
@@ -129,7 +148,7 @@ class AppliedPointing:
     reason: str | None
 
 
-def _none_selection(reason: str | None) -> PointingSelection:
+def none_selection(reason: str | None) -> PointingSelection:
     """Build the selection for a record that supplies no pointing at all.
 
     Parameters:
@@ -372,7 +391,7 @@ def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> Point
         IMAGE_LOGGER.warning(
             'Nav metadata for %s has status=%r; using uncorrected pointing.', subject, status
         )
-        return _none_selection('navigation_did_not_succeed')
+        return none_selection('navigation_did_not_succeed')
 
     offset, offset_reason, offset_key_present = _classify_offset(nav_metadata)
     pointing_values = _parse_pointing_values(nav_metadata)
@@ -471,27 +490,24 @@ def load_pointing_if_any(
     """
     if nav_results_root is None:
         # Nothing was asked for, so nothing is missing.
-        return _none_selection(None)
+        return none_selection(None)
 
     metadata_path = _resolved_nav_metadata_path(nav_results_root, image_file)
     if metadata_path is None:
-        return _none_selection('unusable_metadata_path')
+        return none_selection('unusable_metadata_path')
 
     try:
         text = metadata_path.read_text()
     except FileNotFoundError:
-        IMAGE_LOGGER.warning(
-            'nav_results_root provided but no metadata found for %s; using uncorrected pointing.',
-            image_file.image_file_url,
-        )
-        return _none_selection('no_metadata')
+        IMAGE_LOGGER.warning(NO_METADATA_MESSAGE, image_file.image_file_url)
+        return none_selection(NO_METADATA)
     except (OSError, UnicodeDecodeError) as exc:
         IMAGE_LOGGER.warning(
             'Could not read metadata for %s (%s); using uncorrected pointing.',
             image_file.image_file_url,
             exc,
         )
-        return _none_selection('unreadable_metadata')
+        return none_selection('unreadable_metadata')
 
     try:
         nav_metadata = json.loads(text)
@@ -501,7 +517,7 @@ def load_pointing_if_any(
             image_file.image_file_url,
             exc,
         )
-        return _none_selection('invalid_json')
+        return none_selection('invalid_json')
 
     if not isinstance(nav_metadata, dict):
         IMAGE_LOGGER.warning(
@@ -511,7 +527,7 @@ def load_pointing_if_any(
             type(nav_metadata).__name__,
             nav_metadata,
         )
-        return _none_selection('metadata_not_an_object')
+        return none_selection('metadata_not_an_object')
 
     return select_pointing(nav_metadata, subject=str(image_file.image_file_url))
 
