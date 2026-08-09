@@ -83,6 +83,7 @@ _CLOUD_TASK_DRIVERS = [
     'sd_offset_cloud_tasks',
     'sd_backplanes_cloud_tasks',
     'sd_mosaic_cloud_tasks',
+    'sd_stats_ingest_cloud_tasks',
 ]
 
 

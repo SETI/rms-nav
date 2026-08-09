@@ -83,6 +83,32 @@ def test_an_fcpath_normalizes_the_same_way_as_its_text() -> None:
     )
 
 
+def test_a_root_spelled_as_nothing_at_all_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty spelling renders as the working directory, and is not a root.
+
+    ``--nav-results-root "$ROOT"`` with the variable unset hands a program an
+    empty word, and a program that resolved it would walk whatever directory it
+    happens to be in, write those documents under a root nobody named, and
+    report a pass that completed.
+    """
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match='not a location'):
+        normalize_root_url('')
+
+
+def test_a_root_carrying_a_null_byte_is_refused() -> None:
+    """It renders perfectly well, and fails at the first call that reaches disk.
+
+    Refused where the root is spelled, it is charged to the root; left to
+    render, it becomes an exception out of a directory listing, naming the
+    listing rather than the word that caused it.
+    """
+    with pytest.raises(ValueError, match='null byte'):
+        normalize_root_url('/data/nav\x00results')
+
+
 def _refusal_of_an_unknown_root(tmp_path: Path) -> str:
     """Ask an empty index for a root nobody ingested and return the refusal text.
 

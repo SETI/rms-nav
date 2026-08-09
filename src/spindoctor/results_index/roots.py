@@ -43,13 +43,32 @@ def normalize_root_url(root: str | Path | FCPath) -> str:
     trailing separator except on the filesystem root itself, whose separator is
     its whole name.
 
+    Two spellings are refused here rather than rendered.  An empty one renders
+    as whatever directory the process happens to be in, so a program handed one
+    -- which is what an unset variable in ``--nav-results-root "$ROOT"`` hands it
+    -- would walk the working directory, write its documents under a root nobody
+    named, and report a completed pass.  One carrying a null byte renders
+    perfectly well and then fails at the first call that reaches the filesystem,
+    which is a failure charged to a directory listing rather than to the word
+    that caused it.  Every caller reads a root through here, so both are refused
+    once for the whole surface.
+
     Parameters:
         root: The results root as its holder spelled it: a local path, an
             :class:`FCPath`, or a cloud URL.
 
     Returns:
         The normalized root URL.
+
+    Raises:
+        ValueError: If the spelling is not a location: empty, carrying a null
+            byte, or one the storage layer itself refuses to render absolute.
     """
+    spelled = str(root)
+    if spelled == '':
+        raise ValueError('a results root spelled as nothing at all is not a location')
+    if '\x00' in spelled:
+        raise ValueError(f'a results root carrying a null byte is not a location: {spelled!r}')
     return FCPath(root).absolute().as_posix()
 
 

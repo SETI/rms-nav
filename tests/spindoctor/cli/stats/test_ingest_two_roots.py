@@ -1,121 +1,154 @@
-"""What one root's rows are allowed to decide about another root's files.
+"""Tests for the root half of the key, on every query that writes or removes.
 
-A row is keyed by ``(root_url, results_path_stub)``, and one index serves
-several roots.  Two of them holding copies of one tree is the ordinary result of
-a mirror, a restored backup or a rescue root beside a primary: the same stubs,
-the same lengths and the same modification times under two roots.
+An image is keyed by ``(root_url, results_path_stub)``, and two results trees
+routinely hold the same stub: one volume's images are navigated twice, into a
+production tree and a rescue tree.  Every delete an ingest issues names both
+halves, and on a fixture holding one root a delete that named only the stub
+would behave identically -- which is how a root-blind query ships.  So each of
+them is exercised here with a second root present that holds the same stub, and
+what is asserted is that the other root's row is still there afterwards.
 
-So every question the ingest asks the index before it reads a file has to be
-asked about the root it is walking.  A pass that answered from the other root's
-rows would skip a file it has never read, and skipping is what leaves no row at
-all -- neither an image row nor a refusal -- for a file that exists.  A consumer
-reads that as an image nobody navigated, offers it for navigation again, and no
-later pass corrects it, because the skip lasts as long as the file does not
-change.  A single-root fixture cannot see any of this happen, which is why both
-arms of the question are asked here with a second root stocked to change the
-answer.
+The reads are covered where they are used: a share's lookup in
+``test_ingest_cloud_tasks``, the report's queries in ``test_report``.
 """
 
-import shutil
 from pathlib import Path
 
 import pdslogger
 import sqlalchemy
 
-from spindoctor.results_index import FAILED_FILES, normalize_root_url, open_index
+from spindoctor.results_index import FAILED_FILES, IMAGES, normalize_root_url, open_index
 
-from .conftest import index_url, ingest_tree, metadata_document, write_metadata
+from .conftest import FIRST_STUB, index_url, ingest_tree, metadata_document, write_metadata
 
-INGESTED = 'COISS_2001/data/a/N1454725799_1_CALIB'
-"""Stub of the document both roots hold and the ingest reads."""
-
-REFUSED = 'COISS_2001/data/a/edges'
-"""Stub of the file both roots hold and the ingest refuses."""
+REFUSED_DOCUMENT = '{"edges": []}'
+"""A document that reads as JSON and is not a navigation result of any schema."""
 
 
-def _one_tree_under_two_roots(tmp_path: Path) -> tuple[Path, Path]:
-    """Write one results tree and copy it whole to a second root.
-
-    The copy preserves each file's length and modification time, which is what
-    ``rsync -a``, ``cp -a`` and a restored backup all produce, and which is
-    everything the ingest compares before deciding it has already read a file.
+def write_refusal(root: Path, stub: str) -> Path:
+    """Write a document under a root that no pass can turn into an image row.
 
     Parameters:
-        tmp_path: Directory both roots live under.
+        root: The results root to write under.
+        stub: The document's results path stub under that root.
 
     Returns:
-        The root ingested first, and the copy of it ingested second.
+        The path written.
     """
-    first = tmp_path / 'primary'
-    write_metadata(first, INGESTED, metadata_document())
-    (first / f'{REFUSED}_metadata.json').write_text('{"edges": []}', encoding='utf-8')
-    second = tmp_path / 'rescue'
-    shutil.copytree(first, second, copy_function=shutil.copy2)
-    return first, second
+    path = root / f'{stub}_metadata.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(REFUSED_DOCUMENT, encoding='utf-8')
+    return path
 
 
-def _refusals_under(url: str, root: Path) -> list[str]:
-    """Return the stubs the index records a refusal of under one root.
+def stubs_under(url: str, table: sqlalchemy.Table, root: Path) -> list[str]:
+    """Return the stubs one table holds under one root.
 
     Parameters:
-        url: The index to read.
-        root: The results root to read them for.
+        url: The index URL.
+        table: The table to read, ``images`` or ``failed_files``.
+        root: The results root to ask about.
 
     Returns:
-        The recorded stubs, in the order the index yields them.
+        The stubs, in name order.
     """
     engine = open_index(url)
     try:
         with engine.connect() as connection:
-            rows = connection.execute(
-                sqlalchemy.select(FAILED_FILES.c.results_path_stub).where(
-                    FAILED_FILES.c.root_url == normalize_root_url(root.as_posix())
+            found = connection.execute(
+                sqlalchemy.select(table.c.results_path_stub).where(
+                    table.c.root_url == normalize_root_url(root)
                 )
             )
-            return [str(row[0]) for row in rows]
+            return sorted(str(row.results_path_stub) for row in found)
     finally:
         engine.dispose()
 
 
-def test_a_document_read_under_one_root_is_read_again_under_another(
+def test_ingesting_a_document_keeps_another_roots_refusal_of_that_stub(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """The second root's document has no row of its own until this pass writes one."""
-    first, second = _one_tree_under_two_roots(tmp_path)
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [first], logger=quiet_logger)
-    counts = ingest_tree(url, [second], logger=quiet_logger)
-    assert counts.files_ingested == 1
+    """Writing an image clears the refusal that stub used to carry, per root.
 
-
-def test_a_file_refused_under_one_root_is_read_again_under_another(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
-    """A refusal is evidence about one root's file, and the other root's is another file.
-
-    The two are indistinguishable by everything the skip compares, so a refusal
-    read without its root makes this pass decline to read a file it has never
-    seen.
+    A refusal is what stops the next pass paying to download and parse a file it
+    has already refused, so one cleared by another root's ingest costs that
+    download on every pass from then on, and the recorded reason for it with it.
     """
-    first, second = _one_tree_under_two_roots(tmp_path)
+    refusing = tmp_path / 'refusing'
+    holding = tmp_path / 'holding'
+    write_refusal(refusing, FIRST_STUB)
+    write_metadata(holding, FIRST_STUB, metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [first], logger=quiet_logger)
-    counts = ingest_tree(url, [second], logger=quiet_logger)
-    assert counts.files_failed == 1
+    ingest_tree(url, [refusing], logger=quiet_logger)
+    ingest_tree(url, [holding], logger=quiet_logger)
+    assert stubs_under(url, FAILED_FILES, refusing) == [FIRST_STUB]
 
 
-def test_a_file_refused_under_one_root_is_recorded_under_the_other_too(
+def test_refusing_a_file_keeps_another_roots_row_for_that_stub(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """A file that was skipped leaves no row, and no row is what "never navigated" reads as.
+    """Recording a refusal removes the image row that stub used to have, per root.
 
-    The count above says the file was read; this says what reading it left
-    behind, which is what a selection filter answers from.  A pass that skipped
-    it would write neither an image row nor a refusal, so the root would answer
-    that a file it holds does not exist.
+    A document that stopped reading must not answer for its image any more, so
+    its row goes as the refusal is written.  Removed on the evidence of the stub
+    alone, another root's navigated image goes with it -- and every consumer
+    reads the absence as "this image was never navigated" while that root's own
+    ingest run says it completed.
     """
-    first, second = _one_tree_under_two_roots(tmp_path)
+    holding = tmp_path / 'holding'
+    refusing = tmp_path / 'refusing'
+    write_metadata(holding, FIRST_STUB, metadata_document())
+    write_refusal(refusing, FIRST_STUB)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [holding], logger=quiet_logger)
+    ingest_tree(url, [refusing], logger=quiet_logger)
+    assert stubs_under(url, IMAGES, holding) == [FIRST_STUB]
+
+
+def test_refusing_a_file_keeps_another_roots_refusal_of_that_stub(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A refusal replaces the one recorded for its own root and no other's."""
+    first = tmp_path / 'first'
+    second = tmp_path / 'second'
+    write_refusal(first, FIRST_STUB)
+    write_refusal(second, FIRST_STUB)
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [first], logger=quiet_logger)
     ingest_tree(url, [second], logger=quiet_logger)
-    assert _refusals_under(url, second) == [REFUSED]
+    assert stubs_under(url, FAILED_FILES, first) == [FIRST_STUB]
+
+
+def test_a_prune_keeps_another_roots_row_for_a_stub_it_removed(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A document leaving one tree says nothing about the same stub in another.
+
+    The prune is the one delete that acts on a whole root at once, so a
+    root-blind one takes every other root's row for that stub with it -- while
+    those roots' runs go on saying their ingest completed.
+    """
+    staying = tmp_path / 'staying'
+    emptying = tmp_path / 'emptying'
+    write_metadata(staying, FIRST_STUB, metadata_document())
+    document = write_metadata(emptying, FIRST_STUB, metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [staying, emptying], logger=quiet_logger)
+    document.unlink()
+    ingest_tree(url, [emptying], logger=quiet_logger)
+    assert stubs_under(url, IMAGES, staying) == [FIRST_STUB]
+
+
+def test_a_prune_keeps_another_roots_refusal_of_a_stub_it_removed(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The prune reads both tables, so both of its deletes are keyed on the root."""
+    staying = tmp_path / 'staying'
+    emptying = tmp_path / 'emptying'
+    write_refusal(staying, FIRST_STUB)
+    refused = write_refusal(emptying, FIRST_STUB)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [staying, emptying], logger=quiet_logger)
+    refused.unlink()
+    ingest_tree(url, [emptying], logger=quiet_logger)
+    assert stubs_under(url, FAILED_FILES, staying) == [FIRST_STUB]

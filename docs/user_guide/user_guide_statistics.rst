@@ -58,7 +58,10 @@ program resolves one: ``--nav-results-root`` (repeatable), then the
 ``NAV_RESULTS_ROOT`` environment variable. Each row records the root it came
 from and its path under that root, and every consumer looks a row up by that
 pair. Pointing ingest at a subdirectory of a results root would produce
-identifiers no consumer's lookup can match.
+identifiers no consumer's lookup can match. A root that is not a location is
+refused before anything is walked, and an empty one is such a root: with
+``--nav-results-root "$ROOT"`` and ``ROOT`` unset the program stops rather than
+ingesting whatever directory it was started from under a name nobody chose.
 
 **Ingestion is incremental.** One recursive listing per root collects both the
 metadata documents and the summary PNGs beside them, and carries each file's
@@ -141,16 +144,135 @@ every directory of the root, and absence means what it says everywhere.
 **The exit status says whether the pass completed, not what it found.**
 ``sd_stats_ingest`` exits 0 when every named root was walked, whatever mix of
 documents was read, skipped and refused, and 1 when the run could not complete:
-no index or no results root could be resolved, the index could not be opened, or
-a root could not be listed at all. A scheduled invocation therefore reads the
-same status from the same tree every time, and a status of 1 always means
-something needs fixing rather than that a tree happens to hold no results.
+no index or no results root could be resolved, a named root is not a location
+that can be read, the index could not be opened, or a root could not be listed
+at all. A scheduled invocation therefore reads the same status from the same
+tree every time, and a status of 1 always means something needs fixing rather
+than that a tree happens to hold no results.
 
 The index is disposable, and there is no schema migration. It carries the column
 set version that wrote it, and opening one stamped with a different version
 fails naming both versions. The remedy is always the same -- delete the database
 and re-run ``sd_stats_ingest`` (the source of truth is the metadata documents,
 so nothing is lost).
+
+Ingesting over a queue of workers
+---------------------------------
+
+A root of a few hundred thousand documents is one listing followed by that many
+independent reads, so the reads can be spread over a queue. Three steps do it,
+and the middle one is where the work happens:
+
+.. code-block:: bash
+
+    # 1. List each root, remove the rows of documents that have left it, and
+    #    write out the shares.
+    sd_stats_ingest --nav-results-root /data/nav-offset-results \
+        --results-db postgresql+psycopg://user@dbhost/spindoctor \
+        --output-cloud-tasks-file ingest_tasks.json
+
+    # 2. Run the workers over those tasks, however the queue is driven. Each
+    #    worker writes its results into an event log.
+    sd_stats_ingest_cloud_tasks \
+        --results-db postgresql+psycopg://user@dbhost/spindoctor ...
+
+    # 3. Add the workers' tallies up and record them against each root.
+    sd_stats_ingest --nav-results-root /data/nav-offset-results \
+        --results-db postgresql+psycopg://user@dbhost/spindoctor \
+        --complete-cloud-tasks-file events.log
+
+**Workers on one machine can share a SQLite index**; workers on several cannot.
+A ``sqlite:`` URL names a local file, so a run spread across machines connects
+to PostgreSQL instead. Several worker processes on one machine writing to one
+local file is supported, and needs no merge step -- there is one file.
+
+**Only step 1 creates the index.** A worker opens an index that already exists
+and fails if it does not, because a worker that created one would answer a
+mistyped URL by building an empty index beside the real one, and every consumer
+would then read absence of a row as "this image was never navigated".
+
+**Only step 1 removes a row.** Deleting the rows of documents that have left the
+tree is allowed on the strength of a complete listing of the root, and step 1 is
+where the one listing of the pass happens; a worker holds a share and knows
+nothing about the stubs outside it, so a worker that removed rows would remove
+its peers'. Nothing a worker is about to write can be removed in step 1 either:
+every file a worker is handed came from that listing, and only stubs the listing
+did **not** hold are removed.
+
+**A root is not readable until step 3.** Its ingest run stays unfinished from
+step 1 onwards, so every consumer reports it as a root nobody has ingested while
+the workers are still writing -- rather than answering from whichever shares
+have landed.
+
+**Step 3 refuses to finish a root its tasks did not cover.** Step 1 records how
+many files it found; step 3 adds up how many the tasks ingested, skipped and
+refused, counting each task's report once. If the tasks account for fewer files
+than the listing found -- a task that failed, timed out, or was never run -- the
+root is named, its run is left unfinished, and ``sd_stats_ingest`` exits 1. Re-run
+the outstanding tasks and run step 3 again over a log holding the re-run results;
+a task re-run over a share it already ingested reads nothing, because its files
+match what the index records, so it reports them as skipped. A task that reports
+twice is still one task: the later report stands in for the earlier one, and a
+share reported twice never covers for a share that never ran. An account that
+runs past the listing is refused the same way: with each task counted once the
+sum can only exceed the listing on a report belonging somewhere else.
+
+**Step 3 counts a task's result only for the root it was written under.** A
+result names the run it belongs to and the root it wrote its rows under, and both
+have to match. A run number is only unique inside the index that minted it, so a
+task file run after its index was deleted and rebuilt -- the remedy for a
+schema-version mismatch -- names a run of whatever was built next. Its shares add
+up correctly and their rows are somewhere else entirely, and a root stamped on
+them would hold nothing at all. Such results are counted and named in the summary
+rather than credited; the root they were meant for is left unfinished, and step 1
+over that root is what starts it again.
+
+**Step 3 needs every task's result in the log it reads.** It reads one event log
+and counts what is in it, so a root whose tasks are spread over several logs is
+completed from the concatenation of them::
+
+    cat worker-*.events.log > all-events.log
+
+A task appearing in more than one of them is counted once, under the last report
+of it in the file. Order therefore decides between two reports of one task that
+disagree -- a task that failed on one worker and succeeded on another -- so a
+concatenation that puts the failure last leaves the root unfinished, which the
+same log concatenated the other way completes. Both outcomes are safe; neither
+stamps a root whose documents were not read. A log naming only some of a root's
+tasks leaves that root unfinished, which is the same outcome as tasks that never
+ran and is corrected the same way.
+
+**Step 3 refuses a root whose listing was never recorded.** A root that step 1
+could not list -- mistyped, or an unmounted share -- gets no tasks and no record
+of what it holds, and step 3 will not finish it: there is nothing for its tasks
+to be measured against, and a root completed on that basis would report every
+image under it as never navigated. Correct the root and run step 1 again.
+
+``--force`` belongs to step 1, and is refused in step 3, which reads no document.
+A pass whose shares must ignore what the index records is one whose fan-out was
+run with ``--force``.
+
+The tasks file is a JSON array in the shape a ``cloud_tasks`` queue loads. Each
+entry has a ``task_id`` and a ``data`` object carrying ``run_id`` (the ingest
+run the share belongs to), ``root_url`` (the normalized results root),
+``force``, ``has_file_metrics`` (whether the listing reported a size and
+modification time for every file), and ``files`` -- one object per document,
+with its ``results_path_stub``, ``mtime_ns``, ``size_bytes`` and
+``has_summary_png``. Every one of those comes from the single listing, so no
+worker stats a file or checks for one.
+
+Step 3 reads the ``cloud_tasks`` event log, which is JSON Lines with one event
+per line; the ``task_completed`` events carry what each worker returned, under
+the ``task_id`` the task ran as. Lines that are not events are counted and
+reported rather than refused, because an event log being appended to while it is
+read ends in a partial line.
+
+The closing summary of step 3 is the summary a single-process ingest writes:
+files seen, ingested, skipped and refused, with the refusals tallied by reason
+and one example file per reason. The reasons come back in the task results,
+since a worker has no run log to write them in. Every file a share could not
+read is named in its task result too, and the ones refused for something about
+the document are recorded in the index's ``failed_files`` table as well.
 
 Index schema
 ------------

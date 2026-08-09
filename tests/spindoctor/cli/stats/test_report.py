@@ -23,7 +23,14 @@ from spindoctor.cli.stats.report_sections import IMAGE_COLUMNS
 from spindoctor.dataset import DataSetPDS3CassiniISS, DataSetPDS3VoyagerISS
 from spindoctor.results_index import open_index
 
-from .conftest import index_url, ingest_tree, metadata_document, technique, write_metadata
+from .conftest import (
+    index_url,
+    ingest_tree,
+    metadata_document,
+    technique,
+    write_metadata,
+    write_metadata_in_each,
+)
 
 
 @contextlib.contextmanager
@@ -801,8 +808,11 @@ def _two_roots_sharing_a_stub(tmp_path: Path, logger: pdslogger.PdsLogger) -> It
     )
     primary = tmp_path / 'primary'
     rescue = tmp_path / 'rescue'
-    write_metadata(primary, _SHARED_STUB, document)
-    write_metadata(rescue, _SHARED_STUB, document)
+    # Written with one modification time rather than two moments apart: the
+    # rows of two roots holding one stub are told apart by the root half of the
+    # key alone, so a guard against a query that reads the stub alone only
+    # holds when the two files match in every other respect.
+    write_metadata_in_each([primary, rescue], _SHARED_STUB, document)
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [primary, rescue], logger=logger)
     engine = open_index(url)

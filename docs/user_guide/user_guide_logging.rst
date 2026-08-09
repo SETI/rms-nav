@@ -64,6 +64,9 @@ they run rather than afterwards.
    * - ``sd_stats_ingest``
      - yes
      - none
+   * - ``sd_stats_ingest_cloud_tasks``
+     - no
+     - none
    * - ``sd_stats_report``
      - no
      - none
@@ -371,3 +374,9 @@ Because a cloud task has no main log, an outcome that an interactive run would
 report there is returned in the task result instead. A backplanes task reports
 whether the image was processed or skipped, and a reprojection task returns how
 many images it completed, skipped and failed.
+
+``sd_stats_ingest_cloud_tasks`` is the case where the task result is the whole
+record: it has no per-image log either, because it reads documents rather than
+images. Each task returns how many files it ingested, skipped and could not
+read, and names every file it could not read. ``sd_stats_ingest`` reads those
+tallies back and writes them into the index, where they stay.
