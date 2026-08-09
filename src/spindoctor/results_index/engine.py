@@ -5,7 +5,7 @@ connection URL, applies the SQLite settings the concurrency model depends on,
 and refuses a database whose schema version is not the one this code reads.
 Every refusal is a ``ValueError`` naming the URL, including the ones a database
 driver raises, so a caller that reports failures catches one type.  The URL is
-named with its password masked: these messages are written to run logs and
+named with its credentials masked: these messages are written to run logs and
 handed to operators, and a database password belongs in neither.
 
 Two URL forms are supported::
@@ -68,6 +68,17 @@ the only ones for which moving the index to a server is the remedy.
 _HIDDEN_PASSWORD = '***'
 """What a password is replaced by, matching what a parsed URL renders itself as."""
 
+_CREDENTIAL_QUERY_MARKERS = ('password', 'passwd', 'pwd', 'secret', 'token', 'credential')
+"""Text that makes a query parameter's value a credential rather than a setting.
+
+A connection URL may carry its password as a query parameter instead of in the
+authority -- ``postgresql+psycopg://user@host/db?password=...`` authenticates
+exactly as the authority form does -- and a driver accepts any parameter its
+library knows, so the name is matched by what it contains rather than against a
+fixed list.  Over-hiding a setting whose name says credential costs a word of a
+message; under-hiding one puts a working password in a run log.
+"""
+
 _SUPPORTED_URL_FORMS = (
     'A results index is either a sqlite: URL naming a local path, or a '
     'postgresql+psycopg: URL naming a server.'
@@ -105,32 +116,72 @@ def _scheme_base(url: str) -> str:
 def _authority_start(url: str) -> int:
     """Return the index at which a URL's authority section begins.
 
-    The authority opens after the slashes that follow the scheme, and a URL
-    written with one slash instead of two is the shape a hand-edited setting
-    arrives in.
+    A scheme is only recognized as one when a ``/`` follows its ``:``.  Without
+    that slash the text before the colon reads equally as a scheme and as a user
+    name -- ``postgresql:svc:pw@host/db`` and ``svc:pw@host/db`` are the same
+    shape -- and reading it as a scheme is what leaves the password of the
+    second one visible.  It is therefore read as a user name in both, which
+    hides the first one's user name along with its password.  That is one word
+    of a message about a URL no driver would have accepted anyway; the other
+    reading loses a working password.
+
+    One slash or two, because a hand-edited setting arrives with either.
 
     Parameters:
         url: The URL as the caller wrote it.
 
     Returns:
-        The index just past those slashes, or -1 when the string carries no
-        slash at all and so has no authority to read.
+        The index just past the scheme and the slashes that open the authority.
     """
-    slash = url.find('/')
-    if slash < 0:
-        return -1
-    return slash + 2 if url[slash + 1 : slash + 2] == '/' else slash + 1
+    colon = url.find(':')
+    start = 0
+    if colon >= 0 and url[colon + 1 : colon + 2] == '/':
+        prefix = url[:colon]
+        # A '/' or an '@' before the colon puts the colon inside the authority
+        # rather than after a scheme, whatever follows it.
+        if '/' not in prefix and '@' not in prefix:
+            start = colon + 1
+    end = start
+    while end - start < 2 and url[end : end + 1] == '/':
+        end += 1
+    return end
+
+
+def _credentials_end(url: str, start: int, colon: int) -> int:
+    """Return the index of the ``@`` that ends a URL's credentials.
+
+    An ``@`` is what ends the credentials, and a user name is free to carry one
+    -- ``user@servername`` is the login form of a managed server -- so the one
+    that ends them is the last, not the first.  Last within what, though: a
+    password may carry an unescaped ``/``, so the authority cannot simply be
+    taken to end at the first slash.  It is taken to end there when an ``@``
+    precedes that slash, and to run past it when none does, which is exactly the
+    case where the slash is inside the password.
+
+    Parameters:
+        url: The URL as the caller wrote it.
+        start: Index at which the authority begins.
+        colon: Index of the ``:`` that introduces the password.
+
+    Returns:
+        The index of that ``@``, or -1 when the URL carries no credentials.
+    """
+    slash = url.find('/', start)
+    region_end = len(url) if slash < 0 else slash
+    at = url.rfind('@', colon, region_end)
+    if at >= 0:
+        return at
+    # No at-sign before the slash, so the slash is inside the password and the
+    # credentials run past it.
+    return url.find('@', colon)
 
 
 def _password_span(url: str) -> tuple[int, int] | None:
     """Return the half-open range of characters holding a URL's password.
 
     The rule is the one a URL's own grammar states.  The user name runs from the
-    start of the authority to the first ``:`` or ``/``; only a ``:`` introduces a
-    password, and that password runs to the first ``@`` after it, since an ``@``
-    is what ends the credentials.  A ``/`` inside the span is therefore part of
-    the password rather than the end of the authority, which is what reaches a
-    password written with an unescaped slash.
+    start of the authority to the first ``:``; only a ``:`` introduces a
+    password, and that password runs to the ``@`` that ends the credentials.
 
     One shape is genuinely ambiguous: ``host:5432/path@name`` reads equally as a
     host with a port and a path, or as a user name with a password that carries
@@ -149,8 +200,6 @@ def _password_span(url: str) -> tuple[int, int] | None:
         carries no password to hide.
     """
     start = _authority_start(url)
-    if start < 0:
-        return None
     colon = url.find(':', start)
     if colon < 0:
         return None
@@ -158,58 +207,89 @@ def _password_span(url: str) -> tuple[int, int] | None:
     if 0 <= slash < colon:
         # The authority ended before any colon, so what follows is a path.
         return None
-    at = url.find('@', colon)
+    at = _credentials_end(url, start, colon)
     if at < 0:
         return None
     return colon + 1, at
 
 
+def _masked_parameter(parameter: str) -> str:
+    """Return one query parameter with its value replaced if it is a credential.
+
+    Parameters:
+        parameter: The parameter as written, ``name=value`` or a bare name.
+
+    Returns:
+        The parameter, with its value replaced when its name says credential.
+    """
+    name, separator, _value = parameter.partition('=')
+    if not separator:
+        return parameter
+    if not any(marker in name.strip().lower() for marker in _CREDENTIAL_QUERY_MARKERS):
+        return parameter
+    return f'{name}={_HIDDEN_PASSWORD}'
+
+
+def _masked_query(url: str) -> str:
+    """Return a URL with the value of every credential query parameter replaced.
+
+    Run after the authority has been masked, so that a ``?`` inside a password
+    has already gone with the password and cannot be mistaken for the start of a
+    query.
+
+    Parameters:
+        url: The URL, with its authority already masked.
+
+    Returns:
+        The URL with any credential-bearing parameter hidden.
+    """
+    start = url.find('?')
+    if start < 0:
+        return url
+    end = url.find('#', start)
+    if end < 0:
+        end = len(url)
+    parameters = url[start + 1 : end].split('&')
+    masked = [_masked_parameter(parameter) for parameter in parameters]
+    if masked == parameters:
+        return url
+    return f'{url[: start + 1]}{"&".join(masked)}{url[end:]}'
+
+
 def masked_url(url: str) -> str:
-    """Return a URL string with any password in it replaced.
+    """Return a URL string with every credential in it replaced.
 
     Anything that puts a connection URL in front of a person -- a refusal whose
     parsing is what failed, a run log recording the command line it was given --
-    calls this, so that one structural rule decides what a password is.
-    Everything outside the password survives, because naming the URL is what
+    calls this, so that one structural rule decides what a credential is.  It is
+    the only rule: a parsed URL renders itself with its password hidden, but it
+    renders a ``?password=`` query parameter verbatim, so adopting the parser
+    for the URLs it accepts would adopt its blind spot with it.
+
+    Everything outside a credential survives, because naming the URL is what
     tells a reader which of the resolution levels supplied the value.
 
     A ``sqlite:`` URL is returned exactly as it came.  It names a local
     filesystem path, which has no credentials at all, and a path is free to carry
-    the colons and at-signs that would otherwise read as credentials.  So is any
-    string carrying no authority at all, which is what an ordinary command-line
-    word is.
+    the colons, at-signs and question marks that would otherwise read as some.
+
+    A results root is not a connection URL and is never passed here.  It has no
+    credentials to hide, and a root is the one string an operator reads a run
+    log to correct, so mangling one costs more than it protects.
 
     Parameters:
         url: The URL as the caller wrote it.
 
     Returns:
-        The URL with its password, if any, masked.
+        The URL with its credentials, if any, masked.
     """
     if _scheme_base(url) == _SQLITE_BACKEND:
         return url
     span = _password_span(url)
-    if span is None:
-        return url
-    first, past_last = span
-    return f'{url[:first]}{_HIDDEN_PASSWORD}{url[past_last:]}'
-
-
-def _display_url(url: str) -> str:
-    """Return the form of a URL that messages name it by.
-
-    Parameters:
-        url: The URL as the caller wrote it.
-
-    Returns:
-        The parsed URL rendered with its password hidden, or the text form
-        masked structurally when the URL is one the parser rejects.
-    """
-    try:
-        return sqlalchemy.engine.make_url(url).render_as_string()
-    except Exception:
-        # Any failure at all: this runs while reporting another failure, and a
-        # display string is never worth raising over.
-        return masked_url(url)
+    if span is not None:
+        first, past_last = span
+        url = f'{url[:first]}{_HIDDEN_PASSWORD}{url[past_last:]}'
+    return _masked_query(url)
 
 
 def _sqlite_error_name(exc: BaseException) -> str:
@@ -644,7 +724,7 @@ def _build_engine(url: str, *, create: bool) -> Engine:
         ValueError: For the failures this module diagnoses itself.
     """
     parsed = sqlalchemy.engine.make_url(url)
-    safe_url = parsed.render_as_string()
+    safe_url = masked_url(url)
     backend = parsed.get_backend_name()
     path = _sqlite_target(parsed, safe_url, create=create) if backend == _SQLITE_BACKEND else None
     engine = _make_engine(parsed, safe_url)
@@ -693,7 +773,7 @@ def open_index(url: str, *, create: bool = False) -> Engine:
     Every failure is a ``ValueError`` naming the URL, including the ones a
     database driver raises: a consumer that wants to report the cause rather than
     crash catches one type, and the driver's own exception is kept as the
-    ``__cause__``.  The URL is named with its password masked.
+    ``__cause__``.  The URL is named with its credentials masked.
 
     Parameters:
         url: A ``sqlite:`` URL naming a local filesystem path, or a
@@ -720,7 +800,7 @@ def open_index(url: str, *, create: bool = False) -> Engine:
         raise
     except sqlalchemy.exc.NoSuchModuleError as exc:
         raise ValueError(
-            f'{_display_url(url)}: there is no database driver for this URL scheme ({exc}). '
+            f'{masked_url(url)}: there is no database driver for this URL scheme ({exc}). '
             f'{_SUPPORTED_URL_FORMS}'
         ) from exc
     except Exception as exc:
@@ -728,5 +808,5 @@ def open_index(url: str, *, create: bool = False) -> Engine:
         # reports a malformed port or an uncoercible connect argument as a bare
         # ValueError naming neither the URL nor the setting that supplied it.
         raise ValueError(
-            f'{_display_url(url)}: could not open the results index ({type(exc).__name__}: {exc}).'
+            f'{masked_url(url)}: could not open the results index ({type(exc).__name__}: {exc}).'
         ) from exc

@@ -47,6 +47,11 @@ instead of being downloaded and parsed again forever.  It is a table of its own
 because a consumer reads absence of an ``images`` row as "this image was never
 navigated", and a file with no usable data must leave that answer alone.
 
+Two failures are counted without being recorded: a retrieval that never
+delivered the file, and a document the database itself would not store.  Both
+say nothing about the file that will still be true next pass, and a recorded
+refusal is skipped for as long as the file does not change.
+
 What leaving the tree costs
 ---------------------------
 
@@ -121,6 +126,16 @@ image's own rows are always written inside one transaction, so a concurrent
 worker never sees half of an image.
 """
 
+UNWRITABLE = 'the database would not accept its rows'
+"""Reason counted against a document the database refused to store.
+
+A reason of its own rather than the driver's message, which names the individual
+file and the individual value and would therefore tally as one reason per file.
+It is also not one of the "not a current-schema navigation document" reasons:
+such a document read exactly as the schema says, and only the storage refused
+it.
+"""
+
 
 @dataclass
 class IngestCounts:
@@ -132,7 +147,9 @@ class IngestCounts:
         files_skipped: Files whose recorded size and modification time still
             matched the listing, so they were never read.  A file refused by an
             earlier pass and unchanged since is skipped the same way.
-        files_failed: Files that are not current-schema navigation documents.
+        files_failed: Files no row could be made from: the ones that are not
+            current-schema navigation documents, the ones no retrieval
+            delivered, and the ones the database would not store.
         files_removed: Image rows deleted because the tree no longer holds the
             document they came from.
         roots_unreadable: Roots the walk could not list at all, whose ingest
@@ -278,6 +295,28 @@ def _metrics_of(entry_metadata: dict[str, Any] | None) -> tuple[int | None, int 
     return mtime_ns, size_bytes
 
 
+def _is_directory(path: FCPath, entry_metadata: dict[str, Any] | None) -> bool:
+    """Whether one listing entry is a directory.
+
+    Parameters:
+        path: The entry.
+        entry_metadata: What the listing said about it, or None when the
+            backend reported nothing.
+
+    Returns:
+        True when the entry is a directory.  A backend that reported no
+        metadata is asked, and one that cannot answer is treated as a file:
+        descending into something that is not there would only add a directory
+        the walk could not list.
+    """
+    if entry_metadata is not None:
+        return bool(entry_metadata['is_dir'])
+    try:
+        return bool(path.is_dir())
+    except OSError:
+        return False
+
+
 def _list_directory(directory: FCPath, prefix: str, listing: _RootListing) -> bool:
     """Collect one directory's result files and descend into its subdirectories.
 
@@ -292,15 +331,18 @@ def _list_directory(directory: FCPath, prefix: str, listing: _RootListing) -> bo
     """
     try:
         entries = list(directory.iterdir_metadata())
-    except (FileNotFoundError, NotADirectoryError):
-        # A directory that is not there, or that stopped being a directory
-        # between the parent listing and this call, holds no result files this
-        # walk can see -- which is not the same as holding none.
+    except OSError:
+        # Every way a directory can refuse to be listed: it is not there, it
+        # stopped being a directory between the parent listing and this call,
+        # this user may not read it, the share it lives on has gone away.  All
+        # of them mean the same thing to the walk -- it can see no result file
+        # here, which is not the same as there being none -- and treating only
+        # some of them that way ends the run on the commonest of them.
         return False
     for path, entry_metadata in entries:
         name = path.name
         relative = f'{prefix}{name}'
-        is_dir = entry_metadata['is_dir'] if entry_metadata is not None else path.is_dir()
+        is_dir = _is_directory(path, entry_metadata)
         if is_dir:
             if not _list_directory(path, f'{relative}/', listing):
                 listing.directory_missed = True
@@ -473,6 +515,125 @@ def _write_refusal(connection: sqlalchemy.Connection, refusal: dict[str, Any]) -
     connection.execute(FAILED_FILES.insert(), [refusal])
 
 
+def _connection_was_lost(exc: BaseException) -> bool:
+    """Whether a failure says the database went away rather than refusing a row.
+
+    The two need telling apart.  A row the database will not accept is one
+    document's problem and the pass goes on without it; a connection that is
+    gone would refuse every remaining image the same way, and a pass that
+    "completed" without them leaves every consumer reading the absence of their
+    rows as "this image was never navigated".
+
+    Parameters:
+        exc: The failure to classify.
+
+    Returns:
+        True when the driver reported the connection as no longer usable.
+    """
+    return isinstance(exc, sqlalchemy.exc.DBAPIError) and bool(exc.connection_invalidated)
+
+
+def _write_chunk(
+    engine: sqlalchemy.Engine,
+    pending: Sequence[ImageRows],
+    refused: Sequence[dict[str, Any]],
+    *,
+    counts: IngestCounts,
+    logger: PdsLogger,
+) -> int:
+    """Write one chunk's images and refusals, isolating a row the database refuses.
+
+    The chunk is one transaction, which is what bounds the cost of a crash and
+    keeps a writer from holding a lock for the length of a run.  A document the
+    database will not store -- an identifier too large for its column, a value
+    a backend's type will not hold -- would take the whole chunk down with it
+    and then the run, leaving the root's ingest unfinished and every consumer
+    refusing it.  So a chunk that fails is written again one image at a time,
+    which puts every writable document in and identifies the one that is not.
+
+    Parameters:
+        engine: The open index.
+        pending: The images to write.
+        refused: The ``failed_files`` rows to write.
+        counts: Accumulator the write failures are added to.
+        logger: Logger for the per-file failures.
+
+    Returns:
+        How many images were written.
+
+    Raises:
+        Exception: Whatever the database raised, if it says the connection is
+            gone rather than the row unacceptable.
+    """
+    try:
+        with engine.begin() as connection:
+            for rows in pending:
+                _write_image(connection, rows)
+            for refusal in refused:
+                _write_refusal(connection, refusal)
+    except Exception as exc:
+        if _connection_was_lost(exc):
+            raise
+        logger.debug('Retrying a chunk one image at a time after %s: %s', type(exc).__name__, exc)
+        return _write_separately(engine, pending, refused, counts=counts, logger=logger)
+    return len(pending)
+
+
+def _write_separately(
+    engine: sqlalchemy.Engine,
+    pending: Sequence[ImageRows],
+    refused: Sequence[dict[str, Any]],
+    *,
+    counts: IngestCounts,
+    logger: PdsLogger,
+) -> int:
+    """Write one chunk's rows in a transaction each, counting what will not go in.
+
+    A write failure is counted but not recorded in ``failed_files``, exactly as
+    a retrieval that failed is not: the document read, so nothing about it says
+    the next pass will not store it, and a recorded refusal would be skipped for
+    as long as the file did not change.
+
+    Parameters:
+        engine: The open index.
+        pending: The images to write.
+        refused: The ``failed_files`` rows to write.
+        counts: Accumulator the write failures are added to.
+        logger: Logger for the per-file failures.
+
+    Returns:
+        How many images were written.
+
+    Raises:
+        Exception: Whatever the database raised, if it says the connection is
+            gone rather than the row unacceptable.
+    """
+    written = 0
+    for rows in pending:
+        source_file = str(rows.image['source_file'])
+        try:
+            with engine.begin() as connection:
+                _write_image(connection, rows)
+        except Exception as exc:
+            if _connection_was_lost(exc):
+                raise
+            counts.record_failure(UNWRITABLE, source_file)
+            logger.debug('Skipping %s: %s: %s', source_file, type(exc).__name__, exc)
+            continue
+        written += 1
+    for refusal in refused:
+        try:
+            with engine.begin() as connection:
+                _write_refusal(connection, refusal)
+        except Exception as exc:
+            if _connection_was_lost(exc):
+                raise
+            logger.debug(
+                'Could not record the refusal of %s: %s', refusal['results_path_stub'], exc
+            )
+    return written
+
+
 def _batched(items: Sequence[_Item], size: int) -> Iterator[Sequence[_Item]]:
     """Yield consecutive slices of a sequence.
 
@@ -510,6 +671,15 @@ def _read_document(local_path: Path, source: MetadataSource) -> ImageRows:
         parsed: Any = json.loads(text)
     except json.JSONDecodeError as exc:
         raise MetadataDocumentError('not valid JSON', source_file=source.source_file) from exc
+    except Exception as exc:
+        # The decoder reports more than malformed syntax.  Twenty thousand
+        # nested objects exhaust the recursion limit rather than failing to
+        # parse, and a decoder that runs out of memory says so its own way.
+        # None of them is a reason to end the run.
+        raise MetadataDocumentError(
+            f'{NOT_A_NAVIGATION_DOCUMENT} ({type(exc).__name__} while parsing it)',
+            source_file=source.source_file,
+        ) from exc
     if not isinstance(parsed, dict):
         raise MetadataDocumentError('not a JSON object', source_file=source.source_file)
     try:
@@ -596,12 +766,7 @@ def _ingest_chunk(
                 )
     if not pending and not refused:
         return
-    with engine.begin() as connection:
-        for rows in pending:
-            _write_image(connection, rows)
-        for refusal in refused:
-            _write_refusal(connection, refusal)
-    counts.files_ingested += len(pending)
+    counts.files_ingested += _write_chunk(engine, pending, refused, counts=counts, logger=logger)
 
 
 def _start_run(engine: sqlalchemy.Engine, root_url: str) -> int:

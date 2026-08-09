@@ -16,6 +16,7 @@ after a run that went well.
 """
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -118,6 +119,16 @@ def _malformed_documents() -> dict[str, dict[str, Any]]:
         'diagnostics-is-a-string': _with_navigation(
             per_technique=[{'technique_name': 'BodyLimbNav', 'diagnostics': 'fine'}]
         ),
+        'two-techniques-of-one-name': _with_navigation(
+            per_technique=[
+                technique('BodyLimbNav', (1.0, 1.0)),
+                technique('BodyLimbNav', (2.0, 2.0)),
+            ]
+        ),
+        'two-techniques-with-no-name': _with_navigation(
+            per_technique=[{'offset_px': [1.0, 1.0]}, {'offset_px': [2.0, 2.0]}]
+        ),
+        'one-technique-with-no-name': _with_navigation(per_technique=[{'offset_px': [1.0, 1.0]}]),
     }
 
 
@@ -155,6 +166,17 @@ def test_a_document_of_another_shape_costs_only_itself(
     assert (counts.files_ingested, counts.files_failed) == (1, 1)
 
 
+class _NobodyEnumeratedThisError(Exception):
+    """An exception type the ingest source has no way to name.
+
+    The catch-all exists for the shapes nobody thought of, so a test that raises
+    a type the source could have listed does not exercise it: narrowing the
+    guard to that one type leaves the test passing.  This class is defined here
+    and imported nowhere, so only a guard that catches whatever comes can catch
+    it.
+    """
+
+
 def test_an_unenumerated_failure_costs_only_its_own_file(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -168,12 +190,139 @@ def test_an_unenumerated_failure_costs_only_its_own_file(
     def occasionally_exploding(metadata: Any, source: Any) -> Any:
         calls.append(1)
         if len(calls) == 1:
-            raise ZeroDivisionError('a shape nobody enumerated')
+            raise _NobodyEnumeratedThisError('a shape nobody enumerated')
         return real_rows(metadata, source)
 
     monkeypatch.setattr(ingest_module, 'rows_from_metadata', occasionally_exploding)
     counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
     assert (counts.files_ingested, counts.files_failed) == (1, 1)
+
+
+def _tree_with_unparseable_nesting(tmp_path: Path) -> Path:
+    """Write a tree holding one document and one file the JSON decoder gives up on.
+
+    Twenty thousand opening braces exhaust the decoder's recursion limit rather
+    than failing to parse, so the decoder raises something other than the one
+    exception a decode guard names.
+
+    Parameters:
+        tmp_path: Directory the tree lives under.
+
+    Returns:
+        The results root.
+    """
+    root = tmp_path / 'results'
+    root.mkdir()
+    (root / 'nested_metadata.json').write_text('{"a":' * 20000, encoding='utf-8')
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    return root
+
+
+def test_a_document_the_decoder_gives_up_on_costs_only_itself(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Only one of the decoder's failures is a decoding error; the run outlives all."""
+    root = _tree_with_unparseable_nesting(tmp_path)
+    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    assert (counts.files_ingested, counts.files_failed) == (1, 1)
+
+
+def test_a_document_the_decoder_gives_up_on_leaves_a_completed_run(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """An unfinished run is worse than a lost file: every consumer refuses the root."""
+    root = _tree_with_unparseable_nesting(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    assert [time is not None for time in _finish_times(url)] == [True]
+
+
+UNSTORABLE_IMAGE_NAME = f'N{"9" * 25}_1_CALIB.IMG'
+"""An image name whose leading digit run does not fit in a 64-bit column.
+
+``image_number`` is derived from it, and the driver refuses the value at the
+insert rather than at any check this code makes -- which is what makes it a
+database failure rather than a document-shape one.
+"""
+
+
+def _tree_with_an_unstorable_document(tmp_path: Path) -> Path:
+    """Write a tree holding one document the database will not accept.
+
+    Parameters:
+        tmp_path: Directory the tree lives under.
+
+    Returns:
+        The results root.
+    """
+    root = tmp_path / 'results'
+    write_metadata(
+        root, 'VOL/N9999999999_1_CALIB', metadata_document(image_name=UNSTORABLE_IMAGE_NAME)
+    )
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    return root
+
+
+def test_a_document_the_database_refuses_costs_only_itself(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A value no column can hold is found at the insert, inside the chunk's write."""
+    root = _tree_with_an_unstorable_document(tmp_path)
+    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    assert (counts.files_ingested, counts.files_failed) == (1, 1)
+
+
+def test_a_document_the_database_refuses_leaves_the_rest_of_its_chunk(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The savepoint is what keeps the chunk's other images out of the rollback."""
+    root = _tree_with_an_unstorable_document(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(connection, sqlalchemy.select(IMAGES.c.results_path_stub))
+    engine.dispose()
+    assert [row.results_path_stub for row in found] == ['VOL/N1454725799_1_CALIB']
+
+
+def test_a_document_the_database_refuses_records_no_refusal(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """It read, so nothing about it says the next pass will not store it."""
+    root = _tree_with_an_unstorable_document(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(connection, sqlalchemy.select(FAILED_FILES.c.results_path_stub))
+    engine.dispose()
+    assert found == []
+
+
+def test_a_lost_connection_is_not_read_as_an_unwritable_document(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every later image would fail too, and a completed run would hide all of them.
+
+    A consumer reads the absence of a row as "this image was never navigated",
+    so a run that finished because the database went away is worse than one that
+    did not finish at all.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+
+    def connection_lost(connection: Any, rows: Any) -> Any:
+        raise sqlalchemy.exc.DBAPIError(
+            'INSERT INTO images',
+            {},
+            OSError('server closed the connection'),
+            connection_invalidated=True,
+        )
+
+    monkeypatch.setattr(ingest_module, '_write_image', connection_lost)
+    with pytest.raises(sqlalchemy.exc.DBAPIError, match='server closed the connection'):
+        ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
 
 
 def test_a_reason_says_the_file_was_never_a_navigation_result(
@@ -257,6 +406,55 @@ def test_a_refused_file_is_not_read_again(
     retrievals = _counting_retrievals(monkeypatch)
     ingest_tree(url, [root], logger=quiet_logger)
     assert retrievals == []
+
+
+def _listing_without_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the walk see a backend whose listing reports no size and no time.
+
+    Parameters:
+        monkeypatch: Fixture the listing is wrapped through.
+    """
+    real_iterdir = FCPath.iterdir_metadata
+
+    def without_metrics(self: FCPath) -> Any:
+        for path, _entry_metadata in real_iterdir(self):
+            yield path, None
+
+    monkeypatch.setattr(FCPath, 'iterdir_metadata', without_metrics)
+
+
+def test_a_metric_less_listing_retrieves_every_document_again(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A backend that cannot say whether a file changed cannot be trusted that it did not.
+
+    Both recorded metrics are then NULL, and a comparison of two pairs of NULLs
+    finds them equal -- so a root whose listing reports neither would otherwise
+    be read once and never updated again, silently and permanently.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725798_1_CALIB', metadata_document())
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    _listing_without_metrics(monkeypatch)
+    ingest_tree(url, [root], logger=quiet_logger)
+    retrievals = _counting_retrievals(monkeypatch)
+    ingest_tree(url, [root], logger=quiet_logger)
+    assert [len(batch) for batch in retrievals] == [2]
+
+
+def test_a_metric_less_listing_skips_nothing(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And the count says so, since that is what an operator reads."""
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725798_1_CALIB', metadata_document())
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    _listing_without_metrics(monkeypatch)
+    ingest_tree(url, [root], logger=quiet_logger)
+    counts = ingest_tree(url, [root], logger=quiet_logger)
+    assert (counts.files_ingested, counts.files_skipped) == (2, 0)
 
 
 def test_a_refused_file_is_counted_as_skipped(
@@ -425,30 +623,160 @@ def test_another_roots_rows_are_left_alone(
     assert found[0][0] == 2
 
 
-def test_a_partly_listed_root_removes_nothing(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+def test_a_deleted_refusal_loses_its_recorded_refusal(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """A directory that could not be listed is not a directory that is empty."""
+    """A refusal outliving its file would skip a file written there later.
+
+    The stub is recorded as refused; a file written at that stub afterwards has
+    the size and modification time of a file nobody has read, but the refusal it
+    would be compared against is the deleted file's.
+    """
     root = tmp_path / 'results'
-    write_metadata(root, 'VOL1/N1454725799_1_CALIB', metadata_document())
-    write_metadata(root, 'VOL2/N1454725800_1_CALIB', metadata_document())
+    root.mkdir()
+    gone = root / 'edges_metadata.json'
+    gone.write_text('{"edges": []}', encoding='utf-8')
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=quiet_logger)
+    gone.unlink()
+    ingest_tree(url, [root], logger=quiet_logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(connection, sqlalchemy.select(FAILED_FILES.c.results_path_stub))
+    engine.dispose()
+    assert found == []
 
+
+UNLISTABLE_ERRORS = [
+    pytest.param(FileNotFoundError, id='not-there'),
+    pytest.param(NotADirectoryError, id='not-a-directory'),
+    pytest.param(PermissionError, id='this-user-may-not-read-it'),
+    pytest.param(TimeoutError, id='the-share-stopped-answering'),
+]
+"""Every way a real tree refuses to list a directory.
+
+They are one thing to the walk -- it can see no result file there, which is not
+evidence that there is none -- and enumerating only some of them ends the run on
+the others.  A permission error is the commonest of all on a shared tree.
+"""
+
+
+def _unlistable_subdirectory(monkeypatch: pytest.MonkeyPatch, error: type[OSError]) -> None:
+    """Make one subdirectory of a two-volume tree refuse to be listed.
+
+    Parameters:
+        monkeypatch: Fixture the listing is wrapped through.
+        error: The exception type that directory raises.
+    """
     real_iterdir = FCPath.iterdir_metadata
 
     def unlistable_vol2(self: FCPath) -> Any:
         if self.name == 'VOL2':
-            raise FileNotFoundError(self.as_posix())
+            raise error(self.as_posix())
         yield from real_iterdir(self)
 
     monkeypatch.setattr(FCPath, 'iterdir_metadata', unlistable_vol2)
+
+
+def _two_volume_tree(tmp_path: Path) -> Path:
+    """Write a results tree with one document in each of two volumes.
+
+    Parameters:
+        tmp_path: Directory the tree lives under.
+
+    Returns:
+        The results root.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL1/N1454725799_1_CALIB', metadata_document())
+    write_metadata(root, 'VOL2/N1454725800_1_CALIB', metadata_document())
+    return root
+
+
+@pytest.mark.parametrize('error', UNLISTABLE_ERRORS)
+def test_a_partly_listed_root_removes_nothing(
+    error: type[OSError],
+    tmp_path: Path,
+    quiet_logger: pdslogger.PdsLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A directory that could not be listed is not a directory that is empty.
+
+    Parameters:
+        error: The exception type the unlistable directory raises.
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the listing is wrapped through.
+    """
+    root = _two_volume_tree(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    _unlistable_subdirectory(monkeypatch, error)
     ingest_tree(url, [root], logger=quiet_logger)
     engine = open_index(url)
     with engine.connect() as connection:
         found = _rows(connection, sqlalchemy.select(sqlalchemy.func.count()).select_from(IMAGES))
     engine.dispose()
     assert found[0][0] == 2
+
+
+@pytest.mark.parametrize('error', UNLISTABLE_ERRORS)
+def test_a_directory_that_cannot_be_listed_costs_only_itself(
+    error: type[OSError],
+    tmp_path: Path,
+    quiet_logger: pdslogger.PdsLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One unreadable subdirectory must not end the pass over the rest of the root.
+
+    Parameters:
+        error: The exception type the unlistable directory raises.
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the listing is wrapped through.
+    """
+    root = _two_volume_tree(tmp_path)
+    _unlistable_subdirectory(monkeypatch, error)
+    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    assert counts.files_ingested == 1
+
+
+@pytest.mark.parametrize('error', UNLISTABLE_ERRORS)
+def test_a_directory_that_cannot_be_listed_leaves_a_completed_run(
+    error: type[OSError],
+    tmp_path: Path,
+    quiet_logger: pdslogger.PdsLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The root itself was listed, so it is a root somebody has ingested part of.
+
+    Parameters:
+        error: The exception type the unlistable directory raises.
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the listing is wrapped through.
+    """
+    root = _two_volume_tree(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    _unlistable_subdirectory(monkeypatch, error)
+    ingest_tree(url, [root], logger=quiet_logger)
+    assert [time is not None for time in _finish_times(url)] == [True]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason='the superuser reads a directory of mode 000')
+def test_a_directory_the_filesystem_will_not_open_costs_only_itself(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The same thing again, against a real directory rather than a stand-in."""
+    root = _two_volume_tree(tmp_path)
+    closed = root / 'VOL2'
+    closed.chmod(0o000)
+    try:
+        counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    finally:
+        closed.chmod(0o755)
+    assert counts.files_ingested == 1
 
 
 def test_the_prune_refuses_a_listing_of_part_of_a_root(
@@ -564,6 +892,18 @@ def _seven_images(tmp_path: Path) -> Path:
     return root
 
 
+class _TheWriterDiedError(BaseException):
+    """A failure of the process rather than of the document being written.
+
+    A document the database refuses is that document's own problem and is
+    refused as one, so an ordinary exception no longer reaches the chunk's
+    transaction.  What still does is a failure of everything -- the process
+    being killed, the machine going down -- and that is what a chunk boundary
+    bounds the cost of.  Deriving from ``BaseException`` is what makes this
+    stand for one.
+    """
+
+
 def test_a_crash_mid_run_costs_one_chunk_and_no_more(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -583,11 +923,11 @@ def test_a_crash_mid_run_costs_one_chunk_and_no_more(
     def failing(connection: Any, rows: Any) -> Any:
         written.append(rows)
         if len(written) == 5:
-            raise RuntimeError('the writer died')
+            raise _TheWriterDiedError('the writer died')
         return real_write(connection, rows)
 
     monkeypatch.setattr(ingest_module, '_write_image', failing)
-    with pytest.raises(RuntimeError, match='the writer died'):
+    with pytest.raises(_TheWriterDiedError, match='the writer died'):
         ingest_tree(url, [root], logger=quiet_logger)
     engine = open_index(url)
     with engine.connect() as connection:

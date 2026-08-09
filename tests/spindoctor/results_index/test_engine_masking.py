@@ -1,20 +1,23 @@
-"""Tests that a results-index refusal names its URL without its password.
+"""Tests that a results-index refusal names its URL without its credentials.
 
 These messages are written to run logs and pasted into bug reports, so a
 database password may not survive into one. Everything else about the URL has
 to, because naming the URL is what tells a reader which of the three resolution
 levels supplied the bad value.
 
-Two routes produce the name. A URL SQLAlchemy can parse renders itself with the
-password hidden. A URL it cannot parse -- a stray space from a value copied
-across two lines, a hyphen in the scheme, a missing scheme -- cannot render
-itself at all, and is masked structurally instead. The structural rule is
-covered here twice: directly, as a table of URLs and exactly what masking each
-must produce, and again through the real opener, because the gap between the two
-is where a leak survived three review rounds.
+The rule is asked about a corpus rather than a list of remembered shapes. Every
+combination of scheme, of the slashes that follow it, of credentials, and of
+what a password may contain is built here and asserted in both directions: the
+secret is gone, and the result is exactly the URL with its credentials replaced
+and nothing else touched. A list of shapes somebody thought of is what let four
+separate leaks through, each in a shape nobody had thought of yet.
+
+The corpus is driven through the real opener as well, on the URLs that reach a
+refusal without opening a socket, because a rule nothing calls protects nothing.
 """
 
 import dataclasses
+import itertools
 
 import pytest
 import sqlalchemy
@@ -28,6 +31,9 @@ from spindoctor.results_index import masked_url, open_index
 
 PASSWORD = 'sup3rs3cr3t'
 """A password distinctive enough that finding it anywhere is proof of a leak."""
+
+HIDDEN = '***'
+"""What a credential is replaced by, matching what a parsed URL renders itself as."""
 
 SLASHED_PASSWORD = 'aB3/xY9z'
 """A password carrying a slash, which a URL permits unescaped.
@@ -85,6 +91,20 @@ REFUSAL_ROUTES = [
             hidden_module='psycopg',
         ),
         id='driver-not-installed',
+    ),
+    pytest.param(
+        _Route(
+            # The password as a query parameter, which authenticates exactly as
+            # the authority form does. A parsed URL renders this one verbatim,
+            # so the route that names a URL by its parsed rendering leaked it in
+            # full.
+            url=f'postgresql+psycopg://user@localhost:5432/spindoctor?password={PASSWORD}',
+            message=r'rms-spindoctor\[postgres\]',
+            identifies='localhost:5432',
+            cause=ModuleNotFoundError,
+            hidden_module='psycopg',
+        ),
+        id='a-password-query-parameter',
     ),
     pytest.param(
         _Route(
@@ -221,18 +241,130 @@ def test_every_refusal_route_masks_its_password_and_keeps_everything_else(
     assert route.identifies in str(refusal)
 
 
+# ---------------------------------------------------------------------------
+# The corpus: every combination of the parts a URL is built from
+# ---------------------------------------------------------------------------
+
+
 @dataclasses.dataclass(frozen=True)
-class _MaskingCase:
-    """One URL the structural rule is asked about, and what it must return.
+class _Part:
+    """One value of one dimension of the corpus.
+
+    Attributes:
+        name: Identifier the value is reported under.
+        text: The text it contributes to the URL.
+    """
+
+    name: str
+    text: str
+
+
+SCHEMES = [
+    _Part('no-scheme', ''),
+    _Part('a-bare-scheme', 'postgresql:'),
+    _Part('a-driver-scheme', 'postgresql+psycopg:'),
+]
+"""A scheme with a ``+driver`` suffix, one without, and none at all."""
+
+SLASHES = [_Part('no-slash', ''), _Part('one-slash', '/'), _Part('two-slashes', '//')]
+"""How many slashes follow the scheme.
+
+Two is the spelling a URL is defined with; one is what a hand-edited setting
+arrives as; none is the spelling on which the text before the colon reads
+equally as a scheme and as a user name.
+"""
+
+TAILS = [
+    _Part('a-bare-host', 'db.example'),
+    _Part('a-host-and-a-path', 'db.example/spindoctor'),
+    _Part('a-port-and-a-path', 'db.example:5432/spindoctor'),
+]
+"""What follows the credentials.
+
+The bare host is the shape with no slash anywhere after the authority begins,
+so a rule that ends the credentials at a slash has none to find; the port is a
+second colon after the password's own.
+"""
+
+PASSWORDS = [
+    _Part('plain', PASSWORD),
+    _Part('carrying-a-slash', SLASHED_PASSWORD),
+    _Part('carrying-an-at-sign', 'pa@ss'),
+    _Part('carrying-a-colon', 'pa:ss'),
+    _Part('carrying-a-hash', 'pa#ss'),
+    _Part('carrying-a-question-mark', 'pa?ss'),
+    _Part('digits-only', '86753090'),
+    _Part('empty', ''),
+]
+"""Every character a password may carry that also means something to a URL.
+
+A slash reads as the end of the authority, an at-sign as the end of the
+credentials, a colon as the start of the password, a question mark as the start
+of a query, a hash as the start of a fragment, and a leading digit as a port.
+Each of them is what a rule reading the URL by eye stops at too early.
+"""
+
+
+@dataclasses.dataclass(frozen=True)
+class _Userinfo:
+    """One way the credentials of a URL are written.
+
+    Attributes:
+        name: Identifier the value is reported under.
+        text: The userinfo as written, including its trailing ``@``, or empty.
+        password: The password it carries, or None when it carries none.
+    """
+
+    name: str
+    text: str
+    password: str | None
+
+
+USERINFOS = [
+    _Userinfo('no-credentials', '', None),
+    _Userinfo('a-user-name-alone', 'svc@', None),
+    *[_Userinfo(f'a-password-{part.name}', f'svc:{part.text}@', part.text) for part in PASSWORDS],
+]
+"""Credentials absent, a user name with no password, and each password shape."""
+
+
+def _expected_userinfo(scheme: _Part, slashes: _Part, userinfo: _Userinfo) -> str:
+    """Return what masking must leave of one URL's credentials.
+
+    Parameters:
+        scheme: The scheme the URL was built with.
+        slashes: The slashes that follow it.
+        userinfo: The credentials the URL was built with.
+
+    Returns:
+        The masked userinfo, including its trailing ``@``, or empty.
+    """
+    if not userinfo.text:
+        return ''
+    if scheme.text and not slashes.text:
+        # With no slash to mark the end of the scheme, the scheme's colon reads
+        # equally as the one that introduces a password, and it is read that
+        # way: the other reading leaves the password of a URL written with no
+        # scheme at all visible in full. The user name goes with it, which is
+        # one word of a message about a URL no driver would have accepted.
+        return f'{HIDDEN}@'
+    if userinfo.password is None:
+        return userinfo.text
+    return f'svc:{HIDDEN}@'
+
+
+@dataclasses.dataclass(frozen=True)
+class _Case:
+    """One URL the rule is asked about, and exactly what it must return.
 
     Attributes:
         name: Identifier the case is reported under.
         url: The URL as a caller wrote it.
         expected: Exactly what masking it must produce, which states both
-            directions at once -- that no password survives, and that nothing
-            which is not a password was touched.
-        secret: Text that is a password in this URL and must therefore be gone
-            from the result, or None when the URL carries no password at all.
+            directions at once -- that no credential survives, and that nothing
+            which is not one was touched.
+        secret: Text that is a credential in this URL and must therefore be gone
+            from the result, or None when the URL carries none.
     """
 
     name: str
@@ -241,123 +373,219 @@ class _MaskingCase:
     secret: str | None = None
 
 
-MASKING_CASES = [
-    _MaskingCase('a-password-carrying-a-slash', '//user:pa/ss@h', '//user:***@h', 'pa/ss'),
-    _MaskingCase('no-user-name', '//:pw@h', '//:***@h', 'pw'),
-    _MaskingCase('one-slash-and-no-scheme', '/user:pw@h', '/user:***@h', 'pw'),
-    _MaskingCase(
-        'an-at-sign-in-the-user-name',
-        f'//{AT_SIGN_USER}:{PASSWORD}@host:5432/db',
-        f'//{AT_SIGN_USER}:***@host:5432/db',
+def _corpus() -> list[_Case]:
+    """Build one case per combination of the parts a URL is made of.
+
+    Returns:
+        The cases, in a stable order.
+    """
+    cases: list[_Case] = []
+    for scheme, slashes, userinfo, tail in itertools.product(SCHEMES, SLASHES, USERINFOS, TAILS):
+        masked = _expected_userinfo(scheme, slashes, userinfo)
+        cases.append(
+            _Case(
+                name=f'{scheme.name}-{slashes.name}-{userinfo.name}-{tail.name}',
+                url=f'{scheme.text}{slashes.text}{userinfo.text}{tail.text}',
+                expected=f'{scheme.text}{slashes.text}{masked}{tail.text}',
+                secret=userinfo.password or None,
+            )
+        )
+    return cases
+
+
+CORPUS = _corpus()
+"""Every combination of scheme, slashes, credentials and tail."""
+
+
+QUERY_CASES = [
+    _Case(
+        'a-password-query-parameter',
+        f'postgresql+psycopg://svc@db.example/spindoctor?password={PASSWORD}',
+        'postgresql+psycopg://svc@db.example/spindoctor?password=***',
         PASSWORD,
     ),
-    _MaskingCase(
-        'an-at-sign-in-the-user-name-and-an-unparseable-port',
-        f'//{AT_SIGN_USER}:{PASSWORD}@host:notaport/db',
-        f'//{AT_SIGN_USER}:***@host:notaport/db',
+    _Case(
+        'a-password-query-parameter-in-capitals',
+        f'postgresql+psycopg://svc@db.example/spindoctor?PASSWORD={PASSWORD}',
+        'postgresql+psycopg://svc@db.example/spindoctor?PASSWORD=***',
         PASSWORD,
     ),
-    _MaskingCase(
-        'a-leading-space',
-        f' postgresql+psycopg://{AT_SIGN_USER}:{PASSWORD}@host:5432/db',
-        f' postgresql+psycopg://{AT_SIGN_USER}:***@host:5432/db',
+    _Case(
+        'a-key-passphrase-beside-an-ordinary-setting',
+        f'postgresql+psycopg://svc@db.example/spindoctor?sslpassword={PASSWORD}&connect_timeout=3',
+        'postgresql+psycopg://svc@db.example/spindoctor?sslpassword=***&connect_timeout=3',
         PASSWORD,
     ),
-    _MaskingCase(
-        'a-hyphen-in-the-scheme',
-        f'postgresql-psycopg://{AT_SIGN_USER}:{PASSWORD}@host:5432/db',
-        f'postgresql-psycopg://{AT_SIGN_USER}:***@host:5432/db',
+    _Case(
+        'a-client-secret',
+        f'postgresql+psycopg://svc@db.example/spindoctor?client_secret={PASSWORD}',
+        'postgresql+psycopg://svc@db.example/spindoctor?client_secret=***',
         PASSWORD,
     ),
-    _MaskingCase(
-        'a-url-copied-across-two-lines',
-        f'postgresql psycopg://{AT_SIGN_USER}:{PASSWORD}@host:5432/db',
-        f'postgresql psycopg://{AT_SIGN_USER}:***@host:5432/db',
+    _Case(
+        'an-access-token',
+        f'postgresql+psycopg://svc@db.example/spindoctor?access_token={PASSWORD}',
+        'postgresql+psycopg://svc@db.example/spindoctor?access_token=***',
         PASSWORD,
     ),
-    _MaskingCase(
-        'a-slashed-password-on-an-unparseable-url',
-        f'postgresql psycopg://svc:{SLASHED_PASSWORD}@db.example/spindoctor',
-        'postgresql psycopg://svc:***@db.example/spindoctor',
-        SLASHED_PASSWORD,
+    _Case(
+        'the-short-spellings',
+        f'postgresql+psycopg://svc@db.example/spindoctor?pwd={PASSWORD}&passwd={PASSWORD}',
+        'postgresql+psycopg://svc@db.example/spindoctor?pwd=***&passwd=***',
+        PASSWORD,
     ),
-    _MaskingCase(
-        'a-slashed-password-and-an-unparseable-port',
-        f'postgresql+psycopg://svc:{SLASHED_PASSWORD}@db.example:5432x/spindoctor',
-        'postgresql+psycopg://svc:***@db.example:5432x/spindoctor',
-        SLASHED_PASSWORD,
+    _Case(
+        'a-password-in-the-authority-and-in-the-query',
+        f'postgresql+psycopg://svc:{SLASHED_PASSWORD}@db.example/spindoctor?password={PASSWORD}',
+        'postgresql+psycopg://svc:***@db.example/spindoctor?password=***',
+        PASSWORD,
     ),
-    _MaskingCase(
-        'one-slash-after-the-scheme',
-        'postgresql+psycopg:/svc:aB3xY9z@db.example/spindoctor',
-        'postgresql+psycopg:/svc:***@db.example/spindoctor',
-        'aB3xY9z',
+    _Case(
+        'a-password-followed-by-a-fragment',
+        f'postgresql+psycopg://svc@db.example/spindoctor?password={PASSWORD}#note',
+        'postgresql+psycopg://svc@db.example/spindoctor?password=***#note',
+        PASSWORD,
     ),
-    _MaskingCase(
+    _Case(
+        'an-ordinary-setting',
+        'postgresql+psycopg://svc@db.example/spindoctor?connect_timeout=3',
+        'postgresql+psycopg://svc@db.example/spindoctor?connect_timeout=3',
+    ),
+    _Case(
+        'a-search-path-option',
+        'postgresql+psycopg://svc@db.example/spindoctor?options=-csearch_path%3Dstats',
+        'postgresql+psycopg://svc@db.example/spindoctor?options=-csearch_path%3Dstats',
+    ),
+    _Case(
+        'a-parameter-with-no-value',
+        'postgresql+psycopg://svc@db.example/spindoctor?sslmode',
+        'postgresql+psycopg://svc@db.example/spindoctor?sslmode',
+    ),
+]
+"""Credentials carried as query parameters, and settings that are not credentials."""
+
+
+NEGATIVE_CASES = [
+    _Case(
+        'a-local-path-carrying-a-colon',
+        'sqlite:////data/a:b/index.sqlite3',
+        'sqlite:////data/a:b/index.sqlite3',
+    ),
+    _Case(
+        'a-local-path-carrying-a-colon-and-an-at-sign',
+        'sqlite:////data/a:b/i@dex.sqlite3',
+        'sqlite:////data/a:b/i@dex.sqlite3',
+    ),
+    _Case(
+        'a-local-path-carrying-a-space',
+        'sqlite:////data/nav results/index.sqlite3',
+        'sqlite:////data/nav results/index.sqlite3',
+    ),
+    _Case(
+        'a-local-path-carrying-a-question-mark',
+        'sqlite:////data/a?b/index.sqlite3',
+        'sqlite:////data/a?b/index.sqlite3',
+    ),
+    _Case(
+        'a-local-path-carrying-a-drive-letter',
+        'sqlite:///C:/data/index.sqlite3',
+        'sqlite:///C:/data/index.sqlite3',
+    ),
+    _Case(
+        'a-cloud-results-root', 'gs://rms-nav/nav-offset-results', 'gs://rms-nav/nav-offset-results'
+    ),
+    _Case(
+        'a-web-results-root',
+        'https://storage.example/nav-offset-results',
+        'https://storage.example/nav-offset-results',
+    ),
+    _Case(
+        'a-web-results-root-with-a-port',
+        'https://storage.example:8443/nav-offset-results',
+        'https://storage.example:8443/nav-offset-results',
+    ),
+    _Case('a-local-results-root', '/data/nav-offset-results', '/data/nav-offset-results'),
+    _Case('a-scheme-and-nothing-else', 'postgresql+psycopg:', 'postgresql+psycopg:'),
+    _Case('the-empty-string', '', ''),
+]
+"""Strings that carry no credential, which masking must return exactly as they are."""
+
+
+AMBIGUOUS_CASES = [
+    _Case(
+        'a-port-and-an-at-sign-in-the-database-name',
+        'postgresql psycopg://host:5432/my@db',
+        'postgresql psycopg://host:***@db',
+    ),
+    _Case(
         'a-digit-prefixed-slashed-password',
         'postgresql+psycopg:/svc:123/xY9z@db.example/spindoctor',
         'postgresql+psycopg:/svc:***@db.example/spindoctor',
         '123/xY9z',
     ),
-    _MaskingCase(
-        'a-port-and-an-at-sign-in-the-database-name',
-        'postgresql psycopg://host:5432/my@db',
-        'postgresql psycopg://host:***@db',
-    ),
-    _MaskingCase(
-        'a-user-name-and-no-password',
-        'postgresql+psycopg://user@host/spindoctor',
-        'postgresql+psycopg://user@host/spindoctor',
-    ),
-    _MaskingCase(
-        'a-local-path-carrying-a-colon',
-        'sqlite:////data/a:b/index.sqlite3',
-        'sqlite:////data/a:b/index.sqlite3',
-    ),
-    _MaskingCase(
-        'a-local-path-carrying-a-colon-and-an-at-sign',
-        'sqlite:////data/a:b/i@dex.sqlite3',
-        'sqlite:////data/a:b/i@dex.sqlite3',
-    ),
-    _MaskingCase(
-        'a-local-path-carrying-a-drive-letter',
-        'sqlite:///C:/data/index.sqlite3',
-        'sqlite:///C:/data/index.sqlite3',
-    ),
-    _MaskingCase('a-scheme-and-nothing-else', 'postgresql+psycopg:', 'postgresql+psycopg:'),
-    _MaskingCase('the-empty-string', '', ''),
 ]
-"""URLs the structural rule masks, and URLs it must leave exactly as they are."""
+"""The one shape that reads two ways, in both of its readings.
 
-
-MASKING_PARAMS = [pytest.param(case, id=case.name) for case in MASKING_CASES]
-
-CREDENTIAL_PARAMS = [
-    pytest.param(case.url, case.expected, case.secret, id=case.name)
-    for case in MASKING_CASES
-    if case.secret is not None
-]
-"""The subset carrying a password, which the opener itself is driven with.
-
-Every one of these is a URL SQLAlchemy cannot parse, which is what puts the
-structural rule on the path an operator's message actually takes.
+``host:5432/path@name`` is equally a host with a port and a path, and a user
+name with a password that carries a slash. It is read as credentials, which is
+how the URL parser reads it too: the alternative leaves ``123/secret`` visible
+in full, and a mangled host in a message about an unusable URL is the cheaper
+mistake.
 """
 
 
-@pytest.mark.parametrize('case', MASKING_PARAMS)
-def test_the_rule_masks_a_password_and_nothing_else(case: _MaskingCase) -> None:
+AWKWARD_SPELLINGS = [
+    _Case(
+        'a-leading-space',
+        f' postgresql+psycopg://{AT_SIGN_USER}:{PASSWORD}@host:5432/db',
+        f' postgresql+psycopg://{AT_SIGN_USER}:{HIDDEN}@host:5432/db',
+        PASSWORD,
+    ),
+    _Case(
+        'a-hyphen-in-the-scheme',
+        f'postgresql-psycopg://{AT_SIGN_USER}:{PASSWORD}@host:5432/db',
+        f'postgresql-psycopg://{AT_SIGN_USER}:{HIDDEN}@host:5432/db',
+        PASSWORD,
+    ),
+    _Case(
+        'a-url-copied-across-two-lines',
+        f'postgresql psycopg://{AT_SIGN_USER}:{PASSWORD}@host:5432/db',
+        f'postgresql psycopg://{AT_SIGN_USER}:{HIDDEN}@host:5432/db',
+        PASSWORD,
+    ),
+    _Case(
+        'an-at-sign-in-the-user-name-and-an-unparseable-port',
+        f'//{AT_SIGN_USER}:{PASSWORD}@host:notaport/db',
+        f'//{AT_SIGN_USER}:{HIDDEN}@host:notaport/db',
+        PASSWORD,
+    ),
+    _Case('no-user-name', '//:pw@h', f'//:{HIDDEN}@h', 'pw'),
+]
+"""Spellings a setting arrives in that no parser accepts, and the login form.
+
+The at-sign in ``admin@pgsrv`` is a managed server's own login form, so the
+at-sign that ends the credentials is the last one rather than the first.
+"""
+
+
+ALL_CASES = CORPUS + QUERY_CASES + NEGATIVE_CASES + AMBIGUOUS_CASES + AWKWARD_SPELLINGS
+
+CASE_PARAMS = [pytest.param(case, id=case.name) for case in ALL_CASES]
+
+SECRET_PARAMS = [
+    pytest.param(case, id=case.name) for case in ALL_CASES if case.secret and case.secret.strip()
+]
+"""The subset carrying a secret worth naming, for the direction stated on its own."""
+
+
+@pytest.mark.parametrize('case', CASE_PARAMS)
+def test_the_rule_replaces_the_credentials_and_nothing_else(case: _Case) -> None:
     """The structural rule is the only defense where the URL did not parse.
 
-    It has to reach a password whatever the password contains -- a URL permits an
-    unescaped slash in one, and one may open with digits -- and whatever the user
-    name contains, since the managed-server login form puts an at-sign in it. It
-    has to leave alone a local path that merely happens to carry a colon and a
-    later at-sign, since mangling that costs the identification these messages
-    exist for.
-
-    ``host:5432/my@db`` is the one shape that reads two ways, and it is read as
-    credentials: the alternative leaves a password opening with digits visible in
-    full, and the test below pins that this reading is the parser's own.
+    Asserting the whole result rather than the absence of the secret states both
+    directions at once: a rule that returned ``***`` for everything would hide
+    every password and be useless, and a rule that returned its argument would
+    leave every one visible.
 
     Parameters:
         case: The URL under test and exactly what masking it must produce.
@@ -365,10 +593,35 @@ def test_the_rule_masks_a_password_and_nothing_else(case: _MaskingCase) -> None:
     assert masked_url(case.url) == case.expected
 
 
-@pytest.mark.parametrize(('url', 'expected', 'secret'), CREDENTIAL_PARAMS)
-def test_the_opener_names_a_url_it_could_not_parse_by_its_masked_form(
-    url: str, expected: str, secret: str
-) -> None:
+@pytest.mark.parametrize('case', SECRET_PARAMS)
+def test_no_secret_survives_the_rule(case: _Case) -> None:
+    """Said on its own, because it is the property a leak breaks.
+
+    Parameters:
+        case: The URL under test and the secret it carries.
+    """
+    assert case.secret is not None
+    assert case.secret not in masked_url(case.url)
+
+
+UNPARSEABLE_CREDENTIAL_CASES = [
+    case
+    for case in ALL_CASES
+    if case.secret
+    and case.url.startswith(('postgresql psycopg:', 'postgresql-psycopg:', ' ', '//'))
+]
+"""Credential-bearing URLs the opener refuses without opening a socket.
+
+Every one of these is a URL SQLAlchemy cannot parse, which is what puts the
+structural rule on the path an operator's message actually takes, and what keeps
+the test off the network.
+"""
+
+OPENER_PARAMS = [pytest.param(case, id=case.name) for case in UNPARSEABLE_CREDENTIAL_CASES]
+
+
+@pytest.mark.parametrize('case', OPENER_PARAMS)
+def test_the_opener_names_a_url_it_could_not_parse_by_its_masked_form(case: _Case) -> None:
     """The rule is only worth anything where the opener actually reaches it.
 
     Asserting on the helper alone leaves the opener free to name the URL by some
@@ -378,14 +631,13 @@ def test_the_opener_names_a_url_it_could_not_parse_by_its_masked_form(
     the reader nothing to correct.
 
     Parameters:
-        url: The URL under test, carrying a password.
-        expected: The masked form the refusal must name it by.
-        secret: The password that must not survive into the refusal.
+        case: The URL under test, carrying a password.
     """
+    assert case.secret is not None
     with pytest.raises(ValueError) as excinfo:
-        open_index(url)
-    assert secret not in str(excinfo.value)
-    assert expected in str(excinfo.value)
+        open_index(case.url)
+    assert case.secret not in str(excinfo.value)
+    assert case.expected in str(excinfo.value)
 
 
 PARSEABLE_URLS = [
@@ -396,18 +648,23 @@ PARSEABLE_URLS = [
     'postgresql+psycopg://host:5432/path@name',
     'postgresql+psycopg://user:123/xY9z@host/spindoctor',
 ]
-"""URLs the parser accepts, which therefore have a second opinion about them."""
+"""URLs the parser accepts and carries no query, which have a second opinion.
+
+The parser is not an authority on a credential carried as a query parameter --
+it renders one verbatim -- so the comparison is drawn only over the part of a
+URL it does hide.
+"""
 
 
 @pytest.mark.parametrize('url', PARSEABLE_URLS)
 def test_the_rule_hides_what_the_parser_hides(url: str) -> None:
     """The structural rule and the parser agree about where a password is.
 
-    The rule runs only where the parser failed, so nothing else can check its
-    reading against anything. Running it over URLs the parser does accept gives
-    the one comparison available: for every shape both can read, including the
-    ambiguous one, the same characters have to disappear. A rule that read a
-    password as a port would disagree here first.
+    Nothing else can check the rule's reading of an authority against anything.
+    Running it over URLs the parser does accept gives the one comparison
+    available: for every shape both can read, including the ambiguous one, the
+    same characters have to disappear. A rule that read a password as a port
+    would disagree here first.
 
     Parameters:
         url: A URL the parser accepts.

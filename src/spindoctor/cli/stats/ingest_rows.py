@@ -22,7 +22,11 @@ file whose ``observation`` is a string, or whose ``per_technique`` holds
 numbers, is a document of some other shape rather than a navigation result, and
 the refusal names which field said so.  Reading it without the check would raise
 an ``AttributeError`` out of the middle of a run and cost every other file in
-the tree, so the shape is part of what "current-schema" means here.
+the tree, so the shape is part of what "current-schema" means here.  The names
+inside a container are checked the same way and for the same reason: a
+``per_technique`` list that names one technique twice describes rows the index
+cannot hold, and finding that out from the database ends the run instead of the
+file.
 """
 
 import math
@@ -398,17 +402,33 @@ def _technique_rows(
         One row per technique that reported, in recorded order.
 
     Raises:
-        MetadataDocumentError: If an entry's ``diagnostics`` is not an object.
+        MetadataDocumentError: If an entry carries no ``technique_name``, if two
+            entries carry the same one, or if an entry's ``diagnostics`` is not
+            an object.
     """
     rows: list[dict[str, Any]] = []
+    named: set[str] = set()
     for entry in per_technique:
+        # The name is the identity of the row -- it is half the primary key of
+        # ``techniques``, and every report groups and joins on it -- so an entry
+        # with none has no identity and two entries with one name have the same
+        # one.  Standing a nameless entry in as "unknown" manufactured the
+        # second case out of the first, and either way the database refuses the
+        # insert and ends the run.  Numbering the duplicates instead would put a
+        # technique nobody ran into the operator's report.
+        name = _str_or_none(entry.get('technique_name'))
+        if name is None:
+            _refuse('navigation_result.per_technique[] carries no technique_name', source)
+        if name in named:
+            _refuse('navigation_result.per_technique[] names one technique twice', source)
+        named.add(name)
         offset_dv, offset_du = _pair(entry.get('offset_px'))
         sigma_dv, sigma_du = _sigma_from_covariance(entry.get('covariance_px2'))
         rows.append(
             {
                 'root_url': source.root_url,
                 'results_path_stub': source.results_path_stub,
-                'technique_name': _str_or_none(entry.get('technique_name')) or 'unknown',
+                'technique_name': name,
                 'offset_dv': offset_dv,
                 'offset_du': offset_du,
                 'sigma_dv': sigma_dv,
@@ -493,9 +513,10 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
 
     Raises:
         MetadataDocumentError: If the document lacks the observation image name
-            or the observation instrument, or if any container the schema
-            declares holds something of another shape.  That is what a file
-            which is not a per-image navigation document looks like.
+            or the observation instrument, if any container the schema declares
+            holds something of another shape, or if its technique entries do not
+            each carry a distinct name.  That is what a file which is not a
+            per-image navigation document looks like.
     """
     observation = _object(metadata.get('observation'), 'observation', source)
     image_name = _str_or_none(observation.get('image_name'))

@@ -72,6 +72,12 @@ long as it does not change. ``--force`` re-reads everything; so does a storage
 backend whose listing reports neither size nor modification time, which ingest
 warns about rather than silently skipping.
 
+**A recorded refusal outlives the version of SpinDoctor that made it.** The
+record says what was wrong with the file, not which build read it, so a document
+refused by one build is skipped by every later one, including a build that has
+since learned to read it. After upgrading SpinDoctor, run ``sd_stats_ingest
+--force`` once over each root to re-offer everything it refused.
+
 **Ingestion is idempotent.** The index holds one row per image, and re-ingesting
 the same or an updated document replaces that image's row and its child rows
 rather than duplicating them.
@@ -93,14 +99,27 @@ detection and no automatic refresh, so an operator who navigates more images and
 wants them visible runs ingest again.
 
 Every ingestible document must carry ``observation.image_name`` and
-``observation.instrument``, and every container it declares -- ``observation``,
+``observation.instrument``, every container it declares -- ``observation``,
 ``navigation_result`` and the objects and lists inside it, ``timing`` -- must
-hold what the schema says (the pipeline writes all of this in every metadata
-document). A results tree also holds ``*_metadata.json`` files that are not
-per-image navigation documents at all; each is counted as an error for its own
-file, the run continues, and the closing summary tallies the failures by
-reason and names one file per reason, so several hundred files that were never
-navigation results read as exactly that rather than as a broken ingest.
+hold what the schema says, and each of its ``per_technique`` entries must carry
+a ``technique_name`` of its own, since that name is what the index stores the
+entry under (the pipeline writes all of this in every metadata document). A
+results tree also holds ``*_metadata.json`` files that are not per-image
+navigation documents at all; each is counted as an error for its own file, the
+run continues, and the closing summary tallies the failures by reason and names
+one file per reason, so several hundred files that were never navigation results
+read as exactly that rather than as a broken ingest. A directory the walk cannot
+list -- one this user may not read, a share that stopped answering -- costs the
+files under it and nothing else: the pass continues over the rest of the root
+and removes no row from it.
+
+**The exit status says whether the pass completed, not what it found.**
+``sd_stats_ingest`` exits 0 when every named root was walked, whatever mix of
+documents was read, skipped and refused, and 1 when the run could not complete:
+no index or no results root could be resolved, the index could not be opened, or
+a root could not be listed at all. A scheduled invocation therefore reads the
+same status from the same tree every time, and a status of 1 always means
+something needs fixing rather than that a tree happens to hold no results.
 
 The index is disposable, and there is no schema migration. It carries the column
 set version that wrote it, and opening one stamped with a different version

@@ -30,6 +30,7 @@ from tests.spindoctor.cli.stats.conftest import (
     write_metadata,
 )
 
+from spindoctor.cli.stats.report import main_report
 from spindoctor.results_index import IMAGES, TECHNIQUES, open_index
 
 pytestmark = pytest.mark.postgres
@@ -229,3 +230,54 @@ def test_a_deleted_document_loses_its_row_on_postgresql(
         found = list(connection.execute(sqlalchemy.select(TECHNIQUES.c.technique_name)))
     engine.dispose()
     assert found == []
+
+
+def test_the_report_cli_does_not_print_the_server_password(
+    postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger, capsys: Any
+) -> None:
+    """The one refusal this program makes that names its index rather than a file.
+
+    A SQLite URL has no password to leak, so this route can only be driven on a
+    server, and the server URL a real deployment resolves carries one.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    ingest_tree(postgres_url, [root], logger=quiet_logger)
+    parsed = sqlalchemy.engine.make_url(postgres_url)
+    # The credentials, not the password alone: a deployment is free to name its
+    # user, its database and its password the same word, and this one does, so
+    # the bare password appears in the message for reasons that are not a leak.
+    credentials = f'{parsed.username}:{parsed.password}@'
+    with pytest.raises(SystemExit):
+        main_report(
+            [
+                '--results-db',
+                postgres_url,
+                '--root',
+                str(tmp_path / 'never-ingested'),
+                '--output-dir',
+                str(tmp_path / 'report'),
+            ]
+        )
+    error_text = capsys.readouterr().err
+    assert credentials not in error_text
+    assert f'{parsed.username}:***@' in error_text
+
+
+def test_a_document_the_server_refuses_costs_only_itself(
+    postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A server enforces its column types, so this is where the refusal is real.
+
+    An identifier larger than a ``bigint`` is rejected by the insert rather than
+    by any check ingest makes, and one such document must not end the pass.
+    """
+    root = tmp_path / 'results'
+    write_metadata(
+        root,
+        'VOL/N9999999999_1_CALIB',
+        metadata_document(image_name=f'N{"9" * 25}_1_CALIB.IMG'),
+    )
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    counts = ingest_tree(postgres_url, [root], logger=quiet_logger)
+    assert (counts.files_ingested, counts.files_failed) == (1, 1)

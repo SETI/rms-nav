@@ -40,6 +40,15 @@ PROGRAM_NAME = SD_STATS_INGEST
 """Program identity: names the main log directory and the
 ``logging.programs`` configuration block for this program."""
 
+URL_OPTIONS = ('--results-db',)
+"""Options whose value is a connection URL and can therefore carry a password.
+
+Only these are masked in the logged command line.  A results root is not a
+connection URL: it has no credentials to hide, and it is the one word of the
+command line an operator reads the run log to correct, so masking one would
+corrupt the string and protect nothing.
+"""
+
 
 def parse_args(command_list: list[str]) -> argparse.Namespace:
     """Build the parser and read the command line.
@@ -98,6 +107,37 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     return cmdparser.parse_args(command_list)
 
 
+def masked_command_line(command_list: list[str]) -> list[str]:
+    """Return a command line with the value of every connection-URL option masked.
+
+    The command line is logged because which of the command line, the
+    configuration file and the environment supplied a value is exactly what a
+    reader of a failed run needs to know, and one of its words can be a database
+    password.  Both spellings argparse accepts are covered: the value as a
+    separate word, and the value joined to the option by ``=``.
+
+    Parameters:
+        command_list: The arguments, without the program name.
+
+    Returns:
+        The arguments, with every connection URL among them masked.
+    """
+    masked: list[str] = []
+    value_of_url_option = False
+    for word in command_list:
+        if value_of_url_option:
+            masked.append(masked_url(word))
+            value_of_url_option = False
+            continue
+        option, separator, value = word.partition('=')
+        if separator and option in URL_OPTIONS:
+            masked.append(f'{option}={masked_url(value)}')
+            continue
+        masked.append(word)
+        value_of_url_option = word in URL_OPTIONS
+    return masked
+
+
 def _log_outcome(counts: IngestCounts) -> None:
     """Write the closing summary of an ingest pass to the main log.
 
@@ -138,12 +178,15 @@ def main() -> None:
     writes what it read into the index, reporting the outcome to the main log.
 
     Raises:
-        SystemExit: Always, since this is a console entry point.  The status is
-            0 when the pass accounted for at least one document -- read now or
-            skipped as unchanged since the last pass -- and 1 when no index or
-            no root could be resolved, when the index could not be opened, and
-            when the pass accounted for nothing at all, which is what a root
-            holding no results looks like.
+        SystemExit: Always, since this is a console entry point.  The status
+            says whether the pass completed, not what it found: 0 when every
+            named root was walked, whatever mix of documents was read, skipped
+            and refused, and 1 when the run could not complete -- no index or no
+            root could be resolved, the index could not be opened, or a root
+            could not be listed.  A tree of files that are not navigation
+            documents is a completed pass and exits 0, and exits 0 again on the
+            next pass over the same tree, so a scheduled run's status means the
+            same thing every time it is read.
     """
     command_list = sys.argv[1:]
     arguments = parse_args(command_list)
@@ -175,12 +218,9 @@ def main() -> None:
         sys.exit(1)
 
     MAIN_LOGGER.info('Starting results index ingest')
-    # Masked, not verbatim: a results root can be a signed cloud URL and the
-    # index URL can carry a database password, and a run log is read by whoever
-    # is handed one.
-    MAIN_LOGGER.info('Roots: %s', ', '.join(masked_url(root) for root in roots))
+    MAIN_LOGGER.info('Roots: %s', ', '.join(roots))
     MAIN_LOGGER.info('Force: %s', arguments.force)
-    MAIN_LOGGER.info('Arguments: %s', [masked_url(value) for value in command_list])
+    MAIN_LOGGER.info('Arguments: %s', masked_command_line(command_list))
 
     try:
         engine = open_index(url, create=True)
@@ -192,9 +232,14 @@ def main() -> None:
     finally:
         engine.dispose()
     _log_outcome(counts)
-    # Nothing ingested is a failure only when nothing was skipped either: a
-    # second pass over an unchanged tree legitimately reads no document at all.
-    sys.exit(0 if counts.files_ingested + counts.files_skipped > 0 else 1)
+    # Whether the run completed, not what it found.  A count of documents flips
+    # between two passes over one unchanged tree -- what one pass ingests the
+    # next one skips, and what one pass refuses the next one skips too -- so a
+    # status read from a count tells a scheduled run that a tree it has already
+    # accounted for has gone wrong.  A root that could not be listed is the
+    # failure: nothing under it was walked, and every later root of the same
+    # pass is still walked, so the status is the only place it shows.
+    sys.exit(1 if counts.roots_unreadable else 0)
 
 
 if __name__ == '__main__':

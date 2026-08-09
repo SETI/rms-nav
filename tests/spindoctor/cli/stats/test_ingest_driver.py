@@ -1,11 +1,14 @@
 """Tests for the ``sd_stats_ingest`` command line.
 
-Two things the driver does are worth pinning on their own. It reports a
+Three things the driver does are worth pinning on their own. It reports a
 configuration failure -- no index named, no results root resolvable -- through
-the log an operator is already reading, rather than as a traceback. And what it
-writes to that log is masked: a results root can be a signed cloud URL and an
-index URL can carry a database password, and a run log is read by whoever is
-handed one.
+the log an operator is already reading, rather than as a traceback. Of what it
+writes to that log, the index URL is masked and nothing else is: an index URL
+can carry a database password and a run log is read by whoever is handed one,
+while a results root carries no credentials and is the one word of the command
+line the reader is there to correct. And its exit status says whether the run
+completed, not what the run found, so a scheduled invocation reads the same
+status from the same tree every time.
 """
 
 import sys
@@ -24,6 +27,14 @@ PASSWORD = 'sup3rs3cr3t'
 
 SERVER_URL = f'postgresql+psycopg:/svc:{PASSWORD}@db.example/spindoctor'
 """An index URL carrying a password, in the one-slash form a parser rejects."""
+
+CREDENTIAL_SHAPED_ROOT = '//store:8443/nav@results'
+"""A results root the masking rule would read as credentials if it saw one.
+
+Everything between the first colon and the at-sign is a password to that rule.
+It is a path, and a run log that printed ``//store:***@results`` would have
+hidden the only thing an operator needs from the line.
+"""
 
 
 def _run(
@@ -130,10 +141,30 @@ def test_the_run_log_names_the_roots_it_was_given(
     assert any(f'Roots: {root.as_posix()}' == line for line in written)
 
 
+def test_a_results_root_reaches_the_arguments_whole() -> None:
+    """The one word of the line an operator is reading it to correct."""
+    masked = sd_stats_ingest.masked_command_line(
+        ['--nav-results-root', CREDENTIAL_SHAPED_ROOT, '--force']
+    )
+    assert masked == ['--nav-results-root', CREDENTIAL_SHAPED_ROOT, '--force']
+
+
+def test_an_index_url_is_masked_in_the_arguments() -> None:
+    """A password can be a word of the command line, and the line is logged."""
+    masked = sd_stats_ingest.masked_command_line(['--results-db', SERVER_URL])
+    assert masked == ['--results-db', 'postgresql+psycopg:/svc:***@db.example/spindoctor']
+
+
+def test_an_index_url_joined_by_an_equals_sign_is_masked_too() -> None:
+    """Both spellings argparse accepts put the same password on the same line."""
+    masked = sd_stats_ingest.masked_command_line([f'--results-db={SERVER_URL}'])
+    assert masked == ['--results-db=postgresql+psycopg:/svc:***@db.example/spindoctor']
+
+
 def test_a_root_that_is_not_there_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Exit status 1, because nothing was accounted for under that root."""
+    """Exit status 1, because the run could not walk a root it was given."""
     monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
     status, _written = _run(
         [
@@ -185,4 +216,43 @@ def test_a_failure_reason_names_one_example_file(
         monkeypatch,
         tmp_path,
     )
-    assert any('for example' in line and 'edges_metadata.json' in line for line in written)
+    examples = [line for line in written if 'for example' in line]
+    assert any('edges_metadata.json' in line for line in examples)
+
+
+def _statuses_of_two_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[int | None]:
+    """Run the driver twice over a tree of files that are not navigation documents.
+
+    Parameters:
+        tmp_path: Directory the tree, the index and the logs live under.
+        monkeypatch: Fixture the argument vector and logger are replaced through.
+
+    Returns:
+        The exit status of each pass.
+    """
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    root = tmp_path / 'results'
+    root.mkdir()
+    (root / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
+    (root / 'rings_metadata.json').write_text('{"rings": []}', encoding='utf-8')
+    argv = [
+        '--results-db',
+        index_url(tmp_path / 'index.sqlite3'),
+        '--nav-results-root',
+        root.as_posix(),
+    ]
+    first, _written = _run(argv, monkeypatch, tmp_path)
+    second, _also = _run(argv, monkeypatch, tmp_path)
+    return [first, second]
+
+
+def test_two_passes_over_one_tree_exit_the_same_way(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A status that flips on an unchanged tree tells a scheduled run nothing.
+
+    The first pass refuses both files and the second skips them as unchanged, so
+    a status read from what was ingested or skipped reports a failure once and
+    never again.  The pass completed both times, which is what the status says.
+    """
+    assert _statuses_of_two_passes(tmp_path, monkeypatch) == [0, 0]

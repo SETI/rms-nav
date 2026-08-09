@@ -21,6 +21,7 @@ from pathlib import Path
 import sqlalchemy
 from filecache import FCPath
 
+from spindoctor.results_index.engine import masked_url
 from spindoctor.results_index.schema import INGEST_RUNS
 
 __all__ = ['ingested_roots', 'normalize_root_url', 'require_ingested_roots']
@@ -81,6 +82,13 @@ def require_ingested_roots(
 ) -> None:
     """Verify that every named root has been fully ingested into this index.
 
+    The index URL is masked here rather than by each caller.  This refusal is
+    printed to a terminal and written to run logs, an index URL can carry a
+    database password, and a caller that forgets to mask one is a leak in every
+    program that consumes the index.  The roots are named as they are: a results
+    root is not a connection URL, has no credentials to hide, and is the one
+    string the reader has to correct.
+
     Parameters:
         connection: An open connection to the index.
         roots: The normalized root URLs the caller means to read.
@@ -97,7 +105,7 @@ def require_ingested_roots(
         return
     held = ', '.join(available) if available else '(none)'
     raise ValueError(
-        f'{url}: the results index has no completed ingest of {", ".join(missing)}. '
+        f'{masked_url(url)}: the results index has no completed ingest of {", ".join(missing)}. '
         f'It holds: {held}. Run sd_stats_ingest over that root first; until then the '
         f'index cannot say whether an image under it was navigated.'
     )
