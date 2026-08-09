@@ -20,6 +20,9 @@ The run rows are stocked the same way, because the run table is keyed by root as
 well.  The second root is always passed over last, so its run is the newest in
 the index, and it always records a count and a finish time the root under test
 does not.
+
+The dataset object the enumeration tests ask their questions of is here too,
+since more than one module asks them of the same one.
 """
 
 import uuid
@@ -39,6 +42,7 @@ from tests.spindoctor.cli.stats.conftest import (
 )
 
 from spindoctor.dataset.dataset import ImageFile
+from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
 from spindoctor.dataset.results_filter import RESULTS_FILTER_BATCH_SIZE, ResultsFilter
 from spindoctor.results_index import (
     INGEST_RUNS,
@@ -91,6 +95,19 @@ WITHOUT_A_PNG = tuple(stub for stub in CANDIDATES if stub not in WITH_A_PNG)
 
 FATAL_ERRORS = (SPICE_ERROR, NONSPICE_ERROR, ERROR_WITHOUT_STATUS_ERROR)
 """Every candidate whose document records a fatal error."""
+
+
+@pytest.fixture
+def ds() -> DataSetPDS3CassiniISS:
+    """Return a Cassini ISS dataset whose holdings root is never read.
+
+    Every test that uses it serves the index rows itself, so the root only has
+    to be a path the dataset accepts.
+
+    Returns:
+        The dataset.
+    """
+    return DataSetPDS3CassiniISS('/fake/holdings')
 
 
 def null_logger() -> pdslogger.PdsLogger:
