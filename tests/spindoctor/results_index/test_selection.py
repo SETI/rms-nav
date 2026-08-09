@@ -541,6 +541,45 @@ def test_no_database_exception_escapes_the_read(two_roots: str) -> None:
     assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
 
 
+def _timed_out() -> sqlalchemy.exc.SQLAlchemyError:
+    """Return a database failure that carries no driver exception under it.
+
+    Every failure a dropped table provokes is a statement a driver answered, so
+    it has an ``orig`` to report.  A pool that ran out of connections, a
+    connection used after it closed, and a result read after it was consumed do
+    not: they are raised by the database layer itself, before or after any
+    driver was asked anything, and they are what a production index under load
+    produces.
+
+    Returns:
+        The failure, with the sentence it carries as its own.
+    """
+    return sqlalchemy.exc.TimeoutError(
+        'QueuePool limit of size 5 overflow 10 reached, connection timed out'
+    )
+
+
+def test_a_failure_with_no_driver_message_reports_the_sentence_it_has(tmp_path: Path) -> None:
+    """The report carries the driver's sentence, and this failure's own is all there is."""
+    url = sqlite_url_for(tmp_path / 'index.sqlite3')
+    with (
+        pytest.raises(ValueError, match='connection timed out'),
+        selection._reporting_a_failed_read(url),
+    ):
+        raise _timed_out()
+
+
+def test_a_failure_with_no_driver_message_does_not_report_the_word_none(tmp_path: Path) -> None:
+    """``str(None)`` is ``'None'``, which reads as a driver that answered that."""
+    url = sqlite_url_for(tmp_path / 'index.sqlite3')
+    with (
+        pytest.raises(ValueError) as excinfo,
+        selection._reporting_a_failed_read(url),
+    ):
+        raise _timed_out()
+    assert 'None' not in str(excinfo.value)
+
+
 def test_an_index_that_cannot_be_opened_is_an_error(tmp_path: Path) -> None:
     """A resolved URL that will not open fails the run rather than reading files."""
     url = sqlite_url_for(tmp_path / 'absent.sqlite3')
