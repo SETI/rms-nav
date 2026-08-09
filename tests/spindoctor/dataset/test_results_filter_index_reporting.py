@@ -217,17 +217,25 @@ def test_a_finish_time_with_no_offset_is_read_as_utc(
     assert reported_line(capsys.readouterr().out).endswith(f'{naive} (2 days ago)')
 
 
+@pytest.mark.parametrize('blank', ['', '   '])
 def test_a_recorded_finish_time_of_nothing_is_reported_as_nothing(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], blank: str
 ) -> None:
     """The column is not null, so an empty string is a value a consumer meets.
 
     It says nothing about when the pass finished, and the report says that
-    rather than naming a moment or leaving the sentence unfinished.
+    rather than naming a moment or leaving the sentence unfinished.  Spaces say
+    no more than nothing does, and reported as they stand they end the line in a
+    blank where a moment should be.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        capsys: Fixture the reported line is read back from.
+        blank: A recorded finish time carrying no moment.
     """
     root, _images = one_image_tree(tmp_path)
     url = index_of_two_roots(tmp_path, root, missed=0)
-    stamp_run(url, root, finished_utc='')
+    stamp_run(url, root, finished_utc=blank)
     ResultsFilter(
         VOLUMES,
         str(root),

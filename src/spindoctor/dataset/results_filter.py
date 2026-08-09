@@ -105,12 +105,14 @@ def _snapshot_age(ingested_utc: str | None) -> str:
         A phrase naming that time and how long ago it was.  A stamp that will
         not parse, or one in the future because two clocks disagree, is reported
         as it stands: a reader can act on a value the index really holds, and an
-        interval computed from a stamp nobody can read would be a fiction.  A
-        stamp carrying no offset is read as UTC, which is what every pass writes
-        and the only reading under which the interval means anything; one
-        written as local time is reported an offset out.
+        interval computed from a stamp nobody can read would be a fiction.  One
+        that is empty or nothing but spaces reads as no stamp at all, because
+        the phrase it would otherwise be reported as is a blank space in the
+        line.  A stamp carrying no offset is read as UTC, which is what every
+        pass writes and the only reading under which the interval means
+        anything; one written as local time is reported an offset out.
     """
-    if not ingested_utc:
+    if ingested_utc is None or not ingested_utc.strip():
         return 'at a time this index does not record'
     try:
         finished = datetime.fromisoformat(ingested_utc)
@@ -119,11 +121,7 @@ def _snapshot_age(ingested_utc: str | None) -> str:
     if finished.tzinfo is None:
         finished = finished.replace(tzinfo=UTC)
     elapsed = (datetime.now(UTC) - finished).total_seconds()
-    # Written as a failed comparison rather than "elapsed < 0" so that a value
-    # no comparison holds for takes the same exit as a negative one: every
-    # comparison against a NaN is false, and the phrase below would answer
-    # "less than a minute" for one.
-    if not elapsed >= 0:
+    if elapsed < 0:
         return ingested_utc
     return f'{ingested_utc} ({_elapsed_phrase(elapsed)} ago)'
 
