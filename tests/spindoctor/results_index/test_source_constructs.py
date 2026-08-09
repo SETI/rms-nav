@@ -60,12 +60,17 @@ _KNOWN_MODULES = frozenset(
         'roots.py',
         'schema.py',
         # The statistics programs, where the report's queries live.
+        'chunks.py',
         'classify.py',
-        'ingest.py',
+        'counts.py',
+        'driver.py',
         'ingest_rows.py',
         'report.py',
         'report_common.py',
         'report_sections.py',
+        'runs.py',
+        'store.py',
+        'walk.py',
     }
 )
 """The modules the scan must reach, whatever else either package grows."""

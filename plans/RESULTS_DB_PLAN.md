@@ -1081,6 +1081,18 @@ Details settled during execution, none of them a change of intent:
   first is what keeps "absence means never navigated" honest for the consumers
   of Phase 4; the second stops a link back into a tree from writing one
   document as forty-one rows.
+- **Ingest is a package, on the treatment section 3 names for the report.**
+  Everything section 2.7 asks of one pass carries `spindoctor/cli/stats/ingest`
+  past the 1000-line cap, so it is `ingest/` split along the stages a pass runs
+  through: `counts` (the tally the summary is read from), `walk` (the single
+  listing of a root), `store` (what the index already holds, and how rows go
+  back in), `chunks` (batched retrieval, reading a document, the per-chunk
+  write), `runs` (the record that makes absence of a row readable), and
+  `driver` (the pass itself). The package re-exports the whole surface, so
+  every consumer imports the names it always did from
+  `spindoctor.cli.stats.ingest`. `report.py` stays inside the cap and stays one
+  module. The source scan of criterion 10 finds the split modules for itself,
+  and the floor it asserts its own reach against names them.
 
 ### Phase 3 — Cloud-task ingest
 

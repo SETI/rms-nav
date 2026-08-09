@@ -18,13 +18,15 @@ import pytest
 import sqlalchemy
 from filecache import FCPath
 
-from spindoctor.cli.stats import ingest as ingest_module
 from spindoctor.cli.stats.ingest import (
     INGEST_COMMIT_CHUNK_SIZE,
     INGEST_RETRIEVE_BATCH_SIZE,
     METADATA_SUFFIX,
     ingest_metadata_files,
 )
+from spindoctor.cli.stats.ingest import chunks as chunks_module
+from spindoctor.cli.stats.ingest import driver as driver_module
+from spindoctor.cli.stats.ingest import walk as walk_module
 from spindoctor.cli.stats.ingest_rows import (
     MetadataDocumentError,
     MetadataSource,
@@ -507,7 +509,7 @@ def test_a_cloud_directory_is_not_stat_ed_at_all(monkeypatch: pytest.MonkeyPatch
         raise AssertionError('ingest asked a cloud backend about a directory')
 
     monkeypatch.setattr(FCPath, 'stat', forbidden)
-    assert ingest_module._directory_identity(FCPath('gs://rms-nav/nav-offset-results')) is None
+    assert walk_module._directory_identity(FCPath('gs://rms-nav/nav-offset-results')) is None
 
 
 def test_a_touched_file_is_read_again(tmp_path: Path, quiet_logger: pdslogger.PdsLogger) -> None:
@@ -741,14 +743,14 @@ def test_an_ingest_run_is_recorded_at_the_start(
     engine = open_index(url, create=True)
     seen: list[Any] = []
 
-    real_walk = ingest_module._walk_root
+    real_walk = walk_module._walk_root
 
     def watching(walk_root: Any, **kwargs: Any) -> Any:
         with engine.connect() as connection:
             seen.extend(_rows(connection, sqlalchemy.select(INGEST_RUNS.c.finished_utc)))
         return real_walk(walk_root, **kwargs)
 
-    monkeypatch.setattr(ingest_module, '_walk_root', watching)
+    monkeypatch.setattr(driver_module, '_walk_root', watching)
     ingest_metadata_files(engine, [root.as_posix()], logger=quiet_logger)
     engine.dispose()
     assert [row.finished_utc for row in seen] == [None]
@@ -810,8 +812,8 @@ def test_a_chunk_boundary_is_crossed_mid_run(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """More images than one transaction holds must all still arrive."""
-    monkeypatch.setattr(ingest_module, 'INGEST_COMMIT_CHUNK_SIZE', 3)
-    monkeypatch.setattr(ingest_module, 'INGEST_RETRIEVE_BATCH_SIZE', 2)
+    monkeypatch.setattr(driver_module, 'INGEST_COMMIT_CHUNK_SIZE', 3)
+    monkeypatch.setattr(chunks_module, 'INGEST_RETRIEVE_BATCH_SIZE', 2)
     root = tmp_path / 'results'
     for index in range(7):
         write_metadata(
@@ -828,8 +830,8 @@ def test_a_chunk_boundary_leaves_every_row_readable(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Counting is not the same as having committed."""
-    monkeypatch.setattr(ingest_module, 'INGEST_COMMIT_CHUNK_SIZE', 3)
-    monkeypatch.setattr(ingest_module, 'INGEST_RETRIEVE_BATCH_SIZE', 2)
+    monkeypatch.setattr(driver_module, 'INGEST_COMMIT_CHUNK_SIZE', 3)
+    monkeypatch.setattr(chunks_module, 'INGEST_RETRIEVE_BATCH_SIZE', 2)
     root = tmp_path / 'results'
     for index in range(7):
         write_metadata(

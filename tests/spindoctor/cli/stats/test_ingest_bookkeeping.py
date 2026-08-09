@@ -26,8 +26,11 @@ import pytest
 import sqlalchemy
 from filecache import FCPath
 
-from spindoctor.cli.stats import ingest as ingest_module
 from spindoctor.cli.stats.ingest import METADATA_SUFFIX
+from spindoctor.cli.stats.ingest import chunks as chunks_module
+from spindoctor.cli.stats.ingest import driver as driver_module
+from spindoctor.cli.stats.ingest import store as store_module
+from spindoctor.cli.stats.ingest import walk as walk_module
 from spindoctor.cli.stats.ingest_rows import (
     MetadataDocumentError,
     MetadataSource,
@@ -193,7 +196,7 @@ def test_an_unenumerated_failure_costs_only_its_own_file(
             raise _NobodyEnumeratedThisError('a shape nobody enumerated')
         return real_rows(metadata, source)
 
-    monkeypatch.setattr(ingest_module, 'rows_from_metadata', occasionally_exploding)
+    monkeypatch.setattr(chunks_module, 'rows_from_metadata', occasionally_exploding)
     counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
     assert (counts.files_ingested, counts.files_failed) == (1, 1)
 
@@ -320,7 +323,7 @@ def test_a_lost_connection_is_not_read_as_an_unwritable_document(
             connection_invalidated=True,
         )
 
-    monkeypatch.setattr(ingest_module, '_write_image', connection_lost)
+    monkeypatch.setattr(store_module, '_write_image', connection_lost)
     with pytest.raises(sqlalchemy.exc.DBAPIError, match='server closed the connection'):
         ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
 
@@ -1021,10 +1024,10 @@ def test_the_prune_refuses_a_listing_of_part_of_a_root(
     """A worker holding a share of a root would otherwise delete its peers' rows."""
     url = index_url(tmp_path / 'index.sqlite3')
     engine = open_index(url, create=True)
-    listing = ingest_module._RootListing(directories_missed=1)
+    listing = walk_module._RootListing(directories_missed=1)
     try:
         with pytest.raises(ValueError, match='complete listing'):
-            ingest_module._prune_missing(
+            driver_module._prune_missing(
                 engine, '/data/nav-results', listing, {}, logger=quiet_logger
             )
     finally:
@@ -1150,11 +1153,11 @@ def test_a_crash_mid_run_costs_one_chunk_and_no_more(
     transaction for the whole run would leave none, and a commit per image would
     leave four.
     """
-    monkeypatch.setattr(ingest_module, 'INGEST_COMMIT_CHUNK_SIZE', 3)
+    monkeypatch.setattr(driver_module, 'INGEST_COMMIT_CHUNK_SIZE', 3)
     root = _seven_images(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     written: list[Any] = []
-    real_write = ingest_module._write_image
+    real_write = store_module._write_image
 
     def failing(connection: Any, rows: Any) -> Any:
         written.append(rows)
@@ -1162,7 +1165,7 @@ def test_a_crash_mid_run_costs_one_chunk_and_no_more(
             raise _TheWriterDiedError('the writer died')
         return real_write(connection, rows)
 
-    monkeypatch.setattr(ingest_module, '_write_image', failing)
+    monkeypatch.setattr(store_module, '_write_image', failing)
     with pytest.raises(_TheWriterDiedError, match='the writer died'):
         ingest_tree(url, [root], logger=quiet_logger)
     engine = open_index(url)
