@@ -32,7 +32,8 @@ from spindoctor.nav_technique.diagnostics import StarFieldDiagnostics
 from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import NavTechnique
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
-from spindoctor.support.exceptions import NavContractError
+from spindoctor.support.cmatrix import PointingSolution
+from spindoctor.support.exceptions import NavContractError, NavPointingError
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
 from spindoctor.support.status_reason import NavStatusReason
 
@@ -209,6 +210,11 @@ class _FakeStarTechnique(NavTechnique):
 def fake_obs() -> _FakeObs:
     """Provide a clean fake observation."""
     return _FakeObs()
+
+
+@pytest.fixture(autouse=True)
+def _fakes_report_as_simulated(fakes_report_as_simulated: None) -> None:
+    """Apply the shared simulated-instrument report to every test in this module."""
 
 
 @pytest.fixture(autouse=True)
@@ -1248,3 +1254,232 @@ def test_feasible_technique_report_logged_at_debug(
     captured = capsys.readouterr()
     assert result.status == 'success'
     assert 'Technique _FakeStarTechnique feasible: would consume 3 feature(s)' in captured.out
+
+
+def test_orchestrator_records_no_pointing_without_a_spice_camera_frame(
+    fake_obs: _FakeObs,
+) -> None:
+    """An observation with no known SPICE camera frame records no pointing."""
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.pointing is None
+
+
+def test_orchestrator_stamps_pointing_on_a_successful_result(
+    fake_obs: _FakeObs, monkeypatch: pytest.MonkeyPatch, sentinel_pointing: PointingSolution
+) -> None:
+    """A computed pointing solution is carried on the returned NavResult.
+
+    The SPICE lookups behind the real computation need furnished kernels, so
+    the wiring is exercised with a stand-in solution.
+    """
+    pointing = sentinel_pointing
+    monkeypatch.setattr(
+        'spindoctor.nav_orchestrator.orchestrator.compute_pointing',
+        lambda obs, *, offset_px, rotation_fitted: pointing,
+    )
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'success'
+    assert result.pointing is pointing
+
+
+def test_orchestrator_stamps_pointing_on_a_short_circuited_failure(
+    monkeypatch: pytest.MonkeyPatch, sentinel_pointing: PointingSolution
+) -> None:
+    """A hard-failure image still records its uncorrected attitude and times."""
+    pointing = sentinel_pointing
+    monkeypatch.setattr(
+        'spindoctor.nav_orchestrator.orchestrator.compute_pointing',
+        lambda obs, *, offset_px, rotation_fitted: pointing,
+    )
+    obs = _FakeObs(image=np.zeros((64, 64), np.float64))
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'failed'
+    assert result.pointing is pointing
+
+
+def test_orchestrator_passes_the_fitted_rotation_flag_through(
+    fake_obs: _FakeObs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fitted-rotation flag reflects whether the result carries a rotation."""
+    seen: dict[str, Any] = {}
+
+    def _record(obs: Any, *, offset_px: Any, rotation_fitted: bool) -> None:
+        seen['offset_px'] = offset_px
+        seen['rotation_fitted'] = rotation_fitted
+        return None
+
+    monkeypatch.setattr('spindoctor.nav_orchestrator.orchestrator.compute_pointing', _record)
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert seen['offset_px'] == result.offset_px
+    assert seen['rotation_fitted'] is False
+
+
+def test_orchestrator_reports_a_fitted_rotation_to_the_pointing(
+    fake_obs: _FakeObs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A result carrying a fitted rotation is reported as one.
+
+    The rotation turns about a per-technique pivot that no result records, so
+    an attitude cannot express it and none is claimed.  Reporting such a result
+    as unrotated would publish a C-matrix computed from the translation alone,
+    with the rotation silently dropped -- and the metadata is a product in its
+    own right, whatever the kernel writer later does with it.
+    """
+    seen: dict[str, Any] = {}
+
+    def _record(obs: Any, *, offset_px: Any, rotation_fitted: bool) -> None:
+        seen['rotation_fitted'] = rotation_fitted
+        return None
+
+    monkeypatch.setattr('spindoctor.nav_orchestrator.orchestrator.compute_pointing', _record)
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    seen.clear()
+    orch.with_pointing(replace(result, rotation_rad=0.0035), obs)  # type: ignore[arg-type]
+    assert seen['rotation_fitted'] is True
+
+
+def test_orchestrator_reports_but_survives_a_failed_pointing_computation(
+    fake_obs: _FakeObs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A pointing computation that raises is logged and leaves the result usable."""
+
+    def _boom(obs: Any, *, offset_px: Any, rotation_fitted: bool) -> None:
+        raise NavPointingError('cmatrix is not a proper rotation')
+
+    monkeypatch.setattr('spindoctor.nav_orchestrator.orchestrator.compute_pointing', _boom)
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'success'
+    assert result.pointing is None
+    assert 'Could not compute the corrected pointing' in capsys.readouterr().out
+
+
+def test_orchestrator_reports_a_failed_pointing_to_the_run_log(
+    fake_obs: _FakeObs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A failed pointing computation reaches the run log, not only the image log.
+
+    A batch operator watching the run log must not have to open every
+    per-image log to learn that pointing stopped being recorded.
+    """
+
+    def _boom(obs: Any, *, offset_px: Any, rotation_fitted: bool) -> None:
+        raise NavPointingError('the furnished kernels cannot supply the rotation')
+
+    monkeypatch.setattr('spindoctor.nav_orchestrator.orchestrator.compute_pointing', _boom)
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    orch.navigate(obs)  # type: ignore[arg-type]
+    assert 'Corrected pointing not recorded' in capsys.readouterr().out
+
+
+def test_orchestrator_does_not_swallow_a_defect_in_the_pointing_computation(
+    fake_obs: _FakeObs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A programming error in the computation is not caught.
+
+    Catching everything would let one typo silently drop pointing from an
+    entire batch while every image still reported success.
+    """
+
+    def _typo(obs: Any, *, offset_px: Any, rotation_fitted: bool) -> None:
+        raise AttributeError("'NoneType' object has no attribute 'vals'")
+
+    monkeypatch.setattr('spindoctor.nav_orchestrator.orchestrator.compute_pointing', _typo)
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    with pytest.raises(AttributeError, match='has no attribute'):
+        orch.navigate(obs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    'defect',
+    [ValueError, RuntimeError, LookupError, OSError],
+    ids=['value_error', 'runtime_error', 'lookup_error', 'os_error'],
+)
+def test_orchestrator_does_not_swallow_an_ordinary_exception_from_the_pointing_computation(
+    fake_obs: _FakeObs, monkeypatch: pytest.MonkeyPatch, defect: type[Exception]
+) -> None:
+    """Only the computation's own typed failure is absorbed.
+
+    A defect inside the computation raises an ordinary exception type, and
+    the types SPICE failures arrive as are the same ones ordinary defects
+    raise.  Absorbing that family would make the two indistinguishable and
+    drop pointing from a whole batch while every image reported success, so
+    the computation reports what it expects as a ``NavPointingError`` and
+    everything else propagates.
+    """
+
+    def _defective(obs: Any, *, offset_px: Any, rotation_fitted: bool) -> None:
+        raise defect('index 3 is out of bounds for axis 0 with size 3')
+
+    monkeypatch.setattr('spindoctor.nav_orchestrator.orchestrator.compute_pointing', _defective)
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    with pytest.raises(defect, match='out of bounds'):
+        orch.navigate(obs)  # type: ignore[arg-type]
+
+
+def test_orchestrator_warns_when_a_registered_instrument_has_no_frame_mapping(
+    fake_obs: _FakeObs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An instrument that navigates but maps to no SPICE frame is reported.
+
+    A fifth instrument added without its frame mapping would otherwise
+    produce no corrected attitude for any of its images, with nothing above
+    debug to say so.
+    """
+    monkeypatch.setattr(
+        'spindoctor.nav_orchestrator.orchestrator.obs_class_to_inst_name', lambda cls: 'newinst'
+    )
+    monkeypatch.setattr(
+        'spindoctor.nav_orchestrator.orchestrator.compute_pointing',
+        lambda obs, *, offset_px, rotation_fitted: None,
+    )
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.pointing is None
+    assert 'No SPICE camera frame is mapped for instrument newinst' in capsys.readouterr().out
+
+
+def test_orchestrator_does_not_warn_for_a_simulated_image(
+    fake_obs: _FakeObs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A simulated image records no attitude without raising a warning."""
+    monkeypatch.setattr(
+        'spindoctor.nav_orchestrator.orchestrator.obs_class_to_inst_name', lambda cls: 'sim'
+    )
+    monkeypatch.setattr(
+        'spindoctor.nav_orchestrator.orchestrator.compute_pointing',
+        lambda obs, *, offset_px, rotation_fitted: None,
+    )
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    orch.navigate(obs)  # type: ignore[arg-type]
+    out = capsys.readouterr().out
+    # The positive control proves the log actually reached stdout, so the
+    # negative assertion cannot pass vacuously on an empty capture.
+    assert 'ORCHESTRATION' in out
+    assert 'No SPICE camera frame is mapped' not in out

@@ -76,3 +76,8 @@ def test_star_psf_size_wrong_length_raises() -> None:
     inst._inst_config = {'star_psf_sizes': {10: [7, 7, 7]}}
     with pytest.raises(AssertionError, match='must have 2 elements'):
         inst.star_psf_size(_make_star(4.0))
+
+
+def test_shutter_mode_defaults_to_none() -> None:
+    """An instrument whose host exposes no shutter mode reports None."""
+    assert _ConcreteObsInst().shutter_mode is None

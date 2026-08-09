@@ -307,6 +307,7 @@ def _run_manual_pass(
                     image_name,
                     instrument=obs_class_to_inst_name(obs_class),
                     camera=obs.camera,
+                    shutter_mode=obs.shutter_mode,
                     image_shape=(int(obs.data.shape[0]), int(obs.data.shape[1])),
                     timing=build_timing_section(run_start, datetime.now(UTC)),
                 )

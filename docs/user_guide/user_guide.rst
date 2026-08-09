@@ -14,6 +14,7 @@ instrument-specific appendices.
    user_guide_logging
    user_guide_reprojection
    user_guide_backplanes
+   user_guide_ck_kernels
    user_guide_statistics
    user_guide_simulated_images
    user_guide_pds4_bundle

@@ -16,6 +16,7 @@ from spindoctor.nav_orchestrator.feature_summary import NavFeatureSummary
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from spindoctor.nav_orchestrator.provenance import Provenance
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
+from spindoctor.support.cmatrix import PointingSolution
 from spindoctor.support.status_reason import NavStatusReason
 from spindoctor.support.types import NDArrayFloatType
 
@@ -72,6 +73,11 @@ class NavResult:
         rotation_rad: Optional fitted camera rotation (radians); ``None``
             when ``fit_camera_rotation`` is False.
         sigma_rotation_rad: Optional 1-sigma rotation uncertainty.
+        pointing: Optional corrected-attitude solution: the uncorrected and
+            corrected C-matrices, the SPICE frame identities, and the
+            exposure times.  Stamped by the orchestrator once the
+            observation is in hand; ``None`` for a host whose SPICE frames
+            are unknown, or when the attitude could not be computed.
     """
 
     status: Status
@@ -92,6 +98,7 @@ class NavResult:
     annotations: Annotations = field(default_factory=Annotations)
     rotation_rad: float | None = None
     sigma_rotation_rad: float | None = None
+    pointing: PointingSolution | None = None
 
     def __post_init__(self) -> None:
         """Validate consistency between status, offset, and reason."""

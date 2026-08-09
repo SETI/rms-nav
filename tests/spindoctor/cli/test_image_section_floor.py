@@ -37,6 +37,7 @@ _IMAGE_SECTION_SITES = [
     ('cli/backplanes/backplanes.py', 'backplanes'),
     ('cli/sd_mosaic.py', 'reproj'),
     ('cli/sd_mosaic_cloud_tasks.py', 'reproj'),
+    ('cli/sd_create_ck.py', 'ck'),
 ]
 
 
