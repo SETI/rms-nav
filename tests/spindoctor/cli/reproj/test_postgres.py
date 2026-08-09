@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import pdslogger
 import pytest
+import sqlalchemy
 from tests.spindoctor.cli.reproj.conftest import (
     CMATRIX,
     CMATRIX_ORIGINAL,
@@ -27,6 +28,7 @@ from tests.spindoctor.cli.reproj.conftest import (
     OFFSET,
     POINTING,
     TIMES,
+    UNNAVIGATED_STUB,
     build_tree,
     document,
     image_file,
@@ -162,3 +164,69 @@ def test_the_other_root_answers_for_itself(
         assert source.load_pointing(image_file(CMATRIX_STUB)).offset == (9.25, 8.75)
     finally:
         engine.dispose()
+
+
+def _missing_row_message(root: Path, url: str) -> str:
+    """Return what the refusal says when the index holds no row for an image.
+
+    Parameters:
+        root: The ingested results root the source answers from.
+        url: The index URL, carrying the server's credentials.
+
+    Returns:
+        The refusal message.
+    """
+    engine = open_index(url)
+    try:
+        source = IndexPointingSource(engine, normalize_root_url(root))
+        with pytest.raises(FileNotFoundError) as excinfo:
+            source.read_record(image_file(UNNAVIGATED_STUB))
+        return str(excinfo.value)
+    finally:
+        engine.dispose()
+
+
+def test_the_missing_row_message_hides_the_index_password(
+    tmp_path: Path, postgres_url: str, quiet_ingest_logger: pdslogger.PdsLogger
+) -> None:
+    """The refusal names the index it asked without naming its password.
+
+    It reaches a run log and whoever is sent one, and a connection URL to a
+    server carries credentials that a SQLite path never does.  The authority
+    form is what is looked for rather than the password on its own: this
+    server's password is also its user name and its database name, so a bare
+    substring search would report a leak that is not one, or miss one that is.
+    """
+    parsed = sqlalchemy.engine.make_url(postgres_url)
+    root = tmp_path / 'nav'
+    build_tree(root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET)})
+    _ingested(postgres_url, [root], logger=quiet_ingest_logger)
+    message = _missing_row_message(root, postgres_url)
+    assert f'{parsed.username}:{parsed.password}@' not in message
+
+
+def test_the_missing_row_message_masks_where_the_password_was(
+    tmp_path: Path, postgres_url: str, quiet_ingest_logger: pdslogger.PdsLogger
+) -> None:
+    """A guard on the assertion above, which a blank message would satisfy."""
+    parsed = sqlalchemy.engine.make_url(postgres_url)
+    root = tmp_path / 'nav'
+    build_tree(root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET)})
+    _ingested(postgres_url, [root], logger=quiet_ingest_logger)
+    message = _missing_row_message(root, postgres_url)
+    assert f'{parsed.username}:***@' in message
+
+
+def test_the_missing_row_message_still_names_the_index(
+    tmp_path: Path, postgres_url: str, quiet_ingest_logger: pdslogger.PdsLogger
+) -> None:
+    """Everything but the credentials survives.
+
+    Which of the three resolution levels supplied the URL is exactly what a
+    reader of a failed run needs, and the host is what says which.
+    """
+    parsed = sqlalchemy.engine.make_url(postgres_url)
+    root = tmp_path / 'nav'
+    build_tree(root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET)})
+    _ingested(postgres_url, [root], logger=quiet_ingest_logger)
+    assert str(parsed.host) in _missing_row_message(root, postgres_url)
