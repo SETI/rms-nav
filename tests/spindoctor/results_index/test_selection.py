@@ -356,12 +356,13 @@ def test_a_complete_pass_leaves_nothing_for_the_caller_to_report(two_roots: str)
     assert _stubs(two_roots).directories_missed == 0
 
 
-def _index_missing_directories(tmp_path: Path, missed: int) -> str:
-    """Build an index whose newest pass over the root missed some directories.
+def _index_with_runs(tmp_path: Path, counts: list[int]) -> str:
+    """Build an index whose root was passed over once per count, in that order.
 
     Parameters:
         tmp_path: Directory the index file is written into.
-        missed: How many directories that pass did not list.
+        counts: How many directories each completed pass did not list, oldest
+            pass first.
 
     Returns:
         The connection URL of the index.
@@ -371,7 +372,7 @@ def _index_missing_directories(tmp_path: Path, missed: int) -> str:
         connection.execute(IMAGES.insert(), [_document(SUCCESS_NO_PNG)])
         connection.execute(
             INGEST_RUNS.insert(),
-            [_completed_run(ROOT), _completed_run(ROOT, directories_missed=missed)],
+            [_completed_run(ROOT, directories_missed=missed) for missed in counts],
         )
     return url
 
@@ -383,14 +384,19 @@ def test_a_pass_that_missed_a_directory_hands_the_count_back(tmp_path: Path) -> 
     the run row is the only place it appears, and the caller that reads absence
     as "this image was never navigated" is the one that has to be told.
     """
-    stubs = read_result_stubs(_index_missing_directories(tmp_path, 3), ROOT, [VOLUME])
+    stubs = read_result_stubs(_index_with_runs(tmp_path, [0, 3]), ROOT, [VOLUME])
     assert stubs.directories_missed == 3
 
 
 def test_the_count_comes_from_the_newest_pass(tmp_path: Path) -> None:
-    """An earlier complete pass does not vouch for the tree a later one half-read."""
-    url = _index_missing_directories(tmp_path, 2)
-    assert read_result_stubs(url, ROOT, [VOLUME]).directories_missed == 2
+    """A later complete pass answers for the tree an earlier half-read one left.
+
+    The count belongs to a pass and not to a root: the whole root was listed
+    this time, so absence under it means what it says again, and reporting the
+    older pass's gap would cry wolf on every enumeration until the end of time.
+    """
+    stubs = read_result_stubs(_index_with_runs(tmp_path, [3, 0]), ROOT, [VOLUME])
+    assert stubs.directories_missed == 0
 
 
 def test_a_root_with_no_completed_ingest_is_refused(two_roots: str) -> None:
