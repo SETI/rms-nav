@@ -1,5 +1,11 @@
 # Shift-equivariance sweep (planted OffsetFOV shifts vs reference run)
 
+Row set: all 66 success sidecars at the reference run plus the shifts
+(+0.30, -0.20), (+1.86, 0.00), (+5.50, -3.25), and a 22-image subset
+additionally at (+0.50, +0.50), (-2.60, +1.30), (-10.20, +7.40) --
+66 x 4 + 22 x 3 = 330 navigations, collected with `--shifts` / `--images`
+passes rather than the full default matrix.
+
 330 navigations, 1150 paired technique residuals.
 Residual = offset(shift) - offset(0) + shift; 0 for an equivariant technique.
 

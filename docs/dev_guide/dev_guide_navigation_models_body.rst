@@ -125,7 +125,7 @@ ridge-pixel centers is quantized to the pixel grid: a sub-pixel change in the pr
 pointing re-rasterizes the ridge instead of translating it, and a fit against the polyline
 inherits a sub-pixel-phase-dependent bias of up to half a pixel that breaks shift
 equivariance (re-navigating with corrected pointing does not return the correction). After
-the samplers are built, ``spindoctor.nav_model.silhouette_probe`` therefore moves every
+the samplers are built, :mod:`spindoctor.nav_model.silhouette_probe` therefore moves every
 vertex onto the probed sub-pixel boundary: a short ladder of probe points is laid along the
 vertex's outward normal (1/8 px steps from 1 px inward to 1.5 px outward), each probe is
 classified inside / outside the region by evaluating the body geometry at that exact line of
