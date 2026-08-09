@@ -29,6 +29,7 @@ from tests.spindoctor.results_index.conftest import (
 
 from spindoctor.cli.stats.ingest import (
     IngestCounts,
+    TaskCompletion,
     TaskResult,
     complete_ingest_tasks,
     fan_out_ingest_tasks,
@@ -483,7 +484,7 @@ def complete(
     results: Sequence[TaskResult],
     *,
     logger: pdslogger.PdsLogger,
-) -> Any:
+) -> TaskCompletion:
     """Add up the shares of the given roots and stamp what they completed.
 
     Parameters:
