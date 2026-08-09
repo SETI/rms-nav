@@ -19,8 +19,9 @@ What the index answers differently
 ----------------------------------
 
 The index holds what one ingest pass could read and record, so the answers below
-are bounded by that rather than by this query.  The list is complete as written;
-anything added to it belongs here, in the plan, and in a test of its own.
+are bounded by that rather than by this query.  Each is stated here, in the
+plan, and in a test of its own, and one found later is added in the same three
+places rather than left to be rediscovered.
 
 - **A summary PNG with no document beside it** is recorded nowhere: the flag
   lives on the row of the file it was found beside, and a PNG on its own has no
@@ -50,11 +51,21 @@ anything added to it belongs here, in the plan, and in a test of its own.
     returned as :attr:`ResultStubs.directories_missed`, and the caller reports
     it rather than reading absence under it in silence.
 
-The index is also a snapshot: it answers as of the last ingest over the root,
-and a document written since is one the index does not hold.  When that pass
-finished is returned as :attr:`ResultStubs.ingested_utc` and reported with the
-answer, because how old the answer is decides whether it is the answer the tree
-would give.
+- **A document the tree no longer holds** keeps its row, and reads as present
+  where the tree reads it as absent, which also makes ``--has-no-offset-file``
+  skip an image nothing has been written for.  A row leaves the index only when
+  a pass that listed the whole root finds no file for it, and a pass that missed
+  a single directory anywhere under the root removes no row at all: the stubs it
+  did not see are the ones it has no evidence about.  So one unlistable
+  subdirectory holds every stale row of the root for as long as it stays
+  unlistable, however many passes complete in the meantime, and the count of
+  missed directories is what says so.
+
+The index is also a snapshot: it answers as of the last ingest over the root, so
+a document written since is one it does not hold and a document deleted since is
+one it still holds.  When that pass finished is returned as
+:attr:`ResultStubs.ingested_utc` and reported with the answer, because how old
+the answer is decides whether it is the answer the tree would give.
 """
 
 import contextlib

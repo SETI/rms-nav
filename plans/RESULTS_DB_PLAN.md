@@ -817,8 +817,11 @@ still a file the walk finds, so the presence and absence filters read
 `failed_files` alongside `images`, and that table carries the volume and the
 summary-PNG flag for the same reason. The carve-out is what one ingest pass
 could read and record, never a property of this query; it is enumerated in the
-Phase 5 entry and repeated in the module docstring, and anything added to it is
-added in both places with a test of its own.
+Phase 5 entry and repeated in the module docstring, each member has a test of
+its own, and a member found later is added in all three places in one commit.
+The enumeration is maintained rather than audited closed: it names what is known
+to differ, and a divergence nobody has found yet is not evidence that none
+exists.
 `ResultsFilter` lives in
 `spindoctor.dataset`, which `sd_offset` imports on every run, so the
 index-backed implementation lives in `spindoctor/results_index/selection.py`
@@ -1194,9 +1197,12 @@ Details settled during execution, none of them a change of intent:
   fetches every refusal the root holds. The incremental skip compares the flag
   for a refusal exactly as it does for an image, since a PNG written after the
   refusal was recorded changes the row that ought to be stored.
-- **What the index answers differently, in full.** Each is stated in the module
-  docstring, each has a test of its own, and the list is closed: anything added
-  to it is added here, in the docstring, and in a test, in the same commit.
+- **What the index answers differently, as far as it is known.** Each member is
+  stated in the module docstring, each has a test of its own, and a member found
+  later is added here, in the docstring, and in a test, in the same commit. The
+  list is maintained rather than closed: it is what execution and code reading
+  have found, and a divergence nobody has found yet would be a defect of this
+  list rather than a departure from it.
   1. A summary PNG with **no file beside it** is recorded nowhere, because the
      flag lives on the row of the file it was found beside. It reads as absent,
      which makes `--has-no-offset-file --has-png-file` empty under an index.
@@ -1224,6 +1230,20 @@ Details settled during execution, none of them a change of intent:
      with the same query, handed back with the answer, and reported by
      `ResultsFilter` as a warning naming the root, which is the consumer section
      2.7 wrote that count for.
+  5. A document **the tree no longer holds** keeps its row and reads as present,
+     so `--has-offset-file` hands on an image whose metadata file is gone and
+     `--has-no-offset-file` skips one nothing has been written for. A row leaves
+     the index only when a pass that listed the whole root does not find a file
+     for it (`_prune_missing`, gated on `covers_whole_root`), and a pass that
+     missed one directory anywhere under the root removes no row at all, having
+     no evidence about the stubs it did not see. One unlistable subdirectory
+     therefore holds every stale row of the root for as long as it stays
+     unlistable, across any number of completed passes -- so this is a live
+     consequence of the prune guard and not only the snapshot's age, and the
+     missed-directory warning says both halves. The prune is the ingest's, and
+     narrowing it to the directories a pass did list is a change to what a
+     listing has to report about itself, which sits with the ingest phases and
+     with the sharded pass that also prunes on partial evidence.
 - **The answer says how old it is.** `ingest_runs.finished_utc` is read by the
   same query as the missed count and returned with the stubs, and `ResultsFilter`
   reports it with the count of what the index holds. The index detects no change
@@ -1296,13 +1316,18 @@ add a column (increment the version). No issue numbers in any of it.
    by tests (unit tier at the `OffsetLookup`/selection level; integration
    tier on written products). "Identical" binds returned values, written
    products, and the reachable-reason warnings -- not incidental log text.
-   Two carve-outs, and no others: the reason vocabulary section 2.9 maps, whose
-   two unreachable rows are a stated behavioral difference; and, for the
-   selections, what section 4's Phase 5 entry enumerates -- an input the index
-   holds nothing about because no pass could read or record it, and a document
-   the ingest refused, which is a file that exists but records no status. Both
-   lists are closed, and an addition to either is an addition to the plan, to
-   the module docstring, and to a test, in one commit.
+   Two carve-outs: the reason vocabulary section 2.9 maps, whose two
+   unreachable rows are a stated behavioral difference; and, for the selections,
+   what section 4's Phase 5 entry enumerates -- an input the index holds nothing
+   about because no pass could read or record it; a document the ingest refused,
+   which is a file that exists but records no status; a document whose outcome
+   the index reads from `navigation_result.status` and the tree reads from the
+   top-level field alone; and a document the tree no longer holds, whose row
+   survives every pass that did not list the whole root. Each carve-out is
+   stated in the plan, in the module docstring, and in a test, and one found
+   later is added to all three in one commit. Neither list is asserted to be
+   complete: a divergence outside them is a defect of the enumeration, to be
+   fixed or enumerated, and not a licence to differ.
    `sd_stats_report`'s criterion is section 4 Phase 2's old-vs-new
    byte-identical report.
 2. No pipeline program requires an index, and `import spindoctor.dataset`

@@ -184,8 +184,8 @@ For PDS3 datasets (``coiss``, ``coiss_pds3``, ``coiss_cruise``, ``coiss_cruise_p
   by missing SPICE data.
 
 The results-file filters answer their questions three ways when they read the
-results tree, all efficient even
-when the results root is a cloud location. Presence filters
+results tree, all of them efficient even when the results root is a cloud
+location. Presence filters
 (``--has-offset-file`` / ``--has-png-file``) and the error filters
 (``--has-offset-error`` and its SPICE variants) walk the results tree once per
 selected volume and test each candidate against the collected file set. Pure
@@ -198,12 +198,23 @@ Given ``--results-db``, all of them are answered instead by one query per
 enumeration, and the results tree is not read at all. The index is a snapshot of
 the tree as of the last ingest over that root, with no staleness detection: an
 image navigated since is one the index does not hold, so ``--has-no-offset-file``
-selects it again. The run log says when the pass that filled the index finished
-and how long ago that was, which is what says whether that applies to this run.
-Run ``sd_stats_ingest`` to bring the index up to date, or pass
-``--results-db none`` for a run that must read the tree. A results root the index holds no completed ingest of is refused
+selects it again, and a result file deleted since is one the index still holds,
+so ``--has-offset-file`` selects an image whose metadata file is gone. The run
+log says when the pass that filled the index finished and how long ago that was,
+which is what says whether either applies to this run. Run ``sd_stats_ingest`` to
+bring the index up to date, or pass ``--results-db none`` for a run that must
+read the tree. A results root the index holds no completed ingest of is refused
 rather than answered, because absence of a row would otherwise read as "this
 image was never navigated".
+
+An ingest that could not list every directory under the root reports the number
+it missed, and every enumeration answered from that index repeats it as a
+warning. It bounds both directions of the paragraph above: an image under a
+directory nobody listed is absent from the index whether or not it was
+navigated, and such a pass removes no row anywhere under the root, so a result
+file deleted before it keeps its row until a pass lists the whole root. Fixing
+what stopped the walk -- a directory permission, a symbolic link pointing back
+up the tree -- and re-running ``sd_stats_ingest`` clears both.
 
 Miscellaneous
 ^^^^^^^^^^^^^
