@@ -38,6 +38,7 @@ from spindoctor.config import (
 from spindoctor.config.program_names import SD_OFFSET
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from spindoctor.dataset.dataset import DataSet, ImageFiles
+from spindoctor.dataset.results_filter import SelectionError
 from spindoctor.navigate_image_files import navigate_image_files
 from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class, obs_class_to_inst_name
 from spindoctor.support.file import json_as_string
@@ -350,12 +351,14 @@ def _selected_image_files(arguments: argparse.Namespace) -> Iterator[ImageFiles]
     """Yield the image batches the selection arguments name, reporting a refusal.
 
     The enumeration is where the selection arguments are finally read, so it is
-    where a contradictory pair of them, a results root that cannot be walked, or
-    a results index that cannot be opened or does not cover this root is first
-    diagnosed.  Each of those is a run that is misconfigured rather than one that
-    went wrong, and each already carries a message saying what to change; a
-    traceback would bury it, and would print an index URL's password into the
-    terminal along the way.
+    where a contradictory pair of them, or a results index that cannot be
+    opened, cannot be read, or does not cover this root, is first diagnosed.
+    Each of those is a run that is misconfigured rather than one that went
+    wrong, and each already carries a message saying what to change; a traceback
+    would bury it, and would print an index URL's password into the terminal
+    along the way.  Only those are reported this way: an enumeration that fails
+    for any other reason has gone wrong rather than been misconfigured, and its
+    traceback is what says where.
 
     Parameters:
         arguments: The parsed command line.
@@ -366,7 +369,7 @@ def _selected_image_files(arguments: argparse.Namespace) -> Iterator[ImageFiles]
     assert DATASET is not None  # just for type checking
     try:
         yield from DATASET.yield_image_files_from_arguments(arguments)
-    except ValueError as exc:
+    except SelectionError as exc:
         MAIN_LOGGER.error('%s', exc)
         sys.exit(1)
 

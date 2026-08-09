@@ -57,14 +57,15 @@ answer, because how old the answer is decides whether it is the answer the tree
 would give.
 """
 
-from collections.abc import Iterable, Sequence
+import contextlib
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 import sqlalchemy
 from filecache import FCPath
 
-from spindoctor.results_index.engine import open_index
+from spindoctor.results_index.engine import masked_url, open_index
 from spindoctor.results_index.roots import (
     newest_pass,
     normalize_root_url,
@@ -189,6 +190,40 @@ def _stub_query(
     return documents.union_all(refusals)
 
 
+@contextlib.contextmanager
+def _reporting_a_failed_read(url: str) -> Iterator[None]:
+    """Report a database failure as the refusal every consumer already catches.
+
+    :func:`~spindoctor.results_index.engine.open_index` goes to some length to
+    make every way of failing to open the index a ``ValueError``, so that a
+    consumer reporting the cause rather than crashing catches one type.  The
+    queries issued afterwards are outside that guarantee on their own: a table
+    the account may not read, a database holding part of the schema, or a
+    connection lost between the open and the query raises the database layer's
+    own exception, which a caller that deliberately never imports SQLAlchemy
+    cannot name in an ``except`` clause.
+
+    Parameters:
+        url: The index URL, masked here so that the report names which index
+            was asked without printing its password.
+
+    Yields:
+        Nothing; the queries run inside the translation.
+
+    Raises:
+        ValueError: If the block raises anything the database layer raised.
+    """
+    try:
+        yield
+    except sqlalchemy.exc.SQLAlchemyError as exc:
+        raise ValueError(
+            f'{masked_url(url)}: the results index could not be read '
+            f'({type(exc).__name__}: {exc}). Check that this URL names an index '
+            f'sd_stats_ingest wrote and that the account it is opened with may read '
+            f'every table of it.'
+        ) from exc
+
+
 def read_result_stubs(
     url: str,
     nav_results_root: str | Path | FCPath,
@@ -229,11 +264,11 @@ def read_result_stubs(
 
     Raises:
         ValueError: If the index cannot be opened, is stamped with another
-            schema version, or holds no completed ingest of this root.  A
-            caller never falls back to reading files: a run that resolved a URL
-            and could not use it is misconfigured, and reading the tree instead
-            would answer the same questions far more slowly and silently
-            differently.
+            schema version, holds no completed ingest of this root, or fails
+            the queries this asks it.  A caller never falls back to reading
+            files: a run that resolved a URL and could not use it is
+            misconfigured, and reading the tree instead would answer the same
+            questions far more slowly and silently differently.
     """
     root_url = normalize_root_url(nav_results_root)
     query = _stub_query(
@@ -250,7 +285,7 @@ def read_result_stubs(
     matching_error: set[str] = set()
     engine = open_index(url)
     try:
-        with engine.connect() as connection:
+        with _reporting_a_failed_read(url), engine.connect() as connection:
             require_ingested_roots(connection, [root_url], url=url)
             newest = newest_pass(connection, root_url)
             for stub, has_summary_png, matches_error in connection.execute(query):

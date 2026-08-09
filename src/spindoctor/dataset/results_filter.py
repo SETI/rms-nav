@@ -54,6 +54,24 @@ is what the branch-local import exists to avoid.
 """
 
 
+class SelectionError(ValueError):
+    """A selection this run cannot be given, as opposed to one that went wrong.
+
+    Raised for a contradictory pair of selection flags, and for a results index
+    that cannot be opened, cannot be read, or holds no completed ingest of the
+    results root.  Each is a run that is misconfigured, each already carries a
+    message saying what to change, and a program is therefore free to report
+    that message instead of tracing back.
+
+    It is a :class:`ValueError` because that is the family every caller of this
+    module already catches.  It is a type of its own so that a program reporting
+    the message catches these and not every other ``ValueError`` an enumeration
+    can raise: a malformed index label, a value the walk could not convert, or
+    an outright programming error is a run that went wrong, and its traceback is
+    the useful thing about it.
+    """
+
+
 def _elapsed_phrase(seconds: float) -> str:
     """Return an interval in the coarsest unit that has a whole number of it.
 
@@ -168,23 +186,23 @@ class ResultsFilter:
             logger: Logger for scan statistics and unreadable-metadata warnings.
 
         Raises:
-            ValueError: If the flag combination is contradictory, or if the
-                results index cannot be opened or holds no completed ingest of
-                this results root.
+            SelectionError: If the flag combination is contradictory, or if the
+                results index cannot be opened, cannot be read, or holds no
+                completed ingest of this results root.
         """
         if has_offset_file and has_no_offset_file:
-            raise ValueError('has_offset_file and has_no_offset_file are mutually exclusive')
+            raise SelectionError('has_offset_file and has_no_offset_file are mutually exclusive')
         if has_png_file and has_no_png_file:
-            raise ValueError('has_png_file and has_no_png_file are mutually exclusive')
+            raise SelectionError('has_png_file and has_no_png_file are mutually exclusive')
         if has_offset_spice_error and has_offset_nonspice_error:
-            raise ValueError(
+            raise SelectionError(
                 'has_offset_spice_error and has_offset_nonspice_error are mutually exclusive'
             )
         needs_metadata_read = (
             has_offset_error or has_offset_spice_error or has_offset_nonspice_error
         )
         if needs_metadata_read and has_no_offset_file:
-            raise ValueError(
+            raise SelectionError(
                 'has_no_offset_file contradicts the offset-error filters, which '
                 'require the offset metadata file to exist'
             )
@@ -264,8 +282,8 @@ class ResultsFilter:
                 missing SPICE data is wanted.
 
         Raises:
-            ValueError: If the index cannot be opened or holds no completed
-                ingest of this results root.
+            SelectionError: If the index cannot be opened, cannot be read, or
+                holds no completed ingest of this results root.
         """
         # Imported here rather than at the top of the module, on the same
         # grounds as the GUI imports elsewhere in the package: this module is
@@ -274,14 +292,21 @@ class ResultsFilter:
         # named.
         from spindoctor.results_index.selection import read_result_stubs
 
-        stubs = read_result_stubs(
-            results_db_url,
-            self._nav_results_root,
-            volumes,
-            has_offset_error=has_offset_error,
-            has_offset_spice_error=has_offset_spice_error,
-            has_offset_nonspice_error=has_offset_nonspice_error,
-        )
+        try:
+            stubs = read_result_stubs(
+                results_db_url,
+                self._nav_results_root,
+                volumes,
+                has_offset_error=has_offset_error,
+                has_offset_spice_error=has_offset_spice_error,
+                has_offset_nonspice_error=has_offset_nonspice_error,
+            )
+        except ValueError as exc:
+            # Every way the index refuses to answer arrives as a ValueError
+            # carrying a message that says what to change; this is the boundary
+            # where it becomes the type a program can report on without
+            # catching every other ValueError an enumeration raises.
+            raise SelectionError(str(exc)) from exc
         self._offset_rel_paths = {stub + METADATA_SUFFIX for stub in stubs.with_metadata}
         self._png_rel_paths = {stub + SUMMARY_PNG_SUFFIX for stub in stubs.with_summary_png}
         self._error_stubs = stubs.matching_error

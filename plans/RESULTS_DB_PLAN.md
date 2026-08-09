@@ -1248,11 +1248,24 @@ Details settled during execution, none of them a change of intent:
   this phase therefore leaves alone.
 - **`sd_offset` reports a refused selection rather than tracing back.** The
   selection arguments are finally read while images are enumerated, so that is
-  where a contradictory pair, an unwalkable results root, or an index that
-  cannot be opened or does not cover this root is first diagnosed. Each already
-  carries a message saying what to change, and an index URL can carry a database
-  password, so the enumeration is wrapped once and the message is reported
-  through `MAIN_LOGGER` with an exit status.
+  where a contradictory pair, or an index that cannot be opened, cannot be read,
+  or does not cover this root, is first diagnosed. Each already carries a message
+  saying what to change, and an index URL can carry a database password, so the
+  enumeration is wrapped once and the message is reported through `MAIN_LOGGER`
+  with an exit status. The refusal is a `ValueError` subclass of its own,
+  `SelectionError`, raised by `ResultsFilter` for the flags and at the
+  branch-local import boundary for everything the index refuses with: catching
+  plain `ValueError` around a whole enumeration would report a bad volume name,
+  a value a label would not yield, or a caller error as advice about what to
+  change, and would swallow the traceback that says where it is.
+- **Nothing from the database layer escapes the selection seam.** `open_index`
+  makes every way of failing to open the index a `ValueError`; the queries after
+  it are outside that guarantee, and a table the account may not read, a
+  partially restored database, or a connection lost between the open and the
+  query would otherwise reach `spindoctor.dataset` as `sqlalchemy.exc`'s own
+  types -- which the consumer that deliberately never imports SQLAlchemy cannot
+  name in an `except` clause. `read_result_stubs` translates them, masked URL and
+  driver message included.
 
 ### Phase 6 — Documentation
 

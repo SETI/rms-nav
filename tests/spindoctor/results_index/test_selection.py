@@ -489,6 +489,57 @@ def test_a_root_with_no_completed_ingest_is_refused(two_roots: str) -> None:
     assert '/data/never-ingested' in str(excinfo.value)
 
 
+def _without_a_table(url: str, table: str) -> str:
+    """Take one table away from an index that is otherwise sound.
+
+    This is the shape of an index whose account was granted the rows it reports
+    on and not the bookkeeping beside them, and of one restored from a partial
+    dump.  A connection lost between the open and the query fails the same way
+    and cannot be provoked as cheaply.
+
+    Parameters:
+        url: The index to alter.
+        table: Name of the table to drop.
+
+    Returns:
+        The same URL, for the caller to read.
+    """
+    with opened(url) as engine, engine.begin() as connection:
+        connection.execute(sqlalchemy.text(f'DROP TABLE {table}'))
+    return url
+
+
+def test_a_failing_run_query_is_reported_rather_than_raised_as_it_came(two_roots: str) -> None:
+    """The index opened and then would not answer, which is still a refusal.
+
+    Every consumer of this module catches one type, because the alternative is
+    that a program which deliberately never imports the database layer has to
+    name its exceptions to report on them.
+    """
+    with pytest.raises(ValueError, match='could not be read'):
+        read_result_stubs(_without_a_table(two_roots, 'ingest_runs'), ROOT, [VOLUME])
+
+
+def test_a_failing_stub_query_is_reported_the_same_way(two_roots: str) -> None:
+    """The refusal covers every query the read issues, not only the first."""
+    with pytest.raises(ValueError, match='could not be read'):
+        read_result_stubs(_without_a_table(two_roots, 'failed_files'), ROOT, [VOLUME])
+
+
+def test_a_failure_names_what_the_database_said(two_roots: str) -> None:
+    """A refusal that did not name the missing table would leave nothing to act on."""
+    with pytest.raises(ValueError) as excinfo:
+        read_result_stubs(_without_a_table(two_roots, 'failed_files'), ROOT, [VOLUME])
+    assert 'failed_files' in str(excinfo.value)
+
+
+def test_no_database_exception_escapes_the_read(two_roots: str) -> None:
+    """The type is the one the caller can name, and not a subclass of the one it cannot."""
+    with pytest.raises(ValueError) as excinfo:
+        read_result_stubs(_without_a_table(two_roots, 'ingest_runs'), ROOT, [VOLUME])
+    assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
+
+
 def test_an_index_that_cannot_be_opened_is_an_error(tmp_path: Path) -> None:
     """A resolved URL that will not open fails the run rather than reading files."""
     url = sqlite_url_for(tmp_path / 'absent.sqlite3')

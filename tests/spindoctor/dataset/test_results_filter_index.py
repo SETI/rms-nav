@@ -48,6 +48,7 @@ from spindoctor.dataset.results_filter import (
     _SPICE_STATUS_ERROR,
     RESULTS_FILTER_BATCH_SIZE,
     ResultsFilter,
+    SelectionError,
 )
 from spindoctor.results_index import (
     INGEST_RUNS,
@@ -930,3 +931,90 @@ def test_importing_the_dataset_package_does_not_import_sqlalchemy() -> None:
     )
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout) == []
+
+
+def _index_without_a_table(tmp_path: Path, root: Path, table: str) -> str:
+    """Ingest a tree into an index and then take one of its tables away.
+
+    This is the shape of an index whose account was granted the rows it reports
+    on and not the bookkeeping beside them, and of one restored from a partial
+    dump.  A connection lost between the open and the query fails the same way
+    and cannot be provoked as cheaply.
+
+    Parameters:
+        tmp_path: Directory the index file is written into.
+        root: The results root to ingest.
+        table: Name of the table to drop.
+
+    Returns:
+        The connection URL of the index.
+    """
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=_logger())
+    engine = open_index(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(sqlalchemy.text(f'DROP TABLE {table}'))
+    finally:
+        engine.dispose()
+    return url
+
+
+def test_an_index_that_will_not_answer_refuses_the_selection(tmp_path: Path) -> None:
+    """An index that opened and then failed is a misconfigured run like any other.
+
+    The type is the one a program reporting the message catches, so a database
+    failure reaches an operator as the sentence that says what to change rather
+    than as a traceback out of an enumeration.
+    """
+    root, _images = _one_image_tree(tmp_path)
+    url = _index_without_a_table(tmp_path, root, 'failed_files')
+    with pytest.raises(SelectionError, match='could not be read'):
+        ResultsFilter(
+            VOLUMES, str(root), logger=_logger(), results_db_url=url, has_offset_file=True
+        )
+
+
+def test_an_index_that_will_not_answer_raises_no_database_exception(tmp_path: Path) -> None:
+    """This module never imports the database layer, so it may not raise its types."""
+    root, _images = _one_image_tree(tmp_path)
+    url = _index_without_a_table(tmp_path, root, 'failed_files')
+    with pytest.raises(SelectionError) as excinfo:
+        ResultsFilter(
+            VOLUMES, str(root), logger=_logger(), results_db_url=url, has_offset_file=True
+        )
+    assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
+
+
+def test_an_index_that_cannot_be_opened_refuses_the_selection(tmp_path: Path) -> None:
+    """The three refusals are one type, so a program catches one and reports all three."""
+    root, _images = _one_image_tree(tmp_path)
+    absent = index_url(tmp_path / 'not-an-index.sqlite3')
+    with pytest.raises(SelectionError, match='sd_stats_ingest'):
+        ResultsFilter(
+            VOLUMES, str(root), logger=_logger(), results_db_url=absent, has_offset_file=True
+        )
+
+
+def test_a_root_the_index_does_not_cover_refuses_the_selection(tree: Path, indexed: str) -> None:
+    """Absence under a root nobody ingested is the third of the three."""
+    with pytest.raises(SelectionError, match='no completed ingest'):
+        ResultsFilter(
+            VOLUMES,
+            str(tree.parent / 'never-ingested'),
+            logger=_logger(),
+            results_db_url=indexed,
+            has_offset_file=True,
+        )
+
+
+def test_a_contradictory_pair_refuses_the_selection(tree: Path) -> None:
+    """The flags are the fourth, and the one that needs no index at all."""
+    with pytest.raises(SelectionError, match='mutually exclusive'):
+        ResultsFilter(
+            VOLUMES,
+            str(tree),
+            logger=_logger(),
+            has_offset_file=True,
+            has_no_offset_file=True,
+        )
