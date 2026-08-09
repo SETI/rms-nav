@@ -262,12 +262,18 @@ def test_the_two_cloud_modes_are_refused_by_name(
 # ---------------------------------------------------------------------------
 
 
-def write_event_log(path: Path, results: list[Any]) -> Path:
+def write_event_log_of_results(path: Path, results: list[Any]) -> Path:
     """Write a cloud-tasks event log holding the given task results.
+
+    Named for what it takes: the sibling helper in
+    ``test_ingest_cloud_tasks_reports`` writes whole events, because what that
+    module varies is the event around a result, while what this one varies is
+    the run the results describe.
 
     Parameters:
         path: Where to write it.
-        results: What each task returned.
+        results: What each task returned, each wrapped in an event saying its
+            task completed.
 
     Returns:
         The path written.
@@ -286,7 +292,7 @@ def test_the_driver_completes_the_run_from_an_event_log(
     """The full cycle through the two command lines and the worker between them."""
     url = fanned_out(tmp_path, monkeypatch, count=3)
     results = [process(task['data'], url)[1] for task in tasks_of(tmp_path / 'tasks.json')]
-    write_event_log(tmp_path / 'events.log', results)
+    write_event_log_of_results(tmp_path / 'events.log', results)
     status, _written = run_driver(
         [
             '--results-db',
@@ -307,7 +313,7 @@ def test_completing_a_run_the_tasks_did_not_cover_exits_one(
 ) -> None:
     """A run stamped without every share would license a wrong answer."""
     url = fanned_out(tmp_path, monkeypatch, count=3)
-    write_event_log(tmp_path / 'events.log', [])
+    write_event_log_of_results(tmp_path / 'events.log', [])
     status, _written = run_driver(
         [
             '--results-db',
@@ -328,7 +334,7 @@ def test_completing_a_run_the_tasks_did_not_cover_says_so(
 ) -> None:
     """The shortfall is named, with the root, so an operator knows what to re-run."""
     url = fanned_out(tmp_path, monkeypatch, count=3)
-    write_event_log(tmp_path / 'events.log', [])
+    write_event_log_of_results(tmp_path / 'events.log', [])
     _status, written = run_driver(
         [
             '--results-db',
@@ -357,7 +363,7 @@ def test_the_completion_summary_says_why_a_file_was_refused(
     """
     url = fanned_out_with_a_refusal(tmp_path, monkeypatch)
     results = [process(task['data'], url)[1] for task in tasks_of(tmp_path / 'tasks.json')]
-    write_event_log(tmp_path / 'events.log', results)
+    write_event_log_of_results(tmp_path / 'events.log', results)
     _status, written = run_driver(
         [
             '--results-db',
@@ -385,7 +391,7 @@ def test_a_result_written_under_another_root_is_named_in_the_summary(
     two they are looking at.
     """
     url = fanned_out(tmp_path, monkeypatch, count=3)
-    write_event_log(
+    write_event_log_of_results(
         tmp_path / 'events.log',
         [
             {
@@ -440,7 +446,7 @@ def completing_a_mistyped_root(
         monkeypatch,
         tmp_path,
     )
-    write_event_log(tmp_path / 'events.log', [])
+    write_event_log_of_results(tmp_path / 'events.log', [])
     return run_driver(
         [
             '--results-db',
@@ -629,7 +635,7 @@ def test_forcing_a_completion_is_refused(tmp_path: Path, monkeypatch: pytest.Mon
     property of the fan-out that cut the shares and is decided one step earlier.
     """
     url = fanned_out(tmp_path, monkeypatch)
-    write_event_log(tmp_path / 'events.log', [])
+    write_event_log_of_results(tmp_path / 'events.log', [])
     status, _written = run_driver(
         [
             '--results-db',
@@ -651,7 +657,7 @@ def test_forcing_a_completion_says_what_to_do_instead(
 ) -> None:
     """A refusal nobody can act on is only half a refusal."""
     url = fanned_out(tmp_path, monkeypatch)
-    write_event_log(tmp_path / 'events.log', [])
+    write_event_log_of_results(tmp_path / 'events.log', [])
     _status, written = run_driver(
         [
             '--results-db',
@@ -683,7 +689,7 @@ def completing_a_root_nobody_divided_up(
     root = tmp_path / 'results'
     write_metadata(root, STUB, metadata_document())
     url = fanned_out(tmp_path, monkeypatch)
-    write_event_log(tmp_path / 'events.log', [])
+    write_event_log_of_results(tmp_path / 'events.log', [])
     return run_driver(
         [
             '--results-db',
@@ -726,7 +732,7 @@ def test_completing_against_an_index_that_is_not_there_is_refused(
     The runs the operator meant to complete are sitting in the index they meant
     to name, and an empty index beside it answers the question wrongly.
     """
-    write_event_log(tmp_path / 'events.log', [])
+    write_event_log_of_results(tmp_path / 'events.log', [])
     database = tmp_path / 'index.sqlite3'
     status, _written = run_driver(
         [
@@ -747,7 +753,7 @@ def test_completing_against_an_index_that_is_not_there_creates_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """And leaves nothing behind on the way out."""
-    write_event_log(tmp_path / 'events.log', [])
+    write_event_log_of_results(tmp_path / 'events.log', [])
     database = tmp_path / 'index.sqlite3'
     run_driver(
         [
