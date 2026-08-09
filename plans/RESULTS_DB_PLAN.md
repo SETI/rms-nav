@@ -1230,6 +1230,15 @@ Details settled during execution, none of them a change of intent:
   column holds ends the whole completion in the database driver's own error --
   for one corrupt or foreign line of a concatenated event log, which is exactly
   the input class the guards either side of it exist for.
+- **Each of `_share_tally`'s guards is pinned by what breaking it costs.** The
+  run identifier's type, the root's type and its normalization, and each count's
+  type, sign and magnitude are separately tested, and the tests assert the
+  consequence rather than the refusal: a fractional or Boolean count accounts
+  for a listing exactly and stamps a run whose documents were never read, a
+  Boolean run identifier is credited to run 1 because `hash(True) == hash(1)`,
+  a NaN count writes SQL NULL where the run row records how far the pass got,
+  and a root nothing can render absolute ends the whole completion in an
+  exception nobody enumerated.
 - **The seam lives in `spindoctor/cli/stats/ingest/tasks.py`**, beside the pass
   it divides: fan-out, one share, and the completion that adds them up are the
   same three stages `driver.py` runs in one process, and both read the same
