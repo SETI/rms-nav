@@ -113,6 +113,18 @@ list -- one this user may not read, a share that stopped answering -- costs the
 files under it and nothing else: the pass continues over the rest of the root
 and removes no row from it.
 
+**A directory the walk did not list is counted, and absence under it is not an
+answer.** The closing summary reports how many directories a pass did not
+enumerate, and each pass records the number on its ``ingest_runs`` row. Two
+things put a directory in that count: one the walk could not list, and one it
+had already walked under another name, which is what a link pointing back into
+a tree produces. Such a pass still completes, and the rows it wrote are as good
+as any other pass's -- but under one of those directories the index holds no
+rows at all, and **no row there means the walk never looked, not that the image
+was never navigated**. Read a nonzero count as a question about the tree before
+reading any absence beneath it as a result. A pass whose count is zero listed
+every directory of the root, and absence means what it says everywhere.
+
 **The exit status says whether the pass completed, not what it found.**
 ``sd_stats_ingest`` exits 0 when every named root was walked, whatever mix of
 documents was read, skipped and refused, and 1 when the run could not complete:
@@ -378,9 +390,13 @@ pair with ``ON DELETE CASCADE``.
 ``ingest_runs`` records one row per ingest pass over one root: the root, when
 the pass started and finished (``finished_utc`` is NULL while it is running),
 how many files it saw, ingested, skipped as unchanged, could not read and
-removed, and the schema version it wrote. A root whose newest row has no finish
-time, or which has no row at all, has not been fully ingested, and a consumer
-says so rather than reading absence of rows as "nothing was navigated".
+removed, how many directories it did not list (``directories_missed``), and the
+schema version it wrote. A root whose newest row has no finish time, or which
+has no row at all, has not been fully ingested, and a consumer says so rather
+than reading absence of rows as "nothing was navigated". A finished row whose
+``directories_missed`` is nonzero covers the root apart from those directories:
+the rows it wrote are good, and absence of a row under one of them means the
+walk never looked rather than that the image was never navigated.
 
 ``failed_files`` records one row per file that is not a current-schema
 navigation document: the root and stub that identify it, the reason it was
