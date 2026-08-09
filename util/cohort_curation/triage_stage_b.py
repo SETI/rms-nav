@@ -159,8 +159,9 @@ def _maybe_rescue(candidate: dict, rec: dict) -> dict:
         The rescued record when the rescue pass produced an offset, and the
         original record unchanged otherwise -- which covers a negative case
         (whose failure is the desired outcome), a frame that already has an
-        offset, and a frame whose status is neither failed nor conflicted
-        and so records an infrastructure error rather than a navigation one.
+        offset, and a frame whose status is not failed or conflicted and so
+        is not eligible for rescue, including a success carrying no offset,
+        an infrastructure error, a timeout, and a skip.
     """
     cls = candidate['scene_class']
     if cls == 'negative_cases':
@@ -168,7 +169,7 @@ def _maybe_rescue(candidate: dict, rec: dict) -> dict:
     if rec.get('offset_px') is not None:
         return rec
     if rec.get('status') not in ('failed', 'conflicted'):
-        return rec              # infrastructure error / timeout / skip
+        return rec              # not rescuable: success without offset, error, timeout, skip
     name = rec['image_name']
     if candidate.get('_force') or not _result_files(
             name, '_metadata.json', RESCUE_ROOT):
