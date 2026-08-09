@@ -185,6 +185,42 @@ def test_a_worker_leaves_no_index_behind(tmp_path: Path, monkeypatch: pytest.Mon
     assert not database.exists()
 
 
+LEAKING_PASSWORD = 'se@cr:etlongsecretpassword'
+"""A password whose tail a URL parser quotes back as the port it could not read."""
+
+LEAKING_INDEX_URL = f'postgresql+psycopg://user:{LEAKING_PASSWORD}@dbhost/spindoctor'
+"""An index URL whose refusal is where that tail would otherwise appear."""
+
+
+def test_a_worker_that_cannot_open_the_index_names_no_password(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A task result travels further than a log line, so a leak in one travels too.
+
+    What a worker returns is written verbatim into its event log, and an
+    operator collects those logs, concatenates them and hands the file to the
+    program that completes the ingest. A refusal that masks the URL and then
+    quotes the parser's own complaint about it puts a run of the password in
+    that file.
+    """
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    _retry, result = sd_stats_ingest_cloud_tasks.process_task(
+        'ingest-1-000000', {}, worker_data(results_db=LEAKING_INDEX_URL)
+    )
+    assert 'etlongsecretpassword' not in result['status_exception']
+
+
+def test_a_worker_that_cannot_open_the_index_still_says_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And keeps the diagnosis, which is the whole of what the result is for."""
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    _retry, result = sd_stats_ingest_cloud_tasks.process_task(
+        'ingest-1-000000', {}, worker_data(results_db=LEAKING_INDEX_URL)
+    )
+    assert result['status_error'] == 'index_unopenable'
+
+
 def test_a_worker_with_no_index_url_reports_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -5,8 +5,10 @@ connection URL, applies the SQLite settings the concurrency model depends on,
 and refuses a database whose schema version is not the one this code reads.
 Every refusal is a ``ValueError`` naming the URL, including the ones a database
 driver raises, so a caller that reports failures catches one type.  The URL is
-named with its credentials masked: these messages are written to run logs and
-handed to operators, and a database password belongs in neither.
+named with its credentials masked, and so is anything the failure underneath it
+quoted back: these messages are written to run logs, returned in cloud task
+results and handed to operators, and a database password belongs in none of
+them.
 
 Two URL forms are supported::
 
@@ -92,6 +94,24 @@ _SUPPORTED_URL_FORMS = (
     'A results index is either a sqlite: URL naming a local path, or a '
     'postgresql+psycopg: URL naming a server.'
 )
+
+_SHORTEST_HIDDEN_RUN = 3
+"""Shortest run of a credential that is hidden where something quotes one back.
+
+A message quoting a URL back rarely quotes the whole of it.  A driver that could
+not read a URL reports the fragment it stopped on, and that fragment is a slice
+of the string rather than a field of it: SQLAlchemy reads
+``user:se@cr:etpassword@host`` as a host and a port, and says it could not read
+``etpassword@host`` as a number.  Only the credential itself says which slices
+are its own, so every run of one that appears in a quoted message is replaced.
+
+Three characters is where that stops being worth doing.  Shorter runs collide
+with ordinary words often enough to turn a diagnosis into a row of markers, and
+a secret disclosed three characters at a time, with neither the order of the
+runs nor the gaps between them, is not disclosed.  A credential shorter than
+that is hidden whole, since there is nothing to be lost by mangling a message
+about a two-character password.
+"""
 
 
 class _IndexOpenError(ValueError):
@@ -216,6 +236,18 @@ def _password_span(url: str) -> tuple[int, int] | None:
     return colon + 1, at
 
 
+def _names_a_credential(name: str) -> bool:
+    """Whether a query parameter's name says its value is a credential.
+
+    Parameters:
+        name: The parameter's name, as written.
+
+    Returns:
+        True when the name carries one of :data:`_CREDENTIAL_QUERY_MARKERS`.
+    """
+    return any(marker in name.strip().lower() for marker in _CREDENTIAL_QUERY_MARKERS)
+
+
 def _masked_parameter(parameter: str) -> str:
     """Return one query parameter with its value replaced if it is a credential.
 
@@ -228,9 +260,47 @@ def _masked_parameter(parameter: str) -> str:
     name, separator, _value = parameter.partition('=')
     if not separator:
         return parameter
-    if not any(marker in name.strip().lower() for marker in _CREDENTIAL_QUERY_MARKERS):
+    if not _names_a_credential(name):
         return parameter
     return f'{name}={_HIDDEN_PASSWORD}'
+
+
+def _query_span(url: str) -> tuple[int, int] | None:
+    """Return the half-open range of characters holding a URL's query string.
+
+    Parameters:
+        url: The URL as the caller wrote it.
+
+    Returns:
+        The first and last-plus-one index of the query, without its leading
+        ``?`` and without any fragment after it, or None when the URL carries no
+        query at all.
+    """
+    start = url.find('?')
+    if start < 0:
+        return None
+    end = url.find('#', start)
+    return start + 1, len(url) if end < 0 else end
+
+
+def _query_pieces(url: str) -> list[str]:
+    """Split a URL's query into its parameters and the separators between them.
+
+    Parameters:
+        url: The URL as the caller wrote it, which must carry a query.
+
+    Returns:
+        The parameters at even positions and the separators at odd ones.  A
+        query is separated by ``&`` or by ``;``, both of which libpq and the
+        drivers accept, and splitting on one alone leaves a parameter written
+        with the other unexamined; the separators are kept so that a masked
+        query is rebuilt with the ones it was written with.
+    """
+    span = _query_span(url)
+    if span is None:
+        return []
+    first, past_last = span
+    return _QUERY_SEPARATOR.split(url[first:past_last])
 
 
 def _masked_query(url: str) -> str:
@@ -246,23 +316,17 @@ def _masked_query(url: str) -> str:
     Returns:
         The URL with any credential-bearing parameter hidden.
     """
-    start = url.find('?')
-    if start < 0:
+    span = _query_span(url)
+    if span is None:
         return url
-    end = url.find('#', start)
-    if end < 0:
-        end = len(url)
-    # Odd positions are the separators the split captured, and are put back
-    # exactly as they were written: a query is separated by '&' or by ';', both
-    # of which libpq and the drivers accept, and splitting on one alone leaves
-    # a parameter written with the other unexamined.
-    pieces = _QUERY_SEPARATOR.split(url[start + 1 : end])
+    first, past_last = span
+    pieces = _query_pieces(url)
     masked = [
         piece if index % 2 else _masked_parameter(piece) for index, piece in enumerate(pieces)
     ]
     if masked == pieces:
         return url
-    return f'{url[: start + 1]}{"".join(masked)}{url[end:]}'
+    return f'{url[:first]}{"".join(masked)}{url[past_last:]}'
 
 
 def masked_url(url: str) -> str:
@@ -299,6 +363,88 @@ def masked_url(url: str) -> str:
         first, past_last = span
         url = f'{url[:first]}{_HIDDEN_PASSWORD}{url[past_last:]}'
     return _masked_query(url)
+
+
+def _credentials(url: str) -> list[str]:
+    """Return every credential a URL carries, exactly as it is written.
+
+    The same structural rule :func:`masked_url` masks by, read as values rather
+    than as spans, so that what a message quotes back is measured against the
+    same idea of a credential the URL itself is.
+
+    Parameters:
+        url: The URL as the caller wrote it.
+
+    Returns:
+        The password from the authority and the value of every credential-
+        bearing query parameter, skipping the empty ones.  A ``sqlite:`` URL is
+        a local filesystem path and carries none.
+    """
+    if _scheme_base(url) == _SQLITE_BACKEND:
+        return []
+    found: list[str] = []
+    span = _password_span(url)
+    if span is not None:
+        first, past_last = span
+        found.append(url[first:past_last])
+    for index, piece in enumerate(_query_pieces(url)):
+        name, separator, value = piece.partition('=')
+        if not index % 2 and separator and _names_a_credential(name):
+            found.append(value)
+    return [secret for secret in found if secret]
+
+
+def _without_runs_of(text: str, secret: str) -> str:
+    """Return text with every run of one secret in it replaced.
+
+    Parameters:
+        text: The text to clean, which is not a URL and cannot be masked as one.
+        secret: The credential whose runs are to go.
+
+    Returns:
+        The text, with every run of :data:`_SHORTEST_HIDDEN_RUN` or more
+        characters that also appears in the secret replaced, and a secret
+        shorter than that replaced wherever it appears whole.  Scanned from the
+        left, taking the longest run at each position: a run left over when a
+        shorter one has been replaced is examined again at the position it
+        resumes from, so no run of the secret survives in part.
+    """
+    kept: list[str] = []
+    index = 0
+    while index < len(text):
+        length = 0
+        while index + length < len(text) and text[index : index + length + 1] in secret:
+            length += 1
+        if length and length >= min(_SHORTEST_HIDDEN_RUN, len(secret)):
+            kept.append(_HIDDEN_PASSWORD)
+            index += length
+        else:
+            kept.append(text[index])
+            index += 1
+    return ''.join(kept)
+
+
+def _without_credentials(text: str, url: str) -> str:
+    """Return a message quoting a URL back with the credentials of that URL gone.
+
+    Masking the URL a refusal names is not enough on its own.  A refusal also
+    quotes what the failure underneath it said, and a driver that could not read
+    a URL says so by quoting the piece of it that stopped it -- which, for a
+    password carrying an ``@`` and a ``:``, is a run of the password in
+    cleartext.  Such a message travels: it is written to run logs, returned in a
+    cloud task's result, and collected into event logs an operator concatenates
+    and hands on.
+
+    Parameters:
+        text: What the underlying failure said.
+        url: The URL it was raised about, as the caller wrote it.
+
+    Returns:
+        The text with every run of every credential of that URL replaced.
+    """
+    for secret in _credentials(url):
+        text = _without_runs_of(text, secret)
+    return text
 
 
 def _sqlite_error_name(exc: BaseException) -> str:
@@ -782,7 +928,9 @@ def open_index(url: str, *, create: bool = False) -> Engine:
     Every failure is a ``ValueError`` naming the URL, including the ones a
     database driver raises: a consumer that wants to report the cause rather than
     crash catches one type, and the driver's own exception is kept as the
-    ``__cause__``.  The URL is named with its credentials masked.
+    ``__cause__``.  The URL is named with its credentials masked, and so is
+    whatever the failure underneath it said, since a driver that could not read a
+    URL reports the piece of it that stopped it.
 
     Parameters:
         url: A ``sqlite:`` URL naming a local filesystem path, or a
@@ -809,13 +957,16 @@ def open_index(url: str, *, create: bool = False) -> Engine:
         raise
     except sqlalchemy.exc.NoSuchModuleError as exc:
         raise ValueError(
-            f'{masked_url(url)}: there is no database driver for this URL scheme ({exc}). '
-            f'{_SUPPORTED_URL_FORMS}'
+            f'{masked_url(url)}: there is no database driver for this URL scheme '
+            f'({_without_credentials(str(exc), url)}). {_SUPPORTED_URL_FORMS}'
         ) from exc
     except Exception as exc:
         # Everything else, not only SQLAlchemy's own exceptions: a dialect
         # reports a malformed port or an uncoercible connect argument as a bare
         # ValueError naming neither the URL nor the setting that supplied it.
+        # What it does name is the piece of the URL it stopped on, which is why
+        # the quoted message is cleaned as well as the URL beside it.
         raise ValueError(
-            f'{masked_url(url)}: could not open the results index ({type(exc).__name__}: {exc}).'
+            f'{masked_url(url)}: could not open the results index '
+            f'({type(exc).__name__}: {_without_credentials(str(exc), url)}).'
         ) from exc
