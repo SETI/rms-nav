@@ -29,6 +29,15 @@ ROOT_URL = 'file:///data/nav-results'
 
 STUB = 'COISS_2001/data/1294561143_1295221348/N1294561202_1_CALIB'
 
+AT_SIGN_USER = 'admin@pgsrv'
+"""A user name carrying an at-sign, which is how a managed server names one.
+
+``user@servername`` is the standard login form of a hosted PostgreSQL, and
+SQLAlchemy's own parser accepts it. A rule that took the first at-sign as the
+end of the credentials would find no password after it and leak the whole URL.
+"""
+
+
 EXPLODING_FACTORY_MESSAGE = 'the dialect exploded'
 """What the stand-in engine factory raises, standing for any escape from one."""
 

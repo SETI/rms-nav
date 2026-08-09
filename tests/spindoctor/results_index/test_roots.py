@@ -9,22 +9,43 @@ by a trailing slash or by being relative to the working directory.
 These are assertions about the functions' contracts rather than about any one
 backend's behavior: that two spellings of one root produce one string, that the
 filesystem root -- the one root whose separator is its whole name -- survives
-intact, and that the refusal of a root nobody ingested names its index without
-its password and its roots exactly as they were given.
+intact, that what one pass recorded about its own reach is read from the runs
+over the root it was asked about, and that the refusal of a root nobody ingested
+names its index without its password and its roots exactly as they were given.
 """
 
 from pathlib import Path
 
 import pytest
 from filecache import FCPath
+from tests.spindoctor.results_index.conftest import opened, sqlite_url_for
 
-from spindoctor.results_index import normalize_root_url, open_index, require_ingested_roots
+from spindoctor.results_index import (
+    INGEST_RUNS,
+    SCHEMA_VERSION,
+    newest_pass,
+    normalize_root_url,
+    open_index,
+    require_ingested_roots,
+)
 
 PASSWORD = 'sup3rs3cr3t'
 """A password distinctive enough that finding it anywhere is proof of a leak."""
 
 SERVER_URL = f'postgresql+psycopg://svc:{PASSWORD}@db.example/spindoctor'
 """An index URL carrying a password, as a consumer's own resolution produces it."""
+
+FIRST_ROOT = '/data/nav-results'
+"""The root the per-root queries are asked about."""
+
+SECOND_ROOT = '/data/other-nav-results'
+"""A second root of the same index, passed over after the first."""
+
+FIRST_FINISHED = '2026-02-03T04:05:06+00:00'
+"""When the pass over the first root finished."""
+
+SECOND_FINISHED = '2026-03-04T05:06:07+00:00'
+"""When the pass over the second root finished, which is later and is not the first."""
 
 
 def test_a_trailing_separator_does_not_make_two_roots() -> None:
@@ -62,6 +83,32 @@ def test_an_fcpath_normalizes_the_same_way_as_its_text() -> None:
     )
 
 
+def test_a_root_spelled_as_nothing_at_all_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty spelling renders as the working directory, and is not a root.
+
+    ``--nav-results-root "$ROOT"`` with the variable unset hands a program an
+    empty word, and a program that resolved it would walk whatever directory it
+    happens to be in, write those documents under a root nobody named, and
+    report a pass that completed.
+    """
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match='not a location'):
+        normalize_root_url('')
+
+
+def test_a_root_carrying_a_null_byte_is_refused() -> None:
+    """It renders perfectly well, and fails at the first call that reaches disk.
+
+    Refused where the root is spelled, it is charged to the root; left to
+    render, it becomes an exception out of a directory listing, naming the
+    listing rather than the word that caused it.
+    """
+    with pytest.raises(ValueError, match='null byte'):
+        normalize_root_url('/data/nav\x00results')
+
+
 def _refusal_of_an_unknown_root(tmp_path: Path) -> str:
     """Ask an empty index for a root nobody ingested and return the refusal text.
 
@@ -76,7 +123,7 @@ def _refusal_of_an_unknown_root(tmp_path: Path) -> str:
     Returns:
         The refusal message.
     """
-    engine = open_index(f'sqlite:///{(tmp_path / "index.sqlite3").as_posix()}', create=True)
+    engine = open_index(sqlite_url_for(tmp_path / 'index.sqlite3'), create=True)
     try:
         with (
             engine.connect() as connection,
@@ -107,7 +154,7 @@ def test_the_refusal_masks_its_index_and_leaves_its_roots_alone(tmp_path: Path) 
 
 def test_the_refusal_leaves_a_credential_shaped_root_alone(tmp_path: Path) -> None:
     """Masking a root would corrupt the one string the message exists to deliver."""
-    engine = open_index(f'sqlite:///{(tmp_path / "index.sqlite3").as_posix()}', create=True)
+    engine = open_index(sqlite_url_for(tmp_path / 'index.sqlite3'), create=True)
     try:
         with (
             engine.connect() as connection,
@@ -117,3 +164,98 @@ def test_the_refusal_leaves_a_credential_shaped_root_alone(tmp_path: Path) -> No
     finally:
         engine.dispose()
     assert '//store:8443/nav@results' in str(excinfo.value)
+
+
+def _index_with_two_passed_over_roots(tmp_path: Path) -> str:
+    """Build an index whose two roots were each passed over, the second one last.
+
+    The second root's pass is therefore the newest run in the index, and it
+    records a finish time and a missed count the first root's never records.  A
+    query that read the newest run of the table rather than the newest run of
+    the root it was asked about would answer with that one.
+
+    Parameters:
+        tmp_path: Directory the index file is written into.
+
+    Returns:
+        The connection URL of the index.
+    """
+    url = sqlite_url_for(tmp_path / 'index.sqlite3')
+    with opened(url, create=True) as engine, engine.begin() as connection:
+        connection.execute(
+            INGEST_RUNS.insert(),
+            [
+                {
+                    'root_url': root_url,
+                    'started_utc': finished,
+                    'finished_utc': finished,
+                    'directories_missed': missed,
+                    'schema_version': SCHEMA_VERSION,
+                }
+                for root_url, finished, missed in (
+                    (FIRST_ROOT, FIRST_FINISHED, 0),
+                    (SECOND_ROOT, SECOND_FINISHED, 4),
+                )
+            ],
+        )
+    return url
+
+
+def test_the_missed_count_is_read_from_the_root_it_was_asked_about(tmp_path: Path) -> None:
+    """One index serves several roots, and the newest run in it is routinely another's."""
+    url = _index_with_two_passed_over_roots(tmp_path)
+    with opened(url) as engine, engine.connect() as connection:
+        assert newest_pass(connection, FIRST_ROOT).directories_missed == 0
+
+
+def test_the_finish_time_is_read_from_the_root_it_was_asked_about(tmp_path: Path) -> None:
+    """How old one root's answer is has nothing to do with when another was walked."""
+    url = _index_with_two_passed_over_roots(tmp_path)
+    with opened(url) as engine, engine.connect() as connection:
+        assert newest_pass(connection, FIRST_ROOT).finished_utc == FIRST_FINISHED
+
+
+def test_the_other_root_is_answered_for_on_the_same_terms(tmp_path: Path) -> None:
+    """The gap the second root does have is reported when the second root is asked about."""
+    url = _index_with_two_passed_over_roots(tmp_path)
+    with opened(url) as engine, engine.connect() as connection:
+        assert newest_pass(connection, SECOND_ROOT).directories_missed == 4
+
+
+def test_a_root_with_no_run_row_has_no_gap(tmp_path: Path) -> None:
+    """A root this index never passed over borrows no other root's coverage."""
+    url = _index_with_two_passed_over_roots(tmp_path)
+    with opened(url) as engine, engine.connect() as connection:
+        assert newest_pass(connection, '/data/never-ingested').directories_missed == 0
+
+
+def test_a_root_with_no_run_row_has_no_finish_time(tmp_path: Path) -> None:
+    """Nothing was recorded for it, which is a different thing from a recorded zero."""
+    url = _index_with_two_passed_over_roots(tmp_path)
+    with opened(url) as engine, engine.connect() as connection:
+        assert newest_pass(connection, '/data/never-ingested').finished_utc is None
+
+
+def test_a_pass_that_recorded_no_count_reads_as_no_gap(tmp_path: Path) -> None:
+    """The column is nullable, and a NULL there is not a gap of unknown size.
+
+    A run row is written when the pass starts and its count is stamped when the
+    pass ends, so a NULL is a pass that did not reach the end -- which the
+    completed-ingest check refuses before any of this is read.
+    """
+    url = sqlite_url_for(tmp_path / 'index.sqlite3')
+    with opened(url, create=True) as engine, engine.begin() as connection:
+        connection.execute(
+            INGEST_RUNS.insert(),
+            [
+                {
+                    'root_url': FIRST_ROOT,
+                    'started_utc': FIRST_FINISHED,
+                    'finished_utc': None,
+                    'directories_missed': None,
+                    'schema_version': SCHEMA_VERSION,
+                }
+            ],
+        )
+    with opened(url) as engine, engine.connect() as connection:
+        assert newest_pass(connection, FIRST_ROOT).directories_missed == 0

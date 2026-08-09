@@ -32,7 +32,10 @@ current-schema navigation documents at all.  It is a table of its own rather
 than a marked ``images`` row precisely because absence of an ``images`` row is
 what a consumer reads as "this image was never navigated": a file with no usable
 data must leave that answer alone while still recording enough for the next
-ingest to skip it.
+ingest to skip it.  It also carries the two facts the walk knows about a file
+whatever the file says -- the volume it lives under and whether a summary PNG
+sits beside it -- because a selection filter asks about the file rather than
+about its contents, and a refused file is one the tree still holds.
 
 Types
 -----
@@ -279,6 +282,15 @@ FAILED_FILES = sqlalchemy.Table(
     sqlalchemy.Column('root_url', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('results_path_stub', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('reason', sqlalchemy.Text, nullable=False),
+    # First path segment of the stub, derived exactly as the images column is,
+    # so that a selection restricted to some volumes is one restriction in one
+    # query rather than a second pass over every refusal the root holds.
+    sqlalchemy.Column('volume', sqlalchemy.Text),
+    # Whether the walk saw a summary PNG beside this file.  It comes from the
+    # walk and not from the document, so it is as knowable for a file nothing
+    # could be read from as for one that ingested, and a selection filter that
+    # asks which images have a summary must be told about both.
+    sqlalchemy.Column('has_summary_png', sqlalchemy.Boolean),
     # The same two metrics images carries, for the same purpose: a file that
     # was refused and has not changed since is not read again.  Without them a
     # tree whose non-navigation files outnumber its results pays to re-read

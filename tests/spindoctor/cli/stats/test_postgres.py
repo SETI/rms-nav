@@ -23,15 +23,34 @@ import pytest
 import sqlalchemy
 from tests.spindoctor.cli.stats.conftest import (
     GOLDEN_DIR,
+    build_tree,
+    complete,
+    fan_out,
     ingest_tree,
     metadata_document,
     report_from_tree,
+    reported,
+    run_rows,
     technique,
     write_metadata,
 )
 
+from spindoctor.cli.stats.ingest import (
+    TaskResult,
+    complete_ingest_tasks,
+    fan_out_ingest_tasks,
+    ingest_task_share,
+)
+from spindoctor.cli.stats.ingest.tasks import _LARGEST_RUN_ROW_COUNT
 from spindoctor.cli.stats.report import main_report
-from spindoctor.results_index import IMAGES, TECHNIQUES, open_index
+from spindoctor.results_index import (
+    IMAGES,
+    INGEST_RUNS,
+    TECHNIQUES,
+    normalize_root_url,
+    open_index,
+    require_ingested_roots,
+)
 
 pytestmark = pytest.mark.postgres
 
@@ -284,3 +303,103 @@ def test_a_document_the_server_refuses_costs_only_itself(
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     counts = ingest_tree(postgres_url, [root], logger=quiet_logger)
     assert (counts.files_ingested, counts.files_failed) == (1, 1)
+
+
+def test_the_shares_write_the_rows_and_the_run_a_single_pass_writes_on_postgresql(
+    postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Cross-machine ingest is the case this backend exists for.
+
+    A shared SQLite file is not an option there, so the workers connect to a
+    server as ordinary clients -- and the rows they write between them, and the
+    run row that says the root may be read, must be what one process writes over
+    the same tree.  Both are read from one pass, since standing a schema up on
+    the server twice to ask two questions of the same rows costs more than it
+    tells.
+    """
+    root = tmp_path / 'results'
+    for index in range(6):
+        name = f'N{1454725799 + index}_1_CALIB'
+        write_metadata(root, f'VOL/{name}', metadata_document(image_name=f'{name}.IMG'))
+    engine = open_index(postgres_url, create=True)
+    try:
+        tasks = fan_out_ingest_tasks(
+            engine, [root.as_posix()], share_size=2, logger=quiet_logger
+        ).tasks
+        results = [
+            TaskResult(
+                task_id=str(task['task_id']),
+                result=ingest_task_share(engine, task['data'], logger=quiet_logger),
+            )
+            for task in tasks
+        ]
+        complete_ingest_tasks(engine, [root.as_posix()], results, logger=quiet_logger)
+        with engine.connect() as connection:
+            stubs = list(
+                connection.execute(
+                    sqlalchemy.select(IMAGES.c.results_path_stub).order_by(
+                        IMAGES.c.results_path_stub
+                    )
+                )
+            )
+            runs = list(connection.execute(sqlalchemy.select(INGEST_RUNS.c.files_ingested)))
+    finally:
+        engine.dispose()
+    assert len(stubs) == 6
+    assert runs[0][0] == 6
+
+
+def test_an_account_past_what_a_run_row_holds_is_refused_on_postgresql(
+    postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The bound a run's shares are held to is this server's own column width.
+
+    SQLite types a column by what is put into it and holds 64 bits, so the write
+    that a run's total overflows can only be seen here: the count columns are
+    32-bit integers on this server, and two shares each reporting a count the
+    tally reader accepts on its own sum past what one column holds.  Unrefused,
+    the write ends the whole completion in the database driver's own error --
+    on the backend workers spread across machines connect to, which is where an
+    event log gets concatenated from several sources in the first place.  The
+    row afterwards carries the one share that was counted, at exactly the
+    largest count it can hold.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    fan_out(postgres_url, [root], logger=quiet_logger)
+    huge = [
+        reported(
+            f'ingest-1-00000{index}',
+            {
+                'status': 'ok',
+                'run_id': 1,
+                'root_url': normalize_root_url(root),
+                'files_ingested': _LARGEST_RUN_ROW_COUNT,
+                'files_skipped': 0,
+                'files_failed': 0,
+            },
+        )
+        for index in range(2)
+    ]
+    complete(postgres_url, [root], huge, logger=quiet_logger)
+    assert run_rows(postgres_url)[0].files_ingested == _LARGEST_RUN_ROW_COUNT
+
+
+def test_a_root_is_unreadable_until_its_shares_are_added_up_on_postgresql(
+    postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Workers on several machines write into one index at once.
+
+    Between the fan-out and the completion the index holds a part of the root,
+    and a consumer must be told nobody has ingested it rather than be handed
+    whatever has landed.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    engine = open_index(postgres_url, create=True)
+    try:
+        fan_out_ingest_tasks(engine, [root.as_posix()], share_size=2, logger=quiet_logger)
+        with engine.connect() as connection, pytest.raises(ValueError, match='no completed ingest'):
+            require_ingested_roots(connection, [normalize_root_url(root)], url=postgres_url)
+    finally:
+        engine.dispose()

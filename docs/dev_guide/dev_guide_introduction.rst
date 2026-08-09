@@ -142,6 +142,18 @@ Every CLI listed in ``[project.scripts]`` is installed onto ``$PATH`` by
    * - ``sd_create_simulated_image``
      - Render a synthetic test image (operator-supplied bodies / rings / stars).
        See :doc:`dev_guide_simulator`.
+   * - ``sd_create_ck``
+     - Write the navigated attitudes of a results tree into SPICE C-kernels.
+       See :doc:`/user_guide/user_guide_ck_kernels`.
+   * - ``sd_stats_ingest`` / ``sd_stats_ingest_cloud_tasks``
+     - Read a navigation-results tree into the results index, in one process or
+       over a queue of workers. See :doc:`/user_guide/user_guide_statistics`.
+   * - ``sd_stats_report``
+     - Write the navigation statistics report and its charts from the index.
+       See :doc:`/user_guide/user_guide_statistics`.
+   * - ``sd_consolidate_metadata``
+     - Copy each image's metadata JSON and summary PNG into one flat directory.
+       See :doc:`/user_guide/user_guide_navigation`.
 
 Quick smoke test:
 

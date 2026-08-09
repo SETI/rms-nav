@@ -743,6 +743,19 @@ def build_report(
     return report_path
 
 
+def _to_stderr(message: str) -> None:
+    """Print one diagnostic where this program's other diagnostics go.
+
+    The resolver that names an index reports a value naming none through
+    whatever sink its caller supplies, and this program's sink is the stream its
+    refusals already print to, so the two arrive in the order they happened.
+
+    Parameters:
+        message: The line to print.
+    """
+    print(message, file=sys.stderr)
+
+
 def main_report(cmdline: list[str] | None = None) -> int:
     """Entry point for ``sd_stats_report``.
 
@@ -759,9 +772,10 @@ def main_report(cmdline: list[str] | None = None) -> int:
 
     Raises:
         SystemExit: With status 2, from the argument parser, for a command line
-            it will not accept -- an unknown flag, an unparseable bound, or a
-            root the index holds no completed ingest of, which is a value the
-            index rather than the parser rejects but is reported the same way.
+            it will not accept -- an unknown flag, an unparseable bound, a root
+            that is not a location that can be read, or a root the index holds no
+            completed ingest of, the last of which is a value the index rather
+            than the parser rejects but is reported the same way.
     """
     parser = argparse.ArgumentParser(
         description='Generate a navigation statistics report from an ingested results index.'
@@ -847,7 +861,7 @@ def main_report(cmdline: list[str] | None = None) -> int:
     )
     arguments = parser.parse_args(cmdline)
 
-    url = get_results_db_url(arguments, DEFAULT_CONFIG)
+    url = get_results_db_url(arguments, DEFAULT_CONFIG, warn=_to_stderr)
     if url is None:
         print(
             'sd_stats_report reads a results index and has no file-reading mode. '
@@ -856,7 +870,10 @@ def main_report(cmdline: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    roots = [normalize_root_url(root) for root in arguments.root or []]
+    try:
+        roots = [normalize_root_url(root) for root in arguments.root or []]
+    except ValueError as exc:
+        parser.error(f'a --root is not a location that can be read: {exc}')
     try:
         engine = open_index(url)
     except ValueError as exc:

@@ -1,7 +1,6 @@
 import argparse
 import json
 import random
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -9,19 +8,10 @@ import pdslogger
 import pytest
 from filecache import FCPath
 
-from spindoctor.cli.stats.classify import datetime_from_image_et
-from spindoctor.dataset.dataset import ImageFile
-from spindoctor.dataset.dataset_pds3 import DataSetPDS3
+from spindoctor.cli.stats.ingest import ingest_metadata_files
 from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
-from spindoctor.dataset.dataset_pds3_galileo_ssi import DataSetPDS3GalileoSSI
-from spindoctor.dataset.dataset_pds3_newhorizons_lorri import DataSetPDS3NewHorizonsLORRI
-from spindoctor.dataset.dataset_pds3_voyager_iss import DataSetPDS3VoyagerISS
 from spindoctor.dataset.results_filter import ResultsFilter
-
-
-@pytest.fixture
-def ds() -> DataSetPDS3CassiniISS:
-    return DataSetPDS3CassiniISS('/fake/holdings')
+from spindoctor.results_index import open_index
 
 
 class _FakeIndexTable:
@@ -186,6 +176,297 @@ def _write_result_file(
     path = results_root / volume / 'data' / range_dir / f'{camera}{num:010d}_1_CALIB{suffix}'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
+
+
+def _navigation_document(image_name: str) -> str:
+    """Serialize the smallest document the ingest reads as a navigation result.
+
+    Parameters:
+        image_name: The image the document is about.
+
+    Returns:
+        The document as JSON text.
+    """
+    return json.dumps(
+        {
+            'status': 'success',
+            'offset': [1.5, -2.5],
+            'observation': {'image_name': image_name, 'instrument': 'coiss', 'camera': 'NAC'},
+            'navigation_result': {'status_reason': 'ok'},
+        }
+    )
+
+
+def _ingest_results_tree(results_root: Path, index_path: Path) -> str:
+    """Build a results index over one tree and return its connection URL.
+
+    Parameters:
+        results_root: The results root to walk.
+        index_path: Path of the index file to create.
+
+    Returns:
+        The connection URL of the index.
+    """
+    url = f'sqlite:///{index_path.as_posix()}'
+    engine = open_index(url, create=True)
+    try:
+        ingest_metadata_files(engine, [results_root.as_posix()], logger=pdslogger.NullLogger())
+    finally:
+        engine.dispose()
+    return url
+
+
+def _write_navigated_pair(results_root: Path) -> None:
+    """Write the two navigated frames an ingest of this tree records.
+
+    Parameters:
+        results_root: The results root to write into.
+    """
+    _write_result_file(
+        results_root,
+        'COISS_2001',
+        _FILTER_NUMS,
+        'N',
+        1000000101,
+        '_metadata.json',
+        _navigation_document('N1000000101_1_CALIB.IMG'),
+    )
+    _write_result_file(
+        results_root,
+        'COISS_2001',
+        _FILTER_NUMS,
+        'W',
+        1000000100,
+        '_metadata.json',
+        _navigation_document('W1000000100_1_CALIB.IMG'),
+    )
+
+
+def _write_document_the_index_does_not_hold(results_root: Path) -> None:
+    """Navigate a third frame after the ingest, so the two paths disagree.
+
+    The index is a snapshot of the last ingest, so it does not hold this frame
+    and the tree does. Which of the two answered the enumeration is then
+    readable from the selection itself, which is the only thing that makes
+    either path's test able to fail.
+
+    Parameters:
+        results_root: The results root to write into.
+    """
+    _write_result_file(
+        results_root,
+        'COISS_2001',
+        _FILTER_NUMS,
+        'N',
+        1000000100,
+        '_metadata.json',
+        _navigation_document('N1000000100_1_CALIB.IMG'),
+    )
+
+
+def _indexed_tree_and_late_document(tmp_path: Path) -> tuple[Path, str]:
+    """Build a results tree, index it, and then navigate one more frame.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+
+    Returns:
+        The results root, and the connection URL of the index.
+    """
+    results_root = tmp_path / 'results'
+    _write_navigated_pair(results_root)
+    url = _ingest_results_tree(results_root, tmp_path / 'index.sqlite3')
+    _write_document_the_index_does_not_hold(results_root)
+    return results_root, url
+
+
+def _program_arguments(
+    ds: DataSetPDS3CassiniISS, *, declares_results_db: bool, argv: list[str] | None = None
+) -> argparse.Namespace:
+    """Parse the command line of a program with or without the index option.
+
+    The namespace is built by the dataset's own selection parser rather than
+    written out, because what is under test is the difference one declared
+    option makes to it and nothing else about its shape.
+
+    Parameters:
+        ds: The dataset whose selection arguments the program offers.
+        declares_results_db: Whether the program declares ``--results-db``.
+        argv: The command line to parse, defaulting to an empty one.
+
+    Returns:
+        The parsed arguments.
+    """
+    parser = argparse.ArgumentParser()
+    ds.add_selection_arguments(parser)
+    if declares_results_db:
+        parser.add_argument('--results-db', default=None)
+    return parser.parse_args(argv or [])
+
+
+def test_a_results_index_answers_the_offset_file_filter(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The enumeration is answered by one query over the index rather than by a
+    # walk of the tree, so the frame navigated after the ingest is not selected.
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, url = _indexed_tree_and_late_document(tmp_path)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_offset_file=True,
+            nav_results_root=str(results_root),
+            results_db_url=url,
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000101', 'W1000000100']
+
+
+def test_the_results_index_url_is_resolved_from_the_environment(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A program that declares --results-db and is given no value gets the one
+    # the environment names, exactly as it gets the results root from
+    # NAV_RESULTS_ROOT.
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, url = _indexed_tree_and_late_document(tmp_path)
+    monkeypatch.setenv('NAV_RESULTS_DB', url)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_offset_file=True,
+            nav_results_root=str(results_root),
+            arguments=_program_arguments(ds, declares_results_db=True),
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000101', 'W1000000100']
+
+
+def test_a_program_that_declares_no_index_flag_reads_the_results_tree(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # An exported URL reaches the programs that declare the option and no
+    # others. A program whose selection is meant to read files -- one this work
+    # deliberately leaves reading them -- passes arguments that name no index,
+    # and answers from the tree however the machine is configured. Its
+    # arguments are otherwise those of a program that does declare it, so what
+    # is under test is the declaration and nothing else.
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, url = _indexed_tree_and_late_document(tmp_path)
+    monkeypatch.setenv('NAV_RESULTS_DB', url)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_offset_file=True,
+            nav_results_root=str(results_root),
+            arguments=_program_arguments(ds, declares_results_db=False),
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000100', 'N1000000101', 'W1000000100']
+
+
+def test_an_exported_index_does_not_answer_the_resume_idiom_for_such_a_program(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # --has-no-offset-file is how a run is resumed, and a snapshot answers it
+    # with every image navigated since the last ingest. A program that declares
+    # no index option must therefore not be handed one by the environment: the
+    # tree holds a document for N1000000100, so the resume does not offer it
+    # again, and only the three frames nothing was ever written for are left.
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, url = _indexed_tree_and_late_document(tmp_path)
+    monkeypatch.setenv('NAV_RESULTS_DB', url)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_no_offset_file=True,
+            nav_results_root=str(results_root),
+            arguments=_program_arguments(ds, declares_results_db=False),
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000102', 'W1000000101', 'W1000000102']
+
+
+def test_a_stale_index_re_selects_a_navigated_frame_for_a_program_that_declares_it(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The other half of the same rule, stated so the cost of declaring the
+    # option is visible: a program that does declare it answers from the
+    # snapshot, so N1000000100 -- navigated after the last ingest -- is offered
+    # for navigation all over again.
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, url = _indexed_tree_and_late_document(tmp_path)
+    monkeypatch.setenv('NAV_RESULTS_DB', url)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_no_offset_file=True,
+            nav_results_root=str(results_root),
+            arguments=_program_arguments(ds, declares_results_db=True),
+        )
+    )
+
+    assert _yielded_names(groups) == [
+        'N1000000100',
+        'N1000000102',
+        'W1000000101',
+        'W1000000102',
+    ]
+
+
+def test_the_none_sentinel_reads_the_results_tree(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # An exported index URL would otherwise reach every enumeration of every
+    # program that declares the option. The sentinel opts one out: the tree is
+    # read, so the frame the index does not hold is selected too.
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, _url = _indexed_tree_and_late_document(tmp_path)
+    monkeypatch.setenv('NAV_RESULTS_DB', 'none')
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_offset_file=True,
+            nav_results_root=str(results_root),
+            arguments=_program_arguments(ds, declares_results_db=True),
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000100', 'N1000000101', 'W1000000100']
+
+
+def test_the_none_sentinel_on_the_command_line_overrides_a_working_url(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The command-line opt-out, which is the only one an operator can see in
+    # --help: the exported URL opens and answers, and passing the sentinel
+    # still reads the tree.
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, url = _indexed_tree_and_late_document(tmp_path)
+    monkeypatch.setenv('NAV_RESULTS_DB', url)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_offset_file=True,
+            nav_results_root=str(results_root),
+            arguments=_program_arguments(
+                ds, declares_results_db=True, argv=['--results-db', 'none']
+            ),
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000100', 'N1000000101', 'W1000000100']
 
 
 def test_has_offset_file_keeps_only_navigated_in_order(
@@ -552,265 +833,3 @@ def test_yielded_imagefile_carries_label_resolver(
 
     assert len(groups) == 1
     assert groups[0].image_files[0].image_url_resolver is not None
-
-
-# --- ^IMAGE pointer parsing (issue #12) ---
-
-
-def _write_label(tmp_path: Path, name: str, text: str) -> Path:
-    """Write a synthetic PDS3 label file and return its path."""
-    label_path = tmp_path / name
-    label_path.write_text(text)
-    return label_path
-
-
-@pytest.mark.parametrize(
-    ('pointer_line', 'expected'),
-    [
-        ('^IMAGE = ("N1454725799_1.IMG",4)', 'N1454725799_1.IMG'),
-        ('^IMAGE                          = ("C3250013_GEOMED.IMG", 2)', 'C3250013_GEOMED.IMG'),
-        ('^IMAGE = "LOR_0003103486_0X630_SCI.FIT"', 'LOR_0003103486_0X630_SCI.FIT'),
-        ('^IMAGE = N1454725799_1.IMG', 'N1454725799_1.IMG'),
-    ],
-)
-def test_image_filename_from_label_pointer_forms(
-    tmp_path: Path, pointer_line: str, expected: str
-) -> None:
-    label_path = _write_label(
-        tmp_path,
-        'test.LBL',
-        f'PDS_VERSION_ID = PDS3\r\n^IMAGE_HEADER = ("OTHER.IMG",1)\r\n{pointer_line}\r\nEND\r\n',
-    )
-    assert DataSetPDS3CassiniISS._image_filename_from_label(label_path) == expected
-
-
-def test_image_filename_from_label_attached_offset_is_none(tmp_path: Path) -> None:
-    label_text = 'PDS_VERSION_ID = PDS3\r\n^IMAGE = 3\r\nEND\r\n'
-    label_path = _write_label(tmp_path, 'test.LBL', label_text)
-    assert DataSetPDS3CassiniISS._image_filename_from_label(label_path) is None
-
-
-def test_image_filename_from_label_missing_pointer_is_none(tmp_path: Path) -> None:
-    label_path = _write_label(tmp_path, 'test.LBL', 'PDS_VERSION_ID = PDS3\r\nEND\r\n')
-    assert DataSetPDS3CassiniISS._image_filename_from_label(label_path) is None
-
-
-def test_image_url_from_label_case_insensitive_match_keeps_guess(
-    ds: DataSetPDS3CassiniISS, tmp_path: Path
-) -> None:
-    # NH LORRI labels name the .fit file in uppercase while the holdings store it
-    # in lowercase; a case-only difference must not rewrite the URL.
-    label_path = _write_label(
-        tmp_path,
-        'lor_0003103486_0x630_sci.lbl',
-        '^IMAGE = ("LOR_0003103486_0X630_SCI.FIT", 14)\r\nEND\r\n',
-    )
-    guess = FCPath('/holdings/data/lor_0003103486_0x630_sci.fit')
-    assert ds._image_url_from_label(guess, label_path) is None
-
-
-def test_image_url_from_label_corrects_differing_name(
-    ds: DataSetPDS3CassiniISS, tmp_path: Path
-) -> None:
-    label_path = _write_label(
-        tmp_path,
-        'n1454725799_1.lbl',
-        '^IMAGE = ("N1454725799_1_FULL.IMG", 4)\r\nEND\r\n',
-    )
-    guess = FCPath('/holdings/data/n1454725799_1.img')
-    resolved = ds._image_url_from_label(guess, label_path)
-    assert resolved is not None
-    # The pointer name adopts the label filename's (lowercase) case convention.
-    assert resolved.as_posix() == '/holdings/data/n1454725799_1_full.img'
-
-
-def test_image_url_from_label_no_pointer_keeps_guess(
-    ds: DataSetPDS3CassiniISS, tmp_path: Path
-) -> None:
-    label_path = _write_label(tmp_path, 'test.LBL', 'PDS_VERSION_ID = PDS3\r\nEND\r\n')
-    guess = FCPath('/holdings/data/TEST.IMG')
-    assert ds._image_url_from_label(guess, label_path) is None
-
-
-# --- ImageFile.resolve_image_url ---
-
-
-def _make_imagefile(
-    image_url: FCPath,
-    label_path: Path,
-    resolver: Callable[[FCPath, Path], FCPath | None],
-) -> ImageFile:
-    """Build an ImageFile with the given provisional URL and resolver."""
-    return ImageFile(
-        image_file_url=image_url,
-        label_file_url=FCPath(label_path),
-        results_path_stub='stub',
-        image_url_resolver=resolver,
-    )
-
-
-def test_resolve_image_url_replaces_url_and_runs_once(tmp_path: Path) -> None:
-    label_path = _write_label(tmp_path, 'IMG.LBL', 'END\r\n')
-    corrected = FCPath(tmp_path / 'CORRECTED.IMG')
-    calls: list[FCPath] = []
-
-    def resolver(image_url: FCPath, _label_path: Path) -> FCPath:
-        calls.append(image_url)
-        return corrected
-
-    imagefile = _make_imagefile(FCPath(tmp_path / 'GUESS.IMG'), label_path, resolver)
-
-    assert imagefile.resolve_image_url() == corrected
-    assert imagefile.image_file_url == corrected
-    assert imagefile.resolve_image_url() == corrected
-    assert len(calls) == 1
-
-
-def test_resolve_image_url_none_keeps_guess(tmp_path: Path) -> None:
-    label_path = _write_label(tmp_path, 'IMG.LBL', 'END\r\n')
-    guess = FCPath(tmp_path / 'GUESS.IMG')
-
-    imagefile = _make_imagefile(guess, label_path, lambda _url, _path: None)
-
-    assert imagefile.resolve_image_url() == guess
-
-
-def test_image_file_path_uses_resolved_url(tmp_path: Path) -> None:
-    label_path = _write_label(tmp_path, 'IMG.LBL', 'END\r\n')
-    real_image = tmp_path / 'REAL.IMG'
-    real_image.write_bytes(b'image')
-
-    imagefile = _make_imagefile(
-        FCPath(tmp_path / 'WRONG.IMG'), label_path, lambda _url, _path: FCPath(real_image)
-    )
-
-    assert imagefile.image_file_path == real_image
-
-
-def test_resolve_image_url_falls_back_when_resolver_raises(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    # An unretrievable label must not abort the image before the pipeline's
-    # per-image error boundary: the provisional guess is kept and a warning
-    # is logged, and the resolver never runs again.
-    label_path = _write_label(tmp_path, 'IMG.LBL', 'END\r\n')
-    guess = FCPath(tmp_path / 'GUESS.IMG')
-    calls: list[FCPath] = []
-
-    def resolver(image_url: FCPath, _label_path: Path) -> FCPath:
-        calls.append(image_url)
-        raise FileNotFoundError('label missing from holdings')
-
-    imagefile = _make_imagefile(guess, label_path, resolver)
-
-    assert imagefile.resolve_image_url() == guess
-    assert imagefile.resolve_image_url() == guess
-    assert len(calls) == 1
-    captured = capsys.readouterr()
-    assert 'Image URL resolution from label' in captured.out + captured.err
-
-
-# --- observation epoch from the index row ---
-
-
-@pytest.mark.parametrize(
-    ('dataset_class', 'row', 'expected_iso'),
-    [
-        # Cassini ISS index times are day-of-year; IMAGE_MID_TIME wins.
-        (
-            DataSetPDS3CassiniISS,
-            {'IMAGE_MID_TIME': '1999-230T02:28:20.833', 'IMAGE_TIME': '1999-230T02:28:22.835'},
-            '1999-08-18T02:28:21',
-        ),
-        # Voyager ISS index times are plain ISO.
-        (DataSetPDS3VoyagerISS, {'IMAGE_TIME': '1978-12-11T00:29:23'}, '1978-12-11T00:29:23'),
-        # Galileo SSI index times carry a trailing Z.
-        (DataSetPDS3GalileoSSI, {'IMAGE_TIME': '1996-06-03T17:05:38.015Z'}, '1996-06-03T17:05:38'),
-        # New Horizons LORRI has no IMAGE_TIME; START_TIME is the epoch.
-        (
-            DataSetPDS3NewHorizonsLORRI,
-            {'START_TIME': '2006-02-24T16:12:48.306'},
-            '2006-02-24T16:12:48',
-        ),
-    ],
-)
-def test_image_et_from_index_row_parses_each_instrument_format(
-    dataset_class: type[DataSetPDS3], row: dict[str, Any], expected_iso: str
-) -> None:
-    """Every instrument's index time format is read without SPICE."""
-    image_et = dataset_class.image_et_from_index_row(row)
-    assert image_et is not None
-    assert datetime_from_image_et(image_et) == expected_iso
-
-
-def test_image_et_from_index_row_prefers_first_available_column() -> None:
-    """A missing preferred column falls through to the next one."""
-    row = {'IMAGE_TIME': '1999-230T02:28:20.833'}
-    image_et = DataSetPDS3CassiniISS.image_et_from_index_row(row)
-    assert image_et is not None
-    assert datetime_from_image_et(image_et) == '1999-08-18T02:28:21'
-
-
-def test_image_et_from_index_row_skips_masked_value() -> None:
-    """A null cell (flagged by PdsTable's companion mask) is skipped."""
-    row = {
-        'IMAGE_MID_TIME': 'UNK',
-        'IMAGE_MID_TIME_mask': True,
-        'IMAGE_TIME': '1999-230T02:28:20.833',
-    }
-    image_et = DataSetPDS3CassiniISS.image_et_from_index_row(row)
-    assert image_et is not None
-    assert datetime_from_image_et(image_et) == '1999-08-18T02:28:21'
-
-
-def test_image_et_from_index_row_unparsable_value() -> None:
-    """An unreadable time yields None rather than raising."""
-    assert DataSetPDS3CassiniISS.image_et_from_index_row({'IMAGE_MID_TIME': 'UNK'}) is None
-
-
-def test_image_et_from_index_row_without_index() -> None:
-    """An image not enumerated from an index has no epoch."""
-    assert DataSetPDS3CassiniISS.image_et_from_index_row({}) is None
-
-
-# --- camera from the index row ---
-
-
-@pytest.mark.parametrize(
-    ('dataset_class', 'row', 'expected'),
-    [
-        (DataSetPDS3CassiniISS, {'INSTRUMENT_ID': 'ISSNA'}, 'NAC'),
-        (DataSetPDS3CassiniISS, {'INSTRUMENT_ID': 'ISSWA'}, 'WAC'),
-        # Voyager indexes name the camera instead of carrying an id.
-        (DataSetPDS3VoyagerISS, {'INSTRUMENT_NAME': 'NARROW ANGLE CAMERA'}, 'NAC'),
-        (DataSetPDS3VoyagerISS, {'INSTRUMENT_NAME': 'WIDE ANGLE CAMERA'}, 'WAC'),
-        (DataSetPDS3GalileoSSI, {'INSTRUMENT_ID': 'SSI'}, 'SSI'),
-        (DataSetPDS3NewHorizonsLORRI, {'INSTRUMENT_ID': 'LORRI'}, 'LORRI'),
-    ],
-)
-def test_camera_from_index_row_maps_each_instrument(
-    dataset_class: type[DataSetPDS3], row: dict[str, Any], expected: str
-) -> None:
-    """Every instrument's index names its camera, without SPICE."""
-    assert dataset_class.camera_from_index_row(row) == expected
-
-
-def test_camera_from_index_row_tolerates_padding_and_case() -> None:
-    """Index values are matched stripped and upper-cased."""
-    assert DataSetPDS3CassiniISS.camera_from_index_row({'INSTRUMENT_ID': ' issna '}) == 'NAC'
-
-
-def test_camera_from_index_row_unrecognized_value() -> None:
-    """An unknown camera yields None rather than a name nothing else knows."""
-    assert DataSetPDS3CassiniISS.camera_from_index_row({'INSTRUMENT_ID': 'ISSXX'}) is None
-
-
-def test_camera_from_index_row_skips_masked_value() -> None:
-    """A null cell is skipped rather than read."""
-    row = {'INSTRUMENT_ID': 'ISSNA', 'INSTRUMENT_ID_mask': True}
-    assert DataSetPDS3CassiniISS.camera_from_index_row(row) is None
-
-
-def test_camera_from_index_row_without_index() -> None:
-    """An image not enumerated from an index has no camera."""
-    assert DataSetPDS3CassiniISS.camera_from_index_row({}) is None

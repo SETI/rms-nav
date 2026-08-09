@@ -125,6 +125,11 @@ distributed processing:
   (Mosaic combination remains a single-node step; see
   :doc:`/user_guide/user_guide_reprojection`.)
 
+* ``sd_stats_ingest_cloud_tasks`` - Cloud tasks worker that reads one share of
+  a navigation-results root into the results index. ``sd_stats_ingest`` lists
+  each root and divides it into shares, and adds the workers' tallies up again
+  when they have run; see :doc:`/user_guide/user_guide_statistics`.
+
 These cloud tasks variants read task payloads from a queue and process batches
 of files, making them suitable for large-scale processing in cloud
 environments. The local batch drivers ``sd_offset``, ``sd_backplanes``, and

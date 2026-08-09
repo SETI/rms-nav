@@ -7,6 +7,7 @@ import numpy as np
 import oops
 import pdslogger
 
+from spindoctor.support.command_line import masked_command_line
 from spindoctor.support.types import NDArrayFloatType
 
 
@@ -198,6 +199,11 @@ def log_run_environment(logger: pdslogger.PdsLogger, command_list: list[str]) ->
     the same block on the console when handlers mirror output to
     ``MAIN_LOGGER``.
 
+    The command line is recorded through
+    :func:`~spindoctor.support.command_line.masked_command_line`, because a run
+    log reaches a console, a log file and whoever is sent one, and one word of
+    a command line can be a database password.
+
     Parameters:
         logger: The logger to write to.
         command_list: The command-line arguments for the current run
@@ -213,5 +219,5 @@ def log_run_environment(logger: pdslogger.PdsLogger, command_list: list[str]) ->
         #     logger.info('Host Instance Type: %s', spindoctor.aws.AWS_HOST_INSTANCE_TYPE)
         #     logger.info('Host Instance ID: %s', spindoctor.aws.AWS_HOST_INSTANCE_ID)
         logger.info('GIT Status:      %s', current_git_version())
-        logger.info('Command line:    %s', ' '.join(command_list))
+        logger.info('Command line:    %s', ' '.join(masked_command_line(command_list)))
         logger.info('*' * 40)

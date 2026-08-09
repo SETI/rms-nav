@@ -9,6 +9,11 @@ while a results root carries no credentials and is the one word of the command
 line the reader is there to correct. And its exit status says whether the run
 completed, not what the run found, so a scheduled invocation reads the same
 status from the same tree every time.
+
+What the masking rule itself does with each spelling of an option, each shape of
+a password, and each word that only looks like one is pinned where the rule
+lives, in ``tests/spindoctor/support/test_command_line.py``; what is pinned here
+is that this program's log goes through it.
 """
 
 import os
@@ -28,14 +33,6 @@ PASSWORD = 'sup3rs3cr3t'
 
 SERVER_URL = f'postgresql+psycopg:/svc:{PASSWORD}@db.example/spindoctor'
 """An index URL carrying a password, in the one-slash form a parser rejects."""
-
-CREDENTIAL_SHAPED_ROOT = '//store:8443/nav@results'
-"""A results root the masking rule would read as credentials if it saw one.
-
-Everything between the first colon and the at-sign is a password to that rule.
-It is a path, and a run log that printed ``//store:***@results`` would have
-hidden the only thing an operator needs from the line.
-"""
 
 
 def _run(
@@ -94,6 +91,25 @@ def test_no_navigation_root_says_which_settings_supply_one(
     assert any('--nav-results-root' in line for line in written)
 
 
+def test_no_index_is_reported_and_not_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ingest with nowhere to write is the other configuration failure.
+
+    Both ambient sources of an index URL are closed for every test, so naming
+    none on the command line is a program run with no index at all -- which for
+    this one program is a mistake rather than the ordinary case it is everywhere
+    else in the pipeline.  It is reported rather than raised, and names all
+    three settings that supply one, since which of them an operator meant to
+    set is theirs to know.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    status, written = _run(['--nav-results-root', str(root)], monkeypatch, tmp_path)
+    assert status == 1
+    assert any('NAV_RESULTS_DB' in line for line in written)
+
+
 def test_the_run_log_does_not_carry_a_database_password(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -142,44 +158,6 @@ def test_the_run_log_names_the_roots_it_was_given(
         tmp_path,
     )
     assert any(f'Roots: {root.as_posix()}' == line for line in written)
-
-
-def test_a_results_root_reaches_the_arguments_whole() -> None:
-    """The one word of the line an operator is reading it to correct."""
-    masked = sd_stats_ingest.masked_command_line(
-        ['--nav-results-root', CREDENTIAL_SHAPED_ROOT, '--force']
-    )
-    assert masked == ['--nav-results-root', CREDENTIAL_SHAPED_ROOT, '--force']
-
-
-def test_an_index_url_is_masked_in_the_arguments() -> None:
-    """A password can be a word of the command line, and the line is logged."""
-    masked = sd_stats_ingest.masked_command_line(['--results-db', SERVER_URL])
-    assert masked == ['--results-db', 'postgresql+psycopg:/svc:***@db.example/spindoctor']
-
-
-def test_an_index_url_joined_by_an_equals_sign_is_masked_too() -> None:
-    """Both spellings argparse accepts put the same password on the same line."""
-    masked = sd_stats_ingest.masked_command_line([f'--results-db={SERVER_URL}'])
-    assert masked == ['--results-db=postgresql+psycopg:/svc:***@db.example/spindoctor']
-
-
-def test_an_abbreviated_option_carries_the_same_url() -> None:
-    """argparse accepts any distinguishing prefix and consumes the URL after it."""
-    masked = sd_stats_ingest.masked_command_line(['--results-d', SERVER_URL])
-    assert masked == ['--results-d', 'postgresql+psycopg:/svc:***@db.example/spindoctor']
-
-
-def test_an_abbreviated_option_joined_by_an_equals_sign_carries_it_too() -> None:
-    """The two spellings multiply: an abbreviation joined to its value is a third."""
-    masked = sd_stats_ingest.masked_command_line([f'--results-d={SERVER_URL}'])
-    assert masked == ['--results-d=postgresql+psycopg:/svc:***@db.example/spindoctor']
-
-
-def test_the_argument_separator_does_not_swallow_the_word_after_it() -> None:
-    """Every long option starts with the separator, and it names none of them."""
-    masked = sd_stats_ingest.masked_command_line(['--', CREDENTIAL_SHAPED_ROOT])
-    assert masked == ['--', CREDENTIAL_SHAPED_ROOT]
 
 
 def test_a_root_that_is_not_there_is_reported(

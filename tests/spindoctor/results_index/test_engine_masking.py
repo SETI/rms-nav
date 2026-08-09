@@ -25,6 +25,9 @@ less than it says.
 
 The corpus is driven through the real opener as well, on the URLs that reach a
 refusal without opening a socket, because a rule nothing calls protects nothing.
+
+What a refusal quotes back beside the URL is the other half of the surface, and
+is in ``test_engine_quoted_causes``.
 """
 
 import dataclasses
@@ -33,6 +36,7 @@ import itertools
 import pytest
 import sqlalchemy
 from tests.spindoctor.results_index.conftest import (
+    AT_SIGN_USER,
     EXPLODING_FACTORY_MESSAGE,
     exploding_factory,
     without_module,
@@ -52,14 +56,6 @@ SLASHED_PASSWORD = 'aB3/xY9z'
 The route that masks structurally is the one that runs on a URL nothing could
 parse, so nothing there knows where the password ends except the ``@``. A rule
 that stopped at a path separator would leave this one in the message whole.
-"""
-
-AT_SIGN_USER = 'admin@pgsrv'
-"""A user name carrying an at-sign, which is how a managed server names one.
-
-``user@servername`` is the standard login form of a hosted PostgreSQL, and
-SQLAlchemy's own parser accepts it. A rule that took the first at-sign as the
-end of the credentials would find no password after it and leak the whole URL.
 """
 
 

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 from filecache import FCPath
-from tests.spindoctor.cli.program_parsers import cloud_task_parser, program_help_text
+from tests.spindoctor.cli.conftest import cloud_task_parser, help_text
 
 from spindoctor.cli.logging_args import add_logging_arguments
 
@@ -65,7 +65,10 @@ _WITH_ANY_LOGGER = _WITH_IMAGE_LOGGER + _WITHOUT_IMAGE_LOGGER
 _WITHOUT_LOGGER = [
     ('sd_stats_report', []),
     ('sd_create_simulated_image', []),
-    ('sd_backplane_viewer', []),
+    # The viewer reads its dataset from argv before parsing, so without one it
+    # prints a usage error rather than its help, and every flag is absent from
+    # a string that names none of them.
+    ('sd_backplane_viewer', ['coiss_saturn']),
     ('sd_mosaic_display', ['rings']),
     ('sd_mosaic_display', ['body']),
 ]
@@ -77,6 +80,7 @@ _CLOUD_TASK_DRIVERS = [
     'sd_offset_cloud_tasks',
     'sd_backplanes_cloud_tasks',
     'sd_mosaic_cloud_tasks',
+    'sd_stats_ingest_cloud_tasks',
 ]
 
 
@@ -115,7 +119,7 @@ def test_a_program_with_a_logger_accepts_the_main_flags(
     program: str, argv: list[str], flag: str
 ) -> None:
     """Every program that logs accepts the same main-logger flags."""
-    assert flag in program_help_text(program, argv)
+    assert flag in help_text(program, argv)
 
 
 @pytest.mark.parametrize(('program', 'argv'), _WITH_IMAGE_LOGGER)
@@ -124,7 +128,7 @@ def test_a_program_that_processes_images_accepts_the_image_flags(
     program: str, argv: list[str], flag: str
 ) -> None:
     """A program with a per-image backend accepts the image-logger flags."""
-    assert flag in program_help_text(program, argv)
+    assert flag in help_text(program, argv)
 
 
 @pytest.mark.parametrize(('program', 'argv'), _WITHOUT_IMAGE_LOGGER)
@@ -136,7 +140,7 @@ def test_a_program_without_images_rejects_the_image_flags(
 
     Offering them would leave someone believing they had changed something.
     """
-    assert flag not in program_help_text(program, argv)
+    assert flag not in help_text(program, argv)
 
 
 @pytest.mark.parametrize('destination', [*_MAIN_DESTINATIONS, *_IMAGE_DESTINATIONS])
@@ -158,14 +162,14 @@ def test_a_logging_flag_defaults_to_unset(destination: str) -> None:
 @pytest.mark.parametrize('flag', _NEGATABLE_MAIN_FLAGS)
 def test_a_main_sink_can_be_turned_off(program: str, argv: list[str], flag: str) -> None:
     """Each main sink can be turned off as well as on, from the command line."""
-    assert f'--no-{flag.removeprefix("--")}' in program_help_text(program, argv)
+    assert f'--no-{flag.removeprefix("--")}' in help_text(program, argv)
 
 
 @pytest.mark.parametrize(('program', 'argv'), _WITH_IMAGE_LOGGER)
 @pytest.mark.parametrize('flag', _NEGATABLE_IMAGE_FLAGS)
 def test_an_image_sink_can_be_turned_off(program: str, argv: list[str], flag: str) -> None:
     """So can each image sink, on the programs that have one."""
-    assert f'--no-{flag.removeprefix("--")}' in program_help_text(program, argv)
+    assert f'--no-{flag.removeprefix("--")}' in help_text(program, argv)
 
 
 @pytest.mark.parametrize('flag', [*_NEGATABLE_MAIN_FLAGS, *_NEGATABLE_IMAGE_FLAGS])
@@ -190,7 +194,7 @@ def test_a_program_with_no_logger_has_no_logging_flags(program: str, argv: list[
     calling any helper that calls it -- which is exactly how ``sd_mosaic``
     gets them.  Grepping the dispatch module would not see that.
     """
-    assert '--log-' not in program_help_text(program, argv)
+    assert '--log-' not in help_text(program, argv)
 
 
 @pytest.mark.parametrize('program', _CLOUD_TASK_DRIVERS)

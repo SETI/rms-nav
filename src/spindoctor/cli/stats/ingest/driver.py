@@ -24,6 +24,14 @@ whose summary PNG is as the last pass recorded it, is not read at all.  A
 backend whose listing supplies neither metric cannot answer that question, so
 such a root is re-read in full, with a warning saying so.
 
+Those two metrics are everything a listing supplies, so a document rewritten in
+place that kept both of them is skipped, and its row goes on recording what the
+document before it said.  Reading the file to find out whether it needs reading
+is the retrieval this skip exists to avoid, so ``force`` is the answer to that
+rather than a finer comparison, and the consequence for a consumer is stated
+with the rest of what the index answers differently in
+:mod:`spindoctor.results_index.selection`.
+
 What leaving the tree costs
 ---------------------------
 
@@ -36,6 +44,8 @@ evidence would delete its peers' work.  The prune therefore reads a complete
 listing and refuses anything else.
 """
 
+from collections.abc import Sequence
+
 import sqlalchemy
 from filecache import FCPath
 from pdslogger import PdsLogger
@@ -47,7 +57,7 @@ from spindoctor.cli.stats.ingest.store import _recorded_files, _RecordedFile
 from spindoctor.cli.stats.ingest.walk import _ListedFile, _RootListing, _walk_root
 from spindoctor.results_index import FAILED_FILES, IMAGES, normalize_root_url
 
-__all__ = ['INGEST_COMMIT_CHUNK_SIZE', 'ingest_metadata_files']
+__all__ = ['INGEST_COMMIT_CHUNK_SIZE', 'distinct_roots', 'ingest_metadata_files']
 
 INGEST_COMMIT_CHUNK_SIZE = 512
 """How many images are written per database transaction.
@@ -59,6 +69,38 @@ worker never sees half of an image.
 """
 
 
+def distinct_roots(roots: Sequence[str]) -> list[str]:
+    """Normalize the given roots and drop the repeats, keeping their order.
+
+    ``/data/x`` and ``/data/x/`` are one root, and a command line naming both
+    means the tree once.  Walking it twice reads every document twice and gives
+    one root two ingest runs; in a pass divided into cloud tasks it also hands
+    every document out in two shares, leaves the first of the two runs
+    unfinished forever, and -- since a completion stamps the newest run and then
+    finds nothing outstanding -- tells the operator that a root it has just
+    finished was never divided up.
+
+    Every mode of the pass reads the roots through this, and so does the driver
+    that reports which roots it was given: a run that named a root two ways and
+    then reported on it once reads as a root having gone missing.
+
+    Parameters:
+        roots: The roots as their holder spelled them.
+
+    Returns:
+        The normalized roots, first spelling first.
+
+    Raises:
+        ValueError: If a root is not a location: one the storage layer refuses
+            to render absolute, one carrying a null byte, or an empty spelling,
+            which is the working directory rather than a root anybody named.
+    """
+    distinct: dict[str, None] = {}
+    for root in roots:
+        distinct.setdefault(normalize_root_url(root), None)
+    return list(distinct)
+
+
 def _is_unchanged(
     listed: _ListedFile, recorded: _RecordedFile | None, summary_stubs: set[str]
 ) -> bool:
@@ -67,7 +109,9 @@ def _is_unchanged(
     The summary PNG is part of the comparison because ``has_summary_png`` is a
     column of the row and comes from the walk rather than from the document: a
     summary written after the document was ingested changes the row that ought
-    to be stored, while changing nothing about the document itself.
+    to be stored, while changing nothing about the document itself.  That holds
+    for a refused file as much as for an ingested one, since both tables carry
+    the flag and a selection filter reads it from both.
 
     Parameters:
         listed: The file as this walk saw it.
@@ -81,16 +125,16 @@ def _is_unchanged(
         return False
     if (recorded.mtime_ns, recorded.size_bytes) != (listed.mtime_ns, listed.size_bytes):
         return False
-    if recorded.from_images:
-        return recorded.has_summary_png == (listed.results_path_stub in summary_stubs)
-    return True
+    return recorded.has_summary_png == (listed.results_path_stub in summary_stubs)
 
 
 def _files_to_read(
-    listing: _RootListing,
+    files: Sequence[_ListedFile],
+    summary_stubs: set[str],
     recorded: dict[str, _RecordedFile],
     *,
     force: bool,
+    has_file_metrics: bool,
 ) -> list[_ListedFile]:
     """Select the metadata files this pass has to read.
 
@@ -98,20 +142,28 @@ def _files_to_read(
     ingested: it has not changed, so reading it produces the same refusal.
     ``force`` re-reads both.
 
+    Written over the files rather than over a whole-root listing, because a pass
+    over a share of a root selects from its share by exactly this rule and must
+    not be able to reach for anything a complete listing would have carried.
+
     Parameters:
-        listing: What the walk found.
+        files: The metadata files this pass is responsible for.
+        summary_stubs: Stubs the walk saw a summary PNG for.
         recorded: Stub to what the index already holds about it.
         force: Whether to re-read every document regardless.
+        has_file_metrics: Whether the listing reported a size and modification
+            time for every one of those files.  A listing that reports neither
+            cannot answer "has this changed", so all of them are read.
 
     Returns:
-        The files to read, in stub order.
+        The files to read, in the order given.
     """
-    if force or not listing.has_file_metrics:
-        return list(listing.metadata_files)
+    if force or not has_file_metrics:
+        return list(files)
     return [
         listed
-        for listed in listing.metadata_files
-        if not _is_unchanged(listed, recorded.get(listed.results_path_stub), listing.summary_stubs)
+        for listed in files
+        if not _is_unchanged(listed, recorded.get(listed.results_path_stub), summary_stubs)
     ]
 
 
@@ -194,6 +246,8 @@ def ingest_metadata_files(
     entirely, and its ingest run is deliberately not completed, because a
     mistyped or unmounted root is not an empty one.
 
+    Two spellings of one root are one root, and are walked once.
+
     Parameters:
         engine: The open index, which must already carry the schema.
         roots: Navigation results roots -- local directories or any URL the
@@ -206,12 +260,13 @@ def ingest_metadata_files(
         What the pass did, summed over every root.
     """
     total = IngestCounts()
-    for root_str in roots:
-        root_url = normalize_root_url(root_str)
-        # The normalized form is what is walked, not the string as typed.  It
-        # is the same location, absolute and spelled once: walking the typed
-        # form would record a relative source_file beside an absolute root_url,
-        # and a relative local root is one the storage layer refuses outright.
+    # The normalized form is what is walked, not the string as typed.  It is
+    # the same location, absolute and spelled once: walking the typed form
+    # would record a relative source_file beside an absolute root_url, and a
+    # relative local root is one the storage layer refuses outright.  Two
+    # spellings of one root are one root here as they are at a fan-out, so the
+    # same command line means the same thing in every mode.
+    for root_url in distinct_roots(roots):
         root = FCPath(root_url)
         counts = IngestCounts()
         run_id = _start_run(engine, root_url)
@@ -228,7 +283,13 @@ def ingest_metadata_files(
             continue
         with engine.connect() as connection:
             recorded = _recorded_files(connection, root_url)
-        to_read = _files_to_read(listing, recorded, force=force)
+        to_read = _files_to_read(
+            listing.metadata_files,
+            listing.summary_stubs,
+            recorded,
+            force=force,
+            has_file_metrics=listing.has_file_metrics,
+        )
         counts.files_skipped = counts.files_seen - len(to_read)
         for chunk in _batched(to_read, INGEST_COMMIT_CHUNK_SIZE):
             _ingest_chunk(

@@ -71,7 +71,8 @@ def add_common_env_args(parser: argparse.ArgumentParser) -> None:
             'overrides NAV_RESULTS_DB and the environment.results_db configuration '
             "variable. Each image's navigation record is then read as one row instead of "
             'one file, and --nav-results-root names the ingested root the rows are read '
-            'under. Pass "none" to read the files even where an index is configured.'
+            'under. Pass --results-db none to read the files even where an index is '
+            'configured.'
         ),
     )
     add_logging_arguments(parser)

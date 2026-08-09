@@ -1,13 +1,29 @@
-"""Fixtures shared by the ``sd_create_ck`` end-to-end test modules.
+"""Fixtures and helpers shared by the driver test modules at this level.
 
-The driver's tests live in two modules at this level -- the products of a
-clean run and its refusals -- and both run the real program over prepared
-trees.  The trees, and the guard that undoes what a run furnished into the
-process-global SPICE pool, are built here; the plain builders they use live in
-``sd_create_ck_helpers``.  Nothing here is autouse, so the other test packages
-under this directory are untouched.
+Most of what is here belongs to the ``sd_create_ck`` end-to-end tests.  Those
+live in two modules -- the products of a clean run and its refusals -- and both
+run the real program over prepared trees.  The trees, and the guard that undoes
+what a run furnished into the process-global SPICE pool, are built here; the
+plain builders they use live in ``sd_create_ck_helpers``.
+
+:func:`help_text` and :func:`cloud_task_parser` are shared more widely: a
+program's command-line surface is asserted against the parser the program
+builds for itself rather than against a reconstruction of it, and one spelling
+of that serves every module that asks.  An interactive program is run with
+``--help``, which is the surface a user meets; a cloud-task driver builds its
+parser inside ``async_main`` and hands it straight to the worker, so the worker
+is intercepted and the parser taken from it.
+
+Nothing here is autouse, so the other test packages under this directory are
+untouched.
 """
 
+import argparse
+import asyncio
+import contextlib
+import importlib
+import io
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -34,6 +50,60 @@ from tests.spindoctor.cli.sd_create_ck_helpers import (
     write_kernels,
     write_metadata,
 )
+
+
+def help_text(program: str, argv: list[str]) -> str:
+    """Return what ``program --help`` prints.
+
+    Parameters:
+        program: Dispatch module name under ``spindoctor.cli``.
+        argv: Arguments preceding ``--help``, for a program that reads its
+            dataset or mode from argv before parsing.
+
+    Returns:
+        The help text.
+    """
+    module = importlib.import_module(f'spindoctor.cli.{program}')
+    buffer = io.StringIO()
+    saved = sys.argv
+    sys.argv = [program, *argv, '--help']
+    try:
+        with contextlib.redirect_stdout(buffer), contextlib.suppress(SystemExit):
+            module.main()
+    finally:
+        sys.argv = saved
+    return buffer.getvalue()
+
+
+def cloud_task_parser(program: str) -> argparse.ArgumentParser:
+    """Return the parser a cloud-task driver builds for itself.
+
+    Parameters:
+        program: Dispatch module name under ``spindoctor.cli``.
+
+    Returns:
+        The parser the driver would have run with.
+    """
+    module = importlib.import_module(f'spindoctor.cli.{program}')
+    captured: dict[str, argparse.ArgumentParser] = {}
+
+    class _CapturedError(Exception):
+        """Raised to stop the driver once its parser has been seen."""
+
+    def _intercept(*args: object, **kwargs: object) -> None:
+        parser = kwargs.get('argparser')
+        assert isinstance(parser, argparse.ArgumentParser)
+        captured['parser'] = parser
+        raise _CapturedError
+
+    real_worker = module.Worker
+    module.Worker = _intercept  # type: ignore[attr-defined]
+    try:
+        with contextlib.suppress(_CapturedError):
+            asyncio.run(module.async_main())
+    finally:
+        module.Worker = real_worker  # type: ignore[attr-defined]
+    return captured['parser']
 
 
 class _Furnished:

@@ -115,8 +115,8 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         sqlite: URL naming a local path, or a postgresql+psycopg: URL naming a
         server); overrides NAV_RESULTS_DB and the environment.results_db
         configuration variable. Each image's navigation record is then read as one
-        row instead of one file. Pass "none" to read the files even where an index
-        is configured. Without an index the navigation results tree is read
+        row instead of one file. Pass --results-db none to read the files even where
+        an index is configured. Without an index the navigation results tree is read
         directly, which is the default.""",
     )
 
