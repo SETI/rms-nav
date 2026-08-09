@@ -79,9 +79,9 @@ from spindoctor.cli.stats.ingest.chunks import _batched, _ingest_chunk
 from spindoctor.cli.stats.ingest.counts import IngestCounts
 from spindoctor.cli.stats.ingest.driver import (
     INGEST_COMMIT_CHUNK_SIZE,
-    _distinct_roots,
     _files_to_read,
     _prune_missing,
+    distinct_roots,
 )
 from spindoctor.cli.stats.ingest.runs import (
     _finish_run,
@@ -119,6 +119,18 @@ a task result.
 
 TASK_COMPLETED_EVENT = 'task_completed'
 """Event type under which a worker's return value is written to the event log."""
+
+_LARGEST_SHARE_COUNT = 2**31 - 1
+"""Most files one share may report having ingested, skipped or refused.
+
+A share is a list of files a fan-out cut from one listing, so a report of more
+files than any archive holds is not a count of anything, and a concatenated
+event log carrying a foreign or corrupted line is exactly where one comes from.
+The bound also keeps the shares' sum inside the column it is written to: a run's
+counts are a whole number a backend stores in 64 bits, and no event log holds
+enough lines of this size to overflow one.  Without it the sum reaches the write
+and the driver's own error takes the whole completion down, for one bad line.
+"""
 
 _TASK_EVENT_PREFIX = 'task_'
 """Prefix of every event type that reports the outcome of one task."""
@@ -357,7 +369,7 @@ def fan_out_ingest_tasks(
     if share_size < 1:
         raise ValueError(f'a task share holds at least one file, not {share_size}')
     fan_out = FanOut()
-    for root_url in _distinct_roots(roots):
+    for root_url in distinct_roots(roots):
         root = FCPath(root_url)
         counts = IngestCounts()
         run_id = _start_run(engine, root_url)
@@ -655,9 +667,12 @@ def _share_tally(result: dict[str, Any]) -> _ShareTally | None:
     Returns:
         Which share it is and what it did, or None when the value is not a
         share's tally at all.  Its files are then unaccounted for, which is what
-        stops the run being stamped.  A count below zero is refused with the
-        rest: it is not a number of files, and added in it would let one result
-        cancel another's.
+        stops the run being stamped.  A count outside what a share could report
+        is refused with the rest: below zero it is not a number of files and
+        would let one result cancel another's, and above
+        :data:`_LARGEST_SHARE_COUNT` it is a number the run's own column cannot
+        hold, which would end the whole completion at the write rather than
+        costing the one result it came in on.
     """
     run_id = result.get('run_id')
     if isinstance(run_id, bool) or not isinstance(run_id, int):
@@ -672,7 +687,9 @@ def _share_tally(result: dict[str, Any]) -> _ShareTally | None:
     counts = IngestCounts()
     for name in ('files_ingested', 'files_skipped', 'files_failed'):
         value = result.get(name)
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        if value < 0 or value > _LARGEST_SHARE_COUNT:
             return None
         setattr(counts, name, value)
     counts.failures_by_reason = _reason_map(result.get('failures_by_reason'), int)
@@ -784,7 +801,7 @@ def complete_ingest_tasks(
         by_share.setdefault(key, IngestCounts()).add(tally.counts)
         results_of_share[key] = results_of_share.get(key, 0) + 1
     claimed: set[tuple[int, str]] = set()
-    for root_url in _distinct_roots(roots):
+    for root_url in distinct_roots(roots):
         with engine.connect() as connection:
             run = _unfinished_run(connection, root_url)
         if run is None:

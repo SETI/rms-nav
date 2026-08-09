@@ -1218,6 +1218,12 @@ Details settled during execution, none of them a change of intent:
   twice, the first of the two runs is left unfinished for good, and the
   completion stamps the newer run and then reports the root it has just finished
   as one nobody divided up.
+- **A count no share could report is not a share's tally.** `_share_tally`
+  bounds the magnitude of each count as well as its type and its sign. The
+  counts are written to the run row on a shortfall, and one larger than that
+  column holds ends the whole completion in the database driver's own error --
+  for one corrupt or foreign line of a concatenated event log, which is exactly
+  the input class the guards either side of it exist for.
 - **The seam lives in `spindoctor/cli/stats/ingest/tasks.py`**, beside the pass
   it divides: fan-out, one share, and the completion that adds them up are the
   same three stages `driver.py` runs in one process, and both read the same

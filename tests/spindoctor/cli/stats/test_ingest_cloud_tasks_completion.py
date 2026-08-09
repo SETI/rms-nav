@@ -656,6 +656,36 @@ def test_an_account_past_the_listing_names_its_root(
     assert any('1000000 of 4 file(s)' in named for named in outcome.roots_unaccounted)
 
 
+def test_a_count_too_large_for_the_run_row_is_not_a_share_tally(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A number no share could report is refused before it reaches the row.
+
+    What the shares reported is written to the run row on a shortfall, and a
+    count larger than that column holds fails the write -- ending the whole
+    completion in the driver's own error, for one corrupt or foreign line of a
+    concatenated event log.  Refused here it costs its own result, like every
+    other value of a shape a worker does not return.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    fan_out(url, [root], logger=quiet_logger)
+    enormous = reported(
+        'ingest-1-000000',
+        {
+            'status': 'ok',
+            'run_id': 1,
+            'root_url': normalize_root_url(root),
+            'files_ingested': 10**30,
+            'files_skipped': 0,
+            'files_failed': 0,
+        },
+    )
+    outcome = complete(url, [root], [enormous], logger=quiet_logger)
+    assert outcome.results_unreadable == 1
+
+
 def test_a_count_below_zero_is_not_a_share_tally(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
