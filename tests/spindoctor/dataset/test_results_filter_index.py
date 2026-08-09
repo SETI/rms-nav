@@ -30,7 +30,7 @@ import uuid
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pdslogger
 import pytest
@@ -1496,3 +1496,62 @@ def test_a_recorded_finish_time_of_nothing_is_reported_as_nothing(
         has_no_offset_file=True,
     )
     assert 'at a time this index does not record' in capsys.readouterr().out
+
+
+def test_the_refusal_does_not_repeat_the_query_that_failed(tmp_path: Path) -> None:
+    """The wrapper exists so that the sentence to act on is what a reader meets.
+
+    The database layer renders a failed statement with its SQL, its bound
+    parameters and a link to its own documentation.  Reported through a program
+    that catches this type, that puts the advice under a page of machinery.
+    """
+    root, _images = _one_image_tree(tmp_path)
+    url = _index_without_a_table(tmp_path, root, 'failed_files')
+    with pytest.raises(SelectionError) as excinfo:
+        ResultsFilter(
+            VOLUMES, str(root), logger=_logger(), results_db_url=url, has_offset_file=True
+        )
+    assert 'SELECT' not in str(excinfo.value)
+
+
+def test_the_refusal_carries_what_the_driver_said(tmp_path: Path) -> None:
+    """Which table is missing is the whole of what makes the failure actionable."""
+    root, _images = _one_image_tree(tmp_path)
+    url = _index_without_a_table(tmp_path, root, 'failed_files')
+    with pytest.raises(SelectionError, match='no such table: failed_files'):
+        ResultsFilter(
+            VOLUMES, str(root), logger=_logger(), results_db_url=url, has_offset_file=True
+        )
+
+
+def test_a_database_failure_of_another_class_is_translated_too(tmp_path: Path) -> None:
+    """Every way the layer fails is one type at this seam, not the operational ones.
+
+    A missing table raises one class on SQLite and another on PostgreSQL, and a
+    value the driver will not bind raises a third on both.  A caller that never
+    imports the database layer cannot name any of them, so the guarantee is the
+    family and not a member of it.
+    """
+    root, _images = _one_image_tree(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=_logger())
+    unbindable = cast(list[str], [object()])
+    with pytest.raises(SelectionError, match='could not be read'):
+        ResultsFilter(
+            unbindable, str(root), logger=_logger(), results_db_url=url, has_offset_file=True
+        )
+
+
+def test_a_database_failure_of_another_class_raises_no_database_exception(
+    tmp_path: Path,
+) -> None:
+    """This module never imports the database layer, so it may not raise its types."""
+    root, _images = _one_image_tree(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=_logger())
+    unbindable = cast(list[str], [object()])
+    with pytest.raises(SelectionError) as excinfo:
+        ResultsFilter(
+            unbindable, str(root), logger=_logger(), results_db_url=url, has_offset_file=True
+        )
+    assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)

@@ -227,6 +227,17 @@ def _reporting_a_failed_read(url: str) -> Iterator[None]:
     own exception, which a caller that deliberately never imports SQLAlchemy
     cannot name in an ``except`` clause.
 
+    The whole family is caught rather than the operational failures alone: a
+    missing table is one class on SQLite and another on PostgreSQL, a database
+    whose file is damaged is a third, and a caller that cannot name any of them
+    is not helped by a distinction between them.
+
+    What the report carries is the driver's own sentence.  The database layer
+    renders a failed statement with the SQL, the bound parameters and a link to
+    its own documentation, which is eight lines and a thousand characters of
+    machinery around the one sentence that says what to change -- and this
+    wrapper exists precisely so that the sentence is what an operator reads.
+
     Parameters:
         url: The index URL, masked here so that the report names which index
             was asked without printing its password.
@@ -240,9 +251,13 @@ def _reporting_a_failed_read(url: str) -> Iterator[None]:
     try:
         yield
     except sqlalchemy.exc.SQLAlchemyError as exc:
+        # Compared against None rather than taken for its truth: str(None) is
+        # 'None', which would read as a driver that said so.
+        driver_error = getattr(exc, 'orig', None)
+        detail = (str(driver_error).strip() if driver_error is not None else '') or str(exc)
         raise ValueError(
             f'{masked_url(url)}: the results index could not be read '
-            f'({type(exc).__name__}: {exc}). Check that this URL names an index '
+            f'({type(exc).__name__}: {detail}). Check that this URL names an index '
             f'sd_stats_ingest wrote and that the account it is opened with may read '
             f'every table of it.'
         ) from exc

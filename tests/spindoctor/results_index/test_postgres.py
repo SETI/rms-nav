@@ -591,3 +591,49 @@ def test_the_snapshot_time_answers_for_one_root_on_postgresql(postgres_url: str)
     _seed_selection_rows(postgres_url)
     stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
     assert stubs.ingested_utc == SELECTION_INGESTED
+
+
+def test_a_table_this_account_cannot_read_is_reported_on_postgresql(postgres_url: str) -> None:
+    """A missing relation is a different exception class here, and is still translated.
+
+    An index whose account was granted the rows it reports on and not the
+    bookkeeping beside them is the case the refusal names, and it is a
+    PostgreSQL case: the class SQLite raises for the same query is another one,
+    so a seam that caught only what SQLite raises would let this one out.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_selection_rows(postgres_url)
+    with opened(postgres_url) as engine, engine.begin() as connection:
+        connection.execute(sqlalchemy.text(f'DROP TABLE {FAILED_FILES.name}'))
+    with pytest.raises(ValueError, match='could not be read'):
+        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+
+
+def test_a_failing_query_raises_no_database_exception_on_postgresql(postgres_url: str) -> None:
+    """The consumer that never imports the database layer cannot name its types.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_selection_rows(postgres_url)
+    with opened(postgres_url) as engine, engine.begin() as connection:
+        connection.execute(sqlalchemy.text(f'DROP TABLE {FAILED_FILES.name}'))
+    with pytest.raises(ValueError) as excinfo:
+        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+    assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
+
+
+def test_a_failing_query_is_reported_without_its_sql_on_postgresql(postgres_url: str) -> None:
+    """The advice is what an operator reads, and a statement dump buries it.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_selection_rows(postgres_url)
+    with opened(postgres_url) as engine, engine.begin() as connection:
+        connection.execute(sqlalchemy.text(f'DROP TABLE {FAILED_FILES.name}'))
+    with pytest.raises(ValueError) as excinfo:
+        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+    assert 'SELECT' not in str(excinfo.value)
