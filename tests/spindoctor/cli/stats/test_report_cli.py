@@ -150,6 +150,33 @@ def test_main_report_without_an_index_names_the_flag(
     assert '--results-db' in capsys.readouterr().err
 
 
+def test_main_report_says_an_empty_index_variable_named_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An operator who exported the variable is told the value carries no URL.
+
+    Without it the refusal beside this line says to name an index with
+    ``NAV_RESULTS_DB``, which is what they believe they did.
+    """
+    monkeypatch.setenv('NAV_RESULTS_DB', '')
+    main_report(['--output-dir', str(tmp_path / 'report')])
+    assert 'is set to an empty value' in capsys.readouterr().err
+
+
+def test_main_report_says_it_through_its_own_output_rather_than_a_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """This program's output is terminal text, and both lines are part of it.
+
+    Written through the main log instead, the line arrives wrapped in run-log
+    machinery and after the refusal it explains, because the two then travel by
+    different routes.
+    """
+    monkeypatch.setenv('NAV_RESULTS_DB', '')
+    main_report(['--output-dir', str(tmp_path / 'report')])
+    assert 'NAV_RESULTS_DB' not in capsys.readouterr().out
+
+
 def test_main_report_refuses_an_index_that_is_not_there(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

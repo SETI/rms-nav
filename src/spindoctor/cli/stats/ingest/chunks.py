@@ -16,9 +16,12 @@ more: the run continues, and the closing summary tallies the failures by
 reason, so several hundred documents that were never navigation results read as
 exactly that rather than as a broken ingest.
 
-A refused file is recorded in ``failed_files`` with the same two metrics an
+A refused file is recorded in ``failed_files`` with everything the walk knows
+about it and nothing the document would have said: the same two metrics an
 ingested one records, so an unchanged refusal is skipped on the next pass
-instead of being downloaded and parsed again forever.  A retrieval that never
+instead of being downloaded and parsed again forever, plus the volume it lives
+under and whether a summary PNG sits beside it, which is what a selection
+filter asks of a file it never opens.  A retrieval that never
 delivered the file is counted without being recorded: it says nothing about the
 file that will still be true next pass, and a recorded refusal is skipped for
 as long as the file does not change.
@@ -41,6 +44,7 @@ from spindoctor.cli.stats.ingest_rows import (
     ImageRows,
     MetadataDocumentError,
     MetadataSource,
+    _volume_of,
     rows_from_metadata,
 )
 
@@ -183,6 +187,15 @@ def _ingest_chunk(
                         'root_url': root_url,
                         'results_path_stub': listed.results_path_stub,
                         'reason': exc.reason,
+                        # The walk knows both of these whatever the file says,
+                        # and a selection filter asks about the file rather
+                        # than about its contents: a refused document is one
+                        # the tree still holds, under a volume, possibly with a
+                        # summary beside it.  The volume is derived by the same
+                        # function the images row uses, so the two tables can
+                        # never disagree about which volume a stub is under.
+                        'volume': _volume_of(listed.results_path_stub),
+                        'has_summary_png': source.has_summary_png,
                         'mtime_ns': listed.mtime_ns,
                         'size_bytes': listed.size_bytes,
                     }

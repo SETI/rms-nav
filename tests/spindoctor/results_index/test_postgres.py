@@ -30,13 +30,16 @@ from tests.spindoctor.results_index.conftest import (
 )
 
 from spindoctor.results_index import (
+    FAILED_FILES,
     FEATURE_SOURCES,
     IMAGES,
+    INGEST_RUNS,
     SCHEMA_META,
     SCHEMA_VERSION,
     TECHNIQUES,
     open_index,
 )
+from spindoctor.results_index.selection import read_result_stubs
 
 pytestmark = pytest.mark.postgres
 
@@ -418,3 +421,228 @@ def test_a_nanosecond_mtime_round_trips(postgres_url: str) -> None:
         with engine.connect() as connection:
             stored = connection.execute(sqlalchemy.select(IMAGES.c.mtime_ns)).scalar()
     assert stored == mtime_ns
+
+
+SELECTION_ROOT = '/data/nav-results'
+"""The results root the selection filters are asked about."""
+
+SELECTION_OTHER_ROOT = '/data/other-nav-results'
+"""A second ingested root, holding a row for the same stub."""
+
+REFUSED_STUB = 'COISS_2001/data/1294561143_1295221348/N1294561203_1_CALIB'
+"""A file the ingest refused, which is still a file that exists."""
+
+SELECTION_VOLUME = 'COISS_2001'
+"""The volume the selection reads."""
+
+SELECTION_INGESTED = '2026-08-08T00:00:00+00:00'
+"""When the pass over the root under test finished."""
+
+SELECTION_OTHER_INGESTED = '2026-08-09T00:00:00+00:00'
+"""When the pass over the other root finished, which is later and is not this one."""
+
+
+def _seed_selection_rows(url: str) -> None:
+    """Create the index and write the rows the selection filters read.
+
+    The row under test records a fatal error and no ``status_error`` at all,
+    which is the value SQL comparison handles differently from every other; the
+    other root's row for the same stub records the SPICE error the filters tell
+    apart, so a query that dropped the root would answer with it.
+
+    The two roots' run rows differ the same way.  The other root is passed over
+    second, so its run is the newest in the index, and it is the only one that
+    records a missed directory: what the pass over this root recorded about
+    itself is therefore visibly its own.
+
+    Parameters:
+        url: The index to create and write into.
+    """
+    with opened(url, create=True) as engine, engine.begin() as connection:
+        connection.execute(
+            IMAGES.insert(),
+            [
+                image_row(
+                    root_url=SELECTION_ROOT,
+                    results_path_stub=STUB,
+                    volume=SELECTION_VOLUME,
+                    status='error',
+                    status_error=None,
+                    has_summary_png=True,
+                ),
+                image_row(
+                    root_url=SELECTION_OTHER_ROOT,
+                    results_path_stub=STUB,
+                    volume=SELECTION_VOLUME,
+                    status='error',
+                    status_error='missing_spice_data',
+                    has_summary_png=True,
+                ),
+            ],
+        )
+        connection.execute(
+            FAILED_FILES.insert(),
+            [
+                {
+                    'root_url': SELECTION_ROOT,
+                    'results_path_stub': REFUSED_STUB,
+                    'reason': 'not a current-schema navigation document',
+                    'volume': SELECTION_VOLUME,
+                    'has_summary_png': True,
+                    'mtime_ns': 1,
+                    'size_bytes': 2,
+                }
+            ],
+        )
+        connection.execute(
+            INGEST_RUNS.insert(),
+            [
+                {
+                    'root_url': root_url,
+                    'started_utc': stamp,
+                    'finished_utc': stamp,
+                    'directories_missed': missed,
+                    'schema_version': SCHEMA_VERSION,
+                }
+                for root_url, stamp, missed in (
+                    (SELECTION_ROOT, SELECTION_INGESTED, None),
+                    (SELECTION_OTHER_ROOT, SELECTION_OTHER_INGESTED, 4),
+                )
+            ],
+        )
+
+
+def test_the_selection_reads_a_document_and_a_refusal_on_postgresql(postgres_url: str) -> None:
+    """The two tables are read as one, on the backend that types their columns.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_selection_rows(postgres_url)
+    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+    assert stubs.with_metadata == frozenset({STUB, REFUSED_STUB})
+
+
+def test_the_summary_flag_survives_the_union_on_postgresql(postgres_url: str) -> None:
+    """A boolean column of each table is one column of one type in the union.
+
+    PostgreSQL refuses a union whose columns disagree, and refuses an integer
+    where a boolean belongs; SQLite accepts both.  Both rows carry a summary,
+    one on an image and one on a refusal, so the union is exercised from both
+    sides.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_selection_rows(postgres_url)
+    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+    assert stubs.with_summary_png == frozenset({STUB, REFUSED_STUB})
+
+
+def test_a_fatal_error_with_no_cause_is_not_a_spice_error_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """NULL is not equal to anything and not unequal to anything either.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_selection_rows(postgres_url)
+    stubs = read_result_stubs(
+        postgres_url, SELECTION_ROOT, [SELECTION_VOLUME], has_offset_nonspice_error=True
+    )
+    assert stubs.matching_error == frozenset({STUB})
+
+
+def test_the_error_filter_answers_for_one_root_on_postgresql(postgres_url: str) -> None:
+    """The other root's row for this stub is a SPICE error, and is not read.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_selection_rows(postgres_url)
+    stubs = read_result_stubs(
+        postgres_url, SELECTION_ROOT, [SELECTION_VOLUME], has_offset_spice_error=True
+    )
+    assert stubs.matching_error == frozenset()
+
+
+def test_the_missed_count_answers_for_one_root_on_postgresql(postgres_url: str) -> None:
+    """The run table is keyed by root as well, and the newest run in it is another's.
+
+    This root's run records no count at all, which on a strictly typed backend
+    is a NULL integer rather than a zero, and the other root's -- the newer of
+    the two -- records four.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_selection_rows(postgres_url)
+    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+    assert stubs.directories_missed == 0
+
+
+def test_the_snapshot_time_answers_for_one_root_on_postgresql(postgres_url: str) -> None:
+    """How old this answer is, on the backend that returns the stamp as it typed it.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_selection_rows(postgres_url)
+    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+    assert stubs.ingested_utc == SELECTION_INGESTED
+
+
+def _seeded_without_the_refusals(url: str) -> None:
+    """Seed the selection rows and then take the refusals table away.
+
+    An index whose account was granted the rows it reports on and not the
+    bookkeeping beside them is the case the refusal names, and dropping the
+    table is how that account's view of it is reproduced.
+
+    Parameters:
+        url: The index to create, write into, and take a table from.
+    """
+    _seed_selection_rows(url)
+    with opened(url) as engine, engine.begin() as connection:
+        connection.execute(sqlalchemy.text(f'DROP TABLE {FAILED_FILES.name}'))
+
+
+def test_a_table_this_account_cannot_read_is_reported_on_postgresql(postgres_url: str) -> None:
+    """A missing relation is a different exception class here, and is still translated.
+
+    An index whose account was granted the rows it reports on and not the
+    bookkeeping beside them is the case the refusal names, and it is a
+    PostgreSQL case: the class SQLite raises for the same query is another one,
+    so a seam that caught only what SQLite raises would let this one out.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seeded_without_the_refusals(postgres_url)
+    with pytest.raises(ValueError, match='could not be read'):
+        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+
+
+def test_a_failing_query_raises_no_database_exception_on_postgresql(postgres_url: str) -> None:
+    """The consumer that never imports the database layer cannot name its types.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seeded_without_the_refusals(postgres_url)
+    with pytest.raises(ValueError) as excinfo:
+        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+    assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
+
+
+def test_a_failing_query_is_reported_without_its_sql_on_postgresql(postgres_url: str) -> None:
+    """The advice is what an operator reads, and a statement dump buries it.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seeded_without_the_refusals(postgres_url)
+    with pytest.raises(ValueError) as excinfo:
+        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+    assert 'SELECT' not in str(excinfo.value)

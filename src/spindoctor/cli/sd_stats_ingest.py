@@ -34,40 +34,12 @@ from spindoctor.config import (
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_STATS_INGEST
-from spindoctor.results_index import masked_url, open_index
+from spindoctor.results_index import open_index
+from spindoctor.support.command_line import masked_command_line
 
 PROGRAM_NAME = SD_STATS_INGEST
 """Program identity: names the main log directory and the
 ``logging.programs`` configuration block for this program."""
-
-URL_OPTIONS = ('--results-db',)
-"""Options whose value is a connection URL and can therefore carry a password.
-
-Only these are masked in the logged command line.  A results root is not a
-connection URL: it has no credentials to hide, and it is the one word of the
-command line an operator reads the run log to correct, so masking one would
-corrupt the string and protect nothing.
-"""
-
-
-def _names_a_url_option(word: str) -> bool:
-    """Whether a command-line word names an option whose value is a URL.
-
-    Any distinguishing prefix of a long option is the option: argparse accepts
-    ``--results-d`` for ``--results-db`` and consumes the URL after it just the
-    same, so matching the full spelling alone would leave the abbreviated
-    command line unmasked.  A prefix that argparse would have rejected never
-    reaches here, since parsing runs first and exits on one.
-
-    Parameters:
-        word: One word of the command line, without any ``=value`` part.
-
-    Returns:
-        True when the word names one of :data:`URL_OPTIONS`.
-    """
-    if not word.startswith('--') or word == '--':
-        return False
-    return any(option.startswith(word) for option in URL_OPTIONS)
 
 
 def parse_args(command_list: list[str]) -> argparse.Namespace:
@@ -125,38 +97,6 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     add_logging_arguments(cmdparser, has_image_logger=False)
 
     return cmdparser.parse_args(command_list)
-
-
-def masked_command_line(command_list: list[str]) -> list[str]:
-    """Return a command line with the value of every connection-URL option masked.
-
-    The command line is logged because which of the command line, the
-    configuration file and the environment supplied a value is exactly what a
-    reader of a failed run needs to know, and one of its words can be a database
-    password.  Every spelling argparse accepts is covered: the value as a
-    separate word, the value joined to the option by ``=``, and either of those
-    under an abbreviation of the option's name.
-
-    Parameters:
-        command_list: The arguments, without the program name.
-
-    Returns:
-        The arguments, with every connection URL among them masked.
-    """
-    masked: list[str] = []
-    value_of_url_option = False
-    for word in command_list:
-        if value_of_url_option:
-            masked.append(masked_url(word))
-            value_of_url_option = False
-            continue
-        option, separator, value = word.partition('=')
-        if separator and _names_a_url_option(option):
-            masked.append(f'{option}={masked_url(value)}')
-            continue
-        masked.append(word)
-        value_of_url_option = _names_a_url_option(word)
-    return masked
 
 
 def _log_outcome(counts: IngestCounts) -> None:
