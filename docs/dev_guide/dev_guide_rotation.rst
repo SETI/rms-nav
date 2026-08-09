@@ -10,13 +10,29 @@ enough to be observable per-image.
 Why per-instrument
 ==================
 
-Cassini ISS and New Horizons LORRI report attitude that is essentially
-free of rotation residual; their offsets are 2-DoF (``dv``, ``du``).
-Voyager ISS and Galileo SSI carry image-to-image rotation residuals up
-to a few degrees that are not consistent enough to be calibrated out
-mission-wide. For those instruments the navigator must fit a small
-rotation as part of the per-image solution, which is what
+An instrument whose reconstructed attitude is essentially free of
+rotation residual is navigated in 2 degrees of freedom (``dv``, ``du``),
+and one whose attitude carries an image-to-image residual too
+inconsistent to be calibrated out mission-wide needs a small rotation
+fitted as part of each image's solution, which is what
 ``fit_camera_rotation`` enables.
+
+Three things decide the setting for a given instrument, and only the
+first is about the measurement: whether the residual is frame-varying
+rather than one common value a fixed frame-kernel correction would
+remove; what the per-frame fit costs, since it turns every technique's
+2x2 covariance into a 3x3 one; and whether the instrument's corrected
+pointing is wanted as a C-kernel, because a fitted rotation turns about
+a per-technique pivot the result does not record and therefore cannot be
+expressed as an attitude at all. An instrument with the flag on writes
+no corrected C-kernels.
+
+The measured per-instrument twist and its frame-to-frame scatter are in
+:doc:`/fov_distortion_report/fov_distortion_report`. What each
+instrument's flag is actually set to, and why, is stated in its chapter
+under :doc:`instruments/instruments` -- one chapter, one setting, one
+reason -- rather than enumerated here, where it would drift out of step
+with the configuration files.
 
 The flag
 ========
@@ -25,7 +41,7 @@ Each per-camera config block under ``config_4N0_inst_*.yaml`` carries:
 
 .. code-block:: yaml
 
-    fit_camera_rotation: true        # Voyager ISS, Galileo SSI default
+    fit_camera_rotation: false       # on for exactly one instrument today
     max_rotation_deg: 5.0            # bound on the rotation magnitude
 
 The orchestrator reads both fields from

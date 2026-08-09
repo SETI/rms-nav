@@ -188,6 +188,28 @@ any instrument-specific helpers. Update the instrument registry in
        ):
            ...
 
+An instrument also needs, in the same change:
+
+1. **A configuration block** in
+   ``src/spindoctor/config_files/config_4N0_inst_*.yaml``, carrying the
+   instrument's units, saturation ceiling, missing-pixel marker, image-quality
+   thresholds, extended-FOV margins, PSF parameters and rotation-fitting flag.
+2. **A SPICE frame identity** in ``_frame_identity``
+   (:mod:`spindoctor.support.cmatrix`) and a clock row in
+   :data:`~spindoctor.spice_ids.CK_OBJECT_SCLK_ID`, without which no image of
+   the instrument records a corrected attitude and none can reach a C-kernel.
+   See :doc:`dev_guide_ck_kernels` for the full list of what a mission needs
+   there.
+3. **A chapter in each guide**: ``docs/user_guide/instruments/<name>.rst`` and
+   ``docs/dev_guide/instruments/<name>.rst``, each copied from the
+   ``_template.rst`` beside it and carrying every section that template
+   declares. The chapter file name is the instrument's observation module name
+   with the ``obs_inst_`` prefix removed, so ``obs_inst_new_instrument.py``
+   requires ``new_instrument.rst``. Both indexes discover chapters by glob, so
+   nothing else has to be edited -- and
+   ``tests/spindoctor/test_instrument_chapters.py`` fails on a registered
+   instrument with no chapter, or a chapter missing a template section.
+
 Adding a new NavModel
 ---------------------
 
