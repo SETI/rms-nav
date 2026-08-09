@@ -16,6 +16,7 @@ the finish time when it completes, so a run that died halfway leaves a row that
 says as much.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import sqlalchemy
@@ -24,7 +25,13 @@ from filecache import FCPath
 from spindoctor.results_index.engine import masked_url
 from spindoctor.results_index.schema import INGEST_RUNS
 
-__all__ = ['ingested_roots', 'normalize_root_url', 'require_ingested_roots']
+__all__ = [
+    'NewestPass',
+    'ingested_roots',
+    'newest_pass',
+    'normalize_root_url',
+    'require_ingested_roots',
+]
 
 
 def normalize_root_url(root: str | Path | FCPath) -> str:
@@ -94,6 +101,62 @@ def ingested_roots(connection: sqlalchemy.Connection) -> list[str]:
         .order_by(INGEST_RUNS.c.root_url)
     )
     return [str(row.root_url) for row in connection.execute(completed)]
+
+
+@dataclass(frozen=True)
+class NewestPass:
+    """What the newest ingest pass over one root recorded about its own reach.
+
+    Parameters:
+        finished_utc: When that pass finished, as it stamped it, and None when
+            the root has no run row or the run never finished.  It is the age
+            of the answer a consumer reads out of the index, which is the one
+            fact that says whether the tree has moved on since.
+        directories_missed: How many directories that pass did not list.
+    """
+
+    finished_utc: str | None
+    directories_missed: int
+
+
+def newest_pass(connection: sqlalchemy.Connection, root_url: str) -> NewestPass:
+    """Return what the newest pass over one root recorded about itself.
+
+    A directory nobody enumerated holds files nobody recorded, and absence of a
+    row under it therefore says nothing about the image whose document is there.
+    A consumer that reads absence as a positive answer -- "this image was never
+    navigated" -- asks for this and says so when the count is not zero, because
+    the run completed all the same and nothing else in the index shows the gap.
+    It asks for the finish time in the same breath and for the same reason: the
+    index answers as of that moment and detects no change since, so the moment
+    belongs with the answer rather than in the head of whoever exported the URL.
+
+    Both come from the newest run row of the named root alone.  One database
+    serves several roots, and the newest run in the table is routinely another
+    root's.
+
+    Parameters:
+        connection: An open connection to the index.
+        root_url: The normalized root to ask about.
+
+    Returns:
+        What that pass recorded, with no finish time and a count of zero when
+        the root has no run row at all.
+    """
+    newest = (
+        sqlalchemy.select(INGEST_RUNS.c.finished_utc, INGEST_RUNS.c.directories_missed)
+        .where(INGEST_RUNS.c.root_url == root_url)
+        .order_by(INGEST_RUNS.c.run_id.desc())
+        .limit(1)
+    )
+    row = connection.execute(newest).first()
+    if row is None:
+        return NewestPass(finished_utc=None, directories_missed=0)
+    missed = row.directories_missed
+    return NewestPass(
+        finished_utc=None if row.finished_utc is None else str(row.finished_utc),
+        directories_missed=0 if missed is None else int(missed),
+    )
 
 
 def require_ingested_roots(

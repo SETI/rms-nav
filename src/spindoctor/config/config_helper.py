@@ -1,9 +1,11 @@
 import argparse
 import os
+from collections.abc import Callable
 
 from filecache import FCPath
 
 from .config import Config
+from .logger import MAIN_LOGGER
 from .logging_keys import validate_logging_config
 
 RESULTS_DB_NONE = 'none'
@@ -168,7 +170,12 @@ def get_pds4_bundle_results_root(arguments: argparse.Namespace, config: Config) 
     return pds4_bundle_root_str
 
 
-def get_results_db_url(arguments: argparse.Namespace, config: Config) -> str | None:
+def get_results_db_url(
+    arguments: argparse.Namespace,
+    config: Config,
+    *,
+    warn: Callable[[str], None] | None = None,
+) -> str | None:
     """Get the results index URL from the arguments, configuration, or environment.
 
     First look in arguments.results_db, then in config.environment.results_db, then in
@@ -179,12 +186,25 @@ def get_results_db_url(arguments: argparse.Namespace, config: Config) -> str | N
     value ``none`` resolves to the same answer, so a run on a machine that exports
     NAV_RESULTS_DB can still be told to read files by passing ``--results-db none``.
     The sentinel is honored wherever the value came from, so a configuration file can
-    opt out of an exported variable in the same way, and it is matched as the exact
-    string, so a URL that merely contains the word is still a URL.
+    opt out of an exported variable in the same way; surrounding spaces are not part
+    of it, and it is otherwise matched as the exact string, so a URL that merely
+    contains the word is still a URL.
+
+    A value that is empty, or nothing but spaces, names no index either, and is
+    answered the same way rather than passed on: a URL parser handed one refuses
+    with a message that begins with the colon after a name it does not have, and
+    on a machine exporting an empty NAV_RESULTS_DB that refusal would stop every
+    run.  It is not silent, because the level that set it may have meant to set a
+    URL, so the level is named in a warning.  What the warning says stops at what
+    was found and what to write instead: what follows from no index belongs to the
+    caller, which is also why the caller supplies the sink it is written to.
 
     Parameters:
         arguments: The parsed arguments.
         config: The configuration possibly containing the environment section.
+        warn: Where to report a value that names no index, or None to report it
+            through the main log.  A program whose output is terminal text for a
+            person rather than a run log passes its own printer.
 
     Returns:
         The results index connection URL, or None when no index was named.
@@ -193,14 +213,32 @@ def get_results_db_url(arguments: argparse.Namespace, config: Config) -> str | N
     # --results-db argument, and most configurations name no index -- so each is
     # asked for the key rather than made to raise for it, which would also hide an
     # AttributeError raised by something other than the lookup.
+    named_by = '--results-db'
     results_db_str = vars(arguments).get('results_db')
     if results_db_str is None:
+        named_by = 'the environment.results_db configuration variable'
         results_db_str = config.environment.get('results_db')
     if results_db_str is None:
+        named_by = 'the NAV_RESULTS_DB environment variable'
         results_db_str = os.getenv('NAV_RESULTS_DB')
-    if results_db_str is None or results_db_str == RESULTS_DB_NONE:
+    if results_db_str is None:
         return None
-    return str(results_db_str)
+    url = str(results_db_str)
+    if not url.strip():
+        message = (
+            '%s is set to an empty value, which names no results index. Write %s to '
+            'name none deliberately, or a connection URL to name one.'
+        )
+        if warn is None:
+            # Interpolated by the logger rather than here, so a level that
+            # discards the line does not pay to build it.
+            MAIN_LOGGER.warning(message, named_by, RESULTS_DB_NONE)
+        else:
+            warn(message % (named_by, RESULTS_DB_NONE))
+        return None
+    if url.strip() == RESULTS_DB_NONE:
+        return None
+    return url
 
 
 def load_default_and_user_config(arguments: argparse.Namespace, config: Config) -> None:

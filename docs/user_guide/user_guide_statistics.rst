@@ -75,6 +75,19 @@ long as it does not change. ``--force`` re-reads everything; so does a storage
 backend whose listing reports neither size nor modification time, which ingest
 warns about rather than silently skipping.
 
+**Those two metrics are everything a listing supplies about a file.** A document
+rewritten in place that kept both of them is therefore one the ingest cannot
+tell from the document it already read: it is skipped, and its row goes on
+recording what the earlier document said, however many passes complete
+afterwards. A tree restored by a copy that preserves modification times, a
+document patched and then stamped back from a sibling, and a backend reporting
+one modification time for two writes of equal length all produce that; an
+ordinary re-navigation writes a different length at a later time and does not.
+``sd_stats_ingest --force`` re-reads every document and is what puts such a row
+right. Reading each file to find out whether it needs reading is the retrieval
+the skip exists to avoid, which is why the remedy is a flag rather than a finer
+comparison.
+
 **A recorded refusal outlives the version of SpinDoctor that made it.** The
 record says what was wrong with the file, not which build read it, so a document
 refused by one build is skipped by every later one, including a build that has

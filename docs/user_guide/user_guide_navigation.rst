@@ -123,6 +123,17 @@ Environment options
   will be written, overriding both the ``NAV_RESULTS_ROOT`` environment variable
   and any corresponding configuration setting.
 
+* ``--results-db URL``: connection URL of a results index (a ``sqlite:`` URL
+  naming a local path, or a ``postgresql+psycopg:`` URL naming a server),
+  overriding both the ``NAV_RESULTS_DB`` environment variable and any
+  corresponding configuration setting. The results-file selection filters below
+  are then answered by one query over the index instead of by reading the
+  results tree. Pass ``--results-db none`` to read the tree even when a URL is
+  set in the environment or a configuration file; the opt-out is that word
+  exactly, in lower case, since anything else is read as the URL of an index.
+  A value that is empty, or nothing but spaces, names no index either: the run
+  reads the results tree and says in its log which setting was left empty.
+
 Navigation options
 ^^^^^^^^^^^^^^^^^^
 
@@ -175,8 +186,9 @@ For PDS3 datasets (``coiss``, ``coiss_pds3``, ``coiss_cruise``, ``coiss_cruise_p
   ``--has-offset-error``, but restricted to fatal errors caused by / not caused
   by missing SPICE data.
 
-The results-file filters answer their questions three ways, all efficient even
-when the results root is a cloud location. Presence filters
+The results-file filters answer their questions three ways when they read the
+results tree, all of them efficient even when the results root is a cloud
+location. Presence filters
 (``--has-offset-file`` / ``--has-png-file``) and the error filters
 (``--has-offset-error`` and its SPICE variants) walk the results tree once per
 selected volume and test each candidate against the collected file set. Pure
@@ -184,6 +196,35 @@ absence filters (``--has-no-offset-file`` / ``--has-no-png-file`` with no
 presence or error filter active) do not walk the tree; they answer with batched
 ``exists()`` calls. The error filters additionally retrieve the matched metadata
 files in batches to inspect their contents.
+
+Given ``--results-db``, all of them are answered instead by one query per
+enumeration, and the results tree is not read at all. The index is a snapshot of
+the tree as of the last ingest over that root, with no staleness detection: an
+image navigated since is one the index does not hold, so ``--has-no-offset-file``
+selects it again, and a result file deleted since is one the index still holds,
+so ``--has-offset-file`` selects an image whose metadata file is gone. The run
+log says when the pass that filled the index finished and how long ago that was,
+which is what says whether either applies to this run. Run ``sd_stats_ingest`` to
+bring the index up to date, or pass ``--results-db none`` for a run that must
+read the tree. A results root the index holds no completed ingest of is refused
+rather than answered, because absence of a row would otherwise read as "this
+image was never navigated".
+
+A document rewritten in place that kept the length and the modification time it
+had before is one the ingest skips, because those two metrics are everything a
+listing supplies about a file. Its row goes on recording what the earlier
+document said, so an error filter answers from that one however recently the
+last pass finished. Running ``sd_stats_ingest --force`` over the root re-reads
+every document and is what puts such a row right.
+
+An ingest that could not list every directory under the root reports the number
+it missed, and every enumeration answered from that index repeats it as a
+warning. It bounds both directions of the paragraph above: an image under a
+directory nobody listed is absent from the index whether or not it was
+navigated, and such a pass removes no row anywhere under the root, so a result
+file deleted before it keeps its row until a pass lists the whole root. Fixing
+what stopped the walk -- a directory permission, a symbolic link pointing back
+up the tree -- and re-running ``sd_stats_ingest`` clears both.
 
 Miscellaneous
 ^^^^^^^^^^^^^

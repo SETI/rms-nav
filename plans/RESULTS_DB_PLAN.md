@@ -338,8 +338,16 @@ still crossed, because a corpus quietly narrowed proves less than it says.
 
 The rule is a named function of the Core layer rather than a private helper of
 the opener, because a run log records the command line a program was given and
-one of those words can be a connection URL. `sd_stats_ingest` masks the value of
-`--results-db` in the command line it logs, in both spellings argparse accepts.
+one of those words can be a connection URL. Which words those are is decided by
+`masked_command_line` in `spindoctor/support/command_line.py`, which names the
+connection-URL options in one place and applies the rule to each of their
+values. `log_run_environment` masks every command line it records through it, so
+`sd_offset`, `sd_consolidate_metadata`, `sd_mosaic`, `sd_create_ck` and the
+per-image log of `navigate_image_files` are covered by it; `sd_stats_ingest`,
+which logs its arguments itself, calls the same function. Every spelling
+argparse accepts is masked: the value as a separate word, the value joined to
+the option by `=`, and either of those under a distinguishing abbreviation of
+the option's name.
 
 **A results root is never masked.** It is not a connection URL, it has no
 credentials to hide, and it is the one string an operator reads a run log to
@@ -511,13 +519,45 @@ overriding the configuration key and the environment variable. Without an
 explicit opt-out, an exported `NAV_RESULTS_DB` would make file-mode runs
 impossible on that machine. The sentinel is recognized at whichever level
 supplied the value, so a configuration file or an exported variable can opt out
-the same way; it is matched as the exact string, so a URL that merely contains
-the word is still a URL.
+the same way; the spaces around it are not part of it, and it is otherwise
+matched as the exact string, so a URL that merely contains the word is still a
+URL.
+
+A value that is empty, or nothing but spaces, resolves to no index as well,
+without falling through to the next level -- the level that set it said
+something, and an operator who writes an empty option is not asking for whatever
+the machine exports. It is not silent: the level that carries it is named in a
+warning saying that the value names no index, and how to ask for that on
+purpose. The warning stops there. What follows from having no index is the
+caller's, because one resolver serves `sd_offset`, which then reads files, and
+the two statistics programs, which have no file-reading mode and refuse; a
+warning that stated either would be false for the others and would arrive one
+line before their own message said the opposite. The caller supplies the sink as
+well as the meaning, so a program whose output is terminal text for a person
+prints the line where its other diagnostics go rather than having a run-log line
+routed into its report. Passing it on instead is what an unset variable
+expanded in a wrapper script produces, and it reaches the URL parser as a name
+that is not there, whose refusal begins with the colon after nothing and stops
+every run on the machine.
 
 The codebase convention for an argument of this kind is that each program
 defines its own, as it does for the results roots: the reprojection family
 shares `add_common_env_args` in `spindoctor/cli/reproj/args.py`, and that is
 the only grouping.
+
+**Declaring the option is what makes a program index-backed, and nothing else
+is.** This is the rule that lets section 1 and this section both hold. Section 1
+puts bundle generation and `sd_consolidate_metadata` out of scope and says both
+keep reading files; this section says every consuming program accepts
+`--results-db`. A program that inherited a resolved URL from the configuration
+or the environment would satisfy neither: the out-of-scope programs would stop
+reading files on a machine that exports `NAV_RESULTS_DB`, and they would have no
+command line to say no on. So resolution is gated on the declaration. A program
+that declares the option resolves a URL through the three levels above, in that
+order; a program that does not declare it resolves nothing, whatever the machine
+exports, and passes no URL at all. A shared enumerator therefore reads the
+option from the arguments it was handed rather than resolving one for every
+caller, and a library caller that names no index gets none.
 
 A program that resolves a URL and cannot open it fails immediately with that
 error; it does not silently fall back to reading files. Falling back would
@@ -554,13 +594,20 @@ nothing about the document. `--force` re-reads everything.
 
 **A refused file is bookkeeping, not a row.** A file that is not a
 current-schema navigation document is recorded in a `failed_files` table --
-`root_url`, `results_path_stub`, `reason`, `mtime_ns`, `size_bytes` -- and is
+`root_url`, `results_path_stub`, `reason`, `volume`, `has_summary_png`,
+`mtime_ns`, `size_bytes` -- and is
 skipped on the next pass on the same evidence as an ingested one, so a tree
 whose non-navigation files outnumber its results does not pay to download and
 parse every one of them on every run. It is a table of its own rather than a
 marked `images` row: absence of an `images` row is what every consumer reads as
 "this image was never navigated", and a file with no usable data must leave
-that answer alone. `--force` re-reads a refused file too. A document that
+that answer alone. The two columns beyond the bookkeeping are the two facts the
+walk knows about a file whatever the file turned out to contain: which volume
+it is under, and whether a summary PNG sits beside it. A selection filter asks
+about the file rather than about its contents, so a refused document answers
+those two exactly as an ingested one does, and the volume has to be a column
+because otherwise a one-volume enumeration fetches every refusal in the root.
+`--force` re-reads a refused file too. A document that
 ingested on an earlier pass and no longer reads has its `images` row deleted as
 the refusal is written, since a row nothing backs would answer for an image
 nothing produced; and a file that was refused and now reads has its refusal
@@ -868,7 +915,18 @@ with the same message shapes.
 filters become one query per enumeration instead of a walk per volume plus
 batched reads -- preserving the exact semantics of both existing modes (the
 walked-set mode and the absence-only batched-`exists()` mode) and every
-contradictory-pair rejection in the constructor. `ResultsFilter` lives in
+contradictory-pair rejection in the constructor, apart from the carve-out
+enumerated in section 4's Phase 5 entry. A file the ingest refused is
+still a file the walk finds, so the presence and absence filters read
+`failed_files` alongside `images`, and that table carries the volume and the
+summary-PNG flag for the same reason. The carve-out is what one ingest pass
+could read and record, never a property of this query; it is enumerated in the
+Phase 5 entry and repeated in the module docstring, each member has a test of
+its own, and a member found later is added in all three places in one commit.
+The enumeration is maintained rather than audited closed: it names what is known
+to differ, and a divergence nobody has found yet is not evidence that none
+exists.
+`ResultsFilter` lives in
 `spindoctor.dataset`, which `sd_offset` imports on every run, so the
 index-backed implementation lives in `spindoctor/results_index/selection.py`
 and `results_filter.py` imports it **inside the branch where a URL was
@@ -1098,14 +1156,15 @@ Details settled during execution, none of them a change of intent:
   separator is SQL, and a test pins that the exclusion does not reach a
   statement -- against a widened exclusion as well as a blanked one, since a
   pattern that still excludes something is what would quietly empty the scan.
-- **The column set changed, so the schema version is 4.** The JSON columns
-  gained `none_as_null` (section 2.3), `ingest_runs` gained `files_removed` and
-  then `directories_missed`, and `failed_files` was added (section 2.7). There
-  are no migrations, so this is one version bump covering all four. The last of
-  them arrived after the version had already been raised once in this phase, and
-  it was raised again rather than reused: an index built from an earlier state
-  of this phase would otherwise pass the version gate and then fail on a column
-  that is not there, which is exactly what the gate exists to prevent.
+- **The column set changed, so the schema version was raised to 4 here.** The
+  JSON columns gained `none_as_null` (section 2.3), `ingest_runs` gained
+  `files_removed` and then `directories_missed`, and `failed_files` was added
+  (section 2.7). There are no migrations, so this is one version bump covering
+  all four. The last of them arrived after the version had already been raised
+  once in this phase, and it was raised again rather than reused: an index built
+  from an earlier state of this phase would otherwise pass the version gate and
+  then fail on a column that is not there, which is exactly what the gate exists
+  to prevent. Phase 5 raises it again, to 5, on the same reasoning.
 - **The CSV export states its line terminator.** `csv.writer` defaults to CRLF;
   the export now names LF. The frozen `images.csv` blobs are LF, so what the
   export writes matches them byte for byte, which the previous implementation's
@@ -1333,12 +1392,155 @@ outputs.
 import per section 2.9.
 
 Tests: for every filter flag, both existing modes (walked and
-absence-only-batched) against the index-backed answer over a fixture tree;
-every contradictory-pair rejection unchanged; an import-time assertion that
+absence-only-batched) against the index-backed answer over a fixture tree, whose
+malformed-metadata images carry a summary PNG so the equivalence covers the
+refusal table; every contradictory-pair rejection unchanged; the command-line
+surface of every program that declares `--results-db` and of every program
+section 1 keeps reading files; an exported URL answering an enumeration for the
+first and not for the second; and an import-time assertion that
 `import spindoctor.dataset` does not import `sqlalchemy`. **That assertion is
 criterion 2's only test and this phase owns it**: no earlier phase writes it,
 because the branch-local import it protects is added here, so it must not be
 assumed to exist already.
+
+Details settled during execution, none of them a change of intent:
+
+- **The selection layer hands back plain sets.** `read_result_stubs` opens the
+  index, asks it, disposes the engine and returns three frozen sets of stubs,
+  so no SQLAlchemy object and no SQLAlchemy type reaches `spindoctor.dataset`
+  -- not even in an annotation, which a branch-local import could not satisfy.
+- **Presence is read from `failed_files` as well as `images`.** A
+  `*_metadata.json` the ingest refused is a file the walk finds, so without the
+  refusal table criterion 1's malformed-metadata image would be present in the
+  tree and absent in the index, for `--has-offset-file` and
+  `--has-no-offset-file` alike.
+- **`failed_files` carries the volume and the summary-PNG flag**, which is a
+  column-set change and so a schema version bump, to 5. Both are facts of the
+  walk rather than of the document, so they are as knowable for a file nothing
+  could be read from as for one that ingested, and a selection filter asks about
+  the file and not about its contents. Without the flag, a summary PNG beside a
+  refused document reads as absent, and an entire results root written by an
+  older metadata schema -- the plan's own headline refusal reason, and a tree
+  where every image has a PNG beside it -- answers `--has-png-file` and
+  `--has-no-png-file` backwards. Without the volume, a one-volume enumeration
+  fetches every refusal the root holds. The incremental skip compares the flag
+  for a refusal exactly as it does for an image, since a PNG written after the
+  refusal was recorded changes the row that ought to be stored. That skip reads
+  the refusal table for the root it is walking, and the read is exercised with a
+  second root holding a copy of the same tree, which is what a mirror or a
+  restored backup produces: the same stubs at the same lengths and the same
+  times, so a refusal read without its root makes a pass decline to read a file
+  it has never seen and write no row at all for it -- neither an image row nor a
+  refusal, which every consumer reads as an image nobody navigated.
+- **What the index answers differently, as far as it is known.** Each member is
+  stated in the module docstring, each has a test of its own, and a member found
+  later is added here, in the docstring, and in a test, in the same commit. The
+  list is maintained rather than closed: it is what execution and code reading
+  have found, and a divergence nobody has found yet would be a defect of this
+  list rather than a departure from it.
+  1. A summary PNG with **no file beside it** is recorded nowhere, because the
+     flag lives on the row of the file it was found beside. It reads as absent,
+     which makes `--has-no-offset-file --has-png-file` empty under an index.
+     This one is a property of the schema and not of the query, and the fix is
+     not a column: it is a row keyed by a stub no document backs, and both the
+     presence filters and the ingest's own skip logic read such a row as
+     evidence that a document exists.
+  2. A document that is valid JSON and carries `status` but is **not a
+     navigation document** is refused by ingest, so it records no status and
+     matches no error filter, where the tree path reads `status` and
+     `status_error` out of any JSON object it can parse.
+  3. A document whose top-level `status` is **absent, empty, or not a string**
+     takes its recorded status from `navigation_result.status`, which is where
+     the rest of the index reads an outcome from; the tree path reads the
+     top-level field alone. Such a document can therefore match an error filter
+     under the index and not under the tree.
+  4. A file that exists and has **no row at all** reads as absent, which is what
+     the absence filters read as "this image was never navigated". Three passes
+     end that way: a file the pass could not retrieve; a document the pass read
+     whose rows the database would not store (section 2.7's isolated write
+     failure); and a file under a directory the walk did not list. The first two
+     are deliberate -- a recorded row would be skipped for as long as the file
+     did not change, and the next pass would never retry it. The third is
+     counted rather than invisible: `ingest_runs.directories_missed` is read
+     with the same query, handed back with the answer, and reported by
+     `ResultsFilter` as a warning naming the root, which is the consumer section
+     2.7 wrote that count for.
+  5. A document **the tree no longer holds** keeps its row and reads as present,
+     so `--has-offset-file` hands on an image whose metadata file is gone and
+     `--has-no-offset-file` skips one nothing has been written for. A row leaves
+     the index only when a pass that listed the whole root does not find a file
+     for it (`_prune_missing`, gated on `covers_whole_root`), and a pass that
+     missed one directory anywhere under the root removes no row at all, having
+     no evidence about the stubs it did not see. One unlistable subdirectory
+     therefore holds every stale row of the root for as long as it stays
+     unlistable, across any number of completed passes -- so this is a live
+     consequence of the prune guard and not only the snapshot's age, and the
+     missed-directory warning says both halves. The prune is the ingest's, and
+     narrowing it to the directories a pass did list is a change to what a
+     listing has to report about itself, which sits with the ingest phases and
+     with the sharded pass that also prunes on partial evidence.
+  6. A document **rewritten in place, keeping the length and the modification
+     time it had before,** is skipped by the incremental comparison
+     (`_is_unchanged`, which has only `(mtime_ns, size_bytes)` and the summary
+     flag to go on), so its row goes on recording what the document before it
+     said and an error filter answers from that. A tree restored by a copy that
+     preserves times, a document patched and stamped back from a sibling, and a
+     backend reporting one modification time for two writes all produce it; an
+     ordinary re-navigation writes a different length at a later time and does
+     not. It is documented rather than fixed because the only thing that
+     distinguishes such a file from the one already read is its content, and
+     retrieving every document to find out is exactly the cost the skip exists
+     to avoid -- a content digest would be paid on every file of every pass to
+     catch a case a times-preserving restore produces. `--force` is the remedy
+     and is what the documentation points at. Like member 5, this one is not
+     the snapshot's age: a pass that finished a second ago answers from the
+     document before the rewrite.
+- **The answer says how old it is, and what that does not cover.**
+  `ingest_runs.finished_utc` is read by the same query as the missed count and
+  returned with the stubs, and `ResultsFilter` reports it with the count of what
+  the index holds. The index detects no change since that moment, and a URL
+  resolved from the environment means an operator may not know which pass is
+  answering, so the moment travels with the answer rather than with whoever
+  exported the variable. Outside the enumeration above, the age is what decides
+  whether the answer is the answer the tree would give; members 4, 5 and 6
+  survive a pass that finished a second ago, which is why each is enumerated
+  rather than left to be read off the stamp.
+- **The volume restriction is one restriction in one query.** Both arms are
+  restricted, and a stub with no volume above it is matched by neither, because
+  SQL's `IN` is false for NULL -- which is also how a bare scene name falls
+  outside a walk of the selected volumes' directories.
+- **The URL reaches the filter through the dataset layer, and only from a
+  program that declares the option.** `_yield_image_files_index` takes a
+  `results_db_url` keyword; when its caller passes none it resolves one through
+  `get_results_db_url` and its `none` sentinel, but only when the arguments it
+  was handed carry a `results_db` attribute, which is what declaring
+  `--results-db` supplies. That is section 2.6's rule, and it is what keeps
+  section 1's out-of-scope programs reading files: `sd_create_bundle`,
+  `sd_consolidate_metadata` and `sd_backplane_viewer` all enumerate with the
+  selection flags, and none of them declares the option or resolves a URL.
+  `sd_offset` declares it in this phase, because this phase is what makes it a
+  consuming program. Phase 4 adds it to `sd_backplanes` and `sd_mosaic`, which
+  this phase therefore leaves alone.
+- **`sd_offset` reports a refused selection rather than tracing back.** The
+  selection arguments are finally read while images are enumerated, so that is
+  where a contradictory pair, or an index that cannot be opened, cannot be read,
+  or does not cover this root, is first diagnosed. Each already carries a message
+  saying what to change, and an index URL can carry a database password, so the
+  enumeration is wrapped once and the message is reported through `MAIN_LOGGER`
+  with an exit status. The refusal is a `ValueError` subclass of its own,
+  `SelectionError`, raised by `ResultsFilter` for the flags and at the
+  branch-local import boundary for everything the index refuses with: catching
+  plain `ValueError` around a whole enumeration would report a bad volume name,
+  a value a label would not yield, or a caller error as advice about what to
+  change, and would swallow the traceback that says where it is.
+- **Nothing from the database layer escapes the selection seam.** `open_index`
+  makes every way of failing to open the index a `ValueError`; the queries after
+  it are outside that guarantee, and a table the account may not read, a
+  partially restored database, or a connection lost between the open and the
+  query would otherwise reach `spindoctor.dataset` as `sqlalchemy.exc`'s own
+  types -- which the consumer that deliberately never imports SQLAlchemy cannot
+  name in an `except` clause. `read_result_stubs` translates them, masked URL and
+  driver message included.
 
 ### Phase 6 — Documentation
 
@@ -1364,10 +1566,36 @@ add a column (increment the version). No issue numbers in any of it.
 1. `sd_backplanes`, `sd_mosaic`, and the `ResultsFilter`-driven selections
    produce identical products and identical selections for the same inputs
    with and without an index, over a fixture tree exercising success,
-   failure, error, missing-metadata and malformed-metadata images. Asserted
+   failure, error, missing-metadata and malformed-metadata images -- the last
+   of them with a summary PNG beside it. Asserted
    by tests (unit tier at the `OffsetLookup`/selection level; integration
    tier on written products). "Identical" binds returned values, written
    products, and the reachable-reason warnings -- not incidental log text.
+   Two carve-outs: the reason vocabulary section 2.9 maps, whose two
+   unreachable rows are a stated behavioral difference; and, for the selections,
+   what section 4's Phase 5 entry enumerates, restated here member for member
+   and in its order, so that a reader of this criterion sees the list rather
+   than a sample of it:
+
+   1. a summary PNG with no document beside it, which the index records nowhere,
+      so `--has-no-offset-file --has-png-file` is empty under one;
+   2. a document the ingest refused, which is a file that exists but records no
+      status;
+   3. a document whose outcome the index reads from `navigation_result.status`
+      and the tree reads from the top-level field alone;
+   4. an input the index holds nothing about because no pass could read or
+      record it;
+   5. a document the tree no longer holds, whose row survives every pass that
+      did not list the whole root;
+   6. a document rewritten in place with the length and the modification time it
+      had before, whose row goes on recording what the document before it said.
+
+   Each carve-out is stated in the plan, in the module docstring, and in a test,
+   and one found later is added to all three in one commit; a test counts the
+   three lists against each other, so a member added to one of them and not the
+   others fails. Neither list is asserted to be
+   complete: a divergence outside them is a defect of the enumeration, to be
+   fixed or enumerated, and not a licence to differ.
    `sd_stats_report`'s criterion is section 4 Phase 2's old-vs-new
    byte-identical report.
 2. No pipeline program requires an index, and `import spindoctor.dataset`
@@ -1489,6 +1717,24 @@ File as tracking issues alongside the implementation issue:
   shrunk the index. Only rows whose documents have genuinely left the tree go,
   and the run is unfinished throughout, so nothing valid is lost and no consumer
   reads the root; the way back is a full ingest.
+- **One unlistable directory stops the prune for the whole root** (#481).
+  `_prune_missing` runs only for a listing that covers the whole root, so a
+  single directory a walk could not list -- or one it had already walked under
+  another name -- keeps every stale row of that root across any number of
+  completed passes, and a document deleted from the tree goes on reading as
+  present. Phase 5 enumerates it, tests both directions of it, and says so in
+  the missed-directory warning; narrowing the prune means recording which
+  directories a pass did list, which is a change to the listing contract and
+  belongs with the sharded ingest that prunes on the same rule.
+- **A document rewritten in place with the same length and modification time is
+  never read again** (#488). Those two metrics are everything a listing supplies,
+  so `_is_unchanged` cannot tell such a file from the one already read, and its
+  row goes on recording what the document before it said however many passes
+  complete. Phase 5 enumerates it and tests both directions of it, and `--force`
+  is the remedy; distinguishing it without one means either a cheap identity the
+  storage layer already has (an object-store ETag) or a content digest paid for
+  by retrieving every document on every pass, which is the cost the skip exists
+  to avoid.
 - **The lockability probe takes a write lock on a consumer's open** (#462).
   Section 2.5 has it refuse in both modes, so a consumer opening a SQLite index
   while an ingest holds a write transaction waits out the busy timeout and can
