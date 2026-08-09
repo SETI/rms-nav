@@ -23,9 +23,14 @@ import pytest
 import sqlalchemy
 from tests.spindoctor.cli.stats.conftest import (
     GOLDEN_DIR,
+    build_tree,
+    complete,
+    fan_out,
     ingest_tree,
     metadata_document,
     report_from_tree,
+    reported,
+    run_rows,
     technique,
     write_metadata,
 )
@@ -36,6 +41,7 @@ from spindoctor.cli.stats.ingest import (
     fan_out_ingest_tasks,
     ingest_task_share,
 )
+from spindoctor.cli.stats.ingest.tasks import _LARGEST_RUN_ROW_COUNT
 from spindoctor.cli.stats.report import main_report
 from spindoctor.results_index import (
     IMAGES,
@@ -341,6 +347,42 @@ def test_the_shares_write_the_rows_and_the_run_a_single_pass_writes_on_postgresq
         engine.dispose()
     assert len(stubs) == 6
     assert runs[0][0] == 6
+
+
+def test_an_account_past_what_a_run_row_holds_is_refused_on_postgresql(
+    postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The bound a run's shares are held to is this server's own column width.
+
+    SQLite types a column by what is put into it and holds 64 bits, so the write
+    that a run's total overflows can only be seen here: the count columns are
+    32-bit integers on this server, and two shares each reporting a count the
+    tally reader accepts on its own sum past what one column holds.  Unrefused,
+    the write ends the whole completion in the database driver's own error --
+    on the backend workers spread across machines connect to, which is where an
+    event log gets concatenated from several sources in the first place.  The
+    row afterwards carries the one share that was counted, at exactly the
+    largest count it can hold.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    fan_out(postgres_url, [root], logger=quiet_logger)
+    huge = [
+        reported(
+            f'ingest-1-00000{index}',
+            {
+                'status': 'ok',
+                'run_id': 1,
+                'root_url': normalize_root_url(root),
+                'files_ingested': _LARGEST_RUN_ROW_COUNT,
+                'files_skipped': 0,
+                'files_failed': 0,
+            },
+        )
+        for index in range(2)
+    ]
+    complete(postgres_url, [root], huge, logger=quiet_logger)
+    assert run_rows(postgres_url)[0].files_ingested == _LARGEST_RUN_ROW_COUNT
 
 
 def test_a_root_is_unreadable_until_its_shares_are_added_up_on_postgresql(

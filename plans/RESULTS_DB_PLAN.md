@@ -1224,12 +1224,17 @@ Details settled during execution, none of them a change of intent:
   root having gone missing between the two messages. Applying it there also
   charges a spelling that is not a location to the root, rather than leaving it
   to the catch-all as a failure nobody enumerated.
-- **A count no share could report is not a share's tally.** `_share_tally`
-  bounds the magnitude of each count as well as its type and its sign. The
-  counts are written to the run row on a shortfall, and one larger than that
-  column holds ends the whole completion in the database driver's own error --
-  for one corrupt or foreign line of a concatenated event log, which is exactly
-  the input class the guards either side of it exist for.
+- **A count no share could report is not a share's tally, and neither is a
+  sum.** `_share_tally` bounds the magnitude of each count as well as its type
+  and its sign, and the completion holds the running total of a run's shares to
+  the same bound. What reaches the run row is that total, and its columns hold
+  32 bits on the narrowest supported backend, so bounding each count alone still
+  leaves two accepted lines to overflow one between them -- ending the whole
+  completion in the database driver's own error, for corrupt or foreign lines of
+  a concatenated event log, which is exactly the input class the guards either
+  side of it exist for. A result that would put its run past the bound costs its
+  own line, like every other result nobody can read, and the run comes up short
+  and is named.
 - **Each of `_share_tally`'s guards is pinned by what breaking it costs.** The
   run identifier's type, the root's type and its normalization, and each count's
   type, sign and magnitude are separately tested, and the tests assert the
@@ -1238,7 +1243,8 @@ Details settled during execution, none of them a change of intent:
   Boolean run identifier is credited to run 1 because `hash(True) == hash(1)`,
   a NaN count writes SQL NULL where the run row records how far the pass got,
   and a root nothing can render absolute ends the whole completion in an
-  exception nobody enumerated.
+  exception nobody enumerated. The sum's bound is pinned on the `postgres` tier, since it
+  is the backend whose columns the bound comes from.
 - **The seam lives in `spindoctor/cli/stats/ingest/tasks.py`**, beside the pass
   it divides: fan-out, one share, and the completion that adds them up are the
   same three stages `driver.py` runs in one process, and both read the same

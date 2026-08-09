@@ -120,17 +120,23 @@ a task result.
 TASK_COMPLETED_EVENT = 'task_completed'
 """Event type under which a worker's return value is written to the event log."""
 
-_LARGEST_SHARE_COUNT = 2**31 - 1
-"""Most files one share may report having ingested, skipped or refused.
+_LARGEST_RUN_ROW_COUNT = 2**31 - 1
+"""Most files an ingest run records as ingested, skipped or refused.
 
-A share is a list of files a fan-out cut from one listing, so a report of more
-files than any archive holds is not a count of anything, and a concatenated
-event log carrying a foreign or corrupted line is exactly where one comes from.
-The bound also keeps the shares' sum inside the column it is written to: a run's
-counts are a whole number a backend stores in 64 bits, and no event log holds
-enough lines of this size to overflow one.  Without it the sum reaches the write
-and the driver's own error takes the whole completion down, for one bad line.
+This is what one of those columns holds on the narrowest backend the index
+supports, where they are 32-bit integers.  A share is a list of files a fan-out
+cut from one listing, so a report of more files than any archive holds is not a
+count of anything, and a concatenated event log carrying a foreign or corrupted
+line is exactly where one comes from.  What reaches the column is the sum over a
+run's shares rather than any one of them, so the running total is held to the
+same bound as each count that goes into it; bounding the counts alone would
+leave two accepted lines to overflow it between them.  Past either bound the
+write fails and the database driver's own error takes the whole completion down,
+for one bad line.
 """
+
+_SHARE_COUNT_NAMES = ('files_ingested', 'files_skipped', 'files_failed')
+"""The counts a share reports, which are the counts a run row records."""
 
 _TASK_EVENT_PREFIX = 'task_'
 """Prefix of every event type that reports the outcome of one task."""
@@ -283,7 +289,9 @@ class TaskCompletion:
         results_failed: Task results in which a worker reported an error
             instead of a share.
         results_unreadable: Task results that are not the shape a worker
-            returns at all.
+            returns at all, together with those whose counts cannot be added to
+            their run's account: the run row records the sum over its shares,
+            and a sum larger than that row holds is not an account of a listing.
         results_superseded: Task results replaced by a later report of the same
             task, and therefore counted once between them.
         results_unidentified: Task results carrying no task identity.  One of
@@ -670,7 +678,7 @@ def _share_tally(result: dict[str, Any]) -> _ShareTally | None:
         stops the run being stamped.  A count outside what a share could report
         is refused with the rest: below zero it is not a number of files and
         would let one result cancel another's, and above
-        :data:`_LARGEST_SHARE_COUNT` it is a number the run's own column cannot
+        :data:`_LARGEST_RUN_ROW_COUNT` it is a number the run's own column cannot
         hold, which would end the whole completion at the write rather than
         costing the one result it came in on.
     """
@@ -685,16 +693,36 @@ def _share_tally(result: dict[str, Any]) -> _ShareTally | None:
     except ValueError:
         return None
     counts = IngestCounts()
-    for name in ('files_ingested', 'files_skipped', 'files_failed'):
+    for name in _SHARE_COUNT_NAMES:
         value = result.get(name)
         if isinstance(value, bool) or not isinstance(value, int):
             return None
-        if value < 0 or value > _LARGEST_SHARE_COUNT:
+        if value < 0 or value > _LARGEST_RUN_ROW_COUNT:
             return None
         setattr(counts, name, value)
     counts.failures_by_reason = _reason_map(result.get('failures_by_reason'), int)
     counts.example_by_reason = _reason_map(result.get('example_by_reason'), str)
     return _ShareTally(run_id=run_id, root_url=root_url, counts=counts)
+
+
+def _fits_the_run_row(running: IngestCounts, counts: IngestCounts) -> bool:
+    """Whether one more share's counts leave a run's account writable.
+
+    The bound is on the running total because the total is what is written: a
+    run row records the sum over its shares, and each of two lines a share could
+    legitimately have reported can be inside the column while their sum is not.
+
+    Parameters:
+        running: What this run's shares have reported so far.
+        counts: What one more of them reported.
+
+    Returns:
+        Whether every count of the total is one the run row holds.
+    """
+    return all(
+        getattr(running, name) + getattr(counts, name) <= _LARGEST_RUN_ROW_COUNT
+        for name in _SHARE_COUNT_NAMES
+    )
 
 
 def _latest_of_each_task(
@@ -798,7 +826,23 @@ def complete_ingest_tasks(
             completion.results_unreadable += 1
             continue
         key = (tally.run_id, tally.root_url)
-        by_share.setdefault(key, IngestCounts()).add(tally.counts)
+        running = by_share.setdefault(key, IngestCounts())
+        if not _fits_the_run_row(running, tally.counts):
+            # Refused for the reason each count is refused on its own: the sum
+            # is what the run row is written from, and one it cannot hold ends
+            # the whole completion in the database driver's own error rather
+            # than costing the line it arrived on.  The run then comes up short
+            # and is named, as it is for every other result nobody can read.
+            completion.results_unreadable += 1
+            logger.error(
+                'A task result would put the account of %s past the %d file(s) an ingest '
+                'run records, so it is not counted: no share of a listing reports that '
+                'many, and a log holding one is not an account of this run',
+                tally.root_url,
+                _LARGEST_RUN_ROW_COUNT,
+            )
+            continue
+        running.add(tally.counts)
         results_of_share[key] = results_of_share.get(key, 0) + 1
     claimed: set[tuple[int, str]] = set()
     for root_url in distinct_roots(roots):

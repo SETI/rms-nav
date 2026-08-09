@@ -19,7 +19,7 @@ from typing import Any
 import pdslogger
 import pytest
 
-from spindoctor.cli.stats.ingest.tasks import _share_tally
+from spindoctor.cli.stats.ingest.tasks import _LARGEST_RUN_ROW_COUNT, _share_tally
 from spindoctor.results_index import normalize_root_url
 
 from .conftest import build_tree, complete, fan_out, index_url, reported, run_rows
@@ -369,4 +369,39 @@ def test_a_count_too_large_for_the_run_row_is_not_a_share_tally(
         },
     )
     outcome = complete(url, [root], [enormous], logger=quiet_logger)
+    assert outcome.results_unreadable == 1
+
+
+def test_two_counts_the_run_row_cannot_hold_between_them_are_not_an_account(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The bound is on the running total, because the total is what is written.
+
+    Each of these two lines carries a count the guard accepts on its own; what
+    the run row is written from is their sum, which is twice what the column
+    holds.  Bounding each count and not the total leaves two lines of a
+    concatenated log to overflow the write between them, and the whole
+    completion ends in the database driver's own error rather than the second
+    line costing itself.  Refused, it is counted like every other result nobody
+    can read, and the run is left short.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    fan_out(url, [root], logger=quiet_logger)
+    huge = [
+        reported(
+            f'ingest-1-00000{index}',
+            {
+                'status': 'ok',
+                'run_id': 1,
+                'root_url': normalize_root_url(root),
+                'files_ingested': _LARGEST_RUN_ROW_COUNT,
+                'files_skipped': 0,
+                'files_failed': 0,
+            },
+        )
+        for index in range(2)
+    ]
+    outcome = complete(url, [root], huge, logger=quiet_logger)
     assert outcome.results_unreadable == 1
