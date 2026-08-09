@@ -435,6 +435,12 @@ REFUSED_STUB = 'COISS_2001/data/1294561143_1295221348/N1294561203_1_CALIB'
 SELECTION_VOLUME = 'COISS_2001'
 """The volume the selection reads."""
 
+SELECTION_INGESTED = '2026-08-08T00:00:00+00:00'
+"""When the pass over the root under test finished."""
+
+SELECTION_OTHER_INGESTED = '2026-08-09T00:00:00+00:00'
+"""When the pass over the other root finished, which is later and is not this one."""
+
 
 def _seed_selection_rows(url: str) -> None:
     """Create the index and write the rows the selection filters read.
@@ -444,10 +450,14 @@ def _seed_selection_rows(url: str) -> None:
     other root's row for the same stub records the SPICE error the filters tell
     apart, so a query that dropped the root would answer with it.
 
+    The two roots' run rows differ the same way.  The other root is passed over
+    second, so its run is the newest in the index, and it is the only one that
+    records a missed directory: what the pass over this root recorded about
+    itself is therefore visibly its own.
+
     Parameters:
         url: The index to create and write into.
     """
-    stamp = '2026-08-08T00:00:00+00:00'
     with opened(url, create=True) as engine, engine.begin() as connection:
         connection.execute(
             IMAGES.insert(),
@@ -491,9 +501,13 @@ def _seed_selection_rows(url: str) -> None:
                     'root_url': root_url,
                     'started_utc': stamp,
                     'finished_utc': stamp,
+                    'directories_missed': missed,
                     'schema_version': SCHEMA_VERSION,
                 }
-                for root_url in (SELECTION_ROOT, SELECTION_OTHER_ROOT)
+                for root_url, stamp, missed in (
+                    (SELECTION_ROOT, SELECTION_INGESTED, None),
+                    (SELECTION_OTHER_ROOT, SELECTION_OTHER_INGESTED, 4),
+                )
             ],
         )
 
@@ -551,3 +565,29 @@ def test_the_error_filter_answers_for_one_root_on_postgresql(postgres_url: str) 
         postgres_url, SELECTION_ROOT, [SELECTION_VOLUME], has_offset_spice_error=True
     )
     assert stubs.matching_error == frozenset()
+
+
+def test_the_missed_count_answers_for_one_root_on_postgresql(postgres_url: str) -> None:
+    """The run table is keyed by root as well, and the newest run in it is another's.
+
+    This root's run records no count at all, which on a strictly typed backend
+    is a NULL integer rather than a zero, and the other root's -- the newer of
+    the two -- records four.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_selection_rows(postgres_url)
+    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+    assert stubs.directories_missed == 0
+
+
+def test_the_snapshot_time_answers_for_one_root_on_postgresql(postgres_url: str) -> None:
+    """How old this answer is, on the backend that returns the stamp as it typed it.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_selection_rows(postgres_url)
+    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+    assert stubs.ingested_utc == SELECTION_INGESTED

@@ -51,7 +51,10 @@ anything added to it belongs here, in the plan, and in a test of its own.
     it rather than reading absence under it in silence.
 
 The index is also a snapshot: it answers as of the last ingest over the root,
-and a document written since is one the index does not hold.
+and a document written since is one the index does not hold.  When that pass
+finished is returned as :attr:`ResultStubs.ingested_utc` and reported with the
+answer, because how old the answer is decides whether it is the answer the tree
+would give.
 """
 
 from collections.abc import Iterable, Sequence
@@ -63,7 +66,7 @@ from filecache import FCPath
 
 from spindoctor.results_index.engine import open_index
 from spindoctor.results_index.roots import (
-    directories_missed,
+    newest_pass,
     normalize_root_url,
     require_ingested_roots,
 )
@@ -101,12 +104,15 @@ class ResultStubs:
         directories_missed: How many directories the newest pass over the root
             did not list, so a caller reading absence as an answer can say that
             the answer does not cover all of the root.
+        ingested_utc: When that pass finished, so a caller can say how old the
+            answer is, and None when the index recorded no finish time.
     """
 
     with_metadata: frozenset[str]
     with_summary_png: frozenset[str]
     matching_error: frozenset[str]
     directories_missed: int = 0
+    ingested_utc: str | None = None
 
 
 def _error_condition(
@@ -218,7 +224,8 @@ def read_result_stubs(
 
     Returns:
         The stubs the root holds, in the three sets the filters test membership
-        in, and how much of the root the pass that recorded them missed.
+        in, with how much of the root the pass that recorded them missed and
+        when it finished.
 
     Raises:
         ValueError: If the index cannot be opened, is stamped with another
@@ -245,7 +252,7 @@ def read_result_stubs(
     try:
         with engine.connect() as connection:
             require_ingested_roots(connection, [root_url], url=url)
-            missed = directories_missed(connection, root_url)
+            newest = newest_pass(connection, root_url)
             for stub, has_summary_png, matches_error in connection.execute(query):
                 stub_text = str(stub)
                 with_metadata.add(stub_text)
@@ -259,5 +266,6 @@ def read_result_stubs(
         with_metadata=frozenset(with_metadata),
         with_summary_png=frozenset(with_summary_png),
         matching_error=frozenset(matching_error),
-        directories_missed=missed,
+        directories_missed=newest.directories_missed,
+        ingested_utc=newest.finished_utc,
     )

@@ -198,10 +198,12 @@ Given ``--results-db``, all of them are answered instead by one query per
 enumeration, and the results tree is not read at all. The index is a snapshot of
 the tree as of the last ingest over that root, with no staleness detection: an
 image navigated since is one the index does not hold, so ``--has-no-offset-file``
-selects it again. Run ``sd_stats_ingest`` to bring the index up to date, or pass
-``--results-db none`` for a run that must read the tree. A results root the index
-holds no completed ingest of is refused rather than answered, because absence of
-a row would otherwise read as "this image was never navigated".
+selects it again. The run log says when the pass that filled the index finished
+and how long ago that was, which is what says whether that applies to this run.
+Run ``sd_stats_ingest`` to bring the index up to date, or pass
+``--results-db none`` for a run that must read the tree. A results root the index holds no completed ingest of is refused
+rather than answered, because absence of a row would otherwise read as "this
+image was never navigated".
 
 Miscellaneous
 ^^^^^^^^^^^^^

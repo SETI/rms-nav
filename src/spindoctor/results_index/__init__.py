@@ -26,7 +26,8 @@ Public API:
     normalize_root_url    -- the one spelling of a results root
     ingested_roots        -- the roots a completed ingest covered
     require_ingested_roots -- refuse to read absence from a root nobody ingested
-    directories_missed    -- how much of a root the newest pass over it did not list
+    NewestPass            -- what the newest pass over a root recorded about itself
+    newest_pass           -- when that pass finished and how much of the root it missed
     FATAL_STATUS          -- the status the error selection filters match
     SPICE_STATUS_ERROR    -- the status_error the SPICE selection filters match
     ResultStubs           -- what a root holds, as a selection filter asks it
@@ -35,8 +36,9 @@ Public API:
 
 from spindoctor.results_index.engine import masked_url, open_index
 from spindoctor.results_index.roots import (
-    directories_missed,
+    NewestPass,
     ingested_roots,
+    newest_pass,
     normalize_root_url,
     require_ingested_roots,
 )
@@ -68,10 +70,11 @@ __all__ = [
     'SCHEMA_VERSION',
     'SPICE_STATUS_ERROR',
     'TECHNIQUES',
+    'NewestPass',
     'ResultStubs',
-    'directories_missed',
     'ingested_roots',
     'masked_url',
+    'newest_pass',
     'normalize_root_url',
     'open_index',
     'read_result_stubs',

@@ -816,7 +816,7 @@ enumerated in section 4's Phase 5 entry. A file the ingest refused is
 still a file the walk finds, so the presence and absence filters read
 `failed_files` alongside `images`, and that table carries the volume and the
 summary-PNG flag for the same reason. The carve-out is what one ingest pass
-could read and record, never a property of this query, it is enumerated in the
+could read and record, never a property of this query; it is enumerated in the
 Phase 5 entry and repeated in the module docstring, and anything added to it is
 added in both places with a test of its own.
 `ResultsFilter` lives in
@@ -1224,6 +1224,12 @@ Details settled during execution, none of them a change of intent:
      with the same query, handed back with the answer, and reported by
      `ResultsFilter` as a warning naming the root, which is the consumer section
      2.7 wrote that count for.
+- **The answer says how old it is.** `ingest_runs.finished_utc` is read by the
+  same query as the missed count and returned with the stubs, and `ResultsFilter`
+  reports it with the count of what the index holds. The index detects no change
+  since that moment, and a URL resolved from the environment means an operator
+  may not know which pass is answering, so the moment travels with the answer
+  rather than with whoever exported the variable.
 - **The volume restriction is one restriction in one query.** Both arms are
   restricted, and a stub with no volume above it is matched by neither, because
   SQL's `IN` is false for NULL -- which is also how a bare scene name falls

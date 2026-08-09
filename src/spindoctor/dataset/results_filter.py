@@ -27,6 +27,7 @@ answers the index gives differently from the tree.
 
 import json
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -51,6 +52,55 @@ The index-backed implementation names the same value rather than sharing this
 one, because this module may not import that one at the top of the file, which
 is what the branch-local import exists to avoid.
 """
+
+
+def _elapsed_phrase(seconds: float) -> str:
+    """Return an interval in the coarsest unit that has a whole number of it.
+
+    Parameters:
+        seconds: The interval.
+
+    Returns:
+        The interval named in days, hours or minutes, or as less than a minute.
+    """
+    for size, unit in ((86400.0, 'day'), (3600.0, 'hour'), (60.0, 'minute')):
+        if seconds >= size:
+            count = int(seconds // size)
+            return f'{count} {unit}' if count == 1 else f'{count} {unit}s'
+    return 'less than a minute'
+
+
+def _snapshot_age(ingested_utc: str | None) -> str:
+    """Return how old an index's answer is, in the terms an operator acts on.
+
+    The index answers as of the pass that filled it and detects no change since,
+    so the age of that pass is what says whether its answer is the answer the
+    tree would give.  Both the stamp and the interval are reported: the stamp
+    names the pass to re-run, and the interval is what a reader compares against
+    what they know they have navigated.
+
+    Parameters:
+        ingested_utc: When the newest pass over the root finished, as the index
+            recorded it, or None when it recorded nothing.
+
+    Returns:
+        A phrase naming that time and how long ago it was.  A stamp that will
+        not parse, or one in the future because two clocks disagree, is reported
+        as it stands: a reader can act on a value the index really holds, and an
+        interval computed from a stamp nobody can read would be a fiction.
+    """
+    if not ingested_utc:
+        return 'at a time this index does not record'
+    try:
+        finished = datetime.fromisoformat(ingested_utc)
+    except ValueError:
+        return ingested_utc
+    if finished.tzinfo is None:
+        finished = finished.replace(tzinfo=UTC)
+    elapsed = (datetime.now(UTC) - finished).total_seconds()
+    if elapsed < 0:
+        return ingested_utc
+    return f'{ingested_utc} ({_elapsed_phrase(elapsed)} ago)'
 
 
 class ResultsFilter:
@@ -236,10 +286,12 @@ class ResultsFilter:
         self._png_rel_paths = {stub + SUMMARY_PNG_SUFFIX for stub in stubs.with_summary_png}
         self._error_stubs = stubs.matching_error
         self._logger.info(
-            '*** Results index holds %d offset metadata and %d summary PNG files under %s',
+            '*** Results index holds %d offset metadata and %d summary PNG files under %s, '
+            'ingested %s',
             len(self._offset_rel_paths),
             len(self._png_rel_paths),
             self._nav_results_root,
+            _snapshot_age(stubs.ingested_utc),
         )
         if stubs.directories_missed:
             # The absence filters read "no row" as "this image was never

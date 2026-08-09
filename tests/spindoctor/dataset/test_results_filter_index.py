@@ -26,6 +26,7 @@ import json
 import subprocess
 import sys
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +49,12 @@ from spindoctor.dataset.results_filter import (
     RESULTS_FILTER_BATCH_SIZE,
     ResultsFilter,
 )
-from spindoctor.results_index import INGEST_RUNS, SPICE_STATUS_ERROR, open_index
+from spindoctor.results_index import (
+    INGEST_RUNS,
+    SPICE_STATUS_ERROR,
+    normalize_root_url,
+    open_index,
+)
 
 VOLUMES = ['COISS_2001', 'COISS_2002']
 """The volumes the enumeration selected."""
@@ -712,29 +718,74 @@ def test_a_document_the_database_would_not_store_reads_as_absent(
     assert _select(results_filter, images) == []
 
 
-def _index_that_missed_a_directory(tmp_path: Path, root: Path) -> str:
-    """Ingest a tree and record that the pass did not list every directory.
+OTHER_ROOT_MISSED = 5
+"""How many directories the second root's pass did not list.
 
-    The count is what the walk reports for a directory it could not list, or one
-    it had already listed under another name.  It is written here rather than
-    provoked, so the test is about what a consumer does with the count.
+The second root is ingested last, so its run is the newest in the index: a count
+read from the newest run of the table rather than from the newest run over the
+root being enumerated is this one, and reports a gap the enumerated root does
+not have -- or, with the two the other way round, reports none where it does.
+"""
+
+
+def _stamp_run(url: str, root: Path, **values: Any) -> None:
+    """Record something about the pass over one root, and about no other root.
+
+    A run row is one root's, exactly as an image row is, so an update without a
+    root names every pass in the index and makes the two roots indistinguishable
+    in the column it writes.
+
+    Parameters:
+        url: The index to write into.
+        root: The results root whose newest pass is being described.
+        values: Column values to record on it.
+    """
+    engine = open_index(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                INGEST_RUNS.update()
+                .where(INGEST_RUNS.c.root_url == normalize_root_url(root))
+                .values(**values)
+            )
+    finally:
+        engine.dispose()
+
+
+def _index_of_two_roots(tmp_path: Path, root: Path, *, missed: int) -> str:
+    """Ingest a tree, and a second tree whose pass missed directories after it.
+
+    The count is written rather than provoked, so that the test is about what a
+    consumer does with a count and not about what makes a walk record one.  The
+    second root carries a count of its own for the same reason the fixture tree
+    is ingested beside a decoy: a query answering from the wrong root's run row
+    passes every single-root assertion.
 
     Parameters:
         tmp_path: Directory the index file is written into.
-        root: The results root to ingest.
+        root: The results root to ingest and describe.
+        missed: How many directories the pass over that root is recorded as
+            having missed.
 
     Returns:
         The connection URL of the index.
     """
+    decoy = tmp_path / 'other-results'
+    write_metadata(decoy, SUCCESS_NO_PNG, metadata_document(image_name='N1000000002_1.IMG'))
     url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=_logger())
-    engine = open_index(url)
-    try:
-        with engine.begin() as connection:
-            connection.execute(INGEST_RUNS.update().values(directories_missed=2))
-    finally:
-        engine.dispose()
+    ingest_tree(url, [root, decoy], logger=_logger())
+    _stamp_run(url, root, directories_missed=missed)
+    _stamp_run(url, decoy, directories_missed=OTHER_ROOT_MISSED)
     return url
+
+
+def _reporting_logger() -> pdslogger.PdsLogger:
+    """Return a logger whose output a test reads back.
+
+    Returns:
+        A logger of its own, so raising its level cannot affect another test.
+    """
+    return pdslogger.PdsLogger(f'results_filter_test_{uuid.uuid4().hex}')
 
 
 def test_an_ingest_that_missed_a_directory_is_reported(
@@ -747,11 +798,11 @@ def test_an_ingest_that_missed_a_directory_is_reported(
     under it without a word.
     """
     root, _images = _one_image_tree(tmp_path)
-    url = _index_that_missed_a_directory(tmp_path, root)
+    url = _index_of_two_roots(tmp_path, root, missed=2)
     ResultsFilter(
         VOLUMES,
         str(root),
-        logger=pdslogger.PdsLogger(f'results_filter_test_{uuid.uuid4().hex}'),
+        logger=_reporting_logger(),
         results_db_url=url,
         has_no_offset_file=True,
     )
@@ -761,18 +812,100 @@ def test_an_ingest_that_missed_a_directory_is_reported(
 def test_a_complete_ingest_is_reported_as_nothing(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A pass that listed the whole root leaves absence meaning what it says."""
+    """A pass that listed the whole root leaves absence meaning what it says.
+
+    The other root's pass is the newest in the index and missed directories, so
+    a count read without naming this root warns about a root that has no gap.
+    """
     root, _images = _one_image_tree(tmp_path)
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=_logger())
+    url = _index_of_two_roots(tmp_path, root, missed=0)
     ResultsFilter(
         VOLUMES,
         str(root),
-        logger=pdslogger.PdsLogger(f'results_filter_test_{uuid.uuid4().hex}'),
+        logger=_reporting_logger(),
         results_db_url=url,
         has_no_offset_file=True,
     )
     assert 'did not list' not in capsys.readouterr().out
+
+
+def test_the_report_says_how_old_the_index_answer_is(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The index detects no change since its pass, so its age is what says it is usable.
+
+    An exported URL makes a snapshot answer a resume idiom on every machine that
+    exports it, and how long ago that snapshot was taken is the fact that
+    decides whether this run is affected by it.
+    """
+    root, _images = _one_image_tree(tmp_path)
+    url = _index_of_two_roots(tmp_path, root, missed=0)
+    _stamp_run(url, root, finished_utc=(datetime.now(UTC) - timedelta(days=2)).isoformat())
+    ResultsFilter(
+        VOLUMES,
+        str(root),
+        logger=_reporting_logger(),
+        results_db_url=url,
+        has_no_offset_file=True,
+    )
+    assert '2 days ago' in capsys.readouterr().out
+
+
+def test_the_report_names_the_moment_as_well_as_the_interval(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The interval is what a reader compares against; the stamp names the pass to re-run."""
+    root, _images = _one_image_tree(tmp_path)
+    stamp = '2026-02-03T04:05:06+00:00'
+    url = _index_of_two_roots(tmp_path, root, missed=0)
+    _stamp_run(url, root, finished_utc=stamp)
+    ResultsFilter(
+        VOLUMES,
+        str(root),
+        logger=_reporting_logger(),
+        results_db_url=url,
+        has_no_offset_file=True,
+    )
+    assert stamp in capsys.readouterr().out
+
+
+def test_the_age_is_that_of_this_roots_pass_and_not_another(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The second root was passed over afterwards, and says nothing about this answer."""
+    root, _images = _one_image_tree(tmp_path)
+    url = _index_of_two_roots(tmp_path, root, missed=0)
+    _stamp_run(url, root, finished_utc='2026-02-03T04:05:06+00:00')
+    _stamp_run(url, tmp_path / 'other-results', finished_utc='2026-03-04T05:06:07+00:00')
+    ResultsFilter(
+        VOLUMES,
+        str(root),
+        logger=_reporting_logger(),
+        results_db_url=url,
+        has_no_offset_file=True,
+    )
+    assert '2026-03-04T05:06:07+00:00' not in capsys.readouterr().out
+
+
+def test_a_finish_time_that_will_not_parse_is_reported_as_it_stands(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A reader can act on a value the index really holds and not on a fiction.
+
+    Nothing this pipeline writes puts an unreadable stamp in that column, and an
+    index restored from somewhere else is exactly where one would come from.
+    """
+    root, _images = _one_image_tree(tmp_path)
+    url = _index_of_two_roots(tmp_path, root, missed=0)
+    _stamp_run(url, root, finished_utc='whenever it was')
+    ResultsFilter(
+        VOLUMES,
+        str(root),
+        logger=_reporting_logger(),
+        results_db_url=url,
+        has_no_offset_file=True,
+    )
+    assert 'ingested whenever it was' in capsys.readouterr().out
 
 
 def test_importing_the_dataset_package_does_not_import_sqlalchemy() -> None:
