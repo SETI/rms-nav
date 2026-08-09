@@ -437,13 +437,15 @@ def test_dividing_a_root_that_is_not_there_says_so(
     assert any('Roots that could not be listed' in line for line in written)
 
 
-def test_the_two_cloud_modes_cannot_be_asked_for_at_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Dividing the work up and adding it together are different runs.
+def refusing_both_cloud_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SystemExit:
+    """Parse a command line asking for both cloud modes at once.
 
-    Asking for both would write a tasks file and then complete the run it had
-    just created, before a single worker had read anything.
+    Parameters:
+        tmp_path: Directory the two named files would live under.
+        monkeypatch: Fixture the argument vector is replaced through.
+
+    Returns:
+        The exit the parser raised.
     """
     monkeypatch.setattr(sys, 'argv', ['sd_stats_ingest'])
     with pytest.raises(SystemExit) as caught:
@@ -455,7 +457,31 @@ def test_the_two_cloud_modes_cannot_be_asked_for_at_once(
                 str(tmp_path / 'events.log'),
             ]
         )
-    assert caught.value.code == 2
+    return caught.value
+
+
+def test_the_two_cloud_modes_cannot_be_asked_for_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dividing the work up and adding it together are different runs.
+
+    Asking for both would write a tasks file and then complete the run it had
+    just created, before a single worker had read anything.
+    """
+    assert refusing_both_cloud_modes(tmp_path, monkeypatch).code == 2
+
+
+def test_the_two_cloud_modes_are_refused_by_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A status of 2 is what argparse exits with for any command line at all.
+
+    A renamed option, a missing value, a typo: all of them are status 2, so what
+    says this refusal is the one meant is the message naming the two options
+    that cannot be asked for together.
+    """
+    refusing_both_cloud_modes(tmp_path, monkeypatch)
+    assert '--complete-cloud-tasks-file' in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
