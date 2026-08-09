@@ -550,6 +550,59 @@ def test_results_db_set_to_nothing_says_how_to_ask_for_it(
     assert RESULTS_DB_NONE in capsys.readouterr().out
 
 
+def test_results_db_set_to_nothing_reports_through_the_reporter_it_was_given() -> None:
+    """A program whose output is terminal text supplies the stream it prints to."""
+
+    written: list[str] = []
+    config = _config_with_environment({'results_db': ''})
+    get_results_db_url(argparse.Namespace(), config, warn=written.append)
+    assert len(written) == 1
+
+
+def test_results_db_set_to_nothing_writes_nowhere_else(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """One diagnostic goes to one place, or a run-log line lands in a report.
+
+    Parameters:
+        capsys: Fixture the main log is read back from.
+    """
+
+    written: list[str] = []
+    config = _config_with_environment({'results_db': ''})
+    get_results_db_url(argparse.Namespace(), config, warn=written.append)
+    assert capsys.readouterr().out == ''
+
+
+def test_results_db_set_to_nothing_leaves_what_follows_to_the_caller() -> None:
+    """Two of the three programs that resolve a URL have no file-reading mode.
+
+    One resolver serves all of them, so a warning saying what this run will do
+    next is false for the two that refuse, and reaches them one line before
+    their own refusal says the opposite.
+    """
+
+    written: list[str] = []
+    config = _config_with_environment({'results_db': ''})
+    get_results_db_url(argparse.Namespace(), config, warn=written.append)
+    assert 'reads the navigation results files' not in written[0]
+
+
+@pytest.mark.parametrize('spaced', [' none', 'none ', '  none  '])
+def test_results_db_sentinel_written_with_spaces_around_it_opts_out(spaced: str) -> None:
+    """The spaces a shell or a configuration file leaves behind are not the value.
+
+    An empty value is already read through the spaces around it, so the sentinel
+    is read the same way rather than passed on as a URL that cannot be parsed.
+
+    Parameters:
+        spaced: The sentinel as some level wrote it.
+    """
+
+    config = _config_with_environment(None)
+    assert get_results_db_url(argparse.Namespace(results_db=spaced), config) is None
+
+
 @pytest.mark.parametrize('url', [SQLITE_URL, POSTGRES_URL])
 def test_results_db_returns_the_url_verbatim(url: str) -> None:
     """Both URL forms pass through unchanged; the opener parses them, not this.

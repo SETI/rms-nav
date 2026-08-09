@@ -511,18 +511,26 @@ overriding the configuration key and the environment variable. Without an
 explicit opt-out, an exported `NAV_RESULTS_DB` would make file-mode runs
 impossible on that machine. The sentinel is recognized at whichever level
 supplied the value, so a configuration file or an exported variable can opt out
-the same way; it is matched as the exact string, so a URL that merely contains
-the word is still a URL.
+the same way; the spaces around it are not part of it, and it is otherwise
+matched as the exact string, so a URL that merely contains the word is still a
+URL.
 
 A value that is empty, or nothing but spaces, resolves to no index as well,
 without falling through to the next level -- the level that set it said
 something, and an operator who writes an empty option is not asking for whatever
 the machine exports. It is not silent: the level that carries it is named in a
-warning saying the run reads the results files and how to ask for that on
-purpose. Passing it on instead is what an unset variable expanded in a wrapper
-script produces, and it reaches the URL parser as a name that is not there,
-whose refusal begins with the colon after nothing and stops every run on the
-machine.
+warning saying that the value names no index, and how to ask for that on
+purpose. The warning stops there. What follows from having no index is the
+caller's, because one resolver serves `sd_offset`, which then reads files, and
+the two statistics programs, which have no file-reading mode and refuse; a
+warning that stated either would be false for the others and would arrive one
+line before their own message said the opposite. The caller supplies the sink as
+well as the meaning, so a program whose output is terminal text for a person
+prints the line where its other diagnostics go rather than having a run-log line
+routed into its report. Passing it on instead is what an unset variable
+expanded in a wrapper script produces, and it reaches the URL parser as a name
+that is not there, whose refusal begins with the colon after nothing and stops
+every run on the machine.
 
 The codebase convention for an argument of this kind is that each program
 defines its own, as it does for the results roots: the reprojection family

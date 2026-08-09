@@ -743,6 +743,19 @@ def build_report(
     return report_path
 
 
+def _to_stderr(message: str) -> None:
+    """Print one diagnostic where this program's other diagnostics go.
+
+    The resolver that names an index reports a value naming none through
+    whatever sink its caller supplies, and this program's sink is the stream its
+    refusals already print to, so the two arrive in the order they happened.
+
+    Parameters:
+        message: The line to print.
+    """
+    print(message, file=sys.stderr)
+
+
 def main_report(cmdline: list[str] | None = None) -> int:
     """Entry point for ``sd_stats_report``.
 
@@ -847,7 +860,7 @@ def main_report(cmdline: list[str] | None = None) -> int:
     )
     arguments = parser.parse_args(cmdline)
 
-    url = get_results_db_url(arguments, DEFAULT_CONFIG)
+    url = get_results_db_url(arguments, DEFAULT_CONFIG, warn=_to_stderr)
     if url is None:
         print(
             'sd_stats_report reads a results index and has no file-reading mode. '
