@@ -435,12 +435,12 @@ def main() -> None:
             root could be resolved, a named root is not a location that can be
             read, the index could not be opened, or a root could not be listed.
             A tree of files that are not navigation documents is a completed
-            pass and exits 0, and exits 0 again on the
-            next pass over the same tree, so a scheduled run's status means the
-            same thing every time it is read.  Completing a fan-out exits 1 when
-            the event log cannot be read, when a named root has no unfinished
-            run, when its run never recorded what its listing found, or when its
-            tasks did not account for exactly the files that listing found.
+            pass and exits 0, and exits 0 again on the next pass over the same
+            tree, so a scheduled run's status means the same thing every time it
+            is read.  Completing a fan-out exits 1 when the event log cannot be
+            read, when a named root has no unfinished run, when its run never
+            recorded what its listing found, or when its tasks did not account
+            for exactly the files that listing found.
     """
     command_list = sys.argv[1:]
     arguments = parse_args(command_list)
