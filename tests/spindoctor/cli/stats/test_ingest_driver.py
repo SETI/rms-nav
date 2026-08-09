@@ -99,21 +99,14 @@ def test_no_index_is_reported_and_not_raised(
     Both ambient sources of an index URL are closed for every test, so naming
     none on the command line is a program run with no index at all -- which for
     this one program is a mistake rather than the ordinary case it is everywhere
-    else in the pipeline.
+    else in the pipeline.  It is reported rather than raised, and names all
+    three settings that supply one, since which of them an operator meant to
+    set is theirs to know.
     """
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-    status, _written = _run(['--nav-results-root', str(root)], monkeypatch, tmp_path)
+    status, written = _run(['--nav-results-root', str(root)], monkeypatch, tmp_path)
     assert status == 1
-
-
-def test_no_index_says_which_settings_supply_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """And names all three, since which one an operator meant to set is theirs."""
-    root = tmp_path / 'results'
-    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-    _status, written = _run(['--nav-results-root', str(root)], monkeypatch, tmp_path)
     assert any('NAV_RESULTS_DB' in line for line in written)
 
 

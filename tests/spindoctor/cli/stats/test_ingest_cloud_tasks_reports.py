@@ -45,7 +45,9 @@ def test_the_completion_tallies_the_reasons_the_shares_reported(
 
     A tree holds many documents that were never navigation results, and a count
     of unreadable files with nothing to say about them reads the same whether
-    that is what happened or the ingest went wrong.
+    that is what happened or the ingest went wrong.  The reason is a
+    field-level diagnosis and one real file is what explains it, so the
+    completion carries an example of each alongside the tally.
     """
     root = tmp_path / 'results'
     build_tree(root, 1)
@@ -54,21 +56,8 @@ def test_the_completion_tallies_the_reasons_the_shares_reported(
     tasks = fan_out(url, [root], logger=quiet_logger)
     results = run_shares(url, tasks, logger=quiet_logger)
     outcome = complete(url, [root], results, logger=quiet_logger)
-    assert sum(outcome.counts.failures_by_reason.values()) == 1
-
-
-def test_the_completion_keeps_one_example_of_each_reason(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
-    """A reason is a field-level diagnosis; one real file is what explains it."""
-    root = tmp_path / 'results'
-    build_tree(root, 1)
-    (root / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
-    url = index_url(tmp_path / 'index.sqlite3')
-    tasks = fan_out(url, [root], logger=quiet_logger)
-    results = run_shares(url, tasks, logger=quiet_logger)
-    outcome = complete(url, [root], results, logger=quiet_logger)
     examples = [Path(name).name for name in outcome.counts.example_by_reason.values()]
+    assert sum(outcome.counts.failures_by_reason.values()) == 1
     assert examples == ['edges_metadata.json']
 
 

@@ -379,7 +379,9 @@ def test_a_run_abandoned_under_a_newer_finished_one_is_not_completed(
     A fan-out given up on and then made good by an ordinary pass leaves an older
     unfinished run under a newer finished one.  Stamping the older one would put
     a finish time on a walk nothing came back from, and would date the root's
-    ingest to a pass that was abandoned.
+    ingest to a pass that was abandoned.  So the completion reports the root as
+    one it found no run for, and the abandoned run goes on saying it never
+    finished -- which is what an operator reading the table sees.
     """
     root = tmp_path / 'results'
     build_tree(root, 2)
@@ -389,24 +391,6 @@ def test_a_run_abandoned_under_a_newer_finished_one_is_not_completed(
     ingest_tree(url, [root], logger=quiet_logger)
     outcome = complete(url, [root], results, logger=quiet_logger)
     assert outcome.roots_without_a_run == [normalize_root_url(root)]
-
-
-def test_a_run_abandoned_under_a_newer_finished_one_keeps_its_null_finish(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
-    """And the abandoned run keeps saying so, which is what a consumer reads.
-
-    A consumer takes the newest run of a root, so the stamp on an older one
-    would not mislead it; what it would do is tell an operator reading the table
-    that a pass nothing came back from finished.
-    """
-    root = tmp_path / 'results'
-    build_tree(root, 2)
-    url = index_url(tmp_path / 'index.sqlite3')
-    tasks = fan_out(url, [root], logger=quiet_logger)
-    results = run_shares(url, tasks, logger=quiet_logger)
-    ingest_tree(url, [root], logger=quiet_logger)
-    complete(url, [root], results, logger=quiet_logger)
     assert run_rows(url)[0].finished_utc is None
 
 
