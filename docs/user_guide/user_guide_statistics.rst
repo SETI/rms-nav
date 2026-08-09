@@ -139,6 +139,76 @@ fails naming both versions. The remedy is always the same -- delete the database
 and re-run ``sd_stats_ingest`` (the source of truth is the metadata documents,
 so nothing is lost).
 
+Ingesting over a queue of workers
+---------------------------------
+
+A root of a few hundred thousand documents is one listing followed by that many
+independent reads, so the reads can be spread over a queue. Three steps do it,
+and the middle one is where the work happens:
+
+.. code-block:: bash
+
+    # 1. List each root, remove the rows of documents that have left it, and
+    #    write out the shares.
+    sd_stats_ingest --nav-results-root /data/nav-offset-results \
+        --results-db postgresql+psycopg://user@dbhost/spindoctor \
+        --output-cloud-tasks-file ingest_tasks.json
+
+    # 2. Run the workers over those tasks, however the queue is driven. Each
+    #    worker writes its results into an event log.
+    sd_stats_ingest_cloud_tasks \
+        --results-db postgresql+psycopg://user@dbhost/spindoctor ...
+
+    # 3. Add the workers' tallies up and record them against each root.
+    sd_stats_ingest --nav-results-root /data/nav-offset-results \
+        --results-db postgresql+psycopg://user@dbhost/spindoctor \
+        --complete-cloud-tasks-file events.log
+
+**Workers on one machine can share a SQLite index**; workers on several cannot.
+A ``sqlite:`` URL names a local file, so a run spread across machines connects
+to PostgreSQL instead. Several worker processes on one machine writing to one
+local file is supported, and needs no merge step -- there is one file.
+
+**Only step 1 creates the index.** A worker opens an index that already exists
+and fails if it does not, because a worker that created one would answer a
+mistyped URL by building an empty index beside the real one, and every consumer
+would then read absence of a row as "this image was never navigated".
+
+**Only step 1 removes a row.** Deleting the rows of documents that have left the
+tree is allowed on the strength of a complete listing of the root, and step 1 is
+where the one listing of the pass happens; a worker holds a share and knows
+nothing about the stubs outside it, so a worker that removed rows would remove
+its peers'. Nothing a worker is about to write can be removed in step 1 either:
+every file a worker is handed came from that listing, and only stubs the listing
+did **not** hold are removed.
+
+**A root is not readable until step 3.** Its ingest run stays unfinished from
+step 1 onwards, so every consumer reports it as a root nobody has ingested while
+the workers are still writing -- rather than answering from whichever shares
+have landed.
+
+**Step 3 refuses to finish a root its tasks did not cover.** Step 1 records how
+many files it found; step 3 adds up how many the tasks ingested, skipped and
+refused. If the tasks account for fewer files than the listing found -- a task
+that failed, timed out, or was never run -- the root is named, its run is left
+unfinished, and ``sd_stats_ingest`` exits 1. Re-run the outstanding tasks and
+run step 3 again. A task re-run over a share it already ingested reads nothing:
+its files match what the index records, so it reports them as skipped.
+
+The tasks file is a JSON array in the shape a ``cloud_tasks`` queue loads. Each
+entry has a ``task_id`` and a ``data`` object carrying ``run_id`` (the ingest
+run the share belongs to), ``root_url`` (the normalized results root),
+``force``, ``has_file_metrics`` (whether the listing reported a size and
+modification time for every file), and ``files`` -- one object per document,
+with its ``results_path_stub``, ``mtime_ns``, ``size_bytes`` and
+``has_summary_png``. Every one of those comes from the single listing, so no
+worker stats a file or checks for one.
+
+Step 3 reads the ``cloud_tasks`` event log, which is JSON Lines with one event
+per line; the ``task_completed`` events carry what each worker returned. Lines
+that are not events are counted and reported rather than refused, because an
+event log being appended to while it is read ends in a partial line.
+
 Index schema
 ------------
 
