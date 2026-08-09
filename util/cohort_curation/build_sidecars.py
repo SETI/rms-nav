@@ -140,6 +140,14 @@ def primary_technique(rec: dict, meta: dict) -> str:
     Parameters:
         rec: Triage-report record (scene_class).
         meta: Navigation metadata JSON for the frame.
+
+    Returns:
+        The technique name the rubric expects to win, chosen in this order:
+        the class's mapped technique when the scene class has one; otherwise
+        the highest-confidence non-spurious technique the metadata actually
+        recorded, ties broken by technique name; otherwise the class's
+        fallback, ``StarFieldFromCatalogNav`` for a stars-plus-body scene and
+        ``RingEdgeNav`` for anything else.
     """
     cls = rec['scene_class']
     if cls in PRIMARY_MAP:

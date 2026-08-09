@@ -758,10 +758,11 @@ Rounding summary
        and ``times``; ``observation.image_et``; the ``timing`` block
      - Exact (full float precision, unrounded)
 
-The rounding constants are chosen tighter than the per-image tolerance budget
-so the JSON output is byte-identical across runs of the same input; a
-regression comparator can diff the file directly (after stripping
-``pipeline_run_iso8601`` and ``timing``).
+The rounding constants are chosen tighter than the per-image tolerance
+budget. Two fields change on every run whatever the input --
+``pipeline_run_iso8601`` and the ``timing`` block -- so a regression
+comparator strips those and diffs what remains, which is byte-identical
+across runs of the same input.
 
 How consumers apply the record
 ==============================

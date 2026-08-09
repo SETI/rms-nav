@@ -16,8 +16,10 @@ combined :class:`~spindoctor.nav_orchestrator.nav_result.NavResult`
 covariance, and what finally lands in the metadata file.
 
 Two neighboring concepts are documented elsewhere and deliberately not
-duplicated here. The scalar **confidence** score -- a calibrated probability
-that the technique's answer is usable at all -- is a separate channel from
+duplicated here. The scalar **confidence** score -- a calibrated score for
+whether the technique's answer is usable at all, calibrated against
+simulated planted-truth recovery and not readable as a probability of
+real-image accuracy -- is a separate channel from
 the covariance and is specified in :doc:`dev_guide_techniques_confidence`.
 The ensemble's **grouping, conflict, and veto** machinery (which uses the
 covariances but is about agreement, not uncertainty) is specified in

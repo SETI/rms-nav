@@ -255,7 +255,16 @@ class TiledImageWidget(QAbstractScrollArea):
     # ------------------------------------------------------------------ #
 
     mouse_moved = pyqtSignal(float, float, bool)
-    """Cursor motion signal carrying ``(pixel_x, pixel_y, in_bounds)``."""
+    """Cursor motion signal carrying ``(x, y, valid)``, in whichever frame the
+    projection makes meaningful.
+
+    Under a rectangular projection the payload is image pixel coordinates and
+    ``in_bounds``, true when the pixel lies inside the image.  Under every
+    other projection there are no image pixels to report, so it is viewport
+    coordinates and ``on_surface``, true when the cursor is over the projected
+    body; a receiver wanting geometry there calls
+    :meth:`viewport_to_lonlat` itself.
+    """
 
     zoom_changed = pyqtSignal(float, float)
     """Zoom-factor change signal carrying ``(x_zoom, y_zoom)``."""

@@ -154,6 +154,13 @@ def _maybe_rescue(candidate: dict, rec: dict) -> dict:
     Parameters:
         candidate: The manifest candidate.
         rec: The evaluated default-config triage record.
+
+    Returns:
+        The rescued record when the rescue pass produced an offset, and the
+        original record unchanged otherwise -- which covers a negative case
+        (whose failure is the desired outcome), a frame that already has an
+        offset, and a frame whose status is neither failed nor conflicted
+        and so records an infrastructure error rather than a navigation one.
     """
     cls = candidate['scene_class']
     if cls == 'negative_cases':

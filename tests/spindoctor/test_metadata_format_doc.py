@@ -341,8 +341,8 @@ def _image_files(tmp_path: Path, count: int) -> ImageFiles:
     img_path = tmp_path / 'N0.IMG'
     img_path.write_bytes(b'\x00')
     entry = ImageFile(
-        image_file_url=FCPath(str(img_path)),
-        label_file_url=FCPath(str(img_path)),
+        image_file_url=FCPath(img_path),
+        label_file_url=FCPath(img_path),
         results_path_stub='N0',
         image_et=221309426.8040615,
         camera='NAC',
@@ -355,7 +355,7 @@ def _load_error_document(tmp_path: Path) -> dict[str, Any]:
     _success, metadata = navigate_image_files(
         _LoadErrorObsClass,  # type: ignore[arg-type]
         _image_files(tmp_path, 1),
-        FCPath(str(tmp_path / 'results')),
+        FCPath(tmp_path / 'results'),
         write_output_files=False,
     )
     return _round_trip(metadata)
@@ -366,7 +366,7 @@ def _early_return_document(tmp_path: Path) -> dict[str, Any]:
     _success, metadata = navigate_image_files(
         _LoadErrorObsClass,  # type: ignore[arg-type]
         _image_files(tmp_path, 2),
-        FCPath(str(tmp_path / 'results')),
+        FCPath(tmp_path / 'results'),
         write_output_files=False,
     )
     return _round_trip(metadata)
