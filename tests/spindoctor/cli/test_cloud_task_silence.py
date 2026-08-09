@@ -12,7 +12,6 @@ exactly as a worker installs it, and measures the bytes on each descriptor.
 import json
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -172,16 +171,15 @@ import sys
 
 logging.basicConfig(level=logging.DEBUG)
 
-from pathlib import Path
+from filecache import FCPath
 
 from spindoctor.cli import sd_stats_ingest_cloud_tasks
 from spindoctor.cli.stats.ingest import fan_out_ingest_tasks
 from spindoctor.results_index import open_index
 import argparse
 
-directory = Path(sys.argv[1])
+directory = FCPath(sys.argv[1])
 root = directory / 'results'
-(root / 'VOL').mkdir(parents=True)
 document = {
     'status': 'success',
     'offset': [1.5, -2.5],
@@ -189,8 +187,10 @@ document = {
     'observation': {'image_name': 'N1_CALIB.IMG', 'instrument': 'coiss', 'camera': 'NAC'},
     'navigation_result': {'status': 'success', 'per_technique': [], 'feature_inventory': []},
 }
-(root / 'VOL' / 'N1_CALIB_metadata.json').write_text(json.dumps(document))
-(root / 'VOL' / 'other_metadata.json').write_text('{"edges": []}')
+with (root / 'VOL' / 'N1_CALIB_metadata.json').open('w') as file:
+    file.write(json.dumps(document))
+with (root / 'VOL' / 'other_metadata.json').open('w') as file:
+    file.write('{"edges": []}')
 
 url = 'sqlite:///' + (directory / 'index.sqlite3').as_posix()
 engine = open_index(url, create=True)
@@ -221,7 +221,8 @@ results += [
     sd_stats_ingest_cloud_tasks.process_task(task['task_id'], task['data'], _WorkerData())[1]
     for task in tasks
 ]
-Path(sys.argv[2]).write_text(json.dumps(results))
+with FCPath(sys.argv[2]).open('w') as file:
+    file.write(json.dumps(results))
 """
 
 
@@ -300,7 +301,7 @@ def test_an_ingest_task_still_names_what_it_refused(
     ingest_task_output: tuple[str, str, list[Any]],
 ) -> None:
     """The file that is not a navigation document is named, not merely counted."""
-    named = [Path(name).name for name in ingest_task_output[2][0]['failed_files']]
+    named = [FCPath(name).name for name in ingest_task_output[2][0]['failed_files']]
     assert named == ['other_metadata.json']
 
 
