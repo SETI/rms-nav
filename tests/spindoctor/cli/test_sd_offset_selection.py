@@ -78,12 +78,12 @@ def refusing(monkeypatch: pytest.MonkeyPatch) -> _RecordingLogger:
 def test_a_refused_selection_ends_the_run(refusing: _RecordingLogger) -> None:
     """The run stops; it does not go on to navigate an arbitrary subset."""
     with pytest.raises(SystemExit) as excinfo:
-        list(sd_offset.selected_image_files(argparse.Namespace()))
+        list(sd_offset._selected_image_files(argparse.Namespace()))
     assert excinfo.value.code == 1
 
 
 def test_a_refused_selection_is_reported(refusing: _RecordingLogger) -> None:
     """The message that says what to change is what the operator is shown."""
     with pytest.raises(SystemExit):
-        list(sd_offset.selected_image_files(argparse.Namespace()))
+        list(sd_offset._selected_image_files(argparse.Namespace()))
     assert refusing.errors == [REFUSAL]

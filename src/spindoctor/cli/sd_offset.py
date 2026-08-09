@@ -253,7 +253,7 @@ def _run_manual_pass(
     # distinguish the {0, 1, >1} cases and to surface up to five filespecs
     # in the multi-match diagnostic.  Larger datasets used to scan the
     # whole tree just to print a count.
-    selected_preview = list(islice(selected_image_files(arguments), 6))
+    selected_preview = list(islice(_selected_image_files(arguments), 6))
     if not selected_preview:
         MAIN_LOGGER.error('No images matched the selection arguments')
         sys.exit(1)
@@ -346,7 +346,7 @@ def _run_manual_pass(
 ###############################################################################
 
 
-def selected_image_files(arguments: argparse.Namespace) -> Iterator[ImageFiles]:
+def _selected_image_files(arguments: argparse.Namespace) -> Iterator[ImageFiles]:
     """Yield the image batches the selection arguments name, reporting a refusal.
 
     The enumeration is where the selection arguments are finally read, so it is
@@ -435,7 +435,7 @@ def main() -> None:
             'nav_techniques': nav_techniques,
         }
         tasks_json = []
-        for imagefile_idx, imagefiles in enumerate(selected_image_files(arguments)):
+        for imagefile_idx, imagefiles in enumerate(_selected_image_files(arguments)):
             task_id = f'{DATASET_NAME}-{imagefiles.image_files[0].label_file_name}-{imagefile_idx}'
             task_files = []
             for image_file in imagefiles.image_files:
@@ -464,7 +464,7 @@ def main() -> None:
         MAIN_LOGGER.info('Wrote cloud_tasks file to %s', arguments.output_cloud_tasks_file)
         sys.exit(0)
 
-    for imagefiles in selected_image_files(arguments):
+    for imagefiles in _selected_image_files(arguments):
         assert len(imagefiles.image_files) == 1
         if arguments.dry_run:
             MAIN_LOGGER.info(
