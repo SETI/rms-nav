@@ -292,6 +292,30 @@ def _indexed_tree_and_late_document(tmp_path: Path) -> tuple[Path, str]:
     return results_root, url
 
 
+def _program_arguments(
+    ds: DataSetPDS3CassiniISS, *, declares_results_db: bool, argv: list[str] | None = None
+) -> argparse.Namespace:
+    """Parse the command line of a program with or without the index option.
+
+    The namespace is built by the dataset's own selection parser rather than
+    written out, because what is under test is the difference one declared
+    option makes to it and nothing else about its shape.
+
+    Parameters:
+        ds: The dataset whose selection arguments the program offers.
+        declares_results_db: Whether the program declares ``--results-db``.
+        argv: The command line to parse, defaulting to an empty one.
+
+    Returns:
+        The parsed arguments.
+    """
+    parser = argparse.ArgumentParser()
+    ds.add_selection_arguments(parser)
+    if declares_results_db:
+        parser.add_argument('--results-db', default=None)
+    return parser.parse_args(argv or [])
+
+
 def test_a_results_index_answers_the_offset_file_filter(
     ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -327,7 +351,7 @@ def test_the_results_index_url_is_resolved_from_the_environment(
             volumes=['COISS_2001'],
             has_offset_file=True,
             nav_results_root=str(results_root),
-            arguments=argparse.Namespace(results_db=None),
+            arguments=_program_arguments(ds, declares_results_db=True),
         )
     )
 
@@ -352,7 +376,7 @@ def test_a_program_that_declares_no_index_flag_reads_the_results_tree(
             volumes=['COISS_2001'],
             has_offset_file=True,
             nav_results_root=str(results_root),
-            arguments=argparse.Namespace(nav_results_root=None),
+            arguments=_program_arguments(ds, declares_results_db=False),
         )
     )
 
@@ -365,7 +389,8 @@ def test_an_exported_index_does_not_answer_the_resume_idiom_for_such_a_program(
     # --has-no-offset-file is how a run is resumed, and a snapshot answers it
     # with every image navigated since the last ingest. A program that declares
     # no index option must therefore not be handed one by the environment: the
-    # tree says the third frame is navigated, and so does the enumeration.
+    # tree holds a document for N1000000100, so the resume does not offer it
+    # again, and only the three frames nothing was ever written for are left.
     _install_two_camera_index(ds, monkeypatch)
     results_root, url = _indexed_tree_and_late_document(tmp_path)
     monkeypatch.setenv('NAV_RESULTS_DB', url)
@@ -375,11 +400,11 @@ def test_an_exported_index_does_not_answer_the_resume_idiom_for_such_a_program(
             volumes=['COISS_2001'],
             has_no_offset_file=True,
             nav_results_root=str(results_root),
-            arguments=argparse.Namespace(nav_results_root=None),
+            arguments=_program_arguments(ds, declares_results_db=False),
         )
     )
 
-    assert _yielded_names(groups) == []
+    assert _yielded_names(groups) == ['N1000000102', 'W1000000101', 'W1000000102']
 
 
 def test_a_stale_index_re_selects_a_navigated_frame_for_a_program_that_declares_it(
@@ -387,7 +412,8 @@ def test_a_stale_index_re_selects_a_navigated_frame_for_a_program_that_declares_
 ) -> None:
     # The other half of the same rule, stated so the cost of declaring the
     # option is visible: a program that does declare it answers from the
-    # snapshot, which re-selects a frame navigated after the last ingest.
+    # snapshot, so N1000000100 -- navigated after the last ingest -- is offered
+    # for navigation all over again.
     _install_two_camera_index(ds, monkeypatch)
     results_root, url = _indexed_tree_and_late_document(tmp_path)
     monkeypatch.setenv('NAV_RESULTS_DB', url)
@@ -397,11 +423,16 @@ def test_a_stale_index_re_selects_a_navigated_frame_for_a_program_that_declares_
             volumes=['COISS_2001'],
             has_no_offset_file=True,
             nav_results_root=str(results_root),
-            arguments=argparse.Namespace(results_db=None),
+            arguments=_program_arguments(ds, declares_results_db=True),
         )
     )
 
-    assert _yielded_names(groups) == ['N1000000100']
+    assert _yielded_names(groups) == [
+        'N1000000100',
+        'N1000000102',
+        'W1000000101',
+        'W1000000102',
+    ]
 
 
 def test_the_none_sentinel_reads_the_results_tree(
@@ -419,7 +450,7 @@ def test_the_none_sentinel_reads_the_results_tree(
             volumes=['COISS_2001'],
             has_offset_file=True,
             nav_results_root=str(results_root),
-            arguments=argparse.Namespace(results_db=None),
+            arguments=_program_arguments(ds, declares_results_db=True),
         )
     )
 
@@ -441,7 +472,9 @@ def test_the_none_sentinel_on_the_command_line_overrides_a_working_url(
             volumes=['COISS_2001'],
             has_offset_file=True,
             nav_results_root=str(results_root),
-            arguments=argparse.Namespace(results_db='none'),
+            arguments=_program_arguments(
+                ds, declares_results_db=True, argv=['--results-db', 'none']
+            ),
         )
     )
 
