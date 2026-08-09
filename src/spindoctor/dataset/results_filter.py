@@ -14,6 +14,15 @@ no additional cloud round trip.  Absence filters are answered with batched
 ``FCPath.exists()`` calls (or from the walked sets when a walk already
 happened), and the error filters retrieve the metadata JSON files in batches
 and inspect their ``status`` / ``status_error`` fields.
+
+Given a results index, every one of those questions is answered instead by one
+query over the index, and the tree is not read at all.  The index-backed
+implementation lives in :mod:`spindoctor.results_index.selection` and is
+imported inside the branch that has a URL, not at the top of this module: this
+module is reached by importing :mod:`spindoctor.dataset`, which every navigation
+run does, and the top-level import would put SQLAlchemy on that path for the
+runs that never name an index.  That module also documents the three answers the
+index gives differently from the tree.
 """
 
 import json
@@ -36,6 +45,12 @@ RESULTS_FILTER_BATCH_SIZE = 64
 """Number of images checked per batched ``exists()`` / ``retrieve()`` call."""
 
 _SPICE_STATUS_ERROR = 'missing_spice_data'
+"""The ``status_error`` value the SPICE error filters tell apart.
+
+The index-backed implementation names the same value rather than sharing this
+one, because this module may not import that one at the top of the file, which
+is what the branch-local import exists to avoid.
+"""
 
 
 class ResultsFilter:
@@ -43,9 +58,10 @@ class ResultsFilter:
 
     Constructed once per enumeration when any of the results-based selection
     flags is active.  Construction validates the flag combination (the flags
-    AND together; directly contradictory pairs raise) and, when a presence or
-    error filter is active, walks the results tree under each selected volume
-    to collect the existing result files.
+    AND together; directly contradictory pairs raise) and then collects what
+    the results root holds: from the index in one query when a results-index
+    URL is given, and otherwise, when a presence or error filter is active, by
+    walking the results tree under each selected volume.
 
     The filter is applied in two stages:
 
@@ -53,7 +69,9 @@ class ResultsFilter:
       while scanning index rows.
     - :meth:`filter_batch` applies the absence and metadata-content filters
       to a batch of already-accepted images with one batched ``exists()``
-      and/or ``retrieve()`` call, preserving input order.
+      and/or ``retrieve()`` call, preserving input order.  Answered from a
+      results index, every filter is settled in the first stage and this one
+      does nothing.
     """
 
     def __init__(
@@ -68,13 +86,15 @@ class ResultsFilter:
         has_offset_error: bool = False,
         has_offset_spice_error: bool = False,
         has_offset_nonspice_error: bool = False,
+        results_db_url: str | None = None,
         logger: PdsLogger,
     ) -> None:
-        """Validates the flag combination and scans the results tree if needed.
+        """Validates the flag combination and collects what the results root holds.
 
         Parameters:
             volumes: Volume names selected by the other constraints; only these
-                subdirectories of the results root are walked.
+                subdirectories of the results root are walked, and only images
+                under them are read from a results index.
             nav_results_root: Root of the navigation results tree; may be a
                 cloud URL.  A ``str`` or ``Path`` is normalized to an
                 :class:`FCPath` at construction; an existing :class:`FCPath` is
@@ -91,10 +111,16 @@ class ResultsFilter:
                 indicates a fatal error from missing SPICE data.
             has_offset_nonspice_error: Only keep images whose offset metadata
                 file indicates a fatal error other than missing SPICE data.
+            results_db_url: Connection URL of a results index to answer every
+                filter from, or None to read the results tree.  A URL that
+                cannot be used is an error rather than a reason to fall back
+                to the tree.
             logger: Logger for scan statistics and unreadable-metadata warnings.
 
         Raises:
-            ValueError: If the flag combination is contradictory.
+            ValueError: If the flag combination is contradictory, or if the
+                results index cannot be opened or holds no completed ingest of
+                this results root.
         """
         if has_offset_file and has_no_offset_file:
             raise ValueError('has_offset_file and has_no_offset_file are mutually exclusive')
@@ -131,8 +157,22 @@ class ResultsFilter:
         self._logger = logger
         self._offset_rel_paths: set[str] = set()
         self._png_rel_paths: set[str] = set()
-        self._walked = self._needs_offset_presence or self._needs_png_presence
-        if self._walked:
+        self._error_stubs: frozenset[str] = frozenset()
+        self._from_index = results_db_url is not None
+        # The index answers every filter, including the absence filters, which
+        # a tree read answers only when a walk happened for another reason.
+        self._have_result_sets = (
+            self._from_index or self._needs_offset_presence or self._needs_png_presence
+        )
+        if results_db_url is not None:
+            self._read_index(
+                results_db_url,
+                volumes,
+                has_offset_error=has_offset_error,
+                has_offset_spice_error=has_offset_spice_error,
+                has_offset_nonspice_error=has_offset_nonspice_error,
+            )
+        elif self._have_result_sets:
             self._scan_volumes(volumes)
 
     @property
@@ -143,11 +183,64 @@ class ResultsFilter:
         batches (amortizing the batched ``exists()`` / ``retrieve()`` round
         trips) or to yield them immediately.  When the results tree was walked,
         the absence filters are answered from the walked sets in
-        :meth:`passes_presence` instead and cost nothing here.
+        :meth:`passes_presence` instead and cost nothing here.  When a results
+        index answered the enumeration, so is every other filter, and nothing
+        is left to do per batch.
         """
+        if self._from_index:
+            return False
         if self._needs_metadata_read:
             return True
-        return not self._walked and (self._has_no_offset_file or self._has_no_png_file)
+        return not self._have_result_sets and (self._has_no_offset_file or self._has_no_png_file)
+
+    def _read_index(
+        self,
+        results_db_url: str,
+        volumes: Iterable[str],
+        *,
+        has_offset_error: bool,
+        has_offset_spice_error: bool,
+        has_offset_nonspice_error: bool,
+    ) -> None:
+        """Reads what the results root holds from the results index.
+
+        Parameters:
+            results_db_url: Connection URL of the results index.
+            volumes: Volume names to read results for.
+            has_offset_error: Whether any fatal error is wanted.
+            has_offset_spice_error: Whether only a missing-SPICE-data error is
+                wanted.
+            has_offset_nonspice_error: Whether only a fatal error other than
+                missing SPICE data is wanted.
+
+        Raises:
+            ValueError: If the index cannot be opened or holds no completed
+                ingest of this results root.
+        """
+        # Imported here rather than at the top of the module, on the same
+        # grounds as the GUI imports elsewhere in the package: this module is
+        # reached by importing spindoctor.dataset, which every navigation run
+        # does, and SQLAlchemy has no business on that path when no index was
+        # named.
+        from spindoctor.results_index.selection import read_result_stubs
+
+        stubs = read_result_stubs(
+            results_db_url,
+            self._nav_results_root,
+            volumes,
+            has_offset_error=has_offset_error,
+            has_offset_spice_error=has_offset_spice_error,
+            has_offset_nonspice_error=has_offset_nonspice_error,
+        )
+        self._offset_rel_paths = {stub + METADATA_SUFFIX for stub in stubs.with_metadata}
+        self._png_rel_paths = {stub + SUMMARY_PNG_SUFFIX for stub in stubs.with_summary_png}
+        self._error_stubs = stubs.matching_error
+        self._logger.info(
+            '*** Results index holds %d offset metadata and %d summary PNG files under %s',
+            len(self._offset_rel_paths),
+            len(self._png_rel_paths),
+            self._nav_results_root,
+        )
 
     def _scan_volumes(self, volumes: Iterable[str]) -> None:
         """Walks the results tree under each volume, collecting result files.
@@ -190,21 +283,23 @@ class ResultsFilter:
         )
 
     def passes_presence(self, results_path_stub: str) -> bool:
-        """True if the image passes the filters answerable from the walked sets.
+        """True if the image passes the filters answerable from the collected sets.
 
         Covers the presence filters and, when the results tree was walked
         anyway, the absence filters too (a set lookup instead of a per-file
-        ``exists()`` round trip).
+        ``exists()`` round trip).  When the sets came from a results index they
+        cover the error filters as well, since the query already read what the
+        tree path has to open each metadata file for.
 
         Parameters:
             results_path_stub: The image's results path stub (relative to the
                 results root, no suffix).
 
         Returns:
-            True if every active filter answerable from the walked sets is
+            True if every active filter answerable from the collected sets is
             satisfied.
         """
-        if not self._walked:
+        if not self._have_result_sets:
             return True
         metadata_rel_path = results_path_stub + METADATA_SUFFIX
         png_rel_path = results_path_stub + SUMMARY_PNG_SUFFIX
@@ -214,7 +309,11 @@ class ResultsFilter:
             return False
         if self._has_no_offset_file and metadata_rel_path in self._offset_rel_paths:
             return False
-        return not (self._has_no_png_file and png_rel_path in self._png_rel_paths)
+        if self._has_no_png_file and png_rel_path in self._png_rel_paths:
+            return False
+        if not self._from_index or not self._needs_metadata_read:
+            return True
+        return results_path_stub in self._error_stubs
 
     def filter_batch(self, image_files: list[ImageFile]) -> list[ImageFile]:
         """Applies the absence and metadata-content filters to a batch.
@@ -223,7 +322,8 @@ class ResultsFilter:
         not walked) are answered with one batched ``exists()`` call covering
         every active absence suffix.  The error filters retrieve all metadata
         files in one batched call and inspect their ``status`` /
-        ``status_error`` fields.
+        ``status_error`` fields.  A filter answered from a results index has
+        nothing left to apply here and returns the batch as it was given.
 
         Parameters:
             image_files: Batch of images that already passed the cheap filters.
@@ -237,7 +337,7 @@ class ResultsFilter:
             return keep
 
         absence_suffixes: list[str] = []
-        if not self._walked:
+        if not self._have_result_sets:
             if self._has_no_offset_file:
                 absence_suffixes.append(METADATA_SUFFIX)
             if self._has_no_png_file:

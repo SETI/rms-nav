@@ -13,7 +13,7 @@ import julian
 from filecache import FCPath, FileCache
 from pdstable import PdsTable
 
-from spindoctor.config import Config, get_nav_results_root
+from spindoctor.config import Config, get_nav_results_root, get_results_db_url
 from spindoctor.support.misc import flatten_list
 
 from .dataset import DataSet, ImageFile, ImageFiles
@@ -670,6 +670,13 @@ class DataSetPDS3(DataSet):
             nav_results_root: str | Path | FCPath | None = None,
                 Results root for the filters above.  None resolves via the
                 arguments, configuration, or NAV_RESULTS_ROOT environment variable.
+            results_db_url: str | None = None,
+                Results index answering the filters above, so that an
+                enumeration costs one query instead of a walk per volume and a
+                metadata read per candidate.  None resolves via the arguments,
+                configuration, or NAV_RESULTS_DB environment variable, and
+                resolves to no index when none of the three names one or when
+                the value is the literal ``none``.
             choose_random_images: int | None = None,
                 When set, a positive count of images to sample uniformly at
                 random across the selected volumes.  Must be a positive
@@ -699,6 +706,7 @@ class DataSetPDS3(DataSet):
         has_offset_spice_error: bool = kwargs.pop('has_offset_spice_error', False)
         has_offset_nonspice_error: bool = kwargs.pop('has_offset_nonspice_error', False)
         nav_results_root: str | Path | FCPath | None = kwargs.pop('nav_results_root', None)
+        results_db_url: str | None = kwargs.pop('results_db_url', None)
         choose_random_images: int | None = kwargs.pop('choose_random_images', None)
         if choose_random_images is not None and choose_random_images <= 0:
             raise ValueError(
@@ -789,16 +797,22 @@ class DataSetPDS3(DataSet):
         # Build the results-based filter, if any of its flags is active. Presence
         # filters walk the results tree once per selected volume (at construction);
         # absence and error filters are applied in batches as images are accepted.
+        # A resolved results index replaces all of that with one query.
         results_filter: ResultsFilter | None = None
         if any(results_filter_flags.values()):
+            resolved_arguments = arguments if arguments is not None else argparse.Namespace()
             if nav_results_root is None:
-                nav_results_root = get_nav_results_root(
-                    arguments if arguments is not None else argparse.Namespace(), self.config
-                )
+                nav_results_root = get_nav_results_root(resolved_arguments, self.config)
+            if results_db_url is None:
+                results_db_url = get_results_db_url(resolved_arguments, self.config)
             # ResultsFilter accepts the str | Path | FCPath union and normalizes
             # at its boundary, preserving an existing FCPath's file cache.
             results_filter = ResultsFilter(
-                valid_volumes, nav_results_root, logger=logger, **results_filter_flags
+                valid_volumes,
+                nav_results_root,
+                logger=logger,
+                results_db_url=results_db_url,
+                **results_filter_flags,
             )
 
         # URLs to the volume raw directory and index directory

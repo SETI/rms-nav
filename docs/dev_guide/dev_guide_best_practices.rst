@@ -23,6 +23,25 @@ Code style
 * Do not introduce compatibility shims for prior versions unless explicitly
   requested; change the code instead.
 
+Imports
+-------
+
+* Imports go at the top of the file, in three alphabetically sorted groups
+  separated by blank lines: standard library, third party, then this project.
+* An import inside a function is permitted only to keep a heavy dependency off
+  a path that does not use it. Two such exceptions exist, and each carries a
+  comment saying why:
+
+  * The PyQt6 widgets in ``spindoctor.ui``, so that a headless navigation run
+    never imports a GUI toolkit.
+  * :mod:`spindoctor.results_index.selection` in
+    ``spindoctor/dataset/results_filter.py``, imported inside the branch that
+    was given a results-index URL. Every navigation run imports
+    ``spindoctor.dataset``, and most name no index, so the top-level import
+    would put SQLAlchemy on the navigation critical path for all of them. A
+    test asserts in a subprocess that importing ``spindoctor.dataset`` imports
+    no ``sqlalchemy`` module.
+
 Linting and typing
 ------------------
 

@@ -788,9 +788,14 @@ with the same message shapes.
 
 **`ResultsFilter`.** When a URL is given, the presence, absence, and error
 filters become one query per enumeration instead of a walk per volume plus
-batched reads -- preserving the exact semantics of both existing modes (the
+batched reads -- preserving the semantics of both existing modes (the
 walked-set mode and the absence-only batched-`exists()` mode) and every
-contradictory-pair rejection in the constructor. `ResultsFilter` lives in
+contradictory-pair rejection in the constructor. A file the ingest refused is
+still a file the walk finds, so the presence and absence filters read
+`failed_files` alongside `images`. Three answers the index cannot give
+identically, each a property of what the index records rather than of the
+query, are named in section 4's Phase 5 entry and in the module docstring.
+`ResultsFilter` lives in
 `spindoctor.dataset`, which `sd_offset` imports on every run, so the
 index-backed implementation lives in `spindoctor/results_index/selection.py`
 and `results_filter.py` imports it **inside the branch where a URL was
@@ -1136,6 +1141,44 @@ every contradictory-pair rejection unchanged; an import-time assertion that
 criterion 2's only test and this phase owns it**: no earlier phase writes it,
 because the branch-local import it protects is added here, so it must not be
 assumed to exist already.
+
+Details settled during execution, none of them a change of intent:
+
+- **The selection layer hands back plain sets.** `read_result_stubs` opens the
+  index, asks it, disposes the engine and returns three frozen sets of stubs,
+  so no SQLAlchemy object and no SQLAlchemy type reaches `spindoctor.dataset`
+  -- not even in an annotation, which a branch-local import could not satisfy.
+- **Presence is read from `failed_files` as well as `images`.** A
+  `*_metadata.json` the ingest refused is a file the walk finds, so without the
+  refusal table criterion 1's malformed-metadata image would be present in the
+  tree and absent in the index, for `--has-offset-file` and
+  `--has-no-offset-file` alike.
+- **Three answers the index gives differently**, each stated in the module
+  docstring and each with a test of its own. A summary PNG with no document
+  beside it is recorded nowhere, because the flag lives on the row of the
+  document it was found beside, so it reads as absent -- which makes
+  `--has-no-offset-file --has-png-file` empty under an index. A document that
+  is valid JSON and carries `status` but is not a navigation document is
+  refused by ingest, so it matches no error filter, where the tree path reads
+  the two fields out of any JSON object it can parse. A file a pass could not
+  retrieve is recorded nowhere, deliberately, so it reads as absent until a
+  pass reads it. The first is a property of the schema rather than of the
+  query: recording an orphan PNG needs a column or a table the index does not
+  have, and adding one is a schema version bump.
+- **The volume restriction is applied twice, deliberately.** The images are
+  restricted in the query, so an enumeration of one volume does not fetch the
+  rest of the root; `failed_files` carries no volume column, so the restriction
+  is applied again to the rows the query returned. Without the second, a
+  refused file outside the selected volumes would be present in the index's
+  answer and absent from the walk's.
+- **The URL reaches the filter through the dataset layer.**
+  `_yield_image_files_index` takes a `results_db_url` keyword and, when its
+  caller passes none, resolves one exactly as it resolves `nav_results_root`,
+  through `get_results_db_url` and its `none` sentinel. No program that
+  enumerates with the selection flags declares `--results-db` of its own yet:
+  Phase 4 adds it to `sd_backplanes` and `sd_mosaic`, and `sd_offset` is named
+  by no phase, so an index-backed selection is reachable today through
+  `environment.results_db` and `NAV_RESULTS_DB`.
 
 ### Phase 6 — Documentation
 

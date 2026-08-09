@@ -26,6 +26,8 @@ Public API:
     normalize_root_url    -- the one spelling of a results root
     ingested_roots        -- the roots a completed ingest covered
     require_ingested_roots -- refuse to read absence from a root nobody ingested
+    ResultStubs           -- what a root holds, as a selection filter asks it
+    read_result_stubs     -- one query answering an enumeration's selection filters
 """
 
 from spindoctor.results_index.engine import masked_url, open_index
@@ -44,6 +46,7 @@ from spindoctor.results_index.schema import (
     SCHEMA_VERSION,
     TECHNIQUES,
 )
+from spindoctor.results_index.selection import ResultStubs, read_result_stubs
 
 __all__ = [
     'FAILED_FILES',
@@ -54,9 +57,11 @@ __all__ = [
     'SCHEMA_META',
     'SCHEMA_VERSION',
     'TECHNIQUES',
+    'ResultStubs',
     'ingested_roots',
     'masked_url',
     'normalize_root_url',
     'open_index',
+    'read_result_stubs',
     'require_ingested_roots',
 ]
