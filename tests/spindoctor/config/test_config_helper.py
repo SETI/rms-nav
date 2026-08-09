@@ -485,6 +485,71 @@ def test_results_db_sentinel_is_the_exact_literal() -> None:
     assert get_results_db_url(arguments, config) == 'sqlite:///none.sqlite3'
 
 
+@pytest.mark.parametrize('empty', ['', '   '])
+def test_results_db_set_to_nothing_names_no_index(empty: str) -> None:
+    """An empty value names no index, and is not passed on as one.
+
+    A URL parser handed it refuses with a message that begins with the colon
+    after a name it does not have, and on a machine exporting an empty
+    NAV_RESULTS_DB that refusal stops every navigation run.
+
+    Parameters:
+        empty: A value carrying no URL.
+    """
+
+    config = _config_with_environment(None)
+    assert get_results_db_url(argparse.Namespace(results_db=empty), config) is None
+
+
+@pytest.mark.parametrize('empty', ['', '   '])
+def test_results_db_set_to_nothing_does_not_fall_through_to_the_next_level(
+    empty: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The level that set it said something, so a lower level does not answer for it.
+
+    An operator who writes an empty option is not asking for whatever the
+    machine exports.
+
+    Parameters:
+        empty: A value carrying no URL.
+        monkeypatch: Fixture the exported variable is set through.
+    """
+
+    monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
+    config = _config_with_environment(None)
+    assert get_results_db_url(argparse.Namespace(results_db=empty), config) is None
+
+
+def test_results_db_set_to_nothing_says_which_level_set_it(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Reading files because a variable expanded empty is not something to do silently.
+
+    Parameters:
+        monkeypatch: Fixture the exported variable is set through.
+        capsys: Fixture the warning is read back from.
+    """
+
+    monkeypatch.setenv('NAV_RESULTS_DB', '')
+    config = _config_with_environment(None)
+    get_results_db_url(argparse.Namespace(), config)
+    assert 'NAV_RESULTS_DB' in capsys.readouterr().out
+
+
+def test_results_db_set_to_nothing_says_how_to_ask_for_it(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The sentinel is what an operator writes to mean this on purpose.
+
+    Parameters:
+        capsys: Fixture the warning is read back from.
+    """
+
+    config = _config_with_environment({'results_db': ''})
+    get_results_db_url(argparse.Namespace(), config)
+    assert RESULTS_DB_NONE in capsys.readouterr().out
+
+
 @pytest.mark.parametrize('url', [SQLITE_URL, POSTGRES_URL])
 def test_results_db_returns_the_url_verbatim(url: str) -> None:
     """Both URL forms pass through unchanged; the opener parses them, not this.

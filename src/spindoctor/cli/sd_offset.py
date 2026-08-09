@@ -128,7 +128,8 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         selection options that read the navigation results are then answered by one query
         over that index instead of by reading the results tree. The index is a snapshot of
         its last ingest, so an image navigated since is one it does not hold; pass
-        --results-db none to read the tree instead.""",
+        --results-db none to read the tree instead, spelled exactly that way in lower
+        case, since anything else is read as the URL of an index.""",
     )
 
     # Arguments about the general navigation process

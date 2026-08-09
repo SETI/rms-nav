@@ -129,7 +129,10 @@ Environment options
   corresponding configuration setting. The results-file selection filters below
   are then answered by one query over the index instead of by reading the
   results tree. Pass ``--results-db none`` to read the tree even when a URL is
-  set in the environment or a configuration file.
+  set in the environment or a configuration file; the opt-out is that word
+  exactly, in lower case, since anything else is read as the URL of an index.
+  A value that is empty, or nothing but spaces, names no index either: the run
+  reads the results tree and says in its log which setting was left empty.
 
 Navigation options
 ^^^^^^^^^^^^^^^^^^

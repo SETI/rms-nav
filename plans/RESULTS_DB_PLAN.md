@@ -514,6 +514,16 @@ supplied the value, so a configuration file or an exported variable can opt out
 the same way; it is matched as the exact string, so a URL that merely contains
 the word is still a URL.
 
+A value that is empty, or nothing but spaces, resolves to no index as well,
+without falling through to the next level -- the level that set it said
+something, and an operator who writes an empty option is not asking for whatever
+the machine exports. It is not silent: the level that carries it is named in a
+warning saying the run reads the results files and how to ask for that on
+purpose. Passing it on instead is what an unset variable expanded in a wrapper
+script produces, and it reaches the URL parser as a name that is not there,
+whose refusal begins with the colon after nothing and stops every run on the
+machine.
+
 The codebase convention for an argument of this kind is that each program
 defines its own, as it does for the results roots: the reprojection family
 shares `add_common_env_args` in `spindoctor/cli/reproj/args.py`, and that is

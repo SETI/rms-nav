@@ -4,6 +4,7 @@ import os
 from filecache import FCPath
 
 from .config import Config
+from .logger import MAIN_LOGGER
 from .logging_keys import validate_logging_config
 
 RESULTS_DB_NONE = 'none'
@@ -182,6 +183,13 @@ def get_results_db_url(arguments: argparse.Namespace, config: Config) -> str | N
     opt out of an exported variable in the same way, and it is matched as the exact
     string, so a URL that merely contains the word is still a URL.
 
+    A value that is empty, or nothing but spaces, names no index either, and is
+    answered the same way rather than passed on: a URL parser handed one refuses
+    with a message that begins with the colon after a name it does not have, and
+    on a machine exporting an empty NAV_RESULTS_DB that refusal would stop every
+    run.  It is not silent, because the level that set it may have meant to set a
+    URL, so the level is named in a warning.
+
     Parameters:
         arguments: The parsed arguments.
         config: The configuration possibly containing the environment section.
@@ -193,14 +201,27 @@ def get_results_db_url(arguments: argparse.Namespace, config: Config) -> str | N
     # --results-db argument, and most configurations name no index -- so each is
     # asked for the key rather than made to raise for it, which would also hide an
     # AttributeError raised by something other than the lookup.
+    named_by = '--results-db'
     results_db_str = vars(arguments).get('results_db')
     if results_db_str is None:
+        named_by = 'the environment.results_db configuration variable'
         results_db_str = config.environment.get('results_db')
     if results_db_str is None:
+        named_by = 'the NAV_RESULTS_DB environment variable'
         results_db_str = os.getenv('NAV_RESULTS_DB')
     if results_db_str is None or results_db_str == RESULTS_DB_NONE:
         return None
-    return str(results_db_str)
+    url = str(results_db_str)
+    if not url.strip():
+        MAIN_LOGGER.warning(
+            '%s is set to an empty value, which names no results index; this run '
+            'reads the navigation results files. Write %s to ask for that, or a '
+            'connection URL to name an index.',
+            named_by,
+            RESULTS_DB_NONE,
+        )
+        return None
+    return url
 
 
 def load_default_and_user_config(arguments: argparse.Namespace, config: Config) -> None:
