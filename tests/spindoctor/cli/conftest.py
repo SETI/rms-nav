@@ -1,13 +1,24 @@
-"""Fixtures shared by the ``sd_create_ck`` end-to-end test modules.
+"""Fixtures and helpers shared by the driver test modules at this level.
 
-The driver's tests live in two modules at this level -- the products of a
-clean run and its refusals -- and both run the real program over prepared
-trees.  The trees, and the guard that undoes what a run furnished into the
-process-global SPICE pool, are built here; the plain builders they use live in
-``sd_create_ck_helpers``.  Nothing here is autouse, so the other test packages
-under this directory are untouched.
+Most of what is here belongs to the ``sd_create_ck`` end-to-end tests.  Those
+live in two modules -- the products of a clean run and its refusals -- and both
+run the real program over prepared trees.  The trees, and the guard that undoes
+what a run furnished into the process-global SPICE pool, are built here; the
+plain builders they use live in ``sd_create_ck_helpers``.
+
+:func:`help_text` is shared more widely: a program's command-line surface is
+asserted by running the program's own ``main`` with ``--help``, so what is
+tested is the surface a user meets rather than a reconstruction of it, and one
+spelling of that serves every module that asks.
+
+Nothing here is autouse, so the other test packages under this directory are
+untouched.
 """
 
+import contextlib
+import importlib
+import io
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -34,6 +45,29 @@ from tests.spindoctor.cli.sd_create_ck_helpers import (
     write_kernels,
     write_metadata,
 )
+
+
+def help_text(program: str, argv: list[str]) -> str:
+    """Return what ``program --help`` prints.
+
+    Parameters:
+        program: Dispatch module name under ``spindoctor.cli``.
+        argv: Arguments preceding ``--help``, for a program that reads its
+            dataset or mode from argv before parsing.
+
+    Returns:
+        The help text.
+    """
+    module = importlib.import_module(f'spindoctor.cli.{program}')
+    buffer = io.StringIO()
+    saved = sys.argv
+    sys.argv = [program, *argv, '--help']
+    try:
+        with contextlib.redirect_stdout(buffer), contextlib.suppress(SystemExit):
+            module.main()
+    finally:
+        sys.argv = saved
+    return buffer.getvalue()
 
 
 class _Furnished:

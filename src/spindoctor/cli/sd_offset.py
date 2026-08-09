@@ -13,6 +13,7 @@ import cProfile
 import os
 import sys
 import time
+from collections.abc import Iterator
 from typing import cast
 
 import pdslogger
@@ -36,7 +37,7 @@ from spindoctor.config import (
 )
 from spindoctor.config.program_names import SD_OFFSET
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
-from spindoctor.dataset.dataset import DataSet
+from spindoctor.dataset.dataset import DataSet, ImageFiles
 from spindoctor.navigate_image_files import navigate_image_files
 from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class, obs_class_to_inst_name
 from spindoctor.support.file import json_as_string
@@ -114,6 +115,19 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         default=None,
         help="""The root directory of the navigation results; overrides the NAV_RESULTS_ROOT
         environment variable and the nav_results_root configuration variable""",
+    )
+    environment_group.add_argument(
+        '--results-db',
+        type=str,
+        default=None,
+        metavar='URL',
+        help="""Connection URL of the results index written by sd_stats_ingest (a sqlite:
+        URL naming a local path, or a postgresql+psycopg: URL naming a server); overrides
+        NAV_RESULTS_DB and the environment.results_db configuration variable. The image
+        selection options that read the navigation results are then answered by one query
+        over that index instead of by reading the results tree. The index is a snapshot of
+        its last ingest, so an image navigated since is one it does not hold; pass
+        --results-db none to read the tree instead.""",
     )
 
     # Arguments about the general navigation process
@@ -235,12 +249,11 @@ def _run_manual_pass(
         write_summary_png,
     )
 
-    assert DATASET is not None
     # Bound the dataset traversal to at most six items: we only need to
     # distinguish the {0, 1, >1} cases and to surface up to five filespecs
     # in the multi-match diagnostic.  Larger datasets used to scan the
     # whole tree just to print a count.
-    selected_preview = list(islice(DATASET.yield_image_files_from_arguments(arguments), 6))
+    selected_preview = list(islice(selected_image_files(arguments), 6))
     if not selected_preview:
         MAIN_LOGGER.error('No images matched the selection arguments')
         sys.exit(1)
@@ -333,6 +346,31 @@ def _run_manual_pass(
 ###############################################################################
 
 
+def selected_image_files(arguments: argparse.Namespace) -> Iterator[ImageFiles]:
+    """Yield the image batches the selection arguments name, reporting a refusal.
+
+    The enumeration is where the selection arguments are finally read, so it is
+    where a contradictory pair of them, a results root that cannot be walked, or
+    a results index that cannot be opened or does not cover this root is first
+    diagnosed.  Each of those is a run that is misconfigured rather than one that
+    went wrong, and each already carries a message saying what to change; a
+    traceback would bury it, and would print an index URL's password into the
+    terminal along the way.
+
+    Parameters:
+        arguments: The parsed command line.
+
+    Yields:
+        One batch of image files at a time, in enumeration order.
+    """
+    assert DATASET is not None  # just for type checking
+    try:
+        yield from DATASET.yield_image_files_from_arguments(arguments)
+    except ValueError as exc:
+        MAIN_LOGGER.error('%s', exc)
+        sys.exit(1)
+
+
 def main() -> None:
 
     command_list = sys.argv[1:]
@@ -397,9 +435,7 @@ def main() -> None:
             'nav_techniques': nav_techniques,
         }
         tasks_json = []
-        for imagefile_idx, imagefiles in enumerate(
-            DATASET.yield_image_files_from_arguments(arguments)
-        ):
+        for imagefile_idx, imagefiles in enumerate(selected_image_files(arguments)):
             task_id = f'{DATASET_NAME}-{imagefiles.image_files[0].label_file_name}-{imagefile_idx}'
             task_files = []
             for image_file in imagefiles.image_files:
@@ -428,7 +464,7 @@ def main() -> None:
         MAIN_LOGGER.info('Wrote cloud_tasks file to %s', arguments.output_cloud_tasks_file)
         sys.exit(0)
 
-    for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
+    for imagefiles in selected_image_files(arguments):
         assert len(imagefiles.image_files) == 1
         if arguments.dry_run:
             MAIN_LOGGER.info(

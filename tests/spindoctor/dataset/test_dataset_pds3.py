@@ -315,8 +315,9 @@ def test_a_results_index_answers_the_offset_file_filter(
 def test_the_results_index_url_is_resolved_from_the_environment(
     ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # A caller that names no index gets the one the environment names, exactly
-    # as it gets the results root from NAV_RESULTS_ROOT.
+    # A program that declares --results-db and is given no value gets the one
+    # the environment names, exactly as it gets the results root from
+    # NAV_RESULTS_ROOT.
     _install_two_camera_index(ds, monkeypatch)
     results_root, url = _indexed_tree_and_late_document(tmp_path)
     monkeypatch.setenv('NAV_RESULTS_DB', url)
@@ -326,18 +327,89 @@ def test_the_results_index_url_is_resolved_from_the_environment(
             volumes=['COISS_2001'],
             has_offset_file=True,
             nav_results_root=str(results_root),
+            arguments=argparse.Namespace(results_db=None),
         )
     )
 
     assert _yielded_names(groups) == ['N1000000101', 'W1000000100']
 
 
+def test_a_program_that_declares_no_index_flag_reads_the_results_tree(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # An exported URL reaches the programs that declare the option and no
+    # others. A program whose selection is meant to read files -- one this work
+    # deliberately leaves reading them -- passes arguments that name no index,
+    # and answers from the tree however the machine is configured. Its
+    # arguments are otherwise those of a program that does declare it, so what
+    # is under test is the declaration and nothing else.
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, url = _indexed_tree_and_late_document(tmp_path)
+    monkeypatch.setenv('NAV_RESULTS_DB', url)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_offset_file=True,
+            nav_results_root=str(results_root),
+            arguments=argparse.Namespace(nav_results_root=None),
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000100', 'N1000000101', 'W1000000100']
+
+
+def test_an_exported_index_does_not_answer_the_resume_idiom_for_such_a_program(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # --has-no-offset-file is how a run is resumed, and a snapshot answers it
+    # with every image navigated since the last ingest. A program that declares
+    # no index option must therefore not be handed one by the environment: the
+    # tree says the third frame is navigated, and so does the enumeration.
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, url = _indexed_tree_and_late_document(tmp_path)
+    monkeypatch.setenv('NAV_RESULTS_DB', url)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_no_offset_file=True,
+            nav_results_root=str(results_root),
+            arguments=argparse.Namespace(nav_results_root=None),
+        )
+    )
+
+    assert _yielded_names(groups) == []
+
+
+def test_a_stale_index_re_selects_a_navigated_frame_for_a_program_that_declares_it(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The other half of the same rule, stated so the cost of declaring the
+    # option is visible: a program that does declare it answers from the
+    # snapshot, which re-selects a frame navigated after the last ingest.
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, url = _indexed_tree_and_late_document(tmp_path)
+    monkeypatch.setenv('NAV_RESULTS_DB', url)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_no_offset_file=True,
+            nav_results_root=str(results_root),
+            arguments=argparse.Namespace(results_db=None),
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000100']
+
+
 def test_the_none_sentinel_reads_the_results_tree(
     ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # An exported index URL would otherwise reach every enumeration on the
-    # machine. The sentinel opts one out: the tree is read, so the frame the
-    # index does not hold is selected too.
+    # An exported index URL would otherwise reach every enumeration of every
+    # program that declares the option. The sentinel opts one out: the tree is
+    # read, so the frame the index does not hold is selected too.
     _install_two_camera_index(ds, monkeypatch)
     results_root, _url = _indexed_tree_and_late_document(tmp_path)
     monkeypatch.setenv('NAV_RESULTS_DB', 'none')
@@ -347,6 +419,29 @@ def test_the_none_sentinel_reads_the_results_tree(
             volumes=['COISS_2001'],
             has_offset_file=True,
             nav_results_root=str(results_root),
+            arguments=argparse.Namespace(results_db=None),
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000100', 'N1000000101', 'W1000000100']
+
+
+def test_the_none_sentinel_on_the_command_line_overrides_a_working_url(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The command-line opt-out, which is the only one an operator can see in
+    # --help: the exported URL opens and answers, and passing the sentinel
+    # still reads the tree.
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, url = _indexed_tree_and_late_document(tmp_path)
+    monkeypatch.setenv('NAV_RESULTS_DB', url)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_offset_file=True,
+            nav_results_root=str(results_root),
+            arguments=argparse.Namespace(results_db='none'),
         )
     )
 

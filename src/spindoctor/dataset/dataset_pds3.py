@@ -674,9 +674,11 @@ class DataSetPDS3(DataSet):
                 Results index answering the filters above, so that an
                 enumeration costs one query instead of a walk per volume and a
                 metadata read per candidate.  None resolves via the arguments,
-                configuration, or NAV_RESULTS_DB environment variable, and
-                resolves to no index when none of the three names one or when
-                the value is the literal ``none``.
+                configuration, or NAV_RESULTS_DB environment variable when the
+                arguments carry a ``results_db`` attribute, which is what a
+                program that declares ``--results-db`` supplies; a caller whose
+                arguments carry no such attribute reads the results tree, and
+                so does one whose resolved value is the literal ``none``.
             choose_random_images: int | None = None,
                 When set, a positive count of images to sample uniformly at
                 random across the selected volumes.  Must be a positive
@@ -803,7 +805,15 @@ class DataSetPDS3(DataSet):
             resolved_arguments = arguments if arguments is not None else argparse.Namespace()
             if nav_results_root is None:
                 nav_results_root = get_nav_results_root(resolved_arguments, self.config)
-            if results_db_url is None:
+            if results_db_url is None and 'results_db' in vars(resolved_arguments):
+                # Only a program that declares --results-db reads an index, and
+                # the presence of the argument is that declaration. The URL
+                # resolves from the configuration and the environment as every
+                # root does, so an operator who exports one gets it wherever it
+                # applies -- but a program whose selection is meant to read
+                # files never becomes index-backed because a variable was
+                # exported for another one, and a caller that names no argument
+                # at all is asking for the tree.
                 results_db_url = get_results_db_url(resolved_arguments, self.config)
             # ResultsFilter accepts the str | Path | FCPath union and normalizes
             # at its boundary, preserving an existing FCPath's file cache.
