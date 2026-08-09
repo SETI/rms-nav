@@ -1428,6 +1428,15 @@ File as tracking issues alongside the implementation issue:
 - **A `--since` selector for ingest** (#467). The stat-pair skip makes a re-scan
   cheap in reads but not in listings; a time-bounded scan would cut the
   listing too.
+- **One unlistable directory stops the prune for the whole root** (#481).
+  `_prune_missing` runs only for a listing that covers the whole root, so a
+  single directory a walk could not list -- or one it had already walked under
+  another name -- keeps every stale row of that root across any number of
+  completed passes, and a document deleted from the tree goes on reading as
+  present. Phase 5 enumerates it, tests both directions of it, and says so in
+  the missed-directory warning; narrowing the prune means recording which
+  directories a pass did list, which is a change to the listing contract and
+  belongs with the sharded ingest that prunes on the same rule.
 - **The lockability probe takes a write lock on a consumer's open** (#462).
   Section
   2.5 has it refuse in both modes, so a consumer opening a SQLite index while
