@@ -483,6 +483,245 @@ def test_a_shortfall_records_what_the_shares_did(
     assert run_rows(url)[0].files_ingested == 2
 
 
+def test_a_shortfall_records_what_its_shares_skipped(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A pass whose shares mostly skipped got just as far as one that ingested.
+
+    Recording only the documents read would write a row of zeros for a re-run of
+    an unchanged tree, which is the case the incremental skip makes ordinary.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 4)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    run_shares(url, tasks, logger=quiet_logger)
+    again = run_shares(url, tasks, logger=quiet_logger)
+    complete(url, [root], again[:-1], logger=quiet_logger)
+    assert run_rows(url)[0].files_skipped == 2
+
+
+def test_a_shortfall_records_what_its_shares_could_not_read(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """And the refusals, which are the half an operator is most likely to chase."""
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    (root / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
+    (root / 'rings_metadata.json').write_text('{"rings": []}', encoding='utf-8')
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    results = run_shares(url, tasks, logger=quiet_logger)
+    complete(url, [root], results[1:], logger=quiet_logger)
+    assert run_rows(url)[0].files_failed == 2
+
+
+# ---------------------------------------------------------------------------
+# An account that runs past the listing
+# ---------------------------------------------------------------------------
+
+
+def test_an_account_past_the_listing_leaves_the_run_unfinished(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Each task counts once, so the sum can only exceed the listing wrongly.
+
+    Whatever produced it -- a hand-edited log, a result from somewhere else --
+    is not an account of this run, and stamping on it would license the one
+    claim the run bookkeeping exists to license from evidence that cannot be
+    right.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 4)
+    url = index_url(tmp_path / 'index.sqlite3')
+    fan_out(url, [root], logger=quiet_logger)
+    inflated = reported(
+        'ingest-1-000000',
+        {
+            'status': 'ok',
+            'run_id': 1,
+            'root_url': normalize_root_url(root),
+            'files_ingested': 1000000,
+            'files_skipped': 0,
+            'files_failed': 0,
+        },
+    )
+    complete(url, [root], [inflated], logger=quiet_logger)
+    assert run_rows(url)[0].finished_utc is None
+
+
+def test_an_account_past_the_listing_names_its_root(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """With both numbers, since the excess is the whole of what is wrong."""
+    root = tmp_path / 'results'
+    build_tree(root, 4)
+    url = index_url(tmp_path / 'index.sqlite3')
+    fan_out(url, [root], logger=quiet_logger)
+    inflated = reported(
+        'ingest-1-000000',
+        {
+            'status': 'ok',
+            'run_id': 1,
+            'root_url': normalize_root_url(root),
+            'files_ingested': 1000000,
+            'files_skipped': 0,
+            'files_failed': 0,
+        },
+    )
+    outcome = complete(url, [root], [inflated], logger=quiet_logger)
+    assert any('1000000 of 4 file(s)' in named for named in outcome.roots_unaccounted)
+
+
+def test_a_count_below_zero_is_not_a_share_tally(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A negative count is not a number of files, and it cancels a real one.
+
+    Read as an account it subtracts from the shares that did report, so a run
+    left short by one task is stamped by another claiming minus its files.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    fan_out(url, [root], logger=quiet_logger)
+    negative = reported(
+        'ingest-1-000000',
+        {
+            'status': 'ok',
+            'run_id': 1,
+            'root_url': normalize_root_url(root),
+            'files_ingested': -100,
+            'files_skipped': 0,
+            'files_failed': 0,
+        },
+    )
+    outcome = complete(url, [root], [negative], logger=quiet_logger)
+    assert outcome.results_unreadable == 1
+
+
+# ---------------------------------------------------------------------------
+# Shares written under another root
+# ---------------------------------------------------------------------------
+
+
+def discard_index(path: Path) -> None:
+    """Delete a SQLite index and the side files it writes beside itself.
+
+    This is the documented remedy for an index stamped with another schema
+    version, and it is the step that makes a surrogate run identifier start
+    again at one.
+
+    Parameters:
+        path: The database file.
+    """
+    for name in (path.name, f'{path.name}-wal', f'{path.name}-shm'):
+        (path.parent / name).unlink(missing_ok=True)
+
+
+def stale_shares_of_a_rebuilt_index(
+    tmp_path: Path, logger: pdslogger.PdsLogger
+) -> tuple[str, Path, list[TaskResult]]:
+    """Run one root's tasks against an index rebuilt around another root.
+
+    The sequence takes no hand-editing of anything.  A root is divided up, the
+    index is deleted and rebuilt -- which is what a schema version mismatch is
+    remedied by -- another root is divided into the fresh index and takes the
+    run identifier the first one had, and the queue still holds the first root's
+    tasks.
+
+    Parameters:
+        tmp_path: Directory the trees and the index live under.
+        logger: Logger every stage reports through.
+
+    Returns:
+        The index URL, the root that was divided up second, and what the first
+        root's tasks reported.
+    """
+    first = tmp_path / 'root-a'
+    second = tmp_path / 'root-b'
+    build_tree(first, 4)
+    build_tree(second, 4)
+    database = tmp_path / 'index.sqlite3'
+    url = index_url(database)
+    stale = fan_out(url, [first], logger=logger)
+    discard_index(database)
+    fan_out(url, [second], logger=logger)
+    return url, second, run_shares(url, stale, logger=logger)
+
+
+def test_a_run_is_not_stamped_by_shares_of_another_root(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A run number is unique only inside the index that minted it.
+
+    The shares wrote real rows and reported real counts, and they add up to
+    exactly what this run's listing found -- under a different root. Credited by
+    run number alone they stamp a root with nothing under it, and every consumer
+    then reads absence of a row there as "this image was never navigated".
+    """
+    url, second, results = stale_shares_of_a_rebuilt_index(tmp_path, quiet_logger)
+    complete(url, [second], results, logger=quiet_logger)
+    assert run_rows(url)[0].finished_utc is None
+
+
+def test_a_root_left_to_the_shares_of_another_is_named_short(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Named with nothing accounted for, which is what its own tasks reported."""
+    url, second, results = stale_shares_of_a_rebuilt_index(tmp_path, quiet_logger)
+    outcome = complete(url, [second], results, logger=quiet_logger)
+    assert any('0 of 4 file(s)' in named for named in outcome.roots_unaccounted)
+
+
+def test_shares_written_under_another_root_are_reported(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Told apart from a result belonging to a fan-out nobody is completing here.
+
+    That one is somebody else's to complete; this one names the very run being
+    completed and is still not its share, which is a different thing to say and
+    a different thing to do about it.
+    """
+    url, second, results = stale_shares_of_a_rebuilt_index(tmp_path, quiet_logger)
+    outcome = complete(url, [second], results, logger=quiet_logger)
+    assert outcome.results_of_another_root == 2
+
+
+def test_a_root_left_to_the_shares_of_another_stays_unreadable(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Which is what a consumer asks, and the whole reason for not stamping it."""
+    url, second, results = stale_shares_of_a_rebuilt_index(tmp_path, quiet_logger)
+    complete(url, [second], results, logger=quiet_logger)
+    engine = open_index(url)
+    try:
+        with engine.connect() as connection, pytest.raises(ValueError, match='no completed ingest'):
+            require_ingested_roots(connection, [normalize_root_url(second)], url=url)
+    finally:
+        engine.dispose()
+
+
+def test_a_share_naming_no_root_is_not_counted_as_one(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A tally that names no root says nothing about which root was written.
+
+    The root is half the key of every row a share writes, so a value carrying
+    counts and a run number alone cannot be attributed to anything.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    fan_out(url, [root], logger=quiet_logger)
+    rootless = reported(
+        'ingest-1-000000',
+        {'status': 'ok', 'run_id': 1, 'files_ingested': 2, 'files_skipped': 0, 'files_failed': 0},
+    )
+    outcome = complete(url, [root], [rootless], logger=quiet_logger)
+    assert outcome.results_unreadable == 1
+
+
 # ---------------------------------------------------------------------------
 # A run that never recorded what its root holds
 # ---------------------------------------------------------------------------
@@ -543,6 +782,35 @@ def test_a_root_whose_listing_was_never_recorded_is_named(
     begin_a_run(url, root)
     outcome = complete(url, [root], [], logger=quiet_logger)
     assert outcome.roots_unlisted == [normalize_root_url(root)]
+
+
+def test_a_root_whose_listing_was_never_recorded_records_what_its_shares_did(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Such a run can still hold real work, and the row is where it shows.
+
+    The run is not stamped and the root stays unreadable, but a share may have
+    written rows under it all the same -- a task file that outlived the listing
+    it was cut from is exactly that -- and an operator reading a row of zeros
+    would conclude nothing was written.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    begin_a_run(url, root)
+    share = reported(
+        'ingest-1-000000',
+        {
+            'status': 'ok',
+            'run_id': 1,
+            'root_url': normalize_root_url(root),
+            'files_ingested': 2,
+            'files_skipped': 0,
+            'files_failed': 0,
+        },
+    )
+    complete(url, [root], [share], logger=quiet_logger)
+    assert run_rows(url)[0].files_ingested == 2
 
 
 def test_a_root_the_fan_out_could_not_list_is_not_stamped(

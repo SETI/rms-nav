@@ -196,7 +196,19 @@ the outstanding tasks and run step 3 again over a log holding the re-run results
 a task re-run over a share it already ingested reads nothing, because its files
 match what the index records, so it reports them as skipped. A task that reports
 twice is still one task: the later report stands in for the earlier one, and a
-share reported twice never covers for a share that never ran.
+share reported twice never covers for a share that never ran. An account that
+runs past the listing is refused the same way: with each task counted once the
+sum can only exceed the listing on a report belonging somewhere else.
+
+**Step 3 counts a task's result only for the root it was written under.** A
+result names the run it belongs to and the root it wrote its rows under, and both
+have to match. A run number is only unique inside the index that minted it, so a
+task file run after its index was deleted and rebuilt -- the remedy for a
+schema-version mismatch -- names a run of whatever was built next. Its shares add
+up correctly and their rows are somewhere else entirely, and a root stamped on
+them would hold nothing at all. Such results are counted and named in the summary
+rather than credited; the root they were meant for is left unfinished, and step 1
+over that root is what starts it again.
 
 **Step 3 needs every task's result in the log it reads.** It reads one event log
 and counts what is in it, so a root whose tasks are spread over several logs is
@@ -204,9 +216,14 @@ completed from the concatenation of them::
 
     cat worker-*.events.log > all-events.log
 
-Order does not matter, and a task appearing in more than one of them is counted
-once. A log naming only some of a root's tasks leaves that root unfinished, which
-is the same outcome as tasks that never ran and is corrected the same way.
+A task appearing in more than one of them is counted once, under the last report
+of it in the file. Order therefore decides between two reports of one task that
+disagree -- a task that failed on one worker and succeeded on another -- so a
+concatenation that puts the failure last leaves the root unfinished, which the
+same log concatenated the other way completes. Both outcomes are safe; neither
+stamps a root whose documents were not read. A log naming only some of a root's
+tasks leaves that root unfinished, which is the same outcome as tasks that never
+ran and is corrected the same way.
 
 **Step 3 refuses a root whose listing was never recorded.** A root that step 1
 could not list -- mistyped, or an unmounted share -- gets no tasks and no record

@@ -761,16 +761,19 @@ every root as never fanned out.
 
 **A run is stamped only when its shares account for the whole listing.** The
 fan-out records `files_seen` on the run row, because no worker sees more than a
-share; completion sums `files_ingested + files_skipped + files_failed` over the
-shares that named that run and refuses to stamp a run that falls short. A task
-that failed, timed out, or was never run read none of its documents, and a run
-stamped without them tells every consumer that absence of their rows means those
-images were never navigated -- the one claim the run bookkeeping exists to
+share; completion sums `files_ingested + files_skipped + files_failed` over that
+run's own shares and refuses to stamp a run the sum does not match exactly. A
+task that failed, timed out, or was never run read none of its documents, and a
+run stamped without them tells every consumer that absence of their rows means
+those images were never navigated -- the one claim the run bookkeeping exists to
 license. A worker that reported an error rather than a share is likewise a
 shortfall, so an unopenable index or a malformed task leaves the root unfinished
-rather than silently shrinking it.
+rather than silently shrinking it. An account that runs *past* the listing is
+refused from the other side of the same rule: each task counts once, so the sum
+can only exceed the listing on a report that is not this run's, and a run is not
+stamped on an account that cannot be right.
 
-Two rules are what make that sum mean what it says.
+Three rules are what make that sum mean what it says.
 
 **Each task's report counts once**, taken under the `task_id` its event carries,
 which the fan-out mints uniquely per share. A queue redelivers a task whenever
@@ -782,6 +785,18 @@ walk found, and the run is stamped with its documents unread. The later report
 of a task supersedes the earlier one, since a task that failed and was re-run
 reports its failure first. A result carrying no task identity cannot be told
 from a repeat of another and so counts toward no run.
+
+**A share counts toward a run only when it names that run's root**, which is why
+the worker returns the root beside the run identifier and completion compares
+both. The identifier is a surrogate that starts again at 1 in a fresh index --
+which is exactly what the remedy for a schema-version mismatch produces, and
+what a mistyped `--results-db` names -- so a task file that outlived the index it
+was cut from carries the run number of whatever was built next. Its shares then
+add up to that run's listing while their rows sit under a different root, and a
+run stamped on them is a root with nothing under it: every consumer reads absence
+there as "this image was never navigated". A result naming a run being completed
+but another root is counted and reported rather than credited, and is told apart
+from one belonging to a fan-out nobody here is completing.
 
 **A run whose listing was never recorded is never stamped**, whatever its shares
 say. No files seen is not zero files seen: zero is what a root that was listed
@@ -1187,11 +1202,16 @@ Details settled during execution, none of them a change of intent:
   abandoned shrinks the index -- but only by rows whose documents have genuinely
   left the tree, and the run is unfinished throughout, so no consumer reads the
   root either way.
-- **Each task's report is counted once, under its `task_id`**, and a run whose
-  listing was never recorded is never stamped. Both are in section 2.8 above.
-  Summing files alone lets a share reported twice cover for a share that never
-  ran, and reading an unrecorded listing as zero files stamps a root nobody
-  listed; either one hands consumers a tree of images to read as never
+- **Each task's report is counted once, under its `task_id`**; a share counts
+  toward a run only when it names that run's root; the account must match the
+  listing exactly rather than merely reach it; and a run whose listing was never
+  recorded is never stamped. All four are in section 2.8 above. Summing files
+  alone lets a share reported twice cover for a share that never ran; crediting
+  by run identifier alone lets a task file that outlived its index stamp a root
+  with nothing under it, since the identifier restarts at 1 in a fresh one;
+  accepting an account that runs past the listing stamps a run on evidence that
+  cannot be right; and reading an unrecorded listing as zero files stamps a root
+  nobody listed. Each one hands consumers a tree of images to read as never
   navigated, which is the claim the run bookkeeping exists to license.
 - **Two spellings of one root are one root**, at the fan-out and at the
   completion. Listed twice, every document is handed out in two shares and read

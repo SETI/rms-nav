@@ -109,10 +109,16 @@ def _record_fan_out(engine: sqlalchemy.Engine, run_id: int, counts: IngestCounts
 def _record_shares(engine: sqlalchemy.Engine, run_id: int, counts: IngestCounts) -> None:
     """Record what a pass's shares reported, without stamping the run.
 
-    A pass whose shares do not account for every file its listing found stays
-    unfinished, but the shares that did report did real work: their documents
-    are in the index.  Writing their tally down is what lets an operator see how
-    far the pass got, instead of the row of zeros the fan-out left.
+    A pass whose shares do not account for exactly the files its listing found
+    stays unfinished, and so does one whose listing was never recorded at all,
+    but the shares that did report did real work: their documents are in the
+    index.  Writing their tally down is what lets an operator see how far the
+    pass got, instead of the row of zeros the fan-out left.
+
+    The row records the log it was last handed rather than the most that has
+    ever been reported, so completing again from a shorter log lowers it.  The
+    account is a reading of one log, and a run's own numbers are not a place to
+    accumulate a history of the attempts to complete it.
 
     Parameters:
         engine: The open index.

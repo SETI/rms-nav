@@ -547,6 +547,45 @@ def test_the_completion_summary_says_why_a_file_was_refused(
     assert any('for example' in line and 'edges_metadata.json' in line for line in written)
 
 
+def test_a_result_written_under_another_root_is_named_in_the_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run number is only unique inside the index that minted it.
+
+    A task file that outlived its index names a run of whatever was built next,
+    and its shares add up to that run's listing while having written their rows
+    somewhere else entirely. Saying so is what tells an operator which of the
+    two they are looking at.
+    """
+    url = fanned_out(tmp_path, monkeypatch, count=3)
+    write_event_log(
+        tmp_path / 'events.log',
+        [
+            {
+                'status': 'ok',
+                'run_id': 1,
+                'root_url': str(tmp_path / 'elsewhere'),
+                'files_ingested': 3,
+                'files_skipped': 0,
+                'files_failed': 0,
+            }
+        ],
+    )
+    _status, written = run_driver(
+        [
+            '--results-db',
+            url,
+            '--nav-results-root',
+            (tmp_path / 'results').as_posix(),
+            '--complete-cloud-tasks-file',
+            str(tmp_path / 'events.log'),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert any('reporting rows under a different root' in line for line in written)
+
+
 def test_completing_a_root_whose_listing_was_never_recorded_exits_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

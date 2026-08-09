@@ -282,6 +282,14 @@ def _log_completion(completion: TaskCompletion) -> None:
             'belong to another fan-out, and are left for whoever completes it.',
             completion.results_unclaimed,
         )
+    if completion.results_of_another_root:
+        MAIN_LOGGER.error(
+            'Task results naming a run being completed here but reporting rows under a '
+            "different root: %d. They are not that run's shares and are not counted toward "
+            'it: a run number is only unique within the index that minted it, so a task file '
+            'that outlived its index names a run of whatever was built next.',
+            completion.results_of_another_root,
+        )
     if completion.results_superseded:
         MAIN_LOGGER.info(
             'Task results superseded by a later report of the same task: %d. A queue '

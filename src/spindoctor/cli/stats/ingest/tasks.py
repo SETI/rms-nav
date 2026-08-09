@@ -49,18 +49,21 @@ What makes a run finishable
 ---------------------------
 
 The fan-out records how many files it saw.  A run is stamped only when the
-shares account for at least that many files between them, because a task that
+shares account for exactly that many files between them, because a task that
 never reported leaves its documents unread, and a run stamped without them
 would tell every consumer that absence of their rows means those images were
 never navigated.
 
-Two things make that arithmetic mean what it says.  Each task's report counts
+Three things make that arithmetic mean what it says.  Each task's report counts
 once, however many times the queue delivered it: over- and under-accounting
 would otherwise cancel, and one share reported twice would cover for a share
-that never ran.  And a run whose listing was never recorded -- a root nothing
-could list, a pass that died before it had one -- is never stamped at all,
-because a run that never established what its root holds has nothing for its
-shares to be measured against.
+that never ran.  A report counts toward a run only when it names the root that
+run covers as well as the run itself, because a run identifier starts again at
+one in a fresh index and a task file outliving its index would otherwise stamp
+a root that has nothing under it.  And a run whose listing was never recorded --
+a root nothing could list, a pass that died before it had one -- is never
+stamped at all, because a run that never established what its root holds has
+nothing for its shares to be measured against.
 """
 
 import json
@@ -227,6 +230,22 @@ class TaskResults:
     tasks_unfinished: int = 0
 
 
+@dataclass(frozen=True)
+class _ShareTally:
+    """One share's report, read out of the value its worker returned.
+
+    Parameters:
+        run_id: The ingest run the share names.
+        root_url: The normalized root its rows were written under, which is the
+            other half of the key every one of those rows carries.
+        counts: What the share did.
+    """
+
+    run_id: int
+    root_url: str
+    counts: IngestCounts
+
+
 @dataclass
 class TaskCompletion:
     """What adding the shares up did.
@@ -234,9 +253,9 @@ class TaskCompletion:
     Parameters:
         counts: The shares' tallies, summed.
         runs_completed: Ingest runs stamped as finished.
-        roots_unaccounted: Roots whose shares did not account for every file
-            the fan-out saw, each named with the shortfall.  Their runs keep
-            their NULL finish times.
+        roots_unaccounted: Roots whose shares did not account for exactly the
+            files the fan-out saw, each named with the account and the listing.
+            Their runs keep their NULL finish times.
         roots_unlisted: Roots whose run never recorded what its listing found,
             each named.  Nothing says what such a root holds, so no account of
             it can be complete and its run is never stamped.
@@ -244,6 +263,10 @@ class TaskCompletion:
             named.
         results_unclaimed: Task results naming a run none of the given roots is
             waiting on.
+        results_of_another_root: Task results naming a run that is being
+            completed, but reporting rows written under a different root.  A run
+            identifier is unique only within the index that minted it, so a task
+            file outliving its index names a run of whatever was built next.
         results_failed: Task results in which a worker reported an error
             instead of a share.
         results_unreadable: Task results that are not the shape a worker
@@ -261,6 +284,7 @@ class TaskCompletion:
     roots_unlisted: list[str] = field(default_factory=list)
     roots_without_a_run: list[str] = field(default_factory=list)
     results_unclaimed: int = 0
+    results_of_another_root: int = 0
     results_failed: int = 0
     results_unreadable: int = 0
     results_superseded: int = 0
@@ -631,29 +655,38 @@ def _reason_map(value: Any, kind: type[_ReasonValue]) -> dict[str, _ReasonValue]
     return found
 
 
-def _share_tally(result: dict[str, Any]) -> tuple[int, IngestCounts] | None:
+def _share_tally(result: dict[str, Any]) -> _ShareTally | None:
     """Read one task result as the tally of a share, or refuse it.
 
     Parameters:
         result: One value a worker returned.
 
     Returns:
-        The run it belongs to and what it did, or None when the value is not a
+        Which share it is and what it did, or None when the value is not a
         share's tally at all.  Its files are then unaccounted for, which is what
-        stops the run being stamped.
+        stops the run being stamped.  A count below zero is refused with the
+        rest: it is not a number of files, and added in it would let one result
+        cancel another's.
     """
     run_id = result.get('run_id')
     if isinstance(run_id, bool) or not isinstance(run_id, int):
         return None
+    root_url = result.get('root_url')
+    if not isinstance(root_url, str):
+        return None
+    try:
+        root_url = normalize_root_url(root_url)
+    except ValueError:
+        return None
     counts = IngestCounts()
     for name in ('files_ingested', 'files_skipped', 'files_failed'):
         value = result.get(name)
-        if isinstance(value, bool) or not isinstance(value, int):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             return None
         setattr(counts, name, value)
     counts.failures_by_reason = _reason_map(result.get('failures_by_reason'), int)
     counts.example_by_reason = _reason_map(result.get('example_by_reason'), str)
-    return run_id, counts
+    return _ShareTally(run_id=run_id, root_url=root_url, counts=counts)
 
 
 def _latest_of_each_task(
@@ -703,14 +736,23 @@ def complete_ingest_tasks(
 ) -> TaskCompletion:
     """Add the shares up and stamp the runs they completed.
 
-    A run is stamped only when its shares account for at least as many files as
-    the fan-out's walk saw, counting each task's report once however many times
-    it was delivered.  A share that never reported -- a task that failed, timed
+    A run is stamped only when its shares account for exactly the files the
+    fan-out's walk saw, counting each task's report once however many times it
+    was delivered.  A share that never reported -- a task that failed, timed
     out, or was never run -- leaves its documents unread, and stamping the run
     anyway would tell every consumer that the absence of their rows means those
     images were never navigated.  Such a root keeps its unfinished run and is
     named instead, with what its shares did recorded on the run so that an
-    operator can see how far it got.
+    operator can see how far it got.  An account that runs past the listing is
+    refused for the same reason from the other side: each task counts once, so
+    the sum can only exceed the listing on a report that is not this run's.
+
+    A share is this run's when it names both the run and the root the run
+    covers.  The identifier alone is not enough: it is a surrogate that starts
+    again at one in a fresh index, which is exactly what the remedy for a schema
+    version mismatch produces, so a task file that outlived its index names a
+    run of whatever was built next.  Credited by identifier alone, those shares
+    stamp a root that has nothing under it.
 
     A run whose walk was never recorded is not stamped either, whatever its
     shares say.  A root nothing could list and a pass that died before it had a
@@ -730,8 +772,8 @@ def complete_ingest_tasks(
         What was completed and what was not.
     """
     completion = TaskCompletion()
-    by_run: dict[int, IngestCounts] = {}
-    results_of_run: dict[int, int] = {}
+    by_share: dict[tuple[int, str], IngestCounts] = {}
+    results_of_share: dict[tuple[int, str], int] = {}
     for result in _latest_of_each_task(results, completion):
         if result.get('status') != 'ok':
             # A worker that could not open the index, or was handed a task it
@@ -747,19 +789,27 @@ def complete_ingest_tasks(
         if tally is None:
             completion.results_unreadable += 1
             continue
-        run_id, counts = tally
-        by_run.setdefault(run_id, IngestCounts()).add(counts)
-        results_of_run[run_id] = results_of_run.get(run_id, 0) + 1
-    claimed: set[int] = set()
+        key = (tally.run_id, tally.root_url)
+        by_share.setdefault(key, IngestCounts()).add(tally.counts)
+        results_of_share[key] = results_of_share.get(key, 0) + 1
+    claimed: set[tuple[int, str]] = set()
     for root_url in _distinct_roots(roots):
         with engine.connect() as connection:
             run = _unfinished_run(connection, root_url)
         if run is None:
             completion.roots_without_a_run.append(root_url)
             continue
-        claimed.add(run.run_id)
-        counts = by_run.get(run.run_id, IngestCounts())
+        # Both halves of the share's own identity, because a run identifier is
+        # a surrogate that starts again at one in a fresh index -- which the
+        # documented remedy for a version mismatch creates -- and a task file
+        # written before that rebuild names a run of whatever was built next.
+        claimed.add((run.run_id, run.root_url))
+        counts = by_share.get((run.run_id, run.root_url), IngestCounts())
         if run.files_seen is None:
+            # What its shares did is recorded for the same reason a shortfall's
+            # is: the run stays unreadable either way, and an operator reading
+            # the row can see whether anything was written under this root.
+            _record_shares(engine, run.run_id, counts)
             completion.roots_unlisted.append(root_url)
             logger.error(
                 'The ingest run of %s never recorded what its listing found, so there is '
@@ -773,7 +823,7 @@ def complete_ingest_tasks(
         counts.files_removed = run.files_removed or 0
         counts.directories_missed = run.directories_missed or 0
         accounted = counts.files_ingested + counts.files_skipped + counts.files_failed
-        if accounted < counts.files_seen:
+        if accounted != counts.files_seen:
             # What the shares that did report did is written down without a
             # finish time: the run stays unreadable, and an operator inspecting
             # it can see how far the pass got rather than a row of zeros.
@@ -784,7 +834,11 @@ def complete_ingest_tasks(
             logger.error(
                 'The tasks of %s account for %d of the %d file(s) its listing found, so its '
                 'ingest run is left unfinished: absence of a row under it is not evidence '
-                'that its image was never navigated',
+                'that its image was never navigated'
+                if accounted < counts.files_seen
+                else 'The tasks of %s account for %d file(s) where its listing found %d, so '
+                'its ingest run is left unfinished: each task counts once, so an account '
+                "can only run past a listing on results that are not this run's",
                 root_url,
                 accounted,
                 counts.files_seen,
@@ -802,7 +856,12 @@ def complete_ingest_tasks(
             counts.files_seen,
         )
         completion.counts.add(counts)
-    completion.results_unclaimed = sum(
-        count for run_id, count in results_of_run.items() if run_id not in claimed
-    )
+    claimed_runs = {run_id for run_id, _root_url in claimed}
+    for key, count in results_of_share.items():
+        if key in claimed:
+            continue
+        if key[0] in claimed_runs:
+            completion.results_of_another_root += count
+        else:
+            completion.results_unclaimed += count
     return completion
