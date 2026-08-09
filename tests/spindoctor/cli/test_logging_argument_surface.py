@@ -68,7 +68,10 @@ _WITH_ANY_LOGGER = _WITH_IMAGE_LOGGER + _WITHOUT_IMAGE_LOGGER
 _WITHOUT_LOGGER = [
     ('sd_stats_report', []),
     ('sd_create_simulated_image', []),
-    ('sd_backplane_viewer', []),
+    # The viewer reads its dataset from argv before parsing, so without one it
+    # prints a usage error rather than its help, and every flag is absent from
+    # a string that names none of them.
+    ('sd_backplane_viewer', ['coiss_saturn']),
     ('sd_mosaic_display', ['rings']),
     ('sd_mosaic_display', ['body']),
 ]
