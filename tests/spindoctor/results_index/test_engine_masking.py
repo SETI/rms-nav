@@ -9,8 +9,19 @@ The rule is asked about a corpus rather than a list of remembered shapes. Every
 combination of scheme, of the slashes that follow it, of credentials, and of
 what a password may contain is built here and asserted in both directions: the
 secret is gone, and the result is exactly the URL with its credentials replaced
-and nothing else touched. A list of shapes somebody thought of is what let four
-separate leaks through, each in a shape nobody had thought of yet.
+and nothing else touched. A list of shapes somebody thought of is what let the
+first several leaks through, each in a shape nobody had thought of yet.
+
+Each dimension is **covered rather than sampled**, and the two are not the same
+thing. A corpus that carried no slash, one and two stopped one value short of
+the three-slash spelling, and the rule leaked every URL written that way; a
+corpus that varied one special character of a password at a time could not
+reach a password carrying an at-sign *and* a slash, and the rule leaked that
+one's tail. So the slash count runs from none to :data:`MAXIMUM_SLASHES`, and
+the passwords carry every ordered pair of the characters that mean something to
+a URL rather than one character each. Tests below assert that the dimensions
+are still crossed, because a corpus quietly narrowed is a corpus that proves
+less than it says.
 
 The corpus is driven through the real opener as well, on the URLs that reach a
 refusal without opening a socket, because a rule nothing calls protects nothing.
@@ -266,13 +277,20 @@ SCHEMES = [
 ]
 """A scheme with a ``+driver`` suffix, one without, and none at all."""
 
-SLASHES = [_Part('no-slash', ''), _Part('one-slash', '/'), _Part('two-slashes', '//')]
-"""How many slashes follow the scheme.
+MAXIMUM_SLASHES = 4
+"""How many slashes after the scheme the corpus goes up to.
 
-Two is the spelling a URL is defined with; one is what a hand-edited setting
-arrives as; none is the spelling on which the text before the colon reads
-equally as a scheme and as a user name.
+The dimension is covered from none to this many rather than sampled. Two is
+the spelling a URL is defined with; one is what a hand-edited setting arrives
+as; none is the spelling on which the text before the colon reads equally as a
+scheme and as a user name; three is the spelling that omits the host to name a
+local socket, and the one a ``sqlite:///path`` habituates. Stopping the
+dimension one value short of three is what let the fifth leak through, so it is
+carried two values past the last one anybody has a use for.
 """
+
+SLASHES = [_Part(f'{count}-slashes', '/' * count) for count in range(MAXIMUM_SLASHES + 1)]
+"""How many slashes follow the scheme, from none to :data:`MAXIMUM_SLASHES`."""
 
 TAILS = [
     _Part('a-bare-host', 'db.example'),
@@ -286,23 +304,81 @@ so a rule that ends the credentials at a slash has none to find; the port is a
 second colon after the password's own.
 """
 
-PASSWORDS = [
-    _Part('plain', PASSWORD),
-    _Part('carrying-a-slash', SLASHED_PASSWORD),
-    _Part('carrying-an-at-sign', 'pa@ss'),
-    _Part('carrying-a-colon', 'pa:ss'),
-    _Part('carrying-a-hash', 'pa#ss'),
-    _Part('carrying-a-question-mark', 'pa?ss'),
-    _Part('digits-only', '86753090'),
-    _Part('empty', ''),
-]
+URL_SIGNIFICANT_CHARACTERS = ('/', '@', ':', '#', '?')
 """Every character a password may carry that also means something to a URL.
 
 A slash reads as the end of the authority, an at-sign as the end of the
 credentials, a colon as the start of the password, a question mark as the start
-of a query, a hash as the start of a fragment, and a leading digit as a port.
-Each of them is what a rule reading the URL by eye stops at too early.
+of a query, and a hash as the start of a fragment. Each of them is what a rule
+reading the URL by eye stops at too early.
 """
+
+CHARACTER_NAMES = {
+    '/': 'a-slash',
+    '@': 'an-at-sign',
+    ':': 'a-colon',
+    '#': 'a-hash',
+    '?': 'a-question-mark',
+}
+"""What each of those characters is called in a case identifier."""
+
+
+def _carrying(*characters: str) -> str:
+    """Return a password carrying the given characters, in the given order.
+
+    Parameters:
+        characters: The characters to embed, in the order they must appear.
+
+    Returns:
+        A password distinctive enough that finding any of it is a leak.
+    """
+    text = 'pw'
+    for index, character in enumerate(characters):
+        text = f'{text}{character}s{index}'
+    return text
+
+
+def _password_parts() -> list[_Part]:
+    """Build the password shapes, covering the characters and their order.
+
+    One password per character is not enough, and that is the whole lesson of
+    this rule's history: the leak that survived a corpus varying one character
+    at a time needed an at-sign *and* a slash, in that order. So every ordered
+    pair is here, including a character paired with itself, because the order
+    of two occurrences is what decides where a rule reading by eye stops.
+
+    Returns:
+        The parts, in a stable order.
+    """
+    parts = [
+        _Part('plain', PASSWORD),
+        _Part('digits-only', '86753090'),
+        _Part('empty', ''),
+        # The two shapes an operator actually types, spelled as they are typed
+        # rather than as the generator spells them.
+        _Part('an-at-sign-then-a-slash-as-typed', 'p@ss/word'),
+        _Part('a-colon-then-an-at-sign-as-typed', 'pw:with@both'),
+    ]
+    parts += [
+        _Part(f'carrying-{CHARACTER_NAMES[character]}', _carrying(character))
+        for character in URL_SIGNIFICANT_CHARACTERS
+    ]
+    parts += [
+        _Part(
+            f'carrying-{CHARACTER_NAMES[first]}-then-{CHARACTER_NAMES[second]}',
+            _carrying(first, second),
+        )
+        for first, second in itertools.product(URL_SIGNIFICANT_CHARACTERS, repeat=2)
+    ]
+    parts += [
+        _Part('carrying-all-of-them', _carrying(*URL_SIGNIFICANT_CHARACTERS)),
+        _Part('carrying-all-of-them-reversed', _carrying(*reversed(URL_SIGNIFICANT_CHARACTERS))),
+    ]
+    return parts
+
+
+PASSWORDS = _password_parts()
+"""Passwords with no URL character, with one each, and with every ordered pair."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -447,9 +523,34 @@ QUERY_CASES = [
         PASSWORD,
     ),
     _Case(
+        # libpq separates parameters with ';' as readily as with '&', so both
+        # separators are covered rather than the commoner one alone.
+        'a-semicolon-separated-password',
+        f'postgresql+psycopg://svc@db.example/spindoctor?a=1;password={PASSWORD}',
+        'postgresql+psycopg://svc@db.example/spindoctor?a=1;password=***',
+        PASSWORD,
+    ),
+    _Case(
+        'a-semicolon-separated-password-before-an-ordinary-setting',
+        f'postgresql+psycopg://svc@db.example/sd?password={PASSWORD};connect_timeout=3',
+        'postgresql+psycopg://svc@db.example/sd?password=***;connect_timeout=3',
+        PASSWORD,
+    ),
+    _Case(
+        'both-separators-in-one-query',
+        f'postgresql+psycopg://svc@db.example/sd?a=1;password={PASSWORD}&pwd={PASSWORD};b=2',
+        'postgresql+psycopg://svc@db.example/sd?a=1;password=***&pwd=***;b=2',
+        PASSWORD,
+    ),
+    _Case(
         'an-ordinary-setting',
         'postgresql+psycopg://svc@db.example/spindoctor?connect_timeout=3',
         'postgresql+psycopg://svc@db.example/spindoctor?connect_timeout=3',
+    ),
+    _Case(
+        'ordinary-settings-separated-by-semicolons',
+        'postgresql+psycopg://svc@db.example/sd?connect_timeout=3;sslmode=require',
+        'postgresql+psycopg://svc@db.example/sd?connect_timeout=3;sslmode=require',
     ),
     _Case(
         'a-search-path-option',
@@ -534,6 +635,39 @@ mistake.
 """
 
 
+LAST_AT_SIGN_CASES = [
+    _Case(
+        # The password carries an at-sign and then a hash. Ending the
+        # credentials at the last at-sign *before* the hash -- reading the hash
+        # as the start of a fragment -- stops inside the password and leaves
+        # 's0#s1' in the message, so the bound is the last at-sign of the
+        # string instead.
+        'a-password-carrying-an-at-sign-before-a-hash',
+        'postgresql+psycopg://svc:pw@s0#s1@db.example/sd',
+        'postgresql+psycopg://svc:***@db.example/sd',
+        'pw@s0#s1',
+    ),
+    _Case(
+        'a-password-carrying-an-at-sign-before-a-slash',
+        'postgresql+psycopg://svc:p@ss/word@db.example/sd',
+        'postgresql+psycopg://svc:***@db.example/sd',
+        'p@ss/word',
+    ),
+    _Case(
+        # What the last-at-sign bound costs, stated so the cost is a decision
+        # rather than a surprise: a fragment carrying an at-sign is swallowed
+        # whole. A connection URL has no use for a fragment, so this is a
+        # mangled message about a URL no driver would have accepted, which is
+        # the trade section 2.4 rule 3 takes everywhere else too.
+        'a-fragment-carrying-an-at-sign',
+        'postgresql psycopg://svc:pw@db.example/sd#note@host',
+        'postgresql psycopg://svc:***@host',
+        'pw',
+    ),
+]
+"""Where the credentials end when more than one at-sign is a candidate."""
+
+
 AWKWARD_SPELLINGS = [
     _Case(
         'a-leading-space',
@@ -568,7 +702,9 @@ at-sign that ends the credentials is the last one rather than the first.
 """
 
 
-ALL_CASES = CORPUS + QUERY_CASES + NEGATIVE_CASES + AMBIGUOUS_CASES + AWKWARD_SPELLINGS
+ALL_CASES = (
+    CORPUS + QUERY_CASES + NEGATIVE_CASES + AMBIGUOUS_CASES + LAST_AT_SIGN_CASES + AWKWARD_SPELLINGS
+)
 
 CASE_PARAMS = [pytest.param(case, id=case.name) for case in ALL_CASES]
 
@@ -576,6 +712,48 @@ SECRET_PARAMS = [
     pytest.param(case, id=case.name) for case in ALL_CASES if case.secret and case.secret.strip()
 ]
 """The subset carrying a secret worth naming, for the direction stated on its own."""
+
+
+def test_the_corpus_is_the_whole_product_of_its_dimensions() -> None:
+    """A corpus that samples a dimension proves less than it appears to.
+
+    Every leak this rule has had lived in a value of some dimension the corpus
+    did not reach, so the product being complete is itself worth asserting: a
+    later edit that drops a dimension's values to shorten the run fails here
+    rather than quietly narrowing what the rest of the file proves.
+    """
+    dimensions = len(SCHEMES) * len(SLASHES) * len(USERINFOS) * len(TAILS)
+    assert len(CORPUS) == dimensions
+
+
+def test_the_corpus_covers_every_slash_count_from_none() -> None:
+    """Three slashes is a real spelling, and stopping at two leaked every one."""
+    counts = {part.text.count('/') for part in SLASHES}
+    assert counts == set(range(MAXIMUM_SLASHES + 1))
+
+
+@pytest.mark.parametrize(
+    ('first', 'second'), list(itertools.product(URL_SIGNIFICANT_CHARACTERS, repeat=2))
+)
+def test_the_corpus_holds_a_password_carrying_one_character_then_another(
+    first: str, second: str
+) -> None:
+    """Order decides where a rule reading the URL by eye stops.
+
+    A password carrying an at-sign and then a slash is not the same test as one
+    carrying a slash and then an at-sign: the rule that ended the credentials at
+    the at-sign before the first slash passed the second and leaked the first.
+
+    Parameters:
+        first: The character that must appear first.
+        second: The character that must appear after it.
+    """
+    carried = [
+        part.text
+        for part in PASSWORDS
+        if first in part.text and second in part.text[part.text.index(first) + 1 :]
+    ]
+    assert carried
 
 
 @pytest.mark.parametrize('case', CASE_PARAMS)

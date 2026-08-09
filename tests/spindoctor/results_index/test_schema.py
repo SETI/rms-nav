@@ -126,6 +126,7 @@ INGEST_RUNS_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('files_skipped', sqlalchemy.Integer, True),
     ('files_failed', sqlalchemy.Integer, True),
     ('files_removed', sqlalchemy.Integer, True),
+    ('directories_missed', sqlalchemy.Integer, True),
     ('schema_version', sqlalchemy.Integer, False),
 )
 

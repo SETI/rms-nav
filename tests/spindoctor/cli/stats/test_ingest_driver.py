@@ -11,6 +11,7 @@ completed, not what the run found, so a scheduled invocation reads the same
 status from the same tree every time.
 """
 
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -59,8 +60,10 @@ def _run(
         sys, 'argv', ['sd_stats_ingest', '--log-root', str(tmp_path / 'logs'), *argv]
     )
     monkeypatch.setattr(MAIN_LOGGER, 'info', recording)
+    monkeypatch.setattr(MAIN_LOGGER, 'warning', recording)
     monkeypatch.setattr(MAIN_LOGGER, 'error', recording)
     monkeypatch.setattr(MAIN_LOGGER, 'fatal', recording)
+    monkeypatch.setattr(MAIN_LOGGER, 'exception', recording)
     with pytest.raises(SystemExit) as caught:
         sd_stats_ingest.main()
     status = caught.value.code
@@ -213,6 +216,95 @@ def test_a_root_that_is_not_there_is_named_in_the_summary(
         tmp_path,
     )
     assert any('could not be listed' in line for line in written)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason='the superuser reads a directory of mode 000')
+def test_a_missed_directory_is_named_in_the_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A completed run that saw part of a root has to say which part it missed.
+
+    Every consumer of the index reads a missing row as "this image was never
+    navigated". Under a directory nobody listed that reading is wrong, and the
+    summary is where an operator finds out before acting on it.
+    """
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL1/N1454725799_1_CALIB', metadata_document())
+    write_metadata(root, 'VOL2/N1454725800_1_CALIB', metadata_document())
+    closed = root / 'VOL2'
+    closed.chmod(0o000)
+    try:
+        _status, written = _run(
+            [
+                '--results-db',
+                index_url(tmp_path / 'index.sqlite3'),
+                '--nav-results-root',
+                root.as_posix(),
+            ],
+            monkeypatch,
+            tmp_path,
+        )
+    finally:
+        closed.chmod(0o755)
+    assert any('Directories not listed' in line for line in written)
+
+
+def test_a_failure_nobody_enumerated_exits_rather_than_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A console entry point owes its caller a status, not a traceback.
+
+    The pass charges every failure it expects to one file or one root. What is
+    left is a failure nobody enumerated, and the driver's contract is that it
+    exits either way -- otherwise a caller reading the status gets an exception
+    instead, and the roots the pass never reached keep their unfinished runs
+    with nothing said about why.
+    """
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+
+    def exploding(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError('a failure nobody enumerated')
+
+    monkeypatch.setattr(sd_stats_ingest, 'ingest_metadata_files', exploding)
+    status, _written = _run(
+        [
+            '--results-db',
+            index_url(tmp_path / 'index.sqlite3'),
+            '--nav-results-root',
+            root.as_posix(),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert status == 1
+
+
+def test_a_failure_nobody_enumerated_says_what_it_was(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exit status with nothing in the log leaves nobody anything to act on."""
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+
+    def exploding(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError('a failure nobody enumerated')
+
+    monkeypatch.setattr(sd_stats_ingest, 'ingest_metadata_files', exploding)
+    _status, written = _run(
+        [
+            '--results-db',
+            index_url(tmp_path / 'index.sqlite3'),
+            '--nav-results-root',
+            root.as_posix(),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert any('a failure nobody enumerated' in line for line in written)
 
 
 def test_a_failure_reason_names_one_example_file(

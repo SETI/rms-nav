@@ -8,6 +8,7 @@ be a navigation document at all.
 """
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -436,6 +437,37 @@ def test_an_unchanged_file_is_not_read_again(
     assert retrievals == []
 
 
+def _watch_per_file_questions(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record every path ingest asks the storage layer about individually.
+
+    ``exists`` is never needed at all, so it is forbidden outright.  ``stat``
+    is recorded rather than forbidden: a local walk asks it about a directory
+    it is entering, to recognize one it has already walked, and that question
+    is asked once per directory and never on a cloud root.  What may not
+    happen is asking it about a *file*, which on a cloud root is a paid round
+    trip per image per run.
+
+    Parameters:
+        monkeypatch: Fixture the recorders are installed through.
+
+    Returns:
+        The list the paths accumulate in, in call order.
+    """
+    asked: list[str] = []
+    real_stat = FCPath.stat
+
+    def recorded(self: FCPath, *args: Any, **kwargs: Any) -> Any:
+        asked.append(self.as_posix())
+        return real_stat(self, *args, **kwargs)
+
+    def forbidden(self: FCPath, *args: Any, **kwargs: Any) -> Any:
+        raise AssertionError('ingest asked the backend whether one file exists')
+
+    monkeypatch.setattr(FCPath, 'stat', recorded)
+    monkeypatch.setattr(FCPath, 'exists', forbidden)
+    return asked
+
+
 def test_an_unchanged_file_is_not_stat_ed_either(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -444,14 +476,10 @@ def test_an_unchanged_file_is_not_stat_ed_either(
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=quiet_logger)
-
-    def forbidden(self: FCPath, *args: Any, **kwargs: Any) -> Any:
-        raise AssertionError('ingest asked the backend about one file at a time')
-
-    monkeypatch.setattr(FCPath, 'stat', forbidden)
-    monkeypatch.setattr(FCPath, 'exists', forbidden)
+    asked = _watch_per_file_questions(monkeypatch)
     counts = ingest_tree(url, [root], logger=quiet_logger)
     assert counts.files_skipped == 1
+    assert [path for path in asked if path.endswith(METADATA_SUFFIX)] == []
 
 
 def test_a_first_ingest_asks_about_no_single_file_either(
@@ -460,14 +488,26 @@ def test_a_first_ingest_asks_about_no_single_file_either(
     """The walk feeds presence and both metrics, so a first pass is one listing."""
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-
-    def forbidden(self: FCPath, *args: Any, **kwargs: Any) -> Any:
-        raise AssertionError('ingest asked the backend about one file at a time')
-
-    monkeypatch.setattr(FCPath, 'stat', forbidden)
-    monkeypatch.setattr(FCPath, 'exists', forbidden)
+    asked = _watch_per_file_questions(monkeypatch)
     counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
     assert counts.files_ingested == 1
+    assert [path for path in asked if path.endswith(METADATA_SUFFIX)] == []
+
+
+def test_a_cloud_directory_is_not_stat_ed_at_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Recognizing a directory already walked costs a cloud root nothing.
+
+    A cloud location has no links for a walk to go round in, and asking a
+    bucket about a prefix is a round trip per directory per run. The identity
+    is therefore taken only where a loop is possible, and the check that
+    decides is a string test that reaches no backend.
+    """
+
+    def forbidden(self: FCPath, *args: Any, **kwargs: Any) -> Any:
+        raise AssertionError('ingest asked a cloud backend about a directory')
+
+    monkeypatch.setattr(FCPath, 'stat', forbidden)
+    assert ingest_module._directory_identity(FCPath('gs://rms-nav/nav-offset-results')) is None
 
 
 def test_a_touched_file_is_read_again(tmp_path: Path, quiet_logger: pdslogger.PdsLogger) -> None:
@@ -482,6 +522,76 @@ def test_a_touched_file_is_read_again(tmp_path: Path, quiet_logger: pdslogger.Pd
     )
     counts = ingest_tree(url, [root], logger=quiet_logger)
     assert counts.files_ingested == 1
+
+
+SAME_LENGTH_BEFORE = metadata_document(image_name='N1454725799_1_CALIB.IMG')
+"""A document whose serialization is the same length as the one below."""
+
+SAME_LENGTH_AFTER = metadata_document(image_name='N1454725798_1_CALIB.IMG')
+"""The same document with one digit of the image name changed.
+
+An edit of exactly the same byte length is what leaves the size half of the
+incremental comparison saying nothing, so it is the only edit that asks the
+modification time whether the file changed.
+"""
+
+
+def _rewrite_at_the_same_length(tmp_path: Path, logger: pdslogger.PdsLogger) -> str:
+    """Ingest a document, rewrite it to the same length, and ingest again.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        logger: Logger the ingest reports through.
+
+    Returns:
+        The index URL.
+    """
+    root = tmp_path / 'results'
+    stub = 'VOL/N1454725799_1_CALIB'
+    path = write_metadata(root, stub, SAME_LENGTH_BEFORE)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=logger)
+    written = path.stat().st_mtime_ns
+    path.write_text(json.dumps(SAME_LENGTH_AFTER), encoding='utf-8')
+    # A rewrite this quick can land in the same nanosecond the first write did,
+    # which would make the two passes agree for a reason the test is not about.
+    os.utime(path, ns=(written + 1_000_000_000, written + 1_000_000_000))
+    return url
+
+
+def test_the_same_length_rewrite_really_is_the_same_length() -> None:
+    """Otherwise the test below would be passing on the size half after all."""
+    before = len(json.dumps(SAME_LENGTH_BEFORE).encode('utf-8'))
+    after = len(json.dumps(SAME_LENGTH_AFTER).encode('utf-8'))
+    assert before == after
+
+
+def test_a_file_rewritten_to_the_same_length_is_read_again(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The modification time is the half of the comparison that catches this.
+
+    A results tree is rewritten in place by a re-navigation, and a document
+    that changed without changing length is the ordinary case: one status word
+    for another, one digit of an offset for another. Comparing size alone would
+    skip such a file for as long as it existed.
+    """
+    url = _rewrite_at_the_same_length(tmp_path, quiet_logger)
+    counts = ingest_tree(url, [tmp_path / 'results'], logger=quiet_logger)
+    assert counts.files_ingested == 1
+
+
+def test_a_file_rewritten_to_the_same_length_updates_its_row(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Re-reading is only worth anything if the row that comes back is the new one."""
+    url = _rewrite_at_the_same_length(tmp_path, quiet_logger)
+    ingest_tree(url, [tmp_path / 'results'], logger=quiet_logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(connection, sqlalchemy.select(IMAGES.c.image_name))
+    engine.dispose()
+    assert [row.image_name for row in found] == ['N1454725798_1_CALIB.IMG']
 
 
 def test_a_touched_file_updates_its_row(tmp_path: Path, quiet_logger: pdslogger.PdsLogger) -> None:
@@ -806,16 +916,80 @@ def test_a_cloud_style_root_reads_the_downloaded_document(
 def test_an_unretrievable_file_is_counted_not_raised(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A batched retrieval reports its failures rather than raising on one."""
+    """A batched retrieval reports its failures rather than raising on one.
+
+    The stand-in honors ``exception_on_fail`` rather than swallowing it, which
+    is what makes this a test of the call and not only of the handling: the
+    storage layer raises unless it is asked not to, so a caller that stops
+    passing the keyword ends the run here instead of counting one file.
+    """
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
 
-    def failing(self: FCPath, sub_path: Any = None, **kwargs: Any) -> Any:
-        return [FileNotFoundError('gone') for _ in sub_path]
+    def failing(
+        self: FCPath, sub_path: Any = None, *, exception_on_fail: bool = True, **kwargs: Any
+    ) -> Any:
+        errors = [FileNotFoundError('gone') for _ in sub_path]
+        if exception_on_fail:
+            raise errors[0]
+        return errors
 
     monkeypatch.setattr(FCPath, 'retrieve', failing)
     counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
     assert counts.failures_by_reason == {'could not be retrieved': 1}
+
+
+def _tree_with_a_dangling_symlink(tmp_path: Path) -> Path:
+    """Build a results tree holding one real document and one broken link.
+
+    A dangling symlink is the ordinary way a file the walk listed cannot be
+    retrieved: the listing names it, and the download finds nothing behind it.
+    A re-navigation that moved its output and a partially restored backup both
+    leave them.
+
+    Parameters:
+        tmp_path: Directory the tree lives under.
+
+    Returns:
+        The results root.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    link = root / 'VOL' / f'N1454725800_1_CALIB{METADATA_SUFFIX}'
+    link.symlink_to(tmp_path / 'nowhere' / f'gone{METADATA_SUFFIX}')
+    return root
+
+
+def test_a_dangling_symlink_costs_only_its_own_file(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The same guarantee against a real broken file rather than a stand-in."""
+    root = _tree_with_a_dangling_symlink(tmp_path)
+    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    assert counts.files_ingested == 1
+
+
+def test_a_dangling_symlink_is_counted_as_unretrievable(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """And it is counted, so a tree full of them does not read as a clean pass."""
+    root = _tree_with_a_dangling_symlink(tmp_path)
+    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    assert counts.failures_by_reason == {'could not be retrieved': 1}
+
+
+def test_a_dangling_symlink_leaves_a_completed_run(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A run that ended on one would leave every consumer refusing the root."""
+    root = _tree_with_a_dangling_symlink(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(connection, sqlalchemy.select(INGEST_RUNS.c.finished_utc))
+    engine.dispose()
+    assert [row.finished_utc is not None for row in found] == [True]
 
 
 def test_a_missing_root_is_reported_rather_than_raised(
@@ -841,6 +1015,73 @@ def test_a_root_is_normalized_before_it_is_stored(
         found = _rows(connection, sqlalchemy.select(IMAGES.c.root_url))
     engine.dispose()
     assert [row.root_url for row in found] == [root.as_posix()]
+
+
+def _ingest_a_relative_root(tmp_path: Path, logger: pdslogger.PdsLogger) -> str:
+    """Ingest a root named relatively to the working directory.
+
+    A relative root is a documented spelling of the option, and the walk is
+    handed the same normalized form the rows are keyed by rather than the
+    string as typed.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        logger: Logger the ingest reports through.
+
+    Returns:
+        The index URL, for whatever the caller means to read from it.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    engine = open_index(url, create=True)
+    previous = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        ingest_metadata_files(engine, ['results'], logger=logger)
+    finally:
+        os.chdir(previous)
+        engine.dispose()
+    return url
+
+
+def test_a_relative_root_is_ingested(tmp_path: Path, quiet_logger: pdslogger.PdsLogger) -> None:
+    """The walk is handed the normalized root, which is the absolute one.
+
+    Handing it the string as typed asks the storage layer for a relative local
+    URL, which it refuses outright -- a traceback out of a console entry point,
+    over a spelling the option documents.
+    """
+    url = _ingest_a_relative_root(tmp_path, quiet_logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(connection, sqlalchemy.select(IMAGES.c.results_path_stub))
+    engine.dispose()
+    assert [row.results_path_stub for row in found] == ['VOL/N1454725799_1_CALIB']
+
+
+def test_a_relative_root_completes_its_run(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A run left unfinished is a root every consumer afterwards refuses."""
+    url = _ingest_a_relative_root(tmp_path, quiet_logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(connection, sqlalchemy.select(INGEST_RUNS.c.finished_utc))
+    engine.dispose()
+    assert [row.finished_utc is not None for row in found] == [True]
+
+
+def test_a_relative_root_records_an_absolute_source_file(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The source file names the same location the root does, not a shorter one."""
+    url = _ingest_a_relative_root(tmp_path, quiet_logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(connection, sqlalchemy.select(IMAGES.c.source_file))
+    engine.dispose()
+    assert [str(row.source_file).startswith(tmp_path.as_posix()) for row in found] == [True]
 
 
 def test_a_second_ingest_of_the_same_root_adds_no_row(
@@ -950,3 +1191,19 @@ def test_the_excluded_set_is_stored_as_json(
     finally:
         connection.close()
     assert json.loads(stored) == ['BodyBlobNav']
+
+
+def test_the_excluded_set_is_stored_in_name_order() -> None:
+    """The report joins these names into one cell, so their order is its output.
+
+    A document lists them in whatever order the ensemble dropped them, which is
+    not stable between two runs over the same image. Sorting here is what makes
+    two reports of the same tree comparable.
+    """
+    document = metadata_document(excluded=['StarRefineNav', 'BodyBlobNav', 'RingEdgeNav'])
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image['excluded_from_consensus'] == [
+        'BodyBlobNav',
+        'RingEdgeNav',
+        'StarRefineNav',
+    ]
