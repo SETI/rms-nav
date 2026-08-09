@@ -39,6 +39,7 @@ from spindoctor.cli.stats.ingest import (
     IngestCounts,
     TaskCompletion,
     complete_ingest_tasks,
+    distinct_roots,
     fan_out_ingest_tasks,
     ingest_metadata_files,
     task_results_from_event_log,
@@ -431,9 +432,10 @@ def main() -> None:
             says whether the pass completed, not what it found: 0 when every
             named root was walked, whatever mix of documents was read, skipped
             and refused, and 1 when the run could not complete -- no index or no
-            root could be resolved, the index could not be opened, or a root
-            could not be listed.  A tree of files that are not navigation
-            documents is a completed pass and exits 0, and exits 0 again on the
+            root could be resolved, a named root is not a location that can be
+            read, the index could not be opened, or a root could not be listed.
+            A tree of files that are not navigation documents is a completed
+            pass and exits 0, and exits 0 again on the
             next pass over the same tree, so a scheduled run's status means the
             same thing every time it is read.  Completing a fan-out exits 1 when
             the event log cannot be read, when a named root has no unfinished
@@ -464,9 +466,20 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        roots = arguments.nav_results_roots or [get_nav_results_root(arguments, DEFAULT_CONFIG)]
+        named = arguments.nav_results_roots or [get_nav_results_root(arguments, DEFAULT_CONFIG)]
     except ValueError as exc:
         MAIN_LOGGER.fatal('No navigation results root was named: %s', exc)
+        sys.exit(1)
+
+    # Normalized and de-duplicated here rather than in each mode, so that the
+    # roots this run reports on are the roots it works over: every later message
+    # names the normalized spelling, and a command line naming one root two ways
+    # would otherwise open by listing two and then account for one, which reads
+    # as a root having gone missing.
+    try:
+        roots = distinct_roots(named)
+    except ValueError as exc:
+        MAIN_LOGGER.fatal('A navigation results root is not a location that can be read: %s', exc)
         sys.exit(1)
 
     # Completing a fan-out reads runs the fan-out already recorded, so an index

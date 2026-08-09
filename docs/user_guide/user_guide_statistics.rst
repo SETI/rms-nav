@@ -128,8 +128,9 @@ every directory of the root, and absence means what it says everywhere.
 **The exit status says whether the pass completed, not what it found.**
 ``sd_stats_ingest`` exits 0 when every named root was walked, whatever mix of
 documents was read, skipped and refused, and 1 when the run could not complete:
-no index or no results root could be resolved, the index could not be opened, or
-a root could not be listed at all. A scheduled invocation therefore reads the
+no index or no results root could be resolved, a named root is not a location
+that can be read, the index could not be opened, or a root could not be listed
+at all. A scheduled invocation therefore reads the
 same status from the same tree every time, and a status of 1 always means
 something needs fixing rather than that a tree happens to hold no results.
 

@@ -49,7 +49,7 @@ from spindoctor.cli.stats.ingest.store import _recorded_files, _RecordedFile
 from spindoctor.cli.stats.ingest.walk import _ListedFile, _RootListing, _walk_root
 from spindoctor.results_index import FAILED_FILES, IMAGES, normalize_root_url
 
-__all__ = ['INGEST_COMMIT_CHUNK_SIZE', 'ingest_metadata_files']
+__all__ = ['INGEST_COMMIT_CHUNK_SIZE', 'distinct_roots', 'ingest_metadata_files']
 
 INGEST_COMMIT_CHUNK_SIZE = 512
 """How many images are written per database transaction.
@@ -61,7 +61,7 @@ worker never sees half of an image.
 """
 
 
-def _distinct_roots(roots: Sequence[str]) -> list[str]:
+def distinct_roots(roots: Sequence[str]) -> list[str]:
     """Normalize the given roots and drop the repeats, keeping their order.
 
     ``/data/x`` and ``/data/x/`` are one root, and a command line naming both
@@ -72,11 +72,19 @@ def _distinct_roots(roots: Sequence[str]) -> list[str]:
     finds nothing outstanding -- tells the operator that a root it has just
     finished was never divided up.
 
+    Every mode of the pass reads the roots through this, and so does the driver
+    that reports which roots it was given: a run that named a root two ways and
+    then reported on it once reads as a root having gone missing.
+
     Parameters:
         roots: The roots as their holder spelled them.
 
     Returns:
         The normalized roots, first spelling first.
+
+    Raises:
+        ValueError: If a root is not a location, which the storage layer refuses
+            to render absolute.
     """
     distinct: dict[str, None] = {}
     for root in roots:
@@ -249,7 +257,7 @@ def ingest_metadata_files(
     # relative local root is one the storage layer refuses outright.  Two
     # spellings of one root are one root here as they are at a fan-out, so the
     # same command line means the same thing in every mode.
-    for root_url in _distinct_roots(roots):
+    for root_url in distinct_roots(roots):
         root = FCPath(root_url)
         counts = IngestCounts()
         run_id = _start_run(engine, root_url)

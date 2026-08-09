@@ -20,7 +20,7 @@ from cloud_tasks.worker import WorkerData
 
 from spindoctor.cli import sd_stats_ingest, sd_stats_ingest_cloud_tasks
 from spindoctor.config import MAIN_LOGGER
-from spindoctor.results_index import IMAGES, INGEST_RUNS, open_index
+from spindoctor.results_index import IMAGES, INGEST_RUNS, normalize_root_url, open_index
 
 from .conftest import index_url, metadata_document, write_metadata
 
@@ -421,6 +421,80 @@ def test_dividing_a_root_that_is_not_there_says_so(
     """
     _status, written = dividing_a_root_that_is_not_there(tmp_path, monkeypatch)
     assert any('Roots that could not be listed' in line for line in written)
+
+
+def test_two_spellings_of_one_root_are_logged_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The run opens by naming the roots it will work over, not the words typed.
+
+    A trailing separator is not another root, and every later message names the
+    normalized spelling; a run that opened with two and then accounted for one
+    would read as a root having gone missing between them.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, STUB, metadata_document())
+    _status, written = run_driver(
+        [
+            '--results-db',
+            index_url(tmp_path / 'index.sqlite3'),
+            '--nav-results-root',
+            root.as_posix(),
+            '--nav-results-root',
+            f'{root.as_posix()}/',
+            '--output-cloud-tasks-file',
+            str(tmp_path / 'tasks.json'),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert f'Roots: {normalize_root_url(root)}' in written
+
+
+def naming_a_root_that_is_not_a_location(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[int | None, list[str]]:
+    """Run the driver over a spelling no storage layer can render absolute.
+
+    Parameters:
+        tmp_path: Directory the index and the tasks file live under.
+        monkeypatch: Fixture the driver is run through.
+
+    Returns:
+        The exit status, and one entry per line written to the main log.
+    """
+    return run_driver(
+        [
+            '--results-db',
+            index_url(tmp_path / 'index.sqlite3'),
+            '--nav-results-root',
+            '//',
+            '--output-cloud-tasks-file',
+            str(tmp_path / 'tasks.json'),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+
+
+def test_a_root_that_is_not_a_location_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A root nothing can be read from is a run that did not complete."""
+    status, _written = naming_a_root_that_is_not_a_location(tmp_path, monkeypatch)
+    assert status == 1
+
+
+def test_a_root_that_is_not_a_location_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And is charged to the root, rather than escaping as a failure nobody named.
+
+    Every root is rendered absolute before the pass begins, so the spelling that
+    cannot be is refused there with a message about it.
+    """
+    _status, written = naming_a_root_that_is_not_a_location(tmp_path, monkeypatch)
+    assert any('is not a location that can be read' in line for line in written)
 
 
 def refusing_both_cloud_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SystemExit:

@@ -1217,7 +1217,13 @@ Details settled during execution, none of them a change of intent:
   completion. Listed twice, every document is handed out in two shares and read
   twice, the first of the two runs is left unfinished for good, and the
   completion stamps the newer run and then reports the root it has just finished
-  as one nobody divided up.
+  as one nobody divided up. Every mode reads its roots through one helper,
+  `distinct_roots`, which the driver applies once before any of them, so the
+  roots a run opens by naming are the roots it works over rather than the words
+  typed: a run that named a root two ways and accounted for it once read as a
+  root having gone missing between the two messages. Applying it there also
+  charges a spelling that is not a location to the root, rather than leaving it
+  to the catch-all as a failure nobody enumerated.
 - **A count no share could report is not a share's tally.** `_share_tally`
   bounds the magnitude of each count as well as its type and its sign. The
   counts are written to the run row on a shortfall, and one larger than that
