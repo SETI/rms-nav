@@ -353,9 +353,12 @@ The command-line tools are composed of three layers:
      ``add_body_args``. Every other parameter (output directory, format,
      mosaic geometry, body/planet selection, etc.) is read directly from each
      task's ``task_data['arguments']`` dict.
-     ``process_task`` calls the same ``spindoctor.cli.reproj`` helpers
-     (``build_*_mosaic``, ``per_image_output_path``, ``load_offset_if_any``,
-     ``apply_offset_to_obs``, ``reproject_one_*``) as the local driver.
+     ``process_task`` calls the same :mod:`spindoctor.cli.reproj` helpers
+     (``build_*_mosaic``,
+     :func:`~spindoctor.cli.reproj.paths.per_image_output_path`,
+     :func:`~spindoctor.cli.reproj.offsets.load_pointing_if_any`,
+     :func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs`,
+     ``reproject_one_*``) as the local driver.
      Mosaic combination is not performed here; run
      ``sd_mosaic <mode> <dataset_name> --skip-reproject`` after the queue
      drains (note that ``sd_mosaic.py`` requires both the mode and the
@@ -377,10 +380,17 @@ The command-line tools are composed of three layers:
    - ``paths.py`` — ``per_image_output_path`` / ``mosaic_output_path`` define
      the output-file naming convention; pass-1 image logs go under
      ``{log_root}/reproj/`` (see :func:`~spindoctor.config.logging_config.build_image_log_handlers`).
-   - ``offsets.py`` — ``load_offset_if_any`` reads the ``_metadata.json`` file
-     written by ``sd_offset`` and returns ``(dv, du)`` when ``status ==
-     'success'``. ``apply_offset_to_obs`` wraps the result in
-     ``oops.fov.OffsetFOV``. This mirrors the same pattern used in
+   - ``offsets.py`` —
+     :func:`~spindoctor.cli.reproj.offsets.load_pointing_if_any` reads the
+     ``_metadata.json``
+     file written by ``sd_offset`` and classifies which recorded pointing it
+     supplies (:func:`~spindoctor.cli.reproj.offsets.select_pointing`);
+     :func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs` applies it:
+     the corrected C-matrix by frame replacement when the record carries a
+     usable one, else the ``(dv, du)`` offset via
+     :class:`oops.fov.OffsetFOV`
+     (see :doc:`dev_guide_ck_kernels` for the reader mechanism and its
+     fallback ladder). The same selection and application serve
      ``src/spindoctor/cli/backplanes/backplanes.py``.
    - ``reproject.py`` — ``reproject_one_body`` / ``reproject_one_ring`` thin
      wrappers that translate ring-specific CLI args (zoom, longitude range,
@@ -408,7 +418,9 @@ The reprojection pass loops over
 2. Skip if the file exists and ``--overwrite`` is not set.
 3. Open the image logger handlers writing to ``{log_root}/reproj/…``.
 4. Load the observation via ``obs_class.from_file(image_path)``.
-5. Optionally apply a navigation offset via ``load_offset_if_any`` + ``apply_offset_to_obs``.
+5. Optionally apply the recorded pointing via
+   :func:`~spindoctor.cli.reproj.offsets.load_pointing_if_any` +
+   :func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs`.
 6. Call ``reproject_one_body`` / ``reproject_one_ring`` with the computed
    ``image_name`` (file stem or ``--image-name``).
 7. Save the ``BodyReprojResult`` / ``RingReprojResult`` to disk.

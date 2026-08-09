@@ -8,9 +8,11 @@ what withholds the terminal.
 """
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any, cast
 
+import oops
 import pytest
 from cloud_tasks.worker import WorkerData
 from filecache import FCPath
@@ -243,6 +245,17 @@ class _StubReprojResult:
         """
 
 
+class _StubObs:
+    """Placeholder observation carrying just what the pointing applier touches."""
+
+    def __init__(self) -> None:
+        """Give the stub a real FOV to wrap and a no-op cache reset."""
+        self.fov: Any = oops.fov.FlatFOV((0.001, 0.001), (4, 4))
+
+    def reset_all(self) -> None:
+        """Pretend to clear the cached geometry."""
+
+
 class _StubObsClass:
     """Observation class whose images always load."""
 
@@ -255,9 +268,9 @@ class _StubObsClass:
             **kwargs: Ignored.
 
         Returns:
-            A bare object; nothing downstream inspects it here.
+            A stub observation; only the pointing applier inspects it here.
         """
-        return object()
+        return _StubObs()
 
 
 def _reproject_task_result(
@@ -308,7 +321,45 @@ def test_an_image_reprojected_without_an_offset_is_counted(
 def test_the_count_comes_with_the_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A wrong results root and a genuinely unnavigated image are not the same."""
     result = _reproject_task_result(tmp_path, monkeypatch, nav_root=FCPath(tmp_path) / 'nav')
-    assert result['uncorrected_reasons'] == {'no_metadata': 1}
+    assert result['pointing_reasons'] == {'no_metadata': 1}
+
+
+def test_an_offset_fallback_is_tallied_but_not_uncorrected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An image that fell back to the offset path did get a correction.
+
+    Its reason lands in the per-reason tally so the batch's pointing story is
+    visible, while ``n_uncorrected`` keeps meaning what it says: images with
+    no correction at all.
+    """
+    nav_root = FCPath(tmp_path) / 'nav'
+    Path((nav_root / 'COISS_2001').as_posix()).mkdir(parents=True, exist_ok=True)
+    (nav_root / 'COISS_2001' / 'N1234567890_1_metadata.json').write_text(
+        json.dumps({'status': 'success', 'offset': [1.0, -2.0]})
+    )
+    result = _reproject_task_result(tmp_path, monkeypatch, nav_root=nav_root)
+    assert result['pointing_reasons'] == {'no_pointing_block': 1}
+    assert result['n_uncorrected'] == 0
+
+
+def test_a_missing_offset_key_is_counted_not_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A batch pass survives one defect-shaped record and counts it.
+
+    The backplane stage raises on the same record class, because a
+    single-image task should fail loudly; a batch pass must not lose the
+    whole task to one bad record, so here it is a tally entry instead.
+    """
+    nav_root = FCPath(tmp_path) / 'nav'
+    Path((nav_root / 'COISS_2001').as_posix()).mkdir(parents=True, exist_ok=True)
+    (nav_root / 'COISS_2001' / 'N1234567890_1_metadata.json').write_text(
+        json.dumps({'status': 'success'})
+    )
+    result = _reproject_task_result(tmp_path, monkeypatch, nav_root=nav_root)
+    assert result['pointing_reasons'] == {'missing_offset_key': 1}
+    assert result['n_done'] == 1
 
 
 def test_the_image_is_still_reprojected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -317,9 +368,15 @@ def test_the_image_is_still_reprojected(tmp_path: Path, monkeypatch: pytest.Monk
     assert result['n_done'] == 1
 
 
-def test_asking_for_no_offsets_counts_nothing(
+def test_asking_for_no_offsets_still_counts_uncorrected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A run that never asked for offsets reports no shortfall."""
+    """A run that never asked for offsets is still an uncorrected run.
+
+    The count exists so a batch reprojected entirely on uncorrected pointing
+    is visible in the task result; deliberateness lives in the reason tally,
+    which stays empty because nothing was asked for and so nothing degraded.
+    """
     result = _reproject_task_result(tmp_path, monkeypatch, nav_root=None)
-    assert result['n_uncorrected'] == 0
+    assert result['n_uncorrected'] == 1
+    assert 'pointing_reasons' not in result

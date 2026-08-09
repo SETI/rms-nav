@@ -32,14 +32,27 @@ class NavContractError(Exception):
 
 
 class NavPointingError(Exception):
-    """A navigated image's corrected attitude could not be computed.
+    """A navigated image's corrected attitude could not be computed or applied.
 
-    Raised for the failures that computation expects: an attitude the
-    furnished kernels cannot supply, a frame or spacecraft clock that does
-    not resolve, a spacecraft clock that is not the mission's, and the
-    computation's own guards refusing a matrix that is not a proper
-    rotation.  It is the only exception ``NavOrchestrator.with_pointing``
-    absorbs, so a pointing solution the environment cannot supply is
-    reported and left unrecorded while a programming defect inside the
-    computation propagates and fails the run on its first image.
+    Raised for the failures the attitude computation and the attitude reader
+    expect: an attitude the furnished kernels cannot supply, a frame or
+    spacecraft clock that does not resolve, a spacecraft clock that is not
+    the mission's, the guards refusing a matrix that is not a proper
+    rotation, and a recorded attitude that fails the reader's gates.  It is
+    the only exception ``NavOrchestrator.with_pointing`` and the metadata
+    readers absorb, so a pointing the environment cannot supply or apply is
+    reported and degraded while a programming defect propagates and fails
+    the run on its first image.
+
+    Parameters:
+        message: The human-readable account of what failed.
+        reason: A short machine-readable classification of the failure, or
+            None when the caller has no per-reason accounting to feed.  The
+            reader's gates set it so a run can tally degradations per
+            reason.
     """
+
+    def __init__(self, message: str, *, reason: str | None = None) -> None:
+        """Build the exception, carrying the optional per-reason classification."""
+        super().__init__(message)
+        self.reason = reason
