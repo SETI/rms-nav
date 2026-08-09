@@ -60,12 +60,25 @@ places rather than left to be rediscovered.
   subdirectory holds every stale row of the root for as long as it stays
   unlistable, however many passes complete in the meantime, and the count of
   missed directories is what says so.
+- **A document rewritten in place, keeping the length and the modification time
+  it had before,** keeps the row the document before it produced, so an error
+  filter answers from what that one recorded.  Those two metrics are everything
+  a listing supplies about a file, and reading the file to find out whether it
+  needs reading is the retrieval the skip exists to avoid, so no number of
+  completed passes corrects this one: an ingest told to read every document
+  regardless is what puts the row right.  A tree restored by a copy that
+  preserves times, a document patched and stamped back from a sibling, and a
+  backend reporting one modification time for two writes all produce it; an
+  ordinary re-navigation writes a different length at a later time and does not.
 
 The index is also a snapshot: it answers as of the last ingest over the root, so
 a document written since is one it does not hold and a document deleted since is
 one it still holds.  When that pass finished is returned as
-:attr:`ResultStubs.ingested_utc` and reported with the answer, because how old
-the answer is decides whether it is the answer the tree would give.
+:attr:`ResultStubs.ingested_utc` and reported with the answer, because outside
+the members above that is what decides whether the answer is the answer the tree
+would give.  Inside them the age decides nothing: each of those survives a pass
+that finished a second ago, which is why each is stated here rather than left to
+be read off the stamp.
 """
 
 import contextlib

@@ -20,6 +20,7 @@ read from the newest run rather than from this root's newest run is therefore
 the other root's, and says so.
 """
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,7 @@ import sqlalchemy
 from sqlalchemy.pool import QueuePool
 from tests.spindoctor.results_index.conftest import image_row, opened, sqlite_url_for
 
-from spindoctor.results_index import FAILED_FILES, IMAGES, INGEST_RUNS, SCHEMA_VERSION
+from spindoctor.results_index import FAILED_FILES, IMAGES, INGEST_RUNS, SCHEMA_VERSION, selection
 from spindoctor.results_index.selection import ResultStubs, _stub_query, read_result_stubs
 
 ROOT = '/data/nav-results'
@@ -631,3 +632,101 @@ def test_the_query_returns_its_connection(two_roots: str, monkeypatch: pytest.Mo
     """The pool the read built holds no connection afterwards."""
     _engine, pool = _read_recording_the_engine(two_roots, monkeypatch)
     assert pool.checkedin() == 0
+
+
+ENUMERATION_MEMBERS = 6
+"""How many answers the index gives differently from the tree.
+
+Named here so that the three lists below cannot all stop matching the same
+regular expression and agree at zero.  Raising it is the reminder that a member
+is added to the plan, the module docstring and a test in one commit.
+"""
+
+PLAN = Path(__file__).resolve().parents[3] / 'plans' / 'RESULTS_DB_PLAN.md'
+"""The plan, which states the enumeration twice: in Phase 5 and in criterion 1."""
+
+
+def _plan_lines() -> list[str]:
+    """Return the plan's lines, skipping the test when the plan is not there.
+
+    The plan is a repository document rather than a packaged one, so a checkout
+    always has it and an installed tree never does.
+
+    Returns:
+        The lines of the plan file.
+    """
+    if not PLAN.is_file():
+        pytest.skip(f'{PLAN} is not in this tree')
+    return PLAN.read_text(encoding='utf-8').splitlines()
+
+
+def _numbered_within(lines: list[str], opens: str, closes: str, indent: str) -> list[str]:
+    """Return the numbered items of one block of the plan.
+
+    Parameters:
+        lines: The plan's lines.
+        opens: Text that identifies the line the block starts at.
+        closes: Prefix of the line that ends the block.
+        indent: The exact indentation the block's numbered items carry, which
+            is what tells one list's items from a nested list's.
+
+    Returns:
+        The numbered items, in the order they are written.
+    """
+    item = re.compile(rf'^{indent}\d+\. ')
+    inside = False
+    items: list[str] = []
+    for line in lines:
+        if not inside:
+            inside = opens in line
+            continue
+        if line.startswith(closes):
+            break
+        if item.match(line):
+            items.append(line.strip())
+    return items
+
+
+def _phase_five_members() -> list[str]:
+    """Return the enumeration as the Phase 5 entry states it.
+
+    Returns:
+        One entry per member.
+    """
+    return _numbered_within(
+        _plan_lines(), '**What the index answers differently', '- **The answer says how old', '  '
+    )
+
+
+def _criterion_one_members() -> list[str]:
+    """Return the enumeration as acceptance criterion 1 restates it.
+
+    Returns:
+        One entry per member.
+    """
+    return _numbered_within(_plan_lines(), '## 5. Acceptance criteria', '2. No pipeline', '   ')
+
+
+def _docstring_members() -> list[str]:
+    """Return the enumeration as the module docstring states it.
+
+    Returns:
+        One entry per member.
+    """
+    docstring = selection.__doc__ or ''
+    return [line for line in docstring.splitlines() if line.startswith('- **')]
+
+
+def test_the_module_docstring_states_every_member_of_the_enumeration() -> None:
+    """The count is fixed so that three lists cannot agree at zero."""
+    assert len(_docstring_members()) == ENUMERATION_MEMBERS
+
+
+def test_the_plan_states_every_member_the_module_docstring_states() -> None:
+    """A member is added to the plan, the docstring and a test in one commit."""
+    assert len(_phase_five_members()) == len(_docstring_members())
+
+
+def test_criterion_one_restates_every_member_the_plan_enumerates() -> None:
+    """A reader of the criterion takes its restatement for the list, so it is the list."""
+    assert len(_criterion_one_members()) == len(_phase_five_members())

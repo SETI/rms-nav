@@ -1244,12 +1244,32 @@ Details settled during execution, none of them a change of intent:
      narrowing it to the directories a pass did list is a change to what a
      listing has to report about itself, which sits with the ingest phases and
      with the sharded pass that also prunes on partial evidence.
-- **The answer says how old it is.** `ingest_runs.finished_utc` is read by the
-  same query as the missed count and returned with the stubs, and `ResultsFilter`
-  reports it with the count of what the index holds. The index detects no change
-  since that moment, and a URL resolved from the environment means an operator
-  may not know which pass is answering, so the moment travels with the answer
-  rather than with whoever exported the variable.
+  6. A document **rewritten in place, keeping the length and the modification
+     time it had before,** is skipped by the incremental comparison
+     (`_is_unchanged`, which has only `(mtime_ns, size_bytes)` and the summary
+     flag to go on), so its row goes on recording what the document before it
+     said and an error filter answers from that. A tree restored by a copy that
+     preserves times, a document patched and stamped back from a sibling, and a
+     backend reporting one modification time for two writes all produce it; an
+     ordinary re-navigation writes a different length at a later time and does
+     not. It is documented rather than fixed because the only thing that
+     distinguishes such a file from the one already read is its content, and
+     retrieving every document to find out is exactly the cost the skip exists
+     to avoid -- a content digest would be paid on every file of every pass to
+     catch a case a times-preserving restore produces. `--force` is the remedy
+     and is what the documentation points at. Like member 5, this one is not
+     the snapshot's age: a pass that finished a second ago answers from the
+     document before the rewrite.
+- **The answer says how old it is, and what that does not cover.**
+  `ingest_runs.finished_utc` is read by the same query as the missed count and
+  returned with the stubs, and `ResultsFilter` reports it with the count of what
+  the index holds. The index detects no change since that moment, and a URL
+  resolved from the environment means an operator may not know which pass is
+  answering, so the moment travels with the answer rather than with whoever
+  exported the variable. Outside the enumeration above, the age is what decides
+  whether the answer is the answer the tree would give; members 4, 5 and 6
+  survive a pass that finished a second ago, which is why each is enumerated
+  rather than left to be read off the stamp.
 - **The volume restriction is one restriction in one query.** Both arms are
   restricted, and a stub with no volume above it is matched by neither, because
   SQL's `IN` is false for NULL -- which is also how a bare scene name falls
@@ -1318,14 +1338,27 @@ add a column (increment the version). No issue numbers in any of it.
    products, and the reachable-reason warnings -- not incidental log text.
    Two carve-outs: the reason vocabulary section 2.9 maps, whose two
    unreachable rows are a stated behavioral difference; and, for the selections,
-   what section 4's Phase 5 entry enumerates -- an input the index holds nothing
-   about because no pass could read or record it; a document the ingest refused,
-   which is a file that exists but records no status; a document whose outcome
-   the index reads from `navigation_result.status` and the tree reads from the
-   top-level field alone; and a document the tree no longer holds, whose row
-   survives every pass that did not list the whole root. Each carve-out is
-   stated in the plan, in the module docstring, and in a test, and one found
-   later is added to all three in one commit. Neither list is asserted to be
+   what section 4's Phase 5 entry enumerates, restated here member for member
+   and in its order, so that a reader of this criterion sees the list rather
+   than a sample of it:
+
+   1. a summary PNG with no document beside it, which the index records nowhere,
+      so `--has-no-offset-file --has-png-file` is empty under one;
+   2. a document the ingest refused, which is a file that exists but records no
+      status;
+   3. a document whose outcome the index reads from `navigation_result.status`
+      and the tree reads from the top-level field alone;
+   4. an input the index holds nothing about because no pass could read or
+      record it;
+   5. a document the tree no longer holds, whose row survives every pass that
+      did not list the whole root;
+   6. a document rewritten in place with the length and the modification time it
+      had before, whose row goes on recording what the document before it said.
+
+   Each carve-out is stated in the plan, in the module docstring, and in a test,
+   and one found later is added to all three in one commit; a test counts the
+   three lists against each other, so a member added to one of them and not the
+   others fails. Neither list is asserted to be
    complete: a divergence outside them is a defect of the enumeration, to be
    fixed or enumerated, and not a licence to differ.
    `sd_stats_report`'s criterion is section 4 Phase 2's old-vs-new
@@ -1437,6 +1470,15 @@ File as tracking issues alongside the implementation issue:
   the missed-directory warning; narrowing the prune means recording which
   directories a pass did list, which is a change to the listing contract and
   belongs with the sharded ingest that prunes on the same rule.
+- **A document rewritten in place with the same length and modification time is
+  never read again** (#488). Those two metrics are everything a listing supplies,
+  so `_is_unchanged` cannot tell such a file from the one already read, and its
+  row goes on recording what the document before it said however many passes
+  complete. Phase 5 enumerates it and tests both directions of it, and `--force`
+  is the remedy; distinguishing it without one means either a cheap identity the
+  storage layer already has (an object-store ETag) or a content digest paid for
+  by retrieving every document on every pass, which is the cost the skip exists
+  to avoid.
 - **The lockability probe takes a write lock on a consumer's open** (#462).
   Section
   2.5 has it refuse in both modes, so a consumer opening a SQLite index while
