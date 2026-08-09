@@ -160,8 +160,8 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         metavar='PATH',
         help="""Read the cloud_tasks event log the workers wrote, add up what
         their tasks did, and record it against each named root's ingest run.
-        A root whose tasks do not account for every file its listing found is
-        left unfinished and named.""",
+        A root whose tasks do not account for exactly the files its listing
+        found is left unfinished and named.""",
     )
 
     add_logging_arguments(cmdparser, has_image_logger=False)
@@ -250,8 +250,8 @@ def _log_completion(completion: TaskCompletion) -> None:
     MAIN_LOGGER.info('Ingest runs completed: %d', completion.runs_completed)
     for root in completion.roots_unaccounted:
         MAIN_LOGGER.error(
-            'Left unfinished, because its tasks did not account for every file its listing '
-            'found: %s',
+            'Left unfinished, because its tasks did not account for exactly the files its '
+            'listing found: %s',
             root,
         )
     for root in completion.roots_unlisted:
@@ -438,7 +438,7 @@ def main() -> None:
             same thing every time it is read.  Completing a fan-out exits 1 when
             the event log cannot be read, when a named root has no unfinished
             run, when its run never recorded what its listing found, or when its
-            tasks did not account for every file that listing found.
+            tasks did not account for exactly the files that listing found.
     """
     command_list = sys.argv[1:]
     arguments = parse_args(command_list)

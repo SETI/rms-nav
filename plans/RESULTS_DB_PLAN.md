@@ -1410,6 +1410,18 @@ File as tracking issues alongside the implementation issue:
 - **A `--since` selector for ingest** (#467). The stat-pair skip makes a re-scan
   cheap in reads but not in listings; a time-bounded scan would cut the
   listing too.
+- **Two overlapping ingest passes over one root can leave a stale row** (#479).
+  A worker of the first writes a stub after the second has read what is
+  recorded and before its delete, for a document that left the tree between the
+  two listings. Narrow, self-healing on the next pass, and invisible to
+  consumers while it is open, since both runs are unfinished; what is undecided
+  is whether a fan-out over a root whose newest run is unfinished should be
+  refused, warned about, or left as it is.
+- **An abandoned fan-out has already removed rows** (#480). The prune runs
+  before any document is read, so a pass that is given up on after step 1 has
+  shrunk the index. Only rows whose documents have genuinely left the tree go,
+  and the run is unfinished throughout, so nothing valid is lost and no consumer
+  reads the root; the way back is a full ingest.
 - **The lockability probe takes a write lock on a consumer's open** (#462).
   Section 2.5 has it refuse in both modes, so a consumer opening a SQLite index
   while an ingest holds a write transaction waits out the busy timeout and can
