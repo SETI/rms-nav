@@ -36,6 +36,8 @@ evidence would delete its peers' work.  The prune therefore reads a complete
 listing and refuses anything else.
 """
 
+from collections.abc import Sequence
+
 import sqlalchemy
 from filecache import FCPath
 from pdslogger import PdsLogger
@@ -87,10 +89,12 @@ def _is_unchanged(
 
 
 def _files_to_read(
-    listing: _RootListing,
+    files: Sequence[_ListedFile],
+    summary_stubs: set[str],
     recorded: dict[str, _RecordedFile],
     *,
     force: bool,
+    has_file_metrics: bool,
 ) -> list[_ListedFile]:
     """Select the metadata files this pass has to read.
 
@@ -98,20 +102,28 @@ def _files_to_read(
     ingested: it has not changed, so reading it produces the same refusal.
     ``force`` re-reads both.
 
+    Written over the files rather than over a whole-root listing, because a pass
+    over a share of a root selects from its share by exactly this rule and must
+    not be able to reach for anything a complete listing would have carried.
+
     Parameters:
-        listing: What the walk found.
+        files: The metadata files this pass is responsible for.
+        summary_stubs: Stubs the walk saw a summary PNG for.
         recorded: Stub to what the index already holds about it.
         force: Whether to re-read every document regardless.
+        has_file_metrics: Whether the listing reported a size and modification
+            time for every one of those files.  A listing that reports neither
+            cannot answer "has this changed", so all of them are read.
 
     Returns:
-        The files to read, in stub order.
+        The files to read, in the order given.
     """
-    if force or not listing.has_file_metrics:
-        return list(listing.metadata_files)
+    if force or not has_file_metrics:
+        return list(files)
     return [
         listed
-        for listed in listing.metadata_files
-        if not _is_unchanged(listed, recorded.get(listed.results_path_stub), listing.summary_stubs)
+        for listed in files
+        if not _is_unchanged(listed, recorded.get(listed.results_path_stub), summary_stubs)
     ]
 
 
@@ -228,7 +240,13 @@ def ingest_metadata_files(
             continue
         with engine.connect() as connection:
             recorded = _recorded_files(connection, root_url)
-        to_read = _files_to_read(listing, recorded, force=force)
+        to_read = _files_to_read(
+            listing.metadata_files,
+            listing.summary_stubs,
+            recorded,
+            force=force,
+            has_file_metrics=listing.has_file_metrics,
+        )
         counts.files_skipped = counts.files_seen - len(to_read)
         for chunk in _batched(to_read, INGEST_COMMIT_CHUNK_SIZE):
             _ingest_chunk(

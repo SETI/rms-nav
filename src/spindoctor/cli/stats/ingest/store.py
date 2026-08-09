@@ -41,6 +41,15 @@ such a document read exactly as the schema says, and only the storage refused
 it.
 """
 
+_RECORDED_LOOKUP_BATCH_SIZE = 500
+"""How many stubs one restricted lookup names at a time.
+
+Each stub is a bind parameter, and every backend limits how many one statement
+may carry.  A pass over a whole root names none of them and is unaffected; a
+pass over a share of one names its own, and the share is whatever the caller
+divided the root into.
+"""
+
 
 @dataclass(frozen=True)
 class _RecordedFile:
@@ -61,7 +70,33 @@ class _RecordedFile:
     from_images: bool
 
 
-def _recorded_files(connection: sqlalchemy.Connection, root_url: str) -> dict[str, _RecordedFile]:
+def _stub_restrictions(
+    column: sqlalchemy.Column[Any], stubs: Sequence[str] | None
+) -> list[sqlalchemy.ColumnElement[bool]]:
+    """Return the extra WHERE terms that narrow a lookup to named stubs.
+
+    Parameters:
+        column: The table's stub column to restrict.
+        stubs: The stubs to ask about, or None to ask about the whole root.
+
+    Returns:
+        One term per batch of stubs, or a single term matching nothing when an
+        empty sequence was given.  A caller that names no stub is asking about
+        no file, which is not the same question as asking about all of them.
+    """
+    if stubs is None:
+        return [sqlalchemy.true()]
+    if len(stubs) == 0:
+        return [sqlalchemy.false()]
+    return [
+        column.in_(stubs[start : start + _RECORDED_LOOKUP_BATCH_SIZE])
+        for start in range(0, len(stubs), _RECORDED_LOOKUP_BATCH_SIZE)
+    ]
+
+
+def _recorded_files(
+    connection: sqlalchemy.Connection, root_url: str, *, stubs: Sequence[str] | None = None
+) -> dict[str, _RecordedFile]:
     """What the index already holds about one root's files.
 
     Both tables are read, because both record a file this ingest has already
@@ -71,38 +106,44 @@ def _recorded_files(connection: sqlalchemy.Connection, root_url: str) -> dict[st
     Parameters:
         connection: An open connection to the index.
         root_url: The normalized root to read.
+        stubs: Ask only about these stubs.  A pass over a share of a root reads
+            what is recorded for its own files rather than for the whole root,
+            which on an archive-scale root is the difference between one lookup
+            and one lookup per worker over every row in it.  None asks about
+            every file of the root.
 
     Returns:
         Stub to what is recorded for it.
     """
-    images = sqlalchemy.select(
-        IMAGES.c.results_path_stub,
-        IMAGES.c.mtime_ns,
-        IMAGES.c.size_bytes,
-        IMAGES.c.has_summary_png,
-    ).where(IMAGES.c.root_url == root_url)
-    recorded = {
-        str(row.results_path_stub): _RecordedFile(
-            mtime_ns=row.mtime_ns,
-            size_bytes=row.size_bytes,
-            has_summary_png=None if row.has_summary_png is None else bool(row.has_summary_png),
-            from_images=True,
-        )
-        for row in connection.execute(images)
-    }
-    failed = sqlalchemy.select(
-        FAILED_FILES.c.results_path_stub, FAILED_FILES.c.mtime_ns, FAILED_FILES.c.size_bytes
-    ).where(FAILED_FILES.c.root_url == root_url)
-    for row in connection.execute(failed):
-        recorded.setdefault(
-            str(row.results_path_stub),
-            _RecordedFile(
+    recorded: dict[str, _RecordedFile] = {}
+    for restriction in _stub_restrictions(IMAGES.c.results_path_stub, stubs):
+        images = sqlalchemy.select(
+            IMAGES.c.results_path_stub,
+            IMAGES.c.mtime_ns,
+            IMAGES.c.size_bytes,
+            IMAGES.c.has_summary_png,
+        ).where(IMAGES.c.root_url == root_url, restriction)
+        for row in connection.execute(images):
+            recorded[str(row.results_path_stub)] = _RecordedFile(
                 mtime_ns=row.mtime_ns,
                 size_bytes=row.size_bytes,
-                has_summary_png=None,
-                from_images=False,
-            ),
-        )
+                has_summary_png=None if row.has_summary_png is None else bool(row.has_summary_png),
+                from_images=True,
+            )
+    for restriction in _stub_restrictions(FAILED_FILES.c.results_path_stub, stubs):
+        failed = sqlalchemy.select(
+            FAILED_FILES.c.results_path_stub, FAILED_FILES.c.mtime_ns, FAILED_FILES.c.size_bytes
+        ).where(FAILED_FILES.c.root_url == root_url, restriction)
+        for row in connection.execute(failed):
+            recorded.setdefault(
+                str(row.results_path_stub),
+                _RecordedFile(
+                    mtime_ns=row.mtime_ns,
+                    size_bytes=row.size_bytes,
+                    has_summary_png=None,
+                    from_images=False,
+                ),
+            )
     return recorded
 
 
