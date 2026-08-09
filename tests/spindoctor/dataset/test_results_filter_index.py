@@ -27,6 +27,7 @@ import os
 import subprocess
 import sys
 import uuid
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -56,7 +57,9 @@ from spindoctor.results_index import (
     SPICE_STATUS_ERROR,
     normalize_root_url,
     open_index,
+    selection,
 )
+from spindoctor.results_index.selection import ResultStubs
 
 VOLUMES = ['COISS_2001', 'COISS_2002']
 """The volumes the enumeration selected."""
@@ -1356,3 +1359,59 @@ def test_the_volumes_are_fixed_at_the_boundary_for_the_tree(tree: Path) -> None:
     from_iterator = ResultsFilter(iter(VOLUMES), str(tree), logger=_logger(), has_offset_file=True)
     images = _candidate_files(tree)
     assert _select(from_iterator, images) == _select(results_filter, images)
+
+
+def _reads_recorded_by(reads: list[list[str]]) -> Any:
+    """Return a stand-in read that reads its volumes twice and records both.
+
+    Reading twice is the contract under test.  ``volumes`` arrives here as
+    whatever the constructor passed on, and an iterator passed through would be
+    empty the second time -- which is exactly what the boundary exists to stop,
+    and what an end-to-end comparison of a list against an iterator cannot see,
+    since a single read serves both correctly.
+
+    Parameters:
+        reads: List each read appends its result to.
+
+    Returns:
+        A callable with the signature of
+        :func:`~spindoctor.results_index.selection.read_result_stubs`.
+    """
+
+    def recording(
+        url: str, nav_results_root: Any, volumes: Iterable[str], **flags: bool
+    ) -> ResultStubs:
+        reads.append(list(volumes))
+        reads.append(list(volumes))
+        return ResultStubs(
+            with_metadata=frozenset(), with_summary_png=frozenset(), matching_error=frozenset()
+        )
+
+    return recording
+
+
+def test_the_index_path_is_handed_volumes_it_can_be_read_twice_from(
+    tree: Path, indexed: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The boundary hands on a sequence, not whatever iterable it was given."""
+    reads: list[list[str]] = []
+    monkeypatch.setattr(selection, 'read_result_stubs', _reads_recorded_by(reads))
+    ResultsFilter(
+        iter(VOLUMES), str(tree), logger=_logger(), results_db_url=indexed, has_offset_file=True
+    )
+    assert reads[1] == VOLUMES
+
+
+def test_the_tree_path_is_handed_volumes_it_can_be_read_twice_from(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The walked path is handed the same fixed sequence, for the same reason."""
+    reads: list[list[str]] = []
+
+    def recording(self: ResultsFilter, volumes: Sequence[str]) -> None:
+        reads.append(list(volumes))
+        reads.append(list(volumes))
+
+    monkeypatch.setattr(ResultsFilter, '_scan_volumes', recording)
+    ResultsFilter(iter(VOLUMES), str(tree), logger=_logger(), has_offset_file=True)
+    assert reads[1] == VOLUMES
