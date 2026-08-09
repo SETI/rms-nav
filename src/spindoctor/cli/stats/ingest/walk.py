@@ -1,10 +1,10 @@
 """One walk of a results root, feeding everything a pass takes from the tree.
 
-The recursive listing collects both result-file suffixes in a single pass and
-carries each entry's size and modification time with it, so the summary-PNG
-flag and the two file metrics all come from the walk.  There is no per-file
-stat and no per-file existence check: on a cloud root each of those is a paid
-round trip per image per run, which is the cost this index exists to remove.
+The recursive listing collects the navigation documents in a single pass and
+carries each entry's size and modification time with it, so both file metrics
+come from the walk.  There is no per-file stat and no per-file existence check:
+on a cloud root each of those is a paid round trip per image per run, which is
+the cost this index exists to remove.
 
 A walk also reports what it did not see.  A directory it could not list, and
 one it had already listed under another name, leave it knowing about part of
@@ -18,13 +18,10 @@ from typing import Any
 from filecache import FCPath
 from pdslogger import PdsLogger
 
-__all__ = ['METADATA_SUFFIX', 'SUMMARY_PNG_SUFFIX']
+__all__ = ['METADATA_SUFFIX']
 
 METADATA_SUFFIX = '_metadata.json'
 """Suffix of the per-image navigation document under the results root."""
-
-SUMMARY_PNG_SUFFIX = '_summary.png'
-"""Suffix of the per-image summary PNG written beside the document."""
 
 
 @dataclass(frozen=True)
@@ -48,7 +45,6 @@ class _RootListing:
 
     Parameters:
         metadata_files: The metadata files, in stub order.
-        summary_stubs: Stubs that also have a summary PNG.
         has_file_metrics: Whether every metadata file reported both a size and
             a modification time.  A listing that reports neither cannot answer
             "has this changed", so such a root is re-read in full.
@@ -63,7 +59,6 @@ class _RootListing:
     """
 
     metadata_files: list[_ListedFile] = field(default_factory=list)
-    summary_stubs: set[str] = field(default_factory=set)
     has_file_metrics: bool = True
     root_listed: bool = True
     directories_missed: int = 0
@@ -149,7 +144,7 @@ def _directory_identity(directory: FCPath) -> tuple[int, int] | None:
 def _list_directory(
     directory: FCPath, prefix: str, listing: _RootListing, visited: set[tuple[int, int]]
 ) -> bool:
-    """Collect one directory's result files and descend into its subdirectories.
+    """Collect one directory's documents and descend into its subdirectories.
 
     Parameters:
         directory: The directory to list.
@@ -203,13 +198,15 @@ def _list_directory(
                     size_bytes=size_bytes,
                 )
             )
-        elif name.endswith(SUMMARY_PNG_SUFFIX):
-            listing.summary_stubs.add(relative[: -len(SUMMARY_PNG_SUFFIX)])
+        # Every other file is passed over without being counted anywhere.  A
+        # results tree holds the summary PNG of each document and whatever else
+        # an operator has put there, and none of them is a file this pass reads
+        # or a gap in what it listed.
     return True
 
 
 def _walk_root(root: FCPath, *, logger: PdsLogger) -> _RootListing:
-    """Walk one results root once, collecting both result-file suffixes.
+    """Walk one results root once, collecting its navigation documents.
 
     Parameters:
         root: The results root.
@@ -229,9 +226,8 @@ def _walk_root(root: FCPath, *, logger: PdsLogger) -> _RootListing:
         )
         return listing
     logger.info(
-        'Results scan found %d metadata and %d summary PNG file(s) under %s',
+        'Results scan found %d metadata file(s) under %s',
         len(listing.metadata_files),
-        len(listing.summary_stubs),
         root.as_posix(),
     )
     if listing.directories_missed:

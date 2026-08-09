@@ -31,8 +31,6 @@ from tests.spindoctor.dataset.conftest import (
     SPICE_ERROR,
     VOLUMES,
     WITH_A_DOCUMENT,
-    WITH_A_PNG,
-    WITHOUT_A_PNG,
     candidate_files,
     index_without_a_table,
     null_logger,
@@ -52,8 +50,6 @@ from spindoctor.results_index.selection import ResultStubs
 _MATRIX = [
     pytest.param({'has_offset_file': True}, list(WITH_A_DOCUMENT), id='offset-file'),
     pytest.param({'has_no_offset_file': True}, [NO_RESULT], id='no-offset-file'),
-    pytest.param({'has_png_file': True}, list(WITH_A_PNG), id='png-file'),
-    pytest.param({'has_no_png_file': True}, list(WITHOUT_A_PNG), id='no-png-file'),
     pytest.param({'has_offset_error': True}, list(FATAL_ERRORS), id='offset-error'),
     pytest.param({'has_offset_spice_error': True}, [SPICE_ERROR], id='spice-error'),
     pytest.param(
@@ -62,41 +58,22 @@ _MATRIX = [
         id='nonspice-error',
     ),
     pytest.param(
-        {'has_offset_file': True, 'has_no_png_file': True},
-        [stub for stub in WITHOUT_A_PNG if stub != NO_RESULT],
-        id='offset-file-and-no-png',
+        {'has_offset_error': True, 'has_offset_file': True},
+        list(FATAL_ERRORS),
+        id='offset-error-and-offset-file',
     ),
     pytest.param(
-        {'has_no_offset_file': True, 'has_png_file': True}, [], id='no-offset-file-and-png'
-    ),
-    pytest.param(
-        {'has_no_offset_file': True, 'has_no_png_file': True},
-        [NO_RESULT],
-        id='no-offset-file-and-no-png',
-    ),
-    pytest.param(
-        {'has_offset_file': True, 'has_png_file': True}, list(WITH_A_PNG), id='both-files'
-    ),
-    pytest.param(
-        {'has_offset_error': True, 'has_png_file': True}, [NONSPICE_ERROR], id='error-and-png'
-    ),
-    pytest.param(
-        {'has_offset_spice_error': True, 'has_no_png_file': True},
+        {'has_offset_spice_error': True, 'has_offset_file': True},
         [SPICE_ERROR],
-        id='spice-error-and-no-png',
-    ),
-    pytest.param(
-        {'has_offset_nonspice_error': True, 'has_png_file': True},
-        [NONSPICE_ERROR],
-        id='nonspice-error-and-png',
+        id='spice-error-and-offset-file',
     ),
 ]
 """Every filter flag, alone and paired, with the selection it makes.
 
-The pairings are not decoration: an absence filter alone takes the batched
-``exists()`` path and never walks the tree, and the same flag beside a presence
-filter is answered from the walked sets instead.  Both of those modes have to
-land on the index path's one answer.
+The pairings are not decoration: the absence filter alone takes the batched
+``exists()`` path and never walks the tree, while the presence and error filters
+are answered from the walked set instead.  Both of those modes have to land on
+the index path's one answer.
 """
 
 
@@ -160,7 +137,6 @@ def test_the_index_path_leaves_nothing_for_the_batch_stage(
     'flags',
     [
         pytest.param({'has_offset_file': True, 'has_no_offset_file': True}, id='offset-file-pair'),
-        pytest.param({'has_png_file': True, 'has_no_png_file': True}, id='png-file-pair'),
         pytest.param(
             {'has_offset_spice_error': True, 'has_offset_nonspice_error': True}, id='error-pair'
         ),
@@ -351,9 +327,7 @@ def _reads_recorded_by(reads: list[list[str]]) -> Any:
     ) -> ResultStubs:
         reads.append(list(volumes))
         reads.append(list(volumes))
-        return ResultStubs(
-            with_metadata=frozenset(), with_summary_png=frozenset(), matching_error=frozenset()
-        )
+        return ResultStubs(with_metadata=frozenset(), matching_error=frozenset())
 
     return recording
 

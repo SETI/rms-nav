@@ -75,7 +75,6 @@ IMAGES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('git_sha', sqlalchemy.Text, True),
     ('pipeline_run', sqlalchemy.Text, True),
     ('image_number', sqlalchemy.BigInteger, True),
-    ('has_summary_png', sqlalchemy.Boolean, True),
     ('start_et', sqlalchemy.Double, True),
     ('stop_et', sqlalchemy.Double, True),
     ('exposure_s', sqlalchemy.Double, True),
@@ -135,7 +134,6 @@ FAILED_FILES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('results_path_stub', sqlalchemy.Text, False),
     ('reason', sqlalchemy.Text, False),
     ('volume', sqlalchemy.Text, True),
-    ('has_summary_png', sqlalchemy.Boolean, True),
     ('mtime_ns', sqlalchemy.BigInteger, True),
     ('size_bytes', sqlalchemy.BigInteger, True),
 )

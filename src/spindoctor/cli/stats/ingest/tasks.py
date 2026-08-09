@@ -182,7 +182,6 @@ class _Share:
         has_file_metrics: Whether the fan-out's listing reported both a size
             and a modification time for every file of this share.
         files: The files, with the metrics the listing reported for them.
-        summary_stubs: Stubs of this share that the walk saw a summary PNG for.
     """
 
     run_id: int
@@ -190,7 +189,6 @@ class _Share:
     force: bool
     has_file_metrics: bool
     files: list[_ListedFile]
-    summary_stubs: set[str]
 
 
 @dataclass
@@ -312,25 +310,22 @@ class TaskCompletion:
     results_unidentified: int = 0
 
 
-def _task_files(files: Sequence[_ListedFile], summary_stubs: set[str]) -> list[dict[str, Any]]:
+def _task_files(files: Sequence[_ListedFile]) -> list[dict[str, Any]]:
     """Render one share's files as the task data carries them.
 
     Parameters:
         files: The files of this share.
-        summary_stubs: Stubs the whole walk saw a summary PNG for.
 
     Returns:
-        One JSON object per file.  The summary flag travels per file rather
-        than as a second list, because it is a property of the file the worker
-        is about to write a row for and every consumer of the task data needs
-        it beside the stub.
+        One JSON object per file, carrying the stub and the two metrics the
+        fan-out's listing reported for it, which is everything a worker needs
+        to decide whether it has to read the file.
     """
     return [
         {
             'results_path_stub': listed.results_path_stub,
             'mtime_ns': listed.mtime_ns,
             'size_bytes': listed.size_bytes,
-            'has_summary_png': listed.results_path_stub in summary_stubs,
         }
         for listed in files
     ]
@@ -404,7 +399,7 @@ def fan_out_ingest_tasks(
                     'root_url': root_url,
                     'force': force,
                     'has_file_metrics': listing.has_file_metrics,
-                    'files': _task_files(share, listing.summary_stubs),
+                    'files': _task_files(share),
                 },
             }
             for index, share in enumerate(_batched(listing.metadata_files, share_size))
@@ -490,7 +485,6 @@ def _share_from_task(task_data: dict[str, Any]) -> _Share:
     has_file_metrics = bool(_required(task_data, 'has_file_metrics', bool))
     entries = _required(task_data, 'files', list)
     files: list[_ListedFile] = []
-    summary_stubs: set[str] = set()
     for entry in entries:
         if not isinstance(entry, dict):
             raise ValueError(f'a "files" entry is {type(entry).__name__}, not an object')
@@ -503,8 +497,6 @@ def _share_from_task(task_data: dict[str, Any]) -> _Share:
             isinstance(size_bytes, bool) or not isinstance(size_bytes, int)
         ):
             raise ValueError(f'the "size_bytes" of {stub} is not a whole number')
-        if bool(_required(entry, 'has_summary_png', bool)):
-            summary_stubs.add(stub)
         files.append(_ListedFile(results_path_stub=stub, mtime_ns=mtime_ns, size_bytes=size_bytes))
     return _Share(
         run_id=run_id,
@@ -512,7 +504,6 @@ def _share_from_task(task_data: dict[str, Any]) -> _Share:
         force=force,
         has_file_metrics=has_file_metrics,
         files=files,
-        summary_stubs=summary_stubs,
     )
 
 
@@ -555,7 +546,6 @@ def ingest_task_share(
         recorded = _recorded_files(connection, share.root_url, stubs=stubs)
     to_read = _files_to_read(
         share.files,
-        share.summary_stubs,
         recorded,
         force=share.force,
         has_file_metrics=share.has_file_metrics,
@@ -567,7 +557,6 @@ def ingest_task_share(
             root,
             chunk,
             root_url=share.root_url,
-            summary_stubs=share.summary_stubs,
             counts=counts,
             logger=logger,
         )

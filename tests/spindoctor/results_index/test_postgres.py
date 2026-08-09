@@ -468,7 +468,6 @@ def _seed_selection_rows(url: str) -> None:
                     volume=SELECTION_VOLUME,
                     status='error',
                     status_error=None,
-                    has_summary_png=True,
                 ),
                 image_row(
                     root_url=SELECTION_OTHER_ROOT,
@@ -476,7 +475,6 @@ def _seed_selection_rows(url: str) -> None:
                     volume=SELECTION_VOLUME,
                     status='error',
                     status_error='missing_spice_data',
-                    has_summary_png=True,
                 ),
             ],
         )
@@ -488,7 +486,6 @@ def _seed_selection_rows(url: str) -> None:
                     'results_path_stub': REFUSED_STUB,
                     'reason': 'not a current-schema navigation document',
                     'volume': SELECTION_VOLUME,
-                    'has_summary_png': True,
                     'mtime_ns': 1,
                     'size_bytes': 2,
                 }
@@ -523,20 +520,22 @@ def test_the_selection_reads_a_document_and_a_refusal_on_postgresql(postgres_url
     assert stubs.with_metadata == frozenset({STUB, REFUSED_STUB})
 
 
-def test_the_summary_flag_survives_the_union_on_postgresql(postgres_url: str) -> None:
+def test_the_error_flag_survives_the_union_on_postgresql(postgres_url: str) -> None:
     """A boolean column of each table is one column of one type in the union.
 
     PostgreSQL refuses a union whose columns disagree, and refuses an integer
-    where a boolean belongs; SQLite accepts both.  Both rows carry a summary,
-    one on an image and one on a refusal, so the union is exercised from both
-    sides.
+    where a boolean belongs; SQLite accepts both.  The image arm computes the
+    flag from the row and the refusal arm writes a literal false, so the union
+    is exercised from both sides.
 
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
     """
     _seed_selection_rows(postgres_url)
-    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
-    assert stubs.with_summary_png == frozenset({STUB, REFUSED_STUB})
+    stubs = read_result_stubs(
+        postgres_url, SELECTION_ROOT, [SELECTION_VOLUME], has_offset_error=True
+    )
+    assert stubs.matching_error == frozenset({STUB})
 
 
 def test_a_fatal_error_with_no_cause_is_not_a_spice_error_on_postgresql(

@@ -1,19 +1,18 @@
 """Answering the results-based image selection filters from the index.
 
-The selection filters ask three questions about each candidate image: whether
-its metadata document exists under the results root, whether its summary PNG
-exists beside it, and -- for the images whose document exists -- whether that
-document records a fatal error of a particular kind.  Asked of the tree, those
-cost one directory walk per selected volume plus a batched download of every
-document an error filter has to look inside.  Asked of the index, they cost the
-one query this module issues, whose answer is three sets of stubs the filter
-then tests membership in.
+The selection filters ask two questions about each candidate image: whether its
+metadata document exists under the results root, and -- for the images whose
+document exists -- whether that document records a fatal error of a particular
+kind.  Asked of the tree, those cost one directory walk per selected volume plus
+a batched download of every document an error filter has to look inside.  Asked
+of the index, they cost the one query this module issues, whose answer is two
+sets of stubs the filter then tests membership in.
 
 Both tables that record a file are read.  A document the ingest refused is a
 file that exists, and the tree answers a presence filter with the file rather
 than with its contents, so a refusal recorded in ``failed_files`` counts towards
 presence exactly as an ingested document does, and carries the volume it lives
-under and the summary PNG the walk saw beside it for the same reason.
+under for the same reason.
 
 What the index answers differently
 ----------------------------------
@@ -23,12 +22,6 @@ are bounded by that rather than by this query.  Each is stated here, in the
 plan, and in a test of its own, and one found later is added in the same three
 places rather than left to be rediscovered.
 
-- **A summary PNG with no document beside it** is recorded nowhere: the flag
-  lives on the row of the file it was found beside, and a PNG on its own has no
-  file to be beside.  It reads as absent, where the tree reads it as present,
-  which makes ``--has-no-offset-file --has-png-file`` empty under an index.
-  Recording it needs a row keyed by a stub no document backs, and every other
-  reader of these tables takes such a row as evidence that a document exists.
 - **A document that is valid JSON and carries ``status``, but is not a
   navigation document,** is refused by the ingest and so records no status of
   its own.  It matches no error filter, where the tree reads ``status`` and
@@ -123,7 +116,6 @@ class ResultStubs:
         with_metadata: Stubs the index holds a metadata document for, an
             ingested one and a refused one alike, since both are a file that
             exists under the root.
-        with_summary_png: Stubs the ingest walk saw a summary PNG beside.
         matching_error: Stubs whose document satisfies the error filters that
             were asked for, and empty when none were.
         directories_missed: How many directories the newest pass over the root
@@ -134,7 +126,6 @@ class ResultStubs:
     """
 
     with_metadata: frozenset[str]
-    with_summary_png: frozenset[str]
     matching_error: frozenset[str]
     directories_missed: int = 0
     ingested_utc: str | None = None
@@ -176,7 +167,7 @@ def _error_condition(
 
 def _stub_query(
     root_url: str, volumes: Sequence[str], error_condition: sqlalchemy.ColumnElement[bool]
-) -> sqlalchemy.CompoundSelect[tuple[str, bool | None, bool]]:
+) -> sqlalchemy.CompoundSelect[tuple[str, bool]]:
     """Build the one query the filters are answered from.
 
     Every term filters on the root, because the index is keyed by root and stub
@@ -195,20 +186,15 @@ def _stub_query(
 
     Returns:
         A query yielding one row per recorded file of the selected volumes,
-        carrying its stub, whether a summary PNG was recorded beside it, and
-        whether it matches the error filters.
+        carrying its stub and whether it matches the error filters.
     """
     documents = sqlalchemy.select(
         IMAGES.c.results_path_stub,
-        IMAGES.c.has_summary_png,
         error_condition.label('matches_error'),
     ).where(IMAGES.c.root_url == root_url, IMAGES.c.volume.in_(volumes))
-    # A refused file records no status, so it matches no error filter; the walk
-    # saw its summary PNG all the same, because a PNG is found beside a file
-    # rather than read out of it.
+    # A refused file records no status, so it matches no error filter.
     refusals = sqlalchemy.select(
         FAILED_FILES.c.results_path_stub,
-        FAILED_FILES.c.has_summary_png,
         sqlalchemy.false(),
     ).where(FAILED_FILES.c.root_url == root_url, FAILED_FILES.c.volume.in_(volumes))
     return documents.union_all(refusals)
@@ -297,7 +283,7 @@ def read_result_stubs(
             missing SPICE data is wanted.
 
     Returns:
-        The stubs the root holds, in the three sets the filters test membership
+        The stubs the root holds, in the two sets the filters test membership
         in, with how much of the root the pass that recorded them missed and
         when it finished.
 
@@ -320,25 +306,21 @@ def read_result_stubs(
         ),
     )
     with_metadata: set[str] = set()
-    with_summary_png: set[str] = set()
     matching_error: set[str] = set()
     engine = open_index(url)
     try:
         with _reporting_a_failed_read(url), engine.connect() as connection:
             require_ingested_roots(connection, [root_url], url=url)
             newest = newest_pass(connection, root_url)
-            for stub, has_summary_png, matches_error in connection.execute(query):
+            for stub, matches_error in connection.execute(query):
                 stub_text = str(stub)
                 with_metadata.add(stub_text)
-                if has_summary_png:
-                    with_summary_png.add(stub_text)
                 if matches_error:
                     matching_error.add(stub_text)
     finally:
         engine.dispose()
     return ResultStubs(
         with_metadata=frozenset(with_metadata),
-        with_summary_png=frozenset(with_summary_png),
         matching_error=frozenset(matching_error),
         directories_missed=newest.directories_missed,
         ingested_utc=newest.finished_utc,

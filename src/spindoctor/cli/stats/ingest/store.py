@@ -58,16 +58,12 @@ class _RecordedFile:
     Parameters:
         mtime_ns: Modification time recorded when it was last read.
         size_bytes: Size recorded when it was last read.
-        has_summary_png: Whether a summary PNG was recorded beside it, or None
-            when the row carries no answer, which makes the file one this pass
-            reads again.
         from_images: Whether the record is an ingested image rather than a
             refused file.
     """
 
     mtime_ns: int | None
     size_bytes: int | None
-    has_summary_png: bool | None
     from_images: bool
 
 
@@ -122,13 +118,11 @@ def _recorded_files(
             IMAGES.c.results_path_stub,
             IMAGES.c.mtime_ns,
             IMAGES.c.size_bytes,
-            IMAGES.c.has_summary_png,
         ).where(IMAGES.c.root_url == root_url, restriction)
         for row in connection.execute(images):
             recorded[str(row.results_path_stub)] = _RecordedFile(
                 mtime_ns=row.mtime_ns,
                 size_bytes=row.size_bytes,
-                has_summary_png=None if row.has_summary_png is None else bool(row.has_summary_png),
                 from_images=True,
             )
     for restriction in _stub_restrictions(FAILED_FILES.c.results_path_stub, stubs):
@@ -136,7 +130,6 @@ def _recorded_files(
             FAILED_FILES.c.results_path_stub,
             FAILED_FILES.c.mtime_ns,
             FAILED_FILES.c.size_bytes,
-            FAILED_FILES.c.has_summary_png,
         ).where(FAILED_FILES.c.root_url == root_url, restriction)
         for row in connection.execute(failed):
             recorded.setdefault(
@@ -144,9 +137,6 @@ def _recorded_files(
                 _RecordedFile(
                     mtime_ns=row.mtime_ns,
                     size_bytes=row.size_bytes,
-                    has_summary_png=(
-                        None if row.has_summary_png is None else bool(row.has_summary_png)
-                    ),
                     from_images=False,
                 ),
             )

@@ -9,8 +9,8 @@ That second root is why every test here builds two.  The index is keyed by root
 and stub together, and a query that filtered on the stub alone would answer with
 the other root's rows while every single-root assertion stayed green.  The other
 root is therefore stocked so that every filter's answer changes if one of its
-rows leaks: it holds a fatal SPICE error and a summary PNG for each stub, and a
-document for the one stub the first root deliberately has none of.
+rows leaks: it holds a fatal SPICE error for each stub, and a document for the
+one stub the first root deliberately has none of.
 
 The run rows are stocked the same way, because the run table is keyed by root as
 well and is read by a query of its own.  The other root is always passed over
@@ -45,14 +45,13 @@ VOLUME = 'COISS_2001'
 OTHER_VOLUME = 'COISS_2002'
 """A volume of the same root that the enumeration did not select."""
 
-SUCCESS_WITH_PNG = f'{VOLUME}/data/a/N1000000001_1_CALIB'
-SUCCESS_NO_PNG = f'{VOLUME}/data/a/N1000000002_1_CALIB'
+SUCCESS = f'{VOLUME}/data/a/N1000000001_1_CALIB'
+SECOND_SUCCESS = f'{VOLUME}/data/a/N1000000002_1_CALIB'
 FAILURE = f'{VOLUME}/data/a/N1000000003_1_CALIB'
 SPICE_ERROR = f'{VOLUME}/data/b/N1000000004_1_CALIB'
 NONSPICE_ERROR = f'{VOLUME}/data/b/N1000000005_1_CALIB'
 ERROR_WITHOUT_STATUS_ERROR = f'{VOLUME}/data/b/N1000000006_1_CALIB'
 REFUSED = f'{VOLUME}/data/b/N1000000007_1_CALIB'
-REFUSED_WITH_PNG = f'{VOLUME}/data/b/N1000000012_1_CALIB'
 REFUSED_OTHER_VOLUME = f'{OTHER_VOLUME}/data/b/N1000000008_1_CALIB'
 UNSELECTED_VOLUME_IMAGE = f'{OTHER_VOLUME}/data/a/N1000000009_1_CALIB'
 NO_VOLUME = 'scene_0001'
@@ -60,14 +59,13 @@ ONLY_IN_THE_OTHER_ROOT = f'{VOLUME}/data/c/N1000000010_1_CALIB'
 ONLY_REFUSED_IN_THE_OTHER_ROOT = f'{VOLUME}/data/c/N1000000011_1_CALIB'
 
 EVERY_STUB = (
-    SUCCESS_WITH_PNG,
-    SUCCESS_NO_PNG,
+    SUCCESS,
+    SECOND_SUCCESS,
     FAILURE,
     SPICE_ERROR,
     NONSPICE_ERROR,
     ERROR_WITHOUT_STATUS_ERROR,
     REFUSED,
-    REFUSED_WITH_PNG,
     REFUSED_OTHER_VOLUME,
     UNSELECTED_VOLUME_IMAGE,
     NO_VOLUME,
@@ -124,7 +122,7 @@ def _document(stub: str, **columns: Any) -> dict[str, Any]:
         root_url=ROOT,
         results_path_stub=stub,
         volume=_volume_of(stub),
-        **{'has_summary_png': False, 'status': 'success', 'status_error': None, **columns},
+        **{'status': 'success', 'status_error': None, **columns},
     )
 
 
@@ -178,14 +176,14 @@ def two_roots(tmp_path: Path) -> str:
     """
     url = sqlite_url_for(tmp_path / 'index.sqlite3')
     documents = [
-        _document(SUCCESS_WITH_PNG, has_summary_png=True),
-        _document(SUCCESS_NO_PNG),
+        _document(SUCCESS),
+        _document(SECOND_SUCCESS),
         _document(FAILURE, status='failure'),
         _document(SPICE_ERROR, status='error', status_error=SPICE),
         _document(NONSPICE_ERROR, status='error', status_error='bad_pointing'),
         _document(ERROR_WITHOUT_STATUS_ERROR, status='error', status_error=None),
-        _document(UNSELECTED_VOLUME_IMAGE, has_summary_png=True),
-        _document(NO_VOLUME, has_summary_png=True),
+        _document(UNSELECTED_VOLUME_IMAGE),
+        _document(NO_VOLUME),
     ]
     refusals = [
         {
@@ -193,29 +191,26 @@ def two_roots(tmp_path: Path) -> str:
             'results_path_stub': stub,
             'reason': 'not a current-schema navigation document',
             'volume': _volume_of(stub),
-            'has_summary_png': has_summary_png,
             'mtime_ns': 1,
             'size_bytes': 2,
         }
-        for root_url, stub, has_summary_png in (
-            (ROOT, REFUSED, False),
-            (ROOT, REFUSED_WITH_PNG, True),
-            (ROOT, REFUSED_OTHER_VOLUME, False),
+        for root_url, stub in (
+            (ROOT, REFUSED),
+            (ROOT, REFUSED_OTHER_VOLUME),
             # The other root refuses a file the root under test holds nothing
             # for, so a refusal read without its root shows up as a document
             # that exists under a root that has none.
-            (OTHER_ROOT, ONLY_REFUSED_IN_THE_OTHER_ROOT, True),
+            (OTHER_ROOT, ONLY_REFUSED_IN_THE_OTHER_ROOT),
         )
     ]
     # Everything the other root holds would change an answer if it leaked: a
-    # fatal SPICE error and a summary PNG for every stub, including the one stub
-    # the root under test deliberately holds nothing for.
+    # fatal SPICE error for every stub, including the one stub the root under
+    # test deliberately holds nothing for.
     other_documents = [
         image_row(
             root_url=OTHER_ROOT,
             results_path_stub=stub,
             volume=_volume_of(stub),
-            has_summary_png=True,
             status='error',
             status_error=SPICE,
         )
@@ -247,7 +242,7 @@ def _stubs(url: str, **filters: bool) -> ResultStubs:
 
 def test_an_ingested_document_counts_as_present(two_roots: str) -> None:
     """The ordinary case: a row means the file it was read from exists."""
-    assert SUCCESS_WITH_PNG in _stubs(two_roots).with_metadata
+    assert SUCCESS in _stubs(two_roots).with_metadata
 
 
 def test_a_refused_document_counts_as_present(two_roots: str) -> None:
@@ -276,32 +271,6 @@ def test_the_query_does_not_fetch_an_unselected_volume(two_roots: str) -> None:
     with opened(two_roots) as engine, engine.connect() as connection:
         fetched = {str(row[0]) for row in connection.execute(query)}
     assert UNSELECTED_VOLUME_IMAGE not in fetched
-
-
-def test_a_summary_png_is_read_from_the_document_it_sits_beside(two_roots: str) -> None:
-    """The walk records the PNG on the row of the file it was found with."""
-    assert _stubs(two_roots).with_summary_png == frozenset({SUCCESS_WITH_PNG, REFUSED_WITH_PNG})
-
-
-def test_a_summary_png_beside_a_refused_document_is_present(two_roots: str) -> None:
-    """A PNG is found beside a file, not read out of it.
-
-    The tree walk finds ``X_summary.png`` whatever ``X_metadata.json`` turned
-    out to contain, so a summary beside a document the ingest refused has to
-    read as present here too, or an entire results root written by another tool
-    answers both PNG filters backwards.
-    """
-    assert REFUSED_WITH_PNG in _stubs(two_roots).with_summary_png
-
-
-def test_a_refused_document_with_no_summary_png_is_not_in_the_png_set(two_roots: str) -> None:
-    """The flag is the walk's answer for that file, not a constant for the table."""
-    assert REFUSED not in _stubs(two_roots).with_summary_png
-
-
-def test_a_document_with_no_summary_png_is_not_in_the_png_set(two_roots: str) -> None:
-    """The other root has a PNG for this stub, and answers for its own root only."""
-    assert SUCCESS_NO_PNG not in _stubs(two_roots).with_summary_png
 
 
 def test_an_image_of_an_unselected_volume_is_not_read(two_roots: str) -> None:
@@ -386,7 +355,7 @@ def test_the_nonspice_filter_rejects_the_spice_error(two_roots: str) -> None:
 def test_the_error_filters_answer_for_this_root_only(two_roots: str) -> None:
     """Every stub is a SPICE error in the other root and none of them is here."""
     matching = _stubs(two_roots, has_offset_spice_error=True).matching_error
-    assert SUCCESS_WITH_PNG not in matching
+    assert SUCCESS not in matching
 
 
 def test_a_refused_document_matches_no_error_filter(two_roots: str) -> None:
@@ -431,7 +400,7 @@ def _index_with_runs(tmp_path: Path, counts: list[int]) -> str:
     """
     url = sqlite_url_for(tmp_path / 'missed.sqlite3')
     with opened(url, create=True) as engine, engine.begin() as connection:
-        connection.execute(IMAGES.insert(), [_document(SUCCESS_NO_PNG)])
+        connection.execute(IMAGES.insert(), [_document(SECOND_SUCCESS)])
         connection.execute(
             INGEST_RUNS.insert(),
             [
@@ -607,22 +576,21 @@ def test_a_relative_root_names_the_root_the_ingest_recorded(
             [
                 image_row(
                     root_url=root_url,
-                    results_path_stub=SUCCESS_WITH_PNG,
+                    results_path_stub=SUCCESS,
                     volume=VOLUME,
-                    has_summary_png=True,
                 )
             ],
         )
         connection.execute(INGEST_RUNS.insert(), [_completed_run(root_url)])
     monkeypatch.chdir(tmp_path)
     stubs = read_result_stubs(url, root.name, [VOLUME])
-    assert SUCCESS_WITH_PNG in stubs.with_metadata
+    assert SUCCESS in stubs.with_metadata
 
 
 def test_a_trailing_separator_names_the_root_the_ingest_recorded(two_roots: str) -> None:
     """One program writes the trailing slash on the root and another does not."""
     stubs = read_result_stubs(two_roots, f'{ROOT}/', [VOLUME])
-    assert SUCCESS_WITH_PNG in stubs.with_metadata
+    assert SUCCESS in stubs.with_metadata
 
 
 def _read_recording_the_engine(
@@ -673,7 +641,7 @@ def test_the_query_returns_its_connection(two_roots: str, monkeypatch: pytest.Mo
     assert pool.checkedin() == 0
 
 
-ENUMERATION_MEMBERS = 6
+ENUMERATION_MEMBERS = 5
 """How many answers the index gives differently from the tree.
 
 Named here so that the three lists below cannot all stop matching the same

@@ -510,10 +510,11 @@ def test_has_no_offset_file_excludes_navigated(
     ]
 
 
-def test_has_png_file_ands_with_has_no_offset_file(
+def test_a_summary_png_is_not_a_metadata_file(
     ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # The flags AND together: PNG must exist and the metadata file must not.
+    # A results root holds a summary PNG beside every navigated image, and the
+    # walk that answers the presence filter must count none of them.
     _install_two_camera_index(ds, monkeypatch)
     _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000100, '_summary.png')
     _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000101, '_summary.png')
@@ -522,13 +523,12 @@ def test_has_png_file_ands_with_has_no_offset_file(
     groups = list(
         ds.yield_image_files_index(
             volumes=['COISS_2001'],
-            has_png_file=True,
-            has_no_offset_file=True,
+            has_offset_file=True,
             nav_results_root=str(tmp_path),
         )
     )
 
-    assert _yielded_names(groups) == ['N1000000100']
+    assert _yielded_names(groups) == ['N1000000101']
 
 
 def _write_error_metadata(tmp_path: Path) -> None:
@@ -678,7 +678,6 @@ def test_results_scan_propagates_non_missing_oserror(
     'flags',
     [
         {'has_offset_file': True, 'has_no_offset_file': True},
-        {'has_png_file': True, 'has_no_png_file': True},
         {'has_offset_spice_error': True, 'has_offset_nonspice_error': True},
         {'has_offset_error': True, 'has_no_offset_file': True},
     ],
@@ -815,10 +814,10 @@ def test_selection_arguments_include_results_filters() -> None:
     parser = argparse.ArgumentParser()
     DataSetPDS3CassiniISS.add_selection_arguments(parser)
 
-    arguments = parser.parse_args(['--has-offset-file', '--has-no-png-file'])
+    arguments = parser.parse_args(['--has-offset-file', '--has-offset-error'])
 
     assert arguments.has_offset_file is True
-    assert arguments.has_no_png_file is True
+    assert arguments.has_offset_error is True
     assert arguments.has_offset_spice_error is False
 
 

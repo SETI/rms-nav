@@ -89,20 +89,22 @@ def test_a_task_carries_the_metrics_the_walk_reported(
     assert entry['size_bytes'] == (root / f'{FIRST_STUB}_metadata.json').stat().st_size
 
 
-def test_a_task_carries_the_summary_flag_of_each_of_its_files(
+def test_a_file_that_is_not_a_document_is_handed_to_no_task(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """It is a column of the row, and only the one walk of the root sees it."""
+    """The fan-out divides up the documents the walk found and nothing else.
+
+    A summary PNG sits beside every navigated image, so a walk that counted one
+    as a document would hand every worker a share of files it can only refuse.
+    """
     root = tmp_path / 'results'
-    build_tree(root, 2)
+    stubs = build_tree(root, 2)
     write_summary_png(root, FIRST_STUB)
     tasks = fan_out(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
-    flags = {
-        entry['results_path_stub']: entry['has_summary_png']
-        for task in tasks
-        for entry in task['data']['files']
-    }
-    assert flags[FIRST_STUB] is True
+    handed = sorted(
+        str(entry['results_path_stub']) for task in tasks for entry in task['data']['files']
+    )
+    assert handed == sorted(stubs)
 
 
 def test_a_task_names_the_run_it_belongs_to(
@@ -269,7 +271,6 @@ def test_a_share_removes_no_row(tmp_path: Path, quiet_logger: pdslogger.PdsLogge
                 'results_path_stub': stubs[0],
                 'mtime_ns': None,
                 'size_bytes': None,
-                'has_summary_png': False,
             }
         ],
     }
@@ -757,7 +758,6 @@ def good_task(root: Path) -> dict[str, Any]:
                 'results_path_stub': FIRST_STUB,
                 'mtime_ns': 1,
                 'size_bytes': 2,
-                'has_summary_png': False,
             }
         ],
     }
@@ -821,33 +821,15 @@ def test_a_task_of_another_shape_is_refused(
     ('entry', 'message'),
     [
         ('a string', 'not an object'),
-        ({'has_summary_png': False}, 'results_path_stub'),
-        ({'results_path_stub': FIRST_STUB}, 'has_summary_png'),
-        (
-            {'results_path_stub': FIRST_STUB, 'has_summary_png': False, 'mtime_ns': 1.5},
-            'mtime_ns',
-        ),
-        (
-            {
-                'results_path_stub': FIRST_STUB,
-                'has_summary_png': False,
-                'mtime_ns': float('nan'),
-            },
-            'mtime_ns',
-        ),
-        (
-            {'results_path_stub': FIRST_STUB, 'has_summary_png': False, 'size_bytes': '2'},
-            'size_bytes',
-        ),
-        (
-            {'results_path_stub': FIRST_STUB, 'has_summary_png': False, 'size_bytes': True},
-            'size_bytes',
-        ),
+        ({'mtime_ns': 1}, 'results_path_stub'),
+        ({'results_path_stub': FIRST_STUB, 'mtime_ns': 1.5}, 'mtime_ns'),
+        ({'results_path_stub': FIRST_STUB, 'mtime_ns': float('nan')}, 'mtime_ns'),
+        ({'results_path_stub': FIRST_STUB, 'size_bytes': '2'}, 'size_bytes'),
+        ({'results_path_stub': FIRST_STUB, 'size_bytes': True}, 'size_bytes'),
     ],
     ids=[
         'entry-is-text',
         'no-stub',
-        'no-summary-flag',
         'fractional-time',
         'time-is-not-a-number',
         'size-is-text',
@@ -907,7 +889,6 @@ def test_a_file_entry_may_report_no_metrics(
             'results_path_stub': FIRST_STUB,
             'mtime_ns': None,
             'size_bytes': None,
-            'has_summary_png': False,
         }
     ]
     engine = open_index(index_url(tmp_path / 'index.sqlite3'), create=True)

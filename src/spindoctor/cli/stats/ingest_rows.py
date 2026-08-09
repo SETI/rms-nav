@@ -85,7 +85,6 @@ class MetadataSource:
             backend's listing does not report one.
         size_bytes: Size from the listing entry, or None when the backend's
             listing does not report one.
-        has_summary_png: Whether the walk saw a summary PNG beside it.
     """
 
     root_url: str
@@ -93,7 +92,6 @@ class MetadataSource:
     source_file: str
     mtime_ns: int | None
     size_bytes: int | None
-    has_summary_png: bool
 
 
 @dataclass(frozen=True)
@@ -600,7 +598,6 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         'git_sha': _str_or_none(provenance.get('spindoctor_git_sha')),
         'pipeline_run': _str_or_none(provenance.get('pipeline_run_iso8601')),
         'image_number': image_number_from_name(image_name),
-        'has_summary_png': source.has_summary_png,
         'start_et': _finite_or_none(times.get('start_et')),
         'stop_et': _finite_or_none(times.get('stop_et')),
         'exposure_s': _finite_or_none(times.get('exposure_s')),

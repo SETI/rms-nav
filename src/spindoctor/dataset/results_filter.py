@@ -1,19 +1,18 @@
 """Filter image selections against existing navigation result files.
 
 Implements the ``--has-offset-file`` / ``--has-no-offset-file`` /
-``--has-png-file`` / ``--has-no-png-file`` / ``--has-offset-error`` /
-``--has-offset-spice-error`` / ``--has-offset-nonspice-error`` image
-selection options shared by the PDS3 datasets.
+``--has-offset-error`` / ``--has-offset-spice-error`` /
+``--has-offset-nonspice-error`` image selection options shared by the PDS3
+datasets.
 
 The navigation pipeline writes ``{nav_results_root}/{results_path_stub}_metadata.json``
-and ``{results_path_stub}_summary.png`` (see
-:func:`spindoctor.navigate_image_files.navigate_image_files`).  Presence
-filters are answered by walking the results tree once per selected volume and
-collecting the existing result files into sets, so each candidate image costs
-no additional cloud round trip.  Absence filters are answered with batched
-``FCPath.exists()`` calls (or from the walked sets when a walk already
-happened), and the error filters retrieve the metadata JSON files in batches
-and inspect their ``status`` / ``status_error`` fields.
+(see :func:`spindoctor.navigate_image_files.navigate_image_files`).  The
+presence filter is answered by walking the results tree once per selected
+volume and collecting the existing metadata files into a set, so each candidate
+image costs no additional cloud round trip.  The absence filter is answered
+with batched ``FCPath.exists()`` calls (or from the walked set when a walk
+already happened), and the error filters retrieve the metadata JSON files in
+batches and inspect their ``status`` / ``status_error`` fields.
 
 Given a results index, every one of those questions is answered instead by one
 query over the index, and the tree is not read at all.  The index-backed
@@ -38,9 +37,6 @@ from .dataset import ImageFile
 
 METADATA_SUFFIX = '_metadata.json'
 """Suffix of the per-image offset metadata file under the results root."""
-
-SUMMARY_PNG_SUFFIX = '_summary.png'
-"""Suffix of the per-image summary PNG file under the results root."""
 
 RESULTS_FILTER_BATCH_SIZE = 64
 """Number of images checked per batched ``exists()`` / ``retrieve()`` call."""
@@ -133,8 +129,8 @@ class ResultsFilter:
     flags is active.  Construction validates the flag combination (the flags
     AND together; directly contradictory pairs raise) and then collects what
     the results root holds: from the index in one query when a results-index
-    URL is given, and otherwise, when a presence or error filter is active, by
-    walking the results tree under each selected volume.
+    URL is given, and otherwise, when the presence or an error filter is
+    active, by walking the results tree under each selected volume.
 
     The filter is applied in two stages:
 
@@ -154,8 +150,6 @@ class ResultsFilter:
         *,
         has_offset_file: bool = False,
         has_no_offset_file: bool = False,
-        has_png_file: bool = False,
-        has_no_png_file: bool = False,
         has_offset_error: bool = False,
         has_offset_spice_error: bool = False,
         has_offset_nonspice_error: bool = False,
@@ -175,9 +169,6 @@ class ResultsFilter:
             has_offset_file: Only keep images whose offset metadata file exists.
             has_no_offset_file: Only keep images whose offset metadata file does
                 not exist.
-            has_png_file: Only keep images whose summary PNG file exists.
-            has_no_png_file: Only keep images whose summary PNG file does not
-                exist.
             has_offset_error: Only keep images whose offset metadata file
                 indicates a fatal error (``status == 'error'``).
             has_offset_spice_error: Only keep images whose offset metadata file
@@ -197,8 +188,6 @@ class ResultsFilter:
         """
         if has_offset_file and has_no_offset_file:
             raise SelectionError('has_offset_file and has_no_offset_file are mutually exclusive')
-        if has_png_file and has_no_png_file:
-            raise SelectionError('has_png_file and has_no_png_file are mutually exclusive')
         if has_offset_spice_error and has_offset_nonspice_error:
             raise SelectionError(
                 'has_offset_spice_error and has_offset_nonspice_error are mutually exclusive'
@@ -213,13 +202,11 @@ class ResultsFilter:
             )
 
         self._has_no_offset_file = has_no_offset_file
-        self._has_no_png_file = has_no_png_file
         self._has_offset_spice_error = has_offset_spice_error
         self._has_offset_nonspice_error = has_offset_nonspice_error
         # The error filters read the metadata file, so it must exist; fold them
         # into the presence filter so the walked set prunes candidates first.
         self._needs_offset_presence = has_offset_file or needs_metadata_read
-        self._needs_png_presence = has_png_file
         self._needs_metadata_read = needs_metadata_read
         if isinstance(nav_results_root, FCPath):
             self._nav_results_root = nav_results_root
@@ -229,14 +216,11 @@ class ResultsFilter:
             self._nav_results_root = FileCache(None).new_path(nav_results_root)
         self._logger = logger
         self._offset_rel_paths: set[str] = set()
-        self._png_rel_paths: set[str] = set()
         self._error_stubs: frozenset[str] = frozenset()
         self._from_index = results_db_url is not None
-        # The index answers every filter, including the absence filters, which
-        # a tree read answers only when a walk happened for another reason.
-        self._have_result_sets = (
-            self._from_index or self._needs_offset_presence or self._needs_png_presence
-        )
+        # The index answers every filter, including the absence filter, which a
+        # tree read answers only when a walk happened for another reason.
+        self._have_result_sets = self._from_index or self._needs_offset_presence
         # Fixed here rather than left as it came: an iterator is emptied by
         # whichever path reads it first, and which path that is depends on the
         # flags and on whether a URL was given.
@@ -259,8 +243,8 @@ class ResultsFilter:
         The caller uses this to decide whether to buffer accepted images into
         batches (amortizing the batched ``exists()`` / ``retrieve()`` round
         trips) or to yield them immediately.  When the results tree was walked,
-        the absence filters are answered from the walked sets in
-        :meth:`passes_presence` instead and cost nothing here.  When a results
+        the absence filter is answered from the walked set in
+        :meth:`passes_presence` instead and costs nothing here.  When a results
         index answered the enumeration, so is every other filter, and nothing
         is left to do per batch.
         """
@@ -268,7 +252,7 @@ class ResultsFilter:
             return False
         if self._needs_metadata_read:
             return True
-        return not self._have_result_sets and (self._has_no_offset_file or self._has_no_png_file)
+        return not self._have_result_sets and self._has_no_offset_file
 
     def _read_index(
         self,
@@ -317,13 +301,10 @@ class ResultsFilter:
             # catching every other ValueError an enumeration raises.
             raise SelectionError(str(exc)) from exc
         self._offset_rel_paths = {stub + METADATA_SUFFIX for stub in stubs.with_metadata}
-        self._png_rel_paths = {stub + SUMMARY_PNG_SUFFIX for stub in stubs.with_summary_png}
         self._error_stubs = stubs.matching_error
         self._logger.info(
-            '*** Results index holds %d offset metadata and %d summary PNG files under %s, '
-            'ingested %s',
+            '*** Results index holds %d offset metadata files under %s, ingested %s',
             len(self._offset_rel_paths),
-            len(self._png_rel_paths),
             self._nav_results_root,
             _snapshot_age(stubs.ingested_utc),
         )
@@ -349,9 +330,8 @@ class ResultsFilter:
         """Walks the results tree under each volume, collecting result files.
 
         One directory walk per volume, restricted to the selected volumes so
-        unrelated results are never listed.  Both result-file suffixes are
-        collected in the single walk.  A volume with no results directory is
-        treated as having no result files.
+        unrelated results are never listed.  A volume with no results directory
+        is treated as having no result files.
 
         Parameters:
             volumes: Volume names to walk under the results root.
@@ -369,8 +349,6 @@ class ResultsFilter:
                         rel_path = f'{rel_dir}/{file_name}'
                         if file_name.endswith(METADATA_SUFFIX):
                             self._offset_rel_paths.add(rel_path)
-                        elif file_name.endswith(SUMMARY_PNG_SUFFIX):
-                            self._png_rel_paths.add(rel_path)
             except (FileNotFoundError, NotADirectoryError):
                 # A volume with no results directory (or whose results path is
                 # not a directory) simply has no result files. Any other OSError
@@ -379,17 +357,16 @@ class ResultsFilter:
                 # it is allowed to propagate.
                 continue
         self._logger.info(
-            '*** Results scan found %d offset metadata and %d summary PNG files under %s',
+            '*** Results scan found %d offset metadata files under %s',
             len(self._offset_rel_paths),
-            len(self._png_rel_paths),
             self._nav_results_root,
         )
 
     def passes_presence(self, results_path_stub: str) -> bool:
         """True if the image passes the filters answerable from the collected sets.
 
-        Covers the presence filters and, when the results tree was walked
-        anyway, the absence filters too (a set lookup instead of a per-file
+        Covers the presence filter and, when the results tree was walked
+        anyway, the absence filter too (a set lookup instead of a per-file
         ``exists()`` round trip).  When the sets came from a results index they
         cover the error filters as well, since the query already read what the
         tree path has to open each metadata file for.
@@ -405,14 +382,9 @@ class ResultsFilter:
         if not self._have_result_sets:
             return True
         metadata_rel_path = results_path_stub + METADATA_SUFFIX
-        png_rel_path = results_path_stub + SUMMARY_PNG_SUFFIX
         if self._needs_offset_presence and metadata_rel_path not in self._offset_rel_paths:
             return False
-        if self._needs_png_presence and png_rel_path not in self._png_rel_paths:
-            return False
         if self._has_no_offset_file and metadata_rel_path in self._offset_rel_paths:
-            return False
-        if self._has_no_png_file and png_rel_path in self._png_rel_paths:
             return False
         if not self._from_index or not self._needs_metadata_read:
             return True
@@ -421,12 +393,12 @@ class ResultsFilter:
     def filter_batch(self, image_files: list[ImageFile]) -> list[ImageFile]:
         """Applies the absence and metadata-content filters to a batch.
 
-        Input order is preserved.  Absence filters (when the results tree was
-        not walked) are answered with one batched ``exists()`` call covering
-        every active absence suffix.  The error filters retrieve all metadata
-        files in one batched call and inspect their ``status`` /
-        ``status_error`` fields.  A filter answered from a results index has
-        nothing left to apply here and returns the batch as it was given.
+        Input order is preserved.  The absence filter (when the results tree
+        was not walked) is answered with one batched ``exists()`` call.  The
+        error filters retrieve all metadata files in one batched call and
+        inspect their ``status`` / ``status_error`` fields.  A filter answered
+        from a results index has nothing left to apply here and returns the
+        batch as it was given.
 
         Parameters:
             image_files: Batch of images that already passed the cheap filters.
@@ -439,23 +411,10 @@ class ResultsFilter:
         if not keep or not self.needs_batch_filtering:
             return keep
 
-        absence_suffixes: list[str] = []
-        if not self._have_result_sets:
-            if self._has_no_offset_file:
-                absence_suffixes.append(METADATA_SUFFIX)
-            if self._has_no_png_file:
-                absence_suffixes.append(SUMMARY_PNG_SUFFIX)
-        if absence_suffixes:
-            sub_paths: list[str | Path] = [
-                f.results_path_stub + suffix for f in keep for suffix in absence_suffixes
-            ]
+        if not self._have_result_sets and self._has_no_offset_file:
+            sub_paths: list[str | Path] = [f.results_path_stub + METADATA_SUFFIX for f in keep]
             found = cast(list[bool], self._nav_results_root.exists(sub_paths))
-            n_suffixes = len(absence_suffixes)
-            keep = [
-                f
-                for i, f in enumerate(keep)
-                if not any(found[i * n_suffixes : (i + 1) * n_suffixes])
-            ]
+            keep = [f for f, exists in zip(keep, found, strict=True) if not exists]
 
         if self._needs_metadata_read and keep:
             metadata_sub_paths: list[str | Path] = [

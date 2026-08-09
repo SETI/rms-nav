@@ -41,6 +41,7 @@ from .conftest import (
     run_rows,
     technique,
     write_metadata,
+    write_summary_png,
 )
 
 SOURCE = MetadataSource(
@@ -49,7 +50,6 @@ SOURCE = MetadataSource(
     source_file='/data/nav-results/x_metadata.json',
     mtime_ns=1234567890123456789,
     size_bytes=4096,
-    has_summary_png=True,
 )
 
 
@@ -97,7 +97,6 @@ def test_a_bare_basename_stub_has_no_volume() -> None:
         source_file='/data/nav-results/sim_scene_000042_metadata.json',
         mtime_ns=1,
         size_bytes=2,
-        has_summary_png=False,
     )
     rows = rows_from_metadata(metadata_document(instrument='sim'), source)
     assert rows.image['volume'] is None
@@ -198,12 +197,6 @@ def test_the_rotation_columns_are_read() -> None:
     document['navigation_result']['sigma_rotation_deg'] = 0.004
     rows = rows_from_metadata(document, SOURCE)
     assert rows.image['rotation_deg'] == 0.125
-
-
-def test_the_summary_png_flag_comes_from_the_walk() -> None:
-    """Nothing in the document says whether a summary was written beside it."""
-    rows = rows_from_metadata(metadata_document(), SOURCE)
-    assert rows.image['has_summary_png'] is True
 
 
 def test_the_image_number_is_ingested() -> None:
@@ -377,26 +370,46 @@ def test_a_bare_basename_stub_ingests_with_a_null_volume(
     assert [row.volume for row in found] == [None]
 
 
-def test_the_summary_png_is_seen_by_the_walk(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
-    """One listing collects both suffixes, so nothing asks a second time."""
+def _tree_with_a_file_that_is_not_a_document(tmp_path: Path) -> Path:
+    """Write a root holding one document, its summary PNG, and a stray file.
+
+    A results root holds a summary PNG beside every navigated image and
+    whatever else an operator has left there.  None of them is a file the pass
+    reads, and the walk has to pass over each without adding it to any tally.
+
+    Parameters:
+        tmp_path: Directory the root is written under.
+
+    Returns:
+        The results root.
+    """
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-    (root / 'VOL' / 'N1454725799_1_CALIB_summary.png').write_bytes(b'\x89PNG')
-    write_metadata(root, 'VOL/N1454725800_1_CALIB', metadata_document())
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=quiet_logger)
-    engine = open_index(url)
-    with engine.connect() as connection:
-        found = _rows(
-            connection,
-            sqlalchemy.select(IMAGES.c.results_path_stub, IMAGES.c.has_summary_png).order_by(
-                IMAGES.c.results_path_stub
-            ),
-        )
-    engine.dispose()
-    assert [bool(row.has_summary_png) for row in found] == [True, False]
+    write_summary_png(root, 'VOL/N1454725799_1_CALIB')
+    (root / 'VOL' / 'notes.txt').write_text('nothing to ingest here', encoding='utf-8')
+    return root
+
+
+def test_a_file_that_is_not_a_document_is_not_a_file_this_pass_saw(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The walk counts the documents, and a tree holds far more than documents.
+
+    Counted as one of them, a summary PNG would be retrieved, refused for not
+    being a navigation document, and tallied against the root on every pass.
+    """
+    root = _tree_with_a_file_that_is_not_a_document(tmp_path)
+    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    assert (counts.files_seen, counts.files_ingested, counts.files_failed) == (1, 1, 0)
+
+
+def test_a_file_that_is_not_a_document_is_not_a_missed_directory(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A missed directory is what stops a pass removing rows, so it must be exact."""
+    root = _tree_with_a_file_that_is_not_a_document(tmp_path)
+    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    assert counts.directories_missed == 0
 
 
 def test_re_ingesting_an_image_replaces_its_child_rows(

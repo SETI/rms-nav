@@ -389,7 +389,7 @@ def test_the_markdown_exclusion_is_anchored_at_the_start_of_the_line() -> None:
 
 def test_the_boolean_scan_knows_which_columns_are_boolean() -> None:
     """The boolean check is driven by the schema, so it cannot silently empty."""
-    assert _boolean_column_names() == ['at_edge', 'has_summary_png', 'spurious']
+    assert _boolean_column_names() == ['at_edge', 'spurious']
 
 
 def test_the_pragma_scan_finds_the_connect_handler() -> None:

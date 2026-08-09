@@ -19,10 +19,9 @@ identity is part of the contract rather than a convenience.
 What is read again
 ------------------
 
-A file whose recorded ``(mtime_ns, size_bytes)`` still matches the listing, and
-whose summary PNG is as the last pass recorded it, is not read at all.  A
-backend whose listing supplies neither metric cannot answer that question, so
-such a root is re-read in full, with a warning saying so.
+A file whose recorded ``(mtime_ns, size_bytes)`` still matches the listing is
+not read at all.  A backend whose listing supplies neither metric cannot answer
+that question, so such a root is re-read in full, with a warning saying so.
 
 Those two metrics are everything a listing supplies, so a document rewritten in
 place that kept both of them is skipped, and its row goes on recording what the
@@ -101,36 +100,27 @@ def distinct_roots(roots: Sequence[str]) -> list[str]:
     return list(distinct)
 
 
-def _is_unchanged(
-    listed: _ListedFile, recorded: _RecordedFile | None, summary_stubs: set[str]
-) -> bool:
+def _is_unchanged(listed: _ListedFile, recorded: _RecordedFile | None) -> bool:
     """Whether a listed file is exactly what the index already read.
 
-    The summary PNG is part of the comparison because ``has_summary_png`` is a
-    column of the row and comes from the walk rather than from the document: a
-    summary written after the document was ingested changes the row that ought
-    to be stored, while changing nothing about the document itself.  That holds
-    for a refused file as much as for an ingested one, since both tables carry
-    the flag and a selection filter reads it from both.
+    The comparison is the two metrics the listing supplies, and they are
+    compared the same way for a refused file as for an ingested one, since
+    both tables record them and both kinds of file are skipped unchanged.
 
     Parameters:
         listed: The file as this walk saw it.
         recorded: What the index holds about it, or None when it holds nothing.
-        summary_stubs: Stubs this walk saw a summary PNG for.
 
     Returns:
         True when the file need not be read again.
     """
     if recorded is None:
         return False
-    if (recorded.mtime_ns, recorded.size_bytes) != (listed.mtime_ns, listed.size_bytes):
-        return False
-    return recorded.has_summary_png == (listed.results_path_stub in summary_stubs)
+    return (recorded.mtime_ns, recorded.size_bytes) == (listed.mtime_ns, listed.size_bytes)
 
 
 def _files_to_read(
     files: Sequence[_ListedFile],
-    summary_stubs: set[str],
     recorded: dict[str, _RecordedFile],
     *,
     force: bool,
@@ -148,7 +138,6 @@ def _files_to_read(
 
     Parameters:
         files: The metadata files this pass is responsible for.
-        summary_stubs: Stubs the walk saw a summary PNG for.
         recorded: Stub to what the index already holds about it.
         force: Whether to re-read every document regardless.
         has_file_metrics: Whether the listing reported a size and modification
@@ -163,7 +152,7 @@ def _files_to_read(
     return [
         listed
         for listed in files
-        if not _is_unchanged(listed, recorded.get(listed.results_path_stub), summary_stubs)
+        if not _is_unchanged(listed, recorded.get(listed.results_path_stub))
     ]
 
 
@@ -285,7 +274,6 @@ def ingest_metadata_files(
             recorded = _recorded_files(connection, root_url)
         to_read = _files_to_read(
             listing.metadata_files,
-            listing.summary_stubs,
             recorded,
             force=force,
             has_file_metrics=listing.has_file_metrics,
@@ -297,7 +285,6 @@ def ingest_metadata_files(
                 root,
                 chunk,
                 root_url=root_url,
-                summary_stubs=listing.summary_stubs,
                 counts=counts,
                 logger=logger,
             )

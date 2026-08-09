@@ -20,11 +20,10 @@ A refused file is recorded in ``failed_files`` with everything the walk knows
 about it and nothing the document would have said: the same two metrics an
 ingested one records, so an unchanged refusal is skipped on the next pass
 instead of being downloaded and parsed again forever, plus the volume it lives
-under and whether a summary PNG sits beside it, which is what a selection
-filter asks of a file it never opens.  A retrieval that never
-delivered the file is counted without being recorded: it says nothing about the
-file that will still be true next pass, and a recorded refusal is skipped for
-as long as the file does not change.
+under, which is what a selection filter asks of a file it never opens.  A
+retrieval that never delivered the file is counted without being recorded: it
+says nothing about the file that will still be true next pass, and a recorded
+refusal is skipped for as long as the file does not change.
 """
 
 import json
@@ -131,7 +130,6 @@ def _ingest_chunk(
     chunk: Sequence[_ListedFile],
     *,
     root_url: str,
-    summary_stubs: set[str],
     counts: IngestCounts,
     logger: PdsLogger,
 ) -> None:
@@ -145,7 +143,6 @@ def _ingest_chunk(
         root: The results root, which the retrieval is relative to.
         chunk: The files to ingest.
         root_url: Normalized URL of the root, as the rows record it.
-        summary_stubs: Stubs the walk saw a summary PNG for.
         counts: Accumulator this chunk's outcomes are added to.
         logger: Logger for per-file failures.
     """
@@ -168,7 +165,6 @@ def _ingest_chunk(
                 source_file=(root / f'{listed.results_path_stub}{METADATA_SUFFIX}').as_posix(),
                 mtime_ns=listed.mtime_ns,
                 size_bytes=listed.size_bytes,
-                has_summary_png=listed.results_path_stub in summary_stubs,
             )
             if isinstance(local_path, BaseException):
                 # Nothing was read, so nothing is known about the file beyond
@@ -187,15 +183,14 @@ def _ingest_chunk(
                         'root_url': root_url,
                         'results_path_stub': listed.results_path_stub,
                         'reason': exc.reason,
-                        # The walk knows both of these whatever the file says,
-                        # and a selection filter asks about the file rather
-                        # than about its contents: a refused document is one
-                        # the tree still holds, under a volume, possibly with a
-                        # summary beside it.  The volume is derived by the same
-                        # function the images row uses, so the two tables can
-                        # never disagree about which volume a stub is under.
+                        # The walk knows this whatever the file says, and a
+                        # selection filter asks about the file rather than
+                        # about its contents: a refused document is one the
+                        # tree still holds, under a volume.  The volume is
+                        # derived by the same function the images row uses, so
+                        # the two tables can never disagree about which volume
+                        # a stub is under.
                         'volume': _volume_of(listed.results_path_stub),
-                        'has_summary_png': source.has_summary_png,
                         'mtime_ns': listed.mtime_ns,
                         'size_bytes': listed.size_bytes,
                     }

@@ -315,8 +315,9 @@ def write_refusal_matching(root: Path, stub: str, document: Path) -> Path:
 def write_summary_png(root: Path, stub: str) -> Path:
     """Write a stand-in summary PNG beside a document.
 
-    Only its name matters: the walk records that a summary exists, and never
-    opens one.
+    A results tree holds one of these beside every navigated image, so it is
+    the file a walk of a real root meets most often after the documents
+    themselves.  Only its name matters here: nothing opens one.
 
     Parameters:
         root: The results root.
