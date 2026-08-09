@@ -26,7 +26,7 @@ index gives differently from the tree, each of which has a test of its own.
 """
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -232,16 +232,20 @@ class ResultsFilter:
         self._have_result_sets = (
             self._from_index or self._needs_offset_presence or self._needs_png_presence
         )
+        # Fixed here rather than left as it came: an iterator is emptied by
+        # whichever path reads it first, and which path that is depends on the
+        # flags and on whether a URL was given.
+        volume_names = list(volumes)
         if results_db_url is not None:
             self._read_index(
                 results_db_url,
-                volumes,
+                volume_names,
                 has_offset_error=has_offset_error,
                 has_offset_spice_error=has_offset_spice_error,
                 has_offset_nonspice_error=has_offset_nonspice_error,
             )
         elif self._have_result_sets:
-            self._scan_volumes(volumes)
+            self._scan_volumes(volume_names)
 
     @property
     def needs_batch_filtering(self) -> bool:
@@ -264,7 +268,7 @@ class ResultsFilter:
     def _read_index(
         self,
         results_db_url: str,
-        volumes: Iterable[str],
+        volumes: Sequence[str],
         *,
         has_offset_error: bool,
         has_offset_spice_error: bool,
@@ -336,7 +340,7 @@ class ResultsFilter:
                 'y' if stubs.directories_missed == 1 else 'ies',
             )
 
-    def _scan_volumes(self, volumes: Iterable[str]) -> None:
+    def _scan_volumes(self, volumes: Sequence[str]) -> None:
         """Walks the results tree under each volume, collecting result files.
 
         One directory walk per volume, restricted to the selected volumes so

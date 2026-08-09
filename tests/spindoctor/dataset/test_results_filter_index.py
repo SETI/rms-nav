@@ -1195,3 +1195,28 @@ def test_a_contradictory_pair_refuses_the_selection(tree: Path) -> None:
             has_offset_file=True,
             has_no_offset_file=True,
         )
+
+
+def test_the_volumes_are_fixed_at_the_boundary_for_the_index(tree: Path, indexed: str) -> None:
+    """A caller is free to hand over an iterator, which one read would empty.
+
+    Which path reads the volumes depends on the flags and on whether a URL was
+    given, so the sequence is fixed once at the constructor rather than left to
+    whichever path happens to consume it.
+    """
+    results_filter = ResultsFilter(
+        VOLUMES, str(tree), logger=_logger(), results_db_url=indexed, has_offset_file=True
+    )
+    from_iterator = ResultsFilter(
+        iter(VOLUMES), str(tree), logger=_logger(), results_db_url=indexed, has_offset_file=True
+    )
+    images = _candidate_files(tree)
+    assert _select(from_iterator, images) == _select(results_filter, images)
+
+
+def test_the_volumes_are_fixed_at_the_boundary_for_the_tree(tree: Path) -> None:
+    """The walked path is handed the same fixed sequence, for the same reason."""
+    results_filter = ResultsFilter(VOLUMES, str(tree), logger=_logger(), has_offset_file=True)
+    from_iterator = ResultsFilter(iter(VOLUMES), str(tree), logger=_logger(), has_offset_file=True)
+    images = _candidate_files(tree)
+    assert _select(from_iterator, images) == _select(results_filter, images)
