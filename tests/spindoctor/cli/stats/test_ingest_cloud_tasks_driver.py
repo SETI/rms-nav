@@ -1,347 +1,36 @@
 """Tests for the two command lines that divide an ingest up and put it together.
 
-``sd_stats_ingest`` gains two modes and ``sd_stats_ingest_cloud_tasks`` is the
-worker between them.  What is pinned here is the split of authority: the mode
-that divides the work up is the only one that creates the schema, a worker
-refuses an index that is not there rather than building one beside it, and a
-worker's whole account of itself is its return value, because it has no run log
-to write one in.
+``sd_stats_ingest`` gains two modes: one lists each root, removes the rows whose
+documents have left it, and writes the shares out; the other reads the workers'
+event log, adds their tallies up, and stamps the runs those tallies account for.
+What is pinned here is what each mode does to the index and what its exit status
+says -- a mode that reads no document, a completion that refuses a root its
+tasks did not cover, and a refusal that names its cause rather than escaping as
+a failure nobody enumerated.
+
+The worker between the two is in ``test_ingest_cloud_tasks_worker``.
 """
 
-import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 import sqlalchemy
-from cloud_tasks.worker import WorkerData
 
-from spindoctor.cli import sd_stats_ingest, sd_stats_ingest_cloud_tasks
-from spindoctor.config import MAIN_LOGGER
+from spindoctor.cli import sd_stats_ingest
 from spindoctor.results_index import IMAGES, INGEST_RUNS, normalize_root_url, open_index
 
 from .conftest import index_url, metadata_document, write_metadata
-
-STUB = 'VOL/N1454725799_1_CALIB'
-"""The stub of the document every tree below holds."""
-
-
-class _StubWorkerData:
-    """Stands in for the cloud_tasks worker's data object."""
-
-    def __init__(self, **kwargs: object) -> None:
-        """Build worker data carrying only the given CLI arguments.
-
-        Parameters:
-            **kwargs: Argument names and values for the parsed namespace.
-        """
-        self.args = argparse.Namespace(config_file=None, log_root=None, **kwargs)
-
-
-def worker_data(**kwargs: object) -> WorkerData:
-    """Build the worker data a driver reads its CLI arguments from.
-
-    Parameters:
-        **kwargs: Argument names and values for the parsed namespace.
-
-    Returns:
-        The stub, typed as the worker data a driver expects.  A driver reads
-        only ``args`` from it, so building the real thing would mean standing up
-        a worker for no benefit.
-    """
-    return cast(WorkerData, _StubWorkerData(**kwargs))
-
-
-def run_driver(
-    argv: list[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> tuple[int | None, list[str]]:
-    """Run ``sd_stats_ingest`` and return its exit status and its main log.
-
-    Parameters:
-        argv: Arguments, without the program name.
-        monkeypatch: Fixture the argument vector and logger are replaced through.
-        tmp_path: Directory the run's log files are written under.
-
-    Returns:
-        The exit status, and one entry per line written to the main log.
-    """
-    written: list[str] = []
-
-    def recording(message: Any, *args: Any) -> None:
-        written.append(str(message) % args if args else str(message))
-
-    monkeypatch.setattr(
-        sys, 'argv', ['sd_stats_ingest', '--log-root', str(tmp_path / 'logs'), *argv]
-    )
-    for level in ('info', 'warning', 'error', 'fatal', 'exception'):
-        monkeypatch.setattr(MAIN_LOGGER, level, recording)
-    with pytest.raises(SystemExit) as caught:
-        sd_stats_ingest.main()
-    status = caught.value.code
-    return (status if status is None or isinstance(status, int) else 1), written
-
-
-def tasks_of(path: Path) -> list[dict[str, Any]]:
-    """Read a written cloud-tasks file.
-
-    Parameters:
-        path: The file the driver wrote.
-
-    Returns:
-        The task descriptions.
-    """
-    return cast(list[dict[str, Any]], json.loads(path.read_text(encoding='utf-8')))
-
-
-def process(task_data: dict[str, Any], url: str) -> tuple[bool, Any]:
-    """Run one ingest task through the worker driver.
-
-    Parameters:
-        task_data: The task's data.
-        url: The index URL to hand the worker.
-
-    Returns:
-        What ``process_task`` returned.
-    """
-    return sd_stats_ingest_cloud_tasks.process_task(
-        'ingest-1-000000', task_data, worker_data(results_db=url)
-    )
-
-
-# ---------------------------------------------------------------------------
-# Who creates the schema
-# ---------------------------------------------------------------------------
-
-
-def test_the_fan_out_creates_the_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """One program makes the schema, before any worker is given a task."""
-    root = tmp_path / 'results'
-    write_metadata(root, STUB, metadata_document())
-    database = tmp_path / 'index.sqlite3'
-    run_driver(
-        [
-            '--results-db',
-            index_url(database),
-            '--nav-results-root',
-            root.as_posix(),
-            '--output-cloud-tasks-file',
-            str(tmp_path / 'tasks.json'),
-        ],
-        monkeypatch,
-        tmp_path,
-    )
-    assert database.exists()
-
-
-def test_a_worker_refuses_an_index_that_is_not_there(tmp_path: Path) -> None:
-    """A worker that created one would answer a wrong URL with an empty index.
-
-    Every consumer would then read absence of a row under a fully navigated root
-    as "this image was never navigated", which is the one thing the run
-    bookkeeping exists to prevent.
-    """
-    root = tmp_path / 'results'
-    write_metadata(root, STUB, metadata_document())
-    _retry, result = process(
-        {
-            'run_id': 1,
-            'root_url': root.as_posix(),
-            'force': False,
-            'has_file_metrics': False,
-            'files': [
-                {
-                    'results_path_stub': STUB,
-                    'mtime_ns': None,
-                    'size_bytes': None,
-                    'has_summary_png': False,
-                }
-            ],
-        },
-        index_url(tmp_path / 'index.sqlite3'),
-    )
-    assert result['status_error'] == 'index_unopenable'
-
-
-def test_a_worker_leaves_no_index_behind(tmp_path: Path) -> None:
-    """Refusing is not enough if the refusal creates the file on the way out."""
-    database = tmp_path / 'index.sqlite3'
-    process(
-        {
-            'run_id': 1,
-            'root_url': str(tmp_path / 'results'),
-            'force': False,
-            'has_file_metrics': False,
-            'files': [],
-        },
-        index_url(database),
-    )
-    assert not database.exists()
-
-
-LEAKING_PASSWORD = 'se@cr:etlongsecretpassword'
-"""A password whose tail a URL parser quotes back as the port it could not read."""
-
-LEAKING_INDEX_URL = f'postgresql+psycopg://user:{LEAKING_PASSWORD}@dbhost/spindoctor'
-"""An index URL whose refusal is where that tail would otherwise appear."""
-
-
-def test_a_worker_that_cannot_open_the_index_names_no_password() -> None:
-    """A task result travels further than a log line, so a leak in one travels too.
-
-    What a worker returns is written verbatim into its event log, and an
-    operator collects those logs, concatenates them and hands the file to the
-    program that completes the ingest. A refusal that masks the URL and then
-    quotes the parser's own complaint about it puts a run of the password in
-    that file.
-    """
-    _retry, result = sd_stats_ingest_cloud_tasks.process_task(
-        'ingest-1-000000', {}, worker_data(results_db=LEAKING_INDEX_URL)
-    )
-    assert 'etlongsecretpassword' not in result['status_exception']
-
-
-def test_a_worker_that_cannot_open_the_index_still_says_why() -> None:
-    """And keeps the diagnosis, which is the whole of what the result is for."""
-    _retry, result = sd_stats_ingest_cloud_tasks.process_task(
-        'ingest-1-000000', {}, worker_data(results_db=LEAKING_INDEX_URL)
-    )
-    assert result['status_error'] == 'index_unopenable'
-
-
-def test_a_worker_with_no_index_url_reports_it() -> None:
-    """A worker has no run log, so the missing setting comes back in the result."""
-    _retry, result = sd_stats_ingest_cloud_tasks.process_task(
-        'ingest-1-000000', {}, worker_data(results_db=None)
-    )
-    assert result['status_error'] == 'no_results_db'
-
-
-def test_a_worker_told_to_use_no_index_reports_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``none`` is the documented opt-out, and there is nothing for a worker to do.
-
-    Every other program answers it by reading files; ingest into no index is not
-    a mode that exists.
-    """
-    monkeypatch.setenv('NAV_RESULTS_DB', index_url(tmp_path / 'index.sqlite3'))
-    _retry, result = sd_stats_ingest_cloud_tasks.process_task(
-        'ingest-1-000000', {}, worker_data(results_db='none')
-    )
-    assert result['status_error'] == 'no_results_db'
-
-
-# ---------------------------------------------------------------------------
-# What a worker returns
-# ---------------------------------------------------------------------------
-
-
-def fanned_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, count: int = 1) -> str:
-    """Write a tree, fan it out through the driver, and return the index URL.
-
-    Parameters:
-        tmp_path: Directory the tree, the index and the tasks file live under.
-        monkeypatch: Fixture the driver is run through.
-        count: How many documents to write.
-
-    Returns:
-        The index URL.
-    """
-    root = tmp_path / 'results'
-    for index in range(count):
-        name = f'N{1454725799 + index}_1_CALIB'
-        write_metadata(root, f'VOL/{name}', metadata_document(image_name=f'{name}.IMG'))
-    url = index_url(tmp_path / 'index.sqlite3')
-    run_driver(
-        [
-            '--results-db',
-            url,
-            '--nav-results-root',
-            root.as_posix(),
-            '--output-cloud-tasks-file',
-            str(tmp_path / 'tasks.json'),
-        ],
-        monkeypatch,
-        tmp_path,
-    )
-    return url
-
-
-def fanned_out_with_a_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
-    """Write a tree holding one document and one file that is not one, and fan it out.
-
-    Parameters:
-        tmp_path: Directory the tree, the index and the tasks file live under.
-        monkeypatch: Fixture the driver is run through.
-
-    Returns:
-        The index URL.
-    """
-    root = tmp_path / 'results'
-    write_metadata(root, STUB, metadata_document())
-    (root / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
-    url = index_url(tmp_path / 'index.sqlite3')
-    run_driver(
-        [
-            '--results-db',
-            url,
-            '--nav-results-root',
-            root.as_posix(),
-            '--output-cloud-tasks-file',
-            str(tmp_path / 'tasks.json'),
-        ],
-        monkeypatch,
-        tmp_path,
-    )
-    return url
-
-
-def test_a_worker_reports_what_its_share_ingested(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The task result is the only channel a worker has."""
-    url = fanned_out(tmp_path, monkeypatch, count=2)
-    tasks = tasks_of(tmp_path / 'tasks.json')
-    _retry, result = process(tasks[0]['data'], url)
-    assert result['files_ingested'] == 2
-
-
-def test_a_worker_never_asks_for_a_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A share that failed halfway is re-run by an operator, not by the queue.
-
-    Its files are unaccounted for either way, and the run it belongs to stays
-    unfinished until they are.
-    """
-    url = fanned_out(tmp_path, monkeypatch)
-    tasks = tasks_of(tmp_path / 'tasks.json')
-    retry, _result = process(tasks[0]['data'], url)
-    assert retry is False
-
-
-def test_a_worker_handed_a_task_it_cannot_read_reports_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A malformed task is an error result, not a traceback out of the worker."""
-    url = fanned_out(tmp_path, monkeypatch)
-    _retry, result = process({'run_id': 1}, url)
-    assert result['status_error'] == 'malformed_task'
-
-
-def test_a_worker_says_what_was_wrong_with_the_task(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A refusal nobody can act on is only half a refusal."""
-    url = fanned_out(tmp_path, monkeypatch)
-    _retry, result = process({'run_id': 1}, url)
-    assert 'root_url' in result['status_exception']
-
-
-def test_the_worker_shares_its_interactive_siblings_identity() -> None:
-    """One ``logging.programs`` block governs both forms of a program."""
-    assert sd_stats_ingest_cloud_tasks.PROGRAM_NAME == sd_stats_ingest.PROGRAM_NAME
-
+from .ingest_driver_helpers import (
+    STUB,
+    fanned_out,
+    fanned_out_with_a_refusal,
+    process,
+    run_driver,
+    tasks_of,
+)
 
 # ---------------------------------------------------------------------------
 # The command line that divides the work up
