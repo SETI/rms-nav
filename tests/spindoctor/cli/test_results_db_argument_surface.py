@@ -42,11 +42,13 @@ _WITH_A_FILE_MODE = [
 # its supplemental product, the consolidator copies raw file bytes, and the
 # viewer opens the products of one image.  Their image selection reads the tree
 # like the rest of them, which is only true while they name no index.
+# The modes named are the ones that enumerate with the selection flags, which
+# is the population the rule is about; a mode that selects no images cannot be
+# reached by a resolved URL at all.
 _NON_CONSUMERS = [
     ('sd_create_bundle', ['labels', 'coiss_saturn']),
-    ('sd_create_bundle', ['summary', 'coiss_saturn']),
     ('sd_consolidate_metadata', ['coiss_saturn']),
-    ('sd_backplane_viewer', []),
+    ('sd_backplane_viewer', ['coiss_saturn']),
 ]
 
 
@@ -89,3 +91,17 @@ def test_a_program_that_keeps_reading_files_does_not_accept_the_option(
 ) -> None:
     """Declaring the option is what makes a program index-backed, so these do not."""
     assert '--results-db' not in _one_line(program, argv)
+
+
+@pytest.mark.parametrize(('program', 'argv'), _NON_CONSUMERS)
+def test_the_help_the_absence_is_read_from_is_the_program_s_own(
+    program: str, argv: list[str]
+) -> None:
+    """The control for the assertion above, which is otherwise unfalsifiable.
+
+    A program that reads its dataset from argv before parsing prints a usage
+    error instead of its help when it is not given one, and every option is then
+    absent from a string that names none of them.  Each of these programs writes
+    to the navigation results root, so its help says so.
+    """
+    assert '--nav-results-root' in _one_line(program, argv)
