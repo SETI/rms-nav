@@ -123,6 +123,14 @@ Environment options
   will be written, overriding both the ``NAV_RESULTS_ROOT`` environment variable
   and any corresponding configuration setting.
 
+* ``--results-db URL``: connection URL of a results index (a ``sqlite:`` URL
+  naming a local path, or a ``postgresql+psycopg:`` URL naming a server),
+  overriding both the ``NAV_RESULTS_DB`` environment variable and any
+  corresponding configuration setting. The results-file selection filters below
+  are then answered by one query over the index instead of by reading the
+  results tree. Pass ``--results-db none`` to read the tree even when a URL is
+  set in the environment or a configuration file.
+
 Navigation options
 ^^^^^^^^^^^^^^^^^^
 
@@ -175,7 +183,8 @@ For PDS3 datasets (``coiss``, ``coiss_pds3``, ``coiss_cruise``, ``coiss_cruise_p
   ``--has-offset-error``, but restricted to fatal errors caused by / not caused
   by missing SPICE data.
 
-The results-file filters answer their questions three ways, all efficient even
+The results-file filters answer their questions three ways when they read the
+results tree, all efficient even
 when the results root is a cloud location. Presence filters
 (``--has-offset-file`` / ``--has-png-file``) and the error filters
 (``--has-offset-error`` and its SPICE variants) walk the results tree once per
@@ -184,6 +193,15 @@ absence filters (``--has-no-offset-file`` / ``--has-no-png-file`` with no
 presence or error filter active) do not walk the tree; they answer with batched
 ``exists()`` calls. The error filters additionally retrieve the matched metadata
 files in batches to inspect their contents.
+
+Given ``--results-db``, all of them are answered instead by one query per
+enumeration, and the results tree is not read at all. The index is a snapshot of
+the tree as of the last ingest over that root, with no staleness detection: an
+image navigated since is one the index does not hold, so ``--has-no-offset-file``
+selects it again. Run ``sd_stats_ingest`` to bring the index up to date, or pass
+``--results-db none`` for a run that must read the tree. A results root the index
+holds no completed ingest of is refused rather than answered, because absence of
+a row would otherwise read as "this image was never navigated".
 
 Miscellaneous
 ^^^^^^^^^^^^^
