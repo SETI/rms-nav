@@ -141,13 +141,14 @@ def test_two_spellings_of_one_root_are_logged_once(
 
 
 def naming_a_root_that_is_not_a_location(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spelling: str
 ) -> tuple[int | None, list[str]]:
-    """Run the driver over a spelling no storage layer can render absolute.
+    """Run the driver over a spelling that does not name a location.
 
     Parameters:
         tmp_path: Directory the index and the tasks file live under.
         monkeypatch: Fixture the driver is run through.
+        spelling: The root as it reaches the command line.
 
     Returns:
         The exit status, and one entry per line written to the main log.
@@ -157,7 +158,7 @@ def naming_a_root_that_is_not_a_location(
             '--results-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
-            '//',
+            spelling,
             '--output-cloud-tasks-file',
             str(tmp_path / 'tasks.json'),
         ],
@@ -166,23 +167,43 @@ def naming_a_root_that_is_not_a_location(
     )
 
 
+# What each spelling costs if it is walked instead of refused: a bare UNC path
+# raises out of the storage layer, an empty one is the working directory, and
+# one carrying a null byte renders and then fails at the first listing call.
+_ROOTS_THAT_ARE_NOT_LOCATIONS = ['//', '', '\x00bad']
+
+
+@pytest.mark.parametrize(
+    'spelling', _ROOTS_THAT_ARE_NOT_LOCATIONS, ids=['no-share-name', 'nothing-at-all', 'null-byte']
+)
 def test_a_root_that_is_not_a_location_exits_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spelling: str
 ) -> None:
-    """A root nothing can be read from is a run that did not complete."""
-    status, _written = naming_a_root_that_is_not_a_location(tmp_path, monkeypatch)
+    """A root nothing can be read from is a run that did not complete.
+
+    An empty spelling is the one an operator reaches by accident: it is what
+    ``--nav-results-root "$ROOT"`` hands the program when the variable is unset,
+    and walked rather than refused it ingests the working directory under a root
+    nobody named and reports a completed pass.
+    """
+    status, _written = naming_a_root_that_is_not_a_location(tmp_path, monkeypatch, spelling)
     assert status == 1
 
 
+@pytest.mark.parametrize(
+    'spelling', _ROOTS_THAT_ARE_NOT_LOCATIONS, ids=['no-share-name', 'nothing-at-all', 'null-byte']
+)
 def test_a_root_that_is_not_a_location_says_so(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spelling: str
 ) -> None:
     """And is charged to the root, rather than escaping as a failure nobody named.
 
-    Every root is rendered absolute before the pass begins, so the spelling that
-    cannot be is refused there with a message about it.
+    Every root is rendered absolute before the pass begins, so a spelling that
+    is not a location is refused there with a message about it -- rather than
+    reaching the catch-all as a traceback naming a directory listing, which is
+    where a null byte in a path is otherwise found out.
     """
-    _status, written = naming_a_root_that_is_not_a_location(tmp_path, monkeypatch)
+    _status, written = naming_a_root_that_is_not_a_location(tmp_path, monkeypatch, spelling)
     assert any('is not a location that can be read' in line for line in written)
 
 

@@ -83,8 +83,9 @@ def distinct_roots(roots: Sequence[str]) -> list[str]:
         The normalized roots, first spelling first.
 
     Raises:
-        ValueError: If a root is not a location, which the storage layer refuses
-            to render absolute.
+        ValueError: If a root is not a location: one the storage layer refuses
+            to render absolute, one carrying a null byte, or an empty spelling,
+            which is the working directory rather than a root anybody named.
     """
     distinct: dict[str, None] = {}
     for root in roots:

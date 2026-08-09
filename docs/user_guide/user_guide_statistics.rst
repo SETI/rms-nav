@@ -58,7 +58,10 @@ program resolves one: ``--nav-results-root`` (repeatable), then the
 ``NAV_RESULTS_ROOT`` environment variable. Each row records the root it came
 from and its path under that root, and every consumer looks a row up by that
 pair. Pointing ingest at a subdirectory of a results root would produce
-identifiers no consumer's lookup can match.
+identifiers no consumer's lookup can match. A root that is not a location is
+refused before anything is walked, and an empty one is such a root: with
+``--nav-results-root "$ROOT"`` and ``ROOT`` unset the program stops rather than
+ingesting whatever directory it was started from under a name nobody chose.
 
 **Ingestion is incremental.** One recursive listing per root collects both the
 metadata documents and the summary PNGs beside them, and carries each file's

@@ -1223,7 +1223,13 @@ Details settled during execution, none of them a change of intent:
   typed: a run that named a root two ways and accounted for it once read as a
   root having gone missing between the two messages. Applying it there also
   charges a spelling that is not a location to the root, rather than leaving it
-  to the catch-all as a failure nobody enumerated.
+  to the catch-all as a failure nobody enumerated. Which spellings those are is
+  decided in `normalize_root_url`, so every program that reads a root refuses
+  the same ones: what no storage layer can render absolute, what carries a null
+  byte -- which renders and then fails at the first listing, charged to a
+  directory rather than to the word that caused it -- and an empty one, which
+  renders as the working directory and would otherwise walk it, write its
+  documents under a root nobody named, and report a completed pass.
 - **A count no share could report is not a share's tally, and neither is a
   sum.** `_share_tally` bounds the magnitude of each count as well as its type
   and its sign, and the completion holds the running total of a run's shares to
