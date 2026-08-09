@@ -29,6 +29,7 @@ from tests.spindoctor.cli.ck.ck_helpers import (
 )
 
 from spindoctor.cli import sd_create_ck
+from spindoctor.cli.ck.pointing import NDArrayFloatType
 
 # The two exposures are far enough apart that no original kernel covers both,
 # so each image has exactly one candidate and the two land in different files.
@@ -43,7 +44,7 @@ BASELINE_B = 'orig_b.bc'
 KERNEL_NAMES = ('test.tf', 'test.tls', 'test.tsc', BASELINE_A, BASELINE_B)
 
 
-def camera_attitude(et: float) -> Any:
+def camera_attitude(et: float) -> NDArrayFloatType:
     """Return the camera attitude the baseline kernels give at one epoch.
 
     Parameters:
@@ -53,10 +54,13 @@ def camera_attitude(et: float) -> Any:
         The 3x3 J2000-to-camera rotation, which is what the metadata records
         as the uncorrected attitude.
     """
-    return np.asarray(cspyce.pxform('J2000', CASSINI_CAMERA_FRAME, et), dtype=np.float64)
+    attitude: NDArrayFloatType = np.asarray(
+        cspyce.pxform('J2000', CASSINI_CAMERA_FRAME, et), dtype=np.float64
+    )
+    return attitude
 
 
-def corrected(attitude: Any) -> Any:
+def corrected(attitude: NDArrayFloatType) -> NDArrayFloatType:
     """Return an attitude a small correction away from another.
 
     Parameters:
@@ -68,7 +72,7 @@ def corrected(attitude: Any) -> Any:
     """
     axis = np.array([0.2, 0.5, -0.84])
     turn = np.asarray(cspyce.axisar(axis / np.linalg.norm(axis), 1.0e-3), dtype=np.float64)
-    turned: Any = turn @ np.asarray(attitude, dtype=np.float64)
+    turned: NDArrayFloatType = turn @ np.asarray(attitude, dtype=np.float64)
     return turned
 
 
@@ -93,8 +97,8 @@ def image_document(
     *,
     image_name: str,
     midtime: float,
-    cmatrix_original: Any,
-    cmatrix: Any | None,
+    cmatrix_original: NDArrayFloatType,
+    cmatrix: NDArrayFloatType | None,
     status: str = 'success',
 ) -> dict[str, Any]:
     """Build one Cassini image's metadata document.
@@ -131,7 +135,9 @@ def image_document(
     )
 
 
-def write_kernels(kernels: Path, *, angular_velocity_in_b: bool = True) -> tuple[Any, Any]:
+def write_kernels(
+    kernels: Path, *, angular_velocity_in_b: bool = True
+) -> tuple[NDArrayFloatType, NDArrayFloatType]:
     """Write the hermetic kernels and the two baselines, and read what they give.
 
     The kernels have to be furnished to build the baselines and to read the

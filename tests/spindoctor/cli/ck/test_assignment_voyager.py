@@ -81,6 +81,7 @@ def test_a_frozen_baseline_reproduces_through_the_snapped_lookup(
     )
     assignments = assign_images([entry], index)
     assert assignments[0].baseline is not None
+    assert assignments[0].baseline.basename == VOYAGER_KERNEL_NAME
 
 
 def test_a_frozen_baseline_read_at_the_midtime_reproduces_through_the_wider_lookup(
@@ -112,6 +113,7 @@ def test_a_frozen_baseline_read_at_the_midtime_reproduces_through_the_wider_look
     )
     assignments = assign_images([entry], index)
     assert assignments[0].baseline is not None
+    assert assignments[0].baseline.basename == VOYAGER_KERNEL_NAME
 
 
 def test_a_frozen_baseline_holding_another_attitude_does_not_reproduce(
@@ -168,6 +170,7 @@ def test_a_frozen_baseline_outside_the_first_tolerance_reproduces_at_the_second(
     )
     assignments = assign_images([entry], index)
     assert assignments[0].baseline is not None
+    assert assignments[0].baseline.basename == VOYAGER_KERNEL_NAME
 
 
 def test_a_discrete_baseline_answers_only_within_a_tolerance(
@@ -207,6 +210,7 @@ def test_a_discrete_baseline_reproduces_within_the_base_tolerance(
     index = build_ck_index([root])
     assignments = assign_images([discrete_entry(_INSIDE_BASE_TOLERANCE_TICKS)], index)
     assert assignments[0].baseline is not None
+    assert assignments[0].baseline.basename == VOYAGER_KERNEL_NAME
 
 
 def test_the_snapped_lookup_reaches_a_record_within_its_base_tolerance(
@@ -294,3 +298,4 @@ def test_an_image_at_the_edge_of_the_snapped_lookup_is_still_assigned(
     index = build_ck_index([root])
     assignments = assign_images([discrete_entry(offset_ticks)], index)
     assert assignments[0].baseline is not None
+    assert assignments[0].baseline.basename == VOYAGER_KERNEL_NAME

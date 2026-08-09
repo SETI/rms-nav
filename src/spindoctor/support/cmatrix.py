@@ -66,7 +66,7 @@ from spindoctor.obs import (
 )
 from spindoctor.spice_ids import CK_OBJECT_SCLK_ID, VOYAGER_CK_OBJECT_ID
 from spindoctor.support.exceptions import NavPointingError
-from spindoctor.support.types import NDArrayFloatType
+from spindoctor.support.types import NDArrayAnyType, NDArrayFloatType
 
 # The offset-to-attitude conversion and its inverse are deliberately behind
 # two public functions -- plus the record validator the readers share -- so
@@ -521,11 +521,17 @@ def compute_pointing(
     )
 
 
-def validated_record_rotation(matrix: NDArrayFloatType, label: str) -> NDArrayFloatType:
+def validated_record_rotation(matrix: NDArrayAnyType, label: str) -> NDArrayFloatType:
     """Validate one recorded C-matrix for the reader, refusing rather than coercing.
 
+    The parameter is deliberately an array of any dtype, not a float array:
+    refusing the dtypes a metadata record can carry -- booleans, integers,
+    text -- is exactly this function's job, so a caller hands it whatever the
+    record held and lets it judge.  Narrowing the annotation to a float array
+    would make the callers cast, which is the coercion this refuses to do.
+
     Parameters:
-        matrix: The recorded 3x3 rotation.
+        matrix: The recorded 3x3 rotation, of any dtype.
         label: Name used in refusal messages.
 
     Returns:

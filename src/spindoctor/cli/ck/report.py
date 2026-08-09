@@ -21,6 +21,7 @@ import csv
 import io
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import cspyce
@@ -102,13 +103,21 @@ class ImageFacts:
     status_reason: str | None
 
     def __post_init__(self) -> None:
-        """Refuse an image with no name, which no row could be attributed to.
+        """Refuse an image with no name or no status.
+
+        A row with no name could not be attributed to an image, and an empty
+        status would render a cell indistinguishable from an unrecorded value.
 
         Raises:
-            ValueError: if ``image_name`` is empty.
+            ValueError: if ``image_name`` or ``status`` is empty.
         """
         if len(self.image_name) == 0:
             raise ValueError('image_name is empty; a report row must name the image it is for')
+        if len(self.status) == 0:
+            raise ValueError(
+                f'status is empty for {self.image_name}; a report row must say what became '
+                f'of the image'
+            )
 
 
 def utc_for_et(et: float) -> str:
@@ -296,7 +305,7 @@ def report_text(rows: Sequence[ReportRow]) -> str:
     return buffer.getvalue()
 
 
-def write_report(path: FCPath, rows: Sequence[ReportRow]) -> None:
+def write_report(path: str | Path | FCPath, rows: Sequence[ReportRow]) -> None:
     """Write a run's report.
 
     Parameters:
@@ -306,4 +315,4 @@ def write_report(path: FCPath, rows: Sequence[ReportRow]) -> None:
     Raises:
         ValueError: if two rows name the same image.
     """
-    path.write_text(report_text(rows))
+    FCPath(path).write_text(report_text(rows))

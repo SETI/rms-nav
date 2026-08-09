@@ -67,7 +67,12 @@ def pool_restored() -> Iterator[None]:
 
 @pytest.fixture
 def run_tree(tmp_path: Path) -> dict[str, Path]:
-    """Build a kernel directory, a results root and four images for one run."""
+    """Build a kernel directory, a results root and four images for one run.
+
+    Returns:
+        The run's directories, under the keys ``kernels``, ``results`` and
+        ``output``.
+    """
     kernels = tmp_path / 'kernels'
     results = tmp_path / 'results'
     output = tmp_path / 'output'
@@ -125,6 +130,10 @@ def refused_second_file_tree(tmp_path: Path) -> dict[str, Path]:
     no angular velocity, which no segment can express.  The corrected files are
     written in name order, so the first one is buildable and the second is the
     refusal: a run that wrote as it went would leave the first file behind.
+
+    Returns:
+        The run's directories, under the keys ``kernels``, ``results`` and
+        ``output``.
     """
     kernels = tmp_path / 'kernels'
     results = tmp_path / 'results'
@@ -155,6 +164,10 @@ def straddling_tree(tmp_path: Path) -> dict[str, Path]:
     exposure runs for four, so the midtime reproduces -- which is what pairs
     the image with this baseline -- and the segment's start and stop records
     then have no pointing to read.
+
+    Returns:
+        The run's directories, under the keys ``kernels``, ``results`` and
+        ``output``.
     """
     kernels = tmp_path / 'kernels'
     results = tmp_path / 'results'

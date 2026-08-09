@@ -463,6 +463,13 @@ frame kernels the navigation recorded; the last is the set of originals to pair
 against. Restricting the run to part of the tour is a matter of adding
 ``--start-time`` and ``--stop-time``.
 
+A C-kernel can describe an object whose spacecraft clock none of the furnished
+kernels defines -- the merged New Horizons pointing files name object -1 beside
+the spacecraft -- and the scan indexes the rest of the file rather than
+stopping. The run log carries one warning naming such objects. They can never
+supply a baseline, since their coverage cannot be expressed in TDB, and an
+image that actually corrects one is refused with the missing clock named.
+
 Exit status
 -----------
 

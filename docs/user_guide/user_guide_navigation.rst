@@ -515,7 +515,7 @@ policy, and one annotated example per document shape -- is the
   and ``image_et`` there; that needs no SPICE and never opens the image, so
   a frame whose navigation dies for want of a kernel is still placed in
   time and attributed to its camera. An image navigated by explicit path
-  rather than enumerated from an index has neither.  ``shutter_mode`` records
+  rather than enumerated from an index has neither. ``shutter_mode`` records
   the mode the image was taken in for an instrument whose label carries one
   (Cassini ISS reports ``BOTSIM`` when both cameras were exposed at once);
   instruments whose labels carry no such field omit it.
@@ -534,8 +534,8 @@ policy, and one annotated example per document shape -- is the
   uncorrected J2000-to-camera rotation the furnished kernels gave, and
   ``cmatrix``, the same rotation corrected by the navigated offset, alongside
   the SPICE ``camera_frame``, ``camera_frame_id``, and the ``ck_frame_id`` of
-  the object a corrected C-kernel targets.  Both matrices are nine row-major
-  floats at the exposure midtime.  ``cmatrix`` is present only when the
+  the object a corrected C-kernel targets. Both matrices are nine row-major
+  floats at the exposure midtime. ``cmatrix`` is present only when the
   navigation produced an offset and fitted no camera rotation
 * ``times`` — the exposure window the attitude belongs to: ``start_et``,
   ``stop_et``, ``midtime_et``, ``exposure_s``, and the spacecraft-clock

@@ -592,7 +592,8 @@ is refused before any candidate is tried, naming what is missing:
   look like drift. Recording it rather than refusing the scan is deliberate: a
   real New Horizons kernel names object -1 beside -98000, and refusing there
   would make the whole mission unindexable for the sake of an object no image
-  ever asks about.
+  ever asks about. The driver warns once in its run log, naming the skipped
+  objects, so a kernel set missing a clock says so even when no image needs it.
 
 When several candidates reproduce -- which the holdings make ordinary, since
 reconstructed, gapfill and predicted sets overlap -- the tie-break prefers

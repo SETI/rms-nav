@@ -52,7 +52,7 @@ from spindoctor.support.cmatrix import (
     validated_record_rotation,
 )
 from spindoctor.support.exceptions import NavPointingError
-from spindoctor.support.types import NDArrayFloatType
+from spindoctor.support.types import NDArrayAnyType, NDArrayFloatType
 
 # The degraded-selection reasons this module classifies, beyond the gate and
 # malformed-record reasons ``spindoctor.support.cmatrix`` stamps on its
@@ -331,7 +331,10 @@ def _parse_record_rotation(value: Any, label: str) -> NDArrayFloatType:
     """
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         raise NavPointingError(f'{label} is not a sequence', reason=MALFORMED_POINTING)
-    array = np.asarray(value)
+    # Annotated as an any-dtype array on purpose: ``np.asarray`` of a JSON
+    # sequence carries whatever dtype the record held, and the validator
+    # refuses the wrong ones rather than this coercing them away.
+    array: NDArrayAnyType = np.asarray(value)
     if array.shape == (9,):
         array = array.reshape(3, 3)
     return validated_record_rotation(array, label)

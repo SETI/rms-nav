@@ -37,9 +37,18 @@ _SPICE_ROOT = Path(_RESOURCES) / 'SPICE'
 _CASSINI_ROOT = _SPICE_ROOT / 'Cassini'
 _VOYAGER_ROOT = _SPICE_ROOT / 'Voyager'
 
+_CASSINI_CK_DIRS = (
+    'CK-reconstructed',
+    'CK-gapfill',
+    'CK-predicted',
+    'CK-predicted-v02',
+    'CK-cruise',
+    'CK-jup',
+)
+
 if (
     len(_RESOURCES) == 0
-    or not (_CASSINI_ROOT / 'CK-reconstructed').is_dir()
+    or any(not (_CASSINI_ROOT / name).is_dir() for name in _CASSINI_CK_DIRS)
     or not (_VOYAGER_ROOT / 'CK').is_dir()
 ):
     pytest.skip(
@@ -63,14 +72,6 @@ from spindoctor.cli.ck.index import (  # noqa: E402  (guarded import)
 from spindoctor.cli.ck.pointing import NDArrayFloatType  # noqa: E402  (guarded import)
 from tests.kernel_pool import isolated_kernel_pool  # noqa: E402  (guarded import)
 
-_CASSINI_CK_DIRS = (
-    'CK-reconstructed',
-    'CK-gapfill',
-    'CK-predicted',
-    'CK-predicted-v02',
-    'CK-cruise',
-    'CK-jup',
-)
 _CASSINI_CK_FRAME_ID = -82000
 _CASSINI_SCLK_ID = -82
 _NAC_FRAME = 'CASSINI_ISS_NAC'

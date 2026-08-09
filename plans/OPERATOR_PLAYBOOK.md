@@ -207,7 +207,7 @@ Independent review before done; all CI gates; one PR."
   where the star fix is itself wrong-locked — a safe `conflicted` becomes a
   confident-wrong `success`. Sequence with #230/WS-5.
 - **CK kernel follow-ups**: the kernel-side follow-ups (#433, #434, #437,
-  #440/#444/#455, #446, #448, #452) are independent of each other;
+  #440/#444/#455, #446, #448, #468) are independent of each other;
   #435/#436 are a pair and #436 waits on #435. Whether Cassini navigation
   should run from the predicted rather than the reconstructed kernels
   (#459) is a pending operator decision, not dispatchable work.

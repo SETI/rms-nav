@@ -32,7 +32,7 @@ from spindoctor.nav_technique.diagnostics import StarFieldDiagnostics
 from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import NavTechnique
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
-from spindoctor.support.cmatrix import AttitudeBaseline, PointingSolution
+from spindoctor.support.cmatrix import PointingSolution
 from spindoctor.support.exceptions import NavContractError, NavPointingError
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
 from spindoctor.support.status_reason import NavStatusReason
@@ -1256,25 +1256,6 @@ def test_feasible_technique_report_logged_at_debug(
     assert 'Technique _FakeStarTechnique feasible: would consume 3 feature(s)' in captured.out
 
 
-def _sentinel_pointing() -> PointingSolution:
-    """Build a PointingSolution a wiring test can identify by reference."""
-    baseline = AttitudeBaseline(
-        cmatrix_original=np.eye(3),
-        oops_from_spice=np.eye(3),
-        camera_frame='CASSINI_ISS_NAC',
-        camera_frame_id=-82360,
-        ck_frame_id=-82000,
-        start_et=1.0,
-        stop_et=2.0,
-        midtime_et=1.5,
-        exposure_s=1.0,
-        sclk_start='1/1.000',
-        sclk_midtime='1/1.500',
-        sclk_stop='1/2.000',
-    )
-    return PointingSolution(baseline=baseline, cmatrix=np.eye(3))
-
-
 def test_orchestrator_records_no_pointing_without_a_spice_camera_frame(
     fake_obs: _FakeObs,
 ) -> None:
@@ -1287,14 +1268,14 @@ def test_orchestrator_records_no_pointing_without_a_spice_camera_frame(
 
 
 def test_orchestrator_stamps_pointing_on_a_successful_result(
-    fake_obs: _FakeObs, monkeypatch: pytest.MonkeyPatch
+    fake_obs: _FakeObs, monkeypatch: pytest.MonkeyPatch, sentinel_pointing: PointingSolution
 ) -> None:
     """A computed pointing solution is carried on the returned NavResult.
 
     The SPICE lookups behind the real computation need furnished kernels, so
     the wiring is exercised with a stand-in solution.
     """
-    pointing = _sentinel_pointing()
+    pointing = sentinel_pointing
     monkeypatch.setattr(
         'spindoctor.nav_orchestrator.orchestrator.compute_pointing',
         lambda obs, *, offset_px, rotation_fitted: pointing,
@@ -1308,10 +1289,10 @@ def test_orchestrator_stamps_pointing_on_a_successful_result(
 
 
 def test_orchestrator_stamps_pointing_on_a_short_circuited_failure(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, sentinel_pointing: PointingSolution
 ) -> None:
     """A hard-failure image still records its uncorrected attitude and times."""
-    pointing = _sentinel_pointing()
+    pointing = sentinel_pointing
     monkeypatch.setattr(
         'spindoctor.nav_orchestrator.orchestrator.compute_pointing',
         lambda obs, *, offset_px, rotation_fitted: pointing,
@@ -1497,4 +1478,8 @@ def test_orchestrator_does_not_warn_for_a_simulated_image(
     model = _FakeStarModel(obs, feature_count=3)
     orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
     orch.navigate(obs)  # type: ignore[arg-type]
-    assert 'No SPICE camera frame is mapped' not in capsys.readouterr().out
+    out = capsys.readouterr().out
+    # The positive control proves the log actually reached stdout, so the
+    # negative assertion cannot pass vacuously on an empty capture.
+    assert 'ORCHESTRATION' in out
+    assert 'No SPICE camera frame is mapped' not in out

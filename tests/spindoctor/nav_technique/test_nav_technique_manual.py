@@ -24,7 +24,7 @@ from spindoctor.feature.geometry import StarGeometry
 from spindoctor.nav_model import NavModel
 from spindoctor.nav_technique import NavTechniqueManual
 from spindoctor.nav_technique.nav_technique_manual import run_manual_nav
-from spindoctor.support.cmatrix import AttitudeBaseline, PointingSolution
+from spindoctor.support.cmatrix import PointingSolution
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
 
 
@@ -343,7 +343,9 @@ def test_titan_only_feature_set_composes_a_non_empty_overlay(
     assert bool(mask.any()) is True
 
 
-def test_run_manual_nav_stamps_the_corrected_pointing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_manual_nav_stamps_the_corrected_pointing(
+    monkeypatch: pytest.MonkeyPatch, sentinel_pointing: PointingSolution
+) -> None:
     """An operator-picked offset carries the same recorded attitude as an autonomous one.
 
     Operator-ratified offsets are the highest-quality pointing in the corpus,
@@ -351,21 +353,7 @@ def test_run_manual_nav_stamps_the_corrected_pointing(monkeypatch: pytest.Monkey
     lookups behind the real computation need furnished kernels, so the wiring
     is exercised with a stand-in solution.
     """
-    baseline = AttitudeBaseline(
-        cmatrix_original=np.eye(3),
-        oops_from_spice=np.eye(3),
-        camera_frame='CASSINI_ISS_NAC',
-        camera_frame_id=-82360,
-        ck_frame_id=-82000,
-        start_et=1.0,
-        stop_et=2.0,
-        midtime_et=1.5,
-        exposure_s=1.0,
-        sclk_start='1/1.000',
-        sclk_midtime='1/1.500',
-        sclk_stop='1/2.000',
-    )
-    pointing = PointingSolution(baseline=baseline, cmatrix=np.eye(3))
+    pointing = sentinel_pointing
     monkeypatch.setattr(
         'spindoctor.nav_orchestrator.orchestrator.compute_pointing',
         lambda obs, *, offset_px, rotation_fitted: pointing,
