@@ -591,17 +591,20 @@ def test_a_root_whose_listing_was_never_recorded_keeps_its_unfinished_run(
     assert [row.finished_utc for row in finished] == [None]
 
 
-def test_an_event_log_that_is_not_there_is_reported(
+def missing_event_log_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A mistyped path is an ordinary operator error, not an unhandled failure.
+) -> tuple[int | None, list[str]]:
+    """Complete a fanned-out root against an event log that is not there.
 
-    The pass charges every failure it expects to one file or one root; a path
-    that names no file is one it can charge, so it is named rather than let out
-    as a traceback nobody enumerated.
+    Parameters:
+        tmp_path: Directory the tree, the index and the tasks file live under.
+        monkeypatch: Fixture the driver is run through.
+
+    Returns:
+        The exit status, and one entry per line written to the main log.
     """
     url = fanned_out(tmp_path, monkeypatch)
-    status, _written = run_driver(
+    return run_driver(
         [
             '--results-db',
             url,
@@ -613,27 +616,39 @@ def test_an_event_log_that_is_not_there_is_reported(
         monkeypatch,
         tmp_path,
     )
-    assert status == 1
 
 
 def test_an_event_log_that_is_not_there_is_named(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """And the message names the file, which is the word the operator corrects."""
-    url = fanned_out(tmp_path, monkeypatch)
-    _status, written = run_driver(
-        [
-            '--results-db',
-            url,
-            '--nav-results-root',
-            (tmp_path / 'results').as_posix(),
-            '--complete-cloud-tasks-file',
-            str(tmp_path / 'nowhere.log'),
-        ],
-        monkeypatch,
-        tmp_path,
-    )
-    assert any('nowhere.log' in line for line in written)
+    """A mistyped path is an ordinary operator error, and is charged to the file.
+
+    The message is what says which failure this is: a status of 1 alone is the
+    same status the catch-all produces for a failure nobody enumerated.
+    """
+    _status, written = missing_event_log_run(tmp_path, monkeypatch)
+    assert any('Cannot read the task event log' in line for line in written)
+
+
+def test_an_event_log_that_is_not_there_is_not_an_unhandled_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pass charges every failure it expects to one file or one root.
+
+    A path that names no file is one it can charge, so it must not reach the
+    catch-all, whose message says the run could not complete and whose traceback
+    is what an operator gets instead of a correction to make.
+    """
+    _status, written = missing_event_log_run(tmp_path, monkeypatch)
+    assert not any('Ingest could not complete' in line for line in written)
+
+
+def test_an_event_log_that_is_not_there_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And the status says the run did not complete, as it does for any refusal."""
+    status, _written = missing_event_log_run(tmp_path, monkeypatch)
+    assert status == 1
 
 
 def test_forcing_a_completion_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
