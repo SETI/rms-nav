@@ -277,9 +277,11 @@ probe-refined onto the sub-pixel geometric boundary, and the correlator's
 sub-pixel refinement falls back to the NCC quadratic vertex when the
 upsampled-DFT window saturates instead of pinning at half a pixel. The
 `util/calibration/shift_equivariance.py` sweep is the standing measurement
-(baseline in `util/calibration/shift_equivariance_baseline_20260808.md`);
-RingEdgeNav's wrong-edge re-locks under planted shifts are the remaining
-non-equivariant technique, filed as #476.
+(baseline in `util/calibration/shift_equivariance_baseline_20260808.md`).
+What remains is filed: RingEdgeNav's wrong-edge re-locks under planted
+shifts (#476), the disc correlator's ~0.5-1 px miss on a weakly-constrained
+axis now that the pinning no longer hides it (#482), and the library-pin
+re-ratchet for the five frames the fix legitimately moved (#483).
 
 The plan's own follow-ups are filed: the oops API replacing the hand-derived
 derivation (#433), fitted-twist support (#434) with the static-twist FK/IK
