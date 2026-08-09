@@ -26,12 +26,16 @@ Public API:
     normalize_root_url    -- the one spelling of a results root
     ingested_roots        -- the roots a completed ingest covered
     require_ingested_roots -- refuse to read absence from a root nobody ingested
+    directories_missed    -- how much of a root the newest pass over it did not list
+    FATAL_STATUS          -- the status the error selection filters match
+    SPICE_STATUS_ERROR    -- the status_error the SPICE selection filters match
     ResultStubs           -- what a root holds, as a selection filter asks it
     read_result_stubs     -- one query answering an enumeration's selection filters
 """
 
 from spindoctor.results_index.engine import masked_url, open_index
 from spindoctor.results_index.roots import (
+    directories_missed,
     ingested_roots,
     normalize_root_url,
     require_ingested_roots,
@@ -46,18 +50,26 @@ from spindoctor.results_index.schema import (
     SCHEMA_VERSION,
     TECHNIQUES,
 )
-from spindoctor.results_index.selection import ResultStubs, read_result_stubs
+from spindoctor.results_index.selection import (
+    FATAL_STATUS,
+    SPICE_STATUS_ERROR,
+    ResultStubs,
+    read_result_stubs,
+)
 
 __all__ = [
     'FAILED_FILES',
+    'FATAL_STATUS',
     'FEATURE_SOURCES',
     'IMAGES',
     'INGEST_RUNS',
     'METADATA',
     'SCHEMA_META',
     'SCHEMA_VERSION',
+    'SPICE_STATUS_ERROR',
     'TECHNIQUES',
     'ResultStubs',
+    'directories_missed',
     'ingested_roots',
     'masked_url',
     'normalize_root_url',

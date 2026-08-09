@@ -15,14 +15,17 @@ and a summary PNG for every one of those stubs.  A query that filtered on the
 stub without its root would answer with that second root's rows, and no
 single-root fixture can see it happen.
 
-Three answers the index gives differently from the tree have tests of their own
+Every answer the index gives differently from the tree has a test of its own
 rather than being left out of the matrix, because each is a property of what the
-index records and silently changing it is what the tests are here to catch.
+index records and silently changing it is what the tests are here to catch.  The
+list they cover is the one :mod:`spindoctor.results_index.selection` enumerates,
+and it is closed: a member added there is added here.
 """
 
 import json
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +48,7 @@ from spindoctor.dataset.results_filter import (
     RESULTS_FILTER_BATCH_SIZE,
     ResultsFilter,
 )
-from spindoctor.results_index import SPICE_STATUS_ERROR
+from spindoctor.results_index import INGEST_RUNS, SPICE_STATUS_ERROR, open_index
 
 VOLUMES = ['COISS_2001', 'COISS_2002']
 """The volumes the enumeration selected."""
@@ -707,6 +710,69 @@ def test_a_document_the_database_would_not_store_reads_as_absent(
         VOLUMES, str(root), logger=_logger(), results_db_url=url, has_offset_file=True
     )
     assert _select(results_filter, images) == []
+
+
+def _index_that_missed_a_directory(tmp_path: Path, root: Path) -> str:
+    """Ingest a tree and record that the pass did not list every directory.
+
+    The count is what the walk reports for a directory it could not list, or one
+    it had already listed under another name.  It is written here rather than
+    provoked, so the test is about what a consumer does with the count.
+
+    Parameters:
+        tmp_path: Directory the index file is written into.
+        root: The results root to ingest.
+
+    Returns:
+        The connection URL of the index.
+    """
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=_logger())
+    engine = open_index(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(INGEST_RUNS.update().values(directories_missed=2))
+    finally:
+        engine.dispose()
+    return url
+
+
+def test_an_ingest_that_missed_a_directory_is_reported(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Absence under a directory nobody listed is not an answer, and says so.
+
+    The run completed, so nothing else in the index shows the gap; a run that
+    missed a directory otherwise makes an absence filter re-navigate every image
+    under it without a word.
+    """
+    root, _images = _one_image_tree(tmp_path)
+    url = _index_that_missed_a_directory(tmp_path, root)
+    ResultsFilter(
+        VOLUMES,
+        str(root),
+        logger=pdslogger.PdsLogger(f'results_filter_test_{uuid.uuid4().hex}'),
+        results_db_url=url,
+        has_no_offset_file=True,
+    )
+    assert 'did not list 2 directories' in capsys.readouterr().out
+
+
+def test_a_complete_ingest_is_reported_as_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A pass that listed the whole root leaves absence meaning what it says."""
+    root, _images = _one_image_tree(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=_logger())
+    ResultsFilter(
+        VOLUMES,
+        str(root),
+        logger=pdslogger.PdsLogger(f'results_filter_test_{uuid.uuid4().hex}'),
+        results_db_url=url,
+        has_no_offset_file=True,
+    )
+    assert 'did not list' not in capsys.readouterr().out
 
 
 def test_importing_the_dataset_package_does_not_import_sqlalchemy() -> None:

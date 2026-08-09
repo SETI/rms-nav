@@ -21,8 +21,8 @@ implementation lives in :mod:`spindoctor.results_index.selection` and is
 imported inside the branch that has a URL, not at the top of this module: this
 module is reached by importing :mod:`spindoctor.dataset`, which every navigation
 run does, and the top-level import would put SQLAlchemy on that path for the
-runs that never name an index.  That module also documents the three answers the
-index gives differently from the tree.
+runs that never name an index.  That module also enumerates, in full, the
+answers the index gives differently from the tree.
 """
 
 import json
@@ -241,6 +241,18 @@ class ResultsFilter:
             len(self._png_rel_paths),
             self._nav_results_root,
         )
+        if stubs.directories_missed:
+            # The absence filters read "no row" as "this image was never
+            # navigated", and under a directory nobody listed that reading is
+            # simply false. The run completed all the same, so this count is
+            # the only place the gap shows.
+            self._logger.warning(
+                'The last ingest of %s did not list %d director%s: an image under one of '
+                'them is absent from the index whether or not it was navigated',
+                self._nav_results_root,
+                stubs.directories_missed,
+                'y' if stubs.directories_missed == 1 else 'ies',
+            )
 
     def _scan_volumes(self, volumes: Iterable[str]) -> None:
         """Walks the results tree under each volume, collecting result files.

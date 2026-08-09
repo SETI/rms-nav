@@ -24,7 +24,12 @@ from filecache import FCPath
 from spindoctor.results_index.engine import masked_url
 from spindoctor.results_index.schema import INGEST_RUNS
 
-__all__ = ['ingested_roots', 'normalize_root_url', 'require_ingested_roots']
+__all__ = [
+    'directories_missed',
+    'ingested_roots',
+    'normalize_root_url',
+    'require_ingested_roots',
+]
 
 
 def normalize_root_url(root: str | Path | FCPath) -> str:
@@ -75,6 +80,33 @@ def ingested_roots(connection: sqlalchemy.Connection) -> list[str]:
         .order_by(INGEST_RUNS.c.root_url)
     )
     return [str(row.root_url) for row in connection.execute(completed)]
+
+
+def directories_missed(connection: sqlalchemy.Connection, root_url: str) -> int:
+    """Return how many directories the newest pass over one root did not list.
+
+    A directory nobody enumerated holds files nobody recorded, and absence of a
+    row under it therefore says nothing about the image whose document is there.
+    A consumer that reads absence as a positive answer -- "this image was never
+    navigated" -- asks for this count and says so when it is not zero, because
+    the run completed all the same and nothing else in the index shows the gap.
+
+    Parameters:
+        connection: An open connection to the index.
+        root_url: The normalized root to ask about.
+
+    Returns:
+        The count the newest run over that root recorded, and zero when the
+        root has no run row or the run recorded no count.
+    """
+    newest = (
+        sqlalchemy.select(INGEST_RUNS.c.directories_missed)
+        .where(INGEST_RUNS.c.root_url == root_url)
+        .order_by(INGEST_RUNS.c.run_id.desc())
+        .limit(1)
+    )
+    missed = connection.execute(newest).scalar()
+    return 0 if missed is None else int(missed)
 
 
 def require_ingested_roots(

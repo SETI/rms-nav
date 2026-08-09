@@ -45,7 +45,10 @@ anything added to it belongs here, in the plan, and in a test of its own.
   - a file the pass could not retrieve;
   - a document the pass read whose rows the database would not store;
   - a file under a directory the walk did not list, either because it could not
-    be listed or because it had already been listed under another name.
+    be listed or because it had already been listed under another name.  That
+    one is counted rather than invisible: the count is on the run row, it is
+    returned as :attr:`ResultStubs.directories_missed`, and the caller reports
+    it rather than reading absence under it in silence.
 
 The index is also a snapshot: it answers as of the last ingest over the root,
 and a document written since is one the index does not hold.
@@ -59,7 +62,11 @@ import sqlalchemy
 from filecache import FCPath
 
 from spindoctor.results_index.engine import open_index
-from spindoctor.results_index.roots import normalize_root_url, require_ingested_roots
+from spindoctor.results_index.roots import (
+    directories_missed,
+    normalize_root_url,
+    require_ingested_roots,
+)
 from spindoctor.results_index.schema import FAILED_FILES, IMAGES
 
 __all__ = ['FATAL_STATUS', 'SPICE_STATUS_ERROR', 'ResultStubs', 'read_result_stubs']
@@ -91,11 +98,15 @@ class ResultStubs:
         with_summary_png: Stubs the ingest walk saw a summary PNG beside.
         matching_error: Stubs whose document satisfies the error filters that
             were asked for, and empty when none were.
+        directories_missed: How many directories the newest pass over the root
+            did not list, so a caller reading absence as an answer can say that
+            the answer does not cover all of the root.
     """
 
     with_metadata: frozenset[str]
     with_summary_png: frozenset[str]
     matching_error: frozenset[str]
+    directories_missed: int = 0
 
 
 def _error_condition(
@@ -207,7 +218,7 @@ def read_result_stubs(
 
     Returns:
         The stubs the root holds, in the three sets the filters test membership
-        in.
+        in, and how much of the root the pass that recorded them missed.
 
     Raises:
         ValueError: If the index cannot be opened, is stamped with another
@@ -234,6 +245,7 @@ def read_result_stubs(
     try:
         with engine.connect() as connection:
             require_ingested_roots(connection, [root_url], url=url)
+            missed = directories_missed(connection, root_url)
             for stub, has_summary_png, matches_error in connection.execute(query):
                 stub_text = str(stub)
                 with_metadata.add(stub_text)
@@ -247,4 +259,5 @@ def read_result_stubs(
         with_metadata=frozenset(with_metadata),
         with_summary_png=frozenset(with_summary_png),
         matching_error=frozenset(matching_error),
+        directories_missed=missed,
     )

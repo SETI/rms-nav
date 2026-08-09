@@ -106,11 +106,12 @@ def _document(stub: str, **columns: Any) -> dict[str, Any]:
     )
 
 
-def _completed_run(root_url: str) -> dict[str, Any]:
+def _completed_run(root_url: str, *, directories_missed: int = 0) -> dict[str, Any]:
     """Return an ``ingest_runs`` row saying a pass over one root completed.
 
     Parameters:
         root_url: The root the run covered.
+        directories_missed: How many directories that pass did not list.
 
     Returns:
         A mapping ready to insert.
@@ -120,6 +121,7 @@ def _completed_run(root_url: str) -> dict[str, Any]:
         'root_url': root_url,
         'started_utc': stamp,
         'finished_utc': stamp,
+        'directories_missed': directories_missed,
         'schema_version': SCHEMA_VERSION,
     }
 
@@ -347,6 +349,48 @@ def test_the_error_filters_answer_for_this_root_only(two_roots: str) -> None:
 def test_a_refused_document_matches_no_error_filter(two_roots: str) -> None:
     """Nothing was read from it, so it records no status to match."""
     assert REFUSED not in _stubs(two_roots, has_offset_error=True).matching_error
+
+
+def test_a_complete_pass_leaves_nothing_for_the_caller_to_report(two_roots: str) -> None:
+    """A pass that listed the whole root makes absence mean what it says."""
+    assert _stubs(two_roots).directories_missed == 0
+
+
+def _index_missing_directories(tmp_path: Path, missed: int) -> str:
+    """Build an index whose newest pass over the root missed some directories.
+
+    Parameters:
+        tmp_path: Directory the index file is written into.
+        missed: How many directories that pass did not list.
+
+    Returns:
+        The connection URL of the index.
+    """
+    url = sqlite_url_for(tmp_path / 'missed.sqlite3')
+    with opened(url, create=True) as engine, engine.begin() as connection:
+        connection.execute(IMAGES.insert(), [_document(SUCCESS_NO_PNG)])
+        connection.execute(
+            INGEST_RUNS.insert(),
+            [_completed_run(ROOT), _completed_run(ROOT, directories_missed=missed)],
+        )
+    return url
+
+
+def test_a_pass_that_missed_a_directory_hands_the_count_back(tmp_path: Path) -> None:
+    """Absence under a directory nobody listed is not an answer, and says so.
+
+    The run completed, so nothing else in the index shows the gap; the count on
+    the run row is the only place it appears, and the caller that reads absence
+    as "this image was never navigated" is the one that has to be told.
+    """
+    stubs = read_result_stubs(_index_missing_directories(tmp_path, 3), ROOT, [VOLUME])
+    assert stubs.directories_missed == 3
+
+
+def test_the_count_comes_from_the_newest_pass(tmp_path: Path) -> None:
+    """An earlier complete pass does not vouch for the tree a later one half-read."""
+    url = _index_missing_directories(tmp_path, 2)
+    assert read_result_stubs(url, ROOT, [VOLUME]).directories_missed == 2
 
 
 def test_a_root_with_no_completed_ingest_is_refused(two_roots: str) -> None:
