@@ -10,6 +10,7 @@ in ``test_ingest_cloud_tasks_completion``.
 """
 
 import os
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ from spindoctor.cli.stats.ingest import (
     ingest_metadata_files,
     ingest_task_share,
 )
+from spindoctor.cli.stats.ingest.store import _RECORDED_LOOKUP_BATCH_SIZE, _recorded_files
 from spindoctor.results_index import (
     FEATURE_SOURCES,
     IMAGES,
@@ -526,6 +528,88 @@ def test_a_share_skips_what_the_index_has_already_read(
     run_shares(url, tasks, logger=quiet_logger)
     again = run_shares(url, tasks, logger=quiet_logger)
     assert [found.result['files_skipped'] for found in again] == [2]
+
+
+def recorded_for(url: str, root: Path, stubs: Sequence[str] | None) -> list[str]:
+    """Return the stubs the index answers about, for one root and one question.
+
+    Parameters:
+        url: The index URL.
+        root: The results root to ask about.
+        stubs: The stubs to ask about, or None to ask about the whole root.
+
+    Returns:
+        The stubs it answered with, in name order.
+    """
+    engine = open_index(url)
+    try:
+        with engine.connect() as connection:
+            return sorted(_recorded_files(connection, normalize_root_url(root), stubs=stubs))
+    finally:
+        engine.dispose()
+
+
+def test_a_share_asks_only_about_the_stubs_it_holds(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A worker reads what the index records for its own files.
+
+    Both tables answer, so both are narrowed: the root here holds two ingested
+    documents and one file that was refused, and a share of one of them is
+    entitled to hear about that one.  A lookup that ignored the stubs it was
+    given would read every row of an archive-scale root, once per worker, to
+    decide something about a few hundred files.
+    """
+    root = tmp_path / 'results'
+    stubs = build_tree(root, 2)
+    (root / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
+    url = cycle(tmp_path, [root], logger=quiet_logger)
+    assert recorded_for(url, root, stubs[:1]) == stubs[:1]
+
+
+def test_a_share_of_no_files_asks_about_no_file(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Naming no stub asks about nothing, which is not asking about everything.
+
+    The two differ in what they cost: answering a share that holds nothing with
+    every row of its root is the one lookup a worker has no use for at all.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = cycle(tmp_path, [root], logger=quiet_logger)
+    assert recorded_for(url, root, []) == []
+
+
+def test_a_share_wider_than_one_lookup_reads_none_of_it_again(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A share's stubs are asked about in batches, and every batch has to answer.
+
+    The share here is one file wider than a batch, which is the size a
+    production share crosses on every run.  A lookup answering from its first
+    batch alone would leave a retried task re-reading every file past it -- the
+    download the skip exists to avoid, on the tasks a queue redelivers.
+    """
+    root = tmp_path / 'results'
+    stubs = build_tree(root, _RECORDED_LOOKUP_BATCH_SIZE + 1)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger, share_size=len(stubs))
+    run_shares(url, tasks, logger=quiet_logger)
+    again = run_shares(url, tasks, logger=quiet_logger)
+    assert [found.result['files_skipped'] for found in again] == [len(stubs)]
+
+
+def test_one_lookup_names_no_more_stubs_than_a_backend_will_carry() -> None:
+    """A share is as wide as its fan-out made it, and one statement is not.
+
+    Every stub of a batch is a bind parameter, and a backend caps how many one
+    statement may carry: SQLite's own default cap has been 999, the smallest
+    among the supported backends.  The batch is what holds a lookup under it
+    whatever share size a fan-out was given, so what makes it a bound rather
+    than a tuning choice is asserted.
+    """
+    assert _RECORDED_LOOKUP_BATCH_SIZE <= 999
 
 
 def test_a_forced_share_reads_everything_again(
