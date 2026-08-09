@@ -137,6 +137,21 @@ def test_the_argument_separator_does_not_swallow_the_word_after_it() -> None:
     assert masked_command_line(given) == given
 
 
+def test_a_slash_before_the_first_colon_ends_the_authority() -> None:
+    """A value of this shape carries a path where a password would look to be.
+
+    In ``//svc/corp:x@db.example/spindoctor`` the authority is ``svc`` and
+    everything after the slash is the path, so there is no user name, no colon
+    introducing a password, and nothing to hide.  That is the reading a URL's
+    own grammar gives and the reading ``make_url`` gives -- it parses this as
+    host ``svc`` and a database name carrying the rest -- so the value is
+    recorded as it was written, and an operator reading the log sees the string
+    that failed to connect.
+    """
+    given = ['--results-db', f'postgresql+psycopg://svc/corp:{LEFT}{RIGHT}@db.example/spindoctor']
+    assert masked_command_line(given) == given
+
+
 def test_a_second_index_url_on_the_same_line_is_masked_as_well() -> None:
     """argparse keeps the last of a repeated option; the log carries both."""
     line = ' '.join(
