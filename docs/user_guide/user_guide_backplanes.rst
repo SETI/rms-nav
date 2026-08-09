@@ -76,8 +76,22 @@ Common flags:
 - ``--nav-results-root``: Root containing prior navigation results
   (``*_metadata.json``).
 - ``--backplane-results-root``: Root directory for the backplane outputs.
+- ``--results-db``: Connection URL of a results index built by
+  ``sd_stats_ingest``. With one, each image's navigation record is read as one
+  database row instead of one file, which on a cloud results root replaces a
+  round trip per image with a query. The index must already hold a completed
+  ingest of the root named by ``--nav-results-root``, and the rows it holds are
+  a snapshot of the tree as of that ingest. Without this option the navigation
+  results tree is read directly, which is the default. Pass
+  ``--results-db none`` to read the files on a machine that sets the option
+  through configuration or through ``NAV_RESULTS_DB``.
 - Dataset selection flags are the same as for ``sd_offset`` (see
   :doc:`user_guide_navigation`).
+
+An image the index has no row for is reported and skipped exactly as an image
+with no metadata file is, and a named index that cannot be opened, or a
+navigation results root it has not fully ingested, fails the run rather than
+quietly reverting to reading files.
 
 Examples
 --------

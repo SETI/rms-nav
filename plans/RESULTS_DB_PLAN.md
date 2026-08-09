@@ -753,43 +753,83 @@ the index raises, exactly as a missing metadata file raises in the file
 path -- the caller reports it -- with a message naming the stub and the
 index URL.
 
-**Reprojection pointing lookup.** `load_pointing_if_any` in
-`spindoctor/cli/reproj/offsets.py` is the highest-volume reader in the
-system; since the C-matrix reader switch it returns a `PointingSelection`
-(mechanism plus reason) rather than a bare offset, and its reason
-vocabulary includes the pointing-ladder rows (`no_pointing_block`,
-`malformed_pointing`, the gate reasons, `pool_already_corrected`) beside
-the original offset reasons. The seam is made explicit rather than
-overloaded: a `PointingSource` protocol with two implementations,
+**Where a consumer's records come from.** `spindoctor/cli/reproj/offsets.py`
+holds the highest-volume reader in the system. Since the C-matrix reader
+switch its classifier, `select_pointing(nav_metadata)`, takes a parsed record
+and returns a `PointingSelection` (mechanism plus reason) rather than a bare
+offset, and its reason vocabulary includes the pointing-ladder rows
+(`no_pointing_block`, `no_cmatrix_rotation_fitted`, `missing_offset_key`,
+`malformed_pointing`, the gate reasons, `pool_already_corrected`) beside the
+original offset reasons.
+
+The seam is made explicit rather than overloaded, in
+`spindoctor/cli/reproj/pointing_source.py`: a `PointingSource` protocol with
+two implementations,
 
 ```text
 FilePointingSource(nav_results_root)        # today's body, unchanged
 IndexPointingSource(engine, root_url)       # one SELECT per lookup
 ```
 
-both returning the existing `PointingSelection`. Drivers construct one
-according to the resolved URL and pass it where they pass
-`nav_results_root` today
-(`generate_backplanes_image_files` and the mosaic pass take the source
+Each answers two questions -- `read_record(image_file)`, which the backplane
+stage asks because it reads the record's status before it decides there is
+work to do, and `load_pointing(image_file)`, which returns the existing
+`PointingSelection`. `build_pointing_source` chooses between them from the
+resolved URL, and drivers pass the source where they pass `nav_results_root`
+today (`generate_backplanes_image_files` and the mosaic pass take the source
 object in place of the root-plus-implicit-reader they take now).
 
+**The index-backed source classifies nothing itself.** It rebuilds the shape
+of the document from the row and calls the same `select_pointing`, so there is
+one ladder rather than two that could drift apart. Every field that ladder
+reads is a column: `status`, `status_error`, `offset_dv` / `offset_du`, the
+`times` block including `midtime_et` (section 2.3), and the `pointing` block's
+`cmatrix`, `cmatrix_original`, `camera_frame_id` and `ck_frame_id`. The
+`pointing` block's `camera_frame` name is not a column and is not rebuilt: no
+reader consults it, because the frame identity a recorded attitude is gated
+against is taken from the observation.
+
+Two distinctions the rebuild has to preserve are keyed deliberately. A record
+that fitted a camera rotation and a record with no pointing block at all both
+leave `cmatrix` NULL, so the `pointing` block is emitted whenever *any* of its
+four columns is set rather than only when the corrected attitude is: a row with
+none of them had no pointing block, and a row missing only the corrected
+attitude fitted a rotation. And a NULL offset is rendered as an `offset` key
+holding null rather than as an absent key, since ingest stores an absent,
+malformed and non-finite offset alike as NULL and reporting the commonest of
+them keeps a genuine null offset from being read as a defect-shaped record
+carrying no offset field.
+
 The reason vocabulary maps as follows, and the mapping table belongs in the
-module docstring:
+`pointing_source` module docstring:
 
 | File-path reason | Index-path equivalent |
 |---|---|
-| `no_metadata` | no row for the stub |
+| `no_metadata` | no row for the stub under this root |
 | `navigation_did_not_succeed` | row with `status != 'success'` |
-| `null_offset` | row with `status = 'success'` and `offset_dv IS NULL` |
+| `null_offset` | row with `status = 'success'` and `offset_dv` or `offset_du` NULL |
+| `no_pointing_block` | row with no pointing column set |
+| `no_cmatrix_rotation_fitted` | row with a pointing column set and `cmatrix` NULL |
+| `malformed_pointing` | row carrying a `cmatrix` the validator refuses, or one with no `midtime_et` |
+| `pool_already_corrected` and the gate reasons | identical: they are decided when the selection is applied, from the three recorded values both paths carry |
 | `unusable_metadata_path` | unreachable: a stub is a key, not a path |
 | `unreadable_metadata`, `invalid_json`, `metadata_not_an_object` | unreachable: ingest already refused such a file, so it has no row (surfaces as `no_metadata`) |
-| `invalid_offset_type`, `non_finite_offset`, `malformed_offset` | unreachable: ingest coerces a malformed or non-finite offset to NULL (surfaces as `null_offset`) |
+| `invalid_offset_type`, `non_finite_offset`, `malformed_offset` | unreachable: ingest coerces such an offset to NULL (surfaces as `null_offset`) |
+| `missing_offset_key` | unreachable: a rebuilt record always carries the key (surfaces as `null_offset`) |
 
-The last two rows are a real behavioral difference between the paths -- a
-malformed document reports a different reason depending on the mode -- and
-the docstring states it rather than papering over it. The index path logs
-the same per-image `IMAGE_LOGGER` warnings for the three reachable reasons,
-with the same message shapes.
+One further difference is not a row of that table, because it is the same
+record classified differently rather than a reason reached from a different
+one: a document whose `cmatrix` ingest could not store -- one that is not nine
+finite numbers, whether malformed or written in the nested 3x3 form the
+classifier also accepts -- is `malformed_pointing` via files and
+`no_cmatrix_rotation_fitted` via the index. Both fall back to the offset; they
+differ in what they call it.
+
+The last rows are real behavioral differences between the paths, and the
+docstring states them rather than papering over them. Everything a product is
+built from -- the mechanism, the matrices, the midtime, the offset -- is
+identical in the two paths for every record ingest stored. The index path logs
+the same per-image `IMAGE_LOGGER` warnings, with the same message shapes.
 
 **`ResultsFilter`.** When a URL is given, the presence, absence, and error
 filters become one query per enumeration instead of a walk per volume plus
@@ -882,12 +922,14 @@ per selected volume; absence-only filters skip the walk and use batched
 against `missing_spice_data` verbatim -- the behavior the split columns
 preserve.
 
-**`spindoctor/cli/backplanes/backplanes.py`** reads one document per image
-by stub; a missing file raises and the caller reports it. (The module has no
-docstring; Phase 4 adds one, which is also where the reason-mapping note
-lives.) **`spindoctor/cli/reproj/offsets.py`** reads one document per image
-and returns `PointingSelection`; its reason vocabulary is section 2.9's
-plus the pointing-ladder reasons the C-matrix reader switch added.
+**`spindoctor/cli/backplanes/backplanes.py`** reads one record per image by
+stub through a `PointingSource`; a stub nothing recorded raises and the caller
+reports it. (The module had no docstring; Phase 4 adds one.)
+**`spindoctor/cli/reproj/offsets.py`** classifies one parsed record and returns
+`PointingSelection`; its reason vocabulary is section 2.9's plus the
+pointing-ladder reasons the C-matrix reader switch added, and
+**`spindoctor/cli/reproj/pointing_source.py`** holds the two storages that
+record can come from, with the reason-mapping table in its module docstring.
 **`spindoctor/cli/pds4/bundle_data.py`** serializes the whole document into
 the supplemental product, which is why it is out of scope.
 
@@ -1119,16 +1161,80 @@ the `none` sentinel) on `sd_backplanes`, `sd_mosaic`, and their cloud-task
 variants; the backplane single-row read with the missing-stub raise; the
 root-url comparison failure of section 2.2.
 
-Unit tests at the `PointingSelection` level over a fixture tree: each reachable
-reason with and without an index, including `null_offset` from a
-success-with-NULL row; the unreachable-reason remapping of section 2.9
-asserted (a malformed-offset document yields `malformed_offset` via files
-and `null_offset` via the index); the same `IMAGE_LOGGER` warnings in the
-index path; a program handed an unopenable URL failing rather than falling
-back; a consumer refusing a root with no completed `ingest_runs` row.
-Integration tests (marked `integration`): identical backplane and mosaic
-products for the same images with and without an index, asserted on the
-outputs.
+Unit tests at the `PointingSelection` level over one fixture tree read both
+ways: each reachable reason with and without an index, including `null_offset`
+from a success-with-NULL row, `no_pointing_block` and
+`no_cmatrix_rotation_fitted` from the two shapes of NULL `cmatrix`, and
+`malformed_pointing` from a stored matrix the validator refuses; the
+unreachable-reason remapping of section 2.9 asserted (a malformed-offset
+document yields `malformed_offset` via files and `null_offset` via the index);
+the recorded C-matrix and midtime round-tripping bit for bit on both backends;
+the same `IMAGE_LOGGER` warnings in the index path; a program handed an
+unopenable URL failing rather than falling back; a consumer refusing a root
+with no completed `ingest_runs` row; and a two-root fixture whose second root
+differs in the value under test, asserted from both sides so that no single row
+can satisfy both. Integration tests (marked `integration`): identical backplane
+and reprojection products for the same real, really-navigated, really-ingested
+images with and without an index, asserted exactly on the outputs.
+
+Details settled during execution:
+
+- **The plan's Phase 4 text described an API that no longer existed.** The
+  C-matrix reader switch replaced `load_offset_if_any` / `OffsetLookup` with
+  `select_pointing` / `load_pointing_if_any` / `PointingSelection` and a wider
+  reason vocabulary. Section 2.9 above is rewritten against the code that
+  exists; the requirement is unchanged, and the mapping table gained the rows
+  the new vocabulary needs.
+- **`midtime_et` was missing from the schema and is added here.** The
+  navigator writes a seven-key `times` block and ingest stored six of them.
+  The one it dropped is the value `_parse_pointing_values` requires and
+  `apply_cmatrix_to_obs` gates against the observation's own midtime at 1e-6 s,
+  so without the column every index-backed record would degrade to the pixel
+  offset while the same record read from its document applied the C-matrix --
+  silently, and with different products. The column set changed, so the schema
+  version is 6.
+- **The recorded midtime is stored, never recomputed.** The midpoint of the
+  recorded shutter epochs reproduces it for the frames measured, but that is a
+  property of one producer's arithmetic rather than of the record, and a gate
+  at 1e-6 s leaves no room to be nearly right. A test plants a record where the
+  two differ and asserts the recorded value comes back.
+- **The seam carries the whole record, not only the pointing.** The backplane
+  stage reads a record's status before it decides there is work to do, so
+  `PointingSource` answers `read_record` as well as `load_pointing`. That is
+  also where the missing-stub raise lives, since it is the question whose
+  answer must be an exception.
+- **The pointing block is rebuilt from any of its four columns**, not from
+  `cmatrix_original` alone. Both keys tell a fitted-rotation result from a
+  record with no pointing block, and the wider one additionally reproduces the
+  file path's `malformed_pointing` for a record whose baseline ingest could not
+  store while its corrected attitude survived.
+- **A NULL offset is rebuilt as a null value rather than an absent key**, so
+  the index reports `null_offset` where the file path can report any of four
+  reasons. The consequence is that `missing_offset_key` is unreachable through
+  the index, and with it the backplane stage's refusal of a success-status
+  record carrying no `offset` field: through an index that record is processed
+  on uncorrected pointing and counted, as the mosaic drivers already treat it.
+- **Reading a record refuses a document that is valid JSON and not an object.**
+  The backplane stage cast the parsed document to a mapping and reached an
+  attribute error from the middle of a batch run; the seam has to return a
+  record, so it refuses one that is not, naming the file. The whole-run
+  fragility that refusal exposes is filed separately (#491).
+- **The backplanes driver logs its command line through
+  `log_run_environment`** rather than directly, which is the one place a
+  connection URL on a command line is masked and is what every other driver
+  already does.
+- **The cloud-task workers differ in where their source is built**, each
+  following the structure it already had: the mosaic worker builds one at
+  startup, beside the results root it already precomputed there, because one
+  task holds many images; the backplane worker builds one per task, because it
+  already resolves its whole environment per task and one task is one image.
+  An index the backplane worker cannot open returns `unusable_results_db` in
+  the task result rather than raising, which is how that worker reports every
+  other environment failure.
+- **The shared test helpers that drive a program's own parser** moved from
+  `test_logging_argument_surface.py` into `tests/spindoctor/cli/program_parsers.py`,
+  because the results-db surface is asserted the same way and a second copy
+  would drift.
 
 ### Phase 5 — Selection filters
 

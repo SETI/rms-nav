@@ -490,9 +490,12 @@ Body mosaics quick example::
 Pointing application
 ^^^^^^^^^^^^^^^^^^^^
 
-When ``--nav-results-root`` is provided, ``sd_mosaic`` looks up a
-``_metadata.json`` file for each image (written by ``sd_offset``) and applies
-the pointing it records, preferring the exact form over its approximation:
+When ``--nav-results-root`` is provided, ``sd_mosaic`` looks up the navigation
+record for each image (written by ``sd_offset``) and applies the pointing it
+records, preferring the exact form over its approximation. The record comes
+from that image's ``_metadata.json`` file, or, when ``--results-db`` names a
+results index, from one row of that index; both supply the same recorded values
+and both are classified by the same ladder, so the products are the same:
 
 * When the record carries a corrected camera attitude
   (``navigation_result.pointing.cmatrix``) that passes the reader's
@@ -584,11 +587,12 @@ is **not** performed by the cloud-tasks worker; after all tasks complete, run
 the local driver with ``--skip-reproject`` to assemble the mosaic from the
 accumulated reprojection files.
 
-The cloud-tasks worker accepts only two CLI flags, both environment/credential
+The cloud-tasks worker accepts only three CLI flags, all environment/credential
 scoped and shared across every task the worker handles:
 
 * ``--config-file PATH`` (may be repeated)
 * ``--nav-results-root PATH``
+* ``--results-db URL``
 
 All other parameters that the local ``sd_mosaic_rings`` /
 ``sd_mosaic_body`` accept (``--output-dir``, ``--prefix``, ``--format``,
@@ -599,7 +603,8 @@ passed per-task inside the task JSON. Invoke the worker with:
 
 .. code-block:: bash
 
-   sd_mosaic_cloud_tasks [--config-file PATH] [--nav-results-root PATH]
+   sd_mosaic_cloud_tasks [--config-file PATH] [--nav-results-root PATH] \
+       [--results-db URL]
 
 To build a ready-to-load task-queue JSON file from the local driver without
 running any reprojection, use ``--output-cloud-tasks-file``:
@@ -714,6 +719,15 @@ Common options reference
    * - ``--nav-results-root DIR``
      - ``None``
      - Root written by ``sd_offset``; enables pointing application.
+   * - ``--results-db URL``
+     - ``None``
+     - Connection URL of a results index built by ``sd_stats_ingest``. Each
+       image's navigation record is then read as one database row instead of
+       one file, which on a cloud results root replaces a round trip per image
+       with a query. The index must already hold a completed ingest of the
+       root named by ``--nav-results-root``, and its rows are a snapshot of
+       the tree as of that ingest. ``none`` reads the files on a machine that
+       sets the option through configuration or through ``NAV_RESULTS_DB``.
    * - ``--dry-run``
      - ``False``
      - Print what would be done without writing files.
