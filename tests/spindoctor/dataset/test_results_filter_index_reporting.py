@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 from tests.spindoctor.dataset.conftest import (
+    OTHER_ROOT_NAME,
     VOLUMES,
     index_of_two_roots,
     one_image_tree,
@@ -137,7 +138,7 @@ def test_the_age_is_that_of_this_roots_pass_and_not_another(
     root, _images = one_image_tree(tmp_path)
     url = index_of_two_roots(tmp_path, root, missed=0)
     stamp_run(url, root, finished_utc='2026-02-03T04:05:06+00:00')
-    stamp_run(url, tmp_path / 'other-results', finished_utc='2026-03-04T05:06:07+00:00')
+    stamp_run(url, tmp_path / OTHER_ROOT_NAME, finished_utc='2026-03-04T05:06:07+00:00')
     ResultsFilter(
         VOLUMES,
         str(root),
@@ -228,10 +229,6 @@ def test_a_recorded_finish_time_of_nothing_is_reported_as_nothing(
     no more than nothing does, and reported as they stand they end the line in a
     blank where a moment should be.
 
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        capsys: Fixture the reported line is read back from.
-        blank: A recorded finish time carrying no moment.
     """
     root, _images = one_image_tree(tmp_path)
     url = index_of_two_roots(tmp_path, root, missed=0)

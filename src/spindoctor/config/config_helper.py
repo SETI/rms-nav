@@ -225,12 +225,16 @@ def get_results_db_url(
         return None
     url = str(results_db_str)
     if not url.strip():
-        report = MAIN_LOGGER.warning if warn is None else warn
-        report(
-            f'{named_by} is set to an empty value, which names no results index. '
-            f'Write {RESULTS_DB_NONE} to name none deliberately, or a connection URL '
-            f'to name one.'
+        message = (
+            '%s is set to an empty value, which names no results index. Write %s to '
+            'name none deliberately, or a connection URL to name one.'
         )
+        if warn is None:
+            # Interpolated by the logger rather than here, so a level that
+            # discards the line does not pay to build it.
+            MAIN_LOGGER.warning(message, named_by, RESULTS_DB_NONE)
+        else:
+            warn(message % (named_by, RESULTS_DB_NONE))
         return None
     if url.strip() == RESULTS_DB_NONE:
         return None

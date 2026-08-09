@@ -96,6 +96,14 @@ WITHOUT_A_PNG = tuple(stub for stub in CANDIDATES if stub not in WITH_A_PNG)
 FATAL_ERRORS = (SPICE_ERROR, NONSPICE_ERROR, ERROR_WITHOUT_STATUS_ERROR)
 """Every candidate whose document records a fatal error."""
 
+OTHER_ROOT_NAME = 'other-results'
+"""Directory name of the second root every two-root index is built under.
+
+Published rather than repeated where a test stocks that root itself: a stamp
+written to a name nothing was ingested under updates no row, and a test whose
+assertion is that something is absent then passes for the wrong reason.
+"""
+
 
 @pytest.fixture
 def ds() -> DataSetPDS3CassiniISS:
@@ -241,7 +249,7 @@ def indexed(tree: Path, tmp_path: Path) -> str:
     Returns:
         The connection URL of the index.
     """
-    decoy = tmp_path / 'other-results'
+    decoy = tmp_path / OTHER_ROOT_NAME
     write_decoy_tree(decoy)
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [tree, decoy], logger=null_logger())
@@ -378,7 +386,7 @@ def index_of_two_roots(tmp_path: Path, root: Path, *, missed: int) -> str:
     Returns:
         The connection URL of the index.
     """
-    decoy = tmp_path / 'other-results'
+    decoy = tmp_path / OTHER_ROOT_NAME
     write_metadata(decoy, SUCCESS_NO_PNG, metadata_document(image_name='N1000000002_1.IMG'))
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root, decoy], logger=null_logger())
