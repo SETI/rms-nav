@@ -75,12 +75,22 @@ integration runs should always use ``-n auto --dist=loadfile``.
 **The suite opens no results index it was not handed.** An index URL resolves
 from an argument, then from the ``environment.results_db`` configuration
 variable, then from ``NAV_RESULTS_DB``; a test of what a program does with no
-index names none of the three. Both ambient levels are closed for every test by
-a fixture in ``tests/conftest.py``, which unsets the environment variable and
-runs the test from a directory holding no ``nav_default_config.yaml``. The suite
+index names none of the three. Both ambient levels are closed by fixtures in
+``tests/conftest.py``, which unset the environment variable and run from a
+directory holding no ``nav_default_config.yaml``: once for the whole session, so
+that a fixture of any scope is built with both closed, and again around each
+test, so that what a test sets up for itself is undone afterwards. The suite
 started in a directory that names a live index therefore neither reads nor locks
 it -- for a SQLite index, an open takes a write-lock probe against a file an
-ingest may be holding. A test that wants either level sets it up for itself.
+ingest may be holding.
+
+A test that wants either level sets it up for itself. Two things the closure
+cannot do for you: a subprocess given a working directory of its own resolves
+its configuration there, so a test that starts one names the directory it means;
+and nothing may be written into the directory the suite runs from, which is
+shared by every test of the worker -- a file left there is a configuration every
+later test in that worker resolves through, so a test that writes one is failed
+on the way out. Move to a directory of your own with ``monkeypatch.chdir`` first.
 
 Archive-backed tests additionally require the holdings and catalog environment
 (set by CI; see :doc:`dev_guide_introduction`):

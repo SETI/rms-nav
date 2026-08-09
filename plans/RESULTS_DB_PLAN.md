@@ -1295,11 +1295,19 @@ Details settled during execution, none of them a change of intent:
 - **The suite resolves no results index it did not name.** A URL comes from an
   argument, the `environment.results_db` configuration variable, or
   `NAV_RESULTS_DB`, and a test of the no-index path names none of them. Both
-  ambient levels are closed for every test by one fixture in `tests/conftest.py`
-  rather than by a line each test author has to remember: it unsets the variable
-  and runs from a directory holding no `nav_default_config.yaml`. Run from a
-  directory that names a live index, the suite had opened it -- for SQLite, a
-  write-lock probe against a file an ingest may be holding.
+  ambient levels are closed in `tests/conftest.py` rather than by a line each
+  test author has to remember: the variable is unset and the working directory
+  is one holding no `nav_default_config.yaml`, for the whole session and again
+  around each test. The session half is what covers a fixture of a broader
+  scope, which is built before any per-test closure could run and is exactly the
+  kind that ingests a tree or builds a report. Run from a directory that names a
+  live index, the suite had opened it -- for SQLite, a write-lock probe against
+  a file an ingest may be holding. Two things are left to the test author and
+  documented as such: a subprocess given a working directory of its own resolves
+  its configuration there, and the directory the suite runs from is shared by
+  every test of the worker, so a test that writes a file into it is failed on
+  the way out rather than leaving a configuration for every later test in that
+  worker to resolve through.
 
 ### Phase 4 — Backplanes and reprojection consume the index
 

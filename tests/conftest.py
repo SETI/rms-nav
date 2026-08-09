@@ -1,5 +1,6 @@
 """Pytest configuration and shared fixtures."""
 
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -23,12 +24,20 @@ def config_fixture() -> None:
     DEFAULT_CONFIG.ensure_loaded()
 
 
+USER_CONFIG_NAME = 'nav_default_config.yaml'
+"""The user override file, which is resolved beside whatever process reads it."""
+
+
 @pytest.fixture(scope='session')
 def directory_naming_no_index(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Return a directory holding no user configuration file.
 
-    One directory for the whole session rather than one per test: nothing is
-    ever written into it, and what makes it useful is what it does not hold.
+    One directory for the whole session rather than one per test: what makes it
+    useful is what it does not hold, and it is emptied again after every test
+    rather than trusted to stay that way.  What a test leaves in its working
+    directory is what every later test of the same worker runs beside, so a
+    configuration file left here would be resolved by all of them -- a failure
+    landing arbitrarily far from the test that caused it.
 
     Parameters:
         tmp_path_factory: Factory the directory is made under.
@@ -39,10 +48,35 @@ def directory_naming_no_index(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp('naming_no_index')
 
 
+@pytest.fixture(scope='session', autouse=True)
+def no_ambient_results_index_for_the_session(
+    directory_naming_no_index: Path,
+) -> Iterator[None]:
+    """Close both ambient levels for everything a session runs, not only tests.
+
+    The per-test fixture below cannot reach a fixture of a broader scope: pytest
+    builds a module- or session-scoped one before any function-scoped fixture of
+    the test that first asked for it, so a fixture that ingests a tree or runs a
+    report would run against the working directory and the environment the suite
+    was started with.  Closing both here as well makes the guarantee one about
+    the session rather than about test bodies.
+
+    Parameters:
+        directory_naming_no_index: The working directory to run under.
+
+    Yields:
+        Nothing; both levels are closed for the life of the session.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        patch.chdir(directory_naming_no_index)
+        patch.delenv('NAV_RESULTS_DB', raising=False)
+        yield
+
+
 @pytest.fixture(autouse=True)
 def no_ambient_results_index(
     monkeypatch: pytest.MonkeyPatch, directory_naming_no_index: Path
-) -> None:
+) -> Iterator[None]:
     """Close both ways a test could reach a results index nobody named.
 
     A results index URL is resolved from three places in order: the argument,
@@ -57,15 +91,26 @@ def no_ambient_results_index(
     The configuration level is closed by moving the working directory.  The user
     override file is ``nav_default_config.yaml`` beside the process, so a
     directory holding none is a configuration naming no index, whatever the
-    directory the suite was started from holds.
+    directory the suite was started from holds.  A subprocess a test starts
+    inherits both, so a test that gives one a working directory of its own names
+    the directory it means.
 
     A test that wants either level sets it up for itself: what it does through
     the same fixture is undone before what is done here.
+
+    The directory is shared by the whole session, so whatever a test writes into
+    its working directory without moving there first is taken back out here, and
+    a configuration file is reported as well: that one is not litter but a
+    configuration every later test of this worker would resolve, and it has to
+    fail the test that wrote it rather than one somewhere after it.
 
     Parameters:
         monkeypatch: Fixture the working directory and the environment are moved
             through.
         directory_naming_no_index: The working directory to run under.
+
+    Yields:
+        Nothing; the test runs with neither ambient level reachable.
     """
     monkeypatch.chdir(directory_naming_no_index)
     monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
@@ -74,6 +119,20 @@ def no_ambient_results_index(
     # outlives it: the merge is into a process-global configuration and nothing
     # takes it back out.
     monkeypatch.delitem(DEFAULT_CONFIG.environment, 'results_db', raising=False)
+    yield
+    left_behind = sorted(entry.name for entry in directory_naming_no_index.iterdir())
+    for entry in directory_naming_no_index.iterdir():
+        if entry.is_dir():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
+    if USER_CONFIG_NAME in left_behind:
+        pytest.fail(
+            f'This test wrote a {USER_CONFIG_NAME} into the directory the suite runs '
+            'from, which is shared by every test of this worker and must name no results '
+            "index. Move to a directory of the test's own -- monkeypatch.chdir(tmp_path) "
+            '-- before writing anything relative to the working directory.'
+        )
 
 
 @pytest.fixture(autouse=True)
