@@ -1206,7 +1206,13 @@ Details settled during execution, none of them a change of intent:
   `--has-no-png-file` backwards. Without the volume, a one-volume enumeration
   fetches every refusal the root holds. The incremental skip compares the flag
   for a refusal exactly as it does for an image, since a PNG written after the
-  refusal was recorded changes the row that ought to be stored.
+  refusal was recorded changes the row that ought to be stored. That skip reads
+  the refusal table for the root it is walking, and the read is exercised with a
+  second root holding a copy of the same tree, which is what a mirror or a
+  restored backup produces: the same stubs at the same lengths and the same
+  times, so a refusal read without its root makes a pass decline to read a file
+  it has never seen and write no row at all for it -- neither an image row nor a
+  refusal, which every consumer reads as an image nobody navigated.
 - **What the index answers differently, as far as it is known.** Each member is
   stated in the module docstring, each has a test of its own, and a member found
   later is added here, in the docstring, and in a test, in the same commit. The
