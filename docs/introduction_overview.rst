@@ -72,11 +72,11 @@ Navigation Phase
   descending the per-volume path hierarchy (see
   :doc:`/user_guide/user_guide_navigation`).
 
-* ``sd_stats_ingest`` - Ingest per-image navigation metadata JSON files into a
-  SQLite database (see :doc:`/user_guide/user_guide_statistics`).
+* ``sd_stats_ingest`` - Read per-image navigation metadata JSON files into the
+  results index (see :doc:`/user_guide/user_guide_statistics`).
 
 * ``sd_stats_report`` - Generate success/failure, technique-usage, offset, and
-  agreement reports from the ingested statistics database (see
+  agreement reports from the results index (see
   :doc:`/user_guide/user_guide_statistics`).
 
 Reprojection and Mosaic Phase

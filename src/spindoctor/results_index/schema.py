@@ -27,6 +27,13 @@ it.
 already know the root, and ``image_date`` and ``instrument`` carry one each,
 because the report groups and filters on both across a whole root.
 
+``failed_files`` keys on the same pair and holds the files that are not
+current-schema navigation documents at all.  It is a table of its own rather
+than a marked ``images`` row precisely because absence of an ``images`` row is
+what a consumer reads as "this image was never navigated": a file with no usable
+data must leave that answer alone while still recording enough for the next
+ingest to skip it.
+
 Types
 -----
 
@@ -36,6 +43,14 @@ offset must round-trip the document's value bit for bit.  Booleans are
 ``Boolean``, never an integer flag, so that a PostgreSQL backend rejects integer
 arithmetic on them.  Structured values are ``JSON``, which is TEXT on SQLite and
 ``jsonb`` on PostgreSQL.
+
+A JSON column distinguishes *absent* from *empty*.  An absent value is SQL NULL,
+so ``WHERE cmatrix IS NOT NULL`` finds the rows that carry a matrix; without
+that declaration the column would hold the JSON value ``null``, which is a value
+and satisfies ``IS NOT NULL`` on every row ever written.  An empty list or empty
+object is a statement rather than an absence -- nothing was excluded from the
+consensus, the technique named no sources, it reported no diagnostics -- and is
+stored as the empty container it is.
 
 Versioning
 ----------
@@ -52,6 +67,7 @@ import sqlalchemy
 from sqlalchemy.dialects import postgresql
 
 __all__ = [
+    'FAILED_FILES',
     'FEATURE_SOURCES',
     'IMAGES',
     'INGEST_RUNS',
@@ -61,7 +77,7 @@ __all__ = [
     'TECHNIQUES',
 ]
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 """Column-set version of the index.
 
 Incremented by any change to the column set of any table, and by any change to
@@ -71,8 +87,12 @@ rather than migrated.
 
 # TEXT on SQLite, jsonb on PostgreSQL.  jsonb is the type PostgreSQL's array and
 # object accessors operate on, so a direct-SQL query against the index can reach
-# inside these values without a cast.
-_JSON = sqlalchemy.JSON().with_variant(postgresql.JSONB(), 'postgresql')
+# inside these values without a cast.  none_as_null makes an absent value SQL
+# NULL rather than the JSON value null, which is what any IS NULL test over
+# these columns reads, and what an exported CSV leaves as an empty cell.
+_JSON = sqlalchemy.JSON(none_as_null=True).with_variant(
+    postgresql.JSONB(none_as_null=True), 'postgresql'
+)
 
 METADATA = sqlalchemy.MetaData()
 """Container for every table of the index; the source of all DDL."""
@@ -168,9 +188,10 @@ IMAGES = sqlalchemy.Table(
     sqlalchemy.Column('image_number', sqlalchemy.BigInteger),
     # Whether the ingest walk saw a summary PNG beside the metadata file.
     sqlalchemy.Column('has_summary_png', sqlalchemy.Boolean),
-    # Corrected-pointing fields.  Declared with the names and shapes their
-    # producer specifies and NULL until it lands, because a column-set change
-    # costs every operator a rebuild.
+    # Corrected-pointing fields, carrying the names and shapes their producer
+    # specifies.  They are absent from a document with no navigation result at
+    # all, and cmatrix is additionally absent where the navigation fitted a
+    # camera rotation, so both cases are stored as NULL.
     sqlalchemy.Column('start_et', sqlalchemy.Double),
     sqlalchemy.Column('stop_et', sqlalchemy.Double),
     sqlalchemy.Column('exposure_s', sqlalchemy.Double),
@@ -242,6 +263,25 @@ FEATURE_SOURCES = sqlalchemy.Table(
 )
 """Feature inventory of an image, aggregated per feature type and source."""
 
+FAILED_FILES = sqlalchemy.Table(
+    'failed_files',
+    METADATA,
+    # Deliberately not a child of images and deliberately not a row in it: a
+    # file this table names produced no usable data, and "no images row" is
+    # exactly what every consumer reads as "this image was never navigated".
+    # A row here would be a row there, and would answer that question wrongly.
+    sqlalchemy.Column('root_url', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('results_path_stub', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('reason', sqlalchemy.Text, nullable=False),
+    # The same two metrics images carries, for the same purpose: a file that
+    # was refused and has not changed since is not read again.  Without them a
+    # tree whose non-navigation files outnumber its results pays to re-read
+    # every one of them on every pass, forever.
+    sqlalchemy.Column('mtime_ns', sqlalchemy.BigInteger),
+    sqlalchemy.Column('size_bytes', sqlalchemy.BigInteger),
+)
+"""One row per file that could not be read as a current-schema document."""
+
 SCHEMA_META = sqlalchemy.Table(
     'schema_meta',
     METADATA,
@@ -268,6 +308,12 @@ INGEST_RUNS = sqlalchemy.Table(
     sqlalchemy.Column('files_ingested', sqlalchemy.Integer),
     sqlalchemy.Column('files_skipped', sqlalchemy.Integer),
     sqlalchemy.Column('files_failed', sqlalchemy.Integer),
+    # Rows whose document is no longer in the tree, deleted by this run.
+    sqlalchemy.Column('files_removed', sqlalchemy.Integer),
+    # Directories the run did not list, whose files it therefore never saw.  A
+    # completed run with a nonzero count covers the root apart from those, so
+    # absence of a row under one of them says nothing about its image.
+    sqlalchemy.Column('directories_missed', sqlalchemy.Integer),
     sqlalchemy.Column('schema_version', sqlalchemy.Integer, nullable=False),
     sqlalchemy.Index('ix_ingest_runs_root_url', 'root_url'),
 )

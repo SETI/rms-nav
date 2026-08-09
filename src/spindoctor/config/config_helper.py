@@ -7,10 +7,12 @@ from .config import Config
 from .logging_keys import validate_logging_config
 
 RESULTS_DB_NONE = 'none'
-"""Value of the results index URL that explicitly selects no index.
+"""Value of the results index URL that makes :func:`get_results_db_url` answer None.
 
-An exported NAV_RESULTS_DB would otherwise make a file-mode run impossible on that
-machine, and a program that resolves a URL never falls back to reading files.
+An exported NAV_RESULTS_DB would otherwise reach every program on the machine, and
+one that resolves a URL never falls back to reading files.  What "no index" then
+means belongs to each caller: a program with a file-reading path takes it, and one
+without a file-reading path refuses.
 """
 
 
@@ -172,13 +174,13 @@ def get_results_db_url(arguments: argparse.Namespace, config: Config) -> str | N
     First look in arguments.results_db, then in config.environment.results_db, then in
     the environment variable NAV_RESULTS_DB.
 
-    Unlike the results roots, absence is not an error: it means "no index", which is
-    the default mode of every program.  The literal value ``none`` also means "no
-    index", so a run on a machine that exports NAV_RESULTS_DB can still be told to
-    read files by passing ``--results-db none``.  The sentinel is honored wherever the
-    value came from, so a configuration file can opt out of an exported variable in
-    the same way, and it is matched as the exact string, so a URL that merely contains
-    the word is still a URL.
+    Unlike the results roots, absence is not an error: it means no index was
+    resolved, and each caller decides whether it can proceed without one.  The literal
+    value ``none`` resolves to the same answer, so a run on a machine that exports
+    NAV_RESULTS_DB can still be told to read files by passing ``--results-db none``.
+    The sentinel is honored wherever the value came from, so a configuration file can
+    opt out of an exported variable in the same way, and it is matched as the exact
+    string, so a URL that merely contains the word is still a URL.
 
     Parameters:
         arguments: The parsed arguments.

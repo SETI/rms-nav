@@ -175,18 +175,19 @@ The `images` table:
 | `config_hash`, `git_sha`, `pipeline_run` | `navigation_result.provenance` | |
 | `image_number` | derived from `image_name` | replaces the SQL function (section 2.5) |
 | `has_summary_png` | the ingest walk (section 2.7) | Boolean |
-| `start_et`, `stop_et`, `exposure_s` | `navigation_result.times.*` | NULL until the producer lands (see below) |
-| `sclk_start`, `sclk_midtime`, `sclk_stop` | `navigation_result.times.*` | TEXT; NULL until the producer lands |
-| `camera_frame_id`, `ck_frame_id` | `navigation_result.pointing.*` | INTEGER; NULL until the producer lands |
-| `cmatrix`, `cmatrix_original` | `navigation_result.pointing.*` | JSON (nine floats, row-major); NULL until the producer lands |
+| `start_et`, `stop_et`, `exposure_s` | `navigation_result.times.*` | NULL for a document with no navigation result (see below) |
+| `sclk_start`, `sclk_midtime`, `sclk_stop` | `navigation_result.times.*` | TEXT |
+| `camera_frame_id`, `ck_frame_id` | `navigation_result.pointing.*` | INTEGER |
+| `cmatrix`, `cmatrix_original` | `navigation_result.pointing.*` | JSON (nine floats, row-major); `cmatrix` NULL where the navigation fitted a camera rotation |
 | `source_file` | the metadata file's URL | provenance |
 | `mtime_ns`, `size_bytes` | the metadata file's listing entry | incremental ingest (section 2.7) |
 
-The columns marked "NULL until the producer lands" are the fields the
-corrected-pointing metadata extension will write (`plans/CK_KERNEL_PLAN.md`
-section 2.3). They are declared now, matching that plan's names and shapes
-exactly, because a schema change costs every user a rebuild; when the
-producer lands, ingest picks them up with no schema change.
+The `times` and `pointing` columns are the corrected-attitude fields the
+navigator records (`plans/CK_KERNEL_PLAN.md` section 2.3), and they carry
+that section's names and shapes exactly. They are absent from a document
+that has no navigation result at all -- an image that failed to load -- and
+`cmatrix` is additionally absent where the navigation fitted a camera
+rotation, so both cases ingest as NULL.
 
 Types: every pixel, ET, covariance and sigma column is declared
 `sqlalchemy.Double` (not bare `Float`, which a dialect may map to single
@@ -196,6 +197,17 @@ the child tables' `source_names` / `diagnostics` are `sqlalchemy.JSON`
 are `sqlalchemy.BigInteger`: a nanosecond epoch is far past the 32-bit range a
 dialect is free to give a plain `Integer`, and an image-numbering scheme is
 free to run past it too.
+
+**Absent is not empty, in every JSON column.** The JSON type is declared
+`none_as_null=True` (and its PostgreSQL variant likewise), so a Python `None`
+is stored as SQL NULL rather than as the JSON value `null`. Without that,
+`WHERE cmatrix IS NOT NULL` matches every row ever written and the CSV export
+carries the literal text `null` in the cell. Which columns are ever absent is
+a property of the mapping rather than of the type: `cmatrix` and
+`cmatrix_original` are, and are NULL. `excluded_from_consensus`, `source_names`
+and `diagnostics` are not -- an empty list or object there is a statement
+(nothing was excluded, the technique named no source, it reported no
+diagnostics), and is stored as the empty container.
 
 **Precision.** The top-level `offset` is stored as written, with no
 rounding. (It is written unrounded by `navigate_image_files`; the rounded
@@ -244,32 +256,96 @@ a caller, such an escape is indistinguishable from the guarantee being
 broken, so everything that escapes the builder is translated, and only the
 messages this layer writes itself pass through untouched.
 
-**The URL a message names is rendered with its password masked.** These
+**The URL a message names is rendered with its credentials masked.** These
 messages are written to run logs and pasted into bug reports, and a database
 password belongs in neither. Everything else about the URL survives, because
 naming the URL is what tells a reader which of the three resolution levels
 supplied the value.
 
-A URL the parser rejected cannot render itself, so its password is found
-structurally instead, by a stated rule rather than by a pattern:
+One structural rule does this for every URL, not only for the ones the parser
+rejects. A parsed URL renders itself with its password hidden but renders a
+`?password=` query parameter verbatim, and that parameter authenticates exactly
+as the authority form does; adopting the parser for the URLs it accepts would
+adopt its blind spot with it. The rule is stated rather than pattern-matched:
 
 1. If the scheme -- the text before the first `:`, with any `+driver` suffix
    and surrounding space removed -- is `sqlite`, the string is returned
    unchanged. A SQLite URL names a local path, which has no credentials and is
-   free to carry the colons and at-signs that would otherwise read as some.
-2. Otherwise the authority begins after the slashes that follow the scheme
-   (one or two, since a hand-edited setting arrives with either). The user name
-   runs to the first `:` or `/`; only a `:` introduces a password, and that
-   password runs to the first `@` after it, because an `@` is what ends the
-   credentials. A `/` inside that span is part of the password, which is what
-   reaches a password written with an unescaped slash; an `@` inside the user
-   name is kept, which is what reaches the `user@servername` login form of a
-   managed server.
-3. `host:5432/path@name` is genuinely ambiguous -- a host with a port and a
-   path, or a user name with a slashed password. Digits decide it: a port is
-   digits and a password is not, and mangling a host, a port and half a
-   database name costs the identification these messages exist for.
-4. Only the password is replaced. Nothing outside it is touched.
+   free to carry the colons, at-signs and question marks that would otherwise
+   read as some.
+2. The authority begins after the scheme's `:` **only when a `/` follows that
+   colon**, and then after **every** slash of that run, however many there are.
+   Without that slash, `postgresql:svc:pw@host/db` and `svc:pw@host/db` are the
+   same shape, and reading the leading word as a scheme leaves the second one's
+   password visible; it is read as a user name in both, which hides the first
+   one's user name along with its password. That is one word of a message about
+   a URL no driver would have accepted; the other reading loses a working
+   password. One slash and two are what a hand-edited setting arrives as, three
+   is `postgresql:///db` omitting the host to name a local socket, and a rule
+   that stopped counting at two left the authority start on a slash -- which
+   reads as a path beginning before any password and returns such a URL whole.
+3. Within the authority the user name runs to the first `:`; only a `:`
+   introduces a password. The credentials end at the **last** `@` in the
+   string. A user name is free to carry one -- `user@servername` is the login
+   form of a managed server -- and so is a password: `p@ssword`, `p@ss/word`
+   and `pw:with@both` are all things an operator types. Every narrower bound
+   stops inside a password that carries the character it stops at: ending at
+   the `@` before the first `/` leaves the tail of `p@ss/word` in the message,
+   and ending at the last `@` before a `#` leaves the tail of `pw@part#rest`.
+   The last `@` is the only bound that cannot stop early, because the span it
+   produces contains every other candidate span. What it costs is over-masking
+   a URL whose credentials end sooner and whose tail carries an `@` -- a
+   fragment such as `...?password=x#note@host` is masked to its last character
+   -- which is a mangled message about a URL no driver accepts, against a
+   working password in a run log. If the first `/` precedes the first `:`, the
+   authority ended before any colon and there is no password.
+4. `host:5432/path@name` is genuinely ambiguous -- a host with a port and a
+   path, or a user name with a password that carries a slash. It is read as
+   credentials, which is how the URL parser itself reads it: for the spelling
+   of that shape a parser accepts, this rule and `render_as_string()` hide the
+   same characters, and a test asserts that agreement over a hand-picked set of
+   URLs both can read, which is the only comparison available and cannot reach
+   the unparseable shapes where this rule is the sole defense. Reading it as a
+   port instead -- deciding by whether the text before the slash is digits --
+   leaves a password that opens with digits, `123/secret`, visible in full,
+   which is the failure this rule exists to prevent; the cost of the reading
+   taken is a mangled host and database name in a message about a URL that was
+   already unusable.
+5. A query parameter whose name carries `password`, `passwd`, `pwd`, `secret`,
+   `token` or `credential` has its value replaced. A driver accepts any
+   parameter its library knows, so the name is matched by what it contains
+   rather than against a fixed list: over-hiding a setting whose name says
+   credential costs a word of a message, and under-hiding one puts a working
+   password in a run log. One parameter is separated from the next by `&` or by
+   `;`, both of which libpq and the drivers built on it accept, so both are
+   split on and each is put back as it was written.
+6. Only credential material is replaced. Nothing outside it is touched.
+
+The rule is asked about a **corpus** rather than a list of remembered shapes:
+every combination of scheme, of the slashes after it, of credentials, and of
+what a password may contain, asserted in both directions -- the secret is gone,
+and the result is exactly the URL with its credentials replaced.
+
+Each dimension of that corpus is **covered rather than sampled**, which is not
+the same thing and is where the leaks kept living. A corpus carrying no slash,
+one and two stopped one value short of the three-slash spelling; a corpus
+varying one special character of a password at a time could not reach a
+password carrying an at-sign *and* a slash. So the slash count runs from none
+to four, and the passwords carry every ordered pair of the characters that mean
+something to a URL -- order included, since `p@ss/word` and `pw/part@rest` stop
+a rule reading by eye at different places. Tests assert that the dimensions are
+still crossed, because a corpus quietly narrowed proves less than it says.
+
+The rule is a named function of the Core layer rather than a private helper of
+the opener, because a run log records the command line a program was given and
+one of those words can be a connection URL. `sd_stats_ingest` masks the value of
+`--results-db` in the command line it logs, in both spellings argparse accepts.
+
+**A results root is never masked.** It is not a connection URL, it has no
+credentials to hide, and it is the one string an operator reads a run log to
+correct, so the ambiguity rule 4 accepts would corrupt it for nothing. Every
+message that names both -- `require_ingested_roots`'s refusal above all -- masks
+the index URL and prints the roots as they were given.
 
 The engine factory is the only opener:
 
@@ -353,11 +429,19 @@ shared-memory index beside the database, and a writable file in a directory
 that permits nothing is still a database ingest cannot write. So:
 
 - `create=False` **accepts** a read-only database and reads it.
-- `create=True` refuses it before anything is opened, with a message naming
-  read-only -- of the file, or of its directory -- as the cause and saying to
-  ingest a writable copy, not the filesystem-locking message.
+- `create=True` asks the filesystem first, and a database or directory that
+  `os.access` reports unwritable is refused there, before an engine is built,
+  with a message naming read-only -- of the file, or of its directory -- as the
+  cause and saying to ingest a writable copy, not the filesystem-locking
+  message. A path the filesystem permits still passes through the engine build
+  and the open probe, and a refusal from either is diagnosed by what the driver
+  said, including the `SQLITE_READONLY*` a rollback-journal database gives to
+  the journal-mode selection.
 - A genuine `SQLITE_BUSY` or `SQLITE_IOERR` refuses in both modes, with the
-  filesystem-and-PostgreSQL message.
+  filesystem-and-PostgreSQL message. A refusal carrying no result code at all
+  is neither, and is reported as what SQLite said with no remedy prescribed for
+  it: the locking remedy is a deployment rebuild, and answering an
+  unclassifiable failure with one is a false diagnosis.
 
 The connect-time journal-mode selection still has to tolerate a refusal (any
 `SQLITE_READONLY*` result code), because every connection to a read-only
@@ -462,16 +546,91 @@ same listing entries. There is no per-file `stat` call and no per-file
 degrades to `--force` behavior for that root, with a logged warning.
 
 **Incremental.** A file whose `(mtime_ns, size_bytes)` matches the stored
-pair is skipped without being read. `--force` re-reads everything.
+pair, and beside which the walk saw the same summary PNG the row records, is
+skipped without being read. The summary flag is part of the comparison because
+it comes from the walk rather than from the document: a PNG written after the
+document was ingested changes the row that ought to be stored while changing
+nothing about the document. `--force` re-reads everything.
+
+**A refused file is bookkeeping, not a row.** A file that is not a
+current-schema navigation document is recorded in a `failed_files` table --
+`root_url`, `results_path_stub`, `reason`, `mtime_ns`, `size_bytes` -- and is
+skipped on the next pass on the same evidence as an ingested one, so a tree
+whose non-navigation files outnumber its results does not pay to download and
+parse every one of them on every run. It is a table of its own rather than a
+marked `images` row: absence of an `images` row is what every consumer reads as
+"this image was never navigated", and a file with no usable data must leave
+that answer alone. `--force` re-reads a refused file too. A document that
+ingested on an earlier pass and no longer reads has its `images` row deleted as
+the refusal is written, since a row nothing backs would answer for an image
+nothing produced; and a file that was refused and now reads has its refusal
+deleted as its rows are written.
+
+**A root the walk cannot list is not an empty root.** The walk reports whether
+the root itself could be listed. When it could not -- a mistyped root, an
+unmounted share -- the run's `ingest_runs` row keeps its NULL finish time, so
+every consumer treats the root as one nobody has ingested rather than one that
+holds nothing, and no row of it is touched. A root that exists and is genuinely
+empty completes normally.
+
+**Every way a directory refuses to be listed is one way.** The walk treats any
+`OSError` as "could not be listed": not there, not a directory, unreadable by
+this user, a share that stopped answering. A permission error is the commonest
+of them on a shared tree, and enumerating only some of the others ends the pass
+on it -- skipping every later root of a multi-root run and never reaching the
+closing summary. A directory that could not be listed costs the files under it
+and nothing else; the pass continues over the rest of the root, and the prune is
+refused for that root because the listing no longer covers all of it.
+
+**A directory the walk did not list is counted, not merely logged.** The pass
+carries a `directories_missed` count, reports it in the closing summary, and
+records it on the `ingest_runs` row. Absence of an `images` row is the
+load-bearing claim of the whole design -- every consumer reads it as "this image
+was never navigated" -- and under a directory nobody enumerated that reading is
+simply false. A run that missed a directory still completes, because the rows it did
+write are as good as any other run's, so the count is the only place the gap
+shows; a consumer that means to read absence as an answer has it on the run row
+rather than in a log file nobody kept. A pass whose count is zero listed the
+whole root and absence means what it says everywhere under it.
+
+**A directory already walked is not walked again.** The walk records each local
+directory's device and inode as it enters it and skips one it has already
+listed. A link from a subdirectory back to an ancestor otherwise writes the same
+document under a new stub at every level, until the filesystem's own limit on
+link traversal stops it -- forty-one rows for one document, forty of them
+answering for images at paths no consumer will ask about, and the count of
+navigated images wrong by all of them. A directory skipped this way is counted
+as missed, since the walk did not enumerate it there, which is also what refuses
+the prune for that pass. The identity is taken only for a local directory: a
+cloud location has no links to go round in, and asking a bucket about a prefix
+is a paid round trip per directory per run.
+
+**Rows of documents that have left the tree are removed.** Presence has to mean
+what absence means, so the stubs recorded for a root that this walk did not
+find are deleted, and the count is reported and recorded in `ingest_runs` as
+`files_removed`. The delete cascades to the child tables. This is sound only on
+the evidence of a **complete listing of the root**: the prune reads the walk's
+own listing and refuses one that does not cover the whole root, which is the
+case whenever the root could not be listed or any directory under it could not.
+Section 2.8 states the consequence for a worker that covers a share of a root.
 
 **Per-root bookkeeping.** An `ingest_runs` table records, per root:
 `root_url`, `started_utc`, `finished_utc` (NULL while running),
-`files_seen` / `files_ingested` / `files_skipped` / `files_failed`, and
-`schema_version`, under a surrogate `run_id` primary key (a root legitimately
-has many runs, and a consumer reads the newest). The row is written at
+`files_seen` / `files_ingested` / `files_skipped` / `files_failed` /
+`files_removed` / `directories_missed`, and `schema_version`, under a surrogate
+`run_id` primary key
+(a root legitimately has many runs, and a consumer reads the newest). The row
+is written at
 start and updated at completion, in both the interactive and cloud paths. A
 consumer treats a root whose newest row has `finished_utc IS NULL` -- or no
 row at all -- as not ingested, and fails with a message saying so.
+
+**The normalized root is what is walked.** `normalize_root_url` renders the
+root absolute once, and the walk and the retrievals are handed that rendering
+rather than the string as typed. A relative root is a documented spelling of
+the option, and the storage layer refuses a relative local URL outright; walking
+the typed form would also record a relative `source_file` beside an absolute
+`root_url` for the same file.
 
 **Batched retrieval.** Metadata files are retrieved in batches through
 `FCPath.retrieve()` with `exception_on_fail=False`, the pattern
@@ -489,6 +648,43 @@ run-length lock.
 child rows happens inside one transaction, so concurrent workers can never
 interleave halves of one image's rows.
 
+**A row the database refuses costs its own file.** A document can read cleanly
+and still not go in -- an identifier too large for a `bigint`, a value a
+backend's type will not hold -- and the failure arrives from the driver at the
+insert rather than from any check the converter makes. Such a document would
+otherwise take its whole chunk down and then the run, leaving the root's ingest
+unfinished and every consumer refusing it. So a chunk whose write fails is
+rolled back and written again one image at a time: every writable document goes
+in, and the one that does not is counted as a failure for its own file. Nothing
+is recorded in `failed_files` for it, exactly as nothing is for a retrieval that
+failed -- the document read, so nothing about it says the next pass will not
+store it, and a recorded refusal would be skipped for as long as the file did
+not change. The one failure that is *not* isolated is a connection the driver
+reports as invalidated: every remaining image would fail the same way, and a run
+that "completed" without them leaves a consumer reading the absence of their
+rows as "never navigated", so that one is allowed out.
+
+**Names inside a document are checked with its shapes.** A `per_technique` entry
+carries a `technique_name` and no two entries carry the same one, because that
+name is half the primary key of `techniques`; an entry with none has no identity
+and two entries with one name have the same one. A document that breaks either
+is refused as a document of another shape. Standing a nameless entry in under a
+placeholder name manufactured the collision out of the absence, and numbering
+duplicates apart would put a technique nobody ran into the operator's report.
+
+**The driver's exit status says whether the pass completed**, not what it found:
+0 when every named root was walked, whatever mix of documents was read, skipped
+and refused, and 1 when the run could not complete -- no index or no root
+resolvable, the index unopenable, or a root that could not be listed. A status
+read from a count of ingested documents flips between two passes over one
+unchanged tree, since what one pass ingests or refuses the next one skips, and a
+scheduled run would then see a failure once and never again. **The driver always
+exits rather than raising.** The pass charges every failure it enumerates to one
+file or one root; anything still escaping is a failure nobody enumerated, and a
+console entry point owes its caller a message and a status for one rather than a
+traceback. The roots such a run never reached keep their NULL finish times, so
+no consumer reads absence under them as an answer.
+
 ### 2.8 Cloud-task ingest
 
 `sd_stats_ingest_cloud_tasks` mirrors the structure of the existing
@@ -505,6 +701,15 @@ enqueuer aggregates.
 
 A task carries a list of metadata-file URLs or a stub prefix; the worker
 ingests its share.
+
+**A worker never prunes.** Removing the rows of documents that have left the
+tree (section 2.7) is licensed by a complete listing of the root, and a worker
+holding a share of one has no evidence about the stubs outside its share:
+pruning on it would delete its peers' rows. The prune takes the walk's listing
+and raises unless that listing covers the whole root, so the restriction is a
+property of the seam rather than a rule a worker has to remember. Whether the
+enqueuer -- which does list the whole root to fan the work out -- prunes at
+completion is decided with the rest of Phase 3.
 
 **Concurrency:**
 
@@ -783,6 +988,112 @@ same fixture tree ingested by the old and new ingest, which is what proves
 the `COALESCE` rewrite; and a PostgreSQL run of the same assertions under
 the `postgres` marker.
 
+Details settled during execution, none of them a change of intent:
+
+- **The root normalization lives in `spindoctor/results_index/roots.py`**,
+  alongside the `ingest_runs` reads that decide whether a root has been
+  ingested at all. Section 2.2 asks every consumer to spell a root the same
+  way and to refuse a root with no completed run; both are one function
+  there rather than one per consumer. `sd_stats_report` already uses the
+  refusal for `--root`; the pipeline consumers of Phase 4 use the same one.
+- **The old ingest's output is frozen rather than re-derived.** The
+  byte-identical comparison needs the previous implementation, which this
+  phase deletes, so the fixture tree and the `report.md` / `images.csv` the
+  previous implementation produced from it are committed as test data in
+  their own commit, ahead of the rewrite.
+- **The CSV's two feature-count aggregates become integers.** `TOTAL(...)`
+  always returned a float, including a `0.0` for an image with no features;
+  `COALESCE(SUM(...), 0)` returns the count. The regression test asserts the
+  numbers are equal rather than the text, and asserts it for those two
+  columns alone.
+- **The CSV's `status_reason` column no longer carries a fatal error.** That
+  is the merge the split columns exist to undo, and `status_error` is beside
+  it now. The regression test asserts that the pair reproduces what the one
+  column held.
+- **`sd_stats_ingest` and the statistics package leave the print-only list**
+  in `tests/spindoctor/config/test_logging_static_invariants.py`, which
+  section 2.10's collateral list does not name. The list is narrowed to the
+  report modules, which keep `print()`.
+- **The criterion-10 scan skips Markdown table rows.** The report writes its
+  tables as literal rows, one of them headed `total (s)`, which the `TOTAL(`
+  pattern reads as the SQLite aggregate. Nothing beginning with a table
+  separator is SQL, and a test pins that the exclusion does not reach a
+  statement -- against a widened exclusion as well as a blanked one, since a
+  pattern that still excludes something is what would quietly empty the scan.
+- **The column set changed, so the schema version is 4.** The JSON columns
+  gained `none_as_null` (section 2.3), `ingest_runs` gained `files_removed` and
+  then `directories_missed`, and `failed_files` was added (section 2.7). There
+  are no migrations, so this is one version bump covering all four. The last of
+  them arrived after the version had already been raised once in this phase, and
+  it was raised again rather than reused: an index built from an earlier state
+  of this phase would otherwise pass the version gate and then fail on a column
+  that is not there, which is exactly what the gate exists to prevent.
+- **The CSV export states its line terminator.** `csv.writer` defaults to CRLF;
+  the export now names LF. The frozen `images.csv` blobs are LF, so what the
+  export writes matches them byte for byte, which the previous implementation's
+  output did not -- the blobs were normalized when they were frozen and the
+  commit that froze them did not say so. The regression comparisons read fields
+  rather than lines and would not notice either way, so the terminator has a
+  test of its own reading the file as bytes.
+- **Masking became one rule over a corpus, and stopped touching results
+  roots.** Section 2.4 above is the rule as it now stands: one structural pass
+  covering the query-parameter form of a password as well as the authority
+  form, applied to every URL rather than only to the ones the parser rejects,
+  and asserted over a generated corpus instead of a list of remembered shapes.
+  `require_ingested_roots` masks the index URL itself, so a consumer cannot
+  reintroduce the leak by forgetting; the roots in that message, and the results
+  roots in the ingest driver's log, are printed exactly as they were given.
+- **Section 2.4 rule 4 decides the ambiguous shape the other way round.** The
+  base plan read `host:5432/path@name` by whether the text before the slash is
+  digits -- "a port is digits and a password is not". It is now read as
+  credentials outright. This is the one plan edit of this phase that reverses a
+  decision rather than adding or tightening a requirement, so it is listed here
+  on its own: digits-decide leaves a password that opens with digits,
+  `123/secret`, visible in full, and the cost of the reading taken -- a mangled
+  host and database name -- no longer reaches anything an operator needs, since
+  a results root is never passed through masking at all. The URL parser reads
+  that shape the same way, so for every spelling of it a parser accepts, this
+  rule and `render_as_string()` hide the same characters.
+- **The credentials end at the last `@` of the string** (section 2.4 rule 3),
+  not at the last one before the first `/` and not at the last one before a
+  `#`. Both narrower bounds stop inside a password that carries the character
+  they stop at, and each was a leak. The accepted cost is over-masking a URL
+  whose tail carries an at-sign after the real credentials, which is a fragment
+  on a connection URL and therefore a URL no driver would have taken.
+- **A failed write costs one file, not the run.** Section 2.7's isolation of a
+  chunk whose write fails. SQLAlchemy savepoints were tried first and are not
+  usable here: pysqlite's transaction handling commits a released savepoint
+  independently of the enclosing transaction, which silently breaks the chunk
+  boundary. Rolling the chunk back and rewriting it one image at a time costs
+  nothing when nothing fails.
+- **The ingest driver's exit status reports completion rather than counts**
+  (section 2.7), because the count-based status flipped between two passes over
+  one unchanged tree. It also always exits rather than raising, which is what
+  its own documented contract said and what a traceback out of a console entry
+  point breaks.
+- **The walk is handed the normalized root** (section 2.7). Absolutizing the
+  root for the key while walking the string as typed made a relative root -- a
+  documented spelling -- a traceback out of the driver, with the run row already
+  written and its finish time left NULL.
+- **A directory the walk did not list is counted** (section 2.7), reported in
+  the summary and recorded on the `ingest_runs` row, and the walk skips a
+  directory it has already listed rather than descending into it again. The
+  first is what keeps "absence means never navigated" honest for the consumers
+  of Phase 4; the second stops a link back into a tree from writing one
+  document as forty-one rows.
+- **Ingest is a package, on the treatment section 3 names for the report.**
+  Everything section 2.7 asks of one pass carries `spindoctor/cli/stats/ingest`
+  past the 1000-line cap, so it is `ingest/` split along the stages a pass runs
+  through: `counts` (the tally the summary is read from), `walk` (the single
+  listing of a root), `store` (what the index already holds, and how rows go
+  back in), `chunks` (batched retrieval, reading a document, the per-chunk
+  write), `runs` (the record that makes absence of a row readable), and
+  `driver` (the pass itself). The package re-exports the whole surface, so
+  every consumer imports the names it always did from
+  `spindoctor.cli.stats.ingest`. `report.py` stays inside the cap and stays one
+  module. The source scan of criterion 10 finds the split modules for itself,
+  and the floor it asserts its own reach against names them.
+
 ### Phase 3 — Cloud-task ingest
 
 `sd_stats_ingest_cloud_tasks` per section 2.8, entry point in
@@ -821,8 +1132,10 @@ import per section 2.9.
 Tests: for every filter flag, both existing modes (walked and
 absence-only-batched) against the index-backed answer over a fixture tree;
 every contradictory-pair rejection unchanged; an import-time assertion that
-`import spindoctor.dataset` does not import `sqlalchemy` (this is the
-criterion 2 test).
+`import spindoctor.dataset` does not import `sqlalchemy`. **That assertion is
+criterion 2's only test and this phase owns it**: no earlier phase writes it,
+because the branch-local import it protects is added here, so it must not be
+assumed to exist already.
 
 ### Phase 6 — Documentation
 
@@ -919,9 +1232,9 @@ programs and by `results_index` whether or not an index is used, and by
 nothing on the navigation critical path -- criterion 2 pins that.
 
 **Schema changes cost every user a rebuild.** That is the accepted trade for
-having no migration machinery, and the reason the corrected-pointing columns
-are declared now, with the shapes their producer has already specified,
-rather than when it lands.
+having no migration machinery, and the reason the schema carries the
+corrected-pointing columns in the shapes their producer writes rather than
+leaving them for a later migration.
 
 **The report is the regression surface.** Phase 2 touches every query the
 statistics user guide documents. The old-vs-new byte-identical report test
@@ -934,22 +1247,22 @@ treat a diff there as a defect, not as an acceptable drift.
 
 File as tracking issues alongside the implementation issue:
 
-- **A document column for bundle generation.** Storing the raw metadata JSON
+- **A document column for bundle generation** (#464). Storing the raw metadata JSON
   per image (SQLite TEXT, PostgreSQL `jsonb`) is the only way bundle
   generation stops reading one document per image, since it needs the whole
   document. It roughly doubles the index size, which weakens shipping the
   SQLite file to workers, so it likely belongs in a separate optional
   database rather than the main index.
-- **Serving the curation triage tool.** Needs `missing_frac`,
+- **Serving the curation triage tool** (#465). Needs `missing_frac`,
   `saturation_frac`, classifier flags, the per-technique list, result file
   paths, a name-to-stub lookup, and a second (rescue) root -- a schema
   widening for one out-of-package tool, wanted only if triage's ten
   rglobs-per-frame remain a practical pain after the pipeline consumers are
   converted.
-- **Shipping the index to cloud workers.** Publishing the SQLite file to the
+- **Shipping the index to cloud workers** (#466). Publishing the SQLite file to the
   results bucket and having each worker download it once is the alternative
   to a PostgreSQL instance, and needs a documented workflow either way.
-- **A `--since` selector for ingest.** The stat-pair skip makes a re-scan
+- **A `--since` selector for ingest** (#467). The stat-pair skip makes a re-scan
   cheap in reads but not in listings; a time-bounded scan would cut the
   listing too.
 - **The lockability probe takes a write lock on a consumer's open** (#462).

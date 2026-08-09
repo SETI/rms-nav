@@ -1,8 +1,44 @@
-"""Time helpers for the statistics system."""
+"""Values the statistics system derives from a metadata document.
+
+Each of these turns a recorded field into something a query can filter on: an
+epoch into the calendar date the date filters compare, and an image name into
+the number the image-range filters compare.  They run at ingest, so the derived
+values are columns and the filters are ordinary column comparisons on any
+backend.
+"""
+
+import re
 
 import julian
 
-__all__ = ['date_from_image_et', 'datetime_from_image_et']
+__all__ = ['date_from_image_et', 'datetime_from_image_et', 'image_number_from_name']
+
+_IMAGE_NUMBER_RE = re.compile(r'\d+')
+
+
+def image_number_from_name(image_name: str | None) -> int | None:
+    """Numeric portion (first digit run) of an image name's basename.
+
+    ``N1454725799_1_CALIB.IMG`` yields ``1454725799``;
+    ``lor_0003103486_0x630_sci`` yields ``3103486`` (leading zeros drop in
+    the integer).  This is the value the ``--min-image`` / ``--max-image``
+    range filter compares, and it is stored as a column so that comparison is
+    an ordinary one rather than a call into the process that opened the
+    database.
+
+    Parameters:
+        image_name: Image name or path, or None.
+
+    Returns:
+        The integer value of the first digit run, or None when the name is
+        None or contains no digits.
+    """
+    if image_name is None:
+        return None
+    match = _IMAGE_NUMBER_RE.search(image_name.rsplit('/', 1)[-1])
+    if match is None:
+        return None
+    return int(match.group(0))
 
 
 def date_from_image_et(image_et: float | None) -> str | None:

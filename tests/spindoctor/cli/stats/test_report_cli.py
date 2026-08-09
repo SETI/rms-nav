@@ -1,0 +1,242 @@
+"""Tests for the ``sd_stats_report`` command line.
+
+This program is the one consumer that requires an index, so most of what its
+driver does is refuse: no index named, an index that is not there, an index it
+must not create, and a root the index holds no completed ingest of. The last is
+the load-bearing one -- absence of rows under a root is not evidence that
+nothing was navigated -- and it is decided by the root's newest ingest run
+alone, however many earlier ones finished.
+"""
+
+from pathlib import Path
+
+import pdslogger
+import pytest
+
+from spindoctor.cli.stats.report import main_report
+from spindoctor.results_index import INGEST_RUNS, SCHEMA_VERSION, open_index
+
+from .conftest import index_url, ingest_tree, metadata_document, write_metadata
+
+# ---------------------------------------------------------------------------
+# The command line
+# ---------------------------------------------------------------------------
+
+
+def test_main_report_writes_a_report(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The driver opens the index it was named and writes the report."""
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    out = tmp_path / 'report'
+    exit_code = main_report(['--results-db', url, '--output-dir', str(out)])
+    assert exit_code == 0
+
+
+def test_main_report_accepts_the_drill_down_flags(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The range, suspect, and CSV flags parse and take effect."""
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    out = tmp_path / 'report'
+    main_report(
+        [
+            '--results-db',
+            url,
+            '--output-dir',
+            str(out),
+            '--top-n',
+            '3',
+            '--filelists',
+            '--csv',
+            '--suspect-fraction',
+            '0.8',
+            '--min-image',
+            '1',
+        ]
+    )
+    text = (out / 'report.md').read_text(encoding='utf-8')
+    assert 'at least 0.80 of the per-axis maximum expected pointing' in text
+
+
+def test_main_report_accepts_a_root(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The root is normalized the way ingest normalized it, so it matches."""
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    out = tmp_path / 'report'
+    exit_code = main_report(
+        ['--results-db', url, '--root', f'{root.as_posix()}/', '--output-dir', str(out)]
+    )
+    assert exit_code == 0
+
+
+def test_main_report_refuses_a_root_nobody_ingested(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Absence of rows under a root is not evidence that nothing was navigated."""
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    with pytest.raises(SystemExit) as caught:
+        main_report(
+            [
+                '--results-db',
+                url,
+                '--root',
+                str(tmp_path / 'never-ingested'),
+                '--output-dir',
+                str(tmp_path / 'report'),
+            ]
+        )
+    assert caught.value.code == 2
+
+
+def test_main_report_names_the_roots_it_does_hold(
+    tmp_path: Path,
+    quiet_logger: pdslogger.PdsLogger,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The message has to be actionable, so it says what the index does cover."""
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    with pytest.raises(SystemExit):
+        main_report(
+            [
+                '--results-db',
+                url,
+                '--root',
+                str(tmp_path / 'never-ingested'),
+                '--output-dir',
+                str(tmp_path / 'report'),
+            ]
+        )
+    assert root.as_posix() in capsys.readouterr().err
+
+
+def test_main_report_without_an_index_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """This program has no file-reading mode, and the message says which flag."""
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    exit_code = main_report(['--output-dir', str(tmp_path / 'report')])
+    assert exit_code == 1
+
+
+def test_main_report_without_an_index_names_the_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A refusal that does not say what to type is a refusal nobody can act on."""
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    main_report(['--output-dir', str(tmp_path / 'report')])
+    assert '--results-db' in capsys.readouterr().err
+
+
+def test_main_report_refuses_an_index_that_is_not_there(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A consumer never creates an index; it reports that there is none."""
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    missing = tmp_path / 'absent.sqlite3'
+    exit_code = main_report(
+        ['--results-db', index_url(missing), '--output-dir', str(tmp_path / 'report')]
+    )
+    assert exit_code == 1
+
+
+def test_main_report_leaves_no_database_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty database would answer every question with "not navigated"."""
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    missing = tmp_path / 'absent.sqlite3'
+    main_report(['--results-db', index_url(missing), '--output-dir', str(tmp_path / 'report')])
+    assert not missing.exists()
+
+
+def test_main_report_honors_the_none_sentinel(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exported index URL can be overridden on the command line."""
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    monkeypatch.setenv('NAV_RESULTS_DB', url)
+    exit_code = main_report(['--results-db', 'none', '--output-dir', str(tmp_path / 'report')])
+    assert exit_code == 1
+
+
+def test_main_report_reads_the_environment_variable(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A machine with one index need not name it on every invocation."""
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    monkeypatch.setenv('NAV_RESULTS_DB', url)
+    exit_code = main_report(['--output-dir', str(tmp_path / 'report')])
+    assert exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# A root whose newest run did not finish
+# ---------------------------------------------------------------------------
+
+
+def test_main_report_refuses_a_root_whose_newest_run_did_not_finish(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ingest that started and died leaves a root nothing may read absence from.
+
+    However many earlier runs finished, the tree the dead run half-walked is the
+    tree a consumer would be answering from, so the newest run is the only one
+    that decides.
+    """
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    engine = open_index(url)
+    with engine.begin() as connection:
+        connection.execute(
+            INGEST_RUNS.insert().values(
+                root_url=root.as_posix(),
+                started_utc='2026-08-07T00:00:00+00:00',
+                finished_utc=None,
+                schema_version=SCHEMA_VERSION,
+            )
+        )
+    engine.dispose()
+    with pytest.raises(SystemExit) as caught:
+        main_report(
+            [
+                '--results-db',
+                url,
+                '--root',
+                root.as_posix(),
+                '--output-dir',
+                str(tmp_path / 'report'),
+            ]
+        )
+    assert caught.value.code == 2

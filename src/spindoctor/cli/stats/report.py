@@ -1,17 +1,34 @@
-"""Generate a deterministic statistics report (Markdown + charts) from the database."""
+"""Generate a deterministic statistics report (Markdown + charts) from the index.
+
+The report is the one program for which the results index is not optional: it
+has never had a file-reading mode, and it answers every question with a query.
+Its output is deterministic -- the same index and the same options always
+produce byte-identical Markdown -- so a difference between two runs is a
+difference in the data or a defect, never noise.
+
+Every statement runs on either backend.  The reason tables read
+``COALESCE(status_reason, status_error)``, because the two are separate columns
+holding separate vocabularies and a failure is described by whichever of them
+the document carried; the boolean columns are used as booleans rather than as
+zeroes and ones; and every join onto ``images`` matches the pair that keys an
+image rather than its name, which two volumes may share.
+"""
 
 import argparse
 import itertools
 import json
 import math
-import sqlite3
 import statistics
+import sys
 from pathlib import Path
+from typing import Any
 
+import sqlalchemy
 from filecache import FCPath
 
-from spindoctor.cli.stats.classify import datetime_from_image_et
+from spindoctor.cli.stats.classify import datetime_from_image_et, image_number_from_name
 from spindoctor.cli.stats.report_common import (
+    IMAGE_JOIN,
     ReportContext,
     add_drilldown,
     add_instrument_count_table,
@@ -19,10 +36,9 @@ from spindoctor.cli.stats.report_common import (
     count_pct,
     fmt,
     image_name_from_filename,
-    image_number_from_name,
+    image_order,
     offset_stats,
     percentile,
-    register_image_number_function,
     rows,
     safe_filename,
     where_clause,
@@ -37,9 +53,16 @@ from spindoctor.cli.stats.report_sections import (
     add_suspect_offset_section,
     write_csv_export,
 )
-from spindoctor.cli.stats.schema import open_stats_db
+from spindoctor.config import DEFAULT_CONFIG, get_results_db_url
+from spindoctor.results_index import normalize_root_url, open_index, require_ingested_roots
 
 __all__ = ['build_report', 'main_report']
+
+# Which of the two reason vocabularies describes a non-success outcome depends
+# on how the navigation ended: the navigator's own explanation when it ran, and
+# the fatal error when it never got that far.  They are separate columns, and a
+# report of failure reasons wants whichever one the document carried.
+FAILURE_REASON = 'COALESCE({alias}status_reason, {alias}status_error)'
 
 # Confidence tiers, in descending-confidence order, always reported.
 _CONFIDENCE_TIERS: tuple[str, ...] = ('high', 'medium', 'low', 'failed', 'conflicted')
@@ -61,28 +84,29 @@ def _pairwise_disagreements(
         ``per_image_rank``.
     """
     sql = (
-        'SELECT t.image_name, i.instrument, i.confidence_rank, t.technique_name, '
-        't.offset_dv, t.offset_du '
-        'FROM techniques t JOIN images i ON i.image_name = t.image_name'
+        'SELECT t.root_url, t.results_path_stub, i.instrument, i.confidence_rank, '
+        't.technique_name, t.offset_dv, t.offset_du '
+        'FROM techniques t '
+        + IMAGE_JOIN.format(alias='t.')
         + ctx.where_i
         + connector(ctx.where_i)
-        + 't.spurious = 0 AND t.offset_dv IS NOT NULL AND t.offset_du IS NOT NULL '
-        'ORDER BY t.image_name, t.technique_name'
+        + 'NOT t.spurious AND t.offset_dv IS NOT NULL AND t.offset_du IS NOT NULL '
+        'ORDER BY t.root_url, t.results_path_stub, t.technique_name'
     )
     per_pair: dict[tuple[str, str, str], list[float]] = {}
     per_image_rank: dict[tuple[str, str], list[float]] = {}
-    for _image_name, group in itertools.groupby(
-        rows(ctx.conn, sql, ctx.params_i), key=lambda r: r[0]
+    for _image, group in itertools.groupby(
+        rows(ctx.connection, sql, ctx.params_i), key=lambda r: (r[0], r[1])
     ):
         entries = list(group)
         if len(entries) < 2:
             continue
-        instrument = str(entries[0][1])
-        rank = entries[0][2]
+        instrument = str(entries[0][2])
+        rank = entries[0][3]
         image_max = 0.0
         for a, b in itertools.combinations(entries, 2):
-            delta = math.hypot(a[4] - b[4], a[5] - b[5])
-            pair = (instrument, min(a[3], b[3]), max(a[3], b[3]))
+            delta = math.hypot(a[5] - b[5], a[6] - b[6])
+            pair = (instrument, min(a[4], b[4]), max(a[4], b[4]))
             per_pair.setdefault(pair, []).append(delta)
             image_max = max(image_max, delta)
         if rank is not None:
@@ -104,12 +128,12 @@ def _extreme_image_name(ctx: ReportContext, instrument: str, *, last: bool) -> s
     """
     order = 'DESC' if last else 'ASC'
     found = rows(
-        ctx.conn,
+        ctx.connection,
         f'SELECT image_name FROM images{ctx.where}'
         + connector(ctx.where)
-        + 'instrument = ? AND image_number(image_name) IS NOT NULL '
-        f'ORDER BY image_number(image_name) {order}, image_name LIMIT 1',
-        [*ctx.params, instrument],
+        + 'instrument = :for_instrument AND image_number IS NOT NULL '
+        f'ORDER BY image_number {order}, {image_order()} LIMIT 1',
+        {**ctx.params, 'for_instrument': instrument},
     )
     if len(found) == 0:
         return '-'
@@ -133,11 +157,11 @@ def _extreme_times(ctx: ReportContext, instrument: str) -> tuple[str, str]:
         no selected image of that instrument has an epoch.
     """
     found = rows(
-        ctx.conn,
+        ctx.connection,
         f'SELECT MIN(image_et), MAX(image_et) FROM images{ctx.where}'
         + connector(ctx.where)
-        + 'instrument = ? AND image_et IS NOT NULL',
-        [*ctx.params, instrument],
+        + 'instrument = :for_instrument AND image_et IS NOT NULL',
+        {**ctx.params, 'for_instrument': instrument},
     )
     if len(found) == 0:
         return '-', '-'
@@ -178,7 +202,7 @@ def _add_selection_section(ctx: ReportContext) -> None:
 def _add_status_sections(ctx: ReportContext) -> None:
     """Append the success/failure counts and the failure-reason breakdown."""
     status_rows = rows(
-        ctx.conn,
+        ctx.connection,
         f'SELECT status, instrument, COUNT(*) FROM images{ctx.where} '
         'GROUP BY status, instrument ORDER BY status, instrument',
         ctx.params,
@@ -206,12 +230,13 @@ def _add_status_sections(ctx: ReportContext) -> None:
 
     # Every non-success status is a failure for reporting purposes, so
     # `error` rows (SPICE and otherwise) appear here alongside `failed`.
+    reason_column = FAILURE_REASON.format(alias='')
     reason_rows = rows(
-        ctx.conn,
-        f'SELECT status, status_reason, instrument, COUNT(*) FROM images{ctx.where}'
+        ctx.connection,
+        f'SELECT status, {reason_column}, instrument, COUNT(*) FROM images{ctx.where}'
         + connector(ctx.where)
-        + "status != 'success' GROUP BY status, status_reason, instrument "
-        'ORDER BY status, status_reason, instrument',
+        + f"status != 'success' GROUP BY status, {reason_column}, instrument "
+        f'ORDER BY status, {reason_column}, instrument',
         ctx.params,
     )
     if len(reason_rows) == 0:
@@ -229,10 +254,10 @@ def _add_status_sections(ctx: ReportContext) -> None:
         headers=['status', 'reason'],
     )
     name_rows = rows(
-        ctx.conn,
-        f'SELECT status_reason, instrument, image_name FROM images{ctx.where}'
+        ctx.connection,
+        f'SELECT {reason_column}, instrument, image_name FROM images{ctx.where}'
         + connector(ctx.where)
-        + "status != 'success' ORDER BY image_name",
+        + f"status != 'success' ORDER BY {image_order()}",
         ctx.params,
     )
     names_by_reason: dict[str, list[tuple[str, str]]] = {}
@@ -266,11 +291,14 @@ def _add_status_sections(ctx: ReportContext) -> None:
 
 def _add_technique_usage_section(ctx: ReportContext) -> None:
     """Append per-technique image counts, spurious shares, and mean confidence."""
+    # One row per technique per image is a constraint of the schema, so counting
+    # rows counts images, and no count of distinct column pairs is needed.
     tech_rows = rows(
-        ctx.conn,
-        'SELECT t.technique_name, i.instrument, COUNT(DISTINCT t.image_name), '
-        'SUM(1 - t.spurious), AVG(t.confidence) '
-        'FROM techniques t JOIN images i ON i.image_name = t.image_name'
+        ctx.connection,
+        'SELECT t.technique_name, i.instrument, COUNT(*), '
+        'SUM(CASE WHEN t.spurious THEN 0 ELSE 1 END), AVG(t.confidence) '
+        'FROM techniques t '
+        + IMAGE_JOIN.format(alias='t.')
         + ctx.where_i
         + ' GROUP BY t.technique_name, i.instrument '
         'ORDER BY t.technique_name, i.instrument',
@@ -322,14 +350,22 @@ def _add_technique_usage_section(ctx: ReportContext) -> None:
 
 def _add_source_usage_section(ctx: ReportContext) -> None:
     """Append the per-model / per-source feature-usage tables."""
+    # An image can hold several feature types from one source, so the inner
+    # query collapses each image to one row per source before the outer one
+    # counts images.  Counting distinct values of the column pair that keys an
+    # image would need a spelling no backend shares.
     source_rows = rows(
-        ctx.conn,
-        'SELECT s.source_model, s.source_name, i.instrument, COUNT(DISTINCT s.image_name), '
-        'SUM(s.n_features), SUM(s.n_gated) '
-        'FROM feature_sources s JOIN images i ON i.image_name = s.image_name'
+        ctx.connection,
+        'SELECT source_model, source_name, instrument, COUNT(*), '
+        'SUM(n_features), SUM(n_gated) FROM ('
+        'SELECT s.source_model, s.source_name, i.instrument, s.root_url, s.results_path_stub, '
+        'SUM(s.n_features) AS n_features, SUM(s.n_gated) AS n_gated '
+        'FROM feature_sources s '
+        + IMAGE_JOIN.format(alias='s.')
         + ctx.where_i
-        + ' GROUP BY s.source_model, s.source_name, i.instrument '
-        'ORDER BY s.source_model, s.source_name, i.instrument',
+        + ' GROUP BY s.source_model, s.source_name, i.instrument, s.root_url, s.results_path_stub'
+        ') per_image GROUP BY source_model, source_name, instrument '
+        'ORDER BY source_model, source_name, instrument',
         ctx.params_i,
     )
     if len(source_rows) == 0:
@@ -370,7 +406,7 @@ def _add_offset_section(ctx: ReportContext) -> None:
     two would describe neither).
     """
     offset_rows = rows(
-        ctx.conn,
+        ctx.connection,
         f'SELECT instrument, camera, offset_dv, offset_du FROM images{ctx.where}'
         + connector(ctx.where)
         + "status = 'success' AND offset_dv IS NOT NULL AND offset_du IS NOT NULL "
@@ -441,7 +477,7 @@ def _add_agreement_sections(ctx: ReportContext) -> None:
     ctx.lines.append('')
 
     rank_rows = rows(
-        ctx.conn,
+        ctx.connection,
         f'SELECT confidence_rank, instrument, COUNT(*) FROM images{ctx.where}'
         + connector(ctx.where)
         + 'confidence_rank IS NOT NULL GROUP BY confidence_rank, instrument '
@@ -497,23 +533,58 @@ def _add_agreement_sections(ctx: ReportContext) -> None:
         ctx.lines += ['![agreement by tier](agreement_by_tier.png)', '']
 
 
+def _excluded_techniques(excluded: Any) -> list[str]:
+    """The technique names one image's exclusion column holds.
+
+    A textual statement carries no column types, so a JSON column arrives as
+    whatever the driver makes of it: decoded by a backend with a native JSON
+    type, and as the stored text by one that keeps JSON in a text column.
+
+    Parameters:
+        excluded: The value as the driver returned it.
+
+    Returns:
+        The names, or an empty list when the column is empty or unreadable.
+    """
+    value = excluded
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, list):
+        return []
+    return [str(name) for name in value]
+
+
 def _add_exclusions_section(ctx: ReportContext) -> None:
-    """Append the ensemble outlier-exclusion breakdown."""
+    """Append the ensemble outlier-exclusion breakdown.
+
+    The exclusion set is a JSON column, and the empty set is filtered out here
+    rather than in SQL: comparing a JSON value against a literal is spelled
+    differently on every backend, and the rows are already being read.
+    """
     excluded_rows = rows(
-        ctx.conn,
-        f'SELECT excluded_from_consensus, instrument, COUNT(*) FROM images{ctx.where}'
+        ctx.connection,
+        f'SELECT excluded_from_consensus, instrument, image_name FROM images{ctx.where}'
         + connector(ctx.where)
-        + "excluded_from_consensus != '[]' "
-        'GROUP BY excluded_from_consensus, instrument '
-        'ORDER BY excluded_from_consensus, instrument',
+        + f'excluded_from_consensus IS NOT NULL ORDER BY {image_order()}',
         ctx.params,
     )
-    if len(excluded_rows) == 0:
+    labelled = [
+        (', '.join(names), str(instrument), str(image_name))
+        for excluded, instrument, image_name in excluded_rows
+        for names in [_excluded_techniques(excluded)]
+        if len(names) > 0
+    ]
+    if len(labelled) == 0:
         return
     by_exclusion: dict[str, dict[str, int]] = {}
-    for raw, instrument, count in excluded_rows:
-        label = ', '.join(json.loads(raw)) or '(none)'
-        by_exclusion.setdefault(label, {})[str(instrument)] = int(count)
+    names_by_exclusion: dict[str, list[tuple[str, str]]] = {}
+    for label, instrument, image_name in labelled:
+        counts = by_exclusion.setdefault(label, {})
+        counts[instrument] = counts.get(instrument, 0) + 1
+        names_by_exclusion.setdefault(label, []).append((instrument, image_name))
     ordered = sorted(by_exclusion, key=lambda key: (-sum(by_exclusion[key].values()), key))
     ctx.lines += ['## Ensemble outlier exclusions', '']
     add_instrument_count_table(
@@ -521,17 +592,6 @@ def _add_exclusions_section(ctx: ReportContext) -> None:
         [([label], by_exclusion[label]) for label in ordered],
         headers=['excluded techniques'],
     )
-    name_rows = rows(
-        ctx.conn,
-        f'SELECT excluded_from_consensus, instrument, image_name FROM images{ctx.where}'
-        + connector(ctx.where)
-        + "excluded_from_consensus != '[]' ORDER BY image_name",
-        ctx.params,
-    )
-    names_by_exclusion: dict[str, list[tuple[str, str]]] = {}
-    for raw, instrument, image_name in name_rows:
-        label = ', '.join(json.loads(raw)) or '(none)'
-        names_by_exclusion.setdefault(label, []).append((str(instrument), str(image_name)))
     add_drilldown(
         ctx,
         [(label, names_by_exclusion.get(label, [])) for label in ordered],
@@ -562,7 +622,7 @@ def _image_bound(value: str | None, *, option: str) -> int | None:
 
 
 def build_report(
-    conn: sqlite3.Connection,
+    connection: sqlalchemy.Connection,
     output_dir: str | Path | FCPath,
     *,
     instrument: str | None = None,
@@ -570,19 +630,19 @@ def build_report(
     end_date: str | None = None,
     min_image: str | None = None,
     max_image: str | None = None,
+    roots: list[str] | None = None,
     top_n: int = 0,
     filelists: bool = False,
     suspect_fraction: float = 0.9,
     csv_export: bool = False,
 ) -> FCPath:
-    """Query the statistics database and write ``report.md`` plus charts.
+    """Query the results index and write ``report.md`` plus charts.
 
-    The report is deterministic: the same database and options always
-    produce byte-identical Markdown.  All filters combine and apply to
-    every section.
+    The report is deterministic: the same index and options always produce
+    byte-identical Markdown.  All filters combine and apply to every section.
 
     Parameters:
-        conn: Open statistics database connection.
+        connection: Open connection to the results index.
         output_dir: Directory receiving ``report.md``, the PNG charts, and
             (with ``filelists`` / ``csv_export``) the ``filelists/``
             subdirectory and ``images.csv`` (created if missing).  A local
@@ -596,6 +656,9 @@ def build_report(
             number.
         max_image: Optional inclusive upper bound on the numeric portion
             of the image name.
+        roots: Optional normalized results-root URLs to restrict to; None
+            reports over every root the index holds, which a report may
+            legitimately do where a per-image lookup never does.
         top_n: When positive, categorical sections list up to this many
             example image names per category, the suspect-offset and
             worst-BOTSIM-pair tables are capped at this many rows, and the
@@ -616,7 +679,6 @@ def build_report(
         ValueError: If ``min_image`` or ``max_image`` contains no digits.
     """
     output_path = FCPath(output_dir)
-    register_image_number_function(conn)
     min_image_num = _image_bound(min_image, option='min_image')
     max_image_num = _image_bound(max_image, option='max_image')
     where, params = where_clause(
@@ -625,6 +687,7 @@ def build_report(
         end_date=end_date,
         min_image_num=min_image_num,
         max_image_num=max_image_num,
+        roots=roots,
     )
     # Joined queries alias the images table as ``i``; same filter, qualified.
     where_i, params_i = where_clause(
@@ -633,10 +696,11 @@ def build_report(
         end_date=end_date,
         min_image_num=min_image_num,
         max_image_num=max_image_num,
+        roots=roots,
         alias='i.',
     )
     ctx = ReportContext(
-        conn=conn,
+        connection=connection,
         output_dir=output_path,
         where=where,
         params=params,
@@ -653,6 +717,7 @@ def build_report(
         f'to {end_date}' if end_date is not None else None,
         f'image number >= {min_image_num}' if min_image_num is not None else None,
         f'image number <= {max_image_num}' if max_image_num is not None else None,
+        f'root in {", ".join(roots)}' if roots else None,
     ]
     active = [f for f in filters if f is not None]
     ctx.lines.append(f'Filters: {", ".join(active) if len(active) > 0 else "none (full database)"}')
@@ -681,19 +746,42 @@ def build_report(
 def main_report(cmdline: list[str] | None = None) -> int:
     """Entry point for ``sd_stats_report``.
 
+    This program keeps ``print()`` rather than a logger.  Its output *is*
+    terminal text for a person reading a report, and a logger would wrap that
+    in run-log machinery it has no use for.
+
     Parameters:
         cmdline: Argument list; None uses ``sys.argv``.
 
     Returns:
-        Process exit code (0 on success).
+        Process exit code: 0 on success, and 1 when no index was named or the
+        one that was cannot be read.
+
+    Raises:
+        SystemExit: With status 2, from the argument parser, for a command line
+            it will not accept -- an unknown flag, an unparseable bound, or a
+            root the index holds no completed ingest of, which is a value the
+            index rather than the parser rejects but is reported the same way.
     """
     parser = argparse.ArgumentParser(
-        description='Generate a navigation statistics report from an ingested database.'
+        description='Generate a navigation statistics report from an ingested results index.'
     )
     parser.add_argument(
-        '--db',
-        default='nav_stats.sqlite3',
-        help='SQLite database path written by sd_stats_ingest (default: %(default)s)',
+        '--results-db',
+        default=None,
+        metavar='URL',
+        help='Connection URL of the results index written by sd_stats_ingest '
+        '(a sqlite: URL naming a local path, or a postgresql+psycopg: URL); '
+        'overrides NAV_RESULTS_DB and the environment.results_db configuration '
+        'variable',
+    )
+    parser.add_argument(
+        '--root',
+        action='append',
+        default=None,
+        metavar='ROOT',
+        help='Restrict the report to one ingested navigation-results root; may '
+        'be given more than once. Default: every root the index holds',
     )
     parser.add_argument(
         '--output-dir',
@@ -759,24 +847,41 @@ def main_report(cmdline: list[str] | None = None) -> int:
     )
     arguments = parser.parse_args(cmdline)
 
-    conn = open_stats_db(arguments.db)
-    try:
-        report_path = build_report(
-            conn,
-            arguments.output_dir,
-            instrument=arguments.instrument,
-            start_date=arguments.start_date,
-            end_date=arguments.end_date,
-            min_image=arguments.min_image,
-            max_image=arguments.max_image,
-            top_n=arguments.top_n,
-            filelists=arguments.filelists,
-            suspect_fraction=arguments.suspect_fraction,
-            csv_export=arguments.csv,
+    url = get_results_db_url(arguments, DEFAULT_CONFIG)
+    if url is None:
+        print(
+            'sd_stats_report reads a results index and has no file-reading mode. '
+            'Name one with --results-db, the environment.results_db configuration '
+            'variable, or NAV_RESULTS_DB, and build it with sd_stats_ingest.',
+            file=sys.stderr,
         )
+        return 1
+    roots = [normalize_root_url(root) for root in arguments.root or []]
+    try:
+        engine = open_index(url)
+    except ValueError as exc:
+        print(f'Cannot read the results index: {exc}', file=sys.stderr)
+        return 1
+    try:
+        with engine.connect() as connection:
+            require_ingested_roots(connection, roots, url=url)
+            report_path = build_report(
+                connection,
+                arguments.output_dir,
+                instrument=arguments.instrument,
+                start_date=arguments.start_date,
+                end_date=arguments.end_date,
+                min_image=arguments.min_image,
+                max_image=arguments.max_image,
+                roots=roots,
+                top_n=arguments.top_n,
+                filelists=arguments.filelists,
+                suspect_fraction=arguments.suspect_fraction,
+                csv_export=arguments.csv,
+            )
     except ValueError as exc:
         parser.error(str(exc))
     finally:
-        conn.close()
+        engine.dispose()
     print(f'Wrote {report_path}')
     return 0

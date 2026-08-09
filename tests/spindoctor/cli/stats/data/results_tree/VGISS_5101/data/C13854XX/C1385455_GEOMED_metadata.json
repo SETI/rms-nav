@@ -1,0 +1,103 @@
+{
+  "confidence": 0.66,
+  "navigation_result": {
+    "confidence": 0.66,
+    "confidence_rank": "medium",
+    "covariance_px2": [
+      [
+        0.0961,
+        0.0
+      ],
+      [
+        0.0,
+        0.0784
+      ]
+    ],
+    "excluded_from_consensus": [],
+    "feature_inventory": [
+      {
+        "feature_id": "ring_edge:SATURN:feature_135_ieg:IEG",
+        "feature_type": "RING_EDGE",
+        "gated": false,
+        "source_model": "rings:SATURN"
+      },
+      {
+        "feature_id": "ring_edge:SATURN:feature_136_oeg:OEG",
+        "feature_type": "RING_EDGE",
+        "gated": true,
+        "source_model": "rings:SATURN"
+      }
+    ],
+    "image_classifier": {
+      "class": "clean",
+      "noise_sigma": 0.75
+    },
+    "offset_px": [
+      -2.75,
+      4.5
+    ],
+    "per_technique": [
+      {
+        "at_edge": false,
+        "confidence": 0.66,
+        "covariance_px2": [
+          [
+            0.25,
+            0.0
+          ],
+          [
+            0.0,
+            0.25
+          ]
+        ],
+        "diagnostics": {
+          "converged": true,
+          "n_iterations": 4
+        },
+        "feature_ids": [
+          "ring_edge:SATURN:y:OEG"
+        ],
+        "offset_px": [
+          -2.7,
+          4.55
+        ],
+        "spurious": false,
+        "technique_name": "RingEdgeNav"
+      }
+    ],
+    "provenance": {
+      "config_hash": "0f1e2d3c4b5a6978",
+      "image_et": -660000000.0,
+      "pipeline_run_iso8601": "2026-05-04T11:22:33",
+      "spindoctor_git_sha": "abc1234",
+      "spindoctor_version": "1.0.0"
+    },
+    "sigma_along_unobservable_px": null,
+    "sigma_px": [
+      0.31,
+      0.28
+    ],
+    "status": "success",
+    "status_reason": "ok"
+  },
+  "observation": {
+    "camera": "NAC",
+    "image_name": "C1385455_GEOMED.IMG",
+    "image_path": "/holdings/C1385455_GEOMED.IMG",
+    "image_shape": [
+      800,
+      800
+    ],
+    "instrument": "vgiss"
+  },
+  "offset": [
+    -2.75,
+    4.5
+  ],
+  "status": "success",
+  "timing": {
+    "elapsed_s": 12.5,
+    "end_iso8601": "2026-05-04T11:22:45",
+    "start_iso8601": "2026-05-04T11:22:33"
+  }
+}

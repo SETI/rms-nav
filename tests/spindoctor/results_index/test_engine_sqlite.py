@@ -451,10 +451,14 @@ def test_a_file_this_user_cannot_open_names_the_permissions(tmp_path: Path) -> N
         path.chmod(0o644)
 
 
-def test_a_driver_error_carrying_no_result_code_keeps_the_lock_message(
+def test_a_driver_error_carrying_no_result_code_invents_no_remedy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Classifying by result code must not fail on an exception that carries none.
+
+    An exception with no code says nothing about locking, so answering it with
+    the locking remedy sends an operator to rebuild a deployment over something
+    that may be a full disk. It is reported as what it is: unclassifiable.
 
     Parameters:
         tmp_path: Directory holding the database.
@@ -465,11 +469,11 @@ def test_a_driver_error_carrying_no_result_code_keeps_the_lock_message(
         pass
     refusing = _refusing_with(Exception('nothing to go on'))
     monkeypatch.setattr(Connection, 'exec_driver_sql', refusing)
-    with pytest.raises(ValueError, match='could not take a SQLite write lock'):
+    with pytest.raises(ValueError, match='no result code'):
         open_index(sqlite_url_for(path))
 
 
-def test_a_result_code_that_is_not_a_name_keeps_the_lock_message(
+def test_a_result_code_that_is_not_a_name_invents_no_remedy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A code that is not text at all is as unclassifiable as no code.
@@ -487,7 +491,7 @@ def test_a_result_code_that_is_not_a_name_keeps_the_lock_message(
         pass
     refusing = _refusing_with(_DriverError('disk I/O error', 5386))
     monkeypatch.setattr(Connection, 'exec_driver_sql', refusing)
-    with pytest.raises(ValueError, match='could not take a SQLite write lock'):
+    with pytest.raises(ValueError, match='no result code'):
         open_index(sqlite_url_for(path))
 
 

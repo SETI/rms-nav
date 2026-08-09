@@ -1,17 +1,31 @@
-"""Shared context, query, formatting, and chart helpers for the statistics report."""
+"""Shared context, query, formatting, and chart helpers for the statistics report.
+
+Every query the report issues goes through :func:`rows`, which runs textual SQL
+with named bind parameters against a SQLAlchemy Core connection.  Named binds
+rather than positional ones because the same filter fragment is spliced into
+statements that already carry binds of their own, and a filter that had to know
+how many came before it would be a filter that broke whenever a section grew a
+condition.
+
+Nothing here is dialect-specific.  The filters compare columns -- including
+``image_number``, which is ingested rather than computed by a function
+registered on one connection -- so the same statement runs on SQLite and on
+PostgreSQL and means the same thing on both.
+"""
 
 import math
 import re
-import sqlite3
 import statistics
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Any
 
+import sqlalchemy
 from filecache import FCPath
 
 __all__ = [
+    'IMAGE_JOIN',
     'ReportContext',
     'add_drilldown',
     'add_instrument_count_table',
@@ -19,11 +33,10 @@ __all__ = [
     'count_pct',
     'fmt',
     'image_name_from_filename',
-    'image_number_from_name',
+    'image_order',
     'instrument_color',
     'offset_stats',
     'percentile',
-    'register_image_number_function',
     'rows',
     'safe_filename',
     'where_clause',
@@ -31,32 +44,6 @@ __all__ = [
     'write_stacked_bar_chart',
     'write_stacked_value_hist',
 ]
-
-
-_IMAGE_NUMBER_RE = re.compile(r'\d+')
-
-
-def image_number_from_name(image_name: str | None) -> int | None:
-    """Numeric portion (first digit run) of an image name's basename.
-
-    ``N1454725799_1_CALIB.IMG`` yields ``1454725799``;
-    ``lor_0003103486_0x630_sci`` yields ``3103486`` (leading zeros drop in
-    the integer).  This is the value the ``--min-image`` / ``--max-image``
-    range filter compares.
-
-    Parameters:
-        image_name: Image name or path, or None.
-
-    Returns:
-        The integer value of the first digit run, or None when the name is
-        None or contains no digits.
-    """
-    if image_name is None:
-        return None
-    match = _IMAGE_NUMBER_RE.search(image_name.rsplit('/', 1)[-1])
-    if match is None:
-        return None
-    return int(match.group(0))
 
 
 # The database records ``observation.image_name``, which is the source file's
@@ -100,16 +87,33 @@ def image_name_from_filename(instrument: str, filename: str) -> str:
     return rule(stem) if rule is not None else stem
 
 
-def register_image_number_function(conn: sqlite3.Connection) -> None:
-    """Register the deterministic ``image_number`` SQL function on a connection.
+def image_order(alias: str = '') -> str:
+    """A total ordering over images, for a query that lists them by name.
 
-    The image-number range filter clauses produced by :func:`where_clause`
-    call this function, so it must be registered before those clauses run.
+    Image name alone is not unique: two volumes may hold images with the same
+    basename, and the pair that keys the row breaks the tie.  Without it two
+    rows with one name would come back in whatever order the backend liked, and
+    the report would not be the same twice.
 
     Parameters:
-        conn: Open statistics database connection.
+        alias: Table alias prefix (e.g. ``'i.'``) qualifying the column names.
+
+    Returns:
+        The ``ORDER BY`` column list.
     """
-    conn.create_function('image_number', 1, image_number_from_name, deterministic=True)
+    return f'{alias}image_name, {alias}root_url, {alias}results_path_stub'
+
+
+IMAGE_JOIN = (
+    'JOIN images i ON i.root_url = {alias}root_url '
+    'AND i.results_path_stub = {alias}results_path_stub'
+)
+"""How a child table joins to the image it belongs to.
+
+An image is keyed by the pair, so a child row is matched on the pair.  Joining
+on the image name alone would merge two volumes' images of the same name into
+one, which is precisely the confusion the pair exists to prevent.
+"""
 
 
 @dataclass
@@ -117,17 +121,16 @@ class ReportContext:
     """Mutable state threaded through every report section builder.
 
     Parameters:
-        conn: Open statistics database connection (with the
-            ``image_number`` SQL function registered).
+        connection: Open connection to the results index.
         output_dir: Directory receiving ``report.md``, charts, and the
             optional ``filelists/`` subdirectory; a local directory or
             any URL the ``filecache`` layer accepts.
         where: Images-table filter from :func:`where_clause` (empty string
             or a leading-space ``' WHERE ...'`` fragment).
-        params: Bind values matching ``where``.
+        params: Bind values matching ``where``, by name.
         where_i: The same filter built with ``alias='i.'`` for queries
             that join the ``images`` table as ``i``.
-        params_i: Bind values matching ``where_i``.
+        params_i: Bind values matching ``where_i``, by name.
         lines: Markdown lines accumulated so far.
         top_n: When positive, categorical sections list up to this many
             example image names per category.
@@ -141,12 +144,12 @@ class ReportContext:
         total_images: Total selected images across all instruments.
     """
 
-    conn: sqlite3.Connection
+    connection: sqlalchemy.Connection
     output_dir: FCPath
     where: str
-    params: list[Any]
+    params: dict[str, Any]
     where_i: str
-    params_i: list[Any]
+    params_i: dict[str, Any]
     lines: list[str] = field(default_factory=list)
     top_n: int = 0
     filelists: bool = False
@@ -158,7 +161,7 @@ class ReportContext:
     def __post_init__(self) -> None:
         """Load the per-instrument image counts the whole report reports against."""
         counts = rows(
-            self.conn,
+            self.connection,
             f'SELECT instrument, COUNT(*) FROM images{self.where} '
             'GROUP BY instrument ORDER BY instrument',
             self.params,
@@ -195,45 +198,60 @@ def where_clause(
     end_date: str | None,
     min_image_num: int | None = None,
     max_image_num: int | None = None,
+    roots: list[str] | None = None,
     alias: str = '',
-) -> tuple[str, list[Any]]:
+) -> tuple[str, dict[str, Any]]:
     """Build the images-table filter shared by every query.
+
+    The binds are named rather than positional because the fragment is spliced
+    into statements that carry binds of their own; a positional fragment would
+    have to know how many came before it.
+
+    ``image_number`` is a column, so the range filter is an ordinary comparison
+    on any backend rather than a call into a function registered on whichever
+    connection happened to be open.
 
     Parameters:
         instrument: Optional instrument filter value.
         start_date: Optional inclusive UTC start date (``YYYY-MM-DD``).
         end_date: Optional inclusive UTC end date (``YYYY-MM-DD``).
         min_image_num: Optional inclusive lower bound on the numeric
-            portion of the image name (requires
-            :func:`register_image_number_function`).
+            portion of the image name.
         max_image_num: Optional inclusive upper bound on the numeric
             portion of the image name.
+        roots: Optional normalized results-root URLs to restrict to; None or
+            an empty list reports over every root the index holds.
         alias: Table alias prefix (e.g. ``'i.'``) qualifying the column
             names, for queries that join the ``images`` table.
 
     Returns:
         ``(where, params)`` where ``where`` is ``''`` or a leading-space
-        ``' WHERE ...'`` fragment and ``params`` the bound values.
+        ``' WHERE ...'`` fragment and ``params`` the bound values by name.
     """
     clauses: list[str] = []
-    params: list[Any] = []
+    params: dict[str, Any] = {}
     if instrument is not None:
-        clauses.append(f'{alias}instrument = ?')
-        params.append(instrument)
+        clauses.append(f'{alias}instrument = :instrument')
+        params['instrument'] = instrument
     if start_date is not None:
-        clauses.append(f'{alias}image_date >= ?')
-        params.append(start_date)
+        clauses.append(f'{alias}image_date >= :start_date')
+        params['start_date'] = start_date
     if end_date is not None:
-        clauses.append(f'{alias}image_date <= ?')
-        params.append(end_date)
+        clauses.append(f'{alias}image_date <= :end_date')
+        params['end_date'] = end_date
     if min_image_num is not None:
-        clauses.append(f'image_number({alias}image_name) >= ?')
-        params.append(min_image_num)
+        clauses.append(f'{alias}image_number >= :min_image_num')
+        params['min_image_num'] = min_image_num
     if max_image_num is not None:
-        clauses.append(f'image_number({alias}image_name) <= ?')
-        params.append(max_image_num)
+        clauses.append(f'{alias}image_number <= :max_image_num')
+        params['max_image_num'] = max_image_num
+    if roots:
+        names = [f'root_{index}' for index in range(len(roots))]
+        placeholders = ', '.join(f':{name}' for name in names)
+        clauses.append(f'{alias}root_url IN ({placeholders})')
+        params.update(zip(names, roots, strict=True))
     if len(clauses) == 0:
-        return '', []
+        return '', {}
     return ' WHERE ' + ' AND '.join(clauses), params
 
 
@@ -251,18 +269,20 @@ def connector(where: str) -> str:
     return ' AND ' if len(where) > 0 else ' WHERE '
 
 
-def rows(conn: sqlite3.Connection, sql: str, params: list[Any]) -> list[tuple[Any, ...]]:
+def rows(
+    connection: sqlalchemy.Connection, sql: str, params: dict[str, Any]
+) -> list[tuple[Any, ...]]:
     """Execute a query and return all result rows as a list.
 
     Parameters:
-        conn: Open statistics database connection.
-        sql: SQL statement with ``?`` placeholders.
-        params: Bind values matching the placeholders.
+        connection: Open connection to the results index.
+        sql: SQL statement with ``:name`` bind placeholders.
+        params: Bind values by name.
 
     Returns:
-        All result rows, in query order.
+        All result rows, in query order, as plain tuples.
     """
-    return list(conn.execute(sql, params))
+    return [tuple(row) for row in connection.execute(sqlalchemy.text(sql), params)]
 
 
 def fmt(value: float | None, digits: int = 3) -> str:
