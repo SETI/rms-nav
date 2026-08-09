@@ -138,7 +138,8 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         action='store_true',
         default=False,
         help="""Read every document, including ones whose recorded size and
-        modification time still match the tree.""",
+        modification time still match the tree. Refused with
+        --complete-cloud-tasks-file, which reads no document.""",
     )
 
     cloud_group = cmdparser.add_argument_group('Cloud tasks')
@@ -253,6 +254,13 @@ def _log_completion(completion: TaskCompletion) -> None:
             'found: %s',
             root,
         )
+    for root in completion.roots_unlisted:
+        MAIN_LOGGER.error(
+            'Left unfinished, because its ingest run never recorded what its listing found, '
+            'so nothing says what this root holds: %s. Divide the root up with '
+            '--output-cloud-tasks-file, run its tasks, and complete that run.',
+            root,
+        )
     for root in completion.roots_without_a_run:
         MAIN_LOGGER.error(
             'No unfinished ingest run to complete for %s: run --output-cloud-tasks-file over '
@@ -273,6 +281,19 @@ def _log_completion(completion: TaskCompletion) -> None:
             'Task results naming an ingest run none of these roots is waiting on: %d. They '
             'belong to another fan-out, and are left for whoever completes it.',
             completion.results_unclaimed,
+        )
+    if completion.results_superseded:
+        MAIN_LOGGER.info(
+            'Task results superseded by a later report of the same task: %d. A queue '
+            'delivers a task again whenever it could not see the last delivery '
+            'acknowledged, and one share reported twice is still one share.',
+            completion.results_superseded,
+        )
+    if completion.results_unidentified:
+        MAIN_LOGGER.error(
+            'Task results naming no task: %d. One of them cannot be told from a repeat of '
+            'another, so none of them is counted toward a run.',
+            completion.results_unidentified,
         )
 
 
@@ -352,10 +373,18 @@ def _complete_cloud_tasks(engine: sqlalchemy.Engine, roots: list[str], *, path: 
 
     Returns:
         The exit status: 0 when every named root's ingest run was completed, 1
-        when one was not.
+        when one was not, and 1 when the event log could not be read.
     """
     MAIN_LOGGER.info('Reading task results from %s', path)
-    found = task_results_from_event_log(FCPath(path))
+    try:
+        found = task_results_from_event_log(FCPath(path))
+    except OSError as exc:
+        # An ordinary mistyped path, which the pass enumerates and charges to
+        # the file rather than letting out as a traceback.  Every named root
+        # keeps its unfinished run, so no consumer reads absence under one of
+        # them as an answer.
+        MAIN_LOGGER.fatal('Cannot read the task event log %s: %s', path, exc)
+        return 1
     MAIN_LOGGER.info('Task results read: %d', len(found.results))
     if found.lines_unread:
         MAIN_LOGGER.warning(
@@ -372,7 +401,10 @@ def _complete_cloud_tasks(engine: sqlalchemy.Engine, roots: list[str], *, path: 
         )
     completion = complete_ingest_tasks(engine, roots, found.results, logger=MAIN_LOGGER)
     _log_completion(completion)
-    return 1 if completion.roots_unaccounted or completion.roots_without_a_run else 0
+    unfinished = (
+        completion.roots_unaccounted + completion.roots_unlisted + completion.roots_without_a_run
+    )
+    return 1 if unfinished else 0
 
 
 def main() -> None:
@@ -393,8 +425,9 @@ def main() -> None:
             documents is a completed pass and exits 0, and exits 0 again on the
             next pass over the same tree, so a scheduled run's status means the
             same thing every time it is read.  Completing a fan-out exits 1 when
-            a named root has no unfinished run, or when its tasks did not
-            account for every file its listing found.
+            the event log cannot be read, when a named root has no unfinished
+            run, when its run never recorded what its listing found, or when its
+            tasks did not account for every file that listing found.
     """
     command_list = sys.argv[1:]
     arguments = parse_args(command_list)
@@ -425,16 +458,29 @@ def main() -> None:
         MAIN_LOGGER.fatal('No navigation results root was named: %s', exc)
         sys.exit(1)
 
-    MAIN_LOGGER.info('Starting results index ingest')
-    MAIN_LOGGER.info('Roots: %s', ', '.join(roots))
-    MAIN_LOGGER.info('Force: %s', arguments.force)
-    MAIN_LOGGER.info('Arguments: %s', masked_command_line(command_list))
-
     # Completing a fan-out reads runs the fan-out already recorded, so an index
     # that is not there is a wrong URL rather than a first run: creating an
     # empty one would answer "no run to complete" for a root whose run is
     # sitting in the index the operator meant to name.
     completing = arguments.complete_cloud_tasks_file is not None
+
+    MAIN_LOGGER.info('Starting results index ingest')
+    MAIN_LOGGER.info('Roots: %s', ', '.join(roots))
+    if not completing:
+        MAIN_LOGGER.info('Force: %s', arguments.force)
+    MAIN_LOGGER.info('Arguments: %s', masked_command_line(command_list))
+
+    if completing and arguments.force:
+        # Refused rather than ignored.  Completion reads no document, so there
+        # is nothing for --force to re-read; an operator who typed it meant the
+        # shares to be read again, and that is a property of the fan-out that
+        # cut them, decided one step earlier.
+        MAIN_LOGGER.fatal(
+            '--force has no meaning when adding up what the workers did, since no document '
+            'is read here. Re-run --output-cloud-tasks-file with --force and run the tasks '
+            'it writes.'
+        )
+        sys.exit(1)
     try:
         engine = open_index(url, create=not completing)
     except ValueError as exc:

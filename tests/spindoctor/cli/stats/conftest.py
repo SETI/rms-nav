@@ -28,6 +28,7 @@ from tests.spindoctor.results_index.conftest import (
 
 from spindoctor.cli.stats.ingest import (
     IngestCounts,
+    TaskResult,
     complete_ingest_tasks,
     fan_out_ingest_tasks,
     ingest_metadata_files,
@@ -346,8 +347,30 @@ def build_tree(root: Path, count: int) -> list[str]:
     return sorted(stubs)
 
 
+def root_strings(roots: Sequence[Path | str]) -> list[str]:
+    """Render results roots as the strings a command line would carry.
+
+    A root reaches a program as text, and two spellings of one root -- with and
+    without a trailing separator -- are one root.  A test asking about that has
+    to hand the spelling over untouched, which a ``Path`` cannot do: it drops a
+    trailing separator the moment it is constructed.
+
+    Parameters:
+        roots: The roots, as paths or as the strings an operator typed.
+
+    Returns:
+        One string per root.
+    """
+    return [root.as_posix() if isinstance(root, Path) else root for root in roots]
+
+
 def fan_out(
-    url: str, roots: list[Path], *, logger: pdslogger.PdsLogger, share_size: int = 2, **options: Any
+    url: str,
+    roots: Sequence[Path | str],
+    *,
+    logger: pdslogger.PdsLogger,
+    share_size: int = 2,
+    **options: Any,
 ) -> list[dict[str, Any]]:
     """Create an index and divide the given roots into tasks.
 
@@ -365,7 +388,7 @@ def fan_out(
     try:
         return fan_out_ingest_tasks(
             engine,
-            [root.as_posix() for root in roots],
+            root_strings(roots),
             share_size=share_size,
             logger=logger,
             **options,
@@ -376,7 +399,7 @@ def fan_out(
 
 def run_shares(
     url: str, tasks: Sequence[dict[str, Any]], *, logger: pdslogger.PdsLogger
-) -> list[dict[str, Any]]:
+) -> list[TaskResult]:
     """Ingest every task's share, one after another, as one worker would.
 
     Parameters:
@@ -385,17 +408,42 @@ def run_shares(
         logger: Logger the shares report through.
 
     Returns:
-        What each share returned, in task order.
+        What each share returned, under the task that returned it, in task
+        order.  A completion tells one task's report from another's by that
+        identity, so the helper that runs the shares is where it is attached.
     """
     engine = open_index(url)
     try:
-        return [ingest_task_share(engine, task['data'], logger=logger) for task in tasks]
+        return [
+            TaskResult(
+                task_id=str(task['task_id']),
+                result=ingest_task_share(engine, task['data'], logger=logger),
+            )
+            for task in tasks
+        ]
     finally:
         engine.dispose()
 
 
+def reported(task_id: str, result: dict[str, Any]) -> TaskResult:
+    """Return one hand-built task result under the task that reported it.
+
+    Parameters:
+        task_id: The identity the queue ran the task under.
+        result: What that task returned.
+
+    Returns:
+        The pair a completion reads.
+    """
+    return TaskResult(task_id=task_id, result=result)
+
+
 def complete(
-    url: str, roots: list[Path], results: Sequence[dict[str, Any]], *, logger: pdslogger.PdsLogger
+    url: str,
+    roots: Sequence[Path | str],
+    results: Sequence[TaskResult],
+    *,
+    logger: pdslogger.PdsLogger,
 ) -> Any:
     """Add up the shares of the given roots and stamp what they completed.
 
@@ -410,9 +458,7 @@ def complete(
     """
     engine = open_index(url)
     try:
-        return complete_ingest_tasks(
-            engine, [root.as_posix() for root in roots], results, logger=logger
-        )
+        return complete_ingest_tasks(engine, root_strings(roots), results, logger=logger)
     finally:
         engine.dispose()
 
@@ -457,7 +503,7 @@ def run_rows(url: str) -> list[Any]:
 
 
 def cycle(
-    tmp_path: Path, roots: list[Path], *, logger: pdslogger.PdsLogger, share_size: int = 2
+    tmp_path: Path, roots: Sequence[Path | str], *, logger: pdslogger.PdsLogger, share_size: int = 2
 ) -> str:
     """Fan out, ingest every share, and complete, over the given roots.
 

@@ -36,6 +36,15 @@ completion instead would mean listing the whole root a second time -- the most
 expensive thing an ingest does, and a paid round trip per directory on a cloud
 root -- to act on evidence no share ever came from.
 
+That disjointness is a claim about one fan-out.  Two overlapping fan-outs
+against one root can leave a stale row behind -- a worker of the first writes a
+stub after the second has read what is recorded and before it deletes, for a
+document that left the tree between the two listings -- which the next pass
+removes.  The prune is also destructive before any document has been read, so an
+abandoned fan-out shrinks the index, but only by rows whose documents have
+genuinely left the tree; and the run is unfinished throughout either way, so no
+consumer reads the root while it is happening.
+
 What makes a run finishable
 ---------------------------
 
@@ -44,12 +53,20 @@ shares account for at least that many files between them, because a task that
 never reported leaves its documents unread, and a run stamped without them
 would tell every consumer that absence of their rows means those images were
 never navigated.
+
+Two things make that arithmetic mean what it says.  Each task's report counts
+once, however many times the queue delivered it: over- and under-accounting
+would otherwise cancel, and one share reported twice would cover for a share
+that never ran.  And a run whose listing was never recorded -- a root nothing
+could list, a pass that died before it had one -- is never stamped at all,
+because a run that never established what its root holds has nothing for its
+shares to be measured against.
 """
 
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 import sqlalchemy
 from filecache import FCPath
@@ -65,6 +82,7 @@ from spindoctor.cli.stats.ingest.driver import (
 from spindoctor.cli.stats.ingest.runs import (
     _finish_run,
     _record_fan_out,
+    _record_shares,
     _start_run,
     _unfinished_run,
 )
@@ -76,12 +94,16 @@ __all__ = [
     'INGEST_TASK_SHARE_SIZE',
     'FanOut',
     'TaskCompletion',
+    'TaskResult',
     'TaskResults',
     'complete_ingest_tasks',
     'fan_out_ingest_tasks',
     'ingest_task_share',
     'task_results_from_event_log',
 ]
+
+_ReasonValue = TypeVar('_ReasonValue', int, str)
+"""What one entry of a share's per-reason maps holds: a count, or an example."""
 
 INGEST_TASK_SHARE_SIZE = 512
 """How many metadata files one task is handed.
@@ -165,12 +187,32 @@ class FanOut:
     counts: IngestCounts = field(default_factory=IngestCounts)
 
 
+@dataclass(frozen=True)
+class TaskResult:
+    """What one task returned, with the identity the queue ran it under.
+
+    The identity travels with the value because a task is delivered more than
+    once as a matter of course -- a queue redelivers whatever it could not see
+    acknowledged, and an operator re-runs a task file after a partial failure --
+    and two reports of one share are still one share.
+
+    Parameters:
+        task_id: The task's identifier, as the fan-out minted it, or None when
+            the event carried none.
+        result: The value ``process_task`` returned.
+    """
+
+    task_id: str | None
+    result: dict[str, Any]
+
+
 @dataclass
 class TaskResults:
     """What one worker event log holds.
 
     Parameters:
-        results: The values ``process_task`` returned, newest last.
+        results: The values ``process_task`` returned, each with the task it
+            came from, newest last.
         lines_unread: Lines of the log that are not JSON objects.  An event log
             is appended to while it is being written, so a partial last line is
             ordinary; a great many of them says the file is not an event log.
@@ -180,7 +222,7 @@ class TaskResults:
             stamped.
     """
 
-    results: list[dict[str, Any]] = field(default_factory=list)
+    results: list[TaskResult] = field(default_factory=list)
     lines_unread: int = 0
     tasks_unfinished: int = 0
 
@@ -195,6 +237,9 @@ class TaskCompletion:
         roots_unaccounted: Roots whose shares did not account for every file
             the fan-out saw, each named with the shortfall.  Their runs keep
             their NULL finish times.
+        roots_unlisted: Roots whose run never recorded what its listing found,
+            each named.  Nothing says what such a root holds, so no account of
+            it can be complete and its run is never stamped.
         roots_without_a_run: Roots with no unfinished run to complete, each
             named.
         results_unclaimed: Task results naming a run none of the given roots is
@@ -203,15 +248,44 @@ class TaskCompletion:
             instead of a share.
         results_unreadable: Task results that are not the shape a worker
             returns at all.
+        results_superseded: Task results replaced by a later report of the same
+            task, and therefore counted once between them.
+        results_unidentified: Task results carrying no task identity.  One of
+            them cannot be told from a repeat of another, so none is counted
+            toward a run.
     """
 
     counts: IngestCounts = field(default_factory=IngestCounts)
     runs_completed: int = 0
     roots_unaccounted: list[str] = field(default_factory=list)
+    roots_unlisted: list[str] = field(default_factory=list)
     roots_without_a_run: list[str] = field(default_factory=list)
     results_unclaimed: int = 0
     results_failed: int = 0
     results_unreadable: int = 0
+    results_superseded: int = 0
+    results_unidentified: int = 0
+
+
+def _distinct_roots(roots: Sequence[str]) -> list[str]:
+    """Normalize the given roots and drop the repeats, keeping their order.
+
+    ``/data/x`` and ``/data/x/`` are one root, and a command line naming both
+    means the tree once.  Walking it twice would hand every document out in two
+    shares, leave the first of its two runs unfinished forever, and -- since a
+    completion stamps the newest run and then finds nothing outstanding -- tell
+    the operator that a root it has just finished was never divided up.
+
+    Parameters:
+        roots: The roots as their holder spelled them.
+
+    Returns:
+        The normalized roots, first spelling first.
+    """
+    distinct: dict[str, None] = {}
+    for root in roots:
+        distinct.setdefault(normalize_root_url(root), None)
+    return list(distinct)
 
 
 def _task_files(files: Sequence[_ListedFile], summary_stubs: set[str]) -> list[dict[str, Any]]:
@@ -259,6 +333,8 @@ def fan_out_ingest_tasks(
     exactly as it does in a pass that reads the documents itself: a mistyped or
     unmounted root is not an empty one.
 
+    Two spellings of one root are one root, and are listed and divided up once.
+
     Parameters:
         engine: The open index, which must already carry the schema.
         roots: Navigation results roots, each normalized to the form the rows
@@ -277,8 +353,7 @@ def fan_out_ingest_tasks(
     if share_size < 1:
         raise ValueError(f'a task share holds at least one file, not {share_size}')
     fan_out = FanOut()
-    for root_str in roots:
-        root_url = normalize_root_url(root_str)
+    for root_url in _distinct_roots(roots):
         root = FCPath(root_url)
         counts = IngestCounts()
         run_id = _start_run(engine, root_url)
@@ -354,6 +429,12 @@ def _required(task_data: dict[str, Any], key: str, kind: type) -> Any:
 def _share_from_task(task_data: dict[str, Any]) -> _Share:
     """Read one task's data into the share it describes.
 
+    The root is normalized here as well as at fan-out.  The rows a share writes
+    carry it as half of their primary key, and a task file is an operator-visible
+    artifact that can be written or edited by hand: a share left to write under
+    an unnormalized spelling would produce rows no consumer's lookup matches,
+    and the run would still be stamped because the counts add up.
+
     Parameters:
         task_data: The task data, as the fan-out wrote it.
 
@@ -367,8 +448,13 @@ def _share_from_task(task_data: dict[str, Any]) -> _Share:
             a root nobody named, and a consumer cannot tell such a row from a
             correct one.
     """
+    if not isinstance(task_data, dict):
+        # A queue that delivered something else is a malformed task like any
+        # other, and the driver turns this into a task result rather than a
+        # traceback out of the worker.
+        raise ValueError(f'the task data is {type(task_data).__name__}, not an object')
     run_id = int(_required(task_data, 'run_id', int))
-    root_url = str(_required(task_data, 'root_url', str))
+    root_url = normalize_root_url(str(_required(task_data, 'root_url', str)))
     force = bool(_required(task_data, 'force', bool))
     has_file_metrics = bool(_required(task_data, 'has_file_metrics', bool))
     entries = _required(task_data, 'files', list)
@@ -421,8 +507,11 @@ def ingest_task_share(
 
     Returns:
         The task result: the run and root it belongs to, how many files it
-        ingested, skipped and could not read, and the name of every file it
-        could not read.
+        ingested, skipped and could not read, the name of every file it could
+        not read, and how many failed for each reason with one example of each.
+        The reasons travel because the program that adds the shares up has no
+        other way to report them, and a divided ingest would otherwise report a
+        count of unreadable files with nothing to say about them.
 
     Raises:
         ValueError: If the task data is not the shape a fan-out produces.
@@ -459,6 +548,8 @@ def ingest_task_share(
         'files_skipped': counts.files_skipped,
         'files_failed': counts.files_failed,
         'failed_files': counts.failed_files,
+        'failures_by_reason': counts.failures_by_reason,
+        'example_by_reason': counts.example_by_reason,
     }
 
 
@@ -468,37 +559,75 @@ def task_results_from_event_log(path: FCPath) -> TaskResults:
     The log is JSON Lines, one event per line, written as each task ends.  Only
     the events that carry a return value are of interest here; the rest are
     counted, because a task that ended without returning one read none of its
-    documents.
+    documents.  Each value keeps the identifier of the task it came from, which
+    is what lets a task delivered twice be counted once.
+
+    The file is read a line at a time rather than whole: an archive-scale run's
+    log carries a line per task naming every file that task could not read.
 
     Parameters:
         path: The event log.
 
     Returns:
         The returned values, and what else the log held.
+
+    Raises:
+        OSError: If the log cannot be read.  A path that names no file is the
+            caller's to report, since only the caller knows how the operator
+            spelled it.
     """
     found = TaskResults()
-    for line in path.read_text().splitlines():
-        if not line.strip():
-            continue
-        try:
-            event = json.loads(line)
-        except ValueError:
-            found.lines_unread += 1
-            continue
-        if not isinstance(event, dict):
-            found.lines_unread += 1
-            continue
-        event_type = event.get('event_type')
-        if not isinstance(event_type, str) or not event_type.startswith(_TASK_EVENT_PREFIX):
-            continue
-        if event_type != TASK_COMPLETED_EVENT:
-            found.tasks_unfinished += 1
-            continue
-        result = event.get('result')
-        if isinstance(result, dict):
-            found.results.append(result)
-        else:
-            found.tasks_unfinished += 1
+    with path.open('r', encoding='utf-8') as file:
+        for line in file:
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except ValueError:
+                found.lines_unread += 1
+                continue
+            if not isinstance(event, dict):
+                found.lines_unread += 1
+                continue
+            event_type = event.get('event_type')
+            if not isinstance(event_type, str) or not event_type.startswith(_TASK_EVENT_PREFIX):
+                continue
+            if event_type != TASK_COMPLETED_EVENT:
+                found.tasks_unfinished += 1
+                continue
+            result = event.get('result')
+            if not isinstance(result, dict):
+                found.tasks_unfinished += 1
+                continue
+            task_id = event.get('task_id')
+            found.results.append(
+                TaskResult(task_id=task_id if isinstance(task_id, str) else None, result=result)
+            )
+    return found
+
+
+def _reason_map(value: Any, kind: type[_ReasonValue]) -> dict[str, _ReasonValue]:
+    """Read one of a share's per-reason maps, keeping the entries it can read.
+
+    These maps are the diagnosis rather than the account.  What licenses a run's
+    stamp is the three counts beside them, which are complete without these, so
+    an entry of another shape costs its own reason and nothing else -- where a
+    count of another shape refuses the whole tally and leaves the run unfinished.
+
+    Parameters:
+        value: The map as the task result carried it, whatever it turned out
+            to be.
+        kind: What one entry holds: a count, or an example file.
+
+    Returns:
+        The entries that are a reason and a value of that kind.
+    """
+    if not isinstance(value, dict):
+        return {}
+    found: dict[str, _ReasonValue] = {}
+    for reason, entry in value.items():
+        if isinstance(reason, str) and isinstance(entry, kind) and not isinstance(entry, bool):
+            found[reason] = entry
     return found
 
 
@@ -522,34 +651,79 @@ def _share_tally(result: dict[str, Any]) -> tuple[int, IngestCounts] | None:
         if isinstance(value, bool) or not isinstance(value, int):
             return None
         setattr(counts, name, value)
+    counts.failures_by_reason = _reason_map(result.get('failures_by_reason'), int)
+    counts.example_by_reason = _reason_map(result.get('example_by_reason'), str)
     return run_id, counts
+
+
+def _latest_of_each_task(
+    results: Sequence[TaskResult], completion: TaskCompletion
+) -> list[dict[str, Any]]:
+    """Return one value per task: the last one that task reported.
+
+    A queue delivers a task again whenever it could not see the last delivery
+    acknowledged, and an operator re-runs a task file after a partial failure,
+    so a log holds several reports of one share as a matter of course.  Adding
+    them all up would let over- and under-accounting cancel: one share reported
+    twice covers for a share that never ran, and the run is stamped with its
+    documents unread.
+
+    The last report wins rather than the first, because a task that failed and
+    was re-run reports its failure first and its share second, and the later
+    report is the one that says what the index now holds.
+
+    Parameters:
+        results: The values the workers returned, in the order the log holds
+            them.
+        completion: Outcome the repeats and the unidentifiable are counted on.
+
+    Returns:
+        One value per task.
+    """
+    latest: dict[str, dict[str, Any]] = {}
+    for found in results:
+        if found.task_id is None:
+            # Nothing tells this apart from a repeat of another result, and
+            # counting it could only ever inflate an account, so it counts
+            # toward no run at all.
+            completion.results_unidentified += 1
+            continue
+        if found.task_id in latest:
+            completion.results_superseded += 1
+        latest[found.task_id] = found.result
+    return list(latest.values())
 
 
 def complete_ingest_tasks(
     engine: sqlalchemy.Engine,
     roots: list[str],
-    results: Sequence[dict[str, Any]],
+    results: Sequence[TaskResult],
     *,
     logger: PdsLogger,
 ) -> TaskCompletion:
     """Add the shares up and stamp the runs they completed.
 
     A run is stamped only when its shares account for at least as many files as
-    the fan-out's walk saw.  A share that never reported -- a task that failed,
-    timed out, or was never run -- leaves its documents unread, and stamping the
-    run anyway would tell every consumer that the absence of their rows means
-    those images were never navigated.  Such a root keeps its unfinished run and
-    is named instead.
+    the fan-out's walk saw, counting each task's report once however many times
+    it was delivered.  A share that never reported -- a task that failed, timed
+    out, or was never run -- leaves its documents unread, and stamping the run
+    anyway would tell every consumer that the absence of their rows means those
+    images were never navigated.  Such a root keeps its unfinished run and is
+    named instead, with what its shares did recorded on the run so that an
+    operator can see how far it got.
 
-    A share counted twice is not a shortfall.  A retried task re-reads nothing,
-    because its files already match what the index records, so it reports its
-    share as skipped and the total runs past what the walk saw.
+    A run whose walk was never recorded is not stamped either, whatever its
+    shares say.  A root nothing could list and a pass that died before it had a
+    listing both leave a run that never established what the root holds, and
+    zero files seen is what a root that was listed and is genuinely empty
+    records -- so the two must not be read the same way.
 
     Parameters:
         engine: The open index.
-        roots: The navigation results roots whose runs are being completed,
-            normalized the way the fan-out normalized them.
-        results: The values the workers returned.
+        roots: The navigation results roots whose runs are being completed.  Two
+            spellings of one root are one root, completed once.
+        results: The values the workers returned, each with the task it came
+            from.
         logger: Logger for the per-root outcome.
 
     Returns:
@@ -558,7 +732,7 @@ def complete_ingest_tasks(
     completion = TaskCompletion()
     by_run: dict[int, IngestCounts] = {}
     results_of_run: dict[int, int] = {}
-    for result in results:
+    for result in _latest_of_each_task(results, completion):
         if result.get('status') != 'ok':
             # A worker that could not open the index, or was handed a task it
             # could not read, reports that instead of a tally.  Its files were
@@ -577,8 +751,7 @@ def complete_ingest_tasks(
         by_run.setdefault(run_id, IngestCounts()).add(counts)
         results_of_run[run_id] = results_of_run.get(run_id, 0) + 1
     claimed: set[int] = set()
-    for root_str in roots:
-        root_url = normalize_root_url(root_str)
+    for root_url in _distinct_roots(roots):
         with engine.connect() as connection:
             run = _unfinished_run(connection, root_url)
         if run is None:
@@ -586,11 +759,25 @@ def complete_ingest_tasks(
             continue
         claimed.add(run.run_id)
         counts = by_run.get(run.run_id, IngestCounts())
-        counts.files_seen = run.files_seen or 0
+        if run.files_seen is None:
+            completion.roots_unlisted.append(root_url)
+            logger.error(
+                'The ingest run of %s never recorded what its listing found, so there is '
+                'nothing its tasks can be measured against and the run is left unfinished: '
+                'divide the root up again, and complete the run that fanned out',
+                root_url,
+            )
+            completion.counts.add(counts)
+            continue
+        counts.files_seen = run.files_seen
         counts.files_removed = run.files_removed or 0
         counts.directories_missed = run.directories_missed or 0
         accounted = counts.files_ingested + counts.files_skipped + counts.files_failed
         if accounted < counts.files_seen:
+            # What the shares that did report did is written down without a
+            # finish time: the run stays unreadable, and an operator inspecting
+            # it can see how far the pass got rather than a row of zeros.
+            _record_shares(engine, run.run_id, counts)
             completion.roots_unaccounted.append(
                 f'{root_url} ({accounted} of {counts.files_seen} file(s) accounted for)'
             )

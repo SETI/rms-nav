@@ -697,7 +697,11 @@ arguments (and is added to the `_CLOUD_TASK_DRIVERS` list in
 exactly that). A cloud ingest worker has no run log and no per-image scope;
 its outcome -- counts of ingested, skipped, and failed files, with the
 failing files named -- is **returned in the task result**, which the
-enqueuer aggregates.
+enqueuer aggregates. The result carries the per-reason tally of section 2.7
+beside the names, with one example file per reason, because the enqueuer's
+closing summary is the only place a divided ingest can report why files were
+refused and a bare count of refusals reads the same whether a tree holds many
+documents that were never navigation results or the ingest went wrong.
 
 A task carries the files of its share as the enqueuer's own walk reported them
 -- each with its stub, `mtime_ns`, `size_bytes` and summary-PNG flag, plus the
@@ -706,7 +710,8 @@ all -- and the worker ingests exactly those. It stats nothing and checks for
 nothing: the one listing of the pass is the enqueuer's, and everything a worker
 would otherwise ask the tree travels with the task. The worker applies the
 incremental skip of section 2.7 to its own share, against what the index records
-for its own stubs, so a retried task reads nothing and costs one query.
+for its own stubs, so a retried task reads no document at all and costs a lookup
+over its own stubs instead.
 
 **A worker never prunes.** Removing the rows of documents that have left the
 tree (section 2.7) is licensed by a complete listing of the root, and a worker
@@ -761,10 +766,30 @@ shares that named that run and refuses to stamp a run that falls short. A task
 that failed, timed out, or was never run read none of its documents, and a run
 stamped without them tells every consumer that absence of their rows means those
 images were never navigated -- the one claim the run bookkeeping exists to
-license. An account that runs *past* the listing is not a shortfall: a retried
-task reports its share a second time, as skipped. A worker that reported an error
-rather than a share is likewise a shortfall, so an unopenable index or a
-malformed task leaves the root unfinished rather than silently shrinking it.
+license. A worker that reported an error rather than a share is likewise a
+shortfall, so an unopenable index or a malformed task leaves the root unfinished
+rather than silently shrinking it.
+
+Two rules are what make that sum mean what it says.
+
+**Each task's report counts once**, taken under the `task_id` its event carries,
+which the fan-out mints uniquely per share. A queue redelivers a task whenever
+it could not see the delivery acknowledged, and an operator re-runs a task file
+after a partial failure; a retried task reads nothing and reports its share a
+second time, as skipped. Added twice, that report covers for a share that never
+ran at all: over- and under-accounting cancel, the sum reaches the number the
+walk found, and the run is stamped with its documents unread. The later report
+of a task supersedes the earlier one, since a task that failed and was re-run
+reports its failure first. A result carrying no task identity cannot be told
+from a repeat of another and so counts toward no run.
+
+**A run whose listing was never recorded is never stamped**, whatever its shares
+say. No files seen is not zero files seen: zero is what a root that was listed
+and holds nothing records, and only zero can be accounted for by no shares at
+all. A root the walk could not list keeps a run with no `files_seen`, exactly as
+section 2.7 requires, and so does a pass that died between starting its run and
+listing its root; reading either as zero completes a root nobody ever listed and
+hands every consumer a tree of images to read as never navigated.
 
 ### 2.9 Consumers
 
@@ -1150,7 +1175,29 @@ Details settled during execution, none of them a change of intent:
   decided. The reasoning is in section 2.8 above; the short form is that fan-out
   is the only moment of the pass holding the complete listing the prune is
   licensed by, and it is the listing the shares were cut from, so the prune and
-  the workers' writes cannot touch the same stub.
+  the workers' writes cannot touch the same stub. Within one fan-out this is an
+  ordering guarantee rather than only a set argument: the prune runs before the
+  task descriptions are built, so no worker of that pass exists while it runs.
+  Two limits are worth recording. The disjointness is a claim about **one**
+  fan-out: two overlapping fan-outs against one root can leave a stale row, when
+  a worker of the first writes a stub after the second's snapshot of what is
+  recorded and before its delete, for a document that left the tree between the
+  two listings. It is narrow, and the next pass removes the row. And the prune
+  is destructive before any document has been read, so a fan-out that is
+  abandoned shrinks the index -- but only by rows whose documents have genuinely
+  left the tree, and the run is unfinished throughout, so no consumer reads the
+  root either way.
+- **Each task's report is counted once, under its `task_id`**, and a run whose
+  listing was never recorded is never stamped. Both are in section 2.8 above.
+  Summing files alone lets a share reported twice cover for a share that never
+  ran, and reading an unrecorded listing as zero files stamps a root nobody
+  listed; either one hands consumers a tree of images to read as never
+  navigated, which is the claim the run bookkeeping exists to license.
+- **Two spellings of one root are one root**, at the fan-out and at the
+  completion. Listed twice, every document is handed out in two shares and read
+  twice, the first of the two runs is left unfinished for good, and the
+  completion stamps the newer run and then reports the root it has just finished
+  as one nobody divided up.
 - **The seam lives in `spindoctor/cli/stats/ingest/tasks.py`**, beside the pass
   it divides: fan-out, one share, and the completion that adds them up are the
   same three stages `driver.py` runs in one process, and both read the same
@@ -1165,6 +1212,12 @@ Details settled during execution, none of them a change of intent:
 - **A share names every file it could not read**, which a pass over a whole
   root does not: the fan-out bounds a share, and a worker has no run log to name
   them in instead. The whole-root pass keeps one example per reason, as before.
+  The share's result carries that per-reason tally as well as the names, and the
+  completion folds it into the summary it writes, so a divided ingest reports
+  why files were refused exactly as a single-process pass does. The names stay
+  in the event log: a summary that listed several hundred thousand of them would
+  read as a broken ingest rather than as the ordinary thing it is, which is why
+  the whole-root pass keeps one example per reason in the first place.
 - **A run row carries what the fan-out found before it is finished.**
   `files_seen`, `files_removed` and `directories_missed` are written at fan-out
   with the finish time left NULL, because nothing later in the pass can find
@@ -1342,11 +1395,13 @@ File as tracking issues alongside the implementation issue:
   2.5 has it refuse in both modes, so a consumer opening a SQLite index while
   an ingest holds a write transaction waits out the busy timeout and can then
   fail with the filesystem-and-PostgreSQL message though nothing is wrong. It
-  is the plan's own rule and is left as written here; whether a `create=False`
-  open should probe with a read instead is still open. Phase 3 makes the
-  collision routine -- every worker of a local SQLite run opens while its peers
-  hold write transactions -- and the busy timeout absorbs it there, so the
-  remaining exposure is a consumer opening the index during a long ingest.
+  is the plan's own rule and is left as written here. Cloud-task ingest makes
+  the collision routine rather than occasional: a worker opens the index once
+  per task, so a local SQLite run of a thousand tasks takes a thousand write-lock
+  probes against peers holding chunk transactions. Nothing here measures what
+  those probes wait, and no test does; the question of whether a `create=False`
+  open should probe with a read instead is tracked on its issue, with what this
+  work changed about it recorded there.
 
 ---
 

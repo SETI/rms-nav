@@ -189,11 +189,34 @@ have landed.
 
 **Step 3 refuses to finish a root its tasks did not cover.** Step 1 records how
 many files it found; step 3 adds up how many the tasks ingested, skipped and
-refused. If the tasks account for fewer files than the listing found -- a task
-that failed, timed out, or was never run -- the root is named, its run is left
-unfinished, and ``sd_stats_ingest`` exits 1. Re-run the outstanding tasks and
-run step 3 again. A task re-run over a share it already ingested reads nothing:
-its files match what the index records, so it reports them as skipped.
+refused, counting each task's report once. If the tasks account for fewer files
+than the listing found -- a task that failed, timed out, or was never run -- the
+root is named, its run is left unfinished, and ``sd_stats_ingest`` exits 1. Re-run
+the outstanding tasks and run step 3 again over a log holding the re-run results;
+a task re-run over a share it already ingested reads nothing, because its files
+match what the index records, so it reports them as skipped. A task that reports
+twice is still one task: the later report stands in for the earlier one, and a
+share reported twice never covers for a share that never ran.
+
+**Step 3 needs every task's result in the log it reads.** It reads one event log
+and counts what is in it, so a root whose tasks are spread over several logs is
+completed from the concatenation of them::
+
+    cat worker-*.events.log > all-events.log
+
+Order does not matter, and a task appearing in more than one of them is counted
+once. A log naming only some of a root's tasks leaves that root unfinished, which
+is the same outcome as tasks that never ran and is corrected the same way.
+
+**Step 3 refuses a root whose listing was never recorded.** A root that step 1
+could not list -- mistyped, or an unmounted share -- gets no tasks and no record
+of what it holds, and step 3 will not finish it: there is nothing for its tasks
+to be measured against, and a root completed on that basis would report every
+image under it as never navigated. Correct the root and run step 1 again.
+
+``--force`` belongs to step 1, and is refused in step 3, which reads no document.
+A pass whose shares must ignore what the index records is one whose fan-out was
+run with ``--force``.
 
 The tasks file is a JSON array in the shape a ``cloud_tasks`` queue loads. Each
 entry has a ``task_id`` and a ``data`` object carrying ``run_id`` (the ingest
@@ -205,9 +228,17 @@ with its ``results_path_stub``, ``mtime_ns``, ``size_bytes`` and
 worker stats a file or checks for one.
 
 Step 3 reads the ``cloud_tasks`` event log, which is JSON Lines with one event
-per line; the ``task_completed`` events carry what each worker returned. Lines
-that are not events are counted and reported rather than refused, because an
-event log being appended to while it is read ends in a partial line.
+per line; the ``task_completed`` events carry what each worker returned, under
+the ``task_id`` the task ran as. Lines that are not events are counted and
+reported rather than refused, because an event log being appended to while it is
+read ends in a partial line.
+
+The closing summary of step 3 is the summary a single-process ingest writes:
+files seen, ingested, skipped and refused, with the refusals tallied by reason
+and one example file per reason. The reasons come back in the task results,
+since a worker has no run log to write them in. Every file a share could not
+read is named in its task result too, and the ones refused for something about
+the document are recorded in the index's ``failed_files`` table as well.
 
 Index schema
 ------------

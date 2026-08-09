@@ -20,7 +20,7 @@ from cloud_tasks.worker import WorkerData
 
 from spindoctor.cli import sd_stats_ingest, sd_stats_ingest_cloud_tasks
 from spindoctor.config import MAIN_LOGGER
-from spindoctor.results_index import IMAGES, open_index
+from spindoctor.results_index import IMAGES, INGEST_RUNS, open_index
 
 from .conftest import index_url, metadata_document, write_metadata
 
@@ -247,6 +247,35 @@ def fanned_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, count: int = 
     return url
 
 
+def fanned_out_with_a_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Write a tree holding one document and one file that is not one, and fan it out.
+
+    Parameters:
+        tmp_path: Directory the tree, the index and the tasks file live under.
+        monkeypatch: Fixture the driver is run through.
+
+    Returns:
+        The index URL.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, STUB, metadata_document())
+    (root / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
+    url = index_url(tmp_path / 'index.sqlite3')
+    run_driver(
+        [
+            '--results-db',
+            url,
+            '--nav-results-root',
+            root.as_posix(),
+            '--output-cloud-tasks-file',
+            str(tmp_path / 'tasks.json'),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    return url
+
+
 def test_a_worker_reports_what_its_share_ingested(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -451,6 +480,206 @@ def test_completing_a_run_the_tasks_did_not_cover_says_so(
         tmp_path,
     )
     assert any('0 of 3 file(s) accounted for' in line for line in written)
+
+
+def test_the_completion_summary_says_why_a_file_was_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker has no run log, so its reasons reach this summary or nowhere.
+
+    A results tree holds many ``*_metadata.json`` files that were never
+    navigation documents; several hundred of those are ordinary, and several
+    hundred navigation results that would not parse are not. The tally with one
+    example file per reason is what tells the two apart, and a divided ingest
+    must not be the configuration that loses it.
+    """
+    url = fanned_out_with_a_refusal(tmp_path, monkeypatch)
+    results = [process(task['data'], url)[1] for task in tasks_of(tmp_path / 'tasks.json')]
+    write_event_log(tmp_path / 'events.log', results)
+    _status, written = run_driver(
+        [
+            '--results-db',
+            url,
+            '--nav-results-root',
+            (tmp_path / 'results').as_posix(),
+            '--complete-cloud-tasks-file',
+            str(tmp_path / 'events.log'),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert any('for example' in line and 'edges_metadata.json' in line for line in written)
+
+
+def test_completing_a_root_whose_listing_was_never_recorded_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sequence an operator reaches it by: a mistyped root, then a completion.
+
+    The fan-out refuses the root and records nothing about it, so the completion
+    has nothing to measure its tasks against. Read as zero files, the mistyped
+    root completes as a fully ingested empty tree and every consumer then reports
+    the images under the real one as never navigated.
+    """
+    mistyped = tmp_path / 'nav-offset-reuslts'
+    url = index_url(tmp_path / 'index.sqlite3')
+    run_driver(
+        [
+            '--results-db',
+            url,
+            '--nav-results-root',
+            str(mistyped),
+            '--output-cloud-tasks-file',
+            str(tmp_path / 'tasks.json'),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    write_event_log(tmp_path / 'events.log', [])
+    status, _written = run_driver(
+        [
+            '--results-db',
+            url,
+            '--nav-results-root',
+            str(mistyped),
+            '--complete-cloud-tasks-file',
+            str(tmp_path / 'events.log'),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert status == 1
+
+
+def test_a_root_whose_listing_was_never_recorded_keeps_its_unfinished_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Which is what a consumer reads, and the reason the status is 1."""
+    mistyped = tmp_path / 'nav-offset-reuslts'
+    url = index_url(tmp_path / 'index.sqlite3')
+    run_driver(
+        [
+            '--results-db',
+            url,
+            '--nav-results-root',
+            str(mistyped),
+            '--output-cloud-tasks-file',
+            str(tmp_path / 'tasks.json'),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    write_event_log(tmp_path / 'events.log', [])
+    run_driver(
+        [
+            '--results-db',
+            url,
+            '--nav-results-root',
+            str(mistyped),
+            '--complete-cloud-tasks-file',
+            str(tmp_path / 'events.log'),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    engine = open_index(url)
+    try:
+        with engine.connect() as connection:
+            finished = list(connection.execute(sqlalchemy.select(INGEST_RUNS.c.finished_utc)))
+    finally:
+        engine.dispose()
+    assert [row.finished_utc for row in finished] == [None]
+
+
+def test_an_event_log_that_is_not_there_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A mistyped path is an ordinary operator error, not an unhandled failure.
+
+    The pass charges every failure it expects to one file or one root; a path
+    that names no file is one it can charge, so it is named rather than let out
+    as a traceback nobody enumerated.
+    """
+    url = fanned_out(tmp_path, monkeypatch)
+    status, _written = run_driver(
+        [
+            '--results-db',
+            url,
+            '--nav-results-root',
+            (tmp_path / 'results').as_posix(),
+            '--complete-cloud-tasks-file',
+            str(tmp_path / 'nowhere.log'),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert status == 1
+
+
+def test_an_event_log_that_is_not_there_is_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And the message names the file, which is the word the operator corrects."""
+    url = fanned_out(tmp_path, monkeypatch)
+    _status, written = run_driver(
+        [
+            '--results-db',
+            url,
+            '--nav-results-root',
+            (tmp_path / 'results').as_posix(),
+            '--complete-cloud-tasks-file',
+            str(tmp_path / 'nowhere.log'),
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert any('nowhere.log' in line for line in written)
+
+
+def test_forcing_a_completion_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nothing is read here, so --force could only ever be ignored.
+
+    An operator who typed it meant the documents to be read again, which is a
+    property of the fan-out that cut the shares and is decided one step earlier.
+    """
+    url = fanned_out(tmp_path, monkeypatch)
+    write_event_log(tmp_path / 'events.log', [])
+    status, _written = run_driver(
+        [
+            '--results-db',
+            url,
+            '--nav-results-root',
+            (tmp_path / 'results').as_posix(),
+            '--complete-cloud-tasks-file',
+            str(tmp_path / 'events.log'),
+            '--force',
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert status == 1
+
+
+def test_forcing_a_completion_says_what_to_do_instead(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal nobody can act on is only half a refusal."""
+    url = fanned_out(tmp_path, monkeypatch)
+    write_event_log(tmp_path / 'events.log', [])
+    _status, written = run_driver(
+        [
+            '--results-db',
+            url,
+            '--nav-results-root',
+            (tmp_path / 'results').as_posix(),
+            '--complete-cloud-tasks-file',
+            str(tmp_path / 'events.log'),
+            '--force',
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert any('--output-cloud-tasks-file with --force' in line for line in written)
 
 
 def test_completing_a_root_nobody_divided_up_exits_one(

@@ -19,6 +19,7 @@ import pytest
 import sqlalchemy
 
 from spindoctor.cli.stats.ingest import (
+    TaskResult,
     fan_out_ingest_tasks,
     ingest_metadata_files,
     ingest_task_share,
@@ -131,6 +132,35 @@ def test_the_tasks_of_two_roots_are_all_written(
     build_tree(second, 1)
     tasks = fan_out(index_url(tmp_path / 'index.sqlite3'), [first, second], logger=quiet_logger)
     assert len({task['data']['root_url'] for task in tasks}) == 2
+
+
+def test_two_spellings_of_one_root_are_divided_up_once(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A trailing separator is not another root, and one root is one listing.
+
+    Listed twice, every document is handed out in two shares and read twice, and
+    the first of the two runs is left unfinished for good.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 4)
+    tasks = fan_out(
+        index_url(tmp_path / 'index.sqlite3'),
+        [root, f'{root.as_posix()}/'],
+        logger=quiet_logger,
+    )
+    assert len(tasks) == 2
+
+
+def test_two_spellings_of_one_root_are_one_run(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The run row is what a consumer reads, and a root has one of them per pass."""
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    fan_out(url, [root, f'{root.as_posix()}/'], logger=quiet_logger)
+    assert len(run_rows(url)) == 1
 
 
 def test_a_share_of_no_files_is_refused(tmp_path: Path, quiet_logger: pdslogger.PdsLogger) -> None:
@@ -353,10 +383,13 @@ def test_concurrent_shares_write_the_rows_a_single_pass_writes(
     divided = index_url(tmp_path / 'index.sqlite3')
     tasks = fan_out(divided, [root], logger=quiet_logger, share_size=2)
 
-    def one_worker(task: dict[str, Any]) -> dict[str, Any]:
+    def one_worker(task: dict[str, Any]) -> TaskResult:
         engine = open_index(divided)
         try:
-            return ingest_task_share(engine, task['data'], logger=quiet_logger)
+            return TaskResult(
+                task_id=str(task['task_id']),
+                result=ingest_task_share(engine, task['data'], logger=quiet_logger),
+            )
         finally:
             engine.dispose()
 
@@ -444,7 +477,7 @@ def test_a_share_reads_what_only_another_root_has_recorded(
     run_shares(url, cycle_tasks, logger=quiet_logger)
     tasks = fan_out(url, [second], logger=quiet_logger)
     results = run_shares(url, tasks, logger=quiet_logger)
-    assert [result['files_ingested'] for result in results] == [1]
+    assert [found.result['files_ingested'] for found in results] == [1]
 
 
 def test_a_share_skips_what_the_index_has_already_read(
@@ -457,7 +490,7 @@ def test_a_share_skips_what_the_index_has_already_read(
     tasks = fan_out(url, [root], logger=quiet_logger)
     run_shares(url, tasks, logger=quiet_logger)
     again = run_shares(url, tasks, logger=quiet_logger)
-    assert [result['files_skipped'] for result in again] == [2]
+    assert [found.result['files_skipped'] for found in again] == [2]
 
 
 def test_a_forced_share_reads_everything_again(
@@ -471,7 +504,7 @@ def test_a_forced_share_reads_everything_again(
     run_shares(url, tasks, logger=quiet_logger)
     forced = fan_out(url, [root], logger=quiet_logger, force=True)
     results = run_shares(url, forced, logger=quiet_logger)
-    assert [result['files_ingested'] for result in results] == [2]
+    assert [found.result['files_ingested'] for found in results] == [2]
 
 
 def test_a_share_with_no_metrics_reads_everything(
@@ -507,8 +540,64 @@ def test_a_share_names_every_file_it_could_not_read(
     url = index_url(tmp_path / 'index.sqlite3')
     tasks = fan_out(url, [root], logger=quiet_logger)
     results = run_shares(url, tasks, logger=quiet_logger)
-    named = [Path(name).name for name in results[0]['failed_files']]
+    named = [Path(name).name for name in results[0].result['failed_files']]
     assert sorted(named) == ['edges_metadata.json', 'rings_metadata.json']
+
+
+def test_a_share_says_why_it_could_not_read_a_file(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The reason travels too, since nothing else can find it out afterwards.
+
+    A file's name says nothing about what was wrong with it, and the program
+    that adds the shares up never opens one.
+    """
+    root = tmp_path / 'results'
+    root.mkdir(parents=True, exist_ok=True)
+    (root / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    results = run_shares(url, tasks, logger=quiet_logger)
+    assert sum(results[0].result['failures_by_reason'].values()) == 1
+
+
+def test_a_share_keeps_one_example_of_each_reason(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """One reason with two files under it names one of them for the summary."""
+    root = tmp_path / 'results'
+    root.mkdir(parents=True, exist_ok=True)
+    (root / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
+    (root / 'rings_metadata.json').write_text('{"rings": []}', encoding='utf-8')
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    results = run_shares(url, tasks, logger=quiet_logger)
+    examples = list(results[0].result['example_by_reason'].values())
+    assert len(examples) == 1
+
+
+def test_a_share_writes_its_rows_under_the_normalized_root(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A task file is an operator-visible artifact, and can be written by hand.
+
+    The root is half of every row's key, so a share left to write under the
+    spelling it was handed would produce rows no consumer's lookup matches --
+    and the run would be stamped all the same, because the counts add up.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 1)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    handwritten = dict(tasks[0]['data'], root_url=f'{root.as_posix()}/')
+    engine = open_index(url)
+    try:
+        ingest_task_share(engine, handwritten, logger=quiet_logger)
+        with engine.connect() as connection:
+            found = list(connection.execute(sqlalchemy.select(IMAGES.c.root_url)))
+    finally:
+        engine.dispose()
+    assert [str(row.root_url) for row in found] == [normalize_root_url(root)]
 
 
 def test_a_share_counts_every_file_it_could_not_read(
@@ -522,7 +611,7 @@ def test_a_share_counts_every_file_it_could_not_read(
     url = index_url(tmp_path / 'index.sqlite3')
     tasks = fan_out(url, [root], logger=quiet_logger)
     results = run_shares(url, tasks, logger=quiet_logger)
-    assert results[0]['files_failed'] == 2
+    assert results[0].result['files_failed'] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -664,6 +753,24 @@ def test_a_file_entry_of_another_shape_is_refused(
     try:
         with pytest.raises(ValueError, match=message):
             ingest_task_share(engine, data, logger=quiet_logger)
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize('task_data', [None, 'a share', [1, 2]], ids=['none', 'text', 'a-list'])
+def test_task_data_that_is_not_an_object_is_refused(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, task_data: Any
+) -> None:
+    """A queue that delivers something else is a malformed task like any other.
+
+    Reading a key out of it raises whatever the value's own type raises, which
+    leaves the worker with an exception where its driver expects a refusal it
+    can report as a task result.
+    """
+    engine = open_index(index_url(tmp_path / 'index.sqlite3'), create=True)
+    try:
+        with pytest.raises(ValueError, match='not an object'):
+            ingest_task_share(engine, task_data, logger=quiet_logger)
     finally:
         engine.dispose()
 

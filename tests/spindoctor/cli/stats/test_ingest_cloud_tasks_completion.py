@@ -16,8 +16,10 @@ import pdslogger
 import pytest
 from filecache import FCPath
 
-from spindoctor.cli.stats.ingest import task_results_from_event_log
+from spindoctor.cli.stats.ingest import TaskResult, task_results_from_event_log
 from spindoctor.results_index import (
+    INGEST_RUNS,
+    SCHEMA_VERSION,
     normalize_root_url,
     open_index,
     require_ingested_roots,
@@ -29,6 +31,7 @@ from .conftest import (
     cycle,
     fan_out,
     index_url,
+    reported,
     run_rows,
     run_shares,
 )
@@ -156,7 +159,8 @@ def test_a_worker_that_reported_an_error_leaves_the_run_unfinished(
     url = index_url(tmp_path / 'index.sqlite3')
     tasks = fan_out(url, [root], logger=quiet_logger)
     results = run_shares(url, tasks, logger=quiet_logger)
-    broken = [*results[:-1], {'status': 'error', 'status_error': 'index_unopenable'}]
+    failure = reported('ingest-1-000009', {'status': 'error', 'status_error': 'index_unopenable'})
+    broken = [*results[:-1], failure]
     complete(url, [root], broken, logger=quiet_logger)
     assert run_rows(url)[0].finished_utc is None
 
@@ -171,7 +175,7 @@ def test_a_worker_error_is_counted(tmp_path: Path, quiet_logger: pdslogger.PdsLo
     outcome = complete(
         url,
         [root],
-        [*results, {'status': 'error', 'status_error': 'no_results_db'}],
+        [*results, reported('ingest-1-000009', {'status': 'error', 'status_error': 'no_db'})],
         logger=quiet_logger,
     )
     assert outcome.results_failed == 1
@@ -224,7 +228,7 @@ def test_a_result_of_another_shape_is_not_counted_as_a_share(
     build_tree(root, 2)
     url = index_url(tmp_path / 'index.sqlite3')
     fan_out(url, [root], logger=quiet_logger)
-    outcome = complete(url, [root], [result], logger=quiet_logger)
+    outcome = complete(url, [root], [reported('ingest-1-000000', result)], logger=quiet_logger)
     assert outcome.results_unreadable == 1
 
 
@@ -233,8 +237,8 @@ def test_a_share_counted_twice_does_not_short_the_run(
 ) -> None:
     """A retried task reports its share a second time, as skipped.
 
-    The account then runs past what the walk saw, which is not a shortfall: every
-    file is covered, some of them twice.
+    Its later report stands in for the earlier one, so the account is still one
+    report per task and still covers every file the walk saw.
     """
     root = tmp_path / 'results'
     build_tree(root, 4)
@@ -244,6 +248,105 @@ def test_a_share_counted_twice_does_not_short_the_run(
     retried = run_shares(url, tasks[:1], logger=quiet_logger)
     complete(url, [root], [*results, *retried], logger=quiet_logger)
     assert run_rows(url)[0].finished_utc is not None
+
+
+def test_a_share_reported_twice_does_not_cover_for_one_that_never_ran(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The arithmetic must not let over- and under-accounting cancel.
+
+    A queue redelivers a task whenever it could not see the delivery
+    acknowledged, so one share reported twice while another never ran is an
+    ordinary sequence.  Summed by files alone it reaches the number the walk
+    found, and the run is stamped with two documents nobody read -- which every
+    consumer would then read as two images that were never navigated.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 4)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    first = run_shares(url, tasks[:1], logger=quiet_logger)
+    again = run_shares(url, tasks[:1], logger=quiet_logger)
+    complete(url, [root], [*first, *again], logger=quiet_logger)
+    assert run_rows(url)[0].finished_utc is None
+
+
+def test_a_share_reported_twice_leaves_its_roots_shortfall_named(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """And the shortfall is the one the tasks that never ran left behind."""
+    root = tmp_path / 'results'
+    build_tree(root, 4)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    first = run_shares(url, tasks[:1], logger=quiet_logger)
+    again = run_shares(url, tasks[:1], logger=quiet_logger)
+    outcome = complete(url, [root], [*first, *again], logger=quiet_logger)
+    assert any('2 of 4 file(s)' in named for named in outcome.roots_unaccounted)
+
+
+def test_a_repeat_of_one_task_is_reported(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Counted once, and said out loud, so the log records that it happened."""
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    results = run_shares(url, tasks, logger=quiet_logger)
+    again = run_shares(url, tasks, logger=quiet_logger)
+    outcome = complete(url, [root], [*results, *again], logger=quiet_logger)
+    assert outcome.results_superseded == 1
+
+
+def test_the_later_report_of_a_task_is_the_one_counted(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A task that failed and was re-run reports its failure first.
+
+    Reading the earlier report would leave a run unfinished though its documents
+    are in the index, so the last thing a task said is what counts.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    failed = reported(str(tasks[0]['task_id']), {'status': 'error', 'status_error': 'no_index'})
+    results = run_shares(url, tasks, logger=quiet_logger)
+    complete(url, [root], [failed, *results], logger=quiet_logger)
+    assert run_rows(url)[0].finished_utc is not None
+
+
+def test_a_result_naming_no_task_is_not_counted_toward_a_run(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Nothing tells such a result from a repeat of another, so it counts nowhere.
+
+    Counting it could only ever inflate an account, and an inflated account is
+    what stamps a run whose documents were never read.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    results = run_shares(url, tasks, logger=quiet_logger)
+    anonymous = [TaskResult(task_id=None, result=found.result) for found in results]
+    complete(url, [root], anonymous, logger=quiet_logger)
+    assert run_rows(url)[0].finished_utc is None
+
+
+def test_a_result_naming_no_task_is_counted_as_one(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """And is reported, since a log full of them means the run cannot complete."""
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    results = run_shares(url, tasks, logger=quiet_logger)
+    anonymous = [TaskResult(task_id=None, result=found.result) for found in results]
+    outcome = complete(url, [root], anonymous, logger=quiet_logger)
+    assert outcome.results_unidentified == 1
 
 
 def test_a_root_with_no_unfinished_run_is_named(
@@ -271,6 +374,23 @@ def test_completing_a_root_twice_names_it(
     complete(url, [root], results, logger=quiet_logger)
     outcome = complete(url, [root], results, logger=quiet_logger)
     assert outcome.roots_without_a_run == [normalize_root_url(root)]
+
+
+def test_two_spellings_of_one_root_are_completed_once(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A trailing slash is not another root, here or at the fan-out.
+
+    Completed twice, the second pass finds the run it has just stamped and
+    reports the root as one nobody divided up.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    results = run_shares(url, tasks, logger=quiet_logger)
+    outcome = complete(url, [root, f'{root.as_posix()}/'], results, logger=quiet_logger)
+    assert outcome.roots_without_a_run == []
 
 
 def test_completion_leaves_another_fan_outs_results_alone(
@@ -333,13 +453,202 @@ def test_an_empty_root_completes(tmp_path: Path, quiet_logger: pdslogger.PdsLogg
     """A root that holds nothing yields no task, and must still finish its run.
 
     Otherwise a consumer would refuse it forever, reporting a root that exists
-    and is empty as one nobody has ingested.
+    and is empty as one nobody has ingested.  This root was listed and found to
+    hold nothing, which is what no shares can account for; a root whose listing
+    was never recorded is the case below, and must not complete.
     """
     root = tmp_path / 'results'
     root.mkdir()
     url = index_url(tmp_path / 'index.sqlite3')
     fan_out(url, [root], logger=quiet_logger)
     complete(url, [root], [], logger=quiet_logger)
+    assert run_rows(url)[0].finished_utc is not None
+
+
+def test_a_shortfall_records_what_the_shares_did(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The run stays unfinished, but the work the shares did is not lost.
+
+    Their documents are in the index, and an operator reading the run row after
+    a partial pass needs to see how far it got rather than the zeros the fan-out
+    left there.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 4)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    results = run_shares(url, tasks, logger=quiet_logger)
+    complete(url, [root], results[:-1], logger=quiet_logger)
+    assert run_rows(url)[0].files_ingested == 2
+
+
+# ---------------------------------------------------------------------------
+# A run that never recorded what its root holds
+# ---------------------------------------------------------------------------
+
+
+def begin_a_run(url: str, root: Path) -> None:
+    """Record that an ingest of a root began, and nothing else about it.
+
+    This is the row a pass leaves behind when it dies between starting and
+    listing, and the row a fan-out leaves for a root it could not list at all.
+
+    Parameters:
+        url: The index URL to create or add to.
+        root: The results root the run covers.
+    """
+    engine = open_index(url, create=True)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                INGEST_RUNS.insert().values(
+                    root_url=normalize_root_url(root),
+                    started_utc='2026-01-01T00:00:00+00:00',
+                    schema_version=SCHEMA_VERSION,
+                )
+            )
+    finally:
+        engine.dispose()
+
+
+def test_a_root_whose_listing_was_never_recorded_is_not_stamped(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A run that never established what its root holds cannot be accounted for.
+
+    No files seen is not zero files seen.  Read as zero, a mistyped root
+    completes with nothing under it, and every consumer then reads absence of a
+    row as "this image was never navigated" for a whole tree nobody listed.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    begin_a_run(url, root)
+    complete(url, [root], [], logger=quiet_logger)
+    assert run_rows(url)[0].finished_utc is None
+
+
+def test_a_root_whose_listing_was_never_recorded_is_named(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Told apart from a shortfall, because what to do about it is different.
+
+    A shortfall is re-run the outstanding tasks; this is divide the root up
+    again, because no task was ever cut from it.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    begin_a_run(url, root)
+    outcome = complete(url, [root], [], logger=quiet_logger)
+    assert outcome.roots_unlisted == [normalize_root_url(root)]
+
+
+def test_a_root_the_fan_out_could_not_list_is_not_stamped(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The same rule, reached the way an operator reaches it: a mistyped root.
+
+    The fan-out refuses it and records nothing on the run, so the completion has
+    nothing to measure against and must not stamp it -- otherwise the mistyped
+    root reads as a fully ingested empty tree.
+    """
+    absent = tmp_path / 'nav-offset-reuslts'
+    url = index_url(tmp_path / 'index.sqlite3')
+    fan_out(url, [absent], logger=quiet_logger)
+    complete(url, [absent], [], logger=quiet_logger)
+    assert run_rows(url)[0].finished_utc is None
+
+
+def test_a_root_the_fan_out_could_not_list_stays_unreadable(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Which is what a consumer asks about, and the whole point of not stamping."""
+    absent = tmp_path / 'nav-offset-reuslts'
+    url = index_url(tmp_path / 'index.sqlite3')
+    fan_out(url, [absent], logger=quiet_logger)
+    complete(url, [absent], [], logger=quiet_logger)
+    engine = open_index(url)
+    try:
+        with engine.connect() as connection, pytest.raises(ValueError, match='no completed ingest'):
+            require_ingested_roots(connection, [normalize_root_url(absent)], url=url)
+    finally:
+        engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Why the files a share could not read were refused
+# ---------------------------------------------------------------------------
+
+
+def test_the_completion_tallies_the_reasons_the_shares_reported(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A worker has no run log, so its reasons reach the summary or nowhere.
+
+    A tree holds many documents that were never navigation results, and a count
+    of unreadable files with nothing to say about them reads the same whether
+    that is what happened or the ingest went wrong.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 1)
+    (root / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    results = run_shares(url, tasks, logger=quiet_logger)
+    outcome = complete(url, [root], results, logger=quiet_logger)
+    assert sum(outcome.counts.failures_by_reason.values()) == 1
+
+
+def test_the_completion_keeps_one_example_of_each_reason(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A reason is a field-level diagnosis; one real file is what explains it."""
+    root = tmp_path / 'results'
+    build_tree(root, 1)
+    (root / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    results = run_shares(url, tasks, logger=quiet_logger)
+    outcome = complete(url, [root], results, logger=quiet_logger)
+    examples = [Path(name).name for name in outcome.counts.example_by_reason.values()]
+    assert examples == ['edges_metadata.json']
+
+
+def test_the_completion_tallies_the_reasons_of_every_share(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Two shares refusing for one reason are one reason with two files."""
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    (root / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
+    (root / 'rings_metadata.json').write_text('{"rings": []}', encoding='utf-8')
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger, share_size=1)
+    results = run_shares(url, tasks, logger=quiet_logger)
+    outcome = complete(url, [root], results, logger=quiet_logger)
+    assert sum(outcome.counts.failures_by_reason.values()) == 2
+
+
+def test_a_reason_tally_of_another_shape_costs_only_the_reasons(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The reasons are the diagnosis; the counts beside them are the account.
+
+    A share whose reasons cannot be read has still said what became of its
+    files, so its run completes and only the diagnosis is lost.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    results = run_shares(url, tasks, logger=quiet_logger)
+    mangled = [
+        reported(str(found.task_id), {**found.result, 'failures_by_reason': ['not a map']})
+        for found in results
+    ]
+    complete(url, [root], mangled, logger=quiet_logger)
     assert run_rows(url)[0].finished_utc is not None
 
 
@@ -362,16 +671,20 @@ def write_event_log(path: Path, events: list[Any]) -> Path:
     return path
 
 
-def completed_event(result: Any) -> dict[str, Any]:
+def completed_event(result: Any, *, task_id: str | None = 'ingest-1-000000') -> dict[str, Any]:
     """Return the event a worker's return value is written under.
 
     Parameters:
         result: What the worker returned.
+        task_id: The task it ran under; None writes an event carrying none.
 
     Returns:
         The event.
     """
-    return {'event_type': 'task_completed', 'task_id': 'ingest-1-000000', 'result': result}
+    event: dict[str, Any] = {'event_type': 'task_completed', 'result': result}
+    if task_id is not None:
+        event['task_id'] = task_id
+    return event
 
 
 def test_the_event_log_yields_what_the_workers_returned(tmp_path: Path) -> None:
@@ -381,7 +694,8 @@ def test_the_event_log_yields_what_the_workers_returned(tmp_path: Path) -> None:
         [completed_event({'status': 'ok', 'run_id': 1}), completed_event({'status': 'ok'})],
     )
     found = task_results_from_event_log(FCPath(log))
-    assert found.results == [{'status': 'ok', 'run_id': 1}, {'status': 'ok'}]
+    reported_values = [found.result for found in found.results]
+    assert reported_values == [{'status': 'ok', 'run_id': 1}, {'status': 'ok'}]
 
 
 def test_an_event_about_something_other_than_a_task_is_passed_over(tmp_path: Path) -> None:
@@ -434,6 +748,24 @@ def test_a_blank_line_is_not_an_unread_line(tmp_path: Path) -> None:
     assert found.lines_unread == 0
 
 
+def test_a_result_keeps_the_task_that_reported_it(tmp_path: Path) -> None:
+    """One report per task is what stops a repeat covering for a task that failed."""
+    log = write_event_log(
+        tmp_path / 'events.log', [completed_event({'status': 'ok'}, task_id='ingest-7-000003')]
+    )
+    found = task_results_from_event_log(FCPath(log))
+    assert found.results[0].task_id == 'ingest-7-000003'
+
+
+def test_a_result_whose_event_names_no_task_keeps_none(tmp_path: Path) -> None:
+    """A task nothing identifies is reported as such rather than invented."""
+    log = write_event_log(
+        tmp_path / 'events.log', [completed_event({'status': 'ok'}, task_id=None)]
+    )
+    found = task_results_from_event_log(FCPath(log))
+    assert found.results[0].task_id is None
+
+
 def test_an_event_whose_type_is_not_text_is_passed_over(tmp_path: Path) -> None:
     """Nothing about a number says which task, if any, it belongs to."""
     log = write_event_log(tmp_path / 'events.log', [{'event_type': 7}])
@@ -450,7 +782,10 @@ def test_the_shares_survive_the_round_trip_through_an_event_log(
     url = index_url(tmp_path / 'index.sqlite3')
     tasks = fan_out(url, [root], logger=quiet_logger)
     results = run_shares(url, tasks, logger=quiet_logger)
-    log = write_event_log(tmp_path / 'events.log', [completed_event(r) for r in results])
+    log = write_event_log(
+        tmp_path / 'events.log',
+        [completed_event(found.result, task_id=found.task_id) for found in results],
+    )
     found = task_results_from_event_log(FCPath(log))
     complete(url, [root], found.results, logger=quiet_logger)
     assert run_rows(url)[0].files_ingested == 5

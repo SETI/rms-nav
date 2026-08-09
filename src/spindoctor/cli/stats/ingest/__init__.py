@@ -22,6 +22,7 @@ Public API:
     FanOut                     -- the tasks one root divides into
     fan_out_ingest_tasks       -- list each root once and divide it up
     ingest_task_share          -- ingest one task's share of a root
+    TaskResult                 -- what one task returned, and which task it was
     TaskResults                -- what a worker event log holds
     task_results_from_event_log -- read the workers' return values back
     TaskCompletion             -- what adding the shares up did
@@ -54,6 +55,7 @@ from spindoctor.cli.stats.ingest.tasks import (
     INGEST_TASK_SHARE_SIZE,
     FanOut,
     TaskCompletion,
+    TaskResult,
     TaskResults,
     complete_ingest_tasks,
     fan_out_ingest_tasks,
@@ -71,6 +73,7 @@ __all__ = [
     'FanOut',
     'IngestCounts',
     'TaskCompletion',
+    'TaskResult',
     'TaskResults',
     'complete_ingest_tasks',
     'fan_out_ingest_tasks',

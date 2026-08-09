@@ -61,7 +61,10 @@ class _UnfinishedRun:
         run_id: The run's surrogate identifier.
         root_url: Normalized URL of the root it covers.
         files_seen: Metadata files the fan-out's walk found, or None when the
-            run recorded none because it has not reached that point.
+            run never recorded a listing at all -- a root nothing could list, or
+            a pass that died before it had one.  That is not zero: zero is what
+            a root that was listed and holds nothing records, and only zero can
+            be accounted for by no shares.
         files_removed: Rows the fan-out deleted, whose documents had left the
             tree.
         directories_missed: Directories the fan-out's walk did not list.
@@ -99,6 +102,31 @@ def _record_fan_out(engine: sqlalchemy.Engine, run_id: int, counts: IngestCounts
                 files_failed=0,
                 files_removed=counts.files_removed,
                 directories_missed=counts.directories_missed,
+            )
+        )
+
+
+def _record_shares(engine: sqlalchemy.Engine, run_id: int, counts: IngestCounts) -> None:
+    """Record what a pass's shares reported, without stamping the run.
+
+    A pass whose shares do not account for every file its listing found stays
+    unfinished, but the shares that did report did real work: their documents
+    are in the index.  Writing their tally down is what lets an operator see how
+    far the pass got, instead of the row of zeros the fan-out left.
+
+    Parameters:
+        engine: The open index.
+        run_id: The run to record against.
+        counts: What the shares reported between them.
+    """
+    with engine.begin() as connection:
+        connection.execute(
+            INGEST_RUNS.update()
+            .where(INGEST_RUNS.c.run_id == run_id)
+            .values(
+                files_ingested=counts.files_ingested,
+                files_skipped=counts.files_skipped,
+                files_failed=counts.files_failed,
             )
         )
 
