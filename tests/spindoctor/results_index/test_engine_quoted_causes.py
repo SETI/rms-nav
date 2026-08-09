@@ -37,6 +37,16 @@ to be argued for against a number written down independently.
 ECHOED_CONNECT_FAILURE = 'the dialect rejected the connect arguments for'
 """What the quoting stand-in factory says before repeating the URL it was given."""
 
+UNREADABLE_PORT_FAILURE = 'invalid literal for int()'
+"""What a URL parser says when a password's tail lands where the port belongs.
+
+The diagnosis a reader of a failed run needs, and the half of the message that
+carries no credential.  It is named here so that each case can assert the
+detail it expects to keep: the wrapper's own text survives whether or not the
+cause does, so asserting that alone would pass against a message cleaned of
+everything it was quoting.
+"""
+
 TAIL_LEAKING_PASSWORD = 'se@cr:etlongsecretpassword'
 """A password whose tail a URL parser reports as the port it could not read.
 
@@ -63,7 +73,7 @@ that only cleaned parse errors would leave this route wide open.
 """
 
 
-def echoing_factory(parsed: URL, *args: Any, **kwargs: Any) -> Engine:
+def _echoing_factory(parsed: URL, *args: Any, **kwargs: Any) -> Engine:
     """Stand in for a driver that quotes the URL it was handed back at the caller.
 
     A driver reports an argument it will not accept by naming the arguments it
@@ -89,6 +99,10 @@ class _Quoted:
         name: Identifier for the case.
         url: The URL to open.
         secret: The credential that URL carries, no run of which may survive.
+        detail: The case's own diagnosis, carrying no credential, which the
+            cleaning must leave behind.  Asserted per case rather than once for
+            all of them, because what a reader needs differs by route: which
+            field a parser stopped on, or what a driver would not accept.
         reaches_the_driver: Whether the URL parses, so that the failure comes
             from the engine factory rather than from the parser.
     """
@@ -96,6 +110,7 @@ class _Quoted:
     name: str
     url: str
     secret: str
+    detail: str
     reaches_the_driver: bool = False
 
 
@@ -104,27 +119,32 @@ QUOTED_CASES = [
         'a-password-whose-tail-reads-as-a-port',
         f'postgresql+psycopg://user:{TAIL_LEAKING_PASSWORD}@dbhost/spindoctor',
         TAIL_LEAKING_PASSWORD,
+        UNREADABLE_PORT_FAILURE,
     ),
     _Quoted(
         'a-password-carrying-every-url-character',
         f'postgresql+psycopg://user:{EVERY_CHARACTER_PASSWORD}@dbhost/spindoctor',
         EVERY_CHARACTER_PASSWORD,
+        UNREADABLE_PORT_FAILURE,
     ),
     _Quoted(
         'an-at-sign-in-the-user-name',
         f'postgresql+psycopg://{AT_SIGN_USER}:{TAIL_LEAKING_PASSWORD}@dbhost/spindoctor',
         TAIL_LEAKING_PASSWORD,
+        UNREADABLE_PORT_FAILURE,
     ),
     _Quoted(
         'a-password-the-driver-quotes-back',
         f'postgresql+psycopg://user:{SLASHED_ECHO_PASSWORD}@dbhost/spindoctor',
         SLASHED_ECHO_PASSWORD,
+        ECHOED_CONNECT_FAILURE,
         reaches_the_driver=True,
     ),
     _Quoted(
         'a-password-query-parameter-the-driver-quotes-back',
         f'postgresql+psycopg://user@dbhost/spindoctor?password={SLASHED_ECHO_PASSWORD}',
         SLASHED_ECHO_PASSWORD,
+        ECHOED_CONNECT_FAILURE,
         reaches_the_driver=True,
     ),
 ]
@@ -158,7 +178,7 @@ def _quoted_refusal(case: _Quoted, monkeypatch: pytest.MonkeyPatch) -> ValueErro
         The refusal, for assertions on what it says.
     """
     if case.reaches_the_driver:
-        monkeypatch.setattr(sqlalchemy, 'create_engine', echoing_factory)
+        monkeypatch.setattr(sqlalchemy, 'create_engine', _echoing_factory)
     with pytest.raises(ValueError) as excinfo:
         open_index(case.url)
     return excinfo.value
@@ -193,7 +213,10 @@ def test_a_refusal_that_quotes_a_cause_still_says_what_failed(
 
     The quoted cause is the only thing that tells an unreadable port from a
     server that refused the connection, so it has to survive the cleaning: a
-    refusal that said nothing but the URL would be safe and useless.
+    refusal that said nothing but the URL would be safe and useless.  The
+    case's own diagnosis is asserted beside the wrapper's text, because the
+    wrapper says the same thing whether the cause survived or was cleaned away
+    with the credential.
 
     Parameters:
         case: The refusal under test.
@@ -201,6 +224,7 @@ def test_a_refusal_that_quotes_a_cause_still_says_what_failed(
     """
     message = str(_quoted_refusal(case, monkeypatch))
     assert 'could not open the results index' in message
+    assert case.detail in message
 
 
 def test_a_quoted_cause_keeps_what_is_not_a_credential(
@@ -212,7 +236,7 @@ def test_a_quoted_cause_keeps_what_is_not_a_credential(
     outside the credentials and are what a reader corrects, so they survive
     whole.
     """
-    monkeypatch.setattr(sqlalchemy, 'create_engine', echoing_factory)
+    monkeypatch.setattr(sqlalchemy, 'create_engine', _echoing_factory)
     with pytest.raises(ValueError) as excinfo:
         open_index(f'postgresql+psycopg://user:{SLASHED_ECHO_PASSWORD}@dbhost/spindoctor')
     assert ECHOED_CONNECT_FAILURE in str(excinfo.value)
