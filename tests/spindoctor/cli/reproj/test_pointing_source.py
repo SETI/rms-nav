@@ -161,10 +161,8 @@ def test_the_recorded_midtime_survives_exactly(
 ) -> None:
     """And the midtime, which the reader gates against the observation at 1e-6 s.
 
-    Asserted exactly rather than approximately: the value is the one the
-    navigator recorded, and re-deriving it from the shutter epochs -- which
-    agrees to about 1e-8 s here -- is precisely what the column exists to
-    prevent.
+    Asserted exactly rather than approximately: a gate that tight leaves the
+    stored value no room to be nearly right.
     """
     assert _selection(sources, mode, CMATRIX_STUB).midtime_et == MIDTIME_ET
 
@@ -185,11 +183,7 @@ def test_the_index_carries_the_recorded_midtime_not_a_recomputed_one(
     root = tmp_path / 'nav'
     build_tree(
         root,
-        {
-            CMATRIX_STUB: document(
-                CMATRIX_STUB, offset=OFFSET, times=displaced, pointing=POINTING
-            )
-        },
+        {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET, times=displaced, pointing=POINTING)},
     )
     engine = index_for([root], tmp_path / 'index.sqlite3', logger=quiet_ingest_logger)
     try:
@@ -515,9 +509,7 @@ def test_a_url_reads_rows(tmp_path: Path, quiet_ingest_logger: pdslogger.PdsLogg
     build_tree(root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET)})
     database = tmp_path / 'index.sqlite3'
     index_for([root], database, logger=quiet_ingest_logger).dispose()
-    source = build_pointing_source(
-        FCPath(root), results_db_url=f'sqlite:///{database.as_posix()}'
-    )
+    source = build_pointing_source(FCPath(root), results_db_url=f'sqlite:///{database.as_posix()}')
     try:
         assert isinstance(source, IndexPointingSource)
     finally:
@@ -567,9 +559,7 @@ def test_a_root_nobody_ingested_is_refused(
     database = tmp_path / 'index.sqlite3'
     index_for([ingested], database, logger=quiet_ingest_logger).dispose()
     with pytest.raises(ValueError) as excinfo:
-        build_pointing_source(
-            FCPath(other), results_db_url=f'sqlite:///{database.as_posix()}'
-        )
+        build_pointing_source(FCPath(other), results_db_url=f'sqlite:///{database.as_posix()}')
     assert normalize_root_url(other) in str(excinfo.value)
 
 
@@ -584,9 +574,7 @@ def test_the_refusal_names_the_roots_the_index_does_hold(
     database = tmp_path / 'index.sqlite3'
     index_for([ingested], database, logger=quiet_ingest_logger).dispose()
     with pytest.raises(ValueError) as excinfo:
-        build_pointing_source(
-            FCPath(other), results_db_url=f'sqlite:///{database.as_posix()}'
-        )
+        build_pointing_source(FCPath(other), results_db_url=f'sqlite:///{database.as_posix()}')
     assert normalize_root_url(ingested) in str(excinfo.value)
 
 

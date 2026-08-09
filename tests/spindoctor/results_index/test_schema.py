@@ -78,6 +78,7 @@ IMAGES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('has_summary_png', sqlalchemy.Boolean, True),
     ('start_et', sqlalchemy.Double, True),
     ('stop_et', sqlalchemy.Double, True),
+    ('midtime_et', sqlalchemy.Double, True),
     ('exposure_s', sqlalchemy.Double, True),
     ('sclk_start', sqlalchemy.Text, True),
     ('sclk_midtime', sqlalchemy.Text, True),
