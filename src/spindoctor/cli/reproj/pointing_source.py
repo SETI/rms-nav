@@ -191,6 +191,7 @@ class FilePointingSource:
     """
 
     def __init__(self, nav_results_root: str | FCPath | None) -> None:
+        """Record the root this source reads its documents under."""
         self._nav_results_root = nav_results_root
 
     def read_record(self, image_file: ImageFile) -> dict[str, Any]:
@@ -249,6 +250,12 @@ class IndexPointingSource:
     """
 
     def __init__(self, engine: Engine, root_url: str) -> None:
+        """Take the open index and the root this source answers from.
+
+        The index is named for messages here rather than by each caller, and is
+        rendered with its credentials hidden: these messages reach run logs and
+        bug reports, and a connection URL can carry a database password.
+        """
         self._engine = engine
         self._root_url = root_url
         self._url = masked_url(engine.url.render_as_string(hide_password=False))
