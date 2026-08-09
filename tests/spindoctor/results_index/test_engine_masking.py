@@ -641,8 +641,8 @@ def test_the_opener_names_a_url_it_could_not_parse_by_its_masked_form(case: _Cas
 
 
 PARSEABLE_URLS = [
-    'postgresql+psycopg://user:sup3rs3cr3t@host:5432/spindoctor',
-    'postgresql+psycopg://admin%40pgsrv:sup3rs3cr3t@host/spindoctor',
+    f'postgresql+psycopg://user:{PASSWORD}@host:5432/spindoctor',
+    f'postgresql+psycopg://admin%40pgsrv:{PASSWORD}@host/spindoctor',
     'postgresql+psycopg://user@host/spindoctor',
     'postgresql+psycopg://host:5432/spindoctor',
     'postgresql+psycopg://host:5432/path@name',

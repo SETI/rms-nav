@@ -40,12 +40,7 @@ def test_a_repeated_separator_does_not_make_two_roots() -> None:
 def test_a_relative_root_becomes_an_absolute_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A root named relatively on one run and absolutely on the next is one root.
-
-    Parameters:
-        tmp_path: A directory to resolve the relative name against.
-        monkeypatch: Fixture the working directory is changed through.
-    """
+    """A root named relatively on one run and absolutely on the next is one root."""
     monkeypatch.chdir(tmp_path)
     assert normalize_root_url('results') == (tmp_path / 'results').as_posix()
 
@@ -93,44 +88,25 @@ def _refusal_of_an_unknown_root(tmp_path: Path) -> str:
     return str(excinfo.value)
 
 
-def test_the_refusal_does_not_repeat_the_index_password(tmp_path: Path) -> None:
-    """This refusal is printed to a terminal and written to run logs.
+def test_the_refusal_masks_its_index_and_leaves_its_roots_alone(tmp_path: Path) -> None:
+    """Three things are true of the refusal, and one call shows all three.
 
-    It is masked here rather than by each consumer, because a consumer that
-    forgets is a leak in a program nobody thought to check.
-
-    Parameters:
-        tmp_path: Directory the index file lives under.
+    It is printed to a terminal and written to run logs, so the index password
+    may not survive into it; it is masked inside this function rather than by
+    each consumer, because a consumer that forgets is a leak in a program nobody
+    thought to check. Which of the three resolution levels supplied the URL is
+    half of what the message is for, so the rest of the URL has to survive. And
+    the root is printed exactly as it was given, because a results root has
+    nothing to hide and is the string the reader has to correct.
     """
-    assert PASSWORD not in _refusal_of_an_unknown_root(tmp_path)
-
-
-def test_the_refusal_still_names_the_index_it_asked(tmp_path: Path) -> None:
-    """Which of the three resolution levels supplied the URL is half the answer.
-
-    Parameters:
-        tmp_path: Directory the index file lives under.
-    """
-    assert 'postgresql+psycopg://svc:***@db.example/spindoctor' in _refusal_of_an_unknown_root(
-        tmp_path
-    )
-
-
-def test_the_refusal_names_the_root_exactly_as_it_was_given(tmp_path: Path) -> None:
-    """A results root has nothing to hide and is what the reader has to correct.
-
-    Parameters:
-        tmp_path: Directory the index file lives under.
-    """
-    assert '/data/nav-results' in _refusal_of_an_unknown_root(tmp_path)
+    refusal = _refusal_of_an_unknown_root(tmp_path)
+    assert PASSWORD not in refusal
+    assert 'postgresql+psycopg://svc:***@db.example/spindoctor' in refusal
+    assert '/data/nav-results' in refusal
 
 
 def test_the_refusal_leaves_a_credential_shaped_root_alone(tmp_path: Path) -> None:
-    """Masking a root would corrupt the one string the message exists to deliver.
-
-    Parameters:
-        tmp_path: Directory the index file lives under.
-    """
+    """Masking a root would corrupt the one string the message exists to deliver."""
     engine = open_index(f'sqlite:///{(tmp_path / "index.sqlite3").as_posix()}', create=True)
     try:
         with (

@@ -135,13 +135,11 @@ def test_resolve_offset_limit_missing_size_entry() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_filter_is_a_named_bind_and_not_an_inlined_value() -> None:
-    """An inlined literal is a quoting bug waiting for a value that carries a quote."""
-    where, _params = where_clause(instrument='coiss', start_date=None, end_date=None)
+def test_a_filter_is_a_named_bind_carrying_its_value_beside_it() -> None:
+    """An inlined literal is a quoting bug waiting for a value that carries a quote.
+
+    The fragment is only half of it; the value travels beside it as a parameter.
+    """
+    where, params = where_clause(instrument='coiss', start_date=None, end_date=None)
     assert where == ' WHERE instrument = :instrument'
-
-
-def test_a_filter_carries_its_value_beside_it() -> None:
-    """The fragment is only half of it; the value travels as a parameter."""
-    _where, params = where_clause(instrument='coiss', start_date=None, end_date=None)
     assert params == {'instrument': 'coiss'}

@@ -9,7 +9,6 @@ alone, however many earlier ones finished.
 """
 
 from pathlib import Path
-from typing import Any
 
 import pdslogger
 import pytest
@@ -108,7 +107,10 @@ def test_main_report_refuses_a_root_nobody_ingested(
 
 
 def test_main_report_names_the_roots_it_does_hold(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch, capsys: Any
+    tmp_path: Path,
+    quiet_logger: pdslogger.PdsLogger,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The message has to be actionable, so it says what the index does cover."""
     monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
@@ -131,7 +133,7 @@ def test_main_report_names_the_roots_it_does_hold(
 
 
 def test_main_report_without_an_index_says_so(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """This program has no file-reading mode, and the message says which flag."""
     monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
@@ -140,7 +142,7 @@ def test_main_report_without_an_index_says_so(
 
 
 def test_main_report_without_an_index_names_the_flag(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A refusal that does not say what to type is a refusal nobody can act on."""
     monkeypatch.delenv('NAV_RESULTS_DB', raising=False)

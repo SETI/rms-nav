@@ -1020,13 +1020,22 @@ def test_the_image_delete_and_its_child_inserts_share_one_transaction(
 def _stored_json(database: Path, column: str) -> list[Any]:
     """Read one JSON column of every image row with a plain SQLite reader.
 
+    A column name cannot be a bind parameter, so it is interpolated; it is
+    checked against the table first, so no string a caller invents can reach the
+    statement.
+
     Parameters:
         database: The index file.
-        column: The column to read.
+        column: The column to read, which must be one ``images`` declares.
 
     Returns:
         One entry per row: the stored text, or None for SQL NULL.
+
+    Raises:
+        ValueError: If ``images`` declares no such column.
     """
+    if column not in IMAGES.c:
+        raise ValueError(f'images declares no column named {column}')
     connection = sqlite3.connect(database)
     try:
         return [row[0] for row in connection.execute(f'SELECT {column} FROM images')]

@@ -233,7 +233,10 @@ def test_a_deleted_document_loses_its_row_on_postgresql(
 
 
 def test_the_report_cli_does_not_print_the_server_password(
-    postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger, capsys: Any
+    postgres_url: str,
+    tmp_path: Path,
+    quiet_logger: pdslogger.PdsLogger,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The one refusal this program makes that names its index rather than a file.
 
