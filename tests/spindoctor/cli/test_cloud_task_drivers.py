@@ -196,6 +196,9 @@ def test_the_ingest_driver_isolates_its_logging(
     a line per unreadable file off the worker's terminal.
     """
     recorder = _Recorder(FCPath(tmp_path))
+    # Without this the resolver falls through to the environment, and a machine
+    # that names an index has this worker open one and ingest into it.
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
     monkeypatch.setattr(sd_stats_ingest_cloud_tasks, 'build_cloud_task_logging', recorder)
     sd_stats_ingest_cloud_tasks.process_task('task-1', {}, _worker_data(results_db=None))
     assert recorder.program_name == SD_STATS_INGEST
