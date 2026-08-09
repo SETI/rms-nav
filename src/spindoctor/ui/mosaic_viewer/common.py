@@ -6,6 +6,8 @@ reprojection / mosaic dataclasses (``RingReprojResult``, ``RingMosaicData``,
 ``DisplayData`` object ready for use in the ring or body window.
 """
 
+from __future__ import annotations
+
 import math
 import sys
 from collections.abc import Callable

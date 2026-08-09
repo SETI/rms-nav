@@ -9,6 +9,8 @@ at the limb of a sphere or a map seam), so each returned segment is a
 continuous visible arc.
 """
 
+from __future__ import annotations
+
 import math
 
 import numpy as np

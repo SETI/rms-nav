@@ -17,6 +17,8 @@ Only the viewport's visible region is ever rendered (tiled rendering), so
 arbitrary zoom levels are memory-efficient.
 """
 
+from __future__ import annotations
+
 import math
 from typing import Any, cast
 
