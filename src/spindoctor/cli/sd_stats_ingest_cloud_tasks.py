@@ -107,6 +107,12 @@ def process_task(
 
 
 async def async_main() -> None:
+    """Build the worker's argument parser and run it against the queue.
+
+    The parser carries only what a share needs resolving: the configuration
+    files and the index URL.  It carries no logging arguments, because a cloud
+    task's logging is resolved for it rather than asked for on a command line.
+    """
     argparser = argparse.ArgumentParser(description='Results index ingest (Cloud Tasks version)')
 
     environment_group = argparser.add_argument_group('Environment')
