@@ -50,7 +50,7 @@ class _RecordedFile:
         mtime_ns: Modification time recorded when it was last read.
         size_bytes: Size recorded when it was last read.
         has_summary_png: Whether a summary PNG was recorded beside it, or None
-            for a refused file, which has no image row to carry the flag.
+            when the row predates the flag.
         from_images: Whether the record is an ingested image rather than a
             refused file.
     """
@@ -91,7 +91,10 @@ def _recorded_files(connection: sqlalchemy.Connection, root_url: str) -> dict[st
         for row in connection.execute(images)
     }
     failed = sqlalchemy.select(
-        FAILED_FILES.c.results_path_stub, FAILED_FILES.c.mtime_ns, FAILED_FILES.c.size_bytes
+        FAILED_FILES.c.results_path_stub,
+        FAILED_FILES.c.mtime_ns,
+        FAILED_FILES.c.size_bytes,
+        FAILED_FILES.c.has_summary_png,
     ).where(FAILED_FILES.c.root_url == root_url)
     for row in connection.execute(failed):
         recorded.setdefault(
@@ -99,7 +102,9 @@ def _recorded_files(connection: sqlalchemy.Connection, root_url: str) -> dict[st
             _RecordedFile(
                 mtime_ns=row.mtime_ns,
                 size_bytes=row.size_bytes,
-                has_summary_png=None,
+                has_summary_png=(
+                    None if row.has_summary_png is None else bool(row.has_summary_png)
+                ),
                 from_images=False,
             ),
         )

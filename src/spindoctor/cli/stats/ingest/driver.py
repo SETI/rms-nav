@@ -67,7 +67,9 @@ def _is_unchanged(
     The summary PNG is part of the comparison because ``has_summary_png`` is a
     column of the row and comes from the walk rather than from the document: a
     summary written after the document was ingested changes the row that ought
-    to be stored, while changing nothing about the document itself.
+    to be stored, while changing nothing about the document itself.  That holds
+    for a refused file as much as for an ingested one, since both tables carry
+    the flag and a selection filter reads it from both.
 
     Parameters:
         listed: The file as this walk saw it.
@@ -81,9 +83,7 @@ def _is_unchanged(
         return False
     if (recorded.mtime_ns, recorded.size_bytes) != (listed.mtime_ns, listed.size_bytes):
         return False
-    if recorded.from_images:
-        return recorded.has_summary_png == (listed.results_path_stub in summary_stubs)
-    return True
+    return recorded.has_summary_png == (listed.results_path_stub in summary_stubs)
 
 
 def _files_to_read(

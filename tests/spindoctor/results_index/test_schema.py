@@ -134,6 +134,8 @@ FAILED_FILES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('root_url', sqlalchemy.Text, False),
     ('results_path_stub', sqlalchemy.Text, False),
     ('reason', sqlalchemy.Text, False),
+    ('volume', sqlalchemy.Text, True),
+    ('has_summary_png', sqlalchemy.Boolean, True),
     ('mtime_ns', sqlalchemy.BigInteger, True),
     ('size_bytes', sqlalchemy.BigInteger, True),
 )

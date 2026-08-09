@@ -44,6 +44,7 @@ SPICE_ERROR = f'{VOLUME}/data/b/N1000000004_1_CALIB'
 NONSPICE_ERROR = f'{VOLUME}/data/b/N1000000005_1_CALIB'
 ERROR_WITHOUT_STATUS_ERROR = f'{VOLUME}/data/b/N1000000006_1_CALIB'
 REFUSED = f'{VOLUME}/data/b/N1000000007_1_CALIB'
+REFUSED_WITH_PNG = f'{VOLUME}/data/b/N1000000012_1_CALIB'
 REFUSED_OTHER_VOLUME = f'{OTHER_VOLUME}/data/b/N1000000008_1_CALIB'
 UNSELECTED_VOLUME_IMAGE = f'{OTHER_VOLUME}/data/a/N1000000009_1_CALIB'
 NO_VOLUME = 'scene_0001'
@@ -58,6 +59,7 @@ EVERY_STUB = (
     NONSPICE_ERROR,
     ERROR_WITHOUT_STATUS_ERROR,
     REFUSED,
+    REFUSED_WITH_PNG,
     REFUSED_OTHER_VOLUME,
     UNSELECTED_VOLUME_IMAGE,
     NO_VOLUME,
@@ -148,16 +150,19 @@ def two_roots(tmp_path: Path) -> str:
             'root_url': root_url,
             'results_path_stub': stub,
             'reason': 'not a current-schema navigation document',
+            'volume': _volume_of(stub),
+            'has_summary_png': has_summary_png,
             'mtime_ns': 1,
             'size_bytes': 2,
         }
-        for root_url, stub in (
-            (ROOT, REFUSED),
-            (ROOT, REFUSED_OTHER_VOLUME),
+        for root_url, stub, has_summary_png in (
+            (ROOT, REFUSED, False),
+            (ROOT, REFUSED_WITH_PNG, True),
+            (ROOT, REFUSED_OTHER_VOLUME, False),
             # The other root refuses a file the root under test holds nothing
             # for, so a refusal read without its root shows up as a document
             # that exists under a root that has none.
-            (OTHER_ROOT, ONLY_REFUSED_IN_THE_OTHER_ROOT),
+            (OTHER_ROOT, ONLY_REFUSED_IN_THE_OTHER_ROOT, True),
         )
     ]
     # Everything the other root holds would change an answer if it leaked: a
@@ -229,8 +234,24 @@ def test_the_query_does_not_fetch_an_unselected_volume(two_roots: str) -> None:
 
 
 def test_a_summary_png_is_read_from_the_document_it_sits_beside(two_roots: str) -> None:
-    """The walk records the PNG on the row of the document it was found with."""
-    assert _stubs(two_roots).with_summary_png == frozenset({SUCCESS_WITH_PNG})
+    """The walk records the PNG on the row of the file it was found with."""
+    assert _stubs(two_roots).with_summary_png == frozenset({SUCCESS_WITH_PNG, REFUSED_WITH_PNG})
+
+
+def test_a_summary_png_beside_a_refused_document_is_present(two_roots: str) -> None:
+    """A PNG is found beside a file, not read out of it.
+
+    The tree walk finds ``X_summary.png`` whatever ``X_metadata.json`` turned
+    out to contain, so a summary beside a document the ingest refused has to
+    read as present here too, or an entire results root written by another tool
+    answers both PNG filters backwards.
+    """
+    assert REFUSED_WITH_PNG in _stubs(two_roots).with_summary_png
+
+
+def test_a_refused_document_with_no_summary_png_is_not_in_the_png_set(two_roots: str) -> None:
+    """The flag is the walk's answer for that file, not a constant for the table."""
+    assert REFUSED not in _stubs(two_roots).with_summary_png
 
 
 def test_a_document_with_no_summary_png_is_not_in_the_png_set(two_roots: str) -> None:
@@ -244,8 +265,21 @@ def test_an_image_of_an_unselected_volume_is_not_read(two_roots: str) -> None:
 
 
 def test_a_refusal_of_an_unselected_volume_is_not_read(two_roots: str) -> None:
-    """The refusals carry no volume column, so the restriction is applied to them."""
+    """A refused file is under a volume like any other, and is restricted to it."""
     assert REFUSED_OTHER_VOLUME not in _stubs(two_roots).with_metadata
+
+
+def test_the_query_does_not_fetch_an_unselected_volumes_refusal(two_roots: str) -> None:
+    """The restriction is in the query for the refusals as much as for the images.
+
+    A root whose non-navigation files outnumber its results is exactly the tree
+    the refusal table was made for, and a single-volume enumeration that fetched
+    every refusal in the root would pay for all of them on every run.
+    """
+    query = _stub_query(ROOT, [VOLUME], sqlalchemy.false())
+    with opened(two_roots) as engine, engine.connect() as connection:
+        fetched = {str(row[0]) for row in connection.execute(query)}
+    assert REFUSED_OTHER_VOLUME not in fetched
 
 
 def test_a_stub_with_no_volume_is_not_read(two_roots: str) -> None:
@@ -331,11 +365,33 @@ def test_an_index_that_cannot_be_opened_is_an_error(tmp_path: Path) -> None:
 
 
 def test_a_relative_root_names_the_root_the_ingest_recorded(
-    two_roots: str, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A relative root is a documented spelling of the option, not a second root."""
-    monkeypatch.chdir(Path(ROOT).parent)
-    stubs = read_result_stubs(two_roots, Path(ROOT).name, [VOLUME])
+    """A relative root is a documented spelling of the option, not a second root.
+
+    The root is built under ``tmp_path`` rather than named absolutely, because
+    resolving a relative name means changing into its parent, and a directory
+    named in the source exists on the machine that wrote it and nowhere else.
+    """
+    root = tmp_path / 'nav-results'
+    root.mkdir()
+    url = sqlite_url_for(tmp_path / 'relative.sqlite3')
+    root_url = root.as_posix()
+    with opened(url, create=True) as engine, engine.begin() as connection:
+        connection.execute(
+            IMAGES.insert(),
+            [
+                image_row(
+                    root_url=root_url,
+                    results_path_stub=SUCCESS_WITH_PNG,
+                    volume=VOLUME,
+                    has_summary_png=True,
+                )
+            ],
+        )
+        connection.execute(INGEST_RUNS.insert(), [_completed_run(root_url)])
+    monkeypatch.chdir(tmp_path)
+    stubs = read_result_stubs(url, root.name, [VOLUME])
     assert SUCCESS_WITH_PNG in stubs.with_metadata
 
 

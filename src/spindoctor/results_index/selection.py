@@ -12,23 +12,40 @@ then tests membership in.
 Both tables that record a file are read.  A document the ingest refused is a
 file that exists, and the tree answers a presence filter with the file rather
 than with its contents, so a refusal recorded in ``failed_files`` counts towards
-presence exactly as an ingested document does.
+presence exactly as an ingested document does, and carries the volume it lives
+under and the summary PNG the walk saw beside it for the same reason.
 
 What the index answers differently
 ----------------------------------
 
-The index holds what one ingest pass could read, so three answers are bounded by
-that rather than by this query:
+The index holds what one ingest pass could read and record, so the answers below
+are bounded by that rather than by this query.  The list is complete as written;
+anything added to it belongs here, in the plan, and in a test of its own.
 
-- A summary PNG with no document beside it is not recorded anywhere: the flag
-  lives on the row of the document it was found beside.  Such a PNG reads as
-  absent, where the tree reads it as present.
-- A document the ingest refused, because it is not a per-image navigation
-  document, records no status, so it matches no error filter.  The tree reads
-  ``status`` out of any JSON object it can parse, and a file that is not a
-  navigation document but does carry the field matches there.
-- A file a pass could not download is recorded nowhere at all, deliberately, so
-  that the next pass tries it again.  It reads as absent until a pass reads it.
+- **A summary PNG with no document beside it** is recorded nowhere: the flag
+  lives on the row of the file it was found beside, and a PNG on its own has no
+  file to be beside.  It reads as absent, where the tree reads it as present,
+  which makes ``--has-no-offset-file --has-png-file`` empty under an index.
+  Recording it needs a row keyed by a stub no document backs, and every other
+  reader of these tables takes such a row as evidence that a document exists.
+- **A document that is valid JSON and carries ``status``, but is not a
+  navigation document,** is refused by the ingest and so records no status of
+  its own.  It matches no error filter, where the tree reads ``status`` and
+  ``status_error`` out of any JSON object it can parse.
+- **A document whose top-level ``status`` is absent, empty, or not a string**
+  takes its recorded status from ``navigation_result.status``, which is where
+  the rest of the index reads an outcome from.  The tree reads the top-level
+  field alone, so such a document can match an error filter here and not there.
+- **A file that exists and has no row at all** reads as absent, which is what
+  the absence filters read as "this image was never navigated".  Three passes
+  end that way, and the first two do so deliberately, because a recorded row
+  would be skipped for as long as the file did not change and the next pass
+  would never retry it:
+
+  - a file the pass could not retrieve;
+  - a document the pass read whose rows the database would not store;
+  - a file under a directory the walk did not list, either because it could not
+    be listed or because it had already been listed under another name.
 
 The index is also a snapshot: it answers as of the last ingest over the root,
 and a document written since is one the index does not hold.
@@ -115,20 +132,6 @@ def _error_condition(
     return sqlalchemy.and_(*conditions)
 
 
-def _volume_of(stub: str) -> str | None:
-    """Return the volume a results path stub names, as the index records it.
-
-    Parameters:
-        stub: The results path stub.
-
-    Returns:
-        Its first path segment, or None when it has no separator at all, which
-        is what a scene name with no volume above it produces.
-    """
-    volume, separator, _rest = stub.partition('/')
-    return volume if separator else None
-
-
 def _stub_query(
     root_url: str, volumes: Sequence[str], error_condition: sqlalchemy.ColumnElement[bool]
 ) -> sqlalchemy.CompoundSelect[tuple[str, bool | None, bool]]:
@@ -138,10 +141,10 @@ def _stub_query(
     together and one database serves several roots: a query that asked about the
     stub alone would answer with another root's images.
 
-    The images are restricted to the selected volumes, which is the restriction
-    the tree walk applies by walking only those volumes' directories.  The
-    refusals cannot be, because ``failed_files`` records no volume; the caller
-    holds them to the same restriction as it reads them.
+    Both arms are restricted to the selected volumes, which is the restriction
+    the tree walk applies by walking only those volumes' directories.  A stub
+    with no volume above it -- a bare scene name -- is under no walked directory
+    and is matched by neither arm, because SQL's ``IN`` is false for NULL.
 
     Parameters:
         root_url: The normalized root the candidates live under.
@@ -149,21 +152,23 @@ def _stub_query(
         error_condition: What makes an image row match the error filters.
 
     Returns:
-        A query yielding one row per recorded file, carrying its stub, whether a
-        summary PNG was recorded beside it, and whether it matches the error
-        filters.
+        A query yielding one row per recorded file of the selected volumes,
+        carrying its stub, whether a summary PNG was recorded beside it, and
+        whether it matches the error filters.
     """
     documents = sqlalchemy.select(
         IMAGES.c.results_path_stub,
         IMAGES.c.has_summary_png,
         error_condition.label('matches_error'),
     ).where(IMAGES.c.root_url == root_url, IMAGES.c.volume.in_(volumes))
-    # A refused file has no status to match an error filter with, and no summary
-    # PNG was recorded for it: the flag belongs to an image row, which a file
-    # that is not a navigation document deliberately does not get.
+    # A refused file records no status, so it matches no error filter; the walk
+    # saw its summary PNG all the same, because a PNG is found beside a file
+    # rather than read out of it.
     refusals = sqlalchemy.select(
-        FAILED_FILES.c.results_path_stub, sqlalchemy.false(), sqlalchemy.false()
-    ).where(FAILED_FILES.c.root_url == root_url)
+        FAILED_FILES.c.results_path_stub,
+        FAILED_FILES.c.has_summary_png,
+        sqlalchemy.false(),
+    ).where(FAILED_FILES.c.root_url == root_url, FAILED_FILES.c.volume.in_(volumes))
     return documents.union_all(refusals)
 
 
@@ -213,21 +218,15 @@ def read_result_stubs(
             differently.
     """
     root_url = normalize_root_url(nav_results_root)
-    selected = list(volumes)
     query = _stub_query(
         root_url,
-        selected,
+        list(volumes),
         _error_condition(
             has_offset_error=has_offset_error,
             has_offset_spice_error=has_offset_spice_error,
             has_offset_nonspice_error=has_offset_nonspice_error,
         ),
     )
-    # The volume restriction is applied to every row rather than to the refusals
-    # the query could not restrict, so that one rule bounds the answer: what the
-    # tree path holds is what a walk of these volumes' directories found, and a
-    # stub above them or beside them is not part of that answer.
-    selected_volumes = frozenset(selected)
     with_metadata: set[str] = set()
     with_summary_png: set[str] = set()
     matching_error: set[str] = set()
@@ -237,8 +236,6 @@ def read_result_stubs(
             require_ingested_roots(connection, [root_url], url=url)
             for stub, has_summary_png, matches_error in connection.execute(query):
                 stub_text = str(stub)
-                if _volume_of(stub_text) not in selected_volumes:
-                    continue
                 with_metadata.add(stub_text)
                 if has_summary_png:
                     with_summary_png.add(stub_text)

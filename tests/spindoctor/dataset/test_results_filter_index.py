@@ -28,6 +28,7 @@ from typing import Any
 
 import pdslogger
 import pytest
+import sqlalchemy
 from filecache import FCPath
 from tests.spindoctor.cli.stats.conftest import (
     index_url,
@@ -37,13 +38,14 @@ from tests.spindoctor.cli.stats.conftest import (
     write_summary_png,
 )
 
+from spindoctor.cli.stats.ingest import store
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.dataset.results_filter import (
     _SPICE_STATUS_ERROR,
     RESULTS_FILTER_BATCH_SIZE,
     ResultsFilter,
 )
-from spindoctor.results_index.selection import SPICE_STATUS_ERROR
+from spindoctor.results_index import SPICE_STATUS_ERROR
 
 VOLUMES = ['COISS_2001', 'COISS_2002']
 """The volumes the enumeration selected."""
@@ -76,8 +78,13 @@ CANDIDATES = (
 WITH_A_DOCUMENT = tuple(stub for stub in CANDIDATES if stub != NO_RESULT)
 """Every candidate whose metadata file exists, however well it reads."""
 
-WITH_A_PNG = (SUCCESS_WITH_PNG, FAILURE, NONSPICE_ERROR, OTHER_VOLUME)
-"""Every candidate a summary PNG was written for."""
+WITH_A_PNG = (SUCCESS_WITH_PNG, FAILURE, NONSPICE_ERROR, MALFORMED, OTHER_VOLUME)
+"""Every candidate a summary PNG was written for, in enumeration order.
+
+One of them is a document the ingest refuses, because a PNG is found beside a
+file rather than read out of it: the walk finds ``X_summary.png`` whatever
+``X_metadata.json`` turned out to contain.
+"""
 
 WITHOUT_A_PNG = tuple(stub for stub in CANDIDATES if stub not in WITH_A_PNG)
 """Every candidate no summary PNG was written for."""
@@ -137,6 +144,11 @@ def _write_tree(root: Path) -> None:
         metadata_document(image_name='N1000000006_1.IMG', status='error', offset=None),
     )
     _write_bytes(root, MALFORMED, b'{"status": "error"')
+    # A summary PNG sits beside a document the ingest refuses. This is the
+    # ordinary shape of a results root written by an older metadata schema --
+    # every image in one has a summary beside a document the ingest will not
+    # read -- so both PNG filters have to answer for it as the walk does.
+    write_summary_png(root, MALFORMED)
     _write_bytes(root, NOT_AN_OBJECT, b'[1, 2, 3]')
     write_metadata(root, OTHER_VOLUME, metadata_document(image_name='N1000000010_1.IMG'))
     write_summary_png(root, OTHER_VOLUME)
@@ -160,10 +172,10 @@ def _write_decoy_tree(root: Path) -> None:
 
     Every candidate gets a fatal SPICE error and a summary PNG here, and the one
     candidate the tree under test has no result files for gets a document the
-    ingest refuses, so that a refusal read without its root changes an answer
-    too.  Any filter that read this root's rows for the other root's stubs
-    therefore answers differently, which is what makes the composite key
-    testable at all.
+    ingest refuses with a summary PNG beside it, so that a refusal read without
+    its root changes both the presence answer and the PNG answer.  Any filter
+    that read this root's rows for the other root's stubs therefore answers
+    differently, which is what makes the composite key testable at all.
 
     Parameters:
         root: The second results root to write into.
@@ -171,6 +183,7 @@ def _write_decoy_tree(root: Path) -> None:
     for stub in CANDIDATES:
         if stub == NO_RESULT:
             _write_bytes(root, stub, b'{"status": "error"')
+            write_summary_png(root, stub)
             continue
         write_metadata(
             root,
@@ -535,6 +548,163 @@ def test_a_document_that_is_not_a_navigation_document_matches_no_index_error_fil
         logger=_logger(),
         results_db_url=url,
         has_offset_spice_error=True,
+    )
+    assert _select(results_filter, images) == []
+
+
+def test_a_summary_png_written_after_a_refusal_is_seen_by_the_next_pass(
+    tmp_path: Path,
+) -> None:
+    """The flag is part of what makes a refused file unchanged, as it is for an image.
+
+    A refused file whose metrics still match is skipped without being read,
+    which is what stops a tree of non-navigation documents from being downloaded
+    on every run.  A summary PNG written beside it after the refusal was
+    recorded changes nothing about the file and everything about the row that
+    ought to be stored, so it has to be part of the comparison or the PNG stays
+    invisible until the document itself changes.
+    """
+    root = tmp_path / 'results'
+    _write_bytes(root, MALFORMED, b'{"status": "error"')
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=_logger())
+    write_summary_png(root, MALFORMED)
+    ingest_tree(url, [root], logger=_logger())
+    images = [
+        ImageFile(
+            image_file_url=FCPath(root / 'x.IMG'),
+            label_file_url=FCPath(root / 'x.LBL'),
+            results_path_stub=MALFORMED,
+        )
+    ]
+    results_filter = ResultsFilter(
+        VOLUMES, str(root), logger=_logger(), results_db_url=url, has_png_file=True
+    )
+    assert _select(results_filter, images) == [MALFORMED]
+
+
+def _status_only_in_the_navigation_result(root: Path) -> list[ImageFile]:
+    """Write a document whose outcome is recorded only under ``navigation_result``.
+
+    A document written by an older metadata schema is the plausible shape of
+    this: the outcome is there, in the place the rest of the index reads an
+    outcome from, and the top-level field the tree path reads is not.
+
+    Parameters:
+        root: The results root to write into.
+
+    Returns:
+        The one candidate image, ready to filter.
+    """
+    document = metadata_document(image_name='N1000000004_1.IMG', offset=None)
+    del document['status']
+    document['navigation_result']['status'] = 'error'
+    write_metadata(root, SPICE_ERROR, document)
+    return [
+        ImageFile(
+            image_file_url=FCPath(root / 'x.IMG'),
+            label_file_url=FCPath(root / 'x.LBL'),
+            results_path_stub=SPICE_ERROR,
+        )
+    ]
+
+
+def test_a_status_only_in_the_navigation_result_matches_no_tree_error_filter(
+    tmp_path: Path,
+) -> None:
+    """The tree path reads the top-level field and no other."""
+    root = tmp_path / 'results'
+    images = _status_only_in_the_navigation_result(root)
+    results_filter = ResultsFilter(VOLUMES, str(root), logger=_logger(), has_offset_error=True)
+    assert _select(results_filter, images) == []
+
+
+def test_a_status_only_in_the_navigation_result_matches_the_index_error_filter(
+    tmp_path: Path,
+) -> None:
+    """The recorded status falls back to the navigation result, so the index matches.
+
+    This is one of the answers the index gives differently, pinned rather than
+    left to be discovered: the column the error filters read is the column the
+    whole index reads an outcome from, and it is written from whichever of the
+    two places the document put it.
+    """
+    root = tmp_path / 'results'
+    images = _status_only_in_the_navigation_result(root)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=_logger())
+    results_filter = ResultsFilter(
+        VOLUMES, str(root), logger=_logger(), results_db_url=url, has_offset_error=True
+    )
+    assert _select(results_filter, images) == [SPICE_ERROR]
+
+
+def _one_image_tree(tmp_path: Path) -> tuple[Path, list[ImageFile]]:
+    """Write a results root holding one navigated image.
+
+    Parameters:
+        tmp_path: Directory the root is written under.
+
+    Returns:
+        The root, and the one candidate image ready to filter.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, SUCCESS_NO_PNG, metadata_document(image_name='N1000000002_1.IMG'))
+    return root, [
+        ImageFile(
+            image_file_url=FCPath(root / 'x.IMG'),
+            label_file_url=FCPath(root / 'x.LBL'),
+            results_path_stub=SUCCESS_NO_PNG,
+        )
+    ]
+
+
+def test_a_file_the_pass_could_not_retrieve_reads_as_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing is recorded for it, deliberately, so the next pass tries it again.
+
+    A recorded refusal would be skipped for as long as the file did not change,
+    and a download that failed once says nothing that will still be true then.
+    The cost is that the file reads as absent until a pass reads it, which is one
+    of the answers the index gives differently.
+    """
+    root, images = _one_image_tree(tmp_path)
+
+    def refuse(self: FCPath, *args: Any, **kwargs: Any) -> list[Exception]:
+        return [OSError('the backend did not answer') for _ in args[0]]
+
+    url = index_url(tmp_path / 'index.sqlite3')
+    monkeypatch.setattr(FCPath, 'retrieve', refuse)
+    ingest_tree(url, [root], logger=_logger())
+    monkeypatch.undo()
+    results_filter = ResultsFilter(
+        VOLUMES, str(root), logger=_logger(), results_db_url=url, has_offset_file=True
+    )
+    assert _select(results_filter, images) == []
+
+
+def test_a_document_the_database_would_not_store_reads_as_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A row the database refuses is counted and recorded nowhere, on the same grounds.
+
+    The document read exactly as the schema says, so nothing about it says the
+    next pass will not store it, and a recorded refusal would stop the next pass
+    from trying.  It therefore reads as absent, exactly as a file nobody could
+    retrieve does.
+    """
+    root, images = _one_image_tree(tmp_path)
+
+    def refuse(connection: Any, rows: Any) -> None:
+        raise sqlalchemy.exc.IntegrityError('INSERT', {}, Exception('refused'))
+
+    url = index_url(tmp_path / 'index.sqlite3')
+    monkeypatch.setattr(store, '_write_image', refuse)
+    ingest_tree(url, [root], logger=_logger())
+    monkeypatch.undo()
+    results_filter = ResultsFilter(
+        VOLUMES, str(root), logger=_logger(), results_db_url=url, has_offset_file=True
     )
     assert _select(results_filter, images) == []
 
