@@ -593,6 +593,21 @@ def test_the_snapshot_time_answers_for_one_root_on_postgresql(postgres_url: str)
     assert stubs.ingested_utc == SELECTION_INGESTED
 
 
+def _seeded_without_the_refusals(url: str) -> None:
+    """Seed the selection rows and then take the refusals table away.
+
+    An index whose account was granted the rows it reports on and not the
+    bookkeeping beside them is the case the refusal names, and dropping the
+    table is how that account's view of it is reproduced.
+
+    Parameters:
+        url: The index to create, write into, and take a table from.
+    """
+    _seed_selection_rows(url)
+    with opened(url) as engine, engine.begin() as connection:
+        connection.execute(sqlalchemy.text(f'DROP TABLE {FAILED_FILES.name}'))
+
+
 def test_a_table_this_account_cannot_read_is_reported_on_postgresql(postgres_url: str) -> None:
     """A missing relation is a different exception class here, and is still translated.
 
@@ -604,9 +619,7 @@ def test_a_table_this_account_cannot_read_is_reported_on_postgresql(postgres_url
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
     """
-    _seed_selection_rows(postgres_url)
-    with opened(postgres_url) as engine, engine.begin() as connection:
-        connection.execute(sqlalchemy.text(f'DROP TABLE {FAILED_FILES.name}'))
+    _seeded_without_the_refusals(postgres_url)
     with pytest.raises(ValueError, match='could not be read'):
         read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
 
@@ -617,9 +630,7 @@ def test_a_failing_query_raises_no_database_exception_on_postgresql(postgres_url
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
     """
-    _seed_selection_rows(postgres_url)
-    with opened(postgres_url) as engine, engine.begin() as connection:
-        connection.execute(sqlalchemy.text(f'DROP TABLE {FAILED_FILES.name}'))
+    _seeded_without_the_refusals(postgres_url)
     with pytest.raises(ValueError) as excinfo:
         read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
     assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
@@ -631,9 +642,7 @@ def test_a_failing_query_is_reported_without_its_sql_on_postgresql(postgres_url:
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
     """
-    _seed_selection_rows(postgres_url)
-    with opened(postgres_url) as engine, engine.begin() as connection:
-        connection.execute(sqlalchemy.text(f'DROP TABLE {FAILED_FILES.name}'))
+    _seeded_without_the_refusals(postgres_url)
     with pytest.raises(ValueError) as excinfo:
         read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
     assert 'SELECT' not in str(excinfo.value)

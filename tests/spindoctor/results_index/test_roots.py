@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 from filecache import FCPath
-from tests.spindoctor.results_index.conftest import opened
+from tests.spindoctor.results_index.conftest import opened, sqlite_url_for
 
 from spindoctor.results_index import (
     INGEST_RUNS,
@@ -97,7 +97,7 @@ def _refusal_of_an_unknown_root(tmp_path: Path) -> str:
     Returns:
         The refusal message.
     """
-    engine = open_index(f'sqlite:///{(tmp_path / "index.sqlite3").as_posix()}', create=True)
+    engine = open_index(sqlite_url_for(tmp_path / 'index.sqlite3'), create=True)
     try:
         with (
             engine.connect() as connection,
@@ -128,7 +128,7 @@ def test_the_refusal_masks_its_index_and_leaves_its_roots_alone(tmp_path: Path) 
 
 def test_the_refusal_leaves_a_credential_shaped_root_alone(tmp_path: Path) -> None:
     """Masking a root would corrupt the one string the message exists to deliver."""
-    engine = open_index(f'sqlite:///{(tmp_path / "index.sqlite3").as_posix()}', create=True)
+    engine = open_index(sqlite_url_for(tmp_path / 'index.sqlite3'), create=True)
     try:
         with (
             engine.connect() as connection,
@@ -154,7 +154,7 @@ def _index_with_two_passed_over_roots(tmp_path: Path) -> str:
     Returns:
         The connection URL of the index.
     """
-    url = f'sqlite:///{(tmp_path / "index.sqlite3").as_posix()}'
+    url = sqlite_url_for(tmp_path / 'index.sqlite3')
     with opened(url, create=True) as engine, engine.begin() as connection:
         connection.execute(
             INGEST_RUNS.insert(),
@@ -217,7 +217,7 @@ def test_a_pass_that_recorded_no_count_reads_as_no_gap(tmp_path: Path) -> None:
     pass ends, so a NULL is a pass that did not reach the end -- which the
     completed-ingest check refuses before any of this is read.
     """
-    url = f'sqlite:///{(tmp_path / "index.sqlite3").as_posix()}'
+    url = sqlite_url_for(tmp_path / 'index.sqlite3')
     with opened(url, create=True) as engine, engine.begin() as connection:
         connection.execute(
             INGEST_RUNS.insert(),
