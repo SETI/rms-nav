@@ -49,7 +49,9 @@ Imports
     imports no ``sqlalchemy`` module.
   * :func:`spindoctor.results_index.masked_url` in
     ``spindoctor/support/command_line.py``, imported only when the command line
-    being logged actually carries a connection URL. The run banner of every
+    being logged carries a value for a connection-URL option. Whether such a
+    value holds a credential is what the masking rule itself decides, so
+    locating one is as far as the module gets without it. The run banner of every
     program passes through that module, and :mod:`spindoctor.support.misc` is
     itself reached from :mod:`spindoctor.dataset`, so a top-level import there
     would defeat the guarantee above as well. The same subprocess assertion
