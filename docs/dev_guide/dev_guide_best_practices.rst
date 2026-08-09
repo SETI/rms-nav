@@ -29,11 +29,17 @@ Imports
 * Imports go at the top of the file, in three alphabetically sorted groups
   separated by blank lines: standard library, third party, then this project.
 * An import inside a function is permitted only to keep a heavy dependency off
-  a path that does not use it. Two such exceptions exist, and each carries a
-  comment saying why:
+  a path that does not use it, and it must carry a comment naming the
+  dependency and the path. Most of them keep an optional or costly library out
+  of a module that only some callers reach: the GUI toolkit, the plotting and
+  imaging libraries, the SPICE and array libraries a single function needs, and
+  each instrument's ``oops`` host module.
+* Two of them protect a guarantee beyond their own module:
 
-  * The PyQt6 widgets in ``spindoctor.ui``, so that a headless navigation run
-    never imports a GUI toolkit.
+  * PyQt6, imported where a dialog is opened rather than at the top of the
+    module that opens it -- the manual navigation technique in
+    ``spindoctor/nav_technique/nav_technique_manual.py`` is the one on the
+    navigation path -- so that a headless run never imports a GUI toolkit.
   * :mod:`spindoctor.results_index.selection` in
     ``spindoctor/dataset/results_filter.py``, imported inside the branch that
     was given a results-index URL. Every navigation run imports
