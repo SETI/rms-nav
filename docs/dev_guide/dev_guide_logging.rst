@@ -61,6 +61,26 @@ The pdslogger templates avoid the ``%`` character because pdslogger
 interprets ``%`` as a positional-format placeholder. Plain prose ("most
 pixels at full-well DN") stands in for percent-encoded numbers like ">80%".
 
+Both loggers are process-wide singletons, so what one test attaches to them is
+still attached for the next one in the same worker. That matters more than it
+sounds: a ``PdsLogger`` holding no handlers falls back to printing every record
+to stdout, which is what makes ``capsys`` assertions work at all, and one
+holding a stray handler stops doing so. A leaked handler therefore does not
+fail the test that leaked it -- it empties the captured output of every later
+test in that worker, and only in the worker whose share of the suite happened
+to include both.
+
+The ``restore_loggers_fixture`` in ``tests/conftest.py`` puts both loggers back
+after every test and fails the test if it could not. A test that drives a
+driver's ``main()``, or otherwise builds run or per-image logging, needs no
+further ceremony; one that attaches a handler by hand should detach and close
+it itself. Give a log handler an **absolute** path: pdslogger identifies an
+open log file by the absolute path the working directory gives, so a handler
+built from a relative path cannot be found again -- and so cannot be detached
+-- once the working directory moves. That is why a log root resolves to an
+absolute path when a run's sinks are chosen; see
+:func:`~spindoctor.config.logging_config.absolute_log_root`.
+
 Log levels
 ==========
 

@@ -484,6 +484,7 @@ def test_startup_load_accepts_a_good_logging_section(tmp_path: Path) -> None:
         ('sd_mosaic', SD_MOSAIC),
         ('sd_mosaic_cloud_tasks', SD_MOSAIC),
         ('sd_create_bundle', 'sd_create_bundle'),
+        ('sd_create_ck', 'sd_create_ck'),
         ('sd_consolidate_metadata', 'sd_consolidate_metadata'),
     ],
 )
@@ -504,6 +505,7 @@ def test_dispatch_module_declares_its_program_identity(module_name: str, expecte
         'sd_mosaic',
         'sd_mosaic_cloud_tasks',
         'sd_create_bundle',
+        'sd_create_ck',
         'sd_consolidate_metadata',
     ],
 )

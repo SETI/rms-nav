@@ -24,6 +24,7 @@ from spindoctor.feature.geometry import StarGeometry
 from spindoctor.nav_model import NavModel
 from spindoctor.nav_technique import NavTechniqueManual
 from spindoctor.nav_technique.nav_technique_manual import run_manual_nav
+from spindoctor.support.cmatrix import PointingSolution
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
 
 
@@ -114,6 +115,11 @@ def _patch_build_models(monkeypatch: pytest.MonkeyPatch) -> None:
     import spindoctor.nav_model as nav_model_pkg
 
     monkeypatch.setattr(nav_model_pkg, 'build_models_for_obs', _stub_builder, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _fakes_report_as_simulated(fakes_report_as_simulated: None) -> None:
+    """Apply the shared simulated-instrument report to every test in this module."""
 
 
 def _make_fake_dialog(
@@ -335,3 +341,48 @@ def test_titan_only_feature_set_composes_a_non_empty_overlay(
     feature = _titan_feature(make_titan_feature)
     _image, mask = compose_dialog_overlay([feature], (48, 48))
     assert bool(mask.any()) is True
+
+
+def test_run_manual_nav_stamps_the_corrected_pointing(
+    monkeypatch: pytest.MonkeyPatch, sentinel_pointing: PointingSolution
+) -> None:
+    """An operator-picked offset carries the same recorded attitude as an autonomous one.
+
+    Operator-ratified offsets are the highest-quality pointing in the corpus,
+    so they must not be the one subset a generated C-kernel omits.  The SPICE
+    lookups behind the real computation need furnished kernels, so the wiring
+    is exercised with a stand-in solution.
+    """
+    pointing = sentinel_pointing
+    monkeypatch.setattr(
+        'spindoctor.nav_orchestrator.orchestrator.compute_pointing',
+        lambda obs, *, offset_px, rotation_fitted: pointing,
+    )
+    obs = _FakeObsForRunManual()
+    obs.with_template = True  # type: ignore[attr-defined]
+    fake_dialog, _instances = _make_fake_dialog((True, (3.0, -2.0), 0.92))
+    with patch('spindoctor.ui.manual_nav_dialog.ManualNavDialog', fake_dialog):
+        result = run_manual_nav(obs)  # type: ignore[arg-type]
+    assert result is not None
+    assert result.pointing is pointing
+
+
+def test_run_manual_nav_passes_the_operator_offset_to_the_pointing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The attitude is computed from the offset the operator actually picked."""
+    seen: dict[str, Any] = {}
+
+    def _record(obs: Any, *, offset_px: Any, rotation_fitted: bool) -> None:
+        seen['offset_px'] = offset_px
+        seen['rotation_fitted'] = rotation_fitted
+        return None
+
+    monkeypatch.setattr('spindoctor.nav_orchestrator.orchestrator.compute_pointing', _record)
+    obs = _FakeObsForRunManual()
+    obs.with_template = True  # type: ignore[attr-defined]
+    fake_dialog, _instances = _make_fake_dialog((True, (3.0, -2.0), 0.92))
+    with patch('spindoctor.ui.manual_nav_dialog.ManualNavDialog', fake_dialog):
+        run_manual_nav(obs)  # type: ignore[arg-type]
+    assert seen['offset_px'] == (3.0, -2.0)
+    assert seen['rotation_fitted'] is False

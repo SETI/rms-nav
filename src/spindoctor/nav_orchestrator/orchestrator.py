@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 
 from spindoctor.annotation import Annotations
-from spindoctor.config import Config, logged_section
+from spindoctor.config import MAIN_LOGGER, Config, logged_section
 from spindoctor.feature.feature import NavFeature
 from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.feature.reliability import FeatureReliabilityGate, GatedFeatureRecord
@@ -62,7 +62,9 @@ from spindoctor.nav_technique.nav_technique import (
     technique_tier,
 )
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
-from spindoctor.support.exceptions import NavContractError
+from spindoctor.obs import obs_class_to_inst_name
+from spindoctor.support.cmatrix import compute_pointing
+from spindoctor.support.exceptions import NavContractError, NavPointingError
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec, apply_filter
 from spindoctor.support.image_quality import cosmic_ray_mask, saturation_mask
 from spindoctor.support.nav_base import NavBase
@@ -131,6 +133,17 @@ _HARD_FAILURE_TO_REASON: dict[ImageClass, NavStatusReason] = {
 Maps each hard-failure ``ImageClass`` to the matching ``NavStatusReason``
 returned by the orchestrator's preflight.  Reading from this dict is the
 sole admission test for the hard-failure short-circuit.
+"""
+
+_INSTRUMENTS_WITHOUT_SPICE_FRAMES = frozenset({'sim'})
+"""Instruments that are expected to record no corrected attitude.
+
+A simulated image has no spacecraft and no furnished camera frame, so it is
+the one case where recording no attitude is the right outcome.  Everything
+else reaching the same path is missing its frame mapping, which is a build
+defect and is reported as such rather than passing silently -- including an
+observation class the registry cannot identify at all, which carries the
+least information of any case and is the last one that should be silenced.
 """
 
 
@@ -346,11 +359,14 @@ class NavOrchestrator(NavBase):
     def navigate(self, obs: ObsSnapshotInst) -> NavResult:
         """Run the full pipeline on one observation.
 
-        Never raises through to the caller: plugin failures are sandboxed
-        (see ``_extract_features`` / ``_run_pass``), and a
+        No image-data problem raises through to the caller: plugin failures
+        are sandboxed (see ``_extract_features`` / ``_run_pass``), and a
         ``NavContractError`` (an internal invariant violated by upstream
         code) is logged at error level and converted into a failed
         ``NavResult`` with ``NavStatusReason.CONTRACT_VIOLATION``.
+
+        A programming error inside :meth:`with_pointing`'s attitude
+        computation does propagate, by design: see that method.
 
         Parameters:
             obs: The observation snapshot to navigate.
@@ -362,13 +378,16 @@ class NavOrchestrator(NavBase):
         context, image_classifier = self._make_context(obs, provenance)
         self._log_classifier_verdict(image_classifier)
         if image_classifier.image_class in _HARD_FAILURE_TO_REASON:
-            return self._fail(
-                status_reason=_HARD_FAILURE_TO_REASON[image_classifier.image_class],
-                image_classifier=image_classifier,
-                provenance=provenance,
+            return self.with_pointing(
+                self._fail(
+                    status_reason=_HARD_FAILURE_TO_REASON[image_classifier.image_class],
+                    image_classifier=image_classifier,
+                    provenance=provenance,
+                ),
+                obs,
             )
         try:
-            return self._navigate_pipeline(
+            result = self._navigate_pipeline(
                 context=context,
                 image_classifier=image_classifier,
                 provenance=provenance,
@@ -380,11 +399,96 @@ class NavOrchestrator(NavBase):
                 'failing this image with status_reason=contract_violation',
                 str(exc),
             )
-            return self._fail(
+            result = self._fail(
                 status_reason=NavStatusReason.CONTRACT_VIOLATION,
                 image_classifier=image_classifier,
                 provenance=provenance,
             )
+        return self.with_pointing(result, obs)
+
+    def with_pointing(self, result: NavResult, obs: ObsSnapshotInst) -> NavResult:
+        """Stamp a result with the corrected-attitude solution for its image.
+
+        :meth:`navigate` applies this to every result it returns.  The
+        manual-navigation driver, which builds its own ``NavResult`` outside
+        the autonomous pipeline, calls it directly so an operator-picked
+        offset carries the same recorded attitude.
+
+        The uncorrected attitude, frame identities and exposure times are
+        recorded for every result; a corrected C-matrix additionally requires
+        an offset and no fitted camera rotation.
+
+        A host with no SPICE camera frame this build knows records nothing:
+        that is expected for a simulated image, and reported as a warning for
+        any other instrument, which means the instrument was added without
+        its frame mapping.
+
+        A pointing solution is recorded metadata rather than the navigation
+        itself, so an attitude the environment cannot supply is reported to
+        both logs and simply not recorded, and no wrong C-matrix ever
+        reaches a kernel.  The absorbed set is exactly
+        ``NavPointingError``, which the computation raises for every failure
+        it expects: its own guards, and the kernel and frame lookups SPICE
+        cannot answer.  Every other exception propagates by design, so a
+        defect in the computation fails on the first image rather than
+        silently dropping pointing from a whole batch while every image
+        still reports success.
+
+        Parameters:
+            result: The result to stamp.
+            obs: The observation it was produced from.
+
+        Returns:
+            ``result`` with its ``pointing`` field populated, or ``result``
+            unchanged when no attitude could be computed.
+
+        Raises:
+            Exception: Anything other than ``NavPointingError`` raised by the
+                attitude computation propagates unchanged, so that a defect
+                there surfaces instead of being absorbed.
+        """
+        instrument = obs_class_to_inst_name(type(obs))
+        try:
+            pointing = compute_pointing(
+                obs,
+                offset_px=result.offset_px,
+                rotation_fitted=result.rotation_rad is not None,
+            )
+        except NavPointingError as exc:
+            # Only the expected class; the docstring above says why every
+            # other exception must propagate.
+            self._logger.exception('Could not compute the corrected pointing: %s', exc)
+            # The traceback goes to the per-image log and one line to the run
+            # log, so an operator watching a batch sees one line per affected
+            # image rather than a traceback per image.
+            MAIN_LOGGER.error(
+                'Corrected pointing not recorded for this %s image: %s', instrument, exc
+            )
+            return result
+        if pointing is None:
+            if instrument in _INSTRUMENTS_WITHOUT_SPICE_FRAMES:
+                self._logger.debug(
+                    'Instrument %s has no SPICE camera frame; pointing not recorded', instrument
+                )
+            else:
+                self._logger.warning(
+                    'No SPICE camera frame is mapped for instrument %s; pointing not recorded',
+                    instrument,
+                )
+                MAIN_LOGGER.warning(
+                    'No SPICE camera frame is mapped for instrument %s; no image of it can '
+                    'carry a corrected attitude',
+                    instrument,
+                )
+            return result
+        self._logger.info(
+            'Recorded pointing: camera frame %s (%d), CK object %d, corrected cmatrix %s',
+            pointing.baseline.camera_frame,
+            pointing.baseline.camera_frame_id,
+            pointing.baseline.ck_frame_id,
+            'present' if pointing.cmatrix is not None else 'withheld',
+        )
+        return dataclasses.replace(result, pointing=pointing)
 
     def _navigate_pipeline(
         self,
@@ -782,12 +886,23 @@ class NavOrchestrator(NavBase):
         technique X run on image Y" from the log alone.
 
         A misbehaving NavTechnique is logged with a full traceback and
-        treated as if it produced no result.  Catching every exception is
-        intentional for the same reason as ``_extract_features``: the
-        orchestrator never raises through to its caller, failures land on
-        the returned ``NavResult``.  ``NavContractError`` is exempt (see
-        ``_extract_features``): it is logged at error level and re-raised
-        for :meth:`navigate` to convert into a failed ``NavResult``.
+        omitted from the returned list, exactly as if it had produced no
+        result; the other techniques still contribute, so the navigation
+        can still succeed on their evidence.  Catching every exception is
+        intentional for the same reason as ``_extract_features``: one
+        technique's defect must not fail the image.  ``NavContractError``
+        is exempt (see ``_extract_features``): it is logged at error level
+        and re-raised for :meth:`navigate` to convert into a failed
+        ``NavResult``.
+
+        Returns:
+            One entry per technique that ran and produced a result, in
+            registry order.  A skipped, infeasible, or failed technique
+            contributes no entry, so the list may be empty.
+
+        Raises:
+            NavContractError: Propagated from a technique that violated an
+                internal invariant, for :meth:`navigate` to convert.
         """
         results: list[NavTechniqueResult] = []
         names = [

@@ -20,6 +20,7 @@ from spindoctor.config.logging_config import (
     SILENT_LEVEL,
     LogLevels,
     LogSinks,
+    absolute_log_root,
     build_cloud_task_logging,
     build_image_log_handlers,
     build_main_logger,
@@ -354,6 +355,62 @@ def test_each_sink_flag_can_disable(tmp_path: Path, flag: str, attribute: str) -
     """Each sink flag can turn its sink off."""
     sinks = sinks_from_arguments(_args(**{flag: False}), FCPath(str(tmp_path)))
     assert getattr(sinks, attribute) is False
+
+
+# ---------------------------------------------------------------------------
+# A log root outlives the working directory it was typed in
+# ---------------------------------------------------------------------------
+
+
+def test_a_relative_log_root_is_made_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Where the logs go is decided once, not re-decided at every use."""
+    monkeypatch.chdir(tmp_path)
+    sinks = sinks_from_arguments(None, FCPath('run/logs'))
+    assert sinks.log_root.as_posix() == (tmp_path.resolve() / 'run' / 'logs').as_posix()
+
+
+def test_an_absolute_log_root_is_unchanged(tmp_path: Path) -> None:
+    """Resolving one that is already absolute does not move it.
+
+    The expected value is built from ``tmp_path.resolve()`` because on macOS
+    ``tmp_path`` itself sits behind the ``/var`` symlink that resolution
+    removes.
+    """
+    sinks = sinks_from_arguments(None, FCPath(str(tmp_path / 'logs')))
+    assert sinks.log_root.as_posix() == (tmp_path.resolve() / 'logs').as_posix()
+
+
+def test_a_remote_log_root_is_left_as_it_was_given() -> None:
+    """It is already absolute, and there is no working directory to use."""
+    assert absolute_log_root(FCPath('gs://bucket/logs')).as_posix() == 'gs://bucket/logs'
+
+
+def test_resolving_a_log_root_creates_nothing(tmp_path: Path) -> None:
+    """Deciding where logs go must not itself write to the filesystem."""
+    absolute_log_root(FCPath(str(tmp_path / 'logs')))
+    assert not (tmp_path / 'logs').exists()
+
+
+def test_a_main_handler_detaches_after_the_directory_moves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """pdslogger finds an open log file by absolute path, so the root must be one.
+
+    A handler built from a relative root is registered under the absolute path
+    the working directory gave at the time.  Move the directory and it can no
+    longer be found, so it is never detached and the logger goes on writing
+    into a file nobody reads.
+    """
+    logger = pdslogger.PdsLogger('detach_after_chdir', lognames=False)
+    monkeypatch.chdir(tmp_path)
+    sinks = sinks_from_arguments(_args(log_main_to_console=False), FCPath('run/logs'))
+    build_main_logger(logger, SD_OFFSET, sinks, LogLevels(), timestamp=_STAMP)
+    monkeypatch.undo()
+    _close(logger.handlers)
+    logger.remove_all_handlers()
+    assert logger.handlers == []
 
 
 # ---------------------------------------------------------------------------

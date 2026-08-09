@@ -1,7 +1,9 @@
 """Tests for ``spindoctor.nav_orchestrator.curator.build_metadata_dict``."""
 
+import dataclasses
 import json
 import math
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -18,7 +20,24 @@ from spindoctor.nav_orchestrator.nav_result import NavResult
 from spindoctor.nav_orchestrator.provenance import Provenance
 from spindoctor.nav_technique.diagnostics import BodyLimbDiagnostics
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
+from spindoctor.support.cmatrix import AttitudeBaseline, PointingSolution
 from spindoctor.support.status_reason import NavStatusReason
+
+
+def _json_round_trip(result: NavResult) -> dict[str, Any]:
+    """Build the metadata dict for a result and round-trip it through real JSON.
+
+    Asserting on the parsed-back dict proves the metadata is genuinely
+    serializable and pins what a reader of the written file sees, not what the
+    in-memory objects happened to be.
+
+    Parameters:
+        result: The result to build metadata for.
+
+    Returns:
+        The metadata dict as it survives JSON serialization.
+    """
+    return cast(dict[str, Any], json.loads(json.dumps(build_metadata_dict(result))))
 
 
 def _classifier() -> NavImageClassifierResult:
@@ -269,32 +288,174 @@ def _gated_titan_result() -> NavResult:
 
 def test_gated_feature_entry_reaches_the_json() -> None:
     """A gated feature is recorded in the emitted metadata, not only in the log."""
-    md = json.loads(json.dumps(build_metadata_dict(_gated_titan_result())))
+    md = _json_round_trip(_gated_titan_result())
     entry = md['feature_inventory'][0]
     assert entry['gated'] is True
 
 
 def test_gated_feature_entry_names_its_type() -> None:
     """The gate record identifies which feature type was dropped."""
-    md = json.loads(json.dumps(build_metadata_dict(_gated_titan_result())))
+    md = _json_round_trip(_gated_titan_result())
     assert md['feature_inventory'][0]['feature_type'] == 'TITAN_LIMB'
 
 
 def test_gated_feature_entry_carries_its_breakdown() -> None:
     """The reliability breakdown travels into the JSON so gates are attributable."""
-    md = json.loads(json.dumps(build_metadata_dict(_gated_titan_result())))
+    md = _json_round_trip(_gated_titan_result())
     reasons = md['feature_inventory'][0]['reliability_reasons']
     assert reasons['titan_occluded_fraction'] == pytest.approx(0.42)
 
 
 def test_breakdown_omits_inapplicable_components() -> None:
     """Components that do not apply to a feature type are left out entirely."""
-    md = json.loads(json.dumps(build_metadata_dict(_gated_titan_result())))
+    md = _json_round_trip(_gated_titan_result())
     reasons = md['feature_inventory'][0]['reliability_reasons']
     assert 'predicted_snr' not in reasons
 
 
 def test_breakdown_is_empty_when_no_component_was_populated() -> None:
     """A feature whose model populated no component reports an empty mapping."""
-    md = json.loads(json.dumps(build_metadata_dict(_ok_result_with_one_technique())))
+    md = _json_round_trip(_ok_result_with_one_technique())
     assert md['feature_inventory'][0]['reliability_reasons'] == {}
+
+
+def _pointing(*, corrected: bool) -> PointingSolution:
+    """Build a PointingSolution with recognizable, non-symmetric matrices.
+
+    Parameters:
+        corrected: True to carry a corrected C-matrix alongside the baseline;
+            False for a solution recording only the uncorrected attitude.
+
+    Returns:
+        The solution.
+    """
+    original = np.array(
+        [
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+        ]
+    )
+    baseline = AttitudeBaseline(
+        cmatrix_original=original,
+        oops_from_spice=np.eye(3),
+        camera_frame='CASSINI_ISS_NAC',
+        camera_frame_id=-82360,
+        ck_frame_id=-82000,
+        start_et=246684087.05644953,
+        stop_et=246684087.23644954,
+        midtime_et=246684087.14644954,
+        exposure_s=0.18,
+        sclk_start='1/1572105349.077',
+        sclk_midtime='1/1572105349.100',
+        sclk_stop='1/1572105349.123',
+    )
+    cmatrix = None
+    if corrected:
+        cmatrix = np.array(
+            [
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ]
+        )
+    return PointingSolution(baseline=baseline, cmatrix=cmatrix)
+
+
+def _result_with_pointing(*, corrected: bool) -> NavResult:
+    """Return the one-technique success result stamped with a pointing solution.
+
+    Parameters:
+        corrected: True to carry a corrected C-matrix alongside the baseline;
+            False for a solution recording only the uncorrected attitude.
+    """
+    return dataclasses.replace(
+        _ok_result_with_one_technique(), pointing=_pointing(corrected=corrected)
+    )
+
+
+def test_metadata_dict_omits_pointing_when_none_was_computed() -> None:
+    """A result with no pointing solution writes no pointing block."""
+    md = build_metadata_dict(_ok_result_with_one_technique())
+    assert 'pointing' not in md
+
+
+def test_metadata_dict_omits_times_when_none_was_computed() -> None:
+    """A result with no pointing solution writes no times block."""
+    md = build_metadata_dict(_ok_result_with_one_technique())
+    assert 'times' not in md
+
+
+def test_pointing_block_has_the_declared_key_set() -> None:
+    """A corrected result's pointing block carries exactly the declared keys."""
+    md = _json_round_trip(_result_with_pointing(corrected=True))
+    assert set(md['pointing']) == {
+        'cmatrix',
+        'cmatrix_original',
+        'camera_frame',
+        'camera_frame_id',
+        'ck_frame_id',
+    }
+
+
+def test_times_block_has_the_declared_key_set() -> None:
+    """The times block carries exactly the declared keys."""
+    md = _json_round_trip(_result_with_pointing(corrected=True))
+    assert set(md['times']) == {
+        'start_et',
+        'stop_et',
+        'midtime_et',
+        'exposure_s',
+        'sclk_start',
+        'sclk_midtime',
+        'sclk_stop',
+    }
+
+
+def test_cmatrix_is_serialized_as_nine_row_major_floats() -> None:
+    """The corrected C-matrix flattens row by row, not column by column."""
+    md = _json_round_trip(_result_with_pointing(corrected=True))
+    assert md['pointing']['cmatrix'] == [0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+
+
+def test_cmatrix_original_is_serialized_as_nine_row_major_floats() -> None:
+    """The uncorrected C-matrix flattens row by row too."""
+    md = _json_round_trip(_result_with_pointing(corrected=True))
+    assert md['pointing']['cmatrix_original'] == [0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0]
+
+
+def test_frame_identities_are_serialized_as_recorded() -> None:
+    """The camera frame name and both frame ids travel unchanged."""
+    md = _json_round_trip(_result_with_pointing(corrected=True))
+    assert md['pointing']['camera_frame'] == 'CASSINI_ISS_NAC'
+    assert md['pointing']['camera_frame_id'] == -82360
+    assert md['pointing']['ck_frame_id'] == -82000
+
+
+def test_times_are_serialized_unrounded() -> None:
+    """Epochs keep full precision, since they define a segment interval exactly."""
+    md = _json_round_trip(_result_with_pointing(corrected=True))
+    assert md['times']['start_et'] == 246684087.05644953
+    assert md['times']['midtime_et'] == 246684087.14644954
+    assert md['times']['stop_et'] == 246684087.23644954
+
+
+def test_sclk_strings_are_serialized_as_recorded() -> None:
+    """The three spacecraft-clock strings travel unchanged."""
+    md = _json_round_trip(_result_with_pointing(corrected=True))
+    assert md['times']['sclk_start'] == '1/1572105349.077'
+    assert md['times']['sclk_midtime'] == '1/1572105349.100'
+    assert md['times']['sclk_stop'] == '1/1572105349.123'
+
+
+def test_uncorrectable_result_omits_cmatrix_but_keeps_the_original() -> None:
+    """A solution with no corrected attitude still records the uncorrected one."""
+    md = _json_round_trip(_result_with_pointing(corrected=False))
+    assert 'cmatrix' not in md['pointing']
+    assert md['pointing']['cmatrix_original'] == [0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0]
+
+
+def test_uncorrectable_result_still_records_its_times() -> None:
+    """A solution with no corrected attitude still records the exposure times."""
+    md = _json_round_trip(_result_with_pointing(corrected=False))
+    assert md['times']['exposure_s'] == 0.18

@@ -117,6 +117,7 @@ nitpick_ignore_regex = [
     (r'py:.*', r'oops\..*'),
     (r'py:.*', r'tests\..*'),
     (r'py:.*', r'spindoctor\.cli\.backplanes\..*'),
+    (r'py:.*', r'spindoctor\.cli\.ck(\..*)?'),
     (r'py:.*', r'spindoctor\.cli\.pds4\..*'),
     (r'py:.*', r'spindoctor\.cli\.reproj\..*'),
     (r'py:.*', r'numpy\._typing\..*'),
