@@ -94,6 +94,32 @@ def test_no_navigation_root_says_which_settings_supply_one(
     assert any('--nav-results-root' in line for line in written)
 
 
+def test_no_index_is_reported_and_not_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ingest with nowhere to write is the other configuration failure.
+
+    Both ambient sources of an index URL are closed for every test, so naming
+    none on the command line is a program run with no index at all -- which for
+    this one program is a mistake rather than the ordinary case it is everywhere
+    else in the pipeline.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    status, _written = _run(['--nav-results-root', str(root)], monkeypatch, tmp_path)
+    assert status == 1
+
+
+def test_no_index_says_which_settings_supply_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And names all three, since which one an operator meant to set is theirs."""
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    _status, written = _run(['--nav-results-root', str(root)], monkeypatch, tmp_path)
+    assert any('NAV_RESULTS_DB' in line for line in written)
+
+
 def test_the_run_log_does_not_carry_a_database_password(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
