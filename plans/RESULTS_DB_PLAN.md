@@ -338,8 +338,16 @@ still crossed, because a corpus quietly narrowed proves less than it says.
 
 The rule is a named function of the Core layer rather than a private helper of
 the opener, because a run log records the command line a program was given and
-one of those words can be a connection URL. `sd_stats_ingest` masks the value of
-`--results-db` in the command line it logs, in both spellings argparse accepts.
+one of those words can be a connection URL. Which words those are is decided by
+`masked_command_line` in `spindoctor/support/command_line.py`, which names the
+connection-URL options in one place and applies the rule to each of their
+values. `log_run_environment` masks every command line it records through it, so
+`sd_offset`, `sd_consolidate_metadata`, `sd_mosaic`, `sd_create_ck` and the
+per-image log of `navigate_image_files` are covered by it; `sd_stats_ingest`,
+which logs its arguments itself, calls the same function. Every spelling
+argparse accepts is masked: the value as a separate word, the value joined to
+the option by `=`, and either of those under a distinguishing abbreviation of
+the option's name.
 
 **A results root is never masked.** It is not a connection URL, it has no
 credentials to hide, and it is the one string an operator reads a run log to
