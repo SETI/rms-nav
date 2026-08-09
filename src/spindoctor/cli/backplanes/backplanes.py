@@ -1,10 +1,28 @@
-import json
-from typing import Any, cast
+"""Generate per-pixel geometry backplanes for one navigated image.
+
+The stage reads the image's navigation record, applies the pointing that record
+supplies, computes the body and ring backplanes on the pointed observation, and
+writes them as one FITS file.  Where the record comes from is the caller's
+choice: a :class:`~spindoctor.cli.reproj.pointing_source.PointingSource` reads it
+either from the ``_metadata.json`` document the navigator wrote or from one row
+of an ingested results index.  Both supply the same record fields and both
+classify the pointing with the same classifier, so the products are the same;
+the few classifications that differ between the two are stated in that module.
+
+An image whose navigation did not succeed produces no backplanes, and an image
+nothing navigated at all raises rather than producing them on uncorrected
+pointing.  The distinction is the point: a backplane computed on a pointing
+nobody navigated is geometry for a place the camera was not quite looking, and
+the product carries no sign of it.
+"""
+
+from typing import Any
 
 import pdslogger
 from filecache import FCPath
 
 from spindoctor.cli.reproj.offsets import apply_pointing_to_obs, select_pointing
+from spindoctor.cli.reproj.pointing_source import PointingSource
 from spindoctor.config import (
     DEFAULT_CONFIG,
     IMAGE_LOGGER,
@@ -26,7 +44,7 @@ def generate_backplanes_image_files(
     obs_class: type[ObsSnapshotInst],
     image_files: ImageFiles,
     *,
-    nav_results_root: FCPath,
+    pointing_source: PointingSource,
     backplane_results_root: FCPath,
     write_output_files: bool = True,
     run_logging: RunLogging | None = None,
@@ -36,7 +54,8 @@ def generate_backplanes_image_files(
     Parameters:
         obs_class: Observation snapshot class for the instrument.
         image_files: List of images; must have exactly one image in the batch.
-        nav_results_root: Root containing previously written navigation metadata JSONs.
+        pointing_source: Where this image's navigation record is read from --
+            the documents the navigator wrote, or an ingested results index.
         backplane_results_root: Destination root for FITS and label files.
         write_output_files: Whether to write outputs to storage.
         run_logging: This run's resolved logging, giving the level and sinks
@@ -75,14 +94,12 @@ def generate_backplanes_image_files(
 
     image_file = image_files.image_files[0]
     image_path = image_file.image_file_path.absolute()
-    metadata_file = nav_results_root / (image_file.results_path_stub + '_metadata.json')
     fits_file_path = backplane_results_root / (image_file.results_path_stub + '_backplanes.fits')
 
     # Decide whether there is work before opening a log for it, so a skipped
     # image does not leave behind a file containing only its own header.  This
-    # raises if the metadata is missing or unreadable; the caller reports that.
-    metadata_text = metadata_file.read_text()
-    nav_metadata = cast(dict[str, Any], json.loads(metadata_text))
+    # raises if nothing recorded the image; the caller reports that.
+    nav_metadata = pointing_source.read_record(image_file)
 
     status = nav_metadata.get('status', None)
     if status != 'success':
@@ -100,7 +117,7 @@ def generate_backplanes_image_files(
             'nav_status_error': nav_error,
         }
 
-    pointing_source = 'none'
+    applied_source = 'none'
     pointing_reason: str | None = None
     local_handlers, image_log_path = build_image_log_handlers(
         'backplanes',
@@ -129,7 +146,7 @@ def generate_backplanes_image_files(
             if not selection.offset_key_present:
                 raise ValueError(f'{image_path}: "offset" field not found in metadata')
             applied = apply_pointing_to_obs(snapshot, selection, subject=str(image_path))
-            pointing_source = applied.source
+            applied_source = applied.source
             pointing_reason = applied.reason
             if applied.source == 'none':
                 # Backplanes computed on uncorrected pointing are geometry for
@@ -175,9 +192,9 @@ def generate_backplanes_image_files(
 
     # Returned as well as logged: a cloud task has no run log, so this is
     # the only way the facts leave the worker.
-    result: dict[str, Any] = {'status': 'success', 'pointing_source': pointing_source}
+    result: dict[str, Any] = {'status': 'success', 'pointing_source': applied_source}
     if pointing_reason is not None:
         result['pointing_reason'] = pointing_reason
-    if pointing_source == 'none':
+    if applied_source == 'none':
         result['uncorrected_pointing'] = True
     return result

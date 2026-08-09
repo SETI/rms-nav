@@ -29,6 +29,7 @@ from tests.cmatrix_helpers import synthetic_frame_identity
 import spindoctor.support.cmatrix as cmatrix_module
 from spindoctor.cli.backplanes import backplanes as backplanes_mod
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
+from spindoctor.cli.reproj.pointing_source import FilePointingSource
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
@@ -288,7 +289,7 @@ def _run(
     generate_backplanes_image_files(
         obs_class,
         _image_files(root, 'IMG1'),
-        nav_results_root=nav_root,
+        pointing_source=FilePointingSource(nav_root),
         backplane_results_root=bp_root,
         write_output_files=write_output_files,
     )
@@ -317,7 +318,7 @@ def _result_for(
     result = generate_backplanes_image_files(
         obs_class,
         _image_files(root, 'IMG1'),
-        nav_results_root=nav_root,
+        pointing_source=FilePointingSource(nav_root),
         backplane_results_root=bp_root,
         write_output_files=False,
     )
@@ -342,7 +343,7 @@ def test_driver_rejects_multi_image_batches(tmp_path: Path) -> None:
         generate_backplanes_image_files(
             obs_class,
             _image_files(root, 'IMG1', 'IMG2'),
-            nav_results_root=nav_root,
+            pointing_source=FilePointingSource(nav_root),
             backplane_results_root=bp_root,
         )
 
@@ -371,7 +372,7 @@ def test_driver_invalid_metadata_json_raises(tmp_path: Path) -> None:
         generate_backplanes_image_files(
             obs_class,
             _image_files(root, 'IMG1'),
-            nav_results_root=nav_root,
+            pointing_source=FilePointingSource(nav_root),
             backplane_results_root=bp_root,
         )
 
@@ -672,7 +673,7 @@ def _run_with_null_offset(
         result = generate_backplanes_image_files(
             obs_class,
             _image_files(root, 'IMG1'),
-            nav_results_root=nav_root,
+            pointing_source=FilePointingSource(nav_root),
             backplane_results_root=bp_root,
             write_output_files=False,
         )

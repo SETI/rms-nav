@@ -64,6 +64,9 @@ from spindoctor.cli.reproj.offsets import (  # noqa: E402  (guarded import)
     apply_pointing_to_obs,
     select_pointing,
 )
+from spindoctor.cli.reproj.pointing_source import (  # noqa: E402  (guarded import)
+    FilePointingSource,
+)
 from spindoctor.dataset.dataset import ImageFile, ImageFiles  # noqa: E402  (guarded import)
 from spindoctor.navigate_image_files import navigate_image_files  # noqa: E402  (guarded import)
 from spindoctor.obs import ObsSnapshotInst  # noqa: E402  (guarded import)
@@ -762,7 +765,7 @@ def _run_backplanes(
     result = generate_backplanes_image_files(
         obs_class,
         image_files,
-        nav_results_root=nav_root,
+        pointing_source=FilePointingSource(nav_root),
         backplane_results_root=bp_root,
         write_output_files=True,
     )

@@ -12,9 +12,10 @@
 # is not performed here; run ``sd_mosaic <mode> --skip-reproject`` after all
 # tasks complete to produce the final mosaic.
 #
-# CLI accepts only ``--config-file`` and ``--nav-results-root``. Every other
-# parameter (output directory, format, mosaic geometry, body/planet selection,
-# etc.) is read from each task's ``task_data['arguments']`` dict.
+# CLI accepts only ``--config-file``, ``--nav-results-root`` and
+# ``--results-db``. Every other parameter (output directory, format, mosaic
+# geometry, body/planet selection, etc.) is read from each task's
+# ``task_data['arguments']`` dict.
 ################################################################################
 
 import argparse
@@ -34,8 +35,13 @@ package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
 from spindoctor.cli.reproj.factories import build_body_mosaic, build_ring_mosaic
-from spindoctor.cli.reproj.offsets import apply_pointing_to_obs, load_pointing_if_any
+from spindoctor.cli.reproj.offsets import apply_pointing_to_obs
 from spindoctor.cli.reproj.paths import per_image_output_path
+from spindoctor.cli.reproj.pointing_source import (
+    FilePointingSource,
+    PointingSource,
+    build_pointing_source,
+)
 from spindoctor.cli.reproj.reproject import reproject_one_body, reproject_one_ring
 from spindoctor.config import (
     DEFAULT_CONFIG,
@@ -44,6 +50,7 @@ from spindoctor.config import (
     build_cloud_task_logging,
     build_image_log_handlers,
     get_nav_results_root,
+    get_results_db_url,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_MOSAIC
@@ -58,13 +65,32 @@ PROGRAM_NAME = SD_MOSAIC
 ``logging.programs`` configuration block for this program."""
 
 
-def _resolve_nav_results_root_fcpath(cli_args: argparse.Namespace) -> FCPath | None:
-    """Return the nav results root as an ``FCPath``, or ``None`` if unset."""
+def _resolve_pointing_source(cli_args: argparse.Namespace) -> PointingSource:
+    """Return the source each task reads its navigation records through.
+
+    A reprojection worker is not required to have a navigation results root: one
+    without it reprojects on uncorrected pointing, which is a choice rather than
+    a shortfall, so an unresolvable root is not an error here.  A results index
+    that was named and cannot be opened, or that has not ingested the root, is:
+    it fails the worker at startup rather than letting every task quietly read
+    files instead.
+
+    Parameters:
+        cli_args: The worker's parsed command line.
+
+    Returns:
+        The source, held for the worker's lifetime.
+    """
     try:
-        nav_results_root_str = get_nav_results_root(cli_args, DEFAULT_CONFIG)
+        nav_results_root_str: str | None = get_nav_results_root(cli_args, DEFAULT_CONFIG)
     except ValueError:
-        return None
-    return FileCache(None).new_path(nav_results_root_str)
+        nav_results_root_str = None
+    nav_results_root = (
+        None if nav_results_root_str is None else FileCache(None).new_path(nav_results_root_str)
+    )
+    return build_pointing_source(
+        nav_results_root, results_db_url=get_results_db_url(cli_args, DEFAULT_CONFIG)
+    )
 
 
 def _log_image_exception(msg: str, *args: object) -> None:
@@ -98,9 +124,9 @@ def process_task(
                 - "label_file_url": The URL of the label file.
                 - "results_path_stub": The path stub for the results.
                 - "index_file_row": The row from the index file for the image file.
-            - "arguments": A dict of every per-task parameter (all of the CLI
-              arguments previously accepted by ``sd_mosaic``'s rings/body modes
-              except ``--config-file`` and ``--nav-results-root``). Keys use the
+            - "arguments": A dict of every per-task parameter (the CLI
+              arguments ``sd_mosaic``'s rings/body modes accept, apart from the
+              ones this worker takes on its own command line). Keys use the
               same snake_case names as the argparse destinations; for example
               ``output_dir``, ``prefix``, ``format``, ``overwrite``,
               ``no_write_output_files``, ``image_name``, and the body- or
@@ -109,9 +135,11 @@ def process_task(
               :func:`spindoctor.cli.reproj.factories.build_ring_mosaic` and
               :func:`spindoctor.cli.reproj.reproject.reproject_one_ring`.
         worker_data: The data for the worker (parsed CLI namespace in ``args``,
-            which holds only ``config_file`` and ``nav_results_root``). After worker
-            startup, ``nav_results_root_path`` may be set to a precomputed
-            :class:`filecache.FCPath` for offset loading.
+            which holds only ``config_file``, ``nav_results_root`` and
+            ``results_db``). After worker startup, ``pointing_source`` holds the
+            :class:`~spindoctor.cli.reproj.pointing_source.PointingSource` every
+            task reads its navigation records through; with none set, no
+            pointing is looked up at all.
 
     Returns:
         Tuple of ``(retry, result)``. ``retry`` is always ``False``. ``result``
@@ -146,7 +174,12 @@ def process_task(
     cli_args = cast(argparse.Namespace, worker_data.args)
     load_default_and_user_config(cli_args, DEFAULT_CONFIG)
 
-    nav_results_root_path = cast(FCPath | None, getattr(worker_data, 'nav_results_root_path', None))
+    # Built once at worker startup, because one task holds many images and an
+    # index-backed source opens a connection pool.  A worker started some other
+    # way has none, and then nothing is looked up at all -- which is what a
+    # reprojection run given no navigation results asks for.
+    started_source = cast(PointingSource | None, getattr(worker_data, 'pointing_source', None))
+    pointing_source = FilePointingSource(None) if started_source is None else started_source
 
     dataset_name = task_data.get('dataset_name')
     if dataset_name is None:
@@ -290,7 +323,7 @@ def process_task(
                     image_path = image_file.image_file_path.absolute()
                     obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
 
-                    selection = load_pointing_if_any(nav_results_root_path, image_file)
+                    selection = pointing_source.load_pointing(image_file)
                     applied = apply_pointing_to_obs(
                         cast(ObsSnapshotInst, obs),
                         selection,
@@ -358,12 +391,13 @@ def process_task(
 async def async_main() -> None:
     """Async CLI entry for the cloud_tasks reprojection worker.
 
-    Parses only ``--config-file`` and ``--nav-results-root`` from ``sys.argv``;
-    all other parameters (mode, output directory, mosaic geometry, etc.) are
-    read per-task from ``task_data``. A single worker process can therefore
-    handle a queue that mixes ring and body tasks. Before the worker starts,
-    default and user config are loaded and
-    ``worker._data.nav_results_root_path`` is precomputed for tasks.
+    Parses only ``--config-file``, ``--nav-results-root`` and ``--results-db``
+    from ``sys.argv``; all other parameters (mode, output directory, mosaic
+    geometry, etc.) are read per-task from ``task_data``. A single worker process
+    can therefore handle a queue that mixes ring and body tasks. Before the
+    worker starts, default and user config are loaded and
+    ``worker._data.pointing_source`` is built for tasks to read their navigation
+    records through.
     """
     argparser = argparse.ArgumentParser(
         prog='sd_mosaic_cloud_tasks',
@@ -389,12 +423,25 @@ async def async_main() -> None:
             'usable) from _metadata.json is applied before reprojection.'
         ),
     )
+    env.add_argument(
+        '--results-db',
+        type=str,
+        default=None,
+        metavar='URL',
+        help=(
+            'Connection URL of the results index written by sd_stats_ingest; overrides '
+            'NAV_RESULTS_DB and the environment.results_db configuration variable. Each '
+            "image's navigation record is then read as one row instead of one file, and "
+            '--nav-results-root names the ingested root the rows are read under. Pass '
+            '"none" to read the files even where an index is configured.'
+        ),
+    )
 
     worker = Worker(process_task, args=sys.argv[1:], argparser=argparser)
     init_cli_args = cast(argparse.Namespace, worker._data.args)
     load_default_and_user_config(init_cli_args, DEFAULT_CONFIG)
     # ``WorkerData`` has no typed field; ``process_task`` reads via ``getattr``.
-    worker._data.nav_results_root_path = _resolve_nav_results_root_fcpath(init_cli_args)  # type: ignore[attr-defined]
+    worker._data.pointing_source = _resolve_pointing_source(init_cli_args)  # type: ignore[attr-defined]
     await worker.start()
 
 

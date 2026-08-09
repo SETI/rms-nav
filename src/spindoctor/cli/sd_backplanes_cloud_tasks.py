@@ -20,11 +20,13 @@ package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
+from spindoctor.cli.reproj.pointing_source import build_pointing_source
 from spindoctor.config import (
     DEFAULT_CONFIG,
     build_cloud_task_logging,
     get_backplane_results_root,
     get_nav_results_root,
+    get_results_db_url,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_BACKPLANES
@@ -50,8 +52,11 @@ def process_task(
 
     Returns:
         Tuple of ``(retry, result)``.  ``retry`` is always False.  ``result``
-        names the error when the task could not run, and otherwise reports
-        whether the image was processed or skipped.
+        names the error when the task could not run -- including
+        ``unusable_results_db`` when an index was named that cannot be opened or
+        has not ingested this root, which fails the task rather than falling
+        back to reading files -- and otherwise reports whether the image was
+        processed or skipped.
     """
 
     arguments = cast(argparse.Namespace, worker_data.args)
@@ -114,14 +119,32 @@ def process_task(
         fallback_log_root=backplane_results_root / 'logs',
     )
 
-    result = generate_backplanes_image_files(
-        obs_class,
-        ImageFiles(image_files=image_files),
-        nav_results_root=nav_results_root,
-        backplane_results_root=backplane_results_root,
-        write_output_files=True,
-        run_logging=run_logging,
-    )
+    # Built per task, as every other resource this worker uses is: one task is
+    # one image, so the open costs nothing against loading it, and the worker
+    # keeps its property of resolving its whole environment from the task it was
+    # handed rather than from state left over from startup.
+    try:
+        pointing_source = build_pointing_source(
+            nav_results_root, results_db_url=get_results_db_url(arguments, DEFAULT_CONFIG)
+        )
+    except ValueError as exc:
+        return False, {
+            'status': 'error',
+            'status_error': 'unusable_results_db',
+            'status_exception': str(exc),
+        }
+
+    try:
+        result = generate_backplanes_image_files(
+            obs_class,
+            ImageFiles(image_files=image_files),
+            pointing_source=pointing_source,
+            backplane_results_root=backplane_results_root,
+            write_output_files=True,
+            run_logging=run_logging,
+        )
+    finally:
+        pointing_source.close()
 
     # Returned rather than only logged: an image can be skipped because its
     # navigation did not succeed, and a task has no run log to say so.
@@ -153,6 +176,18 @@ async def async_main() -> None:
         type=str,
         default=None,
         help='Root directory for prior navigation results (metadata, offsets)',
+    )
+    environment_group.add_argument(
+        '--results-db',
+        type=str,
+        default=None,
+        metavar='URL',
+        help=(
+            'Connection URL of the results index written by sd_stats_ingest; overrides '
+            'NAV_RESULTS_DB and the environment.results_db configuration variable. Each '
+            "image's navigation record is then read as one row instead of one file. Pass "
+            '"none" to read the files even where an index is configured.'
+        ),
     )
 
     worker = Worker(process_task, args=sys.argv[1:], argparser=argparser)

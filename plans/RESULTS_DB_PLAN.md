@@ -175,7 +175,7 @@ The `images` table:
 | `config_hash`, `git_sha`, `pipeline_run` | `navigation_result.provenance` | |
 | `image_number` | derived from `image_name` | replaces the SQL function (section 2.5) |
 | `has_summary_png` | the ingest walk (section 2.7) | Boolean |
-| `start_et`, `stop_et`, `exposure_s` | `navigation_result.times.*` | NULL for a document with no navigation result (see below) |
+| `start_et`, `stop_et`, `midtime_et`, `exposure_s` | `navigation_result.times.*` | NULL for a document with no navigation result (see below); `midtime_et` is stored as recorded, never re-derived, because the reader's midtime gate holds it to 1e-6 s |
 | `sclk_start`, `sclk_midtime`, `sclk_stop` | `navigation_result.times.*` | TEXT |
 | `camera_frame_id`, `ck_frame_id` | `navigation_result.pointing.*` | INTEGER |
 | `cmatrix`, `cmatrix_original` | `navigation_result.pointing.*` | JSON (nine floats, row-major); `cmatrix` NULL where the navigation fitted a camera rotation |

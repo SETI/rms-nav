@@ -52,8 +52,9 @@ from spindoctor.cli.reproj.args import (
     add_ring_args,
 )
 from spindoctor.cli.reproj.factories import build_body_mosaic, build_ring_mosaic
-from spindoctor.cli.reproj.offsets import apply_pointing_to_obs, load_pointing_if_any
+from spindoctor.cli.reproj.offsets import apply_pointing_to_obs
 from spindoctor.cli.reproj.paths import mosaic_output_path, per_image_output_path
+from spindoctor.cli.reproj.pointing_source import PointingSource, build_pointing_source
 from spindoctor.cli.reproj.reproject import reproject_one_body, reproject_one_ring
 from spindoctor.config import (
     DEFAULT_CONFIG,
@@ -63,6 +64,7 @@ from spindoctor.config import (
     build_image_log_handlers,
     build_run_logging,
     get_nav_results_root,
+    get_results_db_url,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_MOSAIC
@@ -71,6 +73,7 @@ from spindoctor.dataset.dataset import DataSet
 from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class
 from spindoctor.reproj.bodies import USE_MOSAIC_LIMITS, BodyMosaicData, BodyReprojResult
 from spindoctor.reproj.rings import RingMosaicData, RingReprojResult
+from spindoctor.results_index import masked_url
 from spindoctor.support.file import json_as_string
 from spindoctor.support.misc import log_run_environment
 
@@ -112,7 +115,7 @@ def _run_reproject_pass(
     run_logging: RunLogging,
     *,
     args: argparse.Namespace,
-    nav_results_root_path: FCPath | None,
+    pointing_source: PointingSource,
     output_dir: FCPath,
     prefix: str,
     fmt: str,
@@ -126,7 +129,8 @@ def _run_reproject_pass(
         run_logging: This run's resolved logging, giving the sinks and levels
             each per-image log is written with.
         args: Parsed CLI namespace.
-        nav_results_root_path: Optional root for ``sd_offset`` metadata (offsets).
+        pointing_source: Where each image's navigation record is read from --
+            the documents ``sd_offset`` wrote, or an ingested results index.
         output_dir: Mosaic / per-image output directory.
         prefix: Output filename prefix.
         fmt: Output format (``fits`` or ``npz``).
@@ -194,7 +198,7 @@ def _run_reproject_pass(
                     image_path = image_file.image_file_path.absolute()
                     obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
 
-                    selection = load_pointing_if_any(nav_results_root_path, image_file)
+                    selection = pointing_source.load_pointing(image_file)
                     applied = apply_pointing_to_obs(
                         cast(ObsSnapshotInst, obs),
                         selection,
@@ -307,6 +311,7 @@ _CLI_ONLY_TASK_EXCLUDES: frozenset[str] = frozenset(
     {
         'config_file',
         'nav_results_root',
+        'results_db',
         'pds3_holdings_root',
         'log_level',
         'profile',
@@ -426,15 +431,16 @@ def parse_args(command_list: list[str]) -> tuple[str, argparse.Namespace]:
 
 def _run_body(
     args: argparse.Namespace,
-    nav_results_root_path: FCPath | None,
+    pointing_source: PointingSource,
     run_logging: RunLogging,
 ) -> None:
     """Run the body workflow: reproject each selected image, then mosaic them.
 
     Parameters:
         args: Parsed CLI namespace.
-        nav_results_root_path: Root holding ``sd_offset`` metadata, from which
-            each image's offset is read; None leaves pointing uncorrected.
+        pointing_source: Where each image's navigation record is read from; a
+            source built with no navigation results root leaves every image's
+            pointing uncorrected.
         run_logging: This run's resolved logging, giving the sinks and levels
             each per-image reprojection log is written with.
     """
@@ -454,7 +460,7 @@ def _run_body(
         n_done, n_skipped, n_failed, n_uncorrected = _run_reproject_pass(
             run_logging,
             args=args,
-            nav_results_root_path=nav_results_root_path,
+            pointing_source=pointing_source,
             output_dir=output_dir,
             prefix=prefix,
             fmt=fmt,
@@ -541,15 +547,16 @@ def _run_body(
 
 def _run_rings(
     args: argparse.Namespace,
-    nav_results_root_path: FCPath | None,
+    pointing_source: PointingSource,
     run_logging: RunLogging,
 ) -> None:
     """Run the rings workflow: reproject each selected image, then mosaic them.
 
     Parameters:
         args: Parsed CLI namespace.
-        nav_results_root_path: Root holding ``sd_offset`` metadata, from which
-            each image's offset is read; None leaves pointing uncorrected.
+        pointing_source: Where each image's navigation record is read from; a
+            source built with no navigation results root leaves every image's
+            pointing uncorrected.
         run_logging: This run's resolved logging, giving the sinks and levels
             each per-image reprojection log is written with.
     """
@@ -569,7 +576,7 @@ def _run_rings(
         n_done, n_skipped, n_failed, n_uncorrected = _run_reproject_pass(
             run_logging,
             args=args,
-            nav_results_root_path=nav_results_root_path,
+            pointing_source=pointing_source,
             output_dir=output_dir,
             prefix=prefix,
             fmt=fmt,
@@ -673,12 +680,22 @@ def main() -> None:
             pr.print_stats(sort='cumulative')
         return
 
+    results_db_url = get_results_db_url(args, DEFAULT_CONFIG)
+    MAIN_LOGGER.info(
+        'Results index: %s',
+        masked_url(results_db_url) if results_db_url is not None else 'none (reading files)',
+    )
+    # A resolved index that will not open, or a root it has not fully ingested,
+    # fails the run here rather than quietly reverting to reading files.
+    pointing_source = build_pointing_source(nav_results_root_path, results_db_url=results_db_url)
+
     try:
         if mode == 'body':
-            _run_body(args, nav_results_root_path, run_logging)
+            _run_body(args, pointing_source, run_logging)
         else:
-            _run_rings(args, nav_results_root_path, run_logging)
+            _run_rings(args, pointing_source, run_logging)
     finally:
+        pointing_source.close()
         if args.profile:
             pr.disable()
             pr.print_stats(sort='cumulative')

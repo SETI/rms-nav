@@ -22,6 +22,7 @@ from spindoctor.cli import (
     sd_mosaic_cloud_tasks,
     sd_offset_cloud_tasks,
 )
+from spindoctor.cli.reproj.pointing_source import FilePointingSource
 from spindoctor.config.config import Config
 from spindoctor.config.logging_config import RunLogging, build_cloud_task_logging
 from spindoctor.config.program_names import SD_BACKPLANES, SD_MOSAIC
@@ -292,7 +293,7 @@ def _reproject_task_result(
         sd_mosaic_cloud_tasks, 'reproject_one_ring', lambda *a, **k: _StubReprojResult()
     )
     worker = _worker_data(nav_results_root=FCPath(tmp_path).as_posix())
-    worker.nav_results_root_path = nav_root  # type: ignore[attr-defined]
+    worker.pointing_source = FilePointingSource(nav_root)  # type: ignore[attr-defined]
     _, result = sd_mosaic_cloud_tasks.process_task(
         'task-1',
         {

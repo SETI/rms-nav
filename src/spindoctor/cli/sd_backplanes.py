@@ -20,19 +20,23 @@ sys.path.insert(0, package_source_path)
 
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
 from spindoctor.cli.logging_args import add_logging_arguments, reporting_logging_errors
+from spindoctor.cli.reproj.pointing_source import build_pointing_source
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
     build_run_logging,
     get_backplane_results_root,
     get_nav_results_root,
+    get_results_db_url,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_BACKPLANES
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from spindoctor.dataset.dataset import DataSet
 from spindoctor.obs import inst_name_to_obs_class
+from spindoctor.results_index import masked_url
 from spindoctor.support.file import json_as_string
+from spindoctor.support.misc import log_run_environment
 
 PROGRAM_NAME = SD_BACKPLANES
 """Program identity: names the main log directory and the
@@ -102,6 +106,19 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         help="""Root directory for backplane results; overrides the BACKPLANE_RESULTS_ROOT
         environment variable and the backplane_results_root configuration variable""",
     )
+    environment_group.add_argument(
+        '--results-db',
+        type=str,
+        default=None,
+        metavar='URL',
+        help="""Connection URL of the results index written by sd_stats_ingest (a
+        sqlite: URL naming a local path, or a postgresql+psycopg: URL naming a
+        server); overrides NAV_RESULTS_DB and the environment.results_db
+        configuration variable. Each image's navigation record is then read as one
+        row instead of one file. Pass "none" to read the files even where an index
+        is configured. Without an index the navigation results tree is read
+        directly, which is the default.""",
+    )
 
     # Output
     output_group = cmdparser.add_argument_group('Output')
@@ -158,13 +175,23 @@ def main() -> None:
     backplane_results_root_str = get_backplane_results_root(arguments, DEFAULT_CONFIG)
     backplane_results_root = FileCache(None).new_path(backplane_results_root_str)
 
+    results_db_url = get_results_db_url(arguments, DEFAULT_CONFIG)
+
     MAIN_LOGGER.info('Starting backplanes generation')
     MAIN_LOGGER.info('Dataset: %s', DATASET_NAME)
     MAIN_LOGGER.info('Nav results root: %s', nav_results_root.as_posix())
     MAIN_LOGGER.info('Backplane results root: %s', backplane_results_root.as_posix())
+    MAIN_LOGGER.info(
+        'Results index: %s',
+        masked_url(results_db_url) if results_db_url is not None else 'none (reading files)',
+    )
     MAIN_LOGGER.info('Dry run: %s', arguments.dry_run)
     MAIN_LOGGER.info('No write output files: %s', arguments.no_write_output_files)
-    MAIN_LOGGER.info('Arguments: %s', command_list)
+    # Routed through the run-environment block rather than logged directly: that
+    # is the one place a command line is recorded, and therefore the one place a
+    # connection URL in it is masked before it reaches a log file or a bug
+    # report.  An index URL can carry a database password.
+    log_run_environment(MAIN_LOGGER, command_list)
 
     assert DATASET is not None
     inst_name = dataset_name_to_inst_name(cast(str, DATASET_NAME))
@@ -202,30 +229,37 @@ def main() -> None:
         MAIN_LOGGER.info('Wrote cloud_tasks file to %s', arguments.output_cloud_tasks_file)
         return
 
-    for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
-        assert len(imagefiles.image_files) == 1
-        if arguments.dry_run:
-            MAIN_LOGGER.info(
-                'Would process: %s', imagefiles.image_files[0].label_file_url.as_posix()
-            )
-            continue
+    # A resolved index that will not open, or a root it has not fully ingested,
+    # fails the run here.  Falling back to reading files would turn a
+    # misconfigured run into a slow, silently different one.
+    pointing_source = build_pointing_source(nav_results_root, results_db_url=results_db_url)
+    try:
+        for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
+            assert len(imagefiles.image_files) == 1
+            if arguments.dry_run:
+                MAIN_LOGGER.info(
+                    'Would process: %s', imagefiles.image_files[0].label_file_url.as_posix()
+                )
+                continue
 
-        try:
-            generate_backplanes_image_files(
-                obs_class,
-                imagefiles,
-                nav_results_root=nav_results_root,
-                backplane_results_root=backplane_results_root,
-                write_output_files=not arguments.no_write_output_files,
-                run_logging=run_logging,
-            )
-        except FileNotFoundError as e:
-            MAIN_LOGGER.error(
-                'Skipped due to missing metadata: %s (%s)',
-                imagefiles.image_files[0].label_file_url.as_posix(),
-                str(e),
-            )
-            continue
+            try:
+                generate_backplanes_image_files(
+                    obs_class,
+                    imagefiles,
+                    pointing_source=pointing_source,
+                    backplane_results_root=backplane_results_root,
+                    write_output_files=not arguments.no_write_output_files,
+                    run_logging=run_logging,
+                )
+            except FileNotFoundError as e:
+                MAIN_LOGGER.error(
+                    'Skipped due to missing metadata: %s (%s)',
+                    imagefiles.image_files[0].label_file_url.as_posix(),
+                    str(e),
+                )
+                continue
+    finally:
+        pointing_source.close()
 
 
 if __name__ == '__main__':
