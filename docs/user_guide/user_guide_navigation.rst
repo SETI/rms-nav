@@ -179,9 +179,6 @@ For PDS3 datasets (``coiss``, ``coiss_pds3``, ``coiss_cruise``, ``coiss_cruise_p
 * ``--has-offset-file`` / ``--has-no-offset-file``: only images whose offset
   metadata file (``*_metadata.json`` under the navigation results root) already
   exists / does not exist.
-* ``--has-png-file`` / ``--has-no-png-file``: only images whose summary PNG file
-  (``*_summary.png`` under the navigation results root) already exists / does
-  not exist.
 * ``--has-offset-error``: only images whose offset metadata file exists and
   records a fatal error (``status`` of ``error``).
 * ``--has-offset-spice-error`` / ``--has-offset-nonspice-error``: like
@@ -190,14 +187,13 @@ For PDS3 datasets (``coiss``, ``coiss_pds3``, ``coiss_cruise``, ``coiss_cruise_p
 
 The results-file filters answer their questions three ways when they read the
 results tree, all of them efficient even when the results root is a cloud
-location. Presence filters
-(``--has-offset-file`` / ``--has-png-file``) and the error filters
+location. The presence filter (``--has-offset-file``) and the error filters
 (``--has-offset-error`` and its SPICE variants) walk the results tree once per
-selected volume and test each candidate against the collected file set. Pure
-absence filters (``--has-no-offset-file`` / ``--has-no-png-file`` with no
-presence or error filter active) do not walk the tree; they answer with batched
-``exists()`` calls. The error filters additionally retrieve the matched metadata
-files in batches to inspect their contents.
+selected volume and test each candidate against the collected file set. The
+absence filter on its own (``--has-no-offset-file`` with no presence or error
+filter active) does not walk the tree; it answers with batched ``exists()``
+calls. The error filters additionally retrieve the matched metadata files in
+batches to inspect their contents.
 
 Given ``--results-db``, all of them are answered instead by one query per
 enumeration, and the results tree is not read at all. The index is a snapshot of

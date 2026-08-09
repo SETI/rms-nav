@@ -63,15 +63,15 @@ refused before anything is walked, and an empty one is such a root: with
 ``--nav-results-root "$ROOT"`` and ``ROOT`` unset the program stops rather than
 ingesting whatever directory it was started from under a name nobody chose.
 
-**Ingestion is incremental.** One recursive listing per root collects both the
-metadata documents and the summary PNGs beside them, and carries each file's
-size and modification time along with it. A file whose recorded size and
-modification time still match the listing, and beside which the walk sees the
-summary PNG the index already recorded, is not read at all, so a second pass
-over an unchanged root costs one listing and nothing else. This holds for
-files that could not be ingested as well: a file that is not a navigation
-document is recorded as such, with the same two metrics, and is skipped for as
-long as it does not change. ``--force`` re-reads everything; so does a storage
+**Ingestion is incremental.** One recursive listing per root collects the
+metadata documents and carries each file's size and modification time along
+with it. Every other file under the root -- the summary PNG beside each
+document, and whatever else is there -- is passed over and counted nowhere. A
+file whose recorded size and modification time still match the listing is not
+read at all, so a second pass over an unchanged root costs one listing and
+nothing else. This holds for files that could not be ingested as well: a file
+that is not a navigation document is recorded as such, with the same two
+metrics, and is skipped for as long as it does not change. ``--force`` re-reads everything; so does a storage
 backend whose listing reports neither size nor modification time, which ingest
 warns about rather than silently skipping.
 
@@ -257,9 +257,9 @@ entry has a ``task_id`` and a ``data`` object carrying ``run_id`` (the ingest
 run the share belongs to), ``root_url`` (the normalized results root),
 ``force``, ``has_file_metrics`` (whether the listing reported a size and
 modification time for every file), and ``files`` -- one object per document,
-with its ``results_path_stub``, ``mtime_ns``, ``size_bytes`` and
-``has_summary_png``. Every one of those comes from the single listing, so no
-worker stats a file or checks for one.
+with its ``results_path_stub``, ``mtime_ns`` and ``size_bytes``. Every one of
+those comes from the single listing, so no worker stats a file or checks for
+one.
 
 Step 3 reads the ``cloud_tasks`` event log, which is JSON Lines with one event
 per line; the ``task_completed`` events carry what each worker returned, under
@@ -424,9 +424,6 @@ pair with ``ON DELETE CASCADE``.
      - BIGINT
      - Numeric portion of the image name (the first digit run in the
        basename). What the ``--min-image`` / ``--max-image`` filters compare.
-   * - ``has_summary_png``
-     - BOOLEAN
-     - Whether the ingest walk saw a ``_summary.png`` beside the document.
    * - ``start_et``, ``stop_et``, ``exposure_s``
      - DOUBLE
      - Shutter open and close epochs and the exposure between them.
