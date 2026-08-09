@@ -1415,3 +1415,84 @@ def test_the_tree_path_is_handed_volumes_it_can_be_read_twice_from(
     monkeypatch.setattr(ResultsFilter, '_scan_volumes', recording)
     ResultsFilter(iter(VOLUMES), str(tree), logger=_logger(), has_offset_file=True)
     assert reads[1] == VOLUMES
+
+
+def _reported_line(out: str) -> str:
+    """Return the line reporting what the index holds.
+
+    Parameters:
+        out: Everything the filter wrote.
+
+    Returns:
+        The one line naming the counts and the age of the answer.
+    """
+    return next(line for line in out.splitlines() if 'Results index holds' in line)
+
+
+def test_a_finish_time_in_the_future_is_reported_as_it_stands(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two machines disagreeing by seconds is ordinary, and is not an interval.
+
+    The pass is finished by whichever machine ran the ingest and the stamp is
+    read by another, so a workstation a few seconds behind a cloud worker reads
+    a moment that has not happened yet.  Reporting one as "less than a minute
+    ago" would state an interval that is not one.
+    """
+    root, _images = _one_image_tree(tmp_path)
+    url = _index_of_two_roots(tmp_path, root, missed=0)
+    stamp = (datetime.now(UTC) + timedelta(days=2)).isoformat()
+    _stamp_run(url, root, finished_utc=stamp)
+    ResultsFilter(
+        VOLUMES,
+        str(root),
+        logger=_reporting_logger(),
+        results_db_url=url,
+        has_no_offset_file=True,
+    )
+    assert _reported_line(capsys.readouterr().out).endswith(stamp)
+
+
+def test_a_finish_time_with_no_offset_is_read_as_utc(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An index restored from elsewhere is where a stamp with no offset comes from.
+
+    Every pass this pipeline runs writes an offset, so this is the same input
+    the unreadable stamp is: a column filled by something else.  Without a
+    reading for it, subtracting it raises out of the constructor, which is a
+    crash of the enumeration rather than an answer about the index.
+    """
+    root, _images = _one_image_tree(tmp_path)
+    url = _index_of_two_roots(tmp_path, root, missed=0)
+    naive = (datetime.now(UTC) - timedelta(days=2)).replace(tzinfo=None).isoformat()
+    _stamp_run(url, root, finished_utc=naive)
+    ResultsFilter(
+        VOLUMES,
+        str(root),
+        logger=_reporting_logger(),
+        results_db_url=url,
+        has_no_offset_file=True,
+    )
+    assert _reported_line(capsys.readouterr().out).endswith(f'{naive} (2 days ago)')
+
+
+def test_a_recorded_finish_time_of_nothing_is_reported_as_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The column is not null, so an empty string is a value a consumer meets.
+
+    It says nothing about when the pass finished, and the report says that
+    rather than naming a moment or leaving the sentence unfinished.
+    """
+    root, _images = _one_image_tree(tmp_path)
+    url = _index_of_two_roots(tmp_path, root, missed=0)
+    _stamp_run(url, root, finished_utc='')
+    ResultsFilter(
+        VOLUMES,
+        str(root),
+        logger=_reporting_logger(),
+        results_db_url=url,
+        has_no_offset_file=True,
+    )
+    assert 'at a time this index does not record' in capsys.readouterr().out
