@@ -310,9 +310,6 @@ lifted out of is still organized on no stated axis (#427), an upstream
 registry-eviction request to `rms-pdslogger` (#428), and extending the same
 surface to the `util/` tooling (#429).
 
-Some items start with an operator decision, because each is a scope
-commitment:
-
 The headline capability item is delivered: `plans/CK_KERNEL_PLAN.md` is
 implemented, so the navigator records each image's corrected attitude as a
 C-matrix and `sd_create_ck` ships updated-pointing SPICE C-kernels as a
@@ -322,6 +319,9 @@ that plan's section 7. The remaining decided item with a self-contained
 plan of its own is `plans/RESULTS_DB_PLAN.md` (an optional, rebuildable
 index over the results tree, so programs stop reading one JSON document per
 image on a cloud root; #430).
+
+Some items start with an operator decision, because each is a scope
+commitment:
 
 | Decision | Then the work is |
 |---|---|

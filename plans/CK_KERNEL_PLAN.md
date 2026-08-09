@@ -987,7 +987,8 @@ the exposure midtime and the lookup from that midtime rounded to a whole
 tick; an image that far from any pointing record is refused rather than
 corrected, which is the safe direction.
 
-The `cspyce` surface the writer needs, all present in the installed 2.3.6:
+The `cspyce` surface the writer needs, all present in `cspyce` >= 2.3.5
+(the pinned minimum):
 `furnsh`, `unload`, `kclear`, `pxform`, `frmnam`, `namfrm`, `ckmeta`,
 `sce2c`, `sce2t`, `sce2s`, `ckobj`, `ckcov`, `ckgp`, `ckgpav`, `ktotal`,
 `m2q`, `ckopn`, `ckw03`, `ckcls`, `dafopw`, `dafac`, `dafcls`, `dafopr`,

@@ -369,7 +369,7 @@ def test_an_empty_text_field_is_marked_rather_than_blank() -> None:
     assert line.endswith('-')
 
 
-def test_an_empty_status_is_marked_rather_than_blank() -> None:
-    """An empty status renders as the absence marker, not as a blank column."""
-    line = build_comment_lines(_area(images=(_facts(status=''),)))[-1]
-    assert line.split()[-2] == '-'
+def test_an_empty_status_cannot_reach_the_comment_area() -> None:
+    """An empty status is refused where the facts are built, not rendered around."""
+    with pytest.raises(ValueError, match='status is empty'):
+        _facts(status='')

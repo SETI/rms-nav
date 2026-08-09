@@ -343,6 +343,25 @@ def test_an_empty_image_name_is_refused() -> None:
         )
 
 
+def test_an_empty_status_is_refused() -> None:
+    """An empty status cell would read as an unrecorded value, not a recorded one."""
+    with pytest.raises(ValueError, match='status is empty for N1234567890_1'):
+        ImageFacts(
+            image_name='N1234567890_1',
+            utc=None,
+            et=None,
+            sclk=None,
+            offset_dv=None,
+            offset_du=None,
+            sigma_dv=None,
+            sigma_du=None,
+            confidence=None,
+            confidence_rank=None,
+            status='',
+            status_reason=None,
+        )
+
+
 def test_a_times_block_that_is_not_a_block_is_refused(pool: KernelPool) -> None:
     """A ``times`` field holding text is malformed, not an image without times."""
     assert pool is not None
@@ -449,11 +468,15 @@ def test_a_field_holding_a_comma_is_quoted(pool: KernelPool) -> None:
 
 
 def test_write_report_writes_what_report_text_renders(pool: KernelPool, tmp_path: Path) -> None:
-    """The file on disk is the rendered text and nothing else."""
+    """The file on disk is the rendered text and nothing else.
+
+    The path is passed as a plain ``Path`` to exercise the public boundary,
+    which normalizes ``str`` and ``Path`` inputs to ``FCPath`` at entry.
+    """
     rows = [ReportRow(facts=_facts(pool), source_bc='a_nav.bc', omission_reason=None)]
-    path = FCPath(str(tmp_path / 'report.csv'))
+    path = tmp_path / 'report.csv'
     write_report(path, rows)
-    assert path.read_text() == report_text(rows)
+    assert FCPath(str(path)).read_text() == report_text(rows)
 
 
 def test_a_boolean_confidence_is_refused(pool: KernelPool) -> None:

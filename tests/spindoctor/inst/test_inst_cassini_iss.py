@@ -8,7 +8,9 @@ from tests.config import REQUIRES_EXTERNAL_DATA, URL_CASSINI_ISS_RHEA_01
 import spindoctor.obs.obs_inst_cassini_iss as obstcoiss
 from spindoctor.obs.obs_inst_cassini_iss import ObsCassiniISS
 
-pytestmark = REQUIRES_EXTERNAL_DATA
+# The marker is applied per test rather than module-wide: the shutter-mode
+# label tests build a bare observation and fetch nothing, so they run even
+# where the external trees are absent.
 
 
 def _obs_with_label(label: dict[str, Any]) -> ObsCassiniISS:
@@ -23,11 +25,13 @@ def _obs_with_label(label: dict[str, Any]) -> ObsCassiniISS:
     return obs
 
 
+@REQUIRES_EXTERNAL_DATA
 def test_cassini_iss_basic() -> None:
     obs = obstcoiss.ObsCassiniISS.from_file(URL_CASSINI_ISS_RHEA_01)
     assert obs.midtime == 196177280.54761
 
 
+@REQUIRES_EXTERNAL_DATA
 def test_cassini_iss_calib_filename_selects_calib_inst_config() -> None:
     """A ``_CALIB.IMG`` filename selects the calibrated_if config block.
 
@@ -50,6 +54,7 @@ def test_cassini_iss_calib_filename_selects_calib_inst_config() -> None:
     assert 'noisy_threshold_if' in iqt
 
 
+@REQUIRES_EXTERNAL_DATA
 def test_cassini_iss_reports_shutter_mode() -> None:
     """The shutter mode is read from the image label.
 

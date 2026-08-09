@@ -65,6 +65,11 @@ _ANGLE_TOL_RAD = 1e-9
 
 _IMAGE_NAME = 'N1484573295_1.IMG'
 
+# The clocks the two test CK objects encode their time tags against: what
+# resolve_sclk_id returns for CASSINI_CK_FRAME_ID and VOYAGER_CK_FRAME_ID.
+_CASSINI_SCLK_ID = -82
+_VOYAGER_SCLK_ID = -31
+
 
 @dataclass(frozen=True)
 class _Case:
@@ -216,7 +221,7 @@ def test_corrected_attitude_matches_composed_truth(pool: KernelPool, query_et: f
     """
     case = _build_case(pool)
     _swap_to_corrected(pool, case)
-    read = _attitude_from_pool(CASSINI_CK_FRAME_ID, -82, query_et)
+    read = _attitude_from_pool(CASSINI_CK_FRAME_ID, _CASSINI_SCLK_ID, query_et)
     truth = case.correction @ baseline_attitude(query_et)
     assert rotation_angle_between(read, truth) < _ANGLE_TOL_RAD
 
@@ -225,7 +230,7 @@ def test_baseline_attitude_is_not_the_corrected_one(pool: KernelPool) -> None:
     """The correction really moved the pointing, by the angle that was planted."""
     case = _build_case(pool)
     _swap_to_corrected(pool, case)
-    read = _attitude_from_pool(CASSINI_CK_FRAME_ID, -82, case.pointing.midtime_et)
+    read = _attitude_from_pool(CASSINI_CK_FRAME_ID, _CASSINI_SCLK_ID, case.pointing.midtime_et)
     moved = rotation_angle_between(read, baseline_attitude(case.pointing.midtime_et))
     assert moved == pytest.approx(_CORRECTION_RAD, abs=_ANGLE_TOL_RAD)
 
@@ -235,12 +240,12 @@ def test_angular_velocity_is_copied_unchanged(pool: KernelPool) -> None:
     case = _build_case(pool)
     record_ets = [_START_ET, (_START_ET + _STOP_ET) / 2.0, _STOP_ET]
     baseline_av = [
-        np.asarray(cspyce.ckgpav(CASSINI_CK_FRAME_ID, _tick(-82, et), 0.0, 'J2000')[1])
+        np.asarray(cspyce.ckgpav(CASSINI_CK_FRAME_ID, _tick(_CASSINI_SCLK_ID, et), 0.0, 'J2000')[1])
         for et in record_ets
     ]
     _swap_to_corrected(pool, case)
     corrected_av = [
-        np.asarray(cspyce.ckgpav(CASSINI_CK_FRAME_ID, _tick(-82, et), 0.0, 'J2000')[1])
+        np.asarray(cspyce.ckgpav(CASSINI_CK_FRAME_ID, _tick(_CASSINI_SCLK_ID, et), 0.0, 'J2000')[1])
         for et in record_ets
     ]
     assert case.segment.has_angular_velocity is True
@@ -262,8 +267,8 @@ def test_written_coverage_is_exactly_the_exposure(pool: KernelPool) -> None:
         str(case.corrected_path), CASSINI_CK_FRAME_ID, False, 'SEGMENT', 0.0, 'SCLK'
     )
     assert len(cover) == 2
-    assert float(cover[0]) == _tick(-82, _START_ET)
-    assert float(cover[1]) == _tick(-82, _STOP_ET)
+    assert float(cover[0]) == _tick(_CASSINI_SCLK_ID, _START_ET)
+    assert float(cover[1]) == _tick(_CASSINI_SCLK_ID, _STOP_ET)
 
 
 def test_pointing_outside_the_written_window_falls_through(pool: KernelPool) -> None:
@@ -271,7 +276,7 @@ def test_pointing_outside_the_written_window_falls_through(pool: KernelPool) -> 
     case = _build_case(pool)
     _swap_to_corrected(pool, case)
     with pytest.raises(OSError, match='CKINSUFFDATA'):
-        cspyce.ckgp(CASSINI_CK_FRAME_ID, _tick(-82, _STOP_ET + 0.25), 0.0, 'J2000')
+        cspyce.ckgp(CASSINI_CK_FRAME_ID, _tick(_CASSINI_SCLK_ID, _STOP_ET + 0.25), 0.0, 'J2000')
 
 
 def test_the_correction_reaches_every_lookup_over_a_furnished_baseline(
@@ -288,7 +293,7 @@ def test_the_correction_reaches_every_lookup_over_a_furnished_baseline(
     case = _build_case(pool)
     pool.furnish(case.corrected_path)
     midtime = case.pointing.midtime_et
-    tick = _tick(-82, midtime)
+    tick = _tick(_CASSINI_SCLK_ID, midtime)
     truth = case.correction @ baseline_attitude(midtime)
     from_ckgp = np.asarray(cspyce.ckgp(CASSINI_CK_FRAME_ID, tick, 0.0, 'J2000')[0], np.float64)
     from_ckgpav = np.asarray(cspyce.ckgpav(CASSINI_CK_FRAME_ID, tick, 0.0, 'J2000')[0], np.float64)
@@ -425,9 +430,13 @@ def test_an_exposure_whose_midtime_alone_is_covered_is_refused(pool: KernelPool)
         _build_case(pool, start_et=covered_to - 1.0, stop_et=covered_to + 1.0)
     # The premise: the midtime this image was paired on is covered, and the
     # exposure stop is a second past the end of the same baseline.
-    midtime_lookup = cspyce.ckgp.flag(CASSINI_CK_FRAME_ID, _tick(-82, covered_to), 0.0, 'J2000')
+    midtime_lookup = cspyce.ckgp.flag(
+        CASSINI_CK_FRAME_ID, _tick(_CASSINI_SCLK_ID, covered_to), 0.0, 'J2000'
+    )
     assert bool(midtime_lookup[-1]) is True
-    stop_lookup = cspyce.ckgp.flag(CASSINI_CK_FRAME_ID, _tick(-82, covered_to + 1.0), 0.0, 'J2000')
+    stop_lookup = cspyce.ckgp.flag(
+        CASSINI_CK_FRAME_ID, _tick(_CASSINI_SCLK_ID, covered_to + 1.0), 0.0, 'J2000'
+    )
     assert bool(stop_lookup[-1]) is False
 
 
@@ -550,7 +559,7 @@ def test_quaternion_records_are_sign_continuous(pool: KernelPool) -> None:
     ]
     _swap_to_corrected(pool, case)
     interior_et = _START_ET + 0.3
-    read = _attitude_from_pool(CASSINI_CK_FRAME_ID, -82, interior_et)
+    read = _attitude_from_pool(CASSINI_CK_FRAME_ID, _CASSINI_SCLK_ID, interior_et)
     truth = case.correction @ sweeping_attitude(interior_et)
     assert min(raw_dots) < 0.0
     assert min(written_dots) >= 0.0
@@ -578,7 +587,7 @@ def test_coincident_exposure_epochs_yield_one_record(pool: KernelPool) -> None:
         exposure_s=1.0e-9,
     )
     _swap_to_corrected(pool, case)
-    read = _attitude_from_pool(CASSINI_CK_FRAME_ID, -82, start_et)
+    read = _attitude_from_pool(CASSINI_CK_FRAME_ID, _CASSINI_SCLK_ID, start_et)
     truth = case.correction @ baseline_attitude(case.pointing.midtime_et)
     assert stop_et == start_et
     assert midtime_et == start_et
@@ -635,8 +644,8 @@ def test_record_count_follows_the_cadence(
         stop_et=stop_et,
     )
     assert case.segment.record_count == expected_records
-    assert case.segment.begtim == _tick(-82, start_et)
-    assert case.segment.endtim == _tick(-82, stop_et)
+    assert case.segment.begtim == _tick(_CASSINI_SCLK_ID, start_et)
+    assert case.segment.endtim == _tick(_CASSINI_SCLK_ID, stop_et)
 
 
 def test_an_exposure_needing_more_records_than_a_segment_holds_is_refused(
@@ -665,7 +674,7 @@ def test_frozen_attitude_object_is_constant_across_the_exposure(
     """
     case = _build_case(pool, ck_frame_id=VOYAGER_CK_FRAME_ID, camera_frame=VOYAGER_CAMERA_FRAME)
     _swap_to_corrected(pool, case)
-    read = _attitude_from_pool(VOYAGER_CK_FRAME_ID, -31, query_et)
+    read = _attitude_from_pool(VOYAGER_CK_FRAME_ID, _VOYAGER_SCLK_ID, query_et)
     truth = case.correction @ baseline_attitude(case.pointing.midtime_et)
     assert rotation_angle_between(read, truth) < _ANGLE_TOL_RAD
 
@@ -701,8 +710,8 @@ def test_frozen_attitude_ignores_the_baseline_time_variation(pool: KernelPool) -
     """The frozen segment's start and stop attitudes are the same rotation."""
     case = _build_case(pool, ck_frame_id=VOYAGER_CK_FRAME_ID, camera_frame=VOYAGER_CAMERA_FRAME)
     _swap_to_corrected(pool, case)
-    at_start = _attitude_from_pool(VOYAGER_CK_FRAME_ID, -31, _START_ET)
-    at_stop = _attitude_from_pool(VOYAGER_CK_FRAME_ID, -31, _STOP_ET)
+    at_start = _attitude_from_pool(VOYAGER_CK_FRAME_ID, _VOYAGER_SCLK_ID, _START_ET)
+    at_stop = _attitude_from_pool(VOYAGER_CK_FRAME_ID, _VOYAGER_SCLK_ID, _STOP_ET)
     assert rotation_angle_between(at_start, at_stop) < _ANGLE_TOL_RAD
 
 

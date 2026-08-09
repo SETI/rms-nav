@@ -261,8 +261,8 @@ round trip does on Cassini NAC, Cassini WAC, Voyager and LORRI.
 
 That delivered the writing half of #50. The reading half is what remains:
 the pixel offset stays and every consumer keeps applying it, so switching
-the backplane and reprojection readers to the C-matrix is still open under
-#50. The round trip is the evidence it was waiting for -- the two
+the backplane and reprojection readers to the C-matrix is still open
+under #50. The round trip is the evidence it was waiting for -- the two
 representations agree on real frames, per instrument.
 
 The round trip also measured something that belongs to Track B rather than

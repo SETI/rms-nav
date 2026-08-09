@@ -145,6 +145,7 @@ def test_the_comment_area_names_the_configuration_hash(
     run_driver(run_tree, monkeypatch)
     lines = read_comment_area(run_tree['output'] / 'orig_a_nav.bc')
     stated = [line for line in lines if line.startswith('Configuration hash:')]
+    assert len(stated) == 1
     assert len(stated[0].split()[-1]) == 64
 
 
@@ -320,6 +321,7 @@ def test_a_corrected_image_records_its_file_in_its_own_log(
     """So an image's own log answers what became of it either way."""
     run_driver(run_tree, monkeypatch)
     logs = list((run_tree['output'] / 'logs').rglob('*A_CALIB*'))
+    assert len(logs) == 1
     assert 'orig_a_nav.bc' in logs[0].read_text()
 
 

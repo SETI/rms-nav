@@ -30,6 +30,12 @@ def _json_round_trip(result: NavResult) -> dict[str, Any]:
     Asserting on the parsed-back dict proves the metadata is genuinely
     serializable and pins what a reader of the written file sees, not what the
     in-memory objects happened to be.
+
+    Parameters:
+        result: The result to build metadata for.
+
+    Returns:
+        The metadata dict as it survives JSON serialization.
     """
     return cast(dict[str, Any], json.loads(json.dumps(build_metadata_dict(result))))
 
@@ -314,7 +320,15 @@ def test_breakdown_is_empty_when_no_component_was_populated() -> None:
 
 
 def _pointing(*, corrected: bool) -> PointingSolution:
-    """Build a PointingSolution with recognizable, non-symmetric matrices."""
+    """Build a PointingSolution with recognizable, non-symmetric matrices.
+
+    Parameters:
+        corrected: True to carry a corrected C-matrix alongside the baseline;
+            False for a solution recording only the uncorrected attitude.
+
+    Returns:
+        The solution.
+    """
     original = np.array(
         [
             [0.0, 1.0, 0.0],
