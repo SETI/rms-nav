@@ -65,47 +65,28 @@ self-contained -- their difference is the correction -- and gives the writer the
 means to verify that the baseline kernels have not changed since navigation.
 
 **The oops observation frame is not the SPICE camera frame.** The navigated
-offset lives in the ``oops`` observation frame, and for three of the four
-instruments ``oops`` builds that frame with a constant flip on top of the SPICE
-frame:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 30 40
-
-   * - Instrument
-     - ``oops`` frame versus SPICE frame
-     - Where
-   * - Cassini ISS (NAC, WAC)
-     - ``R = diag(-1, -1, +1)``, a 180 degree flip about the boresight
-     - ``oops/hosts/cassini/iss.py``
-   * - New Horizons LORRI
-     - ``R = diag(+1, -1, -1)``; the SPICE boresight is -Z
-     - ``oops/hosts/newhorizons/lorri.py``
-   * - Galileo SSI
-     - ``R = I``; ``oops`` uses ``GLL_SCAN_PLATFORM`` directly
-     - ``oops/hosts/galileo/ssi/``
-   * - Voyager ISS
-     - no runtime relation: ``oops`` freezes a ``Cmatrix`` built from a
-       tolerance-snapped ``ckgp``
-     - ``oops/hosts/voyager/iss.py``
-
-where ``R`` relates the two J2000-referenced attitudes as
-``C_oops = R . C_spice``.
+offset lives in the ``oops`` observation frame, and a host may build that frame
+with a constant flip on top of the SPICE frame, where ``R`` relates the two
+J2000-referenced attitudes as ``C_oops = R . C_spice``. Each host declares its
+own ``R``, and some declare no runtime relation at all, freezing a ``Cmatrix``
+built from a tolerance-snapped ``ckgp`` instead; which an instrument does, and
+what its ``R`` is, is stated in that instrument's chapter under
+:doc:`instruments/instruments`.
 
 A correction built in the ``oops`` frame and composed onto a
 ``pxform``-derived matrix **without** conjugating through ``R`` is a proper
-rotation of the right magnitude pointing the wrong way -- for Cassini, with both
-tangent-plane components negated. It survives every check a hermetic test can
-make: the result is orthonormal, its determinant is 1, and its rotation angle is
-correct, because a magnitude is invariant under exactly the error being made.
-Only real host frames meeting real kernels can see it.
+rotation of the right magnitude pointing the wrong way -- under a flip about
+the boresight, with both tangent-plane components negated. It survives every
+check a hermetic test can make: the result is orthonormal, its determinant is 1,
+and its rotation angle is correct, because a magnitude is invariant under
+exactly the error being made. Only real host frames meeting real kernels can
+see it.
 
 So ``R`` is measured at runtime, never assumed. The measurement is
-``C_oops . cmatrix_original^T``, and it is checked against the constant this
-table records for the instrument, and checked again for being the same at the
-exposure start and stop as at the midtime. A violation raises rather than being
-absorbed.
+``C_oops . cmatrix_original^T``, and it is checked against the constant
+:func:`~spindoctor.support.cmatrix.compute_pointing` records for that
+instrument, and checked again for being the same at the exposure start and stop
+as at the midtime. A violation raises rather than being absorbed.
 
 Deriving the corrected attitude
 ===============================
@@ -158,56 +139,31 @@ bit-identical to the uncorrected one, so that no correction means no change.
 
 The angle is ``arctan2`` and not the mathematically equivalent
 ``arccos(d . b)``, and the difference matters in exactly the regime a sub-pixel
-offset lives in. At a Cassini NAC pixel scale of 6e-6 rad/px: at 0.01 px
+offset lives in. At a narrow-angle pixel scale of 6e-6 rad/px: at 0.01 px
 ``arccos`` returns 5.9605e-08 rad against a true 6.0000e-08, 0.7% low; at
 0.001 px it returns **exactly 0.0**, because the cosine of 6e-9 rad rounds to
 1.0 in float64 and the correction would be dropped altogether. ``arctan2``
 returns the true angle in both cases.
 
 An exact rigid rotation is not exactly a uniform tangent-plane shift; the two
-differ at second order in field angle. Measured over a 17x17 pixel grid across
-each full frame, worst case over eight offset directions, at **50 pixels of
-total boresight displacement**, comparing ``M`` applied to the ``oops``
-``OffsetFOV`` line of sight against the unmodified field of view:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 34 22 22 22
-
-   * - Instrument
-     - Worst residual (rad)
-     - In tangent-plane px
-     - In pixel space
-   * - Cassini NAC
-     - 6.01e-9
-     - 1.00e-3 px
-     - 1.24e-3 px
-   * - Cassini WAC
-     - 5.91e-6
-     - 9.89e-2 px
-     - 7.86e-2 px
-   * - New Horizons LORRI
-     - 1.62e-8
-     - 8.15e-4 px
-     - 1.23e-3 px
-   * - Galileo SSI
-     - 1.82e-8
-     - 1.79e-3 px
-     - 1.79e-3 px
-   * - Voyager 2 NAC
-     - 1.29e-8
-     - 1.64e-3 px
-     - 1.64e-3 px
+differ at second order in field angle. The residual is measured per instrument
+over a 17x17 pixel grid across each full frame, worst case over eight offset
+directions, at **50 pixels of total boresight displacement**, comparing ``M``
+applied to the ``oops`` ``OffsetFOV`` line of sight against the unmodified
+field of view. Each instrument's chapter under
+:doc:`instruments/instruments` carries its own figure; they span three orders
+of magnitude, because the term grows with field angle and a wide field is a
+different problem from a narrow one.
 
 The residual is **linear in the offset**, not quadratic: measured across
 12.5 / 25 / 50 / 100 px of displacement, each doubling multiplies it by 2.034,
-2.067 and 2.129, on the NAC and the WAC identically. The term is second order in
-*field angle* and first order in the offset. Two consequences for anyone
-changing this code: quoting a residual without the offset it was measured at is
-meaningless, and halving an offset buys only half the headroom a quadratic
-reading would promise. The wide angle camera is the case to watch -- at a 50 px
-offset this term alone is 9.89e-2 px of total displacement, against a round-trip
-target stated as 0.1 px per axis.
+2.067 and 2.129, identically on a narrow and a wide field. The term is second
+order in *field angle* and first order in the offset. Two consequences for
+anyone changing this code: quoting a residual without the offset it was
+measured at is meaningless, and halving an offset buys only half the headroom a
+quadratic reading would promise. A wide field is always the case to watch,
+since this term alone can reach the same order as the round-trip target of
+0.1 px per axis.
 
 Step 3: express both attitudes in the SPICE convention
 ------------------------------------------------------
@@ -225,16 +181,20 @@ conjugation's *direction* cannot be pinned by any real frame, because every
 non-involutory ``R`` is what the test suite uses to hold ``R^T M R`` apart from
 ``R M R^T``.
 
-Voyager takes a different path through the same function. ``oops`` builds the
-observation frame as
-``P . ckgp(ck_id, sce2t(scid, et_mid), 800 + texp/48, 'J2000')`` with
-``P = pxform('VGn_SCAN_PLATFORM', camera_frame, 0)`` -- frozen,
-time-independent, and tolerance-snapped, so a ``pxform`` at the midtime does not
-reproduce it. For Voyager the observation frame attitude already is the SPICE
-camera attitude that was navigated: ``cmatrix_original = C_oops``, ``R`` is the
-identity by construction, and the writer has to reproduce the baseline with the
-same snapped lookup. The tick conversion is ``sce2t``, not ``sce2c``; the two
-differ, and the reproduction step matches the call it reproduces.
+An instrument whose host **freezes** its observation frame takes a different
+path through the same function. Such a host builds the frame from one
+tolerance-snapped pointing lookup composed with a constant rotation, rather
+than from a frame chain evaluated at the epoch, so a ``pxform`` at the midtime
+does not reproduce it. For those instruments the observation frame attitude
+already is the SPICE camera attitude that was navigated:
+``cmatrix_original = C_oops``, ``R`` is the identity by construction, and the
+writer has to reproduce the baseline with the same snapped lookup rather than
+with ``pxform``. The tick conversion inside such a lookup need not be the one
+the writer uses elsewhere, and the reproduction step matches the call it
+reproduces rather than the call that is usual. Which instruments are frozen,
+and the exact lookup each one's host makes, is stated in their chapters under
+:doc:`instruments/instruments`; the CK objects concerned are
+:data:`~spindoctor.spice_ids.FROZEN_ATTITUDE_CK_IDS`.
 
 The result is checked before it is recorded: ``|det(C) - 1| < 1e-9``,
 ``max|C C^T - I| < 1e-9``, and every element finite, all three raising on
@@ -589,18 +549,35 @@ is refused before any candidate is tried, naming what is missing:
 * An object whose spacecraft clock no furnished kernel defines. The index
   reports coverage in TDB, which needs that clock; such an object is recorded as
   unreadable and offers no coverage, which would make every image correcting it
-  look like drift. Recording it rather than refusing the scan is deliberate: a
-  real New Horizons kernel names object -1 beside -98000, and refusing there
-  would make the whole mission unindexable for the sake of an object no image
-  ever asks about. The driver warns once in its run log, naming the skipped
-  objects, so a kernel set missing a clock says so even when no image needs it.
+  look like drift. Recording it rather than refusing the scan is deliberate:
+  real holdings carry kernels that name a phantom object beside the spacecraft,
+  and refusing there would make a whole mission unindexable for the sake of an
+  object no image ever asks about. The driver warns once in its run log, naming
+  the skipped objects, so a kernel set missing a clock says so even when no
+  image needs it. Which missions' holdings carry such an object is stated in
+  their chapters under :doc:`instruments/instruments`.
 
-When several candidates reproduce -- which the holdings make ordinary, since
-reconstructed, gapfill and predicted sets overlap -- the tie-break prefers
-reconstructed over gapfill over predicted (read from the kernel's basename), then
-the lexicographically greatest basename, then the greatest path. The reproducing
+When several candidates reproduce -- which overlapping reconstructed, gapfill
+and predicted sets make ordinary -- the tie-break prefers reconstructed over
+gapfill over predicted (read from the kernel's basename), then the
+lexicographically greatest basename, then the greatest path. The reproducing
 candidates agree on the attitude by construction, so the tie-break decides only
 which output file carries the segment; all it has to be is deterministic.
+
+The class is read from the basename because that is the only place it exists,
+and how a basename declares it is a property of each mission's own naming
+convention. ``_MISSION_NAME_RULES`` in :mod:`spindoctor.cli.ck.index` therefore
+declares the patterns one mission at a time, rather than as a single pattern set
+that would be mission-specific only by the accident of matching one mission's
+names. Each mission's rules are matched in full against the lowercased
+basename, and a mission may declare **none** -- which is recorded as an empty
+rule tuple rather than as an absent entry, so the file says its holdings were
+read and encode nothing rather than that nobody looked. Every candidate of such
+a mission is ``UNCLASSIFIED`` and the tie-break falls through to the basename. A
+basename that two of one mission's rules claim is refused by name, which is why
+the patterns within a mission are written to be mutually exclusive by
+construction rather than by the order they are tested in. The rules a given
+mission declares are stated in its chapter under :doc:`instruments/instruments`.
 
 A corrected kernel is never indexed as a candidate. Writing the corrections back
 beside the originals is the natural workflow, and a corrected kernel reproduces
@@ -613,7 +590,7 @@ Building the segment
 The correction is measured at the camera; the kernels that exist describe a bus
 or a scan platform, and that is where it has to be written. With
 ``F = pxform(ck_frame, camera_frame, midtime)`` -- always computed, never
-assumed, because Cassini's ``F`` is a permutation-like matrix nowhere near the
+assumed, because a real ``F`` can be a permutation-like matrix nowhere near the
 identity::
 
     C_ck_corrected(mid) = F^-1 . cmatrix
@@ -630,10 +607,11 @@ even though what the segment *reproduces* between its records is only as good
 as the interpolation between them (the measured interior error is in
 :doc:`/user_guide/user_guide_ck_kernels`).
 
-Voyager is the exception. Its navigated attitude came from a frozen,
-tolerance-snapped lookup rather than a time-varying frame chain, so its segment
-carries the single corrected attitude, constant across the window; writing
-time-varying pointing there would disagree with what was navigated.
+A frozen-attitude object is the exception. Its navigated attitude came from a
+frozen, tolerance-snapped lookup rather than a time-varying frame chain, so its
+segment carries the single corrected attitude, constant across the window, and
+never reads the baseline's attitude history at all; writing time-varying
+pointing there would disagree with what was navigated.
 
 Records go at the exposure start, midtime and stop, plus a one-second cadence
 once the window reaches ten seconds, each encoded with ``sce2c``. Both the
@@ -684,7 +662,7 @@ value that hides the correction. SPICE does not read such a segment as "attitude
 here, rate unknown" -- it skips the segment outright for ``ckgpav`` and for
 ``sxform`` and answers from the next loaded kernel that does carry a rate for
 the same object and epoch, which is the original, with the original's
-uncorrected attitude. Measured on a real reconstructed Cassini kernel
+uncorrected attitude. Measured on a real reconstructed baseline kernel
 (``04002_04009ra.bc``) with a 1.000e-04 rad correction and ``avflag`` the only
 variable:
 
@@ -707,10 +685,12 @@ That is decisive because ``oops`` reads pointing through ``sxform``:
 ``cspyce.sxform`` in that mode, and no ``oops`` host overrides it. An
 ``avflag = 0`` corrected segment would deliver its correction to ``ckgp`` and
 ``pxform`` and withhold it from ``sxform``, with which of the two a consumer saw
-depending on what else was in their pool. Exposure across the local baselines:
-every Cassini -82000 segment (2645) and every New Horizons -98000 segment (4346)
-carries a rate, so those are immune; of Galileo -77001's 150 segments, 38 carry
-none; Voyager's nine carry none at all.
+depending on what else was in their pool.
+
+How exposed a mission is to that depends on its own baselines, and the spread
+is wide: some carry a rate on every segment and can never hit the refusal
+below, and others carry one on none. Each instrument's chapter under
+:doc:`instruments/instruments` states its own census.
 
 So the writer applies **all records or none, and none means refuse**. A baseline
 that carries no rate is reported by ``ckgpav`` exactly as pointing that is not
@@ -731,12 +711,13 @@ genuinely parks, so an invented zero is indistinguishable from a measured one,
 and the overlay would start answering ``sxform`` at epochs where the pool has no
 answer at all.
 
-A frozen (Voyager) segment writes zeros with ``avflag = 1``. Its attitude is
+A frozen-attitude segment writes zeros with ``avflag = 1``. Its attitude is
 constant, so zero is that attitude's true angular velocity -- a measurement
 rather than an invention -- and writing it is what makes ``sxform`` return the
 corrected attitude. The baseline's own vectors are still not copied there, since
 the rigid-attachment argument does not hold for a segment that deliberately
-drops the baseline's time variation.
+drops the baseline's time variation. That is also why the census above cannot
+refuse such a run: the segment never asks the baseline for a rate.
 
 Writing the file
 ----------------
@@ -860,20 +841,34 @@ and the first two are the ones most easily missed.
    and the orchestrator warns to both logs when one reaches navigation.
 2. **A row in** :data:`~spindoctor.spice_ids.CK_OBJECT_SCLK_ID` pairing that CK
    object with its spacecraft clock. The clock is not derivable from the object
-   by arithmetic: ``-31100 // 1000`` is -32 in Python, which is the other
-   Voyager.
+   by arithmetic: the table already holds a pair for which integer division of
+   the object id yields a different, existing spacecraft's clock, so a computed
+   clock would be plausible, successful, and silently wrong on every record.
 3. **An entry in the driver's mission list** (``MISSIONS`` in
    ``src/spindoctor/cli/sd_create_ck.py``), spelled there rather than read from
    the observation registry, which is behind an ``oops`` import.
 4. **An integration assertion** that the measured ``R`` equals the constant the
    frame table claims, on a real frame. That is the one check hermetic tests
    cannot make, and the flip is the dominant risk in this subsystem.
+5. **A chapter in each guide**, since a registered instrument with no chapter
+   fails ``tests/spindoctor/test_instrument_chapters.py``. The C-kernel
+   sections of those chapters are where the new mission's corrected object,
+   spacecraft clock, kernel-name conventions, angular-velocity census and
+   segment shape are written down; this chapter carries none of them.
 
-An instrument whose observation frame is frozen from a tolerance-snapped lookup,
-as Voyager's is, needs more: its CK object joins the frozen-attitude set, which
-makes its segments carry one constant attitude and a zero rate, widens its
-coverage in the index by the snapped lookup's tolerance, and routes its
-reproduction through the same snapped lookup rather than through ``pxform``.
+An instrument whose observation frame is frozen from a tolerance-snapped lookup
+needs more: its CK object joins
+:data:`~spindoctor.spice_ids.FROZEN_ATTITUDE_CK_IDS`, which makes its segments
+carry one constant attitude and a zero rate, widens its coverage in the index
+by the snapped lookup's tolerance, and routes its reproduction through the same
+snapped lookup rather than through ``pxform``. Whether a host freezes its frame
+is a property of the host rather than of the mission, and the test for it is
+whether a ``pxform`` at the exposure midtime reproduces the observation frame's
+own attitude.
+
+A mission's own C-kernel basenames may also declare a kernel class, in which
+case it needs a rule set in ``_MISSION_NAME_RULES``; see
+`Assignment is by reproduction, not by the recorded kernel list`_.
 
 Testing
 =======
@@ -891,7 +886,8 @@ kernel-writing mechanics fail in different ways.
   interpreter, as described above.
 * **Frame integration tests** (``tests/integration/test_cmatrix_frames.py``)
   measure ``R`` on real frames of each instrument and check it against the
-  table, and confirm it is constant across the exposure.
+  constant that instrument's chapter records, and confirm it is constant across
+  the exposure.
 * **The round trip** (``tests/integration/test_ck_round_trip.py``, driven by
   ``tests/integration/ck_round_trip.py``) navigates a real image, generates the
   corrected kernel, and re-navigates in a fresh process with that kernel
@@ -907,9 +903,9 @@ Two facts from the round trip are worth carrying into any future work on it.
 The corrected kernel must be furnished *after* the host's ``from_file`` returns,
 since that is when ``oops`` has finished furnishing the originals and SPICE
 gives precedence to the C-kernel furnished last. And a host that freezes its
-observation frame during ``from_file`` -- Voyager -- cannot see a kernel
-furnished after that call at all, so for those hosts the image is loaded a
-second time with the correction already furnished.
+observation frame during ``from_file`` cannot see a kernel furnished after that
+call at all, so for those hosts the image is loaded a second time with the
+correction already furnished.
 
 A convention error and a technique's imprecision look different in the result,
 which is what makes the round trip diagnostic rather than merely a pass or a
