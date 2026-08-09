@@ -38,6 +38,7 @@ from .conftest import (
     index_url,
     ingest_tree,
     metadata_document,
+    run_rows,
     technique,
     write_metadata,
 )
@@ -1017,6 +1018,56 @@ def test_a_root_is_normalized_before_it_is_stored(
         found = _rows(connection, sqlalchemy.select(IMAGES.c.root_url))
     engine.dispose()
     assert [row.root_url for row in found] == [root.as_posix()]
+
+
+def _ingest_two_spellings_of_one_root(tmp_path: Path, logger: pdslogger.PdsLogger) -> str:
+    """Ingest one root named twice, with and without a trailing separator.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        logger: Logger the ingest reports through.
+
+    Returns:
+        The index URL.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    engine = open_index(url, create=True)
+    try:
+        ingest_metadata_files(engine, [root.as_posix(), f'{root.as_posix()}/'], logger=logger)
+    finally:
+        engine.dispose()
+    return url
+
+
+def test_two_spellings_of_one_root_are_walked_once(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A trailing separator is not another root, in this mode as in the others.
+
+    Walked twice, every document under it is read twice and the tree is listed
+    twice -- the most expensive thing an ingest does, and a paid round trip per
+    directory on a cloud root.
+    """
+    url = _ingest_two_spellings_of_one_root(tmp_path, quiet_logger)
+    assert len(run_rows(url)) == 1
+
+
+def test_two_spellings_of_one_root_read_their_documents_once(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Which is what the second pass over the same tree costs."""
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    engine = open_index(index_url(tmp_path / 'index.sqlite3'), create=True)
+    try:
+        counts = ingest_metadata_files(
+            engine, [root.as_posix(), f'{root.as_posix()}/'], logger=quiet_logger
+        )
+    finally:
+        engine.dispose()
+    assert counts.files_seen == 1
 
 
 def _ingest_a_relative_root(tmp_path: Path, logger: pdslogger.PdsLogger) -> str:

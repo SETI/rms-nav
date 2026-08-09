@@ -79,6 +79,7 @@ from spindoctor.cli.stats.ingest.chunks import _batched, _ingest_chunk
 from spindoctor.cli.stats.ingest.counts import IngestCounts
 from spindoctor.cli.stats.ingest.driver import (
     INGEST_COMMIT_CHUNK_SIZE,
+    _distinct_roots,
     _files_to_read,
     _prune_missing,
 )
@@ -289,27 +290,6 @@ class TaskCompletion:
     results_unreadable: int = 0
     results_superseded: int = 0
     results_unidentified: int = 0
-
-
-def _distinct_roots(roots: Sequence[str]) -> list[str]:
-    """Normalize the given roots and drop the repeats, keeping their order.
-
-    ``/data/x`` and ``/data/x/`` are one root, and a command line naming both
-    means the tree once.  Walking it twice would hand every document out in two
-    shares, leave the first of its two runs unfinished forever, and -- since a
-    completion stamps the newest run and then finds nothing outstanding -- tell
-    the operator that a root it has just finished was never divided up.
-
-    Parameters:
-        roots: The roots as their holder spelled them.
-
-    Returns:
-        The normalized roots, first spelling first.
-    """
-    distinct: dict[str, None] = {}
-    for root in roots:
-        distinct.setdefault(normalize_root_url(root), None)
-    return list(distinct)
 
 
 def _task_files(files: Sequence[_ListedFile], summary_stubs: set[str]) -> list[dict[str, Any]]:

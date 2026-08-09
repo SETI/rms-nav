@@ -61,6 +61,29 @@ worker never sees half of an image.
 """
 
 
+def _distinct_roots(roots: Sequence[str]) -> list[str]:
+    """Normalize the given roots and drop the repeats, keeping their order.
+
+    ``/data/x`` and ``/data/x/`` are one root, and a command line naming both
+    means the tree once.  Walking it twice reads every document twice and gives
+    one root two ingest runs; in a pass divided into cloud tasks it also hands
+    every document out in two shares, leaves the first of the two runs
+    unfinished forever, and -- since a completion stamps the newest run and then
+    finds nothing outstanding -- tells the operator that a root it has just
+    finished was never divided up.
+
+    Parameters:
+        roots: The roots as their holder spelled them.
+
+    Returns:
+        The normalized roots, first spelling first.
+    """
+    distinct: dict[str, None] = {}
+    for root in roots:
+        distinct.setdefault(normalize_root_url(root), None)
+    return list(distinct)
+
+
 def _is_unchanged(
     listed: _ListedFile, recorded: _RecordedFile | None, summary_stubs: set[str]
 ) -> bool:
@@ -206,6 +229,8 @@ def ingest_metadata_files(
     entirely, and its ingest run is deliberately not completed, because a
     mistyped or unmounted root is not an empty one.
 
+    Two spellings of one root are one root, and are walked once.
+
     Parameters:
         engine: The open index, which must already carry the schema.
         roots: Navigation results roots -- local directories or any URL the
@@ -218,12 +243,13 @@ def ingest_metadata_files(
         What the pass did, summed over every root.
     """
     total = IngestCounts()
-    for root_str in roots:
-        root_url = normalize_root_url(root_str)
-        # The normalized form is what is walked, not the string as typed.  It
-        # is the same location, absolute and spelled once: walking the typed
-        # form would record a relative source_file beside an absolute root_url,
-        # and a relative local root is one the storage layer refuses outright.
+    # The normalized form is what is walked, not the string as typed.  It is
+    # the same location, absolute and spelled once: walking the typed form
+    # would record a relative source_file beside an absolute root_url, and a
+    # relative local root is one the storage layer refuses outright.  Two
+    # spellings of one root are one root here as they are at a fan-out, so the
+    # same command line means the same thing in every mode.
+    for root_url in _distinct_roots(roots):
         root = FCPath(root_url)
         counts = IngestCounts()
         run_id = _start_run(engine, root_url)
