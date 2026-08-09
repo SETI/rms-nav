@@ -107,6 +107,15 @@ def _is_unchanged(listed: _ListedFile, recorded: _RecordedFile | None) -> bool:
     compared the same way for a refused file as for an ingested one, since
     both tables record them and both kinds of file are skipped unchanged.
 
+    A file the listing reported no metric for has not been shown to be
+    unchanged, whatever the pass says about its listing as a whole.  A whole-root
+    walk reports metrics for every file or for none of them, so this only
+    separates them for a share, whose claim to have them travels in the task
+    beside the entries it is a claim about: an entry carrying neither metric
+    beneath a task claiming both would otherwise compare equal to a row that
+    recorded neither, and be skipped on that evidence by every pass that ever
+    reached it.
+
     Parameters:
         listed: The file as this walk saw it.
         recorded: What the index holds about it, or None when it holds nothing.
@@ -115,6 +124,8 @@ def _is_unchanged(listed: _ListedFile, recorded: _RecordedFile | None) -> bool:
         True when the file need not be read again.
     """
     if recorded is None:
+        return False
+    if listed.mtime_ns is None or listed.size_bytes is None:
         return False
     return (recorded.mtime_ns, recorded.size_bytes) == (listed.mtime_ns, listed.size_bytes)
 

@@ -897,3 +897,29 @@ def test_a_file_entry_may_report_no_metrics(
     finally:
         engine.dispose()
     assert result['files_ingested'] == 1
+
+
+def test_a_file_carrying_no_metrics_is_read_again_whatever_its_task_claims(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """An entry with no metrics has not been shown to be unchanged.
+
+    Whether the listing reported metrics travels with the task rather than with
+    each entry, so the two can disagree, and that is the one shape the skip
+    cannot check against a file it never stats.  Compared as they stand, an
+    entry carrying neither metric equals a row that recorded neither, and the
+    file is then skipped by the pass after the one that wrote it and by every
+    pass after that.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 1)
+    data = good_task(root)
+    data['files'] = [{'results_path_stub': FIRST_STUB, 'mtime_ns': None, 'size_bytes': None}]
+    engine = open_index(index_url(tmp_path / 'index.sqlite3'), create=True)
+    try:
+        ingest_task_share(engine, data, logger=quiet_logger)
+        again = ingest_task_share(engine, data, logger=quiet_logger)
+    finally:
+        engine.dispose()
+    assert again['files_ingested'] == 1
+    assert again['files_skipped'] == 0
