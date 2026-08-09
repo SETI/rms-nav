@@ -699,17 +699,34 @@ its outcome -- counts of ingested, skipped, and failed files, with the
 failing files named -- is **returned in the task result**, which the
 enqueuer aggregates.
 
-A task carries a list of metadata-file URLs or a stub prefix; the worker
-ingests its share.
+A task carries the files of its share as the enqueuer's own walk reported them
+-- each with its stub, `mtime_ns`, `size_bytes` and summary-PNG flag, plus the
+run identifier, the root, `force`, and whether the listing reported metrics at
+all -- and the worker ingests exactly those. It stats nothing and checks for
+nothing: the one listing of the pass is the enqueuer's, and everything a worker
+would otherwise ask the tree travels with the task. The worker applies the
+incremental skip of section 2.7 to its own share, against what the index records
+for its own stubs, so a retried task reads nothing and costs one query.
 
 **A worker never prunes.** Removing the rows of documents that have left the
 tree (section 2.7) is licensed by a complete listing of the root, and a worker
 holding a share of one has no evidence about the stubs outside its share:
 pruning on it would delete its peers' rows. The prune takes the walk's listing
 and raises unless that listing covers the whole root, so the restriction is a
-property of the seam rather than a rule a worker has to remember. Whether the
-enqueuer -- which does list the whole root to fan the work out -- prunes at
-completion is decided with the rest of Phase 3.
+property of the seam rather than a rule a worker has to remember. Nothing hands
+a worker a listing at all, so there is nothing for it to offer.
+
+**The enqueuer prunes at fan-out, not at completion.** Fan-out is the one moment
+of the pass that holds a complete listing, and it is the listing the shares were
+cut from, so the prune is licensed exactly as the single-process one is. It
+cannot race the workers either: every stub a worker writes is one the listing
+held and the prune deletes only stubs it did not hold, so the two sets are
+disjoint by construction however the workers are scheduled. Pruning at
+completion instead would mean listing the whole root a second time -- the most
+expensive thing an ingest does, and a paid round trip per directory on a cloud
+root -- to act on evidence no share ever came from. The window between the two
+is not a hazard: the run is unfinished throughout, so no consumer reads the root
+either way.
 
 **Concurrency:**
 
@@ -727,6 +744,27 @@ open with `create=False` and fail if `schema_meta` is absent. Per-task
 counts return in task results and are aggregated and written to
 `ingest_runs` by the enqueuer at completion; workers never touch
 `ingest_runs`.
+
+**The enqueuer is `sd_stats_ingest` in two further modes**, since the fan-out
+resolves the same roots and the same index URL as the pass it replaces:
+`--output-cloud-tasks-file` lists, prunes, records what the walk found on each
+run row, and writes the shares out; `--complete-cloud-tasks-file` reads the
+`cloud_tasks` event log, adds the tallies up, and stamps the runs. The two are
+mutually exclusive. Completion opens with `create=False`: the runs it means to
+finish are in the index the fan-out wrote, and creating an empty one would report
+every root as never fanned out.
+
+**A run is stamped only when its shares account for the whole listing.** The
+fan-out records `files_seen` on the run row, because no worker sees more than a
+share; completion sums `files_ingested + files_skipped + files_failed` over the
+shares that named that run and refuses to stamp a run that falls short. A task
+that failed, timed out, or was never run read none of its documents, and a run
+stamped without them tells every consumer that absence of their rows means those
+images were never navigated -- the one claim the run bookkeeping exists to
+license. An account that runs *past* the listing is not a shortfall: a retried
+task reports its share a second time, as skipped. A worker that reported an error
+rather than a share is likewise a shortfall, so an unopenable index or a
+malformed task leaves the root unfinished rather than silently shrinking it.
 
 ### 2.9 Consumers
 
@@ -1097,7 +1135,7 @@ Details settled during execution, none of them a change of intent:
 ### Phase 3 — Cloud-task ingest
 
 `sd_stats_ingest_cloud_tasks` per section 2.8, entry point in
-`pyproject.toml`.
+`pyproject.toml`, with the enqueuer's two modes on `sd_stats_ingest`.
 
 Tests: enqueuer creates the schema and workers refuse to; concurrent local
 SQLite workers produce the same rows as a serial ingest; per-task counts
@@ -1105,6 +1143,40 @@ aggregate into `ingest_runs`; the worker writes zero bytes to stdout and
 stderr from SpinDoctor code, asserted at file-descriptor level as the
 existing cloud-task silence tests do; the driver appears in
 `_CLOUD_TASK_DRIVERS` and passes the no-logging-flags assertion.
+
+Details settled during execution, none of them a change of intent:
+
+- **The enqueuer prunes at fan-out**, which is section 2.8's open question
+  decided. The reasoning is in section 2.8 above; the short form is that fan-out
+  is the only moment of the pass holding the complete listing the prune is
+  licensed by, and it is the listing the shares were cut from, so the prune and
+  the workers' writes cannot touch the same stub.
+- **The seam lives in `spindoctor/cli/stats/ingest/tasks.py`**, beside the pass
+  it divides: fan-out, one share, and the completion that adds them up are the
+  same three stages `driver.py` runs in one process, and both read the same
+  walk, store and chunk modules. The package re-exports them, so the drivers
+  import from `spindoctor.cli.stats.ingest` as they do everything else.
+- **Two Phase 2 helpers were widened rather than copied.** `_files_to_read`
+  takes the files, their summary stubs and the metrics flag instead of a whole
+  `_RootListing`, so a share selects by exactly the rule a root does and there
+  is nothing listing-shaped for a worker to reach for; `_recorded_files` takes
+  an optional set of stubs, so a share reads what the index holds about its own
+  files rather than about every row of an archive-scale root.
+- **A share names every file it could not read**, which a pass over a whole
+  root does not: the fan-out bounds a share, and a worker has no run log to name
+  them in instead. The whole-root pass keeps one example per reason, as before.
+- **A run row carries what the fan-out found before it is finished.**
+  `files_seen`, `files_removed` and `directories_missed` are written at fan-out
+  with the finish time left NULL, because nothing later in the pass can find
+  them out again and the completion step must not have to list the root to learn
+  them.
+- **`sd_stats_ingest` and `sd_stats_ingest_cloud_tasks` joined the program
+  identity tests** in `tests/spindoctor/config/test_logging_keys.py`, which named
+  neither. The interactive driver has declared `PROGRAM_NAME` since Phase 2 and
+  section 2.10's collateral list did not reach that file.
+- **The developer guide's script table gained the statistics family.** It is
+  headed as the full set of `[project.scripts]` and named none of them, so
+  adding one program to it meant naming its siblings too.
 
 ### Phase 4 — Backplanes and reprojection consume the index
 
@@ -1271,8 +1343,10 @@ File as tracking issues alongside the implementation issue:
   an ingest holds a write transaction waits out the busy timeout and can then
   fail with the filesystem-and-PostgreSQL message though nothing is wrong. It
   is the plan's own rule and is left as written here; whether a `create=False`
-  open should probe with a read instead belongs with the concurrent-ingest work
-  of Phase 3, which is what makes the collision likely.
+  open should probe with a read instead is still open. Phase 3 makes the
+  collision routine -- every worker of a local SQLite run opens while its peers
+  hold write transactions -- and the busy timeout absorbs it there, so the
+  remaining exposure is a consumer opening the index during a long ingest.
 
 ---
 
