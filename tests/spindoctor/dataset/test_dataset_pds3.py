@@ -10,6 +10,7 @@ import pytest
 from filecache import FCPath
 
 from spindoctor.cli.stats.classify import datetime_from_image_et
+from spindoctor.cli.stats.ingest import ingest_metadata_files
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.dataset.dataset_pds3 import DataSetPDS3
 from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
@@ -17,6 +18,7 @@ from spindoctor.dataset.dataset_pds3_galileo_ssi import DataSetPDS3GalileoSSI
 from spindoctor.dataset.dataset_pds3_newhorizons_lorri import DataSetPDS3NewHorizonsLORRI
 from spindoctor.dataset.dataset_pds3_voyager_iss import DataSetPDS3VoyagerISS
 from spindoctor.dataset.results_filter import ResultsFilter
+from spindoctor.results_index import open_index
 
 
 @pytest.fixture
@@ -186,6 +188,169 @@ def _write_result_file(
     path = results_root / volume / 'data' / range_dir / f'{camera}{num:010d}_1_CALIB{suffix}'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
+
+
+def _navigation_document(image_name: str) -> str:
+    """Serialize the smallest document the ingest reads as a navigation result.
+
+    Parameters:
+        image_name: The image the document is about.
+
+    Returns:
+        The document as JSON text.
+    """
+    return json.dumps(
+        {
+            'status': 'success',
+            'offset': [1.5, -2.5],
+            'observation': {'image_name': image_name, 'instrument': 'coiss', 'camera': 'NAC'},
+            'navigation_result': {'status_reason': 'ok'},
+        }
+    )
+
+
+def _ingest_results_tree(results_root: Path, index_path: Path) -> str:
+    """Build a results index over one tree and return its connection URL.
+
+    Parameters:
+        results_root: The results root to walk.
+        index_path: Path of the index file to create.
+
+    Returns:
+        The connection URL of the index.
+    """
+    url = f'sqlite:///{index_path.as_posix()}'
+    engine = open_index(url, create=True)
+    try:
+        ingest_metadata_files(engine, [results_root.as_posix()], logger=pdslogger.NullLogger())
+    finally:
+        engine.dispose()
+    return url
+
+
+def _write_navigated_pair(results_root: Path) -> None:
+    """Write the two navigated frames an ingest of this tree records.
+
+    Parameters:
+        results_root: The results root to write into.
+    """
+    _write_result_file(
+        results_root,
+        'COISS_2001',
+        _FILTER_NUMS,
+        'N',
+        1000000101,
+        '_metadata.json',
+        _navigation_document('N1000000101_1_CALIB.IMG'),
+    )
+    _write_result_file(
+        results_root,
+        'COISS_2001',
+        _FILTER_NUMS,
+        'W',
+        1000000100,
+        '_metadata.json',
+        _navigation_document('W1000000100_1_CALIB.IMG'),
+    )
+
+
+def _write_document_the_index_does_not_hold(results_root: Path) -> None:
+    """Navigate a third frame after the ingest, so the two paths disagree.
+
+    The index is a snapshot of the last ingest, so it does not hold this frame
+    and the tree does. Which of the two answered the enumeration is then
+    readable from the selection itself, which is the only thing that makes
+    either path's test able to fail.
+
+    Parameters:
+        results_root: The results root to write into.
+    """
+    _write_result_file(
+        results_root,
+        'COISS_2001',
+        _FILTER_NUMS,
+        'N',
+        1000000100,
+        '_metadata.json',
+        _navigation_document('N1000000100_1_CALIB.IMG'),
+    )
+
+
+def _indexed_tree_and_late_document(tmp_path: Path) -> tuple[Path, str]:
+    """Build a results tree, index it, and then navigate one more frame.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+
+    Returns:
+        The results root, and the connection URL of the index.
+    """
+    results_root = tmp_path / 'results'
+    _write_navigated_pair(results_root)
+    url = _ingest_results_tree(results_root, tmp_path / 'index.sqlite3')
+    _write_document_the_index_does_not_hold(results_root)
+    return results_root, url
+
+
+def test_a_results_index_answers_the_offset_file_filter(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The enumeration is answered by one query over the index rather than by a
+    # walk of the tree, so the frame navigated after the ingest is not selected.
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, url = _indexed_tree_and_late_document(tmp_path)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_offset_file=True,
+            nav_results_root=str(results_root),
+            results_db_url=url,
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000101', 'W1000000100']
+
+
+def test_the_results_index_url_is_resolved_from_the_environment(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A caller that names no index gets the one the environment names, exactly
+    # as it gets the results root from NAV_RESULTS_ROOT.
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, url = _indexed_tree_and_late_document(tmp_path)
+    monkeypatch.setenv('NAV_RESULTS_DB', url)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_offset_file=True,
+            nav_results_root=str(results_root),
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000101', 'W1000000100']
+
+
+def test_the_none_sentinel_reads_the_results_tree(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # An exported index URL would otherwise reach every enumeration on the
+    # machine. The sentinel opts one out: the tree is read, so the frame the
+    # index does not hold is selected too.
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, _url = _indexed_tree_and_late_document(tmp_path)
+    monkeypatch.setenv('NAV_RESULTS_DB', 'none')
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'],
+            has_offset_file=True,
+            nav_results_root=str(results_root),
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000100', 'N1000000101', 'W1000000100']
 
 
 def test_has_offset_file_keeps_only_navigated_in_order(
