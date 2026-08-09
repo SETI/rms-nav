@@ -510,27 +510,6 @@ def test_has_no_offset_file_excludes_navigated(
     ]
 
 
-def test_a_summary_png_is_not_a_metadata_file(
-    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    # A results root holds a summary PNG beside every navigated image, and the
-    # walk that answers the presence filter must count none of them.
-    _install_two_camera_index(ds, monkeypatch)
-    _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000100, '_summary.png')
-    _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000101, '_summary.png')
-    _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000101, '_metadata.json')
-
-    groups = list(
-        ds.yield_image_files_index(
-            volumes=['COISS_2001'],
-            has_offset_file=True,
-            nav_results_root=str(tmp_path),
-        )
-    )
-
-    assert _yielded_names(groups) == ['N1000000101']
-
-
 def _write_error_metadata(tmp_path: Path) -> None:
     """Write metadata files: one success, one SPICE error, one non-SPICE error."""
     contents = {

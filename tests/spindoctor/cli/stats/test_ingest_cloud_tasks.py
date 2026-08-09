@@ -94,8 +94,9 @@ def test_a_file_that_is_not_a_document_is_handed_to_no_task(
 ) -> None:
     """The fan-out divides up the documents the walk found and nothing else.
 
-    A summary PNG sits beside every navigated image, so a walk that counted one
-    as a document would hand every worker a share of files it can only refuse.
+    A summary PNG sits beside most documents a root holds, so a walk that
+    counted one as a document would hand every worker a share of files it can
+    only refuse.
     """
     root = tmp_path / 'results'
     stubs = build_tree(root, 2)

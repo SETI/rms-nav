@@ -65,15 +65,15 @@ ingesting whatever directory it was started from under a name nobody chose.
 
 **Ingestion is incremental.** One recursive listing per root collects the
 metadata documents and carries each file's size and modification time along
-with it. Every other file under the root -- the summary PNG beside each
-document, and whatever else is there -- is passed over and counted nowhere. A
-file whose recorded size and modification time still match the listing is not
-read at all, so a second pass over an unchanged root costs one listing and
-nothing else. This holds for files that could not be ingested as well: a file
-that is not a navigation document is recorded as such, with the same two
-metrics, and is skipped for as long as it does not change. ``--force`` re-reads everything; so does a storage
-backend whose listing reports neither size nor modification time, which ingest
-warns about rather than silently skipping.
+with it. Every other file under the root -- the summary PNG beside a document,
+and whatever else is there -- is passed over and counted nowhere. A file whose
+recorded size and modification time still match the listing is not read at all,
+so a second pass over an unchanged root costs one listing and nothing else.
+This holds for files that could not be ingested as well: a file that is not a
+navigation document is recorded as such, with the same two metrics, and is
+skipped for as long as it does not change. ``--force`` re-reads everything; so
+does a storage backend whose listing reports neither size nor modification
+time, which ingest warns about rather than silently skipping.
 
 **Those two metrics are everything a listing supplies about a file.** A document
 rewritten in place that kept both of them is therefore one the ingest cannot

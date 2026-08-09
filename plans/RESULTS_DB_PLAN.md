@@ -594,24 +594,22 @@ re-reads everything.
 
 **A refused file is bookkeeping, not a row.** A file that is not a
 current-schema navigation document is recorded in a `failed_files` table --
-`root_url`, `results_path_stub`, `reason`, `volume`, `mtime_ns`,
-`size_bytes` -- and is
-skipped on the next pass on the same evidence as an ingested one, so a tree
-whose non-navigation files outnumber its results does not pay to download and
-parse every one of them on every run. It is a table of its own rather than a
-marked `images` row: absence of an `images` row is what every consumer reads as
-"this image was never navigated", and a file with no usable data must leave
-that answer alone. The one column beyond the bookkeeping is the one fact the
-walk knows about a file whatever the file turned out to contain: which volume
-it is under. A selection filter asks about the file rather than about its
-contents, so a refused document answers that exactly as an ingested one does,
-and it has to be a column because otherwise a one-volume enumeration fetches
-every refusal in the root.
-`--force` re-reads a refused file too. A document that
-ingested on an earlier pass and no longer reads has its `images` row deleted as
-the refusal is written, since a row nothing backs would answer for an image
-nothing produced; and a file that was refused and now reads has its refusal
-deleted as its rows are written.
+`root_url`, `results_path_stub`, `reason`, `volume`, `mtime_ns`, `size_bytes`
+-- and is skipped on the next pass on the same evidence as an ingested one, so
+a tree whose non-navigation files outnumber its results does not pay to
+download and parse every one of them on every run. It is a table of its own
+rather than a marked `images` row: absence of an `images` row is what every
+consumer reads as "this image was never navigated", and a file with no usable
+data must leave that answer alone. The one column beyond the bookkeeping is the
+one fact the walk knows about a file whatever the file turned out to contain:
+which volume it is under. A selection filter asks about the file rather than
+about its contents, so a refused document answers that exactly as an ingested
+one does, and it has to be a column because otherwise a one-volume enumeration
+fetches every refusal in the root. `--force` re-reads a refused file too. A
+document that ingested on an earlier pass and no longer reads has its `images`
+row deleted as the refusal is written, since a row nothing backs would answer
+for an image nothing produced; and a file that was refused and now reads has
+its refusal deleted as its rows are written.
 
 **A root the walk cannot list is not an empty root.** The walk reports whether
 the root itself could be listed. When it could not -- a mistyped root, an
@@ -752,12 +750,15 @@ documents that were never navigation results or the ingest went wrong.
 
 A task carries the files of its share as the enqueuer's own walk reported them
 -- each with its stub, `mtime_ns` and `size_bytes`, plus the run identifier,
-the root, `force`, and whether the listing reported metrics at all -- and the worker ingests exactly those. It stats nothing and checks for
-nothing: the one listing of the pass is the enqueuer's, and everything a worker
-would otherwise ask the tree travels with the task. The worker applies the
-incremental skip of section 2.7 to its own share, against what the index records
-for its own stubs, so a retried task reads no document at all and costs a lookup
-over its own stubs instead.
+the root, `force`, and whether the listing reported metrics at all -- and the
+worker ingests exactly those. It stats nothing and checks for nothing: the one
+listing of the pass is the enqueuer's, and everything a worker would otherwise
+ask the tree travels with the task. The worker applies the incremental skip of
+section 2.7 to its own share, against what the index records for its own stubs,
+so a retried task reads no document at all and costs a lookup over its own
+stubs instead. An entry carrying neither metric is read rather than compared,
+whatever the task claims about its listing: that claim is the enqueuer's and
+travels beside the entries rather than on them, so the two can disagree.
 
 **A worker never prunes.** Removing the rows of documents that have left the
 tree (section 2.7) is licensed by a complete listing of the root, and a worker
@@ -1169,7 +1170,9 @@ Details settled during execution, none of them a change of intent:
   once in this phase, and it was raised again rather than reused: an index built
   from an earlier state of this phase would otherwise pass the version gate and
   then fail on a column that is not there, which is exactly what the gate exists
-  to prevent. Phase 5 raises it again, on the same reasoning.
+  to prevent. Phase 5 raises it again, to 5, on the same reasoning, and the
+  column set changed once more after it -- the summary-PNG flag left both file
+  tables -- which is what makes the current version 6.
 - **The CSV export states its line terminator.** `csv.writer` defaults to CRLF;
   the export now names LF. The frozen `images.csv` blobs are LF, so what the
   export writes matches them byte for byte, which the previous implementation's
@@ -1321,9 +1324,13 @@ Details settled during execution, none of them a change of intent:
   walk, store and chunk modules. The package re-exports them, so the drivers
   import from `spindoctor.cli.stats.ingest` as they do everything else.
 - **Two Phase 2 helpers were widened rather than copied.** `_files_to_read`
-  takes the files, their summary stubs and the metrics flag instead of a whole
-  `_RootListing`, so a share selects by exactly the rule a root does and there
-  is nothing listing-shaped for a worker to reach for; `_recorded_files` takes
+  takes the files, what the index records about them and the metrics flag
+  instead of a whole `_RootListing`, so a share selects by exactly the rule a
+  root does and there is nothing listing-shaped for a worker to reach for; a
+  file the flag claims metrics for while carrying none is read rather than
+  compared, since a share's claim travels beside the entries it describes and
+  can disagree with them, where a whole-root walk reports metrics for every
+  file or for none; `_recorded_files` takes
   an optional set of stubs, so a share reads what the index holds about its own
   files rather than about every row of an archive-scale root.
 - **A share names every file it could not read**, which a pass over a whole
@@ -1397,9 +1404,10 @@ outputs.
 import per section 2.9.
 
 Tests: for every filter flag, both existing modes (walked and
-absence-only-batched) against the index-backed answer over a fixture tree, whose
-malformed-metadata images are files the walk finds so the equivalence covers the
-refusal table; every contradictory-pair rejection unchanged; the command-line
+absence-only-batched) against the index-backed answer over a fixture tree whose
+malformed-metadata images are files the walk finds and the ingest refuses, so
+that the equivalence covers the refusal table; every contradictory-pair
+rejection unchanged; the command-line
 surface of every program that declares `--results-db` and of every program
 section 1 keeps reading files; an exported URL answering an enumeration for the
 first and not for the second; and an import-time assertion that
@@ -1420,18 +1428,18 @@ Details settled during execution, none of them a change of intent:
   tree and absent in the index, for `--has-offset-file` and
   `--has-no-offset-file` alike.
 - **`failed_files` carries the volume**, which is a column-set change and so a
-  schema version bump, to 6. It is a fact of the walk rather than of the
+  schema version bump, to 5. It is a fact of the walk rather than of the
   document, so it is as knowable for a file nothing could be read from as for
   one that ingested, and a selection filter asks about the file and not about
   its contents. Without it, a one-volume enumeration fetches every refusal the
   root holds. The incremental skip compares a refusal's metrics exactly as it
-  compares an image's. That skip reads
-  the refusal table for the root it is walking, and the read is exercised with a
-  second root holding a copy of the same tree, which is what a mirror or a
-  restored backup produces: the same stubs at the same lengths and the same
-  times, so a refusal read without its root makes a pass decline to read a file
-  it has never seen and write no row at all for it -- neither an image row nor a
-  refusal, which every consumer reads as an image nobody navigated.
+  compares an image's. That skip reads the refusal table for the root it is
+  walking, and the read is exercised with a second root holding a copy of the
+  same tree, which is what a mirror or a restored backup produces: the same
+  stubs at the same lengths and the same times, so a refusal read without its
+  root makes a pass decline to read a file it has never seen and write no row
+  at all for it -- neither an image row nor a refusal, which every consumer
+  reads as an image nobody navigated.
 - **What the index answers differently, as far as it is known.** Each member is
   stated in the module docstring, each has a test of its own, and a member found
   later is added here, in the docstring, and in a test, in the same commit. The
@@ -1475,8 +1483,8 @@ Details settled during execution, none of them a change of intent:
   5. A document **rewritten in place, keeping the length and the modification
      time it had before,** is skipped by the incremental comparison
      (`_is_unchanged`, which has only `(mtime_ns, size_bytes)` to go on), so its
-     row goes on recording what the document before it
-     said and an error filter answers from that. A tree restored by a copy that
+     row goes on recording what the document before it said and an error filter
+     answers from that. A tree restored by a copy that
      preserves times, a document patched and stamped back from a sibling, and a
      backend reporting one modification time for two writes all produce it; an
      ordinary re-navigation writes a different length at a later time and does

@@ -608,10 +608,14 @@ reports; see :doc:`user_guide_statistics`.
 Summary PNG Files (``*_summary.png``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Every navigated image is paired with a ``*_summary.png``: one annotated picture
-showing what the navigator saw and where it placed its model. The source image
-is composited with the merged model overlay at the fitted offset, so a glance
-tells you whether the predicted features land on the real ones.
+A navigation that reached a result writes a ``*_summary.png`` beside its
+metadata document: one annotated picture showing what the navigator saw and
+where it placed its model. The source image is composited with the merged model
+overlay at the fitted offset, so a glance tells you whether the predicted
+features land on the real ones. An image whose data could not be loaded at all
+-- a frame outside the SPICE kernels' coverage, most often -- records the
+metadata document, with a ``status`` of ``error``, and no picture: nothing was
+read to draw one from.
 
 The base layer is the source image rendered in grayscale with a quantile
 contrast stretch. The black point sits at a low quantile; the white point adapts

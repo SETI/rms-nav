@@ -373,9 +373,10 @@ def test_a_bare_basename_stub_ingests_with_a_null_volume(
 def _tree_with_a_file_that_is_not_a_document(tmp_path: Path) -> Path:
     """Write a root holding one document, its summary PNG, and a stray file.
 
-    A results root holds a summary PNG beside every navigated image and
-    whatever else an operator has left there.  None of them is a file the pass
-    reads, and the walk has to pass over each without adding it to any tally.
+    A results root holds the summary PNG a navigation that reached a result
+    drew, and whatever else an operator has left there.  None of them is a file
+    the pass reads, and the walk has to pass over each without adding it to any
+    tally.
 
     Parameters:
         tmp_path: Directory the root is written under.

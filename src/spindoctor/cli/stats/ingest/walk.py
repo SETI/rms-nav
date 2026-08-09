@@ -199,9 +199,9 @@ def _list_directory(
                 )
             )
         # Every other file is passed over without being counted anywhere.  A
-        # results tree holds the summary PNG of each document and whatever else
-        # an operator has put there, and none of them is a file this pass reads
-        # or a gap in what it listed.
+        # results tree holds the summary picture a navigation that reached a
+        # result drew, and whatever else an operator has put there, and none of
+        # them is a file this pass reads or a gap in what it listed.
     return True
 
 

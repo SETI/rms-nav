@@ -521,12 +521,12 @@ def test_the_selection_reads_a_document_and_a_refusal_on_postgresql(postgres_url
 
 
 def test_the_error_flag_survives_the_union_on_postgresql(postgres_url: str) -> None:
-    """A boolean column of each table is one column of one type in the union.
+    """The two arms' second column is one column of one type in the union.
 
-    PostgreSQL refuses a union whose columns disagree, and refuses an integer
-    where a boolean belongs; SQLite accepts both.  The image arm computes the
-    flag from the row and the refusal arm writes a literal false, so the union
-    is exercised from both sides.
+    PostgreSQL refuses a union whose columns disagree; SQLite reconciles them.
+    The image arm computes a predicate over the row and the refusal arm writes
+    a literal false, so the union is exercised from both sides, and the answer
+    is what says the predicate reached the row rather than the literal.
 
     Parameters:
         postgres_url: URL of an empty schema of this test's own.

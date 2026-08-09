@@ -10,9 +10,10 @@ The navigation pipeline writes ``{nav_results_root}/{results_path_stub}_metadata
 presence filter is answered by walking the results tree once per selected
 volume and collecting the existing metadata files into a set, so each candidate
 image costs no additional cloud round trip.  The absence filter is answered
-with batched ``FCPath.exists()`` calls (or from the walked set when a walk
-already happened), and the error filters retrieve the metadata JSON files in
-batches and inspect their ``status`` / ``status_error`` fields.
+with batched ``FCPath.exists()`` calls, since it is the one filter that is
+active only when nothing else asked for a walk, and the error filters retrieve
+the metadata JSON files in batches and inspect their ``status`` /
+``status_error`` fields.
 
 Given a results index, every one of those questions is answered instead by one
 query over the index, and the tree is not read at all.  The index-backed
@@ -219,7 +220,9 @@ class ResultsFilter:
         self._error_stubs: frozenset[str] = frozenset()
         self._from_index = results_db_url is not None
         # The index answers every filter, including the absence filter, which a
-        # tree read answers only when a walk happened for another reason.
+        # tree read answers per batch instead: it contradicts every filter a
+        # walk is done for, so reading the tree there is never a walked set to
+        # answer it from.
         self._have_result_sets = self._from_index or self._needs_offset_presence
         # Fixed here rather than left as it came: an iterator is emptied by
         # whichever path reads it first, and which path that is depends on the
@@ -242,11 +245,9 @@ class ResultsFilter:
 
         The caller uses this to decide whether to buffer accepted images into
         batches (amortizing the batched ``exists()`` / ``retrieve()`` round
-        trips) or to yield them immediately.  When the results tree was walked,
-        the absence filter is answered from the walked set in
-        :meth:`passes_presence` instead and costs nothing here.  When a results
-        index answered the enumeration, so is every other filter, and nothing
-        is left to do per batch.
+        trips) or to yield them immediately.  When a results index answered the
+        enumeration, every filter is settled in :meth:`passes_presence` and
+        nothing is left to do per batch.
         """
         if self._from_index:
             return False
@@ -365,11 +366,12 @@ class ResultsFilter:
     def passes_presence(self, results_path_stub: str) -> bool:
         """True if the image passes the filters answerable from the collected sets.
 
-        Covers the presence filter and, when the results tree was walked
-        anyway, the absence filter too (a set lookup instead of a per-file
-        ``exists()`` round trip).  When the sets came from a results index they
-        cover the error filters as well, since the query already read what the
-        tree path has to open each metadata file for.
+        Covers the presence filter.  When the sets came from a results index it
+        covers every other filter as well: the absence filter is a lookup in
+        the same set instead of a per-file ``exists()`` round trip, and the
+        query already read what the tree path has to open each metadata file
+        for.  Reading the tree, the absence filter is active only when nothing
+        asked for a walk, so it is answered in :meth:`filter_batch` instead.
 
         Parameters:
             results_path_stub: The image's results path stub (relative to the
@@ -393,8 +395,8 @@ class ResultsFilter:
     def filter_batch(self, image_files: list[ImageFile]) -> list[ImageFile]:
         """Applies the absence and metadata-content filters to a batch.
 
-        Input order is preserved.  The absence filter (when the results tree
-        was not walked) is answered with one batched ``exists()`` call.  The
+        Input order is preserved.  The absence filter is answered with one
+        batched ``exists()`` call, the tree having gone unwalked for it.  The
         error filters retrieve all metadata files in one batched call and
         inspect their ``status`` / ``status_error`` fields.  A filter answered
         from a results index has nothing left to apply here and returns the

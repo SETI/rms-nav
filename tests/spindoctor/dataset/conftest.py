@@ -157,11 +157,11 @@ def write_tree(root: Path) -> None:
     write_bytes(root, MALFORMED, b'{"status": "error"')
     write_bytes(root, NOT_AN_OBJECT, b'[1, 2, 3]')
     write_metadata(root, OTHER_VOLUME, metadata_document(image_name='N1000000010_1.IMG'))
-    # A summary PNG with no document beside it. Every navigated image has one,
-    # so it is the file a results root holds most of after the documents
-    # themselves, and it must not read as a document to either implementation:
-    # the presence filter has to pass this image over and the absence filter
-    # has to offer it.
+    # A summary PNG with no document beside it. A navigation that reached a
+    # result draws one, so it is the file a results root holds most of after
+    # the documents themselves, and it must not read as a document to either
+    # implementation: the presence filter has to pass this image over and the
+    # absence filter has to offer it.
     write_summary_png(root, NO_RESULT)
 
 
