@@ -7,10 +7,14 @@ and writes the curated metadata (and a summary PNG when requested) to
 ``nav_results_root``.
 
 This is the function ``sd_offset`` and ``sd_offset_cloud_tasks`` invoke
-once per image.  Errors from image loading, missing SPICE coverage, or
-unexpected exceptions during navigation are captured into the output
-metadata so the driver always returns a structured result (never a raised
-exception that crashes the worker process).
+once per image.  Errors from image loading, missing SPICE coverage, and
+navigation contract violations are captured into the output metadata so
+the driver returns a structured result for them rather than crashing the
+worker process.  One class of exception deliberately propagates: a defect
+inside the corrected-pointing computation (anything it raises other than
+``NavPointingError``) fails the run on its first image, because absorbing
+it would silently drop pointing from a whole batch while every image
+still reported success.
 """
 
 from __future__ import annotations
@@ -273,6 +277,7 @@ def navigate_image_files(
                 image_name,
                 instrument=instrument,
                 camera=snapshot_inst.camera,
+                shutter_mode=snapshot_inst.shutter_mode,
                 image_shape=(int(data_shape[0]), int(data_shape[1])),
                 timing=build_timing_section(run_start, datetime.now(UTC)),
             )
@@ -340,6 +345,7 @@ def build_metadata_from_result(
     *,
     instrument: str,
     camera: str | None = None,
+    shutter_mode: str | None = None,
     image_shape: tuple[int, int] | None = None,
     timing: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -360,6 +366,9 @@ def build_metadata_from_result(
         camera: The camera that took the image (``ObsInst.camera``, e.g.
             ``'NAC'``); written to the ``observation.camera`` field.  None
             omits the field.
+        shutter_mode: The shutter mode the image was taken in
+            (``ObsInst.shutter_mode``, e.g. ``'BOTSIM'``); written to the
+            ``observation.shutter_mode`` field.  None omits the field.
         image_shape: ``(v, u)`` pixel dimensions of the loaded image data;
             written to the ``observation.image_shape`` field.  None omits
             the field.
@@ -374,6 +383,8 @@ def build_metadata_from_result(
     }
     if camera is not None:
         observation['camera'] = camera
+    if shutter_mode is not None:
+        observation['shutter_mode'] = shutter_mode
     if image_shape is not None:
         observation['image_shape'] = [int(image_shape[0]), int(image_shape[1])]
     metadata: dict[str, Any] = {

@@ -11,6 +11,7 @@ from typing import Any, cast
 
 import numpy as np
 import pdslogger
+import pytest
 from filecache import FCPath
 
 from spindoctor.config import (
@@ -25,6 +26,7 @@ from spindoctor.config import (
 from spindoctor.config.program_names import SD_OFFSET
 from spindoctor.dataset.dataset import ImageFile, ImageFiles
 from spindoctor.navigate_image_files import log_final_result_to_run, navigate_image_files
+from spindoctor.support.exceptions import NavPointingError
 
 _STAMP = '2026-07-29T12-00-00'
 
@@ -55,6 +57,11 @@ class _StubResult:
         self.confidence = confidence
         self.confidence_rank = confidence_rank
         self.status_reason = status_reason
+
+
+@pytest.fixture(autouse=True)
+def _fakes_report_as_simulated(fakes_report_as_simulated: None) -> None:
+    """Apply the shared simulated-instrument report to every test in this module."""
 
 
 def _main_log_of(tmp_path: Path, report: Any) -> str:
@@ -166,6 +173,7 @@ class _FakeSnapshot:
         self.extdata = self.data
         self.midtime = 100.0
         self.camera = 'NAC'
+        self.shutter_mode: str | None = None
 
     def extfov_data_sensor_mask(self) -> np.ndarray:
         """Return the sensor mask.
@@ -233,6 +241,56 @@ def test_the_driver_reports_each_image_to_the_run_log(tmp_path: Path) -> None:
         ),
     )
     assert 'fake_image.IMG: status=' in text
+
+
+def test_a_failed_pointing_computation_is_reported_to_the_run_log_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one-line pointing failure lands in the run's own log file.
+
+    The orchestrator promises an operator watching a batch one line per
+    affected image; reading the file pins the routing itself, not merely that
+    the message was emitted somewhere.
+    """
+
+    def _boom(obs: Any, *, offset_px: Any, rotation_fitted: bool) -> None:
+        raise NavPointingError('the furnished kernels cannot supply the rotation')
+
+    monkeypatch.setattr('spindoctor.nav_orchestrator.orchestrator.compute_pointing', _boom)
+    text = _main_log_of(
+        tmp_path,
+        lambda: navigate_image_files(
+            cast(Any, _FakeObsClass),
+            _image_files(tmp_path),
+            FCPath(str(tmp_path / 'results')),
+            write_output_files=False,
+        ),
+    )
+    assert 'Corrected pointing not recorded for this sim image' in text
+
+
+def test_a_missing_frame_mapping_warning_is_reported_to_the_run_log_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The missing-frame-mapping warning lands in the run's own log file.
+
+    A registered instrument navigating with no SPICE frame mapping produces no
+    corrected attitude for any of its images, so the warning must be visible
+    from the run log rather than only from each per-image log.
+    """
+    monkeypatch.setattr(
+        'spindoctor.nav_orchestrator.orchestrator.obs_class_to_inst_name', lambda cls: 'newinst'
+    )
+    text = _main_log_of(
+        tmp_path,
+        lambda: navigate_image_files(
+            cast(Any, _FakeObsClass),
+            _image_files(tmp_path),
+            FCPath(str(tmp_path / 'results')),
+            write_output_files=False,
+        ),
+    )
+    assert 'No SPICE camera frame is mapped for instrument newinst' in text
 
 
 def test_the_image_log_keeps_its_own_detail(tmp_path: Path) -> None:

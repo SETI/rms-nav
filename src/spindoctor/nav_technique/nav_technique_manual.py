@@ -222,8 +222,9 @@ def run_manual_nav(
             to :data:`~spindoctor.config.DEFAULT_CONFIG`.
 
     Returns:
-        A :class:`NavResult` with ``status='success'`` on accept, or
-        ``None`` when the operator cancels or no supported overlay
+        A :class:`NavResult` with ``status='success'`` on accept, carrying
+        the same recorded corrected-pointing solution an autonomous result
+        does, or ``None`` when the operator cancels or no supported overlay
         feature paints any pixels into the ext-FOV composite.
         Supported overlay types match
         :meth:`NavTechniqueManual.is_feasible`: template-bearing
@@ -283,7 +284,7 @@ def run_manual_nav(
         # PNG write step.  The cancel reason has already been logged by
         # ``NavTechniqueManual.navigate``.
         return None
-    return NavResult.success(
+    result = NavResult.success(
         offset_px=technique_result.offset_px,
         covariance_px2=technique_result.covariance_px2,
         confidence=technique_result.confidence,
@@ -300,3 +301,8 @@ def run_manual_nav(
         model_metadata=prep.model_metadata,
         annotations=prep.annotations,
     )
+    # Operator-picked offsets are the highest-quality pointing in the corpus,
+    # so they carry the same recorded attitude an autonomous result does; the
+    # orchestrator's own navigate() is bypassed here, so the stamping is
+    # applied explicitly.
+    return orchestrator.with_pointing(result, obs)

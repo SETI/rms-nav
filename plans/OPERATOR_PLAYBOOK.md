@@ -206,10 +206,15 @@ Independent review before done; all CI gates; one PR."
   star fix agrees with the geometric consensus, which leaves the corner
   where the star fix is itself wrong-locked — a safe `conflicted` becomes a
   confident-wrong `success`. Sequence with #230/WS-5.
-- **#188 (CK kernels, with #50)**: decided -- ship. Implement
-  `plans/CK_KERNEL_PLAN.md`; the plan is the specification and its
-  section 8 is the session protocol (per-phase implementer + adversarial
-  reviewer, both Opus-class). Ready to dispatch as written.
+- **CK kernels: the C-matrix consumers (#50)**: the kernels ship, so the
+  reading half is dispatchable -- "Switch the backplane and reprojection
+  readers from the metadata `offset` to the recorded `cmatrix` per #50; the
+  round trip in `tests/integration/test_ck_round_trip.py` is the evidence
+  the two agree on real frames." The kernel-side follow-ups (#433, #434,
+  #437, #440/#444/#455, #446, #448, #452) are independent of it and of each
+  other; #435/#436 are a pair and #436 waits on #435. Whether Cassini
+  navigation should run from the predicted rather than the reconstructed
+  kernels (#459) is a pending operator decision, not dispatchable work.
 - **#430 (results index)**: implement `plans/RESULTS_DB_PLAN.md` -- the
   plan is the specification and its section 8 is the session protocol
   (per-phase implementer + adversarial reviewer, both Opus-class). Ready to

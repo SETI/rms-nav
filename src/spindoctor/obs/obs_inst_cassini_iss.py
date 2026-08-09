@@ -142,6 +142,33 @@ class ObsCassiniISS(ObsSnapshotInst):
         """
         return str(self.detector)
 
+    @property
+    def shutter_mode(self) -> str | None:
+        """The shutter mode this observation was taken in.
+
+        Cassini ISS can expose both cameras at once; the label records that
+        as ``'BOTSIM'``, against ``'NACONLY'`` or ``'WACONLY'`` for a single
+        camera.  Two BOTSIM frames share one spacecraft attitude, so a
+        consumer correcting that attitude can honor only one of them.
+
+        Returns:
+            The ``SHUTTER_MODE_ID`` label value, or None when the label
+            carries none or carries a null.
+
+        Raises:
+            ValueError: if the label value is not text.  ``str()`` would
+                serialize any object without complaint, and the result would
+                pass downstream as a legible shutter mode.
+        """
+        if 'SHUTTER_MODE_ID' not in self.dict:
+            return None
+        value = self.dict['SHUTTER_MODE_ID']
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError(f'SHUTTER_MODE_ID is not text: {value!r}')
+        return value
+
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for Cassini ISS.
 

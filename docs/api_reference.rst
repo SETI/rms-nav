@@ -22,3 +22,4 @@ This section provides detailed API documentation for the SpinDoctor system.
    api_reference/api_sim
    api_reference/api_ui
    api_reference/api_navigate_image_files
+   api_reference/api_spice_ids

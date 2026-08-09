@@ -31,6 +31,13 @@ def restore_loggers_fixture() -> Iterator[None]:
     Without this, one test resolving a cloud task's logging would silence every
     later test in the same worker, and the failures would land far from the
     cause.
+
+    The restore is checked rather than assumed, and a test it could not undo
+    fails here.  A logger holding an unexpected handler stops falling back to
+    printing, so every later test in the same worker that reads its output
+    through ``capsys`` sees nothing -- a failure with no visible connection to
+    the test that caused it, appearing only in the worker that happened to run
+    them in that order.  Failing at the source names the culprit instead.
     """
     main_handlers = list(MAIN_LOGGER.handlers)
     image_handlers = list(IMAGE_LOGGER.handlers)
@@ -40,7 +47,11 @@ def restore_loggers_fixture() -> Iterator[None]:
     image_level = IMAGE_LOGGER.level
     strict_override = strict_scope_override()
     yield
-    for logger, baseline in ((MAIN_LOGGER, main_handlers), (IMAGE_LOGGER, image_handlers)):
+    left_behind: list[str] = []
+    for name, logger, baseline in (
+        ('main', MAIN_LOGGER, main_handlers),
+        ('image', IMAGE_LOGGER, image_handlers),
+    ):
         # remove_all_handlers only detaches, so a handler the test attached
         # would keep its log file open for the rest of the session.  Only what
         # the test added is closed; the baseline is put back as it was, and
@@ -51,6 +62,15 @@ def restore_loggers_fixture() -> Iterator[None]:
         logger.remove_all_handlers()
         for handler in baseline:
             logger.add_handler(handler)
+        # NULL_HANDLER is excluded for the same reason the close loop above
+        # excludes it: pdslogger can reinstate the process-wide singleton on
+        # its own, and nobody here owns it, so finding it attached is not a
+        # test leaving state behind.
+        left_behind += [
+            f'{name} logger: {handler!r}'
+            for handler in logger.handlers
+            if handler not in baseline and handler is not pdslogger.NULL_HANDLER
+        ]
     MAIN_LOGGER.propagate = main_propagate
     IMAGE_LOGGER.propagate = image_propagate
     # Restored to what was found rather than to a level named here: a test that
@@ -65,6 +85,16 @@ def restore_loggers_fixture() -> Iterator[None]:
     # process-wide dedup set, so a later test asserting on that warning sees
     # nothing and fails somewhere unrelated to the cause.
     _reset_reported_call_sites()
+    if len(left_behind) > 0:
+        pytest.fail(
+            'This test left a handler attached that could not be detached: '
+            + '; '.join(left_behind)
+            + '. One known cause: pdslogger identifies an open log file by the absolute '
+            'path the working directory gives, so a handler built from a relative path '
+            'cannot be found again once the working directory moves; build log handlers '
+            'from an absolute path. A handler that was closed and then re-attached '
+            'produces the same symptom.'
+        )
 
 
 @pytest.fixture(autouse=True)

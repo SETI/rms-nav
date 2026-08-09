@@ -43,6 +43,9 @@ they run rather than afterwards.
    * - ``sd_mosaic`` (and ``sd_mosaic_rings`` / ``sd_mosaic_body``)
      - yes
      - ``reproj``
+   * - ``sd_create_ck``
+     - yes
+     - ``ck``
    * - ``sd_create_bundle``
      - yes
      - none
@@ -86,6 +89,11 @@ root it does have -- the backplane results root for
 ``sd_mosaic_cloud_tasks`` -- rather than dropping its logs for want of a
 setting that does not apply to it.
 
+A local root given as a relative path is resolved against the working directory
+once, at startup, and the absolute result is what every log file of that run is
+written under. A run therefore keeps writing to the same place even if
+something later changes the working directory.
+
 .. code-block:: text
 
    {log_root}/{program}/main_{timestamp}.log
@@ -94,7 +102,8 @@ setting that does not apply to it.
 The main log is filed under the program that wrote it. An image log is filed
 under the *stage* rather than the program, so an image's navigation log sits
 beside every other navigation log whether an interactive run or a cloud task
-produced it. The three stages are ``nav``, ``backplanes`` and ``reproj``.
+produced it. The four stages are ``nav``, ``backplanes``, ``reproj`` and
+``ck``.
 
 The timestamp is UTC, in ``YYYY-MM-DDTHH-MM-SS`` form, and is taken once when
 logging is set up rather than once per file. What that groups depends on which
