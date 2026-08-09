@@ -463,11 +463,14 @@ def test_the_two_cloud_modes_are_refused_by_name(
     """A status of 2 is what argparse exits with for any command line at all.
 
     A renamed option, a missing value, a typo: all of them are status 2, so what
-    says this refusal is the one meant is the message naming the two options
-    that cannot be asked for together.
+    says this refusal is the one meant is the message naming the two options and
+    the reason.  Naming one of them is not enough either: an option that does
+    not exist is spelled back in the "unrecognized arguments" message, so a
+    parser that had dropped both would satisfy that much of it.
     """
     refusing_both_cloud_modes(tmp_path, monkeypatch)
-    assert '--complete-cloud-tasks-file' in capsys.readouterr().err
+    refusal = '--complete-cloud-tasks-file: not allowed with argument --output-cloud-tasks-file'
+    assert refusal in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
