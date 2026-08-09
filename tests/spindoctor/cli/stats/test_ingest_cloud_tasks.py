@@ -46,6 +46,7 @@ from .conftest import (
     technique,
     write_metadata,
     write_metadata_in_each,
+    write_refusal_matching,
     write_summary_png,
 )
 
@@ -480,6 +481,34 @@ def test_a_share_reads_what_only_another_root_has_recorded(
     tasks = fan_out(url, [second], logger=quiet_logger)
     results = run_shares(url, tasks, logger=quiet_logger)
     assert [found.result['files_ingested'] for found in results] == [1]
+
+
+def test_a_share_reads_what_only_another_root_refused(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A refusal is recorded per root as well, and skipped on the same evidence.
+
+    One root here holds a file that is not a navigation document; the other
+    holds a real one at the same stub, of the same length and the same
+    modification time.  A share of the second that asked about the stub alone
+    would find the first root's refusal, decide nothing had changed, and skip a
+    document it has never read -- leaving a navigated image with no row of its
+    own, which every consumer reads as never navigated.
+    """
+    refusing = tmp_path / 'refusing'
+    holding = tmp_path / 'holding'
+    (document,) = write_metadata_in_each([holding], FIRST_STUB, metadata_document())
+    write_refusal_matching(refusing, FIRST_STUB, document)
+    url = index_url(tmp_path / 'index.sqlite3')
+    run_shares(url, fan_out(url, [refusing], logger=quiet_logger), logger=quiet_logger)
+    run_shares(url, fan_out(url, [holding], logger=quiet_logger), logger=quiet_logger)
+    engine = open_index(url)
+    try:
+        with engine.connect() as connection:
+            found = list(connection.execute(sqlalchemy.select(IMAGES.c.root_url)))
+    finally:
+        engine.dispose()
+    assert [str(row.root_url) for row in found] == [normalize_root_url(holding)]
 
 
 def test_a_share_skips_what_the_index_has_already_read(

@@ -274,6 +274,44 @@ def write_metadata_in_each(
     return written
 
 
+_NOT_A_NAVIGATION_DOCUMENT = 'not_a_navigation_document'
+"""The one key of a document that reads as JSON and holds no navigation result."""
+
+
+def write_refusal_matching(root: Path, stub: str, document: Path) -> Path:
+    """Write a document a pass refuses, matching another file's size and time.
+
+    A refused file is recorded and skipped on the next pass on exactly the
+    evidence an ingested one is: the size and the modification time the walk
+    reports for it.  So the two halves of a two-root guard on the refusal table
+    have to be indistinguishable but for their root, which means the length is
+    asked for here rather than left to whatever a document happened to
+    serialize to.
+
+    Parameters:
+        root: The results root to write under.
+        stub: The document's results path stub under that root.
+        document: The file whose size and modification time to match.
+
+    Returns:
+        The path written.
+
+    Raises:
+        ValueError: If the file to match is shorter than the smallest document
+            of this shape, which cannot then be padded out to it.
+    """
+    metrics = document.stat()
+    empty = json.dumps({_NOT_A_NAVIGATION_DOCUMENT: ''})
+    if metrics.st_size < len(empty):
+        raise ValueError(f'{document} holds {metrics.st_size} bytes, fewer than {len(empty)}')
+    padding = 'x' * (metrics.st_size - len(empty))
+    path = root / f'{stub}_metadata.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({_NOT_A_NAVIGATION_DOCUMENT: padding}), encoding='utf-8')
+    os.utime(path, ns=(metrics.st_mtime_ns, metrics.st_mtime_ns))
+    return path
+
+
 def write_summary_png(root: Path, stub: str) -> Path:
     """Write a stand-in summary PNG beside a document.
 

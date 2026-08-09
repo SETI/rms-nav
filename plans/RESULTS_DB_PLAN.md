@@ -1250,6 +1250,15 @@ Details settled during execution, none of them a change of intent:
 - **The developer guide's script table gained the statistics family.** It is
   headed as the full set of `[project.scripts]` and named none of them, so
   adding one program to it meant naming its siblings too.
+- **Every root-keyed delete is exercised with a second root present.** A
+  fixture holding one root cannot tell a query keyed by the pair from one keyed
+  by the stub alone, which is how a root-blind query ships. Both arms of the
+  share's own lookup, both deletes of an image write, both of a refusal, and
+  both of the prune are each pinned by a test that fails when its root half is
+  dropped (`tests/spindoctor/cli/stats/test_ingest_two_roots.py`, and the two
+  share-lookup tests beside it). What each break costs differs -- a navigated
+  image made invisible under another root, a refusal cleared so its file is
+  downloaded again on every pass -- and the tests are named for it.
 - **The suite resolves no results index it did not name.** A URL comes from an
   argument, the `environment.results_db` configuration variable, or
   `NAV_RESULTS_DB`, and a test of the no-index path names none of them. Both
