@@ -1411,10 +1411,9 @@ File as tracking issues alongside the implementation issue:
   cheap in reads but not in listings; a time-bounded scan would cut the
   listing too.
 - **The lockability probe takes a write lock on a consumer's open** (#462).
-  Section
-  2.5 has it refuse in both modes, so a consumer opening a SQLite index while
-  an ingest holds a write transaction waits out the busy timeout and can then
-  fail with the filesystem-and-PostgreSQL message though nothing is wrong. It
+  Section 2.5 has it refuse in both modes, so a consumer opening a SQLite index
+  while an ingest holds a write transaction waits out the busy timeout and can
+  then fail with the filesystem-and-PostgreSQL message though nothing is wrong. It
   is the plan's own rule and is left as written here. Cloud-task ingest makes
   the collision routine rather than occasional: a worker opens the index once
   per task, so a local SQLite run of a thousand tasks takes a thousand write-lock

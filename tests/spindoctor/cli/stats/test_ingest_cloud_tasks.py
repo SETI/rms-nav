@@ -485,7 +485,11 @@ def test_a_share_reads_what_only_another_root_has_recorded(
 def test_a_share_skips_what_the_index_has_already_read(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """A retried task costs one query: its files already match what is recorded."""
+    """A retried task reads no document: its files match what is recorded.
+
+    What it costs instead is a lookup over its own stubs, which is a bounded
+    read of the index rather than a re-download of the share.
+    """
     root = tmp_path / 'results'
     build_tree(root, 2)
     url = index_url(tmp_path / 'index.sqlite3')

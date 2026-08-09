@@ -3,9 +3,9 @@
 A root must stay unreadable until every share is accounted for, because a task
 that never reported leaves documents unread and absence of their rows is what
 every consumer reads as "this image was never navigated".  What licenses the
-stamp is arithmetic: the listing found so many files, and the shares must say
-what became of at least that many.  Dividing the root up and ingesting one share
-are in ``test_ingest_cloud_tasks``.
+stamp is arithmetic: the listing found so many files, and this run's own shares
+must say what became of exactly that many.  Dividing the root up and ingesting
+one share are in ``test_ingest_cloud_tasks``.
 """
 
 import json
@@ -920,6 +920,87 @@ def test_a_reason_tally_of_another_shape_costs_only_the_reasons(
     assert run_rows(url)[0].finished_utc is not None
 
 
+def completed_with_reasons(
+    tmp_path: Path, reasons: dict[Any, Any], key: str, *, logger: pdslogger.PdsLogger
+) -> Any:
+    """Complete a two-document root whose one share reports the given reason map.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        reasons: The map to put in the share's result, whatever shape it is.
+        key: Which of the share's two per-reason maps to replace.
+        logger: Logger every stage reports through.
+
+    Returns:
+        The completion outcome.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=logger)
+    results = run_shares(url, tasks, logger=logger)
+    mangled = [reported(str(found.task_id), {**found.result, key: reasons}) for found in results]
+    return complete(url, [root], mangled, logger=logger)
+
+
+def test_a_reason_whose_count_is_not_a_number_is_dropped(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A count is added to the tally, so anything else has to be refused there.
+
+    Carried through, it reaches the addition that folds one share's reasons into
+    the pass's and raises out of the completion -- a diagnostic map taking down
+    the accounting it is written beside.
+    """
+    outcome = completed_with_reasons(
+        tmp_path, {'not a navigation result': 'lots'}, 'failures_by_reason', logger=quiet_logger
+    )
+    assert outcome.counts.failures_by_reason == {}
+
+
+def test_a_reason_whose_count_is_not_a_number_leaves_the_run_completed(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Which is the point: the account is complete without the diagnosis."""
+    completed_with_reasons(
+        tmp_path, {'not a navigation result': 'lots'}, 'failures_by_reason', logger=quiet_logger
+    )
+    assert run_rows(index_url(tmp_path / 'index.sqlite3'))[0].finished_utc is not None
+
+
+def test_a_reason_whose_count_is_a_flag_is_dropped(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A flag is a number to Python, and would be tallied as one file."""
+    outcome = completed_with_reasons(
+        tmp_path, {'not a navigation result': True}, 'failures_by_reason', logger=quiet_logger
+    )
+    assert outcome.counts.failures_by_reason == {}
+
+
+def test_a_reason_that_is_not_text_is_dropped(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The reasons are sorted to be reported, and mixed types do not sort.
+
+    A map arriving from anywhere but a worker of this version is free to be keyed
+    by anything, and one number among the reasons is enough to raise out of the
+    closing summary after every run has already been stamped.
+    """
+    outcome = completed_with_reasons(tmp_path, {7: 2}, 'failures_by_reason', logger=quiet_logger)
+    assert outcome.counts.failures_by_reason == {}
+
+
+def test_an_example_that_is_not_a_file_name_is_dropped(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """An example is printed as the one real file a reason means, so it is text."""
+    outcome = completed_with_reasons(
+        tmp_path, {'not a navigation result': 7}, 'example_by_reason', logger=quiet_logger
+    )
+    assert outcome.counts.example_by_reason == {}
+
+
 # ---------------------------------------------------------------------------
 # Reading the workers' results back out of an event log
 # ---------------------------------------------------------------------------
@@ -1029,6 +1110,22 @@ def test_a_result_whose_event_names_no_task_keeps_none(tmp_path: Path) -> None:
     """A task nothing identifies is reported as such rather than invented."""
     log = write_event_log(
         tmp_path / 'events.log', [completed_event({'status': 'ok'}, task_id=None)]
+    )
+    found = task_results_from_event_log(FCPath(log))
+    assert found.results[0].task_id is None
+
+
+def test_a_task_identity_that_is_not_text_is_kept_as_none(tmp_path: Path) -> None:
+    """An identity of another shape identifies nothing, so it is not one.
+
+    The fan-out mints a string, and every identity is compared against the
+    others as one; a number kept verbatim would sort into the same table as a
+    string and match nothing there. Kept as no identity at all, such a result is
+    counted toward no run rather than credited to a task it cannot be told from.
+    """
+    log = write_event_log(
+        tmp_path / 'events.log',
+        [{'event_type': 'task_completed', 'task_id': 7, 'result': {'status': 'ok'}}],
     )
     found = task_results_from_event_log(FCPath(log))
     assert found.results[0].task_id is None

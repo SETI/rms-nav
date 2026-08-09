@@ -391,11 +391,19 @@ def test_the_driver_reads_no_document_when_it_is_dividing_the_work_up(
     assert found == 0
 
 
-def test_dividing_a_root_that_is_not_there_exits_one(
+def dividing_a_root_that_is_not_there(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The same rule as a pass that reads the documents: a listing failed."""
-    status, _written = run_driver(
+) -> tuple[int | None, list[str]]:
+    """Divide up a root the walk cannot list.
+
+    Parameters:
+        tmp_path: Directory the index and the tasks file live under.
+        monkeypatch: Fixture the driver is run through.
+
+    Returns:
+        The exit status, and one entry per line written to the main log.
+    """
+    return run_driver(
         [
             '--results-db',
             index_url(tmp_path / 'index.sqlite3'),
@@ -407,7 +415,26 @@ def test_dividing_a_root_that_is_not_there_exits_one(
         monkeypatch,
         tmp_path,
     )
+
+
+def test_dividing_a_root_that_is_not_there_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same rule as a pass that reads the documents: a listing failed."""
+    status, _written = dividing_a_root_that_is_not_there(tmp_path, monkeypatch)
     assert status == 1
+
+
+def test_dividing_a_root_that_is_not_there_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The status alone is what the catch-all produces for anything at all.
+
+    What tells this refusal from a failure nobody enumerated is the message
+    naming the thing that went wrong, so the message is what is asserted.
+    """
+    _status, written = dividing_a_root_that_is_not_there(tmp_path, monkeypatch)
+    assert any('Roots that could not be listed' in line for line in written)
 
 
 def test_the_two_cloud_modes_cannot_be_asked_for_at_once(
@@ -544,7 +571,8 @@ def test_the_completion_summary_says_why_a_file_was_refused(
         monkeypatch,
         tmp_path,
     )
-    assert any('for example' in line and 'edges_metadata.json' in line for line in written)
+    examples = [line for line in written if 'for example' in line]
+    assert any('edges_metadata.json' in line for line in examples)
 
 
 def test_a_result_written_under_another_root_is_named_in_the_summary(
@@ -586,15 +614,18 @@ def test_a_result_written_under_another_root_is_named_in_the_summary(
     assert any('reporting rows under a different root' in line for line in written)
 
 
-def test_completing_a_root_whose_listing_was_never_recorded_exits_one(
+def completing_a_mistyped_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The sequence an operator reaches it by: a mistyped root, then a completion.
+) -> tuple[int | None, list[str]]:
+    """Divide up a root that is not there, then complete it from an empty log.
 
-    The fan-out refuses the root and records nothing about it, so the completion
-    has nothing to measure its tasks against. Read as zero files, the mistyped
-    root completes as a fully ingested empty tree and every consumer then reports
-    the images under the real one as never navigated.
+    Parameters:
+        tmp_path: Directory the index, the tasks file and the log live under.
+        monkeypatch: Fixture the driver is run through.
+
+    Returns:
+        The exit status of the completion, and one entry per line it wrote to
+        the main log.
     """
     mistyped = tmp_path / 'nav-offset-reuslts'
     url = index_url(tmp_path / 'index.sqlite3')
@@ -611,7 +642,7 @@ def test_completing_a_root_whose_listing_was_never_recorded_exits_one(
         tmp_path,
     )
     write_event_log(tmp_path / 'events.log', [])
-    status, _written = run_driver(
+    return run_driver(
         [
             '--results-db',
             url,
@@ -623,40 +654,49 @@ def test_completing_a_root_whose_listing_was_never_recorded_exits_one(
         monkeypatch,
         tmp_path,
     )
+
+
+def test_completing_a_root_whose_listing_was_never_recorded_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sequence an operator reaches it by: a mistyped root, then a completion.
+
+    The fan-out refuses the root and records nothing about it, so the completion
+    has nothing to measure its tasks against. Read as zero files, the mistyped
+    root completes as a fully ingested empty tree and every consumer then reports
+    the images under the real one as never navigated.
+    """
+    status, _written = completing_a_mistyped_root(tmp_path, monkeypatch)
     assert status == 1
+
+
+def test_completing_a_root_whose_listing_was_never_recorded_says_which_refusal_it_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A status of 1 is what the catch-all produces for anything whatever.
+
+    This refusal is one the pass enumerates, and what tells it apart is the
+    message naming the root and the correction to make -- divide it up again,
+    rather than re-run the outstanding tasks, which is what a shortfall needs.
+    """
+    _status, written = completing_a_mistyped_root(tmp_path, monkeypatch)
+    assert any('never recorded what its listing found' in line for line in written)
+
+
+def test_completing_a_root_whose_listing_was_never_recorded_is_not_an_unhandled_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And it must not reach the catch-all, whose traceback replaces the message."""
+    _status, written = completing_a_mistyped_root(tmp_path, monkeypatch)
+    assert not any('Ingest could not complete' in line for line in written)
 
 
 def test_a_root_whose_listing_was_never_recorded_keeps_its_unfinished_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Which is what a consumer reads, and the reason the status is 1."""
-    mistyped = tmp_path / 'nav-offset-reuslts'
     url = index_url(tmp_path / 'index.sqlite3')
-    run_driver(
-        [
-            '--results-db',
-            url,
-            '--nav-results-root',
-            str(mistyped),
-            '--output-cloud-tasks-file',
-            str(tmp_path / 'tasks.json'),
-        ],
-        monkeypatch,
-        tmp_path,
-    )
-    write_event_log(tmp_path / 'events.log', [])
-    run_driver(
-        [
-            '--results-db',
-            url,
-            '--nav-results-root',
-            str(mistyped),
-            '--complete-cloud-tasks-file',
-            str(tmp_path / 'events.log'),
-        ],
-        monkeypatch,
-        tmp_path,
-    )
+    completing_a_mistyped_root(tmp_path, monkeypatch)
     engine = open_index(url)
     try:
         with engine.connect() as connection:
@@ -829,15 +869,23 @@ def test_forcing_a_completion_says_what_to_do_instead(
     assert any('--output-cloud-tasks-file with --force' in line for line in written)
 
 
-def test_completing_a_root_nobody_divided_up_exits_one(
+def completing_a_root_nobody_divided_up(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """There is no run to stamp, and saying so is the whole of the diagnosis."""
+) -> tuple[int | None, list[str]]:
+    """Complete a root that no fan-out ever covered.
+
+    Parameters:
+        tmp_path: Directory the tree, the index and the log live under.
+        monkeypatch: Fixture the driver is run through.
+
+    Returns:
+        The exit status, and one entry per line written to the main log.
+    """
     root = tmp_path / 'results'
     write_metadata(root, STUB, metadata_document())
     url = fanned_out(tmp_path, monkeypatch)
     write_event_log(tmp_path / 'events.log', [])
-    status, _written = run_driver(
+    return run_driver(
         [
             '--results-db',
             url,
@@ -849,7 +897,26 @@ def test_completing_a_root_nobody_divided_up_exits_one(
         monkeypatch,
         tmp_path,
     )
+
+
+def test_completing_a_root_nobody_divided_up_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """There is no run to stamp, and saying so is the whole of the diagnosis."""
+    status, _written = completing_a_root_nobody_divided_up(tmp_path, monkeypatch)
     assert status == 1
+
+
+def test_completing_a_root_nobody_divided_up_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Naming the root and the step to run over it is that whole diagnosis.
+
+    The status is the same one every other refusal exits with, so the message is
+    the only thing that distinguishes this from a failure nobody enumerated.
+    """
+    _status, written = completing_a_root_nobody_divided_up(tmp_path, monkeypatch)
+    assert any('No unfinished ingest run to complete' in line for line in written)
 
 
 def test_completing_against_an_index_that_is_not_there_is_refused(
