@@ -210,6 +210,13 @@ read the tree. A results root the index holds no completed ingest of is refused
 rather than answered, because absence of a row would otherwise read as "this
 image was never navigated".
 
+A document rewritten in place that kept the length and the modification time it
+had before is one the ingest skips, because those two metrics are everything a
+listing supplies about a file. Its row goes on recording what the earlier
+document said, so an error filter answers from that one however recently the
+last pass finished. Running ``sd_stats_ingest --force`` over the root re-reads
+every document and is what puts such a row right.
+
 An ingest that could not list every directory under the root reports the number
 it missed, and every enumeration answered from that index repeats it as a
 warning. It bounds both directions of the paragraph above: an image under a
