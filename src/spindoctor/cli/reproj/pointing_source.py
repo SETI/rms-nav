@@ -77,9 +77,12 @@ Both come of ingest storing a rotation only in the nine row-major floats its
 producer writes, so anything else becomes a NULL ``cmatrix`` beside a stored
 baseline -- which is what a fitted-rotation result looks like:
 
-* A ``cmatrix`` that is present and unusable is ``malformed_pointing`` via files
-  and ``no_cmatrix_rotation_fitted`` via the index.  Both fall back to the
-  offset; they differ in what they call it.
+* A ``cmatrix`` ingest cannot store -- one that is not nine finite numbers --
+  is ``malformed_pointing`` via files and ``no_cmatrix_rotation_fitted`` via
+  the index.  Both fall back to the offset; they differ in what they call it.
+  (A ``cmatrix`` that *is* nine finite numbers and is not a rotation is stored,
+  and the validator then refuses it in both paths alike, which is why
+  ``malformed_pointing`` has a row of its own above.)
 * A ``cmatrix`` written as a 3x3 nesting -- a shape this module's classifier
   accepts and the navigator never writes -- selects the C-matrix mechanism via
   files and the offset via the index.  This is the one record class whose
