@@ -50,7 +50,8 @@ class _RecordedFile:
         mtime_ns: Modification time recorded when it was last read.
         size_bytes: Size recorded when it was last read.
         has_summary_png: Whether a summary PNG was recorded beside it, or None
-            when the row predates the flag.
+            when the row carries no answer, which makes the file one this pass
+            reads again.
         from_images: Whether the record is an ingested image rather than a
             refused file.
     """
