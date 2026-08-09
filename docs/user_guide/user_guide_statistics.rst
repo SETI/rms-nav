@@ -292,9 +292,12 @@ pair with ``ON DELETE CASCADE``.
    * - ``has_summary_png``
      - BOOLEAN
      - Whether the ingest walk saw a ``_summary.png`` beside the document.
-   * - ``start_et``, ``stop_et``, ``exposure_s``
+   * - ``start_et``, ``stop_et``, ``midtime_et``, ``exposure_s``
      - DOUBLE
-     - Shutter open and close epochs and the exposure between them.
+     - Shutter open and close epochs, the exposure midtime, and the exposure
+       between them. ``midtime_et`` is stored as the navigator recorded it,
+       because a reader that applies a recorded attitude checks it against the
+       observation's own midtime to a microsecond.
    * - ``sclk_start``, ``sclk_midtime``, ``sclk_stop``
      - TEXT
      - The same three instants as spacecraft-clock strings.

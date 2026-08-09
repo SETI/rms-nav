@@ -77,7 +77,7 @@ __all__ = [
     'TECHNIQUES',
 ]
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 """Column-set version of the index.
 
 Incremented by any change to the column set of any table, and by any change to
@@ -194,6 +194,12 @@ IMAGES = sqlalchemy.Table(
     # camera rotation, so both cases are stored as NULL.
     sqlalchemy.Column('start_et', sqlalchemy.Double),
     sqlalchemy.Column('stop_et', sqlalchemy.Double),
+    # Stored as the navigator recorded it, never recomputed from the shutter
+    # epochs beside it.  It is the epoch a recorded attitude belongs to, and a
+    # reader gates it against the observation's own midtime to a microsecond, so
+    # what the index has to carry is the value that was written rather than one
+    # that happens to agree with it for a particular producer's arithmetic.
+    sqlalchemy.Column('midtime_et', sqlalchemy.Double),
     sqlalchemy.Column('exposure_s', sqlalchemy.Double),
     sqlalchemy.Column('sclk_start', sqlalchemy.Text),
     sqlalchemy.Column('sclk_midtime', sqlalchemy.Text),

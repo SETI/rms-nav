@@ -603,6 +603,12 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         'has_summary_png': source.has_summary_png,
         'start_et': _finite_or_none(times.get('start_et')),
         'stop_et': _finite_or_none(times.get('stop_et')),
+        # Read from the document rather than computed from the shutter epochs
+        # beside it: a reader gates this value against the observation's own
+        # midtime to a microsecond, so the column has to carry what was
+        # recorded rather than a value that reproduces it only as long as one
+        # producer's arithmetic stays what it is.
+        'midtime_et': _finite_or_none(times.get('midtime_et')),
         'exposure_s': _finite_or_none(times.get('exposure_s')),
         'sclk_start': _str_or_none(times.get('sclk_start')),
         'sclk_midtime': _str_or_none(times.get('sclk_midtime')),
