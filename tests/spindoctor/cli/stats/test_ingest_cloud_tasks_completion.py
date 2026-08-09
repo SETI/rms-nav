@@ -31,9 +31,12 @@ from .conftest import (
     cycle,
     fan_out,
     index_url,
+    ingest_tree,
+    metadata_document,
     reported,
     run_rows,
     run_shares,
+    write_metadata,
 )
 
 # ---------------------------------------------------------------------------
@@ -117,6 +120,47 @@ def test_the_run_keeps_the_rows_the_fan_out_removed(
     tasks = fan_out(url, [root], logger=quiet_logger)
     complete(url, [root], run_shares(url, tasks, logger=quiet_logger), logger=quiet_logger)
     assert run_rows(url)[-1].files_removed == 1
+
+
+def unlistable_volume(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the volume named ``VOL2`` refuse to be listed.
+
+    A directory the walk cannot enumerate is the ordinary case on a shared tree
+    -- a permission the run does not hold, a mount that stopped answering -- and
+    it is the case where absence of a row means nothing at all.
+
+    Parameters:
+        monkeypatch: Fixture the listing is wrapped through.
+    """
+    real_iterdir = FCPath.iterdir_metadata
+
+    def refusing_vol2(self: FCPath) -> Any:
+        if self.name == 'VOL2':
+            raise PermissionError(self.as_posix())
+        yield from real_iterdir(self)
+
+    monkeypatch.setattr(FCPath, 'iterdir_metadata', refusing_vol2)
+
+
+def test_the_run_keeps_the_directories_the_fan_out_could_not_list(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the fan-out ever saw them, and the completion rewrites the row.
+
+    Under a directory nobody enumerated, absence of a row is not evidence that
+    an image was never navigated, and the count on the run row is the only place
+    a consumer can read that.  A completion that did not carry the fan-out's
+    count across would replace it with a zero, and the row would then say the
+    whole root was listed.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL1/N1454725799_1_CALIB', metadata_document())
+    write_metadata(root, 'VOL2/N1454725800_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    unlistable_volume(monkeypatch)
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    complete(url, [root], run_shares(url, tasks, logger=quiet_logger), logger=quiet_logger)
+    assert run_rows(url)[-1].directories_missed == 1
 
 
 def test_a_share_that_never_reported_leaves_the_run_unfinished(
@@ -374,6 +418,45 @@ def test_completing_a_root_twice_names_it(
     complete(url, [root], results, logger=quiet_logger)
     outcome = complete(url, [root], results, logger=quiet_logger)
     assert outcome.roots_without_a_run == [normalize_root_url(root)]
+
+
+def test_a_run_abandoned_under_a_newer_finished_one_is_not_completed(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Only the newest run of a root is a candidate for a completion.
+
+    A fan-out given up on and then made good by an ordinary pass leaves an older
+    unfinished run under a newer finished one.  Stamping the older one would put
+    a finish time on a walk nothing came back from, and would date the root's
+    ingest to a pass that was abandoned.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    results = run_shares(url, tasks, logger=quiet_logger)
+    ingest_tree(url, [root], logger=quiet_logger)
+    outcome = complete(url, [root], results, logger=quiet_logger)
+    assert outcome.roots_without_a_run == [normalize_root_url(root)]
+
+
+def test_a_run_abandoned_under_a_newer_finished_one_keeps_its_null_finish(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """And the abandoned run keeps saying so, which is what a consumer reads.
+
+    A consumer takes the newest run of a root, so the stamp on an older one
+    would not mislead it; what it would do is tell an operator reading the table
+    that a pass nothing came back from finished.
+    """
+    root = tmp_path / 'results'
+    build_tree(root, 2)
+    url = index_url(tmp_path / 'index.sqlite3')
+    tasks = fan_out(url, [root], logger=quiet_logger)
+    results = run_shares(url, tasks, logger=quiet_logger)
+    ingest_tree(url, [root], logger=quiet_logger)
+    complete(url, [root], results, logger=quiet_logger)
+    assert run_rows(url)[0].finished_utc is None
 
 
 def test_two_spellings_of_one_root_are_completed_once(
