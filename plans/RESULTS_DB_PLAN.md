@@ -1446,6 +1446,15 @@ File as tracking issues alongside the implementation issue:
   consumers while it is open, since both runs are unfinished; what is undecided
   is whether a fan-out over a root whose newest run is unfinished should be
   refused, warned about, or left as it is.
+- **A hand-written ingest task file can name a stub outside its root** (#489).
+  A task file is an operator-visible artifact, and the worker accepts any string
+  as a stub, so a hand-edited one reads a document outside the root it names and
+  reports it under that root; a share repeated under a second task identity is
+  counted twice, which is the one route left to an account that reaches its
+  listing with a share unrun. Neither is reachable from a fan-out, and the root
+  half of the key was closed for the same threat model; what is undecided is
+  whether the worker should validate the stub domain as the log-path and offset
+  readers already validate theirs.
 - **An abandoned fan-out has already removed rows** (#480). The prune runs
   before any document is read, so a pass that is given up on after step 1 has
   shrunk the index. Only rows whose documents have genuinely left the tree go,
