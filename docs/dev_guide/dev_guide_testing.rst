@@ -72,6 +72,16 @@ secret in the environment of every process the shell starts.
 crashes PyQt6 workers when tests from one file split across processes. Multi-test
 integration runs should always use ``-n auto --dist=loadfile``.
 
+**The suite opens no results index it was not handed.** An index URL resolves
+from an argument, then from the ``environment.results_db`` configuration
+variable, then from ``NAV_RESULTS_DB``; a test of what a program does with no
+index names none of the three. Both ambient levels are closed for every test by
+a fixture in ``tests/conftest.py``, which unsets the environment variable and
+runs the test from a directory holding no ``nav_default_config.yaml``. The suite
+started in a directory that names a live index therefore neither reads nor locks
+it -- for a SQLite index, an open takes a write-lock probe against a file an
+ingest may be holding. A test that wants either level sets it up for itself.
+
 Archive-backed tests additionally require the holdings and catalog environment
 (set by CI; see :doc:`dev_guide_introduction`):
 

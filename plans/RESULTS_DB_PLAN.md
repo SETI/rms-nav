@@ -1250,6 +1250,14 @@ Details settled during execution, none of them a change of intent:
 - **The developer guide's script table gained the statistics family.** It is
   headed as the full set of `[project.scripts]` and named none of them, so
   adding one program to it meant naming its siblings too.
+- **The suite resolves no results index it did not name.** A URL comes from an
+  argument, the `environment.results_db` configuration variable, or
+  `NAV_RESULTS_DB`, and a test of the no-index path names none of them. Both
+  ambient levels are closed for every test by one fixture in `tests/conftest.py`
+  rather than by a line each test author has to remember: it unsets the variable
+  and runs from a directory holding no `nav_default_config.yaml`. Run from a
+  directory that names a live index, the suite had opened it -- for SQLite, a
+  write-lock probe against a file an ingest may be holding.
 
 ### Phase 4 — Backplanes and reprojection consume the index
 

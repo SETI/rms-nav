@@ -72,7 +72,6 @@ def run_driver(
     def recording(message: Any, *args: Any) -> None:
         written.append(str(message) % args if args else str(message))
 
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
     monkeypatch.setattr(
         sys, 'argv', ['sd_stats_ingest', '--log-root', str(tmp_path / 'logs'), *argv]
     )
@@ -136,16 +135,13 @@ def test_the_fan_out_creates_the_index(tmp_path: Path, monkeypatch: pytest.Monke
     assert database.exists()
 
 
-def test_a_worker_refuses_an_index_that_is_not_there(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_worker_refuses_an_index_that_is_not_there(tmp_path: Path) -> None:
     """A worker that created one would answer a wrong URL with an empty index.
 
     Every consumer would then read absence of a row under a fully navigated root
     as "this image was never navigated", which is the one thing the run
     bookkeeping exists to prevent.
     """
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, STUB, metadata_document())
     _retry, result = process(
@@ -168,9 +164,8 @@ def test_a_worker_refuses_an_index_that_is_not_there(
     assert result['status_error'] == 'index_unopenable'
 
 
-def test_a_worker_leaves_no_index_behind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_worker_leaves_no_index_behind(tmp_path: Path) -> None:
     """Refusing is not enough if the refusal creates the file on the way out."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
     database = tmp_path / 'index.sqlite3'
     process(
         {
@@ -192,9 +187,7 @@ LEAKING_INDEX_URL = f'postgresql+psycopg://user:{LEAKING_PASSWORD}@dbhost/spindo
 """An index URL whose refusal is where that tail would otherwise appear."""
 
 
-def test_a_worker_that_cannot_open_the_index_names_no_password(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_worker_that_cannot_open_the_index_names_no_password() -> None:
     """A task result travels further than a log line, so a leak in one travels too.
 
     What a worker returns is written verbatim into its event log, and an
@@ -203,29 +196,22 @@ def test_a_worker_that_cannot_open_the_index_names_no_password(
     quotes the parser's own complaint about it puts a run of the password in
     that file.
     """
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
     _retry, result = sd_stats_ingest_cloud_tasks.process_task(
         'ingest-1-000000', {}, worker_data(results_db=LEAKING_INDEX_URL)
     )
     assert 'etlongsecretpassword' not in result['status_exception']
 
 
-def test_a_worker_that_cannot_open_the_index_still_says_why(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_worker_that_cannot_open_the_index_still_says_why() -> None:
     """And keeps the diagnosis, which is the whole of what the result is for."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
     _retry, result = sd_stats_ingest_cloud_tasks.process_task(
         'ingest-1-000000', {}, worker_data(results_db=LEAKING_INDEX_URL)
     )
     assert result['status_error'] == 'index_unopenable'
 
 
-def test_a_worker_with_no_index_url_reports_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_worker_with_no_index_url_reports_it() -> None:
     """A worker has no run log, so the missing setting comes back in the result."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
     _retry, result = sd_stats_ingest_cloud_tasks.process_task(
         'ingest-1-000000', {}, worker_data(results_db=None)
     )

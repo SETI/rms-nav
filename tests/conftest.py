@@ -1,6 +1,7 @@
 """Pytest configuration and shared fixtures."""
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import pdslogger
 import pytest
@@ -20,6 +21,59 @@ from spindoctor.config.log_scope import _reset_reported_call_sites
 def config_fixture() -> None:
     """Load bundled default config before each test if not already loaded."""
     DEFAULT_CONFIG.ensure_loaded()
+
+
+@pytest.fixture(scope='session')
+def directory_naming_no_index(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Return a directory holding no user configuration file.
+
+    One directory for the whole session rather than one per test: nothing is
+    ever written into it, and what makes it useful is what it does not hold.
+
+    Parameters:
+        tmp_path_factory: Factory the directory is made under.
+
+    Returns:
+        The directory.
+    """
+    return tmp_path_factory.mktemp('naming_no_index')
+
+
+@pytest.fixture(autouse=True)
+def no_ambient_results_index(
+    monkeypatch: pytest.MonkeyPatch, directory_naming_no_index: Path
+) -> None:
+    """Close both ways a test could reach a results index nobody named.
+
+    A results index URL is resolved from three places in order: the argument,
+    the ``environment.results_db`` configuration variable, and the
+    ``NAV_RESULTS_DB`` environment variable.  A test that names none of them is
+    testing what a program does with no index, and on a machine that sets either
+    ambient one it instead opens a real one -- for SQLite a write-lock probe
+    against a file an ingest may be holding, and for a report a read of every
+    row in it.  Both are closed here rather than in each test, because the level
+    an author forgets is the level nothing then tests.
+
+    The configuration level is closed by moving the working directory.  The user
+    override file is ``nav_default_config.yaml`` beside the process, so a
+    directory holding none is a configuration naming no index, whatever the
+    directory the suite was started from holds.
+
+    A test that wants either level sets it up for itself: what it does through
+    the same fixture is undone before what is done here.
+
+    Parameters:
+        monkeypatch: Fixture the working directory and the environment are moved
+            through.
+        directory_naming_no_index: The working directory to run under.
+    """
+    monkeypatch.chdir(directory_naming_no_index)
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    # A configuration merged before this test ran -- by a test that named its own
+    # override file, or by one that ran before the working directory moved --
+    # outlives it: the merge is into a process-global configuration and nothing
+    # takes it back out.
+    monkeypatch.delitem(DEFAULT_CONFIG.environment, 'results_db', raising=False)
 
 
 @pytest.fixture(autouse=True)
