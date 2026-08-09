@@ -439,6 +439,13 @@ def _share_from_task(task_data: dict[str, Any]) -> _Share:
     an unnormalized spelling would produce rows no consumer's lookup matches,
     and the run would still be stamped because the counts add up.
 
+    A relative spelling is resolved against the worker's own working directory,
+    which is the rule every program resolves a root by and the reason a fan-out
+    writes the absolute form.  Two workers on two machines handed a relative root
+    write their shares under two different roots, and the run is then left
+    unfinished and the shares named, since a share counts toward a run only when
+    it names that run's root.
+
     Parameters:
         task_data: The task data, as the fan-out wrote it.
 
