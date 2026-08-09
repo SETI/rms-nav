@@ -639,8 +639,10 @@ def evaluate_candidate(
     upy, upx = np.unravel_index(np.argmax(np.abs(Up)), Up.shape)
     dy = dy_i + (int(upy) - oy) / upsample_factor
     dx = dx_i + (int(upx) - ox) / upsample_factor
-    # The refinement window spans exactly +-0.5 px around the integer NCC
-    # peak.  An argmax on the window boundary means the cross-power surface's
+    # The refinement window spans the half-pixel neighborhood of the integer
+    # NCC peak (exactly +-0.5 px for the even upsample factors in use; an odd
+    # factor would make it asymmetric by one upsampled step).  An argmax on
+    # the window boundary means the cross-power surface's
     # own peak lies beyond half a pixel from the NCC peak — the two surfaces
     # disagree, which happens when the template constrains an axis poorly
     # (e.g. a disc that overflows the FOV) and the raw surface's scale bias

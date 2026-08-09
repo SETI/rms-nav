@@ -125,7 +125,8 @@ the signed normal distance from the model silhouette to the gradient peak gives 
 The model polyline itself is not a quantization source: its vertices are probe-refined onto
 the sub-pixel geometric silhouette (see the sub-pixel boundary refinement section of
 :doc:`dev_guide_navigation_models_body`), so the polyline translates continuously with the
-predicted pointing and the fit returns a planted rigid shift to ~0.01 px. The
+predicted pointing and the fit returns a planted rigid shift to within the DT optimizer's
+own ~0.04 px floor (measured 0.01-0.06 px across planted shifts on real frames). The
 integer-quantized distance transform (see :doc:`dev_guide_techniques_dt_fitting`) adds its
 own sub-pixel-phase jitter on top, and its quantization + Tukey + trust-region machinery
 *accidentally* pulls the fit ~0.1 px back toward truth, so the observed ~0.1 px floor is the
