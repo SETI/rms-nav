@@ -388,10 +388,12 @@ no usable C-matrix: a fitted-rotation result
 (``no_cmatrix_rotation_fitted`` -- the mechanism, not a mission), a record
 with no pointing block (``no_pointing_block``), and a malformed pointing
 block (``malformed_pointing``, warned to both logs like the gate refusals).
-The severity policy belongs to the caller and deliberately differs: the
-backplane driver raises on a success-status record with no ``offset`` key at
-all (a defect-shaped record fails the single-image task) while the mosaic
-callers count it, and both count every degraded outcome per reason.
+Every caller treats a record that supplies no pointing the same way: the
+product is built on uncorrected pointing, the shortfall is reported, and the
+reason is counted.  A caller that refused a record class the others processed
+would build one product from a document and another from the index row the
+same document was ingested into, since a column pair holds every way an offset
+can fail to be a pair.
 
 After either mechanism mutates the observation, ``apply_pointing_to_obs``
 calls ``obs.reset_all()``. "Apply before any geometry is computed" is not an

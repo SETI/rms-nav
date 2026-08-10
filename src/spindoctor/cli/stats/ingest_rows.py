@@ -3,6 +3,17 @@
 The column mapping lives here, apart from the walk and the writer, because it
 is the part that has to be read against the document the navigator writes.
 
+Some of these columns are read back by a consumer that classifies the record
+they came from, and those are not coerced here at all: their domain belongs to
+:mod:`spindoctor.support.nav_record`, which is where the readers get it too, and
+this module stores what those functions return and NULL wherever they return
+nothing.  The rule is what makes the index faithful rather than merely close: a
+value stored means to a reader what the document's own value meant, and a value
+the reader could not have used is not stored, so a record rebuilt from a row is
+classified exactly as its document is.  Writing a second set of rules here that
+agreed today is how the two storages came to disagree about a three-element
+offset and a rotation written as a 3x3 nesting.
+
 Two mappings are easy to get wrong and are called out where they are made.  The
 offset comes from the document's top-level ``offset`` and is stored as written:
 ``navigation_result.offset_px`` is the same offset rounded for display, and the
@@ -34,7 +45,17 @@ from dataclasses import dataclass
 from typing import Any, NoReturn, cast
 
 from spindoctor.cli.stats.classify import date_from_image_et, image_number_from_name
-from spindoctor.results_index import UNKNOWN_STATUS
+
+# Every column a consumer classifies a rebuilt record from is filled by the
+# reader's own function rather than by a rule written here.  A second rule that
+# agreed today is exactly what let a document and its row supply different
+# pointing.
+from spindoctor.support.nav_record import (
+    finite_float,
+    record_offset,
+    record_rotation_values,
+    record_status,
+)
 
 __all__ = [
     'ImageRows',
@@ -201,24 +222,6 @@ def _array_of_objects(value: Any, name: str, source: MetadataSource) -> list[dic
 # ---------------------------------------------------------------------------
 
 
-def _finite_or_none(value: Any) -> float | None:
-    """Coerce a JSON value to a finite float, or None.
-
-    Parameters:
-        value: The value as it was parsed.
-
-    Returns:
-        The float, or None when the value is absent, is not a number, is a
-        boolean, or is not finite.
-    """
-    if value is None or isinstance(value, bool):
-        return None
-    if not isinstance(value, (int, float)):
-        return None
-    out = float(value)
-    return out if math.isfinite(out) else None
-
-
 def _int_or_none(value: Any) -> int | None:
     """Coerce a JSON value to an integer, or None.
 
@@ -259,15 +262,18 @@ def _str_or_none(value: Any) -> str | None:
 def _pair(value: Any) -> tuple[float | None, float | None]:
     """Split a two-element JSON list into a pair of finite floats.
 
+    A sequence of any other length is refused whole rather than truncated: two
+    of three recorded numbers are not the pair anybody wrote.
+
     Parameters:
         value: The value as it was parsed, or None.
 
     Returns:
         The two values, each None when absent or unusable.
     """
-    if not isinstance(value, (list, tuple)) or len(value) < 2:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
         return None, None
-    return _finite_or_none(value[0]), _finite_or_none(value[1])
+    return finite_float(value[0]), finite_float(value[1])
 
 
 def _image_shape(value: Any) -> tuple[int | None, int | None]:
@@ -304,9 +310,9 @@ def _covariance_block(covariance: Any) -> tuple[float | None, float | None, floa
         return None, None, None
     try:
         return (
-            _finite_or_none(covariance[0][0]),
-            _finite_or_none(covariance[0][1]),
-            _finite_or_none(covariance[1][1]),
+            finite_float(covariance[0][0]),
+            finite_float(covariance[0][1]),
+            finite_float(covariance[1][1]),
         )
     except (TypeError, IndexError, KeyError):
         return None, None, None
@@ -335,18 +341,26 @@ def _sigma_from_covariance(covariance: Any) -> tuple[float | None, float | None]
 
 
 def _cmatrix_or_none(value: Any) -> list[float] | None:
-    """Coerce a recorded rotation matrix to nine floats, or None.
+    """Coerce a recorded rotation matrix to the nine floats the readers read.
+
+    The shape is read by the readers' own function, so both shapes a record can
+    write a rotation in -- nine row-major values, or a 3x3 nesting of them --
+    are stored as the nine the readers evaluate.  A value only those readers
+    would refuse is stored as nothing, and a value they would accept is stored,
+    so whether a recorded matrix is a proper rotation is decided by the one
+    validator both of them apply to it rather than by this column.
 
     Parameters:
-        value: The recorded matrix, row-major, or None.
+        value: The recorded matrix, row-major or nested, or None.
 
     Returns:
-        The nine values, or None when the matrix is absent or is not nine
-        numbers.
+        The nine values, or None when the matrix is absent, is neither shape,
+        or holds something that is not a finite real number.
     """
-    if not isinstance(value, list) or len(value) != 9:
+    values = record_rotation_values(value)
+    if values is None:
         return None
-    coerced = [_finite_or_none(entry) for entry in value]
+    coerced = [finite_float(entry) for entry in values]
     if any(entry is None for entry in coerced):
         return None
     return cast(list[float], coerced)
@@ -434,7 +448,7 @@ def _technique_rows(
                 'offset_du': offset_du,
                 'sigma_dv': sigma_dv,
                 'sigma_du': sigma_du,
-                'confidence': _finite_or_none(entry.get('confidence')),
+                'confidence': finite_float(entry.get('confidence')),
                 'spurious': bool(entry.get('spurious')),
                 'at_edge': bool(entry.get('at_edge')),
                 # An empty list is a statement: this technique named no source.
@@ -541,9 +555,9 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
     # image that never loaded has no provenance, so the navigator records the
     # epoch it read from the index under ``observation.image_et``.  Either way
     # every image is placed in time.
-    image_et = _finite_or_none(provenance.get('image_et'))
+    image_et = finite_float(provenance.get('image_et'))
     if image_et is None:
-        image_et = _finite_or_none(observation.get('image_et'))
+        image_et = finite_float(observation.get('image_et'))
     per_technique = _array_of_objects(
         nav.get('per_technique'), 'navigation_result.per_technique', source
     )
@@ -559,7 +573,13 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         )
     timing = _object(metadata.get('timing'), 'timing', source)
     shape_v, shape_u = _image_shape(observation.get('image_shape'))
-    offset_dv, offset_du = _pair(metadata.get('offset'))
+    # Read through the readers' own function, so the pair stored is the pair a
+    # consumer would apply and nothing is stored where a consumer would apply
+    # nothing.  The reason it names is the reader's business, not a column's.
+    recorded_offset = record_offset(metadata)
+    offset_dv, offset_du = (
+        recorded_offset.pair if recorded_offset.pair is not None else (None, None)
+    )
     sigma_dv, sigma_du = _pair(nav.get('sigma_px'))
     covariance_vv, covariance_vu, covariance_uu = _covariance_block(nav.get('covariance_px2'))
 
@@ -576,13 +596,15 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         'image_path': _str_or_none(observation.get('image_path')),
         'image_et': image_et,
         'image_date': date_from_image_et(image_et),
-        # The document's own top-level field, never stood in for by the copy
-        # inside ``navigation_result``.  The column is NOT NULL, so a document
-        # that names no outcome is recorded as naming none; borrowing one would
-        # make the column say ``success`` for a document that never did, and a
-        # reader classifying the rebuilt record would then apply a corrected
-        # pointing the same record read as a file supplies no pointing at all.
-        'status': _str_or_none(metadata.get('status')) or UNKNOWN_STATUS,
+        # The document's own top-level field, read by the function every
+        # consumer reads it through and never stood in for by the copy inside
+        # ``navigation_result``.  Borrowing the nested copy would make the
+        # column say ``success`` for a document that never did, and a reader
+        # classifying the rebuilt record would then apply a corrected pointing
+        # the same record read as a file supplies no pointing at all.
+        'status': record_status(metadata),
+        # NULL exactly where a consumer would report the record as naming no
+        # error, which is what a rebuilt record's absent field then says.
         'status_error': _str_or_none(metadata.get('status_error')),
         'status_reason': _str_or_none(nav.get('status_reason')),
         'offset_dv': offset_dv,
@@ -592,35 +614,35 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         'covariance_vv': covariance_vv,
         'covariance_vu': covariance_vu,
         'covariance_uu': covariance_uu,
-        'sigma_along_unobservable_px': _finite_or_none(nav.get('sigma_along_unobservable_px')),
-        'rotation_deg': _finite_or_none(nav.get('rotation_deg')),
-        'sigma_rotation_deg': _finite_or_none(nav.get('sigma_rotation_deg')),
-        'confidence': _finite_or_none(metadata.get('confidence')),
+        'sigma_along_unobservable_px': finite_float(nav.get('sigma_along_unobservable_px')),
+        'rotation_deg': finite_float(nav.get('rotation_deg')),
+        'sigma_rotation_deg': finite_float(nav.get('sigma_rotation_deg')),
+        'confidence': finite_float(metadata.get('confidence')),
         'confidence_rank': _str_or_none(nav.get('confidence_rank')),
         'n_techniques': len(per_technique),
         # An empty list is a statement: the ensemble excluded nothing.
         'excluded_from_consensus': sorted(excluded),
         'image_class': _str_or_none(classifier.get('class')),
-        'noise_sigma': _finite_or_none(classifier.get('noise_sigma')),
+        'noise_sigma': finite_float(classifier.get('noise_sigma')),
         'image_shape_v': shape_v,
         'image_shape_u': shape_u,
         'run_start': _str_or_none(timing.get('start_iso8601')),
         'run_end': _str_or_none(timing.get('end_iso8601')),
-        'elapsed_s': _finite_or_none(timing.get('elapsed_s')),
+        'elapsed_s': finite_float(timing.get('elapsed_s')),
         'config_hash': _str_or_none(provenance.get('config_hash')),
         'git_sha': _str_or_none(provenance.get('spindoctor_git_sha')),
         'pipeline_run': _str_or_none(provenance.get('pipeline_run_iso8601')),
         'image_number': image_number_from_name(image_name),
         'has_summary_png': source.has_summary_png,
-        'start_et': _finite_or_none(times.get('start_et')),
-        'stop_et': _finite_or_none(times.get('stop_et')),
+        'start_et': finite_float(times.get('start_et')),
+        'stop_et': finite_float(times.get('stop_et')),
         # Read from the document rather than computed from the shutter epochs
         # beside it: a reader gates this value against the observation's own
         # midtime to a microsecond, so the column has to carry what was
         # recorded rather than a value that reproduces it only as long as one
         # producer's arithmetic stays what it is.
-        'midtime_et': _finite_or_none(times.get('midtime_et')),
-        'exposure_s': _finite_or_none(times.get('exposure_s')),
+        'midtime_et': finite_float(times.get('midtime_et')),
+        'exposure_s': finite_float(times.get('exposure_s')),
         'sclk_start': _str_or_none(times.get('sclk_start')),
         'sclk_midtime': _str_or_none(times.get('sclk_midtime')),
         'sclk_stop': _str_or_none(times.get('sclk_stop')),

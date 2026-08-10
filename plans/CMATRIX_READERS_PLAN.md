@@ -318,16 +318,15 @@ the existing `uncorrected_pointing`, so a cloud task reports which
 mechanism a product got; the mosaic cloud-task tally gains the new
 reasons.
 
-**One deliberate per-caller divergence, stated rather than papered
-over.** Today `backplanes.py` *raises* on a success-status record with
-no `offset` key at all (a defect-shaped record fails the single-image
-task) while degrading on a null offset, and `offsets.py`
-warns-and-continues on everything (a batch pass must survive one bad
-record). Unification keeps that split: `select_pointing` classifies the
-record; the backplane caller continues to raise on the
-missing-key-with-success-status class, the mosaic callers continue to
-warn and count. The severity policy belongs to the caller; the
-classification is shared.
+**Every caller treats a record supplying no pointing the same way.**
+`select_pointing` classifies the record and each caller builds its
+product on whatever pointing that leaves, reports the shortfall, and
+counts the reason. A caller that refused a record class the others
+processed would build one product from a document and another from the
+index row the same document was ingested into, because the index stores
+an absent offset and a null one in the same NULL column pair; the
+severity policy cannot be per-caller where the storage cannot carry the
+distinction it would key on.
 
 The module docstrings and CLAUDE.md's `cli/reproj` note record that
 `offsets.py` now serves the backplane stage too. If a third consumer of

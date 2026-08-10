@@ -14,10 +14,10 @@ the shape of the document from the row and hands it to the one classifier,
 :func:`spindoctor.cli.reproj.offsets.select_pointing`, so the two paths cannot
 disagree about which pointing a record supplies -- there is only one ladder, and
 it is the same code in both modes.  That holds only while the columns the
-rebuild reads say what the document's own fields said: the ladder's first
-question is whether the top-level ``status`` is ``success``, and a column
-answering it from anywhere else would be a classification made at ingest time,
-which no reader of the document could arrive at.
+rebuild reads say what the document's own fields said, which is why ingest fills
+every one of them through :mod:`spindoctor.support.nav_record`, the module these
+readers read the same fields through.  A column filled by a rule of its own,
+even one that agreed when it was written, is a second reader of the record.
 
 What the rebuilt record carries
 -------------------------------
@@ -31,21 +31,32 @@ frame identity a recorded attitude is gated against is taken from the
 observation, never from the record.
 
 A field the row does not carry is rebuilt as a field the document did not have,
-rather than as one holding null, because a reader tells those apart: the
-backplane stage reports an absent ``status_error`` as ``unknown`` and would
-report a null one as null.  The one exception is ``offset``, which is rebuilt as
-a key holding null, and the reasoning is below.  The ``status`` column is NOT
-NULL and stands in for a document that named no outcome with
-:data:`~spindoctor.results_index.schema.UNKNOWN_STATUS`, so that value is
-rebuilt as the absent field it stands for.
+rather than as one holding null, because the record is read as a document would
+be.  ``offset`` is the one exception: it is rebuilt as a key holding null,
+because ingest stores an absent, null, malformed and non-finite offset alike as
+NULL and the rebuild has to render the pair as one of them.  Which one is
+chosen makes no difference to any reader, because none of the four supplies a
+pointing and no consumer branches on the key's presence.  The ``status`` column
+is NOT NULL and stands in for a document that named no outcome with
+:data:`~spindoctor.support.nav_record.UNKNOWN_STATUS`; that value is rebuilt as
+the absent field it stands for, and both are then read as naming no outcome by
+:func:`~spindoctor.support.nav_record.record_status`, so a document naming that
+word for itself and one naming nothing are reported alike rather than one of
+them as nothing.
 
 Where the two paths differ
 --------------------------
 
-A row is not a file, and ingest has already refused some documents and coerced
-some values.  Every reason the file path can report either has an index-path
-equivalent or is unreachable there, and an unreachable one surfaces under
-whichever reason describes the row that ingest actually wrote:
+The rule this seam is held to: **a record the two storages classify differently
+may differ in the reason and in nothing else.**  The reason is a name a
+run-level tally counts under; the mechanism, the matrices, the midtime and the
+offset are what a product is built from.  A difference in any of those is a
+defect in this module or in what ingest stores, not an entry for the list below.
+
+A row is not a file, and ingest has already refused some documents.  Every
+reason the file path can report either has an index-path equivalent or is
+unreachable there, and an unreachable one surfaces under whichever reason
+describes the row that ingest actually wrote:
 
 +---------------------------------------+------------------------------------------+
 | File-path reason                      | Index path                               |
@@ -75,63 +86,45 @@ whichever reason describes the row that ingest actually wrote:
 | ``invalid_json``,                     | so it has no row, and it surfaces as     |
 | ``metadata_not_an_object``            | ``no_metadata``                          |
 +---------------------------------------+------------------------------------------+
-| ``invalid_offset_type``,              | unreachable: ingest coerces such an      |
-| ``non_finite_offset``,                | offset to NULL, and it surfaces as       |
-| ``malformed_offset``                  | ``null_offset``                          |
-+---------------------------------------+------------------------------------------+
-| ``missing_offset_key``                | unreachable: a rebuilt record always     |
-|                                       | carries the key, and a row with no       |
-|                                       | offset surfaces as ``null_offset``       |
+| ``missing_offset_key``,               | reported as ``null_offset``: one column  |
+| ``invalid_offset_type``,              | pair holds all five, and none of them    |
+| ``non_finite_offset``,                | supplies a pointing                      |
+| ``malformed_offset``                  |                                          |
 +---------------------------------------+------------------------------------------+
 
-Four further differences have no row of their own, because each is the same
-record classified differently rather than one reason reported in place of
-another.  Each is a shape no navigation produces, and each is named here so that
-a record hand-built into a results tree is not read as agreeing when it does
-not.
+Three classes of record are classified under a different reason by the two
+storages.  The list is measured rather than argued: both sources are driven over
+every shape a record's fields can take, and what survives defines it.  Each
+member is a shape no navigation produces, and each is named here so that a
+record hand-built into a results tree is not read as agreeing when it does not.
+In every one of them the mechanism, the matrices, the midtime and the offset are
+the same on both sides, so the product is the same and the tally is not.
 
-Two differ only in what the outcome is called, so a run-level tally counts the
-image under the other class and the product is the same:
+1. **An ``offset`` no reader can use.**  Absent, null, a boolean pair, a
+   non-finite pair, or anything else that is not two values convertible to
+   finite pixels.  The document is classified under which of those it was;
+   the row, which holds one NULL pair for all of them, under ``null_offset``.
+2. **A ``cmatrix`` no column can hold** -- one that is not nine values, or is
+   nine values that are not finite real numbers.  The document is
+   ``malformed_pointing``; the row is ``no_cmatrix_rotation_fitted`` when
+   something else of the block survives (which is what a fitted-rotation result
+   looks like) and ``no_pointing_block`` when nothing does.  The file path also
+   puts one line in the run log for it and the index path does not.  A
+   ``cmatrix`` that *is* nine finite numbers and is not a rotation is stored,
+   and the validator then refuses it in both paths alike, which is why
+   ``malformed_pointing`` has a row of its own above.
+3. **A ``pointing`` block none of whose four columned fields survives** -- one
+   holding only ``camera_frame``, or frame identities written as floats or
+   booleans, which the integer columns refuse.  The document is
+   ``no_cmatrix_rotation_fitted``, because the block exists and carries no
+   corrected attitude; the row is ``no_pointing_block``, because the block left
+   no trace in it.  The block a navigation writes always carries the baseline
+   and both frame identities as integers.
 
-* A ``cmatrix`` ingest cannot store -- one that is not nine finite numbers --
-  is ``malformed_pointing`` via files and ``no_cmatrix_rotation_fitted`` via
-  the index, because it becomes a NULL ``cmatrix`` beside a stored baseline,
-  which is what a fitted-rotation result looks like.  Both fall back to the
-  offset; they differ in what they call it.  (A ``cmatrix`` that *is* nine
-  finite numbers and is not a rotation is stored, and the validator then
-  refuses it in both paths alike, which is why ``malformed_pointing`` has a row
-  of its own above.)
-* A ``pointing`` block carrying none of the four fields the index has columns
-  for -- one holding only ``camera_frame``, say -- is
-  ``no_cmatrix_rotation_fitted`` via files and ``no_pointing_block`` via the
-  index, since the rebuilt record has no block to distinguish.  The block a
-  navigation writes always carries the baseline and both frame identities, so
-  this is a block none of them wrote.
-
-Two differ in the *product* and not only in what it is called:
-
-* A ``cmatrix`` written as a 3x3 nesting -- a shape this module's classifier
-  accepts and the navigator never writes -- selects the C-matrix mechanism via
-  files and the offset via the index, so the two products are built on
-  different pointing.
-* A ``status: success`` record carrying no ``offset`` key at all is refused by
-  the backplane stage via files, which raises rather than building geometry on
-  a record shaped like a defect, and produces backplanes via the index, which
-  cannot see the difference between an absent offset and a null one and reports
-  the commoner of them.  With a usable ``cmatrix`` beside it the index path
-  applies the corrected attitude and writes the product the file path refuses.
-  The rebuild renders an absent offset as a null one deliberately: ingest
-  stores an absent, null, malformed and non-finite offset alike as NULL, and
-  the other three are records the file path builds products from, so rendering
-  the pair as an absent key would refuse three reachable shapes to agree about
-  one that is not.  No navigation writes it: a result carrying no offset is
-  never a success, so a document whose status is ``success`` always carries
-  one.
-
-These are real behavioral differences and are stated rather than papered over.
-For every record the navigator wrote and ingest stored, everything a product is
-built from -- the mechanism, the matrices, the midtime, the offset -- is
-identical in the two paths, and so is every field the readers report about it.
+Everything else agrees.  For every record the navigator wrote and ingest stored,
+and for every hand-built shape outside those three classes, the mechanism, the
+matrices, the midtime, the offset, the outcome and the error are identical in
+the two paths.
 """
 
 import json
@@ -154,13 +147,13 @@ from spindoctor.config import IMAGE_LOGGER
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.results_index import (
     IMAGES,
-    UNKNOWN_STATUS,
     masked_url,
     normalize_root_url,
     open_index,
     reporting_a_failed_read,
     require_ingested_roots,
 )
+from spindoctor.support.nav_record import UNKNOWN_STATUS
 
 __all__ = [
     'FilePointingSource',
@@ -168,9 +161,6 @@ __all__ = [
     'PointingSource',
     'build_pointing_source',
 ]
-
-_METADATA_SUFFIX = '_metadata.json'
-"""Suffix the navigator appends to a results path stub to name its document."""
 
 _ROW_COLUMNS = (
     IMAGES.c.status,
@@ -457,20 +447,20 @@ def _record_from_row(row: sqlalchemy.Row[Any]) -> dict[str, Any]:
         The rebuilt record.
     """
     # The offset key is always written, with a null value where the row carries
-    # no usable pair.  Ingest stores a malformed, non-finite or absent offset
-    # alike as NULL, so the index cannot tell those apart, and reporting the
-    # commonest of them is what keeps a genuine null offset from being read as a
-    # defect-shaped record with no offset field at all.
+    # no usable pair.  Ingest stores an absent, null, malformed and non-finite
+    # offset alike as NULL, so the rebuild has to render the pair as one of
+    # them; which one makes no difference, because none of the four supplies a
+    # pointing and no consumer branches on the key's presence.
     offset: list[float] | None = None
     if row.offset_dv is not None and row.offset_du is not None:
         offset = [row.offset_dv, row.offset_du]
     # ``status`` and ``status_error`` are rendered back as the fields they
-    # stand for, absent ones included: a reader distinguishes a document that
-    # named an outcome from one that named none, and reports the second by
-    # defaulting rather than by printing whatever the column held.  The status
-    # column is NOT NULL and records a document that named no outcome as
-    # ``UNKNOWN_STATUS``, which is that document's absent field and is rebuilt
-    # as one.
+    # stand for, absent ones included, so the record reads as the document it
+    # came from.  The status column is NOT NULL and records a document that
+    # named no outcome as ``UNKNOWN_STATUS``, which is that document's absent
+    # field and is rebuilt as one; a document naming that same word for itself
+    # is rebuilt without the field too, and both are then read as naming no
+    # outcome by the one function every consumer reads the field through.
     record: dict[str, Any] = _present((('status_error', row.status_error),))
     if row.status != UNKNOWN_STATUS:
         record['status'] = row.status

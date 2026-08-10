@@ -17,6 +17,12 @@ a program reads its records from is chosen by
 places where a record rebuilt from an index row is classified differently from
 the document it was ingested from.
 
+Which values of a record are usable at all is not decided here either: that is
+:mod:`spindoctor.support.nav_record`, and the results index stores what those
+functions return.  The classifier therefore never has to ask whether the record
+in front of it came from a document or a row, because a value that reached it
+through a row is a value a document could have carried unchanged.
+
 Failing to load a pointing does not stop the product; it proceeds on the
 camera's uncorrected pointing, and the product it writes carries no sign of
 that.  So the fact is reported in both places, and the two say different
@@ -35,7 +41,6 @@ result instead.
 import enum
 import json
 import math
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -59,6 +64,21 @@ from spindoctor.support.cmatrix import (
     validated_record_rotation,
 )
 from spindoctor.support.exceptions import NavPointingError
+
+# Which values of a record a reader can use at all is decided in one place, and
+# the results index stores what that place returns, so a record rebuilt from a
+# row supplies the pointing its document supplies.  Importing the domain rather
+# than restating it is what keeps the two from drifting apart.
+from spindoctor.support.nav_record import (
+    INVALID_OFFSET_TYPE,
+    MALFORMED_OFFSET,
+    MISSING_OFFSET_KEY,
+    NON_FINITE_OFFSET,
+    NULL_OFFSET,
+    record_offset,
+    record_rotation_values,
+    record_status,
+)
 from spindoctor.support.types import NDArrayAnyType, NDArrayFloatType
 
 # The degraded-selection reasons this module classifies, beyond the gate and
@@ -68,7 +88,6 @@ from spindoctor.support.types import NDArrayAnyType, NDArrayFloatType
 # mission.
 NO_CMATRIX_ROTATION_FITTED = 'no_cmatrix_rotation_fitted'
 NO_POINTING_BLOCK = 'no_pointing_block'
-MISSING_OFFSET_KEY = 'missing_offset_key'
 
 NO_METADATA = 'no_metadata'
 """Nothing recorded this image at all, however the records are stored."""
@@ -128,9 +147,6 @@ class PointingSelection:
             pointing nobody wanted is not missing.  The detailed account is in
             the image's log; this is the short form a run-level report and
             count use.
-        offset_key_present: Whether the record carries an ``offset`` key at
-            all.  A success-status record without one is defect-shaped; the
-            backplane caller raises on it while the mosaic callers count it.
     """
 
     mechanism: PointingMechanism
@@ -139,7 +155,6 @@ class PointingSelection:
     midtime_et: float | None
     offset: tuple[float, float] | None
     reason: str | None
-    offset_key_present: bool
 
 
 @dataclass(frozen=True)
@@ -178,7 +193,6 @@ def none_selection(reason: str | None) -> PointingSelection:
         midtime_et=None,
         offset=None,
         reason=reason,
-        offset_key_present=False,
     )
 
 
@@ -229,75 +243,14 @@ def resolved_nav_metadata_path(
     return candidate
 
 
-def _parse_nav_offset_pair(offset: object) -> tuple[float, float] | None:
-    """Parse ``offset`` from spindoctor metadata JSON into ``(dv, du)`` floats.
-
-    Returns:
-        A pair of floats on success, or ``None`` if ``offset`` is not a two-element
-        sequence (excluding strings/bytes) or values are not convertible to float.
-
-    Raises:
-        TypeError: If either element is a ``bool`` (booleans are not valid pixel offsets).
-        ValueError: If either element converts to a non-finite float (NaN or Infinity).
-    """
-    if offset is None or isinstance(offset, (str, bytes)):
-        return None
-    if not isinstance(offset, Sequence):
-        return None
-    if len(offset) != 2:
-        return None
-    try:
-        dv_raw, du_raw = offset[0], offset[1]
-    except (TypeError, ValueError, KeyError, IndexError):
-        return None
-    if isinstance(dv_raw, bool) or isinstance(du_raw, bool):
-        raise TypeError(f'Offset elements must not be bool; got dv={dv_raw!r}, du={du_raw!r}')
-    try:
-        dv = float(dv_raw)
-        du = float(du_raw)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(dv) or not math.isfinite(du):
-        raise ValueError(f'Offset elements must be finite floats; got dv={dv!r}, du={du!r}')
-    return dv, du
-
-
-def _classify_offset(
-    nav_metadata: dict[str, Any],
-) -> tuple[tuple[float, float] | None, str | None, bool]:
-    """Classify the record's ``offset`` field without logging anything.
-
-    Parameters:
-        nav_metadata: The parsed metadata record.
-
-    Returns:
-        Tuple of the parsed ``(dv, du)`` offset or None, the reason it is
-        unusable or None, and whether the ``offset`` key is present at all.
-    """
-    if 'offset' not in nav_metadata:
-        return None, MISSING_OFFSET_KEY, False
-    offset = nav_metadata['offset']
-    if offset is None:
-        return None, 'null_offset', True
-    try:
-        parsed = _parse_nav_offset_pair(offset)
-    except TypeError:
-        return None, 'invalid_offset_type', True
-    except ValueError:
-        return None, 'non_finite_offset', True
-    if parsed is None:
-        return None, 'malformed_offset', True
-    return parsed, None, True
-
-
 _OFFSET_REASON_MESSAGES = {
     MISSING_OFFSET_KEY: 'Nav metadata for %s has no offset field; using uncorrected pointing.',
-    'null_offset': 'Nav metadata for %s has null offset; using uncorrected pointing.',
-    'invalid_offset_type': (
+    NULL_OFFSET: 'Nav metadata for %s has null offset; using uncorrected pointing.',
+    INVALID_OFFSET_TYPE: (
         'Nav metadata for %s has invalid offset type; using uncorrected pointing.'
     ),
-    'non_finite_offset': 'Nav metadata for %s has non-finite offset; using uncorrected pointing.',
-    'malformed_offset': (
+    NON_FINITE_OFFSET: 'Nav metadata for %s has non-finite offset; using uncorrected pointing.',
+    MALFORMED_OFFSET: (
         'Nav metadata for %s has malformed offset field; using uncorrected pointing.'
     ),
 }
@@ -357,10 +310,11 @@ def _parse_pointing_values(
 def _parse_record_rotation(value: Any, label: str) -> NDArrayFloatType:
     """Read one recorded C-matrix, accepting only the shapes the schema writes.
 
-    The metadata records a C-matrix as nine row-major floats; a 3x3 nesting is
-    also accepted.  Validation -- real numbers only, finite, a proper
-    orthonormal rotation -- is delegated to the reader's own validator so the
-    selection and the application refuse exactly the same records.
+    The shape is read by the one function the results index stores rotations
+    through, so a matrix this accepts is a matrix that survives ingest and one
+    it refuses is stored as nothing.  Validation -- real numbers only, finite,
+    a proper orthonormal rotation -- is delegated to the reader's own validator
+    so the selection and the application refuse exactly the same records.
 
     Parameters:
         value: The recorded value.
@@ -373,14 +327,25 @@ def _parse_record_rotation(value: Any, label: str) -> NDArrayFloatType:
         NavPointingError: with reason ``malformed_pointing`` when the value is
             unusable.
     """
-    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-        raise NavPointingError(f'{label} is not a sequence', reason=MALFORMED_POINTING)
+    values = record_rotation_values(value)
+    if values is None:
+        raise NavPointingError(
+            f'{label} is not nine row-major values, or a 3x3 nesting of them',
+            reason=MALFORMED_POINTING,
+        )
     # Annotated as an any-dtype array on purpose: ``np.asarray`` of a JSON
     # sequence carries whatever dtype the record held, and the validator
-    # refuses the wrong ones rather than this coercing them away.
-    array: NDArrayAnyType = np.asarray(value)
-    if array.shape == (9,):
-        array = array.reshape(3, 3)
+    # refuses the wrong ones rather than this coercing them away.  Nine values
+    # of shapes numpy cannot reconcile raise out of ``asarray`` itself, which is
+    # a malformed record like any other and not an exception for a caller to
+    # meet.
+    try:
+        array: NDArrayAnyType = np.asarray(values).reshape(3, 3)
+    except ValueError as exc:
+        raise NavPointingError(
+            f'{label} holds nine values of shapes that are not one matrix',
+            reason=MALFORMED_POINTING,
+        ) from exc
     return validated_record_rotation(array, label)
 
 
@@ -411,14 +376,15 @@ def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> Point
     Returns:
         The classified selection.
     """
-    status = nav_metadata.get('status')
+    status = record_status(nav_metadata)
     if status != 'success':
         IMAGE_LOGGER.warning(
             'Nav metadata for %s has status=%r; using uncorrected pointing.', subject, status
         )
         return none_selection('navigation_did_not_succeed')
 
-    offset, offset_reason, offset_key_present = _classify_offset(nav_metadata)
+    classified_offset = record_offset(nav_metadata)
+    offset, offset_reason = classified_offset.pair, classified_offset.reason
     pointing_values = _parse_pointing_values(nav_metadata)
 
     if isinstance(pointing_values, tuple):
@@ -441,7 +407,6 @@ def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> Point
             midtime_et=midtime_et,
             offset=offset,
             reason=None,
-            offset_key_present=offset_key_present,
         )
 
     reason = pointing_values
@@ -468,7 +433,6 @@ def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> Point
             midtime_et=None,
             offset=offset,
             reason=reason,
-            offset_key_present=offset_key_present,
         )
 
     if reason == MALFORMED_POINTING:
@@ -486,7 +450,6 @@ def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> Point
         midtime_et=None,
         offset=None,
         reason=final_reason,
-        offset_key_present=offset_key_present,
     )
 
 

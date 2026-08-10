@@ -69,6 +69,13 @@ from typing import Any
 import sqlalchemy
 from sqlalchemy.dialects import postgresql
 
+# The ``status`` column is NOT NULL, so a document whose top-level ``status``
+# is absent, null, empty or not a string is recorded as naming no outcome.  The
+# value it is recorded as is the one every reader of that document reports for
+# it, and it is taken from there rather than restated here, so the column cannot
+# come to say something the readers do not.
+from spindoctor.support.nav_record import UNKNOWN_STATUS
+
 __all__ = [
     'FAILED_FILES',
     'FEATURE_SOURCES',
@@ -89,15 +96,6 @@ the constraints over it.  A database stamped with a different version is refused
 rather than migrated.
 """
 
-UNKNOWN_STATUS = 'unknown'
-"""What the ``status`` column holds for a document that named no outcome.
-
-The column is NOT NULL, so a document whose top-level ``status`` is absent,
-empty, or not a string is recorded as naming none rather than as carrying an
-outcome taken from somewhere else.  It is none of the navigator's outcomes and
-matches no filter naming one, and a reader rebuilding a record from the row
-renders it back as the absent field it stands for.
-"""
 
 # TEXT on SQLite, jsonb on PostgreSQL.  jsonb is the type PostgreSQL's array and
 # object accessors operate on, so a direct-SQL query against the index can reach

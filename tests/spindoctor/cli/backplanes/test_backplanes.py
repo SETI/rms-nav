@@ -410,16 +410,51 @@ def test_driver_skips_image_with_missing_status(
     assert calls['write'] == []
 
 
-def test_driver_requires_offset_field(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Successful metadata without an offset field is a hard error.
+def test_driver_treats_a_missing_offset_field_as_no_pointing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Successful metadata without an offset field degrades; it does not refuse.
+
+    An index stores an absent offset and a null one alike, so a stage that
+    refused one and processed the other would build a product from a document
+    and refuse the same image read as a row.  Both are recorded no-answers and
+    both leave the pointing uncorrected.
 
     Parameters:
         tmp_path: pytest-provided temporary directory.
         monkeypatch: pytest monkeypatch fixture.
     """
     _stub_pipeline(monkeypatch)
-    with pytest.raises(ValueError, match='"offset" field not found'):
-        _run(tmp_path, metadata={'status': 'success'})
+    result, _snapshot = _result_for(tmp_path, {'status': 'success'})
+    assert result['uncorrected_pointing'] is True
+
+
+def test_driver_names_the_missing_offset_field_as_the_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And says which of the recorded no-answers it was.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(tmp_path, {'status': 'success'})
+    assert result['pointing_reason'] == 'missing_offset_key'
+
+
+def test_driver_still_produces_the_backplanes_for_that_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The product is built, which is what the index-backed path always did.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    calls = _stub_pipeline(monkeypatch)
+    _result_for(tmp_path, {'status': 'success'})
+    assert len(calls['merge']) == 1
 
 
 def test_driver_leaves_a_none_offset_uncorrected(

@@ -543,31 +543,39 @@ implies. SpinDoctor's own products are authoritative for those images.
 Where a document and an index row are classified differently
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``sd_stats_ingest`` stores the fields the ladder reads, in the shapes
-``sd_offset`` writes them. A record that takes a shape ``sd_offset`` does not
-write survives into the index as the nearest shape a column can hold, and the
-ladder then classifies it from that. Three such records are classified
-differently depending on which storage they were read from. None can be
-produced by navigating an image; each requires a record written into the
-results tree by something else.
+``sd_stats_ingest`` stores the fields the ladder reads, and it reads them
+through the same code the ladder does, so a value a run would apply is a value
+the index holds and a value it would refuse is a value the index holds nothing
+for. The products a run builds are therefore the same whether or not
+``--results-db`` was given.
 
-* A ``pointing.cmatrix`` that is not nine finite numbers is ingested as no
-  corrected attitude at all. Read as a document it counts under
-  ``malformed_pointing``; read as a row it counts under
-  ``no_cmatrix_rotation_fitted``. Both apply the recorded offset, so the
-  product is the same and only the run summary's tally differs.
+What a column cannot always keep is *why* a record supplies no pointing. One
+column pair holds every way an offset can fail to be a pair, and a matrix
+column holds a matrix or nothing, so several document shapes reach one row and
+the run summary counts them under the reason that row supports. Three classes
+of record are counted under a different reason depending on which storage they
+were read from. In each of them both storages build the same product from the
+same values; only the tally differs. None can be produced by navigating an
+image; each requires a record written into the results tree by something else.
+
+* An ``offset`` field that supplies no usable pair -- absent, null, a pair of
+  booleans, a pair holding NaN or an infinity, or a sequence that is not two
+  values. Read as a document each is counted under its own name
+  (``missing_offset_key``, ``null_offset``, ``invalid_offset_type``,
+  ``non_finite_offset``, ``malformed_offset``); read as a row all of them are
+  counted under ``null_offset``.
+* A ``pointing.cmatrix`` that is neither nine finite numbers nor a 3x3 nesting
+  of them. Read as a document it counts under ``malformed_pointing``; read as a
+  row it counts under ``no_cmatrix_rotation_fitted``, or under
+  ``no_pointing_block`` when nothing else of the block could be stored either.
+  A ``cmatrix`` that *is* nine finite numbers and is not a rotation is stored,
+  and both storages then count it under ``malformed_pointing``; so is one
+  written as a 3x3 nesting, and both storages apply it.
 * A ``pointing`` block carrying none of ``cmatrix``, ``cmatrix_original``,
-  ``camera_frame_id`` or ``ck_frame_id`` leaves no trace in the row. Read as a
-  document it counts under ``no_cmatrix_rotation_fitted``; read as a row it
-  counts under ``no_pointing_block``. Again the same product and a different
-  tally.
-* A ``status: success`` record with no ``offset`` field, or with a
-  ``pointing.cmatrix`` written as three nested rows of three rather than as
-  nine numbers, differs in the **product** and not only in the tally. The
-  index stores an absent offset and a null one alike, and a nested matrix not
-  at all, so the row says something the document did not. ``sd_backplanes``
-  refuses the first record when it reads it as a document and builds
-  backplanes for it when it reads it as a row.
+  ``camera_frame_id`` or ``ck_frame_id`` in a form a column can hold -- one
+  holding only ``camera_frame``, or frame identities written as floats. Read as
+  a document it counts under ``no_cmatrix_rotation_fitted``; read as a row it
+  counts under ``no_pointing_block``.
 
 Output format
 ^^^^^^^^^^^^^

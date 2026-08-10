@@ -283,21 +283,47 @@ def test_a_malformed_pointing_block_without_an_offset_selects_none() -> None:
 def test_a_missing_offset_key_is_classified_distinctly() -> None:
     """A success record with no offset key at all is defect-shaped and says so.
 
-    The backplane caller raises on this class while the mosaic callers count
-    it, so the classification has to keep it apart from a null offset.
+    Reading the document, an absent field is distinguishable from one holding
+    null, and the reason keeps them apart for the run-level tally.  Neither
+    supplies a pointing, so the two build the same product.
     """
     record = _record(with_pointing=False, with_times=False, with_offset_key=False)
     selection = select_pointing(record)
-    assert selection.offset_key_present is False
     assert selection.reason == 'missing_offset_key'
 
 
-def test_a_null_offset_reports_the_key_as_present() -> None:
+def test_a_null_offset_is_classified_apart_from_a_missing_key() -> None:
     """A null offset is a recorded no-answer, not a missing field."""
     record = _record(with_pointing=False, with_times=False, offset=None)
     selection = select_pointing(record)
-    assert selection.offset_key_present is True
     assert selection.reason == 'null_offset'
+
+
+@pytest.mark.parametrize(
+    'offset',
+    [[1.0, 2.0, 3.0], [1.0], [], [1.0, 2.0, None], {'dv': 1.0, 'du': 2.0}],
+    ids=['three', 'one', 'empty', 'three-with-null', 'object'],
+)
+def test_an_offset_that_is_not_a_pair_is_refused_whole(offset: Any) -> None:
+    """Only two recorded values are a pair; the rest is refused, never truncated.
+
+    A reader that took the first two of three would apply a pointing nobody
+    recorded, and the store that holds these records would have to make the
+    same choice or build a different product from the same document.
+
+    Parameters:
+        offset: The recorded value under test.
+    """
+    record = _record(with_pointing=False, with_times=False, offset=offset)
+    selection = select_pointing(record)
+    assert selection.reason == 'malformed_offset'
+
+
+def test_an_offset_of_numeric_strings_is_read_as_the_numbers_it_names() -> None:
+    """A pair the reader can convert is a pair the reader applies."""
+    record = _record(with_pointing=False, with_times=False, offset=['5.5', '-1.25'])
+    selection = select_pointing(record)
+    assert selection.offset == (5.5, -1.25)
 
 
 # ---------------------------------------------------------------------------
@@ -458,7 +484,6 @@ def test_a_contradictory_selection_is_refused() -> None:
         midtime_et=None,
         offset=None,
         reason=None,
-        offset_key_present=True,
     )
     with pytest.raises(ValueError, match='must carry cmatrix'):
         apply_pointing_to_obs(cast(ObsSnapshotInst, obs), selection)

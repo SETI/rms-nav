@@ -318,6 +318,98 @@ def test_a_corrected_pointing_matrix_is_stored_as_nine_floats() -> None:
     assert rows.image['cmatrix'] == [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
 
 
+@pytest.mark.parametrize('field', ['cmatrix', 'cmatrix_original'])
+def test_a_matrix_written_as_a_nesting_is_stored_as_the_nine_it_denotes(field: str) -> None:
+    """Both shapes a record can write a rotation in reach the column.
+
+    The classifier reads a 3x3 nesting as the nine values it denotes, so a
+    store that held only the flat form would answer with no corrected attitude
+    for a record the classifier applies one from -- two products from one
+    document.  The baseline is stored under the same rule as the corrected
+    attitude, because it is gated against the observation the same way.
+
+    Parameters:
+        field: Which recorded matrix is written as a nesting.
+    """
+    document = metadata_document()
+    document['navigation_result']['pointing'] = {
+        field: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    }
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image[field] == [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+
+
+def test_a_matrix_of_nine_numbers_that_is_not_a_rotation_is_still_stored() -> None:
+    """Whether nine numbers are a rotation is the reader's question, not a column's.
+
+    Stored, the value is refused by the one validator both readers apply to
+    it; refused here, the row would look like a result that fitted a camera
+    rotation and the two paths would call the same record different things.
+    """
+    document = metadata_document()
+    document['navigation_result']['pointing'] = {
+        'cmatrix': [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
+    }
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image['cmatrix'] == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
+
+
+@pytest.mark.parametrize(
+    'value',
+    [
+        [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+        [[1.0, 0.0, 0.0], [0.0, 1.0], [0.0, 0.0, 1.0]],
+        [True] * 9,
+        ['1.0', '0.0', '0.0', '0.0', '1.0', '0.0', '0.0', '0.0', '1.0'],
+        'not a matrix',
+    ],
+    ids=['eight', 'ragged', 'booleans', 'strings', 'text'],
+)
+def test_a_matrix_no_reader_could_use_is_stored_as_nothing(value: Any) -> None:
+    """Nothing a reader would refuse is kept, so a stored value is always usable.
+
+    Parameters:
+        value: The recorded matrix under test.
+    """
+    document = metadata_document()
+    document['navigation_result']['pointing'] = {'cmatrix': value}
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image['cmatrix'] is None
+
+
+@pytest.mark.parametrize(
+    ('offset', 'expected'),
+    [
+        ([1.5, -2.5], (1.5, -2.5)),
+        (['1.5', '-2.5'], (1.5, -2.5)),
+        ([1, -2], (1.0, -2.0)),
+        ([1.5, -2.5, 9.0], (None, None)),
+        ([1.5], (None, None)),
+        ([True, False], (None, None)),
+        ([float('nan'), 1.0], (None, None)),
+    ],
+    ids=['pair', 'numeric-strings', 'integers', 'three', 'one', 'booleans', 'non-finite'],
+)
+def test_the_offset_column_holds_what_a_reader_would_apply(
+    offset: Any, expected: tuple[float | None, float | None]
+) -> None:
+    """Exactly the pair a consumer applies, and nothing where it applies none.
+
+    A store that took the first two of three would build a product on a
+    pointing nobody recorded; one that refused a pair the reader converts would
+    leave an index-backed run uncorrected where the document-backed one is
+    corrected.
+
+    Parameters:
+        offset: The recorded top-level offset.
+        expected: The ``(offset_dv, offset_du)`` the columns must hold.
+    """
+    document = metadata_document()
+    document['offset'] = offset
+    rows = rows_from_metadata(document, SOURCE)
+    assert (rows.image['offset_dv'], rows.image['offset_du']) == expected
+
+
 def test_a_document_with_no_pointing_stores_nulls() -> None:
     """An image that never navigated has no corrected attitude to record."""
     rows = rows_from_metadata(metadata_document(), SOURCE)

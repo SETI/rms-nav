@@ -108,6 +108,29 @@ identities -- so it is here to pin what the two paths do with a block that
 leaves no trace in a row.
 """
 
+FLOAT_FRAME_ID_POINTING: dict[str, Any] = {
+    'camera_frame_id': -82360.0,
+    'ck_frame_id': -82000.0,
+}
+"""A block whose only columned fields are identities written as floats.
+
+The columns are integer ones, so neither value survives ingest and the row
+records no block, exactly as for a block holding nothing columned at all.
+"""
+
+
+def nested(flat: list[float]) -> list[list[float]]:
+    """Rewrite nine row-major values as the 3x3 nesting of them.
+
+    Parameters:
+        flat: The nine values, row-major.
+
+    Returns:
+        Three rows of three.
+    """
+    return [flat[0:3], flat[3:6], flat[6:9]]
+
+
 OFFSET = [5.6005, 1.0788]
 """The navigated offset those attitudes were computed from."""
 
@@ -131,6 +154,15 @@ NO_TOP_LEVEL_STATUS_STUB = f'{VOLUME}/N113_1_CALIB'
 CAMERA_FRAME_ONLY_STUB = f'{VOLUME}/N114_1_CALIB'
 NO_STATUS_ERROR_STUB = f'{VOLUME}/N115_1_CALIB'
 SUCCESS_NO_OFFSET_KEY_STUB = f'{VOLUME}/N116_1_CALIB'
+OVER_LONG_OFFSET_STUB = f'{VOLUME}/N117_1_CALIB'
+NUMERIC_STRING_OFFSET_STUB = f'{VOLUME}/N118_1_CALIB'
+NESTED_ORIGINAL_STUB = f'{VOLUME}/N119_1_CALIB'
+NESTED_NOT_A_ROTATION_STUB = f'{VOLUME}/N120_1_CALIB'
+RAGGED_CMATRIX_STUB = f'{VOLUME}/N121_1_CALIB'
+UNSTORABLE_CMATRIX_ALONE_STUB = f'{VOLUME}/N122_1_CALIB'
+FLOAT_FRAME_ID_STUB = f'{VOLUME}/N123_1_CALIB'
+LITERAL_UNKNOWN_STATUS_STUB = f'{VOLUME}/N124_1_CALIB'
+NULL_STATUS_ERROR_STUB = f'{VOLUME}/N125_1_CALIB'
 UNNAVIGATED_STUB = f'{VOLUME}/N999_1_CALIB'
 """Stubs of the fixture tree; the last is deliberately never written."""
 
@@ -213,15 +245,70 @@ def _reason_tree() -> dict[str, dict[str, Any]]:
             pointing=POINTING,
         ),
         # A rotation written as a 3x3 nesting rather than as the nine row-major
-        # floats its producer writes.  The classifier accepts both shapes and
-        # ingest stores only the one the producer writes, which is the one
-        # record class whose product differs between the two paths.
+        # floats its producer writes.  Both shapes are read by the one function
+        # ingest stores rotations through, so the nesting reaches the index as
+        # the nine values it denotes and both paths apply the same attitude.
         NESTED_CMATRIX_STUB: document(
             NESTED_CMATRIX_STUB,
             offset=OFFSET,
             times=TIMES,
-            pointing={**POINTING, 'cmatrix': [CMATRIX[0:3], CMATRIX[3:6], CMATRIX[6:9]]},
+            pointing={**POINTING, 'cmatrix': nested(CMATRIX)},
         ),
+        # The baseline written the same way.  It is gated against the
+        # observation exactly as the corrected attitude is, so a store that
+        # read one shape for one matrix and both for the other would refuse
+        # through an index what it applies through a document.
+        NESTED_ORIGINAL_STUB: document(
+            NESTED_ORIGINAL_STUB,
+            offset=OFFSET,
+            times=TIMES,
+            pointing={**POINTING, 'cmatrix_original': nested(CMATRIX_ORIGINAL)},
+        ),
+        # A nesting of nine finite numbers that is not a rotation: stored like
+        # any other nine finite numbers, and refused by the validator both
+        # paths apply to what was stored.
+        NESTED_NOT_A_ROTATION_STUB: document(
+            NESTED_NOT_A_ROTATION_STUB,
+            offset=OFFSET,
+            times=TIMES,
+            pointing={**POINTING, 'cmatrix': [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]},
+        ),
+        # Three rows that are not three rows of three.  Read as an array this
+        # is not a matrix at all, and the shape reader refuses it before numpy
+        # is asked to make one of it.
+        RAGGED_CMATRIX_STUB: document(
+            RAGGED_CMATRIX_STUB,
+            offset=OFFSET,
+            times=TIMES,
+            pointing={**POINTING, 'cmatrix': [[1.0, 2.0, 3.0], [4.0, 5.0], [6.0, 7.0, 8.0]]},
+        ),
+        # A corrected attitude and a baseline neither storage can hold, in a
+        # block with no frame identities either, so the row records no block.
+        UNSTORABLE_CMATRIX_ALONE_STUB: document(
+            UNSTORABLE_CMATRIX_ALONE_STUB,
+            offset=OFFSET,
+            times=TIMES,
+            pointing={'cmatrix': 'not a matrix', 'cmatrix_original': 'not a matrix'},
+        ),
+        FLOAT_FRAME_ID_STUB: document(
+            FLOAT_FRAME_ID_STUB, offset=OFFSET, times=TIMES, pointing=FLOAT_FRAME_ID_POINTING
+        ),
+        # An offset of three numbers where the reader wants two.  Neither
+        # storage may take the first two of them: a pointing built from part of
+        # a recorded value is a pointing nobody recorded.
+        OVER_LONG_OFFSET_STUB: document(OVER_LONG_OFFSET_STUB, offset=[*OFFSET, 9.9]),
+        # An offset written as two numeric strings, which the reader converts
+        # and applies, so the index has to store what it converts them to.
+        NUMERIC_STRING_OFFSET_STUB: document(NUMERIC_STRING_OFFSET_STUB, offset=OFFSET),
+        # A document naming, as its own outcome, the word a document naming
+        # none is recorded as.  The two are one row, so both are reported as
+        # that word rather than one of them as nothing.
+        LITERAL_UNKNOWN_STATUS_STUB: document(
+            LITERAL_UNKNOWN_STATUS_STUB, status='unknown', offset=None
+        ),
+        # An unsuccessful outcome whose error field is present and null, which
+        # is a field naming no error just as an absent one is.
+        NULL_STATUS_ERROR_STUB: document(NULL_STATUS_ERROR_STUB, status='failed', offset=None),
         # A document naming no outcome of its own, beside a nested copy that
         # names one.  The ladder's first question is the top-level field, so a
         # column standing the nested one in for it would apply a corrected
@@ -241,7 +328,8 @@ def _reason_tree() -> dict[str, dict[str, Any]]:
         NO_STATUS_ERROR_STUB: document(NO_STATUS_ERROR_STUB, status='failed', offset=None),
         # A successful outcome carrying a usable attitude and no offset field.
         # No navigation writes it, since a result with no offset is never a
-        # success, and it is the one record whose product differs.
+        # success.  Both paths build the product the rest of the record
+        # supplies; only the name they give the offset shortfall differs.
         SUCCESS_NO_OFFSET_KEY_STUB: document(
             SUCCESS_NO_OFFSET_KEY_STUB, offset=OFFSET, times=TIMES, pointing=POINTING
         ),
@@ -255,6 +343,10 @@ def _reason_tree() -> dict[str, dict[str, Any]]:
     # Likewise made here: the factory writes the top-level status always, and
     # the nested copy of it is what the shape under test is about.
     del tree[NO_TOP_LEVEL_STATUS_STUB]['status']
+    # And likewise the values the factory's own types cannot express: an offset
+    # of two numeric strings, and an error field present and holding null.
+    tree[NUMERIC_STRING_OFFSET_STUB]['offset'] = [str(OFFSET[0]), str(OFFSET[1])]
+    tree[NULL_STATUS_ERROR_STUB]['status_error'] = None
     return tree
 
 
