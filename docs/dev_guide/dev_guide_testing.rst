@@ -125,17 +125,23 @@ tests need none of the archive environment above.
        technique, orchestrator, reproj, support).
    * - Results index on a server
        (``tests/spindoctor/results_index/test_postgres.py``,
-       ``tests/spindoctor/results_index/test_drop_postgres.py``)
+       ``tests/spindoctor/results_index/test_drop_postgres.py``,
+       ``tests/spindoctor/results_index/test_creating_open_postgres.py``)
      - postgres
      - PostgreSQL
      - The schema, the version gate, and the type discipline against a backend
-       that enforces them, rather than against SQLite's permissive typing; and
-       the questions only a server can be asked of a drop -- that it leaves
-       another owner's tables standing, including one named as the index names
-       its own; that a search path crossing schemas cannot make one drop span
-       two of them; that an emptied database is the same database as one nothing
-       was built in; and that a lock somebody else holds ends it rather than
-       hanging it.
+       that enforces them, rather than against SQLite's permissive typing; the
+       questions only a server can be asked of a drop -- that it leaves another
+       owner's tables standing, including one named as the index names its own;
+       that a search path crossing schemas cannot make one drop span two of
+       them; that an emptied database is the same database as one nothing was
+       built in; that a stamp column this account may not read costs the version
+       and not the drop; and that a lock somebody else holds ends it rather than
+       hanging it. And the questions only a server can be asked of a creating
+       open: that the schema it examines is the one the index resolves to rather
+       than the database around it, and that a table of one of the index's own
+       names in another schema of the search path is neither adopted nor built
+       around.
    * - Statistics programs on a server
        (``tests/spindoctor/cli/stats/test_postgres.py``, and the
        ``postgres``-marked tests of ``tests/spindoctor/cli/stats/**``)

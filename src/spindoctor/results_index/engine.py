@@ -41,7 +41,15 @@ import sqlalchemy
 from sqlalchemy.engine import URL, Engine
 
 from spindoctor.results_index.masking import masked_url, without_credentials
-from spindoctor.results_index.schema import METADATA, SCHEMA_META, SCHEMA_VERSION
+from spindoctor.results_index.schema import SCHEMA_META, SCHEMA_VERSION
+from spindoctor.results_index.scope import (
+    INDEX_TABLE_NAMES,
+    carries_the_stamp_marks,
+    creation_schema,
+    index_tables_in,
+    relations_in,
+    resolved_schema,
+)
 
 __all__ = ['SQLITE_BUSY_TIMEOUT_MS', 'open_database', 'open_index']
 
@@ -122,7 +130,8 @@ class _Access:
             because the file itself may be perfectly writable.
         absent_remedy: What to do about a SQLite path that is not there.  Empty
             for an access that creates one, which is never refused for it.
-        opening: What this access is opening, as a failure names it.  A drop is
+        opening: What this access is opening, as a failure names it, without an
+            article so that a message is free to supply its own.  A drop is
             pointed at databases that are not indexes, which is the whole of why
             it exists, so reporting that one of those "could not be opened as
             the results index" would name a fault of its own making.
@@ -136,7 +145,7 @@ class _Access:
     write_remedy: str = ''
     directory_remedy: str = ''
     absent_remedy: str = ''
-    opening: str = 'the results index'
+    opening: str = 'results index'
 
 
 _READING = _Access(
@@ -174,7 +183,7 @@ _DROPPING = _Access(
         'file, and removing it removes the index.'
     ),
     absent_remedy='Nothing was dropped.',
-    opening='the database',
+    opening='database',
 )
 """The drop: a database that is there is opened whatever it holds.
 
@@ -527,18 +536,130 @@ def _require_sqlite_readable(engine: Engine, url: str) -> None:
         ) from exc
 
 
-def _create_schema(engine: Engine) -> None:
+def _index_schema_refusal(url: str, schema: str, held: tuple[str, ...]) -> _IndexOpenError:
+    """Return the refusal for a schema an index may not be created in.
+
+    Two shapes reach this, and each is named for what it is.  A schema holding a
+    relation the index does not own is one that belongs to something else: the
+    index and its consumers own the schema they live in, so anything else in it
+    says the URL, or the search path behind it, names somewhere it should not.
+    A schema holding only relations of the index's own names, with no stamp of
+    SpinDoctor's over them, says nothing about whose they are: those names are
+    among the commonest there are, and a stamp written beside a stranger's table
+    would make it this index's for every later reading.
+
+    Parameters:
+        url: The URL as messages name it.
+        schema: The schema the index would have been created in.
+        held: Every relation that schema holds, sorted.
+
+    Returns:
+        The refusal to raise.
+    """
+    foreign = tuple(name for name in held if name not in INDEX_TABLE_NAMES)
+    if foreign:
+        return _IndexOpenError(
+            f'{url}: schema {schema} of this database holds table(s) the results index does '
+            f'not own ({", ".join(foreign)}), so no index was created in it and nothing was '
+            f'stamped. A results index owns the schema it lives in -- its own tables are the '
+            f'whole of what belongs there -- so a table SpinDoctor did not create in that '
+            f'schema means this URL, or the search path behind it, names a database or a '
+            f"schema other than the index's. Check the URL, or name an empty schema with "
+            f'options=-csearch_path=schemaname.'
+        )
+    return _IndexOpenError(
+        f'{url}: schema {schema} of this database holds table(s) the results index also uses '
+        f"({', '.join(held)}), but no schema_meta of SpinDoctor's stands over them, so "
+        f'nothing there says they are an index of ours. They are either tables somebody else '
+        f'created under names this index also uses, what an index whose stamp has gone left '
+        f'behind, or an index another ingest is building at this moment, and the database '
+        f'does not say which. No index was created and nothing was stamped, so they are '
+        f'exactly as they were. Check the URL; run this again if another ingest was building '
+        f'one; remove them by hand if they are an index of yours.'
+    )
+
+
+def _schema_to_create_in(engine: Engine, url: str) -> str:
+    """Return the schema an index may be created in, refusing one that is not ours.
+
+    An ingest never stamps a schema that already holds tables SpinDoctor did not
+    create.  The stamp is what every later reading takes as proof that the tables
+    beside it are the index's -- it is what the drop destroys on the strength of
+    -- so writing one over tables of unknown provenance is what makes a
+    stranger's table indistinguishable from ours.  The four answers:
+
+    - A schema holding nothing is created in and stamped.
+    - A schema carrying a stamp of SpinDoctor's is the index's own, whatever
+      version it is stamped with, and is left to the version gate to accept or
+      refuse.
+    - A schema holding relations of the index's own names with no such stamp is
+      refused, since a name is not evidence.  An index another ingest is part
+      way through building looks like this for as long as that takes, and is
+      answered the same way: running again once it has finished is what the
+      refusal says to do.
+    - A schema holding any relation the index does not own is refused, stamp or
+      no stamp.
+
+    The question is asked of one schema, not of the database: the one the index
+    resolves to, which is where a stamp of ours was found, or, for a database
+    that reaches no stamp at all, the one a table created without a schema name
+    lands in.  Every other schema of the database belongs to whoever made it and
+    is neither read nor named.
+
+    Parameters:
+        engine: The open engine.
+        url: The URL as messages name it.
+
+    Returns:
+        The schema to create the index in.
+
+    Raises:
+        ValueError: If that schema holds anything this did not create, or if the
+            connection reaches no schema a table could be created in.
+    """
+    with engine.connect() as connection:
+        schema = resolved_schema(connection)
+        if schema is None:
+            schema = creation_schema(connection)
+        if schema is None:
+            raise _IndexOpenError(
+                f'{url}: this connection reaches no schema a table can be created in, so '
+                f'there is nowhere to build a results index. Name a schema that exists with '
+                f'options=-csearch_path=schemaname, or create one on the server first.'
+            )
+        held = relations_in(connection, schema)
+        if not held:
+            return schema
+        if not carries_the_stamp_marks(connection, schema) or any(
+            name not in INDEX_TABLE_NAMES for name in held
+        ):
+            raise _index_schema_refusal(url, schema, held)
+    return schema
+
+
+def _create_schema(engine: Engine, schema: str) -> None:
     """Create every missing table and stamp the database with its version.
+
+    Every table is named with its schema, so a name this creates cannot resolve
+    through a search path onto a table of that name in another schema and be
+    built over it.  The whole of the index therefore lands in one schema, which
+    is the schema the drop later removes it from.
 
     Parameters:
         engine: The engine to create the schema in.
+        schema: The schema to create the tables in, from
+            :func:`_schema_to_create_in`.
     """
-    METADATA.create_all(engine)
+    bound = index_tables_in(schema)
+    stamp_table = bound[SCHEMA_META.name]
+    # Every table of that mapping shares one metadata container, which is what
+    # creates them together and in dependency order.
+    stamp_table.metadata.create_all(engine)
     with engine.begin() as connection:
-        stamped = connection.execute(sqlalchemy.select(SCHEMA_META.c.schema_version)).first()
+        stamped = connection.execute(sqlalchemy.select(stamp_table.c.schema_version)).first()
         if stamped is None:
             connection.execute(
-                SCHEMA_META.insert().values(
+                stamp_table.insert().values(
                     singleton=1,
                     schema_version=SCHEMA_VERSION,
                     created_utc=datetime.datetime.now(datetime.UTC).isoformat(),
@@ -619,9 +740,17 @@ def _sqlite_target(parsed: URL, url: str, access: _Access) -> Path | None:
         )
     path = _sqlite_path(parsed)
     if path is None:
+        if access.must_exist:
+            raise _IndexOpenError(
+                f'{url}: this URL names an in-memory SQLite database, which holds nothing '
+                f'when it is opened and is gone when it is closed, so nothing else can ever '
+                f'have written one. Name the database file itself. {access.absent_remedy}'
+            )
         return None
     if access.must_exist and not path.exists():
-        raise _IndexOpenError(f'{url}: there is no results index at {path}. {access.absent_remedy}')
+        raise _IndexOpenError(
+            f'{url}: there is no {access.opening} at {path}. {access.absent_remedy}'
+        )
     if access.writing:
         _require_writable_sqlite_database(path, url, access)
     return path
@@ -665,14 +794,20 @@ def _build_engine(url: str, access: _Access) -> Engine:
                 with engine.connect():
                     pass
             return engine
+        # Which schema to build in is settled before a column of the database is
+        # read, because a schema that is not this index's own is one whose
+        # columns are nobody's business here: reading a stamp out of a stranger's
+        # schema_meta first would answer a wrong URL with whatever that statement
+        # fell over rather than with the diagnosis.
+        schema = _schema_to_create_in(engine, safe_url) if access.creating else None
         # The stamped version is checked before anything is written: creating
         # this version's tables inside a database stamped with another version
         # would leave a mixture no single version number describes.
         stamped = _stamped_version(engine)
         if stamped is not None:
             _verify_schema_version(stamped, safe_url)
-        if access.creating:
-            _create_schema(engine)
+        if schema is not None:
+            _create_schema(engine, schema)
             stamped = _stamped_version(engine)
         # The gate a non-creating open is refused by.  Reached after the create
         # branch too, where it re-reads the row that branch has just written and
@@ -715,7 +850,7 @@ def _translated(url: str, access: _Access) -> Engine:
         # What it does name is the piece of the URL it stopped on, which is why
         # the quoted message is cleaned as well as the URL beside it.
         raise ValueError(
-            f'{masked_url(url)}: could not open {access.opening} '
+            f'{masked_url(url)}: could not open the {access.opening} '
             f'({type(exc).__name__}: {without_credentials(str(exc), url)}).'
         ) from exc
 
@@ -735,6 +870,20 @@ def open_index(url: str, *, create: bool = False) -> Engine:
     -- missing tables are created and the version row is written, and a database
     the filesystem will not let this user write is refused before anything is
     opened.
+
+    **A creating open never stamps a schema that already holds tables SpinDoctor
+    did not create.**  The tables go into one schema: the one a stamp of
+    SpinDoctor's was found in, or, for a database carrying no such stamp, the one
+    a table created without a schema name lands in.  That schema is created in
+    when it holds nothing, and gone on with when it carries a stamp of
+    SpinDoctor's, whatever version that stamp names.  It is refused when it holds
+    a table of one of the index's own names with no such stamp over it -- a name
+    is not evidence, and a stamp written beside a stranger's table would make it
+    this index's for every later reading -- and refused when it holds any table
+    the index does not own, stamp or no stamp, since a results index owns the
+    schema it lives in.  A refusal names the schema and the tables it found and
+    creates nothing, stamps nothing and leaves that schema exactly as it was.
+    Every other schema of the database is neither read nor named.
 
     Either way a database stamped with a different schema version is refused,
     naming both versions, because the index carries no migrations and rebuilding
@@ -764,8 +913,10 @@ def open_index(url: str, *, create: bool = False) -> Engine:
             refuses the file -- because its filesystem cannot honor write
             locking, or for any other cause it reports -- or the file cannot be
             written and ``create`` is true; if ``create`` is false and the
-            database or its ``schema_meta`` row does not exist; or if the
-            stamped schema version is not the one this code reads.
+            database or its ``schema_meta`` row does not exist; if ``create`` is
+            true and the schema the index resolves to holds tables no stamp of
+            SpinDoctor's stands over, or any table the index does not own; or if
+            the stamped schema version is not the one this code reads.
     """
     return _translated(url, _INGESTING if create else _READING)
 

@@ -622,7 +622,7 @@ def test_an_in_memory_database_that_cannot_be_opened_says_only_that(
         _refusing_with(_DriverError('unable to open database file', 'SQLITE_CANTOPEN')),
     )
     with pytest.raises(ValueError, match='could not open this database'):
-        open_index('sqlite://')
+        open_index('sqlite://', create=True)
 
 
 # ---------------------------------------------------------------------------

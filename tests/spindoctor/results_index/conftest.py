@@ -221,11 +221,12 @@ def postgres_decoy_schema() -> str:
 DECOY_TABLE = 'customers'
 """What the decoy schema holds: a table of a name the index never uses.
 
-Deliberately not one of the index's names.  A table called ``images`` in a
-schema the search path reaches is one ``MetaData.create_all`` finds and does not
-create, so an index built over such a path is built across two schemas -- which
-is a defect of the creating open rather than of these tests, and is tracked
-separately.  The tests that need that collision build it after the index exists.
+Deliberately not one of the index's own names, so that the decoy makes the
+search path longer than one entry without also making a bare ``images``
+resolve into it.  A creating open binds the schema it builds in and does not
+adopt a table of one of its names from anywhere else, and the drop reports
+every table of those names its connection reaches; the tests that need either
+of those build the collision themselves.
 """
 
 

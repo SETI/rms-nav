@@ -1193,6 +1193,11 @@ the messages and the exit status are the CLI's, in `spindoctor/cli/stats/drop.py
   list would be right on the day it was written; a test reads the statements the
   drop issues and asserts they are exactly those names, each qualified by the
   one schema.
+- **The six names in a stamped schema are six tables SpinDoctor created**,
+  because an ingest refuses to build an index in a schema holding anything it
+  did not create (below). That is what turns "the tables the drop removes" from
+  a claim about names into a claim about provenance, and it is what the user
+  guide's "nothing else in that schema is touched" rests on.
 - **The reading is what is dropped.** `drop_index_tables` takes the
   `IndexContents` the operator was shown rather than reading the database again,
   so the tables that go are the tables that were named in the question. Between
@@ -1289,14 +1294,47 @@ asked anything. On SQLite the busy timeout already bounds the same wait, and
 `BEGIN IMMEDIATE` is where it is met. The database itself decides, per table,
 instead of a guess deciding beforehand.
 
-**Known limit, tracked as #501.** `open_index(create=True)` resolves its
-table names through the search path as `MetaData.create_all` does, so a database
-whose search path reaches a schema holding a table of one of these names has
-that table adopted rather than a fresh one created. The drop does not produce such a
-state and does not act on one, but the creating open can still walk into one a
-person built. Binding every statement of the index -- the ingest's
-writes, the report's reads, the selection queries -- to one named schema is the
-fix, and it is a change to every query rather than to the drop.
+**What makes the drop's promise true is a rule on the creating open.** A drop
+that will not destroy a table on the strength of its name must not become
+willing because a stamp was found beside it, and `MetaData.create_all` defaults
+to `checkfirst=True`, so without a rule an ordinary ingest adopts an existing
+table of one of these names and stamps the schema over it. From then on nothing
+distinguishes that table from one SpinDoctor created. So an ingest never stamps
+a schema that already holds tables SpinDoctor did not create. The creating open
+resolves one schema -- the one a `schema_meta` of ours was found in, or, where
+there is none, the one an unqualified `CREATE TABLE` lands in -- and answers
+four ways:
+
+- The schema holds nothing: create the tables and stamp it.
+- The schema carries a stamp of SpinDoctor's: it is the index's own whatever
+  version that stamp names, and the version gate decides. This is the case
+  `--drop-index` exists for, so it must keep working for a stamp of any version;
+  the evidence is deliberately the two marks rather than the column set, since a
+  stamp of an older version has our tables with other columns.
+- The schema holds a table of one of the index's own names with no such stamp:
+  refuse. A name is not evidence, and a stamp written beside a stranger's table
+  would make it the index's for every later reading.
+- The schema holds any table the index does not own, stamped or not: refuse. The
+  index and its consumers own the schema they live in, so a foreign table means
+  the URL, or the search path behind it, names somewhere it should not.
+
+A refusal names the schema, the tables it found and the URL with its password
+hidden, creates nothing, stamps nothing and leaves the schema exactly as it was;
+the exit status is 1. The DDL is issued against that one schema by name, so a
+table of one of these names in another schema the search path reaches is neither
+adopted nor built around: the index is created whole in one schema, which is the
+schema the drop later removes it from. Only that schema is examined -- the rest
+of the database belongs to whoever made it and is neither read nor named.
+
+**What is left for #501.** The DDL names its schema; the queries beside it --
+the ingest's writes, `selection.py`, `roots.py` and the report's raw SQL -- still
+name their tables bare and let the server resolve them through the search path.
+Nothing can be adopted or destroyed through that any more, since the index is
+built whole in one schema and the drop removes it from that same one; what
+remains is that a table of one of these names created in an earlier schema of
+the path *after* the index was built would shadow the index's own for those
+queries. Binding `METADATA` to the resolved schema for every statement closes
+it, and it is a change to every query rather than to one command.
 
 ---
 
@@ -1368,10 +1406,11 @@ results-db URL.
 
 Introduce `spindoctor/results_index/` as a library package (not under
 `cli`; library consumers use it). Define the SQLAlchemy Core metadata for
-`images`, `techniques`, `feature_sources`, `schema_meta` and `ingest_runs`
-per sections 2.2-2.4; `open_index` with the `create` flag and version gate;
-the SQLite dialect events (WAL, `busy_timeout`, foreign keys, the
-lockability probe); and the missing-driver message for PostgreSQL URLs.
+`images`, `techniques`, `feature_sources`, `failed_files`, `schema_meta` and
+`ingest_runs` per sections 2.2-2.4; `open_index` with the `create` flag and
+the version gate; the SQLite dialect events (WAL, `busy_timeout`, foreign
+keys, the lockability probe); and the missing-driver message for PostgreSQL
+URLs.
 
 Declare `sqlalchemy` in `[project] dependencies` and the `postgres` extra in
 `[project.optional-dependencies]`. Add `environment` to

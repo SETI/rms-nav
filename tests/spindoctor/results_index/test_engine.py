@@ -30,7 +30,13 @@ from tests.spindoctor.results_index.conftest import (
     without_module,
 )
 
-from spindoctor.results_index import IMAGES, SCHEMA_META, SCHEMA_VERSION, open_index
+from spindoctor.results_index import (
+    IMAGES,
+    SCHEMA_META,
+    SCHEMA_VERSION,
+    open_database,
+    open_index,
+)
 
 MISSING_DRIVER_URL = 'postgresql+psycopg://user@localhost:5432/spindoctor'
 
@@ -164,8 +170,19 @@ def test_a_database_with_no_schema_meta_row_is_refused(tmp_path: Path) -> None:
 
 def test_an_in_memory_database_is_refused_by_a_consumer() -> None:
     """An in-memory URL starts empty every time, so it is never an index."""
-    with pytest.raises(ValueError, match='not a results index'):
+    with pytest.raises(ValueError, match='names an in-memory SQLite database'):
         open_index('sqlite://')
+
+
+def test_an_in_memory_database_is_refused_by_a_drop() -> None:
+    """Every connection to one makes a different empty database.
+
+    A drop answering "nothing to drop" over one would report the state of a
+    database that came into being to be asked and goes when the answer is
+    given.
+    """
+    with pytest.raises(ValueError, match='names an in-memory SQLite database'):
+        open_database('sqlite://')
 
 
 # ---------------------------------------------------------------------------

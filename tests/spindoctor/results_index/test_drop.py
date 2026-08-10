@@ -10,14 +10,22 @@ the database exactly as it was, on the backend whose driver would otherwise
 commit each ``DROP TABLE`` on its own.
 """
 
+import os
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 import sqlalchemy
-from tests.spindoctor.results_index.conftest import image_row, opened, sqlite_url_for
+from tests.spindoctor.results_index.conftest import (
+    exploding_factory,
+    image_row,
+    opened,
+    sqlite_url_for,
+)
 
 from spindoctor.results_index import (
+    FAILED_FILES,
     IMAGES,
     INGEST_RUNS,
     METADATA,
@@ -465,6 +473,133 @@ def test_a_stamp_carrying_the_marks_of_ours_is_evidence(tmp_path: Path) -> None:
         f'(singleton INTEGER PRIMARY KEY, schema_version INTEGER, whatever TEXT)',
     )
     assert _contents(url).schema == SQLITE_SCHEMA
+
+
+def test_a_stamp_carrying_only_the_version_mark_is_not_evidence(tmp_path: Path) -> None:
+    """One mark is what any migration table carries, so one mark is not the pair.
+
+    A ``schema_version`` column alone is the shape of every hand-rolled
+    migration table there is, and taking it as proof would let one of those
+    stand as the evidence a whole schema is emptied on.
+
+    Parameters:
+        tmp_path: Directory the database file is written into.
+    """
+    url = sqlite_url_for(tmp_path / 'other.sqlite3')
+    _execute(
+        url,
+        f'CREATE TABLE {SCHEMA_META.name} (schema_version INTEGER)',
+        f'CREATE TABLE {COLLIDING_TABLE} (id INTEGER)',
+    )
+    assert _contents(url).schema is None
+
+
+def test_a_stamp_carrying_only_the_singleton_mark_is_not_evidence(tmp_path: Path) -> None:
+    """Nor is the other one, so what is required is both of them together.
+
+    Parameters:
+        tmp_path: Directory the database file is written into.
+    """
+    url = sqlite_url_for(tmp_path / 'other.sqlite3')
+    _execute(
+        url,
+        f'CREATE TABLE {SCHEMA_META.name} (singleton INTEGER PRIMARY KEY)',
+        f'CREATE TABLE {COLLIDING_TABLE} (id INTEGER)',
+    )
+    assert _contents(url).schema is None
+
+
+def test_a_stamp_carrying_only_one_mark_drops_nothing(tmp_path: Path) -> None:
+    """The evidence gate decides what is dropped, not only what is reported.
+
+    Parameters:
+        tmp_path: Directory the database file is written into.
+    """
+    url = sqlite_url_for(tmp_path / 'other.sqlite3')
+    _execute(
+        url,
+        f'CREATE TABLE {SCHEMA_META.name} (schema_version INTEGER)',
+        f'CREATE TABLE {COLLIDING_TABLE} (id INTEGER)',
+    )
+    _dropped(url)
+    assert _table_names(url) == sorted([SCHEMA_META.name, COLLIDING_TABLE])
+
+
+def test_a_view_of_one_of_our_names_is_not_one_of_our_tables(tmp_path: Path) -> None:
+    """``DROP TABLE`` refuses a view, and a refusal takes the whole drop back.
+
+    A view of one of these names is therefore left out of what the drop counts
+    and removes, rather than counted in and then failed on halfway through.
+
+    Parameters:
+        tmp_path: Directory the index file is written into.
+    """
+    url = _built(tmp_path / 'index.sqlite3')
+    _execute(
+        url,
+        f'DROP TABLE {FAILED_FILES.name}',
+        f'CREATE VIEW {FAILED_FILES.name} AS SELECT 1 AS root_url',
+    )
+    assert FAILED_FILES.name not in [table.name for table in _contents(url).tables]
+
+
+def test_a_view_of_one_of_our_names_does_not_stop_the_drop(tmp_path: Path) -> None:
+    """The tables that are tables still go, and the view is left where it was.
+
+    Parameters:
+        tmp_path: Directory the index file is written into.
+    """
+    url = _built(tmp_path / 'index.sqlite3')
+    _execute(
+        url,
+        f'DROP TABLE {FAILED_FILES.name}',
+        f'CREATE VIEW {FAILED_FILES.name} AS SELECT 1 AS root_url',
+    )
+    _dropped(url)
+    assert _table_names(url) == []
+
+
+def test_an_index_whose_run_table_lost_a_column_is_still_read(tmp_path: Path) -> None:
+    """A stamp says which version wrote a database, not that nothing changed since.
+
+    The unfinished-run count is phrased in a column, and the count is the one
+    thing here that a column can take away.  Losing it costs the count and
+    nothing else: what the database holds is still reported, and the drop the
+    operator came for is still available.
+
+    Parameters:
+        tmp_path: Directory the index file is written into.
+    """
+    url = _built(tmp_path / 'index.sqlite3')
+    _execute(url, f'ALTER TABLE {INGEST_RUNS.name} RENAME COLUMN finished_utc TO finished_at')
+    assert _contents(url).unfinished_runs is None
+
+
+def test_an_index_whose_run_table_lost_a_column_still_reports_its_tables(
+    tmp_path: Path,
+) -> None:
+    """The count is what is withheld, not the account it was part of.
+
+    Parameters:
+        tmp_path: Directory the index file is written into.
+    """
+    url = _built(tmp_path / 'index.sqlite3')
+    _execute(url, f'ALTER TABLE {INGEST_RUNS.name} RENAME COLUMN finished_utc TO finished_at')
+    assert [table.name for table in _contents(url).tables] == list(index_table_names())
+
+
+def test_an_index_whose_run_table_lost_a_column_can_still_be_dropped(
+    tmp_path: Path,
+) -> None:
+    """It is a database every other program opens, so the drop may not be the one to refuse.
+
+    Parameters:
+        tmp_path: Directory the index file is written into.
+    """
+    url = _built(tmp_path / 'index.sqlite3')
+    _execute(url, f'ALTER TABLE {INGEST_RUNS.name} RENAME COLUMN finished_utc TO finished_at')
+    _dropped(url)
+    assert _table_names(url) == []
 
 
 def test_a_database_holding_part_of_a_schema_with_its_stamp_can_be_dropped(
@@ -966,8 +1101,22 @@ def test_a_sqlite_path_that_is_not_there_is_refused(tmp_path: Path) -> None:
     Parameters:
         tmp_path: Directory the path names a file in.
     """
-    with pytest.raises(ValueError, match='there is no results index at'):
+    with pytest.raises(ValueError, match='there is no database at'):
         open_database(sqlite_url_for(tmp_path / 'absent.sqlite3'))
+
+
+def test_the_absent_refusal_calls_it_a_database_rather_than_an_index(tmp_path: Path) -> None:
+    """The drop is pointed at databases that are not indexes, and says so.
+
+    Calling one of those "the results index" in the sentence that refuses it
+    would assert of it the very thing the drop was asked to find out.
+
+    Parameters:
+        tmp_path: Directory the path names a file in.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        open_database(sqlite_url_for(tmp_path / 'absent.sqlite3'))
+    assert 'results index' not in str(excinfo.value)
 
 
 def test_the_absent_refusal_says_nothing_was_dropped(tmp_path: Path) -> None:
@@ -992,37 +1141,73 @@ def test_a_refused_path_is_not_created(tmp_path: Path) -> None:
     assert not path.exists()
 
 
-def test_a_read_only_database_is_refused_before_a_table_goes(tmp_path: Path) -> None:
+@pytest.fixture
+def read_only_database(tmp_path: Path) -> Iterator[str]:
+    """Yield the URL of an index file this user will never be able to write.
+
+    Whether a mode of 444 forbids anything is asked of the filesystem rather
+    than assumed: the superuser writes such a file, and so does any filesystem
+    that records the mode without enforcing it, and a test that read the refusal
+    out of one of those would be asserting on something that had not happened.
+
+    Parameters:
+        tmp_path: Directory the index file is written into.
+
+    Yields:
+        The URL of the read-only index.
+    """
+    path = tmp_path / 'index.sqlite3'
+    url = _built(path)
+    path.chmod(0o444)
+    try:
+        if os.access(path, os.W_OK):
+            pytest.skip('this user can write a file whose mode forbids writing')
+        yield url
+    finally:
+        # The write-ahead log and the shared-memory index beside the database
+        # inherit its mode, so the directory is left as it was found only by
+        # restoring every one of them.
+        for made_read_only in path.parent.glob(f'{path.name}*'):
+            made_read_only.chmod(0o644)
+
+
+def test_a_read_only_database_is_refused_before_a_table_goes(read_only_database: str) -> None:
     """Refusing beats half-completing, so the question is asked at the open.
 
     Parameters:
-        tmp_path: Directory the index file is written into.
+        read_only_database: URL of an index file this user cannot write.
     """
-    path = tmp_path / 'index.sqlite3'
-    url = _built(path)
-    path.chmod(0o444)
-    try:
-        with pytest.raises(ValueError, match='dropping the index has to write it'):
-            open_database(url)
-    finally:
-        path.chmod(0o644)
+    with pytest.raises(ValueError, match='dropping the index has to write it'):
+        open_database(read_only_database)
 
 
-def test_the_read_only_refusal_does_not_prescribe_ingesting_a_copy(tmp_path: Path) -> None:
+def test_the_read_only_refusal_does_not_prescribe_ingesting_a_copy(
+    read_only_database: str,
+) -> None:
     """The remedy is per operation: a copy answers nothing for a drop.
 
     Parameters:
-        tmp_path: Directory the index file is written into.
+        read_only_database: URL of an index file this user cannot write.
     """
-    path = tmp_path / 'index.sqlite3'
-    url = _built(path)
-    path.chmod(0o444)
-    try:
-        with pytest.raises(ValueError) as excinfo:
-            open_database(url)
-    finally:
-        path.chmod(0o644)
+    with pytest.raises(ValueError) as excinfo:
+        open_database(read_only_database)
     assert 'Ingest a writable copy' not in str(excinfo.value)
+
+
+def test_a_failure_nobody_enumerated_calls_it_a_database_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The catch-all names what was being opened, and a drop was not opening an index.
+
+    Parameters:
+        tmp_path: Directory the index file is written into.
+        monkeypatch: Fixture the failing engine factory is installed through.
+    """
+    url = _built(tmp_path / 'index.sqlite3')
+    monkeypatch.setattr(sqlalchemy, 'create_engine', exploding_factory)
+    with pytest.raises(ValueError, match='could not open the database') as excinfo:
+        open_database(url)
+    assert 'results index' not in str(excinfo.value)
 
 
 def test_a_url_no_driver_reads_is_refused_as_a_value_error() -> None:

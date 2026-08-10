@@ -54,9 +54,6 @@ the wrong one for a test; what is under test is that a bound applies at all, and
 that the drop gives the table up rather than waiting on it forever.
 """
 
-SERVER_DEFAULT_LOCK_TIMEOUT = '0'
-"""What ``lock_timeout`` reads as on a connection nothing has set it on."""
-
 
 def _schema_tables(server_url: str, schema: str) -> list[str]:
     """Return every table of one schema, whoever created it.
@@ -329,6 +326,107 @@ def test_such_a_database_names_the_tables_it_could_not_account_for(postgres_url:
     assert contents.unproven == (COLLIDING_TABLE,)
 
 
+RESTRICTED_PASSWORD = 'ri-restricted-role'
+"""Password of the role that may read one column of the stamp and not the other."""
+
+
+@pytest.fixture
+def restricted_url(
+    postgres_url: str, postgres_server_url: str, postgres_schema: str
+) -> Iterator[str]:
+    """Yield a URL onto an index whose stamp column this account may not read.
+
+    A schema version is read out of one column of one table, and a column is
+    something an account can be allowed part of.  Reaching that state needs a
+    second role, since the role that owns the tables is allowed everything by
+    definition; a server that will not let this test make one is one the
+    question cannot be put to, and the test says so rather than passing.
+
+    Parameters:
+        postgres_url: URL the index's tables are created through.
+        postgres_server_url: URL of the server, unscoped.
+        postgres_schema: Name of the schema the tables live in.
+
+    Yields:
+        The same scoped URL, connecting as the restricted role.
+    """
+    _execute(
+        postgres_url,
+        f'CREATE TABLE {SCHEMA_META.name} '
+        f'(singleton int primary key, schema_version int, created_utc text)',
+        f'INSERT INTO {SCHEMA_META.name} VALUES (1, {SCHEMA_VERSION}, now()::text)',
+        f'CREATE TABLE {IMAGES.name} (root_url text)',
+        f"INSERT INTO {IMAGES.name} VALUES ('file:///data/nav-results')",
+    )
+    role = f'ri_reader_{uuid.uuid4().hex[:16]}'
+    admin = sqlalchemy.create_engine(postgres_server_url, isolation_level='AUTOCOMMIT')
+    try:
+        try:
+            with admin.connect() as connection:
+                connection.exec_driver_sql(
+                    f'CREATE ROLE "{role}" LOGIN PASSWORD \'{RESTRICTED_PASSWORD}\''
+                )
+        except sqlalchemy.exc.SQLAlchemyError:
+            pytest.skip('this account may not create a role on this server')
+        try:
+            with admin.connect() as connection:
+                connection.exec_driver_sql(f'GRANT USAGE ON SCHEMA "{postgres_schema}" TO "{role}"')
+                connection.exec_driver_sql(
+                    f'GRANT SELECT ON "{postgres_schema}".{IMAGES.name} TO "{role}"'
+                )
+                connection.exec_driver_sql(
+                    f'GRANT SELECT (singleton) ON "{postgres_schema}".{SCHEMA_META.name} '
+                    f'TO "{role}"'
+                )
+            yield (
+                sqlalchemy.engine.make_url(postgres_url)
+                .set(username=role, password=RESTRICTED_PASSWORD)
+                .render_as_string(hide_password=False)
+            )
+        finally:
+            with admin.connect() as connection:
+                connection.exec_driver_sql(f'DROP OWNED BY "{role}"')
+                connection.exec_driver_sql(f'DROP ROLE "{role}"')
+    finally:
+        admin.dispose()
+
+
+def test_a_stamp_this_account_may_not_read_is_reported_as_no_stamp(restricted_url: str) -> None:
+    """A version that will not come out of a database is a version it does not have.
+
+    The read is taken inside a savepoint, because a statement PostgreSQL refuses
+    ends the transaction around it, and every later reading of this account
+    would then fail with the first failure's shadow instead of answering.
+
+    Parameters:
+        restricted_url: URL onto an index whose stamp column is unreadable.
+    """
+    engine = open_database(restricted_url)
+    try:
+        assert index_contents(engine).schema_version is None
+    finally:
+        engine.dispose()
+
+
+def test_a_stamp_this_account_may_not_read_leaves_the_rest_of_the_account(
+    restricted_url: str,
+) -> None:
+    """The stamp is one line of the account, and the tables and their rows are the rest.
+
+    Parameters:
+        restricted_url: URL onto an index whose stamp column is unreadable.
+    """
+    engine = open_database(restricted_url)
+    try:
+        contents = index_contents(engine)
+    finally:
+        engine.dispose()
+    assert [(table.name, table.rows) for table in contents.tables] == [
+        (SCHEMA_META.name, 1),
+        (IMAGES.name, 1),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # A search path that crosses schemas
 # ---------------------------------------------------------------------------
@@ -339,9 +437,9 @@ def _index_behind_a_tenant(
 ) -> str:
     """Build the index, then put another tenant's ``images`` in front of it.
 
-    The order the reviewer's case has: an index built normally, and a search
-    path changed afterwards so that a bare ``images`` reaches somebody else's
-    table while a bare ``schema_meta`` still reaches ours.
+    The index is built normally, and the search path is changed afterwards, so
+    that a bare ``images`` reaches somebody else's table while a bare
+    ``schema_meta`` still reaches the index's own.
 
     Parameters:
         postgres_url: URL the index is built through.
@@ -652,8 +750,9 @@ def test_the_lock_bound_lasts_no_longer_than_the_drop(postgres_url: str) -> None
 
     A session-wide setting would work as well for the drop and would then ride
     the pooled connection into whatever ran on it next, silently bounding
-    statements nobody bounded.  What says the bound was local is that it is gone
-    once the drop's transaction has ended.
+    statements nobody bounded.  What says the bound was local is that the
+    setting reads the same after the drop's transaction has ended as it did
+    before it began, whatever this server's own setting happens to be.
 
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
@@ -662,12 +761,14 @@ def test_the_lock_bound_lasts_no_longer_than_the_drop(postgres_url: str) -> None
         pass
     engine = open_database(postgres_url)
     try:
+        with engine.connect() as connection:
+            before = connection.exec_driver_sql('SHOW lock_timeout').scalar()
         drop_index_tables(engine, index_contents(engine))
         with engine.connect() as connection:
             after = connection.exec_driver_sql('SHOW lock_timeout').scalar()
     finally:
         engine.dispose()
-    assert after == SERVER_DEFAULT_LOCK_TIMEOUT
+    assert after == before
 
 
 def test_a_drop_that_could_not_finish_leaves_every_table(

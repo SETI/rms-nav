@@ -45,6 +45,11 @@ import sqlalchemy
 from sqlalchemy.engine import Engine
 
 from spindoctor.results_index.schema import INGEST_RUNS, METADATA, SCHEMA_META, SCHEMA_VERSION
+from spindoctor.results_index.scope import (
+    carries_the_stamp_marks,
+    index_tables_in,
+    resolved_schema,
+)
 
 __all__ = [
     'DROP_LOCK_TIMEOUT_MS',
@@ -79,33 +84,6 @@ _POSTGRES_DIALECT = 'postgresql'
 
 _SQLITE_DIALECT = 'sqlite'
 """Dialect name of the SQLite driver."""
-
-_STAMP_MARKS = ('singleton', 'schema_version')
-"""Columns whose presence in a ``schema_meta`` says SpinDoctor wrote it.
-
-Two rather than the whole column set, because a stamp left by a schema whose
-columns differed from this one's is exactly the database a drop is pointed at,
-and requiring today's columns would withhold the drop from it.  Two rather than
-one, because the pair is idiosyncratic: a version column is what any migration
-table carries, and a constant-keyed ``singleton`` beside it is what this one
-does.
-"""
-
-_VISIBLE_SCHEMA_SQL = """
-SELECT n.nspname
-  FROM pg_catalog.pg_class c
-  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
- WHERE c.relname = :name
-   AND c.relkind IN ('r', 'p', 'f')
-   AND pg_catalog.pg_table_is_visible(c.oid)
-"""
-"""Which schema an unqualified table name resolves to on this connection.
-
-PostgreSQL resolves a bare name through the search path, and the catalog is the
-only thing that can say where it landed.  ``pg_table_is_visible`` is that rule
-itself, so at most one row comes back: the table the server would have reached,
-in the schema it lives in.
-"""
 
 
 @dataclass(frozen=True)
@@ -196,51 +174,6 @@ def index_table_names() -> tuple[str, ...]:
     return tuple(table.name for table in _drop_order())
 
 
-def _tables_of(schema: str) -> dict[str, sqlalchemy.Table]:
-    """Return every table the index owns, named in one schema explicitly.
-
-    The schema is rendered into every statement built from these, so nothing the
-    drop issues can resolve through a search path onto a table in another one.
-
-    Parameters:
-        schema: The schema the index's own stamp was found in.
-
-    Returns:
-        The tables, keyed by name.
-    """
-    metadata = sqlalchemy.MetaData(schema=schema)
-    return {table.name: table.to_metadata(metadata) for table in METADATA.sorted_tables}
-
-
-def _resolved_schema(connection: sqlalchemy.Connection) -> str | None:
-    """Return the schema an unqualified ``schema_meta`` resolves to.
-
-    The same resolution the rest of the system's statements get, asked once and
-    then written down, rather than repeated per table where two tables of these
-    names in two schemas would answer differently.
-
-    Parameters:
-        connection: An open connection to the database.
-
-    Returns:
-        The schema name, or None when this connection reaches no ``schema_meta``
-        at all.
-    """
-    if connection.dialect.name == _POSTGRES_DIALECT:
-        found = connection.execute(
-            sqlalchemy.text(_VISIBLE_SCHEMA_SQL), {'name': SCHEMA_META.name}
-        ).scalar()
-        return None if found is None else str(found)
-    # Every other backend this supports has one namespace per database, which
-    # the inspector names: "main" for SQLite.  Naming it rather than leaving it
-    # implicit is what keeps the two backends on one code path.
-    inspector = sqlalchemy.inspect(connection)
-    schema = inspector.default_schema_name
-    if schema is None or not inspector.has_table(SCHEMA_META.name, schema=schema):
-        return None
-    return schema
-
-
 def _index_schema(connection: sqlalchemy.Connection) -> str | None:
     """Return the schema this database's own results index lives in, if it has one.
 
@@ -252,18 +185,19 @@ def _index_schema(connection: sqlalchemy.Connection) -> str | None:
         marks, or None when this database offers no evidence of holding an
         index of ours.
     """
-    schema = _resolved_schema(connection)
+    schema = resolved_schema(connection)
     if schema is None:
         return None
-    columns = {
-        column['name']
-        for column in sqlalchemy.inspect(connection).get_columns(SCHEMA_META.name, schema=schema)
-    }
-    return schema if columns.issuperset(_STAMP_MARKS) else None
+    return schema if carries_the_stamp_marks(connection, schema) else None
 
 
 def _present_tables(connection: sqlalchemy.Connection, schema: str) -> tuple[sqlalchemy.Table, ...]:
     """Return the index's tables that this schema actually holds.
+
+    Tables only.  A view of one of these names is not a table this drops -- a
+    ``DROP TABLE`` refuses one, and refusing it in the middle of the drop would
+    take back the whole of it -- so it is left out of the account rather than
+    counted into a drop that could not then finish.
 
     Parameters:
         connection: An open connection to the database.
@@ -272,11 +206,9 @@ def _present_tables(connection: sqlalchemy.Connection, schema: str) -> tuple[sql
     Returns:
         The tables that are there, in drop order.
     """
-    inspector = sqlalchemy.inspect(connection)
-    bound = _tables_of(schema)
-    return tuple(
-        bound[name] for name in index_table_names() if inspector.has_table(name, schema=schema)
-    )
+    held = set(sqlalchemy.inspect(connection).get_table_names(schema=schema))
+    bound = index_tables_in(schema)
+    return tuple(bound[name] for name in index_table_names() if name in held)
 
 
 def _unproven_tables(connection: sqlalchemy.Connection) -> tuple[str, ...]:
@@ -365,6 +297,15 @@ def _unfinished_runs(
     the question is phrased in a column, and a column is exactly what a version
     is free to have changed.
 
+    The stamp is not proof of the column all the same, so the count is taken
+    inside a savepoint and every failure of it is answered as "the question
+    cannot be put to this database".  A stamp says which version wrote the
+    database, not that nothing has happened to it since, and a drop that
+    refused a database because one column of ``ingest_runs`` was not where the
+    stamp implied would refuse the database every other program opens without
+    complaint.  The savepoint is what keeps such a failure from ending the
+    transaction the rest of this account is read in.
+
     Parameters:
         connection: An open connection to the database.
         present: The index's tables that this database holds.
@@ -376,11 +317,15 @@ def _unfinished_runs(
     """
     if version != SCHEMA_VERSION or not any(table.name == INGEST_RUNS.name for table in present):
         return None
-    counted = connection.execute(
-        sqlalchemy.select(sqlalchemy.func.count())
-        .select_from(runs_table)
-        .where(runs_table.c.finished_utc.is_(None))
-    ).scalar()
+    try:
+        with connection.begin_nested():
+            counted = connection.execute(
+                sqlalchemy.select(sqlalchemy.func.count())
+                .select_from(runs_table)
+                .where(runs_table.c.finished_utc.is_(None))
+            ).scalar()
+    except (sqlalchemy.exc.SQLAlchemyError, TypeError, ValueError):
+        return None
     return 0 if counted is None else int(counted)
 
 
@@ -450,7 +395,11 @@ def index_contents(engine: Engine) -> IndexContents:
             be able to drop, and finding that out before anything is dropped is
             what keeps a refusal from becoming a half-finished drop.
     """
-    with engine.begin() as connection:
+    # A connection rather than a transaction that commits: this reads and writes
+    # nothing, and what it leaves behind on the server is a transaction rolled
+    # back rather than one committed.  The lock bound still applies, since the
+    # first statement opens the transaction ``SET LOCAL`` is scoped to.
+    with engine.connect() as connection:
         _bound_the_lock_wait(connection)
         schema = _index_schema(connection)
         if schema is None:
@@ -461,7 +410,7 @@ def index_contents(engine: Engine) -> IndexContents:
                 unfinished_runs=None,
                 unproven=_unproven_tables(connection),
             )
-        bound = _tables_of(schema)
+        bound = index_tables_in(schema)
         present = _present_tables(connection, schema)
         version = _stamp(connection, bound[SCHEMA_META.name])
         tables = tuple(
@@ -507,7 +456,7 @@ def drop_index_tables(engine: Engine, contents: IndexContents) -> tuple[str, ...
     """
     if contents.schema is None or not contents.tables:
         return ()
-    bound = _tables_of(contents.schema)
+    bound = index_tables_in(contents.schema)
     going = tuple(bound[table.name] for table in contents.tables)
     with engine.begin() as connection:
         _open_one_transaction(connection)

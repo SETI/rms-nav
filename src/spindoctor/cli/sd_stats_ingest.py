@@ -23,6 +23,12 @@ whole of the remedy.  It drops from one schema, the one this database's own
 stamp table was found in, and only after finding that stamp: a table called
 ``images`` is not evidence of anything.
 
+The two halves rest on one rule.  An ingest builds an index only in a schema
+that holds nothing, or one already carrying a stamp of SpinDoctor's, and refuses
+a schema holding a table it did not create -- so a stamp never comes to stand
+over somebody else's table, and the six names the drop removes from a stamped
+schema are six tables SpinDoctor created.
+
 One pass may also be spread over a queue of workers.  ``--output-cloud-tasks-file``
 lists each root once, removes the rows whose documents have left the tree, and
 writes out the shares for ``sd_stats_ingest_cloud_tasks`` to read; when those
@@ -113,7 +119,12 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         help="""Connection URL of the results index to write (a sqlite: URL
         naming a local path, or a postgresql+psycopg: URL naming a server);
         overrides NAV_RESULTS_DB and the environment.results_db configuration
-        variable. The tables are created if they are absent.""",
+        variable. The tables are created if they are absent, in the schema this
+        database's own schema_meta stamp was found in or, where there is no such
+        stamp, the one a table created without a schema name lands in. That
+        schema is refused, and nothing is created or stamped in it, when it
+        already holds any table the index does not own or any table of the
+        index's own names that no stamp of ours stands over.""",
     )
 
     ingest_group = cmdparser.add_argument_group('Ingest')
@@ -133,21 +144,24 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         default=False,
         help="""Remove the results index's own tables from the database
         --results-db names, and stop: no results root is read and no document is
-        ingested. The tables go from the one schema this database's own
-        schema_meta stamp was found in, and nothing else in that schema, and no
-        other schema, is touched; a database holding none of those tables is
-        left alone and said to be, and one holding tables of those names that no
-        stamp of ours stands over is refused. Refused together with --force,
-        --nav-results-root and either cloud-tasks mode, none of which this
-        does.""",
+        ingested. The tables that go are the index's own six names, from the one
+        schema this database's own schema_meta stamp was found in; no other
+        table of that schema, and no other schema, is touched. What makes those
+        six SpinDoctor's own is that an ingest refuses to build an index in a
+        schema holding anything it did not create, so a schema carrying that
+        stamp holds this index and nothing else. A database holding none of
+        those tables is left alone and said to be, and one holding tables of
+        those names that no stamp of ours stands over is refused. Refused
+        together with --force, --nav-results-root and either cloud-tasks mode,
+        none of which this does.""",
     )
     drop_group.add_argument(
         '--yes',
         action='store_true',
         default=False,
         help="""Drop without asking for confirmation, for a run with nobody at
-        the terminal. Meaningful only with --drop-index, which is the only thing
-        this program asks about.""",
+        the terminal. Refused without --drop-index, which is the only thing this
+        program asks about.""",
     )
 
     cloud_group = cmdparser.add_argument_group('Cloud tasks')

@@ -21,6 +21,11 @@ spindoctor.results_index
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.results_index.scope
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.results_index.drop
    :members:
    :undoc-members:

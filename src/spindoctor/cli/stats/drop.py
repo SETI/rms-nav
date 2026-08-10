@@ -248,6 +248,13 @@ def _nothing_of_ours(safe_url: str, contents: IndexContents, logger: PdsLogger) 
     or what is left of an index whose stamp has gone, and nothing in the
     database says which.
 
+    The first of the two is reported as a fact about this connection rather than
+    about the database.  What was asked is what an unqualified name on this
+    connection reaches, so an index in a schema outside its search path, or in
+    one this account may not look into, answers the same way as one that is not
+    there.  The status is 0 all the same, because the state asked for -- no
+    index reachable through this URL -- is the state found.
+
     Parameters:
         safe_url: The index URL with its credentials already masked.
         contents: What the database holds of the index, proving nothing.
@@ -259,9 +266,11 @@ def _nothing_of_ours(safe_url: str, contents: IndexContents, logger: PdsLogger) 
     """
     if not contents.unproven:
         logger.info(
-            '%s holds none of the results index tables, so nothing was dropped. An index '
-            'that is not there and one that has been dropped are the same thing to every '
-            'program that reads one.',
+            'This connection to %s reaches none of the results index tables, so nothing was '
+            'dropped. What was looked at is what the connection reaches: an index in a schema '
+            'outside its search path, or one this account may not look into, is not reported '
+            'here and is not what was dropped. An index that is not there and one that has '
+            'been dropped are the same thing to every program that reads one.',
             safe_url,
         )
         return 0
@@ -286,6 +295,12 @@ def drop_results_index(url: str, *, assume_yes: bool, logger: PdsLogger) -> int:
     thing a reader has to check: which of the three resolution levels supplied
     the URL, and which URL it was.
 
+    No step of this answers an interrupt with a traceback.  Opening the
+    database, reading what it holds and dropping the tables can each wait on
+    something -- a server, a lock, a scan of a large table -- and Ctrl-C during
+    any of them is reported as the refusal it is, naming which step stopped and
+    saying that nothing went.
+
     Parameters:
         url: Connection URL of the index to drop.
         assume_yes: Whether to drop without asking.  A run with nobody at the
@@ -299,7 +314,8 @@ def drop_results_index(url: str, *, assume_yes: bool, logger: PdsLogger) -> int:
         database held none of them, since an index that is already gone is the
         state asked for; 1 when the database could not be opened or read, when
         it holds tables of these names that nothing proves are the index's, when
-        a table would not drop, and when the operator answered anything but yes.
+        a table would not drop, when the operator answered anything but yes, and
+        when any step of it was interrupted.
     """
     safe_url = masked_url(url)
     logger.info('Results index to drop the tables of: %s', safe_url)
@@ -307,6 +323,9 @@ def drop_results_index(url: str, *, assume_yes: bool, logger: PdsLogger) -> int:
         engine = open_database(url)
     except ValueError as exc:
         logger.fatal('Cannot open the database to drop the results index from: %s', exc)
+        return 1
+    except KeyboardInterrupt:
+        logger.fatal('Nothing was dropped from %s: opening it was interrupted.', safe_url)
         return 1
     try:
         # Said before rather than after, because reading it counts the rows of
@@ -324,6 +343,17 @@ def drop_results_index(url: str, *, assume_yes: bool, logger: PdsLogger) -> int:
                 type(exc).__name__,
                 exc,
                 _because(exc),
+            )
+            return 1
+        except KeyboardInterrupt:
+            # The reading is the step that can run for minutes, so it is the
+            # step most likely to be interrupted, and a destructive command owes
+            # an interrupt the same line every other refusal gets rather than a
+            # traceback.  Nothing had been dropped yet, which is what the line
+            # says.
+            logger.fatal(
+                'Nothing was dropped from %s: the reading of what it holds was interrupted.',
+                safe_url,
             )
             return 1
         if contents.schema is None:
@@ -364,6 +394,17 @@ def drop_results_index(url: str, *, assume_yes: bool, logger: PdsLogger) -> int:
                 type(exc).__name__,
                 exc,
                 _because(exc),
+            )
+            return 1
+        except KeyboardInterrupt:
+            # An interrupt while the drop waits on a lock is the one way this
+            # step ends without a database error, and it is the moment at which
+            # the reassurance matters most: the transaction is taken back on
+            # both backends, so nothing of the index has gone.
+            logger.fatal(
+                'The drop of %s was interrupted. The transaction was taken back, so that '
+                'database is exactly as it was.',
+                safe_url,
             )
             return 1
         logger.info('Dropped from %s, schema %s: %s', safe_url, contents.schema, ', '.join(dropped))
