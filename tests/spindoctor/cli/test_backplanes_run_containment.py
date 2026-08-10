@@ -157,6 +157,49 @@ def test_the_run_says_what_went_wrong_with_it(
     assert 'the record is shaped like a defect' in log_text
 
 
+def test_the_run_records_the_traceback_of_an_unexpected_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An image can fail before it has a log of its own, leaving this the only account.
+
+    The pointing lookup and the observation setup both run before the stage
+    opens the image's log, so a defect in either is diagnosable only from what
+    the run's log kept.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    log_text = _run_with(tmp_path, monkeypatch, _failing_first([]))
+    assert 'Traceback (most recent call last)' in log_text
+
+
+def test_that_traceback_names_the_frame_that_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The message alone does not say where it came from, which is what a traceback is for.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    log_text = _run_with(tmp_path, monkeypatch, _failing_first([]))
+    assert 'in stage' in log_text
+
+
+def test_that_traceback_names_the_exception_class(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two failures can carry the same message and differ only in their type.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    log_text = _run_with(tmp_path, monkeypatch, _failing_first([]))
+    assert 'ValueError: the record is shaped like a defect' in log_text
+
+
 def test_the_closing_summary_counts_the_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

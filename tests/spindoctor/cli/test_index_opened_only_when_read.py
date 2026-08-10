@@ -14,6 +14,7 @@ things in rather than a restatement of it.
 """
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from tests.spindoctor.cli.conftest import backplane_argv, mosaic_argv, run_program
@@ -62,11 +63,43 @@ def _mosaic_argv(tmp_path: Path, *flags: str) -> list[str]:
     return mosaic_argv(tmp_path, _absent_index(tmp_path), '--no-log-main-to-file', *flags)
 
 
+def _urls_asked_for(module: Any, monkeypatch: pytest.MonkeyPatch) -> list[str | None]:
+    """Record the index each source the program builds is asked to open.
+
+    Asserting on the recorded list rather than on the run merely completing:
+    "no index was opened" and "an index was opened and its failure swallowed"
+    both look like a run that finished, and the second is the regression.
+
+    Parameters:
+        module: The dispatch module whose source construction is watched.
+        monkeypatch: Patcher, which reverts after the test.
+
+    Returns:
+        The list the spy appends to, one entry per call, holding the URL that
+        call was given.
+    """
+    urls: list[str | None] = []
+    real = module.build_pointing_source
+
+    def spy(nav_results_root: Any, *, results_db_url: str | None = None) -> Any:
+        urls.append(results_db_url)
+        return real(nav_results_root, results_db_url=results_db_url)
+
+    monkeypatch.setattr(module, 'build_pointing_source', spy)
+    return urls
+
+
 def test_a_backplane_dry_run_does_not_open_the_index(
     tmp_path: Path, datasetless: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A dry run says what it would do and reads no navigation record."""
+    """A dry run says what it would do and reads no navigation record.
+
+    It returns before building a source at all, so nothing is asked of the
+    index and no root has to be resolved either.
+    """
+    urls = _urls_asked_for(sd_backplanes, monkeypatch)
     run_program(sd_backplanes, _backplane_argv(tmp_path, '--dry-run'), monkeypatch)
+    assert urls == []
 
 
 def test_a_backplane_run_that_does_read_records_still_fails_on_that_index(
@@ -77,18 +110,40 @@ def test_a_backplane_run_that_does_read_records_still_fails_on_that_index(
         run_program(sd_backplanes, _backplane_argv(tmp_path), monkeypatch)
 
 
+def test_a_backplane_run_that_does_read_records_is_given_that_index(
+    tmp_path: Path, datasetless: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And is given the resolved URL, which is what makes the dry run's silence mean something.
+
+    A program that never passed the URL on would satisfy the dry-run assertion
+    for the wrong reason.
+    """
+    urls = _urls_asked_for(sd_backplanes, monkeypatch)
+    with pytest.raises(ValueError, match='sd_stats_ingest'):
+        run_program(sd_backplanes, _backplane_argv(tmp_path), monkeypatch)
+    assert urls == [_absent_index(tmp_path)]
+
+
 def test_a_mosaic_run_that_skips_reprojection_does_not_open_the_index(
     tmp_path: Path, datasetless: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The mosaic pass builds from reprojections on disk and looks nothing up."""
+    """The mosaic pass builds from reprojections on disk and looks nothing up.
+
+    It still builds a source, because the pass is handed one either way; what
+    it must not do is name the index to it.
+    """
+    urls = _urls_asked_for(sd_mosaic, monkeypatch)
     run_program(sd_mosaic, _mosaic_argv(tmp_path, '--skip-reproject'), monkeypatch)
+    assert urls == [None]
 
 
 def test_a_mosaic_dry_run_does_not_open_the_index(
     tmp_path: Path, datasetless: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Nor does a dry run, which stops before every per-image lookup."""
+    urls = _urls_asked_for(sd_mosaic, monkeypatch)
     run_program(sd_mosaic, _mosaic_argv(tmp_path, '--dry-run', '--skip-mosaic'), monkeypatch)
+    assert urls == [None]
 
 
 def test_a_mosaic_run_that_does_reproject_still_fails_on_that_index(
@@ -97,3 +152,17 @@ def test_a_mosaic_run_that_does_reproject_still_fails_on_that_index(
     """The control: the reprojection pass is the reader, so it refuses the index."""
     with pytest.raises(ValueError, match='sd_stats_ingest'):
         run_program(sd_mosaic, _mosaic_argv(tmp_path, '--skip-mosaic'), monkeypatch)
+
+
+def test_a_mosaic_run_that_does_reproject_is_given_that_index(
+    tmp_path: Path, datasetless: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same control for the two mosaic modes above, which pass on no URL.
+
+    Both would be satisfied by a program that had stopped resolving the option
+    at all; only a reading pass that is handed it separates the two.
+    """
+    urls = _urls_asked_for(sd_mosaic, monkeypatch)
+    with pytest.raises(ValueError, match='sd_stats_ingest'):
+        run_program(sd_mosaic, _mosaic_argv(tmp_path, '--skip-mosaic'), monkeypatch)
+    assert urls == [_absent_index(tmp_path)]

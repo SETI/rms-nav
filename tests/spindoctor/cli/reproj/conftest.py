@@ -271,8 +271,12 @@ def document(stub: str, **overrides: Any) -> dict[str, Any]:
     return metadata_document(image_name=f'{name}.IMG', **overrides)
 
 
-def _reason_tree() -> dict[str, dict[str, Any]]:
+def reason_tree() -> dict[str, dict[str, Any]]:
     """Build one document per classification the two sources must agree about.
+
+    A fresh tree of fresh documents per call, rather than one shared mapping:
+    every document here is mutable, and a test that edited a nested one would
+    otherwise change what every later test in the run was given.
 
     Returns:
         Results path stub mapped to the document recorded there.
@@ -501,10 +505,6 @@ def _reason_tree() -> dict[str, dict[str, Any]]:
     return tree
 
 
-REASON_TREE = _reason_tree()
-"""The fixture tree, one document per classification under test."""
-
-
 @pytest.fixture
 def quiet_ingest_logger() -> pdslogger.PdsLogger:
     """Return a logger that keeps ingest chatter out of the test output.
@@ -560,7 +560,7 @@ def sources(
         ``'index'``, both answering for the same root.
     """
     root = tmp_path / 'nav'
-    build_tree(root, REASON_TREE)
+    build_tree(root, reason_tree())
     engine = index_for([root], tmp_path / 'index.sqlite3', logger=quiet_ingest_logger)
     try:
         yield {

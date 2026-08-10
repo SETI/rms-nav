@@ -36,6 +36,13 @@ pointing block, a failed gate) is also warned to the run log here, since it
 means the same thing at every call site.  A cloud-task worker has no run
 log, so its caller returns the counts and a per-reason tally in the task
 result instead.
+
+One member of that reason vocabulary is not a degradation at all:
+``pool_already_corrected`` says the furnished kernels already answer the
+corrected attitude, so the observation is right and nothing was applied to it.
+It carries a reason because the tally is per reason and an outcome that is not
+the clean C-matrix application has to be nameable, not because there is
+anything short about it.
 """
 
 import enum
@@ -517,7 +524,7 @@ def load_pointing_if_any(
         )
         return none_selection('metadata_not_an_object')
 
-    return select_pointing(nav_metadata, subject=str(image_file.image_file_url))
+    return select_pointing(nav_metadata, subject=image_file.image_file_url.as_posix())
 
 
 def apply_pointing_to_obs(

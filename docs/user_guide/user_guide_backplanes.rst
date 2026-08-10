@@ -81,10 +81,11 @@ Common flags:
   database row instead of one file, which on a cloud results root replaces a
   round trip per image with a query. The index must already hold a completed
   ingest of the root named by ``--nav-results-root``, and the rows it holds are
-  a snapshot of the tree as of that ingest. Without this option the navigation
-  results tree is read directly, which is the default. Pass
-  ``--results-db none`` to read the files on a machine that sets the option
-  through configuration or through ``NAV_RESULTS_DB``.
+  a snapshot of the tree as of that ingest. Omitting the option names no index,
+  which is the default: the navigation results tree is read directly.
+  ``--results-db none`` names no index either, which is how a machine that sets
+  the option through configuration or through ``NAV_RESULTS_DB`` reads the
+  files.
 - Dataset selection flags are the same as for ``sd_offset`` (see
   :doc:`user_guide_navigation`).
 
@@ -218,8 +219,11 @@ that caused each skip.
 
 One image that cannot be processed does not end the run. Backplane generation
 is per-image work, so a failure is reported against that image, counted, and
-the next image is attempted; the traceback goes into that image's own log. The
-pass ends with a summary line counting what became of every image::
+the next image is attempted. The run's log carries the image, the message and
+the traceback — an image can fail before it has a log of its own, and then the
+run's log is the only account of it — and that image's own log carries the
+traceback too whenever the failure got as far as opening one. The pass ends
+with a summary line counting what became of every image::
 
    Backplane pass complete: 143 done, 4 skipped, 1 failed
 

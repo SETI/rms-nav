@@ -98,7 +98,7 @@ def _navigated_record(
     """
     original = some_attitude()
     solution = _build_pointing_solution(
-        synthetic_baseline(original, flip),
+        synthetic_baseline(original, oops_from_spice=flip),
         synthetic_fov(),
         offset_px=offset_px,
         rotation_fitted=False,
@@ -366,24 +366,36 @@ def test_a_malformed_record_is_refused(
 
 
 @pytest.mark.parametrize(
-    'bad_midtime',
-    [math.nan, None, True],
+    ('bad_midtime', 'match'),
+    [
+        (math.nan, 'midtime_et is not finite'),
+        (None, 'midtime_et is not a real number'),
+        (True, 'midtime_et is not a real number'),
+    ],
     ids=['nan', 'none', 'bool'],
 )
-def test_a_malformed_midtime_is_refused(monkeypatch: pytest.MonkeyPatch, bad_midtime: Any) -> None:
+def test_a_malformed_midtime_is_refused(
+    monkeypatch: pytest.MonkeyPatch, bad_midtime: Any, match: str
+) -> None:
     """A midtime the gate cannot compare against is refused, never waved through.
 
     A NaN ``midtime_et`` makes the gate's inequality false both ways, which
     would silently defeat the one check that ties the record to this
     observation; it is refused as malformed before the gate runs.
 
+    Each case carries the refusal it must produce, because the three reach two
+    different gates: a NaN is a real number and fails only the finiteness
+    check.  Matching on the field name alone would accept a reader that had
+    dropped that check while keeping the type check.
+
     Parameters:
         bad_midtime: The unusable midtime to plant.
+        match: The refusal message expected for it.
     """
     cmatrix, original, c_oops = _navigated_record(_CASSINI_FLIP)
     obs = _FrameOnlyObs(c_oops)
     _inject_identity(monkeypatch, _CASSINI_FLIP)
-    with pytest.raises(NavPointingError, match='midtime_et') as info:
+    with pytest.raises(NavPointingError, match=match) as info:
         apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, bad_midtime)
     assert info.value.reason == MALFORMED_POINTING
 

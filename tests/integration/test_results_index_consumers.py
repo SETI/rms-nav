@@ -22,7 +22,7 @@ import math
 import os
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pdslogger
@@ -216,7 +216,8 @@ def _backplane_planes(
         write_output_files=True,
     )
     planes: dict[str, np.ndarray] = {}
-    with fits.open(Path(str(backplane_root)) / f'{image_id}_backplanes.fits') as hdul:
+    product = backplane_root / f'{image_id}_backplanes.fits'
+    with fits.open(cast(Path, product.retrieve())) as hdul:
         for hdu in hdul[1:]:
             planes[str(hdu.name)] = np.asarray(hdu.data, np.float64)
     return result, planes

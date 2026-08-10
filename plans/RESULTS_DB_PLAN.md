@@ -917,7 +917,7 @@ against is taken from the observation.
 **Ingest fills those columns through the readers' own functions.** The domain
 of every value a consumer classifies a record from lives in
 `spindoctor/support/nav_record.py` -- `record_status`, `record_status_error`,
-`record_offset` and `record_rotation_values` -- and both the readers and
+`record_offset`, `record_rotation_matrix` and `finite_float` -- and both the readers and
 `ingest_rows` call it. The invariant is that every value a reader can use is
 stored, in the form the reader reads it as, and nothing else is stored, so a
 record rebuilt from the columns classifies exactly as its document does. A
@@ -1544,9 +1544,11 @@ Details settled during execution:
   introduced, whose own contract says a caller reports it against one image.
   Backplane generation is per-image work with no cross-image state, so the
   driver reports the failure against the image, counts it, and goes on, closing
-  the pass with a done/skipped/failed summary. The traceback is written into
-  that image's own log by the stage, inside the window where that log is
-  attached.
+  the pass with a done/skipped/failed summary. The run's log carries the
+  traceback as well as the image and the message, because the failures the
+  broad catch exists for include ones raised before the image has a log of its
+  own -- the pointing lookup, the observation setup -- and for those the run log
+  is the only account there is.
 - **The backplanes driver logs its command line through
   `log_run_environment`** rather than directly, which is the one place a
   connection URL on a command line is masked and is what every other driver

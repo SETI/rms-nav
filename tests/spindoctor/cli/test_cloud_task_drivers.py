@@ -359,7 +359,6 @@ def test_an_offset_fallback_is_tallied_but_not_uncorrected(
     no correction at all.
     """
     nav_root = FCPath(tmp_path) / 'nav'
-    Path((nav_root / 'COISS_2001').as_posix()).mkdir(parents=True, exist_ok=True)
     (nav_root / 'COISS_2001' / 'N1234567890_1_metadata.json').write_text(
         json.dumps({'status': 'success', 'offset': [1.0, -2.0]})
     )
@@ -378,7 +377,6 @@ def test_a_missing_offset_key_is_counted_not_fatal(
     did would build one product from a document and another from its row.
     """
     nav_root = FCPath(tmp_path) / 'nav'
-    Path((nav_root / 'COISS_2001').as_posix()).mkdir(parents=True, exist_ok=True)
     (nav_root / 'COISS_2001' / 'N1234567890_1_metadata.json').write_text(
         json.dumps({'status': 'success'})
     )
@@ -403,6 +401,11 @@ def test_asking_for_no_offsets_counts_nothing_as_uncorrected(
     wanted none, so counting every image of it would report a whole batch as
     short of something nobody asked for, which is what a reader of the count
     would act on.
+
+    ``test_an_image_reprojected_without_an_offset_is_counted`` is the control
+    for this and for the reason tally below: it runs the same task with a root
+    and counts the image, so a worker that had stopped counting altogether
+    cannot satisfy both.
     """
     result = _reproject_task_result(tmp_path, monkeypatch, nav_root=None)
     assert result['n_uncorrected'] == 0
@@ -411,17 +414,9 @@ def test_asking_for_no_offsets_counts_nothing_as_uncorrected(
 def test_asking_for_no_offsets_tallies_no_reason_either(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The other half: nothing was asked for, so nothing degraded."""
+    """The other half: nothing was asked for, so there is no outcome to name."""
     result = _reproject_task_result(tmp_path, monkeypatch, nav_root=None)
     assert 'pointing_reasons' not in result
-
-
-def test_asking_for_offsets_and_finding_none_does_count(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The control for the two above, which a worker counting nothing would pass."""
-    result = _reproject_task_result(tmp_path, monkeypatch, nav_root=FCPath(tmp_path) / 'nav')
-    assert result['n_uncorrected'] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -439,7 +434,7 @@ def test_asking_for_offsets_and_finding_none_does_count(
 
 
 def _backplane_result(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raises: Exception | None = None
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, raises: Exception | None = None
 ) -> tuple[bool, Any]:
     """Run one backplane task over one image and return what the driver reported.
 
@@ -477,6 +472,19 @@ def test_an_image_nothing_navigated_is_a_skip_the_task_reports(
     assert result['status_error'] == 'no_navigation_record'
 
 
+def test_that_skip_names_the_navigation_record_it_looked_for(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stage reads the record before it opens the image, and both are lookups.
+
+    Every ``FileNotFoundError`` out of the stage is reported under this one
+    reason, so without naming the document the same result would be produced by
+    a stage that had reached the image first and found that missing instead.
+    """
+    _, result = _backplane_result(tmp_path, monkeypatch)
+    assert '_metadata.json' in result['status_exception']
+
+
 def test_that_skip_is_not_reported_as_a_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -506,7 +514,11 @@ def test_that_failure_carries_what_the_stage_said(
     assert 'the ingest refused it' in result['status_exception']
 
 
-@pytest.mark.parametrize('raises', [None, ValueError('the ingest refused it')])
+@pytest.mark.parametrize(
+    'raises',
+    [None, ValueError('the ingest refused it')],
+    ids=['no-navigation-record', 'document-the-ingest-refused'],
+)
 def test_neither_outcome_is_retried(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raises: Exception | None
 ) -> None:

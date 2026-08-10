@@ -14,6 +14,7 @@ own from the ``postgres_url`` fixture, so a repeated run, or two workers of a
 parallel run, never share a table.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -57,10 +58,20 @@ def _ingested(url: str, roots: list[Path], *, logger: pdslogger.PdsLogger) -> No
         engine.dispose()
 
 
-def test_the_recorded_attitude_survives_jsonb_bit_for_bit(
+@pytest.fixture
+def cmatrix_source(
     tmp_path: Path, postgres_url: str, quiet_ingest_logger: pdslogger.PdsLogger
-) -> None:
-    """A rotation of full-mantissa float64 comes back exactly as recorded."""
+) -> Iterator[IndexPointingSource]:
+    """Yield a source over one server-held record carrying a corrected attitude.
+
+    Parameters:
+        tmp_path: Directory the results root is written under.
+        postgres_url: This test's own schema on the server.
+        quiet_ingest_logger: Logger the ingest reports through.
+
+    Yields:
+        The source, whose engine is disposed of afterwards.
+    """
     root = tmp_path / 'nav'
     build_tree(
         root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET, times=TIMES, pointing=POINTING)}
@@ -68,115 +79,134 @@ def test_the_recorded_attitude_survives_jsonb_bit_for_bit(
     _ingested(postgres_url, [root], logger=quiet_ingest_logger)
     engine = open_index(postgres_url)
     try:
-        source = IndexPointingSource(engine, normalize_root_url(root))
-        selection = source.load_pointing(image_file(CMATRIX_STUB))
-        assert selection.cmatrix is not None
-        assert np.array_equal(selection.cmatrix, np.asarray(CMATRIX).reshape(3, 3))
+        yield IndexPointingSource(engine, normalize_root_url(root))
     finally:
         engine.dispose()
 
 
-def test_the_recorded_baseline_survives_jsonb_bit_for_bit(
+@pytest.fixture
+def two_root_sources(
     tmp_path: Path, postgres_url: str, quiet_ingest_logger: pdslogger.PdsLogger
-) -> None:
-    """So does the as-flown attitude the flip gate is computed against."""
-    root = tmp_path / 'nav'
-    build_tree(
-        root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET, times=TIMES, pointing=POINTING)}
-    )
-    _ingested(postgres_url, [root], logger=quiet_ingest_logger)
+) -> Iterator[tuple[IndexPointingSource, IndexPointingSource]]:
+    """Yield two sources over one index holding the same stub under two roots.
+
+    The two documents differ in exactly the offset each records, so a query
+    that dropped the root half of its key would answer one of the two tests
+    below with the other's value.
+
+    Parameters:
+        tmp_path: Directory both roots are written under.
+        postgres_url: This test's own schema on the server.
+        quiet_ingest_logger: Logger the ingest reports through.
+
+    Yields:
+        The source for the first root and the source for the second.
+    """
+    first = tmp_path / 'nav_a'
+    second = tmp_path / 'nav_b'
+    build_tree(first, {CMATRIX_STUB: document(CMATRIX_STUB, offset=[1.5, -2.5])})
+    build_tree(second, {CMATRIX_STUB: document(CMATRIX_STUB, offset=[9.25, 8.75])})
+    _ingested(postgres_url, [first, second], logger=quiet_ingest_logger)
     engine = open_index(postgres_url)
     try:
-        source = IndexPointingSource(engine, normalize_root_url(root))
-        selection = source.load_pointing(image_file(CMATRIX_STUB))
-        assert selection.cmatrix_original is not None
-        assert np.array_equal(
-            selection.cmatrix_original, np.asarray(CMATRIX_ORIGINAL).reshape(3, 3)
+        yield (
+            IndexPointingSource(engine, normalize_root_url(first)),
+            IndexPointingSource(engine, normalize_root_url(second)),
         )
     finally:
         engine.dispose()
 
 
-def test_the_recorded_midtime_survives_a_native_double(
-    tmp_path: Path, postgres_url: str, quiet_ingest_logger: pdslogger.PdsLogger
+def test_the_recorded_attitude_survives_jsonb_bit_for_bit(
+    cmatrix_source: IndexPointingSource,
 ) -> None:
-    """The epoch the reader gates to a microsecond comes back exactly."""
-    root = tmp_path / 'nav'
-    build_tree(
-        root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET, times=TIMES, pointing=POINTING)}
-    )
-    _ingested(postgres_url, [root], logger=quiet_ingest_logger)
-    engine = open_index(postgres_url)
-    try:
-        source = IndexPointingSource(engine, normalize_root_url(root))
-        assert source.load_pointing(image_file(CMATRIX_STUB)).midtime_et == MIDTIME_ET
-    finally:
-        engine.dispose()
+    """A rotation of full-mantissa float64 comes back exactly as recorded.
+
+    Parameters:
+        cmatrix_source: The source over the server-held record.
+    """
+    selection = cmatrix_source.load_pointing(image_file(CMATRIX_STUB))
+    assert selection.cmatrix is not None
+    assert np.array_equal(selection.cmatrix, np.asarray(CMATRIX).reshape(3, 3))
+
+
+def test_the_recorded_baseline_survives_jsonb_bit_for_bit(
+    cmatrix_source: IndexPointingSource,
+) -> None:
+    """So does the as-flown attitude the flip gate is computed against.
+
+    Parameters:
+        cmatrix_source: The source over the server-held record.
+    """
+    selection = cmatrix_source.load_pointing(image_file(CMATRIX_STUB))
+    assert selection.cmatrix_original is not None
+    assert np.array_equal(selection.cmatrix_original, np.asarray(CMATRIX_ORIGINAL).reshape(3, 3))
+
+
+def test_the_recorded_midtime_survives_a_native_double(
+    cmatrix_source: IndexPointingSource,
+) -> None:
+    """The epoch the reader gates to a microsecond comes back exactly.
+
+    Parameters:
+        cmatrix_source: The source over the server-held record.
+    """
+    assert cmatrix_source.load_pointing(image_file(CMATRIX_STUB)).midtime_et == MIDTIME_ET
 
 
 def test_the_selection_still_takes_the_cmatrix_mechanism(
-    tmp_path: Path, postgres_url: str, quiet_ingest_logger: pdslogger.PdsLogger
+    cmatrix_source: IndexPointingSource,
 ) -> None:
-    """Which is what a matrix that failed to round-trip would have cost."""
-    root = tmp_path / 'nav'
-    build_tree(
-        root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET, times=TIMES, pointing=POINTING)}
-    )
-    _ingested(postgres_url, [root], logger=quiet_ingest_logger)
-    engine = open_index(postgres_url)
-    try:
-        source = IndexPointingSource(engine, normalize_root_url(root))
-        selection = source.load_pointing(image_file(CMATRIX_STUB))
-        assert selection.mechanism is PointingMechanism.CMATRIX
-    finally:
-        engine.dispose()
+    """Which is what a matrix that failed to round-trip would have cost.
+
+    Parameters:
+        cmatrix_source: The source over the server-held record.
+    """
+    selection = cmatrix_source.load_pointing(image_file(CMATRIX_STUB))
+    assert selection.mechanism is PointingMechanism.CMATRIX
 
 
 def test_a_lookup_answers_from_its_own_root(
-    tmp_path: Path, postgres_url: str, quiet_ingest_logger: pdslogger.PdsLogger
+    two_root_sources: tuple[IndexPointingSource, IndexPointingSource],
 ) -> None:
-    """One index holds several roots, and each consumer sees only its own."""
-    first = tmp_path / 'nav_a'
-    second = tmp_path / 'nav_b'
-    build_tree(first, {CMATRIX_STUB: document(CMATRIX_STUB, offset=[1.5, -2.5])})
-    build_tree(second, {CMATRIX_STUB: document(CMATRIX_STUB, offset=[9.25, 8.75])})
-    _ingested(postgres_url, [first, second], logger=quiet_ingest_logger)
-    engine = open_index(postgres_url)
-    try:
-        source = IndexPointingSource(engine, normalize_root_url(first))
-        assert source.load_pointing(image_file(CMATRIX_STUB)).offset == (1.5, -2.5)
-    finally:
-        engine.dispose()
+    """One index holds several roots, and each consumer sees only its own.
+
+    Parameters:
+        two_root_sources: The sources for the two ingested roots.
+    """
+    assert two_root_sources[0].load_pointing(image_file(CMATRIX_STUB)).offset == (1.5, -2.5)
 
 
 def test_the_other_root_answers_for_itself(
-    tmp_path: Path, postgres_url: str, quiet_ingest_logger: pdslogger.PdsLogger
+    two_root_sources: tuple[IndexPointingSource, IndexPointingSource],
 ) -> None:
-    """The other direction of the same assertion, which one row cannot satisfy."""
-    first = tmp_path / 'nav_a'
-    second = tmp_path / 'nav_b'
-    build_tree(first, {CMATRIX_STUB: document(CMATRIX_STUB, offset=[1.5, -2.5])})
-    build_tree(second, {CMATRIX_STUB: document(CMATRIX_STUB, offset=[9.25, 8.75])})
-    _ingested(postgres_url, [first, second], logger=quiet_ingest_logger)
-    engine = open_index(postgres_url)
-    try:
-        source = IndexPointingSource(engine, normalize_root_url(second))
-        assert source.load_pointing(image_file(CMATRIX_STUB)).offset == (9.25, 8.75)
-    finally:
-        engine.dispose()
+    """The other direction of the same assertion, which one row cannot satisfy.
+
+    Parameters:
+        two_root_sources: The sources for the two ingested roots.
+    """
+    assert two_root_sources[1].load_pointing(image_file(CMATRIX_STUB)).offset == (9.25, 8.75)
 
 
-def _missing_row_message(root: Path, url: str) -> str:
+@pytest.fixture
+def missing_row_message(
+    tmp_path: Path, postgres_url: str, quiet_ingest_logger: pdslogger.PdsLogger
+) -> str:
     """Return what the refusal says when the index holds no row for an image.
 
     Parameters:
-        root: The ingested results root the source answers from.
-        url: The index URL, carrying the server's credentials.
+        tmp_path: Directory the results root is written under.
+        postgres_url: This test's own schema on the server, carrying the
+            server's credentials.
+        quiet_ingest_logger: Logger the ingest reports through.
 
     Returns:
         The refusal message.
     """
-    engine = open_index(url)
+    root = tmp_path / 'nav'
+    build_tree(root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET)})
+    _ingested(postgres_url, [root], logger=quiet_ingest_logger)
+    engine = open_index(postgres_url)
     try:
         source = IndexPointingSource(engine, normalize_root_url(root))
         with pytest.raises(FileNotFoundError) as excinfo:
@@ -187,7 +217,7 @@ def _missing_row_message(root: Path, url: str) -> str:
 
 
 def test_the_missing_row_message_hides_the_index_password(
-    tmp_path: Path, postgres_url: str, quiet_ingest_logger: pdslogger.PdsLogger
+    postgres_url: str, missing_row_message: str
 ) -> None:
     """The refusal names the index it asked without naming its password.
 
@@ -196,37 +226,39 @@ def test_the_missing_row_message_hides_the_index_password(
     form is what is looked for rather than the password on its own: this
     server's password is also its user name and its database name, so a bare
     substring search would report a leak that is not one, or miss one that is.
+
+    Parameters:
+        postgres_url: This test's own schema on the server.
+        missing_row_message: What the refusal said.
     """
     parsed = sqlalchemy.engine.make_url(postgres_url)
-    root = tmp_path / 'nav'
-    build_tree(root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET)})
-    _ingested(postgres_url, [root], logger=quiet_ingest_logger)
-    message = _missing_row_message(root, postgres_url)
-    assert f'{parsed.username}:{parsed.password}@' not in message
+    assert f'{parsed.username}:{parsed.password}@' not in missing_row_message
 
 
 def test_the_missing_row_message_masks_where_the_password_was(
-    tmp_path: Path, postgres_url: str, quiet_ingest_logger: pdslogger.PdsLogger
+    postgres_url: str, missing_row_message: str
 ) -> None:
-    """A guard on the assertion above, which a blank message would satisfy."""
+    """A guard on the assertion above, which a blank message would satisfy.
+
+    Parameters:
+        postgres_url: This test's own schema on the server.
+        missing_row_message: What the refusal said.
+    """
     parsed = sqlalchemy.engine.make_url(postgres_url)
-    root = tmp_path / 'nav'
-    build_tree(root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET)})
-    _ingested(postgres_url, [root], logger=quiet_ingest_logger)
-    message = _missing_row_message(root, postgres_url)
-    assert f'{parsed.username}:***@' in message
+    assert f'{parsed.username}:***@' in missing_row_message
 
 
 def test_the_missing_row_message_still_names_the_index(
-    tmp_path: Path, postgres_url: str, quiet_ingest_logger: pdslogger.PdsLogger
+    postgres_url: str, missing_row_message: str
 ) -> None:
     """Everything but the credentials survives.
 
     Which of the three resolution levels supplied the URL is exactly what a
     reader of a failed run needs, and the host is what says which.
+
+    Parameters:
+        postgres_url: This test's own schema on the server.
+        missing_row_message: What the refusal said.
     """
     parsed = sqlalchemy.engine.make_url(postgres_url)
-    root = tmp_path / 'nav'
-    build_tree(root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET)})
-    _ingested(postgres_url, [root], logger=quiet_ingest_logger)
-    assert str(parsed.host) in _missing_row_message(root, postgres_url)
+    assert str(parsed.host) in missing_row_message

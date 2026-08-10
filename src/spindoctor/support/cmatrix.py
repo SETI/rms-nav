@@ -560,8 +560,8 @@ def validated_record_rotation(matrix: NDArrayAnyType, label: str) -> NDArrayFloa
 
 def apply_cmatrix_to_obs(
     obs: ObsSnapshotInst,
-    cmatrix: NDArrayFloatType,
-    cmatrix_original: NDArrayFloatType,
+    cmatrix: NDArrayAnyType,
+    cmatrix_original: NDArrayAnyType,
     midtime_et: float,
 ) -> CmatrixApplication:
     """Point an observation at its recorded corrected attitude.
@@ -610,9 +610,12 @@ def apply_cmatrix_to_obs(
     Parameters:
         obs: The observation to point, mutated in place.
         cmatrix: The recorded corrected J2000-to-camera rotation, SPICE
-            convention, at the exposure midtime.
+            convention, at the exposure midtime.  Annotated as an array of any
+            dtype for the reason :func:`validated_record_rotation` gives:
+            refusing the dtypes a record can carry is this function's job, so
+            a caller hands it what the record held rather than casting first.
         cmatrix_original: The recorded uncorrected rotation, same convention
-            and epoch.
+            and epoch, on the same terms.
         midtime_et: The recorded exposure midtime, TDB seconds past J2000.
 
     Returns:

@@ -627,11 +627,17 @@ them::
    Reprojection pass complete: 143 done, 0 skipped, 0 failed, 12 with
    uncorrected pointing.
 
-Every degraded pointing outcome — an offset fallback, an already-corrected
-pool, or no correction at all — is additionally tallied per reason and the
-tally reported at the end of the pass::
+Every pointing outcome other than the clean C-matrix application — an offset
+fallback, an already-corrected pool, or no correction at all — is additionally
+tallied per reason and the tally reported at the end of the pass::
 
-   Pointing degradations by reason: {'no_cmatrix_rotation_fitted': 12}
+   Pointing outcomes by reason: {'no_cmatrix_rotation_fitted': 12}
+
+Only some of those reasons are shortfalls. ``pool_already_corrected`` is a
+successful no-op: the furnished kernels already carry the corrected attitude,
+so the image is right without anything being applied to it. It appears in the
+tally so that a pass can be told to have taken that path, not because anything
+about it needs acting on.
 
 A cloud-task worker has no run log, so it returns the same information in the
 task result instead, as ``n_uncorrected`` (images with no correction at all)
@@ -793,8 +799,10 @@ Common options reference
        one file, which on a cloud results root replaces a round trip per image
        with a query. The index must already hold a completed ingest of the
        root named by ``--nav-results-root``, and its rows are a snapshot of
-       the tree as of that ingest. ``none`` reads the files on a machine that
-       sets the option through configuration or through ``NAV_RESULTS_DB``.
+       the tree as of that ingest. Omitting the option names no index, and the
+       results tree is read directly. ``--results-db none`` names no index
+       either, which is how a machine that sets the option through
+       configuration or through ``NAV_RESULTS_DB`` reads the files.
    * - ``--dry-run``
      - ``False``
      - Print what would be done without writing files.

@@ -129,6 +129,21 @@ _FILE_ONLY_HELP: list[tuple[str, list[str]]] = [
 ]
 
 
+def _modules_naming_the_resolver() -> set[str]:
+    """Return every package module that names the results-index URL resolver.
+
+    Returns:
+        Paths relative to the package root, using forward slashes, the
+        resolver's own home among them.
+    """
+    root = Path(str(_SOURCE_ROOT))
+    return {
+        path.relative_to(root).as_posix()
+        for path in root.rglob('*.py')
+        if 'get_results_db_url' in path.read_text(encoding='utf-8')
+    }
+
+
 def _modules_resolving_a_url() -> set[str]:
     """Return every package module that resolves a results index URL.
 
@@ -136,13 +151,7 @@ def _modules_resolving_a_url() -> set[str]:
         Paths relative to the package root, using forward slashes, excluding
         the resolver's own home.
     """
-    root = Path(str(_SOURCE_ROOT))
-    found = {
-        path.relative_to(root).as_posix()
-        for path in root.rglob('*.py')
-        if 'get_results_db_url' in path.read_text(encoding='utf-8')
-    }
-    return found - _RESOLVER_HOME
+    return _modules_naming_the_resolver() - _RESOLVER_HOME
 
 
 def _one_line(program: str, argv: list[str]) -> str:
@@ -172,14 +181,12 @@ def test_only_the_declaring_programs_resolve_an_index_url() -> None:
 
 
 def test_the_resolver_home_is_excluded_from_something_that_names_it() -> None:
-    """A guard on the exclusion above, which an empty scan would also satisfy."""
-    root = Path(str(_SOURCE_ROOT))
-    named = {
-        path.relative_to(root).as_posix()
-        for path in root.rglob('*.py')
-        if 'get_results_db_url' in path.read_text(encoding='utf-8')
-    }
-    assert named >= _RESOLVER_HOME
+    """A guard on the exclusion above, which an empty scan would also satisfy.
+
+    The same scan the assertion above filters, so a change to what counts as
+    naming the resolver cannot leave this guard measuring the old rule.
+    """
+    assert _modules_naming_the_resolver() >= _RESOLVER_HOME
 
 
 def _parsed(program: str, argv: list[str]) -> argparse.Namespace:

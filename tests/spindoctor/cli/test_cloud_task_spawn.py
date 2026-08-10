@@ -23,6 +23,7 @@ import asyncio
 import json
 import multiprocessing
 import sys
+from multiprocessing.process import BaseProcess
 from pathlib import Path
 from typing import Any
 
@@ -31,10 +32,10 @@ import pytest
 from tests.spindoctor.cli.cloud_task_spawn_helpers import run_tasks
 from tests.spindoctor.cli.reproj.conftest import (
     FAILED_STUB,
-    REASON_TREE,
     UNNAVIGATED_STUB,
     build_tree,
     index_for,
+    reason_tree,
 )
 
 from spindoctor.cli import sd_backplanes_cloud_tasks, sd_mosaic_cloud_tasks
@@ -44,6 +45,9 @@ _DATASET = 'COISS_saturn'
 
 _CHILD_TIMEOUT_S = 300.0
 """How long the child is given: it imports this package in a fresh interpreter."""
+
+_REAP_TIMEOUT_S = 30.0
+"""How long a child that overran is given to act on a signal before it is killed."""
 
 
 def _worker_from_startup(module: Any, argv: list[str]) -> Any:
@@ -165,7 +169,7 @@ def spawned_results(tmp_path_factory: pytest.TempPathFactory) -> list[Any]:
     quiet = pdslogger.PdsLogger('cloud_task_spawn_ingest')
     quiet.set_level('ERROR')
     root = tmp_path / 'nav'
-    build_tree(root, REASON_TREE)
+    build_tree(root, reason_tree())
     database = tmp_path / 'index.sqlite3'
     index_for([root], database, logger=quiet).dispose()
     url = f'sqlite:///{database.as_posix()}'
@@ -220,9 +224,38 @@ def spawned_results(tmp_path_factory: pytest.TempPathFactory) -> list[Any]:
     context = multiprocessing.get_context('spawn')
     process = context.Process(target=run_tasks, args=(jobs, results_path.as_posix()))
     process.start()
-    process.join(timeout=_CHILD_TIMEOUT_S)
-    assert process.exitcode == 0
+    try:
+        exitcode = _finished_exitcode(process)
+    finally:
+        process.close()
+    assert exitcode == 0, f'the spawned child exited with {exitcode}'
     return list(json.loads(results_path.read_text(encoding='utf-8')))
+
+
+def _finished_exitcode(process: BaseProcess) -> int:
+    """Wait for the child, ending it if it will not end, and return its exit code.
+
+    ``join`` returns whether or not the child finished, so an overrun that is
+    only asserted on leaves the child running.  ``multiprocessing`` joins every
+    non-daemon child at interpreter exit, which would hang the whole session on
+    the way out instead of failing this module.
+
+    Parameters:
+        process: The started child.
+
+    Returns:
+        The child's exit code, which is negative when a signal ended it and is
+        the only account a crashed child leaves in the parent.
+    """
+    process.join(timeout=_CHILD_TIMEOUT_S)
+    if process.exitcode is None:
+        process.terminate()
+        process.join(timeout=_REAP_TIMEOUT_S)
+        if process.exitcode is None:
+            process.kill()
+            process.join()
+        pytest.fail(f'the spawned child did not finish within {_CHILD_TIMEOUT_S} s')
+    return int(process.exitcode)
 
 
 def test_the_reprojection_task_runs_in_the_process_spawned_for_it(

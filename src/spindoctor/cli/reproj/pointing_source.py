@@ -522,7 +522,7 @@ class IndexPointingSource:
             self._refuse_a_document_the_ingest_refused(image_file, row.refusal_reason)
             IMAGE_LOGGER.warning(NO_METADATA_MESSAGE, image_file.image_file_url, self._storage)
             return none_selection(NO_METADATA)
-        return select_pointing(_record_from_row(row), subject=str(image_file.image_file_url))
+        return select_pointing(_record_from_row(row), subject=image_file.image_file_url.as_posix())
 
     def close(self) -> None:
         """Dispose of the engine, closing every connection it pooled."""

@@ -395,14 +395,17 @@ would build one product from a document and another from the index row the
 same document was ingested into, since a column pair holds every way an offset
 can fail to be a pair.
 
-After either mechanism mutates the observation, ``apply_pointing_to_obs``
-calls ``obs.reset_all()``. "Apply before any geometry is computed" is not an
-invariant ``from_file`` leaves available: ``ObsSnapshot.__init__`` runs the
-closest-planet scan, which builds and caches a ``Backplane`` against the
-uncorrected frame before any caller can apply anything, and nothing pins
-that cache's consumers to rotation-invariant quantities. The reset clears
-every cached ``Backplane`` and ``Meshgrid`` so all downstream geometry is
-built on the corrected observation.
+After either mechanism mutates the observation,
+:func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs` calls
+``obs.reset_all()``. "Apply before any geometry is computed" is not an
+invariant :meth:`~spindoctor.obs.obs_inst.ObsInst.from_file`
+leaves available: :class:`~spindoctor.obs.obs_snapshot.ObsSnapshot` runs the
+closest-planet scan while it is constructed, which builds and caches an
+:class:`oops.backplane.Backplane` against the uncorrected frame before any
+caller can apply anything, and nothing pins that cache's consumers to
+rotation-invariant quantities. The reset clears every cached
+:class:`oops.backplane.Backplane` and :class:`oops.meshgrid.Meshgrid` so all
+downstream geometry is built on the corrected observation.
 
 Two boundaries worth stating. First, the recorded ``cmatrix`` is a midtime
 attitude, so the replacement frame is constant across the exposure where the

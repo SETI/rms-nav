@@ -21,13 +21,13 @@ from tests.spindoctor.cli.conftest import backplane_argv, mosaic_argv, run_progr
 
 from spindoctor.cli import sd_backplanes, sd_mosaic
 
-LEFT = 'sup3r'
+_LEFT = 'sup3r'
 """First half of the password, distinctive enough that finding it is a leak."""
 
-RIGHT = 's3cr3t'
+_RIGHT = 's3cr3t'
 """Second half, so a rule that hides only part of a password is still caught."""
 
-_PASSWORD = f'{LEFT}%40%3A%2F%3F%23{RIGHT}'
+_PASSWORD = f'{_LEFT}%40%3A%2F%3F%23{_RIGHT}'
 """The password as a URL carries it, around every character that delimits one.
 
 An ``@`` ends the credentials, a ``:`` starts a port, a ``/`` starts a path, a
@@ -38,7 +38,7 @@ first of them leaves the rest of the password in the log.
 _HOST = 'db.example:5432/spindoctor'
 """Everything after the credentials, which the line is read to learn."""
 
-INDEX_URL = f'postgresql+psycopg://us%40er:{_PASSWORD}@{_HOST}'
+_INDEX_URL = f'postgresql+psycopg://us%40er:{_PASSWORD}@{_HOST}'
 """A server index URL under a user name that itself carries an at-sign."""
 
 # Each program, with the command line that reaches its banner without opening
@@ -69,7 +69,7 @@ def _run_log(program: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> s
     log_root = tmp_path / 'logs'
     run_program(
         module,
-        argv_for(tmp_path, INDEX_URL, '--log-root', log_root.as_posix(), *flags),
+        argv_for(tmp_path, _INDEX_URL, '--log-root', log_root.as_posix(), *flags),
         monkeypatch,
     )
     written = sorted(log_root.rglob('main_*.log'))
@@ -92,7 +92,7 @@ def test_the_index_line_a_run_logs_carries_no_password(
         datasetless: Fixture emptying the enumeration.
         monkeypatch: Patcher, used for ``sys.argv``.
     """
-    assert LEFT not in _run_log(program, tmp_path, monkeypatch)
+    assert _LEFT not in _run_log(program, tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize('program', sorted(_RUNS))
@@ -110,7 +110,7 @@ def test_no_tail_of_that_password_reaches_the_run_log_either(
         datasetless: Fixture emptying the enumeration.
         monkeypatch: Patcher, used for ``sys.argv``.
     """
-    assert RIGHT not in _run_log(program, tmp_path, monkeypatch)
+    assert _RIGHT not in _run_log(program, tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize('program', sorted(_RUNS))

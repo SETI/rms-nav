@@ -165,9 +165,11 @@ def process_task(
         uncorrected pointing is otherwise indistinguishable from a good one.
         A task given no navigation results root sought no pointing, so none of
         its images is counted as missing one.
-        Every degraded pointing outcome -- an offset fallback, an
-        already-corrected pool, or no correction -- is tallied by reason
-        under ``pointing_reasons``.  An image whose ``results_path_stub`` was
+        Every pointing outcome other than the clean C-matrix application -- an
+        offset fallback, an already-corrected pool, or no correction -- is
+        tallied by reason under ``pointing_reasons``.  The already-corrected
+        pool is a successful no-op rather than a shortfall, and is named there
+        so it can be told apart from one.  An image whose ``results_path_stub`` was
         refused is additionally named under ``rejected_stubs``, since no log
         could be opened to record it.
     """
@@ -347,12 +349,15 @@ def process_task(
                         applied = apply_pointing_to_obs(
                             cast(ObsSnapshotInst, obs),
                             selection,
-                            subject=str(image_file.image_file_url),
+                            subject=image_file.image_file_url.as_posix(),
                         )
                         if applied.reason is not None:
                             # A task has no run log, so the tally is what carries
-                            # this out: a batch reprojected entirely on degraded
-                            # pointing looks exactly like a good one otherwise.
+                            # this out: a batch reprojected entirely on the
+                            # offset path, or on none at all, looks exactly like
+                            # a good one otherwise.  Named per reason because one
+                            # of them -- an already-corrected pool -- is not a
+                            # shortfall and must not read as one.
                             pointing_reasons[applied.reason] = (
                                 pointing_reasons.get(applied.reason, 0) + 1
                             )

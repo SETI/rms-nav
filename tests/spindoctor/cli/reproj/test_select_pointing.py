@@ -12,6 +12,7 @@ exactly as the reader's own unit tests inject it.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -586,7 +587,7 @@ def _apply_and_capture_logs(
     return applied, image_text, main_text
 
 
-def test_a_gate_fallback_warns_both_logs(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_gate_fallback_warns_both_logs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A refused C-matrix is warned to the image log and to the run log.
 
     The detailed refusal belongs to the image; that the product fell back to
@@ -608,7 +609,7 @@ def test_a_gate_fallback_warns_both_logs(tmp_path: Any, monkeypatch: pytest.Monk
 
 
 def test_a_malformed_pointing_block_warns_both_logs(
-    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A defective record is a warning in the image log and a line in the run log."""
     record = _record(cmatrix=[True] * 9, cmatrix_original=_flat(_IDENTITY))
@@ -619,7 +620,7 @@ def test_a_malformed_pointing_block_warns_both_logs(
 
 
 def test_the_pool_outcome_is_an_image_log_line_not_a_warning(
-    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The already-corrected pool is a counted fact, not an alarm."""
     plain = _hermetic_obs()

@@ -164,7 +164,17 @@ def test_both_paths_report_the_same_reason(
         (HUGE_INT_IN_CMATRIX_STUB, PointingMechanism.OFFSET),
         (HUGE_INT_MIDTIME_STUB, PointingMechanism.OFFSET),
         (HUGE_INT_OFFSET_STUB, PointingMechanism.NONE),
+        # The four unusable-offset shapes the two storages name differently.
+        # They are here as well as in the differing-reason table because that
+        # one asserts only that the two agree: a change that gave both paths a
+        # pointing for a record that supplies none would satisfy it, and the
+        # whole claim about a differing name is that it costs no product.
+        (MALFORMED_OFFSET_STUB, PointingMechanism.NONE),
+        (NO_OFFSET_KEY_STUB, PointingMechanism.NONE),
+        (NON_FINITE_OFFSET_STUB, PointingMechanism.NONE),
+        (BOOLEAN_OFFSET_STUB, PointingMechanism.NONE),
         (UNSTORABLE_CMATRIX_ALONE_STUB, PointingMechanism.OFFSET),
+        (CAMERA_FRAME_ONLY_STUB, PointingMechanism.OFFSET),
         (FLOAT_FRAME_ID_STUB, PointingMechanism.OFFSET),
         (LITERAL_UNKNOWN_STATUS_STUB, PointingMechanism.NONE),
         (ZERO_OFFSET_STUB, PointingMechanism.OFFSET),
@@ -623,7 +633,7 @@ def test_an_image_nothing_navigated_is_still_reported_as_unnavigated(
     assert _selection(sources, 'index', UNNAVIGATED_STUB).reason == 'no_metadata'
 
 
-def _one_root_refused_it(tmp_path: Path, logger: pdslogger.PdsLogger) -> tuple[Path, Path, Any]:
+def _one_root_refused_it(tmp_path: Path, logger: pdslogger.PdsLogger) -> tuple[Path, Path, Engine]:
     """Build two roots, one of which refused the very stub the other never held.
 
     The stub is absent from the record table under both roots, so every lookup
@@ -1100,7 +1110,7 @@ def test_a_document_that_is_not_an_object_is_refused_by_name(tmp_path: Path) -> 
 # ---------------------------------------------------------------------------
 
 
-def _two_roots(tmp_path: Path, logger: pdslogger.PdsLogger) -> tuple[Path, Path, Any]:
+def _two_roots(tmp_path: Path, logger: pdslogger.PdsLogger) -> tuple[Path, Path, Engine]:
     """Build two results roots holding the same stub with different offsets.
 
     Parameters:

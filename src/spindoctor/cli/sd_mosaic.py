@@ -147,11 +147,12 @@ def _run_reproject_pass(
         applied increments ``n_uncorrected``, and is counted in ``n_done`` as
         well because it did produce a product.  A pass given no navigation
         results root sought no pointing, so none of its images is counted as
-        missing one).  Every degraded pointing outcome
-        is also tallied per reason and the tally reported to the run log at
-        the end of the pass, so a batch that quietly fell back -- to the
-        offset path, to an already-corrected pool, or to no correction --
-        says so in one place.
+        missing one).  Every pointing outcome other than the clean C-matrix
+        application is also tallied per reason and the tally reported to the
+        run log at the end of the pass, so a batch that fell back to the
+        offset path or to no correction says so in one place.  The tally also
+        carries the already-corrected pool, which is a successful no-op rather
+        than a shortfall and is named so it can be told apart from one.
     """
     assert DATASET is not None
     n_done = 0
@@ -204,12 +205,16 @@ def _run_reproject_pass(
                     applied = apply_pointing_to_obs(
                         cast(ObsSnapshotInst, obs),
                         selection,
-                        subject=str(image_file.image_file_url),
+                        subject=image_file.image_file_url.as_posix(),
                     )
                     if applied.reason is not None:
                         # The detailed account stays in the image's log; the
-                        # run needs the degradation counted per reason, which
-                        # is not visible in the product.
+                        # run needs every outcome that is not the clean
+                        # C-matrix application counted per reason, since none
+                        # of them is visible in the product.  An
+                        # already-corrected pool is one of them and is not a
+                        # shortfall, so the tally names the reason rather than
+                        # summing to a single "degraded" number.
                         pointing_reasons[applied.reason] = (
                             pointing_reasons.get(applied.reason, 0) + 1
                         )
@@ -259,7 +264,7 @@ def _run_reproject_pass(
                     handler.close()
 
     if len(pointing_reasons) > 0:
-        MAIN_LOGGER.info('Pointing degradations by reason: %s', pointing_reasons)
+        MAIN_LOGGER.info('Pointing outcomes by reason: %s', pointing_reasons)
     return n_done, n_skipped, n_failed, n_uncorrected
 
 

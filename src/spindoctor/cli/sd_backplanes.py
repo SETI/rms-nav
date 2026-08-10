@@ -9,6 +9,7 @@
 import argparse
 import os
 import sys
+import traceback
 from typing import cast
 
 from filecache import FCPath, FileCache
@@ -271,11 +272,19 @@ def main() -> None:
             except Exception as exc:
                 # Backplane generation is per-image work with no cross-image
                 # state, so one image's failure is that image's failure and not
-                # the run's.  The traceback is written into the image's own log
-                # by the stage itself where the failure got that far; the run's
-                # log names the image and what went wrong, or the only sign of
-                # it is a total that does not add up.
-                MAIN_LOGGER.error('Failed to generate backplanes for %s: %s', label_url, exc)
+                # the run's.  Nothing here knows where the failure came from --
+                # a lookup before the image's own log exists leaves no other
+                # account of it -- so the run's log carries the traceback as
+                # well as the image and the message.  ``stacktrace=False`` plus
+                # ``more=`` is used because PdsLogger's own stack omits the
+                # final "SomeError: ..." line and would duplicate the frames.
+                MAIN_LOGGER.exception(
+                    'Failed to generate backplanes for %s: %s',
+                    label_url,
+                    exc,
+                    stacktrace=False,
+                    more=traceback.format_exc(),
+                )
                 n_failed += 1
                 continue
             if result['status'] == 'skipped':

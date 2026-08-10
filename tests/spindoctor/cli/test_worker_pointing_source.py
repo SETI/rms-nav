@@ -16,6 +16,7 @@ the task by name rather than degrading it.
 """
 
 import argparse
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -176,6 +177,43 @@ def test_a_task_builds_its_source_from_the_workers_own_command_line(tmp_path: Pa
         sd_backplanes_cloud_tasks._task_pointing_source(_arguments(url), FCPath(tmp_path))
 
 
+def _runner(driver: str) -> Callable[[Path, WorkerData], tuple[bool, Any]]:
+    """Return the function that runs one task of the named driver.
+
+    Parameters:
+        driver: ``'backplanes'`` or ``'mosaic'``.
+
+    Returns:
+        The runner for that driver.
+    """
+    return _backplane_task if driver == 'backplanes' else _mosaic_task
+
+
+def _refused_index_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, driver: str
+) -> tuple[bool, Any]:
+    """Run one task of the named driver against an index that will not open.
+
+    The whole worker contract is written once here, so a change to what a
+    worker is handed is made once for every assertion about the refusal.
+
+    Parameters:
+        tmp_path: Directory the task writes under.
+        monkeypatch: Fixture used to stub the mosaic factory.
+        driver: Which of the two drivers is under test.
+
+    Returns:
+        The driver's ``(retry, result)``.
+    """
+    monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_ring_mosaic', lambda *a, **k: _StubMosaic())
+    worker = _worker_data(
+        nav_results_root=FCPath(tmp_path).as_posix(),
+        backplane_results_root=FCPath(tmp_path).as_posix(),
+        results_db=_absent_index(tmp_path),
+    )
+    return _runner(driver)(tmp_path, worker)
+
+
 @pytest.mark.parametrize('driver', ['backplanes', 'mosaic'])
 def test_an_index_that_cannot_be_opened_fails_the_task(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, driver: str
@@ -187,14 +225,7 @@ def test_an_index_that_cannot_be_opened_fails_the_task(
         monkeypatch: Fixture used to stub the mosaic factory.
         driver: Which of the two drivers is under test.
     """
-    monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_ring_mosaic', lambda *a, **k: _StubMosaic())
-    worker = _worker_data(
-        nav_results_root=FCPath(tmp_path).as_posix(),
-        backplane_results_root=FCPath(tmp_path).as_posix(),
-        results_db=_absent_index(tmp_path),
-    )
-    run = _backplane_task if driver == 'backplanes' else _mosaic_task
-    _, result = run(tmp_path, worker)
+    _, result = _refused_index_result(tmp_path, monkeypatch, driver)
     assert result['status_error'] == 'unusable_results_db'
 
 
@@ -209,14 +240,7 @@ def test_such_a_task_is_not_retried(
         monkeypatch: Fixture used to stub the mosaic factory.
         driver: Which of the two drivers is under test.
     """
-    monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_ring_mosaic', lambda *a, **k: _StubMosaic())
-    worker = _worker_data(
-        nav_results_root=FCPath(tmp_path).as_posix(),
-        backplane_results_root=FCPath(tmp_path).as_posix(),
-        results_db=_absent_index(tmp_path),
-    )
-    run = _backplane_task if driver == 'backplanes' else _mosaic_task
-    retry, _ = run(tmp_path, worker)
+    retry, _ = _refused_index_result(tmp_path, monkeypatch, driver)
     assert retry is False
 
 
@@ -231,14 +255,7 @@ def test_the_refusal_names_what_would_have_written_the_index(
         monkeypatch: Fixture used to stub the mosaic factory.
         driver: Which of the two drivers is under test.
     """
-    monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_ring_mosaic', lambda *a, **k: _StubMosaic())
-    worker = _worker_data(
-        nav_results_root=FCPath(tmp_path).as_posix(),
-        backplane_results_root=FCPath(tmp_path).as_posix(),
-        results_db=_absent_index(tmp_path),
-    )
-    run = _backplane_task if driver == 'backplanes' else _mosaic_task
-    _, result = run(tmp_path, worker)
+    _, result = _refused_index_result(tmp_path, monkeypatch, driver)
     assert 'sd_stats_ingest' in result['status_exception']
 
 
@@ -264,6 +281,5 @@ def test_the_task_closes_the_source_it_opened(
         backplane_results_root=FCPath(tmp_path).as_posix(),
         results_db=None,
     )
-    run = _backplane_task if driver == 'backplanes' else _mosaic_task
-    run(tmp_path, worker)
+    _runner(driver)(tmp_path, worker)
     assert source.closed
