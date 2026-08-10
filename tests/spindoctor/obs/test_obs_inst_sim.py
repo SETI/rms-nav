@@ -94,5 +94,8 @@ def test_scene_url_is_fetched_before_it_is_parsed(
     monkeypatch.chdir(tmp_path)
     scene_path = tmp_path / 'pebble_url.yaml'
     save_sim_scene(_body_scene(), scene_path)
-    obs = ObsSim.from_file(f'file://{scene_path}')
+    # as_uri() rather than an f-string: it escapes the characters a URL has to
+    # escape and spells a drive letter the way a URL spells one, neither of
+    # which an interpolated POSIX path does.
+    obs = ObsSim.from_file(scene_path.as_uri())
     assert obs.sim_params['scene_name'] == 'pebble_url'
