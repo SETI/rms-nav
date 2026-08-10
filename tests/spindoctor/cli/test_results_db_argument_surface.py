@@ -37,6 +37,7 @@ from spindoctor.cli import (
     sd_mosaic,
 )
 from spindoctor.config import DEFAULT_CONFIG, get_results_db_url
+from spindoctor.support.command_line import URL_OPTIONS
 
 _SOURCE_ROOT = FCPath(Path(__file__).resolve().parents[3]) / 'src' / 'spindoctor'
 
@@ -316,3 +317,31 @@ def test_no_option_and_no_variable_means_no_index(monkeypatch: pytest.MonkeyPatc
     monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
     arguments = argparse.Namespace(results_db=None)
     assert get_results_db_url(arguments, DEFAULT_CONFIG) is None
+
+
+@pytest.mark.parametrize('mode', ['rings', 'body'])
+def test_no_task_argument_carries_a_connection_url(mode: str) -> None:
+    """A queued task never carries the value of an option that can hold a password.
+
+    ``sd_mosaic`` writes its task descriptions into a queue that outlives the
+    run and is read by whatever drains it, so a connection URL forwarded into
+    one is a credential written to a place nobody masks.  The worker is told
+    its own index on its own command line instead.  Asserted against the
+    option list masking is driven from, so a second URL-valued option is
+    covered the day it is added rather than the day someone remembers this.
+
+    Parameters:
+        mode: The mosaic mode whose task keys are under test.
+    """
+    forwarded = {f'--{key.replace("_", "-")}' for key in sd_mosaic._task_argument_keys(mode)}
+    assert forwarded.isdisjoint(URL_OPTIONS)
+
+
+@pytest.mark.parametrize('mode', ['rings', 'body'])
+def test_a_task_does_carry_its_own_parameters(mode: str) -> None:
+    """The control for it, which an empty key list would otherwise satisfy.
+
+    Parameters:
+        mode: The mosaic mode whose task keys are under test.
+    """
+    assert 'output_dir' in sd_mosaic._task_argument_keys(mode)
