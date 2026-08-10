@@ -187,10 +187,10 @@ def main() -> None:
     )
     MAIN_LOGGER.info('Dry run: %s', arguments.dry_run)
     MAIN_LOGGER.info('No write output files: %s', arguments.no_write_output_files)
-    # Routed through the run-environment block rather than logged directly: that
-    # is the one place a command line is recorded, and therefore the one place a
-    # connection URL in it is masked before it reaches a log file or a bug
-    # report.  An index URL can carry a database password.
+    # Routed through the run-environment block rather than logged directly:
+    # that is the one place a command line is recorded, and it masks the value
+    # of every connection-URL option before the line reaches a log file or a
+    # bug report.  An index URL can carry a database password.
     log_run_environment(MAIN_LOGGER, command_list)
 
     assert DATASET is not None
@@ -229,6 +229,15 @@ def main() -> None:
         MAIN_LOGGER.info('Wrote cloud_tasks file to %s', arguments.output_cloud_tasks_file)
         return
 
+    # A dry run reads no navigation record, so it opens no index: failing it
+    # for want of a working index would fail it for something it never touches.
+    if arguments.dry_run:
+        for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
+            MAIN_LOGGER.info(
+                'Would process: %s', imagefiles.image_files[0].label_file_url.as_posix()
+            )
+        return
+
     # A resolved index that will not open, or a root it has not fully ingested,
     # fails the run here.  Falling back to reading files would turn a
     # misconfigured run into a slow, silently different one.
@@ -236,12 +245,6 @@ def main() -> None:
     try:
         for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
             assert len(imagefiles.image_files) == 1
-            if arguments.dry_run:
-                MAIN_LOGGER.info(
-                    'Would process: %s', imagefiles.image_files[0].label_file_url.as_posix()
-                )
-                continue
-
             try:
                 generate_backplanes_image_files(
                     obs_class,

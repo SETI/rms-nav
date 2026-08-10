@@ -307,6 +307,13 @@ def _build_parser(mode: str) -> argparse.ArgumentParser:
 # task. Dataset-selection arguments (added dynamically by each DataSet) are
 # excluded because we iterate them here and the worker only sees concrete file
 # URLs.
+#
+# The environment keys among these are named for what must not be forwarded
+# rather than for what the task-key parser could produce: that parser is built
+# from the output and mode argument groups alone, so none of them could appear
+# through it today. Listing the whole group is what keeps this readable as the
+# rule it is, and what keeps a key from being forwarded if one of those groups
+# ever grows an environment flag.
 _CLI_ONLY_TASK_EXCLUDES: frozenset[str] = frozenset(
     {
         'config_file',
@@ -686,8 +693,16 @@ def main() -> None:
         masked_url(results_db_url) if results_db_url is not None else 'none (reading files)',
     )
     # A resolved index that will not open, or a root it has not fully ingested,
-    # fails the run here rather than quietly reverting to reading files.
-    pointing_source = build_pointing_source(nav_results_root_path, results_db_url=results_db_url)
+    # fails the run here rather than quietly reverting to reading files -- but
+    # only for a run that was going to read a record.  The reprojection pass is
+    # the only reader, and it reads nothing under --dry-run, so a run that
+    # skips it or only says what it would do opens no index: failing such a run
+    # for want of a working index would fail it for something it never touches.
+    reads_navigation_records = not args.skip_reproject and not args.dry_run
+    pointing_source = build_pointing_source(
+        nav_results_root_path,
+        results_db_url=results_db_url if reads_navigation_records else None,
+    )
 
     try:
         if mode == 'body':
