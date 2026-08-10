@@ -3,8 +3,8 @@ User Guide
 ==========
 
 This guide provides comprehensive documentation for using SpinDoctor, including
-navigation workflows, logging, backplanes, PDS4 bundle creation, and
-instrument-specific appendices.
+navigation workflows, logging, backplanes, PDS4 bundle creation, and one
+chapter per instrument.
 
 .. toctree::
    :maxdepth: 2
@@ -19,7 +19,4 @@ instrument-specific appendices.
    user_guide_statistics
    user_guide_simulated_images
    user_guide_pds4_bundle
-   user_guide_appendix_coiss
-   user_guide_appendix_gossi
-   user_guide_appendix_nhlorri
-   user_guide_appendix_vgiss
+   instruments/instruments

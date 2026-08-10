@@ -69,6 +69,11 @@ that the rest of the pipeline consumes.
   per-instrument hierarchy, and the
   :class:`~spindoctor.feature.feature.NavFeature` dataclass / feature-type
   taxonomy.
+- :doc:`instruments/instruments` — one chapter per instrument, each carrying
+  that instrument's code map, host call, label and index dependencies,
+  configuration block, calibration anchors, frame identities and open items.
+  Read the chapter for whichever instrument you are working on alongside the
+  module list below.
 - :mod:`spindoctor.dataset` — file enumeration. The per-mission subclasses
   share the :class:`~spindoctor.dataset.dataset.DataSet` /
   :class:`~spindoctor.dataset.dataset_pds3.DataSetPDS3` bases:

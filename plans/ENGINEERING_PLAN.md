@@ -354,12 +354,6 @@ asserts the generated half matches the registries.
   (`src/spindoctor/config/config.py`); pairs well with #176's
   constants-into-config completion.
 
-### User-facing docs in Track D scope
-
-- **#93** — the four instrument appendices (write Cassini's from the
-  measured Track A results first; the other three land with Track F
-  enablement).
-
 ## Track E — Test and documentation debt
 
 - **#241 / #242** — unit tests for `spindoctor.cli.backplanes` and
@@ -416,7 +410,9 @@ asserts the generated half matches the registries.
 
 Start after Track A's Cassini verdict; per instrument the pattern is:
 fix ingest/navigation defects, add library frames (#235), extend the
-calibration (#230) and the appendix (#93).
+calibration (#230), and update that instrument's two chapters under
+`docs/user_guide/instruments/` and `docs/dev_guide/instruments/` in the
+same change.
 
 - **Voyager ISS:** #19 — star navigation broken; overlaps the per-camera
   Voyager distortion split (#355) and limiting-magnitude (#130) work, so

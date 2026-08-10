@@ -19,27 +19,9 @@ type-3 segment per navigated exposure, each covering that exposure and nothing
 else, in a file named after the original whose pointing it corrects. The
 correction is written for the object the original describes -- a spacecraft bus
 or a scan platform -- so no fabricated camera frame is involved and no other
-kernel has to change:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 25 45
-
-   * - Mission
-     - Corrected object
-     - What the segments describe
-   * - Cassini ISS
-     - -82000
-     - The spacecraft bus
-   * - Voyager ISS
-     - -31100 / -32100
-     - The scan platform of Voyager 1 / Voyager 2
-   * - Galileo SSI
-     - -77001
-     - The scan platform
-   * - New Horizons LORRI
-     - -98000
-     - The spacecraft
+kernel has to change. Which object that is, and which spacecraft clock its time
+tags are encoded against, is stated in each instrument's own chapter under
+:doc:`instruments/instruments`.
 
 The pixel offset is unaffected. Every consumer that reads ``offset`` from the
 metadata keeps working exactly as it does; the kernels are a second expression
@@ -79,20 +61,20 @@ error that interpolation leaves is **not bounded by anything**.
 How large that error is depends on the instrument and on how the spacecraft was
 moving during the exposure, so this guide does not quote a single figure for it.
 The interpolation error is an angle, and the same angle is a different number of
-pixels on every camera: a Cassini wide angle pixel subtends about ten times what
-a narrow angle pixel does, so an error that matters on one camera can be
-negligible on the other. How much attitude structure a segment interpolates
-across also differs by mission and by how the platform was slewing.
+pixels on every camera, so an error that matters on one camera can be negligible
+on another. How much attitude structure a segment interpolates across also
+differs by mission and by how the platform was slewing.
 
 What is fixed is the shape of the effect rather than its size. The error is zero
 at every record epoch and grows between them; it is largest where the baseline's
 rate changes inside the window; it shrinks as records are added, which is what
 the one-second cadence buys on a long exposure; and it is present in the same
 size when the correction itself is zero, which is how it is known to be
-interpolation loss rather than an error in the correction. A per-instrument
-characterization belongs in the appendix for each instrument, and until those
-sections carry measured figures a consumer who needs a bound should measure it
-for the frames they care about.
+interpolation loss rather than an error in the correction. Each instrument's
+chapter under :doc:`instruments/instruments` carries the characterization for
+that instrument, including the cases where there is no interpolation error at
+all; where a chapter reports no measured figure yet, a consumer who needs a
+bound should measure it for the frames they care about.
 
 A consumer that evaluates geometry at the exposure midtime is unaffected and
 exact: the midtime is a record epoch. That is what the backplane and
@@ -100,10 +82,11 @@ reprojection stages do, and what most single-epoch geometry does. A consumer
 integrating smear across the exposure, or sampling attitude at arbitrary
 interior epochs, is subject to the interpolation error described above.
 
-Voyager segments are a separate case: navigation reads a Voyager attitude from
-one tolerance-snapped pointing lookup that is constant across the exposure, so
-a Voyager segment carries that single corrected attitude, constant across its
-window. There is nothing to interpolate.
+An instrument whose navigated attitude is constant across the exposure is a
+separate case entirely. Its segment carries that single corrected attitude,
+constant across the window, and there is nothing to interpolate and no
+interpolation error at any epoch. Each instrument's chapter says whether it is
+one of those.
 
 Eligibility carries no quality threshold
 ----------------------------------------
@@ -146,16 +129,19 @@ the corrected file carrying its segment or one of these reasons it has none:
    * - ``rotation_unsupported``
      - The navigation fitted a camera rotation. The rotation turns about a
        per-technique pivot that the result does not record, so the correction
-       cannot be expressed as an attitude and none is claimed. This applies to
-       every Galileo SSI image, since that instrument's configuration fits
-       rotation.
+       cannot be expressed as an attitude and none is claimed. It is reached
+       only after the eligibility check above, so it applies to every
+       otherwise eligible image of an instrument whose configuration fits
+       rotation, and to none of an instrument whose configuration does not; an
+       image of such an instrument whose navigation neither succeeded nor
+       conflicted is reported as ``not_eligible`` instead.
    * - ``botsim_loser``
-     - A Cassini exposure taken on both cameras at once. One bus attitude
-       cannot carry two different corrections, so the narrow angle member of
-       the pair keeps its correction and the wide angle member yields. A wide
-       angle frame yields only to a partner that actually writes: one whose
-       narrow angle partner is ineligible, or has no reproducing baseline,
-       keeps its own correction.
+     - An exposure taken on two cameras at once, on an instrument that can do
+       that. The two frames share one spacecraft attitude and one attitude
+       cannot carry two different corrections, so one member of the pair keeps
+       its correction and the other yields. A frame yields only to a partner
+       that actually writes: one whose partner is ineligible, or has no
+       reproducing baseline, keeps its own correction.
    * - ``no_reproducing_baseline``
      - No C-kernel under the run's kernel directories reproduces the attitude
        this image navigated against. Either the kernel set has changed since
@@ -172,7 +158,10 @@ the corrected file carrying its segment or one of these reasons it has none:
 The set is closed, and every member of it is one a run can produce: an image
 whose pointing the writer cannot express as a segment at all is not reported
 here but stops the run, since a run that has found something wrong with the
-kernels or the metadata should not bury it in one image's row.
+kernels or the metadata should not bury it in one image's row. The set is the
+same for every mission because every consumer of the report reads the same
+column; which of these reasons a given instrument can actually produce, and
+why, is stated in its chapter under :doc:`instruments/instruments`.
 
 An omitted image gets no segment and no uncorrected copy of one: its pointing
 falls through to the originals, exactly as an epoch between exposures does.
@@ -199,14 +188,14 @@ One invocation covers one mission and writes everything into ``--output-dir``:
 .. code-block:: text
 
    <output-dir>/
-       03236_04002ra_nav.bc     # one corrected kernel per original
-       04002_04009ra_nav.bc
-       coiss_nav.tm             # meta-kernel furnishing the set in order
-       coiss_ck_report.csv      # one row per image considered
+       <original-1>_nav.bc          # one corrected kernel per original
+       <original-2>_nav.bc
+       <mission>_nav.tm             # meta-kernel furnishing the set in order
+       <mission>_ck_report.csv      # one row per image considered
 
 **Corrected kernels** take the original's basename with ``_nav`` inserted
 before the extension, so the pairing is legible without opening either file:
-``03236_04002ra.bc`` becomes ``03236_04002ra_nav.bc``. One file is written per
+an original named ``abcd.bc`` becomes ``abcd_nav.bc``. One file is written per
 original that some image navigated against; an original no image used produces
 no file, and so does one whose every image was omitted. A corrected file's
 size grows with the number of images corrected against its original -- one
@@ -233,9 +222,12 @@ confidence, rank, status and status reason the report carries. Read it with the
 NAIF ``commnt`` utility or with ``dafec``.
 
 Every corrected segment carries angular velocity, copied unchanged from the
-original; a Voyager segment carries zeros, its attitude being constant across
-the exposure. An exposure whose original does not supply angular velocity at
-every record receives no segment at all, and the run stops and says so. That is
+original; a segment whose attitude is constant across the exposure carries
+zeros instead, which is that attitude's true rate and is written without
+consulting the original at all. Where the rates are copied -- that is, for a
+time-varying segment -- an exposure whose original does not supply angular
+velocity at every record receives no segment at all, and the run stops and says
+so. That is
 because a segment declaring no angular velocity is not read as one whose
 angular velocity is unknown: SPICE skips it for ``ckgpav`` and for ``sxform``
 and answers those from the next loaded kernel that does carry angular velocity
@@ -256,7 +248,7 @@ in that order:
 
    import spiceypy
 
-   spiceypy.furnsh('/data/nav/ck/coiss_nav.tm')
+   spiceypy.furnsh('/data/nav/ck/<mission>_nav.tm')
 
 The paths inside are absolute, so the meta-kernel works from any working
 directory. It furnishes only the original kernels that some correction mirrors;
@@ -273,11 +265,11 @@ C-kernels covering the same object and epoch goes to the one furnished last:
 
    import spiceypy
 
-   spiceypy.furnsh('naif0012.tls')
-   spiceypy.furnsh('cas00172.tsc')
-   spiceypy.furnsh('cas_v43.tf')
-   spiceypy.furnsh('03236_04002ra.bc')       # the original
-   spiceypy.furnsh('03236_04002ra_nav.bc')   # the correction, loaded after
+   spiceypy.furnsh('naif0012.tls')     # leapseconds
+   spiceypy.furnsh('<clock>.tsc')      # the mission's spacecraft clock
+   spiceypy.furnsh('<frames>.tf')      # the mission's frame kernel
+   spiceypy.furnsh('abcd.bc')          # the original
+   spiceypy.furnsh('abcd_nav.bc')      # the correction, loaded after
 
 Reversing the last two lines is not an error and produces no message: the
 originals simply answer everywhere and the corrections are never seen.
@@ -298,12 +290,14 @@ pointing:
 
    import spiceypy
 
-   spiceypy.furnsh('naif0012.tls')
-   spiceypy.furnsh('cas00172.tsc')
-   windows = spiceypy.ckcov('03236_04002ra_nav.bc', -82000, False, 'SEGMENT', 0.0, 'TDB')
+   spiceypy.furnsh('naif0012.tls')     # leapseconds
+   spiceypy.furnsh('<clock>.tsc')      # the mission's spacecraft clock
+   windows = spiceypy.ckcov('abcd_nav.bc', ck_object, False, 'SEGMENT', 0.0, 'TDB')
 
 The leapseconds and spacecraft clock kernels are furnished first because
 coverage in TDB is what they convert the segments' clock ticks into.
+``ck_object`` is the mission's corrected object, which its chapter under
+:doc:`instruments/instruments` names.
 
 The report
 ==========
@@ -371,10 +365,17 @@ navigate anything.
 
    sd_create_ck MISSION --kernel-dir DIR [--kernel-dir DIR ...] --output-dir PATH [options]
 
-``MISSION`` is positional and required: one of ``coiss``, ``gossi``,
-``nhlorri`` or ``vgiss``, case-insensitive. It selects which metadata documents
-under the navigation results root the run considers, matched against each
-document's ``observation.instrument``.
+``MISSION`` is positional and required, and case-insensitive. It selects which
+metadata documents under the navigation results root the run considers, matched
+against each document's ``observation.instrument``. The permitted values are
+exactly the instruments SpinDoctor navigates, each linking to its own chapter,
+which is where that mission's corrected object, kernel directories, naming
+conventions and omission reasons are stated:
+
+* ``coiss`` -- :doc:`instruments/cassini_iss`
+* ``gossi`` -- :doc:`instruments/galileo_ssi`
+* ``nhlorri`` -- :doc:`instruments/newhorizons_lorri`
+* ``vgiss`` -- :doc:`instruments/voyager_iss`
 
 Environment options
 -------------------
@@ -444,31 +445,33 @@ with a count per disposition.
 Example
 -------
 
-Write the Cassini corrections for one navigation results tree, pairing images
+Write one mission's corrections for one navigation results tree, pairing images
 against the reconstructed kernels:
 
 .. code-block:: bash
 
-   sd_create_ck coiss \
+   sd_create_ck MISSION \
        --nav-results-root /data/nav/results \
-       --kernel-dir $SPICE_PATH/Cassini \
-       --kernel-dir $SPICE_PATH/Cassini/SCLK \
-       --kernel-dir $SPICE_PATH/Cassini/FK \
-       --kernel-dir $SPICE_PATH/Cassini/CK-reconstructed \
+       --kernel-dir DIR_HOLDING_THE_LEAPSECONDS_KERNEL \
+       --kernel-dir DIR_HOLDING_THE_SPACECRAFT_CLOCK_KERNEL \
+       --kernel-dir DIR_HOLDING_THE_FRAME_KERNEL \
+       --kernel-dir DIR_HOLDING_THE_ORIGINAL_C_KERNELS \
        --output-dir /data/nav/ck
 
-The first ``--kernel-dir`` contributes the leapseconds kernel, which sits at
-the top of the Cassini tree; the next two contribute the spacecraft clock and
-frame kernels the navigation recorded; the last is the set of originals to pair
-against. Restricting the run to part of the tour is a matter of adding
-``--start-time`` and ``--stop-time``.
+Every kernel the navigation recorded has to be reachable, and directories are
+not searched recursively, so one flag is needed per kernel kind rather than one
+for the tree. Which directories a given mission's holdings put those kernels
+in is stated in that mission's chapter under :doc:`instruments/instruments`,
+each of which carries a worked invocation. Restricting a run to part of a
+mission is a matter of adding ``--start-time`` and ``--stop-time``.
 
 A C-kernel can describe an object whose spacecraft clock none of the furnished
-kernels defines -- the merged New Horizons pointing files name object -1 beside
-the spacecraft -- and the scan indexes the rest of the file rather than
+kernels defines, and the scan indexes the rest of the file rather than
 stopping. The run log carries one warning naming such objects. They can never
 supply a baseline, since their coverage cannot be expressed in TDB, and an
-image that actually corrects one is refused with the missing clock named.
+image that actually corrects one is refused with the missing clock named. A
+mission whose holdings contain such an object says so in its chapter, so the
+warning is expected rather than investigated.
 
 Exit status
 -----------
@@ -550,6 +553,10 @@ every file it wrote, and each of them is a complete, valid kernel.
 Related chapters
 ================
 
+* :doc:`instruments/instruments` -- one chapter per instrument, carrying the
+  corrected object, the spacecraft clock, the kernel directories, the baseline
+  naming conventions, the segment shape, the omission reasons that instrument
+  can produce, and its interpolation-error characterization.
 * :doc:`user_guide_navigation` -- the navigation run that records the
   C-matrices, and the ``pointing`` and ``times`` metadata blocks this program
   reads.

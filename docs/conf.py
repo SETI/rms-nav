@@ -42,12 +42,16 @@ templates_path = ['_templates']
 # This pattern also affects html_static_path and html_extra_path.
 # The simulator image galleries carry a NOTES.md regeneration note alongside the
 # committed PNG assets; exclude them so Sphinx does not treat them as orphan docs.
+# The instrument chapter templates are what a new instrument's chapter is copied
+# from, not documents in their own right, so they are excluded as well -- which
+# also keeps them out of the glob toctree that discovers the chapters.
 exclude_patterns = [
     '_build',
     'Thumbs.db',
     '.DS_Store',
     '**/_sim_images/NOTES.md',
     '**/_scene_images/NOTES.md',
+    '**/instruments/_template.rst',
 ]
 
 # The suffix(es) of source filenames.
