@@ -73,14 +73,28 @@ MISSING_OFFSET_KEY = 'missing_offset_key'
 NO_METADATA = 'no_metadata'
 """Nothing recorded this image at all, however the records are stored."""
 
-NO_METADATA_MESSAGE = (
-    'nav_results_root provided but no metadata found for %s; using uncorrected pointing.'
-)
+NO_METADATA_MESSAGE = 'No navigation record for %s in %s; using uncorrected pointing.'
 """What an image's log says when nothing recorded it.
 
 Shared by every way of looking a record up, so an image with no record reads the
 same in its log whether the records were sought as documents or as index rows.
+The second value names the storage that was searched, from
+:func:`storage_description`: "nothing ever navigated this image" and "the
+storage searched does not hold it yet" read alike, and which one it is can only
+be judged by someone who knows what was searched.
 """
+
+
+def storage_description(nav_results_root: str | FCPath) -> str:
+    """Name the documents a record was sought among, for a message about not finding one.
+
+    Parameters:
+        nav_results_root: Root the navigator wrote its documents under.
+
+    Returns:
+        The phrase naming that storage.
+    """
+    return f'the navigation results under {nav_results_root}'
 
 
 class PointingMechanism(enum.Enum):
@@ -168,7 +182,7 @@ def none_selection(reason: str | None) -> PointingSelection:
     )
 
 
-def _resolved_nav_metadata_path(
+def resolved_nav_metadata_path(
     nav_results_root: str | FCPath,
     image_file: ImageFile,
 ) -> FCPath | None:
@@ -176,6 +190,17 @@ def _resolved_nav_metadata_path(
 
     Rejects null bytes, absolute ``results_path_stub`` fragments, and any resolved
     path that escapes ``nav_results_root`` (e.g. ``..`` segments in ``stub``).
+    Every reader of a navigation document resolves its path through here, so one
+    rule decides which paths a results root may be read at rather than each
+    reader deciding for itself.
+
+    Parameters:
+        nav_results_root: Root the navigator wrote its documents under.
+        image_file: The image whose document is wanted.
+
+    Returns:
+        The resolved path, or None when the stub does not name one this root
+        may be read at, with the reason written to the image's log.
     """
     rel_name = f'{image_file.results_path_stub}_metadata.json'
     if '\x00' in rel_name:
@@ -492,14 +517,18 @@ def load_pointing_if_any(
         # Nothing was asked for, so nothing is missing.
         return none_selection(None)
 
-    metadata_path = _resolved_nav_metadata_path(nav_results_root, image_file)
+    metadata_path = resolved_nav_metadata_path(nav_results_root, image_file)
     if metadata_path is None:
         return none_selection('unusable_metadata_path')
 
     try:
         text = metadata_path.read_text()
     except FileNotFoundError:
-        IMAGE_LOGGER.warning(NO_METADATA_MESSAGE, image_file.image_file_url)
+        IMAGE_LOGGER.warning(
+            NO_METADATA_MESSAGE,
+            image_file.image_file_url,
+            storage_description(nav_results_root),
+        )
         return none_selection(NO_METADATA)
     except (OSError, UnicodeDecodeError) as exc:
         IMAGE_LOGGER.warning(

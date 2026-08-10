@@ -100,6 +100,14 @@ FITTED_ROTATION_POINTING: dict[str, Any] = {
 }
 """What a result that fitted a camera rotation records: a baseline, no cmatrix."""
 
+CAMERA_FRAME_ONLY_POINTING: dict[str, Any] = {'camera_frame': 'CASSINI_ISS_NAC'}
+"""A pointing block holding only the one field the index has no column for.
+
+No navigation writes it -- a block always carries the baseline and both frame
+identities -- so it is here to pin what the two paths do with a block that
+leaves no trace in a row.
+"""
+
 OFFSET = [5.6005, 1.0788]
 """The navigated offset those attitudes were computed from."""
 
@@ -119,6 +127,10 @@ BOOLEAN_OFFSET_STUB = f'{VOLUME}/N109_1_CALIB'
 NOT_A_ROTATION_STUB = f'{VOLUME}/N110_1_CALIB'
 NAN_MIDTIME_STUB = f'{VOLUME}/N111_1_CALIB'
 NESTED_CMATRIX_STUB = f'{VOLUME}/N112_1_CALIB'
+NO_TOP_LEVEL_STATUS_STUB = f'{VOLUME}/N113_1_CALIB'
+CAMERA_FRAME_ONLY_STUB = f'{VOLUME}/N114_1_CALIB'
+NO_STATUS_ERROR_STUB = f'{VOLUME}/N115_1_CALIB'
+SUCCESS_NO_OFFSET_KEY_STUB = f'{VOLUME}/N116_1_CALIB'
 UNNAVIGATED_STUB = f'{VOLUME}/N999_1_CALIB'
 """Stubs of the fixture tree; the last is deliberately never written."""
 
@@ -210,12 +222,39 @@ def _reason_tree() -> dict[str, dict[str, Any]]:
             times=TIMES,
             pointing={**POINTING, 'cmatrix': [CMATRIX[0:3], CMATRIX[3:6], CMATRIX[6:9]]},
         ),
+        # A document naming no outcome of its own, beside a nested copy that
+        # names one.  The ladder's first question is the top-level field, so a
+        # column standing the nested one in for it would apply a corrected
+        # attitude to a record the same document supplies no pointing for.
+        NO_TOP_LEVEL_STATUS_STUB: document(
+            NO_TOP_LEVEL_STATUS_STUB, offset=OFFSET, times=TIMES, pointing=POINTING
+        ),
+        CAMERA_FRAME_ONLY_STUB: document(
+            CAMERA_FRAME_ONLY_STUB,
+            offset=OFFSET,
+            times=TIMES,
+            pointing=CAMERA_FRAME_ONLY_POINTING,
+        ),
+        # An unsuccessful outcome naming no error, which is every failed and
+        # conflicted navigation: the field is written only by a document
+        # recording an image that would not load.
+        NO_STATUS_ERROR_STUB: document(NO_STATUS_ERROR_STUB, status='failed', offset=None),
+        # A successful outcome carrying a usable attitude and no offset field.
+        # No navigation writes it, since a result with no offset is never a
+        # success, and it is the one record whose product differs.
+        SUCCESS_NO_OFFSET_KEY_STUB: document(
+            SUCCESS_NO_OFFSET_KEY_STUB, offset=OFFSET, times=TIMES, pointing=POINTING
+        ),
     }
     # The two shapes of "no usable offset on a successful record" are made here
     # rather than by the factory, which writes the key only when it has a value
     # and so cannot express a key holding null.
     tree[NULL_OFFSET_STUB]['offset'] = None
     del tree[NO_OFFSET_KEY_STUB]['offset']
+    del tree[SUCCESS_NO_OFFSET_KEY_STUB]['offset']
+    # Likewise made here: the factory writes the top-level status always, and
+    # the nested copy of it is what the shape under test is about.
+    del tree[NO_TOP_LEVEL_STATUS_STUB]['status']
     return tree
 
 

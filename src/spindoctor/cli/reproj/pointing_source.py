@@ -26,6 +26,15 @@ the part of the document that decides a pointing.  The ``pointing`` block's
 frame identity a recorded attitude is gated against is taken from the
 observation, never from the record.
 
+A field the row does not carry is rebuilt as a field the document did not have,
+rather than as one holding null, because a reader tells those apart: the
+backplane stage reports an absent ``status_error`` as ``unknown`` and would
+report a null one as null.  The one exception is ``offset``, which is rebuilt as
+a key holding null, and the reasoning is below.  The ``status`` column is NOT
+NULL and stands in for a document that named no outcome with
+:data:`~spindoctor.results_index.schema.UNKNOWN_STATUS`, so that value is
+rebuilt as the absent field it stands for.
+
 Where the two paths differ
 --------------------------
 
@@ -71,27 +80,51 @@ whichever reason describes the row that ingest actually wrote:
 |                                       | offset surfaces as ``null_offset``       |
 +---------------------------------------+------------------------------------------+
 
-Two further differences have no row of their own, because they are not one
-reason reported in place of another but the same record classified differently.
-Both come of ingest storing a rotation only in the nine row-major floats its
-producer writes, so anything else becomes a NULL ``cmatrix`` beside a stored
-baseline -- which is what a fitted-rotation result looks like:
+Three further differences have no row of their own, because each is the same
+record classified differently rather than one reason reported in place of
+another.  Each is a shape no navigation produces, and each is named here so that
+a record hand-built into a results tree is not read as agreeing when it does
+not:
 
 * A ``cmatrix`` ingest cannot store -- one that is not nine finite numbers --
   is ``malformed_pointing`` via files and ``no_cmatrix_rotation_fitted`` via
-  the index.  Both fall back to the offset; they differ in what they call it.
-  (A ``cmatrix`` that *is* nine finite numbers and is not a rotation is stored,
-  and the validator then refuses it in both paths alike, which is why
-  ``malformed_pointing`` has a row of its own above.)
-* A ``cmatrix`` written as a 3x3 nesting -- a shape this module's classifier
-  accepts and the navigator never writes -- selects the C-matrix mechanism via
-  files and the offset via the index.  This is the one record class whose
-  *product* differs between the two, and it is a shape no navigation produces.
+  the index, because it becomes a NULL ``cmatrix`` beside a stored baseline,
+  which is what a fitted-rotation result looks like.  Both fall back to the
+  offset; they differ in what they call it.  (A ``cmatrix`` that *is* nine
+  finite numbers and is not a rotation is stored, and the validator then
+  refuses it in both paths alike, which is why ``malformed_pointing`` has a row
+  of its own above.)
+* A ``pointing`` block carrying none of the four fields the index has columns
+  for -- one holding only ``camera_frame``, say -- is
+  ``no_cmatrix_rotation_fitted`` via files and ``no_pointing_block`` via the
+  index, since the rebuilt record has no block to distinguish.  Same mechanism
+  and same product; a run-level tally counts the image under the other class.
+  The block a navigation writes always carries the baseline and both frame
+  identities, so this is a block none of them wrote.
+
+The third differs in the *product* and not only in what it is called:
+
+* A ``status: success`` record carrying no ``offset`` key at all is refused by
+  the backplane stage via files, which raises rather than building geometry on
+  a record shaped like a defect, and produces backplanes via the index, which
+  cannot see the difference between an absent offset and a null one and reports
+  the commoner of them.  With a usable ``cmatrix`` beside it the index path
+  applies the corrected attitude and writes the product the file path refuses.
+  The rebuild renders an absent offset as a null one deliberately: ingest
+  stores an absent, null, malformed and non-finite offset alike as NULL, and
+  the other three are records the file path builds products from, so rendering
+  the pair as an absent key would refuse three reachable shapes to agree about
+  one that is not.  No navigation writes it: a result carrying no offset is
+  never a success, so a document whose status is ``success`` always carries
+  one.  (A ``cmatrix`` written as a 3x3 nesting -- a shape this module's
+  classifier accepts and the navigator never writes -- likewise selects the
+  C-matrix mechanism via files and the offset via the index, and their products
+  differ in the pointing they were built on.)
 
 These are real behavioral differences and are stated rather than papered over.
 For every record the navigator wrote and ingest stored, everything a product is
 built from -- the mechanism, the matrices, the midtime, the offset -- is
-identical in the two paths.
+identical in the two paths, and so is every field the readers report about it.
 """
 
 import json
@@ -107,15 +140,18 @@ from spindoctor.cli.reproj.offsets import (
     PointingSelection,
     load_pointing_if_any,
     none_selection,
+    resolved_nav_metadata_path,
     select_pointing,
 )
 from spindoctor.config import IMAGE_LOGGER
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.results_index import (
     IMAGES,
+    UNKNOWN_STATUS,
     masked_url,
     normalize_root_url,
     open_index,
+    reporting_a_failed_read,
     require_ingested_roots,
 )
 
@@ -214,9 +250,13 @@ class FilePointingSource:
             The parsed document.
 
         Raises:
-            FileNotFoundError: If the document does not exist, or if this source
-                was built with no navigation results root and therefore has
-                nowhere to look.
+            FileNotFoundError: If the document does not exist; if the stub does
+                not name a path under the root, which a stub carrying a null
+                byte, an absolute fragment or a ``..`` escape does not; or if
+                this source was built with no navigation results root and
+                therefore has nowhere to look. All three mean the same thing to
+                the caller -- this image has no readable record -- and the
+                image's log carries which of them it was.
             ValueError: If the document is not valid JSON, or is valid JSON that
                 is not an object.
         """
@@ -225,9 +265,16 @@ class FilePointingSource:
                 f'{image_file.results_path_stub}: no navigation results root was resolved, '
                 f'so no navigation record can be read for this image'
             )
-        metadata_file = FCPath(self._nav_results_root) / (
-            image_file.results_path_stub + _METADATA_SUFFIX
-        )
+        # Resolved through the one guard both readers share rather than joined
+        # here: the class would otherwise apply different rules about which
+        # paths a results root may be read at depending on which of its two
+        # methods was called.
+        metadata_file = resolved_nav_metadata_path(self._nav_results_root, image_file)
+        if metadata_file is None:
+            raise FileNotFoundError(
+                f'{image_file.results_path_stub}: does not name a navigation record under '
+                f'{self._nav_results_root}, so none can be read for this image'
+            )
         return _json_object_from_text(metadata_file.read_text(), source=str(metadata_file))
 
     def load_pointing(self, image_file: ImageFile) -> PointingSelection:
@@ -269,6 +316,14 @@ class IndexPointingSource:
         self._engine = engine
         self._root_url = root_url
         self._url = masked_url(engine.url.render_as_string(hide_password=False))
+        # An index is a snapshot of its last ingest, so a row can be absent
+        # because nothing navigated the image or because the image was
+        # navigated after that ingest.  Neither the row nor its absence can say
+        # which, so the message says what was searched and leaves the reader
+        # able to tell.
+        self._storage = (
+            f'the results index {self._url}, a snapshot of its last ingest of {root_url}'
+        )
 
     def _row(self, image_file: ImageFile) -> sqlalchemy.Row[Any] | None:
         """Read the one row recording an image, or None when there is none.
@@ -279,12 +334,21 @@ class IndexPointingSource:
         Returns:
             The row, or None when the index holds none for this stub under this
             root.
+
+        Raises:
+            ValueError: If the index cannot be read at all -- a lost
+                connection, a table the account may not read, a partially
+                restored database.  Translated here for the same reason the
+                selection seam translates it: a caller of this module reports
+                the failure against one image, and the database layer's own
+                exception types are ones it cannot name.
         """
         statement = sqlalchemy.select(*_ROW_COLUMNS).where(
             IMAGES.c.root_url == self._root_url,
             IMAGES.c.results_path_stub == image_file.results_path_stub,
         )
-        with self._engine.connect() as connection:
+        url = self._engine.url.render_as_string(hide_password=False)
+        with reporting_a_failed_read(url), self._engine.connect() as connection:
             return connection.execute(statement).first()
 
     def read_record(self, image_file: ImageFile) -> dict[str, Any]:
@@ -298,16 +362,18 @@ class IndexPointingSource:
 
         Raises:
             FileNotFoundError: If the index holds no row for this stub under this
-                root, naming both and the index. The index is a snapshot of a
-                fully ingested root, so absence of a row means the image was
-                never navigated -- the same thing a missing document means, and
-                raised the same way so the caller reports it the same way.
+                root, naming both and the index, and saying that the index is a
+                snapshot: the row is absent either because nothing navigated
+                the image or because it was navigated after the last ingest,
+                and the message names the snapshot so the two can be told
+                apart. A missing document raises the same way, so the caller
+                reports both the same way.
         """
         row = self._row(image_file)
         if row is None:
             raise FileNotFoundError(
-                f'{image_file.results_path_stub}: the results index {self._url} holds no '
-                f'navigation record for this image under {self._root_url}'
+                f'{image_file.results_path_stub}: no navigation record for this image in '
+                f'{self._storage}'
             )
         return _record_from_row(row)
 
@@ -323,7 +389,7 @@ class IndexPointingSource:
         """
         row = self._row(image_file)
         if row is None:
-            IMAGE_LOGGER.warning(NO_METADATA_MESSAGE, image_file.image_file_url)
+            IMAGE_LOGGER.warning(NO_METADATA_MESSAGE, image_file.image_file_url, self._storage)
             return none_selection(NO_METADATA)
         return select_pointing(_record_from_row(row), subject=str(image_file.image_file_url))
 
@@ -391,11 +457,17 @@ def _record_from_row(row: sqlalchemy.Row[Any]) -> dict[str, Any]:
     offset: list[float] | None = None
     if row.offset_dv is not None and row.offset_du is not None:
         offset = [row.offset_dv, row.offset_du]
-    record: dict[str, Any] = {
-        'status': row.status,
-        'status_error': row.status_error,
-        'offset': offset,
-    }
+    # ``status`` and ``status_error`` are rendered back as the fields they
+    # stand for, absent ones included: a reader distinguishes a document that
+    # named an outcome from one that named none, and reports the second by
+    # defaulting rather than by printing whatever the column held.  The status
+    # column is NOT NULL and records a document that named no outcome as
+    # ``UNKNOWN_STATUS``, which is that document's absent field and is rebuilt
+    # as one.
+    record: dict[str, Any] = _present((('status_error', row.status_error),))
+    if row.status != UNKNOWN_STATUS:
+        record['status'] = row.status
+    record['offset'] = offset
     navigation_result: dict[str, Any] = {}
     times = _present(
         (

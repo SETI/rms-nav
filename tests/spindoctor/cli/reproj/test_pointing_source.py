@@ -23,6 +23,7 @@ import pytest
 from filecache import FCPath
 from tests.spindoctor.cli.reproj.conftest import (
     BOOLEAN_OFFSET_STUB,
+    CAMERA_FRAME_ONLY_STUB,
     CMATRIX,
     CMATRIX_ORIGINAL,
     CMATRIX_STUB,
@@ -35,11 +36,14 @@ from tests.spindoctor.cli.reproj.conftest import (
     NO_MIDTIME_STUB,
     NO_OFFSET_KEY_STUB,
     NO_POINTING_STUB,
+    NO_STATUS_ERROR_STUB,
+    NO_TOP_LEVEL_STATUS_STUB,
     NON_FINITE_OFFSET_STUB,
     NOT_A_ROTATION_STUB,
     NULL_OFFSET_STUB,
     OFFSET,
     POINTING,
+    SUCCESS_NO_OFFSET_KEY_STUB,
     TIMES,
     UNNAVIGATED_STUB,
     build_tree,
@@ -56,7 +60,7 @@ from spindoctor.cli.reproj.pointing_source import (
     build_pointing_source,
 )
 from spindoctor.config import IMAGE_LOGGER, LogLevels, LogSinks, build_image_log_handlers
-from spindoctor.results_index import normalize_root_url, open_index
+from spindoctor.results_index import INGEST_RUNS, normalize_root_url, open_index
 
 _STAMP = '2026-08-08T12-00-00'
 
@@ -323,6 +327,145 @@ def test_a_record_with_no_pointing_block_is_not_read_as_a_fitted_rotation(
     assert _selection(sources, 'index', NO_POINTING_STUB).reason == 'no_pointing_block'
 
 
+def test_a_pointing_block_of_uncolumned_fields_is_read_as_a_fitted_rotation(
+    sources: dict[str, PointingSource],
+) -> None:
+    """Reading the document, a block with no cmatrix is a fitted rotation.
+
+    Whatever else the block holds: the classifier keys on the absence of the
+    corrected attitude, not on what is there beside it.
+    """
+    selection = _selection(sources, 'file', CAMERA_FRAME_ONLY_STUB)
+    assert selection.reason == 'no_cmatrix_rotation_fitted'
+
+
+def test_the_index_reads_that_same_block_as_no_block_at_all(
+    sources: dict[str, PointingSource],
+) -> None:
+    """Because none of its fields is a column, so the row records no block.
+
+    A behavioral difference, pinned rather than left to be found: the mechanism
+    and the product are the same, and a run-level tally counts the image under
+    the other class.  No navigation writes such a block.
+    """
+    selection = _selection(sources, 'index', CAMERA_FRAME_ONLY_STUB)
+    assert selection.reason == 'no_pointing_block'
+
+
+@pytest.mark.parametrize('mode', ['file', 'index'])
+def test_that_block_selects_the_recorded_offset_either_way(
+    sources: dict[str, PointingSource], mode: str
+) -> None:
+    """Which is what makes the differing reason a name rather than a product."""
+    assert _selection(sources, mode, CAMERA_FRAME_ONLY_STUB).mechanism is PointingMechanism.OFFSET
+
+
+# ---------------------------------------------------------------------------
+# The outcome a document names, and the one it does not
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('mode', ['file', 'index'])
+def test_a_document_naming_no_outcome_supplies_no_pointing(
+    sources: dict[str, PointingSource], mode: str
+) -> None:
+    """A nested copy of the status does not stand in for the top-level field.
+
+    The ladder's first question is whether the document's own ``status`` is
+    ``success``; a document that names none supplies no pointing at all.  The
+    document under test carries a nested ``success`` beside a usable recorded
+    attitude, so a column standing that copy in for the field would apply the
+    corrected attitude here and nothing at all through the document.
+    """
+    selection = _selection(sources, mode, NO_TOP_LEVEL_STATUS_STUB)
+    assert selection.reason == 'navigation_did_not_succeed'
+
+
+@pytest.mark.parametrize('mode', ['file', 'index'])
+def test_a_document_naming_no_outcome_leaves_the_pointing_uncorrected(
+    sources: dict[str, PointingSource], mode: str
+) -> None:
+    """The half of that which decides the product rather than the tally."""
+    selection = _selection(sources, mode, NO_TOP_LEVEL_STATUS_STUB)
+    assert selection.mechanism is PointingMechanism.NONE
+
+
+@pytest.mark.parametrize('mode', ['file', 'index'])
+def test_a_document_naming_no_outcome_reads_back_as_naming_none(
+    sources: dict[str, PointingSource], mode: str
+) -> None:
+    """And the record reads back with no status, which is what the skip reports.
+
+    The backplane stage puts this value in its skip result and in the run log,
+    and a cloud task has no other channel for it.
+    """
+    record = sources[mode].read_record(image_file(NO_TOP_LEVEL_STATUS_STUB))
+    assert record.get('status') is None
+
+
+@pytest.mark.parametrize('mode', ['file', 'index'])
+def test_an_unsuccessful_record_naming_no_error_reads_back_as_naming_none(
+    sources: dict[str, PointingSource], mode: str
+) -> None:
+    """An absent ``status_error`` is absent, not null.
+
+    Every failed and conflicted navigation writes no such field, and the
+    backplane stage reports an absent one as ``unknown`` by defaulting.  A
+    rebuilt record carrying the key with a null value would default to nothing
+    and report ``None`` instead, on the commonest unsuccessful record there is.
+    """
+    record = sources[mode].read_record(image_file(NO_STATUS_ERROR_STUB))
+    assert 'status_error' not in record
+
+
+@pytest.mark.parametrize('mode', ['file', 'index'])
+def test_a_recorded_error_still_reads_back(sources: dict[str, PointingSource], mode: str) -> None:
+    """The control for the absence above, which an empty record would pass."""
+    record = sources[mode].read_record(image_file(FAILED_STUB))
+    assert record['status_error'] == 'missing_spice_data'
+
+
+# ---------------------------------------------------------------------------
+# A success carrying no offset field, which the two paths build differently
+# ---------------------------------------------------------------------------
+
+
+def test_the_file_path_sees_that_a_success_carries_no_offset_field(
+    sources: dict[str, PointingSource],
+) -> None:
+    """Reading the document, the absent key is visible as an absent key.
+
+    The backplane stage refuses such a record rather than building geometry on
+    something shaped like a defect.
+    """
+    assert _selection(sources, 'file', SUCCESS_NO_OFFSET_KEY_STUB).offset_key_present is False
+
+
+def test_the_index_reports_that_same_record_as_carrying_a_null_offset(
+    sources: dict[str, PointingSource],
+) -> None:
+    """Because ingest stores an absent offset and a null one alike.
+
+    The rebuild renders the pair as a key holding null deliberately: a
+    malformed, non-finite or genuinely null offset is stored the same way, and
+    those are records the backplane stage builds products from, so rendering
+    the pair as an absent key would refuse three reachable shapes to agree
+    about one that no navigation writes.  This is the record whose *product*
+    differs between the paths, and it is pinned here so that a change to either
+    side has to say so.
+    """
+    assert _selection(sources, 'index', SUCCESS_NO_OFFSET_KEY_STUB).offset_key_present is True
+
+
+@pytest.mark.parametrize('mode', ['file', 'index'])
+def test_both_paths_still_select_the_recorded_attitude_for_it(
+    sources: dict[str, PointingSource], mode: str
+) -> None:
+    """The difference is the refusal, not the pointing: both read the C-matrix."""
+    selection = _selection(sources, mode, SUCCESS_NO_OFFSET_KEY_STUB)
+    assert selection.mechanism is PointingMechanism.CMATRIX
+
+
 # ---------------------------------------------------------------------------
 # The warnings an image's own log carries
 # ---------------------------------------------------------------------------
@@ -361,7 +504,7 @@ def _log_of(source: PointingSource, stub: str, log_root: Path) -> str:
 @pytest.mark.parametrize(
     ('stub', 'expected'),
     [
-        (UNNAVIGATED_STUB, 'no metadata found'),
+        (UNNAVIGATED_STUB, 'No navigation record for'),
         (FAILED_STUB, "status='error'"),
         (NULL_OFFSET_STUB, 'null offset'),
         (NO_MIDTIME_STUB, 'malformed pointing block'),
@@ -381,6 +524,28 @@ def test_the_image_log_says_the_same_thing_either_way(
     same line whichever storage the run was pointed at.
     """
     assert expected in _log_of(sources[mode], stub, tmp_path / f'logs_{mode}')
+
+
+def test_the_missing_record_warning_names_the_storage_that_was_searched(
+    sources: dict[str, PointingSource], tmp_path: Path
+) -> None:
+    """An index that holds no row names itself, not a results root it never read.
+
+    An index is a snapshot of its last ingest, so a row can be absent because
+    nothing navigated the image or because the image was navigated since; a
+    message naming a results root would rule the second out for a reader when
+    it is the likelier of the two.
+    """
+    log_text = _log_of(sources['index'], UNNAVIGATED_STUB, tmp_path / 'logs_index')
+    assert 'a snapshot of its last ingest' in log_text
+
+
+def test_the_same_warning_names_the_documents_when_documents_were_searched(
+    sources: dict[str, PointingSource], tmp_path: Path
+) -> None:
+    """The other half: reading documents, the message names the results root."""
+    log_text = _log_of(sources['file'], UNNAVIGATED_STUB, tmp_path / 'logs_file')
+    assert 'the navigation results under' in log_text
 
 
 # ---------------------------------------------------------------------------
@@ -420,9 +585,58 @@ def test_the_raise_names_the_index_it_asked(sources: dict[str, PointingSource]) 
 def test_a_missing_document_raises_in_the_file_path(
     sources: dict[str, PointingSource],
 ) -> None:
-    """The behavior the index path is matched against."""
-    with pytest.raises(FileNotFoundError):
+    """The behavior the index path is matched against, naming the document."""
+    with pytest.raises(FileNotFoundError) as excinfo:
         sources['file'].read_record(image_file(UNNAVIGATED_STUB))
+    assert UNNAVIGATED_STUB in str(excinfo.value)
+
+
+def test_a_stub_that_escapes_the_root_reads_no_record(tmp_path: Path) -> None:
+    """A stub resolving outside the root names no record this source may read.
+
+    The same rule both of this class's methods apply, rather than one guarded
+    lookup and one that joins whatever it was handed onto the root.
+    """
+    root = tmp_path / 'nav'
+    root.mkdir(parents=True)
+    (tmp_path / 'elsewhere_metadata.json').write_text(json.dumps({'status': 'success'}))
+    escaping = image_file('../elsewhere')
+    with pytest.raises(FileNotFoundError) as excinfo:
+        FilePointingSource(FCPath(root)).read_record(escaping)
+    assert 'does not name a navigation record' in str(excinfo.value)
+
+
+def test_a_stub_that_stays_under_the_root_still_reads_its_record(tmp_path: Path) -> None:
+    """The control for the refusal above, which a source refusing all would pass."""
+    root = tmp_path / 'nav'
+    build_tree(root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET)})
+    record = FilePointingSource(FCPath(root)).read_record(image_file(CMATRIX_STUB))
+    assert record['status'] == 'success'
+
+
+def test_an_index_that_stops_answering_is_reported_as_a_refusal(
+    tmp_path: Path, quiet_ingest_logger: pdslogger.PdsLogger
+) -> None:
+    """A lost index is a refusal naming it, not the database layer's own exception.
+
+    The callers of this module report a lookup failure against one image, and
+    they cannot name SQLAlchemy's exception types: they deliberately do not
+    import it.  The index's own tables are dropped here, which is the shape a
+    partially restored database has.
+    """
+    root = tmp_path / 'nav'
+    build_tree(root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET)})
+    database = tmp_path / 'index.sqlite3'
+    engine = index_for([root], database, logger=quiet_ingest_logger)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql('DROP TABLE images')
+        source = IndexPointingSource(engine, normalize_root_url(root))
+        with pytest.raises(ValueError, match='could not be read') as excinfo:
+            source.read_record(image_file(CMATRIX_STUB))
+        assert 'index.sqlite3' in str(excinfo.value)
+    finally:
+        engine.dispose()
 
 
 def test_a_file_source_with_no_root_has_nowhere_to_read(tmp_path: Path) -> None:
@@ -553,8 +767,9 @@ def test_an_unopenable_url_fails_rather_than_falling_back(tmp_path: Path) -> Non
 def test_an_unopenable_url_leaves_no_database_behind(tmp_path: Path) -> None:
     """And it does not create the index it was told to read."""
     missing = tmp_path / 'index.sqlite3'
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='sd_stats_ingest') as excinfo:
         build_pointing_source(FCPath(tmp_path), results_db_url=f'sqlite:///{missing.as_posix()}')
+    assert 'index.sqlite3' in str(excinfo.value)
     assert not missing.exists()
 
 
@@ -620,7 +835,14 @@ def test_a_run_that_died_halfway_leaves_a_root_unreadable(
     engine = open_index(url)
     try:
         with engine.begin() as connection:
-            connection.exec_driver_sql('UPDATE ingest_runs SET finished_utc = NULL')
+            # Restricted to the root under test rather than applied to every
+            # row: a fixture that mutates all of them cannot tell a query
+            # reading the right row from one reading whichever it found first.
+            connection.execute(
+                INGEST_RUNS.update()
+                .where(INGEST_RUNS.c.root_url == normalize_root_url(root))
+                .values(finished_utc=None)
+            )
     finally:
         engine.dispose()
     with pytest.raises(ValueError, match='no completed ingest'):
@@ -646,7 +868,11 @@ def test_the_rebuilt_record_omits_the_camera_frame_name(
     """No reader consults it: the frame identity comes from the observation.
 
     Asserted so that a reader which started consulting it would be caught here
-    rather than by a product built on a name the index never stored.
+    rather than by a product built on a name the index never stored.  The
+    document it was ingested from is checked to carry the name, so what is
+    asserted is that the rebuild drops it rather than that nothing ever had it.
     """
+    ingested = sources['file'].read_record(image_file(CMATRIX_STUB))
+    assert 'camera_frame' in ingested['navigation_result']['pointing']
     record = sources['index'].read_record(image_file(CMATRIX_STUB))
     assert 'camera_frame' not in record['navigation_result']['pointing']
