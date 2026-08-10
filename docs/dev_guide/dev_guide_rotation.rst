@@ -41,7 +41,7 @@ Each per-camera config block under ``config_4N0_inst_*.yaml`` carries:
 
 .. code-block:: yaml
 
-    fit_camera_rotation: false       # on for exactly one instrument today
+    fit_camera_rotation: false       # on for exactly one instrument
     max_rotation_deg: 5.0            # bound on the rotation magnitude
 
 The orchestrator reads both fields from

@@ -8,16 +8,16 @@ Overview
 The Galileo Solid State Imager is a single framing camera which SpinDoctor
 navigates across the whole PDS3 archive: the cruise targets and the Jupiter
 orbital tour. Navigation, backplanes and mosaics are supported; corrected
-pointing kernels are not currently produced for this instrument, for the reason
-given below.
+pointing kernels are not produced for this instrument, for the reason given
+below.
 
 Pipeline support
 ================
 
 * **Navigation** -- supported, with a per-frame camera rotation fitted
   alongside the translation.
-* **Corrected-pointing C-kernels** -- **not currently produced.** The run is
-  accepted and reports every image, but every image is omitted with
+* **Corrected-pointing C-kernels** -- **not produced.** The run is accepted and
+  reports every image, but every otherwise eligible image is omitted with
   ``rotation_unsupported``, so no kernel is written. See
   `Corrected-pointing C-kernels`_.
 * **Backplanes** -- supported.
@@ -49,8 +49,8 @@ index file name is lowercase.
 
 **Which product is navigated.** The index names a ``.LBL`` filespec directly
 and it is used as it stands, with the image resolved from the label's image
-pointer. There is no calibrated Galileo SSI product and there never will be, so
-navigation runs on raw DN.
+pointer. The archive holds no calibrated Galileo SSI product, so navigation
+runs on raw DN.
 
 The directory layout inside a volume is organized by target rather than by
 image number, and the dataset parses both forms it takes: a two-level
@@ -171,10 +171,11 @@ It writes none of the spacecraft-clock fields (``start_time_scet``,
 Corrected-pointing C-kernels
 ============================
 
-**No corrected kernels are produced for this instrument today.** ``sd_create_ck
-gossi`` is a valid invocation and runs to completion, but every image is
-omitted with ``rotation_unsupported`` and no kernel, and no meta-kernel, is
-written. The report is still written and names the reason on every row.
+**No corrected kernels are produced for this instrument.** ``sd_create_ck
+gossi`` is a valid invocation and runs to completion, but every otherwise
+eligible image is omitted with ``rotation_unsupported`` and no kernel, and no
+meta-kernel, is written. The report is still written and names the reason on
+every row.
 
 The cause is the rotation fitting described above. A fitted rotation turns
 about a pivot chosen per technique, which the navigation result does not
@@ -228,8 +229,9 @@ time-varying: the correction is held body-fixed and composed onto the
 baseline's own pointing at each record epoch.
 
 **Omission reasons this instrument produces.** ``rotation_unsupported``, on
-every image, for the reason above. ``not_eligible`` also appears, on images
-whose navigation neither succeeded nor conflicted. ``botsim_loser`` cannot
+every otherwise eligible image, for the reason above. ``not_eligible`` also
+appears, on images whose navigation neither succeeded nor conflicted, and is
+reported ahead of ``rotation_unsupported``. ``botsim_loser`` cannot
 appear: it belongs to an instrument that exposes two cameras at once, and this
 one has a single camera. ``no_reproducing_baseline`` and
 ``baseline_coverage_gap`` are unreachable while every image is refused earlier.

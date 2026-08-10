@@ -184,10 +184,10 @@ be loaded.
 **Camera rotation.** Rotation fitting is **off**, and that is a cost decision
 rather than a statement that there is nothing to fit. These cameras do carry
 per-frame rotation residuals, which the measurements below quantify; fitting
-them per frame is currently too slow to enable across the archive. What a user
-sees is a two degree of freedom offset, ``(dv, du)``, with a real per-frame
-twist absorbed into the translation rather than reported. The setting is
-expected to change once the rotation search is fast enough.
+them per frame is too slow to enable across the archive. What a user sees is a
+two degree of freedom offset, ``(dv, du)``, with a real per-frame twist
+absorbed into the translation rather than reported. The setting is worth
+revisiting whenever the rotation search becomes fast enough.
 
 **Measured twist.** The twist is **frame-varying** on both Voyager 2 cameras,
 which is the regime no static kernel correction can fix. The narrow angle

@@ -203,7 +203,7 @@ attitude at each record epoch.
 
 **Angular-velocity census.** All 4346 -98000 segments in the local baselines
 carry angular velocity, so the refusal for a baseline that supplies pointing
-without a rate is unreachable for this mission today.
+without a rate is unreachable for this mission against those holdings.
 
 **Kernel-name class rules.** ``_NEW_HORIZONS_NAME_RULES`` in
 :mod:`spindoctor.cli.ck.index` carries two patterns matched in full against the

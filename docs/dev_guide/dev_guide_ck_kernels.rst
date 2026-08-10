@@ -82,11 +82,14 @@ and its rotation angle is correct, because a magnitude is invariant under
 exactly the error being made. Only real host frames meeting real kernels can
 see it.
 
-So ``R`` is measured at runtime, never assumed. The measurement is
-``C_oops . cmatrix_original^T``, and it is checked against the constant
-:func:`~spindoctor.support.cmatrix.compute_pointing` records for that
-instrument, and checked again for being the same at the exposure start and stop
-as at the midtime. A violation raises rather than being absorbed.
+So on a host that declares a runtime frame relation, ``R`` is measured, never
+assumed. The measurement is ``C_oops . cmatrix_original^T``, and it is checked
+against the constant :func:`~spindoctor.support.cmatrix.compute_pointing`
+records for that instrument, and checked again for being the same at the
+exposure start and stop as at the midtime. A violation raises rather than being
+absorbed. A host that freezes its observation frame takes neither the
+measurement nor those checks: its ``R`` is the identity by construction, as the
+frozen path below describes.
 
 Deriving the corrected attitude
 ===============================

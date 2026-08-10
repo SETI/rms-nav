@@ -231,7 +231,7 @@ body-fixed ``delta`` onto the baseline's own attitude at each record epoch.
 
 **Angular-velocity census.** All 2645 -82000 segments in the local baselines
 carry angular velocity, so the refusal for a baseline that supplies pointing
-without a rate is unreachable for this mission today.
+without a rate is unreachable for this mission against those holdings.
 
 **Kernel-name class rules.** ``_CASSINI_NAME_RULES`` in
 :mod:`spindoctor.cli.ck.index` carries four patterns matched in full against

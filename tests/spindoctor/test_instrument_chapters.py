@@ -106,9 +106,38 @@ def read_doc(path: Path) -> str:
     Returns:
         The file's text.
     """
-    if not path.is_file():
+    try:
+        return path.read_text(encoding='utf-8')
+    except FileNotFoundError:
         pytest.fail(f'missing documentation file: {path}')
-    return path.read_text(encoding='utf-8')
+
+
+def toctree_blocks(text: str) -> list[list[str]]:
+    """Return the body lines of every ``toctree`` directive in a document.
+
+    A directive body is the indented run that follows the directive line, blank
+    lines included, and ends at the first line indented no further than the
+    directive itself.
+
+    Parameters:
+        text: The whole document.
+
+    Returns:
+        One list of body lines per ``toctree``, in document order.
+    """
+    lines = text.splitlines()
+    blocks: list[list[str]] = []
+    for index, line in enumerate(lines):
+        if line.strip() != '.. toctree::':
+            continue
+        margin = len(line) - len(line.lstrip())
+        body: list[str] = []
+        for candidate in lines[index + 1 :]:
+            if candidate.strip() and len(candidate) - len(candidate.lstrip()) <= margin:
+                break
+            body.append(candidate.strip())
+        blocks.append(body)
+    return blocks
 
 
 CHAPTER_CASES = [
@@ -120,28 +149,64 @@ CHAPTER_CASES = [
 
 @pytest.mark.parametrize('guide', GUIDES)
 def test_the_guide_carries_an_instrument_template(guide: str) -> None:
-    """Each guide's instruments directory holds the template chapters copy."""
+    """Each guide's instruments directory holds the template chapters copy.
+
+    Parameters:
+        guide: Name of the guide whose instruments directory is checked.
+    """
     template = DOCS_ROOT / guide / 'instruments' / '_template.rst'
     assert template.is_file(), f'missing template: {template}'
 
 
 @pytest.mark.parametrize('guide', GUIDES)
-def test_the_instrument_index_discovers_chapters_by_glob(guide: str) -> None:
-    """The index toctree globs, so a new chapter needs no edit to a shared file."""
+def test_the_instrument_index_globs_its_toctree(guide: str) -> None:
+    """One index toctree carries the glob flag, so a new chapter edits no shared file.
+
+    Parameters:
+        guide: Name of the guide whose instruments index is checked.
+    """
     index = read_doc(DOCS_ROOT / guide / 'instruments' / 'instruments.rst')
-    assert ':glob:' in index, f'{guide} instruments index does not use a glob toctree'
+    blocks = toctree_blocks(index)
+    assert blocks, f'{guide} instruments index declares no toctree'
+    globbed = [body for body in blocks if ':glob:' in body]
+    assert globbed, f'{guide} instruments index has no toctree carrying :glob:'
+
+
+@pytest.mark.parametrize('guide', GUIDES)
+def test_the_instrument_index_toctree_lists_the_glob_pattern(guide: str) -> None:
+    """The globbing toctree names ``*``, so every chapter file is picked up.
+
+    Parameters:
+        guide: Name of the guide whose instruments index is checked.
+    """
+    index = read_doc(DOCS_ROOT / guide / 'instruments' / 'instruments.rst')
+    globbed = [body for body in toctree_blocks(index) if ':glob:' in body]
+    assert globbed, f'{guide} instruments index has no toctree carrying :glob:'
+    assert any('*' in body for body in globbed), (
+        f'{guide} instruments index globs but its toctree lists no * pattern, so it '
+        f'still enumerates chapters by hand'
+    )
 
 
 @pytest.mark.parametrize('guide', GUIDES)
 def test_the_template_declares_sections(guide: str) -> None:
-    """A template with no sections would make the conformance check vacuous."""
+    """A template with no sections would make the conformance check vacuous.
+
+    Parameters:
+        guide: Name of the guide whose instrument template is checked.
+    """
     template = read_doc(DOCS_ROOT / guide / 'instruments' / '_template.rst')
     assert section_headings(template), f'{guide} instrument template declares no sections'
 
 
 @pytest.mark.parametrize(('guide', 'instrument'), CHAPTER_CASES)
 def test_a_registered_instrument_has_a_chapter(guide: str, instrument: str) -> None:
-    """Registering an instrument requires a chapter in both guides."""
+    """Registering an instrument requires a chapter in both guides.
+
+    Parameters:
+        guide: Name of the guide the chapter must appear in.
+        instrument: Registered instrument name the chapter must exist for.
+    """
     stem = chapter_stem(inst_name_to_obs_class(instrument))
     chapter = DOCS_ROOT / guide / 'instruments' / f'{stem}.rst'
     assert chapter.is_file(), (
@@ -151,7 +216,12 @@ def test_a_registered_instrument_has_a_chapter(guide: str, instrument: str) -> N
 
 @pytest.mark.parametrize(('guide', 'instrument'), CHAPTER_CASES)
 def test_a_chapter_carries_every_template_section(guide: str, instrument: str) -> None:
-    """A chapter carries the template's sections, in the template's order."""
+    """A chapter carries the template's sections, in the template's order.
+
+    Parameters:
+        guide: Name of the guide holding the chapter.
+        instrument: Registered instrument name whose chapter is checked.
+    """
     stem = chapter_stem(inst_name_to_obs_class(instrument))
     expected = section_headings(read_doc(DOCS_ROOT / guide / 'instruments' / '_template.rst'))
     actual = section_headings(read_doc(DOCS_ROOT / guide / 'instruments' / f'{stem}.rst'))

@@ -48,8 +48,8 @@ code here; it is left in place because the loaders are meant to be
 interchangeable, and it carries a TODO saying the branch belongs somewhere
 shared.
 
-There is no calibration step. There is no I/F-calibrated Galileo SSI product
-and there never will be, and the navigation pipeline treats image brightness
+There is no calibration step. The PDS3 archive holds no I/F-calibrated Galileo
+SSI product, and the navigation pipeline treats image brightness
 scale-invariantly -- normalized cross-correlation, an image-derived noise
 floor, a magnitude-based star gate -- so no photometric calibration is required
 to navigate.
@@ -206,9 +206,9 @@ technique that produces one, not a change to the writer.
 C-kernel specifics
 ==================
 
-Nothing is written for this instrument today, for the reason above. What
-follows describes what a run would do if that changed, and is what the writer's
-holdings tests already exercise.
+Nothing is written for this instrument, for the reason above. What follows
+describes what a run would do were the rotation expressible, and is what the
+writer's holdings tests already exercise.
 
 **Baseline structure.** Ordinary time-varying type-3 kernels for object
 -77001, which a corrected segment would compose a body-fixed ``delta`` onto at

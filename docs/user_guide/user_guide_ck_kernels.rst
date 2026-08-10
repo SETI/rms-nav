@@ -129,9 +129,12 @@ the corrected file carrying its segment or one of these reasons it has none:
    * - ``rotation_unsupported``
      - The navigation fitted a camera rotation. The rotation turns about a
        per-technique pivot that the result does not record, so the correction
-       cannot be expressed as an attitude and none is claimed. It applies to
-       every image of an instrument whose configuration fits rotation, and to
-       none of an instrument whose configuration does not.
+       cannot be expressed as an attitude and none is claimed. It is reached
+       only after the eligibility check above, so it applies to every
+       otherwise eligible image of an instrument whose configuration fits
+       rotation, and to none of an instrument whose configuration does not; an
+       image of such an instrument whose navigation neither succeeded nor
+       conflicted is reported as ``not_eligible`` instead.
    * - ``botsim_loser``
      - An exposure taken on two cameras at once, on an instrument that can do
        that. The two frames share one spacecraft attitude and one attitude
@@ -220,9 +223,11 @@ NAIF ``commnt`` utility or with ``dafec``.
 
 Every corrected segment carries angular velocity, copied unchanged from the
 original; a segment whose attitude is constant across the exposure carries
-zeros instead, which is that attitude's true rate. An exposure whose original
-does not supply angular velocity at
-every record receives no segment at all, and the run stops and says so. That is
+zeros instead, which is that attitude's true rate and is written without
+consulting the original at all. Where the rates are copied -- that is, for a
+time-varying segment -- an exposure whose original does not supply angular
+velocity at every record receives no segment at all, and the run stops and says
+so. That is
 because a segment declaring no angular velocity is not read as one whose
 angular velocity is unknown: SPICE skips it for ``ckgpav`` and for ``sxform``
 and answers those from the next loaded kernel that does carry angular velocity
