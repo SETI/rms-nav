@@ -32,7 +32,13 @@ from spindoctor.cli.stats.ingest_rows import (
     MetadataSource,
     rows_from_metadata,
 )
-from spindoctor.results_index import IMAGES, INGEST_RUNS, TECHNIQUES, open_index
+from spindoctor.results_index import (
+    IMAGES,
+    INGEST_RUNS,
+    TECHNIQUES,
+    UNKNOWN_STATUS,
+    open_index,
+)
 
 from .conftest import (
     index_url,
@@ -141,6 +147,43 @@ def test_a_non_finite_offset_is_null() -> None:
     document['offset'] = [float('nan'), 1.0]
     rows = rows_from_metadata(document, SOURCE)
     assert rows.image['offset_dv'] is None
+
+
+def test_the_stored_status_is_the_documents_own() -> None:
+    """The column holds the top-level field and nothing standing in for it.
+
+    A consumer rebuilds a record from the row and classifies it with the same
+    ladder that reads the document, and that ladder's first question is whether
+    the top-level ``status`` is ``success``.  A column carrying the nested copy
+    where the document named nothing would answer ``success`` for a document
+    that never did, and a record supplying no pointing through its file would
+    then apply a corrected attitude through the index.
+    """
+    document = metadata_document(offset=[1.0, 2.0])
+    del document['status']
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image['status'] != 'success'
+
+
+def test_a_document_naming_no_status_is_recorded_as_naming_none() -> None:
+    """The column is NOT NULL, so "this document did not say" needs a value."""
+    document = metadata_document(offset=[1.0, 2.0])
+    del document['status']
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image['status'] == UNKNOWN_STATUS
+
+
+def test_the_nested_status_is_ignored_even_when_it_names_an_outcome() -> None:
+    """A guard on the two above, which a document with no nested copy would pass."""
+    document = metadata_document(offset=[1.0, 2.0])
+    del document['status']
+    assert document['navigation_result']['status'] == 'success'
+
+
+def test_a_document_naming_a_status_keeps_it() -> None:
+    """The control: the field the ladder reads survives into the column verbatim."""
+    rows = rows_from_metadata(metadata_document(status='conflicted'), SOURCE)
+    assert rows.image['status'] == 'conflicted'
 
 
 def test_status_error_is_stored_verbatim() -> None:

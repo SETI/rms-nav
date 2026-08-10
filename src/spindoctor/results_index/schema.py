@@ -78,6 +78,7 @@ __all__ = [
     'SCHEMA_META',
     'SCHEMA_VERSION',
     'TECHNIQUES',
+    'UNKNOWN_STATUS',
 ]
 
 SCHEMA_VERSION = 6
@@ -86,6 +87,16 @@ SCHEMA_VERSION = 6
 Incremented by any change to the column set of any table, and by any change to
 the constraints over it.  A database stamped with a different version is refused
 rather than migrated.
+"""
+
+UNKNOWN_STATUS = 'unknown'
+"""What the ``status`` column holds for a document that named no outcome.
+
+The column is NOT NULL, so a document whose top-level ``status`` is absent,
+empty, or not a string is recorded as naming none rather than as carrying an
+outcome taken from somewhere else.  It is none of the navigator's outcomes and
+matches no filter naming one, and a reader rebuilding a record from the row
+renders it back as the absent field it stands for.
 """
 
 # TEXT on SQLite, jsonb on PostgreSQL.  jsonb is the type PostgreSQL's array and

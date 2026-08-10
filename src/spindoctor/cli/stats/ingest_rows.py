@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from typing import Any, NoReturn, cast
 
 from spindoctor.cli.stats.classify import date_from_image_et, image_number_from_name
+from spindoctor.results_index import UNKNOWN_STATUS
 
 __all__ = [
     'ImageRows',
@@ -499,6 +500,12 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
     display and is deliberately not what the index carries, because every
     consumer applies the value rather than reading it.
 
+    ``status`` comes from the document's top-level ``status`` and from nowhere
+    else, so that the column holds ``'success'`` exactly when the document did.
+    A reader that rebuilds a record from the row and classifies it gets the same
+    answer as one that reads the document, which it could not if the column
+    stood in for a field the document did not have.
+
     ``status_error`` and ``status_reason`` are different vocabularies and are
     kept in different columns: ``status_error`` is what a selection filter
     matches verbatim, ``status_reason`` is the navigator's explanation of a
@@ -569,9 +576,13 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         'image_path': _str_or_none(observation.get('image_path')),
         'image_et': image_et,
         'image_date': date_from_image_et(image_et),
-        'status': _str_or_none(metadata.get('status'))
-        or _str_or_none(nav.get('status'))
-        or 'unknown',
+        # The document's own top-level field, never stood in for by the copy
+        # inside ``navigation_result``.  The column is NOT NULL, so a document
+        # that names no outcome is recorded as naming none; borrowing one would
+        # make the column say ``success`` for a document that never did, and a
+        # reader classifying the rebuilt record would then apply a corrected
+        # pointing the same record read as a file supplies no pointing at all.
+        'status': _str_or_none(metadata.get('status')) or UNKNOWN_STATUS,
         'status_error': _str_or_none(metadata.get('status_error')),
         'status_reason': _str_or_none(nav.get('status_reason')),
         'offset_dv': offset_dv,

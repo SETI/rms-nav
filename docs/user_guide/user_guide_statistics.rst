@@ -344,8 +344,10 @@ pair with ``ON DELETE CASCADE``.
    * - ``status``
      - TEXT
      - Navigation outcome: ``success``, ``failed``, ``conflicted``, or
-       ``error`` (the last from image-load failures); ``unknown`` when the
-       metadata document carries no status at all.
+       ``error`` (the last from image-load failures). Read from the document's
+       own top-level ``status`` field and from nowhere else; ``unknown`` when
+       that field is absent, empty, or not a string, so a document that named
+       no outcome is never recorded as having named one.
    * - ``status_error``
      - TEXT
      - The fatal error that ended the run, e.g. ``missing_spice_data``.
