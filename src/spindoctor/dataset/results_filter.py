@@ -1,9 +1,14 @@
 """Filter image selections against existing navigation result files.
 
 Implements the ``--has-offset-file`` / ``--has-no-offset-file`` /
-``--has-offset-error`` / ``--has-offset-spice-error`` /
-``--has-offset-nonspice-error`` image selection options shared by the PDS3
-datasets.
+``--has-offset-error`` / ``--has-no-offset-error`` /
+``--has-offset-spice-error`` / ``--has-offset-nonspice-error`` image selection
+options shared by the PDS3 datasets.
+
+The error filters, the negative one among them, ask what a document records,
+so each of them requires the document to exist: an image nothing has been
+written for records no error, and is selected by ``--has-no-offset-file``
+rather than by ``--has-no-offset-error``.
 
 The navigation pipeline writes ``{nav_results_root}/{results_path_stub}_metadata.json``
 (see :func:`spindoctor.navigate_image_files.navigate_image_files`).  The
@@ -152,6 +157,7 @@ class ResultsFilter:
         has_offset_file: bool = False,
         has_no_offset_file: bool = False,
         has_offset_error: bool = False,
+        has_no_offset_error: bool = False,
         has_offset_spice_error: bool = False,
         has_offset_nonspice_error: bool = False,
         results_db_url: str | None = None,
@@ -172,6 +178,14 @@ class ResultsFilter:
                 not exist.
             has_offset_error: Only keep images whose offset metadata file
                 indicates a fatal error (``status == 'error'``).
+            has_no_offset_error: Only keep images whose offset metadata file
+                indicates no fatal error, which is the images whose navigation
+                ran to a result of any kind.  Like every other error filter this
+                one asks what a document records, so it keeps only images that
+                have one: an image nothing has been written for records no error
+                and is selected by ``has_no_offset_file``.  So is a document
+                nothing can be read out of, for the reason
+                :meth:`_metadata_matches` gives.
             has_offset_spice_error: Only keep images whose offset metadata file
                 indicates a fatal error from missing SPICE data.
             has_offset_nonspice_error: Only keep images whose offset metadata
@@ -193,9 +207,17 @@ class ResultsFilter:
             raise SelectionError(
                 'has_offset_spice_error and has_offset_nonspice_error are mutually exclusive'
             )
-        needs_metadata_read = (
-            has_offset_error or has_offset_spice_error or has_offset_nonspice_error
-        )
+        matches_an_error = has_offset_error or has_offset_spice_error or has_offset_nonspice_error
+        if has_no_offset_error and matches_an_error:
+            # Each of the three names a document that records a fatal error, of
+            # any kind or of one kind, and this one names a document that
+            # records none: no document is both, so the pair is a selection
+            # nothing could ever satisfy rather than a narrow one.
+            raise SelectionError(
+                'has_no_offset_error and the offset-error filters are mutually exclusive: '
+                'one document cannot both record a fatal error and record none'
+            )
+        needs_metadata_read = matches_an_error or has_no_offset_error
         if needs_metadata_read and has_no_offset_file:
             raise SelectionError(
                 'has_no_offset_file contradicts the offset-error filters, which '
@@ -203,6 +225,7 @@ class ResultsFilter:
             )
 
         self._has_no_offset_file = has_no_offset_file
+        self._has_no_offset_error = has_no_offset_error
         self._has_offset_spice_error = has_offset_spice_error
         self._has_offset_nonspice_error = has_offset_nonspice_error
         # The error filters read the metadata file, so it must exist; fold them
@@ -233,6 +256,7 @@ class ResultsFilter:
                 results_db_url,
                 volume_names,
                 has_offset_error=has_offset_error,
+                has_no_offset_error=has_no_offset_error,
                 has_offset_spice_error=has_offset_spice_error,
                 has_offset_nonspice_error=has_offset_nonspice_error,
             )
@@ -261,6 +285,7 @@ class ResultsFilter:
         volumes: Sequence[str],
         *,
         has_offset_error: bool,
+        has_no_offset_error: bool,
         has_offset_spice_error: bool,
         has_offset_nonspice_error: bool,
     ) -> None:
@@ -270,6 +295,8 @@ class ResultsFilter:
             results_db_url: Connection URL of the results index.
             volumes: Volume names to read results for.
             has_offset_error: Whether any fatal error is wanted.
+            has_no_offset_error: Whether a document recording no fatal error is
+                wanted.
             has_offset_spice_error: Whether only a missing-SPICE-data error is
                 wanted.
             has_offset_nonspice_error: Whether only a fatal error other than
@@ -292,6 +319,7 @@ class ResultsFilter:
                 self._nav_results_root,
                 volumes,
                 has_offset_error=has_offset_error,
+                has_no_offset_error=has_no_offset_error,
                 has_offset_spice_error=has_offset_spice_error,
                 has_offset_nonspice_error=has_offset_nonspice_error,
             )
@@ -440,7 +468,11 @@ class ResultsFilter:
 
         A metadata file that cannot be read, cannot be decoded as UTF-8, does
         not parse as JSON, or does not parse to a JSON object excludes its image
-        with a logged warning rather than aborting the enumeration.
+        with a logged warning rather than aborting the enumeration.  That holds
+        for the filter on a document recording no fatal error as well: what such
+        a file records is unknown rather than known to be an outcome, and it is
+        also what a results index refuses to record a status for, so excluding
+        it is what keeps the two implementations answering alike.
 
         Parameters:
             image_file: The candidate image (for the warning message only).
@@ -462,6 +494,8 @@ class ResultsFilter:
             )
             return False
         metadata: dict[str, Any] = parsed
+        if self._has_no_offset_error:
+            return metadata.get('status') != 'error'
         if metadata.get('status') != 'error':
             return False
         status_error = metadata.get('status_error')

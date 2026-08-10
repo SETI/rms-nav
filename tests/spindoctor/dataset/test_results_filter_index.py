@@ -31,6 +31,7 @@ from tests.spindoctor.dataset.conftest import (
     SPICE_ERROR,
     VOLUMES,
     WITH_A_DOCUMENT,
+    WITHOUT_A_FATAL_ERROR,
     candidate_files,
     index_without_a_table,
     null_logger,
@@ -51,6 +52,7 @@ _MATRIX = [
     pytest.param({'has_offset_file': True}, list(WITH_A_DOCUMENT), id='offset-file'),
     pytest.param({'has_no_offset_file': True}, [NO_RESULT], id='no-offset-file'),
     pytest.param({'has_offset_error': True}, list(FATAL_ERRORS), id='offset-error'),
+    pytest.param({'has_no_offset_error': True}, list(WITHOUT_A_FATAL_ERROR), id='no-offset-error'),
     pytest.param({'has_offset_spice_error': True}, [SPICE_ERROR], id='spice-error'),
     pytest.param(
         {'has_offset_nonspice_error': True},
@@ -67,13 +69,24 @@ _MATRIX = [
         [SPICE_ERROR],
         id='spice-error-and-offset-file',
     ),
+    pytest.param(
+        {'has_no_offset_error': True, 'has_offset_file': True},
+        list(WITHOUT_A_FATAL_ERROR),
+        id='no-offset-error-and-offset-file',
+    ),
 ]
 """Every filter flag, alone and paired, with the selection it makes.
 
-The pairings are not decoration: the absence filter alone takes the batched
-``exists()`` path and never walks the tree, while the presence and error filters
-are answered from the walked set instead.  Both of those modes have to land on
-the index path's one answer.
+The flags reach the tree two ways, and both have to land on the index path's
+one answer: the absence filter alone takes the batched ``exists()`` path and
+never walks the tree, while the presence and error filters walk it and answer
+from the walked set.
+
+The pairings are the combinations a user has a reason to write.  ``images this
+run navigated to a result`` is the last of them, and it is the pair rather than
+a flag because presence and outcome are separate questions in this vocabulary;
+that each error filter folds presence in, so that naming it changes nothing, is
+what the first two pin.
 """
 
 
@@ -118,6 +131,25 @@ def test_the_index_path_reads_no_file_at_all(
     assert selection_of(tree, flags, results_db_url=indexed) == expected
 
 
+def test_an_image_with_no_document_is_not_one_recording_no_error_in_the_tree(tree: Path) -> None:
+    """The negative error filter asks what a document records, so it needs one.
+
+    An image nothing has been written for is what ``has_no_offset_file``
+    selects.  Reading its absence as an outcome would put it in both selections
+    at once and leave no way to ask for either without the other.
+    """
+    kept = selection_of(tree, {'has_no_offset_error': True}, results_db_url=None)
+    assert NO_RESULT not in kept
+
+
+def test_an_image_with_no_row_is_not_one_recording_no_error_in_the_index(
+    tree: Path, indexed: str
+) -> None:
+    """Absence of a row is absence of a document, and reads the same way here."""
+    kept = selection_of(tree, {'has_no_offset_error': True}, results_db_url=indexed)
+    assert NO_RESULT not in kept
+
+
 _FLAG_CASES = [pytest.param(case.values[0], id=case.id) for case in _MATRIX]
 """The same filter combinations, for the assertions that do not need the answer."""
 
@@ -142,6 +174,21 @@ def test_the_index_path_leaves_nothing_for_the_batch_stage(
         ),
         pytest.param(
             {'has_offset_error': True, 'has_no_offset_file': True}, id='error-and-no-offset-file'
+        ),
+        pytest.param(
+            {'has_offset_error': True, 'has_no_offset_error': True}, id='error-and-no-error'
+        ),
+        pytest.param(
+            {'has_offset_spice_error': True, 'has_no_offset_error': True},
+            id='spice-error-and-no-error',
+        ),
+        pytest.param(
+            {'has_offset_nonspice_error': True, 'has_no_offset_error': True},
+            id='nonspice-error-and-no-error',
+        ),
+        pytest.param(
+            {'has_no_offset_error': True, 'has_no_offset_file': True},
+            id='no-error-and-no-offset-file',
         ),
     ],
 )

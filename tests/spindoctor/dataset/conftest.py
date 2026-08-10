@@ -85,6 +85,15 @@ WITH_A_DOCUMENT = tuple(stub for stub in CANDIDATES if stub != NO_RESULT)
 FATAL_ERRORS = (SPICE_ERROR, NONSPICE_ERROR, ERROR_WITHOUT_STATUS_ERROR)
 """Every candidate whose document records a fatal error."""
 
+WITHOUT_A_FATAL_ERROR = (SUCCESS, SECOND_SUCCESS, FAILURE, OTHER_VOLUME)
+"""Every candidate whose document reads and records no fatal error.
+
+Not the complement of :data:`FATAL_ERRORS` within :data:`WITH_A_DOCUMENT`: a
+document nothing can be parsed out of records neither an error nor the absence
+of one, and both implementations pass it over rather than reading its silence
+as an outcome.
+"""
+
 OTHER_ROOT_NAME = 'other-results'
 """Directory name of the second root every two-root index is built under.
 

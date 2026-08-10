@@ -2,8 +2,8 @@
 
 The selection filters ask two questions about each candidate image: whether its
 metadata document exists under the results root, and -- for the images whose
-document exists -- whether that document records a fatal error of a particular
-kind.  Asked of the tree, those cost one directory walk per selected volume plus
+document exists -- what fatal error, if any, that document records.  Asked of
+the tree, those cost one directory walk per selected volume plus
 a batched download of every document an error filter has to look inside.  Asked
 of the index, they cost the one query this module issues, whose answer is two
 sets of stubs the filter then tests membership in.
@@ -24,12 +24,15 @@ places rather than left to be rediscovered.
 
 - **A document that is valid JSON and carries ``status``, but is not a
   navigation document,** is refused by the ingest and so records no status of
-  its own.  It matches no error filter, where the tree reads ``status`` and
-  ``status_error`` out of any JSON object it can parse.
+  its own.  It matches no error filter, the one for a document recording no
+  fatal error included, where the tree reads ``status`` and ``status_error``
+  out of any JSON object it can parse and answers every one of them from what
+  it read.
 - **A document whose top-level ``status`` is absent, empty, or not a string**
   takes its recorded status from ``navigation_result.status``, which is where
   the rest of the index reads an outcome from.  The tree reads the top-level
-  field alone, so such a document can match an error filter here and not there.
+  field alone, so such a document can match an error filter here and not there,
+  and can be a document recording no fatal error there and not here.
 - **A file that exists and has no row at all** reads as absent, which is what
   the absence filters read as "this image was never navigated".  Three passes
   end that way, and the first two do so deliberately, because a recorded row
@@ -132,12 +135,22 @@ class ResultStubs:
 
 
 def _error_condition(
-    *, has_offset_error: bool, has_offset_spice_error: bool, has_offset_nonspice_error: bool
+    *,
+    has_offset_error: bool,
+    has_no_offset_error: bool,
+    has_offset_spice_error: bool,
+    has_offset_nonspice_error: bool,
 ) -> sqlalchemy.ColumnElement[bool]:
     """Build the condition an image row must satisfy to match the error filters.
 
+    The filters are conjoined here as they are everywhere else, so a caller
+    asking both for a fatal error and for none gets the empty selection that
+    describes, rather than one of the two.
+
     Parameters:
         has_offset_error: Whether any fatal error is wanted.
+        has_no_offset_error: Whether a document recording no fatal error is
+            wanted.
         has_offset_spice_error: Whether only a missing-SPICE-data error is
             wanted.
         has_offset_nonspice_error: Whether only a fatal error other than
@@ -147,9 +160,15 @@ def _error_condition(
         The condition, which is false for every row when no error filter is
         active.
     """
-    if not (has_offset_error or has_offset_spice_error or has_offset_nonspice_error):
-        return sqlalchemy.false()
-    conditions: list[sqlalchemy.ColumnElement[bool]] = [IMAGES.c.status == FATAL_STATUS]
+    conditions: list[sqlalchemy.ColumnElement[bool]] = []
+    if has_offset_error or has_offset_spice_error or has_offset_nonspice_error:
+        conditions.append(IMAGES.c.status == FATAL_STATUS)
+    if has_no_offset_error:
+        # No guard against NULL, unlike status_error below: the column forbids
+        # one, and a document naming no outcome anywhere is recorded with the
+        # status the ingest gives it in place of a missing one, so the
+        # inequality answers for every row there is.
+        conditions.append(IMAGES.c.status != FATAL_STATUS)
     if has_offset_spice_error:
         conditions.append(IMAGES.c.status_error == SPICE_STATUS_ERROR)
     if has_offset_nonspice_error:
@@ -162,6 +181,8 @@ def _error_condition(
                 IMAGES.c.status_error.is_(None), IMAGES.c.status_error != SPICE_STATUS_ERROR
             )
         )
+    if not conditions:
+        return sqlalchemy.false()
     return sqlalchemy.and_(*conditions)
 
 
@@ -192,7 +213,10 @@ def _stub_query(
         IMAGES.c.results_path_stub,
         error_condition.label('matches_error'),
     ).where(IMAGES.c.root_url == root_url, IMAGES.c.volume.in_(volumes))
-    # A refused file records no status, so it matches no error filter.
+    # A refused file records no status, so it matches no error filter -- the
+    # one for a document recording no fatal error included, since what such a
+    # file records is unknown rather than known to be an outcome, which is also
+    # how the tree path reads a document nothing can be parsed out of.
     refusals = sqlalchemy.select(
         FAILED_FILES.c.results_path_stub,
         sqlalchemy.false(),
@@ -255,6 +279,7 @@ def read_result_stubs(
     volumes: Iterable[str],
     *,
     has_offset_error: bool = False,
+    has_no_offset_error: bool = False,
     has_offset_spice_error: bool = False,
     has_offset_nonspice_error: bool = False,
 ) -> ResultStubs:
@@ -277,6 +302,9 @@ def read_result_stubs(
         volumes: Volume names the enumeration selected.  Only images under
             these are read, exactly as only these are walked in the tree.
         has_offset_error: Whether any fatal error is wanted.
+        has_no_offset_error: Whether a document recording no fatal error is
+            wanted.  A file the ingest refused records no outcome at all and
+            satisfies this no more than it satisfies the others.
         has_offset_spice_error: Whether only a missing-SPICE-data error is
             wanted.
         has_offset_nonspice_error: Whether only a fatal error other than
@@ -301,6 +329,7 @@ def read_result_stubs(
         list(volumes),
         _error_condition(
             has_offset_error=has_offset_error,
+            has_no_offset_error=has_no_offset_error,
             has_offset_spice_error=has_offset_spice_error,
             has_offset_nonspice_error=has_offset_nonspice_error,
         ),

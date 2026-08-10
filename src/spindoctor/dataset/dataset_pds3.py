@@ -401,6 +401,14 @@ class DataSetPDS3(DataSet):
             indicates a fatal error""",
         )
         group.add_argument(
+            '--has-no-offset-error',
+            action='store_true',
+            default=False,
+            help="""Only process images if the offset metadata file exists and
+            indicates no fatal error, which is the images whose navigation ran
+            to a result""",
+        )
+        group.add_argument(
             '--has-offset-spice-error',
             action='store_true',
             default=False,
@@ -536,6 +544,7 @@ class DataSetPDS3(DataSet):
             has_offset_file=arguments.has_offset_file,
             has_no_offset_file=arguments.has_no_offset_file,
             has_offset_error=arguments.has_offset_error,
+            has_no_offset_error=arguments.has_no_offset_error,
             has_offset_spice_error=arguments.has_offset_spice_error,
             has_offset_nonspice_error=arguments.has_offset_nonspice_error,
             # TODO selection_expr=arguments.selection_expr,
@@ -647,6 +656,7 @@ class DataSetPDS3(DataSet):
             has_offset_file: bool = False,
             has_no_offset_file: bool = False,
             has_offset_error: bool = False,
+            has_no_offset_error: bool = False,
             has_offset_spice_error: bool = False,
             has_offset_nonspice_error: bool = False,
                 Results-based filters matching the same-named command-line options;
@@ -687,6 +697,7 @@ class DataSetPDS3(DataSet):
         has_offset_file: bool = kwargs.pop('has_offset_file', False)
         has_no_offset_file: bool = kwargs.pop('has_no_offset_file', False)
         has_offset_error: bool = kwargs.pop('has_offset_error', False)
+        has_no_offset_error: bool = kwargs.pop('has_no_offset_error', False)
         has_offset_spice_error: bool = kwargs.pop('has_offset_spice_error', False)
         has_offset_nonspice_error: bool = kwargs.pop('has_offset_nonspice_error', False)
         nav_results_root: str | Path | FCPath | None = kwargs.pop('nav_results_root', None)
@@ -712,6 +723,7 @@ class DataSetPDS3(DataSet):
             'has_offset_file': has_offset_file,
             'has_no_offset_file': has_no_offset_file,
             'has_offset_error': has_offset_error,
+            'has_no_offset_error': has_no_offset_error,
             'has_offset_spice_error': has_offset_spice_error,
             'has_offset_nonspice_error': has_offset_nonspice_error,
         }

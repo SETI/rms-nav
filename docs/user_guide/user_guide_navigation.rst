@@ -179,21 +179,31 @@ For PDS3 datasets (``coiss``, ``coiss_pds3``, ``coiss_cruise``, ``coiss_cruise_p
 * ``--has-offset-file`` / ``--has-no-offset-file``: only images whose offset
   metadata file (``*_metadata.json`` under the navigation results root) already
   exists / does not exist.
-* ``--has-offset-error``: only images whose offset metadata file exists and
-  records a fatal error (``status`` of ``error``).
+* ``--has-offset-error`` / ``--has-no-offset-error``: only images whose offset
+  metadata file exists and records / does not record a fatal error (``status``
+  of ``error``). Every error filter asks what a document records, so each one
+  requires the document to exist: an image nothing has been written for records
+  no error, and ``--has-no-offset-file`` is what selects it. So
+  ``--has-offset-file --has-no-offset-error`` is the images this results root
+  holds a navigated result for, whatever that result concluded.
 * ``--has-offset-spice-error`` / ``--has-offset-nonspice-error``: like
   ``--has-offset-error``, but restricted to fatal errors caused by / not caused
   by missing SPICE data.
 
+An offset metadata file that cannot be read, does not parse as JSON, or does
+not parse to a JSON object satisfies no error filter, positive or negative, and
+is reported as excluded: what it records is unknown rather than known to be an
+outcome.
+
 The results-file filters answer their questions three ways when they read the
 results tree, all of them efficient even when the results root is a cloud
 location. The presence filter (``--has-offset-file``) and the error filters
-(``--has-offset-error`` and its SPICE variants) walk the results tree once per
-selected volume and test each candidate against the collected file set. The
-absence filter on its own (``--has-no-offset-file`` with no presence or error
-filter active) does not walk the tree; it answers with batched ``exists()``
-calls. The error filters additionally retrieve the matched metadata files in
-batches to inspect their contents.
+(``--has-offset-error``, ``--has-no-offset-error`` and the SPICE variants) walk
+the results tree once per selected volume and test each candidate against the
+collected file set. The absence filter is always on its own -- it contradicts
+every other results filter -- so it does not walk the tree; it answers with
+batched ``exists()`` calls. The error filters additionally retrieve the matched
+metadata files in batches to inspect their contents.
 
 Given ``--results-db``, all of them are answered instead by one query per
 enumeration, and the results tree is not read at all. The index is a snapshot of

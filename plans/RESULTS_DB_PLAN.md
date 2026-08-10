@@ -931,6 +931,26 @@ its own, and a member found later is added in all three places in one commit.
 The enumeration is maintained rather than audited closed: it names what is known
 to differ, and a divergence nobody has found yet is not evidence that none
 exists.
+
+**The filter vocabulary is six flags, and they conjoin.** `--has-offset-file`
+and `--has-no-offset-file` ask whether the document exists;
+`--has-offset-error`, `--has-no-offset-error`, `--has-offset-spice-error` and
+`--has-offset-nonspice-error` ask what it records. Every error filter needs a
+document to read, so each one folds presence in, `--has-no-offset-file`
+contradicts all four, and `--has-no-offset-error` contradicts the three that
+name an error. That makes `--has-offset-file --has-no-offset-error` the
+spelling of "the images this root holds a navigated result for, whatever it
+concluded" -- the selection that excludes the frames whose navigation died
+before it could read the image, which is a document with a fatal `status` and
+no summary picture beside it.
+
+Because the flags conjoin, a selection that is a union of two of them is two
+runs rather than one, and one such union is worth naming: "never navigated, or
+navigated and errored" is `--has-no-offset-file` and `--has-offset-error` run
+separately, and no single flag combination expresses it. The vocabulary is
+deliberately a conjunction of questions about one document, not an expression
+language over the tree.
+
 `ResultsFilter` lives in
 `spindoctor.dataset`, which `sd_offset` imports on every run, so the
 index-backed implementation lives in `spindoctor/results_index/selection.py`
@@ -1407,7 +1427,7 @@ Tests: for every filter flag, both existing modes (walked and
 absence-only-batched) against the index-backed answer over a fixture tree whose
 malformed-metadata images are files the walk finds and the ingest refuses, so
 that the equivalence covers the refusal table; every contradictory-pair
-rejection unchanged; the command-line
+rejection, including the four `--has-no-offset-error` adds; the command-line
 surface of every program that declares `--results-db` and of every program
 section 1 keeps reading files; an exported URL answering an enumeration for the
 first and not for the second; and an import-time assertion that
@@ -1419,9 +1439,21 @@ assumed to exist already.
 Details settled during execution, none of them a change of intent:
 
 - **The selection layer hands back plain sets.** `read_result_stubs` opens the
-  index, asks it, disposes the engine and returns three frozen sets of stubs,
-  so no SQLAlchemy object and no SQLAlchemy type reaches `spindoctor.dataset`
-  -- not even in an annotation, which a branch-local import could not satisfy.
+  index, asks it, disposes the engine and returns two frozen sets of stubs with
+  what the pass that recorded them reported about itself, so no SQLAlchemy
+  object and no SQLAlchemy type reaches `spindoctor.dataset` -- not even in an
+  annotation, which a branch-local import could not satisfy.
+- **A document recording no fatal error is a filter of its own.**
+  `--has-no-offset-error` is the negation the other three lacked, and the query
+  answers it with the same computed column: one more condition on the images
+  arm, and the refusals arm's literal false unchanged, since a file the ingest
+  refused records neither an error nor the absence of one. It contradicts the
+  three that name an error and, like them, contradicts `--has-no-offset-file`,
+  because it asks what a document records and a document that does not exist
+  records nothing. The tree path reads it out of the same batched retrieval the
+  other error filters already pay for, and excludes an unreadable document from
+  it exactly as they do, which is what keeps the two implementations answering
+  alike over the malformed-metadata images of the fixture tree.
 - **Presence is read from `failed_files` as well as `images`.** A
   `*_metadata.json` the ingest refused is a file the walk finds, so without the
   refusal table criterion 1's malformed-metadata image would be present in the

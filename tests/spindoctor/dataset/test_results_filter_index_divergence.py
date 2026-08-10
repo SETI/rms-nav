@@ -93,6 +93,64 @@ def test_a_document_that_is_not_a_navigation_document_matches_no_index_error_fil
     assert select_from(results_filter, images) == []
 
 
+def _document_that_is_not_a_navigation_document(root: Path) -> list[ImageFile]:
+    """Write a JSON object recording a plain outcome and nothing else, and its image.
+
+    The mirror image of the error-carrying one above: the tree can read an
+    outcome that is not a fatal error out of it, and the ingest can make no
+    row of it at all.
+
+    Parameters:
+        root: The results root to write into.
+
+    Returns:
+        The one candidate image, ready to filter.
+    """
+    write_metadata(root, SPICE_ERROR, {'status': 'success'})
+    return [
+        ImageFile(
+            image_file_url=FCPath(root / 'x.IMG'),
+            label_file_url=FCPath(root / 'x.LBL'),
+            results_path_stub=SPICE_ERROR,
+        )
+    ]
+
+
+def test_a_document_that_is_not_a_navigation_document_records_no_error_to_the_tree(
+    tmp_path: Path,
+) -> None:
+    """The tree reads an outcome out of any JSON object, and this one is not fatal."""
+    root = tmp_path / 'results'
+    images = _document_that_is_not_a_navigation_document(root)
+    results_filter = ResultsFilter(
+        VOLUMES, str(root), logger=null_logger(), has_no_offset_error=True
+    )
+    assert select_from(results_filter, images) == [SPICE_ERROR]
+
+
+def test_a_document_that_is_not_a_navigation_document_records_nothing_to_the_index(
+    tmp_path: Path,
+) -> None:
+    """A refusal records no status, so it is no more "no error" than it is an error.
+
+    The divergence runs in both directions, which is why the member covers the
+    filter phrased in the negative as well: the tree answers this one from what
+    it parsed, and the index has nothing to answer it from.
+    """
+    root = tmp_path / 'results'
+    images = _document_that_is_not_a_navigation_document(root)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=null_logger())
+    results_filter = ResultsFilter(
+        VOLUMES,
+        str(root),
+        logger=null_logger(),
+        results_db_url=url,
+        has_no_offset_error=True,
+    )
+    assert select_from(results_filter, images) == []
+
+
 def _status_only_in_the_navigation_result(root: Path) -> list[ImageFile]:
     """Write a document whose outcome is recorded only under ``navigation_result``.
 
@@ -147,6 +205,42 @@ def test_a_status_only_in_the_navigation_result_matches_the_index_error_filter(
         VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_error=True
     )
     assert select_from(results_filter, images) == [SPICE_ERROR]
+
+
+def test_a_status_only_in_the_navigation_result_records_no_error_to_the_tree(
+    tmp_path: Path,
+) -> None:
+    """Reading the top-level field alone, the tree finds no fatal error to exclude it.
+
+    The same member seen from the other side: the document records a fatal
+    error where the index looks and nothing where the tree looks, so the filter
+    phrased in the negative diverges wherever the one phrased in the positive
+    does.
+    """
+    root = tmp_path / 'results'
+    images = _status_only_in_the_navigation_result(root)
+    results_filter = ResultsFilter(
+        VOLUMES, str(root), logger=null_logger(), has_no_offset_error=True
+    )
+    assert select_from(results_filter, images) == [SPICE_ERROR]
+
+
+def test_a_status_only_in_the_navigation_result_records_an_error_to_the_index(
+    tmp_path: Path,
+) -> None:
+    """The recorded status is the fatal one, so the negative filter passes it over."""
+    root = tmp_path / 'results'
+    images = _status_only_in_the_navigation_result(root)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=null_logger())
+    results_filter = ResultsFilter(
+        VOLUMES,
+        str(root),
+        logger=null_logger(),
+        results_db_url=url,
+        has_no_offset_error=True,
+    )
+    assert select_from(results_filter, images) == []
 
 
 def test_a_file_the_pass_could_not_retrieve_reads_as_absent(

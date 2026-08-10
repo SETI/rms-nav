@@ -329,6 +329,72 @@ def test_the_error_filter_does_not_match_a_run_that_finished(two_roots: str) -> 
     assert FAILURE not in _stubs(two_roots, has_offset_error=True).matching_error
 
 
+def test_the_negative_error_filter_matches_every_document_recording_no_error(
+    two_roots: str,
+) -> None:
+    """A run that succeeded and a run that finished without one, together.
+
+    This is the selection ``the images this root has a navigated result for``
+    is spelled from, so it has to reach an outcome that is not a success as
+    surely as it reaches one that is.
+    """
+    assert _stubs(two_roots, has_no_offset_error=True).matching_error == frozenset(
+        {SUCCESS, SECOND_SUCCESS, FAILURE}
+    )
+
+
+def test_the_negative_error_filter_matches_no_fatal_error(two_roots: str) -> None:
+    """The two halves of the vocabulary partition the documents between them.
+
+    A fatal error that named no cause is the row a SQL inequality is most
+    likely to mishandle, and it belongs on the other side of this partition.
+    """
+    matching = _stubs(two_roots, has_no_offset_error=True).matching_error
+    assert ERROR_WITHOUT_STATUS_ERROR not in matching
+
+
+def test_the_negative_error_filter_answers_for_this_root_only(tmp_path: Path) -> None:
+    """A stub that errored here and finished there is not read from there.
+
+    It gets a root pair of its own rather than joining the shared fixture,
+    because the disagreement has to run the other way round to be visible: the
+    shared decoy records a fatal error for every stub, which is what makes a
+    filter phrased in the positive answer differently when it drops the root,
+    and is exactly why one phrased in the negative would not.
+
+    Parameters:
+        tmp_path: Directory the index file is written into.
+    """
+    url = sqlite_url_for(tmp_path / 'index.sqlite3')
+    with opened(url, create=True) as engine, engine.begin() as connection:
+        connection.execute(
+            IMAGES.insert(),
+            [
+                _document(SUCCESS, status='error', status_error=SPICE),
+                image_row(
+                    root_url=OTHER_ROOT,
+                    results_path_stub=SUCCESS,
+                    volume=VOLUME,
+                    status='success',
+                    status_error=None,
+                ),
+            ],
+        )
+        connection.execute(INGEST_RUNS.insert(), [_completed_run(ROOT), _completed_run(OTHER_ROOT)])
+    assert _stubs(url, has_no_offset_error=True).matching_error == frozenset()
+
+
+def test_a_refused_document_matches_the_negative_error_filter_no_more_than_the_rest(
+    two_roots: str,
+) -> None:
+    """Nothing was read from it, so it records neither an error nor the lack of one.
+
+    The refusal arm contributes a literal rather than a predicate, and this is
+    what says the literal is false for a filter phrased in the negative too.
+    """
+    assert REFUSED not in _stubs(two_roots, has_no_offset_error=True).matching_error
+
+
 def test_the_spice_filter_matches_only_the_spice_error(two_roots: str) -> None:
     """The value is matched verbatim, which is what the column exists for."""
     assert _stubs(two_roots, has_offset_spice_error=True).matching_error == frozenset({SPICE_ERROR})
