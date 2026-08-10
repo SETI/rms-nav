@@ -878,18 +878,23 @@ the index raises, exactly as a missing metadata file raises in the file
 path -- the caller reports it -- with a message naming the stub and the
 index URL.
 
-**Reprojection offset lookup.** `load_offset_if_any` in
+**Reprojection pointing lookup.** `load_pointing_if_any` in
 `spindoctor/cli/reproj/offsets.py` is the highest-volume reader in the
-system. The seam is made explicit rather than overloaded: an `OffsetSource`
-protocol with two implementations,
+system; since the C-matrix reader switch it returns a `PointingSelection`
+(mechanism plus reason) rather than a bare offset, and its reason
+vocabulary includes the pointing-ladder rows (`no_pointing_block`,
+`malformed_pointing`, the gate reasons, `pool_already_corrected`) beside
+the original offset reasons. The seam is made explicit rather than
+overloaded: a `PointingSource` protocol with two implementations,
 
 ```text
-FileOffsetSource(nav_results_root)          # today's body, unchanged
-IndexOffsetSource(engine, root_url)         # one SELECT per lookup
+FilePointingSource(nav_results_root)        # today's body, unchanged
+IndexPointingSource(engine, root_url)       # one SELECT per lookup
 ```
 
-both returning the existing `OffsetLookup`. Drivers construct one according
-to the resolved URL and pass it where they pass `nav_results_root` today
+both returning the existing `PointingSelection`. Drivers construct one
+according to the resolved URL and pass it where they pass
+`nav_results_root` today
 (`generate_backplanes_image_files` and the mosaic pass take the source
 object in place of the root-plus-implicit-reader they take now).
 
@@ -1017,7 +1022,8 @@ preserve.
 by stub; a missing file raises and the caller reports it. (The module has no
 docstring; Phase 4 adds one, which is also where the reason-mapping note
 lives.) **`spindoctor/cli/reproj/offsets.py`** reads one document per image
-and returns `OffsetLookup` with the ten-reason vocabulary of section 2.9.
+and returns `PointingSelection`; its reason vocabulary is section 2.9's
+plus the pointing-ladder reasons the C-matrix reader switch added.
 **`spindoctor/cli/pds4/bundle_data.py`** serializes the whole document into
 the supplemental product, which is why it is out of scope.
 
@@ -1370,12 +1376,12 @@ Details settled during execution, none of them a change of intent:
 
 ### Phase 4 — Backplanes and reprojection consume the index
 
-The `OffsetSource` protocol and both implementations; `--results-db` (and
+The `PointingSource` protocol and both implementations; `--results-db` (and
 the `none` sentinel) on `sd_backplanes`, `sd_mosaic`, and their cloud-task
 variants; the backplane single-row read with the missing-stub raise; the
 root-url comparison failure of section 2.2.
 
-Unit tests at the `OffsetLookup` level over a fixture tree: each reachable
+Unit tests at the `PointingSelection` level over a fixture tree: each reachable
 reason with and without an index, including `null_offset` from a
 success-with-NULL row; the unreachable-reason remapping of section 2.9
 asserted (a malformed-offset document yields `malformed_offset` via files
@@ -1568,7 +1574,7 @@ add a column (increment the version). No issue numbers in any of it.
    with and without an index, over a fixture tree exercising success,
    failure, error, missing-metadata and malformed-metadata images -- the last
    of them with a summary PNG beside it. Asserted
-   by tests (unit tier at the `OffsetLookup`/selection level; integration
+   by tests (unit tier at the `PointingSelection`/selection level; integration
    tier on written products). "Identical" binds returned values, written
    products, and the reachable-reason warnings -- not incidental log text.
    Two carve-outs: the reason vocabulary section 2.9 maps, whose two

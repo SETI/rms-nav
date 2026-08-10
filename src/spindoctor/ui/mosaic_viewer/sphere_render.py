@@ -10,6 +10,8 @@ The function is intentionally stateless and side-effect-free so it can be
 called from any paint method without lock concerns.
 """
 
+from __future__ import annotations
+
 import math
 from typing import cast
 

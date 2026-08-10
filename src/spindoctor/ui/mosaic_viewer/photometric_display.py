@@ -5,6 +5,8 @@ alternate viewing model for on-screen display. Core correction models live in
 :mod:`spindoctor.reproj.photometric_model`.
 """
 
+from __future__ import annotations
+
 import math
 
 import numpy as np

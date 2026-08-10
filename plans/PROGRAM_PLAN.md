@@ -235,7 +235,8 @@ The known open defects:
   on #150; #128 is the fuller redesign across all body types and
   illuminations. On real frames the fitter contributes only ~0.1 px while
   spacecraft-position / ephemeris error dominates (0.4-1.7 px), so the
-  higher-leverage target is the pointing-kernel side (Track D #50).
+  higher-leverage pointing-kernel side (Track D #50) was built first and is
+  delivered.
 - **#282** — a ~0.05 px, one-pixel-period sub-pixel ripple rides on top of
   the directional bias; a higher-order / matched-filter sub-pixel edge
   estimator would remove it. Precision refinement, secondary to #150.
@@ -310,15 +311,22 @@ lifted out of is still organized on no stated axis (#427), an upstream
 registry-eviction request to `rms-pdslogger` (#428), and extending the same
 surface to the `util/` tooling (#429).
 
-The headline capability item is delivered: `plans/CK_KERNEL_PLAN.md` is
-implemented, so the navigator records each image's corrected attitude as a
-C-matrix and `sd_create_ck` ships updated-pointing SPICE C-kernels as a
-product. What that leaves is #50's reading half — the consumers that apply
-the pixel offset moving to the recorded C-matrix — and the follow-ups in
-that plan's section 7. The remaining decided item with a self-contained
-plan of its own is `plans/RESULTS_DB_PLAN.md` (an optional, rebuildable
-index over the results tree, so programs stop reading one JSON document per
-image on a cloud root; #430).
+Some items start with an operator decision, because each is a scope
+commitment:
+
+The headline capability item is delivered in both halves:
+`plans/CK_KERNEL_PLAN.md` is implemented, so the navigator records each
+image's corrected attitude as a C-matrix and `sd_create_ck` ships
+updated-pointing SPICE C-kernels as a product, and
+`plans/CMATRIX_READERS_PLAN.md` is implemented, so the backplane and
+reprojection consumers apply the recorded C-matrix whenever a usable one
+exists (with the pixel offset as the documented fallback for
+fitted-rotation, offset-only and malformed records, and uncorrected
+pointing with the reason recorded when neither is usable), closing #50. What that leaves is the
+follow-ups in the CK plan's section 7. The remaining decided item with a
+self-contained plan of its own is `plans/RESULTS_DB_PLAN.md` (an optional,
+rebuildable index over the results tree, so programs stop reading one JSON
+document per image on a cloud root; #430).
 
 Some items start with an operator decision, because each is a scope
 commitment:
@@ -346,10 +354,10 @@ replaces the PDS3 source for that instrument.
 Plus, not gated on decisions: the capability matrix itself (#231),
 cloud-operation audit (#108, #67, #141, #142, and the cloud-task items the
 logging work left open, #418 and #424), performance and safe
-parallelism for campaign scale (#236, #103, #134, #126), config
+parallelism for campaign scale (#236, #103, #134, #126), and config
 validation (#118, which should follow the namespace reorganization #427
-rather than freeze the current grouping into a schema), and the user-guide
-completion items (#93, #70).
+rather than freeze the current grouping into a schema). The user-guide
+completion items are delivered.
 
 **Parallelism:** decisions can be made any time; the resulting work is
 independent of Tracks A-B except that #232 (end-product accuracy) wants
@@ -367,12 +375,13 @@ cannot follow.
 - Summary-PNG unit tests (#177).
 - The image-library regression reconciliation (#288), now reduced to the
   deliberately-red pins owned by open navigation issues.
-- Docs: missing dev-guide pages (#178), instrument appendices (#93, with
-  Track D), API-reference gaps (#244), Sphinx nitpicky-clean CI (#129),
-  terminator-doc verification (#122), curation-tooling language pass
-  (#245), and the metadata-JSON format chapter -- every key of the
-  per-image `_metadata.json`, its meaning and presence rules, with
-  examples and a staleness-guard test (#431).
+- Docs: Sphinx nitpicky-clean CI (#129) and terminator-doc verification
+  (#122). The per-instrument chapters are written, one per instrument in
+  each guide, as is the metadata-JSON format chapter
+  (docs/user_guide/user_guide_metadata.rst, with a staleness-guard test),
+  along with the filters / uncertainty / troubleshooting dev-guide pages,
+  the mosaic-viewer API-reference pages, and the curation-tooling language
+  pass.
 - Tooling parity: give the `util/` programs the logging surface the
   pipeline programs now have (#429) — several run for hours and report
   through bare `print()`.
@@ -466,17 +475,17 @@ Every open issue, listed once by the track that owns it.
 | A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #340, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377, #380, #399, #405, #407, #409, #426 |
 | B — navigation correctness | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #373, #394, #400, #401, #402, #403, #404, #406, #447 |
 | C — statistics & QA | #240 (plus the standing cross-check and campaign-report practice) |
-| D — capability completion | #28, #30, #47, #50, #53, #54, #55, #57, #63, #66, #67, #69, #70, #71, #72, #73, #74, #75, #76, #77, #79, #93, #108, #118, #126, #141, #142, #231, #236, #251, #252, #253, #265, #397, #398, #411, #418, #424, #427, #430, #433, #434, #435, #436, #437, #440, #444, #448, #452, #455, #459 |
-| E — test & docs debt | #122, #129, #177, #178, #241, #242, #243, #244, #245, #288, #379, #391, #429, #431, #438, #443, #446 |
+| D — capability completion | #28, #30, #47, #53, #54, #55, #57, #63, #66, #67, #69, #71, #72, #73, #74, #75, #76, #77, #79, #108, #118, #126, #141, #142, #231, #236, #251, #252, #253, #265, #397, #398, #411, #418, #424, #427, #430, #433, #434, #435, #436, #437, #440, #444, #448, #455, #459, #468 |
+| E — test & docs debt | #122, #129, #177, #241, #242, #243, #288, #379, #391, #429, #438, #443, #446 |
 | F — instruments, features, hardening | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #81, #82, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212, #388, #423, #428 |
 
 Cross-listed items (listed once above, noted here): #150/#128 serve both
 Track A's limb-bias workstream and Track B's redesign; the
 confident-wrong ring-lock family (#346) sits in Track B
 but gates the Track A study; #103/#134/#126 serve both Track D performance and
-Track F hardening; #93 is written in Track D, extended per instrument in
-Track F; #174 baselines are Track A infrastructure delivered as Track E test
-work.
+Track F hardening; the per-instrument guide chapters exist and each Track F
+instrument workstream extends its own pair in the same change; #174 baselines
+are Track A infrastructure delivered as Track E test work.
 
 ---
 

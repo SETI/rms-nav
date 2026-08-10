@@ -29,28 +29,36 @@ the ring system), merges the per-source results into one master array per
 backplane name (so the per-pixel output is unambiguous when a body silhouette
 overlaps the rings), and writes the result.
 
-The pipeline preserves the navigation offset. ``sd_backplanes`` reads the
-``_metadata.json`` produced by ``sd_offset``, applies the
-``(dv, du)`` offset to the
-:class:`~spindoctor.obs.obs_snapshot.ObsSnapshot`'s FOV via
-:class:`oops.fov.OffsetFOV`, and *then* evaluates every backplane. Every
-output pixel is therefore the geometry that the navigation step says it is —
-not the geometry that the raw SPICE prediction would have produced before the
-offset correction.
+The pipeline preserves the navigated pointing. ``sd_backplanes`` reads the
+``_metadata.json`` produced by ``sd_offset``, applies the recorded pointing
+to the :class:`~spindoctor.obs.obs_snapshot.ObsSnapshot` — the corrected
+C-matrix by frame replacement when the record carries a usable one, else the
+``(dv, du)`` offset via :class:`oops.fov.OffsetFOV`, and when the furnished
+kernel pool *already* answers the corrected attitude (corrected C-kernels
+furnished at load time) it deliberately applies nothing at all, since either
+mechanism would double-correct (see
+:doc:`dev_guide_ck_kernels` for the reader mechanism and its fallback
+ladder) — and *then* evaluates every backplane. Every output pixel is
+therefore the geometry that the navigation step says it is — not the
+geometry that the raw SPICE prediction would have produced before the
+correction.
 
 Pipeline overview
 =================
 
 Per-image, the driver runs three phases:
 
-1. **Build the offset-corrected snapshot.**  Read the per-image
+1. **Build the pointing-corrected snapshot.**  Read the per-image
    ``_metadata.json`` from ``--nav-results-root``, refuse to proceed if
    ``status != 'success'``, build the per-instrument
    :class:`~spindoctor.obs.obs_snapshot_inst.ObsSnapshotInst` with
    ``extfov_margin_vu=(0, 0)`` (backplanes are evaluated on the sensor
-   only, not on the extended FOV used by navigation), wrap its FOV in
-   :class:`oops.fov.OffsetFOV` carrying the navigated offset, and stash
-   it as ``snapshot``.
+   only, not on the extended FOV used by navigation), apply the recorded
+   pointing via :func:`~spindoctor.cli.reproj.offsets.select_pointing` /
+   :func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs` (the
+   corrected C-matrix when usable, else the navigated offset via
+   :class:`oops.fov.OffsetFOV`; an already-corrected kernel pool is left
+   alone), and stash it as ``snapshot``.
 2. **Evaluate per-source backplanes.**
    :func:`~spindoctor.cli.backplanes.backplanes_bodies.create_body_backplanes` walks
    every body in the per-image inventory and, for each, builds a clipped
@@ -100,11 +108,15 @@ Restrictions and assumptions
 - **Sensor frame, not extfov.**  Backplanes are evaluated on the sensor
   pixel grid (``extfov_margin_vu=(0, 0)``). The extended-FOV margin used
   by navigation does not appear in the FITS file.
-- **Offset must exist.**  An image whose nav ``_metadata.json`` reports
-  ``offset = None`` defaults to ``(0, 0)`` with a warning, which means
-  the resulting backplanes carry the raw SPICE prediction's geometry.
-  Operators who want to refuse those images can filter on
-  ``confidence_tier`` before running the bundle step.
+- **The offset key must exist.**  A success-status record with no
+  ``offset`` key at all is defect-shaped and fails the task.  An image
+  whose record reports ``offset = None`` (and no usable C-matrix) is
+  processed on uncorrected pointing with a warning, which means the
+  resulting backplanes carry the raw SPICE prediction's geometry; the
+  result reports ``pointing_source: 'none'`` and
+  ``uncorrected_pointing: true``.  Operators who want to refuse those
+  images can filter on ``confidence_tier`` before running the bundle
+  step.
 - **Per-body bounding-box evaluation.**  Body backplanes are evaluated
   on a meshgrid clipped to the body's predicted bounding box (no
   oversampling). Pixels outside any body's bounding box and outside

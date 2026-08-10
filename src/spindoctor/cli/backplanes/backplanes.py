@@ -1,10 +1,10 @@
 import json
 from typing import Any, cast
 
-import oops
 import pdslogger
 from filecache import FCPath
 
+from spindoctor.cli.reproj.offsets import apply_pointing_to_obs, select_pointing
 from spindoctor.config import (
     DEFAULT_CONFIG,
     IMAGE_LOGGER,
@@ -31,7 +31,7 @@ def generate_backplanes_image_files(
     write_output_files: bool = True,
     run_logging: RunLogging | None = None,
 ) -> dict[str, Any]:
-    """Generate backplanes for a single image batch using prior offset metadata.
+    """Generate backplanes for a single image batch using prior navigation metadata.
 
     Parameters:
         obs_class: Observation snapshot class for the instrument.
@@ -44,14 +44,23 @@ def generate_backplanes_image_files(
             configuration's defaults against the backplane results root.
 
     Returns:
-        ``{'status': 'success'}`` -- carrying ``uncorrected_pointing`` when
-        navigation recorded no offset and the backplanes were computed on the
-        camera's uncorrected pointing -- or ``{'status': 'skipped'}`` with the
-        navigation status that caused the skip.  An image can be skipped for a
-        reason its caller has no other way to learn: the reason is reported to
-        the run's log, and a cloud task has no run log, so returning it is what
-        keeps a batch that quietly skipped everything distinguishable from one
-        that processed it.
+        ``{'status': 'success'}`` -- carrying ``pointing_source`` (one of
+        ``'cmatrix'``, ``'pool'``, ``'offset'``, ``'none'``) naming which
+        recorded pointing the product was built on, plus ``pointing_reason``
+        when the outcome carries one, plus
+        ``uncorrected_pointing`` when that source is ``'none'`` and the
+        backplanes were computed on the camera's uncorrected pointing -- or
+        ``{'status': 'skipped'}`` with the navigation status that caused the
+        skip.  An image can be skipped or degraded for a reason its caller
+        has no other way to learn: the reason is reported to the run's log,
+        and a cloud task has no run log, so returning it is what keeps a
+        batch that quietly skipped or degraded everything distinguishable
+        from one that processed it.
+
+    Raises:
+        ValueError: if more than one image is batched, or if a success-status
+            record carries no ``offset`` key at all -- a defect-shaped record
+            fails the single-image task rather than degrading silently.
     """
 
     logger = IMAGE_LOGGER
@@ -91,7 +100,8 @@ def generate_backplanes_image_files(
             'nav_status_error': nav_error,
         }
 
-    uncorrected = False
+    pointing_source = 'none'
+    pointing_reason: str | None = None
     local_handlers, image_log_path = build_image_log_handlers(
         'backplanes',
         image_file.results_path_stub,
@@ -112,26 +122,26 @@ def generate_backplanes_image_files(
                 raise TypeError(f'Expected ObsSnapshot, got {type(obs).__name__}')
             snapshot = obs
 
-            # Apply offset via OffsetFOV; metadata uses (dv, du)
-            if 'offset' not in nav_metadata:
+            # Apply the recorded pointing: the corrected C-matrix when the
+            # record carries a usable one, else the (dv, du) offset via
+            # OffsetFOV, else nothing.
+            selection = select_pointing(nav_metadata, subject=str(image_path))
+            if not selection.offset_key_present:
                 raise ValueError(f'{image_path}: "offset" field not found in metadata')
-            if nav_metadata['offset'] is None:
+            applied = apply_pointing_to_obs(snapshot, selection, subject=str(image_path))
+            pointing_source = applied.source
+            pointing_reason = applied.reason
+            if applied.source == 'none':
                 # Backplanes computed on uncorrected pointing are geometry for
                 # a place the camera was not quite looking, and the product
                 # carries no sign of it.  The image's log gets the account; the
                 # run's gets told it happened, because someone watching a batch
                 # would otherwise have to open every log to find out.
-                logger.warning('%s: "offset" field is None, using (0, 0)', image_path)
                 MAIN_LOGGER.warning(
-                    '%s: computing backplanes on uncorrected pointing '
-                    '(navigation recorded no offset)',
+                    '%s: computing backplanes on uncorrected pointing (%s)',
                     image_path,
+                    applied.reason,
                 )
-                uncorrected = True
-                dv, du = 0, 0
-            else:
-                dv, du = nav_metadata['offset']
-            snapshot.fov = oops.fov.OffsetFOV(snapshot.fov, uv_offset=(float(du), float(dv)))
 
             # Compute bodies backplanes
             bodies_result = create_body_backplanes(snapshot, config, logger=logger)
@@ -163,9 +173,11 @@ def generate_backplanes_image_files(
         if image_log_path is not None:
             MAIN_LOGGER.info('Wrote log to %s', image_log_path)
 
-    result: dict[str, Any] = {'status': 'success'}
-    if uncorrected:
-        # Returned as well as logged: a cloud task has no run log, so this is
-        # the only way the fact leaves the worker.
+    # Returned as well as logged: a cloud task has no run log, so this is
+    # the only way the facts leave the worker.
+    result: dict[str, Any] = {'status': 'success', 'pointing_source': pointing_source}
+    if pointing_reason is not None:
+        result['pointing_reason'] = pointing_reason
+    if pointing_source == 'none':
         result['uncorrected_pointing'] = True
     return result

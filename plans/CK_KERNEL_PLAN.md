@@ -1395,13 +1395,13 @@ error itself changed; nothing available today measures that.
 Each is filed as a tracking issue; the number is given with the item. None
 blocks use of the kernels.
 
-- **Consumers switch from the offset to the C-matrix.** The Phase D
-  round trip has shown, per instrument, that the recorded `cmatrix` means
-  what the offset means, so every main program that reads the metadata
-  `offset` and builds an `OffsetFOV` -- backplanes, reprojection/mosaics,
-  and any later consumer -- can move to consuming `cmatrix` instead, with
-  the offset becoming a derived report value rather than the applied one.
-  This is the reading half of #50; this plan delivered the writing half.
+- **Consumers switch from the offset to the C-matrix** -- delivered.
+  `plans/CMATRIX_READERS_PLAN.md` is the design of record: the backplane
+  and reprojection readers apply the recorded `cmatrix` by frame
+  replacement (`apply_cmatrix_to_obs` in `spindoctor/support/cmatrix.py`),
+  with the offset as the documented fallback for records that carry no
+  usable C-matrix. This was the reading half of #50; this plan delivered
+  the writing half.
 - **Replace the C-matrix derivation with the oops API** when oops gains
   one (#433): `spindoctor/support/cmatrix.py` keeps its interface, its body
   goes.
@@ -1440,10 +1440,10 @@ blocks use of the kernels.
   instead of a kernel directory tree (#448), and cover the remote
   kernel-index path, which no test exercises (#446).
 
-Broader than this plan and blocking nothing: the documentation chapter
-specifying the metadata JSON format -- every key, its meaning, presence
-rules, and examples, including the `pointing` and `times` blocks this plan
-added (#431); and whether `spindoctor.cli` subpackages belong in the API
-reference at all (#443), which is what decides whether the writer package
-gets an autodoc page rather than the nitpick-ignore every other
-`spindoctor.cli` subpackage has.
+Broader than this plan and blocking nothing: whether `spindoctor.cli`
+subpackages belong in the API reference at all (#443), which is what
+decides whether the writer package gets an autodoc page rather than the
+nitpick-ignore every other `spindoctor.cli` subpackage has. The
+documentation chapter specifying the metadata JSON format -- including the
+`pointing` and `times` blocks this plan added -- is written
+(docs/user_guide/user_guide_metadata.rst).
