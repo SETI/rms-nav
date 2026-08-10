@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import os
 import sys
+import threading
 from typing import Any, cast
 
 from cloud_tasks.worker import Worker, WorkerData
@@ -20,7 +21,7 @@ package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
-from spindoctor.cli.reproj.pointing_source import build_pointing_source
+from spindoctor.cli.reproj.pointing_source import PointingSource, build_pointing_source
 from spindoctor.config import (
     DEFAULT_CONFIG,
     build_cloud_task_logging,
@@ -37,6 +38,56 @@ from spindoctor.obs import inst_name_to_obs_class
 PROGRAM_NAME = SD_BACKPLANES
 """Program identity: names the main log directory and the
 ``logging.programs`` configuration block for this program."""
+
+_POINTING_SOURCE_LOCK = threading.Lock()
+"""Serializes the one-time build of this worker's pointing source."""
+
+
+def _worker_pointing_source(
+    arguments: argparse.Namespace,
+    nav_results_root: FCPath,
+    worker_data: WorkerData,
+) -> PointingSource:
+    """Return the source this worker reads navigation records through.
+
+    Built once and kept for the worker's lifetime rather than per task.  One
+    task is one image, and an index-backed source opened per task would pay a
+    connection, a schema-version query and an ingest-bookkeeping query for every
+    image -- several round trips each, in the stage whose whole purpose is
+    removing one.  The URL is the worker's own, identical for every task it is
+    handed, so there is nothing per-task for a per-task build to pick up.
+
+    A build that fails is not remembered, so a worker started while the index
+    was unreachable answers from it once it is reachable again instead of
+    failing for the rest of its life.
+
+    Parameters:
+        arguments: The worker's parsed command line, which names the index.
+        nav_results_root: Root the navigator wrote its documents under.
+        worker_data: The worker's shared data, which holds the built source.
+
+    Returns:
+        The source, closed by ``async_main`` when the worker stops.
+
+    Raises:
+        ValueError: If a named index cannot be opened, is not an index, was
+            written by another version of the schema, or has not fully ingested
+            this root.
+    """
+    existing = cast(PointingSource | None, getattr(worker_data, 'pointing_source', None))
+    if existing is not None:
+        return existing
+    with _POINTING_SOURCE_LOCK:
+        # Re-read under the lock: several tasks can reach an unbuilt source at
+        # once, and each would otherwise open an index the others then discard.
+        existing = cast(PointingSource | None, getattr(worker_data, 'pointing_source', None))
+        if existing is not None:
+            return existing
+        source = build_pointing_source(
+            nav_results_root, results_db_url=get_results_db_url(arguments, DEFAULT_CONFIG)
+        )
+        worker_data.pointing_source = source  # type: ignore[attr-defined]
+        return source
 
 
 def process_task(
@@ -119,14 +170,8 @@ def process_task(
         fallback_log_root=backplane_results_root / 'logs',
     )
 
-    # Built per task, as every other resource this worker uses is: one task is
-    # one image, so the open costs nothing against loading it, and the worker
-    # keeps its property of resolving its whole environment from the task it was
-    # handed rather than from state left over from startup.
     try:
-        pointing_source = build_pointing_source(
-            nav_results_root, results_db_url=get_results_db_url(arguments, DEFAULT_CONFIG)
-        )
+        pointing_source = _worker_pointing_source(arguments, nav_results_root, worker_data)
     except ValueError as exc:
         return False, {
             'status': 'error',
@@ -134,17 +179,14 @@ def process_task(
             'status_exception': str(exc),
         }
 
-    try:
-        result = generate_backplanes_image_files(
-            obs_class,
-            ImageFiles(image_files=image_files),
-            pointing_source=pointing_source,
-            backplane_results_root=backplane_results_root,
-            write_output_files=True,
-            run_logging=run_logging,
-        )
-    finally:
-        pointing_source.close()
+    result = generate_backplanes_image_files(
+        obs_class,
+        ImageFiles(image_files=image_files),
+        pointing_source=pointing_source,
+        backplane_results_root=backplane_results_root,
+        write_output_files=True,
+        run_logging=run_logging,
+    )
 
     # Returned rather than only logged: an image can be skipped because its
     # navigation did not succeed, and a task has no run log to say so.
@@ -191,7 +233,14 @@ async def async_main() -> None:
     )
 
     worker = Worker(process_task, args=sys.argv[1:], argparser=argparser)
-    await worker.start()
+    try:
+        await worker.start()
+    finally:
+        # The source outlives every task, so nothing else can close it, and an
+        # index-backed one holds a connection pool open until it is.
+        source = cast(PointingSource | None, getattr(worker._data, 'pointing_source', None))
+        if source is not None:
+            source.close()
 
 
 def main() -> None:  # Required for setuptools entry points

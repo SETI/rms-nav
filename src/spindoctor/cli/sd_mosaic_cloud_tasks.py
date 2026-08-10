@@ -441,8 +441,14 @@ async def async_main() -> None:
     init_cli_args = cast(argparse.Namespace, worker._data.args)
     load_default_and_user_config(init_cli_args, DEFAULT_CONFIG)
     # ``WorkerData`` has no typed field; ``process_task`` reads via ``getattr``.
-    worker._data.pointing_source = _resolve_pointing_source(init_cli_args)  # type: ignore[attr-defined]
-    await worker.start()
+    pointing_source = _resolve_pointing_source(init_cli_args)
+    worker._data.pointing_source = pointing_source  # type: ignore[attr-defined]
+    try:
+        await worker.start()
+    finally:
+        # The source outlives every task, so nothing else can close it, and an
+        # index-backed one holds a connection pool open until it is.
+        pointing_source.close()
 
 
 def main() -> None:  # Required for setuptools entry points
