@@ -29,28 +29,39 @@ the ring system), merges the per-source results into one master array per
 backplane name (so the per-pixel output is unambiguous when a body silhouette
 overlaps the rings), and writes the result.
 
-The pipeline preserves the navigation offset. ``sd_backplanes`` reads the
-``_metadata.json`` produced by ``sd_offset``, applies the
-``(dv, du)`` offset to the
-:class:`~spindoctor.obs.obs_snapshot.ObsSnapshot`'s FOV via
-:class:`oops.fov.OffsetFOV`, and *then* evaluates every backplane. Every
-output pixel is therefore the geometry that the navigation step says it is —
-not the geometry that the raw SPICE prediction would have produced before the
-offset correction.
+The pipeline preserves the navigated pointing. ``sd_backplanes`` reads the
+``_metadata.json`` produced by ``sd_offset``, applies the recorded pointing
+to the :class:`~spindoctor.obs.obs_snapshot.ObsSnapshot` — the corrected
+C-matrix by frame replacement when the record carries a usable one, else the
+``(dv, du)`` offset via :class:`oops.fov.OffsetFOV`, and when the furnished
+kernel pool *already* answers the corrected attitude (corrected C-kernels
+furnished at load time) it deliberately applies nothing at all, since either
+mechanism would double-correct (see
+:doc:`dev_guide_ck_kernels` for the reader mechanism and its fallback
+ladder) — and *then* evaluates every backplane. Every output pixel is
+therefore the geometry that the navigation step says it is — not the
+geometry that the raw SPICE prediction would have produced before the
+correction.
 
 Pipeline overview
 =================
 
 Per-image, the driver runs three phases:
 
-1. **Build the offset-corrected snapshot.**  Read the per-image
-   ``_metadata.json`` from ``--nav-results-root``, refuse to proceed if
+1. **Build the pointing-corrected snapshot.**  Read the per-image navigation
+   record through the stage's
+   :class:`~spindoctor.cli.reproj.pointing_source.PointingSource` -- the
+   ``_metadata.json`` document under ``--nav-results-root``, or one row of the
+   results index named by ``--results-db`` -- refuse to proceed if
    ``status != 'success'``, build the per-instrument
    :class:`~spindoctor.obs.obs_snapshot_inst.ObsSnapshotInst` with
    ``extfov_margin_vu=(0, 0)`` (backplanes are evaluated on the sensor
-   only, not on the extended FOV used by navigation), wrap its FOV in
-   :class:`oops.fov.OffsetFOV` carrying the navigated offset, and stash
-   it as ``snapshot``.
+   only, not on the extended FOV used by navigation), apply the recorded
+   pointing via :func:`~spindoctor.cli.reproj.offsets.select_pointing` /
+   :func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs` (the
+   corrected C-matrix when usable, else the navigated offset via
+   :class:`oops.fov.OffsetFOV`; an already-corrected kernel pool is left
+   alone), and stash it as ``snapshot``.
 2. **Evaluate per-source backplanes.**
    :func:`~spindoctor.cli.backplanes.backplanes_bodies.create_body_backplanes` walks
    every body in the per-image inventory and, for each, builds a clipped
@@ -73,9 +84,13 @@ Per-image, the driver runs three phases:
    companion ``_backplane_metadata.json`` with per-body inventory and
    per-backplane min/max statistics.
 
-Phase 1 fails the image if the navigation step did not converge; the
-downstream PDS4 driver also refuses to render a label for an image whose
-backplane FITS is missing, so a single hard failure propagates cleanly.
+Phase 1 skips the image if the navigation step did not converge, writing no
+FITS for it; the downstream PDS4 driver also refuses to render a label for an
+image whose backplane FITS is missing, so a single missing product propagates
+cleanly.
+A failure belongs to its image: the driver reports it against that image,
+counts it, and goes on to the next one, closing the pass with a summary of
+how many images were done, skipped and failed.
 
 Entry points
 ============
@@ -100,11 +115,22 @@ Restrictions and assumptions
 - **Sensor frame, not extfov.**  Backplanes are evaluated on the sensor
   pixel grid (``extfov_margin_vu=(0, 0)``). The extended-FOV margin used
   by navigation does not appear in the FITS file.
-- **Offset must exist.**  An image whose nav ``_metadata.json`` reports
-  ``offset = None`` defaults to ``(0, 0)`` with a warning, which means
-  the resulting backplanes carry the raw SPICE prediction's geometry.
-  Operators who want to refuse those images can filter on
-  ``confidence_tier`` before running the bundle step.
+- **A successful record supplying no offset is processed, not refused.**
+  The rule applies below the status gate of phase 1: a record whose
+  ``status`` is anything but ``success`` is skipped before its offset is
+  ever read.  A ``success`` record that reports ``offset = None``, or
+  carries no ``offset`` key at all, and has no usable C-matrix is
+  processed on uncorrected pointing with a warning, which means the
+  resulting backplanes carry the raw SPICE prediction's geometry; the
+  result reports
+  ``pointing_source: 'none'``, ``uncorrected_pointing: true`` and the
+  reason (``null_offset`` or ``missing_offset_key``).  The two are one
+  class to this stage on purpose: the results index stores an absent
+  offset and a null one in the same NULL column pair, so a stage that
+  refused one and processed the other would build a product from a
+  document and refuse the same image read as a row.  Operators who want
+  to refuse those images can filter on ``confidence_tier`` before
+  running the bundle step.
 - **Per-body bounding-box evaluation.**  Body backplanes are evaluated
   on a meshgrid clipped to the body's predicted bounding box (no
   oversampling). Pixels outside any body's bounding box and outside

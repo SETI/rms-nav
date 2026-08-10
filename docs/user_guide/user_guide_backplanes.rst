@@ -8,9 +8,42 @@ Overview
 Backplanes are per-pixel geometry products (longitude, latitude, incidence
 angle, emission angle, phase angle, resolution, etc.) derived from a
 navigated image. The system reads prior navigation metadata to apply the
-image offset, then computes body and ring backplanes, merges them per-pixel
-by distance, and writes a multi-HDU FITS file along with a JSON metadata
-file.
+image's recorded pointing, then computes body and ring backplanes, merges
+them per-pixel by distance, and writes a multi-HDU FITS file along with a
+JSON metadata file.
+
+Which pointing a product is built on
+------------------------------------
+
+The driver prefers the exact recorded form over its approximation. When the
+navigation record carries a corrected camera attitude
+(``navigation_result.pointing.cmatrix``) that passes the reader's
+consistency gates, the observation's frame is replaced with that attitude —
+the same measurement as the pixel offset, expressed exactly, and what a
+SPICE consumer of the corrected C-kernels sees for every image whose segment
+was written. When there is no usable corrected attitude — a fitted-rotation
+result (``no_cmatrix_rotation_fitted``), a record with no pointing block
+(``no_pointing_block``), an unusable one (``malformed_pointing``), or a gate
+refusal (``cmatrix_foreign_midtime``, ``cmatrix_baseline_mismatch``,
+``cmatrix_unknown_host``, each
+warned to the run log) — the recorded ``(dv, du)`` offset is applied via
+:class:`oops.fov.OffsetFOV` instead; no product is ever built on a corrected
+attitude that failed a gate. A kernel pool that already answers the
+corrected attitude (corrected C-kernels furnished at load time) is left
+alone, counted as ``pool_already_corrected``, since applying anything again
+would double-correct. With no usable pointing of either kind the backplanes
+are computed on uncorrected pointing, with a warning in the run log.
+
+Each single-image result reports what happened: ``pointing_source`` is one
+of ``'cmatrix'``, ``'pool'``, ``'offset'``, or ``'none'``, joined by
+``pointing_reason`` when the source is degraded and by
+``uncorrected_pointing: true`` when it is ``'none'``. A success-status
+record with no ``offset`` key at all is a recorded no-answer like a null one,
+counted under ``missing_offset_key``. For a result the kernel generator omitted
+from the corrected kernels (a BOTSIM-yielding WAC, or any image with an
+omission reason), the backplanes still carry that image's own recorded
+measurement — the authoritative product for it — while a kernel consumer
+sees the winning segment's attitude.
 
 Key properties:
 
@@ -43,8 +76,40 @@ Common flags:
 - ``--nav-results-root``: Root containing prior navigation results
   (``*_metadata.json``).
 - ``--backplane-results-root``: Root directory for the backplane outputs.
+- ``--results-db``: Connection URL of a results index built by
+  ``sd_stats_ingest``. With one, each image's navigation record is read as one
+  database row instead of one file, which on a cloud results root replaces a
+  round trip per image with a query. The index must already hold a completed
+  ingest of the root named by ``--nav-results-root``, and the rows it holds are
+  a snapshot of the tree as of that ingest. Omitting the option names no index,
+  which is the default: the navigation results tree is read directly.
+  ``--results-db none`` names no index either, which is how a machine that sets
+  the option through configuration or through ``NAV_RESULTS_DB`` reads the
+  files.
 - Dataset selection flags are the same as for ``sd_offset`` (see
   :doc:`user_guide_navigation`).
+
+An image the index has no row for is reported and skipped exactly as an image
+with no metadata file is, and a named index that cannot be opened, or a
+navigation results root it has not fully ingested, fails the run rather than
+quietly reverting to reading files.
+
+An image whose metadata document the ingest could not read is a third case, and
+it fails that image rather than skipping it. Such a document is recorded as a
+file the index holds no navigation record for, which is not the same fact as
+"nothing navigated this image": read directly, the same document may well carry
+a pointing and a status. The failure names the image, the index and the reason
+the ingest recorded, so the remedy — fix the document and ingest that root
+again, or run without ``--results-db`` — is visible from the run log. The rest
+of the pass continues; only that image is lost.
+
+Under ``sd_backplanes_cloud_tasks`` each of those outcomes is reported in the
+task result rather than in a run log, because a cloud task has none: an
+unusable index is ``unusable_results_db``, an image nothing navigated is a
+skip named ``no_navigation_record``, and every other way one image can fail —
+a document the ingest refused among them — is ``backplanes_failed``. All three
+are returned rather than raised, so a queue configured to retry on an
+exception does not retry a refusal that will refuse identically.
 
 Examples
 --------
@@ -151,6 +216,16 @@ program; see :doc:`user_guide_logging`.
 An image whose navigation did not succeed is skipped and gets no backplanes.
 The run's log says which images those were, and reports the navigation status
 that caused each skip.
+
+One image that cannot be processed does not end the run. Backplane generation
+is per-image work, so a failure is reported against that image, counted, and
+the next image is attempted. The run's log carries the image, the message and
+the traceback — an image can fail before it has a log of its own, and then the
+run's log is the only account of it — and that image's own log carries the
+traceback too whenever the failure got as far as opening one. The pass ends
+with a summary line counting what became of every image::
+
+   Backplane pass complete: 143 done, 4 skipped, 1 failed
 
 Backplane Viewer GUI
 ====================

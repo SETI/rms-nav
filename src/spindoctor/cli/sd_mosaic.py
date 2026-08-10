@@ -10,8 +10,10 @@ sd_mosaic_body    -- equivalent to ``sd_mosaic body ...``
 Two-pass workflow
 -----------------
 1. Reprojection pass: for each image in the dataset, load the observation,
-   optionally apply a navigation offset from ``--nav-results-root``, call
-   ``BodyMosaic.reproject()`` / ``RingMosaic.reproject()``, and save the result.
+   optionally apply the recorded navigation pointing from ``--nav-results-root``
+   (the corrected C-matrix when the metadata carries one, else the pixel
+   offset), call ``BodyMosaic.reproject()`` / ``RingMosaic.reproject()``, and
+   save the result.
    Per-image logs are written under the log root, not beside the products:
    ``{log_root}/reproj/<subject>/<results_path_stub>_<timestamp>.log``.
    Existing files are skipped unless ``--overwrite`` is given.
@@ -50,8 +52,9 @@ from spindoctor.cli.reproj.args import (
     add_ring_args,
 )
 from spindoctor.cli.reproj.factories import build_body_mosaic, build_ring_mosaic
-from spindoctor.cli.reproj.offsets import apply_offset_to_obs, load_offset_if_any
+from spindoctor.cli.reproj.offsets import apply_pointing_to_obs
 from spindoctor.cli.reproj.paths import mosaic_output_path, per_image_output_path
+from spindoctor.cli.reproj.pointing_source import PointingSource, build_pointing_source
 from spindoctor.cli.reproj.reproject import reproject_one_body, reproject_one_ring
 from spindoctor.config import (
     DEFAULT_CONFIG,
@@ -61,6 +64,7 @@ from spindoctor.config import (
     build_image_log_handlers,
     build_run_logging,
     get_nav_results_root,
+    get_results_db_url,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_MOSAIC
@@ -69,6 +73,7 @@ from spindoctor.dataset.dataset import DataSet
 from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class
 from spindoctor.reproj.bodies import USE_MOSAIC_LIMITS, BodyMosaicData, BodyReprojResult
 from spindoctor.reproj.rings import RingMosaicData, RingReprojResult
+from spindoctor.results_index import masked_url
 from spindoctor.support.file import json_as_string
 from spindoctor.support.misc import log_run_environment
 
@@ -110,7 +115,7 @@ def _run_reproject_pass(
     run_logging: RunLogging,
     *,
     args: argparse.Namespace,
-    nav_results_root_path: FCPath | None,
+    pointing_source: PointingSource,
     output_dir: FCPath,
     prefix: str,
     fmt: str,
@@ -124,7 +129,8 @@ def _run_reproject_pass(
         run_logging: This run's resolved logging, giving the sinks and levels
             each per-image log is written with.
         args: Parsed CLI namespace.
-        nav_results_root_path: Optional root for ``sd_offset`` metadata (offsets).
+        pointing_source: Where each image's navigation record is read from --
+            the documents ``sd_offset`` wrote, or an ingested results index.
         output_dir: Mosaic / per-image output directory.
         prefix: Output filename prefix.
         fmt: Output format (``fits`` or ``npz``).
@@ -137,15 +143,23 @@ def _run_reproject_pass(
         ``(n_done, n_skipped, n_failed, n_uncorrected)`` counts for the pass
         (dry-run does not increment ``n_done``; skipped-existing increments
         ``n_skipped``; an image whose reprojection raised increments
-        ``n_failed``; an image reprojected without a navigation offset
-        increments ``n_uncorrected``, and is counted in ``n_done`` as well
-        because it did produce a product).
+        ``n_failed``; an image whose recorded pointing was sought and not
+        applied increments ``n_uncorrected``, and is counted in ``n_done`` as
+        well because it did produce a product.  A pass given no navigation
+        results root sought no pointing, so none of its images is counted as
+        missing one).  Every pointing outcome other than the clean C-matrix
+        application is also tallied per reason and the tally reported to the
+        run log at the end of the pass, so a batch that fell back to the
+        offset path or to no correction says so in one place.  The tally also
+        carries the already-corrected pool, which is a successful no-op rather
+        than a shortfall and is named so it can be told apart from one.
     """
     assert DATASET is not None
     n_done = 0
     n_skipped = 0
     n_failed = 0
     n_uncorrected = 0
+    pointing_reasons: dict[str, int] = {}
     for imagefiles in DATASET.yield_image_files_from_arguments(args):
         image_file = imagefiles.image_files[0]
         out_path = per_image_output_path(
@@ -187,20 +201,34 @@ def _run_reproject_pass(
                     image_path = image_file.image_file_path.absolute()
                     obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
 
-                    lookup = load_offset_if_any(nav_results_root_path, image_file)
-                    if lookup.offset is not None:
-                        apply_offset_to_obs(
-                            cast(ObsSnapshotInst, obs), lookup.offset[0], lookup.offset[1]
-                        )
-                    elif lookup.reason is not None:
+                    selection = pointing_source.load_pointing(image_file)
+                    applied = apply_pointing_to_obs(
+                        cast(ObsSnapshotInst, obs),
+                        selection,
+                        subject=image_file.image_file_url.as_posix(),
+                    )
+                    if applied.reason is not None:
                         # The detailed account stays in the image's log; the
-                        # run needs to know the product is registered on
-                        # uncorrected pointing, which is not visible in it.
+                        # run needs every outcome that is not the clean
+                        # C-matrix application counted per reason, since none
+                        # of them is visible in the product.  An
+                        # already-corrected pool is one of them and is not a
+                        # shortfall, so the tally names the reason rather than
+                        # summing to a single "degraded" number.
+                        pointing_reasons[applied.reason] = (
+                            pointing_reasons.get(applied.reason, 0) + 1
+                        )
+                    # A pointing was asked for and none was applied, which is
+                    # the shortfall this count exists to make visible.  A run
+                    # given no navigation results root at all asks for none
+                    # and carries no reason, and nothing it processed is
+                    # missing anything.
+                    if applied.source == 'none' and applied.reason is not None:
                         n_uncorrected += 1
                         MAIN_LOGGER.warning(
                             '%s: reprojecting with uncorrected pointing (%s)',
                             image_file.image_file_url,
-                            lookup.reason,
+                            applied.reason,
                         )
 
                     img_label = (
@@ -235,6 +263,8 @@ def _run_reproject_pass(
                 if handler is not pdslogger.NULL_HANDLER:
                     handler.close()
 
+    if len(pointing_reasons) > 0:
+        MAIN_LOGGER.info('Pointing outcomes by reason: %s', pointing_reasons)
     return n_done, n_skipped, n_failed, n_uncorrected
 
 
@@ -284,10 +314,18 @@ def _build_parser(mode: str) -> argparse.ArgumentParser:
 # task. Dataset-selection arguments (added dynamically by each DataSet) are
 # excluded because we iterate them here and the worker only sees concrete file
 # URLs.
+#
+# The environment keys among these are named for what must not be forwarded
+# rather than for what the task-key parser could produce: that parser is built
+# from the output and mode argument groups alone, so none of them could appear
+# through it today. Listing the whole group is what keeps this readable as the
+# rule it is, and what keeps a key from being forwarded if one of those groups
+# ever grows an environment flag.
 _CLI_ONLY_TASK_EXCLUDES: frozenset[str] = frozenset(
     {
         'config_file',
         'nav_results_root',
+        'results_db',
         'pds3_holdings_root',
         'log_level',
         'profile',
@@ -407,15 +445,16 @@ def parse_args(command_list: list[str]) -> tuple[str, argparse.Namespace]:
 
 def _run_body(
     args: argparse.Namespace,
-    nav_results_root_path: FCPath | None,
+    pointing_source: PointingSource,
     run_logging: RunLogging,
 ) -> None:
     """Run the body workflow: reproject each selected image, then mosaic them.
 
     Parameters:
         args: Parsed CLI namespace.
-        nav_results_root_path: Root holding ``sd_offset`` metadata, from which
-            each image's offset is read; None leaves pointing uncorrected.
+        pointing_source: Where each image's navigation record is read from; a
+            source built with no navigation results root leaves every image's
+            pointing uncorrected.
         run_logging: This run's resolved logging, giving the sinks and levels
             each per-image reprojection log is written with.
     """
@@ -435,7 +474,7 @@ def _run_body(
         n_done, n_skipped, n_failed, n_uncorrected = _run_reproject_pass(
             run_logging,
             args=args,
-            nav_results_root_path=nav_results_root_path,
+            pointing_source=pointing_source,
             output_dir=output_dir,
             prefix=prefix,
             fmt=fmt,
@@ -522,15 +561,16 @@ def _run_body(
 
 def _run_rings(
     args: argparse.Namespace,
-    nav_results_root_path: FCPath | None,
+    pointing_source: PointingSource,
     run_logging: RunLogging,
 ) -> None:
     """Run the rings workflow: reproject each selected image, then mosaic them.
 
     Parameters:
         args: Parsed CLI namespace.
-        nav_results_root_path: Root holding ``sd_offset`` metadata, from which
-            each image's offset is read; None leaves pointing uncorrected.
+        pointing_source: Where each image's navigation record is read from; a
+            source built with no navigation results root leaves every image's
+            pointing uncorrected.
         run_logging: This run's resolved logging, giving the sinks and levels
             each per-image reprojection log is written with.
     """
@@ -550,7 +590,7 @@ def _run_rings(
         n_done, n_skipped, n_failed, n_uncorrected = _run_reproject_pass(
             run_logging,
             args=args,
-            nav_results_root_path=nav_results_root_path,
+            pointing_source=pointing_source,
             output_dir=output_dir,
             prefix=prefix,
             fmt=fmt,
@@ -654,12 +694,30 @@ def main() -> None:
             pr.print_stats(sort='cumulative')
         return
 
+    results_db_url = get_results_db_url(args, DEFAULT_CONFIG)
+    MAIN_LOGGER.info(
+        'Results index: %s',
+        masked_url(results_db_url) if results_db_url is not None else 'none (reading files)',
+    )
+    # A resolved index that will not open, or a root it has not fully ingested,
+    # fails the run here rather than quietly reverting to reading files -- but
+    # only for a run that was going to read a record.  The reprojection pass is
+    # the only reader, and it reads nothing under --dry-run, so a run that
+    # skips it or only says what it would do opens no index: failing such a run
+    # for want of a working index would fail it for something it never touches.
+    reads_navigation_records = not args.skip_reproject and not args.dry_run
+    pointing_source = build_pointing_source(
+        nav_results_root_path,
+        results_db_url=results_db_url if reads_navigation_records else None,
+    )
+
     try:
         if mode == 'body':
-            _run_body(args, nav_results_root_path, run_logging)
+            _run_body(args, pointing_source, run_logging)
         else:
-            _run_rings(args, nav_results_root_path, run_logging)
+            _run_rings(args, pointing_source, run_logging)
     finally:
+        pointing_source.close()
         if args.profile:
             pr.disable()
             pr.print_stats(sort='cumulative')

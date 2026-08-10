@@ -1395,13 +1395,13 @@ error itself changed; nothing available today measures that.
 Each is filed as a tracking issue; the number is given with the item. None
 blocks use of the kernels.
 
-- **Consumers switch from the offset to the C-matrix.** The Phase D
-  round trip has shown, per instrument, that the recorded `cmatrix` means
-  what the offset means, so every main program that reads the metadata
-  `offset` and builds an `OffsetFOV` -- backplanes, reprojection/mosaics,
-  and any later consumer -- can move to consuming `cmatrix` instead, with
-  the offset becoming a derived report value rather than the applied one.
-  This is the reading half of #50; this plan delivered the writing half.
+- **Consumers switch from the offset to the C-matrix** -- delivered.
+  `plans/CMATRIX_READERS_PLAN.md` is the design of record: the backplane
+  and reprojection readers apply the recorded `cmatrix` by frame
+  replacement (`apply_cmatrix_to_obs` in `spindoctor/support/cmatrix.py`),
+  with the offset as the documented fallback for records that carry no
+  usable C-matrix. This was the reading half of #50; this plan delivered
+  the writing half.
 - **Replace the C-matrix derivation with the oops API** when oops gains
   one (#433): `spindoctor/support/cmatrix.py` keeps its interface, its body
   goes.

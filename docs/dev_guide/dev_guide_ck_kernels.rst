@@ -26,6 +26,14 @@ attitude:
    neither ``oops`` nor anything from :mod:`spindoctor.support`, and the
    guarantee is enforced by test rather than by convention.
 
+The recorded matrices have a second consumer inside SpinDoctor itself: the
+backplane and reprojection stages apply them back onto observations through
+:func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs`, whose matrix
+mechanism is :func:`~spindoctor.support.cmatrix.apply_cmatrix_to_obs` (see
+`The readers`_),
+so the pipeline's own downstream products are built on the same attitude a
+kernel consumer sees.
+
 The split is the design, not an accident of layering. The writer package
 exists so that a navigated attitude becomes a kernel without the geometry
 stack; a writer that pulled in ``oops`` would defeat the point of writing
@@ -299,6 +307,126 @@ the image log, one line to the run log. A registered instrument that reaches
 navigation with no entry in the frame table is a build defect and warns to both;
 a simulated image, which has no spacecraft and no furnished camera frame, is
 expected and logs at debug.
+
+The readers
+===========
+
+The metadata readers -- the backplane stage and the mosaic drivers -- consume
+the recorded attitude through
+:func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs`, the consumer
+entry point that owns selection, the offset fallback, the pool no-op, reason
+reporting and cache clearing. The matrix mechanism beneath it is one public
+function beside :func:`~spindoctor.support.cmatrix.compute_pointing`:
+:func:`~spindoctor.support.cmatrix.apply_cmatrix_to_obs` -- calling it
+directly bypasses everything the consumer surface owns. It inverts Step 3 of
+the derivation above rather than re-deriving anything: the corrected frame is,
+by the writing half's own construction, *the frame in which the unmodified
+field of view holds*, so the reader replaces the observation's frame and
+leaves the FOV alone::
+
+    if cmatrix == cmatrix_original (np.array_equal):
+        C_oops_corr = C_oops(mid)                       # short-circuit
+    else:
+        R_hat       = C_oops(mid) . cmatrix_original^T  # measured, gated
+        C_oops_corr = R_hat . cmatrix
+    obs.frame = oops.frame.Cmatrix(C_oops_corr)         # frame_id=None
+
+with ``C_oops(mid)`` read from the observation's own frame at the midtime.
+Algebraically ``C_oops_corr = C_oops . (cmatrix_original^T . cmatrix)``: the
+observation's attitude composed with the recorded correction. The
+``array_equal`` short-circuit mirrors the writer's identity guard and is what
+makes an identity correction reproduce the observation's own midtime attitude
+exactly -- two float64 matrix products do not cancel to bit precision, so
+without it "no correction means no change" would be false at the 1e-16 level.
+The replacement frame is built unregistered (``frame_id=None``), so a batch
+loop over tens of thousands of images pollutes no global oops frame state;
+the one piece of shared state the mechanism touches is the process-global
+temporary-id counter, which is cosmetic when the wayframe is the frame
+itself.
+
+``R_hat`` is measured for one reason only: the gate. Before anything is
+applied, in order:
+
+1. Both matrices must be proper rotations of real numbers, and the recorded
+   ``midtime_et`` finite (else ``malformed_pointing``). The observation's
+   host must have a frame mapping to gate against (else
+   ``cmatrix_unknown_host`` -- unreachable for a record the writer produced,
+   since writing a pointing block required the mapping).
+2. The midtime gate: ``|obs.midtime - midtime_et| <= 1e-6 s``. A mismatch
+   means the record is not this observation's
+   (``cmatrix_foreign_midtime``).
+3. The flip gate: ``max|R_hat - R_expected| <= 1e-9``, with ``R_expected``
+   the instrument's constant from the frame table. Because ``R_hat`` mixes
+   the observation's *current* attitude with the *recorded* baseline, this
+   one inequality fails on a changed kernel pool, a transposed
+   ``cmatrix_original`` or whole record (a transposed rotation is still a
+   proper rotation, so validation alone cannot catch it), and a changed host
+   convention alike. The one sub-case it cannot see is a transposed
+   ``cmatrix`` alone, which no single-serializer defect produces: the
+   inequality contains only ``cmatrix_original``.
+4. On flip-gate failure, one cheap probe before concluding corruption:
+   ``max|C_oops(mid) - R_expected . cmatrix| <= 1e-9``. If it holds, the
+   furnished pool **already answers the corrected attitude** -- corrected
+   kernels furnished at load time. The correct action is to apply nothing:
+   the observation is already right, and either fallback would corrupt it by
+   roughly twice the offset. This is the distinguished
+   ``POOL_ALREADY_CORRECTED`` outcome, counted under its own reason.
+5. Only when neither explanation fits is it ``cmatrix_baseline_mismatch``:
+   the record is never applied, and the caller degrades to the offset path,
+   which reproduces the pre-C-matrix product exactly.
+
+The selection and fallback ladder is shared, not duplicated:
+:func:`~spindoctor.cli.reproj.offsets.select_pointing` classifies an
+already-parsed metadata record into a
+:class:`~spindoctor.cli.reproj.offsets.PointingSelection` (the mechanism, the
+values, and the per-reason short form), and
+:func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs` applies it,
+returning an :class:`~spindoctor.cli.reproj.offsets.AppliedPointing` naming
+what the observation now carries (``cmatrix``, ``pool``, ``offset`` or
+``none``). The offset path is the documented mechanism for every record with
+no usable C-matrix: a fitted-rotation result
+(``no_cmatrix_rotation_fitted`` -- the mechanism, not a mission), a record
+with no pointing block (``no_pointing_block``), and a malformed pointing
+block (``malformed_pointing``, warned to both logs like the gate refusals).
+Every caller treats a record that supplies no pointing the same way: the
+product is built on uncorrected pointing, the shortfall is reported, and the
+reason is counted.  A caller that refused a record class the others processed
+would build one product from a document and another from the index row the
+same document was ingested into, since a column pair holds every way an offset
+can fail to be a pair.
+
+After either mechanism mutates the observation,
+:func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs` calls
+``obs.reset_all()``. "Apply before any geometry is computed" is not an
+invariant :meth:`~spindoctor.obs.obs_inst.ObsInst.from_file`
+leaves available: :class:`~spindoctor.obs.obs_snapshot.ObsSnapshot` runs the
+closest-planet scan while it is constructed, which builds and caches an
+:class:`oops.backplane.Backplane` against the uncorrected frame before any
+caller can apply anything, and nothing pins that cache's consumers to
+rotation-invariant quantities. The reset clears every cached
+:class:`oops.backplane.Backplane` and :class:`oops.meshgrid.Meshgrid` so all
+downstream geometry is built on the corrected observation.
+
+Two boundaries worth stating. First, the recorded ``cmatrix`` is a midtime
+attitude, so the replacement frame is constant across the exposure where the
+original frame was time-varying; every switched consumer is a midtime
+evaluation (oops ``Snapshot`` evaluates every ``Backplane`` at the scalar
+midtime, and the ring reprojection constructs its events at ``obs.midtime``
+explicitly), so nothing changes -- but the replacement frame's transform also
+carries **zero angular velocity** where the original carried the
+spacecraft's. No switched consumer reads frame omega; a future
+velocity-aware backplane (smear planes) must not consume it from the
+replaced frame. Second, the two paths agree exactly only at the boresight,
+where the correction was constructed; away from it they differ at second
+order in field angle and first order in the offset, because the *offset*
+path is the approximation. The acceptance evidence
+(``tests/integration/test_cmatrix_readers.py``) measures that bound in its
+own metric -- ``K_inst``, the worst pixel-space residual via ``uv_from_los``
+inversion over a 17x17 grid and eight offset directions at 50 px of
+displacement on each frame's own FOV -- and holds the two paths within
+``2 K_inst |offset| / 50 + 0.005 px`` at the LOS grid and through one ring
+reprojection, one body reprojection, and one end-to-end backplane run, with
+every measured residual additionally pinned at measured-plus-margin.
 
 The writer
 ==========

@@ -8,12 +8,19 @@ configuration key or an environment variable, and the three routinely differ by
 a trailing slash or by being relative to the working directory.
 
 Absence of a row is only meaningful once the root is known to have been
-ingested.  "No row for this stub" means "this image was never navigated" if and
-only if the whole root was walked, and means nothing at all otherwise, so a
-consumer asks :func:`require_ingested_roots` before it reads absence as an
-answer.  An ingest records its root in ``ingest_runs`` when it starts and stamps
-the finish time when it completes, so a run that died halfway leaves a row that
-says as much.
+ingested.  "No row in ``images`` for this stub" means "this image was never
+navigated" only if the whole root was walked, and means nothing at all
+otherwise, so a consumer asks :func:`require_ingested_roots` before it reads
+absence as an answer.  An ingest records its root in ``ingest_runs`` when it
+starts and stamps the finish time when it completes, so a run that died halfway
+leaves a row that says as much.
+
+A completed run is necessary and not sufficient.  Both tables that record a file
+have to be asked: a document the ingest refused is a file that exists, and it
+has a row in ``failed_files`` and none in ``images``, so a consumer reading the
+absence from ``images`` alone reports a navigated image as one nothing
+navigated.  What a completed run makes true is that absence from *both* tables
+means no file was there to read -- for every directory that run listed.
 """
 
 from dataclasses import dataclass
@@ -178,8 +185,11 @@ def require_ingested_roots(
 
     Raises:
         ValueError: If any named root has no completed ingest run, naming the
-            roots that are missing and the roots the index does hold.  Absence
-            must never be read as "nothing was navigated" under that root.
+            roots that are missing and the roots the index does hold.  Under
+            such a root, absence of a row must never be read as "nothing was
+            navigated".  Under an ingested one it may be, but only once the
+            refusal table has been asked too: a completed run makes absence
+            from both tables meaningful, not absence from ``images`` alone.
     """
     available = ingested_roots(connection)
     missing = [root for root in roots if root not in available]

@@ -436,7 +436,7 @@ the single ``sd_mosaic`` program) reproject a dataset of images and combine
 them into a mosaic using a two-pass workflow:
 
 1. **Reprojection pass** — for each image in the dataset, load the observation,
-   optionally apply a pre-computed navigation offset, call
+   optionally apply its recorded navigation pointing, call
    ``BodyMosaic.reproject()`` / ``RingMosaic.reproject()`` (with ``image_name``
    set to that image's file stem, or to ``--image-name`` when that option is
    given), and save the result as
@@ -487,15 +487,119 @@ Body mosaics quick example::
         --output-dir /data/mosaics \
         --prefix mimas_2004
 
-Offset application
-^^^^^^^^^^^^^^^^^^
+Pointing application
+^^^^^^^^^^^^^^^^^^^^
 
-When ``--nav-results-root`` is provided, ``sd_mosaic`` looks up a
-``_metadata.json`` file for each image (written by ``sd_offset``). If the
-file exists and has ``status == 'success'``, the stored ``(dv, du)`` offset is
-applied to the observation's FOV via ``oops.fov.OffsetFOV`` before reprojection.
-If the file is absent, invalid JSON, or has a non-success status, a warning is
-logged and uncorrected pointing is used.
+When ``--nav-results-root`` is provided, ``sd_mosaic`` looks up the navigation
+record for each image (written by ``sd_offset``) and applies the pointing it
+records, preferring the exact form over its approximation. The record comes
+from that image's ``_metadata.json`` file, or, when ``--results-db`` names a
+results index, from one row of that index; both supply the same recorded values
+and both are classified by the same ladder, so for every record ``sd_offset``
+wrote the products are the same. (A record hand-built into a results tree can
+take shapes ``sd_offset`` never writes, and a few of those the two storages
+classify differently; they are listed under :ref:`reproj-index-differences`.)
+The ladder:
+
+* When the record carries a corrected camera attitude
+  (``navigation_result.pointing.cmatrix``) that passes the reader's
+  consistency gates, the observation's frame is replaced with that attitude
+  and the field of view is left untouched. This is the same measurement as
+  the pixel offset expressed exactly, and it is what a SPICE consumer of the
+  corrected C-kernels sees for every image whose segment was written.
+  ``sd_offset`` writes the attitude as nine row-major numbers, and the readers
+  accept any nesting of nine finite real numbers that denotes one 3x3 matrix
+  -- a 3x3 nesting and nine rows of one among them -- because the recorded
+  value denotes the same rotation however it is bracketed. This holds whether
+  the record is read from its file or from an index row: both read it through
+  the same code.
+* When there is no usable corrected attitude, the stored ``(dv, du)`` offset
+  is applied to the observation's FOV via :class:`oops.fov.OffsetFOV`, exactly as
+  every offset-corrected product has always been built. The reasons this
+  happens, each counted in the run summary: ``no_cmatrix_rotation_fitted``
+  (the navigation fitted a camera rotation, which records no corrected
+  attitude), ``no_pointing_block`` (a simulated image, or a record predating
+  the pointing schema), ``malformed_pointing`` (the pointing block cannot be
+  used; also warned to the run log), and the gate refusals
+  ``cmatrix_foreign_midtime`` (the record belongs to a different
+  observation), ``cmatrix_baseline_mismatch`` (the kernel pool, the
+  record, or the frame convention changed since navigation), and
+  ``cmatrix_unknown_host`` (the observation's instrument has no frame
+  mapping to gate against, which a record carrying a pointing block should
+  never reach); the gate refusals are warned to the run log, and no product
+  is ever built on a corrected attitude that failed a gate.
+* When the reader finds the furnished kernel pool *already* answering the
+  corrected attitude — corrected C-kernels furnished at load time — it
+  applies nothing at all: the observation is already right, and applying
+  either mechanism again would double-correct. This outcome is counted under
+  ``pool_already_corrected``.
+* When neither mechanism is usable (the file is absent, invalid JSON, a
+  non-success status, or a null or malformed offset), a warning is logged
+  and uncorrected pointing is used.
+
+One consequence worth knowing: for a result the kernel generator deliberately
+omitted from the corrected kernels — the yielding WAC of a BOTSIM pair, or
+any image with an omission reason — the readers still apply that image's
+*own* recorded measurement, which is the better product for that image, while
+a consumer of the corrected kernels sees the attitude the winning segment
+implies. SpinDoctor's own products are authoritative for those images.
+
+.. _reproj-index-differences:
+
+Where a document and an index row are classified differently
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``sd_stats_ingest`` stores the fields the ladder reads, and it reads them
+through the same code the ladder does, so a value a run would apply is a value
+the index holds and a value it would refuse is a value the index holds nothing
+for. For every document the ingest could read, the products a run builds are
+therefore the same whether or not ``--results-db`` was given.
+
+A document the ingest could *not* read is the exception, and it is a refusal
+rather than a difference. The ingest records such a file as one it holds no
+navigation record for -- a document naming no instrument or no image name, one
+whose blocks are of some other shape, one naming a technique twice, or a file
+that is not JSON at all. Read directly, that same document may carry a status
+and a pointing, so reporting it as an image nothing navigated would build one
+product from the tree and another from the index in silence. Instead the image
+fails, naming itself, the index and the reason the ingest recorded, and the
+rest of the pass continues. The remedy is to fix the document and ingest the
+root again, or to run the pass without ``--results-db``. One kind of refusal is
+deliberately recorded nowhere -- a file the ingest could not retrieve, which is
+worth retrying on the next pass -- and an image whose document failed that way
+reads as one nothing navigated.
+
+What a column cannot always keep is *why* a record supplies no pointing. One
+column pair holds every way an offset can fail to be a pair, and a matrix
+column holds a matrix or nothing, so several document shapes reach one row and
+the run summary counts them under the reason that row supports. Three classes
+of record are counted under a different reason depending on which storage they
+were read from. In each of them both storages build the same product from the
+same values; only the tally differs. None can be produced by navigating an
+image; each requires a record written into the results tree by something else.
+
+* An ``offset`` field that supplies no usable pair -- absent, null, a pair of
+  booleans, a pair holding NaN or an infinity, a sequence that is not two
+  values, or a pair holding something that is not a number a reader can convert.
+  Read as a document each is counted under its own name
+  (``missing_offset_key``, ``null_offset``, ``invalid_offset_type``,
+  ``non_finite_offset``, ``malformed_offset``); read as a row all of them are
+  counted under ``null_offset``.
+* A ``pointing.cmatrix`` that is not one 3x3 matrix of finite real numbers in
+  some nesting an array library reconciles into that shape. Nine values, a 3x3
+  nesting of them and nine rows of one all denote the same matrix and are all
+  held; a value of any other shape, and one whose nine entries are not finite
+  real numbers, is held by neither storage. Read as a document such a value
+  counts under ``malformed_pointing``; read as a row it counts under
+  ``no_cmatrix_rotation_fitted``, or under ``no_pointing_block`` when nothing
+  else of the block could be stored either. A ``cmatrix`` that *is* nine finite
+  numbers and is not a rotation is stored, and both storages then count it
+  under ``malformed_pointing``.
+* A ``pointing`` block carrying none of ``cmatrix``, ``cmatrix_original``,
+  ``camera_frame_id`` or ``ck_frame_id`` in a form a column can hold -- one
+  holding only ``camera_frame``, or frame identities written as floats or
+  booleans. Read as a document it counts under ``no_cmatrix_rotation_fitted``;
+  read as a row it counts under ``no_pointing_block``.
 
 Output format
 ^^^^^^^^^^^^^
@@ -515,7 +619,7 @@ If ``--prefix`` is empty (the default), the leading underscore is omitted.
 ``sd_mosaic`` accepts the same logging options as every other pipeline
 program; see :doc:`user_guide_logging`.
 
-An image with no usable navigation offset is still reprojected, on
+An image with no usable navigation pointing is still reprojected, on
 uncorrected pointing. Because the product looks the same either way, each one
 is reported to the run's log with the reason, and the pass summary counts
 them::
@@ -523,11 +627,24 @@ them::
    Reprojection pass complete: 143 done, 0 skipped, 0 failed, 12 with
    uncorrected pointing.
 
+Every pointing outcome other than the clean C-matrix application — an offset
+fallback, an already-corrected pool, or no correction at all — is additionally
+tallied per reason and the tally reported at the end of the pass::
+
+   Pointing outcomes by reason: {'no_cmatrix_rotation_fitted': 12}
+
+Only some of those reasons are shortfalls. ``pool_already_corrected`` is a
+successful no-op: the furnished kernels already carry the corrected attitude,
+so the image is right without anything being applied to it. It appears in the
+tally so that a pass can be told to have taken that path, not because anything
+about it needs acting on.
+
 A cloud-task worker has no run log, so it returns the same information in the
-task result instead, as ``n_uncorrected`` with a per-reason tally under
-``uncorrected_reasons``. The full explanation for any one image is in that
-image's log. A run given no ``--nav-results-root`` at all is not counted:
-nothing was asked for, so nothing is missing.
+task result instead, as ``n_uncorrected`` (images with no correction at all)
+with the per-reason tally under ``pointing_reasons``. The full explanation
+for any one image is in that image's log. A run given no
+``--nav-results-root`` at all is not counted: nothing was asked for, so
+nothing is missing.
 
 Cloud-tasks entry point
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -543,11 +660,12 @@ is **not** performed by the cloud-tasks worker; after all tasks complete, run
 the local driver with ``--skip-reproject`` to assemble the mosaic from the
 accumulated reprojection files.
 
-The cloud-tasks worker accepts only two CLI flags, both environment/credential
+The cloud-tasks worker accepts only three CLI flags, all environment/credential
 scoped and shared across every task the worker handles:
 
 * ``--config-file PATH`` (may be repeated)
 * ``--nav-results-root PATH``
+* ``--results-db URL``
 
 All other parameters that the local ``sd_mosaic_rings`` /
 ``sd_mosaic_body`` accept (``--output-dir``, ``--prefix``, ``--format``,
@@ -558,7 +676,8 @@ passed per-task inside the task JSON. Invoke the worker with:
 
 .. code-block:: bash
 
-   sd_mosaic_cloud_tasks [--config-file PATH] [--nav-results-root PATH]
+   sd_mosaic_cloud_tasks [--config-file PATH] [--nav-results-root PATH] \
+       [--results-db URL]
 
 To build a ready-to-load task-queue JSON file from the local driver without
 running any reprojection, use ``--output-cloud-tasks-file``:
@@ -672,7 +791,18 @@ Common options reference
      - Skip the mosaic-building pass.
    * - ``--nav-results-root DIR``
      - ``None``
-     - Root written by ``sd_offset``; enables offset application.
+     - Root written by ``sd_offset``; enables pointing application.
+   * - ``--results-db URL``
+     - ``None``
+     - Connection URL of a results index built by ``sd_stats_ingest``. Each
+       image's navigation record is then read as one database row instead of
+       one file, which on a cloud results root replaces a round trip per image
+       with a query. The index must already hold a completed ingest of the
+       root named by ``--nav-results-root``, and its rows are a snapshot of
+       the tree as of that ingest. Omitting the option names no index, and the
+       results tree is read directly. ``--results-db none`` names no index
+       either, which is how a machine that sets the option through
+       configuration or through ``NAV_RESULTS_DB`` reads the files.
    * - ``--dry-run``
      - ``False``
      - Print what would be done without writing files.

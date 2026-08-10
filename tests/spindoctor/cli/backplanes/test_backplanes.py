@@ -3,10 +3,11 @@
 Contract under test (docs/dev_guide/dev_guide_backplanes.rst "Pipeline overview" and
 "Restrictions and assumptions"): the driver reads the per-image navigation
 ``_metadata.json`` from the nav results root, refuses to proceed unless
-``status == 'success'``, builds the snapshot with a zero extended-FOV margin, wraps
-its FOV in an ``OffsetFOV`` carrying the navigated ``(dv, du)`` offset (``(0, 0)``
-with a warning when the offset is None), and hands the per-source results to the
-merge and the writer.  The configured backplane list in
+``status == 'success'``, builds the snapshot with a zero extended-FOV margin,
+applies the recorded pointing (the corrected C-matrix when the record carries a
+usable one, else the navigated ``(dv, du)`` offset via ``OffsetFOV``, else
+nothing, with a warning), and hands the per-source results to the merge and the
+writer.  The configured backplane list in
 ``config_900_backplanes.yaml`` must name real ``oops.Backplane`` methods and declare
 angle units in radians.
 """
@@ -23,9 +24,12 @@ import pytest
 from astropy.io import fits
 from filecache import FCPath
 from oops.backplane import Backplane
+from tests.cmatrix_helpers import synthetic_frame_identity
 
+import spindoctor.support.cmatrix as cmatrix_module
 from spindoctor.cli.backplanes import backplanes as backplanes_mod
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
+from spindoctor.cli.reproj.pointing_source import FilePointingSource
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
@@ -285,11 +289,40 @@ def _run(
     generate_backplanes_image_files(
         obs_class,
         _image_files(root, 'IMG1'),
-        nav_results_root=nav_root,
+        pointing_source=FilePointingSource(nav_root),
         backplane_results_root=bp_root,
         write_output_files=write_output_files,
     )
     return snapshot, from_file_calls, nav_root, bp_root
+
+
+def _result_for(
+    tmp_path: Path, metadata: dict[str, Any], *, obs: Any | None = None
+) -> tuple[dict[str, Any], Any]:
+    """Run the driver on one record, without writing, and return its result.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory, wrapped once into FCPath.
+        metadata: Nav metadata document to write for the image.
+        obs: Observation returned by from_file; defaults to a fresh simulated
+            HermeticObs.
+
+    Returns:
+        Tuple of the driver's result and the observation it was handed.
+    """
+    root = FCPath(tmp_path)
+    nav_root, bp_root = _roots(root)
+    _write_nav_metadata(nav_root, 'IMG1', metadata)
+    snapshot = obs if obs is not None else make_snapshot(shape_vu=SHAPE_VU, simulated=True)
+    obs_class, _ = _obs_class_for(snapshot)
+    result = generate_backplanes_image_files(
+        obs_class,
+        _image_files(root, 'IMG1'),
+        pointing_source=FilePointingSource(nav_root),
+        backplane_results_root=bp_root,
+        write_output_files=False,
+    )
+    return result, snapshot
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +343,7 @@ def test_driver_rejects_multi_image_batches(tmp_path: Path) -> None:
         generate_backplanes_image_files(
             obs_class,
             _image_files(root, 'IMG1', 'IMG2'),
-            nav_results_root=nav_root,
+            pointing_source=FilePointingSource(nav_root),
             backplane_results_root=bp_root,
         )
 
@@ -339,7 +372,7 @@ def test_driver_invalid_metadata_json_raises(tmp_path: Path) -> None:
         generate_backplanes_image_files(
             obs_class,
             _image_files(root, 'IMG1'),
-            nav_results_root=nav_root,
+            pointing_source=FilePointingSource(nav_root),
             backplane_results_root=bp_root,
         )
 
@@ -377,22 +410,143 @@ def test_driver_skips_image_with_missing_status(
     assert calls['write'] == []
 
 
-def test_driver_requires_offset_field(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Successful metadata without an offset field is a hard error.
+@pytest.mark.parametrize(
+    'metadata',
+    [{'offset': [0.0, 0.0]}, {'status': None}, {'status': ''}, {'status': 42}],
+    ids=['absent', 'null', 'empty', 'number'],
+)
+def test_the_skip_names_the_outcome_every_consumer_reports_such_a_record_under(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata: dict[str, Any]
+) -> None:
+    """The stage reads the outcome through the one function every consumer uses.
+
+    A cloud task has no run log, so this value is the only account of the skip
+    that leaves the worker, and the index records a document naming no outcome
+    as this same word.  A stage reading the field directly would report
+    ``None`` through a document and ``unknown`` through the row it ingested
+    into, for the same image.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+        metadata: A record naming no outcome of its own.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(tmp_path, metadata)
+    assert result['nav_status'] == 'unknown'
+
+
+@pytest.mark.parametrize(
+    'metadata',
+    [
+        {'status': 'failed'},
+        {'status': 'failed', 'status_error': None},
+        {'status': 'failed', 'status_error': ''},
+        {'status': 'failed', 'status_error': 42},
+    ],
+    ids=['absent', 'null', 'empty', 'number'],
+)
+def test_the_skip_names_the_error_every_consumer_reports_such_a_record_under(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata: dict[str, Any]
+) -> None:
+    """And the error beside it, through that same shared function.
+
+    Every failed and conflicted navigation writes no ``status_error`` at all,
+    so the default is the common case; a stage defaulting on its own would
+    report ``None`` for a field present and holding null while the row said
+    ``unknown``.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+        metadata: An unsuccessful record naming no error.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(tmp_path, metadata)
+    assert result['nav_status_error'] == 'unknown'
+
+
+def test_the_skip_still_names_an_error_the_record_does_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control for the default above, which an empty reader would pass.
 
     Parameters:
         tmp_path: pytest-provided temporary directory.
         monkeypatch: pytest monkeypatch fixture.
     """
     _stub_pipeline(monkeypatch)
-    with pytest.raises(ValueError, match='"offset" field not found'):
-        _run(tmp_path, metadata={'status': 'success'})
+    result, _snapshot = _result_for(
+        tmp_path, {'status': 'error', 'status_error': 'missing_spice_data'}
+    )
+    assert result['nav_status_error'] == 'missing_spice_data'
 
 
-def test_driver_defaults_none_offset_to_zero(
+def test_the_skip_still_names_an_outcome_the_record_does_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A None offset falls back to (0, 0) and the pipeline still runs.
+    """And the control for the outcome, likewise.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(tmp_path, {'status': 'conflicted'})
+    assert result['nav_status'] == 'conflicted'
+
+
+def test_driver_treats_a_missing_offset_field_as_no_pointing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Successful metadata without an offset field degrades; it does not refuse.
+
+    An index stores an absent offset and a null one alike, so a stage that
+    refused one and processed the other would build a product from a document
+    and refuse the same image read as a row.  Both are recorded no-answers and
+    both leave the pointing uncorrected.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(tmp_path, {'status': 'success'})
+    assert result['uncorrected_pointing'] is True
+
+
+def test_driver_names_the_missing_offset_field_as_the_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And says which of the recorded no-answers it was.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(tmp_path, {'status': 'success'})
+    assert result['pointing_reason'] == 'missing_offset_key'
+
+
+def test_driver_still_produces_the_backplanes_for_that_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The product is built, which is what the index-backed path always did.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    calls = _stub_pipeline(monkeypatch)
+    _result_for(tmp_path, {'status': 'success'})
+    assert len(calls['merge']) == 1
+
+
+def test_driver_leaves_a_none_offset_uncorrected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A None offset leaves the pointing untouched and the pipeline still runs.
 
     Parameters:
         tmp_path: pytest-provided temporary directory.
@@ -400,9 +554,7 @@ def test_driver_defaults_none_offset_to_zero(
     """
     calls = _stub_pipeline(monkeypatch)
     snapshot, _, _, _ = _run(tmp_path, metadata={'status': 'success', 'offset': None})
-    assert isinstance(snapshot.fov, oops.fov.OffsetFOV)
-    assert snapshot.fov.uv_offset[0] == 0.0
-    assert snapshot.fov.uv_offset[1] == 0.0
+    assert not isinstance(snapshot.fov, oops.fov.OffsetFOV)
     assert len(calls['merge']) == 1
 
 
@@ -642,13 +794,17 @@ def _run_with_null_offset(
         result = generate_backplanes_image_files(
             obs_class,
             _image_files(root, 'IMG1'),
-            nav_results_root=nav_root,
+            pointing_source=FilePointingSource(nav_root),
             backplane_results_root=bp_root,
             write_output_files=False,
         )
     finally:
+        # Detached before closing: a handler closed while still attached
+        # stays registered under its log path, the leaked-handler state the
+        # suite's conftest guards against.
         for handler in list(MAIN_LOGGER.handlers):
             if handler is not pdslogger.NULL_HANDLER:
+                MAIN_LOGGER.remove_handler(handler)
                 handler.close()
     assert log_path is not None
     with log_path.open('r') as stream:
@@ -686,15 +842,86 @@ def test_uncorrected_pointing_is_returned_to_the_caller(
 def test_a_navigated_image_is_not_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """An image with a real offset carries no such flag."""
     _stub_pipeline(monkeypatch)
-    root = FCPath(tmp_path)
-    nav_root, bp_root = _roots(root)
-    _write_nav_metadata(nav_root, 'IMG1', {'status': 'success', 'offset': [1.5, -2.5]})
-    obs_class, _ = _obs_class_for(make_snapshot(shape_vu=SHAPE_VU, simulated=True))
-    result = generate_backplanes_image_files(
-        obs_class,
-        _image_files(root, 'IMG1'),
-        nav_results_root=nav_root,
-        backplane_results_root=bp_root,
-        write_output_files=False,
-    )
+    result, _ = _result_for(tmp_path, {'status': 'success', 'offset': [1.5, -2.5]})
     assert 'uncorrected_pointing' not in result
+
+
+# ---------------------------------------------------------------------------
+# Which pointing the product was built on
+# ---------------------------------------------------------------------------
+
+
+def _small_rotation() -> np.ndarray:
+    """A one-milliradian rotation about X: a valid corrected attitude."""
+    return np.asarray(cspyce.axisar([1.0, 0.0, 0.0], 1.0e-3), np.float64)
+
+
+def _pointing_metadata(midtime_et: float) -> dict[str, Any]:
+    """Build a success record carrying a usable C-matrix pair and offset.
+
+    The baseline is the identity -- which is the hermetic observation's J2000
+    frame attitude -- so the record means for that observation what a real
+    record means for a real one.
+
+    Parameters:
+        midtime_et: The recorded exposure midtime.
+    """
+    return {
+        'status': 'success',
+        'offset': [1.0, -2.0],
+        'navigation_result': {
+            'pointing': {
+                'cmatrix': [float(v) for v in _small_rotation().reshape(9)],
+                'cmatrix_original': [float(v) for v in np.eye(3).reshape(9)],
+            },
+            'times': {'midtime_et': midtime_et},
+        },
+    }
+
+
+def test_the_result_names_the_offset_pointing_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record with no pointing block reports the offset as the source.
+
+    The metadata (dv, du) of [1.5, -2.5] must arrive on the observation as an
+    OffsetFOV uv_offset of (du, dv) = (-2.5, 1.5), pinning that the reported
+    source is the pointing actually applied.
+    """
+    _stub_pipeline(monkeypatch)
+    result, snapshot = _result_for(tmp_path, {'status': 'success', 'offset': [1.5, -2.5]})
+    assert result['pointing_source'] == 'offset'
+    assert result['pointing_reason'] == 'no_pointing_block'
+    assert isinstance(snapshot.fov, oops.fov.OffsetFOV)
+    assert snapshot.fov.uv_offset[0] == -2.5
+    assert snapshot.fov.uv_offset[1] == 1.5
+
+
+def test_the_result_names_the_cmatrix_pointing_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record with a usable C-matrix reports it, and the FOV stays unwrapped.
+
+    The hermetic observation exposes from t=0 for 1 s, so the record's
+    midtime is 0.5; the instrument table lookup is injected exactly as the
+    reader's own unit tests inject it.
+    """
+    identity = synthetic_frame_identity(np.eye(3))
+    monkeypatch.setattr(cmatrix_module, '_frame_identity', lambda obs: identity)
+    _stub_pipeline(monkeypatch)
+    result, snapshot = _result_for(tmp_path, _pointing_metadata(midtime_et=0.5))
+    assert result['pointing_source'] == 'cmatrix'
+    assert 'pointing_reason' not in result
+    assert 'uncorrected_pointing' not in result
+    assert not isinstance(snapshot.fov, oops.fov.OffsetFOV)
+    assert isinstance(snapshot.frame, oops.frame.Cmatrix)
+
+
+def test_an_uncorrected_product_names_the_none_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record with no usable pointing reports 'none' beside the flag."""
+    _stub_pipeline(monkeypatch)
+    result, _ = _result_for(tmp_path, {'status': 'success', 'offset': None})
+    assert result['pointing_source'] == 'none'
+    assert result['uncorrected_pointing'] is True

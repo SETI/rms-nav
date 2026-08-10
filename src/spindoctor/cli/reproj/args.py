@@ -31,7 +31,8 @@ def add_common_env_args(parser: argparse.ArgumentParser) -> None:
     Side effects:
         Adds three groups (``Environment``, ``Logging``, ``Miscellaneous``) with
         flags ``--config-file`` (appendable), ``--pds3-holdings-root``,
-        ``--nav-results-root``, the shared logging options, and ``--profile``.
+        ``--nav-results-root``, ``--results-db``, the shared logging options, and
+        ``--profile``.
         Defaults do not
         read the environment implicitly beyond what downstream nav code does when
         these flags are omitted. No files are read at parse time. Does not raise.
@@ -57,6 +58,21 @@ def add_common_env_args(parser: argparse.ArgumentParser) -> None:
             'Root directory of sd_offset results. When provided, pre-computed offsets '
             'from _metadata.json files are applied before reprojection. If omitted '
             '(or if an image has no success metadata), uncorrected pointing is used.'
+        ),
+    )
+    env.add_argument(
+        '--results-db',
+        type=str,
+        default=None,
+        metavar='URL',
+        help=(
+            'Connection URL of the results index written by sd_stats_ingest (a sqlite: '
+            'URL naming a local path, or a postgresql+psycopg: URL naming a server); '
+            'overrides NAV_RESULTS_DB and the environment.results_db configuration '
+            "variable. Each image's navigation record is then read as one row instead of "
+            'one file, and --nav-results-root names the ingested root the rows are read '
+            'under. Pass --results-db none to read the files even where an index is '
+            'configured.'
         ),
     )
     add_logging_arguments(parser)

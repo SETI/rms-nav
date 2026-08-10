@@ -20,11 +20,13 @@ package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
+from spindoctor.cli.reproj.pointing_source import PointingSource, build_pointing_source
 from spindoctor.config import (
     DEFAULT_CONFIG,
     build_cloud_task_logging,
     get_backplane_results_root,
     get_nav_results_root,
+    get_results_db_url,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_BACKPLANES
@@ -35,6 +37,35 @@ from spindoctor.obs import inst_name_to_obs_class
 PROGRAM_NAME = SD_BACKPLANES
 """Program identity: names the main log directory and the
 ``logging.programs`` configuration block for this program."""
+
+
+def _task_pointing_source(
+    arguments: argparse.Namespace, nav_results_root: FCPath
+) -> PointingSource:
+    """Return the source one task reads its navigation record through.
+
+    Built inside the task, because the task is where it can be used.  The
+    framework runs every task in a process it spawns for that task alone and
+    hands it the worker's shared data by serializing it, so an open index put
+    on that data in the parent is a connection pool no task could receive and a
+    database engine no serializer can encode.  What crosses is the worker's
+    parsed command line, which is what the index is named by.
+
+    Parameters:
+        arguments: The worker's parsed command line, which names the index.
+        nav_results_root: Root the navigator wrote its documents under.
+
+    Returns:
+        The source, which the task closes when it is done with it.
+
+    Raises:
+        ValueError: If a named index cannot be opened, is not an index, was
+            written by another version of the schema, or has not fully ingested
+            this root.
+    """
+    return build_pointing_source(
+        nav_results_root, results_db_url=get_results_db_url(arguments, DEFAULT_CONFIG)
+    )
 
 
 def process_task(
@@ -50,8 +81,18 @@ def process_task(
 
     Returns:
         Tuple of ``(retry, result)``.  ``retry`` is always False.  ``result``
-        names the error when the task could not run, and otherwise reports
-        whether the image was processed or skipped.
+        names the error when the task could not run -- including
+        ``unusable_results_db`` when an index was named that cannot be opened or
+        has not ingested this root, which fails the task rather than falling
+        back to reading files -- and otherwise reports whether the image was
+        processed or skipped.  One task is one image, so the ways that image
+        can fail are reported the same way: nothing recorded it is
+        ``no_navigation_record`` and a skip, and anything else -- a document
+        the ingest refused among them -- is ``backplanes_failed`` and an error.
+        Returned rather than raised, because an exception out of a task is
+        reported as a traceback with no reason a tally can count, and under
+        ``--retry-on-exception`` a refusal that will refuse identically next
+        time is retried.
     """
 
     arguments = cast(argparse.Namespace, worker_data.args)
@@ -114,14 +155,45 @@ def process_task(
         fallback_log_root=backplane_results_root / 'logs',
     )
 
-    result = generate_backplanes_image_files(
-        obs_class,
-        ImageFiles(image_files=image_files),
-        nav_results_root=nav_results_root,
-        backplane_results_root=backplane_results_root,
-        write_output_files=True,
-        run_logging=run_logging,
-    )
+    try:
+        pointing_source = _task_pointing_source(arguments, nav_results_root)
+    except ValueError as exc:
+        return False, {
+            'status': 'error',
+            'status_error': 'unusable_results_db',
+            'status_exception': str(exc),
+        }
+
+    try:
+        result = generate_backplanes_image_files(
+            obs_class,
+            ImageFiles(image_files=image_files),
+            pointing_source=pointing_source,
+            backplane_results_root=backplane_results_root,
+            write_output_files=True,
+            run_logging=run_logging,
+        )
+    except FileNotFoundError as exc:
+        # An expected outcome rather than a defect, and the same one the
+        # interactive driver counts as a skip: nothing navigated this image, so
+        # there is nothing to build geometry from.
+        return False, {
+            'status': 'skipped',
+            'status_error': 'no_navigation_record',
+            'status_exception': str(exc),
+        }
+    except Exception as exc:
+        # Everything else this image can fail on, a document the ingest refused
+        # among them.  That refusal is deliberately not the missing record
+        # above: the image was navigated and the index simply cannot say what
+        # it recorded, which is a fact an operator acts on differently.
+        return False, {
+            'status': 'error',
+            'status_error': 'backplanes_failed',
+            'status_exception': str(exc),
+        }
+    finally:
+        pointing_source.close()
 
     # Returned rather than only logged: an image can be skipped because its
     # navigation did not succeed, and a task has no run log to say so.
@@ -153,6 +225,18 @@ async def async_main() -> None:
         type=str,
         default=None,
         help='Root directory for prior navigation results (metadata, offsets)',
+    )
+    environment_group.add_argument(
+        '--results-db',
+        type=str,
+        default=None,
+        metavar='URL',
+        help=(
+            'Connection URL of the results index written by sd_stats_ingest; overrides '
+            'NAV_RESULTS_DB and the environment.results_db configuration variable. Each '
+            "image's navigation record is then read as one row instead of one file. Pass "
+            '--results-db none to read the files even where an index is configured.'
+        ),
     )
 
     worker = Worker(process_task, args=sys.argv[1:], argparser=argparser)

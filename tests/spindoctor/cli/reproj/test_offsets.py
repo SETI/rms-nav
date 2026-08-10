@@ -1,10 +1,13 @@
-"""Tests that a missing or unusable navigation offset is reported per image.
+"""Tests that a missing or unusable navigation pointing is reported per image.
 
-Every reason an offset could not be loaded describes one image, so it belongs
+Every reason a pointing could not be loaded describes one image, so it belongs
 in that image's log.  It matters where these land: a cloud task has no run log,
 so the same warning bound to the main logger would be discarded, and a
 reprojection that silently used uncorrected pointing looks exactly like one
-that did not.
+that did not.  The selection ladder itself (which mechanism a record picks,
+and the application of a selection to an observation) is covered in
+``test_select_pointing.py``; this file covers the file-and-JSON loading
+ladder and the offset-record classes.
 """
 
 import json
@@ -14,7 +17,7 @@ import pdslogger
 import pytest
 from filecache import FCPath
 
-from spindoctor.cli.reproj.offsets import OffsetLookup, load_offset_if_any
+from spindoctor.cli.reproj.offsets import PointingSelection, load_pointing_if_any
 from spindoctor.config import IMAGE_LOGGER, LogLevels, LogSinks, build_image_log_handlers
 from spindoctor.dataset.dataset import ImageFile
 
@@ -63,7 +66,7 @@ def _metadata_path(nav_root: FCPath) -> FCPath:
     return path
 
 
-def _load_and_capture(nav_root: FCPath, log_root: FCPath) -> tuple[OffsetLookup, str]:
+def _load_and_capture(nav_root: FCPath, log_root: FCPath) -> tuple[PointingSelection, str]:
     """Load the offset inside an image scope and return it with the image log.
 
     Parameters:
@@ -85,7 +88,7 @@ def _load_and_capture(nav_root: FCPath, log_root: FCPath) -> tuple[OffsetLookup,
         # the records take the handler-less print fallback and the log file
         # stays empty.
         with IMAGE_LOGGER.open('REPROJECT', handler=handlers):
-            lookup = load_offset_if_any(nav_root, _image_file())
+            lookup = load_pointing_if_any(nav_root, _image_file())
     finally:
         for handler in handlers:
             if handler is not pdslogger.NULL_HANDLER:
@@ -141,7 +144,7 @@ def test_the_reason_reaches_the_image_log(
 def test_a_missing_metadata_file_is_reported_to_the_image_log(tmp_path: Path) -> None:
     """An image with no navigation result says so in its own log."""
     _, log_text = _load_and_capture(FCPath(tmp_path) / 'nav', FCPath(tmp_path) / 'logs')
-    assert 'no metadata found' in log_text
+    assert 'No navigation record for' in log_text
 
 
 def test_unparsable_metadata_is_reported_to_the_image_log(tmp_path: Path) -> None:
@@ -162,7 +165,7 @@ def test_metadata_that_is_not_an_object_is_reported_to_the_image_log(tmp_path: P
 
 def test_no_nav_root_loads_nothing(tmp_path: Path) -> None:
     """Reprojecting without navigation results asks for no offset at all."""
-    assert load_offset_if_any(None, _image_file()).offset is None
+    assert load_pointing_if_any(None, _image_file()).offset is None
 
 
 def _plant_loadable_metadata(path: FCPath) -> None:
@@ -191,7 +194,7 @@ def test_a_traversing_stub_does_not_load_an_offset_from_outside_the_root(
     nav_root = FCPath(tmp_path) / 'nav'
     Path((nav_root).as_posix()).mkdir(parents=True, exist_ok=True)
     _plant_loadable_metadata(FCPath(tmp_path) / 'evil' / 'N1234567890_1_metadata.json')
-    assert load_offset_if_any(nav_root, _image_file('../evil/N1234567890_1')).offset is None
+    assert load_pointing_if_any(nav_root, _image_file('../evil/N1234567890_1')).offset is None
 
 
 def test_an_absolute_stub_does_not_load_an_offset_from_outside_the_root(
@@ -203,7 +206,7 @@ def test_an_absolute_stub_does_not_load_an_offset_from_outside_the_root(
     planted = FCPath(tmp_path) / 'elsewhere' / 'N1234567890_1_metadata.json'
     _plant_loadable_metadata(planted)
     stub = planted.as_posix().removesuffix('_metadata.json')
-    assert load_offset_if_any(nav_root, _image_file(stub)).offset is None
+    assert load_pointing_if_any(nav_root, _image_file(stub)).offset is None
 
 
 def test_the_refusal_is_reported_to_the_image_log(tmp_path: Path) -> None:
@@ -216,7 +219,7 @@ def test_the_refusal_is_reported_to_the_image_log(tmp_path: Path) -> None:
     )
     try:
         with IMAGE_LOGGER.open('REPROJECT', handler=handlers):
-            load_offset_if_any(nav_root, _image_file('../evil/N1234567890_1'))
+            load_pointing_if_any(nav_root, _image_file('../evil/N1234567890_1'))
     finally:
         for handler in handlers:
             if handler is not pdslogger.NULL_HANDLER:
@@ -230,7 +233,7 @@ def test_a_stub_with_a_null_byte_is_refused(tmp_path: Path) -> None:
     """A null byte cannot reach the filesystem call at all."""
     nav_root = FCPath(tmp_path) / 'nav'
     Path(nav_root.as_posix()).mkdir(parents=True, exist_ok=True)
-    assert load_offset_if_any(nav_root, _image_file('N123\x001')).offset is None
+    assert load_pointing_if_any(nav_root, _image_file('N123\x001')).offset is None
 
 
 # ---------------------------------------------------------------------------
@@ -266,12 +269,16 @@ def test_a_missing_metadata_file_has_its_own_reason(tmp_path: Path) -> None:
     assert lookup.reason == 'no_metadata'
 
 
-def test_a_loaded_offset_carries_no_reason(tmp_path: Path) -> None:
-    """Success is not something to explain."""
+def test_a_loaded_offset_names_why_it_is_the_mechanism(tmp_path: Path) -> None:
+    """An offset-only record explains why the offset, not the C-matrix, applies.
+
+    A record with no ``pointing`` block selects the offset mechanism with the
+    reason a run-level tally counts it under.
+    """
     nav_root = FCPath(tmp_path) / 'nav'
     _write_metadata(nav_root, {'status': 'success', 'offset': [1.5, -2.5]})
     lookup, _ = _load_and_capture(nav_root, FCPath(tmp_path) / 'logs')
-    assert lookup.reason is None
+    assert lookup.reason == 'no_pointing_block'
 
 
 def test_asking_for_no_offset_is_not_a_missing_offset() -> None:
@@ -280,4 +287,4 @@ def test_asking_for_no_offset_is_not_a_missing_offset() -> None:
     Counting it as uncorrected pointing would report every image of a
     deliberately unnavigated run as an anomaly.
     """
-    assert load_offset_if_any(None, _image_file()).reason is None
+    assert load_pointing_if_any(None, _image_file()).reason is None

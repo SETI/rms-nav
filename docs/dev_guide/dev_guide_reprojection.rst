@@ -348,14 +348,24 @@ The command-line tools are composed of three layers:
      reprojection pass only. The mode (``'rings'`` or ``'body'``) is read
      from each task's ``task_data['mode']`` field, so a single worker process
      can handle a queue that mixes ring and body tasks. The worker's CLI
-     parser is minimal: it exposes only ``--config-file`` and
-     ``--nav-results-root`` and does **not** register ``add_ring_args`` /
-     ``add_body_args``. Every other parameter (output directory, format,
+     parser is minimal: it exposes only ``--config-file``,
+     ``--nav-results-root`` and ``--results-db``, and does **not** register
+     ``add_ring_args`` / ``add_body_args``. Every other parameter (output directory, format,
      mosaic geometry, body/planet selection, etc.) is read directly from each
      task's ``task_data['arguments']`` dict.
-     ``process_task`` calls the same ``spindoctor.cli.reproj`` helpers
-     (``build_*_mosaic``, ``per_image_output_path``, ``load_offset_if_any``,
-     ``apply_offset_to_obs``, ``reproject_one_*``) as the local driver.
+     ``process_task`` calls the same :mod:`spindoctor.cli.reproj` helpers
+     (``build_*_mosaic``,
+     :func:`~spindoctor.cli.reproj.paths.per_image_output_path`,
+     :meth:`~spindoctor.cli.reproj.pointing_source.PointingSource.load_pointing`,
+     :func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs`,
+     ``reproject_one_*``) as the local driver.  Each task builds its own
+     pointing source from the worker's command line and closes it when the
+     task ends: ``cloud_tasks`` runs every task in a process it spawns for
+     that task and passes the worker's shared data to it by serializing it, so
+     an open results index left on that data in the parent reaches no task at
+     all.  A named index that cannot be opened fails the task with
+     ``unusable_results_db`` rather than letting it reproject its batch on
+     uncorrected pointing.
      Mosaic combination is not performed here; run
      ``sd_mosaic <mode> <dataset_name> --skip-reproject`` after the queue
      drains (note that ``sd_mosaic.py`` requires both the mode and the
@@ -377,11 +387,48 @@ The command-line tools are composed of three layers:
    - ``paths.py`` — ``per_image_output_path`` / ``mosaic_output_path`` define
      the output-file naming convention; pass-1 image logs go under
      ``{log_root}/reproj/`` (see :func:`~spindoctor.config.logging_config.build_image_log_handlers`).
-   - ``offsets.py`` — ``load_offset_if_any`` reads the ``_metadata.json`` file
-     written by ``sd_offset`` and returns ``(dv, du)`` when ``status ==
-     'success'``. ``apply_offset_to_obs`` wraps the result in
-     ``oops.fov.OffsetFOV``. This mirrors the same pattern used in
+   - ``offsets.py`` —
+     :func:`~spindoctor.cli.reproj.offsets.select_pointing` takes one parsed
+     navigation record and classifies which recorded pointing it supplies;
+     :func:`~spindoctor.cli.reproj.offsets.load_pointing_if_any` reads the
+     ``_metadata.json`` file written by ``sd_offset`` and hands the record to
+     it;
+     :func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs` applies the
+     classification: the corrected C-matrix by frame replacement when the
+     record carries a usable one, else the ``(dv, du)`` offset via
+     :class:`oops.fov.OffsetFOV`
+     (see :doc:`dev_guide_ck_kernels` for the reader mechanism and its
+     fallback ladder). The same selection and application serve
      ``src/spindoctor/cli/backplanes/backplanes.py``.
+   - ``pointing_source.py`` — where a record comes from.
+     :class:`~spindoctor.cli.reproj.pointing_source.PointingSource` is the
+     seam, with
+     :class:`~spindoctor.cli.reproj.pointing_source.FilePointingSource` reading
+     the documents and
+     :class:`~spindoctor.cli.reproj.pointing_source.IndexPointingSource`
+     reading one row of a results index per image;
+     :func:`~spindoctor.cli.reproj.pointing_source.build_pointing_source`
+     chooses between them from the resolved ``--results-db`` URL. Neither
+     classifies anything itself: the index-backed one rebuilds the shape of
+     the document from the row and calls the same
+     :func:`~spindoctor.cli.reproj.offsets.select_pointing`, so the two paths
+     cannot drift apart. That holds because the store fills every one of those
+     columns through :mod:`spindoctor.support.nav_record`, the module the
+     readers read the same fields through:
+     :func:`~spindoctor.support.nav_record.record_status`,
+     :func:`~spindoctor.support.nav_record.record_status_error`,
+     :func:`~spindoctor.support.nav_record.record_offset`,
+     :func:`~spindoctor.support.nav_record.record_rotation_matrix` and
+     :func:`~spindoctor.support.nav_record.finite_float` decide which
+     values a reader can use, and a value the reader cannot use is stored as
+     nothing. Judging a column by a rule of its own, however plainly correct,
+     makes the store a second reader of the record and lets one document supply
+     two pointings. The module docstring records the classifications that still
+     differ; all of them differ in the reason and none in the product. A
+     document the ingest could not read at all is the one input outside that
+     rule: it has no record row and a refusal row instead, so the seam consults
+     the refusal table and fails the image rather than reporting it as an image
+     nothing navigated.
    - ``reproject.py`` — ``reproject_one_body`` / ``reproject_one_ring`` thin
      wrappers that translate ring-specific CLI args (zoom, longitude range,
      radius range, margin) into keyword arguments for
@@ -408,7 +455,9 @@ The reprojection pass loops over
 2. Skip if the file exists and ``--overwrite`` is not set.
 3. Open the image logger handlers writing to ``{log_root}/reproj/…``.
 4. Load the observation via ``obs_class.from_file(image_path)``.
-5. Optionally apply a navigation offset via ``load_offset_if_any`` + ``apply_offset_to_obs``.
+5. Optionally apply the recorded pointing via
+   :meth:`~spindoctor.cli.reproj.pointing_source.PointingSource.load_pointing` +
+   :func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs`.
 6. Call ``reproject_one_body`` / ``reproject_one_ring`` with the computed
    ``image_name`` (file stem or ``--image-name``).
 7. Save the ``BodyReprojResult`` / ``RingReprojResult`` to disk.

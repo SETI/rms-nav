@@ -129,6 +129,8 @@ def metadata_document(
     image_et: float | None = 0.0,
     image_shape: list[int] | None = None,
     elapsed_s: float | None = 3.25,
+    times: dict[str, Any] | None = None,
+    pointing: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a metadata document in the ``navigate_image_files`` shape.
 
@@ -150,6 +152,10 @@ def metadata_document(
         image_et: Recorded provenance epoch.
         image_shape: Recorded ``observation.image_shape``; None omits it.
         elapsed_s: Recorded run time; None omits the whole timing section.
+        times: Recorded ``navigation_result.times``; None omits the block, as
+            it is for an image whose host has no SPICE camera frame.
+        pointing: Recorded ``navigation_result.pointing``; None omits the
+            block likewise.
 
     Returns:
         The document.
@@ -200,6 +206,10 @@ def metadata_document(
     }
     if status_reason is not None:
         navigation_result['status_reason'] = status_reason
+    if times is not None:
+        navigation_result['times'] = times
+    if pointing is not None:
+        navigation_result['pointing'] = pointing
     document: dict[str, Any] = {
         'status': status,
         'observation': observation,

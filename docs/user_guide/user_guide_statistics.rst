@@ -344,8 +344,10 @@ pair with ``ON DELETE CASCADE``.
    * - ``status``
      - TEXT
      - Navigation outcome: ``success``, ``failed``, ``conflicted``, or
-       ``error`` (the last from image-load failures); ``unknown`` when the
-       metadata document carries no status at all.
+       ``error`` (the last from image-load failures). Read from the document's
+       own top-level ``status`` field and from nowhere else; ``unknown`` when
+       that field is absent, empty, or not a string, so a document that named
+       no outcome is never recorded as having named one.
    * - ``status_error``
      - TEXT
      - The fatal error that ended the run, e.g. ``missing_spice_data``.
@@ -427,9 +429,12 @@ pair with ``ON DELETE CASCADE``.
    * - ``has_summary_png``
      - BOOLEAN
      - Whether the ingest walk saw a ``_summary.png`` beside the document.
-   * - ``start_et``, ``stop_et``, ``exposure_s``
+   * - ``start_et``, ``stop_et``, ``midtime_et``, ``exposure_s``
      - DOUBLE
-     - Shutter open and close epochs and the exposure between them.
+     - Shutter open and close epochs, the exposure midtime, and the exposure
+       between them. ``midtime_et`` is stored as the navigator recorded it,
+       because a reader that applies a recorded attitude checks it against the
+       observation's own midtime to a microsecond.
    * - ``sclk_start``, ``sclk_midtime``, ``sclk_stop``
      - TEXT
      - The same three instants as spacecraft-clock strings.
