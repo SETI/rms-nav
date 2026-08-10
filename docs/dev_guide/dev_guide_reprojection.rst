@@ -411,13 +411,18 @@ The command-line tools are composed of three layers:
      readers read the same fields through:
      :func:`~spindoctor.support.nav_record.record_status`,
      :func:`~spindoctor.support.nav_record.record_status_error`,
-     :func:`~spindoctor.support.nav_record.record_offset` and
-     :func:`~spindoctor.support.nav_record.record_rotation_values` decide which
+     :func:`~spindoctor.support.nav_record.record_offset`,
+     :func:`~spindoctor.support.nav_record.record_rotation_matrix` and
+     :func:`~spindoctor.support.nav_record.finite_float` decide which
      values a reader can use, and a value the reader cannot use is stored as
-     nothing. Coercing a column by a rule of its own, however plainly correct,
+     nothing. Judging a column by a rule of its own, however plainly correct,
      makes the store a second reader of the record and lets one document supply
      two pointings. The module docstring records the classifications that still
-     differ; all of them differ in the reason and none in the product.
+     differ; all of them differ in the reason and none in the product. A
+     document the ingest could not read at all is the one input outside that
+     rule: it has no record row and a refusal row instead, so the seam consults
+     the refusal table and fails the image rather than reporting it as an image
+     nothing navigated.
    - ``reproject.py`` — ``reproject_one_body`` / ``reproject_one_ring`` thin
      wrappers that translate ring-specific CLI args (zoom, longitude range,
      radius range, margin) into keyword arguments for

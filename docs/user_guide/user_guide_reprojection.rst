@@ -546,8 +546,22 @@ Where a document and an index row are classified differently
 ``sd_stats_ingest`` stores the fields the ladder reads, and it reads them
 through the same code the ladder does, so a value a run would apply is a value
 the index holds and a value it would refuse is a value the index holds nothing
-for. The products a run builds are therefore the same whether or not
-``--results-db`` was given.
+for. For every document the ingest could read, the products a run builds are
+therefore the same whether or not ``--results-db`` was given.
+
+A document the ingest could *not* read is the exception, and it is a refusal
+rather than a difference. The ingest records such a file as one it holds no
+navigation record for -- a document naming no instrument or no image name, one
+whose blocks are of some other shape, one naming a technique twice, or a file
+that is not JSON at all. Read directly, that same document may carry a status
+and a pointing, so reporting it as an image nothing navigated would build one
+product from the tree and another from the index in silence. Instead the image
+fails, naming itself, the index and the reason the ingest recorded, and the
+rest of the pass continues. The remedy is to fix the document and ingest the
+root again, or to run the pass without ``--results-db``. One kind of refusal is
+deliberately recorded nowhere -- a file the ingest could not retrieve, which is
+worth retrying on the next pass -- and an image whose document failed that way
+reads as one nothing navigated.
 
 What a column cannot always keep is *why* a record supplies no pointing. One
 column pair holds every way an offset can fail to be a pair, and a matrix
@@ -559,23 +573,25 @@ same values; only the tally differs. None can be produced by navigating an
 image; each requires a record written into the results tree by something else.
 
 * An ``offset`` field that supplies no usable pair -- absent, null, a pair of
-  booleans, a pair holding NaN or an infinity, or a sequence that is not two
-  values. Read as a document each is counted under its own name
+  booleans, a pair holding NaN or an infinity, a sequence that is not two
+  values, or a pair holding something that is not a number a reader can convert.
+  Read as a document each is counted under its own name
   (``missing_offset_key``, ``null_offset``, ``invalid_offset_type``,
   ``non_finite_offset``, ``malformed_offset``); read as a row all of them are
   counted under ``null_offset``.
-* A ``pointing.cmatrix`` that is neither nine finite numbers nor a 3x3 nesting
-  of them. Read as a document it counts under ``malformed_pointing``; read as a
-  row it counts under ``no_cmatrix_rotation_fitted``, or under
-  ``no_pointing_block`` when nothing else of the block could be stored either.
-  A ``cmatrix`` that *is* nine finite numbers and is not a rotation is stored,
-  and both storages then count it under ``malformed_pointing``; so is one
-  written as a 3x3 nesting, and both storages apply it.
+* A ``pointing.cmatrix`` that is neither nine values nor a 3x3 nesting of them,
+  or whose nine values are not finite real numbers. Read as a document it
+  counts under ``malformed_pointing``; read as a row it counts under
+  ``no_cmatrix_rotation_fitted``, or under ``no_pointing_block`` when nothing
+  else of the block could be stored either. A ``cmatrix`` that *is* nine finite
+  numbers and is not a rotation is stored, and both storages then count it
+  under ``malformed_pointing``; so is one written as a 3x3 nesting, and both
+  storages apply it.
 * A ``pointing`` block carrying none of ``cmatrix``, ``cmatrix_original``,
   ``camera_frame_id`` or ``ck_frame_id`` in a form a column can hold -- one
-  holding only ``camera_frame``, or frame identities written as floats. Read as
-  a document it counts under ``no_cmatrix_rotation_fitted``; read as a row it
-  counts under ``no_pointing_block``.
+  holding only ``camera_frame``, or frame identities written as floats or
+  booleans. Read as a document it counts under ``no_cmatrix_rotation_fitted``;
+  read as a row it counts under ``no_pointing_block``.
 
 Output format
 ^^^^^^^^^^^^^

@@ -93,6 +93,15 @@ with no metadata file is, and a named index that cannot be opened, or a
 navigation results root it has not fully ingested, fails the run rather than
 quietly reverting to reading files.
 
+An image whose metadata document the ingest could not read is a third case, and
+it fails that image rather than skipping it. Such a document is recorded as a
+file the index holds no navigation record for, which is not the same fact as
+"nothing navigated this image": read directly, the same document may well carry
+a pointing and a status. The failure names the image, the index and the reason
+the ingest recorded, so the remedy — fix the document and ingest that root
+again, or run without ``--results-db`` — is visible from the run log. The rest
+of the pass continues; only that image is lost.
+
 Examples
 --------
 

@@ -964,16 +964,20 @@ The reason vocabulary maps as follows, and the mapping table belongs in the
 | `malformed_pointing` | row carrying a `cmatrix` the validator refuses, or one with no `midtime_et` |
 | `pool_already_corrected` and the gate reasons | identical: they are decided when the selection is applied, from the three recorded values both paths carry |
 | `unusable_metadata_path` | unreachable: a stub is a key, not a path |
-| `unreadable_metadata`, `invalid_json`, `metadata_not_an_object` | unreachable: ingest already refused such a file, so it has no row (surfaces as `no_metadata`) |
+| `unreadable_metadata`, `invalid_json`, `metadata_not_an_object` | unreachable: ingest already refused such a file, so it has no record row and a refusal row instead, and the lookup fails the image rather than classifying it |
 | `missing_offset_key`, `invalid_offset_type`, `non_finite_offset`, `malformed_offset` | reported as `null_offset`: one column pair holds all five ways an offset can supply no pair, and none of them supplies a pointing |
 
-**The rule the seam is held to: a record the two storages classify differently may differ in the reason and in nothing else.** The reason is a name a run-level tally counts under; the mechanism, the matrices, the midtime and the offset are what a product is built from. A difference in any of those is a defect in the reader or in what ingest stores, not an entry for the list. The list itself is derived by measurement rather than by argument: both sources are driven over every shape a record's fields can take -- absent, null, wrong type, over-long, non-finite, boolean, nested, ragged -- and what survives defines it.
+**A document the ingest refused is not a record the index can classify at all**, and it must not be read as an image nothing navigated. Ingest writes such a file to `failed_files` and not to `images`, for every reason `rows_from_metadata` refuses one: no `observation.instrument`, no `image_name`, a declared container of another shape, a duplicated `technique_name`, a file that is not JSON or not an object, and anything else the converter cannot read whole. The document itself is often a perfectly readable navigation record with a status, an offset and a corrected attitude, so a lookup that saw no `images` row and reported `no_metadata` would reproject that image corrected through the tree and uncorrected through the index, and would skip it in `sd_backplanes` while the tree built its product. So the lookup asks `failed_files` whenever it finds no `images` row, and a stub recorded there **fails that image**, naming the stub, the index and the recorded reason. Reading the document instead was considered and rejected: it would make `--results-db` mean a different thing per image, and one round trip per image is the cost the index exists to remove. Failing one image does not fail the run -- both consumers contain a per-image failure -- and the remedy the message names is to fix the document and re-ingest, or to run without an index. The one refusal ingest deliberately records nowhere is a file it could not retrieve, and an image whose document failed that way still reads as one nothing navigated; that is member 3 of the Phase 5 enumeration, and it is the same fact here.
+
+**The rule the seam is held to: a record the two storages *classify* differently may differ in the reason and in nothing else.** The reason is a name a run-level tally counts under; the mechanism, the matrices, the midtime and the offset are what a product is built from. A difference in any of those is a defect in the reader or in what ingest stores, not an entry for the list. The list itself is derived by measurement rather than by argument: both sources are driven over every shape a record's fields can take -- absent, null, wrong type, over-long, non-finite, boolean, nested, ragged, and an integer too large for a float -- and what survives defines it.
 
 Three classes survive. Each needs a record shape no navigation produces, each is stated in the module docstring, the user guide and here with the same members, and each is pinned by a test.
 
 1. **An `offset` no reader can use** -- absent, null, a boolean pair, a non-finite pair, or anything that is not two values convertible to finite pixels. The document is classified under which of those it was; the row, which holds one NULL pair for all of them, under `null_offset`.
-2. **A `cmatrix` no column can hold** -- one that is neither nine values nor a 3x3 nesting of them, or one whose values are not finite real numbers. The document is `malformed_pointing`; the row is `no_cmatrix_rotation_fitted` when something else of the block survives and `no_pointing_block` when nothing does. The file path also puts one line in the run log for it. (A `cmatrix` that *is* nine finite numbers and is not a rotation is stored, and the validator refuses it in both paths alike, which is why `malformed_pointing` has a row of its own in the table.)
+2. **A `cmatrix` no column can hold** -- one that is neither nine values nor a 3x3 nesting of them, or one whose nine values are not finite real numbers. The document is `malformed_pointing`; the row is `no_cmatrix_rotation_fitted` when something else of the block survives and `no_pointing_block` when nothing does. The file path also puts one line in the run log for it. (A `cmatrix` that *is* nine finite numbers and is not a rotation is stored, and the validator refuses it in both paths alike, which is why `malformed_pointing` has a row of its own in the table.)
 3. **A `pointing` block none of whose four columned fields survives** -- one holding only `camera_frame`, or frame identities written as floats or booleans, which the integer columns refuse. The document is `no_cmatrix_rotation_fitted`, because the block exists and carries no corrected attitude; the row is `no_pointing_block`, because the block left no trace in it.
+
+What decides class 2's membership is not a rule of its own: the store assembles a recorded matrix through the same function the reader does, so a matrix the reader can evaluate is one the column holds and a matrix the column holds nothing for is one the reader refuses. The class is exactly the recorded values that are not one 3x3 matrix of finite real numbers, in whatever nesting an array library can reconcile into that shape -- nine rows of one among them.
 
 For every record the navigator wrote and ingest stored, and for every hand-built shape outside those three classes, everything a product is built from -- the mechanism, the matrices, the midtime, the offset -- is identical in the two paths, and so is every field the readers report about it. The index path logs the same per-image `IMAGE_LOGGER` warnings, with the same message shapes; where a message names the storage that was searched, it names the one that actually was.
 
@@ -1576,16 +1580,19 @@ Details settled during execution:
   conflicted record, which write no such field at all. The `status` column is
   NOT NULL, so its `unknown` is rendered back as the absent field it stands
   for. `offset` keeps its null-valued key for the reason below.
-- **A `status: success` record carrying no `offset` field is the second record
-  class whose product differs**, and the plan and the module docstring now say
-  so. Through a document the backplane stage refuses it; through an index it
-  cannot be told from a null offset, so the stage applies the recorded C-matrix
-  and writes the product. The rebuild is not changed to render the absent pair
-  as an absent key: ingest stores an absent, null, malformed and non-finite
-  offset alike as NULL, and the last three are records the backplane stage
-  builds products from, so that rendering would refuse three reachable shapes
-  in order to agree about one that no navigation writes -- `NavResult` forbids
-  a success with no offset. Pinned by a test on both sides.
+- **A `status: success` record carrying no `offset` field builds the same
+  product in both storages.** The backplane stage used to refuse it through a
+  document while the index, which cannot tell an absent pair from a null one,
+  applied the recorded C-matrix and wrote the product. The refusal was the odd
+  one out rather than the index: a null, malformed or non-finite offset already
+  reached geometry on whatever pointing the rest of the record supplied, so the
+  stage now treats an absent offset the same way, degrades on the reason the
+  classifier names, and reports `uncorrected_pointing` when nothing else
+  supplies a pointing either. `NavResult` forbids a success with no offset, so
+  no navigation writes the shape at all. The rebuild still renders the pair as
+  a null-valued key rather than an absent one, which is what makes
+  `null_offset` the row's reason for all five ways an offset can supply no
+  pair. Pinned by a test on both sides.
 - **A `pointing` block carrying only fields the index has no column for is
   classified differently**, and is listed with the other stated differences. A
   block holding only `camera_frame` leaves no trace in the row, so the index
@@ -1614,6 +1621,50 @@ Details settled during execution:
   up and yet failed on an index that would not open, which on a machine
   exporting `NAV_RESULTS_DB` breaks invocations that worked before the variable
   was set. Fail-early stays for every mode that does read a record.
+- **A lookup that finds no record row asks the refusal table before it answers**
+  (section 2.9). Reading absence from `images` alone reported every document
+  the ingest refused as an image nothing navigated, which on a real results root
+  is hundreds of navigated images: their products were built on their recorded
+  offsets through the tree and on uncorrected pointing through the index, and
+  `sd_backplanes` skipped them under an index and built them without one. The
+  index knows better -- `failed_files` holds a row for each -- and Phase 5's
+  selection already reads that table for exactly this reason, so one index was
+  answering "does a record exist for this stub?" two ways in two consumers.
+  Both of the seam's methods now consult it and fail the image. `roots.py` says
+  what is now true: a completed ingest makes absence from *both* tables
+  meaningful, never absence from `images` alone.
+- **The store assembles a recorded rotation through the reader's own function.**
+  `_cmatrix_or_none` re-decided "are these nine real finite numbers" with a
+  per-entry rule while the reader assembled an array, so the two accepted
+  different sets: a `cmatrix` written as nine one-element rows was a valid
+  rotation to the reader and NULL to the column, and the same document was
+  reprojected by frame replacement through the tree and by `OffsetFOV` through
+  the index. `nav_record` now owns the whole question -- the two written shapes,
+  the assembly, the real-number dtypes and finiteness -- and returns the 3x3
+  matrix both the reader and the store use. `cmatrix.py` takes the dtype set
+  from there rather than defining a second one. What is left to
+  `validated_record_rotation` is the question only it can answer: whether the
+  matrix is a proper rotation.
+- **A recorded number too large to be a float is a value a reader cannot use,
+  not an exception.** `finite_float` promised `None` and raised `OverflowError`
+  on a JSON integer of several hundred digits, which JSON permits and no float
+  holds. It cost the image through the documents and the whole document through
+  ingest -- so the image then read as one nothing navigated, on a record whose
+  every other field was fine. `finite_float` and `record_offset` refuse it, and
+  the recorded midtime is read through `finite_float` rather than through a
+  second copy of the same three checks.
+- **`status_error` is stored through the function its readers read it with.**
+  It was the one field a column filled by a rule of its own; the two agreed for
+  every value, which is exactly the shape of the defect this module was created
+  to remove. The column is now NULL wherever `record_status_error` reports the
+  record as naming no error, the literal word `unknown` included, matching what
+  the NOT NULL `status` column does with the same word.
+- **The unpinned guarantees are pinned.** Reverting the backplane stage's two
+  reads through `nav_record`, `select_pointing`'s read of the same field,
+  `_pair`'s refusal of a sequence that is not a pair, the guard that turns nine
+  entries of mismatched shapes into a malformed record, or `close()`'s disposal
+  of the engine, each left the whole suite green. Each now fails a test, and
+  each test was verified by making the reversion.
 
 ### Phase 5 — Selection filters
 
@@ -1795,16 +1846,31 @@ add a column (increment the version). No issue numbers in any of it.
    by tests (unit tier at the `PointingSelection` level; integration
    tier on written products). "Identical" binds returned values, written
    products, and the reachable-reason warnings -- not incidental log text.
-   Two carve-outs: the reason vocabulary section 2.9 maps, whose two
-   unreachable rows are a stated behavioral difference; and, for the selections,
-   what section 4's Phase 5 entry enumerates, restated here member for member
-   and in its order, so that a reader of this criterion sees the list rather
-   than a sample of it:
+   The criterion binds every image whose document the ingest could read.
+
+   Three carve-outs. The first is the reason vocabulary section 2.9 maps, whose
+   unreachable rows are a stated behavioral difference in the name and not in
+   the product.
+
+   The second is **a document the ingest refused**, which is the one input the
+   product programs do not answer identically for. They do not answer
+   differently either: the image fails, naming itself, the index and the
+   recorded reason, and the pass goes on. That is a refusal rather than a
+   divergence, and it is what the criterion requires here -- an image whose
+   corrected product one storage builds and the other cannot must never be
+   built either way in silence. Section 2.9 states the rule, the
+   `pointing_source` module docstring states it, the reprojection and backplane
+   guides state it, and tests pin both directions: the refusal, and the image
+   nothing navigated that must still read as such.
+
+   The third is, **for the selections**, what section 4's Phase 5 entry
+   enumerates, restated here member for member and in its order, so that a
+   reader of this criterion sees the list rather than a sample of it:
 
    1. a summary PNG with no document beside it, which the index records nowhere,
       so `--has-no-offset-file --has-png-file` is empty under one;
    2. a document the ingest refused, which is a file that exists but records no
-      status;
+      status, so it counts towards presence and matches no error filter;
    3. an input the index holds nothing about because no pass could read or
       record it;
    4. a document the tree no longer holds, whose row survives every pass that
