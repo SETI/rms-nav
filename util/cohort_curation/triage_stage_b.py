@@ -12,8 +12,10 @@ review batch:
   desired behavior; the PNG lets the operator confirm unnavigability)
 - needs_visual frames (scattered_light surrogates): promoted whenever the
   pipeline produced a summary PNG at all
-- star-class frames that fail are promoted flagged=manual_nav_queue (the
-  calibrated-CISS star gate is known-uncalibrated; PHASE10 workflow B)
+- star-class frames that fail are promoted flagged=manual_nav_queue: the
+  calibrated-Cassini star gate is known-uncalibrated, so a star-frame
+  failure is not evidence of unnavigability and the operator navigates the
+  frame by hand instead (plans/COHORT_CURATION_PLAN.md workflow)
 
 Writes triage_report.yaml next to the manifest.
 
@@ -140,9 +142,10 @@ def run_one(candidate: dict) -> dict:
 def _maybe_rescue(candidate: dict, rec: dict) -> dict:
     """Retry a navigation-failed frame with the relaxed rescue config.
 
-    The default pipeline gates carry uncalibrated placeholder values
-    (Phase 10 calibrates them); many navigable scenes fail only because
-    a confidence formula or spurious detector is conservative.  The
+    The default pipeline gates carry uncalibrated placeholder values,
+    whose calibration waits on the assembled image library; many
+    navigable scenes fail only because a confidence formula or spurious
+    detector is conservative.  The
     rescue pass re-runs the frame with rescue_config.yaml (relaxed
     alpha0 / spurious knobs); an offset produced this way is promoted
     with an explicit warning so the operator verifies the overlay.
@@ -151,6 +154,14 @@ def _maybe_rescue(candidate: dict, rec: dict) -> dict:
     Parameters:
         candidate: The manifest candidate.
         rec: The evaluated default-config triage record.
+
+    Returns:
+        The rescued record when the rescue pass produced an offset, and the
+        original record unchanged otherwise -- which covers a negative case
+        (whose failure is the desired outcome), a frame that already has an
+        offset, and a frame whose status is not failed or conflicted and so
+        is not eligible for rescue, including a success carrying no offset,
+        an infrastructure error, a timeout, and a skip.
     """
     cls = candidate['scene_class']
     if cls == 'negative_cases':
@@ -158,7 +169,7 @@ def _maybe_rescue(candidate: dict, rec: dict) -> dict:
     if rec.get('offset_px') is not None:
         return rec
     if rec.get('status') not in ('failed', 'conflicted'):
-        return rec              # infrastructure error / timeout / skip
+        return rec              # not rescuable: success without offset, error, timeout, skip
     name = rec['image_name']
     if candidate.get('_force') or not _result_files(
             name, '_metadata.json', RESCUE_ROOT):

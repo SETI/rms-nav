@@ -1,5 +1,6 @@
 """Stage A cohort scan (plans/COHORT_CURATION_PLAN.md): candidate manifest
-for the eight empty scene classes of the Phase-10 49-image budget:
+for the eight scene classes the image library lacked entirely, out of the
+first-stage scene-class budget in that plan's appendix:
 
     body_irregular, faint_stars, negative_cases, ring_only_flat,
     ring_plus_body, scattered_light, stars_plus_body,
@@ -104,7 +105,10 @@ FOV_DEG = {('COISS', 'NAC'): 0.35, ('COISS', 'WAC'): 3.5,
            ('GOSSI', 'SSI'): 0.46, ('NHLORRI', 'LORRI'): 0.29}
 
 FRAME_PX = 1024.0
-FLAT_SAGITTA_PX = 0.5          # PHASE10 rank-1 curvature threshold
+# Edge sagitta (px) below which a ring edge reads as flat across the frame,
+# making the scene rank-1 (the ring_only_flat class; see
+# docs/dev_guide/dev_guide_image_library.rst for the class definitions).
+FLAT_SAGITTA_PX = 0.5
 FLAT_MIN_APPARENT_R_PX = FRAME_PX * FRAME_PX / (8.0 * FLAT_SAGITTA_PX)
 
 # Minimum clearly-bright catalog stars a stars-only scattered_light surrogate
@@ -493,7 +497,8 @@ def _scan_coiss_volume(vs: dict, volume: str, *,
                      'center_phase_deg': ph, 'filter': filt,
                      'year': time}))
 
-        # ---- ring_plus_body (skip near-edge-on rings; PHASE10 gotcha)
+        # ---- ring_plus_body (skip near-edge-on rings: their edges collapse
+        # toward a line and stop being an independent radial constraint)
         if (redges and res_moons and not planet_disc
                 and bobs is not None and abs(bobs) >= 1.0):
             tgt, d, mr = max(res_moons, key=lambda x: x[1])
@@ -1076,7 +1081,8 @@ def scan_vgiss() -> dict[str, list[dict]]:
 # ---------------------------------------------------------------- sampling
 
 QUOTAS_BY_BATCH: dict[int, dict[str, int]] = {
-    # batch 1: the eight empty classes of the Phase-10 budget
+    # batch 1: the eight scene classes the library then lacked entirely
+    # (first-stage budget, plans/COHORT_CURATION_PLAN.md appendix)
     1: {
         'body_irregular': 20,
         'ring_only_flat': 20,

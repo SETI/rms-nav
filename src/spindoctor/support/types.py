@@ -1,6 +1,7 @@
 """Shared type aliases and protocols used across the nav package.
 
-This module defines the numpy-array aliases (``NDArrayBoolType``,
+This module defines the numpy-array aliases (``NDArrayAnyType``,
+``NDArrayBoolType``,
 ``NDArrayFloatType``, ``NDArrayIntType``, ``NDArrayUint8Type``,
 ``NDArrayUint32Type``, ``NDArrayType``), the generic ``NPType`` type
 variable, the ``PathLike`` union accepted by I/O helpers, and the
@@ -21,6 +22,7 @@ from filecache import FCPath
 
 NDArrayLike = npt.ArrayLike
 DTypeLike = npt.DTypeLike
+NDArrayAnyType = npt.NDArray[Any]
 NDArrayBoolType = npt.NDArray[np.bool_]
 NDArrayFloatType = npt.NDArray[np.floating[Any]]
 NDArrayIntType = npt.NDArray[np.integer[Any]]
