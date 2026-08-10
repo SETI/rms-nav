@@ -25,7 +25,6 @@ from spindoctor.results_index import selection
 
 ENUMERATION_MEMBERS = {
     'a document the ingest refused': 'the ingest refused',
-    'a status the index falls back for': 'absent, empty, or not a string',
     'a file with no row': 'has no row at all',
     'a document that left the tree': 'the tree no longer holds',
     'a document rewritten in place': 'rewritten in place',

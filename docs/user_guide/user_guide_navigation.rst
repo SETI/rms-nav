@@ -272,14 +272,6 @@ nothing and tallies nothing. Run ``sd_stats_ingest --force`` over the root to
 have every document read again and the reasons tallied by that summary, which
 names one file per reason.
 
-**A document whose top-level ``status`` is absent, empty, or not a string is
-read differently.** An index takes the recorded status from the top-level
-``status`` field and falls back to ``navigation_result.status`` in that case;
-reading the tree, only the top-level field is consulted. Such a document can
-therefore record a fatal error to an index and none to the tree, so
-``--has-offset-error`` selects it in the first case and ``--has-no-offset-error``
-in the second.
-
 **A file the index has no row at all for reads as absent**, and
 ``--has-no-offset-file`` reads absence as "this image was never navigated", so
 it selects that image again. Three passes end that way: one that could not

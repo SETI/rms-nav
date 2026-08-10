@@ -2,15 +2,17 @@
 
 Each of these is a property of what one ingest pass could read and record rather
 than of the query, and each is enumerated in
-:mod:`spindoctor.results_index.selection`, in the plan, and here.  They are
-tested in both directions -- what the tree answers and what the index answers --
-because what makes each a divergence is that the two differ, and an assertion
-about one of them alone would pass if the other silently changed to match.
+:mod:`spindoctor.results_index.selection`, in the navigation guide, in the plan,
+and here.  They are tested in both directions -- what the tree answers and what
+the index answers -- because what makes each a divergence is that the two
+differ, and an assertion about one of them alone would pass if the other
+silently changed to match.
 
 A member added to the enumeration is added here.  One that stops being a
-divergence keeps its tests, asserting the agreement instead: what made it worth
-a test is that the two answers could differ, and that is as true of the answer
-that now matches as of the one that did not.
+divergence keeps a test and loses this file: what made it worth a test is that
+the two answers could differ, which is as true of the answer that matches as of
+the one that did not, so the test moves to the parity file and asserts the
+agreement there.
 """
 
 import os
@@ -142,118 +144,6 @@ def test_a_document_that_is_not_a_navigation_document_records_nothing_to_the_ind
     """
     root = tmp_path / 'results'
     images = _document_that_is_not_a_navigation_document(root)
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=null_logger())
-    results_filter = ResultsFilter(
-        VOLUMES,
-        str(root),
-        logger=null_logger(),
-        results_db_url=url,
-        has_no_offset_error=True,
-    )
-    assert select_from(results_filter, images) == []
-
-
-def _status_only_in_the_navigation_result(root: Path) -> list[ImageFile]:
-    """Write a document whose outcome is recorded only under ``navigation_result``.
-
-    The outcome is in the nested copy and the top-level field both paths read
-    is absent.  Neither path takes the nested copy for it, which is what keeps
-    the two agreeing, and is asserted here because a column that borrowed it
-    would be a classification made at ingest time -- an answer no reader of the
-    document could arrive at.
-
-    Parameters:
-        root: The results root to write into.
-
-    Returns:
-        The one candidate image, ready to filter.
-    """
-    document = metadata_document(image_name='N1000000004_1.IMG', offset=None)
-    del document['status']
-    document['navigation_result']['status'] = 'error'
-    write_metadata(root, SPICE_ERROR, document)
-    return [
-        ImageFile(
-            image_file_url=FCPath(root / 'x.IMG'),
-            label_file_url=FCPath(root / 'x.LBL'),
-            results_path_stub=SPICE_ERROR,
-        )
-    ]
-
-
-def test_a_status_only_in_the_navigation_result_matches_no_tree_error_filter(
-    tmp_path: Path,
-) -> None:
-    """The tree path reads the top-level field and no other."""
-    root = tmp_path / 'results'
-    images = _status_only_in_the_navigation_result(root)
-    results_filter = ResultsFilter(VOLUMES, str(root), logger=null_logger(), has_offset_error=True)
-    assert select_from(results_filter, images) == []
-
-
-def test_a_status_only_in_the_navigation_result_matches_no_index_error_filter(
-    tmp_path: Path,
-) -> None:
-    """And the index reads the same field, so it answers the same way.
-
-    The ``status`` column holds the document's own top-level field and nothing
-    standing in for it.  A column that fell back to the nested copy would match
-    an error filter here for a document that matches none in the tree, and --
-    since the pointing readers rebuild a record from these same columns -- would
-    apply a corrected attitude to an image whose document supplies no pointing
-    at all.
-    """
-    root = tmp_path / 'results'
-    images = _status_only_in_the_navigation_result(root)
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=null_logger())
-    results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_error=True
-    )
-    assert select_from(results_filter, images) == []
-
-
-def test_a_status_only_in_the_navigation_result_is_still_a_row(tmp_path: Path) -> None:
-    """The control for the agreement above, which an uningested document passes.
-
-    The document is a navigation document and ingests; what it is not is a
-    document naming an outcome, so it matches no filter that names one.
-    """
-    root = tmp_path / 'results'
-    images = _status_only_in_the_navigation_result(root)
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=null_logger())
-    results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
-    )
-    assert select_from(results_filter, images) == [SPICE_ERROR]
-
-
-def test_a_status_only_in_the_navigation_result_records_no_error_to_the_tree(
-    tmp_path: Path,
-) -> None:
-    """Reading the top-level field alone, the tree finds no fatal error to exclude it.
-
-    The same member seen from the other side: the document records a fatal
-    error where the index looks and nothing where the tree looks, so the filter
-    phrased in the negative diverges wherever the one phrased in the positive
-    does.
-    """
-    root = tmp_path / 'results'
-    images = _status_only_in_the_navigation_result(root)
-    results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), has_no_offset_error=True
-    )
-    assert select_from(results_filter, images) == [SPICE_ERROR]
-
-
-def test_a_status_only_in_the_navigation_result_records_an_error_to_the_index(
-    tmp_path: Path,
-) -> None:
-    """The recorded status is the fatal one, so the negative filter passes it over."""
-    root = tmp_path / 'results'
-    images = _status_only_in_the_navigation_result(root)
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=null_logger())
     results_filter = ResultsFilter(

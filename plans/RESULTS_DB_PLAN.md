@@ -1008,7 +1008,7 @@ The reason vocabulary maps as follows, and the mapping table belongs in the
 | `unreadable_metadata`, `invalid_json`, `metadata_not_an_object` | unreachable: ingest already refused such a file, so it has no record row and a refusal row instead, and the lookup fails the image rather than classifying it |
 | `missing_offset_key`, `invalid_offset_type`, `non_finite_offset`, `malformed_offset` | reported as `null_offset`: one column pair holds all five ways an offset can supply no pair, and none of them supplies a pointing |
 
-**A document the ingest refused is not a record the index can classify at all**, and it must not be read as an image nothing navigated. Ingest writes such a file to `failed_files` and not to `images`, for every reason `rows_from_metadata` refuses one: no `observation.instrument`, no `image_name`, a declared container of another shape, a duplicated `technique_name`, a file that is not JSON or not an object, and anything else the converter cannot read whole. The document itself is often a perfectly readable navigation record with a status, an offset and a corrected attitude, so a lookup that saw no `images` row and reported `no_metadata` would reproject that image corrected through the tree and uncorrected through the index, and would skip it in `sd_backplanes` while the tree built its product. So the lookup asks `failed_files` whenever it finds no `images` row, and a stub recorded there **fails that image**, naming the stub, the index and the recorded reason. Reading the document instead was considered and rejected: it would make `--results-db` mean a different thing per image, and one round trip per image is the cost the index exists to remove. Failing one image does not fail the run -- both consumers contain a per-image failure -- and the remedy the message names is to fix the document and re-ingest, or to run without an index. The one refusal ingest deliberately records nowhere is a file it could not retrieve, and an image whose document failed that way still reads as one nothing navigated; that is member 3 of the Phase 5 enumeration, and it is the same fact here.
+**A document the ingest refused is not a record the index can classify at all**, and it must not be read as an image nothing navigated. Ingest writes such a file to `failed_files` and not to `images`, for every reason `rows_from_metadata` refuses one: no `observation.instrument`, no `image_name`, a declared container of another shape, a duplicated `technique_name`, a file that is not JSON or not an object, and anything else the converter cannot read whole. The document itself is often a perfectly readable navigation record with a status, an offset and a corrected attitude, so a lookup that saw no `images` row and reported `no_metadata` would reproject that image corrected through the tree and uncorrected through the index, and would skip it in `sd_backplanes` while the tree built its product. So the lookup asks `failed_files` whenever it finds no `images` row, and a stub recorded there **fails that image**, naming the stub, the index and the recorded reason. Reading the document instead was considered and rejected: it would make `--results-db` mean a different thing per image, and one round trip per image is the cost the index exists to remove. Failing one image does not fail the run -- both consumers contain a per-image failure -- and the remedy the message names is to fix the document and re-ingest, or to run without an index. The one refusal ingest deliberately records nowhere is a file it could not retrieve, and an image whose document failed that way still reads as one nothing navigated; that is member 2 of the Phase 5 enumeration, and it is the same fact here.
 
 **The rule the seam is held to: a record the two storages *classify* differently may differ in the reason and in nothing else.** The reason is a name a run-level tally counts under; the mechanism, the matrices, the midtime and the offset are what a product is built from. A difference in any of those is a defect in the reader or in what ingest stores, not an entry for the list. The list itself is derived by measurement rather than by argument: both sources are driven over every shape a record's fields can take -- absent, null, wrong type, over-long, non-finite, boolean, nested, ragged, and an integer too large for a float -- and what survives defines it.
 
@@ -1900,12 +1900,7 @@ Details settled during execution, none of them a change of intent:
      parse, one carrying no `status` at all included. A file no JSON object
      came out of is refused too and is not one of these: the tree excludes such
      a file from every error filter as well.
-  2. A document whose top-level `status` is **absent, empty, or not a string**
-     takes its recorded status from `navigation_result.status`, which is where
-     the rest of the index reads an outcome from; the tree path reads the
-     top-level field alone. Such a document can therefore match an error filter
-     under the index and not under the tree.
-  3. A file that exists and **has no row at all** reads as absent, which is what
+  2. A file that exists and **has no row at all** reads as absent, which is what
      the absence filters read as "this image was never navigated". Three passes
      end that way: a file the pass could not retrieve; a document the pass read
      whose rows the database would not store (section 2.7's isolated write
@@ -1916,7 +1911,7 @@ Details settled during execution, none of them a change of intent:
      with the same query, handed back with the answer, and reported by
      `ResultsFilter` as a warning naming the root, which is the consumer section
      2.7 wrote that count for.
-  4. A document **the tree no longer holds** keeps its row and reads as present,
+  3. A document **the tree no longer holds** keeps its row and reads as present,
      so `--has-offset-file` hands on an image whose metadata file is gone and
      `--has-no-offset-file` skips one nothing has been written for. A row leaves
      the index only when a pass that listed the whole root does not find a file
@@ -1930,7 +1925,7 @@ Details settled during execution, none of them a change of intent:
      narrowing it to the directories a pass did list is a change to what a
      listing has to report about itself, which sits with the ingest phases and
      with the sharded pass that also prunes on partial evidence.
-  5. A document **rewritten in place, keeping the length and the modification
+  4. A document **rewritten in place, keeping the length and the modification
      time it had before,** is skipped by the incremental comparison
      (`_is_unchanged`, which has only `(mtime_ns, size_bytes)` to go on), so its
      row goes on recording what the document before it said and an error filter
@@ -1943,7 +1938,7 @@ Details settled during execution, none of them a change of intent:
      retrieving every document to find out is exactly the cost the skip exists
      to avoid -- a content digest would be paid on every file of every pass to
      catch a case a times-preserving restore produces. `--force` is the remedy
-     and is what the documentation points at. Like member 4, this one is not
+     and is what the documentation points at. Like member 3, this one is not
      the snapshot's age: a pass that finished a second ago answers from the
      document before the rewrite.
 - **The answer says how old it is, and what that does not cover.**
@@ -1953,7 +1948,7 @@ Details settled during execution, none of them a change of intent:
   resolved from the environment means an operator may not know which pass is
   answering, so the moment travels with the answer rather than with whoever
   exported the variable. Outside the enumeration above, the age is what decides
-  whether the answer is the answer the tree would give; members 3, 4 and 5
+  whether the answer is the answer the tree would give; members 2, 3 and 4
   survive a pass that finished a second ago, which is why each is enumerated
   rather than left to be read off the stamp.
 - **The volume restriction is one restriction in one query.** Both arms are
@@ -2044,14 +2039,11 @@ add a column (increment the version). No issue numbers in any of it.
 
    1. a document the ingest refused, which is a file that exists but records no
       status;
-   2. a document whose top-level `status` is absent, empty, or not a string,
-      whose outcome the index therefore reads from `navigation_result.status`
-      and the tree from the top-level field alone;
-   3. a file that has no row at all in the index, because no pass could read or
+   2. a file that has no row at all in the index, because no pass could read or
       record it;
-   4. a document the tree no longer holds, whose row survives every pass that
+   3. a document the tree no longer holds, whose row survives every pass that
       did not list the whole root;
-   5. a document rewritten in place with the length and the modification time it
+   4. a document rewritten in place with the length and the modification time it
       had before, whose row goes on recording what the document before it said.
 
    Each carve-out is stated in the plan, in the module docstring, in the

@@ -33,11 +33,6 @@ never shown answers nobody's question about the selection they got.
   A file no JSON object came out of is refused too and is not one of these: the
   tree excludes such a file from every error filter as well, so the two answer
   alike about it.
-- **A document whose top-level ``status`` is absent, empty, or not a string**
-  takes its recorded status from ``navigation_result.status``, which is where
-  the rest of the index reads an outcome from.  The tree reads the top-level
-  field alone, so such a document can match an error filter here and not there,
-  and can be a document recording no fatal error there and not here.
 - **A file that exists and has no row at all in the index** reads as absent,
   which is what the absence filters read as "this image was never navigated".
   Three passes end that way, and the first two do so deliberately, because a

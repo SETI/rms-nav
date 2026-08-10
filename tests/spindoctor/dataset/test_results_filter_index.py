@@ -3,9 +3,11 @@
 The parity matrix is here: every filter flag asked of the tree and of the index
 over the one fixture tree, each held to a stated answer, plus the assertions
 that the index path reads no file at all and leaves nothing for the batch stage.
-The refusals are here too, because a filter that cannot answer has to say so in
-one type a program can catch, and so is the guarantee that the navigation
-critical path never imports the database layer.
+So is every document shape the two paths could plausibly read differently and do
+not, each asked of both over a tree of its own.  The refusals are here too,
+because a filter that cannot answer has to say so in one type a program can
+catch, and so is the guarantee that the navigation critical path never imports
+the database layer.
 
 Two files carry the rest: the answers the index gives differently from the tree,
 each with a test of its own, and what the filter reports about the pass that
@@ -23,7 +25,12 @@ from typing import Any, cast
 import pytest
 import sqlalchemy
 from filecache import FCPath
-from tests.spindoctor.cli.stats.conftest import index_url, ingest_tree
+from tests.spindoctor.cli.stats.conftest import (
+    index_url,
+    ingest_tree,
+    metadata_document,
+    write_metadata,
+)
 from tests.spindoctor.dataset.conftest import (
     ERROR_WITHOUT_STATUS_ERROR,
     FATAL_ERRORS,
@@ -41,6 +48,7 @@ from tests.spindoctor.dataset.conftest import (
     selection_of,
 )
 
+from spindoctor.dataset.dataset import ImageFile
 from spindoctor.dataset.results_filter import (
     _SPICE_STATUS_ERROR,
     ResultsFilter,
@@ -184,6 +192,133 @@ def test_an_image_with_no_row_is_not_one_recording_no_error_in_the_index(
     """Absence of a row is absence of a document, and reads the same way here."""
     kept = selection_of(tree, {'has_no_offset_error': True}, results_db_url=indexed)
     assert NO_RESULT not in kept
+
+
+_NO_OUTCOME_STUB = 'COISS_2001/data/b/N1000000011_1_CALIB'
+"""The one image of the tree written for the document naming no outcome.
+
+Under a selected volume, since a stub outside one is answered by neither path
+and would make every expectation below the empty selection for the wrong
+reason.  It is not a stub of the shared fixture tree: that tree states an answer
+per filter for ten documents at once, and what is asked here is what one
+document shape answers.
+"""
+
+_NO_STATUS_FIELD = object()
+"""Stands for the document that carries no top-level ``status`` field at all."""
+
+_NO_OUTCOME_STATUSES = [
+    pytest.param(_NO_STATUS_FIELD, id='absent'),
+    pytest.param(None, id='null'),
+    pytest.param('', id='empty'),
+    pytest.param(42, id='not-a-string'),
+]
+"""Every shape of a top-level ``status`` that names no outcome.
+
+The four are kept apart because one reader tells them apart by type and another
+by SQL: a document carrying no field, one carrying null, one carrying the empty
+string and one carrying a number reach the store as four different values and
+have to leave it as one.
+"""
+
+_NO_OUTCOME_MATRIX = [
+    pytest.param({'has_offset_file': True}, [_NO_OUTCOME_STUB], id='offset-file'),
+    pytest.param({'has_offset_error': True}, [], id='offset-error'),
+    pytest.param({'has_no_offset_error': True}, [_NO_OUTCOME_STUB], id='no-offset-error'),
+    pytest.param({'has_offset_spice_error': True}, [], id='spice-error'),
+    pytest.param({'has_offset_nonspice_error': True}, [], id='nonspice-error'),
+]
+"""What every filter that reads a document answers about one naming no outcome.
+
+The presence filter leads, because it is what says the document is there to be
+read: without it every empty answer below would also be the answer for a root
+holding nothing.  ``has_no_offset_error`` carries the same weight from the other
+side -- a document the ingest refused matches it no more than it matches the
+rest, so an answer of the image itself is an answer read off a stored outcome.
+"""
+
+
+def _naming_no_outcome(root: Path, status: Any) -> list[ImageFile]:
+    """Write a document that names no outcome of its own, and return its image.
+
+    The outcome sits in the nested ``navigation_result`` copy instead, which is
+    what makes the answers evidence of anything: a path that read the nested
+    copy wherever the top-level field names nothing would answer the error
+    filters with this image and the negative one without it.
+
+    Parameters:
+        root: The results root to write into.
+        status: The top-level ``status`` the document carries, or
+            :data:`_NO_STATUS_FIELD` for one carrying no such field.
+
+    Returns:
+        The one candidate image, ready to filter.
+    """
+    document = metadata_document(image_name='N1000000011_1.IMG', offset=None)
+    if status is _NO_STATUS_FIELD:
+        del document['status']
+    else:
+        document['status'] = status
+    document['navigation_result']['status'] = 'error'
+    write_metadata(root, _NO_OUTCOME_STUB, document)
+    return [
+        ImageFile(
+            image_file_url=FCPath(root / f'{_NO_OUTCOME_STUB}.IMG'),
+            label_file_url=FCPath(root / f'{_NO_OUTCOME_STUB}.LBL'),
+            results_path_stub=_NO_OUTCOME_STUB,
+        )
+    ]
+
+
+@pytest.mark.parametrize('status', _NO_OUTCOME_STATUSES)
+@pytest.mark.parametrize(('flags', 'expected'), _NO_OUTCOME_MATRIX)
+def test_the_tree_reads_a_document_naming_no_outcome(
+    tmp_path: Path, status: Any, flags: dict[str, bool], expected: list[str]
+) -> None:
+    """The walk reads the top-level field and no other, so it finds no outcome.
+
+    Parameters:
+        tmp_path: Directory the root is written under.
+        status: The shape of top-level ``status`` the document carries.
+        flags: The selection flags to apply.
+        expected: The stubs the filter selects.
+    """
+    root = tmp_path / 'results'
+    images = _naming_no_outcome(root, status)
+    results_filter = ResultsFilter(
+        VOLUMES, str(root), logger=null_logger(), results_db_url=None, **flags
+    )
+    assert select_from(results_filter, images) == expected
+
+
+@pytest.mark.parametrize('status', _NO_OUTCOME_STATUSES)
+@pytest.mark.parametrize(('flags', 'expected'), _NO_OUTCOME_MATRIX)
+def test_the_index_reads_a_document_naming_no_outcome_the_same_way(
+    tmp_path: Path, status: Any, flags: dict[str, bool], expected: list[str]
+) -> None:
+    """The stored status is the document's own field, so the query answers alike.
+
+    Every shape above is stored as the one value a record naming no outcome is
+    read as, which is an outcome the error filters name nowhere.  A store that
+    borrowed the nested copy would be making a classification no reader of the
+    document could arrive at, and -- since the pointing readers rebuild a record
+    from these same columns -- would hand a corrected attitude to an image whose
+    document supplies no pointing at all.
+
+    Parameters:
+        tmp_path: Directory the root and the index are written under.
+        status: The shape of top-level ``status`` the document carries.
+        flags: The selection flags to apply.
+        expected: The stubs the filter selects.
+    """
+    root = tmp_path / 'results'
+    images = _naming_no_outcome(root, status)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=null_logger())
+    results_filter = ResultsFilter(
+        VOLUMES, str(root), logger=null_logger(), results_db_url=url, **flags
+    )
+    assert select_from(results_filter, images) == expected
 
 
 _FLAG_CASES = [pytest.param(case.values[0], id=case.id) for case in _MATRIX]
