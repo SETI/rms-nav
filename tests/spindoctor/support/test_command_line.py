@@ -241,6 +241,77 @@ def test_a_persisted_run_log_still_records_the_command_line(tmp_path: Path) -> N
     assert 'db.example:5432/spindoctor' in written
 
 
+_CLI_DIR = Path(__file__).resolve().parents[3] / 'src' / 'spindoctor' / 'cli'
+
+# The interactive programs that both declare a connection-URL option and write
+# a run log, which is the pair of properties that puts a password in a file.
+_PROGRAMS_LOGGING_A_URL_BEARING_LINE = ['sd_backplanes', 'sd_mosaic']
+
+# What each of them is invoked as, with the dataset positional its parser reads
+# before the option, so the line masked here is the shape a run really carries.
+_PROGRAM_ARGV = {
+    'sd_backplanes': ['coiss_saturn', '--nav-results-root', '/data/nav'],
+    'sd_mosaic': ['rings', 'coiss_saturn', '--planet', 'SATURN'],
+}
+
+
+@pytest.mark.parametrize('program', _PROGRAMS_LOGGING_A_URL_BEARING_LINE)
+def test_a_program_carrying_the_option_records_its_line_through_the_masking(
+    program: str,
+) -> None:
+    """A program with both properties records its command line the one masked way.
+
+    The banner is where a command line is written down, and a program that
+    formatted its own would put the URL it was handed into a log file without
+    passing the rule that hides the password in it.
+    """
+    source = (_CLI_DIR / f'{program}.py').read_text(encoding='utf-8')
+    assert 'log_run_environment(' in source
+
+
+@pytest.mark.parametrize('program', _PROGRAMS_LOGGING_A_URL_BEARING_LINE)
+def test_such_a_program_formats_no_command_line_of_its_own(program: str) -> None:
+    """The guard on that: one place records the line, so nothing else joins it.
+
+    Both spellings of the whole command line as one string, which is the shape
+    a second copy of it would take.
+    """
+    source = (_CLI_DIR / f'{program}.py').read_text(encoding='utf-8')
+    joined = ["' '.join(command_list", "' '.join(sys.argv"]
+    assert not any(spelling in source for spelling in joined)
+
+
+@pytest.mark.parametrize('program', _PROGRAMS_LOGGING_A_URL_BEARING_LINE)
+def test_such_a_programs_own_command_line_reaches_a_log_file_masked(
+    program: str, tmp_path: Path
+) -> None:
+    """And the bytes that reach the file carry no password.
+
+    Written with the argv the program is really invoked with, dataset
+    positional included, so a rule that only held for a line beginning with the
+    option would be caught here.
+    """
+    argv = [*_PROGRAM_ARGV[program], '--results-db', _url(PASSWORDS[-1], user=USER)]
+    written = _persisted_banner(f'test_banner_{program}', argv, tmp_path / 'run.log')
+    assert LEFT not in written
+
+
+@pytest.mark.parametrize('program', _PROGRAMS_LOGGING_A_URL_BEARING_LINE)
+def test_no_tail_of_that_password_reaches_the_file_either(program: str, tmp_path: Path) -> None:
+    """A rule stopping at the first URL delimiter would leave a working password."""
+    argv = [*_PROGRAM_ARGV[program], '--results-db', _url(PASSWORDS[-1], user=USER)]
+    written = _persisted_banner(f'test_banner_tail_{program}', argv, tmp_path / 'run.log')
+    assert RIGHT not in written
+
+
+@pytest.mark.parametrize('program', _PROGRAMS_LOGGING_A_URL_BEARING_LINE)
+def test_that_line_still_names_the_index_and_the_dataset(program: str, tmp_path: Path) -> None:
+    """The control: a banner that hid the line would pass both assertions above."""
+    argv = [*_PROGRAM_ARGV[program], '--results-db', _url(PASSWORDS[-1], user=USER)]
+    written = _persisted_banner(f'test_banner_named_{program}', argv, tmp_path / 'run.log')
+    assert 'db.example:5432/spindoctor' in written
+
+
 def test_masking_a_line_with_no_url_imports_no_database_layer() -> None:
     """The banner is written by every run, and most of them name no index.
 
