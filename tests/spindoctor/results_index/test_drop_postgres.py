@@ -326,8 +326,17 @@ def test_such_a_database_names_the_tables_it_could_not_account_for(postgres_url:
     assert contents.unproven == (COLLIDING_TABLE,)
 
 
-RESTRICTED_PASSWORD = 'ri-restricted-role'
-"""Password of the role that may read one column of the stamp and not the other."""
+def _generated_password() -> str:
+    """Return a password for a role this test creates and drops again.
+
+    Generated per run rather than written down, for the same reason the role
+    name is: a literal in a test file is a credential in the repository, and
+    this one is handed to a real server.
+
+    Returns:
+        A password unique to this fixture's role.
+    """
+    return f'ri-pw-{uuid.uuid4().hex}'
 
 
 @pytest.fixture
@@ -359,13 +368,12 @@ def restricted_url(
         f"INSERT INTO {IMAGES.name} VALUES ('file:///data/nav-results')",
     )
     role = f'ri_reader_{uuid.uuid4().hex[:16]}'
+    password = _generated_password()
     admin = sqlalchemy.create_engine(postgres_server_url, isolation_level='AUTOCOMMIT')
     try:
         try:
             with admin.connect() as connection:
-                connection.exec_driver_sql(
-                    f'CREATE ROLE "{role}" LOGIN PASSWORD \'{RESTRICTED_PASSWORD}\''
-                )
+                connection.exec_driver_sql(f'CREATE ROLE "{role}" LOGIN PASSWORD \'{password}\'')
         except sqlalchemy.exc.SQLAlchemyError:
             pytest.skip('this account may not create a role on this server')
         try:
@@ -380,7 +388,7 @@ def restricted_url(
                 )
             yield (
                 sqlalchemy.engine.make_url(postgres_url)
-                .set(username=role, password=RESTRICTED_PASSWORD)
+                .set(username=role, password=password)
                 .render_as_string(hide_password=False)
             )
         finally:

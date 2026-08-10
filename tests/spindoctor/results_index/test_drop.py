@@ -90,6 +90,26 @@ def _table_names(url: str) -> list[str]:
         engine.dispose()
 
 
+def _view_names(url: str) -> list[str]:
+    """Return every view a database holds.
+
+    Views are asked for separately because ``get_table_names`` does not report
+    them, so a test that reads only tables cannot tell a view that survived
+    from one that was dropped.
+
+    Parameters:
+        url: The database URL.
+
+    Returns:
+        The view names, sorted.
+    """
+    engine = sqlalchemy.create_engine(url)
+    try:
+        return sorted(sqlalchemy.inspect(engine).get_view_names())
+    finally:
+        engine.dispose()
+
+
 def _contents(url: str) -> IndexContents:
     """Open a database and read what of the index it holds.
 
@@ -557,6 +577,7 @@ def test_a_view_of_one_of_our_names_does_not_stop_the_drop(tmp_path: Path) -> No
     )
     _dropped(url)
     assert _table_names(url) == []
+    assert _view_names(url) == [FAILED_FILES.name]
 
 
 def test_an_index_whose_run_table_lost_a_column_is_still_read(tmp_path: Path) -> None:
