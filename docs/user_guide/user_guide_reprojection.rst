@@ -495,7 +495,11 @@ record for each image (written by ``sd_offset``) and applies the pointing it
 records, preferring the exact form over its approximation. The record comes
 from that image's ``_metadata.json`` file, or, when ``--results-db`` names a
 results index, from one row of that index; both supply the same recorded values
-and both are classified by the same ladder, so the products are the same:
+and both are classified by the same ladder, so for every record ``sd_offset``
+wrote the products are the same. (A record hand-built into a results tree can
+take shapes ``sd_offset`` never writes, and a few of those the two storages
+classify differently; they are listed under :ref:`reproj-index-differences`.)
+The ladder:
 
 * When the record carries a corrected camera attitude
   (``navigation_result.pointing.cmatrix``) that passes the reader's
@@ -533,6 +537,37 @@ any image with an omission reason — the readers still apply that image's
 *own* recorded measurement, which is the better product for that image, while
 a consumer of the corrected kernels sees the attitude the winning segment
 implies. SpinDoctor's own products are authoritative for those images.
+
+.. _reproj-index-differences:
+
+Where a document and an index row are classified differently
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``sd_stats_ingest`` stores the fields the ladder reads, in the shapes
+``sd_offset`` writes them. A record that takes a shape ``sd_offset`` does not
+write survives into the index as the nearest shape a column can hold, and the
+ladder then classifies it from that. Three such records are classified
+differently depending on which storage they were read from. None can be
+produced by navigating an image; each requires a record written into the
+results tree by something else.
+
+* A ``pointing.cmatrix`` that is not nine finite numbers is ingested as no
+  corrected attitude at all. Read as a document it counts under
+  ``malformed_pointing``; read as a row it counts under
+  ``no_cmatrix_rotation_fitted``. Both apply the recorded offset, so the
+  product is the same and only the run summary's tally differs.
+* A ``pointing`` block carrying none of ``cmatrix``, ``cmatrix_original``,
+  ``camera_frame_id`` or ``ck_frame_id`` leaves no trace in the row. Read as a
+  document it counts under ``no_cmatrix_rotation_fitted``; read as a row it
+  counts under ``no_pointing_block``. Again the same product and a different
+  tally.
+* A ``status: success`` record with no ``offset`` field, or with a
+  ``pointing.cmatrix`` written as three nested rows of three rather than as
+  nine numbers, differs in the **product** and not only in the tally. The
+  index stores an absent offset and a null one alike, and a nested matrix not
+  at all, so the row says something the document did not. ``sd_backplanes``
+  refuses the first record when it reads it as a document and builds
+  backplanes for it when it reads it as a row.
 
 Output format
 ^^^^^^^^^^^^^

@@ -6,8 +6,10 @@ writes them as one FITS file.  Where the record comes from is the caller's
 choice: a :class:`~spindoctor.cli.reproj.pointing_source.PointingSource` reads it
 either from the ``_metadata.json`` document the navigator wrote or from one row
 of an ingested results index.  Both supply the same record fields and both
-classify the pointing with the same classifier, so the products are the same;
-the few classifications that differ between the two are stated in that module.
+classify the pointing with the same classifier, so for every record a
+navigation wrote the products are the same; the few hand-built record shapes
+that the two classify differently, one of which this stage refuses through a
+document and processes through an index, are stated in that module.
 
 An image whose navigation did not succeed produces no backplanes, and an image
 nothing navigated at all raises rather than producing them on uncorrected
@@ -79,7 +81,12 @@ def generate_backplanes_image_files(
     Raises:
         ValueError: if more than one image is batched, or if a success-status
             record carries no ``offset`` key at all -- a defect-shaped record
-            fails the single-image task rather than degrading silently.
+            fails the single-image task rather than degrading silently.  A
+            navigation never writes that record, since a result carrying no
+            offset is never a success; and only a record read as a document can
+            reach the refusal, because an index stores an absent offset and a
+            null one alike and a record rebuilt from a row therefore always
+            carries the key.
     """
 
     logger = IMAGE_LOGGER

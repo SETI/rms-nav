@@ -159,7 +159,7 @@ The `images` table:
 | `camera` | `observation.camera` | present whenever the dataset index supplied it, including for an image that never loaded; NULL only when no camera column exists for the dataset |
 | `image_path` | `observation.image_path` | |
 | `image_et`, `image_date` | `navigation_result.provenance.image_et`, falling back to `observation.image_et` | every image is placed in time even when it never loaded |
-| `status` | top-level `status` | NOT NULL; the existing `'unknown'` fallback survives |
+| `status` | top-level `status` | NOT NULL; `'unknown'` when the document names no outcome, never a value taken from another field |
 | `status_error` | top-level `status_error` | stored **verbatim and separately** from `status_reason` |
 | `status_reason` | `navigation_result.status_reason` | the navigator's vocabulary, distinct from `status_error` |
 | `offset_dv`, `offset_du` | **top-level `offset`**, unrounded | the authoritative number every consumer applies |
@@ -925,6 +925,17 @@ malformed and non-finite offset alike as NULL and reporting the commonest of
 them keeps a genuine null offset from being read as a defect-shaped record
 carrying no offset field.
 
+Every other field the row does not carry is rendered as a field the document
+did not have, not as one holding null, because the readers tell those apart:
+the backplane stage reports an absent `status_error` as `unknown` and a null
+one as null, and every failed and conflicted document writes no such field.
+`status` is NOT NULL and records a document naming no outcome as `unknown`, so
+that value is rendered back as the absent field it stands for. What makes the
+rebuild faithful at all is that ingest stores the document's own top-level
+`status` and nothing standing in for it: a column that borrowed the copy inside
+`navigation_result` would answer `success` for a document that never said so,
+and the ladder's first question is exactly that field.
+
 The reason vocabulary maps as follows, and the mapping table belongs in the
 `pointing_source` module docstring:
 
@@ -940,28 +951,45 @@ The reason vocabulary maps as follows, and the mapping table belongs in the
 | `unusable_metadata_path` | unreachable: a stub is a key, not a path |
 | `unreadable_metadata`, `invalid_json`, `metadata_not_an_object` | unreachable: ingest already refused such a file, so it has no row (surfaces as `no_metadata`) |
 | `invalid_offset_type`, `non_finite_offset`, `malformed_offset` | unreachable: ingest coerces such an offset to NULL (surfaces as `null_offset`) |
-| `missing_offset_key` | unreachable: a rebuilt record always carries the key (surfaces as `null_offset`) |
+| `missing_offset_key` | unreachable: a rebuilt record always carries the key (surfaces as `null_offset`); the backplane stage's refusal of a success record carrying no offset field is therefore reachable only through a document |
 
-Two further differences are not rows of that table, because each is the same
+Four further differences are not rows of that table, because each is the same
 record classified differently rather than a reason reached from a different
-one. Both come of ingest storing a rotation only in the nine row-major floats
-its producer writes, so anything else becomes a NULL `cmatrix` beside a stored
-baseline, which is what a fitted-rotation result looks like. A `cmatrix` ingest
-cannot store -- one that is not nine finite numbers -- is `malformed_pointing`
-via files and `no_cmatrix_rotation_fitted` via the index; both fall back to the
-offset and differ only in what they call it. (One that *is* nine finite numbers
-and is not a rotation is stored, and the validator refuses it in both paths
-alike, which is why `malformed_pointing` has a row of its own in the table.) A `cmatrix` written as a 3x3 nesting -- a
-shape the classifier accepts and the navigator never writes -- selects the
-C-matrix mechanism via files and the offset via the index, which is the one
-record class whose *product* differs, and it is a shape no navigation produces.
+one. Each needs a record shape no navigation produces, and each is stated in
+the module docstring and pinned by a test rather than papered over.
 
-These are real behavioral differences between the paths, and the module
-docstring states them rather than papering over them. For every record the
-navigator wrote and ingest stored, everything a product is built from -- the
-mechanism, the matrices, the midtime, the offset -- is identical in the two
-paths. The index path logs the same per-image `IMAGE_LOGGER` warnings, with the
-same message shapes.
+Two differ only in what the outcome is called, so a run-level tally counts the
+image under the other class and the product is the same. A `cmatrix` ingest
+cannot store -- one that is not nine finite numbers -- is `malformed_pointing`
+via files and `no_cmatrix_rotation_fitted` via the index, because it becomes a
+NULL `cmatrix` beside a stored baseline, which is what a fitted-rotation result
+looks like. (One that *is* nine finite numbers and is not a rotation is stored,
+and the validator refuses it in both paths alike, which is why
+`malformed_pointing` has a row of its own in the table.) And a `pointing` block
+carrying none of the four fields the index has columns for -- one holding only
+`camera_frame` -- leaves no trace in the row, so it is
+`no_cmatrix_rotation_fitted` via files and `no_pointing_block` via the index.
+
+Two differ in the *product*. A `cmatrix` written as a 3x3 nesting -- a shape the
+classifier accepts and the navigator never writes -- selects the C-matrix
+mechanism via files and the offset via the index. And a `status: success` record
+carrying no `offset` field at all is refused by the backplane stage via files,
+which raises rather than building geometry on a record shaped like a defect,
+and is processed via the index, which cannot tell an absent offset from a null
+one; with a usable `cmatrix` beside it the index path applies the corrected
+attitude and writes the product the file path refuses. `NavResult` forbids a
+success carrying no offset, so no navigation writes that record, and the
+rebuild is not changed to render the pair as an absent key: doing so would
+refuse the three reachable shapes ingest stores the same way -- a null, a
+malformed and a non-finite offset, all of which the backplane stage builds
+products from.
+
+For every record the navigator wrote and ingest stored, everything a product is
+built from -- the mechanism, the matrices, the midtime, the offset -- is
+identical in the two paths, and so is every field the readers report about it.
+The index path logs the same per-image `IMAGE_LOGGER` warnings, with the same
+message shapes; where a message names the storage that was searched, it names
+the one that actually was.
 
 **`ResultsFilter`.** When a URL is given, the presence, absence, and error
 filters become one query per enumeration instead of a walk per volume plus
@@ -1440,11 +1468,13 @@ document yields `malformed_offset` via files and `null_offset` via the index);
 the recorded C-matrix and midtime round-tripping bit for bit on both backends;
 the same `IMAGE_LOGGER` warnings in the index path; a program handed an
 unopenable URL failing rather than falling back; a consumer refusing a root
-with no completed `ingest_runs` row; and a two-root fixture whose second root
-differs in the value under test, asserted from both sides so that no single row
-can satisfy both. Integration tests (marked `integration`): identical backplane
-and reprojection products for the same real, really-navigated, really-ingested
-images with and without an index, asserted exactly on the outputs.
+with no completed `ingest_runs` row; a mode that reads no navigation record --
+a dry run, a mosaic pass that skips reprojection -- not failing on an index it
+never asks; and a two-root fixture whose second root differs in the value under
+test, asserted from both sides so that no single row can satisfy both.
+Integration tests (marked `integration`): identical backplane and mosaic
+products for the same real, really-navigated, really-ingested images with and
+without an index, asserted exactly on the outputs.
 
 Details settled during execution:
 
@@ -1482,7 +1512,8 @@ Details settled during execution:
   reasons. The consequence is that `missing_offset_key` is unreachable through
   the index, and with it the backplane stage's refusal of a success-status
   record carrying no `offset` field: through an index that record is processed
-  on uncorrected pointing and counted, as the mosaic drivers already treat it.
+  and counted rather than refused, on whichever pointing the rest of it
+  supplies -- the recorded C-matrix when it carries a usable one.
 - **A rotation written as a 3x3 nesting is the one shape whose product
   differs.** The classifier accepts both that and the flat nine floats; ingest
   stores only the flat form, so a nested one becomes a NULL `cmatrix` beside a
@@ -1501,18 +1532,81 @@ Details settled during execution:
   `log_run_environment`** rather than directly, which is the one place a
   connection URL on a command line is masked and is what every other driver
   already does.
-- **The cloud-task workers differ in where their source is built**, each
-  following the structure it already had: the mosaic worker builds one at
-  startup, beside the results root it already precomputed there, because one
-  task holds many images; the backplane worker builds one per task, because it
-  already resolves its whole environment per task and one task is one image.
-  An index the backplane worker cannot open returns `unusable_results_db` in
-  the task result rather than raising, which is how that worker reports every
-  other environment failure.
-- **The shared test helpers that drive a program's own parser** moved from
-  `test_logging_argument_surface.py` into `tests/spindoctor/cli/program_parsers.py`,
-  because the results-db surface is asserted the same way and a second copy
-  would drift.
+- **Both cloud-task workers keep one source for the worker's lifetime**, and
+  both close it when the worker stops. One backplane task is one image and the
+  URL is the worker's own, identical for every task it is handed, so a source
+  built per task would pay a connection and two bookkeeping queries per image
+  in the stage whose purpose is removing one round trip per image. The
+  backplane worker builds its own lazily rather than at startup, because a
+  build that fails must still return `unusable_results_db` in the task result,
+  which is how that worker reports every other environment failure, and because
+  a failure that was remembered would leave a worker started during a moment's
+  outage refusing every task for the rest of its life.
+- **The shared test helpers that drive a program's own parser** live in
+  `tests/spindoctor/cli/conftest.py`, which is the narrowest scope covering
+  every module that asserts a command-line surface, and is where the project's
+  own testing rule puts shared test helpers.
+- **`status` is the document's own top-level field and nothing standing in for
+  it.** Ingest coalesced the top-level `status` with the copy inside
+  `navigation_result` before falling back to `unknown`, which made a
+  classification decision at ingest time: for a document naming no outcome of
+  its own beside a nested `success`, a record rebuilt from the row selected the
+  recorded C-matrix where the same record read as a file supplied no pointing
+  at all -- a product difference, and the sharpest possible falsification of
+  "the index-backed source classifies nothing itself". The fix belongs at
+  ingest, because a rebuild cannot reproduce a field the column already merged
+  away. The column now holds `'success'` exactly when the document's top-level
+  field does, which is the whole of what the ladder asks it; a document naming
+  no outcome still records `unknown`, which is what section 2.3 always said the
+  column held and what the user guide documents. The consequence for the
+  selection filters is that such a document no longer matches an error filter
+  under an index either, so it no longer diverges from the tree path, and the
+  divergence Phase 5 recorded for it is removed from that list.
+- **A field the row does not carry is rebuilt as an absent field, not a null
+  one**, `offset` excepted. The backplane stage reads `status_error` with a
+  default, so a rebuilt record carrying the key with a null value reported
+  `None` where the document reported `unknown` -- on every failed and
+  conflicted record, which write no such field at all. The `status` column is
+  NOT NULL, so its `unknown` is rendered back as the absent field it stands
+  for. `offset` keeps its null-valued key for the reason below.
+- **A `status: success` record carrying no `offset` field is the second record
+  class whose product differs**, and the plan and the module docstring now say
+  so. Through a document the backplane stage refuses it; through an index it
+  cannot be told from a null offset, so the stage applies the recorded C-matrix
+  and writes the product. The rebuild is not changed to render the absent pair
+  as an absent key: ingest stores an absent, null, malformed and non-finite
+  offset alike as NULL, and the last three are records the backplane stage
+  builds products from, so that rendering would refuse three reachable shapes
+  in order to agree about one that no navigation writes -- `NavResult` forbids
+  a success with no offset. Pinned by a test on both sides.
+- **A `pointing` block carrying only fields the index has no column for is
+  classified differently**, and is listed with the other stated differences. A
+  block holding only `camera_frame` leaves no trace in the row, so the index
+  reads `no_pointing_block` where the document reads
+  `no_cmatrix_rotation_fitted`. Same mechanism, same product, different tally.
+  Every block a navigation writes carries the baseline and both frame
+  identities.
+- **Both of a file-backed source's methods apply the same path rule.**
+  `read_record` joined the stub onto the root while `load_pointing` resolved it
+  through the guard that refuses null bytes, absolute fragments and `..`
+  escapes. One class applying two rules depending on which method was called is
+  the shape a traversal gets through; the guard is now shared, and a stub that
+  does not name a path under the root reads as no record for that image.
+- **The message for a record nobody holds names the storage that was
+  searched.** It named `nav_results_root` in both paths, which is untrue of an
+  index and hides the likelier of the two causes: an index is a snapshot of its
+  last ingest, so an absent row can mean the image was navigated since. One
+  message shape, one value naming what was searched, in both paths.
+- **Nothing from the database layer escapes the pointing seam either.** The
+  translation Phase 5 wrote for the selection seam is now shared rather than
+  copied, so a lost connection or an unreadable table is reported against the
+  image as a refusal naming the index, not as the database layer's own
+  exception type in the middle of a per-image catch-all.
+- **The modes that read no navigation record open no index.** `sd_backplanes
+  --dry-run` and `sd_mosaic --skip-reproject` and `--dry-run` looked nothing
+  up and yet failed on an index that would not open, which on a machine
+  exporting `NAV_RESULTS_DB` breaks invocations that worked before the variable
+  was set. Fail-early stays for every mode that does read a record.
 
 ### Phase 5 — Selection filters
 
@@ -1577,12 +1671,7 @@ Details settled during execution, none of them a change of intent:
      navigation document** is refused by ingest, so it records no status and
      matches no error filter, where the tree path reads `status` and
      `status_error` out of any JSON object it can parse.
-  3. A document whose top-level `status` is **absent, empty, or not a string**
-     takes its recorded status from `navigation_result.status`, which is where
-     the rest of the index reads an outcome from; the tree path reads the
-     top-level field alone. Such a document can therefore match an error filter
-     under the index and not under the tree.
-  4. A file that exists and has **no row at all** reads as absent, which is what
+  3. A file that exists and has **no row at all** reads as absent, which is what
      the absence filters read as "this image was never navigated". Three passes
      end that way: a file the pass could not retrieve; a document the pass read
      whose rows the database would not store (section 2.7's isolated write
@@ -1593,7 +1682,7 @@ Details settled during execution, none of them a change of intent:
      with the same query, handed back with the answer, and reported by
      `ResultsFilter` as a warning naming the root, which is the consumer section
      2.7 wrote that count for.
-  5. A document **the tree no longer holds** keeps its row and reads as present,
+  4. A document **the tree no longer holds** keeps its row and reads as present,
      so `--has-offset-file` hands on an image whose metadata file is gone and
      `--has-no-offset-file` skips one nothing has been written for. A row leaves
      the index only when a pass that listed the whole root does not find a file
@@ -1607,7 +1696,7 @@ Details settled during execution, none of them a change of intent:
      narrowing it to the directories a pass did list is a change to what a
      listing has to report about itself, which sits with the ingest phases and
      with the sharded pass that also prunes on partial evidence.
-  6. A document **rewritten in place, keeping the length and the modification
+  5. A document **rewritten in place, keeping the length and the modification
      time it had before,** is skipped by the incremental comparison
      (`_is_unchanged`, which has only `(mtime_ns, size_bytes)` and the summary
      flag to go on), so its row goes on recording what the document before it
@@ -1709,13 +1798,11 @@ add a column (increment the version). No issue numbers in any of it.
       so `--has-no-offset-file --has-png-file` is empty under one;
    2. a document the ingest refused, which is a file that exists but records no
       status;
-   3. a document whose outcome the index reads from `navigation_result.status`
-      and the tree reads from the top-level field alone;
-   4. an input the index holds nothing about because no pass could read or
+   3. an input the index holds nothing about because no pass could read or
       record it;
-   5. a document the tree no longer holds, whose row survives every pass that
+   4. a document the tree no longer holds, whose row survives every pass that
       did not list the whole root;
-   6. a document rewritten in place with the length and the modification time it
+   5. a document rewritten in place with the length and the modification time it
       had before, whose row goes on recording what the document before it said.
 
    Each carve-out is stated in the plan, in the module docstring, and in a test,
