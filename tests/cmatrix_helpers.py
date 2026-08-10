@@ -77,12 +77,22 @@ SYNTHETIC_STOP_ET = 100.5
 
 
 def synthetic_fov() -> oops.fov.FOV:
-    """Build the synthetic camera the hermetic C-matrix tests point."""
+    """Build the synthetic camera the hermetic C-matrix tests point.
+
+    Returns:
+        A flat square FOV of :data:`SHAPE` pixels at :data:`PIXEL_RAD` radians
+        each, whose boresight pixel maps to xy exactly ``(0, 0)``.
+    """
     return oops.fov.FlatFOV((PIXEL_RAD, PIXEL_RAD), SHAPE)
 
 
 def some_attitude() -> np.ndarray:
-    """Return an arbitrary, deliberately non-axis-aligned J2000-to-camera rotation."""
+    """Return an arbitrary, deliberately non-axis-aligned J2000-to-camera rotation.
+
+    Returns:
+        A 3x3 proper rotation, fixed across calls, whose every element is
+        nonzero so a dropped or transposed axis cannot pass unnoticed.
+    """
     ra, dec, twist = 0.7, -0.4, 1.9
     rot_z = np.array(
         [[np.cos(ra), np.sin(ra), 0.0], [-np.sin(ra), np.cos(ra), 0.0], [0.0, 0.0, 1.0]]
@@ -98,7 +108,7 @@ def some_attitude() -> np.ndarray:
 
 
 def synthetic_baseline(
-    cmatrix_original: np.ndarray, oops_from_spice: np.ndarray | None = None
+    cmatrix_original: np.ndarray, *, oops_from_spice: np.ndarray | None = None
 ) -> AttitudeBaseline:
     """Build a synthetic AttitudeBaseline around a given attitude and flip.
 

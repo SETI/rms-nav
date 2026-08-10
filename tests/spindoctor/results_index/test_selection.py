@@ -641,7 +641,7 @@ def test_a_failure_with_no_driver_message_reports_the_sentence_it_has(tmp_path: 
     url = sqlite_url_for(tmp_path / 'index.sqlite3')
     with (
         pytest.raises(ValueError, match='connection timed out'),
-        selection._reporting_a_failed_read(url),
+        selection.reporting_a_failed_read(url),
     ):
         raise _timed_out()
 
@@ -651,7 +651,7 @@ def test_a_failure_with_no_driver_message_does_not_report_the_word_none(tmp_path
     url = sqlite_url_for(tmp_path / 'index.sqlite3')
     with (
         pytest.raises(ValueError) as excinfo,
-        selection._reporting_a_failed_read(url),
+        selection.reporting_a_failed_read(url),
     ):
         raise _timed_out()
     assert 'None' not in str(excinfo.value)

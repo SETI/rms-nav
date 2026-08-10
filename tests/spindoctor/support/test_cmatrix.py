@@ -147,7 +147,7 @@ def test_cassini_style_flip_reproduces_the_offset_in_the_spice_convention() -> N
     fov = synthetic_fov()
     original = some_attitude()
     solution = _build_pointing_solution(
-        synthetic_baseline(original, _CASSINI_FLIP),
+        synthetic_baseline(original, oops_from_spice=_CASSINI_FLIP),
         fov,
         offset_px=_PLANTED_OFFSET,
         rotation_fitted=False,
@@ -289,7 +289,10 @@ def test_conjugation_direction_is_pinned_by_a_non_involutory_flip() -> None:
     flip = _quarter_turn_about_z()
     original = some_attitude()
     solution = _build_pointing_solution(
-        synthetic_baseline(original, flip), fov, offset_px=_PLANTED_OFFSET, rotation_fitted=False
+        synthetic_baseline(original, oops_from_spice=flip),
+        fov,
+        offset_px=_PLANTED_OFFSET,
+        rotation_fitted=False,
     )
     assert solution.cmatrix is not None
     recovered = offset_from_correction(
@@ -571,7 +574,7 @@ def test_attitude_baseline_refuses_a_nan_matrix_at_construction() -> None:
 def test_attitude_baseline_refuses_a_non_rotation_flip_at_construction() -> None:
     """The flip matrix is validated at construction alongside the attitude."""
     with pytest.raises(NavPointingError, match='oops_from_spice is not a proper rotation'):
-        synthetic_baseline(some_attitude(), np.diag([1.0, 1.0, 2.0]))
+        synthetic_baseline(some_attitude(), oops_from_spice=np.diag([1.0, 1.0, 2.0]))
 
 
 def test_pointing_solution_refuses_a_nan_corrected_matrix_at_construction() -> None:

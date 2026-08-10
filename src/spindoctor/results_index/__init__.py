@@ -21,6 +21,7 @@ Public API:
     FAILED_FILES     -- files that are not current-schema navigation documents
     SCHEMA_META      -- the single row stamping the schema version
     INGEST_RUNS      -- one row per ingest pass over one root
+    UNKNOWN_STATUS   -- the status a document that named no outcome is recorded with
     open_index       -- the only opener, with the version gate
     masked_url       -- a connection URL with any password in it hidden
     normalize_root_url    -- the one spelling of a results root
@@ -32,6 +33,7 @@ Public API:
     SPICE_STATUS_ERROR    -- the status_error the SPICE selection filters match
     ResultStubs           -- what a root holds, as a selection filter asks it
     read_result_stubs     -- one query answering an enumeration's selection filters
+    reporting_a_failed_read -- the one translation of a database failure into a refusal
 """
 
 from spindoctor.results_index.engine import masked_url, open_index
@@ -51,12 +53,14 @@ from spindoctor.results_index.schema import (
     SCHEMA_META,
     SCHEMA_VERSION,
     TECHNIQUES,
+    UNKNOWN_STATUS,
 )
 from spindoctor.results_index.selection import (
     FATAL_STATUS,
     SPICE_STATUS_ERROR,
     ResultStubs,
     read_result_stubs,
+    reporting_a_failed_read,
 )
 
 __all__ = [
@@ -70,6 +74,7 @@ __all__ = [
     'SCHEMA_VERSION',
     'SPICE_STATUS_ERROR',
     'TECHNIQUES',
+    'UNKNOWN_STATUS',
     'NewestPass',
     'ResultStubs',
     'ingested_roots',
@@ -78,5 +83,6 @@ __all__ = [
     'normalize_root_url',
     'open_index',
     'read_result_stubs',
+    'reporting_a_failed_read',
     'require_ingested_roots',
 ]

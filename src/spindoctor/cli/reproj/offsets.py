@@ -10,6 +10,19 @@ image, a malformed pointing block, or a record that fails the reader's
 gates).  This module serves both the mosaic drivers (``sd_mosaic`` and its
 cloud-task worker) and the backplane stage.
 
+:func:`select_pointing` is the whole classifier and takes a parsed record, so
+it is equally the classifier for a record that never was a file.  Which storage
+a program reads its records from is chosen by
+:mod:`spindoctor.cli.reproj.pointing_source`, and that module states the few
+places where a record rebuilt from an index row is classified differently from
+the document it was ingested from.
+
+Which values of a record are usable at all is not decided here either: that is
+:mod:`spindoctor.support.nav_record`, and the results index stores what those
+functions return.  The classifier therefore never has to ask whether the record
+in front of it came from a document or a row, because a value that reached it
+through a row is a value a document could have carried unchanged.
+
 Failing to load a pointing does not stop the product; it proceeds on the
 camera's uncorrected pointing, and the product it writes carries no sign of
 that.  So the fact is reported in both places, and the two say different
@@ -23,17 +36,21 @@ pointing block, a failed gate) is also warned to the run log here, since it
 means the same thing at every call site.  A cloud-task worker has no run
 log, so its caller returns the counts and a per-reason tally in the task
 result instead.
+
+One member of that reason vocabulary is not a degradation at all:
+``pool_already_corrected`` says the furnished kernels already answer the
+corrected attitude, so the observation is right and nothing was applied to it.
+It carries a reason because the tally is per reason and an outcome that is not
+the clean C-matrix application has to be nameable, not because there is
+anything short about it.
 """
 
 import enum
 import json
-import math
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-import numpy as np
 import oops
 from filecache import FCPath
 
@@ -52,7 +69,23 @@ from spindoctor.support.cmatrix import (
     validated_record_rotation,
 )
 from spindoctor.support.exceptions import NavPointingError
-from spindoctor.support.types import NDArrayAnyType, NDArrayFloatType
+
+# Which values of a record a reader can use at all is decided in one place, and
+# the results index stores what that place returns, so a record rebuilt from a
+# row supplies the pointing its document supplies.  Importing the domain rather
+# than restating it is what keeps the two from drifting apart.
+from spindoctor.support.nav_record import (
+    INVALID_OFFSET_TYPE,
+    MALFORMED_OFFSET,
+    MISSING_OFFSET_KEY,
+    NON_FINITE_OFFSET,
+    NULL_OFFSET,
+    finite_float,
+    record_offset,
+    record_rotation_matrix,
+    record_status,
+)
+from spindoctor.support.types import NDArrayFloatType
 
 # The degraded-selection reasons this module classifies, beyond the gate and
 # malformed-record reasons ``spindoctor.support.cmatrix`` stamps on its
@@ -61,7 +94,32 @@ from spindoctor.support.types import NDArrayAnyType, NDArrayFloatType
 # mission.
 NO_CMATRIX_ROTATION_FITTED = 'no_cmatrix_rotation_fitted'
 NO_POINTING_BLOCK = 'no_pointing_block'
-MISSING_OFFSET_KEY = 'missing_offset_key'
+
+NO_METADATA = 'no_metadata'
+"""Nothing recorded this image at all, however the records are stored."""
+
+NO_METADATA_MESSAGE = 'No navigation record for %s in %s; using uncorrected pointing.'
+"""What an image's log says when nothing recorded it.
+
+Shared by every way of looking a record up, so an image with no record reads the
+same in its log whether the records were sought as documents or as index rows.
+The second value names the storage that was searched, from
+:func:`storage_description`: "nothing ever navigated this image" and "the
+storage searched does not hold it yet" read alike, and which one it is can only
+be judged by someone who knows what was searched.
+"""
+
+
+def storage_description(nav_results_root: str | FCPath) -> str:
+    """Name the documents a record was sought among, for a message about not finding one.
+
+    Parameters:
+        nav_results_root: Root the navigator wrote its documents under.
+
+    Returns:
+        The phrase naming that storage.
+    """
+    return f'the navigation results under {nav_results_root}'
 
 
 class PointingMechanism(enum.Enum):
@@ -95,9 +153,6 @@ class PointingSelection:
             pointing nobody wanted is not missing.  The detailed account is in
             the image's log; this is the short form a run-level report and
             count use.
-        offset_key_present: Whether the record carries an ``offset`` key at
-            all.  A success-status record without one is defect-shaped; the
-            backplane caller raises on it while the mosaic callers count it.
     """
 
     mechanism: PointingMechanism
@@ -106,7 +161,6 @@ class PointingSelection:
     midtime_et: float | None
     offset: tuple[float, float] | None
     reason: str | None
-    offset_key_present: bool
 
 
 @dataclass(frozen=True)
@@ -129,7 +183,7 @@ class AppliedPointing:
     reason: str | None
 
 
-def _none_selection(reason: str | None) -> PointingSelection:
+def none_selection(reason: str | None) -> PointingSelection:
     """Build the selection for a record that supplies no pointing at all.
 
     Parameters:
@@ -145,11 +199,10 @@ def _none_selection(reason: str | None) -> PointingSelection:
         midtime_et=None,
         offset=None,
         reason=reason,
-        offset_key_present=False,
     )
 
 
-def _resolved_nav_metadata_path(
+def resolved_nav_metadata_path(
     nav_results_root: str | FCPath,
     image_file: ImageFile,
 ) -> FCPath | None:
@@ -157,6 +210,17 @@ def _resolved_nav_metadata_path(
 
     Rejects null bytes, absolute ``results_path_stub`` fragments, and any resolved
     path that escapes ``nav_results_root`` (e.g. ``..`` segments in ``stub``).
+    Every reader of a navigation document resolves its path through here, so one
+    rule decides which paths a results root may be read at rather than each
+    reader deciding for itself.
+
+    Parameters:
+        nav_results_root: Root the navigator wrote its documents under.
+        image_file: The image whose document is wanted.
+
+    Returns:
+        The resolved path, or None when the stub does not name one this root
+        may be read at, with the reason written to the image's log.
     """
     rel_name = f'{image_file.results_path_stub}_metadata.json'
     if '\x00' in rel_name:
@@ -185,75 +249,14 @@ def _resolved_nav_metadata_path(
     return candidate
 
 
-def _parse_nav_offset_pair(offset: object) -> tuple[float, float] | None:
-    """Parse ``offset`` from spindoctor metadata JSON into ``(dv, du)`` floats.
-
-    Returns:
-        A pair of floats on success, or ``None`` if ``offset`` is not a two-element
-        sequence (excluding strings/bytes) or values are not convertible to float.
-
-    Raises:
-        TypeError: If either element is a ``bool`` (booleans are not valid pixel offsets).
-        ValueError: If either element converts to a non-finite float (NaN or Infinity).
-    """
-    if offset is None or isinstance(offset, (str, bytes)):
-        return None
-    if not isinstance(offset, Sequence):
-        return None
-    if len(offset) != 2:
-        return None
-    try:
-        dv_raw, du_raw = offset[0], offset[1]
-    except (TypeError, ValueError, KeyError, IndexError):
-        return None
-    if isinstance(dv_raw, bool) or isinstance(du_raw, bool):
-        raise TypeError(f'Offset elements must not be bool; got dv={dv_raw!r}, du={du_raw!r}')
-    try:
-        dv = float(dv_raw)
-        du = float(du_raw)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(dv) or not math.isfinite(du):
-        raise ValueError(f'Offset elements must be finite floats; got dv={dv!r}, du={du!r}')
-    return dv, du
-
-
-def _classify_offset(
-    nav_metadata: dict[str, Any],
-) -> tuple[tuple[float, float] | None, str | None, bool]:
-    """Classify the record's ``offset`` field without logging anything.
-
-    Parameters:
-        nav_metadata: The parsed metadata record.
-
-    Returns:
-        Tuple of the parsed ``(dv, du)`` offset or None, the reason it is
-        unusable or None, and whether the ``offset`` key is present at all.
-    """
-    if 'offset' not in nav_metadata:
-        return None, MISSING_OFFSET_KEY, False
-    offset = nav_metadata['offset']
-    if offset is None:
-        return None, 'null_offset', True
-    try:
-        parsed = _parse_nav_offset_pair(offset)
-    except TypeError:
-        return None, 'invalid_offset_type', True
-    except ValueError:
-        return None, 'non_finite_offset', True
-    if parsed is None:
-        return None, 'malformed_offset', True
-    return parsed, None, True
-
-
 _OFFSET_REASON_MESSAGES = {
     MISSING_OFFSET_KEY: 'Nav metadata for %s has no offset field; using uncorrected pointing.',
-    'null_offset': 'Nav metadata for %s has null offset; using uncorrected pointing.',
-    'invalid_offset_type': (
+    NULL_OFFSET: 'Nav metadata for %s has null offset; using uncorrected pointing.',
+    INVALID_OFFSET_TYPE: (
         'Nav metadata for %s has invalid offset type; using uncorrected pointing.'
     ),
-    'non_finite_offset': 'Nav metadata for %s has non-finite offset; using uncorrected pointing.',
-    'malformed_offset': (
+    NON_FINITE_OFFSET: 'Nav metadata for %s has non-finite offset; using uncorrected pointing.',
+    MALFORMED_OFFSET: (
         'Nav metadata for %s has malformed offset field; using uncorrected pointing.'
     ),
 }
@@ -299,24 +302,35 @@ def _parse_pointing_values(
         return MALFORMED_POINTING
     if not isinstance(times, dict) or 'midtime_et' not in times:
         return MALFORMED_POINTING
-    midtime = times['midtime_et']
-    # ``float()`` is deliberately not used to coerce: it accepts text and
-    # booleans, and a NaN midtime would defeat the reader's midtime gate in
-    # both directions.
-    if isinstance(midtime, bool) or not isinstance(midtime, int | float):
+    # Read through the one function that decides which recorded numbers a
+    # reader can use: ``float()`` on its own accepts text and booleans, a NaN
+    # midtime would defeat the reader's midtime gate in both directions, and an
+    # integer of several hundred digits raises out of it.
+    midtime = finite_float(times['midtime_et'])
+    if midtime is None:
         return MALFORMED_POINTING
-    if not math.isfinite(float(midtime)):
-        return MALFORMED_POINTING
-    return cmatrix, cmatrix_original, float(midtime)
+    return cmatrix, cmatrix_original, midtime
 
 
 def _parse_record_rotation(value: Any, label: str) -> NDArrayFloatType:
-    """Read one recorded C-matrix, accepting only the shapes the schema writes.
+    """Read one recorded C-matrix as the one 3x3 matrix of numbers it denotes.
 
-    The metadata records a C-matrix as nine row-major floats; a 3x3 nesting is
-    also accepted.  Validation -- real numbers only, finite, a proper
-    orthonormal rotation -- is delegated to the reader's own validator so the
-    selection and the application refuse exactly the same records.
+    The matrix is assembled by the one function the results index stores
+    rotations through, so a matrix this accepts is a matrix that survives
+    ingest and one it refuses is stored as nothing.  Whether the matrix that
+    survives is a proper orthonormal rotation is delegated to the reader's own
+    validator, so the selection and the application refuse exactly the same
+    records.
+
+    A producer writes the nine values row-major and a 3x3 nesting of them
+    denotes the same nine, but what is accepted is every nesting an array
+    library reconciles into one 3x3 -- nine rows of one among them.  That is
+    deliberate and it is wider than the two written shapes: the recorded value
+    denotes exactly one matrix in any of them, and a reader that took the
+    typography for the value would classify a record by how its nine numbers
+    were bracketed.  The domain is stated once, in
+    :func:`~spindoctor.support.nav_record.record_rotation_matrix`, because the
+    store reads it through the same function.
 
     Parameters:
         value: The recorded value.
@@ -329,15 +343,13 @@ def _parse_record_rotation(value: Any, label: str) -> NDArrayFloatType:
         NavPointingError: with reason ``malformed_pointing`` when the value is
             unusable.
     """
-    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-        raise NavPointingError(f'{label} is not a sequence', reason=MALFORMED_POINTING)
-    # Annotated as an any-dtype array on purpose: ``np.asarray`` of a JSON
-    # sequence carries whatever dtype the record held, and the validator
-    # refuses the wrong ones rather than this coercing them away.
-    array: NDArrayAnyType = np.asarray(value)
-    if array.shape == (9,):
-        array = array.reshape(3, 3)
-    return validated_record_rotation(array, label)
+    matrix = record_rotation_matrix(value)
+    if matrix is None:
+        raise NavPointingError(
+            f'{label} is not one 3x3 matrix of finite real numbers',
+            reason=MALFORMED_POINTING,
+        )
+    return validated_record_rotation(matrix, label)
 
 
 def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> PointingSelection:
@@ -367,14 +379,15 @@ def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> Point
     Returns:
         The classified selection.
     """
-    status = nav_metadata.get('status')
+    status = record_status(nav_metadata)
     if status != 'success':
         IMAGE_LOGGER.warning(
             'Nav metadata for %s has status=%r; using uncorrected pointing.', subject, status
         )
-        return _none_selection('navigation_did_not_succeed')
+        return none_selection('navigation_did_not_succeed')
 
-    offset, offset_reason, offset_key_present = _classify_offset(nav_metadata)
+    classified_offset = record_offset(nav_metadata)
+    offset, offset_reason = classified_offset.pair, classified_offset.reason
     pointing_values = _parse_pointing_values(nav_metadata)
 
     if isinstance(pointing_values, tuple):
@@ -397,7 +410,6 @@ def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> Point
             midtime_et=midtime_et,
             offset=offset,
             reason=None,
-            offset_key_present=offset_key_present,
         )
 
     reason = pointing_values
@@ -424,7 +436,6 @@ def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> Point
             midtime_et=None,
             offset=offset,
             reason=reason,
-            offset_key_present=offset_key_present,
         )
 
     if reason == MALFORMED_POINTING:
@@ -442,7 +453,6 @@ def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> Point
         midtime_et=None,
         offset=None,
         reason=final_reason,
-        offset_key_present=offset_key_present,
     )
 
 
@@ -471,27 +481,28 @@ def load_pointing_if_any(
     """
     if nav_results_root is None:
         # Nothing was asked for, so nothing is missing.
-        return _none_selection(None)
+        return none_selection(None)
 
-    metadata_path = _resolved_nav_metadata_path(nav_results_root, image_file)
+    metadata_path = resolved_nav_metadata_path(nav_results_root, image_file)
     if metadata_path is None:
-        return _none_selection('unusable_metadata_path')
+        return none_selection('unusable_metadata_path')
 
     try:
         text = metadata_path.read_text()
     except FileNotFoundError:
         IMAGE_LOGGER.warning(
-            'nav_results_root provided but no metadata found for %s; using uncorrected pointing.',
+            NO_METADATA_MESSAGE,
             image_file.image_file_url,
+            storage_description(nav_results_root),
         )
-        return _none_selection('no_metadata')
+        return none_selection(NO_METADATA)
     except (OSError, UnicodeDecodeError) as exc:
         IMAGE_LOGGER.warning(
             'Could not read metadata for %s (%s); using uncorrected pointing.',
             image_file.image_file_url,
             exc,
         )
-        return _none_selection('unreadable_metadata')
+        return none_selection('unreadable_metadata')
 
     try:
         nav_metadata = json.loads(text)
@@ -501,7 +512,7 @@ def load_pointing_if_any(
             image_file.image_file_url,
             exc,
         )
-        return _none_selection('invalid_json')
+        return none_selection('invalid_json')
 
     if not isinstance(nav_metadata, dict):
         IMAGE_LOGGER.warning(
@@ -511,9 +522,9 @@ def load_pointing_if_any(
             type(nav_metadata).__name__,
             nav_metadata,
         )
-        return _none_selection('metadata_not_an_object')
+        return none_selection('metadata_not_an_object')
 
-    return select_pointing(nav_metadata, subject=str(image_file.image_file_url))
+    return select_pointing(nav_metadata, subject=image_file.image_file_url.as_posix())
 
 
 def apply_pointing_to_obs(

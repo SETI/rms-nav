@@ -98,7 +98,13 @@ from spindoctor.results_index.roots import (
 )
 from spindoctor.results_index.schema import FAILED_FILES, IMAGES
 
-__all__ = ['FATAL_STATUS', 'SPICE_STATUS_ERROR', 'ResultStubs', 'read_result_stubs']
+__all__ = [
+    'FATAL_STATUS',
+    'SPICE_STATUS_ERROR',
+    'ResultStubs',
+    'read_result_stubs',
+    'reporting_a_failed_read',
+]
 
 FATAL_STATUS = 'error'
 """Value of ``status`` that the error filters select on.
@@ -230,7 +236,7 @@ def _stub_query(
 
 
 @contextlib.contextmanager
-def _reporting_a_failed_read(url: str) -> Iterator[None]:
+def reporting_a_failed_read(url: str) -> Iterator[None]:
     """Report a database failure as the refusal every consumer already catches.
 
     :func:`~spindoctor.results_index.engine.open_index` goes to some length to
@@ -343,7 +349,7 @@ def read_result_stubs(
     matching_error: set[str] = set()
     engine = open_index(url)
     try:
-        with _reporting_a_failed_read(url), engine.connect() as connection:
+        with reporting_a_failed_read(url), engine.connect() as connection:
             require_ingested_roots(connection, [root_url], url=url)
             newest = newest_pass(connection, root_url)
             for stub, matches_error in connection.execute(query):

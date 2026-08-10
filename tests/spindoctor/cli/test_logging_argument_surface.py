@@ -12,15 +12,12 @@ actually meets rather than a reconstruction of it.
 """
 
 import argparse
-import asyncio
-import contextlib
-import importlib
 import re
 from pathlib import Path
 
 import pytest
 from filecache import FCPath
-from tests.spindoctor.cli.conftest import help_text
+from tests.spindoctor.cli.conftest import cloud_task_parser, help_text
 
 from spindoctor.cli.logging_args import add_logging_arguments
 
@@ -85,41 +82,6 @@ _CLOUD_TASK_DRIVERS = [
     'sd_mosaic_cloud_tasks',
     'sd_stats_ingest_cloud_tasks',
 ]
-
-
-def _cloud_task_parser(program: str) -> argparse.ArgumentParser:
-    """Return the parser a cloud-task driver builds for itself.
-
-    A cloud-task driver builds its parser inside ``async_main`` and hands it
-    straight to the worker, so the worker is intercepted to capture it rather
-    than started.
-
-    Parameters:
-        program: Dispatch module name under ``spindoctor.cli``.
-
-    Returns:
-        The parser the driver would have run with.
-    """
-    module = importlib.import_module(f'spindoctor.cli.{program}')
-    captured: dict[str, argparse.ArgumentParser] = {}
-
-    class _CapturedError(Exception):
-        """Raised to stop the driver once its parser has been seen."""
-
-    def _intercept(*args: object, **kwargs: object) -> None:
-        parser = kwargs.get('argparser')
-        assert isinstance(parser, argparse.ArgumentParser)
-        captured['parser'] = parser
-        raise _CapturedError
-
-    real_worker = module.Worker
-    module.Worker = _intercept  # type: ignore[attr-defined]
-    try:
-        with contextlib.suppress(_CapturedError):
-            asyncio.run(module.async_main())
-    finally:
-        module.Worker = real_worker  # type: ignore[attr-defined]
-    return captured['parser']
 
 
 def _logging_options_of(parser: argparse.ArgumentParser) -> list[str]:
@@ -242,7 +204,7 @@ def test_a_cloud_task_driver_has_no_logging_flags(program: str) -> None:
     Every flag configures a main logger a cloud task must not have, or a
     console it must not write to.
     """
-    assert _logging_options_of(_cloud_task_parser(program)) == []
+    assert _logging_options_of(cloud_task_parser(program)) == []
 
 
 # ---------------------------------------------------------------------------

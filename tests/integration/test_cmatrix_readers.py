@@ -31,7 +31,7 @@ import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -63,6 +63,9 @@ from spindoctor.cli.reproj.offsets import (  # noqa: E402  (guarded import)
     PointingMechanism,
     apply_pointing_to_obs,
     select_pointing,
+)
+from spindoctor.cli.reproj.pointing_source import (  # noqa: E402  (guarded import)
+    FilePointingSource,
 )
 from spindoctor.dataset.dataset import ImageFile, ImageFiles  # noqa: E402  (guarded import)
 from spindoctor.navigate_image_files import navigate_image_files  # noqa: E402  (guarded import)
@@ -757,19 +760,18 @@ def _run_backplanes(
     obs_class, image_files = _image_files_for(image_id)
     nav_root = FCPath(str(work)) / 'nav'
     bp_root = FCPath(str(work)) / 'bp'
-    (nav_root / f'{image_id}_metadata.json').parent.mkdir(parents=True, exist_ok=True)
     (nav_root / f'{image_id}_metadata.json').write_text(json.dumps(metadata))
     result = generate_backplanes_image_files(
         obs_class,
         image_files,
-        nav_results_root=nav_root,
+        pointing_source=FilePointingSource(nav_root),
         backplane_results_root=bp_root,
         write_output_files=True,
     )
     assert result['status'] == 'success'
-    fits_path = Path(str(bp_root)) / f'{image_id}_backplanes.fits'
+    product = bp_root / f'{image_id}_backplanes.fits'
     planes: dict[str, np.ndarray] = {}
-    with fits.open(fits_path) as hdul:
+    with fits.open(cast(Path, product.retrieve())) as hdul:
         for hdu in hdul[1:]:
             planes[str(hdu.name)] = np.asarray(hdu.data, np.float64)
     return str(result['pointing_source']), planes

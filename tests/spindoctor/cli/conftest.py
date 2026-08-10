@@ -6,21 +6,34 @@ run the real program over prepared trees.  The trees, and the guard that undoes
 what a run furnished into the process-global SPICE pool, are built here; the
 plain builders they use live in ``sd_create_ck_helpers``.
 
-:func:`help_text` is shared more widely: a program's command-line surface is
-asserted by running the program's own ``main`` with ``--help``, so what is
-tested is the surface a user meets rather than a reconstruction of it, and one
-spelling of that serves every module that asks.
+:func:`help_text` and :func:`cloud_task_parser` are shared more widely: a
+program's command-line surface is asserted against the parser the program
+builds for itself rather than against a reconstruction of it, and one spelling
+of that serves every module that asks.  An interactive program is run with
+``--help``, which is the surface a user meets; a cloud-task driver builds its
+parser inside ``async_main`` and hands it straight to the worker, so the worker
+is intercepted and the parser taken from it.
+
+So are the pieces that drive ``sd_backplanes`` and ``sd_mosaic`` through their
+own ``main`` over an empty enumeration -- the ``datasetless`` fixture,
+:func:`backplane_argv`, :func:`mosaic_argv` and :func:`run_program`.  Several
+modules assert what a run does around its per-image loop, and each of them has
+to exercise the order the program really works in rather than a restatement of
+it, so the command lines both programs are driven with live once here.
 
 Nothing here is autouse, so the other test packages under this directory are
 untouched.
 """
 
+import argparse
+import asyncio
 import contextlib
 import importlib
 import io
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import cspyce
 import pytest
@@ -46,6 +59,8 @@ from tests.spindoctor.cli.sd_create_ck_helpers import (
     write_metadata,
 )
 
+from spindoctor.cli import sd_backplanes, sd_mosaic
+
 
 def help_text(program: str, argv: list[str]) -> str:
     """Return what ``program --help`` prints.
@@ -68,6 +83,145 @@ def help_text(program: str, argv: list[str]) -> str:
     finally:
         sys.argv = saved
     return buffer.getvalue()
+
+
+def cloud_task_parser(program: str) -> argparse.ArgumentParser:
+    """Return the parser a cloud-task driver builds for itself.
+
+    Parameters:
+        program: Dispatch module name under ``spindoctor.cli``.
+
+    Returns:
+        The parser the driver would have run with.
+    """
+    module = importlib.import_module(f'spindoctor.cli.{program}')
+    captured: dict[str, argparse.ArgumentParser] = {}
+
+    class _CapturedError(Exception):
+        """Raised to stop the driver once its parser has been seen."""
+
+    def _intercept(*args: object, **kwargs: object) -> None:
+        parser = kwargs.get('argparser')
+        assert isinstance(parser, argparse.ArgumentParser)
+        captured['parser'] = parser
+        raise _CapturedError
+
+    real_worker = module.Worker
+    module.Worker = _intercept  # type: ignore[attr-defined]
+    try:
+        with contextlib.suppress(_CapturedError):
+            asyncio.run(module.async_main())
+    finally:
+        module.Worker = real_worker  # type: ignore[attr-defined]
+    return captured['parser']
+
+
+class _NoImages:
+    """A dataset that enumerates nothing and takes no selection arguments."""
+
+    def add_selection_arguments(self, parser: argparse.ArgumentParser) -> None:
+        """Add nothing: a run using this dataset selects no images.
+
+        Parameters:
+            parser: The program's parser.
+        """
+
+    def yield_image_files_from_arguments(self, arguments: argparse.Namespace) -> Iterator[Any]:
+        """Yield no images.
+
+        Parameters:
+            arguments: The parsed command line.
+
+        Yields:
+            Nothing.
+        """
+        return iter(())
+
+
+@pytest.fixture
+def datasetless(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace both consuming programs' dataset lookup with one enumerating nothing.
+
+    What is under test in the modules that ask for this is the order a program
+    does things in around its per-image loop, so the loop itself is emptied
+    rather than furnished with images and holdings.
+
+    Parameters:
+        monkeypatch: Patcher, which reverts after the test.
+    """
+    for module in (sd_backplanes, sd_mosaic):
+        monkeypatch.setattr(module, 'dataset_name_to_class', lambda _name: _NoImages)
+
+
+def backplane_argv(tmp_path: Path, results_db: str, *flags: str) -> list[str]:
+    """Return a backplane command line naming both roots and an index.
+
+    Parameters:
+        tmp_path: Directory the roots are placed under.
+        results_db: The value of ``--results-db``.
+        flags: Extra flags for the mode under test, which include the one
+            saying where the run's own logs go.
+
+    Returns:
+        The arguments, without the program name.
+    """
+    return [
+        'coiss_saturn',
+        '--nav-results-root',
+        (tmp_path / 'nav').as_posix(),
+        '--backplane-results-root',
+        (tmp_path / 'backplanes').as_posix(),
+        '--results-db',
+        results_db,
+        *flags,
+    ]
+
+
+def mosaic_argv(tmp_path: Path, results_db: str, *flags: str) -> list[str]:
+    """Return a ring-mosaic command line naming a root and an index.
+
+    Parameters:
+        tmp_path: Directory the roots are placed under.
+        results_db: The value of ``--results-db``.
+        flags: Extra flags for the mode under test, which include the one
+            saying where the run's own logs go.
+
+    Returns:
+        The arguments, without the program name.
+    """
+    return [
+        'rings',
+        'coiss_saturn',
+        '--nav-results-root',
+        (tmp_path / 'nav').as_posix(),
+        '--output-dir',
+        (tmp_path / 'out').as_posix(),
+        '--planet',
+        'SATURN',
+        '--radius-inner',
+        '74000',
+        '--radius-outer',
+        '140000',
+        '--radius-resolution',
+        '100',
+        '--longitude-resolution',
+        '0.1',
+        '--results-db',
+        results_db,
+        *flags,
+    ]
+
+
+def run_program(module: Any, argv: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run one program's ``main`` with the given command line.
+
+    Parameters:
+        module: The dispatch module.
+        argv: The arguments, without the program name.
+        monkeypatch: Patcher, used for ``sys.argv``.
+    """
+    monkeypatch.setattr('sys.argv', [module.__name__, *argv])
+    module.main()
 
 
 class _Furnished:

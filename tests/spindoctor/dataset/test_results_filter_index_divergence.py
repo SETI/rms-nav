@@ -7,7 +7,10 @@ tested in both directions -- what the tree answers and what the index answers --
 because what makes each a divergence is that the two differ, and an assertion
 about one of them alone would pass if the other silently changed to match.
 
-A member added to the enumeration is added here.
+A member added to the enumeration is added here.  One that stops being a
+divergence keeps its tests, asserting the agreement instead: what made it worth
+a test is that the two answers could differ, and that is as true of the answer
+that now matches as of the one that did not.
 """
 
 import os
@@ -154,9 +157,11 @@ def test_a_document_that_is_not_a_navigation_document_records_nothing_to_the_ind
 def _status_only_in_the_navigation_result(root: Path) -> list[ImageFile]:
     """Write a document whose outcome is recorded only under ``navigation_result``.
 
-    A document written by an older metadata schema is the plausible shape of
-    this: the outcome is there, in the place the rest of the index reads an
-    outcome from, and the top-level field the tree path reads is not.
+    The outcome is in the nested copy and the top-level field both paths read
+    is absent.  Neither path takes the nested copy for it, which is what keeps
+    the two agreeing, and is asserted here because a column that borrowed it
+    would be a classification made at ingest time -- an answer no reader of the
+    document could arrive at.
 
     Parameters:
         root: The results root to write into.
@@ -187,15 +192,17 @@ def test_a_status_only_in_the_navigation_result_matches_no_tree_error_filter(
     assert select_from(results_filter, images) == []
 
 
-def test_a_status_only_in_the_navigation_result_matches_the_index_error_filter(
+def test_a_status_only_in_the_navigation_result_matches_no_index_error_filter(
     tmp_path: Path,
 ) -> None:
-    """The recorded status falls back to the navigation result, so the index matches.
+    """And the index reads the same field, so it answers the same way.
 
-    This is one of the answers the index gives differently, pinned rather than
-    left to be discovered: the column the error filters read is the column the
-    whole index reads an outcome from, and it is written from whichever of the
-    two places the document put it.
+    The ``status`` column holds the document's own top-level field and nothing
+    standing in for it.  A column that fell back to the nested copy would match
+    an error filter here for a document that matches none in the tree, and --
+    since the pointing readers rebuild a record from these same columns -- would
+    apply a corrected attitude to an image whose document supplies no pointing
+    at all.
     """
     root = tmp_path / 'results'
     images = _status_only_in_the_navigation_result(root)
@@ -203,6 +210,22 @@ def test_a_status_only_in_the_navigation_result_matches_the_index_error_filter(
     ingest_tree(url, [root], logger=null_logger())
     results_filter = ResultsFilter(
         VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_error=True
+    )
+    assert select_from(results_filter, images) == []
+
+
+def test_a_status_only_in_the_navigation_result_is_still_a_row(tmp_path: Path) -> None:
+    """The control for the agreement above, which an uningested document passes.
+
+    The document is a navigation document and ingests; what it is not is a
+    document naming an outcome, so it matches no filter that names one.
+    """
+    root = tmp_path / 'results'
+    images = _status_only_in_the_navigation_result(root)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=null_logger())
+    results_filter = ResultsFilter(
+        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
     )
     assert select_from(results_filter, images) == [SPICE_ERROR]
 

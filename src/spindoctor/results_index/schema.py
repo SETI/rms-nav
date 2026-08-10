@@ -69,6 +69,13 @@ from typing import Any
 import sqlalchemy
 from sqlalchemy.dialects import postgresql
 
+# The ``status`` column is NOT NULL, so a document whose top-level ``status``
+# is absent, null, empty or not a string is recorded as naming no outcome.  The
+# value it is recorded as is the one every reader of that document reports for
+# it, and it is taken from there rather than restated here, so the column cannot
+# come to say something the readers do not.
+from spindoctor.support.nav_record import UNKNOWN_STATUS
+
 __all__ = [
     'FAILED_FILES',
     'FEATURE_SOURCES',
@@ -78,6 +85,7 @@ __all__ = [
     'SCHEMA_META',
     'SCHEMA_VERSION',
     'TECHNIQUES',
+    'UNKNOWN_STATUS',
 ]
 
 SCHEMA_VERSION = 6
@@ -87,6 +95,7 @@ Incremented by any change to the column set of any table, and by any change to
 the constraints over it.  A database stamped with a different version is refused
 rather than migrated.
 """
+
 
 # TEXT on SQLite, jsonb on PostgreSQL.  jsonb is the type PostgreSQL's array and
 # object accessors operate on, so a direct-SQL query against the index can reach
@@ -195,6 +204,12 @@ IMAGES = sqlalchemy.Table(
     # camera rotation, so both cases are stored as NULL.
     sqlalchemy.Column('start_et', sqlalchemy.Double),
     sqlalchemy.Column('stop_et', sqlalchemy.Double),
+    # Stored as the navigator recorded it, never recomputed from the shutter
+    # epochs beside it.  It is the epoch a recorded attitude belongs to, and a
+    # reader gates it against the observation's own midtime to a microsecond, so
+    # what the index has to carry is the value that was written rather than one
+    # that happens to agree with it for a particular producer's arithmetic.
+    sqlalchemy.Column('midtime_et', sqlalchemy.Double),
     sqlalchemy.Column('exposure_s', sqlalchemy.Double),
     sqlalchemy.Column('sclk_start', sqlalchemy.Text),
     sqlalchemy.Column('sclk_midtime', sqlalchemy.Text),

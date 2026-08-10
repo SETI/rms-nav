@@ -144,7 +144,7 @@ def test_the_reason_reaches_the_image_log(
 def test_a_missing_metadata_file_is_reported_to_the_image_log(tmp_path: Path) -> None:
     """An image with no navigation result says so in its own log."""
     _, log_text = _load_and_capture(FCPath(tmp_path) / 'nav', FCPath(tmp_path) / 'logs')
-    assert 'no metadata found' in log_text
+    assert 'No navigation record for' in log_text
 
 
 def test_unparsable_metadata_is_reported_to_the_image_log(tmp_path: Path) -> None:
