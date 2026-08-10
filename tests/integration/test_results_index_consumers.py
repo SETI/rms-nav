@@ -72,6 +72,7 @@ from spindoctor.obs import (  # noqa: E402  (guarded import)
 )
 from spindoctor.reproj.rings import (  # noqa: E402  (guarded import)
     RingMosaic,
+    RingMosaicData,
     RingReprojResult,
 )
 from spindoctor.results_index import (  # noqa: E402  (guarded import)
@@ -494,3 +495,79 @@ def test_the_ring_reprojection_populated_something(
 ) -> None:
     """A guard on the comparisons above, which two empty grids would satisfy."""
     assert int(np.count_nonzero(~np.ma.getmaskarray(ring_reprojections['file'].img))) > 0
+
+
+def _mosaicked(reprojection: RingReprojResult) -> RingMosaic:
+    """Accumulate one reprojection into a mosaic of its own.
+
+    A mosaic is what a run of ``sd_mosaic`` writes, and it is an accumulation
+    of reprojections rather than a second computation, so the comparison is
+    made on the assembled product as well as on what went into it.
+
+    Parameters:
+        reprojection: The reprojection to accumulate.
+
+    Returns:
+        The mosaic holding it.
+    """
+    mosaic = RingMosaic(
+        'SATURN',
+        _RING_RADIUS_INNER_KM,
+        _RING_RADIUS_OUTER_KM,
+        longitude_resolution=_RING_LONGITUDE_RESOLUTION_RAD,
+        radius_resolution=_RING_RADIUS_RESOLUTION_KM,
+    )
+    mosaic.add(reprojection)
+    return mosaic
+
+
+@pytest.fixture(scope='module')
+def ring_mosaics(ring_reprojections: dict[str, Any]) -> dict[str, RingMosaicData]:
+    """Assemble a mosaic from each source's reprojection, as a run would save it.
+
+    Parameters:
+        ring_reprojections: The two reprojections.
+
+    Returns:
+        The two mosaics, in the form ``sd_mosaic`` writes.
+    """
+    return {mode: _mosaicked(ring_reprojections[mode]).to_sparse() for mode in ('file', 'index')}
+
+
+def test_the_mosaics_cover_the_same_longitudes(ring_mosaics: dict[str, RingMosaicData]) -> None:
+    """The assembled products claim the same longitude columns."""
+    assert np.array_equal(
+        ring_mosaics['file'].longitude_antimask, ring_mosaics['index'].longitude_antimask
+    )
+
+
+def test_the_mosaics_hold_the_same_brightness(ring_mosaics: dict[str, RingMosaicData]) -> None:
+    """And the same value in every cell of them."""
+    assert np.array_equal(
+        ring_mosaics['file'].img.filled(np.nan),
+        ring_mosaics['index'].img.filled(np.nan),
+        equal_nan=True,
+    )
+
+
+def test_the_mosaics_claim_the_same_cells(ring_mosaics: dict[str, RingMosaicData]) -> None:
+    """And leave the same ones unclaimed."""
+    assert np.array_equal(
+        np.ma.getmaskarray(ring_mosaics['file'].img),
+        np.ma.getmaskarray(ring_mosaics['index'].img),
+    )
+
+
+def test_the_mosaics_name_the_same_contributing_images(
+    ring_mosaics: dict[str, RingMosaicData],
+) -> None:
+    """And record the same image behind the product."""
+    assert (
+        ring_mosaics['file'].contributing_image_names
+        == ring_mosaics['index'].contributing_image_names
+    )
+
+
+def test_the_mosaics_are_not_empty(ring_mosaics: dict[str, RingMosaicData]) -> None:
+    """A guard on the comparisons above, which two empty mosaics satisfy."""
+    assert int(np.count_nonzero(~np.ma.getmaskarray(ring_mosaics['file'].img))) > 0
