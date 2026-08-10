@@ -13,7 +13,11 @@ Neither implementation classifies anything itself.  The index-backed one rebuild
 the shape of the document from the row and hands it to the one classifier,
 :func:`spindoctor.cli.reproj.offsets.select_pointing`, so the two paths cannot
 disagree about which pointing a record supplies -- there is only one ladder, and
-it is the same code in both modes.
+it is the same code in both modes.  That holds only while the columns the
+rebuild reads say what the document's own fields said: the ladder's first
+question is whether the top-level ``status`` is ``success``, and a column
+answering it from anywhere else would be a classification made at ingest time,
+which no reader of the document could arrive at.
 
 What the rebuilt record carries
 -------------------------------
@@ -80,11 +84,14 @@ whichever reason describes the row that ingest actually wrote:
 |                                       | offset surfaces as ``null_offset``       |
 +---------------------------------------+------------------------------------------+
 
-Three further differences have no row of their own, because each is the same
+Four further differences have no row of their own, because each is the same
 record classified differently rather than one reason reported in place of
 another.  Each is a shape no navigation produces, and each is named here so that
 a record hand-built into a results tree is not read as agreeing when it does
-not:
+not.
+
+Two differ only in what the outcome is called, so a run-level tally counts the
+image under the other class and the product is the same:
 
 * A ``cmatrix`` ingest cannot store -- one that is not nine finite numbers --
   is ``malformed_pointing`` via files and ``no_cmatrix_rotation_fitted`` via
@@ -97,13 +104,16 @@ not:
 * A ``pointing`` block carrying none of the four fields the index has columns
   for -- one holding only ``camera_frame``, say -- is
   ``no_cmatrix_rotation_fitted`` via files and ``no_pointing_block`` via the
-  index, since the rebuilt record has no block to distinguish.  Same mechanism
-  and same product; a run-level tally counts the image under the other class.
-  The block a navigation writes always carries the baseline and both frame
-  identities, so this is a block none of them wrote.
+  index, since the rebuilt record has no block to distinguish.  The block a
+  navigation writes always carries the baseline and both frame identities, so
+  this is a block none of them wrote.
 
-The third differs in the *product* and not only in what it is called:
+Two differ in the *product* and not only in what it is called:
 
+* A ``cmatrix`` written as a 3x3 nesting -- a shape this module's classifier
+  accepts and the navigator never writes -- selects the C-matrix mechanism via
+  files and the offset via the index, so the two products are built on
+  different pointing.
 * A ``status: success`` record carrying no ``offset`` key at all is refused by
   the backplane stage via files, which raises rather than building geometry on
   a record shaped like a defect, and produces backplanes via the index, which
@@ -116,10 +126,7 @@ The third differs in the *product* and not only in what it is called:
   the pair as an absent key would refuse three reachable shapes to agree about
   one that is not.  No navigation writes it: a result carrying no offset is
   never a success, so a document whose status is ``success`` always carries
-  one.  (A ``cmatrix`` written as a 3x3 nesting -- a shape this module's
-  classifier accepts and the navigator never writes -- likewise selects the
-  C-matrix mechanism via files and the offset via the index, and their products
-  differ in the pointing they were built on.)
+  one.
 
 These are real behavioral differences and are stated rather than papered over.
 For every record the navigator wrote and ingest stored, everything a product is
