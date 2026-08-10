@@ -38,8 +38,8 @@ Each single-image result reports what happened: ``pointing_source`` is one
 of ``'cmatrix'``, ``'pool'``, ``'offset'``, or ``'none'``, joined by
 ``pointing_reason`` when the source is degraded and by
 ``uncorrected_pointing: true`` when it is ``'none'``. A success-status
-record with no ``offset`` key at all is defect-shaped and fails the task
-rather than degrading silently. For a result the kernel generator omitted
+record with no ``offset`` key at all is a recorded no-answer like a null one,
+counted under ``missing_offset_key``. For a result the kernel generator omitted
 from the corrected kernels (a BOTSIM-yielding WAC, or any image with an
 omission reason), the backplanes still carry that image's own recorded
 measurement — the authoritative product for it — while a kernel consumer
@@ -198,6 +198,13 @@ program; see :doc:`user_guide_logging`.
 An image whose navigation did not succeed is skipped and gets no backplanes.
 The run's log says which images those were, and reports the navigation status
 that caused each skip.
+
+One image that cannot be processed does not end the run. Backplane generation
+is per-image work, so a failure is reported against that image, counted, and
+the next image is attempted; the traceback goes into that image's own log. The
+pass ends with a summary line counting what became of every image::
+
+   Backplane pass complete: 143 done, 4 skipped, 1 failed
 
 Backplane Viewer GUI
 ====================

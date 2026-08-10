@@ -233,6 +233,10 @@ def main() -> None:
     # for want of a working index would fail it for something it never touches.
     if arguments.dry_run:
         for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
+            # The same batching the real loop requires: a dry run that reported
+            # a batch the real run would refuse would report a run that cannot
+            # happen.
+            assert len(imagefiles.image_files) == 1
             MAIN_LOGGER.info(
                 'Would process: %s', imagefiles.image_files[0].label_file_url.as_posix()
             )
@@ -242,11 +246,15 @@ def main() -> None:
     # fails the run here.  Falling back to reading files would turn a
     # misconfigured run into a slow, silently different one.
     pointing_source = build_pointing_source(nav_results_root, results_db_url=results_db_url)
+    n_done = 0
+    n_skipped = 0
+    n_failed = 0
     try:
         for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
             assert len(imagefiles.image_files) == 1
+            label_url = imagefiles.image_files[0].label_file_url.as_posix()
             try:
-                generate_backplanes_image_files(
+                result = generate_backplanes_image_files(
                     obs_class,
                     imagefiles,
                     pointing_source=pointing_source,
@@ -255,14 +263,30 @@ def main() -> None:
                     run_logging=run_logging,
                 )
             except FileNotFoundError as e:
-                MAIN_LOGGER.error(
-                    'Skipped due to missing metadata: %s (%s)',
-                    imagefiles.image_files[0].label_file_url.as_posix(),
-                    str(e),
-                )
+                # An expected outcome rather than a defect: nothing navigated
+                # this image, so there is nothing to build geometry from.
+                MAIN_LOGGER.error('Skipped due to missing metadata: %s (%s)', label_url, str(e))
+                n_skipped += 1
                 continue
+            except Exception as exc:
+                # Backplane generation is per-image work with no cross-image
+                # state, so one image's failure is that image's failure and not
+                # the run's.  The traceback is written into the image's own log
+                # by the stage itself where the failure got that far; the run's
+                # log names the image and what went wrong, or the only sign of
+                # it is a total that does not add up.
+                MAIN_LOGGER.error('Failed to generate backplanes for %s: %s', label_url, exc)
+                n_failed += 1
+                continue
+            if result['status'] == 'skipped':
+                n_skipped += 1
+            else:
+                n_done += 1
     finally:
         pointing_source.close()
+    MAIN_LOGGER.info(
+        'Backplane pass complete: %d done, %d skipped, %d failed', n_done, n_skipped, n_failed
+    )
 
 
 if __name__ == '__main__':
