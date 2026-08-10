@@ -97,7 +97,7 @@ carry the methodology and acceptance criteria):
 | WS-8 | #53, #67 | Output bundles for all four instruments (required). PDS4 input (#34) is availability-contingent and not required for completion. |
 | WS-9 | #233, #130, #176 | Measured star SNR + sensitivity tests (#233); constants inventory (#176); limiting magnitudes (#130). |
 | WS-10 | #150, #128 | Limb bias root cause and redesign. |
-| WS-12 | #93 | Instrument appendices. |
+| WS-12 | -- | Per-instrument guide chapters. Delivered; each instrument's workstream now updates its own pair. |
 | WS-13 | #234 (+ #153) | Detector-noise model for the I/F render path. |
 | WS-15 | #236, #103, #134, #126 | Thread safety, profiling, batch-parallel throughput. |
 | WS-18 | #232 (+ #28, #66 partial) | End-product accuracy checks. |
@@ -607,7 +607,7 @@ anything.
  *not* cleanly separable by their field dependence. Model the edge-dependent
  centroiding error explicitly (from the PSF map) and propagate its uncertainty
  rather than assuming it away. Then apply the distortion model per feature-position
- in WS-1 (above) and feed the field map into the WS-12 appendices.
+ in WS-1 (above) and feed the field map into the per-instrument chapters.
 - **Voyager / Galileo (zero star frames — the star route is impossible for exactly
  the most-distorted instruments):** there is no in-house way to validate
  distortion. **Adopt the published Voyager ISS / Galileo SSI geometric-distortion
@@ -910,21 +910,24 @@ implemented).
 
 **Dependencies:** WS-6. **Risk:** medium.
 
-### WS-12: Write the instrument appendices
-**Closes:** "the instrument appendices are empty."
-**Tracked by:** #93.
+### WS-12: Per-instrument guide chapters — delivered
 
-**Tasks.** Replace the four placeholder appendices
-(`user_guide_appendix_{coiss,gossi,nhlorri,vgiss}.rst`) with real content:
-required kernels, plate scale/FOV, PSF characteristics, geometric distortion
-(esp. Voyager), known artifacts (NAC haze/ghosts, LORRI), per-instrument config
-knobs and their defaults, and instrument-specific gotchas. Source the per-
-instrument numbers from the config files and the static-data citations.
+The four placeholder appendices are gone. Each instrument now has one chapter
+in `docs/user_guide/instruments/` and one in `docs/dev_guide/instruments/`,
+both copied from a `_template.rst` that fixes the section list, both discovered
+by a glob toctree, and both required by
+`tests/spindoctor/test_instrument_chapters.py`, which walks the instrument
+registry and fails on a missing chapter or a missing template section. The
+chapters carry what SpinDoctor decides, configures, measures or does
+differently per instrument; they deliberately do **not** restate the instrument
+teams' own optics, filter or plate-scale documentation, which the References
+section of each chapter points at instead.
 
-**Acceptance criteria.** Each appendix documents kernels, optics, distortion,
-artifacts, and the config knobs a user touches; none is a placeholder.
-
-**Dependencies:** light coupling to WS-9 (constant justifications). **Risk:** low.
+**Remaining work is per instrument, not per document.** Every value a chapter
+records as a placeholder or a nominal-optics derivation is closed by the
+workstream that measures it -- WS-9 for the limiting magnitudes and constants,
+WS-1 for the distortion field, WS-13 for the noise model -- and each of those
+updates the affected chapters in the same change.
 
 ---
 
@@ -1110,8 +1113,9 @@ survives reflow.
 - **WS-4** (CI) — WS-3 (+ WS-1 for the accuracy-regression gate).
 - **WS-5** (confidence) — WS-0, WS-1, WS-2.
 - **WS-6** (capability matrix) — light coupling to WS-8.
-- **WS-8 / WS-12** (PDS4 / appendices) — decision gates first. **WS-7** (Titan)
-  is delivered; its remaining issues are independent.
+- **WS-8** (PDS4) — decision gates first. **WS-7** (Titan) and **WS-12**
+  (per-instrument chapters) are delivered; their remaining issues are
+  independent.
 - **WS-9 / WS-10 / WS-13** (constants / limb bias / I/F) — WS-1 and/or WS-2.
 - **WS-15** (performance) — independent; start anytime.
 - **WS-18** (end-product accuracy) — WS-1b + WS-2 + WS-8.
@@ -1158,7 +1162,7 @@ common-mode/identifiability/bias caveats together are the honest result.
 | 5 | Mid-rewrite; docs ≠ code; vapor; dead config | WS-6 | test-verified capability matrix; docs/config reconciled |
 | 6a | Titan is a no-op | WS-7 | closed: haze solar-symmetry navigation implemented and validated on an 82-frame Cassini cohort to a stated 1 px cross-track / 3 px along-track bound, star-anchored |
 | 6b | PDS4 input absent; bundles Cassini-only | WS-8 | bundles schema-validate for all four instruments; input recorded as pending external archive availability |
-| 6c | Empty instrument appendices | WS-12 | all four appendices written |
+| 6c | Empty instrument appendices | WS-12 | closed: one user-guide and one dev-guide chapter per instrument, template-conformant and registry-enforced by test |
 | 7a | Covariance shaped by magic constants | WS-9 | each constant derived + sensitivity-bounded |
 | 7b | Star SNR fabricated from magnitude | WS-9 | measured-photometry SNR; covariance coverage passes |
 | 8 | Limb bias, fix disabled | WS-10 | bias ≤ target on real+mismatched data, fix enabled |

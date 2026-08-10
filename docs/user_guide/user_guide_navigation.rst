@@ -30,13 +30,15 @@ Supported Missions
 
 SpinDoctor supports multiple instruments, organized by dataset names you will pass on the command line. Dataset names are case-insensitive and map to instrument-specific handlers. The complete set is:
 
-* ``coiss`` and ``coiss_pds3`` — Cassini Imaging Science Subsystem (all volumes)
-* ``coiss_cruise`` and ``coiss_cruise_pds3`` — Cassini Imaging Science Subsystem (Cruise volumes 1001-1009)
-* ``coiss_saturn`` and ``coiss_saturn_pds3`` — Cassini Imaging Science Subsystem (Saturn volumes 2001-2116)
-* ``gossi`` and ``gossi_pds3`` — Galileo Solid State Imager
-* ``nhlorri`` and ``nhlorri_pds3`` — New Horizons Long Range Reconnaissance Imager
-* ``vgiss`` and ``vgiss_pds3`` — Voyager Imaging Science Subsystem
-* ``sim`` — simulated images
+* ``coiss`` and ``coiss_pds3`` — Cassini Imaging Science Subsystem (all volumes) — :doc:`instruments/cassini_iss`
+* ``coiss_cruise`` and ``coiss_cruise_pds3`` — Cassini Imaging Science Subsystem (Cruise volumes 1001-1009) — :doc:`instruments/cassini_iss`
+* ``coiss_saturn`` and ``coiss_saturn_pds3`` — Cassini Imaging Science Subsystem (Saturn volumes 2001-2116) — :doc:`instruments/cassini_iss`
+* ``gossi`` and ``gossi_pds3`` — Galileo Solid State Imager — :doc:`instruments/galileo_ssi`
+* ``nhlorri`` and ``nhlorri_pds3`` — New Horizons Long Range Reconnaissance Imager — :doc:`instruments/newhorizons_lorri`
+* ``vgiss`` and ``vgiss_pds3`` — Voyager Imaging Science Subsystem — :doc:`instruments/voyager_iss`
+* ``sim`` — simulated images (see :doc:`user_guide_simulated_images`)
+
+Each instrument's chapter carries the volumes it covers, which product is navigated, the image-name forms accepted, the units and thresholds it is judged against, and everything else that is true of that instrument and not of another. The shared chapters describe the mechanisms; the instrument chapters carry the values.
 
 Installation and Setup
 ======================
@@ -544,7 +546,10 @@ SpinDoctor generates two types of output files:
 Metadata Files (``*_metadata.json``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-These JSON files contain the navigation results, including:
+These JSON files contain the navigation results. The complete key-by-key
+specification -- every key, its type, its presence rules, the rounding
+policy, and one annotated example per document shape -- is the
+:doc:`user_guide_metadata` chapter; in summary they include:
 
 * ``observation`` — the image's identity: name, path, instrument, and
   ``camera`` (the camera that took it, e.g. ``NAC``). An image that fails to

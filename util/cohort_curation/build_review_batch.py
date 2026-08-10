@@ -104,7 +104,8 @@ def compose(rec: dict, out_path: Path, seq: int) -> None:
 
 
 # Review-batch size cap is 100 (operator, 2026-07-08); per-class caps keep
-# every class represented with headroom over the Phase-10 minima.
+# every class represented with headroom over the per-class minima in the
+# plans/COHORT_CURATION_PLAN.md appendix budget table.
 CLASS_CAPS = {
     'body_irregular': 15,
     'faint_stars': 10,

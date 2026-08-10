@@ -12,6 +12,8 @@ is kept alongside it. Histogram counts are shown on a logarithmic vertical
 axis so small populations remain visible against a dominant peak.
 """
 
+from __future__ import annotations
+
 from collections.abc import Callable
 
 import numpy as np
