@@ -365,9 +365,9 @@ def test_a_missing_offset_key_is_counted_not_fatal(
 ) -> None:
     """A batch pass survives one defect-shaped record and counts it.
 
-    The backplane stage raises on the same record class, because a
-    single-image task should fail loudly; a batch pass must not lose the
-    whole task to one bad record, so here it is a tally entry instead.
+    The record is a recorded no-answer like a null offset, and every consumer
+    treats it as one: the index cannot tell the two apart, so a consumer that
+    did would build one product from a document and another from its row.
     """
     nav_root = FCPath(tmp_path) / 'nav'
     Path((nav_root / 'COISS_2001').as_posix()).mkdir(parents=True, exist_ok=True)
@@ -385,15 +385,32 @@ def test_the_image_is_still_reprojected(tmp_path: Path, monkeypatch: pytest.Monk
     assert result['n_done'] == 1
 
 
-def test_asking_for_no_offsets_still_counts_uncorrected(
+def test_asking_for_no_offsets_counts_nothing_as_uncorrected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A run that never asked for offsets is still an uncorrected run.
+    """A task that asked for no pointing is missing none.
 
-    The count exists so a batch reprojected entirely on uncorrected pointing
-    is visible in the task result; deliberateness lives in the reason tally,
-    which stays empty because nothing was asked for and so nothing degraded.
+    The count is a shortfall: it says how many images wanted a recorded
+    pointing and did not get one.  A task given no navigation results root
+    wanted none, so counting every image of it would report a whole batch as
+    short of something nobody asked for, which is what a reader of the count
+    would act on.
     """
     result = _reproject_task_result(tmp_path, monkeypatch, nav_root=None)
-    assert result['n_uncorrected'] == 1
+    assert result['n_uncorrected'] == 0
+
+
+def test_asking_for_no_offsets_tallies_no_reason_either(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half: nothing was asked for, so nothing degraded."""
+    result = _reproject_task_result(tmp_path, monkeypatch, nav_root=None)
     assert 'pointing_reasons' not in result
+
+
+def test_asking_for_offsets_and_finding_none_does_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control for the two above, which a worker counting nothing would pass."""
+    result = _reproject_task_result(tmp_path, monkeypatch, nav_root=FCPath(tmp_path) / 'nav')
+    assert result['n_uncorrected'] == 1

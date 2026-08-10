@@ -143,9 +143,11 @@ def _run_reproject_pass(
         ``(n_done, n_skipped, n_failed, n_uncorrected)`` counts for the pass
         (dry-run does not increment ``n_done``; skipped-existing increments
         ``n_skipped``; an image whose reprojection raised increments
-        ``n_failed``; an image reprojected with no pointing correction at all
-        increments ``n_uncorrected``, and is counted in ``n_done`` as well
-        because it did produce a product).  Every degraded pointing outcome
+        ``n_failed``; an image whose recorded pointing was sought and not
+        applied increments ``n_uncorrected``, and is counted in ``n_done`` as
+        well because it did produce a product.  A pass given no navigation
+        results root sought no pointing, so none of its images is counted as
+        missing one).  Every degraded pointing outcome
         is also tallied per reason and the tally reported to the run log at
         the end of the pass, so a batch that quietly fell back -- to the
         offset path, to an already-corrected pool, or to no correction --
@@ -211,18 +213,18 @@ def _run_reproject_pass(
                         pointing_reasons[applied.reason] = (
                             pointing_reasons.get(applied.reason, 0) + 1
                         )
-                    # Counted outside the reason branch: a run configured
-                    # with no nav results root corrects nothing and carries
-                    # no reason, and an entirely-uncorrected batch is
-                    # exactly what this count exists to make visible.
-                    if applied.source == 'none':
+                    # A pointing was asked for and none was applied, which is
+                    # the shortfall this count exists to make visible.  A run
+                    # given no navigation results root at all asks for none
+                    # and carries no reason, and nothing it processed is
+                    # missing anything.
+                    if applied.source == 'none' and applied.reason is not None:
                         n_uncorrected += 1
-                        if applied.reason is not None:
-                            MAIN_LOGGER.warning(
-                                '%s: reprojecting with uncorrected pointing (%s)',
-                                image_file.image_file_url,
-                                applied.reason,
-                            )
+                        MAIN_LOGGER.warning(
+                            '%s: reprojecting with uncorrected pointing (%s)',
+                            image_file.image_file_url,
+                            applied.reason,
+                        )
 
                     img_label = (
                         args.image_name

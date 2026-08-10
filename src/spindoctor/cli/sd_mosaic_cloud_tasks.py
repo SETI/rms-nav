@@ -149,9 +149,11 @@ def process_task(
         ``n_failed``: an individual image is allowed to fail without failing
         the task, so the counts are what distinguish a task that reprojected
         its images from one that failed every one of them.  ``n_uncorrected``
-        counts images reprojected with no pointing correction at all: those
-        images do produce a product, and a batch registered entirely on
+        counts images whose recorded pointing was sought and not applied:
+        those images do produce a product, and a batch registered entirely on
         uncorrected pointing is otherwise indistinguishable from a good one.
+        A task given no navigation results root sought no pointing, so none of
+        its images is counted as missing one.
         Every degraded pointing outcome -- an offset fallback, an
         already-corrected pool, or no correction -- is tallied by reason
         under ``pointing_reasons``.  An image whose ``results_path_stub`` was
@@ -336,11 +338,12 @@ def process_task(
                         pointing_reasons[applied.reason] = (
                             pointing_reasons.get(applied.reason, 0) + 1
                         )
-                    # Counted outside the reason branch: a run configured with
-                    # no nav results root corrects nothing and carries no
-                    # reason, and an entirely-uncorrected batch is exactly
-                    # what this count exists to make visible.
-                    if applied.source == 'none':
+                    # A pointing was asked for and none was applied, which is
+                    # the shortfall this count exists to make visible.  A task
+                    # given no navigation results root at all asks for none and
+                    # carries no reason, and nothing it processed is missing
+                    # anything.
+                    if applied.source == 'none' and applied.reason is not None:
                         n_uncorrected += 1
 
                     img_label = (
