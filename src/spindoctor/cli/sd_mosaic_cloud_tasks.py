@@ -37,11 +37,7 @@ sys.path.insert(0, package_source_path)
 from spindoctor.cli.reproj.factories import build_body_mosaic, build_ring_mosaic
 from spindoctor.cli.reproj.offsets import apply_pointing_to_obs
 from spindoctor.cli.reproj.paths import per_image_output_path
-from spindoctor.cli.reproj.pointing_source import (
-    FilePointingSource,
-    PointingSource,
-    build_pointing_source,
-)
+from spindoctor.cli.reproj.pointing_source import PointingSource, build_pointing_source
 from spindoctor.cli.reproj.reproject import reproject_one_body, reproject_one_ring
 from spindoctor.config import (
     DEFAULT_CONFIG,
@@ -66,20 +62,32 @@ PROGRAM_NAME = SD_MOSAIC
 
 
 def _resolve_pointing_source(cli_args: argparse.Namespace) -> PointingSource:
-    """Return the source each task reads its navigation records through.
+    """Return the source one task reads its navigation records through.
+
+    Built inside the task, because the task is where it can be used.  The
+    framework runs every task in a process it spawns for that task alone and
+    hands it the worker's shared data by serializing it, so an open index put
+    on that data in the parent is a connection pool no task could receive and a
+    database engine no serializer can encode.  What crosses is the worker's
+    parsed command line, which is what both the root and the index are named
+    by.
 
     A reprojection worker is not required to have a navigation results root: one
     without it reprojects on uncorrected pointing, which is a choice rather than
     a shortfall, so an unresolvable root is not an error here.  A results index
     that was named and cannot be opened, or that has not ingested the root, is:
-    it fails the worker at startup rather than letting every task quietly read
-    files instead.
+    the task fails naming it rather than quietly reading files instead.
 
     Parameters:
         cli_args: The worker's parsed command line.
 
     Returns:
-        The source, held for the worker's lifetime.
+        The source, which the task closes when it is done with it.
+
+    Raises:
+        ValueError: If a named index cannot be opened, is not an index, was
+            written by another version of the schema, or has not fully ingested
+            this root.
     """
     try:
         nav_results_root_str: str | None = get_nav_results_root(cli_args, DEFAULT_CONFIG)
@@ -136,15 +144,18 @@ def process_task(
               :func:`spindoctor.cli.reproj.reproject.reproject_one_ring`.
         worker_data: The data for the worker (parsed CLI namespace in ``args``,
             which holds only ``config_file``, ``nav_results_root`` and
-            ``results_db``). After worker startup, ``pointing_source`` holds the
-            :class:`~spindoctor.cli.reproj.pointing_source.PointingSource` every
-            task reads its navigation records through; with none set, no
-            pointing is looked up at all.
+            ``results_db``).  Those three are what the task builds its
+            :class:`~spindoctor.cli.reproj.pointing_source.PointingSource` from;
+            with no navigation results root among them, no pointing is looked
+            up at all.
 
     Returns:
         Tuple of ``(retry, result)``. ``retry`` is always ``False``. ``result``
         is ``{'status': 'error', 'status_error': ...}`` (and optionally
-        ``status_exception``) when the task itself could not run.  Otherwise it
+        ``status_exception``) when the task itself could not run -- including
+        ``unusable_results_db`` when an index was named that cannot be opened or
+        has not ingested this root, which fails the task rather than letting it
+        reproject a whole batch on uncorrected pointing.  Otherwise it
         is ``{'status': 'success'}`` with ``n_done``, ``n_skipped`` and
         ``n_failed``: an individual image is allowed to fail without failing
         the task, so the counts are what distinguish a task that reprojected
@@ -175,13 +186,6 @@ def process_task(
 
     cli_args = cast(argparse.Namespace, worker_data.args)
     load_default_and_user_config(cli_args, DEFAULT_CONFIG)
-
-    # Built once at worker startup, because one task holds many images and an
-    # index-backed source opens a connection pool.  A worker started some other
-    # way has none, and then nothing is looked up at all -- which is what a
-    # reprojection run given no navigation results asks for.
-    started_source = cast(PointingSource | None, getattr(worker_data, 'pointing_source', None))
-    pointing_source = FilePointingSource(None) if started_source is None else started_source
 
     dataset_name = task_data.get('dataset_name')
     if dataset_name is None:
@@ -240,6 +244,19 @@ def process_task(
     else:
         mosaic = build_ring_mosaic(task_args)
 
+    # Opened here rather than at worker startup: the source cannot cross the
+    # boundary the framework spawns this task over, and a task that fell back
+    # to looking nothing up would reproject its whole batch on uncorrected
+    # pointing and report it as a clean one.
+    try:
+        pointing_source = _resolve_pointing_source(cli_args)
+    except ValueError as exc:
+        return False, {
+            'status': 'error',
+            'status_error': 'unusable_results_db',
+            'status_exception': str(exc),
+        }
+
     # A task has no run log to report these to, so they are counted and
     # returned: a task that skipped or failed every image would otherwise be
     # indistinguishable from one that reprojected them all.
@@ -250,130 +267,137 @@ def process_task(
     pointing_reasons: dict[str, int] = {}
     rejected_stubs: list[dict[str, str]] = []
 
-    for file in files:
-        if not isinstance(file, dict):
-            return False, {'status': 'error', 'status_error': 'invalid_file_entry_type'}
-        image_file_url = file.get('image_file_url', None)
-        label_file_url = file.get('label_file_url', None)
-        results_path_stub = file.get('results_path_stub', None)
-        index_file_row = file.get('index_file_row', None)
-        if index_file_row is not None and not isinstance(index_file_row, dict):
-            return False, {'status': 'error', 'status_error': 'invalid_index_file_row_type'}
-        index_row: dict[str, Any] = index_file_row if isinstance(index_file_row, dict) else {}
-        if image_file_url is None:
-            return False, {'status': 'error', 'status_error': 'no_image_file_url'}
-        if not isinstance(image_file_url, str):
-            return False, {'status': 'error', 'status_error': 'invalid_image_file_url'}
-        if label_file_url is None:
-            return False, {'status': 'error', 'status_error': 'no_label_file_url'}
-        if not isinstance(label_file_url, str):
-            return False, {'status': 'error', 'status_error': 'invalid_label_file_url'}
-        if results_path_stub is None:
-            return False, {'status': 'error', 'status_error': 'no_results_path_stub'}
-        if not isinstance(results_path_stub, str):
-            return False, {'status': 'error', 'status_error': 'invalid_results_path_stub'}
-        image_file = ImageFile(
-            image_file_url=FCPath(image_file_url),
-            label_file_url=FCPath(label_file_url),
-            results_path_stub=results_path_stub,
-            index_file_row=index_row,
-        )
-
-        out_path = per_image_output_path(
-            output_dir,
-            prefix,
-            image_file,
-            fmt=fmt,
-            subject_name=mosaic.body_name,
-        )
-
-        if not overwrite and out_path.exists():
-            MAIN_LOGGER.debug('Skipping (exists): %s', out_path)
-            n_skipped += 1
-            continue
-
-        try:
-            # The log path is not reported anywhere: a cloud task has no
-            # console to report it to, and naming the file inside itself tells
-            # a later reader nothing they did not have to know already.
-            local_handlers, _ = build_image_log_handlers(
-                'reproj',
-                f'{mosaic.body_name}/{image_file.results_path_stub}',
-                run_logging.sinks,
-                run_logging.levels,
-                timestamp=run_logging.timestamp,
+    try:
+        for file in files:
+            if not isinstance(file, dict):
+                return False, {'status': 'error', 'status_error': 'invalid_file_entry_type'}
+            image_file_url = file.get('image_file_url', None)
+            label_file_url = file.get('label_file_url', None)
+            results_path_stub = file.get('results_path_stub', None)
+            index_file_row = file.get('index_file_row', None)
+            if index_file_row is not None and not isinstance(index_file_row, dict):
+                return False, {'status': 'error', 'status_error': 'invalid_index_file_row_type'}
+            index_row: dict[str, Any] = index_file_row if isinstance(index_file_row, dict) else {}
+            if image_file_url is None:
+                return False, {'status': 'error', 'status_error': 'no_image_file_url'}
+            if not isinstance(image_file_url, str):
+                return False, {'status': 'error', 'status_error': 'invalid_image_file_url'}
+            if label_file_url is None:
+                return False, {'status': 'error', 'status_error': 'no_label_file_url'}
+            if not isinstance(label_file_url, str):
+                return False, {'status': 'error', 'status_error': 'invalid_label_file_url'}
+            if results_path_stub is None:
+                return False, {'status': 'error', 'status_error': 'no_results_path_stub'}
+            if not isinstance(results_path_stub, str):
+                return False, {'status': 'error', 'status_error': 'invalid_results_path_stub'}
+            image_file = ImageFile(
+                image_file_url=FCPath(image_file_url),
+                label_file_url=FCPath(label_file_url),
+                results_path_stub=results_path_stub,
+                index_file_row=index_row,
             )
-        except ValueError as exc:
-            # results_path_stub comes from task data; a stub that would put the
-            # log outside the log root is a bad entry rather than a retryable
-            # failure.  It fails its own image and the task carries on, because
-            # abandoning the batch would discard the images already reprojected
-            # and let one malformed entry cost the whole task.  Reported in the
-            # result rather than logged: the reason there is nowhere to write
-            # this image's log is precisely that its log path was refused.
-            rejected_stubs.append({'results_path_stub': results_path_stub, 'reason': str(exc)})
-            n_failed += 1
-            continue
 
-        try:
-            with IMAGE_LOGGER.open(
-                f'REPROJECT {image_file.image_file_url}',
-                handler=local_handlers,
-                level=run_logging.levels.image_section_level(),
-            ):
-                try:
-                    image_path = image_file.image_file_path.absolute()
-                    obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
+            out_path = per_image_output_path(
+                output_dir,
+                prefix,
+                image_file,
+                fmt=fmt,
+                subject_name=mosaic.body_name,
+            )
 
-                    selection = pointing_source.load_pointing(image_file)
-                    applied = apply_pointing_to_obs(
-                        cast(ObsSnapshotInst, obs),
-                        selection,
-                        subject=str(image_file.image_file_url),
-                    )
-                    if applied.reason is not None:
-                        # A task has no run log, so the tally is what carries
-                        # this out: a batch reprojected entirely on degraded
-                        # pointing looks exactly like a good one otherwise.
-                        pointing_reasons[applied.reason] = (
-                            pointing_reasons.get(applied.reason, 0) + 1
+            if not overwrite and out_path.exists():
+                MAIN_LOGGER.debug('Skipping (exists): %s', out_path)
+                n_skipped += 1
+                continue
+
+            try:
+                # The log path is not reported anywhere: a cloud task has no
+                # console to report it to, and naming the file inside itself tells
+                # a later reader nothing they did not have to know already.
+                local_handlers, _ = build_image_log_handlers(
+                    'reproj',
+                    f'{mosaic.body_name}/{image_file.results_path_stub}',
+                    run_logging.sinks,
+                    run_logging.levels,
+                    timestamp=run_logging.timestamp,
+                )
+            except ValueError as exc:
+                # results_path_stub comes from task data; a stub that would put the
+                # log outside the log root is a bad entry rather than a retryable
+                # failure.  It fails its own image and the task carries on, because
+                # abandoning the batch would discard the images already reprojected
+                # and let one malformed entry cost the whole task.  Reported in the
+                # result rather than logged: the reason there is nowhere to write
+                # this image's log is precisely that its log path was refused.
+                rejected_stubs.append({'results_path_stub': results_path_stub, 'reason': str(exc)})
+                n_failed += 1
+                continue
+
+            try:
+                with IMAGE_LOGGER.open(
+                    f'REPROJECT {image_file.image_file_url}',
+                    handler=local_handlers,
+                    level=run_logging.levels.image_section_level(),
+                ):
+                    try:
+                        image_path = image_file.image_file_path.absolute()
+                        obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
+
+                        selection = pointing_source.load_pointing(image_file)
+                        applied = apply_pointing_to_obs(
+                            cast(ObsSnapshotInst, obs),
+                            selection,
+                            subject=str(image_file.image_file_url),
                         )
-                    # A pointing was asked for and none was applied, which is
-                    # the shortfall this count exists to make visible.  A task
-                    # given no navigation results root at all asks for none and
-                    # carries no reason, and nothing it processed is missing
-                    # anything.
-                    if applied.source == 'none' and applied.reason is not None:
-                        n_uncorrected += 1
+                        if applied.reason is not None:
+                            # A task has no run log, so the tally is what carries
+                            # this out: a batch reprojected entirely on degraded
+                            # pointing looks exactly like a good one otherwise.
+                            pointing_reasons[applied.reason] = (
+                                pointing_reasons.get(applied.reason, 0) + 1
+                            )
+                        # A pointing was asked for and none was applied, which is
+                        # the shortfall this count exists to make visible.  A task
+                        # given no navigation results root at all asks for none and
+                        # carries no reason, and nothing it processed is missing
+                        # anything.
+                        if applied.source == 'none' and applied.reason is not None:
+                            n_uncorrected += 1
 
-                    img_label = (
-                        image_name_override
-                        if image_name_override is not None
-                        else image_file.image_file_path.stem
-                    )
-                    obs_inst = cast(ObsSnapshotInst, obs)
-                    result: BodyReprojResult | RingReprojResult
-                    if mode == 'body':
-                        result = reproject_one_body(
-                            obs_inst, cast(BodyMosaic, mosaic), image_name=img_label
+                        img_label = (
+                            image_name_override
+                            if image_name_override is not None
+                            else image_file.image_file_path.stem
                         )
-                    else:
-                        result = reproject_one_ring(
-                            obs_inst, task_args, cast(RingMosaic, mosaic), image_name=img_label
-                        )
+                        obs_inst = cast(ObsSnapshotInst, obs)
+                        result: BodyReprojResult | RingReprojResult
+                        if mode == 'body':
+                            result = reproject_one_body(
+                                obs_inst, cast(BodyMosaic, mosaic), image_name=img_label
+                            )
+                        else:
+                            result = reproject_one_ring(
+                                obs_inst, task_args, cast(RingMosaic, mosaic), image_name=img_label
+                            )
 
-                    if not no_write_output_files:
-                        out_path.parent.mkdir(parents=True, exist_ok=True)
-                        result.save(out_path)
-                        IMAGE_LOGGER.info('Saved reproj: %s', out_path)
-                    n_done += 1
-                except Exception:
-                    _log_image_exception('Error reprojecting %s', image_file.image_file_url)
-                    n_failed += 1
-        finally:
-            for handler in local_handlers:
-                if handler is not pdslogger.NULL_HANDLER:
-                    handler.close()
+                        if not no_write_output_files:
+                            out_path.parent.mkdir(parents=True, exist_ok=True)
+                            result.save(out_path)
+                            IMAGE_LOGGER.info('Saved reproj: %s', out_path)
+                        n_done += 1
+                    except Exception:
+                        _log_image_exception('Error reprojecting %s', image_file.image_file_url)
+                        n_failed += 1
+            finally:
+                for handler in local_handlers:
+                    if handler is not pdslogger.NULL_HANDLER:
+                        handler.close()
+
+    finally:
+        # An index-backed source holds a connection pool, and this task is
+        # the only thing that will ever hold it: the process it opened in
+        # ends with the task.
+        pointing_source.close()
 
     # No retry under any circumstances.  The status reports that the task ran,
     # not that every image in it reprojected; the counts say which.
@@ -397,10 +421,9 @@ async def async_main() -> None:
     Parses only ``--config-file``, ``--nav-results-root`` and ``--results-db``
     from ``sys.argv``; all other parameters (mode, output directory, mosaic
     geometry, etc.) are read per-task from ``task_data``. A single worker process
-    can therefore handle a queue that mixes ring and body tasks. Before the
-    worker starts, default and user config are loaded and
-    ``worker._data.pointing_source`` is built for tasks to read their navigation
-    records through.
+    can therefore handle a queue that mixes ring and body tasks. Default and
+    user config are loaded before the worker starts, so that the worker's own
+    command line is what every task resolves its roots and its index from.
     """
     argparser = argparse.ArgumentParser(
         prog='sd_mosaic_cloud_tasks',
@@ -441,17 +464,8 @@ async def async_main() -> None:
     )
 
     worker = Worker(process_task, args=sys.argv[1:], argparser=argparser)
-    init_cli_args = cast(argparse.Namespace, worker._data.args)
-    load_default_and_user_config(init_cli_args, DEFAULT_CONFIG)
-    # ``WorkerData`` has no typed field; ``process_task`` reads via ``getattr``.
-    pointing_source = _resolve_pointing_source(init_cli_args)
-    worker._data.pointing_source = pointing_source  # type: ignore[attr-defined]
-    try:
-        await worker.start()
-    finally:
-        # The source outlives every task, so nothing else can close it, and an
-        # index-backed one holds a connection pool open until it is.
-        pointing_source.close()
+    load_default_and_user_config(cast(argparse.Namespace, worker._data.args), DEFAULT_CONFIG)
+    await worker.start()
 
 
 def main() -> None:  # Required for setuptools entry points

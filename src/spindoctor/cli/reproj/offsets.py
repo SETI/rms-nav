@@ -306,7 +306,7 @@ def _parse_pointing_values(
 
 
 def _parse_record_rotation(value: Any, label: str) -> NDArrayFloatType:
-    """Read one recorded C-matrix, accepting only the shapes the schema writes.
+    """Read one recorded C-matrix as the one 3x3 matrix of numbers it denotes.
 
     The matrix is assembled by the one function the results index stores
     rotations through, so a matrix this accepts is a matrix that survives
@@ -314,6 +314,16 @@ def _parse_record_rotation(value: Any, label: str) -> NDArrayFloatType:
     survives is a proper orthonormal rotation is delegated to the reader's own
     validator, so the selection and the application refuse exactly the same
     records.
+
+    A producer writes the nine values row-major and a 3x3 nesting of them
+    denotes the same nine, but what is accepted is every nesting an array
+    library reconciles into one 3x3 -- nine rows of one among them.  That is
+    deliberate and it is wider than the two written shapes: the recorded value
+    denotes exactly one matrix in any of them, and a reader that took the
+    typography for the value would classify a record by how its nine numbers
+    were bracketed.  The domain is stated once, in
+    :func:`~spindoctor.support.nav_record.record_rotation_matrix`, because the
+    store reads it through the same function.
 
     Parameters:
         value: The recorded value.
@@ -329,7 +339,7 @@ def _parse_record_rotation(value: Any, label: str) -> NDArrayFloatType:
     matrix = record_rotation_matrix(value)
     if matrix is None:
         raise NavPointingError(
-            f'{label} is not nine finite real numbers, or a 3x3 nesting of them',
+            f'{label} is not one 3x3 matrix of finite real numbers',
             reason=MALFORMED_POINTING,
         )
     return validated_record_rotation(matrix, label)

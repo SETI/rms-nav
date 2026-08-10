@@ -392,17 +392,52 @@ def test_a_non_finite_entry_makes_the_matrix_unreadable(value: Any) -> None:
     assert record_rotation_matrix(value) is None
 
 
+def _rows_of_one(flat: list[Any]) -> list[list[Any]]:
+    """Rewrite nine row-major values as nine rows of one.
+
+    Parameters:
+        flat: The nine values, row-major.
+
+    Returns:
+        Nine rows of one, a nesting the assembly reconciles into the same 3x3.
+    """
+    return [[value] for value in flat]
+
+
 @pytest.mark.parametrize(
     'value',
-    [[True] * 9, [True, *_ROTATION[1:]], [[True, False, False], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]],
-    ids=['all', 'one-among-numbers', 'nested'],
+    [
+        [True] * 9,
+        [True, *_ROTATION[1:]],
+        [[True, False, False], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        _rows_of_one([True] * 9),
+        _rows_of_one([True, *_ROTATION[1:]]),
+        _rows_of_one(_rows_of_one([True, *_ROTATION[1:]])),
+        [
+            _rows_of_one([True, *_ROTATION[1:3]]),
+            _rows_of_one(_ROTATION[3:6]),
+            _rows_of_one(_ROTATION[6:9]),
+        ],
+    ],
+    ids=[
+        'all',
+        'one-among-numbers',
+        'nested',
+        'rows-of-one-all',
+        'rows-of-one-among-numbers',
+        'rows-of-one-nested-twice',
+        'three-rows-of-one-element-rows',
+    ],
 )
 def test_a_boolean_anywhere_in_a_matrix_is_read_as_nothing(value: Any) -> None:
     """The one element type an assembled array would silently make a number of.
 
     An array library promotes a boolean beside a number to that number's type,
     so a single ``True`` among eight floats would assemble into ``1.0`` and
-    nine of them into an identity rotation.
+    nine of them into an identity rotation.  Every nesting the assembly
+    reconciles into a 3x3 is covered, not only the two a record is written in:
+    the deeper ones hand a container to any test of an entry's own type, and
+    the promotion happens all the same.
 
     Parameters:
         value: The recorded value under test.

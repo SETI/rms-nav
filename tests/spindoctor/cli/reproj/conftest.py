@@ -197,8 +197,39 @@ HUGE_INT_MIDTIME_STUB = f'{VOLUME}/N130_1_CALIB'
 HUGE_INT_OFFSET_STUB = f'{VOLUME}/N131_1_CALIB'
 LITERAL_UNKNOWN_ERROR_STUB = f'{VOLUME}/N132_1_CALIB'
 REFUSED_DOCUMENT_STUB = f'{VOLUME}/N133_1_CALIB'
+ZERO_OFFSET_STUB = f'{VOLUME}/N134_1_CALIB'
+ZERO_EPOCH_STUB = f'{VOLUME}/N135_1_CALIB'
 UNNAVIGATED_STUB = f'{VOLUME}/N999_1_CALIB'
 """Stubs of the fixture tree; the last is deliberately never written."""
+
+ZERO_OFFSET = [0.0, 0.0]
+"""A navigated offset of exactly no pixels.
+
+A recorded value that is present and false at once, which is what separates
+asking whether a column holds a value from asking whether the value is true.
+The pair is applied like any other, so a rebuild that read it as no pair at all
+would build an offset-corrected product through the document and an uncorrected
+one through the row.
+"""
+
+ZERO_TIMES: dict[str, Any] = {
+    'start_et': 0.0,
+    'stop_et': 0.0,
+    'midtime_et': 0.0,
+    'exposure_s': 0.0,
+    'sclk_start': '1/0000000000.000',
+    'sclk_midtime': '1/0000000000.000',
+    'sclk_stop': '1/0000000000.000',
+}
+"""Exposure epochs at the J2000 epoch itself, every number among them a zero.
+
+``midtime_et`` is the one the pointing ladder cannot run without, so a rebuild
+that dropped a present zero would report a clean corrected attitude as a
+malformed pointing block.
+"""
+
+ZERO_FRAME_ID_POINTING: dict[str, Any] = {**POINTING, 'camera_frame_id': 0, 'ck_frame_id': 0}
+"""A complete pointing block whose two frame identities are recorded zeros."""
 
 REFUSED_DOCUMENT_REASON = 'no observation.instrument'
 """Why the ingest refuses the one document in the tree it cannot read.
@@ -439,6 +470,18 @@ def _reason_tree() -> dict[str, dict[str, Any]]:
             offset=OFFSET,
             times=TIMES,
             pointing=POINTING,
+        ),
+        # An offset of two zeros: a navigation that found the pointing already
+        # right records one, and it is a pair like any other.  Every column of
+        # the row it becomes holds a value that is false when it is read for
+        # its truth rather than for its presence.
+        ZERO_OFFSET_STUB: document(ZERO_OFFSET_STUB, offset=ZERO_OFFSET),
+        # And the same on the other half of the rebuild: exposure epochs at the
+        # J2000 epoch and frame identities of zero, beside a corrected attitude
+        # the ladder does apply.  A rebuild reading presence as truth loses the
+        # midtime and reports this record as a malformed pointing block.
+        ZERO_EPOCH_STUB: document(
+            ZERO_EPOCH_STUB, offset=OFFSET, times=ZERO_TIMES, pointing=ZERO_FRAME_ID_POINTING
         ),
     }
     # The two shapes of "no usable offset on a successful record" are made here

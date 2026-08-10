@@ -243,6 +243,16 @@ def _malformed_records() -> dict[str, dict[str, Any]]:
         'eight-elements': _record(cmatrix=good[:8], cmatrix_original=identity),
         'nan-element': _record(cmatrix=nan_matrix, cmatrix_original=identity),
         'bool-elements': _record(cmatrix=[True] * 9, cmatrix_original=identity),
+        # The same promotion one nesting deeper, which is where it survives a
+        # reader that judges the nine entries by their own type: the entries
+        # are containers, the assembled array is float64, and one ``True``
+        # among eight numbers reads as the ``1.0`` that completes an identity.
+        'bool-among-numbers-in-rows-of-one': _record(
+            cmatrix=[[True], *([value] for value in identity[1:])], cmatrix_original=identity
+        ),
+        'bool-among-numbers-in-the-baseline': _record(
+            cmatrix=good, cmatrix_original=[[True], *([value] for value in identity[1:])]
+        ),
         'str-elements': _record(cmatrix=[str(v) for v in good], cmatrix_original=identity),
         'not-a-rotation': _record(
             cmatrix=_flat(np.diag([1.0, 1.0, 2.0])), cmatrix_original=identity

@@ -9,7 +9,6 @@ import argparse
 import asyncio
 import os
 import sys
-import threading
 from typing import Any, cast
 
 from cloud_tasks.worker import Worker, WorkerData
@@ -39,55 +38,34 @@ PROGRAM_NAME = SD_BACKPLANES
 """Program identity: names the main log directory and the
 ``logging.programs`` configuration block for this program."""
 
-_POINTING_SOURCE_LOCK = threading.Lock()
-"""Serializes the one-time build of this worker's pointing source."""
 
-
-def _worker_pointing_source(
-    arguments: argparse.Namespace,
-    nav_results_root: FCPath,
-    worker_data: WorkerData,
+def _task_pointing_source(
+    arguments: argparse.Namespace, nav_results_root: FCPath
 ) -> PointingSource:
-    """Return the source this worker reads navigation records through.
+    """Return the source one task reads its navigation record through.
 
-    Built once and kept for the worker's lifetime rather than per task.  One
-    task is one image, and an index-backed source opened per task would pay a
-    connection, a schema-version query and an ingest-bookkeeping query for every
-    image -- several round trips each, in the stage whose whole purpose is
-    removing one.  The URL is the worker's own, identical for every task it is
-    handed, so there is nothing per-task for a per-task build to pick up.
-
-    A build that fails is not remembered, so a worker started while the index
-    was unreachable answers from it once it is reachable again instead of
-    failing for the rest of its life.
+    Built inside the task, because the task is where it can be used.  The
+    framework runs every task in a process it spawns for that task alone and
+    hands it the worker's shared data by serializing it, so an open index put
+    on that data in the parent is a connection pool no task could receive and a
+    database engine no serializer can encode.  What crosses is the worker's
+    parsed command line, which is what the index is named by.
 
     Parameters:
         arguments: The worker's parsed command line, which names the index.
         nav_results_root: Root the navigator wrote its documents under.
-        worker_data: The worker's shared data, which holds the built source.
 
     Returns:
-        The source, closed by ``async_main`` when the worker stops.
+        The source, which the task closes when it is done with it.
 
     Raises:
         ValueError: If a named index cannot be opened, is not an index, was
             written by another version of the schema, or has not fully ingested
             this root.
     """
-    existing = cast(PointingSource | None, getattr(worker_data, 'pointing_source', None))
-    if existing is not None:
-        return existing
-    with _POINTING_SOURCE_LOCK:
-        # Re-read under the lock: several tasks can reach an unbuilt source at
-        # once, and each would otherwise open an index the others then discard.
-        existing = cast(PointingSource | None, getattr(worker_data, 'pointing_source', None))
-        if existing is not None:
-            return existing
-        source = build_pointing_source(
-            nav_results_root, results_db_url=get_results_db_url(arguments, DEFAULT_CONFIG)
-        )
-        worker_data.pointing_source = source  # type: ignore[attr-defined]
-        return source
+    return build_pointing_source(
+        nav_results_root, results_db_url=get_results_db_url(arguments, DEFAULT_CONFIG)
+    )
 
 
 def process_task(
@@ -107,7 +85,14 @@ def process_task(
         ``unusable_results_db`` when an index was named that cannot be opened or
         has not ingested this root, which fails the task rather than falling
         back to reading files -- and otherwise reports whether the image was
-        processed or skipped.
+        processed or skipped.  One task is one image, so the ways that image
+        can fail are reported the same way: nothing recorded it is
+        ``no_navigation_record`` and a skip, and anything else -- a document
+        the ingest refused among them -- is ``backplanes_failed`` and an error.
+        Returned rather than raised, because an exception out of a task is
+        reported as a traceback with no reason a tally can count, and under
+        ``--retry-on-exception`` a refusal that will refuse identically next
+        time is retried.
     """
 
     arguments = cast(argparse.Namespace, worker_data.args)
@@ -171,7 +156,7 @@ def process_task(
     )
 
     try:
-        pointing_source = _worker_pointing_source(arguments, nav_results_root, worker_data)
+        pointing_source = _task_pointing_source(arguments, nav_results_root)
     except ValueError as exc:
         return False, {
             'status': 'error',
@@ -179,14 +164,36 @@ def process_task(
             'status_exception': str(exc),
         }
 
-    result = generate_backplanes_image_files(
-        obs_class,
-        ImageFiles(image_files=image_files),
-        pointing_source=pointing_source,
-        backplane_results_root=backplane_results_root,
-        write_output_files=True,
-        run_logging=run_logging,
-    )
+    try:
+        result = generate_backplanes_image_files(
+            obs_class,
+            ImageFiles(image_files=image_files),
+            pointing_source=pointing_source,
+            backplane_results_root=backplane_results_root,
+            write_output_files=True,
+            run_logging=run_logging,
+        )
+    except FileNotFoundError as exc:
+        # An expected outcome rather than a defect, and the same one the
+        # interactive driver counts as a skip: nothing navigated this image, so
+        # there is nothing to build geometry from.
+        return False, {
+            'status': 'skipped',
+            'status_error': 'no_navigation_record',
+            'status_exception': str(exc),
+        }
+    except Exception as exc:
+        # Everything else this image can fail on, a document the ingest refused
+        # among them.  That refusal is deliberately not the missing record
+        # above: the image was navigated and the index simply cannot say what
+        # it recorded, which is a fact an operator acts on differently.
+        return False, {
+            'status': 'error',
+            'status_error': 'backplanes_failed',
+            'status_exception': str(exc),
+        }
+    finally:
+        pointing_source.close()
 
     # Returned rather than only logged: an image can be skipped because its
     # navigation did not succeed, and a task has no run log to say so.
@@ -233,14 +240,7 @@ async def async_main() -> None:
     )
 
     worker = Worker(process_task, args=sys.argv[1:], argparser=argparser)
-    try:
-        await worker.start()
-    finally:
-        # The source outlives every task, so nothing else can close it, and an
-        # index-backed one holds a connection pool open until it is.
-        source = cast(PointingSource | None, getattr(worker._data, 'pointing_source', None))
-        if source is not None:
-            source.close()
+    await worker.start()
 
 
 def main() -> None:  # Required for setuptools entry points

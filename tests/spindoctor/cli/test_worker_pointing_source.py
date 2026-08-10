@@ -1,26 +1,32 @@
-"""How long a cloud-task worker's navigation-record source lives.
+"""How a cloud-task worker gets the source it reads navigation records through.
 
-One backplane task is one image, and the URL the source is built from is the
-worker's own command line, identical for every task it is handed.  Rebuilding
-the source per task would therefore buy nothing and cost, for an index-backed
-one, a connection and two bookkeeping queries per image -- in the stage whose
-purpose is removing one round trip per image.  So it is built once and kept.
+The framework runs each task in a process it spawns for that task and hands the
+task the worker's shared data by serializing it.  So a source built at worker
+startup is a source no task ever receives, and an index-backed one -- which
+holds a database engine and a connection pool -- cannot be serialized at all.
+Each task therefore builds its own from the worker's command line, which is
+what does cross, and closes it when it is done.
 
-A build that failed is deliberately not kept, because a worker started while
-the index was unreachable would otherwise answer nothing for the rest of its
-life.
+The failure that follows from getting this wrong is silent in exactly the way
+this phase exists to prevent: a task that could not obtain the source it was
+meant to use, and looked nothing up instead, reprojects its whole batch on
+uncorrected pointing and reports the same counts as one that applied every
+recorded attitude it was given.  So a named index that cannot be opened fails
+the task by name rather than degrading it.
 """
 
 import argparse
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from cloud_tasks.worker import WorkerData
 from filecache import FCPath
 
-from spindoctor.cli import sd_backplanes_cloud_tasks
-from spindoctor.cli.reproj.pointing_source import FilePointingSource
+from spindoctor.cli import sd_backplanes_cloud_tasks, sd_mosaic_cloud_tasks
+from spindoctor.cli.reproj.pointing_source import FilePointingSource, PointingSource
+
+_DATASET = 'COISS_saturn'
 
 
 class _StubWorkerData:
@@ -59,45 +65,205 @@ def _arguments(url: str | None) -> argparse.Namespace:
     return argparse.Namespace(results_db=url)
 
 
-def test_two_tasks_share_one_source(tmp_path: Path) -> None:
-    """The second task is answered by the source the first one built."""
-    worker = _worker_data()
-    first = sd_backplanes_cloud_tasks._worker_pointing_source(
-        _arguments(None), FCPath(tmp_path), worker
+def _absent_index(tmp_path: Path) -> str:
+    """Return a URL naming an index file that was never written.
+
+    Parameters:
+        tmp_path: Directory the named file would have been in.
+
+    Returns:
+        The URL.
+    """
+    return f'sqlite:///{(tmp_path / "nowhere" / "index.sqlite3").as_posix()}'
+
+
+class _StubMosaic:
+    """Stands in for a mosaic, which these tests do not need to build."""
+
+    body_name = 'SATURN'
+
+
+class _ClosedWhenTheTaskEnds:
+    """A source that records whether whoever took it gave it back."""
+
+    def __init__(self) -> None:
+        """Start out open."""
+        self.closed = False
+
+    def read_record(self, image_file: Any) -> dict[str, Any]:
+        """Answer for no image.
+
+        Parameters:
+            image_file: Ignored.
+
+        Returns:
+            Nothing; this is never reached.
+
+        Raises:
+            FileNotFoundError: Always.
+        """
+        raise FileNotFoundError('nothing recorded this image')
+
+    def load_pointing(self, image_file: Any) -> Any:
+        """Answer for no image.
+
+        Parameters:
+            image_file: Ignored.
+
+        Returns:
+            Nothing; this is never reached.
+
+        Raises:
+            FileNotFoundError: Always.
+        """
+        raise FileNotFoundError('nothing recorded this image')
+
+    def close(self) -> None:
+        """Record that the task released it."""
+        self.closed = True
+
+
+def _mosaic_task(tmp_path: Path, worker: WorkerData) -> tuple[bool, Any]:
+    """Run one reprojection task over an empty batch.
+
+    An empty batch reaches the source and nothing else, which is what these
+    assert on.
+
+    Parameters:
+        tmp_path: Directory the task writes under.
+        worker: The worker data the task reads its command line from.
+
+    Returns:
+        The driver's ``(retry, result)``.
+    """
+    return sd_mosaic_cloud_tasks.process_task(
+        'task-1',
+        {
+            'mode': 'rings',
+            'dataset_name': _DATASET,
+            'files': [],
+            'arguments': {'output_dir': FCPath(tmp_path).as_posix()},
+        },
+        worker,
     )
-    second = sd_backplanes_cloud_tasks._worker_pointing_source(
-        _arguments(None), FCPath(tmp_path), worker
+
+
+def _backplane_task(tmp_path: Path, worker: WorkerData) -> tuple[bool, Any]:
+    """Run one backplane task over an empty batch.
+
+    Parameters:
+        tmp_path: Directory the task writes under.
+        worker: The worker data the task reads its command line from.
+
+    Returns:
+        The driver's ``(retry, result)``.
+    """
+    return sd_backplanes_cloud_tasks.process_task(
+        'task-1', {'dataset_name': _DATASET, 'files': []}, worker
     )
-    assert second is first
 
 
-def test_the_source_outlives_the_task_that_built_it(tmp_path: Path) -> None:
-    """It is kept on the worker, which is what lets the next task find it."""
-    worker = _worker_data()
-    built = sd_backplanes_cloud_tasks._worker_pointing_source(
-        _arguments(None), FCPath(tmp_path), worker
-    )
-    assert getattr(worker, 'pointing_source', None) is built
-
-
-def test_a_worker_with_no_index_still_reads_documents(tmp_path: Path) -> None:
+def test_a_task_with_no_index_reads_documents(tmp_path: Path) -> None:
     """The default is unchanged: no URL means the documents, as it always does."""
-    worker = _worker_data()
-    built = sd_backplanes_cloud_tasks._worker_pointing_source(
-        _arguments(None), FCPath(tmp_path), worker
-    )
+    built = sd_backplanes_cloud_tasks._task_pointing_source(_arguments(None), FCPath(tmp_path))
     assert isinstance(built, FilePointingSource)
 
 
-def test_a_build_that_failed_is_not_kept(tmp_path: Path) -> None:
-    """A worker started while the index was down answers once it is back up.
-
-    Caching the failure would leave the worker refusing every task it is ever
-    handed, which for a long-lived worker turns a moment's outage into a lost
-    fleet member.
-    """
-    worker = _worker_data()
-    url = f'sqlite:///{(tmp_path / "nowhere" / "index.sqlite3").as_posix()}'
+def test_a_task_builds_its_source_from_the_workers_own_command_line(tmp_path: Path) -> None:
+    """Which is the one thing that crosses into the process a task runs in."""
+    url = _absent_index(tmp_path)
     with pytest.raises(ValueError, match='sd_stats_ingest'):
-        sd_backplanes_cloud_tasks._worker_pointing_source(_arguments(url), FCPath(tmp_path), worker)
-    assert getattr(worker, 'pointing_source', None) is None
+        sd_backplanes_cloud_tasks._task_pointing_source(_arguments(url), FCPath(tmp_path))
+
+
+@pytest.mark.parametrize('driver', ['backplanes', 'mosaic'])
+def test_an_index_that_cannot_be_opened_fails_the_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, driver: str
+) -> None:
+    """Both drivers refuse rather than degrade, and they refuse the same way.
+
+    Parameters:
+        tmp_path: Directory the task writes under.
+        monkeypatch: Fixture used to stub the mosaic factory.
+        driver: Which of the two drivers is under test.
+    """
+    monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_ring_mosaic', lambda *a, **k: _StubMosaic())
+    worker = _worker_data(
+        nav_results_root=FCPath(tmp_path).as_posix(),
+        backplane_results_root=FCPath(tmp_path).as_posix(),
+        results_db=_absent_index(tmp_path),
+    )
+    run = _backplane_task if driver == 'backplanes' else _mosaic_task
+    _, result = run(tmp_path, worker)
+    assert result['status_error'] == 'unusable_results_db'
+
+
+@pytest.mark.parametrize('driver', ['backplanes', 'mosaic'])
+def test_such_a_task_is_not_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, driver: str
+) -> None:
+    """A URL that will not open will not open on the next attempt either.
+
+    Parameters:
+        tmp_path: Directory the task writes under.
+        monkeypatch: Fixture used to stub the mosaic factory.
+        driver: Which of the two drivers is under test.
+    """
+    monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_ring_mosaic', lambda *a, **k: _StubMosaic())
+    worker = _worker_data(
+        nav_results_root=FCPath(tmp_path).as_posix(),
+        backplane_results_root=FCPath(tmp_path).as_posix(),
+        results_db=_absent_index(tmp_path),
+    )
+    run = _backplane_task if driver == 'backplanes' else _mosaic_task
+    retry, _ = run(tmp_path, worker)
+    assert retry is False
+
+
+@pytest.mark.parametrize('driver', ['backplanes', 'mosaic'])
+def test_the_refusal_names_what_would_have_written_the_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, driver: str
+) -> None:
+    """An operator reading the task result has to know what to fix.
+
+    Parameters:
+        tmp_path: Directory the task writes under.
+        monkeypatch: Fixture used to stub the mosaic factory.
+        driver: Which of the two drivers is under test.
+    """
+    monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_ring_mosaic', lambda *a, **k: _StubMosaic())
+    worker = _worker_data(
+        nav_results_root=FCPath(tmp_path).as_posix(),
+        backplane_results_root=FCPath(tmp_path).as_posix(),
+        results_db=_absent_index(tmp_path),
+    )
+    run = _backplane_task if driver == 'backplanes' else _mosaic_task
+    _, result = run(tmp_path, worker)
+    assert 'sd_stats_ingest' in result['status_exception']
+
+
+@pytest.mark.parametrize('driver', ['backplanes', 'mosaic'])
+def test_the_task_closes_the_source_it_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, driver: str
+) -> None:
+    """Nothing outlives the task to close it, and an index-backed one pools connections.
+
+    Parameters:
+        tmp_path: Directory the task writes under.
+        monkeypatch: Fixture used to stub the source and the mosaic factory.
+        driver: Which of the two drivers is under test.
+    """
+    monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_ring_mosaic', lambda *a, **k: _StubMosaic())
+    source = _ClosedWhenTheTaskEnds()
+    module = sd_backplanes_cloud_tasks if driver == 'backplanes' else sd_mosaic_cloud_tasks
+    monkeypatch.setattr(
+        module, 'build_pointing_source', lambda *a, **k: cast(PointingSource, source)
+    )
+    worker = _worker_data(
+        nav_results_root=FCPath(tmp_path).as_posix(),
+        backplane_results_root=FCPath(tmp_path).as_posix(),
+        results_db=None,
+    )
+    run = _backplane_task if driver == 'backplanes' else _mosaic_task
+    run(tmp_path, worker)
+    assert source.closed

@@ -102,6 +102,14 @@ the ingest recorded, so the remedy — fix the document and ingest that root
 again, or run without ``--results-db`` — is visible from the run log. The rest
 of the pass continues; only that image is lost.
 
+Under ``sd_backplanes_cloud_tasks`` each of those outcomes is reported in the
+task result rather than in a run log, because a cloud task has none: an
+unusable index is ``unusable_results_db``, an image nothing navigated is a
+skip named ``no_navigation_record``, and every other way one image can fail —
+a document the ingest refused among them — is ``backplanes_failed``. All three
+are returned rather than raised, so a queue configured to retry on an
+exception does not retry a refusal that will refuse identically.
+
 Examples
 --------
 

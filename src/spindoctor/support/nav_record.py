@@ -209,6 +209,24 @@ def record_offset(nav_metadata: dict[str, Any]) -> RecordOffset:
     return RecordOffset(pair=(dv, du), reason=None)
 
 
+def _records_booleans(entry: Any) -> bool:
+    """Whether one recorded entry is a boolean, or is written wholly of them.
+
+    Parameters:
+        entry: One of the nine entries, exactly as it was recorded.
+
+    Returns:
+        True when the entry on its own assembles into an array of boolean
+        kind, which a bare ``True`` and every nesting of nothing but booleans
+        does.  An entry no array can be made of at all is not one of those; the
+        assembly of the nine refuses it.
+    """
+    try:
+        return bool(np.asarray(entry).dtype.kind == 'b')
+    except ValueError:
+        return False
+
+
 def _nine_recorded_entries(value: Any) -> list[Any] | None:
     """Read the nine entries a recorded rotation is written as, uncoerced.
 
@@ -218,11 +236,14 @@ def _nine_recorded_entries(value: Any) -> list[Any] | None:
     Returns:
         The nine entries in row-major order, exactly as they were recorded, or
         None when the value is neither nine entries nor a 3x3 nesting of them,
-        or when any entry is a boolean.  Booleans are refused on the entry
-        rather than on the assembled array, because ``numpy`` promotes a
-        boolean beside a number to that number's type: a single ``True`` among
-        eight floats would otherwise assemble into a float array and read as
-        ``1.0``.
+        or when any entry is written wholly of booleans.  Booleans are refused
+        one entry at a time rather than on the nine assembled together, because
+        ``numpy`` promotes a boolean beside a number to that number's type: a
+        single ``True`` among eight floats would otherwise assemble into a
+        float array and read as ``1.0``.  The question is asked of the array
+        each entry makes rather than of the entry's own Python type, because an
+        entry is a container in every nesting deeper than the two a record is
+        written in, and a type test walks straight past those.
     """
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         return None
@@ -234,7 +255,7 @@ def _nine_recorded_entries(value: Any) -> list[Any] | None:
         entries = [entry for row in entries for entry in row]
     if len(entries) != 9:
         return None
-    if any(isinstance(entry, bool) for entry in entries):
+    if any(_records_booleans(entry) for entry in entries):
         return None
     return entries
 
@@ -245,7 +266,11 @@ def record_rotation_matrix(value: Any) -> NDArrayFloatType | None:
     A record writes a rotation as nine row-major values, and a 3x3 nesting of
     them is read as the same nine.  Either shape is then assembled into one 3x3
     array, which accepts any further nesting an array library can reconcile
-    into that shape -- nine one-element rows among them.
+    into that shape -- nine one-element rows among them.  That the accepted
+    domain is wider than the two written shapes is deliberate: the recorded
+    value denotes exactly one matrix in every one of them, and a reader that
+    refused one of the denoting shapes while applying another would classify a
+    record by how its nine numbers were bracketed rather than by what they say.
 
     This is the whole of what "a recorded matrix a reader can evaluate" means,
     for the reader that applies one and for the store that holds one alike.

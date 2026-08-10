@@ -16,12 +16,14 @@ the two directions of the same assertion cannot both be satisfied by one row.
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pdslogger
 import pytest
+import sqlalchemy
 from filecache import FCPath
+from sqlalchemy.engine import Engine
 from tests.spindoctor.cli.reproj.conftest import (
     BOOLEAN_OFFSET_STUB,
     CAMERA_FRAME_ONLY_STUB,
@@ -65,6 +67,8 @@ from tests.spindoctor.cli.reproj.conftest import (
     TIMES,
     UNNAVIGATED_STUB,
     UNSTORABLE_CMATRIX_ALONE_STUB,
+    ZERO_EPOCH_STUB,
+    ZERO_OFFSET_STUB,
     build_tree,
     document,
     image_file,
@@ -121,6 +125,8 @@ _SAME_REASON = [
     (SUCCESS_NO_OFFSET_KEY_STUB, None),
     (NUMERIC_STRING_OFFSET_STUB, 'no_pointing_block'),
     (HUGE_INT_MIDTIME_STUB, 'malformed_pointing'),
+    (ZERO_OFFSET_STUB, 'no_pointing_block'),
+    (ZERO_EPOCH_STUB, None),
     (UNNAVIGATED_STUB, 'no_metadata'),
 ]
 
@@ -161,6 +167,8 @@ def test_both_paths_report_the_same_reason(
         (UNSTORABLE_CMATRIX_ALONE_STUB, PointingMechanism.OFFSET),
         (FLOAT_FRAME_ID_STUB, PointingMechanism.OFFSET),
         (LITERAL_UNKNOWN_STATUS_STUB, PointingMechanism.NONE),
+        (ZERO_OFFSET_STUB, PointingMechanism.OFFSET),
+        (ZERO_EPOCH_STUB, PointingMechanism.CMATRIX),
         (UNNAVIGATED_STUB, PointingMechanism.NONE),
     ],
 )
@@ -178,6 +186,7 @@ _SAME_OFFSET: list[tuple[str, tuple[float, float] | None]] = [
     (OVER_LONG_OFFSET_STUB, None),
     (SUCCESS_NO_OFFSET_KEY_STUB, None),
     (CMATRIX_STUB, (OFFSET[0], OFFSET[1])),
+    (ZERO_OFFSET_STUB, (0.0, 0.0)),
 ]
 
 
@@ -280,6 +289,62 @@ def test_the_recorded_midtime_survives_exactly(
     stored value no room to be nearly right.
     """
     assert _selection(sources, mode, CMATRIX_STUB).midtime_et == MIDTIME_ET
+
+
+# ---------------------------------------------------------------------------
+# A recorded value that is present and false
+# ---------------------------------------------------------------------------
+#
+# The rebuild asks of every column whether the row carries a value, and every
+# such question has a spelling that asks instead whether the value is true.
+# The two agree for every record whose numbers happen to be non-zero, which is
+# all of them above.  A recorded zero is what separates them, and it separates
+# them in the product rather than in the reason: an offset of two zeros becomes
+# no offset at all, and a midtime at the J2000 epoch becomes a pointing block
+# with no epoch to gate against.
+
+
+@pytest.mark.parametrize('mode', ['file', 'index'])
+def test_a_recorded_offset_of_two_zeros_is_a_pair_in_both_paths(
+    sources: dict[str, PointingSource], mode: str
+) -> None:
+    """An offset of no pixels is an offset, not the absence of one.
+
+    A navigation whose image was already pointed correctly records exactly
+    this, and a rebuild that read the pair for its truth would render it as
+    null: the row would then be counted under ``null_offset`` and reprojected
+    uncorrected while the document was reprojected on the pair it recorded.
+    """
+    assert _selection(sources, mode, ZERO_OFFSET_STUB).offset == (0.0, 0.0)
+
+
+@pytest.mark.parametrize('mode', ['file', 'index'])
+def test_a_recorded_offset_of_two_zeros_still_selects_the_offset_mechanism(
+    sources: dict[str, PointingSource], mode: str
+) -> None:
+    """The other half of it: which mechanism builds the product."""
+    assert _selection(sources, mode, ZERO_OFFSET_STUB).mechanism is PointingMechanism.OFFSET
+
+
+@pytest.mark.parametrize('mode', ['file', 'index'])
+def test_a_recorded_midtime_of_zero_survives_into_both_records(
+    sources: dict[str, PointingSource], mode: str
+) -> None:
+    """The J2000 epoch is an epoch, and the ladder cannot run without one.
+
+    Dropped from the rebuild, the pointing block loses the value its gates are
+    computed against and the record is classified ``malformed_pointing``,
+    where the document is a clean corrected attitude.
+    """
+    assert _selection(sources, mode, ZERO_EPOCH_STUB).midtime_et == 0.0
+
+
+@pytest.mark.parametrize('mode', ['file', 'index'])
+def test_a_record_of_zero_epochs_still_applies_its_corrected_attitude(
+    sources: dict[str, PointingSource], mode: str
+) -> None:
+    """The product that follows from it, which is what the difference costs."""
+    assert _selection(sources, mode, ZERO_EPOCH_STUB).mechanism is PointingMechanism.CMATRIX
 
 
 def test_the_index_carries_the_recorded_midtime_not_a_recomputed_one(
@@ -1418,3 +1483,217 @@ def test_every_place_says_a_boolean_frame_identity_leaves_no_trace(stated: Any) 
         stated: The reader of one of the three places.
     """
     assert 'boolean' in stated()[2]
+
+
+# ---------------------------------------------------------------------------
+# The password an index URL can carry
+# ---------------------------------------------------------------------------
+#
+# The index-backed source names its index in three messages that reach files:
+# the refusal a missing record raises, the warning that refusal writes into the
+# image's own log, and the translation of a read the database would not answer.
+# A connection URL can carry a database password, so each of them names the
+# index through the masking rule.
+#
+# A ``sqlite:`` URL is returned by that rule exactly as it came -- it names a
+# filesystem path, which has no credentials -- so no test built on one can hold
+# any of these to masking anything.  These build the source over a server URL
+# instead, which needs no server: the source reads the URL from the engine, and
+# a lookup that finds no row is the shortest path to a message carrying it.
+
+_LEFT = 'sup3r'
+"""First half of the password, distinctive enough that finding it is a leak."""
+
+_RIGHT = 's3cr3t'
+"""Second half, so a rule that hides only part of a password is still caught."""
+
+_SERVER_HOST = 'db.example:5432/spindoctor'
+"""Everything after the credentials, which a reader of the message needs."""
+
+_SERVER_URL = f'postgresql+psycopg://us%40er:{_LEFT}%40%3A%2F%3F%23{_RIGHT}@{_SERVER_HOST}'
+"""A server index URL whose password carries every character delimiting a URL.
+
+An ``@`` ends the credentials, a ``:`` starts a port, a ``/`` starts a path, a
+``?`` starts a query and a ``#`` starts a fragment; the user name carries an
+at-sign of its own, so a rule ending the credentials at the first one would
+leave the whole password behind.
+"""
+
+
+class _KnownToNeitherTable:
+    """The row a lookup gets for a stub the index holds nothing about."""
+
+    record_stub = None
+    refusal_reason = None
+
+
+class _HoldingNothing:
+    """A connection whose every lookup finds neither a record nor a refusal."""
+
+    def __enter__(self) -> '_HoldingNothing':
+        """Return itself, so it can be used where a connection is.
+
+        Returns:
+            This connection.
+        """
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        """Close nothing and swallow nothing.
+
+        Parameters:
+            *exc_info: The exception leaving the block, if any.
+        """
+
+    def execute(self, statement: Any) -> '_HoldingNothing':
+        """Run nothing and answer as the result of it.
+
+        Parameters:
+            statement: The statement, which is not run.
+
+        Returns:
+            This object, which is its own result.
+        """
+        return self
+
+    def first(self) -> _KnownToNeitherTable:
+        """Return the one row the real statement always answers with.
+
+        Returns:
+            A row naming neither a record nor a refusal.
+        """
+        return _KnownToNeitherTable()
+
+
+class _IndexNamedByAUrl:
+    """Stands in for an open index carrying a URL, and holding nothing.
+
+    Parameters:
+        url: The connection URL the source names its index by.
+        unreadable: Whether connecting fails the way a lost server does.
+    """
+
+    def __init__(self, url: str, *, unreadable: bool = False) -> None:
+        """Take the URL and whether this index answers at all."""
+        self.url = sqlalchemy.engine.url.make_url(url)
+        self._unreadable = unreadable
+
+    def connect(self) -> _HoldingNothing:
+        """Open a connection that holds no rows, or fail as a lost server does.
+
+        Returns:
+            The connection.
+
+        Raises:
+            sqlalchemy.exc.OperationalError: When this index is unreadable.
+        """
+        if self._unreadable:
+            raise sqlalchemy.exc.OperationalError(
+                'SELECT images.status FROM images', {}, OSError('connection refused')
+            )
+        return _HoldingNothing()
+
+    def dispose(self) -> None:
+        """Release nothing: this index never opened anything."""
+
+
+def _source_over_a_server_url(*, unreadable: bool = False) -> IndexPointingSource:
+    """Build an index-backed source naming a server URL with a password in it.
+
+    Parameters:
+        unreadable: Whether the index fails every read.
+
+    Returns:
+        The source.
+    """
+    engine = _IndexNamedByAUrl(_SERVER_URL, unreadable=unreadable)
+    return IndexPointingSource(cast(Engine, engine), 'file:///nav')
+
+
+def _missing_record_message() -> str:
+    """Return the refusal an index holding no row for an image raises.
+
+    Returns:
+        The text of the exception.
+    """
+    with pytest.raises(FileNotFoundError) as excinfo:
+        _source_over_a_server_url().read_record(image_file(UNNAVIGATED_STUB))
+    return str(excinfo.value)
+
+
+def _unreadable_index_message() -> str:
+    """Return the refusal an index that will not answer a read raises.
+
+    Returns:
+        The text of the exception.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        _source_over_a_server_url(unreadable=True).read_record(image_file(UNNAVIGATED_STUB))
+    return str(excinfo.value)
+
+
+def test_the_missing_record_refusal_carries_no_password() -> None:
+    """It names the index, and the caller writes it into the run's log."""
+    assert _LEFT not in _missing_record_message()
+
+
+def test_no_tail_of_that_password_reaches_the_refusal_either() -> None:
+    """A rule stopping at the first URL delimiter would leave a working password."""
+    assert _RIGHT not in _missing_record_message()
+
+
+def test_the_missing_record_refusal_still_names_the_index() -> None:
+    """The control: a message naming no index would pass both assertions above."""
+    assert _SERVER_HOST in _missing_record_message()
+
+
+def test_the_missing_record_warning_in_an_image_log_carries_no_password(tmp_path: Path) -> None:
+    """The same name reaches one file per image with no record, which is most of them."""
+    log_text = _log_of(_source_over_a_server_url(), UNNAVIGATED_STUB, tmp_path / 'logs')
+    assert _LEFT not in log_text
+
+
+def test_no_tail_of_that_password_reaches_the_image_log_either(tmp_path: Path) -> None:
+    """And a half-hidden password in a per-image log is a password in a log."""
+    log_text = _log_of(_source_over_a_server_url(), UNNAVIGATED_STUB, tmp_path / 'logs')
+    assert _RIGHT not in log_text
+
+
+def test_that_warning_still_names_the_index_it_searched(tmp_path: Path) -> None:
+    """The control for those two, on the line a reader of the log is there for."""
+    log_text = _log_of(_source_over_a_server_url(), UNNAVIGATED_STUB, tmp_path / 'logs')
+    assert _SERVER_HOST in log_text
+
+
+def test_an_unreadable_index_is_reported_without_its_password() -> None:
+    """A failed read names the URL that failed, which is the whole of the diagnosis."""
+    assert _LEFT not in _unreadable_index_message()
+
+
+def test_no_tail_of_that_password_reaches_the_failed_read_either() -> None:
+    """The driver's own message is quoted into it, so the URL is quoted twice over."""
+    assert _RIGHT not in _unreadable_index_message()
+
+
+def test_the_failed_read_still_names_the_index_that_would_not_answer() -> None:
+    """The control: an operator is reading this to learn which index refused."""
+    assert _SERVER_HOST in _unreadable_index_message()
+
+
+@pytest.mark.parametrize(
+    'stated',
+    [_docstring_classes, _plan_classes, _guide_classes],
+    ids=['docstring', 'plan', 'guide'],
+)
+def test_every_place_names_the_nesting_the_column_holds(stated: Any) -> None:
+    """And names it, rather than leaving a reader to infer which nestings count.
+
+    Nine rows of one is the shape that separates a correct statement of this
+    class from an incorrect one: it is neither of the two shapes a producer
+    writes, both storages hold it, and a wording saying the class is everything
+    but those two shapes puts it in the class it is not in.
+
+    Parameters:
+        stated: The reader of one of the three places.
+    """
+    assert 'rows of one' in stated()[1]

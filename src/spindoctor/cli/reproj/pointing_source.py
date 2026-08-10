@@ -108,11 +108,16 @@ that found no record row and stopped there would report a navigated image as one
 nothing navigated, and would build a corrected product through documents and an
 uncorrected one through the index without saying so.
 
-The lookup therefore asks the refusal table whenever it finds no record row, and
-a stub recorded there fails the image, naming the stub, the index and the reason
-the ingest recorded.  A refusal is an answer the index cannot give, which is a
-different fact from "no such image was navigated", and the two are reported
-differently.  The image is refused rather than quietly read from its document:
+The lookup therefore asks both tables at once -- one query, the stub and root
+selected as a row of their own with each table joined onto it -- and a stub
+recorded as a refusal fails the image, naming the stub, the index and the reason
+the ingest recorded.  Both halves in one query rather than a second lookup where
+the first found nothing: an image with no record is the common case on a
+partially navigated root, and it is exactly that image that would pay the extra
+round trip the index exists to remove.  A refusal is an answer the index cannot
+give, which is a different fact from "no such image was navigated", and the two
+are reported differently.  The image is refused rather than quietly read from
+its document:
 a source that fell back to files for some images would make ``--results-db``
 mean a different thing per image, and one round trip per image is the cost the
 index exists to remove.  Failing one image does not fail the run -- both
@@ -140,8 +145,12 @@ record hand-built into a results tree is not read as agreeing when it does not.
    non-finite pair, or anything else that is not two values convertible to
    finite pixels.  The document is classified under which of those it was;
    the row, which holds one NULL pair for all of them, under ``null_offset``.
-2. **A ``cmatrix`` no column can hold** -- one that is neither nine values nor a
-   3x3 nesting of them, or one whose nine values are not finite real numbers.
+2. **A ``cmatrix`` no column can hold** -- one whose recorded value is not one
+   3x3 matrix of finite real numbers in some nesting an array library
+   reconciles into that shape.  Nine values, a 3x3 nesting of them and nine
+   rows of one all denote the same matrix and are all held; a value of any
+   other shape, and one whose nine entries are not finite real numbers, is
+   held by neither storage.
    The document is ``malformed_pointing``; the row is
    ``no_cmatrix_rotation_fitted`` when something else of the block survives
    (which is what a fitted-rotation result looks like) and ``no_pointing_block``
@@ -366,15 +375,28 @@ class IndexPointingSource:
             f'the results index {self._url}, a snapshot of its last ingest of {root_url}'
         )
 
-    def _row(self, image_file: ImageFile) -> sqlalchemy.Row[Any] | None:
-        """Read the one row recording an image, or None when there is none.
+    def _row(self, image_file: ImageFile) -> sqlalchemy.Row[Any]:
+        """Read what the index holds about one image, from both of its tables.
+
+        One query rather than a record lookup followed by a refusal lookup: an
+        image with no record is the common case on a partially navigated root,
+        and it is the case that would pay the second round trip -- against the
+        stage whose whole purpose is removing one per image.  The key is
+        selected as a row of its own and both tables are joined onto it, so
+        exactly one row comes back whether the index holds a record, a refusal
+        or neither.
 
         Parameters:
             image_file: The image to look up.
 
         Returns:
-            The row, or None when the index holds none for this stub under this
-            root.
+            The row.  ``record_stub`` carries the stub when the index holds a
+            navigation record for it and nothing otherwise, and
+            ``refusal_reason`` carries the recorded reason when the index holds
+            a refusal for it and nothing otherwise; a stub the index knows
+            nothing about answers to neither.  Both halves are read rather than
+            one, because a stub in both tables is a record with a stale refusal
+            beside it and must be read as the record it is.
 
         Raises:
             ValueError: If the index cannot be read at all -- a lost
@@ -384,23 +406,50 @@ class IndexPointingSource:
                 the failure against one image, and the database layer's own
                 exception types are ones it cannot name.
         """
-        statement = sqlalchemy.select(*_ROW_COLUMNS).where(
-            IMAGES.c.root_url == self._root_url,
-            IMAGES.c.results_path_stub == image_file.results_path_stub,
+        key = sqlalchemy.select(
+            sqlalchemy.literal(self._root_url, sqlalchemy.Text).label('root_url'),
+            sqlalchemy.literal(image_file.results_path_stub, sqlalchemy.Text).label(
+                'results_path_stub'
+            ),
+        ).subquery()
+        statement = (
+            sqlalchemy.select(
+                IMAGES.c.results_path_stub.label('record_stub'),
+                FAILED_FILES.c.reason.label('refusal_reason'),
+                *_ROW_COLUMNS,
+            )
+            .select_from(key)
+            .outerjoin(
+                IMAGES,
+                sqlalchemy.and_(
+                    IMAGES.c.root_url == key.c.root_url,
+                    IMAGES.c.results_path_stub == key.c.results_path_stub,
+                ),
+            )
+            .outerjoin(
+                FAILED_FILES,
+                sqlalchemy.and_(
+                    FAILED_FILES.c.root_url == key.c.root_url,
+                    FAILED_FILES.c.results_path_stub == key.c.results_path_stub,
+                ),
+            )
         )
         url = self._engine.url.render_as_string(hide_password=False)
         with reporting_a_failed_read(url), self._engine.connect() as connection:
-            return connection.execute(statement).first()
+            row = connection.execute(statement).first()
+        # The key is selected as a row of its own and both tables are joined
+        # onto it, so the statement answers with one row for every stub,
+        # including one neither table knows.
+        assert row is not None
+        return row
 
-    def _refuse_a_document_the_ingest_refused(self, image_file: ImageFile) -> None:
+    def _refuse_a_document_the_ingest_refused(self, image_file: ImageFile, reason: Any) -> None:
         """Fail an image whose document the ingest recorded as one it could not read.
-
-        Asked only after the record lookup found nothing, so an image the index
-        holds a record for costs the one SELECT it always did and only an image
-        it holds none for pays a second.
 
         Parameters:
             image_file: The image whose record was not found.
+            reason: What the index records as the reason it could not read that
+                image's document, or None when it records no refusal for it.
 
         Raises:
             ValueError: If the index records this stub as a document the ingest
@@ -410,18 +459,11 @@ class IndexPointingSource:
                 the one as the other builds a product from the document under
                 one storage and from uncorrected pointing under the other.
         """
-        statement = sqlalchemy.select(FAILED_FILES.c.reason).where(
-            FAILED_FILES.c.root_url == self._root_url,
-            FAILED_FILES.c.results_path_stub == image_file.results_path_stub,
-        )
-        url = self._engine.url.render_as_string(hide_password=False)
-        with reporting_a_failed_read(url), self._engine.connect() as connection:
-            row = connection.execute(statement).first()
-        if row is None:
+        if reason is None:
             return
         raise ValueError(
             f'{image_file.results_path_stub}: {self._storage} records the navigation '
-            f'document for this image as one the ingest could not read ({row.reason}), so '
+            f'document for this image as one the ingest could not read ({reason}), so '
             f'the index cannot say what it recorded. Read the navigation documents '
             f'instead, or fix the document and ingest that root again.'
         )
@@ -450,8 +492,8 @@ class IndexPointingSource:
                 what it recorded.
         """
         row = self._row(image_file)
-        if row is None:
-            self._refuse_a_document_the_ingest_refused(image_file)
+        if row.record_stub is None:
+            self._refuse_a_document_the_ingest_refused(image_file, row.refusal_reason)
             raise FileNotFoundError(
                 f'{image_file.results_path_stub}: no navigation record for this image in '
                 f'{self._storage}'
@@ -476,8 +518,8 @@ class IndexPointingSource:
                 supply one and the product would differ in silence.
         """
         row = self._row(image_file)
-        if row is None:
-            self._refuse_a_document_the_ingest_refused(image_file)
+        if row.record_stub is None:
+            self._refuse_a_document_the_ingest_refused(image_file, row.refusal_reason)
             IMAGE_LOGGER.warning(NO_METADATA_MESSAGE, image_file.image_file_url, self._storage)
             return none_selection(NO_METADATA)
         return select_pointing(_record_from_row(row), subject=str(image_file.image_file_url))

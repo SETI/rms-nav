@@ -974,7 +974,7 @@ The reason vocabulary maps as follows, and the mapping table belongs in the
 Three classes survive. Each needs a record shape no navigation produces, each is stated in the module docstring, the user guide and here with the same members, and each is pinned by a test.
 
 1. **An `offset` no reader can use** -- absent, null, a boolean pair, a non-finite pair, or anything that is not two values convertible to finite pixels. The document is classified under which of those it was; the row, which holds one NULL pair for all of them, under `null_offset`.
-2. **A `cmatrix` no column can hold** -- one that is neither nine values nor a 3x3 nesting of them, or one whose nine values are not finite real numbers. The document is `malformed_pointing`; the row is `no_cmatrix_rotation_fitted` when something else of the block survives and `no_pointing_block` when nothing does. The file path also puts one line in the run log for it. (A `cmatrix` that *is* nine finite numbers and is not a rotation is stored, and the validator refuses it in both paths alike, which is why `malformed_pointing` has a row of its own in the table.)
+2. **A `cmatrix` no column can hold** -- one whose recorded value is not one 3x3 matrix of finite real numbers in some nesting an array library reconciles into that shape. Nine values, a 3x3 nesting of them and nine rows of one all denote the same matrix and are all held; a value of any other shape, and one whose nine entries are not finite real numbers, is held by neither storage. The document is `malformed_pointing`; the row is `no_cmatrix_rotation_fitted` when something else of the block survives and `no_pointing_block` when nothing does. The file path also puts one line in the run log for it. (A `cmatrix` that *is* nine finite numbers and is not a rotation is stored, and the validator refuses it in both paths alike, which is why `malformed_pointing` has a row of its own in the table.)
 3. **A `pointing` block none of whose four columned fields survives** -- one holding only `camera_frame`, or frame identities written as floats or booleans, which the integer columns refuse. The document is `no_cmatrix_rotation_fitted`, because the block exists and carries no corrected attitude; the row is `no_pointing_block`, because the block left no trace in it.
 
 What decides class 2's membership is not a rule of its own: the store assembles a recorded matrix through the same function the reader does, so a matrix the reader can evaluate is one the column holds and a matrix the column holds nothing for is one the reader refuses. The class is exactly the recorded values that are not one 3x3 matrix of finite real numbers, in whatever nesting an array library can reconcile into that shape -- nine rows of one among them.
@@ -1460,8 +1460,16 @@ the same `IMAGE_LOGGER` warnings in the index path; a program handed an
 unopenable URL failing rather than falling back; a consumer refusing a root
 with no completed `ingest_runs` row; a mode that reads no navigation record --
 a dry run, a mosaic pass that skips reprojection -- not failing on an index it
-never asks; and a two-root fixture whose second root differs in the value under
-test, asserted from both sides so that no single row can satisfy both.
+never asks; a recorded zero -- an offset of two zeros, a midtime at the J2000
+epoch -- read as the value it is rather than as an absence, since that is what
+separates asking whether a column holds a value from asking whether the value
+is true; each credential-masking call on the consumer path asserted on real
+bytes over a server URL, because a `sqlite:` URL is returned by the masking rule
+unchanged and can hold nothing to it; each cloud-task driver's worker data
+carried across a real spawn context, with a task run in the child, because a
+source that cannot cross that boundary fails every task of a run before the
+child starts; and a two-root fixture whose second root differs in the value
+under test, asserted from both sides so that no single row can satisfy both.
 Integration tests (marked `integration`): identical backplane and mosaic
 products for the same real, really-navigated, really-ingested images with and
 without an index, asserted exactly on the outputs.
@@ -1543,16 +1551,20 @@ Details settled during execution:
   `log_run_environment`** rather than directly, which is the one place a
   connection URL on a command line is masked and is what every other driver
   already does.
-- **Both cloud-task workers keep one source for the worker's lifetime**, and
-  both close it when the worker stops. One backplane task is one image and the
-  URL is the worker's own, identical for every task it is handed, so a source
-  built per task would pay a connection and two bookkeeping queries per image
-  in the stage whose purpose is removing one round trip per image. The
-  backplane worker builds its own lazily rather than at startup, because a
-  build that fails must still return `unusable_results_db` in the task result,
-  which is how that worker reports every other environment failure, and because
-  a failure that was remembered would leave a worker started during a moment's
-  outage refusing every task for the rest of its life.
+- **Each cloud task builds its own source and closes it**, in both workers.
+  `cloud_tasks` runs every task in a process it spawns for that task and hands
+  it the worker's shared data by serializing it, so a source built at worker
+  startup reaches no task at all: a `SQLAlchemy` engine cannot be serialized,
+  and the reprojection worker's whole index-backed mode failed in the parent
+  before a single task ran. What crosses is the worker's parsed command line,
+  which is what the root and the index are named by, so that is what a task
+  builds from. A named index that cannot be opened returns
+  `unusable_results_db` in the task result, which is how a worker reports every
+  other environment failure and is what keeps a task that could not obtain its
+  source from reprojecting its whole batch on uncorrected pointing and
+  reporting a clean one. Pinned by a test that stands up a real spawn context
+  with the shared data each driver's own startup built, and runs a task in the
+  child.
 - **The shared test helpers that drive a program's own parser** live in
   `tests/spindoctor/cli/conftest.py`, which is the narrowest scope covering
   every module that asserts a command-line surface, and is where the project's
@@ -1621,8 +1633,7 @@ Details settled during execution:
   up and yet failed on an index that would not open, which on a machine
   exporting `NAV_RESULTS_DB` breaks invocations that worked before the variable
   was set. Fail-early stays for every mode that does read a record.
-- **A lookup that finds no record row asks the refusal table before it answers**
-  (section 2.9). Reading absence from `images` alone reported every document
+- **One lookup asks both tables** (section 2.9). Reading absence from `images` alone reported every document
   the ingest refused as an image nothing navigated, which on a real results root
   is hundreds of navigated images: their products were built on their recorded
   offsets through the tree and on uncorrected pointing through the index, and
@@ -1632,7 +1643,12 @@ Details settled during execution:
   answering "does a record exist for this stub?" two ways in two consumers.
   Both of the seam's methods now consult it and fail the image. `roots.py` says
   what is now true: a completed ingest makes absence from *both* tables
-  meaningful, never absence from `images` alone.
+  meaningful, never absence from `images` alone. Both halves are one query --
+  the root and stub are selected as a row of their own and each table is
+  outer-joined onto it -- rather than a record lookup followed by a refusal
+  lookup: an image with no record is the common case on a partially navigated
+  root, so it is exactly that image that would have paid the second round trip
+  the index exists to remove.
 - **The store assembles a recorded rotation through the reader's own function.**
   `_cmatrix_or_none` re-decided "are these nine real finite numbers" with a
   per-entry rule while the reader assembled an array, so the two accepted
@@ -1659,6 +1675,47 @@ Details settled during execution:
   to remove. The column is now NULL wherever `record_status_error` reports the
   record as naming no error, the literal word `unknown` included, matching what
   the NOT NULL `status` column does with the same word.
+- **A boolean is refused wherever a recorded rotation puts one.** The refusal
+  was written on the nine entries and read their Python type, which is a
+  container for every nesting deeper than the two a record is written in. So
+  `[[true],[0.0],[0],[0],[1],[0],[0],[0],[1]]` assembled into a float array,
+  read as the identity, and was selected and applied as a corrected attitude by
+  both storages -- the case three docstrings and a test name said could not
+  happen. Each entry is now judged by the array it makes, so a `True` among
+  numbers is refused however deeply it is written.
+- **The accepted domain of a recorded rotation is stated where it is decided,
+  and is wider than the two shapes a producer writes.** A recorded value is one
+  3x3 matrix of finite real numbers in any nesting an array library reconciles
+  into that shape: nine values, a 3x3 nesting of them, and nine rows of one.
+  That is deliberate rather than incidental -- the value denotes the same
+  rotation however it is bracketed, and a reader that refused one denoting
+  shape while applying another would classify a record by its typography -- and
+  it is what the reader and the store both apply, so no shape is a rotation to
+  one and nothing to the other. Three statements of the class the two storages
+  count differently said "neither nine values nor a 3x3 nesting", which put
+  nine rows of one in a class it is not in; all three now name it, and the
+  drift test asserts on the shape that separates the two wordings.
+- **A recorded value that is present and false is present.** The rebuild's two
+  presence guards are `is not None` and were held by no test: a recorded offset
+  of two zeros and a midtime at the J2000 epoch are the separating inputs, and
+  they separate in the product -- the first becomes no offset at all, the
+  second a pointing block with no epoch to gate against. Both are now fixture
+  records the two storages are compared over.
+- **Every masking call on the consumer path is pinned in the tier that runs.**
+  A `sqlite:` URL is returned by the masking rule unchanged, so no test built on
+  one can hold anything to masking; the calls that name a server URL -- the
+  source's own name for its index, the run log's `Results index:` line in both
+  consuming programs, and the translation of a read the database would not
+  answer -- are pinned on real bytes, with a password carrying every character
+  that delimits a URL and a user name carrying an at-sign. None of the three
+  needs a database.
+- **A cloud backplane task returns every way its image can fail.** It reported
+  an unusable index and let a per-image failure out as an unhandled exception,
+  which the framework logs as a traceback with no reason an enqueuer's tally
+  can count and, under `--retry-on-exception`, retries for a refusal that will
+  refuse identically. Nothing recorded the image is a skip named
+  `no_navigation_record` and everything else is `backplanes_failed`, both
+  returned rather than raised.
 - **The unpinned guarantees are pinned.** Reverting the backplane stage's two
   reads through `nav_record`, `select_pointing`'s read of the same field,
   `_pair`'s refusal of a sequence that is not a pair, the guard that turns nine

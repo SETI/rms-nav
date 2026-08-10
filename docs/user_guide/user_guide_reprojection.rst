@@ -507,6 +507,12 @@ The ladder:
   and the field of view is left untouched. This is the same measurement as
   the pixel offset expressed exactly, and it is what a SPICE consumer of the
   corrected C-kernels sees for every image whose segment was written.
+  ``sd_offset`` writes the attitude as nine row-major numbers, and the readers
+  accept any nesting of nine finite real numbers that denotes one 3x3 matrix
+  -- a 3x3 nesting and nine rows of one among them -- because the recorded
+  value denotes the same rotation however it is bracketed. This holds whether
+  the record is read from its file or from an index row: both read it through
+  the same code.
 * When there is no usable corrected attitude, the stored ``(dv, du)`` offset
   is applied to the observation's FOV via :class:`oops.fov.OffsetFOV`, exactly as
   every offset-corrected product has always been built. The reasons this
@@ -579,14 +585,16 @@ image; each requires a record written into the results tree by something else.
   (``missing_offset_key``, ``null_offset``, ``invalid_offset_type``,
   ``non_finite_offset``, ``malformed_offset``); read as a row all of them are
   counted under ``null_offset``.
-* A ``pointing.cmatrix`` that is neither nine values nor a 3x3 nesting of them,
-  or whose nine values are not finite real numbers. Read as a document it
+* A ``pointing.cmatrix`` that is not one 3x3 matrix of finite real numbers in
+  some nesting an array library reconciles into that shape. Nine values, a 3x3
+  nesting of them and nine rows of one all denote the same matrix and are all
+  held; a value of any other shape, and one whose nine entries are not finite
+  real numbers, is held by neither storage. Read as a document such a value
   counts under ``malformed_pointing``; read as a row it counts under
   ``no_cmatrix_rotation_fitted``, or under ``no_pointing_block`` when nothing
   else of the block could be stored either. A ``cmatrix`` that *is* nine finite
   numbers and is not a rotation is stored, and both storages then count it
-  under ``malformed_pointing``; so is one written as a 3x3 nesting, and both
-  storages apply it.
+  under ``malformed_pointing``.
 * A ``pointing`` block carrying none of ``cmatrix``, ``cmatrix_original``,
   ``camera_frame_id`` or ``ck_frame_id`` in a form a column can hold -- one
   holding only ``camera_frame``, or frame identities written as floats or

@@ -358,8 +358,14 @@ The command-line tools are composed of three layers:
      :func:`~spindoctor.cli.reproj.paths.per_image_output_path`,
      :meth:`~spindoctor.cli.reproj.pointing_source.PointingSource.load_pointing`,
      :func:`~spindoctor.cli.reproj.offsets.apply_pointing_to_obs`,
-     ``reproject_one_*``) as the local driver.  Its pointing source is built
-     once at worker startup and shared by every task.
+     ``reproject_one_*``) as the local driver.  Each task builds its own
+     pointing source from the worker's command line and closes it when the
+     task ends: ``cloud_tasks`` runs every task in a process it spawns for
+     that task and passes the worker's shared data to it by serializing it, so
+     an open results index left on that data in the parent reaches no task at
+     all.  A named index that cannot be opened fails the task with
+     ``unusable_results_db`` rather than letting it reproject its batch on
+     uncorrected pointing.
      Mosaic combination is not performed here; run
      ``sd_mosaic <mode> <dataset_name> --skip-reproject`` after the queue
      drains (note that ``sd_mosaic.py`` requires both the mode and the
