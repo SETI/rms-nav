@@ -8,6 +8,7 @@ own contract rather than only through the consumers that call it.
 
 from typing import Any
 
+import numpy as np
 import pytest
 
 from spindoctor.support.nav_record import (
@@ -19,12 +20,20 @@ from spindoctor.support.nav_record import (
     UNKNOWN_STATUS,
     finite_float,
     record_offset,
-    record_rotation_values,
+    record_rotation_matrix,
     record_status,
     record_status_error,
 )
 
 _ROTATION = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+
+_TOO_BIG_FOR_A_FLOAT = 10**400
+"""A JSON integer literal no float can hold.
+
+JSON puts no bound on an integer, and ``float()`` of one this size raises
+rather than returning an infinity, so it is a value that reaches every reader
+and is a number to none of them.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +63,25 @@ def test_a_recorded_number_is_read_as_a_float(value: Any, expected: float) -> No
 )
 def test_a_value_that_is_not_a_finite_number_is_read_as_nothing(value: Any) -> None:
     """Booleans included: an ``int`` in Python is a measurement nowhere.
+
+    Parameters:
+        value: The recorded value.
+    """
+    assert finite_float(value) is None
+
+
+@pytest.mark.parametrize(
+    'value',
+    [_TOO_BIG_FOR_A_FLOAT, -_TOO_BIG_FOR_A_FLOAT],
+    ids=['positive', 'negative'],
+)
+def test_an_integer_too_large_for_a_float_is_read_as_nothing(value: int) -> None:
+    """It is refused, not raised over, which is what the docstring promises.
+
+    ``float()`` of such an integer raises ``OverflowError``, which is neither a
+    ``TypeError`` nor a ``ValueError``; letting it out would turn every reader
+    of a recorded number into one that can raise, from a function whose whole
+    contract is to answer with a number or with nothing.
 
     Parameters:
         value: The recorded value.
@@ -161,6 +189,8 @@ def test_a_usable_offset_is_read_as_its_two_numbers(offset: Any, pair: tuple[flo
         ({'offset': '1.0,2.0'}, MALFORMED_OFFSET),
         ({'offset': 1.5}, MALFORMED_OFFSET),
         ({'offset': {'dv': 1.0, 'du': 2.0}}, MALFORMED_OFFSET),
+        ({'offset': [_TOO_BIG_FOR_A_FLOAT, 1.0]}, MALFORMED_OFFSET),
+        ({'offset': [1.0, _TOO_BIG_FOR_A_FLOAT]}, MALFORMED_OFFSET),
     ],
     ids=[
         'absent',
@@ -176,6 +206,8 @@ def test_a_usable_offset_is_read_as_its_two_numbers(offset: Any, pair: tuple[flo
         'text',
         'scalar',
         'object',
+        'huge-integer-first',
+        'huge-integer-second',
     ],
 )
 def test_an_unusable_offset_is_read_as_nothing_and_says_why(
@@ -214,24 +246,51 @@ def test_a_usable_offset_carries_no_reason() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_nine_row_major_values_are_read_as_they_were_written() -> None:
-    """The shape the producer writes, kept in order."""
-    assert record_rotation_values(_ROTATION) == _ROTATION
+@pytest.mark.parametrize(
+    'value',
+    [
+        _ROTATION,
+        [_ROTATION[0:3], _ROTATION[3:6], _ROTATION[6:9]],
+        [[value] for value in _ROTATION],
+        [
+            [[value] for value in _ROTATION[0:3]],
+            [[value] for value in _ROTATION[3:6]],
+            [[value] for value in _ROTATION[6:9]],
+        ],
+        [1, 0, 0, 0, 1, 0, 0, 0, 1],
+    ],
+    ids=['row-major', 'nesting', 'one-element-rows', 'nested-one-element-rows', 'integers'],
+)
+def test_every_shape_one_matrix_can_be_made_of_is_read_as_that_matrix(value: Any) -> None:
+    """Whatever an array library can reconcile into one 3x3 of numbers.
 
+    The producer writes nine row-major floats and a 3x3 nesting denotes the
+    same nine, but a reader that assembles an array accepts more than those
+    two, and every one of them has to mean the same thing to the store: a
+    rotation the reader applies and the store held nothing for is a corrected
+    product through a document and an uncorrected one through a row.
 
-def test_a_nesting_is_read_as_the_nine_it_denotes() -> None:
-    """Three rows of three are the same nine values in the same order."""
-    nested = [_ROTATION[0:3], _ROTATION[3:6], _ROTATION[6:9]]
-    assert record_rotation_values(nested) == _ROTATION
-
-
-def test_the_values_are_returned_as_recorded_rather_than_coerced() -> None:
-    """Whether they are real, finite numbers is the validator's question.
-
-    Coercing here would answer it twice, and the second answer is the one that
-    drifts.
+    Parameters:
+        value: The recorded value under test.
     """
-    assert record_rotation_values([1, 0, 0, 0, 1, 0, 0, 0, 1]) == [1, 0, 0, 0, 1, 0, 0, 0, 1]
+    matrix = record_rotation_matrix(value)
+    assert matrix is not None
+    assert np.array_equal(matrix, np.asarray(_ROTATION).reshape(3, 3))
+
+
+def test_the_matrix_is_read_as_float_whatever_the_record_wrote() -> None:
+    """One dtype leaves the reader, so the store holds what the reader evaluates."""
+    matrix = record_rotation_matrix([1, 0, 0, 0, 1, 0, 0, 0, 1])
+    assert matrix is not None
+    assert matrix.dtype == np.float64
+
+
+def test_a_full_mantissa_value_survives_the_reading_exactly() -> None:
+    """Assembling the array must not round: the reader's gate holds it to 1e-9."""
+    values = [0.9636758075215185, *_ROTATION[1:]]
+    matrix = record_rotation_matrix(values)
+    assert matrix is not None
+    assert matrix[0][0] == 0.9636758075215185
 
 
 @pytest.mark.parametrize(
@@ -265,7 +324,72 @@ def test_anything_that_is_neither_shape_is_read_as_nothing(value: Any) -> None:
     Parameters:
         value: The recorded value under test.
     """
-    assert record_rotation_values(value) is None
+    assert record_rotation_matrix(value) is None
+
+
+@pytest.mark.parametrize(
+    'value',
+    [
+        [[1.0, 2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0], [9.0], [10.0]],
+        [[1.0, 2.0, 3.0], 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0],
+        [_ROTATION[0:3], _ROTATION[0:3], _ROTATION[0:3], *_ROTATION[0:6]],
+    ],
+    ids=['a-row-of-two-among-eight', 'a-row-among-scalars', 'three-rows-among-six-scalars'],
+)
+def test_nine_entries_of_shapes_no_matrix_holds_are_read_as_nothing(value: Any) -> None:
+    """Nine entries are not nine numbers, and assembling them raises.
+
+    These pass the count and reach the array library, which refuses to make one
+    homogeneous array of them.  That refusal is a malformed record like any
+    other: letting it out would put a bare exception through a classifier whose
+    callers absorb only what it declares.
+
+    Parameters:
+        value: The recorded value under test.
+    """
+    assert record_rotation_matrix(value) is None
+
+
+@pytest.mark.parametrize(
+    'value',
+    [
+        [str(value) for value in _ROTATION],
+        ['1.0', *_ROTATION[1:]],
+        [None, *_ROTATION[1:]],
+        [{}, *_ROTATION[1:]],
+        [_TOO_BIG_FOR_A_FLOAT, *_ROTATION[1:]],
+    ],
+    ids=['all-text', 'one-text', 'one-null', 'one-object', 'one-huge-integer'],
+)
+def test_nine_entries_that_are_not_all_numbers_are_read_as_nothing(value: Any) -> None:
+    """A single non-number makes the whole assembled array something else.
+
+    Text, nulls and objects each assemble into an array of a kind that is not a
+    number, and an integer too large for a float does the same rather than
+    raising, so all of them are refused by the one rule.
+
+    Parameters:
+        value: The recorded value under test.
+    """
+    assert record_rotation_matrix(value) is None
+
+
+@pytest.mark.parametrize(
+    'value',
+    [
+        [float('nan'), *_ROTATION[1:]],
+        [float('inf'), *_ROTATION[1:]],
+        [*_ROTATION[:8], float('-inf')],
+    ],
+    ids=['nan', 'inf', 'neg-inf'],
+)
+def test_a_non_finite_entry_makes_the_matrix_unreadable(value: Any) -> None:
+    """NaN defeats every comparison a rotation check makes, so it never gets there.
+
+    Parameters:
+        value: The recorded value under test.
+    """
+    assert record_rotation_matrix(value) is None
 
 
 @pytest.mark.parametrize(
@@ -274,13 +398,23 @@ def test_anything_that_is_neither_shape_is_read_as_nothing(value: Any) -> None:
     ids=['all', 'one-among-numbers', 'nested'],
 )
 def test_a_boolean_anywhere_in_a_matrix_is_read_as_nothing(value: Any) -> None:
-    """The one element type the reader and the store would otherwise judge apart.
+    """The one element type an assembled array would silently make a number of.
 
     An array library promotes a boolean beside a number to that number's type,
-    so a single ``True`` among eight floats reads as ``1.0`` from a document
-    while a column refusing booleans holds nothing at all.
+    so a single ``True`` among eight floats would assemble into ``1.0`` and
+    nine of them into an identity rotation.
 
     Parameters:
         value: The recorded value under test.
     """
-    assert record_rotation_values(value) is None
+    assert record_rotation_matrix(value) is None
+
+
+def test_nine_finite_numbers_that_are_no_rotation_are_still_read() -> None:
+    """Whether they are a rotation is the validator's question, not this one.
+
+    The store holds these nine, and the validator both readers apply then
+    refuses them identically; a reader that refused them here would leave the
+    two storages disagreeing about which records exist at all.
+    """
+    assert record_rotation_matrix([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]) is not None

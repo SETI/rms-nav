@@ -131,6 +131,32 @@ def nested(flat: list[float]) -> list[list[float]]:
     return [flat[0:3], flat[3:6], flat[6:9]]
 
 
+def one_element_rows(flat: list[float]) -> list[list[float]]:
+    """Rewrite nine row-major values as nine rows of one.
+
+    A shape no producer writes and every reader that assembles an array
+    accepts, because nine rows of one reshape into 3x3 exactly as nine scalars
+    do.  It is here because a store that judged the entries instead of
+    assembling them held nothing for it.
+
+    Parameters:
+        flat: The nine values, row-major.
+
+    Returns:
+        Nine rows of one.
+    """
+    return [[value] for value in flat]
+
+
+TOO_BIG_FOR_A_FLOAT = 10**400
+"""A JSON integer literal no float can hold.
+
+JSON bounds no integer, so a document can carry one; ``float()`` of it raises
+rather than overflowing to an infinity, which is a reader that raises where its
+contract says it answers.
+"""
+
+
 OFFSET = [5.6005, 1.0788]
 """The navigated offset those attitudes were computed from."""
 
@@ -163,8 +189,23 @@ UNSTORABLE_CMATRIX_ALONE_STUB = f'{VOLUME}/N122_1_CALIB'
 FLOAT_FRAME_ID_STUB = f'{VOLUME}/N123_1_CALIB'
 LITERAL_UNKNOWN_STATUS_STUB = f'{VOLUME}/N124_1_CALIB'
 NULL_STATUS_ERROR_STUB = f'{VOLUME}/N125_1_CALIB'
+ONE_ELEMENT_ROWS_CMATRIX_STUB = f'{VOLUME}/N126_1_CALIB'
+ONE_ELEMENT_ROWS_ORIGINAL_STUB = f'{VOLUME}/N127_1_CALIB'
+RAGGED_NINE_CMATRIX_STUB = f'{VOLUME}/N128_1_CALIB'
+HUGE_INT_IN_CMATRIX_STUB = f'{VOLUME}/N129_1_CALIB'
+HUGE_INT_MIDTIME_STUB = f'{VOLUME}/N130_1_CALIB'
+HUGE_INT_OFFSET_STUB = f'{VOLUME}/N131_1_CALIB'
+LITERAL_UNKNOWN_ERROR_STUB = f'{VOLUME}/N132_1_CALIB'
+REFUSED_DOCUMENT_STUB = f'{VOLUME}/N133_1_CALIB'
 UNNAVIGATED_STUB = f'{VOLUME}/N999_1_CALIB'
 """Stubs of the fixture tree; the last is deliberately never written."""
+
+REFUSED_DOCUMENT_REASON = 'no observation.instrument'
+"""Why the ingest refuses the one document in the tree it cannot read.
+
+Named here because the refusal a consumer reports has to carry it: an operator
+told only that the index cannot answer for an image has nothing to fix.
+"""
 
 
 def image_file(stub: str) -> ImageFile:
@@ -333,6 +374,72 @@ def _reason_tree() -> dict[str, dict[str, Any]]:
         SUCCESS_NO_OFFSET_KEY_STUB: document(
             SUCCESS_NO_OFFSET_KEY_STUB, offset=OFFSET, times=TIMES, pointing=POINTING
         ),
+        # A rotation written as nine rows of one.  Every reader that assembles
+        # an array reshapes it into the same 3x3 the flat nine denote, so the
+        # store has to hold it: a store that judged the entries one at a time
+        # instead would leave the corrected attitude applied through a document
+        # and an OffsetFOV applied through a row.
+        ONE_ELEMENT_ROWS_CMATRIX_STUB: document(
+            ONE_ELEMENT_ROWS_CMATRIX_STUB,
+            offset=OFFSET,
+            times=TIMES,
+            pointing={**POINTING, 'cmatrix': one_element_rows(CMATRIX)},
+        ),
+        # The baseline written the same way, which is gated against the
+        # observation exactly as the corrected attitude is.
+        ONE_ELEMENT_ROWS_ORIGINAL_STUB: document(
+            ONE_ELEMENT_ROWS_ORIGINAL_STUB,
+            offset=OFFSET,
+            times=TIMES,
+            pointing={**POINTING, 'cmatrix_original': one_element_rows(CMATRIX_ORIGINAL)},
+        ),
+        # Nine entries that pass the count and are of shapes no single array
+        # can hold.  Assembling them raises, and that refusal has to be the
+        # malformed record it is rather than an exception through a classifier.
+        RAGGED_NINE_CMATRIX_STUB: document(
+            RAGGED_NINE_CMATRIX_STUB,
+            offset=OFFSET,
+            times=TIMES,
+            pointing={
+                **POINTING,
+                'cmatrix': [[1.0, 2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0], [9.0], [10.0]],
+            },
+        ),
+        # An integer no float can hold, in each of the three places a reader
+        # converts one.  Each is a malformed value to both storages; a reader
+        # that raised on it would cost the image in one path and the whole
+        # document in the other.
+        HUGE_INT_IN_CMATRIX_STUB: document(
+            HUGE_INT_IN_CMATRIX_STUB,
+            offset=OFFSET,
+            times=TIMES,
+            pointing={**POINTING, 'cmatrix': [TOO_BIG_FOR_A_FLOAT, *CMATRIX[1:]]},
+        ),
+        HUGE_INT_MIDTIME_STUB: document(
+            HUGE_INT_MIDTIME_STUB,
+            offset=OFFSET,
+            times={**TIMES, 'midtime_et': TOO_BIG_FOR_A_FLOAT},
+            pointing=POINTING,
+        ),
+        HUGE_INT_OFFSET_STUB: document(HUGE_INT_OFFSET_STUB, offset=OFFSET),
+        # An unsuccessful outcome naming, as its own error, the word a record
+        # naming none is reported under.  Stored as the record naming none it
+        # reads as, so the column cannot come to hold one thing and the reader
+        # report another.
+        LITERAL_UNKNOWN_ERROR_STUB: document(
+            LITERAL_UNKNOWN_ERROR_STUB, status='failed', offset=None, status_error='unknown'
+        ),
+        # A document the ingest refuses whole, carrying a usable corrected
+        # attitude all the same.  Read as a file it supplies that attitude;
+        # the index holds no record of it and must say so rather than report
+        # the image as one nothing navigated.
+        REFUSED_DOCUMENT_STUB: document(
+            REFUSED_DOCUMENT_STUB,
+            instrument=None,
+            offset=OFFSET,
+            times=TIMES,
+            pointing=POINTING,
+        ),
     }
     # The two shapes of "no usable offset on a successful record" are made here
     # rather than by the factory, which writes the key only when it has a value
@@ -347,6 +454,7 @@ def _reason_tree() -> dict[str, dict[str, Any]]:
     # of two numeric strings, and an error field present and holding null.
     tree[NUMERIC_STRING_OFFSET_STUB]['offset'] = [str(OFFSET[0]), str(OFFSET[1])]
     tree[NULL_STATUS_ERROR_STUB]['status_error'] = None
+    tree[HUGE_INT_OFFSET_STUB]['offset'] = [TOO_BIG_FOR_A_FLOAT, 1.0]
     return tree
 
 

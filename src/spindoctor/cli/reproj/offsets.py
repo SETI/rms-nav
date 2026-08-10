@@ -40,12 +40,10 @@ result instead.
 
 import enum
 import json
-import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-import numpy as np
 import oops
 from filecache import FCPath
 
@@ -75,11 +73,12 @@ from spindoctor.support.nav_record import (
     MISSING_OFFSET_KEY,
     NON_FINITE_OFFSET,
     NULL_OFFSET,
+    finite_float,
     record_offset,
-    record_rotation_values,
+    record_rotation_matrix,
     record_status,
 )
-from spindoctor.support.types import NDArrayAnyType, NDArrayFloatType
+from spindoctor.support.types import NDArrayFloatType
 
 # The degraded-selection reasons this module classifies, beyond the gate and
 # malformed-record reasons ``spindoctor.support.cmatrix`` stamps on its
@@ -296,25 +295,25 @@ def _parse_pointing_values(
         return MALFORMED_POINTING
     if not isinstance(times, dict) or 'midtime_et' not in times:
         return MALFORMED_POINTING
-    midtime = times['midtime_et']
-    # ``float()`` is deliberately not used to coerce: it accepts text and
-    # booleans, and a NaN midtime would defeat the reader's midtime gate in
-    # both directions.
-    if isinstance(midtime, bool) or not isinstance(midtime, int | float):
+    # Read through the one function that decides which recorded numbers a
+    # reader can use: ``float()`` on its own accepts text and booleans, a NaN
+    # midtime would defeat the reader's midtime gate in both directions, and an
+    # integer of several hundred digits raises out of it.
+    midtime = finite_float(times['midtime_et'])
+    if midtime is None:
         return MALFORMED_POINTING
-    if not math.isfinite(float(midtime)):
-        return MALFORMED_POINTING
-    return cmatrix, cmatrix_original, float(midtime)
+    return cmatrix, cmatrix_original, midtime
 
 
 def _parse_record_rotation(value: Any, label: str) -> NDArrayFloatType:
     """Read one recorded C-matrix, accepting only the shapes the schema writes.
 
-    The shape is read by the one function the results index stores rotations
-    through, so a matrix this accepts is a matrix that survives ingest and one
-    it refuses is stored as nothing.  Validation -- real numbers only, finite,
-    a proper orthonormal rotation -- is delegated to the reader's own validator
-    so the selection and the application refuse exactly the same records.
+    The matrix is assembled by the one function the results index stores
+    rotations through, so a matrix this accepts is a matrix that survives
+    ingest and one it refuses is stored as nothing.  Whether the matrix that
+    survives is a proper orthonormal rotation is delegated to the reader's own
+    validator, so the selection and the application refuse exactly the same
+    records.
 
     Parameters:
         value: The recorded value.
@@ -327,26 +326,13 @@ def _parse_record_rotation(value: Any, label: str) -> NDArrayFloatType:
         NavPointingError: with reason ``malformed_pointing`` when the value is
             unusable.
     """
-    values = record_rotation_values(value)
-    if values is None:
+    matrix = record_rotation_matrix(value)
+    if matrix is None:
         raise NavPointingError(
-            f'{label} is not nine row-major values, or a 3x3 nesting of them',
+            f'{label} is not nine finite real numbers, or a 3x3 nesting of them',
             reason=MALFORMED_POINTING,
         )
-    # Annotated as an any-dtype array on purpose: ``np.asarray`` of a JSON
-    # sequence carries whatever dtype the record held, and the validator
-    # refuses the wrong ones rather than this coercing them away.  Nine values
-    # of shapes numpy cannot reconcile raise out of ``asarray`` itself, which is
-    # a malformed record like any other and not an exception for a caller to
-    # meet.
-    try:
-        array: NDArrayAnyType = np.asarray(values).reshape(3, 3)
-    except ValueError as exc:
-        raise NavPointingError(
-            f'{label} holds nine values of shapes that are not one matrix',
-            reason=MALFORMED_POINTING,
-        ) from exc
-    return validated_record_rotation(array, label)
+    return validated_record_rotation(matrix, label)
 
 
 def select_pointing(nav_metadata: dict[str, Any], *, subject: str = '') -> PointingSelection:

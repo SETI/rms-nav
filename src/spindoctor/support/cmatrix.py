@@ -66,6 +66,12 @@ from spindoctor.obs import (
 )
 from spindoctor.spice_ids import CK_OBJECT_SCLK_ID, VOYAGER_CK_OBJECT_ID
 from spindoctor.support.exceptions import NavPointingError
+
+# Which array dtypes count as recorded numbers is a property of a metadata
+# record rather than of the C-matrix conventions, and the module that reads
+# recorded values owns it, so this validator and the record reader cannot
+# come to disagree about what nine ``True`` values are.
+from spindoctor.support.nav_record import REAL_NUMBER_DTYPE_KINDS
 from spindoctor.support.types import NDArrayAnyType, NDArrayFloatType
 
 # The offset-to-attitude conversion and its inverse are deliberately behind
@@ -154,12 +160,6 @@ _ROTATION_TOL = 1e-9
 # same float64 computation serialized unrounded, so they agree exactly; a
 # microsecond leaves room for nothing but representation noise.
 _MIDTIME_TOL_S = 1e-6
-
-# The numpy dtype kinds a recorded C-matrix may arrive as: signed and
-# unsigned integers and floats.  Booleans ('b') and text ('U', 'S') are
-# excluded although both convert to float64 without complaint, which is what
-# would let nine ``True`` values pass as an identity rotation.
-_REAL_NUMBER_KINDS = frozenset({'i', 'u', 'f'})
 
 # Below this cross-product norm the corrected and uncorrected boresights are
 # the same direction to sub-nanoradian precision and the correction is exactly
@@ -545,7 +545,7 @@ def validated_record_rotation(matrix: NDArrayAnyType, label: str) -> NDArrayFloa
             pass as an identity rotation.
     """
     given = np.asarray(matrix)
-    if given.dtype.kind not in _REAL_NUMBER_KINDS:
+    if given.dtype.kind not in REAL_NUMBER_DTYPE_KINDS:
         raise NavPointingError(
             f'{label} holds values that are not real numbers (dtype {given.dtype})',
             reason=MALFORMED_POINTING,

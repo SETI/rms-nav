@@ -19,10 +19,10 @@ convention:
 A record rebuilt from those columns therefore classifies exactly as its document
 does.
 
-What is not decided here is whether a value is *right*.  Whether nine numbers
-form a proper rotation is
+What is not decided here is whether a value is *right*.  Whether a 3x3 array of
+real numbers is a proper rotation is
 :func:`spindoctor.support.cmatrix.validated_record_rotation`'s question, and
-both readers ask it of the same nine numbers, so a recorded matrix that is not a
+both readers ask it of the same array, so a recorded matrix that is not a
 rotation is refused identically however it was stored.  This module decides only
 which values survive to be asked about.
 """
@@ -32,20 +32,34 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+
+from spindoctor.support.types import NDArrayFloatType
+
 __all__ = [
     'INVALID_OFFSET_TYPE',
     'MALFORMED_OFFSET',
     'MISSING_OFFSET_KEY',
     'NON_FINITE_OFFSET',
     'NULL_OFFSET',
+    'REAL_NUMBER_DTYPE_KINDS',
     'UNKNOWN_STATUS',
     'RecordOffset',
     'finite_float',
     'record_offset',
-    'record_rotation_values',
+    'record_rotation_matrix',
     'record_status',
     'record_status_error',
 ]
+
+REAL_NUMBER_DTYPE_KINDS = frozenset({'i', 'u', 'f'})
+"""Array dtype kinds a recorded value may hold and still be read as numbers.
+
+Signed integers, unsigned integers and floats.  Booleans are excluded although
+they convert to float without complaint, and so are text, objects, complex
+numbers and every date-like kind: none of them is a measurement, and nine
+``True`` values would otherwise read as an identity rotation.
+"""
 
 UNKNOWN_STATUS = 'unknown'
 """What a record naming no outcome of its own is read as naming.
@@ -81,14 +95,20 @@ def finite_float(value: Any) -> float | None:
 
     Returns:
         The float, or None when the value is absent, is not a number, is a
-        boolean, or is not finite.  A boolean is refused although it converts
-        without complaint: it is an ``int`` in Python and a measurement nowhere.
+        boolean, is not finite, or is an integer too large to be one.  A
+        boolean is refused although it converts without complaint: it is an
+        ``int`` in Python and a measurement nowhere.  JSON puts no bound on an
+        integer literal, so a recorded integer of several hundred digits is a
+        value a reader cannot use rather than an error for a caller to meet.
     """
     if value is None or isinstance(value, bool):
         return None
     if not isinstance(value, (int, float)):
         return None
-    out = float(value)
+    try:
+        out = float(value)
+    except OverflowError:
+        return None
     return out if math.isfinite(out) else None
 
 
@@ -178,34 +198,31 @@ def record_offset(nav_metadata: dict[str, Any]) -> RecordOffset:
     try:
         dv = float(dv_raw)
         du = float(du_raw)
-    except (TypeError, ValueError):
+    except (OverflowError, TypeError, ValueError):
+        # ``OverflowError`` among them: a JSON integer of more than about three
+        # hundred digits is a value no reader can turn into a pixel, and a
+        # record carrying one is a malformed record rather than an exception
+        # for a caller that asked for a classification.
         return RecordOffset(pair=None, reason=MALFORMED_OFFSET)
     if not math.isfinite(dv) or not math.isfinite(du):
         return RecordOffset(pair=None, reason=NON_FINITE_OFFSET)
     return RecordOffset(pair=(dv, du), reason=None)
 
 
-def record_rotation_values(value: Any) -> list[Any] | None:
-    """Read the nine row-major values a recorded rotation is written as.
-
-    A record writes a rotation as nine row-major values, and a 3x3 nesting of
-    them is read as the same nine.  Nothing else is a rotation this reader can
-    evaluate, and nothing else is stored.
-
-    Booleans are refused here rather than left to the validator, because they
-    are the one element type the two readers would otherwise judge differently:
-    ``numpy`` promotes a boolean beside a number to that number's type, so a
-    single ``True`` among eight floats would read as ``1.0`` from a document
-    while a store that refuses booleans held nothing at all.
+def _nine_recorded_entries(value: Any) -> list[Any] | None:
+    """Read the nine entries a recorded rotation is written as, uncoerced.
 
     Parameters:
         value: The recorded value.
 
     Returns:
-        The nine values in row-major order, exactly as they were recorded, or
-        None when the value is not one of the two shapes.  Whether the nine are
-        real, finite numbers forming a proper rotation is decided by the
-        validator that both readers apply to them.
+        The nine entries in row-major order, exactly as they were recorded, or
+        None when the value is neither nine entries nor a 3x3 nesting of them,
+        or when any entry is a boolean.  Booleans are refused on the entry
+        rather than on the assembled array, because ``numpy`` promotes a
+        boolean beside a number to that number's type: a single ``True`` among
+        eight floats would otherwise assemble into a float array and read as
+        ``1.0``.
     """
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         return None
@@ -220,3 +237,46 @@ def record_rotation_values(value: Any) -> list[Any] | None:
     if any(isinstance(entry, bool) for entry in entries):
         return None
     return entries
+
+
+def record_rotation_matrix(value: Any) -> NDArrayFloatType | None:
+    """Read a recorded rotation as the 3x3 matrix of numbers it denotes.
+
+    A record writes a rotation as nine row-major values, and a 3x3 nesting of
+    them is read as the same nine.  Either shape is then assembled into one 3x3
+    array, which accepts any further nesting an array library can reconcile
+    into that shape -- nine one-element rows among them.
+
+    This is the whole of what "a recorded matrix a reader can evaluate" means,
+    for the reader that applies one and for the store that holds one alike.
+    Asking it twice is how a rotation the reader applied came to be stored as
+    nothing, so the question has exactly this one answer.
+
+    Parameters:
+        value: The recorded value.
+
+    Returns:
+        The 3x3 matrix as float64, or None when the recorded value is not nine
+        entries or a 3x3 nesting of them, when those entries are of shapes no
+        3x3 array can be made of, when they are not real numbers (text,
+        booleans, nulls, objects, or an integer too large to be a float, all of
+        which assemble into an array of some other kind), or when any of them
+        is not finite.  Whether the matrix that survives is a proper rotation
+        is decided by the validator both readers apply to it.
+    """
+    entries = _nine_recorded_entries(value)
+    if entries is None:
+        return None
+    try:
+        assembled = np.asarray(entries).reshape(3, 3)
+    except ValueError:
+        # Nine entries of shapes no single array can hold -- a row of two
+        # beside eight scalars -- is a malformed record like any other, and not
+        # an exception for a caller asking what a record denotes.
+        return None
+    if assembled.dtype.kind not in REAL_NUMBER_DTYPE_KINDS:
+        return None
+    matrix: NDArrayFloatType = assembled.astype(np.float64)
+    if not bool(np.all(np.isfinite(matrix))):
+        return None
+    return matrix

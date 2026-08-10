@@ -14,6 +14,7 @@ the two directions of the same assertion cannot both be satisfied by one row.
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,10 @@ from tests.spindoctor.cli.reproj.conftest import (
     FAILED_STUB,
     FITTED_STUB,
     FLOAT_FRAME_ID_STUB,
+    HUGE_INT_IN_CMATRIX_STUB,
+    HUGE_INT_MIDTIME_STUB,
+    HUGE_INT_OFFSET_STUB,
+    LITERAL_UNKNOWN_ERROR_STUB,
     LITERAL_UNKNOWN_STATUS_STUB,
     MALFORMED_OFFSET_STUB,
     MIDTIME_ET,
@@ -48,9 +53,14 @@ from tests.spindoctor.cli.reproj.conftest import (
     NULL_STATUS_ERROR_STUB,
     NUMERIC_STRING_OFFSET_STUB,
     OFFSET,
+    ONE_ELEMENT_ROWS_CMATRIX_STUB,
+    ONE_ELEMENT_ROWS_ORIGINAL_STUB,
     OVER_LONG_OFFSET_STUB,
     POINTING,
     RAGGED_CMATRIX_STUB,
+    RAGGED_NINE_CMATRIX_STUB,
+    REFUSED_DOCUMENT_REASON,
+    REFUSED_DOCUMENT_STUB,
     SUCCESS_NO_OFFSET_KEY_STUB,
     TIMES,
     UNNAVIGATED_STUB,
@@ -61,6 +71,7 @@ from tests.spindoctor.cli.reproj.conftest import (
     index_for,
 )
 
+from spindoctor.cli.reproj import pointing_source as pointing_source_module
 from spindoctor.cli.reproj.offsets import PointingMechanism, PointingSelection
 from spindoctor.cli.reproj.pointing_source import (
     FilePointingSource,
@@ -105,8 +116,11 @@ _SAME_REASON = [
     (NAN_MIDTIME_STUB, 'malformed_pointing'),
     (NESTED_CMATRIX_STUB, None),
     (NESTED_ORIGINAL_STUB, None),
+    (ONE_ELEMENT_ROWS_CMATRIX_STUB, None),
+    (ONE_ELEMENT_ROWS_ORIGINAL_STUB, None),
     (SUCCESS_NO_OFFSET_KEY_STUB, None),
     (NUMERIC_STRING_OFFSET_STUB, 'no_pointing_block'),
+    (HUGE_INT_MIDTIME_STUB, 'malformed_pointing'),
     (UNNAVIGATED_STUB, 'no_metadata'),
 ]
 
@@ -134,10 +148,16 @@ def test_both_paths_report_the_same_reason(
         (NAN_MIDTIME_STUB, PointingMechanism.OFFSET),
         (NESTED_CMATRIX_STUB, PointingMechanism.CMATRIX),
         (NESTED_ORIGINAL_STUB, PointingMechanism.CMATRIX),
+        (ONE_ELEMENT_ROWS_CMATRIX_STUB, PointingMechanism.CMATRIX),
+        (ONE_ELEMENT_ROWS_ORIGINAL_STUB, PointingMechanism.CMATRIX),
         (OVER_LONG_OFFSET_STUB, PointingMechanism.NONE),
         (NUMERIC_STRING_OFFSET_STUB, PointingMechanism.OFFSET),
         (SUCCESS_NO_OFFSET_KEY_STUB, PointingMechanism.CMATRIX),
         (RAGGED_CMATRIX_STUB, PointingMechanism.OFFSET),
+        (RAGGED_NINE_CMATRIX_STUB, PointingMechanism.OFFSET),
+        (HUGE_INT_IN_CMATRIX_STUB, PointingMechanism.OFFSET),
+        (HUGE_INT_MIDTIME_STUB, PointingMechanism.OFFSET),
+        (HUGE_INT_OFFSET_STUB, PointingMechanism.NONE),
         (UNSTORABLE_CMATRIX_ALONE_STUB, PointingMechanism.OFFSET),
         (FLOAT_FRAME_ID_STUB, PointingMechanism.OFFSET),
         (LITERAL_UNKNOWN_STATUS_STUB, PointingMechanism.NONE),
@@ -205,7 +225,16 @@ def test_a_numeric_string_offset_is_applied_by_both(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize('stub', [CMATRIX_STUB, NESTED_CMATRIX_STUB, NESTED_ORIGINAL_STUB])
+@pytest.mark.parametrize(
+    'stub',
+    [
+        CMATRIX_STUB,
+        NESTED_CMATRIX_STUB,
+        NESTED_ORIGINAL_STUB,
+        ONE_ELEMENT_ROWS_CMATRIX_STUB,
+        ONE_ELEMENT_ROWS_ORIGINAL_STUB,
+    ],
+)
 @pytest.mark.parametrize('mode', ['file', 'index'])
 def test_the_recorded_cmatrix_survives_bit_for_bit(
     sources: dict[str, PointingSource], mode: str, stub: str
@@ -221,7 +250,16 @@ def test_the_recorded_cmatrix_survives_bit_for_bit(
     assert np.array_equal(selection.cmatrix, np.asarray(CMATRIX).reshape(3, 3))
 
 
-@pytest.mark.parametrize('stub', [CMATRIX_STUB, NESTED_CMATRIX_STUB, NESTED_ORIGINAL_STUB])
+@pytest.mark.parametrize(
+    'stub',
+    [
+        CMATRIX_STUB,
+        NESTED_CMATRIX_STUB,
+        NESTED_ORIGINAL_STUB,
+        ONE_ELEMENT_ROWS_CMATRIX_STUB,
+        ONE_ELEMENT_ROWS_ORIGINAL_STUB,
+    ],
+)
 @pytest.mark.parametrize('mode', ['file', 'index'])
 def test_the_recorded_baseline_survives_bit_for_bit(
     sources: dict[str, PointingSource], mode: str, stub: str
@@ -288,9 +326,12 @@ _DIFFERENT_REASON = [
     (NO_OFFSET_KEY_STUB, 'missing_offset_key', 'null_offset'),
     (NON_FINITE_OFFSET_STUB, 'non_finite_offset', 'null_offset'),
     (BOOLEAN_OFFSET_STUB, 'invalid_offset_type', 'null_offset'),
+    (HUGE_INT_OFFSET_STUB, 'malformed_offset', 'null_offset'),
     # A ``cmatrix`` no column can hold, beside something of the block that one
     # can: the row looks like a result that fitted a camera rotation.
     (RAGGED_CMATRIX_STUB, 'malformed_pointing', 'no_cmatrix_rotation_fitted'),
+    (RAGGED_NINE_CMATRIX_STUB, 'malformed_pointing', 'no_cmatrix_rotation_fitted'),
+    (HUGE_INT_IN_CMATRIX_STUB, 'malformed_pointing', 'no_cmatrix_rotation_fitted'),
     # The same, with nothing of the block stored at all.
     (UNSTORABLE_CMATRIX_ALONE_STUB, 'malformed_pointing', 'no_pointing_block'),
     # A block none of whose columned fields survives, for want of a column of
@@ -397,28 +438,187 @@ def test_a_baseline_written_as_a_nesting_is_read_by_both(
     assert _selection(sources, mode, NESTED_ORIGINAL_STUB).mechanism is PointingMechanism.CMATRIX
 
 
+@pytest.mark.parametrize('stub', [RAGGED_CMATRIX_STUB, RAGGED_NINE_CMATRIX_STUB])
 @pytest.mark.parametrize('mode', ['file', 'index'])
 def test_a_ragged_nesting_is_a_malformed_record_and_not_an_exception(
-    sources: dict[str, PointingSource], mode: str
+    sources: dict[str, PointingSource], mode: str, stub: str
 ) -> None:
-    """Three rows that are not three of three degrade the image, not the run.
+    """Values that are not one matrix degrade the image, not the run.
 
     Handed straight to ``numpy`` such a value raises out of the classifier,
     which the mosaic driver counts as a failed image and the backplane driver
     used to end its run on; the shape reader refuses it as the malformed record
-    it is.
+    it is.  Both spellings are here because they fail at different steps: three
+    rows that are not three of three never reach the array library, while nine
+    entries of mismatched shapes are what it refuses to assemble.
     """
-    assert _selection(sources, mode, RAGGED_CMATRIX_STUB).mechanism is PointingMechanism.OFFSET
+    assert _selection(sources, mode, stub).mechanism is PointingMechanism.OFFSET
 
 
-def test_a_document_that_is_not_an_object_has_no_row_at_all(
+@pytest.mark.parametrize(
+    'stub', [HUGE_INT_IN_CMATRIX_STUB, HUGE_INT_MIDTIME_STUB, HUGE_INT_OFFSET_STUB]
+)
+def test_an_integer_no_float_can_hold_costs_the_value_and_not_the_document(
+    sources: dict[str, PointingSource], stub: str
+) -> None:
+    """In every field a reader converts one, it costs that field and nothing more.
+
+    Converting such an integer raises rather than overflowing, and the raise
+    reaches ingest as a document it cannot read at all, so the whole record is
+    lost over one unusable number.  The mechanism assertions above cover the
+    file path, where the same raise costs the image.
+    """
+    assert sources['index'].read_record(image_file(stub))['status'] == 'success'
+
+
+def test_a_document_the_ingest_refused_is_not_reported_as_an_unnavigated_image(
+    sources: dict[str, PointingSource],
+) -> None:
+    """A refusal is an answer the index cannot give, not the absence of one.
+
+    The document under test records a usable corrected attitude and is refused
+    whole for want of an ``observation.instrument``, so reading its absence as
+    "nothing navigated this image" would reproject it corrected through the
+    documents and uncorrected through the index, with nothing said either way.
+    """
+    with pytest.raises(ValueError, match='could not read'):
+        sources['index'].load_pointing(image_file(REFUSED_DOCUMENT_STUB))
+
+
+def test_the_refusal_names_the_reason_the_ingest_recorded(
+    sources: dict[str, PointingSource],
+) -> None:
+    """Without it an operator is told only that the index cannot answer."""
+    with pytest.raises(ValueError) as excinfo:
+        sources['index'].load_pointing(image_file(REFUSED_DOCUMENT_STUB))
+    assert REFUSED_DOCUMENT_REASON in str(excinfo.value)
+
+
+def test_the_refusal_names_the_stub_it_is_about(sources: dict[str, PointingSource]) -> None:
+    """One image of a batch is refused, so the message has to say which."""
+    with pytest.raises(ValueError) as excinfo:
+        sources['index'].load_pointing(image_file(REFUSED_DOCUMENT_STUB))
+    assert REFUSED_DOCUMENT_STUB in str(excinfo.value)
+
+
+def test_the_refusal_names_the_index_that_holds_it(sources: dict[str, PointingSource]) -> None:
+    """And which index recorded the refusal, since a run may be pointed at any."""
+    with pytest.raises(ValueError) as excinfo:
+        sources['index'].load_pointing(image_file(REFUSED_DOCUMENT_STUB))
+    assert 'index.sqlite3' in str(excinfo.value)
+
+
+def test_reading_the_whole_record_refuses_that_document_too(
+    sources: dict[str, PointingSource],
+) -> None:
+    """The backplane stage reads the record, not the pointing, and must not skip.
+
+    A skip is what it reports for an image nothing navigated; reporting this
+    one that way would silently build no product where the documents build one.
+    """
+    with pytest.raises(ValueError, match='could not read'):
+        sources['index'].read_record(image_file(REFUSED_DOCUMENT_STUB))
+
+
+def test_the_refusal_is_not_the_exception_a_missing_record_raises(
+    sources: dict[str, PointingSource],
+) -> None:
+    """The backplane driver skips a ``FileNotFoundError`` and fails anything else.
+
+    The two facts are different -- nothing navigated this image, against the
+    index cannot say what was recorded for it -- so they must not arrive as one
+    exception type.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        sources['index'].read_record(image_file(REFUSED_DOCUMENT_STUB))
+    assert not isinstance(excinfo.value, FileNotFoundError)
+
+
+def test_the_file_path_still_supplies_that_documents_pointing(
+    sources: dict[str, PointingSource],
+) -> None:
+    """The control that makes the refusal necessary rather than cautious.
+
+    Read as a file the same document supplies the corrected attitude it
+    records, which is the product the index-backed run would otherwise have
+    silently built without.
+    """
+    selection = _selection(sources, 'file', REFUSED_DOCUMENT_STUB)
+    assert selection.mechanism is PointingMechanism.CMATRIX
+
+
+def test_an_image_nothing_navigated_is_still_reported_as_unnavigated(
+    sources: dict[str, PointingSource],
+) -> None:
+    """The other control: absence with no refusal beside it keeps its meaning.
+
+    A source that refused every miss would fail every image a results root
+    holds no document for, which is most of a dataset.
+    """
+    assert _selection(sources, 'index', UNNAVIGATED_STUB).reason == 'no_metadata'
+
+
+def _one_root_refused_it(tmp_path: Path, logger: pdslogger.PdsLogger) -> tuple[Path, Path, Any]:
+    """Build two roots, one of which refused the very stub the other never held.
+
+    The stub is absent from the record table under both roots, so every lookup
+    of it reaches the refusal table; only the root half of the key separates
+    "this root never navigated the image" from "this root holds a document
+    nothing could be read from".
+
+    Parameters:
+        tmp_path: Directory both roots and the index are written under.
+        logger: Logger the ingest reports through.
+
+    Returns:
+        The root that navigated something else, the root that refused the stub,
+        and the open index over both.
+    """
+    silent = tmp_path / 'nav_a'
+    refused = tmp_path / 'nav_b'
+    build_tree(silent, {NO_POINTING_STUB: document(NO_POINTING_STUB, offset=OFFSET)})
+    build_tree(refused, {CMATRIX_STUB: document(CMATRIX_STUB, instrument=None, offset=OFFSET)})
+    return silent, refused, index_for([silent, refused], tmp_path / 'index.sqlite3', logger=logger)
+
+
+def test_a_refusal_recorded_under_another_root_does_not_refuse_this_one(
     tmp_path: Path, quiet_ingest_logger: pdslogger.PdsLogger
 ) -> None:
-    """Ingest refuses it, so the index reports the image as never navigated.
+    """The refusal lookup is keyed by root as well as by stub.
 
-    The file path calls the same document ``metadata_not_an_object``; the
-    index has nothing to call it, which is why that reason is unreachable
-    there.
+    One index holds several roots, and a stub one of them refused is routinely
+    a stub another simply never navigated; a lookup that dropped the root would
+    fail an image on the strength of its neighbour's refusal.
+    """
+    silent, _refused, engine = _one_root_refused_it(tmp_path, quiet_ingest_logger)
+    try:
+        source = IndexPointingSource(engine, normalize_root_url(silent))
+        assert source.load_pointing(image_file(CMATRIX_STUB)).reason == 'no_metadata'
+    finally:
+        engine.dispose()
+
+
+def test_the_root_that_did_record_the_refusal_still_refuses(
+    tmp_path: Path, quiet_ingest_logger: pdslogger.PdsLogger
+) -> None:
+    """The other direction of the same key, which one row cannot satisfy both of."""
+    _silent, refused, engine = _one_root_refused_it(tmp_path, quiet_ingest_logger)
+    try:
+        source = IndexPointingSource(engine, normalize_root_url(refused))
+        with pytest.raises(ValueError, match='could not read'):
+            source.load_pointing(image_file(CMATRIX_STUB))
+    finally:
+        engine.dispose()
+
+
+def test_a_document_that_is_not_an_object_is_refused_by_the_index(
+    tmp_path: Path, quiet_ingest_logger: pdslogger.PdsLogger
+) -> None:
+    """Ingest refuses it, so the index says it cannot answer for the image.
+
+    The file path calls the same document ``metadata_not_an_object`` and
+    reprojects on uncorrected pointing; the index has no record of it and
+    reports that rather than reporting an image nothing navigated.
     """
     root = tmp_path / 'nav'
     path = root / f'{NO_POINTING_STUB}_metadata.json'
@@ -427,7 +627,8 @@ def test_a_document_that_is_not_an_object_has_no_row_at_all(
     engine = index_for([root], tmp_path / 'index.sqlite3', logger=quiet_ingest_logger)
     try:
         source = IndexPointingSource(engine, normalize_root_url(root))
-        assert source.load_pointing(image_file(NO_POINTING_STUB)).reason == 'no_metadata'
+        with pytest.raises(ValueError, match='not a JSON object'):
+            source.load_pointing(image_file(NO_POINTING_STUB))
     finally:
         engine.dispose()
 
@@ -564,6 +765,20 @@ def test_a_recorded_error_still_reads_back(sources: dict[str, PointingSource], m
     assert record['status_error'] == 'missing_spice_data'
 
 
+def test_an_error_naming_the_word_for_naming_none_is_stored_as_naming_none(
+    sources: dict[str, PointingSource],
+) -> None:
+    """The store reads the field through the consumers' own function, not its own.
+
+    A record whose ``status_error`` is literally the word every reader reports
+    a record naming no error under is a record naming no error, and it is
+    stored as one.  A column that decided for itself which fields name an error
+    would agree with the readers until one of the two changed.
+    """
+    record = sources['index'].read_record(image_file(LITERAL_UNKNOWN_ERROR_STUB))
+    assert 'status_error' not in record
+
+
 # ---------------------------------------------------------------------------
 # What a record says about its own outcome, however it names it
 # ---------------------------------------------------------------------------
@@ -599,6 +814,7 @@ def test_both_paths_report_the_same_outcome(
         (FAILED_STUB, 'missing_spice_data'),
         (NO_STATUS_ERROR_STUB, 'unknown'),
         (NULL_STATUS_ERROR_STUB, 'unknown'),
+        (LITERAL_UNKNOWN_ERROR_STUB, 'unknown'),
     ],
 )
 @pytest.mark.parametrize('mode', ['file', 'index'])
@@ -654,6 +870,8 @@ def _log_of(source: PointingSource, stub: str, log_root: Path) -> str:
     [
         (UNNAVIGATED_STUB, 'No navigation record for'),
         (FAILED_STUB, "status='error'"),
+        (LITERAL_UNKNOWN_STATUS_STUB, "status='unknown'"),
+        (NO_TOP_LEVEL_STATUS_STUB, "status='unknown'"),
         (NULL_OFFSET_STUB, 'null offset'),
         (NO_MIDTIME_STUB, 'malformed pointing block'),
     ],
@@ -669,7 +887,11 @@ def test_the_image_log_says_the_same_thing_either_way(
     """The per-image warnings keep their message shapes in the index path.
 
     A reader of one image's log, and anything scraping those logs, sees the
-    same line whichever storage the run was pointed at.
+    same line whichever storage the run was pointed at.  A record naming no
+    outcome of its own is among them because the classifier names the outcome
+    through the one function every consumer reads that field with: reading the
+    field directly would put the word ``None`` in the log of a record naming
+    nothing and the word ``unknown`` in the log of the row it ingested into.
     """
     assert expected in _log_of(sources[mode], stub, tmp_path / f'logs_{mode}')
 
@@ -904,6 +1126,29 @@ def test_a_url_reads_rows(tmp_path: Path, quiet_ingest_logger: pdslogger.PdsLogg
         source.close()
 
 
+def test_closing_an_index_backed_source_disposes_the_engine(
+    tmp_path: Path, quiet_ingest_logger: pdslogger.PdsLogger
+) -> None:
+    """Closing it returns every pooled connection, rather than only dropping a name.
+
+    Both cloud-task workers hold one index open for the worker's lifetime and
+    close it at the end, so a close that disposed of nothing would leak a
+    connection pool per worker with nothing to say so.  Disposal is observable
+    as the pool being replaced: the engine keeps no connection from before it.
+    """
+    root = tmp_path / 'nav'
+    build_tree(root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET)})
+    database = tmp_path / 'index.sqlite3'
+    index_for([root], database, logger=quiet_ingest_logger).dispose()
+    source = build_pointing_source(FCPath(root), results_db_url=f'sqlite:///{database.as_posix()}')
+    assert isinstance(source, IndexPointingSource)
+    engine = source._engine
+    source.load_pointing(image_file(CMATRIX_STUB))
+    pooled_before = engine.pool
+    source.close()
+    assert engine.pool is not pooled_before
+
+
 def test_an_unopenable_url_fails_rather_than_falling_back(tmp_path: Path) -> None:
     """A misconfigured index is a failed run, not a slow and different one."""
     missing = tmp_path / 'nowhere' / 'index.sqlite3'
@@ -1024,3 +1269,152 @@ def test_the_rebuilt_record_omits_the_camera_frame_name(
     assert 'camera_frame' in ingested['navigation_result']['pointing']
     record = sources['index'].read_record(image_file(CMATRIX_STUB))
     assert 'camera_frame' not in record['navigation_result']['pointing']
+
+
+# ---------------------------------------------------------------------------
+# The three classes, stated in three places
+# ---------------------------------------------------------------------------
+
+CLASS_COUNT = 3
+"""How many record classes the two storages classify under different reasons.
+
+Fixed here so that three lists cannot all stop matching their patterns and
+agree at zero.  Changing it is the reminder that a class is added to the module
+docstring, the plan and the user guide in one commit.
+"""
+
+_REPOSITORY = Path(__file__).resolve().parents[4]
+"""Root of the checkout, which holds the plan and the guides."""
+
+
+def _repository_text(relative: str) -> list[str]:
+    """Return the lines of one repository document, skipping if it is absent.
+
+    The plan and the guides are repository documents rather than packaged ones,
+    so a checkout always has them and an installed tree never does.
+
+    Parameters:
+        relative: Path of the document under the repository root.
+
+    Returns:
+        The lines of the document.
+    """
+    path = _REPOSITORY / relative
+    if not path.is_file():
+        pytest.skip(f'{path} is not in this tree')
+    return path.read_text(encoding='utf-8').splitlines()
+
+
+def _items_between(lines: list[str], opens: str, closes: str, marker: str) -> list[str]:
+    """Return one list's items from a block of text, each folded to one line.
+
+    Parameters:
+        lines: The lines to read.
+        opens: Text identifying the line the block starts after.
+        closes: Prefix of the line that ends the block.
+        marker: Regular expression matching the first line of an item.
+
+    Returns:
+        One string per item, its continuation lines joined onto it.
+    """
+    start = re.compile(marker)
+    inside = False
+    items: list[str] = []
+    for line in lines:
+        if not inside:
+            inside = opens in line
+            continue
+        if line.startswith(closes):
+            break
+        if start.match(line):
+            items.append(line.strip())
+        elif items and line.strip():
+            items[-1] = f'{items[-1]} {line.strip()}'
+    return items
+
+
+def _docstring_classes() -> list[str]:
+    """Return the three classes as the module docstring states them.
+
+    Returns:
+        One string per class.
+    """
+    docstring = pointing_source_module.__doc__ or ''
+    return _items_between(
+        docstring.splitlines(), 'Three classes of record', 'Everything else agrees', r'\d+\. '
+    )
+
+
+def _plan_classes() -> list[str]:
+    """Return the three classes as the plan states them.
+
+    Returns:
+        One string per class.
+    """
+    return _items_between(
+        _repository_text('plans/RESULTS_DB_PLAN.md'),
+        'Three classes survive.',
+        'What decides class 2',
+        r'\d+\. ',
+    )
+
+
+def _guide_classes() -> list[str]:
+    """Return the three classes as the reprojection guide states them.
+
+    Returns:
+        One string per class.
+    """
+    return _items_between(
+        _repository_text('docs/user_guide/user_guide_reprojection.rst'),
+        'Three classes',
+        'Output format',
+        r'\* ',
+    )
+
+
+@pytest.mark.parametrize(
+    'stated',
+    [_docstring_classes, _plan_classes, _guide_classes],
+    ids=['docstring', 'plan', 'guide'],
+)
+def test_every_place_states_every_class(stated: Any) -> None:
+    """The three lists are one list, so a reader checking one against the code sees it all.
+
+    Parameters:
+        stated: The reader of one of the three places.
+    """
+    assert len(stated()) == CLASS_COUNT
+
+
+@pytest.mark.parametrize(
+    'stated',
+    [_docstring_classes, _plan_classes, _guide_classes],
+    ids=['docstring', 'plan', 'guide'],
+)
+def test_every_place_says_a_nesting_is_a_shape_the_column_holds(stated: Any) -> None:
+    """The matrix class is about shapes no matrix can be made of, not about nine values.
+
+    A statement reading "not nine values" says a 3x3 nesting belongs to the
+    class, which is false in both storages: the readers assemble it and the
+    column holds it.  That is exactly where the store and the reader once
+    disagreed, so it is exactly where the three statements have to agree.
+
+    Parameters:
+        stated: The reader of one of the three places.
+    """
+    assert 'nesting' in stated()[1]
+
+
+@pytest.mark.parametrize(
+    'stated',
+    [_docstring_classes, _plan_classes, _guide_classes],
+    ids=['docstring', 'plan', 'guide'],
+)
+def test_every_place_says_a_boolean_frame_identity_leaves_no_trace(stated: Any) -> None:
+    """And the block class covers booleans as well as floats, which the columns refuse alike.
+
+    Parameters:
+        stated: The reader of one of the three places.
+    """
+    assert 'boolean' in stated()[2]

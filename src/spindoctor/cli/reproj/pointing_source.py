@@ -35,8 +35,10 @@ rather than as one holding null, because the record is read as a document would
 be.  ``offset`` is the one exception: it is rebuilt as a key holding null,
 because ingest stores an absent, null, malformed and non-finite offset alike as
 NULL and the rebuild has to render the pair as one of them.  Which one is
-chosen makes no difference to any reader, because none of the four supplies a
-pointing and no consumer branches on the key's presence.  The ``status`` column
+chosen makes no difference to the pointing, since none of the four supplies
+one; it does decide the name the shortfall is counted under, and the null-valued
+key is what makes ``null_offset`` the row's reason for all four, as class 1
+below states.  The ``status`` column
 is NOT NULL and stands in for a document that named no outcome with
 :data:`~spindoctor.support.nav_record.UNKNOWN_STATUS`; that value is rebuilt as
 the absent field it stands for, and both are then read as naming no outcome by
@@ -83,8 +85,9 @@ describes the row that ingest actually wrote:
 | ``unusable_metadata_path``            | unreachable: a stub is a key, not a path |
 +---------------------------------------+------------------------------------------+
 | ``unreadable_metadata``,              | unreachable: ingest refused such a file, |
-| ``invalid_json``,                     | so it has no row, and it surfaces as     |
-| ``metadata_not_an_object``            | ``no_metadata``                          |
+| ``invalid_json``,                     | so it has no record row and a refusal    |
+| ``metadata_not_an_object``            | row instead, and the lookup fails the    |
+|                                       | image rather than classifying it         |
 +---------------------------------------+------------------------------------------+
 | ``missing_offset_key``,               | reported as ``null_offset``: one column  |
 | ``invalid_offset_type``,              | pair holds all five, and none of them    |
@@ -92,27 +95,60 @@ describes the row that ingest actually wrote:
 | ``malformed_offset``                  |                                          |
 +---------------------------------------+------------------------------------------+
 
-Three classes of record are classified under a different reason by the two
-storages.  The list is measured rather than argued: both sources are driven over
-every shape a record's fields can take, and what survives defines it.  Each
-member is a shape no navigation produces, and each is named here so that a
+A document the ingest refused
+-----------------------------
+
+Ingest reads a file it cannot make a navigation record of as a refusal rather
+than as a record, and writes it to ``failed_files`` instead of to ``images``:
+a document naming no ``observation.instrument`` or no ``image_name``, one
+whose declared containers are of another shape, one naming a technique twice,
+and any other file the converter cannot read whole.  The file path reads such a
+document perfectly well and supplies whatever pointing it records.  So a lookup
+that found no record row and stopped there would report a navigated image as one
+nothing navigated, and would build a corrected product through documents and an
+uncorrected one through the index without saying so.
+
+The lookup therefore asks the refusal table whenever it finds no record row, and
+a stub recorded there fails the image, naming the stub, the index and the reason
+the ingest recorded.  A refusal is an answer the index cannot give, which is a
+different fact from "no such image was navigated", and the two are reported
+differently.  The image is refused rather than quietly read from its document:
+a source that fell back to files for some images would make ``--results-db``
+mean a different thing per image, and one round trip per image is the cost the
+index exists to remove.  Failing one image does not fail the run -- both
+consumers contain a per-image failure -- so a root whose ingest refused some of
+its documents is re-ingested rather than worked around.
+
+The one refusal ingest deliberately records nowhere is a file it could not
+retrieve: nothing is known about it that will still be true next pass, and a
+recorded refusal is skipped for as long as the file does not change.  Such a
+file has no row in either table and reads as an image nothing navigated.
+
+The three classes read differently
+----------------------------------
+
+Three classes of record the index does hold are classified under a different
+reason by the two storages, and that the reason is the whole of the difference
+is asserted rather than observed: a member whose mechanism, matrices, midtime or
+offset differed would be a defect in this module or in what ingest stores, not a
+fourth class.  The membership is measured rather than argued -- both sources are
+driven over every shape a record's fields can take, and what survives defines it
+-- and each member is a shape no navigation produces, named here so that a
 record hand-built into a results tree is not read as agreeing when it does not.
-In every one of them the mechanism, the matrices, the midtime and the offset are
-the same on both sides, so the product is the same and the tally is not.
 
 1. **An ``offset`` no reader can use.**  Absent, null, a boolean pair, a
    non-finite pair, or anything else that is not two values convertible to
    finite pixels.  The document is classified under which of those it was;
    the row, which holds one NULL pair for all of them, under ``null_offset``.
-2. **A ``cmatrix`` no column can hold** -- one that is not nine values, or is
-   nine values that are not finite real numbers.  The document is
-   ``malformed_pointing``; the row is ``no_cmatrix_rotation_fitted`` when
-   something else of the block survives (which is what a fitted-rotation result
-   looks like) and ``no_pointing_block`` when nothing does.  The file path also
-   puts one line in the run log for it and the index path does not.  A
-   ``cmatrix`` that *is* nine finite numbers and is not a rotation is stored,
-   and the validator then refuses it in both paths alike, which is why
-   ``malformed_pointing`` has a row of its own above.
+2. **A ``cmatrix`` no column can hold** -- one that is neither nine values nor a
+   3x3 nesting of them, or one whose nine values are not finite real numbers.
+   The document is ``malformed_pointing``; the row is
+   ``no_cmatrix_rotation_fitted`` when something else of the block survives
+   (which is what a fitted-rotation result looks like) and ``no_pointing_block``
+   when nothing does.  The file path also puts one line in the run log for it
+   and the index path does not.  A ``cmatrix`` that *is* nine finite numbers and
+   is not a rotation is stored, and the validator then refuses it in both paths
+   alike, which is why ``malformed_pointing`` has a row of its own above.
 3. **A ``pointing`` block none of whose four columned fields survives** -- one
    holding only ``camera_frame``, or frame identities written as floats or
    booleans, which the integer columns refuse.  The document is
@@ -146,6 +182,7 @@ from spindoctor.cli.reproj.offsets import (
 from spindoctor.config import IMAGE_LOGGER
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.results_index import (
+    FAILED_FILES,
     IMAGES,
     masked_url,
     normalize_root_url,
@@ -201,6 +238,8 @@ class PointingSource(Protocol):
 
         Raises:
             FileNotFoundError: If nothing recorded this image.
+            ValueError: If something recorded this image and the source cannot
+                say what it recorded.
         """
         ...
 
@@ -215,6 +254,11 @@ class PointingSource(Protocol):
 
         Returns:
             The classified selection.
+
+        Raises:
+            ValueError: If something recorded this image and the source cannot
+                say what it recorded, which is not a record supplying no
+                pointing and must not be counted as one.
         """
         ...
 
@@ -348,6 +392,40 @@ class IndexPointingSource:
         with reporting_a_failed_read(url), self._engine.connect() as connection:
             return connection.execute(statement).first()
 
+    def _refuse_a_document_the_ingest_refused(self, image_file: ImageFile) -> None:
+        """Fail an image whose document the ingest recorded as one it could not read.
+
+        Asked only after the record lookup found nothing, so an image the index
+        holds a record for costs the one SELECT it always did and only an image
+        it holds none for pays a second.
+
+        Parameters:
+            image_file: The image whose record was not found.
+
+        Raises:
+            ValueError: If the index records this stub as a document the ingest
+                refused, naming the stub, the index and the recorded reason. A
+                refusal means the index cannot answer for this image, which is
+                a different fact from nothing having navigated it, and reading
+                the one as the other builds a product from the document under
+                one storage and from uncorrected pointing under the other.
+        """
+        statement = sqlalchemy.select(FAILED_FILES.c.reason).where(
+            FAILED_FILES.c.root_url == self._root_url,
+            FAILED_FILES.c.results_path_stub == image_file.results_path_stub,
+        )
+        url = self._engine.url.render_as_string(hide_password=False)
+        with reporting_a_failed_read(url), self._engine.connect() as connection:
+            row = connection.execute(statement).first()
+        if row is None:
+            return
+        raise ValueError(
+            f'{image_file.results_path_stub}: {self._storage} records the navigation '
+            f'document for this image as one the ingest could not read ({row.reason}), so '
+            f'the index cannot say what it recorded. Read the navigation documents '
+            f'instead, or fix the document and ingest that root again.'
+        )
+
     def read_record(self, image_file: ImageFile) -> dict[str, Any]:
         """Rebuild one image's navigation record from its row.
 
@@ -365,9 +443,15 @@ class IndexPointingSource:
                 and the message names the snapshot so the two can be told
                 apart. A missing document raises the same way, so the caller
                 reports both the same way.
+            ValueError: If the index records the document for this stub as one
+                the ingest refused. Deliberately not the same exception: a
+                caller reports a missing record as an image nothing navigated,
+                and this image was navigated -- the index simply cannot say
+                what it recorded.
         """
         row = self._row(image_file)
         if row is None:
+            self._refuse_a_document_the_ingest_refused(image_file)
             raise FileNotFoundError(
                 f'{image_file.results_path_stub}: no navigation record for this image in '
                 f'{self._storage}'
@@ -383,9 +467,17 @@ class IndexPointingSource:
         Returns:
             The classified selection, from the same classifier the file-backed
             source uses.
+
+        Raises:
+            ValueError: If the index records the document for this stub as one
+                the ingest refused. A record that supplies no pointing is
+                classified and counted; a document the index cannot answer for
+                is neither, because the same document read as a file may well
+                supply one and the product would differ in silence.
         """
         row = self._row(image_file)
         if row is None:
+            self._refuse_a_document_the_ingest_refused(image_file)
             IMAGE_LOGGER.warning(NO_METADATA_MESSAGE, image_file.image_file_url, self._storage)
             return none_selection(NO_METADATA)
         return select_pointing(_record_from_row(row), subject=str(image_file.image_file_url))
@@ -449,8 +541,10 @@ def _record_from_row(row: sqlalchemy.Row[Any]) -> dict[str, Any]:
     # The offset key is always written, with a null value where the row carries
     # no usable pair.  Ingest stores an absent, null, malformed and non-finite
     # offset alike as NULL, so the rebuild has to render the pair as one of
-    # them; which one makes no difference, because none of the four supplies a
-    # pointing and no consumer branches on the key's presence.
+    # them.  None of the four supplies a pointing, so the choice cannot change a
+    # product; it does decide the name the shortfall is counted under, and this
+    # one is what makes ``null_offset`` the row's reason for all of them rather
+    # than ``missing_offset_key``.
     offset: list[float] | None = None
     if row.offset_dv is not None and row.offset_du is not None:
         offset = [row.offset_dv, row.offset_du]

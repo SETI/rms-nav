@@ -51,10 +51,12 @@ from spindoctor.cli.stats.classify import date_from_image_et, image_number_from_
 # agreed today is exactly what let a document and its row supply different
 # pointing.
 from spindoctor.support.nav_record import (
+    UNKNOWN_STATUS,
     finite_float,
     record_offset,
-    record_rotation_values,
+    record_rotation_matrix,
     record_status,
+    record_status_error,
 )
 
 __all__ = [
@@ -341,29 +343,28 @@ def _sigma_from_covariance(covariance: Any) -> tuple[float | None, float | None]
 
 
 def _cmatrix_or_none(value: Any) -> list[float] | None:
-    """Coerce a recorded rotation matrix to the nine floats the readers read.
+    """Store the nine row-major values a recorded rotation denotes to its readers.
 
-    The shape is read by the readers' own function, so both shapes a record can
-    write a rotation in -- nine row-major values, or a 3x3 nesting of them --
-    are stored as the nine the readers evaluate.  A value only those readers
-    would refuse is stored as nothing, and a value they would accept is stored,
-    so whether a recorded matrix is a proper rotation is decided by the one
-    validator both of them apply to it rather than by this column.
+    The matrix is assembled by the readers' own function and nothing else is
+    asked of it here.  A column that re-decided what nine real numbers are
+    would be a second reader of the record, and the second answer is the one
+    that drifts: a rotation written in a nesting the readers assemble and this
+    column refused would be applied through a document and be NULL in a row.
+    Whether the matrix that survives is a proper rotation is decided by the one
+    validator both readers apply to it, not by this column.
 
     Parameters:
         value: The recorded matrix, row-major or nested, or None.
 
     Returns:
-        The nine values, or None when the matrix is absent, is neither shape,
-        or holds something that is not a finite real number.
+        The nine values row-major, or None when the readers can make no 3x3
+        matrix of finite real numbers from the recorded value.
     """
-    values = record_rotation_values(value)
-    if values is None:
+    matrix = record_rotation_matrix(value)
+    if matrix is None:
         return None
-    coerced = [finite_float(entry) for entry in values]
-    if any(entry is None for entry in coerced):
-        return None
-    return cast(list[float], coerced)
+    nine: list[float] = matrix.reshape(9).tolist()
+    return nine
 
 
 def _source_names_from_feature_ids(feature_ids: Any) -> list[str]:
@@ -580,6 +581,11 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
     offset_dv, offset_du = (
         recorded_offset.pair if recorded_offset.pair is not None else (None, None)
     )
+    # Likewise read through the consumers' own function.  It answers the word a
+    # record naming no error is reported under, and that is a record with
+    # nothing to store rather than one whose error is that word.
+    recorded_error = record_status_error(metadata)
+    status_error = None if recorded_error == UNKNOWN_STATUS else recorded_error
     sigma_dv, sigma_du = _pair(nav.get('sigma_px'))
     covariance_vv, covariance_vu, covariance_uu = _covariance_block(nav.get('covariance_px2'))
 
@@ -603,9 +609,12 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         # classifying the rebuilt record would then apply a corrected pointing
         # the same record read as a file supplies no pointing at all.
         'status': record_status(metadata),
-        # NULL exactly where a consumer would report the record as naming no
-        # error, which is what a rebuilt record's absent field then says.
-        'status_error': _str_or_none(metadata.get('status_error')),
+        # Read through the consumer's own function and stored as NULL exactly
+        # where that function reports the record as naming no error, which is
+        # what a rebuilt record's absent field then says.  A column deciding
+        # for itself which fields name an error would be a second reader of
+        # this one, agreeing until one of the two changed.
+        'status_error': status_error,
         'status_reason': _str_or_none(nav.get('status_reason')),
         'offset_dv': offset_dv,
         'offset_du': offset_du,

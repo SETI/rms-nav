@@ -218,6 +218,76 @@ def test_an_empty_reason_is_stored_as_nothing() -> None:
     assert rows.image['status_reason'] is None
 
 
+@pytest.mark.parametrize(
+    'recorded', [None, '', 42, UNKNOWN_STATUS], ids=['null', 'empty', 'number', 'the-word']
+)
+def test_a_document_naming_no_error_stores_no_error(recorded: Any) -> None:
+    """Read through the consumers' own function rather than a rule of the column.
+
+    Every one of these names no error to the readers, the word ``unknown``
+    included, since that is what they report a record naming none under.  A
+    column deciding for itself which fields name an error would agree with them
+    until one of the two changed.
+
+    Parameters:
+        recorded: The recorded ``status_error``.
+    """
+    document = metadata_document(status='failed', offset=None)
+    document['status_error'] = recorded
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image['status_error'] is None
+
+
+@pytest.mark.parametrize(
+    ('sigma', 'expected'),
+    [
+        ([0.5, 0.75], (0.5, 0.75)),
+        ([0.5, 0.75, 1.0], (None, None)),
+        ([0.5], (None, None)),
+        ([], (None, None)),
+    ],
+    ids=['pair', 'three', 'one', 'empty'],
+)
+def test_a_recorded_sigma_pair_is_refused_whole_unless_it_is_a_pair(
+    sigma: Any, expected: tuple[float | None, float | None]
+) -> None:
+    """Two of three recorded numbers are not the pair anybody wrote.
+
+    The per-axis uncertainty an operator reads off a report has to be the one
+    the navigation recorded; taking the first two of three would report an
+    uncertainty from a value of some other shape as though it were that pair.
+
+    Parameters:
+        sigma: The recorded ``navigation_result.sigma_px``.
+        expected: The ``(sigma_dv, sigma_du)`` the columns must hold.
+    """
+    document = metadata_document()
+    document['navigation_result']['sigma_px'] = sigma
+    rows = rows_from_metadata(document, SOURCE)
+    assert (rows.image['sigma_dv'], rows.image['sigma_du']) == expected
+
+
+@pytest.mark.parametrize(
+    ('offset', 'expected'),
+    [([1.5, -2.5], (1.5, -2.5)), ([1.5, -2.5, 9.0], (None, None)), ([1.5], (None, None))],
+    ids=['pair', 'three', 'one'],
+)
+def test_a_techniques_offset_is_refused_whole_unless_it_is_a_pair(
+    offset: Any, expected: tuple[float | None, float | None]
+) -> None:
+    """The same rule for the per-technique estimates a report compares.
+
+    Parameters:
+        offset: The recorded ``per_technique[].offset_px``.
+        expected: The ``(offset_dv, offset_du)`` the row must hold.
+    """
+    entry = technique('StarFieldFromCatalogNav', (0.0, 0.0))
+    entry['offset_px'] = offset
+    document = metadata_document(per_technique=[entry])
+    rows = rows_from_metadata(document, SOURCE)
+    assert (rows.techniques[0]['offset_dv'], rows.techniques[0]['offset_du']) == expected
+
+
 def test_the_covariance_block_is_the_offset_block() -> None:
     """A twist-fitted 3x3 matrix contributes only its 2x2 offset block."""
     document = metadata_document()
@@ -362,8 +432,20 @@ def test_a_matrix_of_nine_numbers_that_is_not_a_rotation_is_still_stored() -> No
         [True] * 9,
         ['1.0', '0.0', '0.0', '0.0', '1.0', '0.0', '0.0', '0.0', '1.0'],
         'not a matrix',
+        [[1.0, 2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0], [9.0], [10.0]],
+        [float('nan'), 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        [10**400, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
     ],
-    ids=['eight', 'ragged', 'booleans', 'strings', 'text'],
+    ids=[
+        'eight',
+        'ragged',
+        'booleans',
+        'strings',
+        'text',
+        'nine-shapes-that-are-not-one-matrix',
+        'non-finite',
+        'integer-too-large-for-a-float',
+    ],
 )
 def test_a_matrix_no_reader_could_use_is_stored_as_nothing(value: Any) -> None:
     """Nothing a reader would refuse is kept, so a stored value is always usable.
@@ -375,6 +457,45 @@ def test_a_matrix_no_reader_could_use_is_stored_as_nothing(value: Any) -> None:
     document['navigation_result']['pointing'] = {'cmatrix': value}
     rows = rows_from_metadata(document, SOURCE)
     assert rows.image['cmatrix'] is None
+
+
+@pytest.mark.parametrize('field', ['cmatrix', 'cmatrix_original'])
+def test_a_matrix_written_as_rows_of_one_is_stored_as_the_nine_it_denotes(field: str) -> None:
+    """Whatever shape the readers assemble one matrix from, the column holds it.
+
+    Nine rows of one reshape into the same 3x3 the flat nine do, so a reader
+    applies the rotation; a column that judged the entries one at a time
+    instead of assembling them would hold nothing, and the same record would be
+    reprojected on its corrected attitude through a document and on an
+    ``OffsetFOV`` through a row.
+
+    Parameters:
+        field: Which of the two recorded matrices is written that way.
+    """
+    document = metadata_document()
+    document['navigation_result']['pointing'] = {
+        'cmatrix': [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        'cmatrix_original': [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+    }
+    document['navigation_result']['pointing'][field] = [
+        [value] for value in [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    ]
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image[field] == [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+
+
+def test_an_unreadable_matrix_costs_the_matrix_and_not_the_document() -> None:
+    """A value no reader can use is a NULL column, never a refused file.
+
+    An integer too large for a float is the case that used to raise out of the
+    conversion, and the raise cost the whole document: every other column of a
+    real navigation record was lost, and the image then read as one nothing had
+    navigated.
+    """
+    document = metadata_document(offset=[1.5, -2.5])
+    document['navigation_result']['pointing'] = {'cmatrix': [10**400] * 9}
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image['offset_dv'] == 1.5
 
 
 @pytest.mark.parametrize(

@@ -410,6 +410,92 @@ def test_driver_skips_image_with_missing_status(
     assert calls['write'] == []
 
 
+@pytest.mark.parametrize(
+    'metadata',
+    [{'offset': [0.0, 0.0]}, {'status': None}, {'status': ''}, {'status': 42}],
+    ids=['absent', 'null', 'empty', 'number'],
+)
+def test_the_skip_names_the_outcome_every_consumer_reports_such_a_record_under(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata: dict[str, Any]
+) -> None:
+    """The stage reads the outcome through the one function every consumer uses.
+
+    A cloud task has no run log, so this value is the only account of the skip
+    that leaves the worker, and the index records a document naming no outcome
+    as this same word.  A stage reading the field directly would report
+    ``None`` through a document and ``unknown`` through the row it ingested
+    into, for the same image.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+        metadata: A record naming no outcome of its own.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(tmp_path, metadata)
+    assert result['nav_status'] == 'unknown'
+
+
+@pytest.mark.parametrize(
+    'metadata',
+    [
+        {'status': 'failed'},
+        {'status': 'failed', 'status_error': None},
+        {'status': 'failed', 'status_error': ''},
+        {'status': 'failed', 'status_error': 42},
+    ],
+    ids=['absent', 'null', 'empty', 'number'],
+)
+def test_the_skip_names_the_error_every_consumer_reports_such_a_record_under(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata: dict[str, Any]
+) -> None:
+    """And the error beside it, through that same shared function.
+
+    Every failed and conflicted navigation writes no ``status_error`` at all,
+    so the default is the common case; a stage defaulting on its own would
+    report ``None`` for a field present and holding null while the row said
+    ``unknown``.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+        metadata: An unsuccessful record naming no error.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(tmp_path, metadata)
+    assert result['nav_status_error'] == 'unknown'
+
+
+def test_the_skip_still_names_an_error_the_record_does_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control for the default above, which an empty reader would pass.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(
+        tmp_path, {'status': 'error', 'status_error': 'missing_spice_data'}
+    )
+    assert result['nav_status_error'] == 'missing_spice_data'
+
+
+def test_the_skip_still_names_an_outcome_the_record_does_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And the control for the outcome, likewise.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(tmp_path, {'status': 'conflicted'})
+    assert result['nav_status'] == 'conflicted'
+
+
 def test_driver_treats_a_missing_offset_field_as_no_pointing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
