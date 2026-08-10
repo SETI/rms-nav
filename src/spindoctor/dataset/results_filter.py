@@ -1,19 +1,24 @@
 """Filter image selections against existing navigation result files.
 
 Implements the ``--has-offset-file`` / ``--has-no-offset-file`` /
-``--has-png-file`` / ``--has-no-png-file`` / ``--has-offset-error`` /
-``--has-offset-spice-error`` / ``--has-offset-nonspice-error`` image
-selection options shared by the PDS3 datasets.
+``--has-offset-error`` / ``--has-no-offset-error`` /
+``--has-offset-spice-error`` / ``--has-offset-nonspice-error`` image selection
+options shared by the PDS3 datasets.
+
+The error filters, including the negative one, ask what a document records, so
+each of them requires the document to exist: an image nothing has been written
+for records no error, and is selected by ``--has-no-offset-file`` rather than by
+``--has-no-offset-error``.
 
 The navigation pipeline writes ``{nav_results_root}/{results_path_stub}_metadata.json``
-and ``{results_path_stub}_summary.png`` (see
-:func:`spindoctor.navigate_image_files.navigate_image_files`).  Presence
-filters are answered by walking the results tree once per selected volume and
-collecting the existing result files into sets, so each candidate image costs
-no additional cloud round trip.  Absence filters are answered with batched
-``FCPath.exists()`` calls (or from the walked sets when a walk already
-happened), and the error filters retrieve the metadata JSON files in batches
-and inspect their ``status`` / ``status_error`` fields.
+(see :func:`spindoctor.navigate_image_files.navigate_image_files`).  The
+presence filter is answered by walking the results tree once per selected
+volume and collecting the existing metadata files into a set, so each candidate
+image costs no additional cloud round trip.  The absence filter is answered
+with batched ``FCPath.exists()`` calls, since it is the one filter that is
+active only when nothing else asked for a walk, and the error filters retrieve
+the metadata JSON files in batches and inspect their ``status`` /
+``status_error`` fields.
 
 Given a results index, every one of those questions is answered instead by one
 query over the index, and the tree is not read at all.  The index-backed
@@ -39,9 +44,6 @@ from .dataset import ImageFile
 METADATA_SUFFIX = '_metadata.json'
 """Suffix of the per-image offset metadata file under the results root."""
 
-SUMMARY_PNG_SUFFIX = '_summary.png'
-"""Suffix of the per-image summary PNG file under the results root."""
-
 RESULTS_FILTER_BATCH_SIZE = 64
 """Number of images checked per batched ``exists()`` / ``retrieve()`` call."""
 
@@ -57,7 +59,7 @@ is what the branch-local import exists to avoid.
 class SelectionError(ValueError):
     """A selection this run cannot be given, as opposed to one that went wrong.
 
-    Raised for a contradictory pair of selection flags, and for a results index
+    Raised for a contradictory combination of selection flags, and for a results index
     that cannot be opened, cannot be read, or holds no completed ingest of the
     results root.  Each is a run that is misconfigured, each already carries a
     message saying what to change, and a program is therefore free to report
@@ -70,6 +72,22 @@ class SelectionError(ValueError):
     an outright programming error is a run that went wrong, and its traceback is
     the useful thing about it.
     """
+
+
+def _named_flags(names: Sequence[str]) -> str:
+    """Render the flags a refusal is about, in the spelling the caller passed.
+
+    Parameters:
+        names: The flag names, in the order they are declared.
+
+    Returns:
+        The names joined into a phrase, so that a message can name every flag
+        that made the selection unsatisfiable rather than a category the reader
+        has to look up.
+    """
+    if len(names) == 1:
+        return names[0]
+    return f'{", ".join(names[:-1])} and {names[-1]}'
 
 
 def _elapsed_phrase(seconds: float) -> str:
@@ -131,10 +149,11 @@ class ResultsFilter:
 
     Constructed once per enumeration when any of the results-based selection
     flags is active.  Construction validates the flag combination (the flags
-    AND together; directly contradictory pairs raise) and then collects what
-    the results root holds: from the index in one query when a results-index
-    URL is given, and otherwise, when a presence or error filter is active, by
-    walking the results tree under each selected volume.
+    AND together; a combination carrying a contradictory pair raises, naming
+    every contradiction it carries rather than the first one found) and then
+    collects what the results root holds: from the index in one query when a
+    results-index URL is given, and otherwise, when the presence or an error
+    filter is active, by walking the results tree under each selected volume.
 
     The filter is applied in two stages:
 
@@ -154,9 +173,8 @@ class ResultsFilter:
         *,
         has_offset_file: bool = False,
         has_no_offset_file: bool = False,
-        has_png_file: bool = False,
-        has_no_png_file: bool = False,
         has_offset_error: bool = False,
+        has_no_offset_error: bool = False,
         has_offset_spice_error: bool = False,
         has_offset_nonspice_error: bool = False,
         results_db_url: str | None = None,
@@ -175,11 +193,20 @@ class ResultsFilter:
             has_offset_file: Only keep images whose offset metadata file exists.
             has_no_offset_file: Only keep images whose offset metadata file does
                 not exist.
-            has_png_file: Only keep images whose summary PNG file exists.
-            has_no_png_file: Only keep images whose summary PNG file does not
-                exist.
             has_offset_error: Only keep images whose offset metadata file
                 indicates a fatal error (``status == 'error'``).
+            has_no_offset_error: Only keep images whose offset metadata file
+                records a status other than the fatal one, which for the
+                documents this pipeline writes is the images whose navigation
+                ran to a result of any kind.  It is what the document says and
+                not what it holds: any JSON object whose ``status`` is not
+                ``error`` matches, including one carrying no navigation result
+                at all.  Like every other error filter this one asks what a
+                document records, so it keeps only images that have one: an
+                image nothing has been written for records no error and is
+                selected by ``has_no_offset_file``.  So is a document nothing
+                can be read out of, for the reason :meth:`_metadata_matches`
+                gives.
             has_offset_spice_error: Only keep images whose offset metadata file
                 indicates a fatal error from missing SPICE data.
             has_offset_nonspice_error: Only keep images whose offset metadata
@@ -195,31 +222,75 @@ class ResultsFilter:
                 results index cannot be opened, cannot be read, or holds no
                 completed ingest of this results root.
         """
+        # Declaration order, so that every message names the flags in the order
+        # the options themselves are documented in.  A refusal that names one
+        # flag against the others it excludes leads with that one and lists the
+        # rest in this order, which is what says which exclusion is claimed.
+        reading_a_document = [
+            name
+            for name, given in (
+                ('has_offset_error', has_offset_error),
+                ('has_no_offset_error', has_no_offset_error),
+                ('has_offset_spice_error', has_offset_spice_error),
+                ('has_offset_nonspice_error', has_offset_nonspice_error),
+            )
+            if given
+        ]
+        naming_an_error = [name for name in reading_a_document if name != 'has_no_offset_error']
+        contradictions: list[str] = []
         if has_offset_file and has_no_offset_file:
-            raise SelectionError('has_offset_file and has_no_offset_file are mutually exclusive')
-        if has_png_file and has_no_png_file:
-            raise SelectionError('has_png_file and has_no_png_file are mutually exclusive')
+            contradictions.append(
+                'has_offset_file and has_no_offset_file are mutually exclusive: one image '
+                'cannot both have an offset metadata file and have none'
+            )
         if has_offset_spice_error and has_offset_nonspice_error:
-            raise SelectionError(
-                'has_offset_spice_error and has_offset_nonspice_error are mutually exclusive'
+            contradictions.append(
+                'has_offset_spice_error and has_offset_nonspice_error are mutually exclusive: '
+                'one fatal error either came from missing SPICE data or did not'
             )
-        needs_metadata_read = (
-            has_offset_error or has_offset_spice_error or has_offset_nonspice_error
-        )
-        if needs_metadata_read and has_no_offset_file:
-            raise SelectionError(
-                'has_no_offset_file contradicts the offset-error filters, which '
-                'require the offset metadata file to exist'
+        if has_no_offset_file and reading_a_document:
+            # Whichever of the four was given is named, because "the
+            # offset-error filters" is a category the reader would have to look
+            # up, and one of its members is a flag whose own name says "no
+            # error" -- so a message that only named the category would leave a
+            # user who typed --has-no-offset-error reading about something else.
+            # "Cannot be combined with" rather than "are mutually exclusive":
+            # the exclusion runs between this flag and each of the others, and
+            # the others are satisfiable together -- has_offset_error with
+            # has_offset_spice_error is a row of the table this refusal is
+            # tested against.  Named as a set, the message would assert an
+            # exclusion between every pair of them, which is false.
+            named = _named_flags(reading_a_document)
+            asks = 'asks' if len(reading_a_document) == 1 else 'ask'
+            contradictions.append(
+                f'has_no_offset_file cannot be combined with {named}: {named} {asks} what an '
+                'offset metadata file records, which requires the file to exist'
             )
+        if has_no_offset_error and naming_an_error:
+            # Each of the three names a document that records a fatal error, of
+            # any kind or of one kind, and this one names a document that
+            # records none: no document is both, so the combination is a
+            # selection nothing could ever satisfy rather than a narrow one.
+            # The three are not exclusive of each other, so this reads the same
+            # way as the refusal above: one flag against the ones it excludes.
+            contradictions.append(
+                f'has_no_offset_error cannot be combined with {_named_flags(naming_an_error)}: '
+                'one document cannot both record a fatal error and record none'
+            )
+        if contradictions:
+            # Every contradiction the flags carry, not the first one found: a
+            # selection refused one pair at a time costs the user a run per pair,
+            # and a flag left out of the message reads as one the run accepted.
+            raise SelectionError('; '.join(contradictions))
+        needs_metadata_read = bool(reading_a_document)
 
         self._has_no_offset_file = has_no_offset_file
-        self._has_no_png_file = has_no_png_file
+        self._has_no_offset_error = has_no_offset_error
         self._has_offset_spice_error = has_offset_spice_error
         self._has_offset_nonspice_error = has_offset_nonspice_error
         # The error filters read the metadata file, so it must exist; fold them
         # into the presence filter so the walked set prunes candidates first.
         self._needs_offset_presence = has_offset_file or needs_metadata_read
-        self._needs_png_presence = has_png_file
         self._needs_metadata_read = needs_metadata_read
         if isinstance(nav_results_root, FCPath):
             self._nav_results_root = nav_results_root
@@ -229,14 +300,13 @@ class ResultsFilter:
             self._nav_results_root = FileCache(None).new_path(nav_results_root)
         self._logger = logger
         self._offset_rel_paths: set[str] = set()
-        self._png_rel_paths: set[str] = set()
         self._error_stubs: frozenset[str] = frozenset()
         self._from_index = results_db_url is not None
-        # The index answers every filter, including the absence filters, which
-        # a tree read answers only when a walk happened for another reason.
-        self._have_result_sets = (
-            self._from_index or self._needs_offset_presence or self._needs_png_presence
-        )
+        # The index answers every filter, including the absence filter, which a
+        # tree read answers per batch instead: it contradicts every filter a
+        # walk is done for, so reading the tree there is never a walked set to
+        # answer it from.
+        self._have_result_sets = self._from_index or self._needs_offset_presence
         # Fixed here rather than left as it came: an iterator is emptied by
         # whichever path reads it first, and which path that is depends on the
         # flags and on whether a URL was given.
@@ -246,6 +316,7 @@ class ResultsFilter:
                 results_db_url,
                 volume_names,
                 has_offset_error=has_offset_error,
+                has_no_offset_error=has_no_offset_error,
                 has_offset_spice_error=has_offset_spice_error,
                 has_offset_nonspice_error=has_offset_nonspice_error,
             )
@@ -258,17 +329,18 @@ class ResultsFilter:
 
         The caller uses this to decide whether to buffer accepted images into
         batches (amortizing the batched ``exists()`` / ``retrieve()`` round
-        trips) or to yield them immediately.  When the results tree was walked,
-        the absence filters are answered from the walked sets in
-        :meth:`passes_presence` instead and cost nothing here.  When a results
-        index answered the enumeration, so is every other filter, and nothing
-        is left to do per batch.
+        trips) or to yield them immediately.  When a results index answered the
+        enumeration, every filter is settled in :meth:`passes_presence` and
+        nothing is left to do per batch.
         """
         if self._from_index:
             return False
         if self._needs_metadata_read:
             return True
-        return not self._have_result_sets and (self._has_no_offset_file or self._has_no_png_file)
+        # The absence filter is the only one left, and it is the one no walk was
+        # done for: it contradicts every flag that sets the presence fold-in, so
+        # reaching here with it set means the collected sets are empty.
+        return self._has_no_offset_file
 
     def _read_index(
         self,
@@ -276,6 +348,7 @@ class ResultsFilter:
         volumes: Sequence[str],
         *,
         has_offset_error: bool,
+        has_no_offset_error: bool,
         has_offset_spice_error: bool,
         has_offset_nonspice_error: bool,
     ) -> None:
@@ -285,6 +358,8 @@ class ResultsFilter:
             results_db_url: Connection URL of the results index.
             volumes: Volume names to read results for.
             has_offset_error: Whether any fatal error is wanted.
+            has_no_offset_error: Whether a document recording no fatal error is
+                wanted.
             has_offset_spice_error: Whether only a missing-SPICE-data error is
                 wanted.
             has_offset_nonspice_error: Whether only a fatal error other than
@@ -307,6 +382,7 @@ class ResultsFilter:
                 self._nav_results_root,
                 volumes,
                 has_offset_error=has_offset_error,
+                has_no_offset_error=has_no_offset_error,
                 has_offset_spice_error=has_offset_spice_error,
                 has_offset_nonspice_error=has_offset_nonspice_error,
             )
@@ -317,13 +393,10 @@ class ResultsFilter:
             # catching every other ValueError an enumeration raises.
             raise SelectionError(str(exc)) from exc
         self._offset_rel_paths = {stub + METADATA_SUFFIX for stub in stubs.with_metadata}
-        self._png_rel_paths = {stub + SUMMARY_PNG_SUFFIX for stub in stubs.with_summary_png}
         self._error_stubs = stubs.matching_error
         self._logger.info(
-            '*** Results index holds %d offset metadata and %d summary PNG files under %s, '
-            'ingested %s',
+            '*** Results index holds %d offset metadata files under %s, ingested %s',
             len(self._offset_rel_paths),
-            len(self._png_rel_paths),
             self._nav_results_root,
             _snapshot_age(stubs.ingested_utc),
         )
@@ -349,9 +422,8 @@ class ResultsFilter:
         """Walks the results tree under each volume, collecting result files.
 
         One directory walk per volume, restricted to the selected volumes so
-        unrelated results are never listed.  Both result-file suffixes are
-        collected in the single walk.  A volume with no results directory is
-        treated as having no result files.
+        unrelated results are never listed.  A volume with no results directory
+        is treated as having no result files.
 
         Parameters:
             volumes: Volume names to walk under the results root.
@@ -369,8 +441,6 @@ class ResultsFilter:
                         rel_path = f'{rel_dir}/{file_name}'
                         if file_name.endswith(METADATA_SUFFIX):
                             self._offset_rel_paths.add(rel_path)
-                        elif file_name.endswith(SUMMARY_PNG_SUFFIX):
-                            self._png_rel_paths.add(rel_path)
             except (FileNotFoundError, NotADirectoryError):
                 # A volume with no results directory (or whose results path is
                 # not a directory) simply has no result files. Any other OSError
@@ -379,20 +449,20 @@ class ResultsFilter:
                 # it is allowed to propagate.
                 continue
         self._logger.info(
-            '*** Results scan found %d offset metadata and %d summary PNG files under %s',
+            '*** Results scan found %d offset metadata files under %s',
             len(self._offset_rel_paths),
-            len(self._png_rel_paths),
             self._nav_results_root,
         )
 
     def passes_presence(self, results_path_stub: str) -> bool:
         """True if the image passes the filters answerable from the collected sets.
 
-        Covers the presence filters and, when the results tree was walked
-        anyway, the absence filters too (a set lookup instead of a per-file
-        ``exists()`` round trip).  When the sets came from a results index they
-        cover the error filters as well, since the query already read what the
-        tree path has to open each metadata file for.
+        Covers the presence filter.  When the sets came from a results index it
+        covers every other filter as well: the absence filter is a lookup in
+        the same set instead of a per-file ``exists()`` round trip, and the
+        query already read what the tree path has to open each metadata file
+        for.  Reading the tree, the absence filter is active only when nothing
+        asked for a walk, so it is answered in :meth:`filter_batch` instead.
 
         Parameters:
             results_path_stub: The image's results path stub (relative to the
@@ -405,14 +475,9 @@ class ResultsFilter:
         if not self._have_result_sets:
             return True
         metadata_rel_path = results_path_stub + METADATA_SUFFIX
-        png_rel_path = results_path_stub + SUMMARY_PNG_SUFFIX
         if self._needs_offset_presence and metadata_rel_path not in self._offset_rel_paths:
             return False
-        if self._needs_png_presence and png_rel_path not in self._png_rel_paths:
-            return False
         if self._has_no_offset_file and metadata_rel_path in self._offset_rel_paths:
-            return False
-        if self._has_no_png_file and png_rel_path in self._png_rel_paths:
             return False
         if not self._from_index or not self._needs_metadata_read:
             return True
@@ -421,12 +486,12 @@ class ResultsFilter:
     def filter_batch(self, image_files: list[ImageFile]) -> list[ImageFile]:
         """Applies the absence and metadata-content filters to a batch.
 
-        Input order is preserved.  Absence filters (when the results tree was
-        not walked) are answered with one batched ``exists()`` call covering
-        every active absence suffix.  The error filters retrieve all metadata
-        files in one batched call and inspect their ``status`` /
-        ``status_error`` fields.  A filter answered from a results index has
-        nothing left to apply here and returns the batch as it was given.
+        Input order is preserved.  The absence filter is answered with one
+        batched ``exists()`` call, the tree having gone unwalked for it.  The
+        error filters retrieve all metadata files in one batched call and
+        inspect their ``status`` / ``status_error`` fields.  A filter answered
+        from a results index has nothing left to apply here and returns the
+        batch as it was given.
 
         Parameters:
             image_files: Batch of images that already passed the cheap filters.
@@ -439,23 +504,10 @@ class ResultsFilter:
         if not keep or not self.needs_batch_filtering:
             return keep
 
-        absence_suffixes: list[str] = []
-        if not self._have_result_sets:
-            if self._has_no_offset_file:
-                absence_suffixes.append(METADATA_SUFFIX)
-            if self._has_no_png_file:
-                absence_suffixes.append(SUMMARY_PNG_SUFFIX)
-        if absence_suffixes:
-            sub_paths: list[str | Path] = [
-                f.results_path_stub + suffix for f in keep for suffix in absence_suffixes
-            ]
+        if self._has_no_offset_file:
+            sub_paths: list[str | Path] = [f.results_path_stub + METADATA_SUFFIX for f in keep]
             found = cast(list[bool], self._nav_results_root.exists(sub_paths))
-            n_suffixes = len(absence_suffixes)
-            keep = [
-                f
-                for i, f in enumerate(keep)
-                if not any(found[i * n_suffixes : (i + 1) * n_suffixes])
-            ]
+            keep = [f for f, exists in zip(keep, found, strict=True) if not exists]
 
         if self._needs_metadata_read and keep:
             metadata_sub_paths: list[str | Path] = [
@@ -479,7 +531,11 @@ class ResultsFilter:
 
         A metadata file that cannot be read, cannot be decoded as UTF-8, does
         not parse as JSON, or does not parse to a JSON object excludes its image
-        with a logged warning rather than aborting the enumeration.
+        with a logged warning rather than aborting the enumeration.  That holds
+        for the filter on a document recording no fatal error as well: what such
+        a file records is unknown rather than known to be an outcome, and it is
+        also what a results index refuses to record a status for, so excluding
+        it is what keeps the two implementations answering alike.
 
         Parameters:
             image_file: The candidate image (for the warning message only).
@@ -501,6 +557,8 @@ class ResultsFilter:
             )
             return False
         metadata: dict[str, Any] = parsed
+        if self._has_no_offset_error:
+            return metadata.get('status') != 'error'
         if metadata.get('status') != 'error':
             return False
         status_error = metadata.get('status_error')

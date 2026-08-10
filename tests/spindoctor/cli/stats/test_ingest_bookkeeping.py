@@ -44,7 +44,6 @@ from .conftest import (
     metadata_document,
     technique,
     write_metadata,
-    write_summary_png,
 )
 
 SOURCE = MetadataSource(
@@ -53,7 +52,6 @@ SOURCE = MetadataSource(
     source_file='/data/nav-results/x_metadata.json',
     mtime_ns=1234567890123456789,
     size_bytes=4096,
-    has_summary_png=True,
 )
 
 
@@ -582,24 +580,6 @@ def test_a_document_that_stops_reading_loses_its_row(
         found = _rows(connection, sqlalchemy.select(IMAGES.c.results_path_stub))
     engine.dispose()
     assert found == []
-
-
-def test_a_summary_png_written_after_the_document_is_noticed(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
-    """The flag comes from the walk, so the walk is what has to be compared."""
-    root = tmp_path / 'results'
-    stub = 'VOL/N1454725799_1_CALIB'
-    write_metadata(root, stub, metadata_document())
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=quiet_logger)
-    write_summary_png(root, stub)
-    ingest_tree(url, [root], logger=quiet_logger)
-    engine = open_index(url)
-    with engine.connect() as connection:
-        found = _rows(connection, sqlalchemy.select(IMAGES.c.has_summary_png))
-    engine.dispose()
-    assert [bool(row.has_summary_png) for row in found] == [True]
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,6 @@ it the complete listing that alone licenses one.
 Public API:
 
     METADATA_SUFFIX            -- suffix of the per-image navigation document
-    SUMMARY_PNG_SUFFIX         -- suffix of the summary PNG written beside it
     INGEST_RETRIEVE_BATCH_SIZE -- metadata files retrieved in one download
     INGEST_COMMIT_CHUNK_SIZE   -- images written per database transaction
     INGEST_TASK_SHARE_SIZE     -- metadata files handed to one cloud task
@@ -67,14 +66,13 @@ from spindoctor.cli.stats.ingest.tasks import (
     ingest_task_share,
     task_results_from_event_log,
 )
-from spindoctor.cli.stats.ingest.walk import METADATA_SUFFIX, SUMMARY_PNG_SUFFIX
+from spindoctor.cli.stats.ingest.walk import METADATA_SUFFIX
 
 __all__ = [
     'INGEST_COMMIT_CHUNK_SIZE',
     'INGEST_RETRIEVE_BATCH_SIZE',
     'INGEST_TASK_SHARE_SIZE',
     'METADATA_SUFFIX',
-    'SUMMARY_PNG_SUFFIX',
     'FanOut',
     'IngestCounts',
     'TaskCompletion',

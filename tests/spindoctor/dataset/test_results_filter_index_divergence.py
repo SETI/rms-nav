@@ -2,15 +2,17 @@
 
 Each of these is a property of what one ingest pass could read and record rather
 than of the query, and each is enumerated in
-:mod:`spindoctor.results_index.selection`, in the plan, and here.  They are
-tested in both directions -- what the tree answers and what the index answers --
-because what makes each a divergence is that the two differ, and an assertion
-about one of them alone would pass if the other silently changed to match.
+:mod:`spindoctor.results_index.selection`, in the navigation guide, in the plan,
+and here.  They are tested in both directions -- what the tree answers and what
+the index answers -- because what makes each a divergence is that the two
+differ, and an assertion about one of them alone would pass if the other
+silently changed to match.
 
 A member added to the enumeration is added here.  One that stops being a
-divergence keeps its tests, asserting the agreement instead: what made it worth
-a test is that the two answers could differ, and that is as true of the answer
-that now matches as of the one that did not.
+divergence keeps a test and loses this file: what made it worth a test is that
+the two answers could differ, which is as true of the answer that matches as of
+the one that did not, so the test moves to the parity file and asserts the
+agreement there.
 """
 
 import os
@@ -25,67 +27,22 @@ from tests.spindoctor.cli.stats.conftest import (
     ingest_tree,
     metadata_document,
     write_metadata,
-    write_summary_png,
 )
 from tests.spindoctor.dataset.conftest import (
-    MALFORMED,
+    SECOND_SUCCESS,
     SPICE_ERROR,
-    SUCCESS_NO_PNG,
-    SUCCESS_WITH_PNG,
     UNLISTABLE,
     VOLUMES,
     null_logger,
     one_image_tree,
     refusing_to_list,
     select_from,
-    write_bytes,
 )
 
 from spindoctor.cli.stats.ingest import store
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.dataset.results_filter import ResultsFilter
 from spindoctor.results_index import SPICE_STATUS_ERROR
-
-
-def test_a_summary_png_with_no_document_reads_as_present_in_the_tree(tmp_path: Path) -> None:
-    """The walk finds the file, whatever else the image does or does not have."""
-    root = tmp_path / 'results'
-    write_summary_png(root, SUCCESS_WITH_PNG)
-    images = [
-        ImageFile(
-            image_file_url=FCPath(root / 'x.IMG'),
-            label_file_url=FCPath(root / 'x.LBL'),
-            results_path_stub=SUCCESS_WITH_PNG,
-        )
-    ]
-    results_filter = ResultsFilter(VOLUMES, str(root), logger=null_logger(), has_png_file=True)
-    assert select_from(results_filter, images) == [SUCCESS_WITH_PNG]
-
-
-def test_a_summary_png_with_no_document_reads_as_absent_in_the_index(tmp_path: Path) -> None:
-    """The flag lives on the row of the document the PNG was found beside.
-
-    A PNG with no document beside it is recorded nowhere, so the index answers
-    that no summary exists for it.  This is one of the answers the index gives
-    differently from the tree, and it is pinned here rather than left to be
-    discovered.
-    """
-    root = tmp_path / 'results'
-    write_summary_png(root, SUCCESS_WITH_PNG)
-    root.mkdir(parents=True, exist_ok=True)
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=null_logger())
-    images = [
-        ImageFile(
-            image_file_url=FCPath(root / 'x.IMG'),
-            label_file_url=FCPath(root / 'x.LBL'),
-            results_path_stub=SUCCESS_WITH_PNG,
-        )
-    ]
-    results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_png_file=True
-    )
-    assert select_from(results_filter, images) == []
 
 
 def _error_document_that_is_not_a_navigation_document(root: Path) -> list[ImageFile]:
@@ -141,45 +98,12 @@ def test_a_document_that_is_not_a_navigation_document_matches_no_index_error_fil
     assert select_from(results_filter, images) == []
 
 
-def test_a_summary_png_written_after_a_refusal_is_seen_by_the_next_pass(
-    tmp_path: Path,
-) -> None:
-    """The flag is part of what makes a refused file unchanged, as it is for an image.
+def _document_that_is_not_a_navigation_document(root: Path) -> list[ImageFile]:
+    """Write a JSON object recording a plain outcome and nothing else, and its image.
 
-    A refused file whose metrics still match is skipped without being read,
-    which is what stops a tree of non-navigation documents from being downloaded
-    on every run.  A summary PNG written beside it after the refusal was
-    recorded changes nothing about the file and everything about the row that
-    ought to be stored, so it has to be part of the comparison or the PNG stays
-    invisible until the document itself changes.
-    """
-    root = tmp_path / 'results'
-    write_bytes(root, MALFORMED, b'{"status": "error"')
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=null_logger())
-    write_summary_png(root, MALFORMED)
-    ingest_tree(url, [root], logger=null_logger())
-    images = [
-        ImageFile(
-            image_file_url=FCPath(root / 'x.IMG'),
-            label_file_url=FCPath(root / 'x.LBL'),
-            results_path_stub=MALFORMED,
-        )
-    ]
-    results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_png_file=True
-    )
-    assert select_from(results_filter, images) == [MALFORMED]
-
-
-def _status_only_in_the_navigation_result(root: Path) -> list[ImageFile]:
-    """Write a document whose outcome is recorded only under ``navigation_result``.
-
-    The outcome is in the nested copy and the top-level field both paths read
-    is absent.  Neither path takes the nested copy for it, which is what keeps
-    the two agreeing, and is asserted here because a column that borrowed it
-    would be a classification made at ingest time -- an answer no reader of the
-    document could arrive at.
+    The mirror image of the error-carrying one above: the tree can read an
+    outcome that is not a fatal error out of it, and the ingest can make no
+    row of it at all.
 
     Parameters:
         root: The results root to write into.
@@ -187,10 +111,7 @@ def _status_only_in_the_navigation_result(root: Path) -> list[ImageFile]:
     Returns:
         The one candidate image, ready to filter.
     """
-    document = metadata_document(image_name='N1000000004_1.IMG', offset=None)
-    del document['status']
-    document['navigation_result']['status'] = 'error'
-    write_metadata(root, SPICE_ERROR, document)
+    write_metadata(root, SPICE_ERROR, {'status': 'success'})
     return [
         ImageFile(
             image_file_url=FCPath(root / 'x.IMG'),
@@ -200,52 +121,39 @@ def _status_only_in_the_navigation_result(root: Path) -> list[ImageFile]:
     ]
 
 
-def test_a_status_only_in_the_navigation_result_matches_no_tree_error_filter(
+def test_a_document_that_is_not_a_navigation_document_records_no_error_to_the_tree(
     tmp_path: Path,
 ) -> None:
-    """The tree path reads the top-level field and no other."""
+    """The tree reads an outcome out of any JSON object, and this one is not fatal."""
     root = tmp_path / 'results'
-    images = _status_only_in_the_navigation_result(root)
-    results_filter = ResultsFilter(VOLUMES, str(root), logger=null_logger(), has_offset_error=True)
-    assert select_from(results_filter, images) == []
-
-
-def test_a_status_only_in_the_navigation_result_matches_no_index_error_filter(
-    tmp_path: Path,
-) -> None:
-    """And the index reads the same field, so it answers the same way.
-
-    The ``status`` column holds the document's own top-level field and nothing
-    standing in for it.  A column that fell back to the nested copy would match
-    an error filter here for a document that matches none in the tree, and --
-    since the pointing readers rebuild a record from these same columns -- would
-    apply a corrected attitude to an image whose document supplies no pointing
-    at all.
-    """
-    root = tmp_path / 'results'
-    images = _status_only_in_the_navigation_result(root)
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=null_logger())
+    images = _document_that_is_not_a_navigation_document(root)
     results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_error=True
-    )
-    assert select_from(results_filter, images) == []
-
-
-def test_a_status_only_in_the_navigation_result_is_still_a_row(tmp_path: Path) -> None:
-    """The control for the agreement above, which an uningested document passes.
-
-    The document is a navigation document and ingests; what it is not is a
-    document naming an outcome, so it matches no filter that names one.
-    """
-    root = tmp_path / 'results'
-    images = _status_only_in_the_navigation_result(root)
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=null_logger())
-    results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
+        VOLUMES, str(root), logger=null_logger(), has_no_offset_error=True
     )
     assert select_from(results_filter, images) == [SPICE_ERROR]
+
+
+def test_a_document_that_is_not_a_navigation_document_records_nothing_to_the_index(
+    tmp_path: Path,
+) -> None:
+    """A refusal records no status, so it is no more "no error" than it is an error.
+
+    The divergence runs in both directions, which is why the member covers the
+    filter phrased in the negative as well: the tree answers this one from what
+    it parsed, and the index has nothing to answer it from.
+    """
+    root = tmp_path / 'results'
+    images = _document_that_is_not_a_navigation_document(root)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=null_logger())
+    results_filter = ResultsFilter(
+        VOLUMES,
+        str(root),
+        logger=null_logger(),
+        results_db_url=url,
+        has_no_offset_error=True,
+    )
+    assert select_from(results_filter, images) == []
 
 
 def test_a_file_the_pass_could_not_retrieve_reads_as_absent(
@@ -308,7 +216,7 @@ def _tree_of_two_documents(tmp_path: Path) -> tuple[Path, list[ImageFile]]:
         The root, and the two candidate images in enumeration order.
     """
     root = tmp_path / 'results'
-    write_metadata(root, SUCCESS_NO_PNG, metadata_document(image_name='N1000000002_1.IMG'))
+    write_metadata(root, SECOND_SUCCESS, metadata_document(image_name='N1000000002_1.IMG'))
     write_metadata(root, SPICE_ERROR, metadata_document(image_name='N1000000004_1.IMG'))
     (root / UNLISTABLE).mkdir(parents=True, exist_ok=True)
     return root, [
@@ -317,7 +225,7 @@ def _tree_of_two_documents(tmp_path: Path) -> tuple[Path, list[ImageFile]]:
             label_file_url=FCPath(root / f'{stub}.LBL'),
             results_path_stub=stub,
         )
-        for stub in (SUCCESS_NO_PNG, SPICE_ERROR)
+        for stub in (SECOND_SUCCESS, SPICE_ERROR)
     ]
 
 
@@ -358,7 +266,7 @@ def test_a_document_that_left_the_tree_reads_as_absent_in_the_tree(
         tmp_path, monkeypatch, listing_the_whole_root=True
     )
     results_filter = ResultsFilter(VOLUMES, str(root), logger=null_logger(), has_offset_file=True)
-    assert select_from(results_filter, images) == [SUCCESS_NO_PNG]
+    assert select_from(results_filter, images) == [SECOND_SUCCESS]
 
 
 def test_a_document_that_left_the_tree_is_pruned_by_a_pass_that_listed_it_all(
@@ -376,7 +284,7 @@ def test_a_document_that_left_the_tree_is_pruned_by_a_pass_that_listed_it_all(
     results_filter = ResultsFilter(
         VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
     )
-    assert select_from(results_filter, images) == [SUCCESS_NO_PNG]
+    assert select_from(results_filter, images) == [SECOND_SUCCESS]
 
 
 def test_a_document_that_left_the_tree_survives_a_pass_that_missed_a_directory(
@@ -396,7 +304,7 @@ def test_a_document_that_left_the_tree_survives_a_pass_that_missed_a_directory(
     results_filter = ResultsFilter(
         VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
     )
-    assert select_from(results_filter, images) == [SUCCESS_NO_PNG, SPICE_ERROR]
+    assert select_from(results_filter, images) == [SECOND_SUCCESS, SPICE_ERROR]
 
 
 def test_the_tree_offers_a_document_that_left_it_to_the_absence_filter(

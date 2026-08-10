@@ -394,23 +394,20 @@ class DataSetPDS3(DataSet):
             help="Only process images that don't already have an offset metadata file",
         )
         group.add_argument(
-            '--has-png-file',
-            action='store_true',
-            default=False,
-            help='Only process images that already have a summary PNG file',
-        )
-        group.add_argument(
-            '--has-no-png-file',
-            action='store_true',
-            default=False,
-            help="Only process images that don't already have a summary PNG file",
-        )
-        group.add_argument(
             '--has-offset-error',
             action='store_true',
             default=False,
             help="""Only process images if the offset metadata file exists and
             indicates a fatal error""",
+        )
+        group.add_argument(
+            '--has-no-offset-error',
+            action='store_true',
+            default=False,
+            help="""Only process images if the offset metadata file exists and
+            records a status other than the fatal one, which for the documents
+            this pipeline writes is the images whose navigation ran to a
+            result""",
         )
         group.add_argument(
             '--has-offset-spice-error',
@@ -547,9 +544,8 @@ class DataSetPDS3(DataSet):
             img_filespec_list=img_filespec_list,
             has_offset_file=arguments.has_offset_file,
             has_no_offset_file=arguments.has_no_offset_file,
-            has_png_file=arguments.has_png_file,
-            has_no_png_file=arguments.has_no_png_file,
             has_offset_error=arguments.has_offset_error,
+            has_no_offset_error=arguments.has_no_offset_error,
             has_offset_spice_error=arguments.has_offset_spice_error,
             has_offset_nonspice_error=arguments.has_offset_nonspice_error,
             # TODO selection_expr=arguments.selection_expr,
@@ -660,9 +656,8 @@ class DataSetPDS3(DataSet):
                 ``img_name_filter_list`` (unresolvable entries skipped).
             has_offset_file: bool = False,
             has_no_offset_file: bool = False,
-            has_png_file: bool = False,
-            has_no_png_file: bool = False,
             has_offset_error: bool = False,
+            has_no_offset_error: bool = False,
             has_offset_spice_error: bool = False,
             has_offset_nonspice_error: bool = False,
                 Results-based filters matching the same-named command-line options;
@@ -702,9 +697,8 @@ class DataSetPDS3(DataSet):
         img_name_filter_list: list[str] | None = kwargs.pop('img_filespec_list', None)
         has_offset_file: bool = kwargs.pop('has_offset_file', False)
         has_no_offset_file: bool = kwargs.pop('has_no_offset_file', False)
-        has_png_file: bool = kwargs.pop('has_png_file', False)
-        has_no_png_file: bool = kwargs.pop('has_no_png_file', False)
         has_offset_error: bool = kwargs.pop('has_offset_error', False)
+        has_no_offset_error: bool = kwargs.pop('has_no_offset_error', False)
         has_offset_spice_error: bool = kwargs.pop('has_offset_spice_error', False)
         has_offset_nonspice_error: bool = kwargs.pop('has_offset_nonspice_error', False)
         nav_results_root: str | Path | FCPath | None = kwargs.pop('nav_results_root', None)
@@ -729,9 +723,8 @@ class DataSetPDS3(DataSet):
         results_filter_flags = {
             'has_offset_file': has_offset_file,
             'has_no_offset_file': has_no_offset_file,
-            'has_png_file': has_png_file,
-            'has_no_png_file': has_no_png_file,
             'has_offset_error': has_offset_error,
+            'has_no_offset_error': has_no_offset_error,
             'has_offset_spice_error': has_offset_spice_error,
             'has_offset_nonspice_error': has_offset_nonspice_error,
         }

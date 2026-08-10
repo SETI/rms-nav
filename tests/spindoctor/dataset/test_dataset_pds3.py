@@ -510,27 +510,6 @@ def test_has_no_offset_file_excludes_navigated(
     ]
 
 
-def test_has_png_file_ands_with_has_no_offset_file(
-    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    # The flags AND together: PNG must exist and the metadata file must not.
-    _install_two_camera_index(ds, monkeypatch)
-    _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000100, '_summary.png')
-    _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000101, '_summary.png')
-    _write_result_file(tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000101, '_metadata.json')
-
-    groups = list(
-        ds.yield_image_files_index(
-            volumes=['COISS_2001'],
-            has_png_file=True,
-            has_no_offset_file=True,
-            nav_results_root=str(tmp_path),
-        )
-    )
-
-    assert _yielded_names(groups) == ['N1000000100']
-
-
 def _write_error_metadata(tmp_path: Path) -> None:
     """Write metadata files: one success, one SPICE error, one non-SPICE error."""
     contents = {
@@ -565,6 +544,32 @@ def test_has_offset_error_matches_any_fatal_error(
     )
 
     assert _yielded_names(groups) == ['N1000000101', 'N1000000102']
+
+
+def test_has_no_offset_error_matches_only_documents_recording_none(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The filter keeps a document recording no fatal error and nothing else.
+
+    Parameters:
+        ds: The dataset under test.
+        monkeypatch: Fixture the index is installed through.
+        tmp_path: Directory the results root is written under.
+    """
+    # The one success is kept and the two fatal errors are not. The WAC frames
+    # and the NAC frames outside the three written here have no metadata file
+    # at all: a document that does not exist records no error, and this filter
+    # asks what a document records, so the implied presence filter drops them.
+    _install_two_camera_index(ds, monkeypatch)
+    _write_error_metadata(tmp_path)
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'], has_no_offset_error=True, nav_results_root=str(tmp_path)
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000100']
 
 
 def test_has_offset_spice_error_matches_only_spice(
@@ -674,13 +679,26 @@ def test_results_scan_propagates_non_missing_oserror(
         )
 
 
+CONTRADICTION_REFUSAL = r'mutually exclusive|cannot be combined with'
+"""The two shapes a refusal of contradictory selection flags takes.
+
+Two flags that exclude each other and nothing else are mutually exclusive.  One
+flag that excludes several which are satisfiable together is named against the
+ones it excludes instead, since "mutually exclusive" over a set claims an
+exclusion between every pair in it.
+"""
+
+
 @pytest.mark.parametrize(
     'flags',
     [
         {'has_offset_file': True, 'has_no_offset_file': True},
-        {'has_png_file': True, 'has_no_png_file': True},
         {'has_offset_spice_error': True, 'has_offset_nonspice_error': True},
         {'has_offset_error': True, 'has_no_offset_file': True},
+        {'has_offset_error': True, 'has_no_offset_error': True},
+        {'has_offset_spice_error': True, 'has_no_offset_error': True},
+        {'has_offset_nonspice_error': True, 'has_no_offset_error': True},
+        {'has_no_offset_error': True, 'has_no_offset_file': True},
     ],
 )
 def test_contradictory_results_flags_raise(
@@ -689,9 +707,17 @@ def test_contradictory_results_flags_raise(
     tmp_path: Path,
     flags: dict[str, bool],
 ) -> None:
+    """A pair of selection flags no image could satisfy is refused, not answered.
+
+    Parameters:
+        ds: The dataset under test.
+        monkeypatch: Fixture the index is installed through.
+        tmp_path: Directory the results root is written under.
+        flags: The contradictory pair under test.
+    """
     _install_two_camera_index(ds, monkeypatch)
 
-    with pytest.raises(ValueError, match=r'mutually exclusive|contradicts'):
+    with pytest.raises(ValueError, match=CONTRADICTION_REFUSAL):
         list(
             ds.yield_image_files_index(
                 volumes=['COISS_2001'], nav_results_root=str(tmp_path), **flags
@@ -812,14 +838,27 @@ def test_choose_random_images_argparse_accepts_positive() -> None:
 
 
 def test_selection_arguments_include_results_filters() -> None:
+    """The command-line parser carries the presence and error filters."""
     parser = argparse.ArgumentParser()
     DataSetPDS3CassiniISS.add_selection_arguments(parser)
 
-    arguments = parser.parse_args(['--has-offset-file', '--has-no-png-file'])
+    arguments = parser.parse_args(['--has-offset-file', '--has-offset-error'])
 
     assert arguments.has_offset_file is True
-    assert arguments.has_no_png_file is True
+    assert arguments.has_offset_error is True
     assert arguments.has_offset_spice_error is False
+    assert arguments.has_no_offset_error is False
+
+
+def test_the_negative_error_filter_is_one_of_the_selection_arguments() -> None:
+    """The parser carries the negative error filter beside the positive ones."""
+    parser = argparse.ArgumentParser()
+    DataSetPDS3CassiniISS.add_selection_arguments(parser)
+
+    arguments = parser.parse_args(['--has-offset-file', '--has-no-offset-error'])
+
+    assert arguments.has_no_offset_error is True
+    assert arguments.has_offset_error is False
 
 
 def test_yielded_imagefile_carries_label_resolver(

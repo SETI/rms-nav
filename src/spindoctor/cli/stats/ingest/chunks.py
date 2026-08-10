@@ -20,11 +20,26 @@ A refused file is recorded in ``failed_files`` with everything the walk knows
 about it and nothing the document would have said: the same two metrics an
 ingested one records, so an unchanged refusal is skipped on the next pass
 instead of being downloaded and parsed again forever, plus the volume it lives
-under and whether a summary PNG sits beside it, which is what a selection
-filter asks of a file it never opens.  A retrieval that never
-delivered the file is counted without being recorded: it says nothing about the
-file that will still be true next pass, and a recorded refusal is skipped for
-as long as the file does not change.
+under, which is what a selection filter asks of a file it never opens.  A
+retrieval that never delivered the file is counted without being recorded: it
+says nothing about the file that will still be true next pass, and a recorded
+refusal is skipped for as long as the file does not change.
+
+Two families of reason
+----------------------
+
+A reason says which of two things happened, and the two are read apart rather
+than added up.  :data:`UNREADABLE`, :data:`NOT_VALID_JSON` and
+:data:`NOT_A_JSON_OBJECT` are the file yielding no JSON object at all, and the
+tree path excludes such a file from every error filter for the same reason this
+one records no status for it, so the two agree about it.
+:data:`~spindoctor.cli.stats.ingest_rows.NOT_A_NAVIGATION_DOCUMENT` is a JSON
+object this schema will not accept, and the tree path reads a ``status`` out of
+any object it can parse: those are the documents the two answer differently
+about, and counting them is what
+:func:`~spindoctor.cli.stats.ingest.store._report_refusals` reports.  So a parse
+that failed carries a parse reason even when it failed in a way the decoder does
+not call a syntax error, rather than being filed under the schema.
 """
 
 import json
@@ -48,7 +63,27 @@ from spindoctor.cli.stats.ingest_rows import (
     rows_from_metadata,
 )
 
-__all__ = ['INGEST_RETRIEVE_BATCH_SIZE']
+__all__ = [
+    'INGEST_RETRIEVE_BATCH_SIZE',
+    'NOT_A_JSON_OBJECT',
+    'NOT_VALID_JSON',
+    'UNREADABLE',
+]
+
+UNREADABLE = 'unreadable'
+"""Reason counted against a file whose bytes could not be read as text."""
+
+NOT_VALID_JSON = 'not valid JSON'
+"""Reason counted against a file no JSON value came out of.
+
+Carried by every way the decoder can fail to produce a value, not by malformed
+syntax alone: a document nested deeply enough to exhaust the recursion limit and
+one large enough to exhaust memory both end with nothing parsed, which is the
+fact the reason states.
+"""
+
+NOT_A_JSON_OBJECT = 'not a JSON object'
+"""Reason counted against a file that parses to a JSON value of another kind."""
 
 _Item = TypeVar('_Item')
 """What one slice of a batched sequence holds."""
@@ -93,22 +128,25 @@ def _read_document(local_path: Path, source: MetadataSource) -> ImageRows:
     try:
         text = local_path.read_text(encoding='utf-8')
     except (OSError, UnicodeDecodeError) as exc:
-        raise MetadataDocumentError('unreadable', source_file=source.source_file) from exc
+        raise MetadataDocumentError(UNREADABLE, source_file=source.source_file) from exc
     try:
         parsed: Any = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise MetadataDocumentError('not valid JSON', source_file=source.source_file) from exc
+        raise MetadataDocumentError(NOT_VALID_JSON, source_file=source.source_file) from exc
     except Exception as exc:
         # The decoder reports more than malformed syntax.  Twenty thousand
         # nested objects exhaust the recursion limit rather than failing to
         # parse, and a decoder that runs out of memory says so its own way.
-        # None of them is a reason to end the run.
+        # None of them is a reason to end the run.  The reason names the parse
+        # and not the schema, because what happened is that no value came out
+        # of the file: nothing read a ``status`` out of it here, and nothing
+        # reading the tree reads one out of it either.
         raise MetadataDocumentError(
-            f'{NOT_A_NAVIGATION_DOCUMENT} ({type(exc).__name__} while parsing it)',
+            f'{NOT_VALID_JSON} ({type(exc).__name__} while parsing it)',
             source_file=source.source_file,
         ) from exc
     if not isinstance(parsed, dict):
-        raise MetadataDocumentError('not a JSON object', source_file=source.source_file)
+        raise MetadataDocumentError(NOT_A_JSON_OBJECT, source_file=source.source_file)
     try:
         return rows_from_metadata(parsed, source)
     except MetadataDocumentError:
@@ -131,7 +169,6 @@ def _ingest_chunk(
     chunk: Sequence[_ListedFile],
     *,
     root_url: str,
-    summary_stubs: set[str],
     counts: IngestCounts,
     logger: PdsLogger,
 ) -> None:
@@ -145,7 +182,6 @@ def _ingest_chunk(
         root: The results root, which the retrieval is relative to.
         chunk: The files to ingest.
         root_url: Normalized URL of the root, as the rows record it.
-        summary_stubs: Stubs the walk saw a summary PNG for.
         counts: Accumulator this chunk's outcomes are added to.
         logger: Logger for per-file failures.
     """
@@ -168,7 +204,6 @@ def _ingest_chunk(
                 source_file=(root / f'{listed.results_path_stub}{METADATA_SUFFIX}').as_posix(),
                 mtime_ns=listed.mtime_ns,
                 size_bytes=listed.size_bytes,
-                has_summary_png=listed.results_path_stub in summary_stubs,
             )
             if isinstance(local_path, BaseException):
                 # Nothing was read, so nothing is known about the file beyond
@@ -187,15 +222,14 @@ def _ingest_chunk(
                         'root_url': root_url,
                         'results_path_stub': listed.results_path_stub,
                         'reason': exc.reason,
-                        # The walk knows both of these whatever the file says,
-                        # and a selection filter asks about the file rather
-                        # than about its contents: a refused document is one
-                        # the tree still holds, under a volume, possibly with a
-                        # summary beside it.  The volume is derived by the same
-                        # function the images row uses, so the two tables can
-                        # never disagree about which volume a stub is under.
+                        # The walk knows this whatever the file says, and a
+                        # selection filter asks about the file rather than
+                        # about its contents: a refused document is one the
+                        # tree still holds, under a volume.  The volume is
+                        # derived by the same function the images row uses, so
+                        # the two tables can never disagree about which volume
+                        # a stub is under.
                         'volume': _volume_of(listed.results_path_stub),
-                        'has_summary_png': source.has_summary_png,
                         'mtime_ns': listed.mtime_ns,
                         'size_bytes': listed.size_bytes,
                     }

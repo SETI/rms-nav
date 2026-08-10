@@ -37,7 +37,7 @@ from spindoctor.cli.stats.ingest import (
     ingest_task_share,
 )
 from spindoctor.cli.stats.report import build_report
-from spindoctor.results_index import INGEST_RUNS, open_index
+from spindoctor.results_index import INGEST_RUNS, normalize_root_url, open_index
 
 # The statistics postgres tier runs against a schema of its own, exactly as the
 # results-index tier does; re-exporting rather than restating keeps one
@@ -325,8 +325,9 @@ def write_refusal_matching(root: Path, stub: str, document: Path) -> Path:
 def write_summary_png(root: Path, stub: str) -> Path:
     """Write a stand-in summary PNG beside a document.
 
-    Only its name matters: the walk records that a summary exists, and never
-    opens one.
+    A results tree holds one of these beside every navigated image, so it is
+    the file a walk of a real root meets most often after the documents
+    themselves.  Only its name matters here: nothing opens one.
 
     Parameters:
         root: The results root.
@@ -339,6 +340,82 @@ def write_summary_png(root: Path, stub: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b'\x89PNG\r\n\x1a\n')
     return path
+
+
+REFUSED_DOCUMENT = '{"edges": []}'
+"""A document that reads as JSON and is not a navigation result of any schema."""
+
+
+def write_refusal(root: Path, stub: str) -> Path:
+    """Write a document under a root that no pass can turn into an image row.
+
+    Parameters:
+        root: The results root to write under.
+        stub: The document's results path stub under that root.
+
+    Returns:
+        The path written.
+    """
+    path = root / f'{stub}_metadata.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(REFUSED_DOCUMENT, encoding='utf-8')
+    return path
+
+
+REFUSAL_REPORT_LEAD = 'Documents under '
+"""How the standing-refusal line opens, for picking it out of a log."""
+
+
+def refusal_report(root: Path | str, refused: int) -> str:
+    """Return the line a pass writes about the refusals its root's index holds.
+
+    Written once here because three modules read the same line: it is what an
+    operator is told about the gap between an error filter answered from the
+    index and the same filter answered from the tree, and the number in it is
+    the root's own standing total of the refusals that make that gap, rather
+    than what any one pass refused.
+
+    Parameters:
+        root: The results root the pass covered.
+        refused: How many such refusals the index holds under it.
+
+    Returns:
+        The line, spelled as the pass writes it.
+    """
+    return (
+        f'{REFUSAL_REPORT_LEAD}{normalize_root_url(root)} an error filter reads from the '
+        f'results tree and not from this index: {refused}, whichever pass recorded them. '
+        f'Each is a JSON object the ingest refused, so this index records no status for it '
+        f'and no error filter answered here selects its image. The count is the whole root, '
+        f'so it bounds rather than measures how short a selection over some of its volumes '
+        f'comes.'
+    )
+
+
+def recorded_lines(
+    logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch, *, level: str = 'info'
+) -> list[str]:
+    """Capture one level of a logger's output, rendered as it would be written.
+
+    ``pdslogger`` writes through its own stream handler, so a test reads what a
+    pass told an operator by standing in for the method rather than by capturing
+    a stream.
+
+    Parameters:
+        logger: The logger to record.
+        monkeypatch: Fixture the method is replaced through.
+        level: Which method to record.
+
+    Returns:
+        The list the lines land in, which fills as the recorded code runs.
+    """
+    written: list[str] = []
+
+    def recording(message: object, *args: object) -> None:
+        written.append(str(message) % args if args else str(message))
+
+    monkeypatch.setattr(logger, level, recording)
+    return written
 
 
 def ingest_tree(

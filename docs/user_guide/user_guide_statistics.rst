@@ -63,17 +63,17 @@ refused before anything is walked, and an empty one is such a root: with
 ``--nav-results-root "$ROOT"`` and ``ROOT`` unset the program stops rather than
 ingesting whatever directory it was started from under a name nobody chose.
 
-**Ingestion is incremental.** One recursive listing per root collects both the
-metadata documents and the summary PNGs beside them, and carries each file's
-size and modification time along with it. A file whose recorded size and
-modification time still match the listing, and beside which the walk sees the
-summary PNG the index already recorded, is not read at all, so a second pass
-over an unchanged root costs one listing and nothing else. This holds for
-files that could not be ingested as well: a file that is not a navigation
-document is recorded as such, with the same two metrics, and is skipped for as
-long as it does not change. ``--force`` re-reads everything; so does a storage
-backend whose listing reports neither size nor modification time, which ingest
-warns about rather than silently skipping.
+**Ingestion is incremental.** One recursive listing per root collects the
+metadata documents and carries each file's size and modification time along
+with it. Every other file under the root -- the summary PNG beside a document,
+and whatever else is there -- is passed over and counted nowhere. A file whose
+recorded size and modification time still match the listing is not read at all,
+so a second pass over an unchanged root costs one listing and nothing else.
+This holds for files that could not be ingested as well: a file that is not a
+navigation document is recorded as such, with the same two metrics, and is
+skipped for as long as it does not change. ``--force`` re-reads everything; so
+does a storage backend whose listing reports neither size nor modification
+time, which ingest warns about rather than silently skipping.
 
 **Those two metrics are everything a listing supplies about a file.** A document
 rewritten in place that kept both of them is therefore one the ingest cannot
@@ -128,6 +128,25 @@ read as exactly that rather than as a broken ingest. A directory the walk cannot
 list -- one this user may not read, a share that stopped answering -- costs the
 files under it and nothing else: the pass continues over the rest of the root
 and removes no row from it.
+
+That tally is what this pass read, and not what the root holds. A refused file
+is recorded in ``failed_files``, and every pass after it skips the file
+unchanged rather than reading it again, so a second pass over the same tree
+refuses nothing and tallies nothing. Each root's pass therefore also reports a
+standing count, as the line ``Documents under ... an error filter reads from the
+results tree and not from this index``, which counts the rows ``failed_files``
+holds for that root whichever pass wrote them, restricted to the ones a
+selection can be short by. Those are the rows whose ``reason`` begins ``not a
+current-schema navigation document`` -- a JSON object the index will not take,
+which reading the tree answers every error filter out of -- and that carry a
+volume, since an enumeration reads the volumes it selected and nothing above
+them. The other reasons record a file no JSON object came out of, which the tree
+excludes from every error filter as well, so they are refusals without being a
+difference. Read the count as a bound on how much shorter a selection answered
+from the index comes than the tree would have made it, and
+:doc:`user_guide_navigation` for what to do about it.
+``sd_stats_ingest --force`` reads every document again, which puts the reasons
+and the example files back into the summary.
 
 **A directory the walk did not list is counted, and absence under it is not an
 answer.** The closing summary reports how many directories a pass did not
@@ -257,9 +276,9 @@ entry has a ``task_id`` and a ``data`` object carrying ``run_id`` (the ingest
 run the share belongs to), ``root_url`` (the normalized results root),
 ``force``, ``has_file_metrics`` (whether the listing reported a size and
 modification time for every file), and ``files`` -- one object per document,
-with its ``results_path_stub``, ``mtime_ns``, ``size_bytes`` and
-``has_summary_png``. Every one of those comes from the single listing, so no
-worker stats a file or checks for one.
+with its ``results_path_stub``, ``mtime_ns`` and ``size_bytes``. Every one of
+those comes from the single listing, so no worker stats a file or checks for
+one.
 
 Step 3 reads the ``cloud_tasks`` event log, which is JSON Lines with one event
 per line; the ``task_completed`` events carry what each worker returned, under
@@ -269,10 +288,12 @@ read ends in a partial line.
 
 The closing summary of step 3 is the summary a single-process ingest writes:
 files seen, ingested, skipped and refused, with the refusals tallied by reason
-and one example file per reason. The reasons come back in the task results,
-since a worker has no run log to write them in. Every file a share could not
-read is named in its task result too, and the ones refused for something about
-the document are recorded in the index's ``failed_files`` table as well.
+and one example file per reason, followed by the same standing count for each
+root it completed. A root whose shares do not add up is not completed, and no
+count is reported for it. The reasons come back in the task results, since a
+worker has no run log to write them in. Every file a share could not read is
+named in its task result too, and the ones refused for something about the
+document are recorded in the index's ``failed_files`` table as well.
 
 Index schema
 ------------
@@ -426,9 +447,6 @@ pair with ``ON DELETE CASCADE``.
      - BIGINT
      - Numeric portion of the image name (the first digit run in the
        basename). What the ``--min-image`` / ``--max-image`` filters compare.
-   * - ``has_summary_png``
-     - BOOLEAN
-     - Whether the ingest walk saw a ``_summary.png`` beside the document.
    * - ``start_et``, ``stop_et``, ``midtime_et``, ``exposure_s``
      - DOUBLE
      - Shutter open and close epochs, the exposure midtime, and the exposure
@@ -539,11 +557,19 @@ the rows it wrote are good, and absence of a row under one of them means the
 walk never looked rather than that the image was never navigated.
 
 ``failed_files`` records one row per file that is not a current-schema
-navigation document: the root and stub that identify it, the reason it was
-refused, and the size and modification time it had when it was read. It is what
-lets a second pass skip it. It is deliberately not an ``images`` row, because a
-file with no usable data must not answer the question ``images`` exists to
-answer.
+navigation document: the root and stub that identify it, the volume it is under,
+the reason it was refused, and the size and modification time it had when it was
+read. It is what lets a second pass skip it. It is deliberately not an ``images``
+row, because a file with no usable data must not answer the question ``images``
+exists to answer.
+
+``reason`` names one of two things. ``unreadable``, ``not valid JSON`` and ``not
+a JSON object`` are a file no JSON object came out of, which every reader
+excludes alike. A reason beginning ``not a current-schema navigation document``
+is a JSON object this schema will not take, and names in parentheses what was
+missing or what went wrong reading it; reading the results tree answers an error
+filter out of such an object, so those are the rows a selection answered from
+the index can be short by.
 
 ``schema_meta`` holds a single row stamping the database with the column-set
 version that created it.

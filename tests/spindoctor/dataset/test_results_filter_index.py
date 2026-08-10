@@ -3,15 +3,18 @@
 The parity matrix is here: every filter flag asked of the tree and of the index
 over the one fixture tree, each held to a stated answer, plus the assertions
 that the index path reads no file at all and leaves nothing for the batch stage.
-The refusals are here too, because a filter that cannot answer has to say so in
-one type a program can catch, and so is the guarantee that the navigation
-critical path never imports the database layer.
+So is every document shape the two paths could plausibly read differently and do
+not, each asked of both over a tree of its own.  The refusals are here too,
+because a filter that cannot answer has to say so in one type a program can
+catch, and so is the guarantee that the navigation critical path never imports
+the database layer.
 
 Two files carry the rest: the answers the index gives differently from the tree,
 each with a test of its own, and what the filter reports about the pass that
 filled the index.
 """
 
+import itertools
 import json
 import subprocess
 import sys
@@ -22,7 +25,12 @@ from typing import Any, cast
 import pytest
 import sqlalchemy
 from filecache import FCPath
-from tests.spindoctor.cli.stats.conftest import index_url, ingest_tree
+from tests.spindoctor.cli.stats.conftest import (
+    index_url,
+    ingest_tree,
+    metadata_document,
+    write_metadata,
+)
 from tests.spindoctor.dataset.conftest import (
     ERROR_WITHOUT_STATUS_ERROR,
     FATAL_ERRORS,
@@ -31,8 +39,7 @@ from tests.spindoctor.dataset.conftest import (
     SPICE_ERROR,
     VOLUMES,
     WITH_A_DOCUMENT,
-    WITH_A_PNG,
-    WITHOUT_A_PNG,
+    WITHOUT_A_FATAL_ERROR,
     candidate_files,
     index_without_a_table,
     null_logger,
@@ -41,6 +48,7 @@ from tests.spindoctor.dataset.conftest import (
     selection_of,
 )
 
+from spindoctor.dataset.dataset import ImageFile
 from spindoctor.dataset.results_filter import (
     _SPICE_STATUS_ERROR,
     ResultsFilter,
@@ -52,9 +60,8 @@ from spindoctor.results_index.selection import ResultStubs
 _MATRIX = [
     pytest.param({'has_offset_file': True}, list(WITH_A_DOCUMENT), id='offset-file'),
     pytest.param({'has_no_offset_file': True}, [NO_RESULT], id='no-offset-file'),
-    pytest.param({'has_png_file': True}, list(WITH_A_PNG), id='png-file'),
-    pytest.param({'has_no_png_file': True}, list(WITHOUT_A_PNG), id='no-png-file'),
     pytest.param({'has_offset_error': True}, list(FATAL_ERRORS), id='offset-error'),
+    pytest.param({'has_no_offset_error': True}, list(WITHOUT_A_FATAL_ERROR), id='no-offset-error'),
     pytest.param({'has_offset_spice_error': True}, [SPICE_ERROR], id='spice-error'),
     pytest.param(
         {'has_offset_nonspice_error': True},
@@ -62,41 +69,36 @@ _MATRIX = [
         id='nonspice-error',
     ),
     pytest.param(
-        {'has_offset_file': True, 'has_no_png_file': True},
-        [stub for stub in WITHOUT_A_PNG if stub != NO_RESULT],
-        id='offset-file-and-no-png',
+        {'has_offset_error': True, 'has_offset_file': True},
+        list(FATAL_ERRORS),
+        id='offset-error-and-offset-file',
     ),
     pytest.param(
-        {'has_no_offset_file': True, 'has_png_file': True}, [], id='no-offset-file-and-png'
-    ),
-    pytest.param(
-        {'has_no_offset_file': True, 'has_no_png_file': True},
-        [NO_RESULT],
-        id='no-offset-file-and-no-png',
-    ),
-    pytest.param(
-        {'has_offset_file': True, 'has_png_file': True}, list(WITH_A_PNG), id='both-files'
-    ),
-    pytest.param(
-        {'has_offset_error': True, 'has_png_file': True}, [NONSPICE_ERROR], id='error-and-png'
-    ),
-    pytest.param(
-        {'has_offset_spice_error': True, 'has_no_png_file': True},
+        {'has_offset_spice_error': True, 'has_offset_file': True},
         [SPICE_ERROR],
-        id='spice-error-and-no-png',
+        id='spice-error-and-offset-file',
     ),
     pytest.param(
-        {'has_offset_nonspice_error': True, 'has_png_file': True},
-        [NONSPICE_ERROR],
-        id='nonspice-error-and-png',
+        {'has_no_offset_error': True, 'has_offset_file': True},
+        list(WITHOUT_A_FATAL_ERROR),
+        id='no-offset-error-and-offset-file',
     ),
 ]
 """Every filter flag, alone and paired, with the selection it makes.
 
-The pairings are not decoration: an absence filter alone takes the batched
-``exists()`` path and never walks the tree, and the same flag beside a presence
-filter is answered from the walked sets instead.  Both of those modes have to
-land on the index path's one answer.
+The flags reach the tree two ways, and both have to land on the index path's
+one answer: the absence filter alone takes the batched ``exists()`` path and
+never walks the tree, while the presence and error filters walk it.  The
+presence filter is answered from the walked set; an error filter is answered
+from the document itself, the walked set only pruning the candidates it is then
+retrieved for.  No error filter can reach the batched ``exists()`` path at all:
+each folds presence in, which is what asks for the walk.
+
+The pairings are the combinations a user has a reason to write.  ``images this
+run navigated to a result`` is the last of them, and it is the pair rather than
+a flag because presence and outcome are separate questions in this vocabulary;
+that each error filter folds presence in, so that naming it changes nothing, is
+what the first two pin.
 """
 
 
@@ -141,6 +143,184 @@ def test_the_index_path_reads_no_file_at_all(
     assert selection_of(tree, flags, results_db_url=indexed) == expected
 
 
+def test_an_image_with_no_document_is_not_one_recording_no_error_in_the_tree(tree: Path) -> None:
+    """The negative error filter asks what a document records, so it needs one.
+
+    An image nothing has been written for is what ``has_no_offset_file``
+    selects.  Reading its absence as an outcome would put it in both selections
+    at once and leave no way to ask for either without the other.
+    """
+    kept = selection_of(tree, {'has_no_offset_error': True}, results_db_url=None)
+    assert NO_RESULT not in kept
+
+
+@pytest.mark.parametrize(
+    'flag',
+    [
+        'has_offset_error',
+        'has_no_offset_error',
+        'has_offset_spice_error',
+        'has_offset_nonspice_error',
+    ],
+)
+def test_an_error_filter_prunes_a_missing_document_against_the_walked_set(
+    tree: Path, flag: str
+) -> None:
+    """Every error filter folds presence in, and this is where that shows.
+
+    The fold-in changes no answer: without it the retrieval of a document that
+    is not there fails and the batch stage drops the image anyway.  What it
+    changes is the cost, and only here -- an image nothing has been written for
+    is settled by a set already in memory rather than by one retrieval per
+    candidate, which on a cloud root is a paid round trip per image.  The
+    population that pays it is every image the run has yet to navigate, so it
+    is the common case rather than the corner.
+
+    Parameters:
+        tree: The results root under test.
+        flag: The error filter, one per flag that reads a document.
+    """
+    results_filter = ResultsFilter(
+        VOLUMES, str(tree), logger=null_logger(), results_db_url=None, **{flag: True}
+    )
+    assert results_filter.passes_presence(NO_RESULT) is False
+
+
+def test_an_image_with_no_row_is_not_one_recording_no_error_in_the_index(
+    tree: Path, indexed: str
+) -> None:
+    """Absence of a row is absence of a document, and reads the same way here."""
+    kept = selection_of(tree, {'has_no_offset_error': True}, results_db_url=indexed)
+    assert NO_RESULT not in kept
+
+
+_NO_OUTCOME_STUB = 'COISS_2001/data/b/N1000000011_1_CALIB'
+"""The one image of the tree written for the document naming no outcome.
+
+Under a selected volume, since a stub outside one is answered by neither path
+and would make every expectation below the empty selection for the wrong
+reason.  It is not a stub of the shared fixture tree: that tree states an answer
+per filter for ten documents at once, and what is asked here is what one
+document shape answers.
+"""
+
+_NO_STATUS_FIELD = object()
+"""Stands for the document that carries no top-level ``status`` field at all."""
+
+_NO_OUTCOME_STATUSES = [
+    pytest.param(_NO_STATUS_FIELD, id='absent'),
+    pytest.param(None, id='null'),
+    pytest.param('', id='empty'),
+    pytest.param(42, id='not-a-string'),
+]
+"""Every shape of a top-level ``status`` that names no outcome.
+
+The four are kept apart because one reader tells them apart by type and another
+by SQL: a document carrying no field, one carrying null, one carrying the empty
+string and one carrying a number reach the store as four different values and
+have to leave it as one.
+"""
+
+_NO_OUTCOME_MATRIX = [
+    pytest.param({'has_offset_file': True}, [_NO_OUTCOME_STUB], id='offset-file'),
+    pytest.param({'has_offset_error': True}, [], id='offset-error'),
+    pytest.param({'has_no_offset_error': True}, [_NO_OUTCOME_STUB], id='no-offset-error'),
+    pytest.param({'has_offset_spice_error': True}, [], id='spice-error'),
+    pytest.param({'has_offset_nonspice_error': True}, [], id='nonspice-error'),
+]
+"""What every filter that reads a document answers about one naming no outcome.
+
+The presence filter leads, because it is what says the document is there to be
+read: without it every empty answer below would also be the answer for a root
+holding nothing.  ``has_no_offset_error`` carries the same weight from the other
+side -- a document the ingest refused matches it no more than it matches the
+rest, so an answer of the image itself is an answer read off a stored outcome.
+"""
+
+
+def _naming_no_outcome(root: Path, status: Any) -> list[ImageFile]:
+    """Write a document that names no outcome of its own, and return its image.
+
+    The outcome sits in the nested ``navigation_result`` copy instead, which is
+    what makes the answers evidence of anything: a path that read the nested
+    copy wherever the top-level field names nothing would answer the error
+    filters with this image and the negative one without it.
+
+    Parameters:
+        root: The results root to write into.
+        status: The top-level ``status`` the document carries, or
+            :data:`_NO_STATUS_FIELD` for one carrying no such field.
+
+    Returns:
+        The one candidate image, ready to filter.
+    """
+    document = metadata_document(image_name='N1000000011_1.IMG', offset=None)
+    if status is _NO_STATUS_FIELD:
+        del document['status']
+    else:
+        document['status'] = status
+    document['navigation_result']['status'] = 'error'
+    write_metadata(root, _NO_OUTCOME_STUB, document)
+    return [
+        ImageFile(
+            image_file_url=FCPath(root / f'{_NO_OUTCOME_STUB}.IMG'),
+            label_file_url=FCPath(root / f'{_NO_OUTCOME_STUB}.LBL'),
+            results_path_stub=_NO_OUTCOME_STUB,
+        )
+    ]
+
+
+@pytest.mark.parametrize('status', _NO_OUTCOME_STATUSES)
+@pytest.mark.parametrize(('flags', 'expected'), _NO_OUTCOME_MATRIX)
+def test_the_tree_reads_a_document_naming_no_outcome(
+    tmp_path: Path, status: Any, flags: dict[str, bool], expected: list[str]
+) -> None:
+    """The walk reads the top-level field and no other, so it finds no outcome.
+
+    Parameters:
+        tmp_path: Directory the root is written under.
+        status: The shape of top-level ``status`` the document carries.
+        flags: The selection flags to apply.
+        expected: The stubs the filter selects.
+    """
+    root = tmp_path / 'results'
+    images = _naming_no_outcome(root, status)
+    results_filter = ResultsFilter(
+        VOLUMES, str(root), logger=null_logger(), results_db_url=None, **flags
+    )
+    assert select_from(results_filter, images) == expected
+
+
+@pytest.mark.parametrize('status', _NO_OUTCOME_STATUSES)
+@pytest.mark.parametrize(('flags', 'expected'), _NO_OUTCOME_MATRIX)
+def test_the_index_reads_a_document_naming_no_outcome_the_same_way(
+    tmp_path: Path, status: Any, flags: dict[str, bool], expected: list[str]
+) -> None:
+    """The stored status is the document's own field, so the query answers alike.
+
+    Every shape above is stored as the one value a record naming no outcome is
+    read as, which is an outcome the error filters name nowhere.  A store that
+    borrowed the nested copy would be making a classification no reader of the
+    document could arrive at, and -- since the pointing readers rebuild a record
+    from these same columns -- would hand a corrected attitude to an image whose
+    document supplies no pointing at all.
+
+    Parameters:
+        tmp_path: Directory the root and the index are written under.
+        status: The shape of top-level ``status`` the document carries.
+        flags: The selection flags to apply.
+        expected: The stubs the filter selects.
+    """
+    root = tmp_path / 'results'
+    images = _naming_no_outcome(root, status)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=null_logger())
+    results_filter = ResultsFilter(
+        VOLUMES, str(root), logger=null_logger(), results_db_url=url, **flags
+    )
+    assert select_from(results_filter, images) == expected
+
+
 _FLAG_CASES = [pytest.param(case.values[0], id=case.id) for case in _MATRIX]
 """The same filter combinations, for the assertions that do not need the answer."""
 
@@ -156,19 +336,188 @@ def test_the_index_path_leaves_nothing_for_the_batch_stage(
     assert results_filter.needs_batch_filtering is False
 
 
-@pytest.mark.parametrize(
-    'flags',
-    [
-        pytest.param({'has_offset_file': True, 'has_no_offset_file': True}, id='offset-file-pair'),
-        pytest.param({'has_png_file': True, 'has_no_png_file': True}, id='png-file-pair'),
-        pytest.param(
-            {'has_offset_spice_error': True, 'has_offset_nonspice_error': True}, id='error-pair'
-        ),
-        pytest.param(
-            {'has_offset_error': True, 'has_no_offset_file': True}, id='error-and-no-offset-file'
-        ),
-    ],
+CONTRADICTORY_PAIRS = [
+    pytest.param({'has_offset_file': True, 'has_no_offset_file': True}, id='offset-file-pair'),
+    pytest.param(
+        {'has_offset_spice_error': True, 'has_offset_nonspice_error': True}, id='error-pair'
+    ),
+    pytest.param(
+        {'has_offset_error': True, 'has_no_offset_file': True}, id='error-and-no-offset-file'
+    ),
+    pytest.param({'has_offset_error': True, 'has_no_offset_error': True}, id='error-and-no-error'),
+    pytest.param(
+        {'has_offset_spice_error': True, 'has_no_offset_error': True},
+        id='spice-error-and-no-error',
+    ),
+    pytest.param(
+        {'has_offset_nonspice_error': True, 'has_no_offset_error': True},
+        id='nonspice-error-and-no-error',
+    ),
+    pytest.param(
+        {'has_no_offset_error': True, 'has_no_offset_file': True},
+        id='no-error-and-no-offset-file',
+    ),
+    pytest.param(
+        {'has_offset_spice_error': True, 'has_no_offset_file': True},
+        id='spice-error-and-no-offset-file',
+    ),
+    pytest.param(
+        {'has_offset_nonspice_error': True, 'has_no_offset_file': True},
+        id='nonspice-error-and-no-offset-file',
+    ),
+]
+"""Every pair of selection flags no image could satisfy.
+
+That it is every one of them is asserted rather than claimed: the six flags make
+fifteen pairs, and the test below puts each of the fifteen to the constructor and
+holds the ones it refuses to exactly this list.  A list short by a pair leaves
+the message that pair produces unasserted, which is how two of the four
+contradictions came to have a path through the message builder nothing read.
+"""
+
+CONTRADICTION_REFUSAL = r'mutually exclusive|cannot be combined with'
+"""The two shapes a refusal of contradictory selection flags takes.
+
+Two flags that exclude each other and nothing else are mutually exclusive.  One
+flag that excludes several which are satisfiable together is named against the
+ones it excludes instead: ``has_offset_error`` and ``has_offset_spice_error``
+are a pair the constructor accepts, so a message calling the three of them
+mutually exclusive would assert an exclusion between two flags that have none.
+"""
+
+SELECTION_FLAGS = (
+    'has_offset_file',
+    'has_no_offset_file',
+    'has_offset_error',
+    'has_no_offset_error',
+    'has_offset_spice_error',
+    'has_offset_nonspice_error',
 )
+"""The six results-file selection flags."""
+
+COMBINATIONS = [
+    names
+    for size in range(2, len(SELECTION_FLAGS) + 1)
+    for names in itertools.combinations(SELECTION_FLAGS, size)
+]
+"""Every combination of two or more of them, which is what a user may type.
+
+A user types flags rather than pairs, and a refusal is about the combination
+they typed: three of these carry two contradictions at once, and the
+contradiction a run happens to notice first is not the whole of what is wrong
+with the selection.
+"""
+
+
+def _contradicted_within(names: Sequence[str]) -> set[str]:
+    """Return the flags of one combination that another flag of it contradicts.
+
+    Parameters:
+        names: The flags the user typed.
+
+    Returns:
+        Every flag belonging to a contradictory pair both of whose flags are in
+        the combination.  A flag that contradicts nothing else present is not
+        one of them: it is a narrowing the selection could have satisfied, and
+        naming it in a refusal would send its user to change the wrong thing.
+    """
+    given = set(names)
+    return {
+        name
+        for case in CONTRADICTORY_PAIRS
+        for pair in [set(cast(dict[str, bool], case.values[0]))]
+        if pair <= given
+        for name in pair
+    }
+
+
+def _refusal_of(tree: Path, names: Sequence[str]) -> str | None:
+    """Build a filter over the given flags and return what it refused, if it did.
+
+    Parameters:
+        tree: The results root, read only by the combinations that are not
+            refused.
+        names: The flags to turn on.
+
+    Returns:
+        The refusal's message, or None when the combination was accepted.
+    """
+    flags = dict.fromkeys(names, True)
+    try:
+        ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_db_url=None, **flags)
+    except SelectionError as exc:
+        return str(exc)
+    return None
+
+
+def test_exactly_the_combinations_holding_a_contradictory_pair_are_refused(tree: Path) -> None:
+    """The list of contradictions is the whole of what the constructor refuses.
+
+    Asserted over every combination rather than over the pairs alone, so that a
+    contradiction reachable only by three flags together, and a combination
+    refused for no pair anybody wrote down, are both failures here.
+    """
+    refused = {names for names in COMBINATIONS if _refusal_of(tree, names) is not None}
+    assert refused == {names for names in COMBINATIONS if _contradicted_within(names)}
+
+
+def test_a_refusal_names_every_flag_of_the_combination_it_cannot_satisfy(tree: Path) -> None:
+    """A flag left out of the message reads as one the run accepted.
+
+    A combination carrying two contradictions is refused for both, because a
+    user who removes the flag the first one named and runs again would otherwise
+    meet the second, and a run refused a pair at a time costs a run per pair.
+    """
+    unnamed = {
+        names: sorted(name for name in _contradicted_within(names) if name not in (message or ''))
+        for names in COMBINATIONS
+        if (message := _refusal_of(tree, names)) is not None
+    }
+    assert {names: missing for names, missing in unnamed.items() if missing} == {}
+
+
+def _pairs_called_mutually_exclusive(tree: Path) -> set[frozenset[str]]:
+    """Return every pair of flags a refusal claims cannot hold together.
+
+    "Mutually exclusive" is a claim about each pair of the flags it leads, so a
+    clause leading three of them claims three pairs.
+
+    Parameters:
+        tree: The results root the combinations are put to.
+
+    Returns:
+        One frozen pair per claim any refusal makes.
+    """
+    claimed: set[frozenset[str]] = set()
+    for names in COMBINATIONS:
+        message = _refusal_of(tree, names)
+        if message is None:
+            continue
+        for clause in message.split('; '):
+            if 'mutually exclusive' not in clause:
+                continue
+            lead = clause.split(':')[0]
+            named = sorted(name for name in SELECTION_FLAGS if name in lead)
+            claimed.update(frozenset(pair) for pair in itertools.combinations(named, 2))
+    return claimed
+
+
+def test_no_refusal_calls_a_satisfiable_pair_mutually_exclusive(tree: Path) -> None:
+    """A refusal that says more than it means sends its user to change the wrong flag.
+
+    ``has_offset_error`` and ``has_offset_spice_error`` are a pair the
+    constructor accepts, so a message that named them and
+    ``has_no_offset_file`` together as mutually exclusive would tell a user that
+    a selection this program answers is impossible.  The refusal that names one
+    flag against the ones it excludes says only what is true, and this is what
+    holds every "mutually exclusive" clause to a pair that really is one.
+    """
+    exclusive = {frozenset(cast(dict[str, bool], case.values[0])) for case in CONTRADICTORY_PAIRS}
+    unfounded = _pairs_called_mutually_exclusive(tree) - exclusive
+    assert sorted(sorted(pair) for pair in unfounded) == []
+
+
+@pytest.mark.parametrize('flags', CONTRADICTORY_PAIRS)
 def test_a_contradictory_pair_is_refused_before_the_index_is_opened(
     tree: Path, tmp_path: Path, flags: dict[str, bool]
 ) -> None:
@@ -178,9 +527,30 @@ def test_a_contradictory_pair_is_refused_before_the_index_is_opened(
     the index before checking its flags would report that instead.
     """
     absent = index_url(tmp_path / 'not-an-index.sqlite3')
-    with pytest.raises(ValueError, match=r'mutually exclusive|contradicts') as excinfo:
+    with pytest.raises(ValueError, match=CONTRADICTION_REFUSAL) as excinfo:
         ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_db_url=absent, **flags)
     assert 'not-an-index.sqlite3' not in str(excinfo.value)
+
+
+@pytest.mark.parametrize('flags', CONTRADICTORY_PAIRS)
+def test_a_refusal_names_every_flag_that_made_the_selection_impossible(
+    tree: Path, flags: dict[str, bool]
+) -> None:
+    """The message is the whole diagnosis, so it names what the user typed.
+
+    A message naming a category rather than a flag -- "the offset-error
+    filters" -- leaves the user to work out which of six flags belongs to it,
+    and one of the six is named for the absence of an error, so the category
+    reads as something they did not ask for.
+
+    Parameters:
+        tree: The results root, which is never read: the flags are refused
+            first.
+        flags: The contradictory pair.
+    """
+    with pytest.raises(SelectionError) as excinfo:
+        ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_db_url=None, **flags)
+    assert [name for name in flags if name not in str(excinfo.value)] == []
 
 
 def test_a_root_with_no_completed_ingest_is_refused(tree: Path, indexed: str) -> None:
@@ -351,9 +721,7 @@ def _reads_recorded_by(reads: list[list[str]]) -> Any:
     ) -> ResultStubs:
         reads.append(list(volumes))
         reads.append(list(volumes))
-        return ResultStubs(
-            with_metadata=frozenset(), with_summary_png=frozenset(), matching_error=frozenset()
-        )
+        return ResultStubs(with_metadata=frozenset(), matching_error=frozenset())
 
     return recording
 

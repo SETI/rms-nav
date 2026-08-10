@@ -6,39 +6,37 @@ production tree and a rescue tree.  Every delete an ingest issues names both
 halves, and on a fixture holding one root a delete that named only the stub
 would behave identically -- which is how a root-blind query ships.  So each of
 them is exercised here with a second root present that holds the same stub, and
-what is asserted is that the other root's row is still there afterwards.
+what is asserted is that the other root's row is still there afterwards.  The
+count a pass reports of what its root's refusals amount to is a read of one
+root, and is here for the same reason: two roots that disagree about it are what
+tells a count of one from a count of the index.
 
-The reads are covered where they are used: a share's lookup in
+The other reads are covered where they are used: a share's lookup in
 ``test_ingest_cloud_tasks``, the report's queries in ``test_report``.
 """
 
 from pathlib import Path
 
 import pdslogger
+import pytest
 import sqlalchemy
 
 from spindoctor.results_index import FAILED_FILES, IMAGES, normalize_root_url, open_index
 
-from .conftest import FIRST_STUB, index_url, ingest_tree, metadata_document, write_metadata
+from .conftest import (
+    FIRST_STUB,
+    REFUSAL_REPORT_LEAD,
+    index_url,
+    ingest_tree,
+    metadata_document,
+    recorded_lines,
+    refusal_report,
+    write_metadata,
+    write_refusal,
+)
 
-REFUSED_DOCUMENT = '{"edges": []}'
-"""A document that reads as JSON and is not a navigation result of any schema."""
-
-
-def write_refusal(root: Path, stub: str) -> Path:
-    """Write a document under a root that no pass can turn into an image row.
-
-    Parameters:
-        root: The results root to write under.
-        stub: The document's results path stub under that root.
-
-    Returns:
-        The path written.
-    """
-    path = root / f'{stub}_metadata.json'
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(REFUSED_DOCUMENT, encoding='utf-8')
-    return path
+SECOND_STUB = 'VOL/N1454725800_1_CALIB'
+"""A second stub, for the root that has to differ from the other in its count."""
 
 
 def stubs_under(url: str, table: sqlalchemy.Table, root: Path) -> list[str]:
@@ -152,3 +150,27 @@ def test_a_prune_keeps_another_roots_refusal_of_a_stub_it_removed(
     refused.unlink()
     ingest_tree(url, [emptying], logger=quiet_logger)
     assert stubs_under(url, FAILED_FILES, staying) == [FIRST_STUB]
+
+
+def test_a_pass_reports_the_refusals_of_the_root_it_walked(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The standing count is a read, and a read of one root is keyed on it too.
+
+    Read without its root, one number answers for the whole index: an operator
+    measuring how short an error filter comes on this root is handed the sum of
+    every root anybody ingested, and a root holding no refusal at all reports
+    another root's.  The two roots are built to disagree about it, which a count
+    over both cannot report as either.
+    """
+    written = recorded_lines(quiet_logger, monkeypatch)
+    first = tmp_path / 'first'
+    second = tmp_path / 'second'
+    write_refusal(first, FIRST_STUB)
+    write_refusal(second, FIRST_STUB)
+    write_refusal(second, SECOND_STUB)
+    ingest_tree(index_url(tmp_path / 'index.sqlite3'), [first, second], logger=quiet_logger)
+    assert [line for line in written if line.startswith(REFUSAL_REPORT_LEAD)] == [
+        refusal_report(first, 1),
+        refusal_report(second, 2),
+    ]

@@ -179,54 +179,144 @@ For PDS3 datasets (``coiss``, ``coiss_pds3``, ``coiss_cruise``, ``coiss_cruise_p
 * ``--has-offset-file`` / ``--has-no-offset-file``: only images whose offset
   metadata file (``*_metadata.json`` under the navigation results root) already
   exists / does not exist.
-* ``--has-png-file`` / ``--has-no-png-file``: only images whose summary PNG file
-  (``*_summary.png`` under the navigation results root) already exists / does
-  not exist.
-* ``--has-offset-error``: only images whose offset metadata file exists and
-  records a fatal error (``status`` of ``error``).
+* ``--has-offset-error`` / ``--has-no-offset-error``: only images whose offset
+  metadata file exists and records / does not record a fatal error (``status``
+  of ``error``). Every error filter asks what a document records, so each one
+  requires the document to exist: an image nothing has been written for records
+  no error, and ``--has-no-offset-file`` is what selects it. So
+  ``--has-offset-file --has-no-offset-error`` is how a run asks for the images
+  whose navigation reached a result rather than dying before it could read the
+  image. What it selects is stated exactly below, and it is not the same set
+  read from the results tree as read from a results index.
 * ``--has-offset-spice-error`` / ``--has-offset-nonspice-error``: like
   ``--has-offset-error``, but restricted to fatal errors caused by / not caused
   by missing SPICE data.
 
+Reading the results tree, an error filter is answered from whatever JSON object
+the file parses to: any object with a ``status`` of ``error`` is a fatal error
+and any other object records none, whether or not the object is a navigation
+document. An offset metadata file that cannot be read, does not parse as JSON,
+or does not parse to a JSON object satisfies no error filter, positive or
+negative, and is reported as excluded: what it records is unknown rather than
+known to be an outcome. Reading a results index, the excluded set is larger,
+and ``--results-db`` below says by how much.
+
 The results-file filters answer their questions three ways when they read the
 results tree, all of them efficient even when the results root is a cloud
-location. Presence filters
-(``--has-offset-file`` / ``--has-png-file``) and the error filters
-(``--has-offset-error`` and its SPICE variants) walk the results tree once per
-selected volume and test each candidate against the collected file set. Pure
-absence filters (``--has-no-offset-file`` / ``--has-no-png-file`` with no
-presence or error filter active) do not walk the tree; they answer with batched
-``exists()`` calls. The error filters additionally retrieve the matched metadata
-files in batches to inspect their contents.
+location. The presence filter (``--has-offset-file``) and the error filters
+(``--has-offset-error``, ``--has-no-offset-error`` and the SPICE variants) walk
+the results tree once per selected volume and test each candidate against the
+collected file set. The absence filter is always on its own -- it contradicts
+every other results filter -- so it does not walk the tree; it answers with
+batched ``exists()`` calls. The error filters additionally retrieve the matched
+metadata files in batches to inspect their contents.
 
 Given ``--results-db``, all of them are answered instead by one query per
-enumeration, and the results tree is not read at all. The index is a snapshot of
-the tree as of the last ingest over that root, with no staleness detection: an
-image navigated since is one the index does not hold, so ``--has-no-offset-file``
-selects it again, and a result file deleted since is one the index still holds,
-so ``--has-offset-file`` selects an image whose metadata file is gone. The run
-log says when the pass that filled the index finished and how long ago that was,
-which is what says whether either applies to this run. Run ``sd_stats_ingest`` to
-bring the index up to date, or pass ``--results-db none`` for a run that must
-read the tree. A results root the index holds no completed ingest of is refused
-rather than answered, because absence of a row would otherwise read as "this
-image was never navigated".
+enumeration, and the results tree is not read at all. A results root the index
+holds no completed ingest of is refused rather than answered, because absence of
+a row would otherwise read as "this image was never navigated". The paragraphs
+below are the answers an index is known to give differently from the tree; each
+of them is a property of what an ingest pass could read and record rather than
+of the query.
 
-A document rewritten in place that kept the length and the modification time it
-had before is one the ingest skips, because those two metrics are everything a
-listing supplies about a file. Its row goes on recording what the earlier
-document said, so an error filter answers from that one however recently the
-last pass finished. Running ``sd_stats_ingest --force`` over the root re-reads
-every document and is what puts such a row right.
+**A document the ingest refused answers no error filter.** A
+``*_metadata.json`` file the ingest could not read as a navigation document is
+recorded as a file that exists and as nothing else. It is present in the tree
+and present for the presence filters, so ``--has-offset-file`` selects its image
+and ``--has-no-offset-file`` passes it over; and it records no outcome, so it
+satisfies neither ``--has-offset-error`` nor ``--has-no-offset-error`` nor
+either SPICE variant.
+
+Whether that differs from the tree depends on why the file was refused. One that
+cannot be read, does not parse as JSON, or does not parse to a JSON object
+satisfies no error filter read from the tree either, as the paragraph on the
+results tree above says, so the two answer alike about it. One that parses to a
+JSON object the index will not take -- contents that do not carry what the index
+requires (see :doc:`user_guide_statistics`), or a JSON object that was never a
+navigation document at all -- is read from the tree as it stands, and its
+``status`` answers every error filter there. Those are the images an error
+filter answered from an index drops and the same filter answered from the tree
+keeps, with nothing in the run saying so. The line ``*** Results index holds N
+offset metadata files under ...`` counts every refused file among the N, so a
+count in line with what the tree holds is no evidence that the selection
+matched. The gap is not necessarily small. A root every one of whose documents
+is a JSON object the index will not take answers every error filter with nothing
+at all while still reporting a plausible count of metadata files, so a selection
+that comes back short, or empty, is a reason to measure the gap rather than to
+conclude the root holds no such images. Pass ``--results-db none`` for a run
+that must ask the documents themselves.
+
+The gap is the rows ``failed_files`` holds for the root whose ``reason`` begins
+``not a current-schema navigation document``; the other reasons are the files
+the tree excludes as well. One query separates them:
+
+.. code-block:: sql
+
+    SELECT reason, COUNT(*) FROM failed_files
+    WHERE root_url = '/path/to/nav-results'
+    GROUP BY reason;
+
+``root_url`` is the results root as the ingest normalized it: absolute, with any
+trailing ``/`` removed. A selection also enumerates volumes, so add ``AND volume
+IN (...)`` to bound what one selection can be short by; a row whose ``volume`` is
+NULL sits above every volume an enumeration walks and can shorten nothing.
+
+``sd_stats_ingest`` reports that count, narrowed to the rows carrying a volume,
+at the end of each root's pass, as the line ``Documents under ... an error
+filter reads from the results tree and not from this index``, which is the
+root's standing total rather than what that pass refused. The two differ, and
+the difference is what makes the tally in the pass's closing summary the wrong
+number to read here: an ingest is incremental, a refused file that has not
+changed since is skipped without being read, and a pass that skips it refuses
+nothing and tallies nothing. Run ``sd_stats_ingest --force`` over the root to
+have every document read again and the reasons tallied by that summary, which
+names one file per reason.
+
+**A file the index has no row at all for reads as absent**, and
+``--has-no-offset-file`` reads absence as "this image was never navigated", so
+it selects that image again. Three passes end that way: one that could not
+retrieve the file, one whose rows the database would not store, and one that did
+not list the directory the file is under. The first two are deliberate -- a
+recorded refusal would be skipped for as long as the file did not change, and
+the next pass would never retry it -- and the third is counted rather than
+silent, by the paragraph on unlisted directories below.
+
+**A document the tree no longer holds keeps its row** and reads as present, so
+``--has-offset-file`` hands on an image whose metadata file is gone and
+``--has-no-offset-file`` skips an image nothing has been written for. A row
+leaves the index only when a pass that listed the whole root finds no file for
+it, and a pass that missed a single directory anywhere under the root removes no
+row at all, having no evidence about the stubs it did not see. One unlistable
+subdirectory therefore holds every stale row of the root, however many passes
+complete in the meantime, which is why this one is not answered by ingesting
+again.
+
+**A document rewritten in place that kept the length and the modification time
+it had before** is one the ingest skips, because those two metrics are
+everything a listing supplies about a file. Its row goes on recording what the
+document before it said, so an error filter answers from that one however
+recently the last pass finished. Running ``sd_stats_ingest --force`` over the
+root re-reads every document and is what puts such a row right.
+
+An index is also a snapshot of the tree as of the last ingest over that root,
+with no staleness detection: an image navigated since is one the index does not
+hold, so ``--has-no-offset-file`` selects it again, and a result file deleted
+since is one the index still holds, so ``--has-offset-file`` selects an image
+whose metadata file is gone. The run log says when the pass that filled the
+index finished and how long ago that was, which is what says whether either
+applies to this run. Run ``sd_stats_ingest`` to bring the index up to date, or
+pass ``--results-db none`` for a run that must read the tree. That age is what
+decides the answer outside the paragraphs above; inside them it decides nothing,
+since each of them survives a pass that finished a second ago.
 
 An ingest that could not list every directory under the root reports the number
 it missed, and every enumeration answered from that index repeats it as a
-warning. It bounds both directions of the paragraph above: an image under a
-directory nobody listed is absent from the index whether or not it was
-navigated, and such a pass removes no row anywhere under the root, so a result
-file deleted before it keeps its row until a pass lists the whole root. Fixing
-what stopped the walk -- a directory permission, a symbolic link pointing back
-up the tree -- and re-running ``sd_stats_ingest`` clears both.
+warning. It bounds both directions of the snapshot: an image under a directory
+nobody listed is absent from the index whether or not it was navigated, and such
+a pass removes no row anywhere under the root, so a result file deleted before it
+keeps its row until a pass lists the whole root. Fixing what stopped the walk --
+a directory permission, a symbolic link pointing back up the tree -- and
+re-running ``sd_stats_ingest`` clears both.
 
 Miscellaneous
 ^^^^^^^^^^^^^
@@ -612,10 +702,14 @@ reports; see :doc:`user_guide_statistics`.
 Summary PNG Files (``*_summary.png``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Every navigated image is paired with a ``*_summary.png``: one annotated picture
-showing what the navigator saw and where it placed its model. The source image
-is composited with the merged model overlay at the fitted offset, so a glance
-tells you whether the predicted features land on the real ones.
+A navigation that reached a result writes a ``*_summary.png`` beside its
+metadata document: one annotated picture showing what the navigator saw and
+where it placed its model. The source image is composited with the merged model
+overlay at the fitted offset, so a glance tells you whether the predicted
+features land on the real ones. An image whose data could not be loaded at all
+-- a frame outside the SPICE kernels' coverage, most often -- writes the
+metadata document, with a ``status`` of ``error``, and no picture: nothing was
+read to draw one from.
 
 The base layer is the source image rendered in grayscale with a quantile
 contrast stretch. The black point sits at a low quantile; the white point adapts

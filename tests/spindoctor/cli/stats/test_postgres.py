@@ -23,16 +23,20 @@ import pytest
 import sqlalchemy
 from tests.spindoctor.cli.stats.conftest import (
     GOLDEN_DIR,
+    REFUSAL_REPORT_LEAD,
     build_tree,
     complete,
     fan_out,
     ingest_tree,
     metadata_document,
+    recorded_lines,
+    refusal_report,
     report_from_tree,
     reported,
     run_rows,
     technique,
     write_metadata,
+    write_refusal,
 )
 
 from spindoctor.cli.stats.ingest import (
@@ -229,6 +233,31 @@ def test_a_refused_file_is_skipped_on_postgresql(
     ingest_tree(postgres_url, [root], logger=quiet_logger)
     counts = ingest_tree(postgres_url, [root], logger=quiet_logger)
     assert (counts.files_seen, counts.files_skipped) == (2, 2)
+
+
+def test_the_standing_refusal_count_is_the_same_on_postgresql(
+    postgres_url: str,
+    tmp_path: Path,
+    quiet_logger: pdslogger.PdsLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The count restricts on a reason prefix, which is a LIKE each backend spells.
+
+    SQLite matches a LIKE pattern without regard to ASCII case and PostgreSQL
+    matches it with, so a prefix restriction is one of the places two backends
+    can quietly answer differently.  The reasons are one case throughout, and
+    this is what says the two agree over a root holding one refusal of each
+    kind.
+    """
+    root = tmp_path / 'results'
+    write_refusal(root, 'VOL/N1454725799_1_CALIB')
+    (root / 'VOL' / 'half_metadata.json').write_text('{"status": "error"', encoding='utf-8')
+    write_refusal(root, 'N1454725800_1_CALIB')
+    written = recorded_lines(quiet_logger, monkeypatch)
+    ingest_tree(postgres_url, [root], logger=quiet_logger)
+    assert [line for line in written if line.startswith(REFUSAL_REPORT_LEAD)] == [
+        refusal_report(root, 1)
+    ]
 
 
 def test_a_deleted_document_loses_its_row_on_postgresql(

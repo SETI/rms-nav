@@ -75,7 +75,6 @@ IMAGES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('git_sha', sqlalchemy.Text, True),
     ('pipeline_run', sqlalchemy.Text, True),
     ('image_number', sqlalchemy.BigInteger, True),
-    ('has_summary_png', sqlalchemy.Boolean, True),
     ('start_et', sqlalchemy.Double, True),
     ('stop_et', sqlalchemy.Double, True),
     ('midtime_et', sqlalchemy.Double, True),
@@ -136,7 +135,6 @@ FAILED_FILES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('results_path_stub', sqlalchemy.Text, False),
     ('reason', sqlalchemy.Text, False),
     ('volume', sqlalchemy.Text, True),
-    ('has_summary_png', sqlalchemy.Boolean, True),
     ('mtime_ns', sqlalchemy.BigInteger, True),
     ('size_bytes', sqlalchemy.BigInteger, True),
 )
@@ -146,6 +144,24 @@ SCHEMA_META_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('schema_version', sqlalchemy.Integer, False),
     ('created_utc', sqlalchemy.Text, False),
 )
+
+COLUMN_SET_VERSION = 6
+"""The schema version the column sets above make up.
+
+An index is readable only by code whose column set is the one that wrote it, and
+the stamped version is the whole of what says so: there are no migrations, and
+the remedy for a mismatch is to build the index again.  So the number is written
+down here beside the columns it belongs to as well as in the schema, and the two
+are compared, because a version compared only against itself agrees with every
+value it could be given.
+
+What that catches is a version changed without the columns.  It does not catch
+the reverse, and cannot: a column removed from the schema and from the list
+above, with the version left alone, agrees with this number as readily as it
+agrees with itself, and every index in the world then reads as current while
+holding a column set no code has.  Bumping :data:`SCHEMA_VERSION` is part of
+changing a column set, and nothing here enforces it.
+"""
 
 TABLE_CASES = [
     pytest.param(IMAGES, IMAGES_COLUMNS, id='images'),
@@ -177,6 +193,16 @@ def sqlite_url(tmp_path: Path) -> str:
 # ---------------------------------------------------------------------------
 # The declared column set
 # ---------------------------------------------------------------------------
+
+
+def test_the_schema_stamps_the_version_this_column_set_belongs_to() -> None:
+    """The stamp is what refuses an index an older column set wrote.
+
+    Lowered back to a version whose columns these are not, it stops refusing:
+    every index built by either column set opens, and the one built by the older
+    is read as though it carried the newer's columns.
+    """
+    assert SCHEMA_VERSION == COLUMN_SET_VERSION
 
 
 @pytest.mark.parametrize(('table', 'expected'), TABLE_CASES)

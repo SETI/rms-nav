@@ -174,7 +174,6 @@ The `images` table:
 | `run_start`, `run_end`, `elapsed_s` | `timing` | |
 | `config_hash`, `git_sha`, `pipeline_run` | `navigation_result.provenance` | |
 | `image_number` | derived from `image_name` | replaces the SQL function (section 2.5) |
-| `has_summary_png` | the ingest walk (section 2.7) | Boolean |
 | `start_et`, `stop_et`, `midtime_et`, `exposure_s` | `navigation_result.times.*` | NULL for a document with no navigation result (see below); `midtime_et` is stored as recorded, never re-derived, because the reader's midtime gate holds it to 1e-6 s |
 | `sclk_start`, `sclk_midtime`, `sclk_stop` | `navigation_result.times.*` | TEXT |
 | `camera_frame_id`, `ck_frame_id` | `navigation_result.pointing.*` | INTEGER |
@@ -577,41 +576,81 @@ PR body.
 `sd_stats_ingest` walks each root for `*_metadata.json`, reads each
 document, and upserts its rows.
 
-**One walk feeds everything.** The recursive listing collects both
-`*_metadata.json` and `*_summary.png` names in a single pass (the pattern
-`ResultsFilter._scan_volumes` already uses), so `has_summary_png` comes from
-the walk, and each metadata file's `mtime_ns` and `size_bytes` come from the
-same listing entries. There is no per-file `stat` call and no per-file
-`exists` call; a backend whose listing does not supply size and mtime
-degrades to `--force` behavior for that root, with a logged warning.
+**One walk feeds everything.** The recursive listing collects the
+`*_metadata.json` names in a single pass (the pattern
+`ResultsFilter._scan_volumes` already uses), and each metadata file's
+`mtime_ns` and `size_bytes` come from the same listing entries. Every other
+file the listing reports -- the `*_summary.png` beside each document, and
+whatever else an operator has left under the root -- is passed over and enters
+no tally: not the count of files seen, not the count of directories the walk
+missed. There is no per-file `stat` call and no per-file `exists` call; a
+backend whose listing does not supply size and mtime degrades to `--force`
+behavior for that root, with a logged warning.
 
-**Incremental.** A file whose `(mtime_ns, size_bytes)` matches the stored
-pair, and beside which the walk saw the same summary PNG the row records, is
-skipped without being read. The summary flag is part of the comparison because
-it comes from the walk rather than from the document: a PNG written after the
-document was ingested changes the row that ought to be stored while changing
-nothing about the document. `--force` re-reads everything.
+**Incremental.** A file whose `(mtime_ns, size_bytes)` matches the stored pair
+is skipped without being read, and those two metrics are the whole of the
+comparison, for a refused file exactly as for an ingested one. `--force`
+re-reads everything.
 
 **A refused file is bookkeeping, not a row.** A file that is not a
 current-schema navigation document is recorded in a `failed_files` table --
-`root_url`, `results_path_stub`, `reason`, `volume`, `has_summary_png`,
-`mtime_ns`, `size_bytes` -- and is
-skipped on the next pass on the same evidence as an ingested one, so a tree
-whose non-navigation files outnumber its results does not pay to download and
-parse every one of them on every run. It is a table of its own rather than a
-marked `images` row: absence of an `images` row is what every consumer reads as
-"this image was never navigated", and a file with no usable data must leave
-that answer alone. The two columns beyond the bookkeeping are the two facts the
-walk knows about a file whatever the file turned out to contain: which volume
-it is under, and whether a summary PNG sits beside it. A selection filter asks
-about the file rather than about its contents, so a refused document answers
-those two exactly as an ingested one does, and the volume has to be a column
-because otherwise a one-volume enumeration fetches every refusal in the root.
-`--force` re-reads a refused file too. A document that
-ingested on an earlier pass and no longer reads has its `images` row deleted as
-the refusal is written, since a row nothing backs would answer for an image
-nothing produced; and a file that was refused and now reads has its refusal
-deleted as its rows are written.
+`root_url`, `results_path_stub`, `reason`, `volume`, `mtime_ns`, `size_bytes`
+-- and is skipped on the next pass on the same evidence as an ingested one, so
+a tree whose non-navigation files outnumber its results does not pay to
+download and parse every one of them on every run. It is a table of its own
+rather than a marked `images` row: absence of an `images` row is what every
+consumer reads as "this image was never navigated", and a file with no usable
+data must leave that answer alone. The one column beyond the bookkeeping is the
+one fact the walk knows about a file whatever the file turned out to contain:
+which volume it is under. A selection filter asks about the file rather than
+about its contents, so a refused document answers that exactly as an ingested
+one does, and it has to be a column because otherwise a one-volume enumeration
+fetches every refusal in the root. `--force` re-reads a refused file too. A
+document that ingested on an earlier pass and no longer reads has its `images`
+row deleted as the refusal is written, since a row nothing backs would answer
+for an image nothing produced; and a file that was refused and now reads has
+its refusal deleted as its rows are written.
+
+**What a pass refused is not what the root holds refusals for.** A refused file
+is recorded and then skipped unchanged by every pass after it, so the pass's own
+tally counts it once and never again. An operator sent to that tally to measure how
+short an index-answered error filter comes therefore reads zero on a root that
+was ingested before, which is every root a consumer accepts. So each root's pass
+closes by counting rows of `failed_files` for that root and reporting that as a
+line of its own, named as the root's standing count rather than as this pass's,
+and a fan-out reports it the same way for each root it completes -- and only for
+a root it completed, since a run left unfinished is one every consumer refuses
+and a count beside it would read as an account of it. The count is also one
+query over `failed_files` away at any time, which is what the guide gives an
+operator first; the reported line is what makes the natural action -- run the
+ingest and read its log -- the correct one rather than merely the documented
+one. `--force` remains what puts the reasons and the example files back into the
+summary.
+
+**The count is the refusals a selection can be short by, not every refusal.**
+Three of the reasons -- `unreadable`, `not valid JSON`, `not a JSON object` --
+are a file no JSON object came out of, and the tree path excludes such a file
+from every error filter exactly as the index answers none for it, so the two
+agree and the row is no gap. The `not a current-schema navigation document`
+family is the divergence: a JSON object the tree reads a `status` out of and
+this index records no status for. A refusal whose `volume` is NULL is left out
+for the second reason, that both arms of the selection query are restricted by
+`IN` over the enumerated volumes and `IN` is false for NULL, so such a row is in
+no selection's answer either way. What remains is still the whole root's number
+where a selection enumerates volumes, so the line says it bounds a shortfall
+rather than measuring one. A parse that fails in a way the decoder does not call
+a syntax error carries a parse reason rather than a schema one, so that the
+family boundary is the fact it states: no value came out of the file, and
+nothing reading the tree gets one out of it either.
+
+**A failure of the report costs the report.** The count is taken after the
+root's rows are written and its run is stamped, and its only product is a log
+line. Raised, it would skip every root after the one it fired on -- each of them
+left with a run row carrying no finish time, which every consumer refuses -- and
+discard the counts of the root that had just finished, so the run would end with
+no closing summary over work that completed. It is contained to a warning naming
+the root, which is the same containment every other error path in the ingest
+has.
 
 **A root the walk cannot list is not an empty root.** The walk reports whether
 the root itself could be listed. When it could not -- a mistyped root, an
@@ -751,14 +790,16 @@ refused and a bare count of refusals reads the same whether a tree holds many
 documents that were never navigation results or the ingest went wrong.
 
 A task carries the files of its share as the enqueuer's own walk reported them
--- each with its stub, `mtime_ns`, `size_bytes` and summary-PNG flag, plus the
-run identifier, the root, `force`, and whether the listing reported metrics at
-all -- and the worker ingests exactly those. It stats nothing and checks for
-nothing: the one listing of the pass is the enqueuer's, and everything a worker
-would otherwise ask the tree travels with the task. The worker applies the
-incremental skip of section 2.7 to its own share, against what the index records
-for its own stubs, so a retried task reads no document at all and costs a lookup
-over its own stubs instead.
+-- each with its stub, `mtime_ns` and `size_bytes`, plus the run identifier,
+the root, `force`, and whether the listing reported metrics at all -- and the
+worker ingests exactly those. It stats nothing and checks for nothing: the one
+listing of the pass is the enqueuer's, and everything a worker would otherwise
+ask the tree travels with the task. The worker applies the incremental skip of
+section 2.7 to its own share, against what the index records for its own stubs,
+so a retried task reads no document at all and costs a lookup over its own
+stubs instead. An entry carrying neither metric is read rather than compared,
+whatever the task claims about its listing: that claim is the enqueuer's and
+travels beside the entries rather than on them, so the two can disagree.
 
 **A worker never prunes.** Removing the rows of documents that have left the
 tree (section 2.7) is licensed by a complete listing of the root, and a worker
@@ -967,7 +1008,7 @@ The reason vocabulary maps as follows, and the mapping table belongs in the
 | `unreadable_metadata`, `invalid_json`, `metadata_not_an_object` | unreachable: ingest already refused such a file, so it has no record row and a refusal row instead, and the lookup fails the image rather than classifying it |
 | `missing_offset_key`, `invalid_offset_type`, `non_finite_offset`, `malformed_offset` | reported as `null_offset`: one column pair holds all five ways an offset can supply no pair, and none of them supplies a pointing |
 
-**A document the ingest refused is not a record the index can classify at all**, and it must not be read as an image nothing navigated. Ingest writes such a file to `failed_files` and not to `images`, for every reason `rows_from_metadata` refuses one: no `observation.instrument`, no `image_name`, a declared container of another shape, a duplicated `technique_name`, a file that is not JSON or not an object, and anything else the converter cannot read whole. The document itself is often a perfectly readable navigation record with a status, an offset and a corrected attitude, so a lookup that saw no `images` row and reported `no_metadata` would reproject that image corrected through the tree and uncorrected through the index, and would skip it in `sd_backplanes` while the tree built its product. So the lookup asks `failed_files` whenever it finds no `images` row, and a stub recorded there **fails that image**, naming the stub, the index and the recorded reason. Reading the document instead was considered and rejected: it would make `--results-db` mean a different thing per image, and one round trip per image is the cost the index exists to remove. Failing one image does not fail the run -- both consumers contain a per-image failure -- and the remedy the message names is to fix the document and re-ingest, or to run without an index. The one refusal ingest deliberately records nowhere is a file it could not retrieve, and an image whose document failed that way still reads as one nothing navigated; that is member 3 of the Phase 5 enumeration, and it is the same fact here.
+**A document the ingest refused is not a record the index can classify at all**, and it must not be read as an image nothing navigated. Ingest writes such a file to `failed_files` and not to `images`, for every reason `rows_from_metadata` refuses one: no `observation.instrument`, no `image_name`, a declared container of another shape, a duplicated `technique_name`, a file that is not JSON or not an object, and anything else the converter cannot read whole. The document itself is often a perfectly readable navigation record with a status, an offset and a corrected attitude, so a lookup that saw no `images` row and reported `no_metadata` would reproject that image corrected through the tree and uncorrected through the index, and would skip it in `sd_backplanes` while the tree built its product. So the lookup asks `failed_files` whenever it finds no `images` row, and a stub recorded there **fails that image**, naming the stub, the index and the recorded reason. Reading the document instead was considered and rejected: it would make `--results-db` mean a different thing per image, and one round trip per image is the cost the index exists to remove. Failing one image does not fail the run -- both consumers contain a per-image failure -- and the remedy the message names is to fix the document and re-ingest, or to run without an index. The one refusal ingest deliberately records nowhere is a file it could not retrieve, and an image whose document failed that way still reads as one nothing navigated; that is member 2 of the Phase 5 enumeration, and it is the same fact here.
 
 **The rule the seam is held to: a record the two storages *classify* differently may differ in the reason and in nothing else.** The reason is a name a run-level tally counts under; the mechanism, the matrices, the midtime and the offset are what a product is built from. A difference in any of those is a defect in the reader or in what ingest stores, not an entry for the list. The list itself is derived by measurement rather than by argument: both sources are driven over every shape a record's fields can take -- absent, null, wrong type, over-long, non-finite, boolean, nested, ragged, and an integer too large for a float -- and what survives defines it.
 
@@ -988,14 +1029,55 @@ walked-set mode and the absence-only batched-`exists()` mode) and every
 contradictory-pair rejection in the constructor, apart from the carve-out
 enumerated in section 4's Phase 5 entry. A file the ingest refused is
 still a file the walk finds, so the presence and absence filters read
-`failed_files` alongside `images`, and that table carries the volume and the
-summary-PNG flag for the same reason. The carve-out is what one ingest pass
+`failed_files` alongside `images`, and that table carries the volume for the
+same reason. The carve-out is what one ingest pass
 could read and record, never a property of this query; it is enumerated in the
-Phase 5 entry and repeated in the module docstring, each member has a test of
-its own, and a member found later is added in all three places in one commit.
+Phase 5 entry, repeated in the module docstring and stated for an operator in
+the navigation guide's account of `--results-db`, each member has a test of its
+own, and a member found later is added in all four places in one commit.
 The enumeration is maintained rather than audited closed: it names what is known
 to differ, and a divergence nobody has found yet is not evidence that none
-exists.
+exists. The guide is one of the four because the person a silently short
+selection is served to reads the guide and not the module: a divergence
+enumerated only where a maintainer meets it leaves a user with a selection that
+looks like the one they asked for.
+
+**The filter vocabulary is six flags, and they conjoin.** `--has-offset-file`
+and `--has-no-offset-file` ask whether the document exists;
+`--has-offset-error`, `--has-no-offset-error`, `--has-offset-spice-error` and
+`--has-offset-nonspice-error` ask what it records. Every error filter needs a
+document to read, so each one folds presence in, `--has-no-offset-file`
+contradicts all four, and `--has-no-offset-error` contradicts the three that
+name an error. That makes `--has-offset-file --has-no-offset-error` how a run
+asks for "the images this root holds a navigated result for, whatever it
+concluded" -- the selection that excludes the frames whose navigation died
+before it could read the image, which is a document with a fatal `status` and
+no summary picture beside it.
+
+**That pair is not the selection a picture-presence filter made, and the
+navigation guide says what each mode really selects.** The two differ in both
+directions, and neither is a defect of this vocabulary. A `*_summary.png` with
+no document beside it -- a PDS4 browse product, a document deleted from under
+its picture -- was a file a picture-presence filter selected, and neither mode
+selects it here, because both ask a question about a document and there is
+none. Read from an index, a document the ingest refused is one this pair drops
+(divergence member 1) where a picture-presence filter kept it, since the
+refusal is a fact about reading the document and the picture beside it is
+untouched by it. No image a navigation run wrote both files for falls in the
+first gap, since a picture is drawn only beside a document; the second is
+bounded by what an ingest accepts rather than by what a navigator wrote, and on
+a root whose documents carry less than the index requires it is most of the
+root. So the claim the guide makes is the narrow one: reading the tree the pair
+selects every image whose document parses to a JSON object without a fatal
+`status`, and reading an index it selects the accepted documents alone.
+
+Because the flags conjoin, a selection that is a union of two of them is two
+runs rather than one, and one such union is worth naming: "never navigated, or
+navigated and errored" is `--has-no-offset-file` and `--has-offset-error` run
+separately, and no single flag combination expresses it. The vocabulary is
+deliberately a conjunction of questions about one document, not an expression
+language over the tree.
+
 `ResultsFilter` lives in
 `spindoctor.dataset`, which `sd_offset` imports on every run, so the
 index-backed implementation lives in `spindoctor/results_index/selection.py`
@@ -1237,7 +1319,9 @@ Details settled during execution, none of them a change of intent:
   once in this phase, and it was raised again rather than reused: an index built
   from an earlier state of this phase would otherwise pass the version gate and
   then fail on a column that is not there, which is exactly what the gate exists
-  to prevent. Phase 5 raises it again, to 5, on the same reasoning.
+  to prevent. Phase 5 raises it again, to 5, on the same reasoning, and the
+  column set changed once more after it -- the summary-PNG flag left both file
+  tables -- which is what makes the current version 6.
 - **The CSV export states its line terminator.** `csv.writer` defaults to CRLF;
   the export now names LF. The frozen `images.csv` blobs are LF, so what the
   export writes matches them byte for byte, which the previous implementation's
@@ -1389,9 +1473,13 @@ Details settled during execution, none of them a change of intent:
   walk, store and chunk modules. The package re-exports them, so the drivers
   import from `spindoctor.cli.stats.ingest` as they do everything else.
 - **Two Phase 2 helpers were widened rather than copied.** `_files_to_read`
-  takes the files, their summary stubs and the metrics flag instead of a whole
-  `_RootListing`, so a share selects by exactly the rule a root does and there
-  is nothing listing-shaped for a worker to reach for; `_recorded_files` takes
+  takes the files, what the index records about them and the metrics flag
+  instead of a whole `_RootListing`, so a share selects by exactly the rule a
+  root does and there is nothing listing-shaped for a worker to reach for; a
+  file the flag claims metrics for while carrying none is read rather than
+  compared, since a share's claim travels beside the entries it describes and
+  can disagree with them, where a whole-root walk reports metrics for every
+  file or for none; `_recorded_files` takes
   an optional set of stubs, so a share reads what the index holds about its own
   files rather than about every row of an archive-scale root.
 - **A share names every file it could not read**, which a pass over a whole
@@ -1731,9 +1819,10 @@ Details settled during execution:
 import per section 2.9.
 
 Tests: for every filter flag, both existing modes (walked and
-absence-only-batched) against the index-backed answer over a fixture tree, whose
-malformed-metadata images carry a summary PNG so the equivalence covers the
-refusal table; every contradictory-pair rejection unchanged; the command-line
+absence-only-batched) against the index-backed answer over a fixture tree whose
+malformed-metadata images are files the walk finds and the ingest refuses, so
+that the equivalence covers the refusal table; every contradictory-pair
+rejection, including the four `--has-no-offset-error` adds; the command-line
 surface of every program that declares `--results-db` and of every program
 section 1 keeps reading files; an exported URL answering an enumeration for the
 first and not for the second; and an import-time assertion that
@@ -1745,50 +1834,73 @@ assumed to exist already.
 Details settled during execution, none of them a change of intent:
 
 - **The selection layer hands back plain sets.** `read_result_stubs` opens the
-  index, asks it, disposes the engine and returns three frozen sets of stubs,
-  so no SQLAlchemy object and no SQLAlchemy type reaches `spindoctor.dataset`
-  -- not even in an annotation, which a branch-local import could not satisfy.
+  index, asks it, disposes the engine and returns two frozen sets of stubs with
+  what the pass that recorded them reported about itself, so no SQLAlchemy
+  object and no SQLAlchemy type reaches `spindoctor.dataset` -- not even in an
+  annotation, which a branch-local import could not satisfy.
+- **A document recording no fatal error is a filter of its own.**
+  `--has-no-offset-error` is the negation the other three lacked, and the query
+  answers it with the same computed column: one more condition on the images
+  arm, and the refusals arm's literal false unchanged, since a file the ingest
+  refused records neither an error nor the absence of one. It contradicts the
+  three that name an error and, like them, contradicts `--has-no-offset-file`,
+  because it asks what a document records and a document that does not exist
+  records nothing. The tree path reads it out of the same batched retrieval the
+  other error filters already pay for, and excludes an unreadable document from
+  it exactly as they do, which is what keeps the two implementations answering
+  alike over the malformed-metadata images of the fixture tree.
+- **A refusal says which exclusion it means.** Two flags that exclude each other
+  and nothing else are named as mutually exclusive. One flag that excludes
+  several which are satisfiable together -- `--has-no-offset-file` against the
+  four that read a document, `--has-no-offset-error` against the three that name
+  an error -- is named against the ones it excludes instead, because "mutually
+  exclusive" over a set claims an exclusion between every pair in it, and
+  `--has-offset-error` with `--has-offset-spice-error` is a pair the constructor
+  accepts. Every flag of the combination is still named, which is what a user
+  needs in order to know which one to drop; what changes is the claim made about
+  them. A test holds every "mutually exclusive" clause any combination can
+  produce to a pair the constructor really does refuse.
 - **Presence is read from `failed_files` as well as `images`.** A
   `*_metadata.json` the ingest refused is a file the walk finds, so without the
   refusal table criterion 1's malformed-metadata image would be present in the
   tree and absent in the index, for `--has-offset-file` and
   `--has-no-offset-file` alike.
-- **`failed_files` carries the volume and the summary-PNG flag**, which is a
-  column-set change and so a schema version bump, to 5. Both are facts of the
-  walk rather than of the document, so they are as knowable for a file nothing
-  could be read from as for one that ingested, and a selection filter asks about
-  the file and not about its contents. Without the flag, a summary PNG beside a
-  refused document reads as absent, and an entire results root written by an
-  older metadata schema -- the plan's own headline refusal reason, and a tree
-  where every image has a PNG beside it -- answers `--has-png-file` and
-  `--has-no-png-file` backwards. Without the volume, a one-volume enumeration
-  fetches every refusal the root holds. The incremental skip compares the flag
-  for a refusal exactly as it does for an image, since a PNG written after the
-  refusal was recorded changes the row that ought to be stored. That skip reads
-  the refusal table for the root it is walking, and the read is exercised with a
-  second root holding a copy of the same tree, which is what a mirror or a
-  restored backup produces: the same stubs at the same lengths and the same
-  times, so a refusal read without its root makes a pass decline to read a file
-  it has never seen and write no row at all for it -- neither an image row nor a
-  refusal, which every consumer reads as an image nobody navigated.
+- **`failed_files` carries the volume**, which is a column-set change and so a
+  schema version bump, to 5. It is a fact of the walk rather than of the
+  document, so it is as knowable for a file nothing could be read from as for
+  one that ingested, and a selection filter asks about the file and not about
+  its contents. Without it, a one-volume enumeration fetches every refusal the
+  root holds. The incremental skip compares a refusal's metrics exactly as it
+  compares an image's. That skip reads the refusal table for the root it is
+  walking, and the read is exercised with a second root holding a copy of the
+  same tree, which is what a mirror or a restored backup produces: the same
+  stubs at the same lengths and the same times, so a refusal read without its
+  root makes a pass decline to read a file it has never seen and write no row
+  at all for it -- neither an image row nor a refusal, which every consumer
+  reads as an image nobody navigated.
 - **What the index answers differently, as far as it is known.** Each member is
-  stated in the module docstring, each has a test of its own, and a member found
-  later is added here, in the docstring, and in a test, in the same commit. The
+  stated in the module docstring and in the navigation guide's account of
+  `--results-db`, each has a test of its own, and a member found later is added
+  here, in the docstring, in the guide, and in a test, in the same commit. Each
+  member carries a phrase that identifies it, and a test binds that phrase to
+  the entry carrying it and to that entry's place in the list, then compares the
+  four lists entry for entry. So an entry deleted, an entry that states two
+  members because a neighbour absorbed the deleted one's phrase, an entry that
+  states none, a member added to one list and not the others, and a list whose
+  members come in another order all fail. What that test cannot check is whether
+  an entry tells the truth about the member it states: an entry that keeps its
+  identifying phrase and claims the opposite of the member passes it, and only
+  reading the paragraph, or the member's own behavioral test, catches that. The
   list is maintained rather than closed: it is what execution and code reading
   have found, and a divergence nobody has found yet would be a defect of this
   list rather than a departure from it.
-  1. A summary PNG with **no file beside it** is recorded nowhere, because the
-     flag lives on the row of the file it was found beside. It reads as absent,
-     which makes `--has-no-offset-file --has-png-file` empty under an index.
-     This one is a property of the schema and not of the query, and the fix is
-     not a column: it is a row keyed by a stub no document backs, and both the
-     presence filters and the ingest's own skip logic read such a row as
-     evidence that a document exists.
-  2. A document that is valid JSON and carries `status` but is **not a
-     navigation document** is refused by ingest, so it records no status and
-     matches no error filter, where the tree path reads `status` and
-     `status_error` out of any JSON object it can parse.
-  3. A file that exists and has **no row at all** reads as absent, which is what
+  1. **A document the ingest refused** -- a JSON object this index will not
+     accept -- records no status and so matches no error filter, where the tree
+     path reads `status` and `status_error` out of any JSON object it can
+     parse, one carrying no `status` at all included. A file no JSON object
+     came out of is refused too and is not one of these: the tree excludes such
+     a file from every error filter as well.
+  2. A file that exists and **has no row at all** reads as absent, which is what
      the absence filters read as "this image was never navigated". Three passes
      end that way: a file the pass could not retrieve; a document the pass read
      whose rows the database would not store (section 2.7's isolated write
@@ -1799,7 +1911,7 @@ Details settled during execution, none of them a change of intent:
      with the same query, handed back with the answer, and reported by
      `ResultsFilter` as a warning naming the root, which is the consumer section
      2.7 wrote that count for.
-  4. A document **the tree no longer holds** keeps its row and reads as present,
+  3. A document **the tree no longer holds** keeps its row and reads as present,
      so `--has-offset-file` hands on an image whose metadata file is gone and
      `--has-no-offset-file` skips one nothing has been written for. A row leaves
      the index only when a pass that listed the whole root does not find a file
@@ -1813,11 +1925,11 @@ Details settled during execution, none of them a change of intent:
      narrowing it to the directories a pass did list is a change to what a
      listing has to report about itself, which sits with the ingest phases and
      with the sharded pass that also prunes on partial evidence.
-  5. A document **rewritten in place, keeping the length and the modification
+  4. A document **rewritten in place, keeping the length and the modification
      time it had before,** is skipped by the incremental comparison
-     (`_is_unchanged`, which has only `(mtime_ns, size_bytes)` and the summary
-     flag to go on), so its row goes on recording what the document before it
-     said and an error filter answers from that. A tree restored by a copy that
+     (`_is_unchanged`, which has only `(mtime_ns, size_bytes)` to go on), so its
+     row goes on recording what the document before it said and an error filter
+     answers from that. A tree restored by a copy that
      preserves times, a document patched and stamped back from a sibling, and a
      backend reporting one modification time for two writes all produce it; an
      ordinary re-navigation writes a different length at a later time and does
@@ -1826,7 +1938,7 @@ Details settled during execution, none of them a change of intent:
      retrieving every document to find out is exactly the cost the skip exists
      to avoid -- a content digest would be paid on every file of every pass to
      catch a case a times-preserving restore produces. `--force` is the remedy
-     and is what the documentation points at. Like member 5, this one is not
+     and is what the documentation points at. Like member 3, this one is not
      the snapshot's age: a pass that finished a second ago answers from the
      document before the rewrite.
 - **The answer says how old it is, and what that does not cover.**
@@ -1836,7 +1948,7 @@ Details settled during execution, none of them a change of intent:
   resolved from the environment means an operator may not know which pass is
   answering, so the moment travels with the answer rather than with whoever
   exported the variable. Outside the enumeration above, the age is what decides
-  whether the answer is the answer the tree would give; members 4, 5 and 6
+  whether the answer is the answer the tree would give; members 2, 3 and 4
   survive a pass that finished a second ago, which is why each is enumerated
   rather than left to be read off the stamp.
 - **The volume restriction is one restriction in one query.** Both arms are
@@ -1900,9 +2012,8 @@ add a column (increment the version). No issue numbers in any of it.
 1. `sd_backplanes`, `sd_mosaic`, and the `ResultsFilter`-driven selections
    produce identical products and identical selections for the same inputs
    with and without an index, over a fixture tree exercising success,
-   failure, error, missing-metadata and malformed-metadata images -- the last
-   of them with a summary PNG beside it. Asserted
-   by tests (unit tier at the `PointingSelection` level; integration
+   failure, error, missing-metadata and malformed-metadata images. Asserted
+   by tests (unit tier at the `PointingSelection`/selection level; integration
    tier on written products). "Identical" binds returned values, written
    products, and the reachable-reason warnings -- not incidental log text.
    The criterion binds every image whose document the ingest could read.
@@ -1926,23 +2037,25 @@ add a column (increment the version). No issue numbers in any of it.
    enumerates, restated here member for member and in its order, so that a
    reader of this criterion sees the list rather than a sample of it:
 
-   1. a summary PNG with no document beside it, which the index records nowhere,
-      so `--has-no-offset-file --has-png-file` is empty under one;
-   2. a document the ingest refused, which is a file that exists but records no
-      status, so it counts towards presence and matches no error filter;
-   3. an input the index holds nothing about because no pass could read or
+   1. a document the ingest refused, which is a file that exists but records no
+      status;
+   2. a file that has no row at all in the index, because no pass could read or
       record it;
-   4. a document the tree no longer holds, whose row survives every pass that
+   3. a document the tree no longer holds, whose row survives every pass that
       did not list the whole root;
-   5. a document rewritten in place with the length and the modification time it
+   4. a document rewritten in place with the length and the modification time it
       had before, whose row goes on recording what the document before it said.
 
-   Each carve-out is stated in the plan, in the module docstring, and in a test,
-   and one found later is added to all three in one commit; a test counts the
-   three lists against each other, so a member added to one of them and not the
-   others fails. Neither list is asserted to be
-   complete: a divergence outside them is a defect of the enumeration, to be
-   fixed or enumerated, and not a licence to differ.
+   Each carve-out is stated in the plan, in the module docstring, in the
+   navigation guide, and in a test, and one found later is added to all four in
+   one commit; a test binds each member's identifying phrase to the entry
+   carrying it and compares the four lists entry for entry, so a member dropped
+   from one of them, added to one and not the others, or stated out of order
+   fails. It matches text, so it cannot tell whether an entry says something
+   true about its member; that is what each member's own behavioral test is for.
+   Neither carve-out is asserted to be complete: a divergence outside them is a
+   defect of the enumeration, to be fixed or enumerated, and not a licence to
+   differ.
    `sd_stats_report`'s criterion is section 4 Phase 2's old-vs-new
    byte-identical report.
 2. No pipeline program requires an index, and `import spindoctor.dataset`

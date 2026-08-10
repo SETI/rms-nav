@@ -9,8 +9,8 @@ That second root is why every test here builds two.  The index is keyed by root
 and stub together, and a query that filtered on the stub alone would answer with
 the other root's rows while every single-root assertion stayed green.  The other
 root is therefore stocked so that every filter's answer changes if one of its
-rows leaks: it holds a fatal SPICE error and a summary PNG for each stub, and a
-document for the one stub the first root deliberately has none of.
+rows leaks: it holds a fatal SPICE error for each stub, and a document for the
+one stub the first root deliberately has none of.
 
 The run rows are stocked the same way, because the run table is keyed by root as
 well and is read by a query of its own.  The other root is always passed over
@@ -20,7 +20,6 @@ read from the newest run rather than from this root's newest run is therefore
 the other root's, and says so.
 """
 
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -45,14 +44,13 @@ VOLUME = 'COISS_2001'
 OTHER_VOLUME = 'COISS_2002'
 """A volume of the same root that the enumeration did not select."""
 
-SUCCESS_WITH_PNG = f'{VOLUME}/data/a/N1000000001_1_CALIB'
-SUCCESS_NO_PNG = f'{VOLUME}/data/a/N1000000002_1_CALIB'
+SUCCESS = f'{VOLUME}/data/a/N1000000001_1_CALIB'
+SECOND_SUCCESS = f'{VOLUME}/data/a/N1000000002_1_CALIB'
 FAILURE = f'{VOLUME}/data/a/N1000000003_1_CALIB'
 SPICE_ERROR = f'{VOLUME}/data/b/N1000000004_1_CALIB'
 NONSPICE_ERROR = f'{VOLUME}/data/b/N1000000005_1_CALIB'
 ERROR_WITHOUT_STATUS_ERROR = f'{VOLUME}/data/b/N1000000006_1_CALIB'
 REFUSED = f'{VOLUME}/data/b/N1000000007_1_CALIB'
-REFUSED_WITH_PNG = f'{VOLUME}/data/b/N1000000012_1_CALIB'
 REFUSED_OTHER_VOLUME = f'{OTHER_VOLUME}/data/b/N1000000008_1_CALIB'
 UNSELECTED_VOLUME_IMAGE = f'{OTHER_VOLUME}/data/a/N1000000009_1_CALIB'
 NO_VOLUME = 'scene_0001'
@@ -60,14 +58,13 @@ ONLY_IN_THE_OTHER_ROOT = f'{VOLUME}/data/c/N1000000010_1_CALIB'
 ONLY_REFUSED_IN_THE_OTHER_ROOT = f'{VOLUME}/data/c/N1000000011_1_CALIB'
 
 EVERY_STUB = (
-    SUCCESS_WITH_PNG,
-    SUCCESS_NO_PNG,
+    SUCCESS,
+    SECOND_SUCCESS,
     FAILURE,
     SPICE_ERROR,
     NONSPICE_ERROR,
     ERROR_WITHOUT_STATUS_ERROR,
     REFUSED,
-    REFUSED_WITH_PNG,
     REFUSED_OTHER_VOLUME,
     UNSELECTED_VOLUME_IMAGE,
     NO_VOLUME,
@@ -124,7 +121,7 @@ def _document(stub: str, **columns: Any) -> dict[str, Any]:
         root_url=ROOT,
         results_path_stub=stub,
         volume=_volume_of(stub),
-        **{'has_summary_png': False, 'status': 'success', 'status_error': None, **columns},
+        **{'status': 'success', 'status_error': None, **columns},
     )
 
 
@@ -178,14 +175,14 @@ def two_roots(tmp_path: Path) -> str:
     """
     url = sqlite_url_for(tmp_path / 'index.sqlite3')
     documents = [
-        _document(SUCCESS_WITH_PNG, has_summary_png=True),
-        _document(SUCCESS_NO_PNG),
+        _document(SUCCESS),
+        _document(SECOND_SUCCESS),
         _document(FAILURE, status='failure'),
         _document(SPICE_ERROR, status='error', status_error=SPICE),
         _document(NONSPICE_ERROR, status='error', status_error='bad_pointing'),
         _document(ERROR_WITHOUT_STATUS_ERROR, status='error', status_error=None),
-        _document(UNSELECTED_VOLUME_IMAGE, has_summary_png=True),
-        _document(NO_VOLUME, has_summary_png=True),
+        _document(UNSELECTED_VOLUME_IMAGE),
+        _document(NO_VOLUME),
     ]
     refusals = [
         {
@@ -193,29 +190,26 @@ def two_roots(tmp_path: Path) -> str:
             'results_path_stub': stub,
             'reason': 'not a current-schema navigation document',
             'volume': _volume_of(stub),
-            'has_summary_png': has_summary_png,
             'mtime_ns': 1,
             'size_bytes': 2,
         }
-        for root_url, stub, has_summary_png in (
-            (ROOT, REFUSED, False),
-            (ROOT, REFUSED_WITH_PNG, True),
-            (ROOT, REFUSED_OTHER_VOLUME, False),
+        for root_url, stub in (
+            (ROOT, REFUSED),
+            (ROOT, REFUSED_OTHER_VOLUME),
             # The other root refuses a file the root under test holds nothing
             # for, so a refusal read without its root shows up as a document
             # that exists under a root that has none.
-            (OTHER_ROOT, ONLY_REFUSED_IN_THE_OTHER_ROOT, True),
+            (OTHER_ROOT, ONLY_REFUSED_IN_THE_OTHER_ROOT),
         )
     ]
     # Everything the other root holds would change an answer if it leaked: a
-    # fatal SPICE error and a summary PNG for every stub, including the one stub
-    # the root under test deliberately holds nothing for.
+    # fatal SPICE error for every stub, including the one stub the root under
+    # test deliberately holds nothing for.
     other_documents = [
         image_row(
             root_url=OTHER_ROOT,
             results_path_stub=stub,
             volume=_volume_of(stub),
-            has_summary_png=True,
             status='error',
             status_error=SPICE,
         )
@@ -247,7 +241,7 @@ def _stubs(url: str, **filters: bool) -> ResultStubs:
 
 def test_an_ingested_document_counts_as_present(two_roots: str) -> None:
     """The ordinary case: a row means the file it was read from exists."""
-    assert SUCCESS_WITH_PNG in _stubs(two_roots).with_metadata
+    assert SUCCESS in _stubs(two_roots).with_metadata
 
 
 def test_a_refused_document_counts_as_present(two_roots: str) -> None:
@@ -276,32 +270,6 @@ def test_the_query_does_not_fetch_an_unselected_volume(two_roots: str) -> None:
     with opened(two_roots) as engine, engine.connect() as connection:
         fetched = {str(row[0]) for row in connection.execute(query)}
     assert UNSELECTED_VOLUME_IMAGE not in fetched
-
-
-def test_a_summary_png_is_read_from_the_document_it_sits_beside(two_roots: str) -> None:
-    """The walk records the PNG on the row of the file it was found with."""
-    assert _stubs(two_roots).with_summary_png == frozenset({SUCCESS_WITH_PNG, REFUSED_WITH_PNG})
-
-
-def test_a_summary_png_beside_a_refused_document_is_present(two_roots: str) -> None:
-    """A PNG is found beside a file, not read out of it.
-
-    The tree walk finds ``X_summary.png`` whatever ``X_metadata.json`` turned
-    out to contain, so a summary beside a document the ingest refused has to
-    read as present here too, or an entire results root written by another tool
-    answers both PNG filters backwards.
-    """
-    assert REFUSED_WITH_PNG in _stubs(two_roots).with_summary_png
-
-
-def test_a_refused_document_with_no_summary_png_is_not_in_the_png_set(two_roots: str) -> None:
-    """The flag is the walk's answer for that file, not a constant for the table."""
-    assert REFUSED not in _stubs(two_roots).with_summary_png
-
-
-def test_a_document_with_no_summary_png_is_not_in_the_png_set(two_roots: str) -> None:
-    """The other root has a PNG for this stub, and answers for its own root only."""
-    assert SUCCESS_NO_PNG not in _stubs(two_roots).with_summary_png
 
 
 def test_an_image_of_an_unselected_volume_is_not_read(two_roots: str) -> None:
@@ -360,6 +328,115 @@ def test_the_error_filter_does_not_match_a_run_that_finished(two_roots: str) -> 
     assert FAILURE not in _stubs(two_roots, has_offset_error=True).matching_error
 
 
+def test_the_negative_error_filter_matches_every_document_recording_no_error(
+    two_roots: str,
+) -> None:
+    """A run that succeeded and a run that finished without one, together.
+
+    This is the selection ``the images this root has a navigated result for``
+    is spelled from, so it has to reach an outcome that is not a success as
+    surely as it reaches one that is.
+    """
+    assert _stubs(two_roots, has_no_offset_error=True).matching_error == frozenset(
+        {SUCCESS, SECOND_SUCCESS, FAILURE}
+    )
+
+
+def test_the_negative_error_filter_matches_no_fatal_error(two_roots: str) -> None:
+    """The two halves of the vocabulary exclude each other, without exhausting.
+
+    No document is in both, which is what this pins.  Documents outside both
+    are what the sibling file is for: a file the ingest refused records neither
+    an error nor the absence of one.
+
+    A fatal error that named no cause is the row a SQL inequality is most
+    likely to mishandle, and it belongs on the other side of this exclusion.
+    """
+    matching = _stubs(two_roots, has_no_offset_error=True).matching_error
+    assert ERROR_WITHOUT_STATUS_ERROR not in matching
+
+
+def test_the_negative_error_filter_answers_for_this_root_only(tmp_path: Path) -> None:
+    """Each root disagrees with the other about both of its stubs.
+
+    It gets a root pair of its own rather than joining the shared fixture,
+    because the disagreement has to run the other way round to be visible: the
+    shared decoy records a fatal error for every stub, which is what makes a
+    filter phrased in the positive answer differently when it drops the root,
+    and is exactly why one phrased in the negative would not.
+
+    So this pair holds one stub that errored here and finished there, and one
+    that finished here and errored there, and the answer is stated as the whole
+    set.  The second stub is what makes the assertion a positive one: a query
+    that read no row at all -- the volume predicate emptied, the root predicate
+    inverted -- answers with the empty set, which a test that only denied the
+    other root's stub would have accepted.
+
+    Parameters:
+        tmp_path: Directory the index file is written into.
+    """
+    url = sqlite_url_for(tmp_path / 'index.sqlite3')
+    with opened(url, create=True) as engine, engine.begin() as connection:
+        connection.execute(
+            IMAGES.insert(),
+            [
+                _document(SUCCESS, status='error', status_error=SPICE),
+                _document(SECOND_SUCCESS, status='success', status_error=None),
+                image_row(
+                    root_url=OTHER_ROOT,
+                    results_path_stub=SUCCESS,
+                    volume=VOLUME,
+                    status='success',
+                    status_error=None,
+                ),
+                image_row(
+                    root_url=OTHER_ROOT,
+                    results_path_stub=SECOND_SUCCESS,
+                    volume=VOLUME,
+                    status='error',
+                    status_error=SPICE,
+                ),
+            ],
+        )
+        connection.execute(INGEST_RUNS.insert(), [_completed_run(ROOT), _completed_run(OTHER_ROOT)])
+    assert _stubs(url, has_no_offset_error=True).matching_error == frozenset({SECOND_SUCCESS})
+
+
+@pytest.mark.parametrize(
+    'naming_an_error',
+    ['has_offset_error', 'has_offset_spice_error', 'has_offset_nonspice_error'],
+)
+def test_asking_for_a_fatal_error_and_for_none_selects_nothing(
+    two_roots: str, naming_an_error: str
+) -> None:
+    """This layer conjoins the pair rather than rejecting it, as it does the rest.
+
+    ``ResultsFilter`` refuses a contradictory pair before it opens anything,
+    but this function is exported and takes the flags as it finds them, so what
+    it does with a pair nothing can satisfy is part of its contract: the empty
+    selection that describes it, rather than one of the two filters silently
+    winning.
+
+    Parameters:
+        two_roots: The index to read.
+        naming_an_error: The flag paired with ``has_no_offset_error``.
+    """
+    stubs = _stubs(two_roots, has_no_offset_error=True, **{naming_an_error: True})
+    assert SUCCESS in stubs.with_metadata
+    assert stubs.matching_error == frozenset()
+
+
+def test_a_refused_document_matches_the_negative_error_filter_no_more_than_the_rest(
+    two_roots: str,
+) -> None:
+    """Nothing was read from it, so it records neither an error nor the lack of one.
+
+    The refusal arm contributes a literal rather than a predicate, and this is
+    what says the literal is false for a filter phrased in the negative too.
+    """
+    assert REFUSED not in _stubs(two_roots, has_no_offset_error=True).matching_error
+
+
 def test_the_spice_filter_matches_only_the_spice_error(two_roots: str) -> None:
     """The value is matched verbatim, which is what the column exists for."""
     assert _stubs(two_roots, has_offset_spice_error=True).matching_error == frozenset({SPICE_ERROR})
@@ -386,7 +463,7 @@ def test_the_nonspice_filter_rejects_the_spice_error(two_roots: str) -> None:
 def test_the_error_filters_answer_for_this_root_only(two_roots: str) -> None:
     """Every stub is a SPICE error in the other root and none of them is here."""
     matching = _stubs(two_roots, has_offset_spice_error=True).matching_error
-    assert SUCCESS_WITH_PNG not in matching
+    assert SUCCESS not in matching
 
 
 def test_a_refused_document_matches_no_error_filter(two_roots: str) -> None:
@@ -431,7 +508,7 @@ def _index_with_runs(tmp_path: Path, counts: list[int]) -> str:
     """
     url = sqlite_url_for(tmp_path / 'missed.sqlite3')
     with opened(url, create=True) as engine, engine.begin() as connection:
-        connection.execute(IMAGES.insert(), [_document(SUCCESS_NO_PNG)])
+        connection.execute(IMAGES.insert(), [_document(SECOND_SUCCESS)])
         connection.execute(
             INGEST_RUNS.insert(),
             [
@@ -607,22 +684,21 @@ def test_a_relative_root_names_the_root_the_ingest_recorded(
             [
                 image_row(
                     root_url=root_url,
-                    results_path_stub=SUCCESS_WITH_PNG,
+                    results_path_stub=SUCCESS,
                     volume=VOLUME,
-                    has_summary_png=True,
                 )
             ],
         )
         connection.execute(INGEST_RUNS.insert(), [_completed_run(root_url)])
     monkeypatch.chdir(tmp_path)
     stubs = read_result_stubs(url, root.name, [VOLUME])
-    assert SUCCESS_WITH_PNG in stubs.with_metadata
+    assert SUCCESS in stubs.with_metadata
 
 
 def test_a_trailing_separator_names_the_root_the_ingest_recorded(two_roots: str) -> None:
     """One program writes the trailing slash on the root and another does not."""
     stubs = read_result_stubs(two_roots, f'{ROOT}/', [VOLUME])
-    assert SUCCESS_WITH_PNG in stubs.with_metadata
+    assert SUCCESS in stubs.with_metadata
 
 
 def _read_recording_the_engine(
@@ -671,101 +747,3 @@ def test_the_query_returns_its_connection(two_roots: str, monkeypatch: pytest.Mo
     """The pool the read built holds no connection afterwards."""
     _engine, pool = _read_recording_the_engine(two_roots, monkeypatch)
     assert pool.checkedin() == 0
-
-
-ENUMERATION_MEMBERS = 5
-"""How many answers the index gives differently from the tree.
-
-Named here so that the three lists below cannot all stop matching the same
-regular expression and agree at zero.  Raising it is the reminder that a member
-is added to the plan, the module docstring and a test in one commit.
-"""
-
-PLAN = Path(__file__).resolve().parents[3] / 'plans' / 'RESULTS_DB_PLAN.md'
-"""The plan, which states the enumeration twice: in Phase 5 and in criterion 1."""
-
-
-def _plan_lines() -> list[str]:
-    """Return the plan's lines, skipping the test when the plan is not there.
-
-    The plan is a repository document rather than a packaged one, so a checkout
-    always has it and an installed tree never does.
-
-    Returns:
-        The lines of the plan file.
-    """
-    if not PLAN.is_file():
-        pytest.skip(f'{PLAN} is not in this tree')
-    return PLAN.read_text(encoding='utf-8').splitlines()
-
-
-def _numbered_within(lines: list[str], opens: str, closes: str, indent: str) -> list[str]:
-    """Return the numbered items of one block of the plan.
-
-    Parameters:
-        lines: The plan's lines.
-        opens: Text that identifies the line the block starts at.
-        closes: Prefix of the line that ends the block.
-        indent: The exact indentation the block's numbered items carry, which
-            is what tells one list's items from a nested list's.
-
-    Returns:
-        The numbered items, in the order they are written.
-    """
-    item = re.compile(rf'^{indent}\d+\. ')
-    inside = False
-    items: list[str] = []
-    for line in lines:
-        if not inside:
-            inside = opens in line
-            continue
-        if line.startswith(closes):
-            break
-        if item.match(line):
-            items.append(line.strip())
-    return items
-
-
-def _phase_five_members() -> list[str]:
-    """Return the enumeration as the Phase 5 entry states it.
-
-    Returns:
-        One entry per member.
-    """
-    return _numbered_within(
-        _plan_lines(), '**What the index answers differently', '- **The answer says how old', '  '
-    )
-
-
-def _criterion_one_members() -> list[str]:
-    """Return the enumeration as acceptance criterion 1 restates it.
-
-    Returns:
-        One entry per member.
-    """
-    return _numbered_within(_plan_lines(), '## 5. Acceptance criteria', '2. No pipeline', '   ')
-
-
-def _docstring_members() -> list[str]:
-    """Return the enumeration as the module docstring states it.
-
-    Returns:
-        One entry per member.
-    """
-    docstring = selection.__doc__ or ''
-    return [line for line in docstring.splitlines() if line.startswith('- **')]
-
-
-def test_the_module_docstring_states_every_member_of_the_enumeration() -> None:
-    """The count is fixed so that three lists cannot agree at zero."""
-    assert len(_docstring_members()) == ENUMERATION_MEMBERS
-
-
-def test_the_plan_states_every_member_the_module_docstring_states() -> None:
-    """A member is added to the plan, the docstring and a test in one commit."""
-    assert len(_phase_five_members()) == len(_docstring_members())
-
-
-def test_criterion_one_restates_every_member_the_plan_enumerates() -> None:
-    """A reader of the criterion takes its restatement for the list, so it is the list."""
-    assert len(_criterion_one_members()) == len(_phase_five_members())

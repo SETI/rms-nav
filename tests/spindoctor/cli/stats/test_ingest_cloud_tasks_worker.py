@@ -74,7 +74,6 @@ def test_a_worker_refuses_an_index_that_is_not_there(tmp_path: Path) -> None:
                     'results_path_stub': STUB,
                     'mtime_ns': None,
                     'size_bytes': None,
-                    'has_summary_png': False,
                 }
             ],
         },

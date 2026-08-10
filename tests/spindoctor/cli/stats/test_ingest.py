@@ -47,6 +47,7 @@ from .conftest import (
     run_rows,
     technique,
     write_metadata,
+    write_summary_png,
 )
 
 SOURCE = MetadataSource(
@@ -55,7 +56,6 @@ SOURCE = MetadataSource(
     source_file='/data/nav-results/x_metadata.json',
     mtime_ns=1234567890123456789,
     size_bytes=4096,
-    has_summary_png=True,
 )
 
 
@@ -103,7 +103,6 @@ def test_a_bare_basename_stub_has_no_volume() -> None:
         source_file='/data/nav-results/sim_scene_000042_metadata.json',
         mtime_ns=1,
         size_bytes=2,
-        has_summary_png=False,
     )
     rows = rows_from_metadata(metadata_document(instrument='sim'), source)
     assert rows.image['volume'] is None
@@ -311,12 +310,6 @@ def test_the_rotation_columns_are_read() -> None:
     document['navigation_result']['sigma_rotation_deg'] = 0.004
     rows = rows_from_metadata(document, SOURCE)
     assert rows.image['rotation_deg'] == 0.125
-
-
-def test_the_summary_png_flag_comes_from_the_walk() -> None:
-    """Nothing in the document says whether a summary was written beside it."""
-    rows = rows_from_metadata(metadata_document(), SOURCE)
-    assert rows.image['has_summary_png'] is True
 
 
 def test_the_image_number_is_ingested() -> None:
@@ -633,26 +626,128 @@ def test_a_bare_basename_stub_ingests_with_a_null_volume(
     assert [row.volume for row in found] == [None]
 
 
-def test_the_summary_png_is_seen_by_the_walk(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
-    """One listing collects both suffixes, so nothing asks a second time."""
+def _ingest_a_file_named_only_by_the_suffix(
+    tmp_path: Path, logger: pdslogger.PdsLogger
+) -> list[Any]:
+    """Ingest a tree holding a file whose whole name is the document suffix.
+
+    It is the last bracket case of the suffix test: a name that ends in the
+    suffix and is nothing else, so trimming the suffix leaves an empty stub.
+    The pass treats it as any other document, which puts it in under the empty
+    stub with no volume above it -- a row every volume-restricted query passes
+    over, which is what a selection is.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        logger: Logger the pass reports through.
+
+    Returns:
+        The stub and volume of every row the pass wrote.
+    """
     root = tmp_path / 'results'
-    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-    (root / 'VOL' / 'N1454725799_1_CALIB_summary.png').write_bytes(b'\x89PNG')
-    write_metadata(root, 'VOL/N1454725800_1_CALIB', metadata_document())
+    root.mkdir(parents=True, exist_ok=True)
+    (root / METADATA_SUFFIX).write_text(json.dumps(metadata_document()), encoding='utf-8')
     url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=quiet_logger)
+    ingest_tree(url, [root], logger=logger)
     engine = open_index(url)
     with engine.connect() as connection:
-        found = _rows(
-            connection,
-            sqlalchemy.select(IMAGES.c.results_path_stub, IMAGES.c.has_summary_png).order_by(
-                IMAGES.c.results_path_stub
-            ),
-        )
+        found = _rows(connection, sqlalchemy.select(IMAGES.c.results_path_stub, IMAGES.c.volume))
     engine.dispose()
-    assert [bool(row.has_summary_png) for row in found] == [True, False]
+    return found
+
+
+def test_a_file_named_only_by_the_suffix_ingests_under_an_empty_stub(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Trimming a suffix off a name of exactly that length leaves nothing."""
+    found = _ingest_a_file_named_only_by_the_suffix(tmp_path, quiet_logger)
+    assert [row.results_path_stub for row in found] == ['']
+
+
+def test_a_file_named_only_by_the_suffix_ingests_with_a_null_volume(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """So it is under no volume, and no enumeration of volumes reaches it."""
+    found = _ingest_a_file_named_only_by_the_suffix(tmp_path, quiet_logger)
+    assert [row.volume for row in found] == [None]
+
+
+def _tree_with_a_file_that_is_not_a_document(tmp_path: Path) -> Path:
+    """Write a root holding one document and four files that are not one.
+
+    A results root holds the summary PNG a navigation that reached a result
+    drew, and whatever else an operator has left there.  None of them is a file
+    the pass reads, and the walk has to pass over each without adding it to any
+    tally.
+
+    The clutter is chosen to bracket the suffix test rather than to be merely
+    unlike a document.  ``notes.txt`` and the summary PNG are unlike one in
+    every way; ``scene_index.json`` is JSON and is not a navigation document,
+    which is what separates the document suffix from the file extension; and
+    ``..._metadata.json.tmp`` -- a partial write, an editor's backup, a
+    ``.json.gz`` -- carries the suffix without ending in it, which is what
+    separates ending in the suffix from containing it.  A name that only
+    contains it yields a stub with the suffix's length cut off the end of a
+    longer name, naming nothing, which the pass then retrieves, fails on,
+    records nothing for, and retrieves again on every pass afterwards.
+
+    The remaining bracket case is a name that is the suffix and nothing else,
+    which is a document as far as the walk is concerned; what it ingests as is
+    two tests above.
+
+    Parameters:
+        tmp_path: Directory the root is written under.
+
+    Returns:
+        The results root.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    write_summary_png(root, 'VOL/N1454725799_1_CALIB')
+    (root / 'VOL' / 'notes.txt').write_text('nothing to ingest here', encoding='utf-8')
+    (root / 'VOL' / 'scene_index.json').write_text('{"not": "a document"}', encoding='utf-8')
+    (root / 'VOL' / f'N1454725799_1_CALIB{METADATA_SUFFIX}.tmp').write_text(
+        '{"half": "written"', encoding='utf-8'
+    )
+    return root
+
+
+def test_a_file_that_is_not_a_document_is_not_a_file_this_pass_saw(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The walk counts the documents, and a tree holds far more than documents.
+
+    Counted as one of them, a summary PNG, a JSON file that is not a navigation
+    result, or a half-written document would be retrieved, refused for not being
+    a navigation document, and tallied against the root on every pass.
+    """
+    root = _tree_with_a_file_that_is_not_a_document(tmp_path)
+    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    assert (counts.files_seen, counts.files_ingested, counts.files_failed) == (1, 1, 0)
+
+
+def test_a_file_that_is_not_a_document_is_no_part_of_what_the_walk_found(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Both tallies the entry loop can add to, over a tree of ordinary clutter.
+
+    Every entry is a directory to descend into, a document to collect, or a
+    file to pass over, and only the last leaves both tallies as they were.  A
+    name that ends in the document suffix is what says which, and neither half
+    of that is enough on its own: a file that merely ends in ``.json`` is not a
+    navigation document, and one that merely contains the suffix yields a stub
+    with the suffix's length cut off the end of a longer name, naming nothing,
+    which the pass then retrieves, fails on, records nothing for, and retrieves
+    again on every pass afterwards.  The missed count is the other half, because
+    a directory in it stops the pass removing rows anywhere under the root, and
+    a file passed over is not a directory that went unlisted.
+    """
+    root = _tree_with_a_file_that_is_not_a_document(tmp_path)
+    listing = walk_module._walk_root(FCPath(root), logger=quiet_logger)
+    assert [found.results_path_stub for found in listing.metadata_files] == [
+        'VOL/N1454725799_1_CALIB'
+    ]
+    assert listing.directories_missed == 0
 
 
 def test_re_ingesting_an_image_replaces_its_child_rows(
