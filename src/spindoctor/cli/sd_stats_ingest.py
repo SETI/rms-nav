@@ -13,6 +13,14 @@ consumer's lookup can match.
 Ingest is never automatic: no batch driver runs it as a side effect, and the
 index it writes is a snapshot of the tree as of this run.
 
+``--drop-index`` is the opposite operation and shares only the URL with the
+rest: it removes the index's own tables from the database that URL names and
+stops there, walking no tree.  It is what makes emptying an index and starting
+over something an operator can reach without hand-written SQL, on a shared
+PostgreSQL server as well as on a file -- which the schema version gate depends
+on, since a version bump is deliberately not migrated and rebuilding is the
+whole of the remedy.
+
 One pass may also be spread over a queue of workers.  ``--output-cloud-tasks-file``
 lists each root once, removes the rows whose documents have left the tree, and
 writes out the shares for ``sd_stats_ingest_cloud_tasks`` to read; when those
@@ -35,6 +43,7 @@ package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
 from spindoctor.cli.logging_args import add_logging_arguments, reporting_logging_errors
+from spindoctor.cli.stats.drop import drop_results_index
 from spindoctor.cli.stats.ingest import (
     IngestCounts,
     TaskCompletion,
@@ -113,6 +122,27 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         help="""Read every document, including ones whose recorded size and
         modification time still match the tree. Refused with
         --complete-cloud-tasks-file, which reads no document.""",
+    )
+
+    drop_group = cmdparser.add_argument_group('Drop')
+    drop_group.add_argument(
+        '--drop-index',
+        action='store_true',
+        default=False,
+        help="""Remove the results index's own tables from the database
+        --results-db names, and stop: no results root is read and no document is
+        ingested. Nothing else in that database is touched, and a database
+        holding none of those tables is left alone and said to be. Refused
+        together with --force and with either cloud-tasks mode, none of which
+        this does.""",
+    )
+    drop_group.add_argument(
+        '--yes',
+        action='store_true',
+        default=False,
+        help="""Drop without asking for confirmation, for a run with nobody at
+        the terminal. Meaningful only with --drop-index, which is the only thing
+        this program asks about.""",
     )
 
     cloud_group = cmdparser.add_argument_group('Cloud tasks')
@@ -359,13 +389,55 @@ def _complete_cloud_tasks(engine: sqlalchemy.Engine, roots: list[str], *, path: 
     return 1 if unfinished else 0
 
 
+def _mode_refusal(arguments: argparse.Namespace) -> str | None:
+    """Return why a command line cannot be run as it stands, or None.
+
+    Refused rather than ignored, on the same grounds as ``--force`` under a
+    completion below: an operator who typed an option meant something by it, and
+    a program that silently does one of the two things asked of it has decided
+    which one on their behalf.  ``--drop-index`` removes the index and stops, so
+    every option describing an ingest is at odds with it rather than modifying
+    it; and ``--yes`` answers a question only the drop asks.
+
+    Parameters:
+        arguments: The parsed command line.
+
+    Returns:
+        The refusal to report, or None when the arguments agree with each other.
+    """
+    if not arguments.drop_index:
+        if arguments.yes:
+            return (
+                '--yes says not to ask before dropping the results index, and this command '
+                'line asks for no drop. Add --drop-index, or leave --yes off.'
+            )
+        return None
+    conflicting = [
+        name
+        for name, given in (
+            ('--force', arguments.force),
+            ('--output-cloud-tasks-file', arguments.output_cloud_tasks_file is not None),
+            ('--complete-cloud-tasks-file', arguments.complete_cloud_tasks_file is not None),
+        )
+        if given
+    ]
+    if conflicting:
+        return (
+            f'--drop-index removes the index and stops, reading no document, so it has '
+            f'nothing to do with {", ".join(conflicting)}. Drop first, then run the ingest '
+            f'you want against what it left behind.'
+        )
+    return None
+
+
 def main() -> None:
     """Console entry point for ``sd_stats_ingest``.
 
-    Resolves the index URL and the results roots and, according to the mode
-    named on the command line, reads every document under those roots, divides
-    them into cloud tasks, or adds up what those tasks did.  The outcome goes to
-    the main log either way.
+    Resolves the index URL and, unless the command line asks for a drop, the
+    results roots as well; then, according to the mode named on the command
+    line, removes the index's tables, reads every document under those roots,
+    divides them into cloud tasks, or adds up what those tasks did.  The outcome
+    goes to the main log whichever mode ran.
 
     Raises:
         SystemExit: Always, since this is a console entry point.  The status
@@ -380,7 +452,10 @@ def main() -> None:
             is read.  Completing a fan-out exits 1 when the event log cannot be
             read, when a named root has no unfinished run, when its run never
             recorded what its listing found, or when its tasks did not account
-            for exactly the files that listing found.
+            for exactly the files that listing found.  A drop exits 0 when the
+            tables went and 0 again when there were none to go, and 1 when the
+            database could not be opened or read, when a table would not drop,
+            or when whoever was asked said anything but yes.
     """
     command_list = sys.argv[1:]
     arguments = parse_args(command_list)
@@ -397,6 +472,11 @@ def main() -> None:
     with reporting_logging_errors():
         build_run_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
 
+    refusal = _mode_refusal(arguments)
+    if refusal is not None:
+        MAIN_LOGGER.fatal('%s', refusal)
+        sys.exit(1)
+
     url = get_results_db_url(arguments, DEFAULT_CONFIG)
     if url is None:
         MAIN_LOGGER.fatal(
@@ -404,6 +484,14 @@ def main() -> None:
             'environment.results_db configuration variable, or NAV_RESULTS_DB.'
         )
         sys.exit(1)
+
+    if arguments.drop_index:
+        # Before the roots are resolved, and instead of them: a drop is about
+        # the database alone, and requiring a results root for it would refuse
+        # the command on a machine that has the index and not the tree.
+        MAIN_LOGGER.info('Starting results index drop')
+        MAIN_LOGGER.info('Arguments: %s', masked_command_line(command_list))
+        sys.exit(drop_results_index(url, assume_yes=arguments.yes, logger=MAIN_LOGGER))
 
     try:
         named = arguments.nav_results_roots or [get_nav_results_root(arguments, DEFAULT_CONFIG)]

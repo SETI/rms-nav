@@ -22,8 +22,15 @@ Public API:
     SCHEMA_META      -- the single row stamping the schema version
     INGEST_RUNS      -- one row per ingest pass over one root
     UNKNOWN_STATUS   -- the status a document that named no outcome is recorded with
-    open_index       -- the only opener, with the version gate
+    open_index       -- the opener every reader and writer goes through
+    open_database    -- the opener the drop uses, which stops before the gate
+    stamped_version  -- the schema version a database is stamped with
     masked_url       -- a connection URL with any password in it hidden
+    TableContents    -- one table of the index, and how many rows it holds
+    IndexContents    -- what of the index a database holds, before a drop
+    index_contents   -- read that, so a drop can say what it is about to remove
+    index_table_names -- every table the index owns, in drop order
+    drop_index_tables -- remove those tables, and nothing else
     normalize_root_url    -- the one spelling of a results root
     ingested_roots        -- the roots a completed ingest covered
     require_ingested_roots -- refuse to read absence from a root nobody ingested
@@ -36,7 +43,15 @@ Public API:
     reporting_a_failed_read -- the one translation of a database failure into a refusal
 """
 
-from spindoctor.results_index.engine import masked_url, open_index
+from spindoctor.results_index.drop import (
+    IndexContents,
+    TableContents,
+    drop_index_tables,
+    index_contents,
+    index_table_names,
+)
+from spindoctor.results_index.engine import open_database, open_index, stamped_version
+from spindoctor.results_index.masking import masked_url
 from spindoctor.results_index.roots import (
     NewestPass,
     ingested_roots,
@@ -75,14 +90,21 @@ __all__ = [
     'SPICE_STATUS_ERROR',
     'TECHNIQUES',
     'UNKNOWN_STATUS',
+    'IndexContents',
     'NewestPass',
     'ResultStubs',
+    'TableContents',
+    'drop_index_tables',
+    'index_contents',
+    'index_table_names',
     'ingested_roots',
     'masked_url',
     'newest_pass',
     'normalize_root_url',
+    'open_database',
     'open_index',
     'read_result_stubs',
     'reporting_a_failed_read',
     'require_ingested_roots',
+    'stamped_version',
 ]

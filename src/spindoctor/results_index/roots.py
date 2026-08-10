@@ -29,7 +29,7 @@ from pathlib import Path
 import sqlalchemy
 from filecache import FCPath
 
-from spindoctor.results_index.engine import masked_url
+from spindoctor.results_index.masking import masked_url
 from spindoctor.results_index.schema import INGEST_RUNS
 
 __all__ = [

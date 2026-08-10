@@ -171,9 +171,77 @@ than that a tree happens to hold no results.
 
 The index is disposable, and there is no schema migration. It carries the column
 set version that wrote it, and opening one stamped with a different version
-fails naming both versions. The remedy is always the same -- delete the database
-and re-run ``sd_stats_ingest`` (the source of truth is the metadata documents,
-so nothing is lost).
+fails naming both versions. The remedy is always the same -- empty the database
+with ``sd_stats_ingest --drop-index`` and re-run ``sd_stats_ingest`` (the source
+of truth is the metadata documents, so nothing is lost).
+
+Dropping an index and starting over
+-----------------------------------
+
+Starting a results tree over -- delete the results, navigate again, ingest
+again -- has a counterpart on the index, and it is a flag on the same command:
+
+.. code-block:: bash
+
+    sd_stats_ingest --results-db postgresql+psycopg://user@dbhost/spindoctor \
+        --drop-index
+
+**It drops and stops.** No results root is read and no document is ingested, so
+dropping is a deliberate act rather than the opening move of a long pass, and a
+mistyped URL costs one command. It needs no ``--nav-results-root``: a drop is
+about the database alone, and works on a machine that has the index and not the
+tree.
+
+**It removes SpinDoctor's own tables and nothing else** -- ``images``,
+``techniques``, ``feature_sources``, ``failed_files``, ``schema_meta`` and
+``ingest_runs``, named one at a time. No schema is dropped, nothing is matched
+by pattern, and anything else in that database is left exactly as it was, which
+is what makes the command safe to point at an index sharing a PostgreSQL
+database with somebody else's tables.
+
+**It confirms first.** The run log lists the tables with their row counts and
+names the schema version, and the question -- which names the index, how many
+tables and rows go with it, and any ingest run that has not finished -- is put
+to the terminal. Anything but ``y`` or ``yes`` leaves the index alone and exits
+1. ``--yes`` drops without asking, for a run with nobody at the terminal -- and
+is required for one, because a standard input with nothing to read is treated as
+a refusal rather than as consent. Every message names the index URL with its
+password hidden.
+
+**It works on the databases nothing else will open**, which is the point: an
+index stamped with a schema version this build does not read, or one an
+interrupted creation left holding part of a schema, is exactly what the drop is
+pointed at.
+
+**Dropping twice is not an error.** A database holding none of these tables is
+not written at all, and says so; an index that is already gone is the state the
+command was asked for, so it exits 0.
+
+**What is left behind is a database, not a hole.** Every consumer reads a
+dropped index exactly as it reads one nobody has ever ingested into -- "not
+ingested", with a message naming ``sd_stats_ingest`` -- and the next
+``sd_stats_ingest`` builds it again from the metadata documents. On PostgreSQL
+the two states are literally the same database. On SQLite the file itself
+remains, empty; deleting the file is equivalent and is the one thing the drop
+deliberately does not do for you.
+
+Two things it does **not** refuse:
+
+* **An ingest run that has not finished.** Such a run is either a pass writing
+  the index at this moment or one that died, and nothing recorded in the index
+  tells the two apart. A pass that died is also the commonest reason to want a
+  drop, so the count is reported in the confirmation rather than acted on.
+  Dropping under a live pass ends that pass, which fails on a table that has
+  gone; no reader is affected, because an unfinished run already reads as "not
+  ingested" both before and after.
+* **Another process holding the database.** Neither backend can be asked that
+  question honestly, so the attempt is what answers it. On PostgreSQL the drop
+  waits a bounded time for each table's lock and then gives up, and its
+  transaction puts every table back; on SQLite the same bound is the busy
+  timeout, and the tables are dropped in an order whose every interruption
+  leaves a database with no version stamp -- which reads as "not ingested" and
+  which the next ingest rebuilds -- rather than a stamp standing over tables
+  that have gone.
 
 Ingesting over a queue of workers
 ---------------------------------

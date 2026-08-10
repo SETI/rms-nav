@@ -370,7 +370,8 @@ open_index(url: str, *, create: bool = False) -> Engine
   from the current opener's silent-create behavior.
 - Either way, a `schema_version` that does not match the version the code
   was built for raises, naming both versions and instructing the reader to
-  delete the database and re-ingest. The stamped version is read and checked
+  empty the database with `sd_stats_ingest --drop-index` and re-ingest
+  (section 2.11). The stamped version is read and checked
   before anything is written, so a refused `create=True` open creates no table
   and writes no row; creating this version's tables inside a database
   stamped with another version would leave a mixture no single version number
@@ -1120,6 +1121,100 @@ reading a report; a logger would wrap that in machinery it does not need.
 The docstring says so, so the split reads as a decision rather than an
 oversight.
 
+
+### 2.11 Dropping an index
+
+Emptying an index is the counterpart to starting a results tree over, and the
+version gate in section 2.4 makes it structural rather than convenient: a
+version bump is deliberately not migrated, and the remedy that gate prescribes
+is delete-and-re-ingest. On SQLite that remedy is `rm`; on PostgreSQL it is
+`psql`, the right connection string, and knowing which tables SpinDoctor owns
+in a database that may hold somebody else's.
+
+`sd_stats_ingest --drop-index` removes the index's tables from whatever backend
+the URL names and **stops** -- it reads no results root and ingests no
+document. Dropping is a deliberate act rather than the first step of a long
+pass, and a command that did both would make a mistyped URL expensive twice
+over; dropping and re-ingesting in one command is available as two commands. It
+resolves no results root at all, so a machine holding the index and not the tree
+can still drop.
+
+`--yes` drops without asking. Without it the tables are listed with their row
+counts and the schema version, the question is put to standard output, and
+anything but `y` or `yes` leaves the index alone and exits 1. A standard input
+that has nothing to read -- at its end, closed, or absent, which is what a
+scheduled run has -- is a refusal rather than consent, and the refusal names
+`--yes`. Every message names the index URL through `masked_url`.
+
+The Core layer holds the operation, in `spindoctor/results_index/drop.py`:
+`index_contents(engine)` reads what of the index a database holds, and
+`drop_index_tables(engine)` removes it. The confirmation, the messages and the
+exit status are the CLI's, in `spindoctor/cli/stats/drop.py`.
+
+- **The tables come from `METADATA` by name**, one `DROP TABLE` each. Never
+  `DROP SCHEMA`, never a wildcard, nothing discovered by pattern. A shared
+  PostgreSQL server may hold objects SpinDoctor did not create, and a hand-
+  written list would be right on the day it was written; a test reads the
+  statements the drop issues and asserts they are exactly those names.
+- **`open_database`** is the opener, beside `open_index` in
+  `engine.py`. It applies every URL diagnosis, SQLite probe and masking rule
+  `open_index` does and stops before the version gate, because a database the
+  gate refuses is precisely what a drop is pointed at. Nothing is read from the
+  database through it, so no column the gate protects is ever touched. The
+  three openers differ along four axes -- creating, writing, must-exist, gated
+  -- and an `_Access` record spells each combination out rather than inferring
+  one from another; it carries the read-only and absent-path remedies too,
+  since what to do about an unwritable file differs by operation.
+- **A database that is not there is refused**, on both backends alike: a
+  PostgreSQL database that does not exist is refused by the server, and a
+  SQLite path that does not exist gets the same answer rather than being
+  created. A database that *is* there and holds none of these tables is not
+  written at all and says so, and exits 0: an index already gone is the state
+  asked for, and an idempotent drop has to be visibly idempotent.
+- **`schema_meta` is dropped first**, before the tables it stamps. The drop runs
+  in one transaction, but that transaction is not equally strong on both
+  backends -- PostgreSQL rolls DDL back with everything else, while the SQLite
+  driver commits each `DROP TABLE` outside it -- so the order is what carries
+  the guarantee. Every state an interruption can leave is then one with no
+  stamp, which the gate reads as "this is not a results index" and which the
+  next `create=True` open rebuilds. The state that must never be left is the
+  opposite one: a stamp standing over tables that have gone, which the gate
+  reads as healthy and every consumer then fails inside its first query.
+- **A dropped index and one that never existed are the same thing to every
+  consumer.** Both are "not ingested": `open_index` refuses both naming
+  `sd_stats_ingest`, `read_result_stubs` refuses both, and `sd_stats_report`
+  exits 1 on both. On PostgreSQL they are literally the same database, and a
+  test compares the two refusals character for character over one URL. On
+  SQLite the emptied file remains; deleting it is equivalent, and the drop
+  deliberately does not do it, so that one flag means one thing on both
+  backends.
+
+Two questions the drop answers by reporting rather than by refusing.
+
+**An unfinished ingest run does not stop a drop.** Such a run is either a pass
+writing the index now or one that died, and nothing recorded in the index tells
+the two apart: there is no heartbeat and no process to ask. A pass that died is
+also the commonest reason to want a drop, so refusing on that evidence would
+withhold the command from the case that needs it most, to guard a case the
+confirmation already guards. The count is therefore named in the summary, before
+the question, so the person about to end a live pass is told while there is
+still an answer to give. What a drop under a live pass costs is that pass, which
+fails on a table that has gone; no reader is affected, since an unfinished run
+already reads as "not ingested" before and after. The count is asked only of a
+database stamped with this version, because the question is phrased in a column.
+
+**Another process holding the database does not stop it either.** Neither
+backend can be asked honestly: SQLite's readers take no lock to observe under
+write-ahead logging, and a PostgreSQL role need not be allowed to read the
+server's activity view, so a "nobody is using it" answer would be a guess. What
+can be done is to make the attempt fail rather than hang, and to leave nothing
+half-finished when it does. `DROP_LOCK_TIMEOUT_MS` (30 s, matching
+`SQLITE_BUSY_TIMEOUT_MS`) is issued as `SET LOCAL lock_timeout` inside the drop
+transaction, so a table another session holds ends the drop promptly and
+PostgreSQL's transaction puts every table back; on SQLite the busy timeout
+already bounds the same wait, and the drop order covers the rest. The database
+itself decides, per table, instead of a guess deciding beforehand.
+
 ---
 
 ## 3. Current state
@@ -1237,7 +1332,7 @@ exclusion.
 The engine tests are three files, because one would run past the 1000-line
 module cap: the opener's contract (`test_engine.py`), what it does with a
 SQLite file (`test_engine_sqlite.py`), and how it names a URL without naming
-its password (`test_engine_masking.py`).
+its password (`test_masking.py`).
 
 ### Phase 2 — Ingest and reporting onto the index
 

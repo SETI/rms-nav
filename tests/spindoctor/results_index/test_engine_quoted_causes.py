@@ -14,7 +14,7 @@ The other direction is asserted beside it, because a message cleaned of its
 cause would be safe and useless.
 
 The masking of the URL itself, over the corpus of every shape one can be
-written in, is in ``test_engine_masking``.
+written in, is in ``test_masking``.
 """
 
 import dataclasses

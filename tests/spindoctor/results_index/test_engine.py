@@ -8,7 +8,7 @@ database driver, or -- worse -- a run that quietly reads nothing.
 
 What the opener does with a SQLite file specifically is in
 ``test_engine_sqlite.py``; how it names a URL without naming its password is in
-``test_engine_masking.py``.
+``test_masking.py``.
 """
 
 import dataclasses
@@ -202,7 +202,7 @@ def test_the_version_message_says_to_delete_and_re_ingest(tmp_path: Path) -> Non
         tmp_path: Directory holding the database.
     """
     path = _index_stamped_with_another_version(tmp_path)
-    with pytest.raises(ValueError, match='delete the database and re-run sd_stats_ingest'):
+    with pytest.raises(ValueError, match='empty the database with sd_stats_ingest --drop-index'):
         open_index(sqlite_url_for(path))
 
 

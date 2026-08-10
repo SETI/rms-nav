@@ -124,11 +124,16 @@ tests need none of the archive environment above.
      - One component in isolation (config, feature, dataset, obs, model,
        technique, orchestrator, reproj, support).
    * - Results index on a server
-       (``tests/spindoctor/results_index/test_postgres.py``)
+       (``tests/spindoctor/results_index/test_postgres.py``,
+       ``test_drop_postgres.py``, ``tests/spindoctor/cli/stats/test_postgres.py``)
      - postgres
      - PostgreSQL
      - The schema, the version gate, and the type discipline against a backend
-       that enforces them, rather than against SQLite's permissive typing.
+       that enforces them, rather than against SQLite's permissive typing; and
+       what a drop can only be asked of a server -- that it leaves another
+       owner's tables standing, that an emptied database is the same database as
+       one nothing was built in, and that a lock somebody else holds ends it
+       rather than hanging it.
    * - Simulator unit tests (``tests/spindoctor/sim/**``)
      - default
      - nothing
