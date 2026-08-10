@@ -6,7 +6,10 @@ Overview
 ========
 
 The curator turns a :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` into a JSON-friendly
-metadata dict consumed by downstream readers. Two functions form the public surface:
+metadata dict consumed by downstream readers. The complete key-by-key specification of
+the file this block is written into, with annotated examples of every document shape,
+is the user guide's :doc:`/user_guide/user_guide_metadata` chapter; this page covers the
+conversion mechanism. Two functions form the public surface:
 :func:`~spindoctor.nav_orchestrator.curator.build_metadata_dict` does the conversion, and
 :func:`~spindoctor.nav_orchestrator.curator.assert_diagnostic_fields_present` runs at startup to
 enforce the per-technique ``CURATOR_FIELDS`` allow-list discipline so a new diagnostic
@@ -106,7 +109,7 @@ Implementation
 Source file: ``src/spindoctor/nav_orchestrator/curator.py`` —
 :func:`~spindoctor.nav_orchestrator.curator.build_metadata_dict`,
 :func:`~spindoctor.nav_orchestrator.curator.assert_diagnostic_fields_present`, plus the private
-``_round_float`` / ``_round_pair`` / ``_round_2x2`` rounding helpers.
+``_round_float`` / ``_round_pair`` / ``_round_matrix`` rounding helpers.
 
 Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 

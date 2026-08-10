@@ -5,6 +5,8 @@ splitter (**radial | EW | image**), corotating EW bands (Ctrl+click), a Cursor
 Info grid and Color By controls in the lower strip, and status-bar readouts.
 """
 
+from __future__ import annotations
+
 import math
 import sys
 import traceback
@@ -1077,7 +1079,7 @@ class RingMosaicWindow(QMainWindow):
         return float(np.min(abs_r)), float(np.max(abs_r))
 
     @staticmethod
-    def _column_longitudes_deg(dd: 'RingDisplayData') -> np.ndarray:
+    def _column_longitudes_deg(dd: RingDisplayData) -> np.ndarray:
         """Return a 1-D float64 array of longitude (deg) for each image column.
 
         Uses ``longitude_global_bins`` for non-contiguous sparse mosaics so that
@@ -1091,7 +1093,7 @@ class RingMosaicWindow(QMainWindow):
         )
 
     @staticmethod
-    def _corot_longitude_for_column(dd: 'RingDisplayData', ix: int) -> float:
+    def _corot_longitude_for_column(dd: RingDisplayData, ix: int) -> float:
         hi = dd.longitude_extent_hi_deg
         if hi is None:
             hi = dd.longitude_column_origin_deg + float(

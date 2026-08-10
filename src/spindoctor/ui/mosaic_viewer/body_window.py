@@ -1,5 +1,7 @@
 """BodyMosaicWindow: PyQt6 window for browsing body reprojections and mosaics."""
 
+from __future__ import annotations
+
 import math
 import sys
 import traceback

@@ -8,4 +8,6 @@ Submodules:
     body_window           -- BodyMosaicWindow for body reprojections/mosaics.
 """
 
+from __future__ import annotations
+
 __all__: list[str] = []

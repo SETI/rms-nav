@@ -1,5 +1,10 @@
 """Matplotlib QtAgg helpers (third-party constructors lack usable stubs under mypy)."""
 
+# Annotations must stay strings: the docs build mocks the Qt backend, and an
+# evaluated ``FigureCanvasQTAgg | object`` union on a mocked class raises at
+# import time, which would knock this module out of the API reference.
+from __future__ import annotations
+
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
