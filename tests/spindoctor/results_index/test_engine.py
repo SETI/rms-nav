@@ -8,7 +8,7 @@ database driver, or -- worse -- a run that quietly reads nothing.
 
 What the opener does with a SQLite file specifically is in
 ``test_engine_sqlite.py``; how it names a URL without naming its password is in
-``test_engine_masking.py``.
+``test_masking.py``.
 """
 
 import dataclasses
@@ -30,7 +30,13 @@ from tests.spindoctor.results_index.conftest import (
     without_module,
 )
 
-from spindoctor.results_index import IMAGES, SCHEMA_META, SCHEMA_VERSION, open_index
+from spindoctor.results_index import (
+    IMAGES,
+    SCHEMA_META,
+    SCHEMA_VERSION,
+    open_database,
+    open_index,
+)
 
 MISSING_DRIVER_URL = 'postgresql+psycopg://user@localhost:5432/spindoctor'
 
@@ -164,8 +170,19 @@ def test_a_database_with_no_schema_meta_row_is_refused(tmp_path: Path) -> None:
 
 def test_an_in_memory_database_is_refused_by_a_consumer() -> None:
     """An in-memory URL starts empty every time, so it is never an index."""
-    with pytest.raises(ValueError, match='not a results index'):
+    with pytest.raises(ValueError, match='names an in-memory SQLite database'):
         open_index('sqlite://')
+
+
+def test_an_in_memory_database_is_refused_by_a_drop() -> None:
+    """Every connection to one makes a different empty database.
+
+    A drop answering "nothing to drop" over one would report the state of a
+    database that came into being to be asked and goes when the answer is
+    given.
+    """
+    with pytest.raises(ValueError, match='names an in-memory SQLite database'):
+        open_database('sqlite://')
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +219,7 @@ def test_the_version_message_says_to_delete_and_re_ingest(tmp_path: Path) -> Non
         tmp_path: Directory holding the database.
     """
     path = _index_stamped_with_another_version(tmp_path)
-    with pytest.raises(ValueError, match='delete the database and re-run sd_stats_ingest'):
+    with pytest.raises(ValueError, match='empty the database with sd_stats_ingest --drop-index'):
         open_index(sqlite_url_for(path))
 
 

@@ -63,6 +63,34 @@ refused before anything is walked, and an empty one is such a root: with
 ``--nav-results-root "$ROOT"`` and ``ROOT`` unset the program stops rather than
 ingesting whatever directory it was started from under a name nobody chose.
 
+**An ingest builds the index in one schema, and only in a schema of its own.**
+The tables go into the schema the index resolves to: the one holding a
+``schema_meta`` stamp SpinDoctor wrote, or, where the database carries no such
+stamp, the one an unqualified ``CREATE TABLE`` lands in (``main`` on SQLite, the
+first schema of the search path on PostgreSQL). That schema is built in when it
+holds nothing at all, and gone on with when it already carries SpinDoctor's
+stamp, whatever schema version that stamp names. Anything else is **refused**,
+before a table is created or a stamp is written:
+
+- A schema holding a table of one of the index's own names -- ``images``,
+  ``techniques``, ``feature_sources``, ``failed_files``, ``schema_meta`` or
+  ``ingest_runs`` -- that no stamp of SpinDoctor's stands over. Those are among
+  the commonest table names there are, so a table called ``images`` is not
+  evidence of anything, and a stamp written beside somebody else's table would
+  make it SpinDoctor's for every later reading, including the drop's.
+- A schema holding any table SpinDoctor does not own, stamped or not. A results
+  index owns the schema it lives in, so a table nobody here created in it means
+  the URL, or the search path behind it, names a database or a schema other than
+  the one intended.
+
+The refusal names the schema, the tables it stopped on and the index URL with
+its password hidden, and exits 1; nothing is created, nothing is stamped, and
+that schema is exactly as it was. The remedy is to check the URL, or to name a
+schema of the index's own -- on PostgreSQL, by appending
+``?options=-csearch_path=schemaname`` to the URL. Other schemas of the same
+database are neither read nor named, so one server holds an index beside
+whatever else it holds.
+
 **Ingestion is incremental.** One recursive listing per root collects the
 metadata documents and carries each file's size and modification time along
 with it. Every other file under the root -- the summary PNG beside a document,
@@ -169,11 +197,146 @@ at all. A scheduled invocation therefore reads the same status from the same
 tree every time, and a status of 1 always means something needs fixing rather
 than that a tree happens to hold no results.
 
+Under ``--drop-index`` the status says whether the index is gone: 0 when the
+tables went, and 0 again when the database held none of them, since an index
+that is already absent is the state the command was asked for. It is 1 when the
+database could not be opened or read, when the database holds tables of those
+names that nothing proves are the index's, when a table would not drop, and when
+whoever was asked answered anything but yes.
+
 The index is disposable, and there is no schema migration. It carries the column
 set version that wrote it, and opening one stamped with a different version
-fails naming both versions. The remedy is always the same -- delete the database
-and re-run ``sd_stats_ingest`` (the source of truth is the metadata documents,
-so nothing is lost).
+fails naming both versions. The remedy is always the same -- empty the database
+with ``sd_stats_ingest --drop-index`` and re-run ``sd_stats_ingest`` (the source
+of truth is the metadata documents, so nothing is lost).
+
+Dropping an index and starting over
+-----------------------------------
+
+Starting a results tree over -- delete the results, navigate again, ingest
+again -- has a counterpart on the index, and it is a flag on the same command:
+
+.. code-block:: bash
+
+    sd_stats_ingest --results-db postgresql+psycopg://user@dbhost/spindoctor \
+        --drop-index
+
+**It drops and stops.** No results root is read and no document is ingested, so
+dropping is a deliberate act rather than the opening move of a long pass, and a
+mistyped URL costs one command. It needs no ``--nav-results-root``: a drop is
+about the database alone, and works on a machine that has the index and not the
+tree.
+
+**It removes SpinDoctor's own tables and nothing else** -- ``images``,
+``techniques``, ``feature_sources``, ``failed_files``, ``schema_meta`` and
+``ingest_runs``, named one at a time. No schema is dropped and nothing is
+matched by pattern. What makes those six SpinDoctor's own rather than six names
+is the rule the ingest follows: it refuses to build an index in a schema holding
+any table it did not create, so a schema carrying SpinDoctor's stamp holds this
+index and nothing else. No other table of that schema, and no other schema of
+that database, is read or written, so an index shares a PostgreSQL server, and a
+database, with whatever else lives in the other schemas.
+
+**It drops only from a database that proves it holds an index.** Those six are
+among the commonest table names there are, so a table called ``images`` is not
+evidence of anything and is never removed for its name alone. What is evidence
+is the index's own stamp: a ``schema_meta`` table carrying the columns
+SpinDoctor's stamp carries. A database with no such stamp is refused, exits 1,
+and has the tables that stopped it named -- because nothing distinguishes
+somebody else's ``images`` from what is left of an index whose stamp has gone,
+and a destructive command may not decide that on your behalf. Such tables are
+removed by hand, or with the SQLite file that holds them.
+
+**It drops from one schema: the one that stamp was found in.** A server resolves
+an unqualified table name through a search path that may cross several schemas,
+so the stamp is looked for once and every statement of the drop then names the
+schema it was found in. A table of one of these names in any other schema
+belongs to whoever put it there and is not touched. The schema is named in the
+confirmation and in the run log. On SQLite it is always ``main``, the one
+namespace a database file has.
+
+**It confirms first.** The run log lists the tables with their row counts and
+names the schema and the schema version, and the question -- which names the
+index, its schema, how many tables and rows go with it, and any ingest run that
+has not finished -- is written to standard output, which is where ``input``
+writes a prompt. The answer is read without regard to case or surrounding
+space, so ``y``, ``Y``, ``yes`` and ``YES`` all mean yes; anything else, Ctrl-C
+included, leaves the index alone and exits 1. ``--yes`` drops without asking,
+for a run with nobody at the terminal -- and is required for one, because a
+standard input with nothing to read is treated as a refusal rather than as
+consent. Every refusal, the question itself, and the first line of the account
+name the index URL with its password hidden; the lines that continue that
+account carry the schema and the counts rather than repeating the URL.
+
+**It does one thing, so it refuses to be asked for two.** ``--drop-index``
+together with ``--force``, ``--nav-results-root``, ``--output-cloud-tasks-file``
+or ``--complete-cloud-tasks-file`` is refused before anything is opened and
+exits 1, naming the option it will not combine with: a drop reads no document
+and walks no tree, so each of those was meant for a different command. A results
+root reaching the program from ``NAV_RESULTS_ROOT`` or from the configuration is
+a machine's standing setting rather than a request, and is simply unused.
+``--yes`` without ``--drop-index`` is refused for the same reason from the other
+side: it answers a question only the drop asks.
+
+**It works on the databases nothing else will open**, which is the point: an
+index stamped with a schema version this build does not read, or one whose stamp
+holds something no version number could, is exactly what the drop is pointed at.
+It also works on one whose columns are not this build's, since a stamp says which
+version wrote a database rather than that nothing has happened to it since: the
+account then leaves out whatever could not be read -- the schema version, the
+count of unfinished ingest runs -- and drops the tables all the same. The drop
+never refuses a database the other programs open.
+
+**Dropping twice is not an error.** A database holding none of these tables is
+not written at all, and says so; an index that is already gone is the state the
+command was asked for, so it exits 0. What that answer was established over is
+what the connection reaches: an index in a schema outside this URL's search
+path, or in one this account may not look into, reads the same way as one that
+is not there, and the message says so rather than claiming the database holds
+none. A database that is not there at all is a
+different answer: the server refuses a PostgreSQL database it does not have, and
+a SQLite path that is not there gets the same refusal rather than being created,
+so both exit 1 and neither leaves an empty database behind.
+
+**What is left behind is a database, not a hole.** Every consumer reads a
+dropped index exactly as it reads one nobody has ever ingested into -- "not
+ingested", with a message naming ``sd_stats_ingest`` -- and the next
+``sd_stats_ingest`` builds it again from the metadata documents. On PostgreSQL
+the two states are literally the same database. On SQLite the file itself
+remains, empty, and the drop deliberately does not delete it, so that one flag
+means one thing on both backends. Deleting the file instead removes the database
+rather than the index, which every consumer reads the same way but which a later
+``--drop-index`` refuses rather than reporting as nothing to do.
+
+**An interruption costs nothing.** The whole drop is one transaction on both
+backends: PostgreSQL rolls DDL back with everything else, and on SQLite -- whose
+driver would otherwise commit each ``DROP TABLE`` on its own -- the drop opens
+its transaction itself, which SQLite's own transactional DDL then honors. Ctrl-C
+partway through, a table that will not drop, a lost connection: each leaves the
+database exactly as it was, still readable by every consumer, and the drop is
+run again when the cause is dealt with. Ctrl-C is reported as the refusal it is
+wherever it lands -- while the database is being opened, while what it holds is
+being read, or during the drop -- naming which step stopped and exiting 1,
+rather than printing a traceback.
+
+Two things it does **not** refuse:
+
+* **An ingest run that has not finished.** Such a run is either a pass writing
+  the index at this moment or one that died, and nothing recorded in the index
+  tells the two apart. A pass that died is also the commonest reason to want a
+  drop, so the count is reported in the confirmation rather than acted on.
+  Dropping under a live pass ends that pass, which fails on a table that has
+  gone; no reader is affected, because an unfinished run already reads as "not
+  ingested" both before and after.
+* **Another process holding the database.** Neither backend can be asked that
+  question honestly, so the attempt is what answers it. Both the reading that
+  precedes the question and the drop itself wait a bounded time for each table
+  -- ``lock_timeout`` on PostgreSQL, the busy timeout on SQLite -- and then give
+  up, and what they give up on is put back whole by the transaction around it.
+  A failure names what the database said the cause was: a lock somebody holds, a
+  view or another object depending on one of these tables, an account that does
+  not own one of them, or, where the database gave no code this recognizes, its
+  own words with no cause invented for them.
 
 Ingesting over a queue of workers
 ---------------------------------

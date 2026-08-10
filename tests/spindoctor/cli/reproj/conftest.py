@@ -24,6 +24,7 @@ from filecache import FCPath
 from sqlalchemy.engine import Engine
 from tests.spindoctor.cli.stats.conftest import metadata_document, write_metadata
 from tests.spindoctor.results_index.conftest import (
+    postgres_decoy_schema,
     postgres_schema,
     postgres_server_url,
     postgres_url,
@@ -41,7 +42,12 @@ from spindoctor.results_index import normalize_root_url, open_index
 # The pointing postgres tier runs against a schema of its own, exactly as the
 # results-index tier does; re-exporting rather than restating keeps one
 # definition of how that schema is created and dropped.
-__all__ = ['postgres_schema', 'postgres_server_url', 'postgres_url']
+__all__ = [
+    'postgres_decoy_schema',
+    'postgres_schema',
+    'postgres_server_url',
+    'postgres_url',
+]
 
 CMATRIX_ORIGINAL = [
     0.963676611721357,

@@ -98,7 +98,7 @@ def masked_command_line(command_list: Sequence[str]) -> list[str]:
     # the GUI imports elsewhere in the package: this module is reached by the
     # run banner of every program, including the ones that never open a
     # database, and the masking rule lives beside the URL parsing it mirrors.
-    from spindoctor.results_index.engine import masked_url
+    from spindoctor.results_index.masking import masked_url
 
     masked = list(command_list)
     for index, start in starts.items():

@@ -588,6 +588,21 @@ NEGATIVE_CASES = [
         'sqlite:///C:/data/index.sqlite3',
         'sqlite:///C:/data/index.sqlite3',
     ),
+    # The two below are the shapes that the scheme rule alone saves. Read as an
+    # authority, a drive letter is a user name and everything to the last
+    # at-sign is a password, and a path ending in something spelled like a query
+    # parameter is one; a path is neither, and a refusal naming a SQLite URL is
+    # the one message an operator reads to correct the path.
+    _Case(
+        'a-local-path-carrying-a-drive-letter-and-an-at-sign',
+        'sqlite:///C:/data/my@dir/index.sqlite3',
+        'sqlite:///C:/data/my@dir/index.sqlite3',
+    ),
+    _Case(
+        'a-local-path-that-ends-like-a-credential-parameter',
+        'sqlite:////data/index.sqlite3?password=x',
+        'sqlite:////data/index.sqlite3?password=x',
+    ),
     _Case(
         'a-cloud-results-root', 'gs://rms-nav/nav-offset-results', 'gs://rms-nav/nav-offset-results'
     ),
