@@ -78,8 +78,15 @@ def test_no_tail_of_such_a_password_survives_either(password: str) -> None:
 
 @pytest.mark.parametrize('password', _PASSWORDS)
 def test_a_user_name_carrying_an_at_sign_does_not_shelter_the_password(password: str) -> None:
-    """The credentials end at the last at-sign, not the first."""
+    """The credentials end at the last at-sign, not the first.
+
+    Both halves are asserted: masking that stopped at the at-sign inside the
+    user name would leave the head of the password on the line, and masking
+    that stopped at the one inside the password would leave its tail, so a test
+    naming one half passes against a defect that exposes the other.
+    """
     line = ' '.join(masked_command_line(['--results-db', _url(password, user=_USER)]))
+    assert _LEFT not in line
     assert _RIGHT not in line
 
 
@@ -155,13 +162,19 @@ def test_a_slash_before_the_first_colon_ends_the_authority() -> None:
 
 
 def test_a_second_index_url_on_the_same_line_is_masked_as_well() -> None:
-    """argparse keeps the last of a repeated option; the log carries both."""
+    """argparse keeps the last of a repeated option; the log carries both.
+
+    Both halves are asserted, because masking that reached only as far as the
+    first occurrence would leave the second password whole and a test naming
+    one half of it would pass.
+    """
     line = ' '.join(
         masked_command_line(
             ['--results-db', _url(_PASSWORDS[0]), '--results-db', _url(_PASSWORDS[3])]
         )
     )
     assert _LEFT not in line
+    assert _RIGHT not in line
 
 
 def _console_banner(name: str, argv: list[str]) -> str:

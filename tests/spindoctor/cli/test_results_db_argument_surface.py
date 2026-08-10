@@ -129,6 +129,19 @@ _FILE_ONLY_HELP: list[tuple[str, list[str]]] = [
 ]
 
 
+def _names_the_resolver(module: FCPath) -> bool:
+    """Whether one module's source names the results-index URL resolver.
+
+    Parameters:
+        module: The module to read.
+
+    Returns:
+        True when the resolver's name appears anywhere in the source.
+    """
+    with module.open('r', encoding='utf-8') as source:
+        return 'get_results_db_url' in source.read()
+
+
 def _modules_naming_the_resolver() -> set[str]:
     """Return every package module that names the results-index URL resolver.
 
@@ -136,11 +149,10 @@ def _modules_naming_the_resolver() -> set[str]:
         Paths relative to the package root, using forward slashes, the
         resolver's own home among them.
     """
-    root = Path(str(_SOURCE_ROOT))
     return {
-        path.relative_to(root).as_posix()
-        for path in root.rglob('*.py')
-        if 'get_results_db_url' in path.read_text(encoding='utf-8')
+        module.relative_to(_SOURCE_ROOT).as_posix()
+        for module in _SOURCE_ROOT.rglob('*.py')
+        if _names_the_resolver(module)
     }
 
 
