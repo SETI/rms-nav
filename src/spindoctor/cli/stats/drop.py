@@ -1,17 +1,24 @@
 """Dropping a results index from the command line.
 
 The destructive half of the statistics system.  It opens the database the URL
-names, says what of the index is in it, asks whoever typed the command whether
-that is what they meant, removes those tables and stops.  It never walks a
-results tree: dropping is a deliberate act, not the opening move of a long
-ingest, and a command that did both would make a mistyped URL expensive twice
-over.
+names, finds out whether that database holds a SpinDoctor index at all, says
+what of one is in it, asks whoever typed the command whether that is what they
+meant, removes those tables and stops.  It never walks a results tree: dropping
+is a deliberate act, not the opening move of a long ingest, and a command that
+did both would make a mistyped URL expensive twice over.
 
 The account of what is about to go is written to the log, which is where
 everything else ``sd_stats_ingest`` does is written.  The one thing this module
-puts on the terminal itself is the question, which ``input`` writes: a prompt is
-a dialogue rather than a report, and carrying it in the log alone would leave a
-run whose log was routed to a file waiting silently for an answer.
+puts on standard output itself is the question, which ``input`` writes there: a
+prompt is a dialogue rather than a report, and carrying it in the log alone
+would leave a run whose log was routed to a file waiting silently for an answer.
+
+**A database has to prove it holds an index before anything is dropped from
+it.**  The proof is the index's own stamp table, and the schema that stamp was
+found in is the only schema anything is dropped from.  A database holding tables
+that merely share these names -- ``images`` above all -- is refused and named,
+because nothing can tell somebody else's table from the remains of an index of
+ours, and a destructive command must not decide such a thing on its own.
 
 Two questions this answers by reporting rather than by refusing:
 
@@ -33,9 +40,10 @@ backend can be asked the question honestly: SQLite's readers take no lock to
 observe under write-ahead logging, and a PostgreSQL role need not be allowed to
 read the server's activity view.  What can be done is to make the attempt fail
 rather than hang, which
-:data:`~spindoctor.results_index.drop.DROP_LOCK_TIMEOUT_MS` does, and to leave
-nothing half-finished when it does, which the drop order does.  So the database
-itself decides, promptly and per table, instead of a guess deciding beforehand.
+:data:`~spindoctor.results_index.drop.DROP_LOCK_TIMEOUT_MS` does for the reading
+and for the drop alike, and to leave nothing half-finished when it does, which
+the transaction around the drop does on both backends.  So the database itself
+decides, promptly and per table, instead of a guess deciding beforehand.
 """
 
 from pdslogger import PdsLogger
@@ -52,9 +60,13 @@ from spindoctor.results_index import (
 __all__ = ['AGREEMENT', 'drop_results_index']
 
 AGREEMENT = ('y', 'yes')
-"""The answers that mean yes.  Anything else, including nothing, means no."""
+"""The answers that mean yes.  Anything else, including nothing, means no.
 
-_PROMPT = 'Drop {tables} table(s) and {rows} row(s) from {url}?{unfinished} [y/N] '
+Compared after the line is stripped and lower-cased, so ``Y``, ``YES`` and a
+line with spaces around it are the same answer as ``yes``.
+"""
+
+_PROMPT = 'Drop {tables} table(s) and {rows} row(s) from {url}, schema {schema}?{unfinished} [y/N] '
 """What the operator is asked.
 
 The question carries the facts an answer turns on rather than only the verb.
@@ -62,10 +74,13 @@ The account above it goes to the log, which is where the whole of what this run
 did belongs and which is on the terminal in an ordinary run -- but a run whose
 log has been routed to a file still puts this line in front of the person
 typing, and a question that read only "are you sure?" would be one they had to
-answer out of memory.
+answer out of memory.  The schema is one of those facts: on a server the same
+URL reaches several, and which one holds the index is not something the command
+line said.
 
 ``sd_stats_ingest`` carries a main logger and reports through it; this is a
-dialogue rather than a report, and the prompt is written by ``input`` itself.
+dialogue rather than a report, and the prompt is written to standard output by
+``input`` itself.
 """
 
 _UNFINISHED = ' {count} ingest run(s) have not finished.'
@@ -75,6 +90,80 @@ A pass may be writing the index at this moment, and the drop would end it.  It
 is the only thing here that a person answering could not have known from the
 command they typed.
 """
+
+_FAILURE_CAUSES = (
+    ('55P03', 'Another session is holding a lock on one of these tables.'),
+    (
+        '2BP01',
+        'Another object of this database depends on one of these tables, and has to be '
+        'removed, or stop depending on it, first.',
+    ),
+    (
+        '42501',
+        'This account does not own one of these tables, and a table is dropped by its owner.',
+    ),
+    (
+        '42P01',
+        'One of these tables went between the reading of what this database held and the '
+        'drop of it.',
+    ),
+    ('SQLITE_BUSY', 'Another process is holding the write lock on this SQLite database.'),
+    ('SQLITE_READONLY', 'This SQLite database is read-only.'),
+    (
+        'SQLITE_CONSTRAINT_FOREIGNKEY',
+        'A table outside the index carries a reference into one of these tables.',
+    ),
+)
+"""What a database's own failure code says the cause was.
+
+A destructive command that names the wrong cause is worse than one that names
+none: it sends whoever reads it to grant a privilege over a lock, or to hunt a
+session over a view.  So each code is answered with what it means and nothing
+is answered with a guess -- a code not in this table is reported as the database
+worded it, with no cause invented for it.
+
+PostgreSQL codes are the five-character SQLSTATE the server returns; SQLite
+codes are the result-code names its driver carries, matched by prefix because
+SQLite refines several of them into extended forms.
+"""
+
+
+def _failure_code(exc: BaseException) -> str:
+    """Return the code a database driver's own exception carries.
+
+    Parameters:
+        exc: The exception to read, either a driver exception or the wrapper
+            SQLAlchemy raised around one.
+
+    Returns:
+        The SQLSTATE or SQLite result-code name, or an empty string for a
+        failure that carries neither -- a connection that dropped, or an
+        exception SQLAlchemy raised on its own behalf.
+    """
+    original = getattr(exc, 'orig', exc)
+    for attribute in ('sqlstate', 'sqlite_errorname'):
+        code = getattr(original, attribute, None)
+        if isinstance(code, str) and code:
+            return code
+    return ''
+
+
+def _because(exc: SQLAlchemyError) -> str:
+    """Return what the database said the cause was, ready to append to a message.
+
+    Parameters:
+        exc: The failure to diagnose.
+
+    Returns:
+        One sentence with a leading space, or an empty string when the database
+        gave no code this recognizes and there is therefore nothing to say
+        beyond what it said itself.
+    """
+    code = _failure_code(exc)
+    for prefix, cause in _FAILURE_CAUSES:
+        if code.startswith(prefix):
+            return f' {cause}'
+    return ''
 
 
 def _summary(safe_url: str, contents: IndexContents) -> list[str]:
@@ -93,7 +182,10 @@ def _summary(safe_url: str, contents: IndexContents) -> list[str]:
     Returns:
         The lines, in the order they are said.
     """
-    lines = [f'About to drop the SpinDoctor results index tables from {safe_url}']
+    lines = [
+        f'About to drop the SpinDoctor results index tables from {safe_url}, '
+        f'schema {contents.schema}'
+    ]
     lines.extend(f'    {table.name}: {table.rows} row(s)' for table in contents.tables)
     lines.append(f'    {len(contents.tables)} table(s), {contents.rows} row(s) in all')
     if contents.schema_version is None:
@@ -107,8 +199,9 @@ def _summary(safe_url: str, contents: IndexContents) -> list[str]:
             f'recorded here tells the two apart.'
         )
     lines.append(
-        'Nothing else in this database is touched. The metadata documents are the source of '
-        'truth, so a dropped index is rebuilt by running sd_stats_ingest again.'
+        f'Nothing else in schema {contents.schema} is touched, and no other schema of this '
+        f'database is looked at. The metadata documents are the source of truth, so a dropped '
+        f'index is rebuilt by running sd_stats_ingest again.'
     )
     return lines
 
@@ -132,12 +225,57 @@ def _answer(safe_url: str, contents: IndexContents) -> str | None:
         _UNFINISHED.format(count=contents.unfinished_runs) if contents.unfinished_runs else ''
     )
     question = _PROMPT.format(
-        tables=len(contents.tables), rows=contents.rows, url=safe_url, unfinished=unfinished
+        tables=len(contents.tables),
+        rows=contents.rows,
+        url=safe_url,
+        schema=contents.schema,
+        unfinished=unfinished,
     )
     try:
         return input(question)
     except (EOFError, OSError, RuntimeError):
         return None
+
+
+def _nothing_of_ours(safe_url: str, contents: IndexContents, logger: PdsLogger) -> int:
+    """Report a database that proved it holds no index of SpinDoctor's, and drop nothing.
+
+    Two states reach this, and they are not the same answer.  A database with no
+    table of these names in it is the state a drop was asked for and exits 0.
+    One holding tables of these names with no stamp of ours over them is a URL
+    naming something that is not a SpinDoctor index, which is refused: the
+    tables are either somebody else's -- ``images`` is not a name anyone owns --
+    or what is left of an index whose stamp has gone, and nothing in the
+    database says which.
+
+    Parameters:
+        safe_url: The index URL with its credentials already masked.
+        contents: What the database holds of the index, proving nothing.
+        logger: Logger the account is written to.
+
+    Returns:
+        The exit status: 0 when there was nothing of these names, 1 when there
+        was and none of it could be shown to be the index's.
+    """
+    if not contents.unproven:
+        logger.info(
+            '%s holds none of the results index tables, so nothing was dropped. An index '
+            'that is not there and one that has been dropped are the same thing to every '
+            'program that reads one.',
+            safe_url,
+        )
+        return 0
+    logger.fatal(
+        'Nothing was dropped: %s holds table(s) the results index also uses (%s), but no '
+        "schema_meta of SpinDoctor's stands over them, so nothing here says this database "
+        'holds a results index. They are either tables somebody else created under names '
+        'this index also uses, or what an index whose stamp has gone left behind, and the '
+        'database does not say which. Check the URL; remove them by hand if they are an '
+        'index of yours.',
+        safe_url,
+        ', '.join(contents.unproven),
+    )
+    return 1
 
 
 def drop_results_index(url: str, *, assume_yes: bool, logger: PdsLogger) -> int:
@@ -157,10 +295,11 @@ def drop_results_index(url: str, *, assume_yes: bool, logger: PdsLogger) -> int:
             was asked.
 
     Returns:
-        The exit status: 0 when the tables were dropped and 0 again when there
-        were none to drop, since an index that is already gone is the state
-        asked for; 1 when the database could not be opened or read, when a
-        table would not drop, and when the operator answered anything but yes.
+        The exit status: 0 when the tables were dropped and 0 again when the
+        database held none of them, since an index that is already gone is the
+        state asked for; 1 when the database could not be opened or read, when
+        it holds tables of these names that nothing proves are the index's, when
+        a table would not drop, and when the operator answered anything but yes.
     """
     safe_url = masked_url(url)
     logger.info('Results index to drop the tables of: %s', safe_url)
@@ -170,51 +309,64 @@ def drop_results_index(url: str, *, assume_yes: bool, logger: PdsLogger) -> int:
         logger.fatal('Cannot open the database to drop the results index from: %s', exc)
         return 1
     try:
+        # Said before rather than after, because reading it counts the rows of
+        # every table, which on a production-sized index is a scan apiece: a
+        # confirmation that appears minutes after the command was typed is
+        # otherwise a command that looks hung.
+        logger.info('Reading what %s holds of the results index', safe_url)
         try:
             contents = index_contents(engine)
         except SQLAlchemyError as exc:
             logger.fatal(
-                'Nothing was dropped: %s holds tables of the results index that could not be '
-                'read (%s: %s). Check that the account this URL opens may read every table '
-                'it is being asked to drop.',
+                'Nothing was dropped: what %s holds of the results index could not be read '
+                '(%s: %s).%s',
                 safe_url,
                 type(exc).__name__,
                 exc,
+                _because(exc),
             )
             return 1
-        if not contents.tables:
-            logger.info(
-                '%s holds none of the results index tables, so nothing was dropped. An index '
-                'that is not there and one that has been dropped are the same thing to every '
-                'program that reads one.',
-                safe_url,
-            )
-            return 0
+        if contents.schema is None:
+            return _nothing_of_ours(safe_url, contents, logger)
         for line in _summary(safe_url, contents):
             logger.info('%s', line)
         if not assume_yes:
-            answer = _answer(safe_url, contents)
+            try:
+                answer = _answer(safe_url, contents)
+            except KeyboardInterrupt:
+                # The one refusal a person makes with a key rather than a word.
+                # It reaches here as an exception rather than as an answer, and
+                # a destructive command owes it the same line every other
+                # refusal gets rather than a traceback.
+                logger.fatal('Nothing was dropped from %s: the question was interrupted.', safe_url)
+                return 1
             if answer is None:
                 logger.fatal(
-                    'Nothing was dropped: there is nobody to confirm with, since standard '
-                    'input is at its end. Pass --yes to drop without being asked.'
+                    'Nothing was dropped from %s: there is nobody to confirm with, since '
+                    'standard input is at its end. Pass --yes to drop without being asked.',
+                    safe_url,
                 )
                 return 1
             if answer.strip().lower() not in AGREEMENT:
-                logger.info('Nothing was dropped: the answer was %r rather than yes.', answer)
+                logger.info(
+                    'Nothing was dropped from %s: the answer was %r rather than yes.',
+                    safe_url,
+                    answer,
+                )
                 return 1
         try:
-            dropped = drop_index_tables(engine)
+            dropped = drop_index_tables(engine, contents)
         except SQLAlchemyError as exc:
             logger.fatal(
-                'The drop of %s did not complete (%s: %s). Another session may be holding one '
-                'of these tables; nothing else in the database was touched.',
+                'The drop of %s did not complete (%s: %s).%s The transaction was taken back, '
+                'so that database is exactly as it was.',
                 safe_url,
                 type(exc).__name__,
                 exc,
+                _because(exc),
             )
             return 1
-        logger.info('Dropped from %s: %s', safe_url, ', '.join(dropped))
+        logger.info('Dropped from %s, schema %s: %s', safe_url, contents.schema, ', '.join(dropped))
         logger.info(
             'That index is now what one nobody has ingested into looks like. Run '
             'sd_stats_ingest to build it again.'

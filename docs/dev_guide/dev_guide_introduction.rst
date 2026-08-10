@@ -147,8 +147,8 @@ Every CLI listed in ``[project.scripts]`` is installed onto ``$PATH`` by
        See :doc:`/user_guide/user_guide_ck_kernels`.
    * - ``sd_stats_ingest`` / ``sd_stats_ingest_cloud_tasks``
      - Read a navigation-results tree into the results index, in one process or
-       over a queue of workers; ``--drop-index`` empties the index instead. See
-       :doc:`/user_guide/user_guide_statistics`.
+       over a queue of workers. ``sd_stats_ingest --drop-index`` empties the
+       index instead. See :doc:`/user_guide/user_guide_statistics`.
    * - ``sd_stats_report``
      - Write the navigation statistics report and its charts from the index.
        See :doc:`/user_guide/user_guide_statistics`.

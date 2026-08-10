@@ -7,27 +7,36 @@ is deliberately not migrated, so emptying the database and ingesting again is
 the whole of what the gate leaves an operator to do, and it is what the gate's
 own refusal sends them here for.
 
-**Only the tables named here are touched.**  They are the tables of
-:data:`~spindoctor.results_index.schema.METADATA`, taken by name.  No schema is
-dropped, no pattern is matched and nothing is discovered by looking at what the
-database holds: a PostgreSQL server is routinely shared, and an index living in
-a database beside somebody else's tables must be removable without a thought
-about theirs.
+**A name is not evidence.**  The tables this removes are called ``images``,
+``techniques``, ``feature_sources``, ``failed_files``, ``schema_meta`` and
+``ingest_runs``, which are among the commonest table names there are, so a
+database is never taken to hold a SpinDoctor index because a table of one of
+those names is in it.  What proves the index is its own stamp table: a
+``schema_meta`` carrying the marks SpinDoctor's stamp carries.  Without that
+this reports what it found and removes nothing, which is the same answer the
+drop owes a URL naming something that is not an index at all.
 
-**What is left behind is a database, not a hole.**  Dropping every table of an
-index leaves what a database that was never ingested into looks like -- on
-PostgreSQL literally so -- which every consumer already reads as "not
-ingested", and which the next opener with ``create`` rebuilds.
+**The evidence names the schema too.**  A server resolves an unqualified table
+name through a search path that may cross several schemas, and resolving six
+names independently is how one drop comes to span two of them -- destroying a
+stranger's table in the first while leaving the index's own in the second.  So
+the stamp is looked for once, the schema it was found in is the schema every
+later statement names explicitly, and a table of one of these names in any other
+schema is not this index's and is never touched.
 
-**The order is the guarantee.**  ``schema_meta`` goes first, before the tables
-it stamps.  Every state an interrupted drop can leave is then one with no stamp,
-which the version gate reads as "this is not a results index"; the state that
-must never be left is the opposite one, a stamp still standing over tables that
-have gone, because the gate reads that as a healthy index and every consumer
-then fails inside its first query.  The order matters because the transaction
-around the drop is not equally strong on both backends: PostgreSQL rolls DDL
-back with everything else, while the SQLite driver commits each ``DROP TABLE``
-outside the surrounding transaction.
+**The transaction is the guarantee, on both backends.**  PostgreSQL rolls DDL
+back with everything else.  The SQLite driver opens no transaction of its own
+for ``DROP TABLE``, which would leave each drop committed on its own -- so this
+opens one itself, with ``BEGIN IMMEDIATE``, and SQLite's own DDL is
+transactional inside it.  An interrupted drop therefore leaves the database
+exactly as it was on either backend, rather than a state something else has to
+be able to read.
+
+**The order is the second line.**  ``schema_meta`` goes first, before the tables
+it stamps, so that the one state which must never be reached is the one the
+statement order cannot produce: a stamp still standing over tables that have
+gone, which the version gate reads as a healthy index and inside which every
+consumer's first query fails.
 """
 
 from dataclasses import dataclass
@@ -35,7 +44,6 @@ from dataclasses import dataclass
 import sqlalchemy
 from sqlalchemy.engine import Engine
 
-from spindoctor.results_index.engine import stamped_version
 from spindoctor.results_index.schema import INGEST_RUNS, METADATA, SCHEMA_META, SCHEMA_VERSION
 
 __all__ = [
@@ -56,6 +64,11 @@ ingest in flight, or a session somebody left sitting in ``psql``.  Without a
 bound the drop waits for that silently and forever, which reads as a hung
 command rather than as a table somebody else is using.
 
+Applied to the reading that precedes the drop as well as to the drop itself.
+Counting the rows of a table takes a lock too, and a bound that began only after
+the confirmation would leave the command hanging before anybody was asked
+anything -- which is the one place a hang is hardest to account for.
+
 Matched to :data:`~spindoctor.results_index.engine.SQLITE_BUSY_TIMEOUT_MS`, so
 that a contended drop gives up after the same wait on either backend.  SQLite
 needs nothing more: the busy timeout applies to every connection already.
@@ -63,6 +76,36 @@ needs nothing more: the busy timeout applies to every connection already.
 
 _POSTGRES_DIALECT = 'postgresql'
 """Dialect name of every PostgreSQL driver, whichever one the URL asked for."""
+
+_SQLITE_DIALECT = 'sqlite'
+"""Dialect name of the SQLite driver."""
+
+_STAMP_MARKS = ('singleton', 'schema_version')
+"""Columns whose presence in a ``schema_meta`` says SpinDoctor wrote it.
+
+Two rather than the whole column set, because a stamp left by a schema whose
+columns differed from this one's is exactly the database a drop is pointed at,
+and requiring today's columns would withhold the drop from it.  Two rather than
+one, because the pair is idiosyncratic: a version column is what any migration
+table carries, and a constant-keyed ``singleton`` beside it is what this one
+does.
+"""
+
+_VISIBLE_SCHEMA_SQL = """
+SELECT n.nspname
+  FROM pg_catalog.pg_class c
+  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+ WHERE c.relname = :name
+   AND c.relkind IN ('r', 'p', 'f')
+   AND pg_catalog.pg_table_is_visible(c.oid)
+"""
+"""Which schema an unqualified table name resolves to on this connection.
+
+PostgreSQL resolves a bare name through the search path, and the catalog is the
+only thing that can say where it landed.  ``pg_table_is_visible`` is that rule
+itself, so at most one row comes back: the table the server would have reached,
+in the schema it lives in.
+"""
 
 
 @dataclass(frozen=True)
@@ -80,16 +123,21 @@ class TableContents:
 
 @dataclass(frozen=True)
 class IndexContents:
-    """What of SpinDoctor's own index a database holds.
+    """What of SpinDoctor's own index a database holds, and where.
 
     Read before the drop, so that a destructive command can say what it is about
-    to destroy, and so that a database holding none of it is answered without
-    being touched.
+    to destroy, so that a database holding none of it is answered without being
+    touched, and so that one holding tables that merely share these names is
+    refused rather than emptied.
 
     Parameters:
-        tables: The index's tables that are present, in the order they would be
-            dropped, each with its row count.  Empty when the database holds
-            none of them.
+        schema: The schema SpinDoctor's own stamp table was found in, which is
+            the schema every statement of the drop then names.  None when
+            nothing in this database proves it holds a SpinDoctor index, in
+            which case nothing is to be dropped from it whatever it is called.
+        tables: The index's tables that are present in that schema, in the order
+            they would be dropped, each with its row count.  Empty when the
+            database holds none of them, and empty whenever ``schema`` is None.
         schema_version: The version the database is stamped with, or None when
             it carries no readable stamp.  It is reported rather than required:
             a database this command is pointed at is quite likely to be one no
@@ -98,11 +146,18 @@ class IndexContents:
             None when the question cannot be put to this database -- there is no
             run table, or its stamp is not the version whose columns this code
             knows.
+        unproven: Names of tables the database holds that the index also uses,
+            reported only when ``schema`` is None.  They are what a refusal
+            names: either somebody else's tables that happen to be called this,
+            or the remains of an index whose stamp has gone, and nothing here
+            can tell those apart.
     """
 
+    schema: str | None
     tables: tuple[TableContents, ...]
     schema_version: int | None
     unfinished_runs: int | None
+    unproven: tuple[str, ...]
 
     @property
     def rows(self) -> int:
@@ -120,9 +175,8 @@ def _drop_order() -> tuple[sqlalchemy.Table, ...]:
     Dependents come before what they depend on, because a table another one
     references cannot be dropped while that reference stands.  ``schema_meta``
     is lifted to the front of that order: it references nothing and nothing
-    references it, so it is free to go first, and going first is what makes
-    every interruption leave a database with no stamp rather than a stamp with
-    no tables.
+    references it, so it is free to go first, and going first is what keeps a
+    stamp from ever standing over tables that have gone.
 
     Returns:
         The tables, in drop order.
@@ -142,17 +196,105 @@ def index_table_names() -> tuple[str, ...]:
     return tuple(table.name for table in _drop_order())
 
 
-def _present_tables(engine: Engine) -> tuple[sqlalchemy.Table, ...]:
-    """Return the index's tables that this database actually holds.
+def _tables_of(schema: str) -> dict[str, sqlalchemy.Table]:
+    """Return every table the index owns, named in one schema explicitly.
+
+    The schema is rendered into every statement built from these, so nothing the
+    drop issues can resolve through a search path onto a table in another one.
 
     Parameters:
-        engine: The open database.
+        schema: The schema the index's own stamp was found in.
+
+    Returns:
+        The tables, keyed by name.
+    """
+    metadata = sqlalchemy.MetaData(schema=schema)
+    return {table.name: table.to_metadata(metadata) for table in METADATA.sorted_tables}
+
+
+def _resolved_schema(connection: sqlalchemy.Connection) -> str | None:
+    """Return the schema an unqualified ``schema_meta`` resolves to.
+
+    The same resolution the rest of the system's statements get, asked once and
+    then written down, rather than repeated per table where two tables of these
+    names in two schemas would answer differently.
+
+    Parameters:
+        connection: An open connection to the database.
+
+    Returns:
+        The schema name, or None when this connection reaches no ``schema_meta``
+        at all.
+    """
+    if connection.dialect.name == _POSTGRES_DIALECT:
+        found = connection.execute(
+            sqlalchemy.text(_VISIBLE_SCHEMA_SQL), {'name': SCHEMA_META.name}
+        ).scalar()
+        return None if found is None else str(found)
+    # Every other backend this supports has one namespace per database, which
+    # the inspector names: "main" for SQLite.  Naming it rather than leaving it
+    # implicit is what keeps the two backends on one code path.
+    inspector = sqlalchemy.inspect(connection)
+    schema = inspector.default_schema_name
+    if schema is None or not inspector.has_table(SCHEMA_META.name, schema=schema):
+        return None
+    return schema
+
+
+def _index_schema(connection: sqlalchemy.Connection) -> str | None:
+    """Return the schema this database's own results index lives in, if it has one.
+
+    Parameters:
+        connection: An open connection to the database.
+
+    Returns:
+        The schema holding a ``schema_meta`` that carries SpinDoctor's own
+        marks, or None when this database offers no evidence of holding an
+        index of ours.
+    """
+    schema = _resolved_schema(connection)
+    if schema is None:
+        return None
+    columns = {
+        column['name']
+        for column in sqlalchemy.inspect(connection).get_columns(SCHEMA_META.name, schema=schema)
+    }
+    return schema if columns.issuperset(_STAMP_MARKS) else None
+
+
+def _present_tables(connection: sqlalchemy.Connection, schema: str) -> tuple[sqlalchemy.Table, ...]:
+    """Return the index's tables that this schema actually holds.
+
+    Parameters:
+        connection: An open connection to the database.
+        schema: The schema the index's own stamp was found in.
 
     Returns:
         The tables that are there, in drop order.
     """
-    inspector = sqlalchemy.inspect(engine)
-    return tuple(table for table in _drop_order() if inspector.has_table(table.name))
+    inspector = sqlalchemy.inspect(connection)
+    bound = _tables_of(schema)
+    return tuple(
+        bound[name] for name in index_table_names() if inspector.has_table(name, schema=schema)
+    )
+
+
+def _unproven_tables(connection: sqlalchemy.Connection) -> tuple[str, ...]:
+    """Return the index's table names that this database holds somewhere reachable.
+
+    Asked only of a database that proved nothing, and only so that the refusal
+    can say what it saw.  The names are resolved the way the server resolves
+    them, because those are the tables a drop deciding from names alone would
+    have destroyed.
+
+    Parameters:
+        connection: An open connection to the database.
+
+    Returns:
+        The names, in drop order.
+    """
+    inspector = sqlalchemy.inspect(connection)
+    return tuple(name for name in index_table_names() if inspector.has_table(name))
 
 
 def _row_count(connection: sqlalchemy.Connection, table: sqlalchemy.Table) -> int:
@@ -164,7 +306,7 @@ def _row_count(connection: sqlalchemy.Connection, table: sqlalchemy.Table) -> in
 
     Parameters:
         connection: An open connection to the database.
-        table: The table to count.
+        table: The table to count, named in its schema.
 
     Returns:
         The row count.
@@ -175,29 +317,41 @@ def _row_count(connection: sqlalchemy.Connection, table: sqlalchemy.Table) -> in
     return 0 if counted is None else int(counted)
 
 
-def _stamp(engine: Engine) -> int | None:
+def _stamp(connection: sqlalchemy.Connection, stamp_table: sqlalchemy.Table) -> int | None:
     """Return the schema version a database is stamped with, if it can be read.
 
     The stamp is a fact this reports rather than one it requires.  A database
     the drop is pointed at may be malformed in ways no opener would accept --
-    a ``schema_meta`` left over from a schema whose columns were different -- and
+    a ``schema_meta`` whose version column holds text, or nothing at all -- and
     refusing to say what a database holds because the stamp would not come out
-    of it would withhold the drop from one of the cases it exists for.
+    of it would withhold the drop from one of the cases it exists for.  So every
+    way of not being a version is answered the same way, including the ones that
+    are not database errors at all.
+
+    The read is taken inside a savepoint, because a statement PostgreSQL refuses
+    ends the transaction around it, and everything else this reads would then
+    fail with the first failure's shadow rather than with its own answer.
 
     Parameters:
-        engine: The open database.
+        connection: An open connection to the database.
+        stamp_table: The index's stamp table, named in its schema.
 
     Returns:
         The stamped version, or None when there is none or it will not be read.
     """
     try:
-        return stamped_version(engine)
-    except sqlalchemy.exc.SQLAlchemyError:
+        with connection.begin_nested():
+            row = connection.execute(sqlalchemy.select(stamp_table.c.schema_version)).first()
+            return None if row is None else int(row.schema_version)
+    except (sqlalchemy.exc.SQLAlchemyError, TypeError, ValueError):
         return None
 
 
 def _unfinished_runs(
-    connection: sqlalchemy.Connection, present: tuple[sqlalchemy.Table, ...], version: int | None
+    connection: sqlalchemy.Connection,
+    present: tuple[sqlalchemy.Table, ...],
+    version: int | None,
+    runs_table: sqlalchemy.Table,
 ) -> int | None:
     """Return how many ingest runs have begun and not finished.
 
@@ -215,61 +369,33 @@ def _unfinished_runs(
         connection: An open connection to the database.
         present: The index's tables that this database holds.
         version: The version the database is stamped with, if any.
+        runs_table: The index's run table, named in its schema.
 
     Returns:
         The count, or None when the question cannot be put to this database.
     """
-    if version != SCHEMA_VERSION or INGEST_RUNS not in present:
+    if version != SCHEMA_VERSION or not any(table.name == INGEST_RUNS.name for table in present):
         return None
     counted = connection.execute(
         sqlalchemy.select(sqlalchemy.func.count())
-        .select_from(INGEST_RUNS)
-        .where(INGEST_RUNS.c.finished_utc.is_(None))
+        .select_from(runs_table)
+        .where(runs_table.c.finished_utc.is_(None))
     ).scalar()
     return 0 if counted is None else int(counted)
 
 
-def index_contents(engine: Engine) -> IndexContents:
-    """Return what of SpinDoctor's own index a database holds.
-
-    Parameters:
-        engine: An open database, from
-            :func:`~spindoctor.results_index.engine.open_database`, since one
-            holding a version no opener accepts is a database this is asked
-            about rather than one it is not.
-
-    Returns:
-        The tables that are present with their row counts, the stamp, and how
-        many ingest runs are outstanding.
-
-    Raises:
-        sqlalchemy.exc.SQLAlchemyError: If a table that is there cannot be
-            counted.  A table this account may not read is one it is unlikely to
-            be able to drop, and finding that out before anything is dropped is
-            what keeps a refusal from becoming a half-finished drop.
-    """
-    present = _present_tables(engine)
-    version = _stamp(engine)
-    with engine.connect() as connection:
-        tables = tuple(
-            TableContents(name=table.name, rows=_row_count(connection, table)) for table in present
-        )
-        unfinished = _unfinished_runs(connection, present, version)
-    return IndexContents(tables=tables, schema_version=version, unfinished_runs=unfinished)
-
-
 def _bound_the_lock_wait(connection: sqlalchemy.Connection) -> None:
-    """Stop the drop from waiting forever on a lock somebody else holds.
+    """Stop a statement from waiting forever on a lock somebody else holds.
 
     ``SET LOCAL`` lasts exactly as long as the transaction it is issued in, so
-    the bound applies to this drop and to no other statement the connection
-    later carries.
+    the bound applies to the work this transaction carries and to no other
+    statement the connection is later handed.
 
     SQLite is left alone: its busy timeout is applied to every connection when
     the engine is built, and it bounds the same wait for the same reason.
 
     Parameters:
-        connection: The connection the drop runs on, inside its transaction.
+        connection: The connection the work runs on, inside its transaction.
     """
     if connection.dialect.name != _POSTGRES_DIALECT:
         return
@@ -279,33 +405,113 @@ def _bound_the_lock_wait(connection: sqlalchemy.Connection) -> None:
     connection.exec_driver_sql(f"SET LOCAL lock_timeout = '{int(DROP_LOCK_TIMEOUT_MS)}ms'")
 
 
-def drop_index_tables(engine: Engine) -> tuple[str, ...]:
-    """Remove every table of the results index from a database, and nothing else.
+def _open_one_transaction(connection: sqlalchemy.Connection) -> None:
+    """Make everything that follows one transaction, on the SQLite driver too.
 
-    Idempotent: a database holding none of these tables is not written at all,
+    SQLite's own DDL is transactional; its Python driver is what is not.  The
+    driver opens a transaction when it sees an INSERT, UPDATE or DELETE and for
+    nothing else, so a run of ``DROP TABLE`` statements is issued in autocommit
+    and each one stands on its own the moment it returns.  Issuing ``BEGIN``
+    here is what puts them inside a transaction that a failure or an interrupt
+    takes back whole.
+
+    ``IMMEDIATE`` rather than a plain begin, so the write lock is taken at the
+    start: a drop that would have to give way to another writer gives way before
+    it has dropped anything, and the busy timeout bounds that wait exactly as
+    the lock timeout bounds PostgreSQL's.
+
+    Parameters:
+        connection: The connection the drop runs on, at the start of its
+            transaction and before any statement of its own.
+    """
+    if connection.dialect.name != _SQLITE_DIALECT:
+        return
+    connection.exec_driver_sql('BEGIN IMMEDIATE')
+
+
+def index_contents(engine: Engine) -> IndexContents:
+    """Return what of SpinDoctor's own index a database holds, and where.
+
+    Parameters:
+        engine: An open database, from
+            :func:`~spindoctor.results_index.engine.open_database`, since one
+            holding a version no opener accepts is a database this is asked
+            about rather than one it is not.
+
+    Returns:
+        The schema the index's own stamp proves it lives in, the tables of that
+        schema that are present with their row counts, the stamp, and how many
+        ingest runs are outstanding -- or, for a database that proves nothing,
+        a report naming whatever tables of these names it does hold.
+
+    Raises:
+        sqlalchemy.exc.SQLAlchemyError: If a table that is there cannot be
+            counted.  A table this account may not read is one it is unlikely to
+            be able to drop, and finding that out before anything is dropped is
+            what keeps a refusal from becoming a half-finished drop.
+    """
+    with engine.begin() as connection:
+        _bound_the_lock_wait(connection)
+        schema = _index_schema(connection)
+        if schema is None:
+            return IndexContents(
+                schema=None,
+                tables=(),
+                schema_version=None,
+                unfinished_runs=None,
+                unproven=_unproven_tables(connection),
+            )
+        bound = _tables_of(schema)
+        present = _present_tables(connection, schema)
+        version = _stamp(connection, bound[SCHEMA_META.name])
+        tables = tuple(
+            TableContents(name=table.name, rows=_row_count(connection, table)) for table in present
+        )
+        unfinished = _unfinished_runs(connection, present, version, bound[INGEST_RUNS.name])
+    return IndexContents(
+        schema=schema,
+        tables=tables,
+        schema_version=version,
+        unfinished_runs=unfinished,
+        unproven=(),
+    )
+
+
+def drop_index_tables(engine: Engine, contents: IndexContents) -> tuple[str, ...]:
+    """Remove the tables a reading of this database found, and nothing else.
+
+    The reading is passed in rather than taken again, so that the tables which
+    go are the tables somebody was shown and agreed to.  Between one reading and
+    another the answer is free to change -- a creating open in another process
+    puts them back -- and a destructive command must not act on a list nobody
+    saw.
+
+    Idempotent: contents holding no table of the index are not written at all,
     and the empty answer is what says so.
 
     Parameters:
         engine: An open database, from
             :func:`~spindoctor.results_index.engine.open_database`.
+        contents: What :func:`index_contents` read from that database, naming
+            the schema to drop from and the tables to drop.
 
     Returns:
         The names of the tables that were dropped, in the order they went, and
-        an empty tuple when there was nothing of the index there.
+        an empty tuple when there was nothing of the index to drop.
 
     Raises:
         sqlalchemy.exc.SQLAlchemyError: If a table cannot be dropped, including
             because another session holds a lock on it for longer than
-            :data:`DROP_LOCK_TIMEOUT_MS`.  On PostgreSQL the transaction rolls
-            back and the database is left exactly as it was; on SQLite the drops
-            already committed stand, which the order they are issued in is what
-            makes safe.
+            :data:`DROP_LOCK_TIMEOUT_MS`.  The transaction rolls back on both
+            backends and the database is left exactly as it was.
     """
-    present = _present_tables(engine)
-    if not present:
+    if contents.schema is None or not contents.tables:
         return ()
+    bound = _tables_of(contents.schema)
+    going = tuple(bound[table.name] for table in contents.tables)
     with engine.begin() as connection:
+        _open_one_transaction(connection)
         _bound_the_lock_wait(connection)
-        for table in present:
+        for table in going:
             connection.execute(sqlalchemy.schema.DropTable(table))
-    return tuple(table.name for table in present)
+    return tuple(table.name for table in going)

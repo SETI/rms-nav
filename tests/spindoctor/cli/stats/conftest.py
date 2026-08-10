@@ -22,6 +22,7 @@ import pdslogger
 import pytest
 import sqlalchemy
 from tests.spindoctor.results_index.conftest import (
+    postgres_decoy_schema,
     postgres_schema,
     postgres_server_url,
     postgres_url,
@@ -42,7 +43,7 @@ from spindoctor.results_index import INGEST_RUNS, normalize_root_url, open_index
 # The statistics postgres tier runs against a schema of its own, exactly as the
 # results-index tier does; re-exporting rather than restating keeps one
 # definition of how that schema is created and dropped.
-__all__ = ['postgres_schema', 'postgres_server_url', 'postgres_url']
+__all__ = ['postgres_decoy_schema', 'postgres_schema', 'postgres_server_url', 'postgres_url']
 
 DATA_DIR = Path(__file__).resolve().parent / 'data'
 """Directory holding the fixture results tree and the frozen report output."""

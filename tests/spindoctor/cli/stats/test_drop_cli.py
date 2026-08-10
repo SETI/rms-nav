@@ -11,6 +11,7 @@ statement about them.
 """
 
 import io
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -18,11 +19,13 @@ import pdslogger
 import pytest
 import sqlalchemy
 
+from spindoctor.cli.stats.drop import _because
 from spindoctor.cli.stats.report import main_report
 from spindoctor.results_index import IMAGES, SCHEMA_VERSION, index_table_names, read_result_stubs
+from spindoctor.results_index import engine as engine_module
 
 from .conftest import index_url, ingest_tree, metadata_document, rows_of, write_metadata
-from .ingest_driver_helpers import run_driver
+from .ingest_driver_helpers import process, run_driver
 
 STUB = 'VOL/N1454725799_1_CALIB'
 """The stub of the document the trees below hold."""
@@ -41,6 +44,34 @@ CREDENTIALED_URL = f'postgresql+psycopg://ad@min:{SECRET}@127.0.0.1:1/spindoctor
 Port 1 refuses at once, so the refusal this drives is the connection failing
 rather than a name lookup waiting.
 """
+
+
+class _CodedError(Exception):
+    """A driver exception carrying the code a server would have returned.
+
+    Parameters:
+        sqlstate: The five-character code.
+    """
+
+    def __init__(self, sqlstate: str) -> None:
+        super().__init__(f'the server said {sqlstate}')
+        self.sqlstate = sqlstate
+
+
+def _failure_with(sqlstate: str) -> sqlalchemy.exc.SQLAlchemyError:
+    """Return the failure SQLAlchemy raises around a driver exception of one code.
+
+    Every one of these is reachable from a real server, and two of them are
+    reached in the postgres tier; asking each of them here is what keeps the
+    table of causes from losing a row unnoticed.
+
+    Parameters:
+        sqlstate: The five-character code the server returns.
+
+    Returns:
+        The wrapper, carrying the driver exception as its ``orig``.
+    """
+    return sqlalchemy.exc.OperationalError('DROP TABLE images', {}, _CodedError(sqlstate))
 
 
 def _tree_with_an_index(tmp_path: Path, logger: pdslogger.PdsLogger) -> str:
@@ -262,7 +293,7 @@ def test_the_question_names_the_index_it_is_about(
     url = _tree_with_an_index(tmp_path, quiet_logger)
     _answering(monkeypatch, 'n\n')
     _drop(url, monkeypatch, tmp_path)
-    assert f'from {url}?' in capsys.readouterr().out
+    assert f'from {url}, schema ' in capsys.readouterr().out
 
 
 def test_the_account_of_each_table_is_logged(
@@ -819,3 +850,719 @@ def test_a_rebuilt_index_carries_this_schema_version(
     finally:
         engine.dispose()
     assert stamped == SCHEMA_VERSION
+
+
+# ---------------------------------------------------------------------------
+# A database that does not prove it holds an index of ours
+# ---------------------------------------------------------------------------
+
+
+def _database_holding(tmp_path: Path, *statements: str) -> str:
+    """Build a database that SpinDoctor did not create, and return its URL.
+
+    Parameters:
+        tmp_path: Directory the database file is written into.
+        statements: The statements that create what is in it.
+
+    Returns:
+        The database URL.
+    """
+    url = index_url(tmp_path / 'theirs.sqlite3')
+    engine = sqlalchemy.create_engine(url)
+    try:
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.exec_driver_sql(statement)
+    finally:
+        engine.dispose()
+    return url
+
+
+def test_a_stranger_s_table_of_one_of_our_names_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A URL naming something that is not a SpinDoctor index is refused.
+
+    Parameters:
+        tmp_path: Directory the database file is written into.
+        monkeypatch: Fixture the driver is run through.
+    """
+    url = _database_holding(
+        tmp_path,
+        'CREATE TABLE images (id INTEGER PRIMARY KEY, caption TEXT)',
+        "INSERT INTO images (caption) VALUES ('somebody elses cat'), ('their dog')",
+        'CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT)',
+    )
+    status, _written = _drop(url, monkeypatch, tmp_path, '--yes')
+    assert status == 1
+
+
+def test_such_a_refusal_names_the_tables_it_would_not_account_for(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An operator needs to know which tables stopped it, to decide about them.
+
+    Parameters:
+        tmp_path: Directory the database file is written into.
+        monkeypatch: Fixture the driver is run through.
+    """
+    url = _database_holding(tmp_path, 'CREATE TABLE images (id INTEGER PRIMARY KEY)')
+    _status, written = _drop(url, monkeypatch, tmp_path, '--yes')
+    assert any('images' in line and 'schema_meta' in line for line in written)
+
+
+def test_such_a_database_keeps_every_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The finding itself: two rows of somebody else's data, destroyed at exit 0.
+
+    Parameters:
+        tmp_path: Directory the database file is written into.
+        monkeypatch: Fixture the driver is run through.
+    """
+    url = _database_holding(
+        tmp_path,
+        'CREATE TABLE images (id INTEGER PRIMARY KEY, caption TEXT)',
+        "INSERT INTO images (caption) VALUES ('somebody elses cat'), ('their dog')",
+        'CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT)',
+    )
+    _drop(url, monkeypatch, tmp_path, '--yes')
+    assert _tables(url) == ['customers', 'images']
+
+
+def test_such_a_database_keeps_the_rows_of_that_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Counted, because a table recreated empty passes a test that counts tables.
+
+    Parameters:
+        tmp_path: Directory the database file is written into.
+        monkeypatch: Fixture the driver is run through.
+    """
+    url = _database_holding(
+        tmp_path,
+        'CREATE TABLE images (id INTEGER PRIMARY KEY, caption TEXT)',
+        "INSERT INTO images (caption) VALUES ('somebody elses cat'), ('their dog')",
+    )
+    _drop(url, monkeypatch, tmp_path, '--yes')
+    engine = sqlalchemy.create_engine(url)
+    try:
+        with engine.connect() as connection:
+            remaining: Any = connection.exec_driver_sql('SELECT count(*) FROM images').scalar()
+    finally:
+        engine.dispose()
+    assert remaining == 2
+
+
+def test_such_a_database_is_never_called_the_results_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The account said "the SpinDoctor results index tables" over a stranger's rows.
+
+    Parameters:
+        tmp_path: Directory the database file is written into.
+        monkeypatch: Fixture the driver is run through.
+    """
+    url = _database_holding(tmp_path, 'CREATE TABLE images (id INTEGER PRIMARY KEY)')
+    _status, written = _drop(url, monkeypatch, tmp_path, '--yes')
+    assert not any(
+        line.startswith('About to drop the SpinDoctor results index') for line in written
+    )
+
+
+def test_nobody_is_asked_about_a_database_that_proves_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """There is no question to ask: the answer does not turn on consent.
+
+    Standard input holds a yes, which would drop an index that was there.
+
+    Parameters:
+        tmp_path: Directory the database file is written into.
+        monkeypatch: Fixture the driver and standard input are run through.
+    """
+    url = _database_holding(tmp_path, 'CREATE TABLE images (id INTEGER PRIMARY KEY)')
+    _answering(monkeypatch, 'yes\n')
+    _drop(url, monkeypatch, tmp_path)
+    assert _tables(url) == ['images']
+
+
+# ---------------------------------------------------------------------------
+# What the messages name
+# ---------------------------------------------------------------------------
+
+
+def test_the_refusal_for_want_of_an_answer_names_the_index(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every message of a destructive command says which database it is about.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver and standard input are run through.
+    """
+    url = _tree_with_an_index(tmp_path, quiet_logger)
+    _answering(monkeypatch, '')
+    _status, written = _drop(url, monkeypatch, tmp_path)
+    assert any('Nothing was dropped from ' in line and url in line for line in written)
+
+
+def test_the_refusal_of_an_answer_that_is_not_yes_names_the_index(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same, for the refusal a person makes by typing one.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver and standard input are run through.
+    """
+    url = _tree_with_an_index(tmp_path, quiet_logger)
+    _answering(monkeypatch, 'n\n')
+    _status, written = _drop(url, monkeypatch, tmp_path)
+    assert any('rather than yes' in line and url in line for line in written)
+
+
+def test_the_reading_is_announced_before_it_is_done(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Counting the rows of a large index is a scan per table, and looks like a hang.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver is run through.
+    """
+    url = _tree_with_an_index(tmp_path, quiet_logger)
+    _status, written = _drop(url, monkeypatch, tmp_path, '--yes')
+    assert any(line.startswith('Reading what ') for line in written)
+
+
+def test_the_summary_names_the_schema_the_tables_are_in(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One URL reaches several schemas of a server, and only one holds the index.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver is run through.
+    """
+    url = _tree_with_an_index(tmp_path, quiet_logger)
+    _status, written = _drop(url, monkeypatch, tmp_path, '--yes')
+    about = [line for line in written if line.startswith('About to drop ')]
+    assert about[0].endswith(', schema main')
+
+
+# ---------------------------------------------------------------------------
+# Ctrl-C at the question
+# ---------------------------------------------------------------------------
+
+
+def _interrupting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the confirmation raise ``KeyboardInterrupt``, as Ctrl-C does.
+
+    Parameters:
+        monkeypatch: Fixture the built-in reader is replaced through.
+    """
+
+    def interrupted(prompt: str = '') -> str:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr('builtins.input', interrupted)
+
+
+def test_ctrl_c_at_the_question_leaves_the_index_alone(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal a person makes with a key rather than a word.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver and the reader are replaced through.
+    """
+    url = _tree_with_an_index(tmp_path, quiet_logger)
+    _interrupting(monkeypatch)
+    _drop(url, monkeypatch, tmp_path)
+    assert _tables(url) == sorted(index_table_names())
+
+
+def test_ctrl_c_at_the_question_exits_nonzero(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A script must not read success from a drop nobody agreed to.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver and the reader are replaced through.
+    """
+    url = _tree_with_an_index(tmp_path, quiet_logger)
+    _interrupting(monkeypatch)
+    status, _written = _drop(url, monkeypatch, tmp_path)
+    assert status == 1
+
+
+def test_ctrl_c_at_the_question_says_so_rather_than_raising(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every other refusal prints a line, and this one is not a traceback either.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver and the reader are replaced through.
+    """
+    url = _tree_with_an_index(tmp_path, quiet_logger)
+    _interrupting(monkeypatch)
+    _status, written = _drop(url, monkeypatch, tmp_path)
+    assert any('the question was interrupted' in line for line in written)
+
+
+# ---------------------------------------------------------------------------
+# The option a drop has nothing to do with
+# ---------------------------------------------------------------------------
+
+
+def test_a_drop_refuses_a_results_root_that_was_typed(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A drop reads no tree, so a root named on the command line meant something else.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver is run through.
+    """
+    url = _tree_with_an_index(tmp_path, quiet_logger)
+    _status, written = _drop(
+        url, monkeypatch, tmp_path, '--nav-results-root', str(tmp_path / 'results')
+    )
+    assert any('--nav-results-root' in line for line in written)
+
+
+def test_such_a_command_line_leaves_the_index_alone(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Refused before the open, so nothing is opened and nothing goes.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver is run through.
+    """
+    url = _tree_with_an_index(tmp_path, quiet_logger)
+    _drop(url, monkeypatch, tmp_path, '--yes', '--nav-results-root', str(tmp_path / 'results'))
+    assert _tables(url) == sorted(index_table_names())
+
+
+def test_a_results_root_from_the_environment_does_not_refuse_a_drop(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A machine's standing setting is not a request, so it is not a conflict.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver and the environment are set through.
+    """
+    url = _tree_with_an_index(tmp_path, quiet_logger)
+    monkeypatch.setenv('NAV_RESULTS_ROOT', str(tmp_path / 'results'))
+    status, _written = _drop(url, monkeypatch, tmp_path, '--yes')
+    assert status == 0
+
+
+# ---------------------------------------------------------------------------
+# What a failure is blamed on
+# ---------------------------------------------------------------------------
+
+
+def test_a_live_writer_is_not_reported_as_a_filesystem_that_cannot_lock(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A running ingest is the ordinary cause, and rebuilding a deployment is not the fix.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver and the busy timeout are set through.
+    """
+    url = _tree_with_an_index(tmp_path, quiet_logger)
+    monkeypatch.setattr(engine_module, 'SQLITE_BUSY_TIMEOUT_MS', 50)
+    holder = sqlite3.connect(tmp_path / 'index.sqlite3')
+    try:
+        holder.execute('BEGIN IMMEDIATE')
+        _status, written = _drop(url, monkeypatch, tmp_path, '--yes')
+    finally:
+        holder.rollback()
+        holder.close()
+    assert any('Another process is holding it' in line for line in written)
+
+
+def test_a_live_writer_leaves_the_index_alone(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bound is what makes it a refusal rather than a wait.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver and the busy timeout are set through.
+    """
+    url = _tree_with_an_index(tmp_path, quiet_logger)
+    monkeypatch.setattr(engine_module, 'SQLITE_BUSY_TIMEOUT_MS', 50)
+    holder = sqlite3.connect(tmp_path / 'index.sqlite3')
+    try:
+        holder.execute('BEGIN IMMEDIATE')
+        _drop(url, monkeypatch, tmp_path, '--yes')
+    finally:
+        holder.rollback()
+        holder.close()
+    assert _tables(url) == sorted(index_table_names())
+
+
+def test_an_unrecognized_failure_gets_no_cause_invented_for_it() -> None:
+    """A code this does not know is reported as the database worded it, and no more.
+
+    Parameters:
+        None.
+    """
+    assert _because(sqlalchemy.exc.SQLAlchemyError('something nobody enumerated')) == ''
+
+
+@pytest.mark.parametrize(
+    ('sqlstate', 'names'),
+    [
+        ('55P03', 'lock'),
+        ('2BP01', 'depends on'),
+        ('42501', 'does not own'),
+    ],
+    ids=['a-lock', 'a-dependent-object', 'a-privilege'],
+)
+def test_each_failure_a_server_reports_is_named_as_itself(sqlstate: str, names: str) -> None:
+    """Blaming a lock for a dependent view sends an operator hunting a session.
+
+    Parameters:
+        sqlstate: The five-character code the server returns.
+        names: What the message for it has to say.
+    """
+    assert names in _because(_failure_with(sqlstate))
+
+
+@pytest.mark.parametrize(
+    'sqlstate',
+    ['2BP01', '42501'],
+    ids=['a-dependent-object', 'a-privilege'],
+)
+def test_a_failure_that_is_not_a_lock_is_not_blamed_on_one(sqlstate: str) -> None:
+    """Which is what every drop failure was blamed on.
+
+    Parameters:
+        sqlstate: The five-character code the server returns.
+    """
+    assert 'Another session' not in _because(_failure_with(sqlstate))
+
+
+# ---------------------------------------------------------------------------
+# The five programs that open an index
+# ---------------------------------------------------------------------------
+
+
+def test_neither_state_lets_a_cloud_task_worker_ingest_a_share(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The worker opens without creating, so both states are the same refusal.
+
+    Parameters:
+        tmp_path: Directory the trees and the indexes live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver is run through.
+    """
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    outcomes = []
+    for url in _dropped_and_never_built(tmp_path, quiet_logger, monkeypatch):
+        _retry, result = process(
+            {'root_url': str(tmp_path / 'results'), 'files': [], 'run_id': 1}, url
+        )
+        outcomes.append(result['status_error'])
+    assert outcomes == ['index_unopenable', 'index_unopenable']
+
+
+def test_neither_state_lets_a_fan_out_be_completed(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Completion opens without creating too, so a wrong URL is not a first run.
+
+    Parameters:
+        tmp_path: Directory the trees and the indexes live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver is run through.
+    """
+    events = tmp_path / 'events.log'
+    events.write_text('', encoding='utf-8')
+    statuses = [
+        run_driver(
+            [
+                '--results-db',
+                url,
+                '--nav-results-root',
+                str(tmp_path / 'results'),
+                '--complete-cloud-tasks-file',
+                str(events),
+            ],
+            monkeypatch,
+            tmp_path,
+        )[0]
+        for url in _dropped_and_never_built(tmp_path, quiet_logger, monkeypatch)
+    ]
+    assert statuses == [1, 1]
+
+
+def test_both_states_are_rebuilt_by_the_ingest_that_creates(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one opener that creates treats them alike as well: it builds one.
+
+    Parameters:
+        tmp_path: Directory the trees and the indexes live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver is run through.
+    """
+    root = tmp_path / 'results'
+    statuses = [
+        run_driver(
+            ['--results-db', url, '--nav-results-root', root.as_posix()], monkeypatch, tmp_path
+        )[0]
+        for url in _dropped_and_never_built(tmp_path, quiet_logger, monkeypatch)
+    ]
+    assert statuses == [0, 0]
+
+
+def test_neither_state_lets_a_drop_find_anything_to_drop(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fifth opener is the drop's own, and it answers the two the same way.
+
+    An index that was dropped is a database holding none of these tables; one
+    that was never built is a SQLite path that is not there, which is refused on
+    both backends alike.  Both leave nothing behind and neither creates one.
+
+    Parameters:
+        tmp_path: Directory the trees and the indexes live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver is run through.
+    """
+    dropped, never_built = _dropped_and_never_built(tmp_path, quiet_logger, monkeypatch)
+    assert _drop(dropped, monkeypatch, tmp_path, '--yes')[0] == 0
+    assert not Path(never_built.removeprefix('sqlite:///')).exists()
+
+
+# ---------------------------------------------------------------------------
+# The same command line against a server
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.postgres
+def test_a_server_database_holding_no_index_exits_zero(
+    postgres_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same status a SQLite database holding none of them exits with.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+        tmp_path: Directory the run's log files are written under.
+        monkeypatch: Fixture the driver is run through.
+    """
+    status, _written = _drop(postgres_url, monkeypatch, tmp_path, '--yes')
+    assert status == 0
+
+
+@pytest.mark.postgres
+def test_a_server_database_that_is_not_there_is_refused(
+    postgres_server_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """As a SQLite path that is not there is: one flag, one answer, two backends.
+
+    Parameters:
+        postgres_server_url: URL of the server, unscoped.
+        tmp_path: Directory the run's log files are written under.
+        monkeypatch: Fixture the driver is run through.
+    """
+    absent = sqlalchemy.engine.make_url(postgres_server_url).set(database='ri_no_such_database')
+    status, _written = _drop(
+        absent.render_as_string(hide_password=False), monkeypatch, tmp_path, '--yes'
+    )
+    assert status == 1
+
+
+@pytest.mark.postgres
+def test_a_server_database_that_is_not_there_is_not_called_a_permissions_problem(
+    postgres_server_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It was reported as tables that could not be read, over a database never reached.
+
+    Parameters:
+        postgres_server_url: URL of the server, unscoped.
+        tmp_path: Directory the run's log files are written under.
+        monkeypatch: Fixture the driver is run through.
+    """
+    absent = sqlalchemy.engine.make_url(postgres_server_url).set(database='ri_no_such_database')
+    _status, written = _drop(
+        absent.render_as_string(hide_password=False), monkeypatch, tmp_path, '--yes'
+    )
+    said = '\n'.join(written)
+    assert 'may read every table' not in said
+
+
+@pytest.mark.postgres
+def test_a_server_database_that_is_not_there_says_it_could_not_be_opened(
+    postgres_server_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Which is what happened, and what names the thing to fix.
+
+    Parameters:
+        postgres_server_url: URL of the server, unscoped.
+        tmp_path: Directory the run's log files are written under.
+        monkeypatch: Fixture the driver is run through.
+    """
+    absent = sqlalchemy.engine.make_url(postgres_server_url).set(database='ri_no_such_database')
+    _status, written = _drop(
+        absent.render_as_string(hide_password=False), monkeypatch, tmp_path, '--yes'
+    )
+    assert any('Cannot open the database' in line for line in written)
+
+
+@pytest.mark.postgres
+def test_a_dependent_view_is_not_reported_as_a_lock(
+    postgres_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, quiet_logger: Any
+) -> None:
+    """A view over ``images`` is a drop failure nobody's session is holding.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+        tmp_path: Directory the run's log files are written under.
+        monkeypatch: Fixture the driver is run through.
+        quiet_logger: Logger the ingest reports through, unused here.
+    """
+    engine = sqlalchemy.create_engine(postgres_url)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                'CREATE TABLE schema_meta (singleton int primary key, schema_version int, '
+                'created_utc text)'
+            )
+            connection.exec_driver_sql('INSERT INTO schema_meta VALUES (1, 6, now()::text)')
+            connection.exec_driver_sql('CREATE TABLE images (root_url text)')
+            connection.exec_driver_sql('CREATE VIEW their_view AS SELECT * FROM images')
+    finally:
+        engine.dispose()
+    _status, written = _drop(postgres_url, monkeypatch, tmp_path, '--yes')
+    said = '\n'.join(written)
+    assert 'Another session' not in said
+
+
+@pytest.mark.postgres
+def test_a_dependent_view_is_reported_as_what_it_is(
+    postgres_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """So that the next step is to look at the view rather than at pg_stat_activity.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+        tmp_path: Directory the run's log files are written under.
+        monkeypatch: Fixture the driver is run through.
+    """
+    engine = sqlalchemy.create_engine(postgres_url)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                'CREATE TABLE schema_meta (singleton int primary key, schema_version int, '
+                'created_utc text)'
+            )
+            connection.exec_driver_sql('INSERT INTO schema_meta VALUES (1, 6, now()::text)')
+            connection.exec_driver_sql('CREATE TABLE images (root_url text)')
+            connection.exec_driver_sql('CREATE VIEW their_view AS SELECT * FROM images')
+    finally:
+        engine.dispose()
+    _status, written = _drop(postgres_url, monkeypatch, tmp_path, '--yes')
+    assert any('depends on one of these tables' in line for line in written)
+
+
+@pytest.mark.postgres
+def test_a_drop_a_dependent_view_refused_leaves_every_table(
+    postgres_url: str,
+    postgres_server_url: str,
+    postgres_schema: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The transaction takes them back, so a refused drop costs nothing.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+        postgres_server_url: URL of the server that schema lives on.
+        postgres_schema: Name of that schema.
+        tmp_path: Directory the run's log files are written under.
+        monkeypatch: Fixture the driver is run through.
+    """
+    engine = sqlalchemy.create_engine(postgres_url)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                'CREATE TABLE schema_meta (singleton int primary key, schema_version int, '
+                'created_utc text)'
+            )
+            connection.exec_driver_sql('INSERT INTO schema_meta VALUES (1, 6, now()::text)')
+            connection.exec_driver_sql('CREATE TABLE images (root_url text)')
+            connection.exec_driver_sql('CREATE VIEW their_view AS SELECT * FROM images')
+    finally:
+        engine.dispose()
+    _drop(postgres_url, monkeypatch, tmp_path, '--yes')
+    remaining = sqlalchemy.create_engine(postgres_server_url)
+    try:
+        held = sorted(sqlalchemy.inspect(remaining).get_table_names(schema=postgres_schema))
+    finally:
+        remaining.dispose()
+    assert held == ['images', 'schema_meta']
+
+
+def test_the_tables_dropped_are_the_tables_the_question_named(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second reading between the question and the drop is a different list.
+
+    The index here is missing one of its tables when the question is put, and
+    that table is put back while the answer is being typed.  What goes is what
+    the person was shown.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the driver and the reader are replaced through.
+    """
+    url = _tree_with_an_index(tmp_path, quiet_logger)
+    _run_sql(url, 'DROP TABLE ingest_runs')
+
+    def answering_and_meddling(prompt: str = '') -> str:
+        _run_sql(url, 'CREATE TABLE ingest_runs (run_id INTEGER PRIMARY KEY)')
+        return 'yes'
+
+    monkeypatch.setattr('builtins.input', answering_and_meddling)
+    _drop(url, monkeypatch, tmp_path)
+    assert _tables(url) == ['ingest_runs']
+
+
+def _run_sql(url: str, *statements: str) -> None:
+    """Run statements against a database from outside the command under test.
+
+    Parameters:
+        url: The database URL.
+        statements: The statements to run, in order.
+    """
+    engine = sqlalchemy.create_engine(url)
+    try:
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.exec_driver_sql(statement)
+    finally:
+        engine.dispose()

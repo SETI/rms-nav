@@ -24,7 +24,6 @@ Public API:
     UNKNOWN_STATUS   -- the status a document that named no outcome is recorded with
     open_index       -- the opener every reader and writer goes through
     open_database    -- the opener the drop uses, which stops before the gate
-    stamped_version  -- the schema version a database is stamped with
     masked_url       -- a connection URL with any password in it hidden
     TableContents    -- one table of the index, and how many rows it holds
     IndexContents    -- what of the index a database holds, before a drop
@@ -50,7 +49,7 @@ from spindoctor.results_index.drop import (
     index_contents,
     index_table_names,
 )
-from spindoctor.results_index.engine import open_database, open_index, stamped_version
+from spindoctor.results_index.engine import open_database, open_index
 from spindoctor.results_index.masking import masked_url
 from spindoctor.results_index.roots import (
     NewestPass,
@@ -106,5 +105,4 @@ __all__ = [
     'read_result_stubs',
     'reporting_a_failed_read',
     'require_ingested_roots',
-    'stamped_version',
 ]

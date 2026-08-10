@@ -19,7 +19,9 @@ stops there, walking no tree.  It is what makes emptying an index and starting
 over something an operator can reach without hand-written SQL, on a shared
 PostgreSQL server as well as on a file -- which the schema version gate depends
 on, since a version bump is deliberately not migrated and rebuilding is the
-whole of the remedy.
+whole of the remedy.  It drops from one schema, the one this database's own
+stamp table was found in, and only after finding that stamp: a table called
+``images`` is not evidence of anything.
 
 One pass may also be spread over a queue of workers.  ``--output-cloud-tasks-file``
 lists each root once, removes the rows whose documents have left the tree, and
@@ -131,10 +133,13 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         default=False,
         help="""Remove the results index's own tables from the database
         --results-db names, and stop: no results root is read and no document is
-        ingested. Nothing else in that database is touched, and a database
-        holding none of those tables is left alone and said to be. Refused
-        together with --force and with either cloud-tasks mode, none of which
-        this does.""",
+        ingested. The tables go from the one schema this database's own
+        schema_meta stamp was found in, and nothing else in that schema, and no
+        other schema, is touched; a database holding none of those tables is
+        left alone and said to be, and one holding tables of those names that no
+        stamp of ours stands over is refused. Refused together with --force,
+        --nav-results-root and either cloud-tasks mode, none of which this
+        does.""",
     )
     drop_group.add_argument(
         '--yes',
@@ -399,6 +404,12 @@ def _mode_refusal(arguments: argparse.Namespace) -> str | None:
     every option describing an ingest is at odds with it rather than modifying
     it; and ``--yes`` answers a question only the drop asks.
 
+    ``--nav-results-root`` is refused only when it was typed.  The same root
+    reaches this program from the configuration and from the environment, where
+    it is a machine's standing setting rather than a request, and refusing a
+    drop because the machine has a results tree would refuse it nearly
+    everywhere.
+
     Parameters:
         arguments: The parsed command line.
 
@@ -416,6 +427,7 @@ def _mode_refusal(arguments: argparse.Namespace) -> str | None:
         name
         for name, given in (
             ('--force', arguments.force),
+            ('--nav-results-root', arguments.nav_results_roots is not None),
             ('--output-cloud-tasks-file', arguments.output_cloud_tasks_file is not None),
             ('--complete-cloud-tasks-file', arguments.complete_cloud_tasks_file is not None),
         )
@@ -453,9 +465,10 @@ def main() -> None:
             read, when a named root has no unfinished run, when its run never
             recorded what its listing found, or when its tasks did not account
             for exactly the files that listing found.  A drop exits 0 when the
-            tables went and 0 again when there were none to go, and 1 when the
-            database could not be opened or read, when a table would not drop,
-            or when whoever was asked said anything but yes.
+            tables went and 0 again when the database held none of them, and 1
+            when the database could not be opened or read, when it holds tables
+            of those names that nothing proves are the index's, when a table
+            would not drop, or when whoever was asked said anything but yes.
     """
     command_list = sys.argv[1:]
     arguments = parse_args(command_list)

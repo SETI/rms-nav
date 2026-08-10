@@ -169,6 +169,13 @@ at all. A scheduled invocation therefore reads the same status from the same
 tree every time, and a status of 1 always means something needs fixing rather
 than that a tree happens to hold no results.
 
+Under ``--drop-index`` the status says whether the index is gone: 0 when the
+tables went, and 0 again when the database held none of them, since an index
+that is already absent is the state the command was asked for. It is 1 when the
+database could not be opened or read, when the database holds tables of those
+names that nothing proves are the index's, when a table would not drop, and when
+whoever was asked answered anything but yes.
+
 The index is disposable, and there is no schema migration. It carries the column
 set version that wrote it, and opening one stamped with a different version
 fails naming both versions. The remedy is always the same -- empty the database
@@ -199,31 +206,73 @@ by pattern, and anything else in that database is left exactly as it was, which
 is what makes the command safe to point at an index sharing a PostgreSQL
 database with somebody else's tables.
 
+**It drops only from a database that proves it holds an index.** Those six are
+among the commonest table names there are, so a table called ``images`` is not
+evidence of anything and is never removed for its name alone. What is evidence
+is the index's own stamp: a ``schema_meta`` table carrying the columns
+SpinDoctor's stamp carries. A database with no such stamp is refused, exits 1,
+and has the tables that stopped it named -- because nothing distinguishes
+somebody else's ``images`` from what is left of an index whose stamp has gone,
+and a destructive command may not decide that on your behalf. Such tables are
+removed by hand, or with the SQLite file that holds them.
+
+**It drops from one schema: the one that stamp was found in.** A server resolves
+an unqualified table name through a search path that may cross several schemas,
+so the stamp is looked for once and every statement of the drop then names the
+schema it was found in. A table of one of these names in any other schema
+belongs to whoever put it there and is not touched. The schema is named in the
+confirmation and in the run log. On SQLite it is always ``main``, the one
+namespace a database file has.
+
 **It confirms first.** The run log lists the tables with their row counts and
-names the schema version, and the question -- which names the index, how many
-tables and rows go with it, and any ingest run that has not finished -- is put
-to the terminal. Anything but ``y`` or ``yes`` leaves the index alone and exits
-1. ``--yes`` drops without asking, for a run with nobody at the terminal -- and
-is required for one, because a standard input with nothing to read is treated as
-a refusal rather than as consent. Every message names the index URL with its
-password hidden.
+names the schema and the schema version, and the question -- which names the
+index, its schema, how many tables and rows go with it, and any ingest run that
+has not finished -- is written to standard output, which is where ``input``
+writes a prompt. The answer is read without regard to case or surrounding
+space, so ``y``, ``Y``, ``yes`` and ``YES`` all mean yes; anything else, Ctrl-C
+included, leaves the index alone and exits 1. ``--yes`` drops without asking,
+for a run with nobody at the terminal -- and is required for one, because a
+standard input with nothing to read is treated as a refusal rather than as
+consent. Every message names the index URL with its password hidden.
+
+**It does one thing, so it refuses to be asked for two.** ``--drop-index``
+together with ``--force``, ``--nav-results-root``, ``--output-cloud-tasks-file``
+or ``--complete-cloud-tasks-file`` is refused before anything is opened and
+exits 1, naming the option it will not combine with: a drop reads no document
+and walks no tree, so each of those was meant for a different command. A results
+root reaching the program from ``NAV_RESULTS_ROOT`` or from the configuration is
+a machine's standing setting rather than a request, and is simply unused.
+``--yes`` without ``--drop-index`` is refused for the same reason from the other
+side: it answers a question only the drop asks.
 
 **It works on the databases nothing else will open**, which is the point: an
-index stamped with a schema version this build does not read, or one an
-interrupted creation left holding part of a schema, is exactly what the drop is
-pointed at.
+index stamped with a schema version this build does not read, or one whose stamp
+holds something no version number could, is exactly what the drop is pointed at.
 
 **Dropping twice is not an error.** A database holding none of these tables is
 not written at all, and says so; an index that is already gone is the state the
-command was asked for, so it exits 0.
+command was asked for, so it exits 0. A database that is not there at all is a
+different answer: the server refuses a PostgreSQL database it does not have, and
+a SQLite path that is not there gets the same refusal rather than being created,
+so both exit 1 and neither leaves an empty database behind.
 
 **What is left behind is a database, not a hole.** Every consumer reads a
 dropped index exactly as it reads one nobody has ever ingested into -- "not
 ingested", with a message naming ``sd_stats_ingest`` -- and the next
 ``sd_stats_ingest`` builds it again from the metadata documents. On PostgreSQL
 the two states are literally the same database. On SQLite the file itself
-remains, empty; deleting the file is equivalent and is the one thing the drop
-deliberately does not do for you.
+remains, empty, and the drop deliberately does not delete it, so that one flag
+means one thing on both backends. Deleting the file instead removes the database
+rather than the index, which every consumer reads the same way but which a later
+``--drop-index`` refuses rather than reporting as nothing to do.
+
+**An interruption costs nothing.** The whole drop is one transaction on both
+backends: PostgreSQL rolls DDL back with everything else, and on SQLite -- whose
+driver would otherwise commit each ``DROP TABLE`` on its own -- the drop opens
+its transaction itself, which SQLite's own transactional DDL then honors. Ctrl-C
+partway through, a table that will not drop, a lost connection: each leaves the
+database exactly as it was, still readable by every consumer, and the drop is
+run again when the cause is dealt with.
 
 Two things it does **not** refuse:
 
@@ -235,13 +284,14 @@ Two things it does **not** refuse:
   gone; no reader is affected, because an unfinished run already reads as "not
   ingested" both before and after.
 * **Another process holding the database.** Neither backend can be asked that
-  question honestly, so the attempt is what answers it. On PostgreSQL the drop
-  waits a bounded time for each table's lock and then gives up, and its
-  transaction puts every table back; on SQLite the same bound is the busy
-  timeout, and the tables are dropped in an order whose every interruption
-  leaves a database with no version stamp -- which reads as "not ingested" and
-  which the next ingest rebuilds -- rather than a stamp standing over tables
-  that have gone.
+  question honestly, so the attempt is what answers it. Both the reading that
+  precedes the question and the drop itself wait a bounded time for each table
+  -- ``lock_timeout`` on PostgreSQL, the busy timeout on SQLite -- and then give
+  up, and what they give up on is put back whole by the transaction around it.
+  A failure names what the database said the cause was: a lock somebody holds, a
+  view or another object depending on one of these tables, an account that does
+  not own one of them, or, where the database gave no code this recognizes, its
+  own words with no cause invented for them.
 
 Ingesting over a queue of workers
 ---------------------------------

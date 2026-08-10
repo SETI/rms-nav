@@ -43,7 +43,7 @@ from sqlalchemy.engine import URL, Engine
 from spindoctor.results_index.masking import masked_url, without_credentials
 from spindoctor.results_index.schema import METADATA, SCHEMA_META, SCHEMA_VERSION
 
-__all__ = ['SQLITE_BUSY_TIMEOUT_MS', 'open_database', 'open_index', 'stamped_version']
+__all__ = ['SQLITE_BUSY_TIMEOUT_MS', 'open_database', 'open_index']
 
 SQLITE_BUSY_TIMEOUT_MS = 30000
 """How long a SQLite connection waits for a competing writer before failing.
@@ -68,11 +68,23 @@ _SQLITE_NOT_A_DATABASE = 'SQLITE_NOTADB'
 _SQLITE_CANNOT_OPEN = 'SQLITE_CANTOPEN'
 """Result code SQLite gives for a path it cannot open, whatever the reason."""
 
-_SQLITE_LOCK_REFUSED_PREFIXES = ('SQLITE_BUSY', 'SQLITE_IOERR')
-"""Prefixes of the result codes that say the write lock itself was not granted.
+_SQLITE_BUSY_PREFIX = 'SQLITE_BUSY'
+"""Prefix of the result codes that say somebody else holds the write lock.
 
-These are the codes a filesystem that cannot honor SQLite locking produces, and
-the only ones for which moving the index to a server is the remedy.
+A lock another process is holding is the ordinary reason: an ingest of this
+index is running, or a session was left open on it.  A filesystem that cannot
+honor SQLite locking produces this code too, which is why the remedy for that is
+offered second rather than asserted first -- the common cause is a live writer,
+and telling an operator to rebuild their deployment over one is telling them to
+solve the wrong problem.
+"""
+
+_SQLITE_LOCK_REFUSED_PREFIXES = ('SQLITE_IOERR',)
+"""Prefixes of the result codes a filesystem that cannot lock produces.
+
+Distinct from a busy lock: this is the layer under SQLite failing to carry the
+locking operation at all, which no waiting fixes and which moving the index to a
+server does.
 """
 
 _SUPPORTED_URL_FORMS = (
@@ -85,8 +97,8 @@ _SUPPORTED_URL_FORMS = (
 class _Access:
     """What a caller means to do with the database it is opening.
 
-    The three openers differ in four independent ways, and spelling each one out
-    is what keeps them from being inferred from one another.  A drop, in
+    The three accesses differ in four independent ways, and spelling each one
+    out is what keeps them from being inferred from one another.  A drop, in
     particular, writes a database it does not create and reads a version it does
     not require, which no combination of "create" and "read" describes.
 
@@ -110,6 +122,10 @@ class _Access:
             because the file itself may be perfectly writable.
         absent_remedy: What to do about a SQLite path that is not there.  Empty
             for an access that creates one, which is never refused for it.
+        opening: What this access is opening, as a failure names it.  A drop is
+            pointed at databases that are not indexes, which is the whole of why
+            it exists, so reporting that one of those "could not be opened as
+            the results index" would name a fault of its own making.
     """
 
     creating: bool
@@ -120,6 +136,7 @@ class _Access:
     write_remedy: str = ''
     directory_remedy: str = ''
     absent_remedy: str = ''
+    opening: str = 'the results index'
 
 
 _READING = _Access(
@@ -157,6 +174,7 @@ _DROPPING = _Access(
         'file, and removing it removes the index.'
     ),
     absent_remedy='Nothing was dropped.',
+    opening='the database',
 )
 """The drop: a database that is there is opened whatever it holds.
 
@@ -420,6 +438,15 @@ def _sqlite_probe_failure(
         )
     if error_name.startswith(_SQLITE_CANNOT_OPEN):
         return _IndexOpenError(_cannot_open_message(exc, url, path))
+    if error_name.startswith(_SQLITE_BUSY_PREFIX):
+        return _IndexOpenError(
+            f'{url}: could not take a SQLite write lock within {SQLITE_BUSY_TIMEOUT_MS} ms '
+            f'({exc.orig}). Another process is holding it: an ingest of this index, or a '
+            f'session left open on it. Wait for that to finish and run this again. If '
+            f'nothing else is using this file, then its filesystem is not honoring SQLite '
+            f'locking, and a postgresql+psycopg: URL is how one index is shared across '
+            f'machines.'
+        )
     if error_name.startswith(_SQLITE_LOCK_REFUSED_PREFIXES):
         return _IndexOpenError(
             f'{url}: could not take a SQLite write lock ({exc.orig}). A SQLite index '
@@ -519,11 +546,12 @@ def _create_schema(engine: Engine) -> None:
             )
 
 
-def stamped_version(engine: Engine) -> int | None:
+def _stamped_version(engine: Engine) -> int | None:
     """Return the schema version the database is stamped with.
 
-    Read by the version gate, and reported by the drop, which names the version
-    it is about to remove precisely because that version may not be this one.
+    Read by the version gate, and by nothing else: the drop reads its own,
+    because it reads one out of a named schema and tolerates a value that is not
+    a version, neither of which the gate does.
 
     Parameters:
         engine: The engine to inspect.
@@ -626,16 +654,26 @@ def _build_engine(url: str, access: _Access) -> Engine:
             sqlalchemy.event.listen(engine, 'connect', _sqlite_on_connect)
             _probe_sqlite_access(engine, safe_url, path, access)
         if not access.gated:
+            if backend != _SQLITE_BACKEND:
+                # Reading the stamp is what reaches the server for every other
+                # access.  An ungated open that returned here would hand back an
+                # engine that has never connected to anything, and a URL naming
+                # a database the server does not have, a password it refuses or
+                # a host nothing answers on would surface later as some
+                # statement failing rather than as this URL not opening -- which
+                # is the difference between a diagnosis and a symptom.
+                with engine.connect():
+                    pass
             return engine
         # The stamped version is checked before anything is written: creating
         # this version's tables inside a database stamped with another version
         # would leave a mixture no single version number describes.
-        stamped = stamped_version(engine)
+        stamped = _stamped_version(engine)
         if stamped is not None:
             _verify_schema_version(stamped, safe_url)
         if access.creating:
             _create_schema(engine)
-            stamped = stamped_version(engine)
+            stamped = _stamped_version(engine)
         # The gate a non-creating open is refused by.  Reached after the create
         # branch too, where it re-reads the row that branch has just written and
         # so cannot fail; no test can observe that call refusing anything.
@@ -677,7 +715,7 @@ def _translated(url: str, access: _Access) -> Engine:
         # What it does name is the piece of the URL it stopped on, which is why
         # the quoted message is cleaned as well as the URL beside it.
         raise ValueError(
-            f'{masked_url(url)}: could not open the results index '
+            f'{masked_url(url)}: could not open {access.opening} '
             f'({type(exc).__name__}: {without_credentials(str(exc), url)}).'
         ) from exc
 
@@ -752,7 +790,11 @@ def open_database(url: str) -> Engine:
 
     Nothing is read out of the database through this, so no column the version
     gate protects is ever touched.  What the caller may do with it is name
-    tables, and the only names it has come from the schema metadata.
+    tables, and the only names it has come from the schema metadata.  The
+    connection is taken all the same, and taken here: reading the stamp is what
+    reaches the server for the other opener, and an engine handed back without
+    it would turn a database that is not there, or a password the server
+    refuses, into whatever statement the caller ran first.
 
     Parameters:
         url: A ``sqlite:`` URL naming an existing local path, or a
