@@ -26,7 +26,7 @@ import sqlalchemy
 from pdslogger import PdsLogger
 
 from spindoctor.cli.stats.ingest.counts import IngestCounts
-from spindoctor.cli.stats.ingest_rows import ImageRows
+from spindoctor.cli.stats.ingest_rows import NOT_A_NAVIGATION_DOCUMENT, ImageRows
 from spindoctor.results_index import FAILED_FILES, FEATURE_SOURCES, IMAGES, TECHNIQUES
 
 __all__ = ['UNWRITABLE']
@@ -143,54 +143,99 @@ def _recorded_files(
     return recorded
 
 
-def _refusals_recorded(connection: sqlalchemy.Connection, root_url: str) -> int:
-    """How many files of one root the index holds a refusal for.
+def _refusals_the_tree_answers_for(connection: sqlalchemy.Connection, root_url: str) -> int:
+    """How many of one root's refusals an error filter reads out of the tree.
+
+    Three terms, because a row of ``failed_files`` is only a divergence when all
+    three hold:
+
+    - The row is this root's, since one index serves several roots.
+    - Its reason is the schema family
+      (:data:`~spindoctor.cli.stats.ingest_rows.NOT_A_NAVIGATION_DOCUMENT`),
+      which is a JSON object the tree reads a ``status`` out of and this index
+      records no status for.  The other reasons are a file no JSON object came
+      out of, and the tree excludes such a file from every error filter exactly
+      as this index answers none for it, so the two agree and the row is not a
+      gap.
+    - It carries a volume, because a selection asks about the volumes it
+      enumerated and :func:`~spindoctor.results_index.selection._stub_query`
+      restricts both arms by ``IN`` over them, which is false for NULL.  A
+      refusal under no volume is in no selection's answer either way.
 
     Parameters:
         connection: An open connection to the index.
         root_url: The normalized root to count under.
 
     Returns:
-        The rows ``failed_files`` holds for that root, whichever pass wrote
-        them.  That is a different number from what any one pass refused: an
-        unchanged file is skipped rather than read, so a pass after the one that
-        refused it refuses nothing and tallies nothing.
+        The rows meeting all three, whichever pass wrote them.  That is a
+        different number from what any one pass refused: an unchanged file is
+        skipped rather than read, so a pass after the one that refused it
+        refuses nothing and tallies nothing.
     """
     total = (
         sqlalchemy.select(sqlalchemy.func.count())
         .select_from(FAILED_FILES)
-        .where(FAILED_FILES.c.root_url == root_url)
+        .where(
+            FAILED_FILES.c.root_url == root_url,
+            FAILED_FILES.c.reason.startswith(NOT_A_NAVIGATION_DOCUMENT, autoescape=True),
+            FAILED_FILES.c.volume.is_not(None),
+        )
     )
     return int(connection.execute(total).scalar_one())
 
 
-def _report_refusals(engine: sqlalchemy.Engine, root_url: str, *, logger: PdsLogger) -> int:
-    """Report how many documents of one root the index answers nothing about.
+def _report_refusals(engine: sqlalchemy.Engine, root_url: str, *, logger: PdsLogger) -> None:
+    """Report how many of one root's documents the tree answers for and this does not.
 
     Said at the end of every pass over a root, and said as the root's own total
     rather than as this pass's, because the pass's tally is zero on every pass
-    after the one that read the file.  It is the size of the gap between what an
-    error filter answered from the index selects and what the same filter
-    answered from the tree selects, which is otherwise a number an operator can
+    after the one that read the file.  It is otherwise a number an operator can
     reach only by querying ``failed_files``.
+
+    What it counts is the refusals a selection can actually be short by, not
+    every refusal: a file no JSON object came out of is one the tree excludes
+    from every error filter too, and counting it would report a gap where the
+    two agree.  It is still the whole root's count, and a selection enumerates
+    volumes, so it bounds one selection's shortfall rather than measuring it.
+
+    The report is informational, so a failure of it costs the report and nothing
+    else.  It runs after the root's rows are written and its run is stamped, and
+    a database that went away between the two would otherwise take with it the
+    remaining roots of the run and the counts of the one just finished.
 
     Parameters:
         engine: The open index.
         root_url: The normalized root the pass covered.
         logger: Logger for the count.
-
-    Returns:
-        The rows ``failed_files`` holds for that root.
     """
-    with engine.connect() as connection:
-        refused = _refusals_recorded(connection, root_url)
+    try:
+        with engine.connect() as connection:
+            refused = _refusals_the_tree_answers_for(connection, root_url)
+    except sqlalchemy.exc.SQLAlchemyError as exc:
+        # The driver's own sentence rather than the exception's rendering, which
+        # wraps it in the statement, the bound parameters and a documentation
+        # link -- several lines of machinery around the one that says what
+        # happened.  Compared against None rather than taken for its truth:
+        # str(None) is 'None', which would read as a driver that said so.
+        driver_error = getattr(exc, 'orig', None)
+        detail = (str(driver_error).strip() if driver_error is not None else '') or str(exc)
+        logger.warning(
+            'Could not count the refused documents under %s (%s: %s). The pass itself is '
+            'unaffected; query failed_files for the count.',
+            root_url,
+            type(exc).__name__,
+            detail,
+        )
+        return
     logger.info(
-        'Refused documents the index now holds under %s, whichever pass recorded them: %d. '
-        'An error filter answered from this index selects none of their images.',
+        'Documents under %s an error filter reads from the results tree and not from this '
+        'index: %d, whichever pass recorded them. Each is a JSON object the ingest refused, '
+        'so this index records no status for it and no error filter answered here selects '
+        'its image. The count is the whole root, so it bounds rather than measures how '
+        'short a selection over some of its volumes comes.',
         root_url,
         refused,
     )
-    return refused
 
 
 def _write_image(connection: sqlalchemy.Connection, rows: ImageRows) -> None:

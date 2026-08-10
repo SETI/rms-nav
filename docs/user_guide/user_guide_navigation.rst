@@ -220,28 +220,35 @@ of them is a property of what an ingest pass could read and record rather than
 of the query.
 
 **A document the ingest refused answers no error filter.** A
-``*_metadata.json`` file the ingest could not read as a navigation document --
-one whose contents do not carry what the index requires (see
-:doc:`user_guide_statistics`), or a file that was never a navigation document at
-all -- is recorded as a file that exists and as nothing else. It is present in
-the tree and present for the presence filters, so ``--has-offset-file`` selects
-its image and ``--has-no-offset-file`` passes it over; and it records no
-outcome, so it satisfies neither ``--has-offset-error`` nor
-``--has-no-offset-error`` nor either SPICE variant. Reading the tree, that same
-file is read as it stands and its ``status`` answers every error filter. So an
-error filter answered from an index selects the accepted documents alone, and
-the images whose documents were refused are subtracted from the selection with
-nothing in the run saying so. The line ``*** Results index holds N offset
-metadata files under ...`` counts the refused files among the N, so a count in
-line with what the tree holds is no evidence that the selection matched. The
-gap is not necessarily small. A root every one of whose documents is refused
-answers every error filter with nothing at all while still reporting a plausible
-count of metadata files, so a selection that comes back short, or empty, is a
-reason to measure the gap rather than to conclude the root holds no such images.
-Pass ``--results-db none`` for a run that must ask the documents themselves.
+``*_metadata.json`` file the ingest could not read as a navigation document is
+recorded as a file that exists and as nothing else. It is present in the tree
+and present for the presence filters, so ``--has-offset-file`` selects its image
+and ``--has-no-offset-file`` passes it over; and it records no outcome, so it
+satisfies neither ``--has-offset-error`` nor ``--has-no-offset-error`` nor
+either SPICE variant.
 
-The size of the gap is the number of rows ``failed_files`` holds for the root,
-and it is answered at any time by one query:
+Whether that differs from the tree depends on why the file was refused. One that
+cannot be read, does not parse as JSON, or does not parse to a JSON object
+satisfies no error filter read from the tree either, as the paragraph on the
+results tree above says, so the two answer alike about it. One that parses to a
+JSON object the index will not take -- contents that do not carry what the index
+requires (see :doc:`user_guide_statistics`), or a JSON object that was never a
+navigation document at all -- is read from the tree as it stands, and its
+``status`` answers every error filter there. Those are the images an error
+filter answered from an index drops and the same filter answered from the tree
+keeps, with nothing in the run saying so. The line ``*** Results index holds N
+offset metadata files under ...`` counts every refused file among the N, so a
+count in line with what the tree holds is no evidence that the selection
+matched. The gap is not necessarily small. A root every one of whose documents
+is a JSON object the index will not take answers every error filter with nothing
+at all while still reporting a plausible count of metadata files, so a selection
+that comes back short, or empty, is a reason to measure the gap rather than to
+conclude the root holds no such images. Pass ``--results-db none`` for a run
+that must ask the documents themselves.
+
+The gap is the rows ``failed_files`` holds for the root whose ``reason`` begins
+``not a current-schema navigation document``; the other reasons are the files
+the tree excludes as well. One query separates them:
 
 .. code-block:: sql
 
@@ -250,15 +257,20 @@ and it is answered at any time by one query:
     GROUP BY reason;
 
 ``root_url`` is the results root as the ingest normalized it: absolute, with any
-trailing ``/`` removed. ``sd_stats_ingest`` reports the same total at the end of
-each root's pass, as the line ``Refused documents the index now holds under
-...``, which is the root's standing total rather than what that pass refused.
-The two differ, and the difference is what makes the tally in the pass's closing
-summary the wrong number to read here: an ingest is incremental, a refused file
-that has not changed since is skipped without being read, and a pass that skips
-it refuses nothing and tallies nothing. Run ``sd_stats_ingest --force`` over the
-root to have every document read again and the reasons tallied by that summary,
-which names one file per reason.
+trailing ``/`` removed. A selection also enumerates volumes, so add ``AND volume
+IN (...)`` to bound what one selection can be short by; a row whose ``volume`` is
+NULL sits above every volume an enumeration walks and can shorten nothing.
+
+``sd_stats_ingest`` reports that count, narrowed to the rows carrying a volume,
+at the end of each root's pass, as the line ``Documents under ... an error
+filter reads from the results tree and not from this index``, which is the
+root's standing total rather than what that pass refused. The two differ, and
+the difference is what makes the tally in the pass's closing summary the wrong
+number to read here: an ingest is incremental, a refused file that has not
+changed since is skipped without being read, and a pass that skips it refuses
+nothing and tallies nothing. Run ``sd_stats_ingest --force`` over the root to
+have every document read again and the reasons tallied by that summary, which
+names one file per reason.
 
 **A document whose top-level ``status`` is absent, empty, or not a string is
 read differently.** An index takes the recorded status from the top-level

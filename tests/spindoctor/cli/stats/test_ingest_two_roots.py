@@ -25,9 +25,11 @@ from spindoctor.results_index import FAILED_FILES, IMAGES, normalize_root_url, o
 
 from .conftest import (
     FIRST_STUB,
+    REFUSAL_REPORT_LEAD,
     index_url,
     ingest_tree,
     metadata_document,
+    recorded_lines,
     refusal_report,
     write_metadata,
     write_refusal,
@@ -161,19 +163,14 @@ def test_a_pass_reports_the_refusals_of_the_root_it_walked(
     another root's.  The two roots are built to disagree about it, which a count
     over both cannot report as either.
     """
-    written: list[str] = []
-
-    def recording(message: object, *args: object) -> None:
-        written.append(str(message) % args if args else str(message))
-
-    monkeypatch.setattr(quiet_logger, 'info', recording)
+    written = recorded_lines(quiet_logger, monkeypatch)
     first = tmp_path / 'first'
     second = tmp_path / 'second'
     write_refusal(first, FIRST_STUB)
     write_refusal(second, FIRST_STUB)
     write_refusal(second, SECOND_STUB)
     ingest_tree(index_url(tmp_path / 'index.sqlite3'), [first, second], logger=quiet_logger)
-    assert [line for line in written if line.startswith('Refused documents')] == [
+    assert [line for line in written if line.startswith(REFUSAL_REPORT_LEAD)] == [
         refusal_report(first, 1),
         refusal_report(second, 2),
     ]

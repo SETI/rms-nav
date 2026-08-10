@@ -616,14 +616,41 @@ is recorded and then skipped unchanged by every pass after it, so the pass's own
 tally counts it once and never again. An operator sent to that tally to measure how
 short an index-answered error filter comes therefore reads zero on a root that
 was ingested before, which is every root a consumer accepts. So each root's pass
-closes by counting the rows `failed_files` holds for that root and reporting
-that as a line of its own, named as the root's standing total rather than as
-this pass's, and a fan-out reports it the same way for each root it completes.
-The count is also one query over `failed_files` away at any time, which is what
-the guide gives an operator first; the reported line is what makes the natural
-action -- run the ingest and read its log -- the correct one rather than merely
-the documented one. `--force` remains what puts the reasons and the example
-files back into the summary.
+closes by counting rows of `failed_files` for that root and reporting that as a
+line of its own, named as the root's standing count rather than as this pass's,
+and a fan-out reports it the same way for each root it completes -- and only for
+a root it completed, since a run left unfinished is one every consumer refuses
+and a count beside it would read as an account of it. The count is also one
+query over `failed_files` away at any time, which is what the guide gives an
+operator first; the reported line is what makes the natural action -- run the
+ingest and read its log -- the correct one rather than merely the documented
+one. `--force` remains what puts the reasons and the example files back into the
+summary.
+
+**The count is the refusals a selection can be short by, not every refusal.**
+Three of the reasons -- `unreadable`, `not valid JSON`, `not a JSON object` --
+are a file no JSON object came out of, and the tree path excludes such a file
+from every error filter exactly as the index answers none for it, so the two
+agree and the row is no gap. The `not a current-schema navigation document`
+family is the divergence: a JSON object the tree reads a `status` out of and
+this index records no status for. A refusal whose `volume` is NULL is left out
+for the second reason, that both arms of the selection query are restricted by
+`IN` over the enumerated volumes and `IN` is false for NULL, so such a row is in
+no selection's answer either way. What remains is still the whole root's number
+where a selection enumerates volumes, so the line says it bounds a shortfall
+rather than measuring one. A parse that fails in a way the decoder does not call
+a syntax error carries a parse reason rather than a schema one, so that the
+family boundary is the fact it states: no value came out of the file, and
+nothing reading the tree gets one out of it either.
+
+**A failure of the report costs the report.** The count is taken after the
+root's rows are written and its run is stamped, and its only product is a log
+line. Raised, it would skip every root after the one it fired on -- each of them
+left with a run row carrying no finish time, which every consumer refuses -- and
+discard the counts of the root that had just finished, so the run would end with
+no closing summary over work that completed. It is contained to a warning naming
+the root, which is the same containment every other error path in the ingest
+has.
 
 **A root the walk cannot list is not an empty root.** The walk reports whether
 the root itself could be listed. When it could not -- a mistyped root, an
@@ -1489,6 +1516,17 @@ Details settled during execution, none of them a change of intent:
   other error filters already pay for, and excludes an unreadable document from
   it exactly as they do, which is what keeps the two implementations answering
   alike over the malformed-metadata images of the fixture tree.
+- **A refusal says which exclusion it means.** Two flags that exclude each other
+  and nothing else are named as mutually exclusive. One flag that excludes
+  several which are satisfiable together -- `--has-no-offset-file` against the
+  four that read a document, `--has-no-offset-error` against the three that name
+  an error -- is named against the ones it excludes instead, because "mutually
+  exclusive" over a set claims an exclusion between every pair in it, and
+  `--has-offset-error` with `--has-offset-spice-error` is a pair the constructor
+  accepts. Every flag of the combination is still named, which is what a user
+  needs in order to know which one to drop; what changes is the claim made about
+  them. A test holds every "mutually exclusive" clause any combination can
+  produce to a pair the constructor really does refuse.
 - **Presence is read from `failed_files` as well as `images`.** A
   `*_metadata.json` the ingest refused is a file the walk finds, so without the
   refusal table criterion 1's malformed-metadata image would be present in the
@@ -1511,17 +1549,24 @@ Details settled during execution, none of them a change of intent:
   stated in the module docstring and in the navigation guide's account of
   `--results-db`, each has a test of its own, and a member found later is added
   here, in the docstring, in the guide, and in a test, in the same commit. Each
-  member carries a phrase that identifies it, and a test matches the members of
-  those lists against each other by that phrase, so that a member dropped from
-  one of them, reworded out of one of them, or added to one and not the others
-  fails rather than passing on a count that still agrees. The list is maintained
-  rather than closed: it is what execution and code reading have found, and a
-  divergence nobody has found yet would be a defect of this list rather than a
-  departure from it.
-  1. **A document the ingest refused** -- valid JSON that carries `status` but
-     is not a navigation document -- records no status and so matches no error
-     filter, where the tree path reads `status` and `status_error` out of any
-     JSON object it can parse.
+  member carries a phrase that identifies it, and a test binds that phrase to
+  the entry carrying it and to that entry's place in the list, then compares the
+  four lists entry for entry. So an entry deleted, an entry that states two
+  members because a neighbour absorbed the deleted one's phrase, an entry that
+  states none, a member added to one list and not the others, and a list whose
+  members come in another order all fail. What that test cannot check is whether
+  an entry tells the truth about the member it states: an entry that keeps its
+  identifying phrase and claims the opposite of the member passes it, and only
+  reading the paragraph, or the member's own behavioral test, catches that. The
+  list is maintained rather than closed: it is what execution and code reading
+  have found, and a divergence nobody has found yet would be a defect of this
+  list rather than a departure from it.
+  1. **A document the ingest refused** -- a JSON object this index will not
+     accept -- records no status and so matches no error filter, where the tree
+     path reads `status` and `status_error` out of any JSON object it can
+     parse, one carrying no `status` at all included. A file no JSON object
+     came out of is refused too and is not one of these: the tree excludes such
+     a file from every error filter as well.
   2. A document whose top-level `status` is **absent, empty, or not a string**
      takes its recorded status from `navigation_result.status`, which is where
      the rest of the index reads an outcome from; the tree path reads the
@@ -1663,11 +1708,14 @@ add a column (increment the version). No issue numbers in any of it.
 
    Each carve-out is stated in the plan, in the module docstring, in the
    navigation guide, and in a test, and one found later is added to all four in
-   one commit; a test matches the four lists against each other member by
-   member, by the phrase that identifies each, so a member dropped from one of
-   them or added to one and not the others fails. Neither carve-out is asserted
-   to be complete: a divergence outside them is a defect of the enumeration, to
-   be fixed or enumerated, and not a licence to differ.
+   one commit; a test binds each member's identifying phrase to the entry
+   carrying it and compares the four lists entry for entry, so a member dropped
+   from one of them, added to one and not the others, or stated out of order
+   fails. It matches text, so it cannot tell whether an entry says something
+   true about its member; that is what each member's own behavioral test is for.
+   Neither carve-out is asserted to be complete: a divergence outside them is a
+   defect of the enumeration, to be fixed or enumerated, and not a licence to
+   differ.
    `sd_stats_report`'s criterion is section 4 Phase 2's old-vs-new
    byte-identical report.
 2. No pipeline program requires an index, and `import spindoctor.dataset`

@@ -132,14 +132,21 @@ and removes no row from it.
 That tally is what this pass read, and not what the root holds. A refused file
 is recorded in ``failed_files``, and every pass after it skips the file
 unchanged rather than reading it again, so a second pass over the same tree
-refuses nothing and tallies nothing. Each root's pass therefore also reports the
-standing total, as the line ``Refused documents the index now holds under
-...``, which counts the rows ``failed_files`` holds for that root whichever pass
-wrote them. That is the number to read when a selection answered from the index
-comes back shorter than the tree would have made it, since an error filter
-answered from an index passes over every one of those documents
-(:doc:`user_guide_navigation`). ``sd_stats_ingest --force`` reads every document
-again, which puts the reasons and the example files back into the summary.
+refuses nothing and tallies nothing. Each root's pass therefore also reports a
+standing count, as the line ``Documents under ... an error filter reads from the
+results tree and not from this index``, which counts the rows ``failed_files``
+holds for that root whichever pass wrote them, restricted to the ones a
+selection can be short by. Those are the rows whose ``reason`` begins ``not a
+current-schema navigation document`` -- a JSON object the index will not take,
+which reading the tree answers every error filter out of -- and that carry a
+volume, since an enumeration reads the volumes it selected and nothing above
+them. The other reasons record a file no JSON object came out of, which the tree
+excludes from every error filter as well, so they are refusals without being a
+difference. Read the count as a bound on how much shorter a selection answered
+from the index comes than the tree would have made it, and
+:doc:`user_guide_navigation` for what to do about it.
+``sd_stats_ingest --force`` reads every document again, which puts the reasons
+and the example files back into the summary.
 
 **A directory the walk did not list is counted, and absence under it is not an
 answer.** The closing summary reports how many directories a pass did not
@@ -281,8 +288,9 @@ read ends in a partial line.
 
 The closing summary of step 3 is the summary a single-process ingest writes:
 files seen, ingested, skipped and refused, with the refusals tallied by reason
-and one example file per reason, followed by each completed root's standing
-total of refused documents. The reasons come back in the task results, since a
+and one example file per reason, followed by the same standing count for each
+root it completed. A root whose shares do not add up is not completed, and no
+count is reported for it. The reasons come back in the task results, since a
 worker has no run log to write them in. Every file a share could not read is
 named in its task result too, and the ones refused for something about the
 document are recorded in the index's ``failed_files`` table as well.
@@ -544,11 +552,19 @@ the rows it wrote are good, and absence of a row under one of them means the
 walk never looked rather than that the image was never navigated.
 
 ``failed_files`` records one row per file that is not a current-schema
-navigation document: the root and stub that identify it, the reason it was
-refused, and the size and modification time it had when it was read. It is what
-lets a second pass skip it. It is deliberately not an ``images`` row, because a
-file with no usable data must not answer the question ``images`` exists to
-answer.
+navigation document: the root and stub that identify it, the volume it is under,
+the reason it was refused, and the size and modification time it had when it was
+read. It is what lets a second pass skip it. It is deliberately not an ``images``
+row, because a file with no usable data must not answer the question ``images``
+exists to answer.
+
+``reason`` names one of two things. ``unreadable``, ``not valid JSON`` and ``not
+a JSON object`` are a file no JSON object came out of, which every reader
+excludes alike. A reason beginning ``not a current-schema navigation document``
+is a JSON object this schema will not take, and names in parentheses what was
+missing or what went wrong reading it; reading the results tree answers an error
+filter out of such an object, so those are the rows a selection answered from
+the index can be short by.
 
 ``schema_meta`` holds a single row stamping the database with the column-set
 version that created it.

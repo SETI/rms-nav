@@ -240,6 +240,16 @@ the message that pair produces unasserted, which is how two of the four
 contradictions came to have a path through the message builder nothing read.
 """
 
+CONTRADICTION_REFUSAL = r'mutually exclusive|cannot be combined with'
+"""The two shapes a refusal of contradictory selection flags takes.
+
+Two flags that exclude each other and nothing else are mutually exclusive.  One
+flag that excludes several which are satisfiable together is named against the
+ones it excludes instead: ``has_offset_error`` and ``has_offset_spice_error``
+are a pair the constructor accepts, so a message calling the three of them
+mutually exclusive would assert an exclusion between two flags that have none.
+"""
+
 SELECTION_FLAGS = (
     'has_offset_file',
     'has_no_offset_file',
@@ -331,6 +341,47 @@ def test_a_refusal_names_every_flag_of_the_combination_it_cannot_satisfy(tree: P
     assert {names: missing for names, missing in unnamed.items() if missing} == {}
 
 
+def _pairs_called_mutually_exclusive(tree: Path) -> set[frozenset[str]]:
+    """Return every pair of flags a refusal claims cannot hold together.
+
+    "Mutually exclusive" is a claim about each pair of the flags it leads, so a
+    clause leading three of them claims three pairs.
+
+    Parameters:
+        tree: The results root the combinations are put to.
+
+    Returns:
+        One frozen pair per claim any refusal makes.
+    """
+    claimed: set[frozenset[str]] = set()
+    for names in COMBINATIONS:
+        message = _refusal_of(tree, names)
+        if message is None:
+            continue
+        for clause in message.split('; '):
+            if 'mutually exclusive' not in clause:
+                continue
+            lead = clause.split(':')[0]
+            named = sorted(name for name in SELECTION_FLAGS if name in lead)
+            claimed.update(frozenset(pair) for pair in itertools.combinations(named, 2))
+    return claimed
+
+
+def test_no_refusal_calls_a_satisfiable_pair_mutually_exclusive(tree: Path) -> None:
+    """A refusal that says more than it means sends its user to change the wrong flag.
+
+    ``has_offset_error`` and ``has_offset_spice_error`` are a pair the
+    constructor accepts, so a message that named them and
+    ``has_no_offset_file`` together as mutually exclusive would tell a user that
+    a selection this program answers is impossible.  The refusal that names one
+    flag against the ones it excludes says only what is true, and this is what
+    holds every "mutually exclusive" clause to a pair that really is one.
+    """
+    exclusive = {frozenset(cast(dict[str, bool], case.values[0])) for case in CONTRADICTORY_PAIRS}
+    unfounded = _pairs_called_mutually_exclusive(tree) - exclusive
+    assert sorted(sorted(pair) for pair in unfounded) == []
+
+
 @pytest.mark.parametrize('flags', CONTRADICTORY_PAIRS)
 def test_a_contradictory_pair_is_refused_before_the_index_is_opened(
     tree: Path, tmp_path: Path, flags: dict[str, bool]
@@ -341,7 +392,7 @@ def test_a_contradictory_pair_is_refused_before_the_index_is_opened(
     the index before checking its flags would report that instead.
     """
     absent = index_url(tmp_path / 'not-an-index.sqlite3')
-    with pytest.raises(ValueError, match=r'mutually exclusive|contradicts') as excinfo:
+    with pytest.raises(ValueError, match=CONTRADICTION_REFUSAL) as excinfo:
         ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_db_url=absent, **flags)
     assert 'not-an-index.sqlite3' not in str(excinfo.value)
 

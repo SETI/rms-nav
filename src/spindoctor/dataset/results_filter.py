@@ -223,7 +223,9 @@ class ResultsFilter:
                 completed ingest of this results root.
         """
         # Declaration order, so that every message names the flags in the order
-        # the options themselves are documented in.
+        # the options themselves are documented in.  A refusal that names one
+        # flag against the others it excludes leads with that one and lists the
+        # rest in this order, which is what says which exclusion is claimed.
         reading_a_document = [
             name
             for name, given in (
@@ -252,21 +254,28 @@ class ResultsFilter:
             # up, and one of its members is a flag whose own name says "no
             # error" -- so a message that only named the category would leave a
             # user who typed --has-no-offset-error reading about something else.
+            # "Cannot be combined with" rather than "are mutually exclusive":
+            # the exclusion runs between this flag and each of the others, and
+            # the others are satisfiable together -- has_offset_error with
+            # has_offset_spice_error is a row of the table this refusal is
+            # tested against.  Named as a set, the message would assert an
+            # exclusion between every pair of them, which is false.
             named = _named_flags(reading_a_document)
             asks = 'asks' if len(reading_a_document) == 1 else 'ask'
             contradictions.append(
-                f'{_named_flags(["has_no_offset_file", *reading_a_document])} are mutually '
-                f'exclusive: {named} {asks} what an offset metadata file records, which '
-                'requires the file to exist'
+                f'has_no_offset_file cannot be combined with {named}: {named} {asks} what an '
+                'offset metadata file records, which requires the file to exist'
             )
         if has_no_offset_error and naming_an_error:
             # Each of the three names a document that records a fatal error, of
             # any kind or of one kind, and this one names a document that
             # records none: no document is both, so the combination is a
             # selection nothing could ever satisfy rather than a narrow one.
+            # The three are not exclusive of each other, so this reads the same
+            # way as the refusal above: one flag against the ones it excludes.
             contradictions.append(
-                f'{_named_flags(["has_no_offset_error", *naming_an_error])} are mutually '
-                'exclusive: one document cannot both record a fatal error and record none'
+                f'has_no_offset_error cannot be combined with {_named_flags(naming_an_error)}: '
+                'one document cannot both record a fatal error and record none'
             )
         if contradictions:
             # Every contradiction the flags carry, not the first one found: a

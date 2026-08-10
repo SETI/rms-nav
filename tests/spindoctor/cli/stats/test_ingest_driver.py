@@ -26,7 +26,13 @@ import pytest
 from spindoctor.cli import sd_stats_ingest
 from spindoctor.config import MAIN_LOGGER
 
-from .conftest import index_url, metadata_document, refusal_report, write_metadata
+from .conftest import (
+    REFUSAL_REPORT_LEAD,
+    index_url,
+    metadata_document,
+    refusal_report,
+    write_metadata,
+)
 
 PASSWORD = 'sup3rs3cr3t'
 """A password distinctive enough that finding it anywhere is proof of a leak."""
@@ -316,7 +322,9 @@ def _two_passes(
     This is the shape of the tree an operator measures a short selection
     against: every document under the root is one the ingest refuses, and the
     root has already been ingested, which is the only state a consumer accepts
-    it in.
+    it in.  They sit under a volume because that is where a selection looks:
+    one enumerates the volumes it was given, and a document above all of them is
+    in no selection's answer whatever it records.
 
     Parameters:
         tmp_path: Directory the tree, the index and the logs live under.
@@ -327,9 +335,9 @@ def _two_passes(
     """
     monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
     root = tmp_path / 'results'
-    root.mkdir()
-    (root / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
-    (root / 'rings_metadata.json').write_text('{"rings": []}', encoding='utf-8')
+    (root / 'VOL').mkdir(parents=True)
+    (root / 'VOL' / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
+    (root / 'VOL' / 'rings_metadata.json').write_text('{"rings": []}', encoding='utf-8')
     argv = [
         '--results-db',
         index_url(tmp_path / 'index.sqlite3'),
@@ -358,9 +366,9 @@ def test_a_second_pass_tallies_none_of_the_refusals_the_first_one_recorded(
     """The pass's own tally answers "what did this pass read", and nothing else.
 
     A refused file that has not changed is skipped without being read, so it
-    never reaches the tally again.  Read as the size of the gap an error filter
-    answered from this index leaves, that zero is the one conclusion the number
-    exists to prevent, on the only kind of root a consumer accepts.
+    never reaches the tally again.  Read as what an error filter answered from
+    this index comes up short by, that zero is the one conclusion the standing
+    count exists to prevent, on the only kind of root a consumer accepts.
     """
     _root, passes = _two_passes(tmp_path, monkeypatch)
     _status, written = passes[1]
@@ -378,6 +386,6 @@ def test_a_second_pass_still_reports_the_refusals_the_root_holds(
     """
     root, passes = _two_passes(tmp_path, monkeypatch)
     _status, written = passes[1]
-    assert [line for line in written if line.startswith('Refused documents')] == [
+    assert [line for line in written if line.startswith(REFUSAL_REPORT_LEAD)] == [
         refusal_report(root, 2)
     ]

@@ -672,6 +672,16 @@ def test_results_scan_propagates_non_missing_oserror(
         )
 
 
+CONTRADICTION_REFUSAL = r'mutually exclusive|cannot be combined with'
+"""The two shapes a refusal of contradictory selection flags takes.
+
+Two flags that exclude each other and nothing else are mutually exclusive.  One
+flag that excludes several which are satisfiable together is named against the
+ones it excludes instead, since "mutually exclusive" over a set claims an
+exclusion between every pair in it.
+"""
+
+
 @pytest.mark.parametrize(
     'flags',
     [
@@ -692,7 +702,7 @@ def test_contradictory_results_flags_raise(
 ) -> None:
     _install_two_camera_index(ds, monkeypatch)
 
-    with pytest.raises(ValueError, match=r'mutually exclusive|contradicts'):
+    with pytest.raises(ValueError, match=CONTRADICTION_REFUSAL):
         list(
             ds.yield_image_files_index(
                 volumes=['COISS_2001'], nav_results_root=str(tmp_path), **flags

@@ -25,11 +25,14 @@ to be rediscovered.  The guide is one of them because an operator reading it is
 the person a silently short selection is served to: an enumeration a user is
 never shown answers nobody's question about the selection they got.
 
-- **A document the ingest refused** -- valid JSON that carries ``status`` but is
-  not a navigation document -- records no status of its own.  It matches no
-  error filter, the one for a document recording no fatal error included, where
-  the tree reads ``status`` and ``status_error`` out of any JSON object it can
-  parse and answers every one of them from what it read.
+- **A document the ingest refused** -- a JSON object this index will not accept
+  -- records no status of its own.  It matches no error filter, the one for a
+  document recording no fatal error included, where the tree reads ``status``
+  and ``status_error`` out of any JSON object it can parse and answers every one
+  of them from what it read, an object carrying no ``status`` at all included.
+  A file no JSON object came out of is refused too and is not one of these: the
+  tree excludes such a file from every error filter as well, so the two answer
+  alike about it.
 - **A document whose top-level ``status`` is absent, empty, or not a string**
   takes its recorded status from ``navigation_result.status``, which is where
   the rest of the index reads an outcome from.  The tree reads the top-level

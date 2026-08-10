@@ -153,6 +153,13 @@ the remedy for a mismatch is to build the index again.  So the number is written
 down here beside the columns it belongs to as well as in the schema, and the two
 are compared, because a version compared only against itself agrees with every
 value it could be given.
+
+What that catches is a version changed without the columns.  It does not catch
+the reverse, and cannot: a column removed from the schema and from the list
+above, with the version left alone, agrees with this number as readily as it
+agrees with itself, and every index in the world then reads as current while
+holding a column set no code has.  Bumping :data:`SCHEMA_VERSION` is part of
+changing a column set, and nothing here enforces it.
 """
 
 TABLE_CASES = [

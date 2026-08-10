@@ -370,6 +370,52 @@ def test_a_bare_basename_stub_ingests_with_a_null_volume(
     assert [row.volume for row in found] == [None]
 
 
+def _ingest_a_file_named_only_by_the_suffix(
+    tmp_path: Path, logger: pdslogger.PdsLogger
+) -> list[Any]:
+    """Ingest a tree holding a file whose whole name is the document suffix.
+
+    It is the last bracket case of the suffix test: a name that ends in the
+    suffix and is nothing else, so trimming the suffix leaves an empty stub.
+    The pass treats it as any other document, which puts it in under the empty
+    stub with no volume above it -- a row every volume-restricted query passes
+    over, which is what a selection is.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        logger: Logger the pass reports through.
+
+    Returns:
+        The stub and volume of every row the pass wrote.
+    """
+    root = tmp_path / 'results'
+    root.mkdir(parents=True, exist_ok=True)
+    (root / METADATA_SUFFIX).write_text(json.dumps(metadata_document()), encoding='utf-8')
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(connection, sqlalchemy.select(IMAGES.c.results_path_stub, IMAGES.c.volume))
+    engine.dispose()
+    return found
+
+
+def test_a_file_named_only_by_the_suffix_ingests_under_an_empty_stub(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Trimming a suffix off a name of exactly that length leaves nothing."""
+    found = _ingest_a_file_named_only_by_the_suffix(tmp_path, quiet_logger)
+    assert [row.results_path_stub for row in found] == ['']
+
+
+def test_a_file_named_only_by_the_suffix_ingests_with_a_null_volume(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """So it is under no volume, and no enumeration of volumes reaches it."""
+    found = _ingest_a_file_named_only_by_the_suffix(tmp_path, quiet_logger)
+    assert [row.volume for row in found] == [None]
+
+
 def _tree_with_a_file_that_is_not_a_document(tmp_path: Path) -> Path:
     """Write a root holding one document and four files that are not one.
 
@@ -388,6 +434,10 @@ def _tree_with_a_file_that_is_not_a_document(tmp_path: Path) -> Path:
     contains it yields a stub with the suffix's length cut off the end of a
     longer name, naming nothing, which the pass then retrieves, fails on,
     records nothing for, and retrieves again on every pass afterwards.
+
+    The remaining bracket case is a name that is the suffix and nothing else,
+    which is a document as far as the walk is concerned; what it ingests as is
+    two tests above.
 
     Parameters:
         tmp_path: Directory the root is written under.

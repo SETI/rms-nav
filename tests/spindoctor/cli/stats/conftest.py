@@ -352,26 +352,60 @@ def write_refusal(root: Path, stub: str) -> Path:
     return path
 
 
+REFUSAL_REPORT_LEAD = 'Documents under '
+"""How the standing-refusal line opens, for picking it out of a log."""
+
+
 def refusal_report(root: Path | str, refused: int) -> str:
     """Return the line a pass writes about the refusals its root's index holds.
 
-    Written once here because two modules read the same line: it is what an
+    Written once here because three modules read the same line: it is what an
     operator is told about the gap between an error filter answered from the
     index and the same filter answered from the tree, and the number in it is
-    the root's own total rather than what any one pass refused.
+    the root's own standing total of the refusals that make that gap, rather
+    than what any one pass refused.
 
     Parameters:
         root: The results root the pass covered.
-        refused: How many refusals the index holds under it.
+        refused: How many such refusals the index holds under it.
 
     Returns:
         The line, spelled as the pass writes it.
     """
     return (
-        f'Refused documents the index now holds under {normalize_root_url(root)}, whichever '
-        f'pass recorded them: {refused}. An error filter answered from this index selects '
-        f'none of their images.'
+        f'{REFUSAL_REPORT_LEAD}{normalize_root_url(root)} an error filter reads from the '
+        f'results tree and not from this index: {refused}, whichever pass recorded them. '
+        f'Each is a JSON object the ingest refused, so this index records no status for it '
+        f'and no error filter answered here selects its image. The count is the whole root, '
+        f'so it bounds rather than measures how short a selection over some of its volumes '
+        f'comes.'
     )
+
+
+def recorded_lines(
+    logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch, *, level: str = 'info'
+) -> list[str]:
+    """Capture one level of a logger's output, rendered as it would be written.
+
+    ``pdslogger`` writes through its own stream handler, so a test reads what a
+    pass told an operator by standing in for the method rather than by capturing
+    a stream.
+
+    Parameters:
+        logger: The logger to record.
+        monkeypatch: Fixture the method is replaced through.
+        level: Which method to record.
+
+    Returns:
+        The list the lines land in, which fills as the recorded code runs.
+    """
+    written: list[str] = []
+
+    def recording(message: object, *args: object) -> None:
+        written.append(str(message) % args if args else str(message))
+
+    monkeypatch.setattr(logger, level, recording)
+    return written
 
 
 def ingest_tree(
