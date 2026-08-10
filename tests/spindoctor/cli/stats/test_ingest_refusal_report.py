@@ -29,7 +29,13 @@ import sqlalchemy
 
 from spindoctor.cli.stats.ingest import store
 from spindoctor.cli.stats.ingest.counts import IngestCounts
-from spindoctor.results_index import FAILED_FILES, IMAGES, normalize_root_url, open_index
+from spindoctor.results_index import (
+    FAILED_FILES,
+    IMAGES,
+    INGEST_RUNS,
+    normalize_root_url,
+    open_index,
+)
 
 from .conftest import (
     FIRST_STUB,
@@ -137,6 +143,38 @@ def roots_holding_an_image(url: str) -> list[str]:
         with engine.connect() as connection:
             found = connection.execute(sqlalchemy.select(IMAGES.c.root_url).distinct())
             return sorted(str(row.root_url) for row in found)
+    finally:
+        engine.dispose()
+
+
+def roots_whose_newest_run_finished(url: str) -> list[str]:
+    """Return the roots whose newest ingest run carries a finish time.
+
+    An ``images`` row says a document was read; it says nothing about whether
+    the pass that read it ever finished, and a run left unfinished is what
+    every consumer reads as "this root is not ingested".  The two facts are
+    asserted apart because a failure between them leaves exactly the first.
+
+    Parameters:
+        url: The index URL.
+
+    Returns:
+        The normalized roots, in name order.
+    """
+    engine = open_index(url)
+    try:
+        with engine.connect() as connection:
+            newest = connection.execute(
+                sqlalchemy.select(
+                    INGEST_RUNS.c.root_url,
+                    INGEST_RUNS.c.finished_utc,
+                    INGEST_RUNS.c.run_id,
+                ).order_by(INGEST_RUNS.c.root_url, INGEST_RUNS.c.run_id.desc())
+            )
+            finished: dict[str, bool] = {}
+            for row in newest:
+                finished.setdefault(str(row.root_url), row.finished_utc is not None)
+            return sorted(root for root, done in finished.items() if done)
     finally:
         engine.dispose()
 
@@ -342,10 +380,9 @@ def test_a_failing_report_leaves_every_root_ingested(
     time -- so every consumer afterwards refuses them.
     """
     url, _warnings, _counts = _two_roots_with_a_failing_report(tmp_path, quiet_logger, monkeypatch)
-    assert roots_holding_an_image(url) == [
-        normalize_root_url(tmp_path / 'first'),
-        normalize_root_url(tmp_path / 'second'),
-    ]
+    both = [normalize_root_url(tmp_path / 'first'), normalize_root_url(tmp_path / 'second')]
+    assert roots_holding_an_image(url) == both
+    assert roots_whose_newest_run_finished(url) == both
 
 
 def test_a_failing_report_keeps_the_counts_of_the_root_it_fired_on(

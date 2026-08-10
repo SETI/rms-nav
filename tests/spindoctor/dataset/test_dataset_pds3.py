@@ -549,6 +549,13 @@ def test_has_offset_error_matches_any_fatal_error(
 def test_has_no_offset_error_matches_only_documents_recording_none(
     ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """The filter keeps a document recording no fatal error and nothing else.
+
+    Parameters:
+        ds: The dataset under test.
+        monkeypatch: Fixture the index is installed through.
+        tmp_path: Directory the results root is written under.
+    """
     # The one success is kept and the two fatal errors are not. The WAC frames
     # and the NAC frames outside the three written here have no metadata file
     # at all: a document that does not exist records no error, and this filter
@@ -700,6 +707,14 @@ def test_contradictory_results_flags_raise(
     tmp_path: Path,
     flags: dict[str, bool],
 ) -> None:
+    """A pair of selection flags no image could satisfy is refused, not answered.
+
+    Parameters:
+        ds: The dataset under test.
+        monkeypatch: Fixture the index is installed through.
+        tmp_path: Directory the results root is written under.
+        flags: The contradictory pair under test.
+    """
     _install_two_camera_index(ds, monkeypatch)
 
     with pytest.raises(ValueError, match=CONTRADICTION_REFUSAL):
@@ -823,6 +838,7 @@ def test_choose_random_images_argparse_accepts_positive() -> None:
 
 
 def test_selection_arguments_include_results_filters() -> None:
+    """The command-line parser carries the presence and error filters."""
     parser = argparse.ArgumentParser()
     DataSetPDS3CassiniISS.add_selection_arguments(parser)
 
@@ -835,6 +851,7 @@ def test_selection_arguments_include_results_filters() -> None:
 
 
 def test_the_negative_error_filter_is_one_of_the_selection_arguments() -> None:
+    """The parser carries the negative error filter beside the positive ones."""
     parser = argparse.ArgumentParser()
     DataSetPDS3CassiniISS.add_selection_arguments(parser)
 

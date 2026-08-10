@@ -20,6 +20,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
+from filecache import FCPath
 
 from spindoctor.results_index import selection
 
@@ -61,11 +62,14 @@ why this file's guard is described as binding the lists together rather than as
 validating any of them.
 """
 
-PLAN = Path(__file__).resolve().parents[3] / 'plans' / 'RESULTS_DB_PLAN.md'
+PLAN = FCPath(Path(__file__).resolve().parents[3]) / 'plans' / 'RESULTS_DB_PLAN.md'
 """The plan, which states the enumeration twice: in Phase 5 and in criterion 1."""
 
 NAVIGATION_GUIDE = (
-    Path(__file__).resolve().parents[3] / 'docs' / 'user_guide' / 'user_guide_navigation.rst'
+    FCPath(Path(__file__).resolve().parents[3])
+    / 'docs'
+    / 'user_guide'
+    / 'user_guide_navigation.rst'
 )
 """The guide, which states the enumeration where an operator will meet it.
 
@@ -84,9 +88,12 @@ def _plan_lines() -> list[str]:
     Returns:
         The lines of the plan file.
     """
-    if not PLAN.is_file():
-        pytest.skip(f'{PLAN} is not in this tree')
-    return PLAN.read_text(encoding='utf-8').splitlines()
+    try:
+        with PLAN.open('r', encoding='utf-8') as plan:
+            text: str = plan.read()
+        return text.splitlines()
+    except FileNotFoundError:
+        pytest.skip(f'{PLAN.as_posix()} is not in this tree')
 
 
 def _normalized(text: str) -> str:
@@ -193,10 +200,14 @@ def _navigation_guide_members() -> list[str]:
     Returns:
         One entry per member.
     """
-    if not NAVIGATION_GUIDE.is_file():
-        pytest.skip(f'{NAVIGATION_GUIDE} is not in this tree')
+    try:
+        with NAVIGATION_GUIDE.open('r', encoding='utf-8') as guide:
+            text: str = guide.read()
+        lines = text.splitlines()
+    except FileNotFoundError:
+        pytest.skip(f'{NAVIGATION_GUIDE.as_posix()} is not in this tree')
     return _lead_paragraphs(
-        NAVIGATION_GUIDE.read_text(encoding='utf-8').splitlines(),
+        lines,
         re.compile(r'^\*\*'),
         opens='Given ``--results-db``',
         closes='Miscellaneous',
