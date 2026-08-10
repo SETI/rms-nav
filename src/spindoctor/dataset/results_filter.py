@@ -74,6 +74,22 @@ class SelectionError(ValueError):
     """
 
 
+def _named_flags(names: Sequence[str]) -> str:
+    """Render the flags a refusal is about, in the spelling the caller passed.
+
+    Parameters:
+        names: The flag names, in the order they are declared.
+
+    Returns:
+        The names joined into a phrase, so that a message can name every flag
+        that made the selection unsatisfiable rather than a category the reader
+        has to look up.
+    """
+    if len(names) == 1:
+        return names[0]
+    return f'{", ".join(names[:-1])} and {names[-1]}'
+
+
 def _elapsed_phrase(seconds: float) -> str:
     """Return an interval in the coarsest unit that has a whole number of it.
 
@@ -179,13 +195,17 @@ class ResultsFilter:
             has_offset_error: Only keep images whose offset metadata file
                 indicates a fatal error (``status == 'error'``).
             has_no_offset_error: Only keep images whose offset metadata file
-                indicates no fatal error, which is the images whose navigation
-                ran to a result of any kind.  Like every other error filter this
-                one asks what a document records, so it keeps only images that
-                have one: an image nothing has been written for records no error
-                and is selected by ``has_no_offset_file``.  So is a document
-                nothing can be read out of, for the reason
-                :meth:`_metadata_matches` gives.
+                records a status other than the fatal one, which for the
+                documents this pipeline writes is the images whose navigation
+                ran to a result of any kind.  It is what the document says and
+                not what it holds: any JSON object whose ``status`` is not
+                ``error`` matches, including one carrying no navigation result
+                at all.  Like every other error filter this one asks what a
+                document records, so it keeps only images that have one: an
+                image nothing has been written for records no error and is
+                selected by ``has_no_offset_file``.  So is a document nothing
+                can be read out of, for the reason :meth:`_metadata_matches`
+                gives.
             has_offset_spice_error: Only keep images whose offset metadata file
                 indicates a fatal error from missing SPICE data.
             has_offset_nonspice_error: Only keep images whose offset metadata
@@ -207,21 +227,37 @@ class ResultsFilter:
             raise SelectionError(
                 'has_offset_spice_error and has_offset_nonspice_error are mutually exclusive'
             )
-        matches_an_error = has_offset_error or has_offset_spice_error or has_offset_nonspice_error
-        if has_no_offset_error and matches_an_error:
+        naming_an_error = [
+            name
+            for name, given in (
+                ('has_offset_error', has_offset_error),
+                ('has_offset_spice_error', has_offset_spice_error),
+                ('has_offset_nonspice_error', has_offset_nonspice_error),
+            )
+            if given
+        ]
+        if has_no_offset_error and naming_an_error:
             # Each of the three names a document that records a fatal error, of
             # any kind or of one kind, and this one names a document that
             # records none: no document is both, so the pair is a selection
             # nothing could ever satisfy rather than a narrow one.
             raise SelectionError(
-                'has_no_offset_error and the offset-error filters are mutually exclusive: '
-                'one document cannot both record a fatal error and record none'
+                f'has_no_offset_error and {_named_flags(naming_an_error)} are mutually '
+                'exclusive: one document cannot both record a fatal error and record none'
             )
-        needs_metadata_read = matches_an_error or has_no_offset_error
+        needs_metadata_read = bool(naming_an_error) or has_no_offset_error
         if needs_metadata_read and has_no_offset_file:
+            # Whichever of the four was given is named, because "the
+            # offset-error filters" is a category the reader would have to look
+            # up, and one of its members is a flag whose own name says "no
+            # error" -- so a message that only named the category would leave a
+            # user who typed --has-no-offset-error reading about something else.
+            reading_a_document = naming_an_error or ['has_no_offset_error']
+            named = _named_flags(reading_a_document)
+            asks = 'asks' if len(reading_a_document) == 1 else 'ask'
             raise SelectionError(
-                'has_no_offset_file contradicts the offset-error filters, which '
-                'require the offset metadata file to exist'
+                f'has_no_offset_file and {named} are mutually exclusive: {named} {asks} '
+                'what an offset metadata file records, which requires the file to exist'
             )
 
         self._has_no_offset_file = has_no_offset_file
@@ -277,7 +313,10 @@ class ResultsFilter:
             return False
         if self._needs_metadata_read:
             return True
-        return not self._have_result_sets and self._has_no_offset_file
+        # The absence filter is the only one left, and it is the one no walk was
+        # done for: it contradicts every flag that sets the presence fold-in, so
+        # reaching here with it set means the collected sets are empty.
+        return self._has_no_offset_file
 
     def _read_index(
         self,
@@ -441,7 +480,7 @@ class ResultsFilter:
         if not keep or not self.needs_batch_filtering:
             return keep
 
-        if not self._have_result_sets and self._has_no_offset_file:
+        if self._has_no_offset_file:
             sub_paths: list[str | Path] = [f.results_path_stub + METADATA_SUFFIX for f in keep]
             found = cast(list[bool], self._nav_results_root.exists(sub_paths))
             keep = [f for f, exists in zip(keep, found, strict=True) if not exists]

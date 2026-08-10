@@ -405,8 +405,9 @@ class DataSetPDS3(DataSet):
             action='store_true',
             default=False,
             help="""Only process images if the offset metadata file exists and
-            indicates no fatal error, which is the images whose navigation ran
-            to a result""",
+            records a status other than the fatal one, which for the documents
+            this pipeline writes is the images whose navigation ran to a
+            result""",
         )
         group.add_argument(
             '--has-offset-spice-error',

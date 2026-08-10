@@ -344,23 +344,34 @@ def test_the_negative_error_filter_matches_every_document_recording_no_error(
 
 
 def test_the_negative_error_filter_matches_no_fatal_error(two_roots: str) -> None:
-    """The two halves of the vocabulary partition the documents between them.
+    """The two halves of the vocabulary exclude each other, without exhausting.
+
+    No document is in both, which is what this pins.  Documents outside both
+    are what the sibling file is for: a file the ingest refused records neither
+    an error nor the absence of one.
 
     A fatal error that named no cause is the row a SQL inequality is most
-    likely to mishandle, and it belongs on the other side of this partition.
+    likely to mishandle, and it belongs on the other side of this exclusion.
     """
     matching = _stubs(two_roots, has_no_offset_error=True).matching_error
     assert ERROR_WITHOUT_STATUS_ERROR not in matching
 
 
 def test_the_negative_error_filter_answers_for_this_root_only(tmp_path: Path) -> None:
-    """A stub that errored here and finished there is not read from there.
+    """Each root disagrees with the other about both of its stubs.
 
     It gets a root pair of its own rather than joining the shared fixture,
     because the disagreement has to run the other way round to be visible: the
     shared decoy records a fatal error for every stub, which is what makes a
     filter phrased in the positive answer differently when it drops the root,
     and is exactly why one phrased in the negative would not.
+
+    So this pair holds one stub that errored here and finished there, and one
+    that finished here and errored there, and the answer is stated as the whole
+    set.  The second stub is what makes the assertion a positive one: a query
+    that read no row at all -- the volume predicate emptied, the root predicate
+    inverted -- answers with the empty set, which a test that only denied the
+    other root's stub would have accepted.
 
     Parameters:
         tmp_path: Directory the index file is written into.
@@ -371,6 +382,7 @@ def test_the_negative_error_filter_answers_for_this_root_only(tmp_path: Path) ->
             IMAGES.insert(),
             [
                 _document(SUCCESS, status='error', status_error=SPICE),
+                _document(SECOND_SUCCESS, status='success', status_error=None),
                 image_row(
                     root_url=OTHER_ROOT,
                     results_path_stub=SUCCESS,
@@ -378,10 +390,41 @@ def test_the_negative_error_filter_answers_for_this_root_only(tmp_path: Path) ->
                     status='success',
                     status_error=None,
                 ),
+                image_row(
+                    root_url=OTHER_ROOT,
+                    results_path_stub=SECOND_SUCCESS,
+                    volume=VOLUME,
+                    status='error',
+                    status_error=SPICE,
+                ),
             ],
         )
         connection.execute(INGEST_RUNS.insert(), [_completed_run(ROOT), _completed_run(OTHER_ROOT)])
-    assert _stubs(url, has_no_offset_error=True).matching_error == frozenset()
+    assert _stubs(url, has_no_offset_error=True).matching_error == frozenset({SECOND_SUCCESS})
+
+
+@pytest.mark.parametrize(
+    'naming_an_error',
+    ['has_offset_error', 'has_offset_spice_error', 'has_offset_nonspice_error'],
+)
+def test_asking_for_a_fatal_error_and_for_none_selects_nothing(
+    two_roots: str, naming_an_error: str
+) -> None:
+    """This layer conjoins the pair rather than rejecting it, as it does the rest.
+
+    ``ResultsFilter`` refuses a contradictory pair before it opens anything,
+    but this function is exported and takes the flags as it finds them, so what
+    it does with a pair nothing can satisfy is part of its contract: the empty
+    selection that describes it, rather than one of the two filters silently
+    winning.
+
+    Parameters:
+        two_roots: The index to read.
+        naming_an_error: The flag paired with ``has_no_offset_error``.
+    """
+    stubs = _stubs(two_roots, has_no_offset_error=True, **{naming_an_error: True})
+    assert SUCCESS in stubs.with_metadata
+    assert stubs.matching_error == frozenset()
 
 
 def test_a_refused_document_matches_the_negative_error_filter_no_more_than_the_rest(
@@ -710,13 +753,24 @@ def test_the_query_returns_its_connection(two_roots: str, monkeypatch: pytest.Mo
 ENUMERATION_MEMBERS = 5
 """How many answers the index gives differently from the tree.
 
-Named here so that the three lists below cannot all stop matching the same
+Named here so that the four lists below cannot all stop matching the same
 regular expression and agree at zero.  Raising it is the reminder that a member
-is added to the plan, the module docstring and a test in one commit.
+is added to the plan, the module docstring, the navigation guide and a test in
+one commit.
 """
 
 PLAN = Path(__file__).resolve().parents[3] / 'plans' / 'RESULTS_DB_PLAN.md'
 """The plan, which states the enumeration twice: in Phase 5 and in criterion 1."""
+
+NAVIGATION_GUIDE = (
+    Path(__file__).resolve().parents[3] / 'docs' / 'user_guide' / 'user_guide_navigation.rst'
+)
+"""The guide, which states the enumeration where an operator will meet it.
+
+The member the guide is most easily written without is the one that costs an
+operator most: a selection answered from an index is short by every document
+the ingest refused, and nothing in the run says so.
+"""
 
 
 def _plan_lines() -> list[str]:
@@ -803,3 +857,39 @@ def test_the_plan_states_every_member_the_module_docstring_states() -> None:
 def test_criterion_one_restates_every_member_the_plan_enumerates() -> None:
     """A reader of the criterion takes its restatement for the list, so it is the list."""
     assert len(_criterion_one_members()) == len(_phase_five_members())
+
+
+def _navigation_guide_members() -> list[str]:
+    """Return the enumeration as the navigation guide states it.
+
+    The guide's members are the bold-led paragraphs of its account of
+    ``--results-db``, which runs from the sentence introducing that option's
+    answers to the end of the selection section.
+
+    Returns:
+        One entry per member.
+    """
+    if not NAVIGATION_GUIDE.is_file():
+        pytest.skip(f'{NAVIGATION_GUIDE} is not in this tree')
+    inside = False
+    members: list[str] = []
+    for line in NAVIGATION_GUIDE.read_text(encoding='utf-8').splitlines():
+        if not inside:
+            inside = line.startswith('Given ``--results-db``')
+            continue
+        if line.startswith('Miscellaneous'):
+            break
+        if line.startswith('**'):
+            members.append(line)
+    return members
+
+
+def test_the_navigation_guide_states_every_member_the_module_docstring_states() -> None:
+    """An enumeration only a maintainer reads does not reach the person it costs.
+
+    A selection answered from an index differs from the same selection answered
+    from the tree, silently and by however many documents the ingest refused,
+    so the operator choosing between them is told which members of this list
+    apply to their root.
+    """
+    assert len(_navigation_guide_members()) == len(_docstring_members())

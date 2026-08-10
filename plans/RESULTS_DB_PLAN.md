@@ -926,11 +926,15 @@ still a file the walk finds, so the presence and absence filters read
 `failed_files` alongside `images`, and that table carries the volume for the
 same reason. The carve-out is what one ingest pass
 could read and record, never a property of this query; it is enumerated in the
-Phase 5 entry and repeated in the module docstring, each member has a test of
-its own, and a member found later is added in all three places in one commit.
+Phase 5 entry, repeated in the module docstring and stated for an operator in
+the navigation guide's account of `--results-db`, each member has a test of its
+own, and a member found later is added in all four places in one commit.
 The enumeration is maintained rather than audited closed: it names what is known
 to differ, and a divergence nobody has found yet is not evidence that none
-exists.
+exists. The guide is one of the four because the person a silently short
+selection is served to reads the guide and not the module: a divergence
+enumerated only where a maintainer meets it leaves a user with a selection that
+looks like the one they asked for.
 
 **The filter vocabulary is six flags, and they conjoin.** `--has-offset-file`
 and `--has-no-offset-file` ask whether the document exists;
@@ -938,11 +942,28 @@ and `--has-no-offset-file` ask whether the document exists;
 `--has-offset-nonspice-error` ask what it records. Every error filter needs a
 document to read, so each one folds presence in, `--has-no-offset-file`
 contradicts all four, and `--has-no-offset-error` contradicts the three that
-name an error. That makes `--has-offset-file --has-no-offset-error` the
-spelling of "the images this root holds a navigated result for, whatever it
+name an error. That makes `--has-offset-file --has-no-offset-error` how a run
+asks for "the images this root holds a navigated result for, whatever it
 concluded" -- the selection that excludes the frames whose navigation died
 before it could read the image, which is a document with a fatal `status` and
 no summary picture beside it.
+
+**That pair is not the selection a picture-presence filter made, and the
+navigation guide says what each mode really selects.** The two differ in both
+directions, and neither is a defect of this vocabulary. A `*_summary.png` with
+no document beside it -- a PDS4 browse product, a document deleted from under
+its picture -- was a file a picture-presence filter selected, and neither mode
+selects it here, because both ask a question about a document and there is
+none. Read from an index, a document the ingest refused is one this pair drops
+(divergence member 1) where a picture-presence filter kept it, since the
+refusal is a fact about reading the document and the picture beside it is
+untouched by it. No image a navigation run wrote both files for falls in the
+first gap, since a picture is drawn only beside a document; the second is
+bounded by what an ingest accepts rather than by what a navigator wrote, and on
+a root whose documents carry less than the index requires it is most of the
+root. So the claim the guide makes is the narrow one: reading the tree the pair
+selects every image whose document parses to a JSON object without a fatal
+`status`, and reading an index it selects the accepted documents alone.
 
 Because the flags conjoin, a selection that is a union of two of them is two
 runs rather than one, and one such union is worth naming: "never navigated, or
@@ -1473,11 +1494,13 @@ Details settled during execution, none of them a change of intent:
   at all for it -- neither an image row nor a refusal, which every consumer
   reads as an image nobody navigated.
 - **What the index answers differently, as far as it is known.** Each member is
-  stated in the module docstring, each has a test of its own, and a member found
-  later is added here, in the docstring, and in a test, in the same commit. The
-  list is maintained rather than closed: it is what execution and code reading
-  have found, and a divergence nobody has found yet would be a defect of this
-  list rather than a departure from it.
+  stated in the module docstring and in the navigation guide's account of
+  `--results-db`, each has a test of its own, and a member found later is added
+  here, in the docstring, in the guide, and in a test, in the same commit. A
+  test counts the members of each of those lists so that none of them can
+  quietly drop one. The list is maintained rather than closed: it is what
+  execution and code reading have found, and a divergence nobody has found yet
+  would be a defect of this list rather than a departure from it.
   1. A document that is valid JSON and carries `status` but is **not a
      navigation document** is refused by ingest, so it records no status and
      matches no error filter, where the tree path reads `status` and

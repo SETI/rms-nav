@@ -79,8 +79,11 @@ _MATRIX = [
 
 The flags reach the tree two ways, and both have to land on the index path's
 one answer: the absence filter alone takes the batched ``exists()`` path and
-never walks the tree, while the presence and error filters walk it and answer
-from the walked set.
+never walks the tree, while the presence and error filters walk it.  The
+presence filter is answered from the walked set; an error filter is answered
+from the document itself, the walked set only pruning the candidates it is then
+retrieved for.  No error filter can reach the batched ``exists()`` path at all:
+each folds presence in, which is what asks for the walk.
 
 The pairings are the combinations a user has a reason to write.  ``images this
 run navigated to a result`` is the last of them, and it is the pair rather than
@@ -142,6 +145,38 @@ def test_an_image_with_no_document_is_not_one_recording_no_error_in_the_tree(tre
     assert NO_RESULT not in kept
 
 
+@pytest.mark.parametrize(
+    'flag',
+    [
+        'has_offset_error',
+        'has_no_offset_error',
+        'has_offset_spice_error',
+        'has_offset_nonspice_error',
+    ],
+)
+def test_an_error_filter_prunes_a_missing_document_against_the_walked_set(
+    tree: Path, flag: str
+) -> None:
+    """Every error filter folds presence in, and this is where that shows.
+
+    The fold-in changes no answer: without it the retrieval of a document that
+    is not there fails and the batch stage drops the image anyway.  What it
+    changes is the cost, and only here -- an image nothing has been written for
+    is settled by a set already in memory rather than by one retrieval per
+    candidate, which on a cloud root is a paid round trip per image.  The
+    population that pays it is every image the run has yet to navigate, so it
+    is the common case rather than the corner.
+
+    Parameters:
+        tree: The results root under test.
+        flag: The error filter, one per flag that reads a document.
+    """
+    results_filter = ResultsFilter(
+        VOLUMES, str(tree), logger=null_logger(), results_db_url=None, **{flag: True}
+    )
+    assert results_filter.passes_presence(NO_RESULT) is False
+
+
 def test_an_image_with_no_row_is_not_one_recording_no_error_in_the_index(
     tree: Path, indexed: str
 ) -> None:
@@ -165,33 +200,32 @@ def test_the_index_path_leaves_nothing_for_the_batch_stage(
     assert results_filter.needs_batch_filtering is False
 
 
-@pytest.mark.parametrize(
-    'flags',
-    [
-        pytest.param({'has_offset_file': True, 'has_no_offset_file': True}, id='offset-file-pair'),
-        pytest.param(
-            {'has_offset_spice_error': True, 'has_offset_nonspice_error': True}, id='error-pair'
-        ),
-        pytest.param(
-            {'has_offset_error': True, 'has_no_offset_file': True}, id='error-and-no-offset-file'
-        ),
-        pytest.param(
-            {'has_offset_error': True, 'has_no_offset_error': True}, id='error-and-no-error'
-        ),
-        pytest.param(
-            {'has_offset_spice_error': True, 'has_no_offset_error': True},
-            id='spice-error-and-no-error',
-        ),
-        pytest.param(
-            {'has_offset_nonspice_error': True, 'has_no_offset_error': True},
-            id='nonspice-error-and-no-error',
-        ),
-        pytest.param(
-            {'has_no_offset_error': True, 'has_no_offset_file': True},
-            id='no-error-and-no-offset-file',
-        ),
-    ],
-)
+CONTRADICTORY_PAIRS = [
+    pytest.param({'has_offset_file': True, 'has_no_offset_file': True}, id='offset-file-pair'),
+    pytest.param(
+        {'has_offset_spice_error': True, 'has_offset_nonspice_error': True}, id='error-pair'
+    ),
+    pytest.param(
+        {'has_offset_error': True, 'has_no_offset_file': True}, id='error-and-no-offset-file'
+    ),
+    pytest.param({'has_offset_error': True, 'has_no_offset_error': True}, id='error-and-no-error'),
+    pytest.param(
+        {'has_offset_spice_error': True, 'has_no_offset_error': True},
+        id='spice-error-and-no-error',
+    ),
+    pytest.param(
+        {'has_offset_nonspice_error': True, 'has_no_offset_error': True},
+        id='nonspice-error-and-no-error',
+    ),
+    pytest.param(
+        {'has_no_offset_error': True, 'has_no_offset_file': True},
+        id='no-error-and-no-offset-file',
+    ),
+]
+"""Every pair of selection flags no image could satisfy."""
+
+
+@pytest.mark.parametrize('flags', CONTRADICTORY_PAIRS)
 def test_a_contradictory_pair_is_refused_before_the_index_is_opened(
     tree: Path, tmp_path: Path, flags: dict[str, bool]
 ) -> None:
@@ -204,6 +238,27 @@ def test_a_contradictory_pair_is_refused_before_the_index_is_opened(
     with pytest.raises(ValueError, match=r'mutually exclusive|contradicts') as excinfo:
         ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_db_url=absent, **flags)
     assert 'not-an-index.sqlite3' not in str(excinfo.value)
+
+
+@pytest.mark.parametrize('flags', CONTRADICTORY_PAIRS)
+def test_a_refusal_names_every_flag_that_made_the_selection_impossible(
+    tree: Path, flags: dict[str, bool]
+) -> None:
+    """The message is the whole diagnosis, so it names what the user typed.
+
+    A message naming a category rather than a flag -- "the offset-error
+    filters" -- leaves the user to work out which of six flags belongs to it,
+    and one of the six is named for the absence of an error, so the category
+    reads as something they did not ask for.
+
+    Parameters:
+        tree: The results root, which is never read: the flags are refused
+            first.
+        flags: The contradictory pair.
+    """
+    with pytest.raises(SelectionError) as excinfo:
+        ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_db_url=None, **flags)
+    assert [name for name in flags if name not in str(excinfo.value)] == []
 
 
 def test_a_root_with_no_completed_ingest_is_refused(tree: Path, indexed: str) -> None:
