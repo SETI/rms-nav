@@ -371,12 +371,23 @@ def test_a_bare_basename_stub_ingests_with_a_null_volume(
 
 
 def _tree_with_a_file_that_is_not_a_document(tmp_path: Path) -> Path:
-    """Write a root holding one document, its summary PNG, and a stray file.
+    """Write a root holding one document and four files that are not one.
 
     A results root holds the summary PNG a navigation that reached a result
     drew, and whatever else an operator has left there.  None of them is a file
     the pass reads, and the walk has to pass over each without adding it to any
     tally.
+
+    The clutter is chosen to bracket the suffix test rather than to be merely
+    unlike a document.  ``notes.txt`` and the summary PNG are unlike one in
+    every way; ``scene_index.json`` is JSON and is not a navigation document,
+    which is what separates the document suffix from the file extension; and
+    ``..._metadata.json.tmp`` -- a partial write, an editor's backup, a
+    ``.json.gz`` -- carries the suffix without ending in it, which is what
+    separates ending in the suffix from containing it.  A name that only
+    contains it yields a stub with the suffix's length cut off the end of a
+    longer name, naming nothing, which the pass then retrieves, fails on,
+    records nothing for, and retrieves again on every pass afterwards.
 
     Parameters:
         tmp_path: Directory the root is written under.
@@ -388,6 +399,10 @@ def _tree_with_a_file_that_is_not_a_document(tmp_path: Path) -> Path:
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     write_summary_png(root, 'VOL/N1454725799_1_CALIB')
     (root / 'VOL' / 'notes.txt').write_text('nothing to ingest here', encoding='utf-8')
+    (root / 'VOL' / 'scene_index.json').write_text('{"not": "a document"}', encoding='utf-8')
+    (root / 'VOL' / f'N1454725799_1_CALIB{METADATA_SUFFIX}.tmp').write_text(
+        '{"half": "written"', encoding='utf-8'
+    )
     return root
 
 
@@ -396,8 +411,9 @@ def test_a_file_that_is_not_a_document_is_not_a_file_this_pass_saw(
 ) -> None:
     """The walk counts the documents, and a tree holds far more than documents.
 
-    Counted as one of them, a summary PNG would be retrieved, refused for not
-    being a navigation document, and tallied against the root on every pass.
+    Counted as one of them, a summary PNG, a JSON file that is not a navigation
+    result, or a half-written document would be retrieved, refused for not being
+    a navigation document, and tallied against the root on every pass.
     """
     root = _tree_with_a_file_that_is_not_a_document(tmp_path)
     counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
@@ -410,13 +426,15 @@ def test_a_file_that_is_not_a_document_is_no_part_of_what_the_walk_found(
     """Both tallies the entry loop can add to, over a tree of ordinary clutter.
 
     Every entry is a directory to descend into, a document to collect, or a
-    file to pass over, and only the last leaves both tallies as they were.  The
-    stub is what says which: it is the name with the document suffix's length
-    removed, so a name that never carried that suffix yields a stub naming
-    nothing, which the pass then retrieves, fails on, records nothing for, and
-    retrieves again on every pass afterwards.  The missed count is the other
-    half, because a directory in it stops the pass removing rows anywhere under
-    the root, and a file passed over is not a directory that went unlisted.
+    file to pass over, and only the last leaves both tallies as they were.  A
+    name that ends in the document suffix is what says which, and neither half
+    of that is enough on its own: a file that merely ends in ``.json`` is not a
+    navigation document, and one that merely contains the suffix yields a stub
+    with the suffix's length cut off the end of a longer name, naming nothing,
+    which the pass then retrieves, fails on, records nothing for, and retrieves
+    again on every pass afterwards.  The missed count is the other half, because
+    a directory in it stops the pass removing rows anywhere under the root, and
+    a file passed over is not a directory that went unlisted.
     """
     root = _tree_with_a_file_that_is_not_a_document(tmp_path)
     listing = walk_module._walk_root(FCPath(root), logger=quiet_logger)

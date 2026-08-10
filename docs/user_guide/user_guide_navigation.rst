@@ -219,7 +219,7 @@ below are the answers an index is known to give differently from the tree; each
 of them is a property of what an ingest pass could read and record rather than
 of the query.
 
-**An index answers only for the documents its ingest accepted.** A
+**A document the ingest refused answers no error filter.** A
 ``*_metadata.json`` file the ingest could not read as a navigation document --
 one whose contents do not carry what the index requires (see
 :doc:`user_guide_statistics`), or a file that was never a navigation document at
@@ -234,40 +234,58 @@ the images whose documents were refused are subtracted from the selection with
 nothing in the run saying so. The line ``*** Results index holds N offset
 metadata files under ...`` counts the refused files among the N, so a count in
 line with what the tree holds is no evidence that the selection matched. The
-size of the gap is visible in the ingest and nowhere else: run
-``sd_stats_ingest`` over the root and read its closing summary, which tallies
-the files it refused by reason and names one file per reason. The gap is not
-necessarily small. A root every one of whose documents is refused answers every
-error filter with nothing at all while still reporting a plausible count of
-metadata files, so a selection that comes back short, or empty, is a reason to
-read that summary rather than to conclude the root holds no such images. Pass
-``--results-db none`` for a run that must ask the documents themselves.
+gap is not necessarily small. A root every one of whose documents is refused
+answers every error filter with nothing at all while still reporting a plausible
+count of metadata files, so a selection that comes back short, or empty, is a
+reason to measure the gap rather than to conclude the root holds no such images.
+Pass ``--results-db none`` for a run that must ask the documents themselves.
 
-**A document that records its outcome only under ``navigation_result`` is read
-differently.** An index takes the recorded status from the top-level ``status``
-field and falls back to ``navigation_result.status`` when the top-level field is
-absent, empty, or not a string; reading the tree, only the top-level field is
-consulted. Such a document can therefore record a fatal error to an index and
-none to the tree, so ``--has-offset-error`` selects it in the first case and
-``--has-no-offset-error`` in the second.
+The size of the gap is the number of rows ``failed_files`` holds for the root,
+and it is answered at any time by one query:
 
-**A file the ingest recorded nothing for at all reads as absent**, and
+.. code-block:: sql
+
+    SELECT reason, COUNT(*) FROM failed_files
+    WHERE root_url = '/path/to/nav-results'
+    GROUP BY reason;
+
+``root_url`` is the results root as the ingest normalized it: absolute, with any
+trailing ``/`` removed. ``sd_stats_ingest`` reports the same total at the end of
+each root's pass, as the line ``Refused documents the index now holds under
+...``, which is the root's standing total rather than what that pass refused.
+The two differ, and the difference is what makes the tally in the pass's closing
+summary the wrong number to read here: an ingest is incremental, a refused file
+that has not changed since is skipped without being read, and a pass that skips
+it refuses nothing and tallies nothing. Run ``sd_stats_ingest --force`` over the
+root to have every document read again and the reasons tallied by that summary,
+which names one file per reason.
+
+**A document whose top-level ``status`` is absent, empty, or not a string is
+read differently.** An index takes the recorded status from the top-level
+``status`` field and falls back to ``navigation_result.status`` in that case;
+reading the tree, only the top-level field is consulted. Such a document can
+therefore record a fatal error to an index and none to the tree, so
+``--has-offset-error`` selects it in the first case and ``--has-no-offset-error``
+in the second.
+
+**A file the index has no row at all for reads as absent**, and
 ``--has-no-offset-file`` reads absence as "this image was never navigated", so
 it selects that image again. Three passes end that way: one that could not
 retrieve the file, one whose rows the database would not store, and one that did
 not list the directory the file is under. The first two are deliberate -- a
 recorded refusal would be skipped for as long as the file did not change, and
 the next pass would never retry it -- and the third is counted rather than
-silent, by the paragraph that closes this section.
+silent, by the paragraph on unlisted directories below.
 
-**An index is a snapshot** of the tree as of the last ingest over that root,
-with no staleness detection: an image navigated since is one the index does not
-hold, so ``--has-no-offset-file`` selects it again, and a result file deleted
-since is one the index still holds, so ``--has-offset-file`` selects an image
-whose metadata file is gone. The run log says when the pass that filled the
-index finished and how long ago that was, which is what says whether either
-applies to this run. Run ``sd_stats_ingest`` to bring the index up to date, or
-pass ``--results-db none`` for a run that must read the tree.
+**A document the tree no longer holds keeps its row** and reads as present, so
+``--has-offset-file`` hands on an image whose metadata file is gone and
+``--has-no-offset-file`` skips an image nothing has been written for. A row
+leaves the index only when a pass that listed the whole root finds no file for
+it, and a pass that missed a single directory anywhere under the root removes no
+row at all, having no evidence about the stubs it did not see. One unlistable
+subdirectory therefore holds every stale row of the root, however many passes
+complete in the meantime, which is why this one is not answered by ingesting
+again.
 
 **A document rewritten in place that kept the length and the modification time
 it had before** is one the ingest skips, because those two metrics are
@@ -276,14 +294,25 @@ document before it said, so an error filter answers from that one however
 recently the last pass finished. Running ``sd_stats_ingest --force`` over the
 root re-reads every document and is what puts such a row right.
 
+An index is also a snapshot of the tree as of the last ingest over that root,
+with no staleness detection: an image navigated since is one the index does not
+hold, so ``--has-no-offset-file`` selects it again, and a result file deleted
+since is one the index still holds, so ``--has-offset-file`` selects an image
+whose metadata file is gone. The run log says when the pass that filled the
+index finished and how long ago that was, which is what says whether either
+applies to this run. Run ``sd_stats_ingest`` to bring the index up to date, or
+pass ``--results-db none`` for a run that must read the tree. That age is what
+decides the answer outside the paragraphs above; inside them it decides nothing,
+since each of them survives a pass that finished a second ago.
+
 An ingest that could not list every directory under the root reports the number
 it missed, and every enumeration answered from that index repeats it as a
-warning. It bounds both directions of the snapshot paragraph above: an image
-under a directory nobody listed is absent from the index whether or not it was
-navigated, and such a pass removes no row anywhere under the root, so a result
-file deleted before it keeps its row until a pass lists the whole root. Fixing
-what stopped the walk -- a directory permission, a symbolic link pointing back
-up the tree -- and re-running ``sd_stats_ingest`` clears both.
+warning. It bounds both directions of the snapshot: an image under a directory
+nobody listed is absent from the index whether or not it was navigated, and such
+a pass removes no row anywhere under the root, so a result file deleted before it
+keeps its row until a pass lists the whole root. Fixing what stopped the walk --
+a directory permission, a symbolic link pointing back up the tree -- and
+re-running ``sd_stats_ingest`` clears both.
 
 Miscellaneous
 ^^^^^^^^^^^^^

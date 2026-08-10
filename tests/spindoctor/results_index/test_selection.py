@@ -21,6 +21,7 @@ the other root's, and says so.
 """
 
 import re
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -750,13 +751,25 @@ def test_the_query_returns_its_connection(two_roots: str, monkeypatch: pytest.Mo
     assert pool.checkedin() == 0
 
 
-ENUMERATION_MEMBERS = 5
-"""How many answers the index gives differently from the tree.
+ENUMERATION_MEMBERS = {
+    'a document the ingest refused': 'the ingest refused',
+    'a status the index falls back for': 'absent, empty, or not a string',
+    'a file with no row': 'has no row at all',
+    'a document that left the tree': 'the tree no longer holds',
+    'a document rewritten in place': 'rewritten in place',
+}
+"""The answers the index gives differently from the tree, and what names each.
 
-Named here so that the four lists below cannot all stop matching the same
-regular expression and agree at zero.  Raising it is the reminder that a member
-is added to the plan, the module docstring, the navigation guide and a test in
-one commit.
+Every place that states the enumeration states each member in its own words,
+which is why the member is identified by a phrase it carries rather than by its
+position or by the number of members: a list compared by length agrees with a
+list that dropped one member and gained another, and agrees with itself after a
+member is deleted and an unrelated paragraph is emphasized in its place.
+
+The phrase is chosen to be the one wording every statement of that member shares
+and no other member's carries.  Adding a member means adding it here, to the
+module docstring, to the navigation guide and to the plan's two lists, in one
+commit; rewording one out of any of those lists fails, which is the point.
 """
 
 PLAN = Path(__file__).resolve().parents[3] / 'plans' / 'RESULTS_DB_PLAN.md'
@@ -787,31 +800,60 @@ def _plan_lines() -> list[str]:
     return PLAN.read_text(encoding='utf-8').splitlines()
 
 
-def _numbered_within(lines: list[str], opens: str, closes: str, indent: str) -> list[str]:
-    """Return the numbered items of one block of the plan.
+def _normalized(text: str) -> str:
+    """Return one entry with the markup the four lists spell differently removed.
 
     Parameters:
-        lines: The plan's lines.
-        opens: Text that identifies the line the block starts at.
-        closes: Prefix of the line that ends the block.
-        indent: The exact indentation the block's numbered items carry, which
-            is what tells one list's items from a nested list's.
+        text: The entry as its list writes it.
 
     Returns:
-        The numbered items, in the order they are written.
+        The text with emphasis and literal markers dropped, its line breaks
+        collapsed to single spaces, and its case folded, so that one phrase
+        identifies a member whether the list around it is Python, ``.rst`` or
+        Markdown, and whether the phrase is wrapped across two lines.
     """
-    item = re.compile(rf'^{indent}\d+\. ')
-    inside = False
-    items: list[str] = []
+    stripped = text.replace('*', '').replace('`', '')
+    return re.sub(r'\s+', ' ', stripped).strip().casefold()
+
+
+def _lead_paragraphs(
+    lines: Sequence[str], lead: re.Pattern[str], *, opens: str | None = None, closes: str | None
+) -> list[str]:
+    """Return each paragraph of one region that a member's own lead opens.
+
+    An entry is its lead line and the lines wrapped under it, up to the blank
+    line that closes the paragraph: the identity of a member belongs where a
+    reader meets it, which is the paragraph that announces it, and not in a
+    sub-list or an aside further down.
+
+    Parameters:
+        lines: The lines of the file, or of the docstring.
+        lead: Pattern matching the opening line of an entry.
+        opens: Text identifying the line the region starts after, or None to
+            start at the first line.
+        closes: Prefix of the line that ends the region, or None to read to the
+            end.
+
+    Returns:
+        One entry per lead, each as a single line of text.
+    """
+    inside = opens is None
+    collected: list[list[str]] = []
+    open_paragraph = False
     for line in lines:
         if not inside:
-            inside = opens in line
+            inside = opens is not None and opens in line
             continue
-        if line.startswith(closes):
+        if closes is not None and line.startswith(closes):
             break
-        if item.match(line):
-            items.append(line.strip())
-    return items
+        if lead.match(line):
+            collected.append([line.strip()])
+            open_paragraph = True
+        elif not line.strip():
+            open_paragraph = False
+        elif open_paragraph:
+            collected[-1].append(line.strip())
+    return [' '.join(parts) for parts in collected]
 
 
 def _phase_five_members() -> list[str]:
@@ -820,8 +862,11 @@ def _phase_five_members() -> list[str]:
     Returns:
         One entry per member.
     """
-    return _numbered_within(
-        _plan_lines(), '**What the index answers differently', '- **The answer says how old', '  '
+    return _lead_paragraphs(
+        _plan_lines(),
+        re.compile(r'^  \d+\. '),
+        opens='**What the index answers differently',
+        closes='- **The answer says how old',
     )
 
 
@@ -831,7 +876,12 @@ def _criterion_one_members() -> list[str]:
     Returns:
         One entry per member.
     """
-    return _numbered_within(_plan_lines(), '## 5. Acceptance criteria', '2. No pipeline', '   ')
+    return _lead_paragraphs(
+        _plan_lines(),
+        re.compile(r'^   \d+\. '),
+        opens='## 5. Acceptance criteria',
+        closes='2. No pipeline',
+    )
 
 
 def _docstring_members() -> list[str]:
@@ -841,22 +891,7 @@ def _docstring_members() -> list[str]:
         One entry per member.
     """
     docstring = selection.__doc__ or ''
-    return [line for line in docstring.splitlines() if line.startswith('- **')]
-
-
-def test_the_module_docstring_states_every_member_of_the_enumeration() -> None:
-    """The count is fixed so that three lists cannot agree at zero."""
-    assert len(_docstring_members()) == ENUMERATION_MEMBERS
-
-
-def test_the_plan_states_every_member_the_module_docstring_states() -> None:
-    """A member is added to the plan, the docstring and a test in one commit."""
-    assert len(_phase_five_members()) == len(_docstring_members())
-
-
-def test_criterion_one_restates_every_member_the_plan_enumerates() -> None:
-    """A reader of the criterion takes its restatement for the list, so it is the list."""
-    assert len(_criterion_one_members()) == len(_phase_five_members())
+    return _lead_paragraphs(docstring.splitlines(), re.compile(r'^- \*\*'), closes=None)
 
 
 def _navigation_guide_members() -> list[str]:
@@ -871,25 +906,73 @@ def _navigation_guide_members() -> list[str]:
     """
     if not NAVIGATION_GUIDE.is_file():
         pytest.skip(f'{NAVIGATION_GUIDE} is not in this tree')
-    inside = False
-    members: list[str] = []
-    for line in NAVIGATION_GUIDE.read_text(encoding='utf-8').splitlines():
-        if not inside:
-            inside = line.startswith('Given ``--results-db``')
-            continue
-        if line.startswith('Miscellaneous'):
-            break
-        if line.startswith('**'):
-            members.append(line)
-    return members
+    return _lead_paragraphs(
+        NAVIGATION_GUIDE.read_text(encoding='utf-8').splitlines(),
+        re.compile(r'^\*\*'),
+        opens='Given ``--results-db``',
+        closes='Miscellaneous',
+    )
 
 
-def test_the_navigation_guide_states_every_member_the_module_docstring_states() -> None:
-    """An enumeration only a maintainer reads does not reach the person it costs.
+def _members_stated_in(entries: Sequence[str]) -> list[str]:
+    """Return the member each entry of one list states, entry by entry.
+
+    Parameters:
+        entries: The list's entries.
+
+    Returns:
+        One name per member an entry carries the identifying phrase of, so that
+        an entry stating none contributes nothing and an entry stating two
+        contributes both.
+    """
+    return [
+        name
+        for entry in entries
+        for name, phrase in ENUMERATION_MEMBERS.items()
+        if _normalized(phrase) in _normalized(entry)
+    ]
+
+
+ENUMERATION_LISTS = [
+    pytest.param(_docstring_members, id='module-docstring'),
+    pytest.param(_navigation_guide_members, id='navigation-guide'),
+    pytest.param(_phase_five_members, id='plan-phase-5'),
+    pytest.param(_criterion_one_members, id='plan-criterion-1'),
+]
+"""Every place a member of the enumeration has to be stated, and how to read it.
+
+The guide is one of them because an operator reading it is the person a silently
+short selection is served to.  The plan states the enumeration twice, and both
+are here, because acceptance criterion 1 restates it as the list rather than as
+a pointer at one.
+"""
+
+
+@pytest.mark.parametrize('members', ENUMERATION_LISTS)
+def test_every_list_states_each_member_of_the_enumeration_once(
+    members: Callable[[], list[str]],
+) -> None:
+    """Matched member by member, because a length agrees with the wrong list.
 
     A selection answered from an index differs from the same selection answered
-    from the tree, silently and by however many documents the ingest refused,
-    so the operator choosing between them is told which members of this list
-    apply to their root.
+    from the tree, silently and by however many documents the ingest refused, so
+    the operator choosing between them is told which members of this list apply
+    to their root.  Deleting the paragraph that says so and emphasizing another
+    in its place leaves the count where it was; it does not leave this set where
+    it was.
     """
-    assert len(_navigation_guide_members()) == len(_docstring_members())
+    assert sorted(_members_stated_in(members())) == sorted(ENUMERATION_MEMBERS)
+
+
+@pytest.mark.parametrize('members', ENUMERATION_LISTS)
+def test_no_entry_of_a_list_states_anything_outside_the_enumeration(
+    members: Callable[[], list[str]],
+) -> None:
+    """An entry naming no member is a member added to one list and not the rest.
+
+    It is also what a paragraph promoted into the enumeration by emphasis looks
+    like: the snapshot, which the docstring states after the list precisely
+    because the age of the pass decides nothing about the members, reads as one
+    of them the moment its lead is emphasized like theirs.
+    """
+    assert [entry for entry in members() if not _members_stated_in([entry])] == []

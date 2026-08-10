@@ -26,7 +26,7 @@ import pytest
 from spindoctor.cli import sd_stats_ingest
 from spindoctor.config import MAIN_LOGGER
 
-from .conftest import index_url, metadata_document, write_metadata
+from .conftest import index_url, metadata_document, refusal_report, write_metadata
 
 PASSWORD = 'sup3rs3cr3t'
 """A password distinctive enough that finding it anywhere is proof of a leak."""
@@ -308,15 +308,22 @@ def test_a_failure_reason_names_one_example_file(
     assert any('edges_metadata.json' in line for line in examples)
 
 
-def _statuses_of_two_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[int | None]:
+def _two_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, list[tuple[int | None, list[str]]]]:
     """Run the driver twice over a tree of files that are not navigation documents.
+
+    This is the shape of the tree an operator measures a short selection
+    against: every document under the root is one the ingest refuses, and the
+    root has already been ingested, which is the only state a consumer accepts
+    it in.
 
     Parameters:
         tmp_path: Directory the tree, the index and the logs live under.
         monkeypatch: Fixture the argument vector and logger are replaced through.
 
     Returns:
-        The exit status of each pass.
+        The results root, and the exit status and main log of each pass.
     """
     monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
     root = tmp_path / 'results'
@@ -329,9 +336,7 @@ def _statuses_of_two_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
         '--nav-results-root',
         root.as_posix(),
     ]
-    first, _written = _run(argv, monkeypatch, tmp_path)
-    second, _also = _run(argv, monkeypatch, tmp_path)
-    return [first, second]
+    return root, [_run(argv, monkeypatch, tmp_path), _run(argv, monkeypatch, tmp_path)]
 
 
 def test_two_passes_over_one_tree_exit_the_same_way(
@@ -343,4 +348,36 @@ def test_two_passes_over_one_tree_exit_the_same_way(
     a status read from what was ingested or skipped reports a failure once and
     never again.  The pass completed both times, which is what the status says.
     """
-    assert _statuses_of_two_passes(tmp_path, monkeypatch) == [0, 0]
+    _root, passes = _two_passes(tmp_path, monkeypatch)
+    assert [status for status, _written in passes] == [0, 0]
+
+
+def test_a_second_pass_tallies_none_of_the_refusals_the_first_one_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pass's own tally answers "what did this pass read", and nothing else.
+
+    A refused file that has not changed is skipped without being read, so it
+    never reaches the tally again.  Read as the size of the gap an error filter
+    answered from this index leaves, that zero is the one conclusion the number
+    exists to prevent, on the only kind of root a consumer accepts.
+    """
+    _root, passes = _two_passes(tmp_path, monkeypatch)
+    _status, written = passes[1]
+    assert [line for line in written if line.startswith('Not ingestible')] == ['Not ingestible: 0']
+
+
+def test_a_second_pass_still_reports_the_refusals_the_root_holds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What the index refuses to answer for is reported however old the refusal.
+
+    It is the root's standing total rather than the pass's tally, so an operator
+    who runs the ingest to find out how short a selection came is told, on a root
+    that was ingested long ago and has not changed since.
+    """
+    root, passes = _two_passes(tmp_path, monkeypatch)
+    _status, written = passes[1]
+    assert [line for line in written if line.startswith('Refused documents')] == [
+        refusal_report(root, 2)
+    ]

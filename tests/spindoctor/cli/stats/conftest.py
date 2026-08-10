@@ -37,7 +37,7 @@ from spindoctor.cli.stats.ingest import (
     ingest_task_share,
 )
 from spindoctor.cli.stats.report import build_report
-from spindoctor.results_index import INGEST_RUNS, open_index
+from spindoctor.results_index import INGEST_RUNS, normalize_root_url, open_index
 
 # The statistics postgres tier runs against a schema of its own, exactly as the
 # results-index tier does; re-exporting rather than restating keeps one
@@ -330,6 +330,48 @@ def write_summary_png(root: Path, stub: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b'\x89PNG\r\n\x1a\n')
     return path
+
+
+REFUSED_DOCUMENT = '{"edges": []}'
+"""A document that reads as JSON and is not a navigation result of any schema."""
+
+
+def write_refusal(root: Path, stub: str) -> Path:
+    """Write a document under a root that no pass can turn into an image row.
+
+    Parameters:
+        root: The results root to write under.
+        stub: The document's results path stub under that root.
+
+    Returns:
+        The path written.
+    """
+    path = root / f'{stub}_metadata.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(REFUSED_DOCUMENT, encoding='utf-8')
+    return path
+
+
+def refusal_report(root: Path | str, refused: int) -> str:
+    """Return the line a pass writes about the refusals its root's index holds.
+
+    Written once here because two modules read the same line: it is what an
+    operator is told about the gap between an error filter answered from the
+    index and the same filter answered from the tree, and the number in it is
+    the root's own total rather than what any one pass refused.
+
+    Parameters:
+        root: The results root the pass covered.
+        refused: How many refusals the index holds under it.
+
+    Returns:
+        The line, spelled as the pass writes it.
+    """
+    return (
+        f'Refused documents the index now holds under {normalize_root_url(root)}, whichever '
+        f'pass recorded them: {refused}. An error filter answered from this index selects '
+        f'none of their images.'
+    )
 
 
 def ingest_tree(

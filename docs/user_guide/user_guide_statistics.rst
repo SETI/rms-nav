@@ -129,6 +129,18 @@ list -- one this user may not read, a share that stopped answering -- costs the
 files under it and nothing else: the pass continues over the rest of the root
 and removes no row from it.
 
+That tally is what this pass read, and not what the root holds. A refused file
+is recorded in ``failed_files``, and every pass after it skips the file
+unchanged rather than reading it again, so a second pass over the same tree
+refuses nothing and tallies nothing. Each root's pass therefore also reports the
+standing total, as the line ``Refused documents the index now holds under
+...``, which counts the rows ``failed_files`` holds for that root whichever pass
+wrote them. That is the number to read when a selection answered from the index
+comes back shorter than the tree would have made it, since an error filter
+answered from an index passes over every one of those documents
+(:doc:`user_guide_navigation`). ``sd_stats_ingest --force`` reads every document
+again, which puts the reasons and the example files back into the summary.
+
 **A directory the walk did not list is counted, and absence under it is not an
 answer.** The closing summary reports how many directories a pass did not
 enumerate, and each pass records the number on its ``ingest_runs`` row. Two
@@ -269,10 +281,11 @@ read ends in a partial line.
 
 The closing summary of step 3 is the summary a single-process ingest writes:
 files seen, ingested, skipped and refused, with the refusals tallied by reason
-and one example file per reason. The reasons come back in the task results,
-since a worker has no run log to write them in. Every file a share could not
-read is named in its task result too, and the ones refused for something about
-the document are recorded in the index's ``failed_files`` table as well.
+and one example file per reason, followed by each completed root's standing
+total of refused documents. The reasons come back in the task results, since a
+worker has no run log to write them in. Every file a share could not read is
+named in its task result too, and the ones refused for something about the
+document are recorded in the index's ``failed_files`` table as well.
 
 Index schema
 ------------

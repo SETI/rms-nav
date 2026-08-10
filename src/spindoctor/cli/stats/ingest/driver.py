@@ -52,7 +52,7 @@ from pdslogger import PdsLogger
 from spindoctor.cli.stats.ingest.chunks import _batched, _ingest_chunk
 from spindoctor.cli.stats.ingest.counts import IngestCounts
 from spindoctor.cli.stats.ingest.runs import _finish_run, _start_run
-from spindoctor.cli.stats.ingest.store import _recorded_files, _RecordedFile
+from spindoctor.cli.stats.ingest.store import _recorded_files, _RecordedFile, _report_refusals
 from spindoctor.cli.stats.ingest.walk import _ListedFile, _RootListing, _walk_root
 from spindoctor.results_index import FAILED_FILES, IMAGES, normalize_root_url
 
@@ -248,6 +248,13 @@ def ingest_metadata_files(
 
     Two spellings of one root are one root, and are walked once.
 
+    Each root's pass closes by reporting how many refused documents the index
+    then holds under it.  That is the root's own total rather than this pass's:
+    a file refused by an earlier pass and unchanged since is skipped without
+    being read, so the pass that follows the one that refused it refuses
+    nothing, and only the total says what an error filter answered from this
+    index will pass over.
+
     Parameters:
         engine: The open index, which must already carry the schema.
         roots: Navigation results roots -- local directories or any URL the
@@ -313,5 +320,6 @@ def ingest_metadata_files(
             counts.files_seen,
             root_url,
         )
+        _report_refusals(engine, root_url, logger=logger)
         total.add(counts)
     return total

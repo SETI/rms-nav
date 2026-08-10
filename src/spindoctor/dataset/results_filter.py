@@ -5,10 +5,10 @@ Implements the ``--has-offset-file`` / ``--has-no-offset-file`` /
 ``--has-offset-spice-error`` / ``--has-offset-nonspice-error`` image selection
 options shared by the PDS3 datasets.
 
-The error filters, the negative one among them, ask what a document records,
-so each of them requires the document to exist: an image nothing has been
-written for records no error, and is selected by ``--has-no-offset-file``
-rather than by ``--has-no-offset-error``.
+The error filters, including the negative one, ask what a document records, so
+each of them requires the document to exist: an image nothing has been written
+for records no error, and is selected by ``--has-no-offset-file`` rather than by
+``--has-no-offset-error``.
 
 The navigation pipeline writes ``{nav_results_root}/{results_path_stub}_metadata.json``
 (see :func:`spindoctor.navigate_image_files.navigate_image_files`).  The
@@ -59,7 +59,7 @@ is what the branch-local import exists to avoid.
 class SelectionError(ValueError):
     """A selection this run cannot be given, as opposed to one that went wrong.
 
-    Raised for a contradictory pair of selection flags, and for a results index
+    Raised for a contradictory combination of selection flags, and for a results index
     that cannot be opened, cannot be read, or holds no completed ingest of the
     results root.  Each is a run that is misconfigured, each already carries a
     message saying what to change, and a program is therefore free to report
@@ -149,10 +149,11 @@ class ResultsFilter:
 
     Constructed once per enumeration when any of the results-based selection
     flags is active.  Construction validates the flag combination (the flags
-    AND together; directly contradictory pairs raise) and then collects what
-    the results root holds: from the index in one query when a results-index
-    URL is given, and otherwise, when the presence or an error filter is
-    active, by walking the results tree under each selected volume.
+    AND together; a combination carrying a contradictory pair raises, naming
+    every contradiction it carries rather than the first one found) and then
+    collects what the results root holds: from the index in one query when a
+    results-index URL is given, and otherwise, when the presence or an error
+    filter is active, by walking the results tree under each selected volume.
 
     The filter is applied in two stages:
 
@@ -221,44 +222,58 @@ class ResultsFilter:
                 results index cannot be opened, cannot be read, or holds no
                 completed ingest of this results root.
         """
-        if has_offset_file and has_no_offset_file:
-            raise SelectionError('has_offset_file and has_no_offset_file are mutually exclusive')
-        if has_offset_spice_error and has_offset_nonspice_error:
-            raise SelectionError(
-                'has_offset_spice_error and has_offset_nonspice_error are mutually exclusive'
-            )
-        naming_an_error = [
+        # Declaration order, so that every message names the flags in the order
+        # the options themselves are documented in.
+        reading_a_document = [
             name
             for name, given in (
                 ('has_offset_error', has_offset_error),
+                ('has_no_offset_error', has_no_offset_error),
                 ('has_offset_spice_error', has_offset_spice_error),
                 ('has_offset_nonspice_error', has_offset_nonspice_error),
             )
             if given
         ]
-        if has_no_offset_error and naming_an_error:
-            # Each of the three names a document that records a fatal error, of
-            # any kind or of one kind, and this one names a document that
-            # records none: no document is both, so the pair is a selection
-            # nothing could ever satisfy rather than a narrow one.
-            raise SelectionError(
-                f'has_no_offset_error and {_named_flags(naming_an_error)} are mutually '
-                'exclusive: one document cannot both record a fatal error and record none'
+        naming_an_error = [name for name in reading_a_document if name != 'has_no_offset_error']
+        contradictions: list[str] = []
+        if has_offset_file and has_no_offset_file:
+            contradictions.append(
+                'has_offset_file and has_no_offset_file are mutually exclusive: one image '
+                'cannot both have an offset metadata file and have none'
             )
-        needs_metadata_read = bool(naming_an_error) or has_no_offset_error
-        if needs_metadata_read and has_no_offset_file:
+        if has_offset_spice_error and has_offset_nonspice_error:
+            contradictions.append(
+                'has_offset_spice_error and has_offset_nonspice_error are mutually exclusive: '
+                'one fatal error either came from missing SPICE data or did not'
+            )
+        if has_no_offset_file and reading_a_document:
             # Whichever of the four was given is named, because "the
             # offset-error filters" is a category the reader would have to look
             # up, and one of its members is a flag whose own name says "no
             # error" -- so a message that only named the category would leave a
             # user who typed --has-no-offset-error reading about something else.
-            reading_a_document = naming_an_error or ['has_no_offset_error']
             named = _named_flags(reading_a_document)
             asks = 'asks' if len(reading_a_document) == 1 else 'ask'
-            raise SelectionError(
-                f'has_no_offset_file and {named} are mutually exclusive: {named} {asks} '
-                'what an offset metadata file records, which requires the file to exist'
+            contradictions.append(
+                f'{_named_flags(["has_no_offset_file", *reading_a_document])} are mutually '
+                f'exclusive: {named} {asks} what an offset metadata file records, which '
+                'requires the file to exist'
             )
+        if has_no_offset_error and naming_an_error:
+            # Each of the three names a document that records a fatal error, of
+            # any kind or of one kind, and this one names a document that
+            # records none: no document is both, so the combination is a
+            # selection nothing could ever satisfy rather than a narrow one.
+            contradictions.append(
+                f'{_named_flags(["has_no_offset_error", *naming_an_error])} are mutually '
+                'exclusive: one document cannot both record a fatal error and record none'
+            )
+        if contradictions:
+            # Every contradiction the flags carry, not the first one found: a
+            # selection refused one pair at a time costs the user a run per pair,
+            # and a flag left out of the message reads as one the run accepted.
+            raise SelectionError('; '.join(contradictions))
+        needs_metadata_read = bool(reading_a_document)
 
         self._has_no_offset_file = has_no_offset_file
         self._has_no_offset_error = has_no_offset_error

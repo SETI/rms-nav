@@ -611,6 +611,20 @@ row deleted as the refusal is written, since a row nothing backs would answer
 for an image nothing produced; and a file that was refused and now reads has
 its refusal deleted as its rows are written.
 
+**What a pass refused is not what the root holds refusals for.** A refused file
+is recorded and then skipped unchanged by every pass after it, so the pass's own
+tally counts it once and never again. An operator sent to that tally to measure how
+short an index-answered error filter comes therefore reads zero on a root that
+was ingested before, which is every root a consumer accepts. So each root's pass
+closes by counting the rows `failed_files` holds for that root and reporting
+that as a line of its own, named as the root's standing total rather than as
+this pass's, and a fan-out reports it the same way for each root it completes.
+The count is also one query over `failed_files` away at any time, which is what
+the guide gives an operator first; the reported line is what makes the natural
+action -- run the ingest and read its log -- the correct one rather than merely
+the documented one. `--force` remains what puts the reasons and the example
+files back into the summary.
+
 **A root the walk cannot list is not an empty root.** The walk reports whether
 the root itself could be listed. When it could not -- a mistyped root, an
 unmounted share -- the run's `ingest_runs` row keeps its NULL finish time, so
@@ -1496,21 +1510,24 @@ Details settled during execution, none of them a change of intent:
 - **What the index answers differently, as far as it is known.** Each member is
   stated in the module docstring and in the navigation guide's account of
   `--results-db`, each has a test of its own, and a member found later is added
-  here, in the docstring, in the guide, and in a test, in the same commit. A
-  test counts the members of each of those lists so that none of them can
-  quietly drop one. The list is maintained rather than closed: it is what
-  execution and code reading have found, and a divergence nobody has found yet
-  would be a defect of this list rather than a departure from it.
-  1. A document that is valid JSON and carries `status` but is **not a
-     navigation document** is refused by ingest, so it records no status and
-     matches no error filter, where the tree path reads `status` and
-     `status_error` out of any JSON object it can parse.
+  here, in the docstring, in the guide, and in a test, in the same commit. Each
+  member carries a phrase that identifies it, and a test matches the members of
+  those lists against each other by that phrase, so that a member dropped from
+  one of them, reworded out of one of them, or added to one and not the others
+  fails rather than passing on a count that still agrees. The list is maintained
+  rather than closed: it is what execution and code reading have found, and a
+  divergence nobody has found yet would be a defect of this list rather than a
+  departure from it.
+  1. **A document the ingest refused** -- valid JSON that carries `status` but
+     is not a navigation document -- records no status and so matches no error
+     filter, where the tree path reads `status` and `status_error` out of any
+     JSON object it can parse.
   2. A document whose top-level `status` is **absent, empty, or not a string**
      takes its recorded status from `navigation_result.status`, which is where
      the rest of the index reads an outcome from; the tree path reads the
      top-level field alone. Such a document can therefore match an error filter
      under the index and not under the tree.
-  3. A file that exists and has **no row at all** reads as absent, which is what
+  3. A file that exists and **has no row at all** reads as absent, which is what
      the absence filters read as "this image was never navigated". Three passes
      end that way: a file the pass could not retrieve; a document the pass read
      whose rows the database would not store (section 2.7's isolated write
@@ -1634,21 +1651,23 @@ add a column (increment the version). No issue numbers in any of it.
 
    1. a document the ingest refused, which is a file that exists but records no
       status;
-   2. a document whose outcome the index reads from `navigation_result.status`
-      and the tree reads from the top-level field alone;
-   3. an input the index holds nothing about because no pass could read or
+   2. a document whose top-level `status` is absent, empty, or not a string,
+      whose outcome the index therefore reads from `navigation_result.status`
+      and the tree from the top-level field alone;
+   3. a file that has no row at all in the index, because no pass could read or
       record it;
    4. a document the tree no longer holds, whose row survives every pass that
       did not list the whole root;
    5. a document rewritten in place with the length and the modification time it
       had before, whose row goes on recording what the document before it said.
 
-   Each carve-out is stated in the plan, in the module docstring, and in a test,
-   and one found later is added to all three in one commit; a test counts the
-   three lists against each other, so a member added to one of them and not the
-   others fails. Neither list is asserted to be
-   complete: a divergence outside them is a defect of the enumeration, to be
-   fixed or enumerated, and not a licence to differ.
+   Each carve-out is stated in the plan, in the module docstring, in the
+   navigation guide, and in a test, and one found later is added to all four in
+   one commit; a test matches the four lists against each other member by
+   member, by the phrase that identifies each, so a member dropped from one of
+   them or added to one and not the others fails. Neither carve-out is asserted
+   to be complete: a divergence outside them is a defect of the enumeration, to
+   be fixed or enumerated, and not a licence to differ.
    `sd_stats_report`'s criterion is section 4 Phase 2's old-vs-new
    byte-identical report.
 2. No pipeline program requires an index, and `import spindoctor.dataset`

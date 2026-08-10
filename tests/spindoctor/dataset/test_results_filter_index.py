@@ -12,6 +12,7 @@ each with a test of its own, and what the filter reports about the pass that
 filled the index.
 """
 
+import itertools
 import json
 import subprocess
 import sys
@@ -221,8 +222,113 @@ CONTRADICTORY_PAIRS = [
         {'has_no_offset_error': True, 'has_no_offset_file': True},
         id='no-error-and-no-offset-file',
     ),
+    pytest.param(
+        {'has_offset_spice_error': True, 'has_no_offset_file': True},
+        id='spice-error-and-no-offset-file',
+    ),
+    pytest.param(
+        {'has_offset_nonspice_error': True, 'has_no_offset_file': True},
+        id='nonspice-error-and-no-offset-file',
+    ),
 ]
-"""Every pair of selection flags no image could satisfy."""
+"""Every pair of selection flags no image could satisfy.
+
+That it is every one of them is asserted rather than claimed: the six flags make
+fifteen pairs, and the test below puts each of the fifteen to the constructor and
+holds the ones it refuses to exactly this list.  A list short by a pair leaves
+the message that pair produces unasserted, which is how two of the four
+contradictions came to have a path through the message builder nothing read.
+"""
+
+SELECTION_FLAGS = (
+    'has_offset_file',
+    'has_no_offset_file',
+    'has_offset_error',
+    'has_no_offset_error',
+    'has_offset_spice_error',
+    'has_offset_nonspice_error',
+)
+"""The six results-file selection flags."""
+
+COMBINATIONS = [
+    names
+    for size in range(2, len(SELECTION_FLAGS) + 1)
+    for names in itertools.combinations(SELECTION_FLAGS, size)
+]
+"""Every combination of two or more of them, which is what a user may type.
+
+A user types flags rather than pairs, and a refusal is about the combination
+they typed: three of these carry two contradictions at once, and the
+contradiction a run happens to notice first is not the whole of what is wrong
+with the selection.
+"""
+
+
+def _contradicted_within(names: Sequence[str]) -> set[str]:
+    """Return the flags of one combination that another flag of it contradicts.
+
+    Parameters:
+        names: The flags the user typed.
+
+    Returns:
+        Every flag belonging to a contradictory pair both of whose flags are in
+        the combination.  A flag that contradicts nothing else present is not
+        one of them: it is a narrowing the selection could have satisfied, and
+        naming it in a refusal would send its user to change the wrong thing.
+    """
+    given = set(names)
+    return {
+        name
+        for case in CONTRADICTORY_PAIRS
+        for pair in [set(cast(dict[str, bool], case.values[0]))]
+        if pair <= given
+        for name in pair
+    }
+
+
+def _refusal_of(tree: Path, names: Sequence[str]) -> str | None:
+    """Build a filter over the given flags and return what it refused, if it did.
+
+    Parameters:
+        tree: The results root, read only by the combinations that are not
+            refused.
+        names: The flags to turn on.
+
+    Returns:
+        The refusal's message, or None when the combination was accepted.
+    """
+    flags = dict.fromkeys(names, True)
+    try:
+        ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_db_url=None, **flags)
+    except SelectionError as exc:
+        return str(exc)
+    return None
+
+
+def test_exactly_the_combinations_holding_a_contradictory_pair_are_refused(tree: Path) -> None:
+    """The list of contradictions is the whole of what the constructor refuses.
+
+    Asserted over every combination rather than over the pairs alone, so that a
+    contradiction reachable only by three flags together, and a combination
+    refused for no pair anybody wrote down, are both failures here.
+    """
+    refused = {names for names in COMBINATIONS if _refusal_of(tree, names) is not None}
+    assert refused == {names for names in COMBINATIONS if _contradicted_within(names)}
+
+
+def test_a_refusal_names_every_flag_of_the_combination_it_cannot_satisfy(tree: Path) -> None:
+    """A flag left out of the message reads as one the run accepted.
+
+    A combination carrying two contradictions is refused for both, because a
+    user who removes the flag the first one named and runs again would otherwise
+    meet the second, and a run refused a pair at a time costs a run per pair.
+    """
+    unnamed = {
+        names: sorted(name for name in _contradicted_within(names) if name not in (message or ''))
+        for names in COMBINATIONS
+        if (message := _refusal_of(tree, names)) is not None
+    }
+    assert {names: missing for names, missing in unnamed.items() if missing} == {}
 
 
 @pytest.mark.parametrize('flags', CONTRADICTORY_PAIRS)

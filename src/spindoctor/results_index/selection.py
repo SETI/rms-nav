@@ -25,22 +25,21 @@ to be rediscovered.  The guide is one of them because an operator reading it is
 the person a silently short selection is served to: an enumeration a user is
 never shown answers nobody's question about the selection they got.
 
-- **A document that is valid JSON and carries ``status``, but is not a
-  navigation document,** is refused by the ingest and so records no status of
-  its own.  It matches no error filter, the one for a document recording no
-  fatal error included, where the tree reads ``status`` and ``status_error``
-  out of any JSON object it can parse and answers every one of them from what
-  it read.
+- **A document the ingest refused** -- valid JSON that carries ``status`` but is
+  not a navigation document -- records no status of its own.  It matches no
+  error filter, the one for a document recording no fatal error included, where
+  the tree reads ``status`` and ``status_error`` out of any JSON object it can
+  parse and answers every one of them from what it read.
 - **A document whose top-level ``status`` is absent, empty, or not a string**
   takes its recorded status from ``navigation_result.status``, which is where
   the rest of the index reads an outcome from.  The tree reads the top-level
   field alone, so such a document can match an error filter here and not there,
   and can be a document recording no fatal error there and not here.
-- **A file that exists and has no row at all** reads as absent, which is what
-  the absence filters read as "this image was never navigated".  Three passes
-  end that way, and the first two do so deliberately, because a recorded row
-  would be skipped for as long as the file did not change and the next pass
-  would never retry it:
+- **A file that exists and has no row at all in the index** reads as absent,
+  which is what the absence filters read as "this image was never navigated".
+  Three passes end that way, and the first two do so deliberately, because a
+  recorded row would be skipped for as long as the file did not change and the
+  next pass would never retry it:
 
   - a file the pass could not retrieve;
   - a document the pass read whose rows the database would not store;

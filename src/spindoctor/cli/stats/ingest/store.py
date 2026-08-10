@@ -143,6 +143,56 @@ def _recorded_files(
     return recorded
 
 
+def _refusals_recorded(connection: sqlalchemy.Connection, root_url: str) -> int:
+    """How many files of one root the index holds a refusal for.
+
+    Parameters:
+        connection: An open connection to the index.
+        root_url: The normalized root to count under.
+
+    Returns:
+        The rows ``failed_files`` holds for that root, whichever pass wrote
+        them.  That is a different number from what any one pass refused: an
+        unchanged file is skipped rather than read, so a pass after the one that
+        refused it refuses nothing and tallies nothing.
+    """
+    total = (
+        sqlalchemy.select(sqlalchemy.func.count())
+        .select_from(FAILED_FILES)
+        .where(FAILED_FILES.c.root_url == root_url)
+    )
+    return int(connection.execute(total).scalar_one())
+
+
+def _report_refusals(engine: sqlalchemy.Engine, root_url: str, *, logger: PdsLogger) -> int:
+    """Report how many documents of one root the index answers nothing about.
+
+    Said at the end of every pass over a root, and said as the root's own total
+    rather than as this pass's, because the pass's tally is zero on every pass
+    after the one that read the file.  It is the size of the gap between what an
+    error filter answered from the index selects and what the same filter
+    answered from the tree selects, which is otherwise a number an operator can
+    reach only by querying ``failed_files``.
+
+    Parameters:
+        engine: The open index.
+        root_url: The normalized root the pass covered.
+        logger: Logger for the count.
+
+    Returns:
+        The rows ``failed_files`` holds for that root.
+    """
+    with engine.connect() as connection:
+        refused = _refusals_recorded(connection, root_url)
+    logger.info(
+        'Refused documents the index now holds under %s, whichever pass recorded them: %d. '
+        'An error filter answered from this index selects none of their images.',
+        root_url,
+        refused,
+    )
+    return refused
+
+
 def _write_image(connection: sqlalchemy.Connection, rows: ImageRows) -> None:
     """Replace one image and its child rows.
 

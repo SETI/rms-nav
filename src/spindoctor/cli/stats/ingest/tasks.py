@@ -90,7 +90,7 @@ from spindoctor.cli.stats.ingest.runs import (
     _start_run,
     _unfinished_run,
 )
-from spindoctor.cli.stats.ingest.store import _recorded_files
+from spindoctor.cli.stats.ingest.store import _recorded_files, _report_refusals
 from spindoctor.cli.stats.ingest.walk import _ListedFile, _walk_root
 from spindoctor.results_index import normalize_root_url
 
@@ -785,6 +785,10 @@ def complete_ingest_tasks(
     zero files seen is what a root that was listed and is genuinely empty
     records -- so the two must not be read the same way.
 
+    A root whose run this stamps closes by reporting how many refused documents
+    the index then holds under it, on the same terms an undivided pass reports
+    it: the root's own total, which is what the shares' tallies are not.
+
     Parameters:
         engine: The open index.
         roots: The navigation results roots whose runs are being completed.  Two
@@ -896,6 +900,7 @@ def complete_ingest_tasks(
             counts.files_failed,
             counts.files_seen,
         )
+        _report_refusals(engine, root_url, logger=logger)
         completion.counts.add(counts)
     claimed_runs = {run_id for run_id, _root_url in claimed}
     for key, count in results_of_share.items():
