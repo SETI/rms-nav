@@ -178,7 +178,7 @@ def test_the_resolver_home_is_excluded_from_something_that_names_it() -> None:
         for path in root.rglob('*.py')
         if 'get_results_db_url' in path.read_text(encoding='utf-8')
     }
-    assert _RESOLVER_HOME <= named
+    assert named >= _RESOLVER_HOME
 
 
 def _parsed(program: str, argv: list[str]) -> argparse.Namespace:
