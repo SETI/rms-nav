@@ -505,7 +505,10 @@ SpinDoctor generates two types of output files:
 Metadata Files (``*_metadata.json``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-These JSON files contain the navigation results, including:
+These JSON files contain the navigation results. The complete key-by-key
+specification -- every key, its type, its presence rules, the rounding
+policy, and one annotated example per document shape -- is the
+:doc:`user_guide_metadata` chapter; in summary they include:
 
 * ``observation`` — the image's identity: name, path, instrument, and
   ``camera`` (the camera that took it, e.g. ``NAC``). An image that fails to

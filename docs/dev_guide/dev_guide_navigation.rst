@@ -32,6 +32,7 @@ the rest of the chapter assumes.
    dev_guide_orchestrator
    dev_guide_annotations
    dev_guide_rotation
+   dev_guide_uncertainty
 
 .. toctree::
    :maxdepth: 4

@@ -354,10 +354,6 @@ asserts the generated half matches the registries.
   (`src/spindoctor/config/config.py`); pairs well with #176's
   constants-into-config completion.
 
-### User-facing docs in Track D scope
-
-- **#70** — supplemental-metadata file format documentation.
-
 ## Track E — Test and documentation debt
 
 - **#241 / #242** — unit tests for `spindoctor.cli.backplanes` and
@@ -388,24 +384,10 @@ asserts the generated half matches the registries.
   `PDS3_HOLDINGS_DIR`) and commit them with the per-image diff
   accounted for.
 - **#177** — unit tests for `spindoctor.support.summary_png`.
-- **#178** — missing dev-guide pages: filters, uncertainty (write
-  after #230 makes sigmas load-bearing), troubleshooting.
 - **#129** — drive Sphinx nitpicky warnings to zero, then add `-n` to
   the CI docs build.
 - **#122** — verify the albedo/terminator-sharpness rationale in the
   body-terminator dev guide against the shipped implementation.
-- **#244** — api_reference pages for the missing `mosaic_viewer`
-  modules (follow the existing PyQt6-safe autodoc pattern).
-- **#245** — self-contained language pass over `util/cohort_curation/`
-  (drop the internal phase codenames; point at the committed docs).
-- **#431** — a documentation chapter specifying the per-image metadata
-  JSON exactly: every key, type, meaning, and presence rule across the
-  three document shapes (navigated, load-error, early-return), with
-  annotated examples and a test asserting the documented key set matches
-  what the writers emit. The file is read by six programs and by external
-  users, and its format currently exists only in the code that writes it.
-  Includes the `pointing` and `times` blocks once the corrected-pointing
-  metadata extension lands.
 - **#429** — give the `util/` tooling the logging surface the pipeline
   programs have. Several of these programs run for hours over hundreds of
   images and report through bare `print()`: no level control, no file

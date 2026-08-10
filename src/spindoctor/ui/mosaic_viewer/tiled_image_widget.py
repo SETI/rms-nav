@@ -17,6 +17,8 @@ Only the viewport's visible region is ever rendered (tiled rendering), so
 arbitrary zoom levels are memory-efficient.
 """
 
+from __future__ import annotations
+
 import math
 from typing import Any, cast
 
@@ -254,14 +256,26 @@ class TiledImageWidget(QAbstractScrollArea):
     #  Signals                                                             #
     # ------------------------------------------------------------------ #
 
-    # (pixel_x, pixel_y, in_bounds)
     mouse_moved = pyqtSignal(float, float, bool)
-    # (x_zoom, y_zoom)
+    """Cursor motion signal carrying ``(x, y, valid)``, in whichever frame the
+    projection makes meaningful.
+
+    Under a rectangular projection the payload is image pixel coordinates and
+    ``in_bounds``, true when the pixel lies inside the image.  Under every
+    other projection there are no image pixels to report, so it is viewport
+    coordinates and ``on_surface``, true when the cursor is over the projected
+    body; a receiver wanting geometry there calls
+    :meth:`viewport_to_lonlat` itself.
+    """
+
     zoom_changed = pyqtSignal(float, float)
-    # right-click: (pixel_x, pixel_y)
+    """Zoom-factor change signal carrying ``(x_zoom, y_zoom)``."""
+
     right_clicked = pyqtSignal(float, float)
-    # Ctrl+left-click: (pixel_x, pixel_y)
+    """Right-click signal carrying ``(pixel_x, pixel_y)``."""
+
     ctrl_clicked = pyqtSignal(float, float)
+    """Ctrl+left-click signal carrying ``(pixel_x, pixel_y)``."""
 
     def horizontalScrollBar(self) -> QScrollBar:
         bar = super().horizontalScrollBar()

@@ -11,6 +11,7 @@ chapter per instrument.
    :caption: User Guide:
 
    user_guide_navigation
+   user_guide_metadata
    user_guide_logging
    user_guide_reprojection
    user_guide_backplanes
