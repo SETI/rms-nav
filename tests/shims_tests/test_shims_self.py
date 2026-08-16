@@ -125,8 +125,8 @@ def test_fake_backplane_ring_methods_round_trip() -> None:
     bp = FakeBackplane(per_ring={'saturn:ring': ring})
     radii_scalar = bp.ring_radius('saturn:ring')
     assert not radii_scalar.is_all_masked()
-    assert radii_scalar.min().vals == pytest.approx(70_000.0)
-    assert radii_scalar.max().vals == pytest.approx(140_000.0)
+    assert radii_scalar.min(builtins=True) == pytest.approx(70_000.0)
+    assert radii_scalar.max(builtins=True) == pytest.approx(140_000.0)
     res = bp.ring_radial_resolution('saturn:ring')
     assert np.all(np.asarray(res.vals) == 200.0)
 

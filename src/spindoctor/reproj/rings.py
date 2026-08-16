@@ -907,18 +907,20 @@ class RingMosaic:
         Returns:
             Tuple of (u, v) floating-point pixel coordinate arrays.
         """
-        longitude = Scalar(longitude)
-        radius = Scalar(radius)
-
         if orbit_model is not None:
             longitude = orbit_model.corotating_to_inertial(longitude, obs.midtime)
 
         if len(longitude) == 0:
             return np.zeros(0, dtype=float), np.zeros(0, dtype=float)
 
+        longitude_scalar = Scalar(longitude)
+        radius_scalar = Scalar(radius)
+
         ring_surface = _ring_plane_surface(ring_body_name)
         obs_event = oops.Event(obs.midtime, (Vector3.ZERO, Vector3.ZERO), obs.path, obs.frame)
-        _, obs_event = ring_surface.photon_to_event_by_coords(obs_event, (radius, longitude))
+        _, obs_event = ring_surface.photon_to_event_by_coords(
+            obs_event, (radius_scalar, longitude_scalar)
+        )
 
         uv = obs.fov.uv_from_los(obs_event.neg_arr_ap)
         u, v = uv.to_scalars()

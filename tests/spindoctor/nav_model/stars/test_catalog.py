@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, cast
 
 import numpy as np
@@ -14,6 +15,7 @@ from spindoctor.nav_model.stars.catalog import (
     _find_stars_in_one_catalog,
     _mark_visual_overlaps,
     _merge_catalogs,
+    aberrate_star,
     select_radec_list,
 )
 from spindoctor.support.types import MutableStar
@@ -73,6 +75,22 @@ def test_select_radec_list_without_proper_motion() -> None:
         _as_stars([_FakeStar(ra=0.5, dec=1.5)]), use_proper_motion=False, midtime=0.0
     )
     assert out == [(0.5, 1.5)]
+
+
+def test_aberrate_star_rejects_a_record_with_no_ra() -> None:
+    """A star carrying no RA is a caller error, not silent garbage."""
+    star = cast(MutableStar, _FakeStar(ra=None, dec=2.0))
+    obs = cast(Any, SimpleNamespace(midtime=0.0, path=None, frame=None))
+    with pytest.raises(ValueError, match='requires a star with RA and DEC'):
+        aberrate_star(obs, star)
+
+
+def test_aberrate_star_rejects_a_record_with_no_dec() -> None:
+    """A star carrying no DEC is a caller error, not silent garbage."""
+    star = cast(MutableStar, _FakeStar(ra=1.0, dec=None))
+    obs = cast(Any, SimpleNamespace(midtime=0.0, path=None, frame=None))
+    with pytest.raises(ValueError, match='requires a star with RA and DEC'):
+        aberrate_star(obs, star)
 
 
 def test_merge_catalogs_drops_exact_duplicates() -> None:
