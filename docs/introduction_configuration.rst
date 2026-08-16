@@ -52,6 +52,7 @@ Configuration files use YAML format and are organized into sections:
    environment:
      nav_results_root: /path/to/results
      pds3_holdings_root: /path/to/pds3
+     results_db: sqlite:////path/to/results/index.sqlite3
 
    logging:
      models:
@@ -161,6 +162,17 @@ Environment Options
 * ``--nav-results-root PATH``: Overrides the ``NAV_RESULTS_ROOT`` environment
   variable and any ``environment.nav_results_root`` configuration setting. This
   specifies the root directory or URL where navigation results will be written.
+
+* ``--results-db URL``: Overrides the ``NAV_RESULTS_DB`` environment variable
+  and any ``environment.results_db`` configuration setting. This names the
+  results index --- a database derived from the navigation results tree by a
+  separate ingest step --- as a ``sqlite:`` URL naming a local file or a
+  ``postgresql+psycopg:`` URL naming a server. Unset means no index, which is
+  the default for every program that offers the option; the literal value
+  ``none`` says so explicitly and overrides a URL set elsewhere. Only a program
+  that offers the option reads one: ``environment.results_db`` and
+  ``NAV_RESULTS_DB`` do not make a program index-backed that does not declare
+  ``--results-db``. See :doc:`/user_guide/user_guide_results_index`.
 
 Navigation Options
 ------------------

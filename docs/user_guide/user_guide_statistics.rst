@@ -42,6 +42,12 @@ Both commands take the URL from ``--results-db``, the ``environment.results_db``
 configuration variable, or the ``NAV_RESULTS_DB`` environment variable, in that
 order of precedence.
 
+The index these two commands write and read is the same one the navigation,
+backplane and reprojection stages can be pointed at.
+:doc:`user_guide_results_index` is the account of it as a whole: what it
+promises, which programs read it, and when to rebuild it. This chapter is the
+reference for the two statistics programs and for the schema they write.
+
 Ingestion
 ---------
 
