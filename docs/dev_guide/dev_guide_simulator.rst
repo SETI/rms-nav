@@ -2808,7 +2808,16 @@ obs to the simulated NavModels -- ``NavModelBodySimulated``,
 feature set per body / ring / star field from that filtered view, while the
 SPICE-backed models decline a simulated obs. From there the same techniques run
 and produce the same ``NavResult``. In tests the scene is usually driven
-directly: ``ObsSim.from_file(path, sim_params=load_sim_scene(path))``.
+directly:
+
+.. code-block:: python
+
+    ObsSim.from_file(path, sim_params=load_sim_scene(path))
+
+When ``sim_params`` is supplied the scene file is never read, so ``path`` is
+only the name the observation carries: it may name a file that does not exist,
+and no storage is touched to resolve it. A harness holding a scene it built in
+memory can therefore pass a pure label such as ``sim://limb_bias``.
 
 .. _sim-png-export:
 

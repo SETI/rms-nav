@@ -42,7 +42,9 @@ class ObsSim(ObsSnapshotInst):
         """Creates an ObsSim from a YAML scene file.
 
         Parameters:
-            path: Path to the YAML scene file.
+            path: Path or URL of the YAML scene file.  When ``sim_params`` is
+                supplied no file is read and this is only the name the
+                observation carries, so it may name nothing that exists.
             config: Navigation configuration. If None, uses defaults.
             extfov_margin_vu: Optional extended FOV margins (v,u) to add around the image.
             **kwargs: Additional keyword arguments.
@@ -53,6 +55,9 @@ class ObsSim(ObsSnapshotInst):
             The :class:`ObsSim` wrapping the rendered scene: the rendered
             image as ``data``, the full scene and renderer truth metadata on
             the snapshot, and the filtered idealized view as ``nav_params``.
+            Its ``abspath`` is the local file the scene was read from, or,
+            for a scene supplied in memory, ``path`` rendered absolute
+            without any storage being touched.
         """
 
         config = config or DEFAULT_CONFIG
@@ -60,11 +65,20 @@ class ObsSim(ObsSnapshotInst):
 
         provided_sim_params = kwargs.get('sim_params')
         scene_path = FCPath(path)
-        abspath = cast(Path, scene_path.get_local_path()).absolute()
+        abspath: Path | FCPath
         if provided_sim_params is None:
             logger.debug(f'Reading simulated image scene {scene_path}')
+            # Parsing the scene needs it as a file on local storage, which is
+            # what get_local_path provides: it fetches a remote scene into the
+            # cache and creates the local directories that hold it.
+            abspath = cast(Path, scene_path.get_local_path()).absolute()
             sim_params = load_sim_scene(abspath)
         else:
+            # A scene supplied in memory is never read back, so its path is only
+            # a label carried into the logs and the metadata.  absolute()
+            # renders it without reaching storage, where get_local_path would
+            # create the directories of a file that is never opened.
+            abspath = scene_path.absolute()
             sim_params = provided_sim_params
             logger.debug('Using provided sim_params')
 
