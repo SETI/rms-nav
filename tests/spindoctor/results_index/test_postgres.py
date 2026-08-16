@@ -457,9 +457,9 @@ def _seed_selection_rows(url: str) -> None:
     satisfied by answering nothing.
 
     The two roots' run rows differ the same way.  The other root is passed over
-    second, so its run is the newest in the index, and it is the only one that
-    records a missed directory: what the pass over this root recorded about
-    itself is therefore visibly its own.
+    second, so its run is the newest in the index and its finish time is not
+    this root's: what the pass over this root recorded about itself is
+    therefore visibly its own.
 
     Parameters:
         url: The index to create and write into.

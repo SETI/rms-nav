@@ -471,35 +471,6 @@ def test_a_listing_that_does_not_say_what_is_a_directory_is_asked(
     assert counts.files_ingested == 1
 
 
-def test_an_entry_the_filesystem_will_not_classify_is_read_as_a_file(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Asking an entry what it is has to survive the entry refusing to answer.
-
-    The question is only asked when the listing did not say, which is already
-    a degraded backend; the answer can fail for every reason a listing can.
-    Letting it out would end the pass on one entry of one directory. Read as a
-    file, the worst it costs is a subtree the walk did not descend into, which
-    is what the missed-directory bookkeeping is for.
-    """
-    root = tmp_path / 'results'
-    write_metadata(root, 'N1454725799_1_CALIB', metadata_document())
-    (root / 'VOL2').mkdir()
-    real_iterdir = FCPath.iterdir_metadata
-
-    def saying_nothing(self: FCPath) -> Any:
-        for path, _entry_metadata in real_iterdir(self):
-            yield path, None
-
-    def refusing(self: FCPath) -> bool:
-        raise OSError('the share stopped answering')
-
-    monkeypatch.setattr(FCPath, 'iterdir_metadata', saying_nothing)
-    monkeypatch.setattr(FCPath, 'is_dir', refusing)
-    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
-    assert counts.files_ingested == 1
-
-
 def test_a_metric_less_listing_skips_nothing(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -855,6 +826,72 @@ def test_a_stopped_pass_leaves_its_run_unfinished(
     with pytest.raises(UnlistableDirectoryError):
         ingest_tree(url, [root], logger=quiet_logger)
     assert [time is not None for time in _finish_times(url)] == [False]
+
+
+def _entries_the_listing_says_nothing_about(
+    monkeypatch: pytest.MonkeyPatch, error: type[OSError]
+) -> None:
+    """Strip the listing's metadata and make asking about an entry fail.
+
+    A backend whose listing carries no ``is_dir`` is asked about each entry
+    directly, which is the only path on which the answer can fail at all.
+
+    Parameters:
+        monkeypatch: Fixture the listing and the inspection are wrapped through.
+        error: The exception type asking about an entry raises.
+    """
+    real_iterdir = FCPath.iterdir_metadata
+
+    def without_metadata(self: FCPath) -> Any:
+        for path, _metadata in real_iterdir(self):
+            yield path, None
+
+    def refusing(self: FCPath) -> bool:
+        raise error(self.as_posix())
+
+    monkeypatch.setattr(FCPath, 'iterdir_metadata', without_metadata)
+    monkeypatch.setattr(FCPath, 'is_dir', refusing)
+
+
+def test_an_entry_the_storage_layer_will_not_classify_stops_the_pass(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An entry nobody will answer about may be a directory full of documents.
+
+    Passing it over as a file is the same gap as walking past a directory that
+    would not list, arrived at one step earlier: the walk goes on, the run
+    completes, and everything under it reads as never navigated.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the listing and the inspection are wrapped through.
+    """
+    root = _two_volume_tree(tmp_path)
+    _entries_the_listing_says_nothing_about(monkeypatch, PermissionError)
+    with pytest.raises(UnlistableDirectoryError, match='could not be listed'):
+        ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+
+
+def test_an_entry_that_has_gone_away_since_the_listing_is_passed_over(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deletion landing mid-walk is ordinary, and leaves nothing to have missed.
+
+    The pass finishes and ingests what it did find, because an entry that is
+    not there holds no document this pass failed to see.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the listing and the inspection are wrapped through.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'N1454725799_1_CALIB', metadata_document())
+    (root / 'VOL1').mkdir(exist_ok=True)
+    _entries_the_listing_says_nothing_about(monkeypatch, FileNotFoundError)
+    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    assert counts.files_ingested == 1
 
 
 def test_a_root_walked_before_the_one_that_stopped_keeps_its_pass(

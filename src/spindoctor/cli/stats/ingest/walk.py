@@ -127,18 +127,27 @@ def _is_directory(path: FCPath, entry_metadata: dict[str, Any] | None) -> bool:
     Returns:
         True when the entry is a directory.  A backend that reported no
         metadata for the entry, or metadata that does not say, is asked
-        directly; one that cannot answer either is treated as a file rather
-        than ending the pass, because the commonest way to reach that is an
-        entry that has gone away since the listing named it, and a pass that
-        stopped for one would stop for every deletion that lands mid-walk.
+        directly; an entry that is no longer there to answer about is a file
+        as far as this pass is concerned, since a deletion landing mid-walk is
+        ordinary and there is nothing under such an entry to have missed.
+
+    Raises:
+        UnlistableDirectoryError: If the storage layer refuses to say what the
+            entry is for any other reason.  An entry it will not answer about
+            may be a directory holding documents, and calling it a file is
+            exactly the silent gap this pass refuses: the walk would go on, the
+            run would complete, and every document under it would read as an
+            image nothing had navigated.
     """
     is_dir = None if entry_metadata is None else entry_metadata.get('is_dir')
     if is_dir is not None:
         return bool(is_dir)
     try:
         return bool(path.is_dir())
-    except OSError:
+    except (FileNotFoundError, NotADirectoryError):
         return False
+    except OSError as exc:
+        raise UnlistableDirectoryError(path.as_posix(), str(exc)) from exc
 
 
 def _directory_identity(directory: FCPath) -> tuple[int, int] | None:

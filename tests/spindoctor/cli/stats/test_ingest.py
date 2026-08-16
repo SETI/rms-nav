@@ -729,12 +729,12 @@ def test_a_file_that_is_not_a_document_is_not_a_file_this_pass_saw(
 def test_a_file_that_is_not_a_document_is_no_part_of_what_the_walk_found(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """Both tallies the entry loop can add to, over a tree of ordinary clutter.
+    """What the entry loop collects, over a tree of ordinary clutter.
 
     Every entry is a directory to descend into, a document to collect, or a
-    file to pass over, and only the last leaves both tallies as they were.  A
-    name that ends in the document suffix is what says which, and neither half
-    of that is enough on its own: a file that merely ends in ``.json`` is not a
+    file to pass over, and only the last leaves the listing as it was.  A name
+    that ends in the document suffix is what says which, and neither half of
+    that is enough on its own: a file that merely ends in ``.json`` is not a
     navigation document, and one that merely contains the suffix yields a stub
     with the suffix's length cut off the end of a longer name, naming nothing,
     which the pass then retrieves, fails on, records nothing for, and retrieves

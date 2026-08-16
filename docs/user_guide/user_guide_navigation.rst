@@ -302,9 +302,11 @@ since each of them survives a pass that finished a second ago.
 
 An ingest that meets a directory it cannot list stops there, reports it as an
 error, and completes no root from that point on, so no index a consumer reads
-holds a root that was only partly walked. Fix what stopped the walk -- a
-directory permission, a share that was not answering -- and run
-``sd_stats_ingest`` again.
+holds a root that was only partly walked. A results root that cannot be listed
+at all is the other case and does not stop the pass: that root alone is left
+unfinished, which every consumer already refuses, and the ingest goes on to the
+next root. Fix what stopped the walk -- a directory permission, a share that was
+not answering -- and run ``sd_stats_ingest`` again.
 
 Miscellaneous
 ^^^^^^^^^^^^^

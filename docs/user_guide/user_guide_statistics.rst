@@ -173,11 +173,20 @@ from the index comes than the tree would have made it, and
 ``sd_stats_ingest --force`` reads every document again, which puts the reasons
 and the example files back into the summary.
 
-**A directory the walk cannot list stops the ingest.** One this user may not
-read, or on a share that stopped answering, is reported as an error naming the
-directory, and the pass ends there: the root it was under gets no finish time,
-no root named after it on the same command line is walked, and
+**A directory under a root that the walk cannot list stops the ingest.** One
+this user may not read, or on a share that stopped answering, is reported as an
+error naming the directory, and the pass ends there: the root it was under gets
+no finish time, no root named after it on the same command line is walked, and
 ``sd_stats_ingest`` exits 1. Fix what stopped the walk and run it again.
+
+**A root that cannot be listed does not stop it.** That is the case above --
+the mistyped path, the unmounted share -- and it is charged to the root it is
+about: that root is reported, left unfinished and ingested not at all, every
+other root named on the command line is still walked, and the status is 1 at the
+end. The difference is what the walk knows. A root nobody can list is a root
+this pass has said nothing about, and the next root has nothing to do with it; a
+directory nobody can list sits inside a root the pass is otherwise about to
+declare it has read.
 
 The alternative was tried and is worse. A pass that finished around the gap
 completed, stamped its root as ingested, and left every image under that
