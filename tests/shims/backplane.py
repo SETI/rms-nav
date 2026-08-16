@@ -42,6 +42,13 @@ class KeyedScalar(polymath.Scalar):
     ``ring_radius`` result to call :meth:`oops.Backplane.border_atop`.
     ``polymath.Scalar`` has no such attribute of its own, so the shim
     declares one here rather than grafting it onto an instance.
+
+    Construction takes the same arguments as ``polymath.Scalar``; the
+    ``key`` attribute is not a constructor argument.  It defaults to
+    ``None`` and :func:`_scalar` assigns it when a caller supplies one,
+    so every arithmetic or indexing result derived from a keyed scalar
+    reports ``key is None`` rather than inheriting a key that no longer
+    describes it.
     """
 
     key: tuple[Any, ...] | None = None
@@ -284,7 +291,17 @@ class FakeBackplane:
     # ------------------------------------------------------------------
 
     def ring_radius(self, ring_target: str) -> KeyedScalar:
-        """Return per-pixel ring-plane radius in km, tagged with its key."""
+        """Return per-pixel ring-plane radius in km, tagged with its key.
+
+        Parameters:
+            ring_target: Ring target name, as keyed into ``per_ring``.
+
+        Returns:
+            :class:`KeyedScalar` of per-pixel radii, masked outside the
+            configured ``ring_mask``, whose ``key`` is the
+            ``('ring_radius', ring_target)`` tuple the production code
+            reads back and hands to :meth:`border_atop`.
+        """
         data = self._ring(ring_target)
         return _scalar(
             data.ring_radius_km,
