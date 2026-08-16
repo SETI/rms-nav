@@ -399,6 +399,25 @@ step 1 onwards, so every consumer reports it as a root nobody has ingested while
 the workers are still writing -- rather than answering from whichever shares
 have landed.
 
+**Abandoning a fan-out costs a full re-ingest of that root.** Step 1 removes the
+rows of documents that have left the tree before any document is read, so a
+pass whose tasks are never queued, or that is given up on, has already shrunk
+the index. Nothing incorrect is lost -- the rows removed are exactly those whose
+documents the listing did not find -- and the root stays unfinished throughout,
+so no consumer reads a wrong answer from it. What it costs is the rest of the
+root's content in the index, which comes back by running the three steps through
+to the end, or an ordinary ``sd_stats_ingest`` over the root.
+
+**Two passes over one root at the same time are a documented limit.** Nothing
+refuses a fan-out over a root whose newest run is still unfinished, and two that
+overlap can leave behind one row whose document has gone: a worker of the first
+writes a stub after the second has read what the index holds and before it
+deletes. The window is narrow, both runs are unfinished while it is open -- so
+no consumer reads the root during it -- and the next pass over the root removes
+the row. Leaving it alone is a decision rather than an oversight: refusing or
+warning about a concurrent pass was considered and not done, and the case for
+either would have to be made afresh. Run one pass over a root at a time.
+
 **Step 3 refuses to finish a root its tasks did not cover.** Step 1 records how
 many files it found; step 3 adds up how many the tasks ingested, skipped and
 refused, counting each task's report once. If the tasks account for fewer files

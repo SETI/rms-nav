@@ -2379,13 +2379,15 @@ File as tracking issues alongside the implementation issue:
 - **A `--since` selector for ingest** (#467). The stat-pair skip makes a re-scan
   cheap in reads but not in listings; a time-bounded scan would cut the
   listing too.
-- **Two overlapping ingest passes over one root can leave a stale row** (#479).
-  A worker of the first writes a stub after the second has read what is
-  recorded and before its delete, for a document that left the tree between the
-  two listings. Narrow, self-healing on the next pass, and invisible to
-  consumers while it is open, since both runs are unfinished; what is undecided
-  is whether a fan-out over a root whose newest run is unfinished should be
-  refused, warned about, or left as it is.
+- **Two overlapping ingest passes over one root can leave a stale row** (#479),
+  **closed as a documented limit.** A worker of the first writes a stub after
+  the second has read what is recorded and before its delete, for a document
+  that left the tree between the two listings. Narrow, self-healing on the next
+  pass, and invisible to consumers while it is open, since both runs are
+  unfinished. Refusing or warning about a fan-out over a root whose newest run
+  is unfinished was considered and not done; the statistics guide says so in
+  those terms, so that a later reader sees a choice rather than a question
+  nobody reached.
 - **A hand-written ingest task file can name a stub outside its root** (#489).
   A task file is an operator-visible artifact, and the worker accepts any string
   as a stub, so a hand-edited one reads a document outside the root it names and
@@ -2395,11 +2397,13 @@ File as tracking issues alongside the implementation issue:
   half of the key was closed for the same threat model; what is undecided is
   whether the worker should validate the stub domain as the log-path and offset
   readers already validate theirs.
-- **An abandoned fan-out has already removed rows** (#480). The prune runs
-  before any document is read, so a pass that is given up on after step 1 has
-  shrunk the index. Only rows whose documents have genuinely left the tree go,
-  and the run is unfinished throughout, so nothing valid is lost and no consumer
-  reads the root; the way back is a full ingest.
+- **An abandoned fan-out has already removed rows** (#480), **closed as a
+  documented limit.** The prune runs before any document is read, so a pass that
+  is given up on after step 1 has shrunk the index. Only rows whose documents
+  have genuinely left the tree go, and the run is unfinished throughout, so
+  nothing valid is lost and no consumer reads the root. The statistics guide
+  states the operator-visible consequence, which is that abandoning a fan-out
+  costs a full re-ingest of that root.
 - **One unlistable directory stopped the prune for the whole root** (#481),
   **closed.** A pass that could not list one directory completed all the same
   and removed no row anywhere under its root, so a deleted document went on
