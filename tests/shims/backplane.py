@@ -28,9 +28,30 @@ import polymath
 __all__ = [
     'BodyBackplaneData',
     'FakeBackplane',
+    'KeyedScalar',
     'RingBackplaneData',
     'plant_circular_body',
 ]
+
+
+class KeyedScalar(polymath.Scalar):
+    """A ``polymath.Scalar`` that also carries a backplane ``key``.
+
+    ``oops.Backplane`` tags each result it returns with the key that
+    produced it, and the navigation pipeline reads that key back off a
+    ``ring_radius`` result to call :meth:`oops.Backplane.border_atop`.
+    ``polymath.Scalar`` has no such attribute of its own, so the shim
+    declares one here rather than grafting it onto an instance.
+
+    Construction takes the same arguments as ``polymath.Scalar``; the
+    ``key`` attribute is not a constructor argument.  It defaults to
+    ``None`` and :func:`_scalar` assigns it when a caller supplies one,
+    so every arithmetic or indexing result derived from a keyed scalar
+    reports ``key is None`` rather than inheriting a key that no longer
+    describes it.
+    """
+
+    key: tuple[Any, ...] | None = None
 
 
 def _scalar(
@@ -38,8 +59,8 @@ def _scalar(
     mask: np.ndarray | bool | None = None,
     *,
     key: tuple[Any, ...] | None = None,
-) -> polymath.Scalar:
-    """Build a ``polymath.Scalar`` and optionally tag it with a backplane ``key``.
+) -> KeyedScalar:
+    """Build a ``KeyedScalar`` and optionally tag it with a backplane ``key``.
 
     ``polymath.Scalar`` already covers ``.vals`` / ``.mvals`` /
     ``min`` / ``max`` / ``median`` / ``expand_mask`` / ``mask_where`` /
@@ -51,15 +72,16 @@ def _scalar(
     Parameters:
         vals: Numpy array or scalar.
         mask: Optional boolean mask of the same shape as ``vals``.
-        key: Optional opaque key surfaced as ``.key``.
+        key: Optional opaque key surfaced as ``.key``.  A result built
+            without one reports ``key is None``.
 
     Returns:
-        Configured ``polymath.Scalar``.
+        Configured ``KeyedScalar``.
     """
     if mask is None:
-        scalar = polymath.Scalar(np.asarray(vals))
+        scalar = KeyedScalar(np.asarray(vals))
     else:
-        scalar = polymath.Scalar(np.asarray(vals), np.asarray(mask, dtype=bool))
+        scalar = KeyedScalar(np.asarray(vals), np.asarray(mask, dtype=bool))
     if key is not None:
         scalar.key = key
     return scalar
@@ -268,8 +290,18 @@ class FakeBackplane:
     # Ring methods
     # ------------------------------------------------------------------
 
-    def ring_radius(self, ring_target: str) -> polymath.Scalar:
-        """Return per-pixel ring-plane radius in km."""
+    def ring_radius(self, ring_target: str) -> KeyedScalar:
+        """Return per-pixel ring-plane radius in km, tagged with its key.
+
+        Parameters:
+            ring_target: Ring target name, as keyed into ``per_ring``.
+
+        Returns:
+            :class:`KeyedScalar` of per-pixel radii, masked outside the
+            configured ``ring_mask``, whose ``key`` is the
+            ``('ring_radius', ring_target)`` tuple the production code
+            reads back and hands to :meth:`border_atop`.
+        """
         data = self._ring(ring_target)
         return _scalar(
             data.ring_radius_km,

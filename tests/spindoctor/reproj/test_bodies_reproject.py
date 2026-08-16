@@ -16,7 +16,7 @@ Contract sources: the ``reproject()`` / ``BodyMosaic`` docstrings in
 
 import math
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import numpy as np
@@ -234,8 +234,10 @@ class FakeObs:
             coords: (longitude, latitude) polymath Scalars in radians.
         """
         lon, lat = coords
-        lon_v = np.asarray(polymath.Scalar.as_scalar(lon).vals, dtype=np.float64)
-        lat_v = np.asarray(polymath.Scalar.as_scalar(lat).vals, dtype=np.float64)
+        lon_scalar = cast(polymath.Scalar, polymath.Scalar.as_scalar(lon))
+        lat_scalar = cast(polymath.Scalar, polymath.Scalar.as_scalar(lat))
+        lon_v = np.asarray(lon_scalar.vals, dtype=np.float64)
+        lat_v = np.asarray(lat_scalar.vals, dtype=np.float64)
         lon_bins = np.round(lon_v / _LON_RES)
         u = lon_bins - self._lon0 + self._frac_u
         v = np.round((lat_v + _HALF_PI) / _LAT_RES) - self._lat0 + self._frac_v

@@ -690,7 +690,7 @@ class NavModelBody(NavModelBodyBase):
             | shift_array(is_dark, (0, 1))
         )
 
-        if not body_mask_valid.any() or incidence_scalar[body_mask_valid].min() >= HALFPI:
+        if not body_mask_valid.any() or incidence_vals[body_mask_valid].min() >= HALFPI:
             local_model: NDArrayFloatType = np.zeros_like(body_mask_valid, dtype=np.float64)
             local_model[body_mask_valid] = 0.01
         else:

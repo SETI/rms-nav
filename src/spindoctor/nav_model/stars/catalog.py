@@ -126,8 +126,17 @@ def aberrate_star(obs: ObsSnapshot, star: MutableStar) -> None:
     Parameters:
         obs: Observation snapshot supplying ``midtime``, ``path``, and
             ``frame``.
-        star: Star record to mutate.
+        star: Star record to mutate.  Both ``ra`` and ``dec`` are
+            required; the catalog reduction drops records without them
+            before it gets here.
+
+    Raises:
+        ValueError: If the record carries no RA or no DEC.
     """
+    if star.ra is None or star.dec is None:
+        raise ValueError(
+            f'aberrate_star requires a star with RA and DEC, got ra={star.ra!r}, dec={star.dec!r}'
+        )
     event = Event(
         obs.midtime,
         (polymath.Vector3.ZERO, polymath.Vector3.ZERO),
