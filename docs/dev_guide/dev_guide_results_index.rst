@@ -164,10 +164,11 @@ no business on that path.
 
 :class:`~spindoctor.dataset.results_filter.ResultsFilter` therefore imports
 :func:`~spindoctor.results_index.read_result_stubs` **inside** the branch that
-has a URL, rather than at the top of the module. This is one of the two
-sanctioned exceptions to the imports-at-the-top rule in this codebase, the
-other being the GUI toolkit; it is a deliberate cost decision and not a cycle
-workaround, and the comment at the import says so.
+has a URL, rather than at the top of the module. The imports-at-the-top rule
+permits an inline import only to keep a heavy optional dependency off a path
+that does not need it, which is what this is and what the GUI toolkit's inline
+imports are; it is not a cycle workaround, and the comment at the import says
+which of the two it is.
 
 A test pins it, in a subprocess: by the time any test in the session runs,
 something has already imported SQLAlchemy, so the same assertion inside the

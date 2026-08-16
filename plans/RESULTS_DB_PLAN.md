@@ -2401,6 +2401,11 @@ File as tracking issues alongside the implementation issue:
   widening for one out-of-package tool, wanted only if triage's ten
   rglobs-per-frame remain a practical pain after the pipeline consumers are
   converted.
+- **`sd_create_ck` reads one document per image** (#507). Every field its report
+  and its segment writer take from a document is already a column, so it is the
+  last high-volume reader of the tree outside bundle generation; converting it
+  is the Phase 4 shape again -- declare the option, resolve the URL, read
+  records through a source object.
 - **Shipping the index to cloud workers** (#466). Publishing the SQLite file to the
   results bucket and having each worker download it once is the alternative
   to a PostgreSQL instance, and needs a documented workflow either way.
