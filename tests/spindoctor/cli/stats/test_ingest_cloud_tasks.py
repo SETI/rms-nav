@@ -21,6 +21,7 @@ import sqlalchemy
 
 from spindoctor.cli.stats.ingest import (
     TaskResult,
+    UnlistableDirectoryError,
     fan_out_ingest_tasks,
     ingest_metadata_files,
     ingest_task_share,
@@ -286,10 +287,15 @@ def test_a_share_removes_no_row(tmp_path: Path, quiet_logger: pdslogger.PdsLogge
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason='the superuser reads a directory of mode 000')
-def test_a_partly_listed_root_is_fanned_out_without_removing_a_row(
+def test_a_root_holding_a_directory_nobody_can_list_is_not_fanned_out(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """A listing of part of a root is not evidence that a stub it missed is gone."""
+    """A fan-out is the one moment a whole root is listed, so it has to be one.
+
+    Shares cut from a listing of part of a root would be ingested, added up, and
+    stamped as a completed pass over the root, and every stub the walk never
+    reached would then read as an image nothing navigated.
+    """
     root = tmp_path / 'results'
     write_metadata(root, 'VOL1/N1454725799_1_CALIB', metadata_document())
     write_metadata(root, 'VOL2/N1454725800_1_CALIB', metadata_document())
@@ -299,14 +305,12 @@ def test_a_partly_listed_root_is_fanned_out_without_removing_a_row(
     try:
         engine = open_index(url)
         try:
-            found = fan_out_ingest_tasks(
-                engine, [root.as_posix()], share_size=2, logger=quiet_logger
-            )
+            with pytest.raises(UnlistableDirectoryError, match='could not be listed'):
+                fan_out_ingest_tasks(engine, [root.as_posix()], share_size=2, logger=quiet_logger)
         finally:
             engine.dispose()
     finally:
         closed.chmod(0o755)
-    assert found.counts.files_removed == 0
 
 
 # ---------------------------------------------------------------------------

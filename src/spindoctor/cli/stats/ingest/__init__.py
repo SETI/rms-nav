@@ -13,6 +13,7 @@ it the complete listing that alone licenses one.
 Public API:
 
     METADATA_SUFFIX            -- suffix of the per-image navigation document
+    UnlistableDirectoryError   -- a directory under a root that ends the pass
     INGEST_RETRIEVE_BATCH_SIZE -- metadata files retrieved in one download
     INGEST_COMMIT_CHUNK_SIZE   -- images written per database transaction
     INGEST_TASK_SHARE_SIZE     -- metadata files handed to one cloud task
@@ -35,7 +36,8 @@ stage a name lives in:
 * :mod:`~spindoctor.cli.stats.ingest.counts` -- the tally a pass keeps and the
   summary it is read from.
 * :mod:`~spindoctor.cli.stats.ingest.walk` -- the single listing of a root,
-  which every later stage draws on.
+  which every later stage draws on, and which stops the pass rather than
+  returning an account of part of a root.
 * :mod:`~spindoctor.cli.stats.ingest.store` -- what the index already holds
   about a root, and how rows go back into it.
 * :mod:`~spindoctor.cli.stats.ingest.chunks` -- batched retrieval, reading a
@@ -66,7 +68,7 @@ from spindoctor.cli.stats.ingest.tasks import (
     ingest_task_share,
     task_results_from_event_log,
 )
-from spindoctor.cli.stats.ingest.walk import METADATA_SUFFIX
+from spindoctor.cli.stats.ingest.walk import METADATA_SUFFIX, UnlistableDirectoryError
 
 __all__ = [
     'INGEST_COMMIT_CHUNK_SIZE',
@@ -78,6 +80,7 @@ __all__ = [
     'TaskCompletion',
     'TaskResult',
     'TaskResults',
+    'UnlistableDirectoryError',
     'complete_ingest_tasks',
     'distinct_roots',
     'fan_out_ingest_tasks',

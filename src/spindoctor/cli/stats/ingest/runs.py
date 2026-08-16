@@ -10,8 +10,8 @@ or unmounted root must read as one nobody has ingested rather than as one that
 holds nothing, and leaving the finish time NULL is what says so.
 
 A pass fanned out over many workers is one run all the same.  What the fan-out
-itself did -- how many files it saw, how many rows it removed, how many
-directories it did not list -- is recorded on the row as soon as it is known,
+itself did -- how many files it saw, how many rows it removed -- is recorded on
+the row as soon as it is known,
 because nothing later in the pass can find it out again; the finish time waits
 for the workers, so the root stays unreadable until every one of their shares
 is accounted for.
@@ -67,14 +67,12 @@ class _UnfinishedRun:
             be accounted for by no shares.
         files_removed: Rows the fan-out deleted, whose documents had left the
             tree.
-        directories_missed: Directories the fan-out's walk did not list.
     """
 
     run_id: int
     root_url: str
     files_seen: int | None
     files_removed: int | None
-    directories_missed: int | None
 
 
 def _record_fan_out(engine: sqlalchemy.Engine, run_id: int, counts: IngestCounts) -> None:
@@ -101,7 +99,6 @@ def _record_fan_out(engine: sqlalchemy.Engine, run_id: int, counts: IngestCounts
                 files_skipped=0,
                 files_failed=0,
                 files_removed=counts.files_removed,
-                directories_missed=counts.directories_missed,
             )
         )
 
@@ -160,7 +157,6 @@ def _unfinished_run(connection: sqlalchemy.Connection, root_url: str) -> _Unfini
             INGEST_RUNS.c.finished_utc,
             INGEST_RUNS.c.files_seen,
             INGEST_RUNS.c.files_removed,
-            INGEST_RUNS.c.directories_missed,
         )
         .where(INGEST_RUNS.c.root_url == root_url)
         .order_by(INGEST_RUNS.c.run_id.desc())
@@ -174,7 +170,6 @@ def _unfinished_run(connection: sqlalchemy.Connection, root_url: str) -> _Unfini
         root_url=str(row.root_url),
         files_seen=row.files_seen,
         files_removed=row.files_removed,
-        directories_missed=row.directories_missed,
     )
 
 
@@ -197,6 +192,5 @@ def _finish_run(engine: sqlalchemy.Engine, run_id: int, counts: IngestCounts) ->
                 files_skipped=counts.files_skipped,
                 files_failed=counts.files_failed,
                 files_removed=counts.files_removed,
-                directories_missed=counts.directories_missed,
             )
         )

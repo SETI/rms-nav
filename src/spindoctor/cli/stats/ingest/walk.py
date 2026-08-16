@@ -6,10 +6,16 @@ come from the walk.  There is no per-file stat and no per-file existence check:
 on a cloud root each of those is a paid round trip per image per run, which is
 the cost this index exists to remove.
 
-A walk also reports what it did not see.  A directory it could not list, and
-one it had already listed under another name, leave it knowing about part of
-the root rather than all of it -- which is not evidence that a stub it did not
-find has left the tree, and not evidence a prune may act on.
+A walk that cannot list a directory ends the pass there and then.  A directory
+nobody enumerated holds documents nobody recorded, and absence of a row is
+exactly what every consumer reads as "this image was never navigated", so a
+pass that finished around the gap would stamp that reading as an answer.
+Stopping costs a run; finishing costs a wrong answer that outlives it.
+
+A directory the walk has already listed under another name is a different
+thing, and not a gap: its documents are in the listing under the path the walk
+met first, and descending a second time would only write them again under
+stubs no consumer asks about.  The walk declines it, says so, and goes on.
 """
 
 from dataclasses import dataclass, field
@@ -18,10 +24,38 @@ from typing import Any
 from filecache import FCPath
 from pdslogger import PdsLogger
 
-__all__ = ['METADATA_SUFFIX']
+__all__ = ['METADATA_SUFFIX', 'UnlistableDirectoryError']
 
 METADATA_SUFFIX = '_metadata.json'
 """Suffix of the per-image navigation document under the results root."""
+
+
+class UnlistableDirectoryError(Exception):
+    """A directory under a results root that the walk could not list.
+
+    Raised where the walk meets the directory rather than where the damage
+    would show, which is what keeps the cost to the run that has read nothing
+    yet: a pass stopped at prune time has already read every document under an
+    archive-scale root, and discards hours of retrieval to say what it could
+    have said in the first minute.
+
+    A transient failure -- a share that stops answering for a moment, a
+    permission fixed a minute later -- therefore costs a whole pass rather than
+    degrading one.  That is the trade this exception is: an ingest is
+    reproducible from the tree and can simply be run again, and the answer it
+    would otherwise leave behind is one no later pass corrects.
+
+    Parameters:
+        directory: The directory that would not be listed.
+        reason: What the storage layer said when it refused.
+    """
+
+    def __init__(self, directory: str, reason: str) -> None:
+        super().__init__(
+            f'{directory} could not be listed ({reason}), so the documents under it were '
+            f'never seen and an image beneath it would read as one nothing was ever '
+            f'written for'
+        )
 
 
 @dataclass(frozen=True)
@@ -50,29 +84,15 @@ class _RootListing:
             "has this changed", so such a root is re-read in full.
         root_listed: Whether the root itself could be listed.  A root that is
             not there is a different thing from a root that is empty, and only
-            the second one has been ingested when the walk ends.
-        directories_missed: How many directories under the root this walk did
-            not list on their own account -- ones it could not list, and ones
-            it had already walked under another name.  The walk then knows
-            about some of the root rather than all of it, which is not evidence
-            that a stub it did not see is gone.
+            the second one has been ingested when the walk ends.  It is the one
+            directory whose refusal is reported rather than raised, because a
+            pass over several roots accounts for each of them separately and a
+            mistyped root is the commonest thing an operator types.
     """
 
     metadata_files: list[_ListedFile] = field(default_factory=list)
     has_file_metrics: bool = True
     root_listed: bool = True
-    directories_missed: int = 0
-
-    @property
-    def covers_whole_root(self) -> bool:
-        """Whether this listing is a complete account of the root.
-
-        Returns:
-            True when every directory under the root, and the root itself, was
-            listed.  Only such a listing is evidence that a recorded stub it
-            does not hold has left the tree.
-        """
-        return self.root_listed and not self.directories_missed
 
 
 def _metrics_of(entry_metadata: dict[str, Any] | None) -> tuple[int | None, int | None]:
@@ -107,9 +127,10 @@ def _is_directory(path: FCPath, entry_metadata: dict[str, Any] | None) -> bool:
     Returns:
         True when the entry is a directory.  A backend that reported no
         metadata for the entry, or metadata that does not say, is asked
-        directly; one that cannot answer either is treated as a file, since
-        descending into something that is not there would only add a directory
-        the walk could not list.
+        directly; one that cannot answer either is treated as a file rather
+        than ending the pass, because the commonest way to reach that is an
+        entry that has gone away since the listing named it, and a pass that
+        stopped for one would stop for every deletion that lands mid-walk.
     """
     is_dir = None if entry_metadata is None else entry_metadata.get('is_dir')
     if is_dir is not None:
@@ -142,7 +163,12 @@ def _directory_identity(directory: FCPath) -> tuple[int, int] | None:
 
 
 def _list_directory(
-    directory: FCPath, prefix: str, listing: _RootListing, visited: set[tuple[int, int]]
+    directory: FCPath,
+    prefix: str,
+    listing: _RootListing,
+    visited: dict[tuple[int, int], str],
+    *,
+    logger: PdsLogger,
 ) -> bool:
     """Collect one directory's documents and descend into its subdirectories.
 
@@ -151,42 +177,61 @@ def _list_directory(
         prefix: The path of that directory under the root, ending in ``/`` (or
             empty at the root itself).
         listing: Accumulator the walk fills in.
-        visited: Identities of the directories this walk has already listed,
-            which it adds this one to.
+        visited: Where this walk has already listed each directory it has
+            listed, by identity, which it adds this one to.
+        logger: Logger for a directory reached a second way.
 
     Returns:
-        Whether the directory was listed on its own account.  False both for
-        one that could not be listed and for one already walked under another
-        name, because the caller's bookkeeping is the same either way: the walk
-        did not enumerate this directory here, so it must not act on what it
-        did not see.
+        Whether the directory was listed here.  False for the root of the pass
+        when it could not be listed, which its caller reports as a root nobody
+        ingested, and False for a directory already listed under another name,
+        which is not a gap and which the recursive caller has nothing to do
+        about.
+
+    Raises:
+        UnlistableDirectoryError: If a directory under the root could not be
+            listed.  The documents beneath it are then documents this pass
+            cannot see, and a row's absence is what a consumer reads as an
+            answer, so the pass stops instead of finishing around them.
     """
     identity = _directory_identity(directory)
     if identity is not None:
-        if identity in visited:
-            # A link back to a directory already walked.  Descending would
-            # write the same documents again under a second set of stubs --
-            # one row per document per level, until the filesystem stops the
-            # loop at its own link limit -- so the walk stops here instead.
+        listed_as = visited.get(identity)
+        if listed_as is not None:
+            # A second path to a directory this walk has already listed -- a
+            # link back to an ancestor, or one volume reachable two ways.
+            # Descending would write the same documents again under a second
+            # set of stubs, one row per document per level until the
+            # filesystem stops the loop at its own link limit, and no consumer
+            # asks about any of them: a stub comes from the image's own
+            # volume and filespec, which name the directory once.  So the walk
+            # declines it, and the root is still wholly listed, because every
+            # document under it is in this listing under the path met first.
+            logger.info(
+                'Not listing %s, which is %s reached a second way and already listed',
+                directory.as_posix(),
+                listed_as,
+            )
             return False
-        visited.add(identity)
+        visited[identity] = directory.as_posix()
     try:
         entries = list(directory.iterdir_metadata())
-    except OSError:
+    except OSError as exc:
         # Every way a directory can refuse to be listed: it is not there, it
         # stopped being a directory between the parent listing and this call,
         # this user may not read it, the share it lives on has gone away.  All
         # of them mean the same thing to the walk -- it can see no result file
-        # here, which is not the same as there being none -- and treating only
-        # some of them that way ends the run on the commonest of them.
-        return False
+        # here, which is not the same as there being none -- and it is the root
+        # alone that is reported rather than raised.
+        if not prefix:
+            return False
+        raise UnlistableDirectoryError(directory.as_posix(), str(exc)) from exc
     for path, entry_metadata in entries:
         name = path.name
         relative = f'{prefix}{name}'
         is_dir = _is_directory(path, entry_metadata)
         if is_dir:
-            if not _list_directory(path, f'{relative}/', listing, visited):
-                listing.directories_missed += 1
+            _list_directory(path, f'{relative}/', listing, visited, logger=logger)
         elif name.endswith(METADATA_SUFFIX):
             mtime_ns, size_bytes = _metrics_of(entry_metadata)
             if mtime_ns is None or size_bytes is None:
@@ -213,10 +258,17 @@ def _walk_root(root: FCPath, *, logger: PdsLogger) -> _RootListing:
         logger: Logger for the scan summary and the degraded-listing warning.
 
     Returns:
-        What the walk found, with the metadata files in stub order.
+        What the walk found, with the metadata files in stub order.  A listing
+        this returns for a root it listed is a complete account of that root,
+        which is what licenses the prune to act on what it does not hold.
+
+    Raises:
+        UnlistableDirectoryError: If a directory under the root could not be
+            listed, which ends the whole pass rather than this root's part of
+            it.
     """
     listing = _RootListing()
-    listing.root_listed = _list_directory(root, '', listing, set())
+    listing.root_listed = _list_directory(root, '', listing, {}, logger=logger)
     listing.metadata_files.sort(key=lambda listed: listed.results_path_stub)
     if not listing.root_listed:
         logger.error(
@@ -230,14 +282,6 @@ def _walk_root(root: FCPath, *, logger: PdsLogger) -> _RootListing:
         len(listing.metadata_files),
         root.as_posix(),
     )
-    if listing.directories_missed:
-        logger.warning(
-            '%d director(ies) under %s were not listed, so this pass covers some of the '
-            'root rather than all of it and removes no row from it: absence of a row under '
-            'one of them is not evidence that its image was never navigated',
-            listing.directories_missed,
-            root.as_posix(),
-        )
     if not listing.has_file_metrics and listing.metadata_files:
         logger.warning(
             'Listing of %s reports no size or modification time, so every document '

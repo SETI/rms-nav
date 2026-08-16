@@ -18,7 +18,7 @@ import pdslogger
 import pytest
 from filecache import FCPath
 
-from spindoctor.cli.stats.ingest import TaskResult
+from spindoctor.cli.stats.ingest import TaskResult, UnlistableDirectoryError
 from spindoctor.results_index import (
     INGEST_RUNS,
     SCHEMA_VERSION,
@@ -144,25 +144,22 @@ def unlistable_volume(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(FCPath, 'iterdir_metadata', refusing_vol2)
 
 
-def test_the_run_keeps_the_directories_the_fan_out_could_not_list(
+def test_a_fan_out_that_cannot_list_a_directory_completes_nothing(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Only the fan-out ever saw them, and the completion rewrites the row.
+    """The fan-out is the only step that sees the whole root, so it is where this ends.
 
-    Under a directory nobody enumerated, absence of a row is not evidence that
-    an image was never navigated, and the count on the run row is the only place
-    a consumer can read that.  A completion that did not carry the fan-out's
-    count across would replace it with a zero, and the row would then say the
-    whole root was listed.
+    Its shares would otherwise be ingested and added up into a completed pass
+    over a root nobody listed whole, and every stub under the directory it
+    missed would read as an image nothing navigated.
     """
     root = tmp_path / 'results'
     write_metadata(root, 'VOL1/N1454725799_1_CALIB', metadata_document())
     write_metadata(root, 'VOL2/N1454725800_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
     unlistable_volume(monkeypatch)
-    tasks = fan_out(url, [root], logger=quiet_logger)
-    complete(url, [root], run_shares(url, tasks, logger=quiet_logger), logger=quiet_logger)
-    assert run_rows(url)[-1].directories_missed == 1
+    with pytest.raises(UnlistableDirectoryError, match='could not be listed'):
+        fan_out(url, [root], logger=quiet_logger)
 
 
 def test_a_share_that_never_reported_leaves_the_run_unfinished(

@@ -400,23 +400,6 @@ class ResultsFilter:
             self._nav_results_root,
             _snapshot_age(stubs.ingested_utc),
         )
-        if stubs.directories_missed:
-            # The absence filters read "no row" as "this image was never
-            # navigated", and under a directory nobody listed that reading is
-            # simply false. The pass also removed no row anywhere under the
-            # root, having no evidence about the stubs it did not see, so a
-            # document deleted since the pass before it still reads as present.
-            # The run completed all the same, so this count is the only place
-            # either gap shows.
-            self._logger.warning(
-                'The last ingest of %s did not list %d director%s: an image under one of '
-                'them is absent from the index whether or not it was navigated, and no row '
-                'was removed anywhere under the root, so a document deleted since the '
-                'previous pass still reads as present',
-                self._nav_results_root,
-                stubs.directories_missed,
-                'y' if stubs.directories_missed == 1 else 'ies',
-            )
 
     def _scan_volumes(self, volumes: Sequence[str]) -> None:
         """Walks the results tree under each volume, collecting result files.

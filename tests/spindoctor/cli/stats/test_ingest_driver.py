@@ -202,15 +202,17 @@ def test_a_root_that_is_not_there_is_named_in_the_summary(
     assert any('could not be listed' in line for line in written)
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason='the superuser reads a directory of mode 000')
-def test_a_missed_directory_is_named_in_the_summary(
+def _run_over_an_unlistable_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A completed run that saw part of a root has to say which part it missed.
+) -> tuple[int | None, list[str]]:
+    """Run the driver over a root one directory of which will not be listed.
 
-    Every consumer of the index reads a missing row as "this image was never
-    navigated". Under a directory nobody listed that reading is wrong, and the
-    summary is where an operator finds out before acting on it.
+    Parameters:
+        tmp_path: Directory the tree, the index and the logs live under.
+        monkeypatch: Fixture the argument vector and logger are replaced through.
+
+    Returns:
+        The exit status, and one entry per line written to the main log.
     """
     monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
     root = tmp_path / 'results'
@@ -219,7 +221,7 @@ def test_a_missed_directory_is_named_in_the_summary(
     closed = root / 'VOL2'
     closed.chmod(0o000)
     try:
-        _status, written = _run(
+        return _run(
             [
                 '--results-db',
                 index_url(tmp_path / 'index.sqlite3'),
@@ -231,7 +233,52 @@ def test_a_missed_directory_is_named_in_the_summary(
         )
     finally:
         closed.chmod(0o755)
-    assert any('Directories not listed' in line for line in written)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason='the superuser reads a directory of mode 000')
+def test_a_directory_that_cannot_be_listed_stops_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pass ends rather than completing around documents it could not see.
+
+    Every consumer of the index reads a missing row as "this image was never
+    navigated", and under a directory nobody listed that reading is wrong, so
+    the run an operator would otherwise act on is the thing that has to stop.
+    """
+    _status, written = _run_over_an_unlistable_directory(tmp_path, monkeypatch)
+    assert any('Ingest stopped' in line for line in written)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason='the superuser reads a directory of mode 000')
+def test_the_directory_that_stopped_the_run_is_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It is the one thing the operator has to go and fix."""
+    _status, written = _run_over_an_unlistable_directory(tmp_path, monkeypatch)
+    assert any((tmp_path / 'results' / 'VOL2').as_posix() in line for line in written)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason='the superuser reads a directory of mode 000')
+def test_a_run_stopped_by_a_directory_exits_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scheduled ingest reads its status and nothing else."""
+    status, _written = _run_over_an_unlistable_directory(tmp_path, monkeypatch)
+    assert status == 1
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason='the superuser reads a directory of mode 000')
+def test_the_directory_refusal_is_not_reported_as_an_unenumerated_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The catch-all below exits 1 and says so too, which would hide this one.
+
+    Status and traceback alike are the same for both, so what tells them apart
+    is the message: this failure is one the pass enumerated, and it reads as the
+    directory it is about rather than as something nobody expected.
+    """
+    _status, written = _run_over_an_unlistable_directory(tmp_path, monkeypatch)
+    assert not any('Ingest could not complete' in line for line in written)
 
 
 def test_a_failure_nobody_enumerated_exits_rather_than_raising(

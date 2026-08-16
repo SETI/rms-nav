@@ -36,6 +36,7 @@ from tests.spindoctor.dataset.conftest import (
     FATAL_ERRORS,
     NO_RESULT,
     NONSPICE_ERROR,
+    SECOND_SUCCESS,
     SPICE_ERROR,
     VOLUMES,
     WITH_A_DOCUMENT,
@@ -810,3 +811,87 @@ def test_a_database_failure_of_another_class_raises_no_database_exception(
             unbindable, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
         )
     assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
+
+
+# ---------------------------------------------------------------------------
+# A document that has left the tree
+# ---------------------------------------------------------------------------
+
+
+def _index_after_a_document_left_the_tree(
+    tmp_path: Path,
+) -> tuple[Path, list[ImageFile], str]:
+    """Ingest a root, delete one of its documents, and ingest it again.
+
+    This was a divergence while a pass that could not list one directory
+    completed anyway and removed no row: the deleted document's row then
+    outlived any number of finished passes.  A pass that meets such a directory
+    now stops instead, so every completed pass is one that listed the whole
+    root and every completed pass prunes, and the two paths answer alike.
+
+    Parameters:
+        tmp_path: Directory the root and the index are written under.
+
+    Returns:
+        The root, the two candidate images, and the connection URL of the index.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, SECOND_SUCCESS, metadata_document(image_name='N1000000002_1.IMG'))
+    write_metadata(root, SPICE_ERROR, metadata_document(image_name='N1000000004_1.IMG'))
+    images = [
+        ImageFile(
+            image_file_url=FCPath(root / f'{stub}.IMG'),
+            label_file_url=FCPath(root / f'{stub}.LBL'),
+            results_path_stub=stub,
+        )
+        for stub in (SECOND_SUCCESS, SPICE_ERROR)
+    ]
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=null_logger())
+    (root / f'{SPICE_ERROR}_metadata.json').unlink()
+    ingest_tree(url, [root], logger=null_logger())
+    return root, images, url
+
+
+def test_a_document_that_left_the_tree_reads_as_absent_in_the_tree(tmp_path: Path) -> None:
+    """The walk finds what is there now, which is the answer the index is held to."""
+    root, images, _url = _index_after_a_document_left_the_tree(tmp_path)
+    results_filter = ResultsFilter(VOLUMES, str(root), logger=null_logger(), has_offset_file=True)
+    assert select_from(results_filter, images) == [SECOND_SUCCESS]
+
+
+def test_a_document_that_left_the_tree_reads_as_absent_in_the_index(tmp_path: Path) -> None:
+    """The pass that listed the whole root had the evidence to remove the row, and did.
+
+    Presence of a row means the tree still holds the result, which is what makes
+    absence of one mean that nothing navigated the image.
+    """
+    root, images, url = _index_after_a_document_left_the_tree(tmp_path)
+    results_filter = ResultsFilter(
+        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
+    )
+    assert select_from(results_filter, images) == [SECOND_SUCCESS]
+
+
+def test_the_tree_offers_a_document_that_left_it_to_the_absence_filter(tmp_path: Path) -> None:
+    """Nothing has been written for that image now, so the resume idiom picks it up."""
+    root, images, _url = _index_after_a_document_left_the_tree(tmp_path)
+    results_filter = ResultsFilter(
+        VOLUMES, str(root), logger=null_logger(), has_no_offset_file=True
+    )
+    assert select_from(results_filter, images) == [SPICE_ERROR]
+
+
+def test_the_index_offers_a_document_that_left_the_tree_to_the_absence_filter(
+    tmp_path: Path,
+) -> None:
+    """The other direction of the same row, and the costlier one to get wrong.
+
+    ``--has-no-offset-file`` is the resume idiom, so a row that outlived its
+    document is an image the run silently declines to navigate again.
+    """
+    root, images, url = _index_after_a_document_left_the_tree(tmp_path)
+    results_filter = ResultsFilter(
+        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_no_offset_file=True
+    )
+    assert select_from(results_filter, images) == [SPICE_ERROR]

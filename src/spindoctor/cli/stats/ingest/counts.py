@@ -32,11 +32,6 @@ class IngestCounts:
             delivered, and the ones the database would not store.
         files_removed: Image rows deleted because the tree no longer holds the
             document they came from.
-        directories_missed: Directories under a root that this pass did not
-            list on their own account, so the files under them were never
-            seen.  Absence of a row for a stub beneath one of them says
-            nothing, which is why the number is reported rather than left in a
-            log line.
         roots_unreadable: Roots the walk could not list at all, whose ingest
             run is deliberately left unfinished.
         failures_by_reason: How many files failed for each distinct reason, so
@@ -51,7 +46,6 @@ class IngestCounts:
     files_skipped: int = 0
     files_failed: int = 0
     files_removed: int = 0
-    directories_missed: int = 0
     roots_unreadable: int = 0
     failures_by_reason: dict[str, int] = field(default_factory=dict)
     example_by_reason: dict[str, str] = field(default_factory=dict)
@@ -67,7 +61,6 @@ class IngestCounts:
         self.files_skipped += other.files_skipped
         self.files_failed += other.files_failed
         self.files_removed += other.files_removed
-        self.directories_missed += other.directories_missed
         self.roots_unreadable += other.roots_unreadable
         for reason, count in other.failures_by_reason.items():
             self.failures_by_reason[reason] = self.failures_by_reason.get(reason, 0) + count

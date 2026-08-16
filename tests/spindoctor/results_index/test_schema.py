@@ -126,7 +126,6 @@ INGEST_RUNS_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('files_skipped', sqlalchemy.Integer, True),
     ('files_failed', sqlalchemy.Integer, True),
     ('files_removed', sqlalchemy.Integer, True),
-    ('directories_missed', sqlalchemy.Integer, True),
     ('schema_version', sqlalchemy.Integer, False),
 )
 
@@ -145,7 +144,7 @@ SCHEMA_META_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('created_utc', sqlalchemy.Text, False),
 )
 
-COLUMN_SET_VERSION = 6
+COLUMN_SET_VERSION = 7
 """The schema version the column sets above make up.
 
 An index is readable only by code whose column set is the one that wrote it, and

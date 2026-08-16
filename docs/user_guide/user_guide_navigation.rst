@@ -274,22 +274,13 @@ names one file per reason.
 
 **A file the index has no row at all for reads as absent**, and
 ``--has-no-offset-file`` reads absence as "this image was never navigated", so
-it selects that image again. Three passes end that way: one that could not
-retrieve the file, one whose rows the database would not store, and one that did
-not list the directory the file is under. The first two are deliberate -- a
-recorded refusal would be skipped for as long as the file did not change, and
-the next pass would never retry it -- and the third is counted rather than
-silent, by the paragraph on unlisted directories below.
-
-**A document the tree no longer holds keeps its row** and reads as present, so
-``--has-offset-file`` hands on an image whose metadata file is gone and
-``--has-no-offset-file`` skips an image nothing has been written for. A row
-leaves the index only when a pass that listed the whole root finds no file for
-it, and a pass that missed a single directory anywhere under the root removes no
-row at all, having no evidence about the stubs it did not see. One unlistable
-subdirectory therefore holds every stale row of the root, however many passes
-complete in the meantime, which is why this one is not answered by ingesting
-again.
+it selects that image again. Two passes end that way: one that could not
+retrieve the file, and one whose rows the database would not store. Both are
+deliberate -- a recorded refusal would be skipped for as long as the file did
+not change, and the next pass would never retry it. A file under a directory
+nobody listed is not a third: an ingest that cannot list a directory stops
+there rather than completing, so a root the index holds a completed pass over
+is a root every directory of which was listed.
 
 **A document rewritten in place that kept the length and the modification time
 it had before** is one the ingest skips, because those two metrics are
@@ -309,14 +300,11 @@ pass ``--results-db none`` for a run that must read the tree. That age is what
 decides the answer outside the paragraphs above; inside them it decides nothing,
 since each of them survives a pass that finished a second ago.
 
-An ingest that could not list every directory under the root reports the number
-it missed, and every enumeration answered from that index repeats it as a
-warning. It bounds both directions of the snapshot: an image under a directory
-nobody listed is absent from the index whether or not it was navigated, and such
-a pass removes no row anywhere under the root, so a result file deleted before it
-keeps its row until a pass lists the whole root. Fixing what stopped the walk --
-a directory permission, a symbolic link pointing back up the tree -- and
-re-running ``sd_stats_ingest`` clears both.
+An ingest that meets a directory it cannot list stops there, reports it as an
+error, and completes no root from that point on, so no index a consumer reads
+holds a root that was only partly walked. Fix what stopped the walk -- a
+directory permission, a share that was not answering -- and run
+``sd_stats_ingest`` again.
 
 Miscellaneous
 ^^^^^^^^^^^^^

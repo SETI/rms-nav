@@ -199,8 +199,7 @@ class FanOut:
         tasks: The task descriptions, in the shape a cloud-tasks queue loads:
             each a ``task_id`` and the ``data`` one worker is handed.
         counts: What the fan-out itself did -- the files its walks found, the
-            rows it removed, the directories it did not list, and the roots it
-            could not list at all.
+            rows it removed, and the roots it could not list at all.
     """
 
     tasks: list[dict[str, Any]] = field(default_factory=list)
@@ -341,12 +340,11 @@ def fan_out_ingest_tasks(
 ) -> FanOut:
     """List each root once and divide the documents under it into tasks.
 
-    Each root gets an ingest run, a single walk, and -- when that walk covered
-    the whole root -- the removal of the rows whose documents the tree no longer
-    holds.  What the walk found is recorded on the run immediately, because
-    nothing later in the pass can find it out again; the finish time is left for
-    :func:`complete_ingest_tasks`, so until then every consumer treats the root
-    as one nobody has ingested.
+    Each root gets an ingest run, a single walk, and the removal of the rows
+    whose documents the tree no longer holds.  What the walk found is recorded
+    on the run immediately, because nothing later in the pass can find it out
+    again; the finish time is left for :func:`complete_ingest_tasks`, so until
+    then every consumer treats the root as one nobody has ingested.
 
     A root the walk could not list yields no task and keeps its unfinished run,
     exactly as it does in a pass that reads the documents itself: a mistyped or
@@ -368,6 +366,9 @@ def fan_out_ingest_tasks(
     Raises:
         ValueError: If the share size is not at least one file, which would
             divide a root into no tasks at all and lose every document under it.
+        UnlistableDirectoryError: If a directory under any root could not be
+            listed.  The fan-out ends there and writes no tasks at all, so a
+            queue is never loaded with shares of a root nobody listed whole.
     """
     if share_size < 1:
         raise ValueError(f'a task share holds at least one file, not {share_size}')
@@ -379,17 +380,13 @@ def fan_out_ingest_tasks(
         logger.info('Dividing %s into ingest tasks', root_url)
         listing = _walk_root(root, logger=logger)
         counts.files_seen = len(listing.metadata_files)
-        counts.directories_missed = listing.directories_missed
         if not listing.root_listed:
             counts.roots_unreadable = 1
             fan_out.counts.add(counts)
             continue
-        if listing.covers_whole_root:
-            with engine.connect() as connection:
-                recorded = _recorded_files(connection, root_url)
-            counts.files_removed = _prune_missing(
-                engine, root_url, listing, recorded, logger=logger
-            )
+        with engine.connect() as connection:
+            recorded = _recorded_files(connection, root_url)
+        counts.files_removed = _prune_missing(engine, root_url, listing, recorded, logger=logger)
         _record_fan_out(engine, run_id, counts)
         tasks_of_root = [
             {
@@ -866,7 +863,6 @@ def complete_ingest_tasks(
             continue
         counts.files_seen = run.files_seen
         counts.files_removed = run.files_removed or 0
-        counts.directories_missed = run.directories_missed or 0
         accounted = counts.files_ingested + counts.files_skipped + counts.files_failed
         if accounted != counts.files_seen:
             # What the shares that did report did is written down without a

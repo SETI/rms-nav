@@ -511,12 +511,11 @@ def _seed_selection_rows(url: str) -> None:
                     'root_url': root_url,
                     'started_utc': stamp,
                     'finished_utc': stamp,
-                    'directories_missed': missed,
                     'schema_version': SCHEMA_VERSION,
                 }
-                for root_url, stamp, missed in (
-                    (SELECTION_ROOT, SELECTION_INGESTED, None),
-                    (SELECTION_OTHER_ROOT, SELECTION_OTHER_INGESTED, 4),
+                for root_url, stamp in (
+                    (SELECTION_ROOT, SELECTION_INGESTED),
+                    (SELECTION_OTHER_ROOT, SELECTION_OTHER_INGESTED),
                 )
             ],
         )
@@ -595,21 +594,6 @@ def test_the_error_filter_answers_for_one_root_on_postgresql(postgres_url: str) 
         postgres_url, SELECTION_ROOT, [SELECTION_VOLUME], has_offset_spice_error=True
     )
     assert stubs.matching_error == frozenset()
-
-
-def test_the_missed_count_answers_for_one_root_on_postgresql(postgres_url: str) -> None:
-    """The run table is keyed by root as well, and the newest run in it is another's.
-
-    This root's run records no count at all, which on a strictly typed backend
-    is a NULL integer rather than a zero, and the other root's -- the newer of
-    the two -- records four.
-
-    Parameters:
-        postgres_url: URL of an empty schema of this test's own.
-    """
-    _seed_selection_rows(postgres_url)
-    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
-    assert stubs.directories_missed == 0
 
 
 def test_the_snapshot_time_answers_for_one_root_on_postgresql(postgres_url: str) -> None:

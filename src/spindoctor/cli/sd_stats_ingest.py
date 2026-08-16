@@ -55,6 +55,7 @@ from spindoctor.cli.stats.drop import drop_results_index
 from spindoctor.cli.stats.ingest import (
     IngestCounts,
     TaskCompletion,
+    UnlistableDirectoryError,
     complete_ingest_tasks,
     distinct_roots,
     fan_out_ingest_tasks,
@@ -217,12 +218,6 @@ def _log_outcome(counts: IngestCounts) -> None:
             counts.failures_by_reason[reason],
             counts.example_by_reason.get(reason, '(none recorded)'),
         )
-    if counts.directories_missed:
-        MAIN_LOGGER.warning(
-            'Directories not listed, whose files were therefore never seen: %d. Absence of '
-            'a row under one of them is not evidence that its image was never navigated.',
-            counts.directories_missed,
-        )
     if counts.roots_unreadable:
         MAIN_LOGGER.error(
             'Roots that could not be listed and are therefore not ingested: %d',
@@ -343,12 +338,6 @@ def _write_cloud_tasks(
     MAIN_LOGGER.info(
         'Rows removed, their document gone from the tree: %d', fan_out.counts.files_removed
     )
-    if fan_out.counts.directories_missed:
-        MAIN_LOGGER.warning(
-            'Directories not listed, whose files were therefore never seen: %d. Absence of '
-            'a row under one of them is not evidence that its image was never navigated.',
-            fan_out.counts.directories_missed,
-        )
     if fan_out.counts.roots_unreadable:
         MAIN_LOGGER.error(
             'Roots that could not be listed and are therefore not ingested: %d',
@@ -471,7 +460,9 @@ def main() -> None:
             named root was walked, whatever mix of documents was read, skipped
             and refused, and 1 when the run could not complete -- no index or no
             root could be resolved, a named root is not a location that can be
-            read, the index could not be opened, or a root could not be listed.
+            read, the index could not be opened, a root could not be listed, or
+            a directory under one could not be, which stops the pass where it
+            is found and leaves every root from there on unfinished.
             A tree of files that are not navigation documents is a completed
             pass and exits 0, and exits 0 again on the next pass over the same
             tree, so a scheduled run's status means the same thing every time it
@@ -574,6 +565,19 @@ def main() -> None:
             status = _complete_cloud_tasks(engine, roots, path=arguments.complete_cloud_tasks_file)
         else:
             status = _run_ingest(engine, roots, force=arguments.force)
+    except UnlistableDirectoryError as exc:
+        # The one failure a pass stops for rather than charging to a file or a
+        # root.  A directory nobody listed holds documents nobody recorded, and
+        # absence of a row is what every consumer reads as "this image was
+        # never navigated", so the alternative to stopping is a completed pass
+        # that answers wrongly and goes on answering wrongly.
+        MAIN_LOGGER.fatal(
+            'Ingest stopped: %s. This root and any named after it have no completed ingest '
+            'run, so no consumer reads absence under them as an answer. Make that directory '
+            'readable and run the ingest again.',
+            exc,
+        )
+        status = 1
     except Exception as exc:
         # The pass enumerates every failure it expects and charges it to one
         # file or one root.  Anything still escaping is a failure nobody
