@@ -134,8 +134,9 @@ def aberrate_star(obs: ObsSnapshot, star: MutableStar) -> None:
         obs.path,
         obs.frame,
     )
+    # Callers filter out records with no RA/DEC before reaching here.
     event.neg_arr_j2000 = polymath.Vector3.from_ra_dec_length(
-        star.ra, star.dec, 1.0, recursive=False
+        cast(float, star.ra), cast(float, star.dec), 1.0, recursive=False
     )
     abb_ra, abb_dec, _ = event.neg_arr_ap_j2000.to_ra_dec_length(recursive=False)
     star.ra = abb_ra.vals
