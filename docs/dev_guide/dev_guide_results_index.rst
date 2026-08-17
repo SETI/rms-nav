@@ -32,8 +32,10 @@ operator runs rather than an API a consumer calls.
    * - :mod:`spindoctor.results_index.schema`
      - Every table, its columns and constraints, and ``SCHEMA_VERSION``.
    * - :mod:`spindoctor.results_index.engine`
-     - ``open_index``: backend selection, SQLite settings, the version gate.
-       ``open_database`` is the one opener that stops before the gate.
+     - :func:`~spindoctor.results_index.open_index`: backend selection, SQLite
+       settings, the version gate.
+       :func:`~spindoctor.results_index.open_database` is the one opener that
+       stops before the gate.
    * - :mod:`spindoctor.results_index.scope`
      - Which schema of a database the index lives in, decided from the stamp.
    * - :mod:`spindoctor.results_index.masking`
@@ -207,6 +209,42 @@ version gate is what makes that happen rather than being discovered later.
    somebody writing SQL against it.
 
 Dropping a column is the same list, and the same version bump.
+
+The five edits, in the order the list gives them:
+
+.. code-block:: python
+
+    # spindoctor/results_index/schema.py
+    IMAGES = sqlalchemy.Table(
+        'images',
+        METADATA,
+        ...,
+        # What the column carries, and what a NULL in it means.
+        sqlalchemy.Column('shutter_mode', sqlalchemy.Text),
+    )
+
+    SCHEMA_VERSION = 8  # incremented by this change
+
+    # spindoctor/cli/stats/ingest_rows.py, inside rows_from_metadata
+    image_row: dict[str, Any] = {
+        ...,
+        'shutter_mode': _str_or_none(observation.get('shutter_mode')),
+    }
+
+    # The consumer, reading the column it was added for
+    mode = row.shutter_mode
+
+    # tests/spindoctor/results_index/test_schema.py
+    IMAGES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
+        ...,
+        ('shutter_mode', sqlalchemy.Text, True),  # name, type, nullable
+    )
+
+    COLUMN_SET_VERSION = 8  # the same number, written down beside the columns
+
+The value is read out of the document with the coercion its column's meaning
+calls for, and never coerced past what the document said: ``str(None)`` is
+``'None'``, which would be stored as a value a document never recorded.
 
 Testing
 =======

@@ -27,14 +27,14 @@ reachable.
 This chapter is the index: when to build one, how programs are pointed at it,
 what it does and does not promise, how to build, share, rebuild and query one,
 and the tables it holds. :doc:`user_guide_statistics` documents the one
-program that reads an index and nothing else: the report ``sd_stats_report``
-writes.
+program that reads an index and nothing else, ``sd_stats_report``, which turns
+one into the navigation statistics report.
 
 Nothing requires an index
 =========================
 
 Every program runs with no index at all, and that is the default. A run that
-names none reads the results tree exactly as it always has; there is no
+names no index reads the results tree exactly as it always has; there is no
 fallback path to get wrong, because reading files *is* the ordinary path.
 
 ``sd_stats_report`` is the one exception in the other direction: it has no

@@ -28,9 +28,9 @@ does not answer. Build one before running the report:
     sd_stats_ingest --nav-results-root /data/nav-offset-results \
         --results-db sqlite:////data/nav-offset-results/index.sqlite3
 
-Every other program takes ``--results-db`` as an option and reads files
-without it. This one has no file-reading mode, and it fails naming
-``--results-db`` when no index is resolved from the command line, the
+Every other program that reads an index takes ``--results-db`` as an option
+and reads files without it. This one has no file-reading mode, and it fails
+naming ``--results-db`` when no index is resolved from the command line, the
 ``environment.results_db`` configuration variable or the ``NAV_RESULTS_DB``
 environment variable.
 
