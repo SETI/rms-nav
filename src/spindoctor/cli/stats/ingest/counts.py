@@ -14,7 +14,7 @@ than as the ordinary thing it is.
 
 from dataclasses import dataclass, field
 
-__all__ = ['IngestCounts']
+__all__ = ['IngestCounts', 'IngestSummary']
 
 
 @dataclass
@@ -77,3 +77,61 @@ class IngestCounts:
         self.files_failed += 1
         self.failures_by_reason[reason] = self.failures_by_reason.get(reason, 0) + 1
         self.example_by_reason.setdefault(reason, source_file)
+
+    def summary(self) -> 'IngestSummary':
+        """Return what this pass did, as the lines a program reports it in.
+
+        The lines are built here rather than by each program because two
+        programs run this pass now: the ingest, which writes them to its run
+        log, and the report over a results tree, which prints them to a
+        terminal.  An operator reading the second is reading about the same pass
+        as the first, so the two say it in the same words.
+
+        The failures are tallied by reason as well as counted, because a results
+        tree holds many ``*_metadata.json`` files that were never navigation
+        documents.  Several hundred of those are ordinary; several hundred
+        navigation results that would not parse are not, and the tally is what
+        tells the two apart at a glance.  Each reason names one file that
+        carried it, because a reason is a field-level diagnosis and one look at a
+        real file is what turns it into a judgement about the tree.
+
+        Returns:
+            The summary, with what could not be listed kept apart from what the
+            pass did: one is a pass that read the tree, and the other is a pass
+            that could not, which a program reports as a failure.
+        """
+        lines = [
+            f'Metadata files seen: {self.files_seen}',
+            f'Ingested: {self.files_ingested}',
+            f'Skipped as unchanged: {self.files_skipped}',
+            f'Rows removed, their document gone from the tree: {self.files_removed}',
+            f'Not ingestible: {self.files_failed}',
+        ]
+        for reason in sorted(self.failures_by_reason):
+            example = self.example_by_reason.get(reason, '(none recorded)')
+            lines.append(
+                f'    {reason}: {self.failures_by_reason[reason]} file(s), for example {example}'
+            )
+        failures = []
+        if self.roots_unreadable:
+            failures.append(
+                f'Roots that could not be listed and are therefore not ingested: '
+                f'{self.roots_unreadable}'
+            )
+        return IngestSummary(lines=tuple(lines), failures=tuple(failures))
+
+
+@dataclass(frozen=True)
+class IngestSummary:
+    """One pass's closing summary, in the words every program reports it in.
+
+    Parameters:
+        lines: What the pass did, in the order it is reported.
+        failures: What it could not do, reported at whatever level a program
+            reports a failure at.  A root nobody could list is the one member:
+            the pass leaves its run unfinished, so no consumer will read it, and
+            the program that ran the pass has to say so.
+    """
+
+    lines: tuple[str, ...]
+    failures: tuple[str, ...]

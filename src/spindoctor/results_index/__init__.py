@@ -33,6 +33,7 @@ Public API:
     normalize_root_url    -- the one spelling of a results root
     ingested_roots        -- the roots a completed ingest covered
     require_ingested_roots -- refuse to read absence from a root nobody ingested
+    RootNotIngestedError  -- what that refusal is, for a caller that reports it its own way
     open_index_for_roots  -- open an index, refusing a root it has not ingested
     newest_finish_time    -- when the newest pass over a root finished
     FATAL_STATUS          -- the status the error selection filters match
@@ -74,6 +75,7 @@ from spindoctor.results_index.record_source import (
     build_record_source,
 )
 from spindoctor.results_index.roots import (
+    RootNotIngestedError,
     ingested_roots,
     newest_finish_time,
     normalize_root_url,
@@ -116,6 +118,7 @@ __all__ = [
     'RecordField',
     'RecordSource',
     'ResultStubs',
+    'RootNotIngestedError',
     'TableContents',
     'TreeRecordSource',
     'build_record_source',

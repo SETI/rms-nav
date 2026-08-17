@@ -72,6 +72,7 @@ def no_ambient_results_index_for_the_session(
     with pytest.MonkeyPatch.context() as patch:
         patch.chdir(directory_naming_no_index)
         patch.delenv('NAV_RESULTS_DB', raising=False)
+        patch.delenv('NAV_RESULTS_ROOT', raising=False)
         yield
 
 
@@ -79,7 +80,7 @@ def no_ambient_results_index_for_the_session(
 def no_ambient_results_index(
     monkeypatch: pytest.MonkeyPatch, directory_naming_no_index: Path
 ) -> Iterator[None]:
-    """Close both ways a test could reach a results index nobody named.
+    """Close every way a test could reach a results index or tree nobody named.
 
     A results index URL is resolved from three places in order: the argument,
     the ``environment.results_db`` configuration variable, and the
@@ -89,6 +90,13 @@ def no_ambient_results_index(
     against a file an ingest may be holding, and for a report a read of every
     row in it.  Both are closed here rather than in each test, because the level
     an author forgets is the level nothing then tests.
+
+    The navigation results root is closed on the same terms, and for a sharper
+    reason: a program that resolves one *walks* it.  ``sd_stats_report`` with no
+    index ingests the tree it resolves into a temporary index of its own, so a
+    test naming neither an index nor a root would read every document under
+    whatever ``NAV_RESULTS_ROOT`` the machine exports -- several hundred thousand
+    of them on a working machine, from a test that means to assert a refusal.
 
     The configuration level is closed by moving the working directory.  The user
     override file is ``nav_default_config.yaml`` beside the process, so a
@@ -116,11 +124,13 @@ def no_ambient_results_index(
     """
     monkeypatch.chdir(directory_naming_no_index)
     monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
     # A configuration merged before this test ran -- by a test that named its own
     # override file, or by one that ran before the working directory moved --
     # outlives it: the merge is into a process-global configuration and nothing
     # takes it back out.
     monkeypatch.delitem(DEFAULT_CONFIG.environment, 'results_db', raising=False)
+    monkeypatch.delitem(DEFAULT_CONFIG.environment, 'nav_results_root', raising=False)
     yield
     left_behind = sorted(entry.name for entry in directory_naming_no_index.iterdir())
     for entry in directory_naming_no_index.iterdir():

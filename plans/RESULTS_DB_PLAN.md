@@ -43,10 +43,11 @@ index when it is given.
 - Replacing the JSON documents. They remain the authoritative record. The
   index is derived and disposable; deleting it costs nothing but the time to
   rebuild.
-- Making any pipeline program require a database. Every program except
-  `sd_stats_report` (which has no file-reading mode today and reads only a
-  database by construction) must run correctly with no index at all, and
-  that path stays the default.
+- Making any pipeline program require a database. Every program must run
+  correctly with no index at all, and that path stays the default. That now
+  includes `sd_stats_report`, which was the one exception: it reads a tree by
+  ingesting it into a temporary index of its own, so it needs no index of the
+  operator's and still computes every statistic exactly once.
 - Writing the index from the navigation pipeline. Navigation writes JSON;
   ingest reads it. Nothing in the navigation path gains a database
   dependency.
@@ -77,9 +78,10 @@ index when it is given.
 A database whose rows are derived from the results tree by a separate ingest
 step. A consumer given `--results-db` answers its questions with SQL instead
 of file reads. A consumer given no such option behaves exactly as it does
-today, reading files. (`sd_stats_report` is the one exception in both
-directions: it reads only a database today and after this work, and it is
-the one program for which the index is not optional.)
+today, reading files. `sd_stats_report` is the one that reads them the long way
+round: every number it prints comes from a query, so it ingests the tree into a
+temporary index of its own and reports from that, which is one implementation of
+every statistic rather than two obliged to agree.
 
 The index is a **snapshot**. It reflects the tree as of the last ingest over
 the roots it covers. Consumers trust its contents as given: there is no
@@ -535,10 +537,11 @@ something, and an operator who writes an empty option is not asking for whatever
 the machine exports. It is not silent: the level that carries it is named in a
 warning saying that the value names no index, and how to ask for that on
 purpose. The warning stops there. What follows from having no index is the
-caller's, because one resolver serves `sd_offset`, which then reads files, and
-the two statistics programs, which have no file-reading mode and refuse; a
-warning that stated either would be false for the others and would arrive one
-line before their own message said the opposite. The caller supplies the sink as
+caller's, because one resolver serves programs that then read the tree, the
+report that reads it by ingesting it first, and `sd_stats_ingest`, which writes
+an index and has nothing to read without one; a warning that stated any of those
+would be false for the others and would arrive one line before their own message
+said the opposite. The caller supplies the sink as
 well as the meaning, so a program whose output is terminal text for a person
 prints the line where its other diagnostics go rather than having a run-log line
 routed into its report. Passing it on instead is what an unset variable

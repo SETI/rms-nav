@@ -51,6 +51,7 @@ passes that finished.
 
 from collections.abc import Sequence
 
+import pdslogger
 import sqlalchemy
 from filecache import FCPath
 from pdslogger import PdsLogger
@@ -229,6 +230,36 @@ def _prune_missing(
                 )
             )
     return removed
+
+
+def ingest_metadata_files_silently(
+    engine: sqlalchemy.Engine, roots: list[str], *, force: bool = False
+) -> IngestCounts:
+    """Run one ingest pass with nothing written to any log.
+
+    For a caller whose own output is the run's output.  ``sd_stats_report``
+    reports over a results tree by ingesting it into a temporary index of its
+    own, and that program's output is terminal text a person reads: it holds no
+    logger, and a test asserts it imports none, so the null logger a silent pass
+    needs is built here where the logging already lives rather than there.
+
+    What the pass did is still reported -- the report prints the summary the
+    counts carry, in the same words the ingest logs it in.
+
+    Parameters:
+        engine: The open index, which must already carry the schema.
+        roots: Navigation results roots, as :func:`ingest_metadata_files` takes
+            them.
+        force: Re-read every document, ignoring the recorded file metrics.
+
+    Returns:
+        What the pass did.
+
+    Raises:
+        UnlistableDirectoryError: If a directory under any root could not be
+            listed, exactly as the logged pass raises it.
+    """
+    return ingest_metadata_files(engine, roots, force=force, logger=pdslogger.NullLogger())
 
 
 def ingest_metadata_files(

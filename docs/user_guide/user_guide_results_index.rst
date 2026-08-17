@@ -37,9 +37,14 @@ Every program runs with no index at all, and that is the default. A run that
 names no index reads the results tree exactly as it always has; there is no
 fallback path to get wrong, because reading files *is* the ordinary path.
 
-``sd_stats_report`` is the one exception in the other direction: it has no
-file-reading mode, and it fails naming ``--results-db`` when no index is
-resolved.
+``sd_stats_report`` reads a tree the long way round, and that is worth knowing
+before pointing it at one. Every number it prints comes from a query, so a report
+over a tree is a report over an index of that tree: the run ingests the tree into
+a temporary index of its own and reports from that. The report is identical
+either way --- the same statements answer it --- and what it costs is one full
+read of every document in the tree, which is exactly the cost an index exists to
+remove. For a local tree and one report, that is the right trade; for a cloud
+root or a report you will run again, build an index first.
 
 **A program becomes index-backed by declaring** ``--results-db``, never by
 inheriting an exported ``NAV_RESULTS_DB``. A program whose selection is meant
@@ -102,7 +107,9 @@ Which programs read it
    * - ``sd_stats_ingest_cloud_tasks``
      - Writes one share of it, as a queue worker.
    * - ``sd_stats_report``
-     - Reads it and nothing else; the one program an index is not optional for.
+     - Every section of the report. Without an index it ingests the tree into a
+       temporary one of its own and reports from that, so the report is the same
+       either way.
    * - ``sd_offset``
      - The results-based selection filters (``--has-offset-file``,
        ``--has-no-offset-file``, the error filters), which otherwise walk the

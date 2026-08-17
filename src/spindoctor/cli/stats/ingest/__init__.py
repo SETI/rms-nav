@@ -56,6 +56,7 @@ from spindoctor.cli.stats.ingest.driver import (
     INGEST_COMMIT_CHUNK_SIZE,
     distinct_roots,
     ingest_metadata_files,
+    ingest_metadata_files_silently,
 )
 from spindoctor.cli.stats.ingest.tasks import (
     INGEST_TASK_SHARE_SIZE,
@@ -85,6 +86,7 @@ __all__ = [
     'distinct_roots',
     'fan_out_ingest_tasks',
     'ingest_metadata_files',
+    'ingest_metadata_files_silently',
     'ingest_task_share',
     'task_results_from_event_log',
 ]

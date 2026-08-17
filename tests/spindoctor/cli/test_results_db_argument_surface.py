@@ -67,12 +67,15 @@ _CONSUMERS: list[tuple[str, list[str]]] = [
 ]
 
 # The consumers that also have a file-reading mode, which is what the sentinel
-# opts back into.  The statistics programs read and write the index by
-# construction and have no such mode, so naming the sentinel to them would
-# advertise an answer they refuse.
+# opts back into.  Only the ingest is absent: it writes the index, so an index is
+# its subject rather than one of two storages it can read, and naming the
+# sentinel to it would advertise an answer it refuses.  The report reads the tree
+# by ingesting it into a temporary index of its own, so the sentinel means to it
+# what it means everywhere else.
 _WITH_A_FILE_MODE: list[tuple[str, list[str]]] = [
     *_INDEX_BACKED,
     ('sd_offset', ['coiss_saturn']),
+    ('sd_stats_report', []),
 ]
 
 _INDEX_BACKED_CLOUD_TASK_DRIVERS = [
@@ -82,9 +85,9 @@ _INDEX_BACKED_CLOUD_TASK_DRIVERS = [
 ]
 
 # The programs that read a results index in any capacity, as the paths of the
-# modules that resolve the URL, relative to the package root.  The statistics
-# programs read it as their whole subject; the pipeline stages read one row per
-# image; the kernel writer reads one mission's records in one query; the
+# modules that resolve the URL, relative to the package root.  The ingest writes
+# it and the report reads it as their whole subject; the pipeline stages read one
+# row per image; the kernel writer reads one mission's records in bulk; the
 # navigator's dataset layer answers one selection query from it.  A
 # module absent from this list must not resolve a URL: it would then pick one up
 # from an exported NAV_RESULTS_DB without ever offering the option that opts

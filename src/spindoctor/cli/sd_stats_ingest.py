@@ -195,34 +195,18 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
 def _log_outcome(counts: IngestCounts) -> None:
     """Write the closing summary of an ingest pass to the main log.
 
-    The failures are tallied by reason as well as counted, because a results
-    tree holds many ``*_metadata.json`` files that were never navigation
-    documents.  Several hundred of those are ordinary; several hundred
-    navigation results that would not parse are not, and the tally is what
-    tells the two apart at a glance.  Each reason names one file that carried
-    it, because a reason is a field-level diagnosis and one look at a real file
-    is what turns it into a judgement about the tree.
+    The lines themselves are the pass's own, so that the report over a results
+    tree -- which runs this same pass into a temporary index -- tells an operator
+    about it in the same words.
 
     Parameters:
         counts: What the pass did.
     """
-    MAIN_LOGGER.info('Metadata files seen: %d', counts.files_seen)
-    MAIN_LOGGER.info('Ingested: %d', counts.files_ingested)
-    MAIN_LOGGER.info('Skipped as unchanged: %d', counts.files_skipped)
-    MAIN_LOGGER.info('Rows removed, their document gone from the tree: %d', counts.files_removed)
-    MAIN_LOGGER.info('Not ingestible: %d', counts.files_failed)
-    for reason in sorted(counts.failures_by_reason):
-        MAIN_LOGGER.info(
-            '    %s: %d file(s), for example %s',
-            reason,
-            counts.failures_by_reason[reason],
-            counts.example_by_reason.get(reason, '(none recorded)'),
-        )
-    if counts.roots_unreadable:
-        MAIN_LOGGER.error(
-            'Roots that could not be listed and are therefore not ingested: %d',
-            counts.roots_unreadable,
-        )
+    summary = counts.summary()
+    for line in summary.lines:
+        MAIN_LOGGER.info('%s', line)
+    for line in summary.failures:
+        MAIN_LOGGER.error('%s', line)
 
 
 def _log_completion(completion: TaskCompletion) -> None:

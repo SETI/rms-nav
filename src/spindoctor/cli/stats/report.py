@@ -1,10 +1,16 @@
-"""Generate a deterministic statistics report (Markdown + charts) from the index.
+"""Generate a deterministic statistics report (Markdown + charts) from an index.
 
-The report is the one program for which the results index is not optional: it
-has never had a file-reading mode, and it answers every question with a query.
+Every question is answered with a query, and an index is what answers queries --
+so a report over a results tree is a report over an index of that tree, ingested
+into a temporary file of this program's own and thrown away with the run.  The
+alternative was computing forty sections of statistics from documents in Python,
+which is two versions of every number, obliged to agree forever.
+
 Its output is deterministic -- the same index and the same options always
 produce byte-identical Markdown -- so a difference between two runs is a
-difference in the data or a defect, never noise.
+difference in the data or a defect, never noise.  A report over a tree and a
+report from an index ingested from that same tree are therefore byte-identical
+too, and a test holds them to it.
 
 Every statement runs on either backend.  The reason tables read
 ``COALESCE(status_reason, status_error)``, because the two are separate columns
@@ -20,6 +26,7 @@ import json
 import math
 import statistics
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +34,11 @@ import sqlalchemy
 from filecache import FCPath
 
 from spindoctor.cli.stats.classify import datetime_from_image_et, image_number_from_name
+from spindoctor.cli.stats.ingest import (
+    UnlistableDirectoryError,
+    distinct_roots,
+    ingest_metadata_files_silently,
+)
 from spindoctor.cli.stats.report_common import (
     IMAGE_JOIN,
     ReportContext,
@@ -53,10 +65,23 @@ from spindoctor.cli.stats.report_sections import (
     add_suspect_offset_section,
     write_csv_export,
 )
-from spindoctor.config import DEFAULT_CONFIG, get_results_db_url
-from spindoctor.results_index import normalize_root_url, open_index, require_ingested_roots
+from spindoctor.config import DEFAULT_CONFIG, get_nav_results_root, get_results_db_url
+from spindoctor.results_index import (
+    RootNotIngestedError,
+    normalize_root_url,
+    open_index,
+    open_index_for_roots,
+)
 
 __all__ = ['build_report', 'main_report']
+
+TEMPORARY_INDEX_NAME = 'index.sqlite3'
+"""What the throwaway index of a report over a tree is called.
+
+It lives in a temporary directory of the program's own, so the name only has to
+be a name; it is written down because the tests that assert the directory is gone
+afterwards have to name what they are looking for.
+"""
 
 # Which of the two reason vocabularies describes a non-success outcome depends
 # on how the navigation ended: the navigator's own explanation when it ran, and
@@ -763,22 +788,29 @@ def main_report(cmdline: list[str] | None = None) -> int:
     terminal text for a person reading a report, and a logger would wrap that
     in run-log machinery it has no use for.
 
+    An index is optional here as it is everywhere else.  Named, it is read;
+    unnamed, the navigation results tree is ingested into a temporary index of
+    this program's own and reported from that, so that every number comes from
+    the one set of statements whichever storage the operator has.
+
     Parameters:
         cmdline: Argument list; None uses ``sys.argv``.
 
     Returns:
-        Process exit code: 0 on success, and 1 when no index was named or the
-        one that was cannot be read.
+        Process exit code: 0 on success, and 1 when the index that was named
+        cannot be read, when no tree can be resolved to read instead, or when a
+        tree cannot be read whole.
 
     Raises:
         SystemExit: With status 2, from the argument parser, for a command line
             it will not accept -- an unknown flag, an unparseable bound, a root
-            that is not a location that can be read, or a root the index holds no
-            completed ingest of, the last of which is a value the index rather
-            than the parser rejects but is reported the same way.
+            that is not a location that can be read, a root the index holds no
+            completed ingest of (a value the index rather than the parser
+            rejects, reported the same way), or ``--root`` with no index to hold
+            it against.
     """
     parser = argparse.ArgumentParser(
-        description='Generate a navigation statistics report from an ingested results index.'
+        description='Generate a navigation statistics report from a results tree or an index.'
     )
     parser.add_argument(
         '--results-db',
@@ -787,7 +819,21 @@ def main_report(cmdline: list[str] | None = None) -> int:
         help='Connection URL of the results index written by sd_stats_ingest '
         '(a sqlite: URL naming a local path, or a postgresql+psycopg: URL); '
         'overrides the environment.results_db configuration variable and '
-        'NAV_RESULTS_DB',
+        'NAV_RESULTS_DB. Without one the navigation results tree is read '
+        "instead, by ingesting it into a temporary index of this run's own. "
+        'Pass --results-db none to read the tree even where one is configured',
+    )
+    parser.add_argument(
+        '--nav-results-root',
+        action='append',
+        dest='nav_results_roots',
+        default=None,
+        metavar='ROOT',
+        help='Root directory of a navigation results tree to report on (a local '
+        'directory or any URL the filecache layer accepts); may be specified '
+        'multiple times. Overrides NAV_RESULTS_ROOT and the nav_results_root '
+        'configuration variable. Read only when no index is named, and then '
+        'every document under it is read once',
     )
     parser.add_argument(
         '--root',
@@ -795,7 +841,8 @@ def main_report(cmdline: list[str] | None = None) -> int:
         default=None,
         metavar='ROOT',
         help='Restrict the report to one ingested navigation-results root; may '
-        'be given more than once. Default: every root the index holds',
+        'be given more than once. Default: every root the index holds. Refused '
+        'when no index is named, since there is then nothing to select among',
     )
     parser.add_argument(
         '--output-dir',
@@ -863,42 +910,161 @@ def main_report(cmdline: list[str] | None = None) -> int:
 
     url = get_results_db_url(arguments, DEFAULT_CONFIG, warn=_to_stderr)
     if url is None:
-        print(
-            'sd_stats_report reads a results index and has no file-reading mode. '
-            'Name one with --results-db, the environment.results_db configuration '
-            'variable, or NAV_RESULTS_DB, and build it with sd_stats_ingest.',
-            file=sys.stderr,
-        )
-        return 1
+        return _report_over_a_tree(arguments, parser)
+    return _report_from_an_index(url, arguments, parser)
+
+
+def _report_written_from(
+    connection: sqlalchemy.Connection, arguments: argparse.Namespace, roots: list[str]
+) -> FCPath:
+    """Write the report from one open index, whichever index it is.
+
+    The report is the same forty sections of SQL either way, because the tree
+    is reported on by ingesting it and reporting from that: a second
+    implementation in Python would be two versions of every statistic, obliged
+    to agree forever, and the first divergence would be found by an operator
+    comparing two reports rather than by a test.
+
+    Parameters:
+        connection: An open connection to the index to report from.
+        arguments: The parsed command line.
+        roots: Normalized roots to restrict the report to, and empty for every
+            root the index holds.
+
+    Returns:
+        Where the report was written.
+    """
+    return build_report(
+        connection,
+        arguments.output_dir,
+        instrument=arguments.instrument,
+        start_date=arguments.start_date,
+        end_date=arguments.end_date,
+        min_image=arguments.min_image,
+        max_image=arguments.max_image,
+        roots=roots,
+        top_n=arguments.top_n,
+        filelists=arguments.filelists,
+        suspect_fraction=arguments.suspect_fraction,
+        csv_export=arguments.csv,
+    )
+
+
+def _report_from_an_index(
+    url: str, arguments: argparse.Namespace, parser: argparse.ArgumentParser
+) -> int:
+    """Report from an index somebody built, which is the cheap way to run twice.
+
+    Parameters:
+        url: Connection URL of the results index.
+        arguments: The parsed command line.
+        parser: The parser, for the refusals it reports as usage errors.
+
+    Returns:
+        Process exit code.
+
+    Raises:
+        SystemExit: With status 2, from the parser, for a ``--root`` that is not
+            a location or that the index holds no completed ingest of.
+    """
     try:
         roots = [normalize_root_url(root) for root in arguments.root or []]
     except ValueError as exc:
         parser.error(f'a --root is not a location that can be read: {exc}')
     try:
-        engine = open_index(url)
+        engine = open_index_for_roots(url, roots)
+    except RootNotIngestedError as exc:
+        # A value the operator typed, so it is reported as a usage error like
+        # every other bad value on this command line, rather than as a run that
+        # failed on something it found.
+        parser.error(str(exc))
     except ValueError as exc:
         print(f'Cannot read the results index: {exc}', file=sys.stderr)
         return 1
     try:
         with engine.connect() as connection:
-            require_ingested_roots(connection, roots, url=url)
-            report_path = build_report(
-                connection,
-                arguments.output_dir,
-                instrument=arguments.instrument,
-                start_date=arguments.start_date,
-                end_date=arguments.end_date,
-                min_image=arguments.min_image,
-                max_image=arguments.max_image,
-                roots=roots,
-                top_n=arguments.top_n,
-                filelists=arguments.filelists,
-                suspect_fraction=arguments.suspect_fraction,
-                csv_export=arguments.csv,
-            )
+            report_path = _report_written_from(connection, arguments, roots)
     except ValueError as exc:
         parser.error(str(exc))
     finally:
         engine.dispose()
+    print(f'Wrote {report_path}')
+    return 0
+
+
+def _report_over_a_tree(arguments: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Report over a results tree, by ingesting it into an index of its own.
+
+    The index is a temporary file of this program's, in a directory of its own
+    that goes when the run does, however the run ends.  It is a file rather than
+    an in-memory database because an archive-scale root does not fit in memory,
+    and because the in-memory URL is a special case in the opener that nothing
+    else asks for.
+
+    What it costs is one full read of every document in the tree, which is
+    exactly the cost an index exists to remove.  That is the right trade for a
+    local tree and one report, and the wrong one for a cloud root or a repeated
+    report; the statistics guide says so beside the option.
+
+    Parameters:
+        arguments: The parsed command line.
+        parser: The parser, for the refusals it reports as usage errors.
+
+    Returns:
+        Process exit code: 0 on success, and 1 when a root cannot be resolved or
+        cannot be read whole.
+
+    Raises:
+        SystemExit: With status 2, from the parser, for a command line that names
+            ``--root`` with no index to hold it against.
+    """
+    if arguments.root:
+        # Refused rather than read as a second spelling of --nav-results-root.
+        # --root selects among the roots one index holds, and the index here
+        # holds exactly the roots this run ingested into it a moment ago.
+        parser.error(
+            '--root restricts a report to a root the index holds, and no index was named. '
+            'Name the trees to report on with --nav-results-root, or name an index with '
+            '--results-db.'
+        )
+    try:
+        named = arguments.nav_results_roots or [get_nav_results_root(arguments, DEFAULT_CONFIG)]
+    except ValueError as exc:
+        print(
+            f'No results index and no navigation results root: {exc}. Name a tree with '
+            f'--nav-results-root, the nav_results_root configuration variable or '
+            f'NAV_RESULTS_ROOT, or name an index with --results-db.',
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        roots = distinct_roots(named)
+    except ValueError as exc:
+        parser.error(f'a navigation results root is not a location that can be read: {exc}')
+    print(f'Reading {", ".join(roots)} into a temporary index')
+    with tempfile.TemporaryDirectory(prefix='sd_stats_report_') as directory:
+        engine = open_index(f'sqlite:///{Path(directory) / TEMPORARY_INDEX_NAME}', create=True)
+        try:
+            counts = ingest_metadata_files_silently(engine, roots)
+        except UnlistableDirectoryError as exc:
+            engine.dispose()
+            print(f'Cannot read the navigation results tree: {exc}', file=sys.stderr)
+            return 1
+        summary = counts.summary()
+        for line in summary.lines:
+            print(line)
+        for line in summary.failures:
+            print(line, file=sys.stderr)
+        try:
+            if summary.failures:
+                # A root the pass could not list is a report that would cover
+                # less than the tree and say nothing about it.
+                return 1
+            with engine.connect() as connection:
+                report_path = _report_written_from(connection, arguments, [])
+        except ValueError as exc:
+            parser.error(str(exc))
+        finally:
+            engine.dispose()
     print(f'Wrote {report_path}')
     return 0

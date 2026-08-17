@@ -21,20 +21,45 @@ built from the navigation results tree by a separate pass,
 ``sd_stats_ingest``, and :doc:`user_guide_results_index` is where it is
 documented: how it is named and resolved, how to build and rebuild one, the
 tables it holds, and how to query it directly for the questions this report
-does not answer. Build one before running the report:
+does not answer.
 
 .. code-block:: bash
 
     sd_stats_ingest --nav-results-root /data/nav-offset-results \
         --results-db sqlite:////data/nav-offset-results/index.sqlite3
+    sd_stats_report --results-db sqlite:////data/nav-offset-results/index.sqlite3
 
-Every other program that reads an index takes ``--results-db`` as an option
-and reads files without it. This one has no file-reading mode, and it fails
-naming ``--results-db`` when no index is resolved from the command line, the
-``environment.results_db`` configuration variable or the ``NAV_RESULTS_DB``
-environment variable.
+An index is optional here as it is everywhere else, and the option behaves as it
+does everywhere else: named on the command line, in the
+``environment.results_db`` configuration variable or in ``NAV_RESULTS_DB``, in
+that order, with the literal ``none`` meaning no index.
 
-``sd_stats_report [--results-db URL] [--root ROOT] [--output-dir DIR]
+Without one the navigation results tree is read:
+
+.. code-block:: bash
+
+    sd_stats_report --nav-results-root /data/nav-offset-results
+
+**What that costs is one full read of every document under the root.** Every
+number in the report comes from a query, so a report over a tree is a report over
+an index of that tree: the run ingests the tree into a temporary index of its own,
+reports from that, and throws the index away. The report is identical either way,
+because the same statements answer it. But the read is exactly the cost an index
+exists to remove --- a Cassini-scale root is several hundred thousand documents,
+and on a cloud root each one is a paid round trip --- so for anything but a local
+tree and a single report, build an index with ``sd_stats_ingest`` first and name
+it.
+
+The roots to read come from ``--nav-results-root`` (repeatable), then the
+``nav_results_root`` configuration variable, then ``NAV_RESULTS_ROOT``, as they
+do for the ingest. What the pass could not read is reported the way the ingest
+reports it: files that are not navigation documents are counted and tallied by
+reason, with one example each, so a report over a tree says what it covered
+rather than quietly covering less. A root that cannot be listed at all fails the
+run.
+
+``sd_stats_report [--results-db URL] [--nav-results-root ROOT] [--root ROOT]
+[--output-dir DIR]
 [--instrument NAME] [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD]
 [--min-image NAME] [--max-image NAME] [--top-n N] [--filelists]
 [--suspect-fraction F] [--csv]`` writes ``report.md`` and its charts into the
@@ -50,7 +75,8 @@ numbers and the same charts.
 be given more than once; with none given the report covers every root the index
 holds. A report legitimately spans roots where a per-image lookup never does.
 Naming a root the index has not fully ingested is an error rather than an empty
-report.
+report. It selects among the roots one index holds, so it is a different thing
+from ``--nav-results-root`` and is refused when no index is named.
 
 Three options control drill-down output:
 
