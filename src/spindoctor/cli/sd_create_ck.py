@@ -33,6 +33,7 @@ sys.path.insert(0, package_source_path)
 from spindoctor import __version__
 from spindoctor.cli.ck.assignment import Assignment, assign_images, group_for_output
 from spindoctor.cli.ck.comments import CommentArea, build_comment_lines
+from spindoctor.cli.ck.documents import build_document_source
 from spindoctor.cli.ck.images import ImageEntry, OmissionReason
 from spindoctor.cli.ck.index import CkFile, build_ck_index
 from spindoctor.cli.ck.inputs import (
@@ -42,7 +43,6 @@ from spindoctor.cli.ck.inputs import (
     furnish_frame_kernels,
     furnish_supporting_kernels,
     kernel_paths,
-    read_documents,
     recorded_basenames,
     resolve_one,
     select_by_time,
@@ -67,6 +67,7 @@ from spindoctor.config import (
     build_image_log_handlers,
     build_run_logging,
     get_nav_results_root,
+    get_results_db_url,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_CREATE_CK
@@ -139,6 +140,19 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         help="""The root directory of the navigation results to read metadata from;
         overrides the NAV_RESULTS_ROOT environment variable and the nav_results_root
         configuration variable""",
+    )
+    environment_group.add_argument(
+        '--results-db',
+        type=str,
+        default=None,
+        metavar='URL',
+        help="""Connection URL of the results index written by sd_stats_ingest (a
+        sqlite: URL naming a local path, or a postgresql+psycopg: URL naming a
+        server); overrides NAV_RESULTS_DB and the environment.results_db
+        configuration variable. The run then reads the mission's navigation records
+        as rows of one query instead of one file per image. Pass --results-db none
+        to read the files even where an index is configured. Without an index the
+        navigation results tree is read directly, which is the default.""",
     )
     environment_group.add_argument(
         '--kernel-dir',
@@ -710,6 +724,7 @@ def main() -> None:
         load_default_and_user_config(arguments, DEFAULT_CONFIG)
 
     nav_results_root = FileCache(None).new_path(get_nav_results_root(arguments, DEFAULT_CONFIG))
+    results_db_url = get_results_db_url(arguments, DEFAULT_CONFIG)
     # Resolved to absolute, both of them, because the meta-kernel names the
     # kernels it furnishes by these paths and SPICE resolves a relative name
     # against the *consumer's* working directory.  A meta-kernel written with
@@ -729,12 +744,20 @@ def main() -> None:
     MAIN_LOGGER.info('')
     log_run_environment(MAIN_LOGGER, command_list)
 
-    documents, unreadable = read_documents(nav_results_root, arguments.mission)
+    # Opened before anything else is read, and closed at the end of the run:
+    # an index that cannot be opened, or that has no completed ingest of this
+    # root, is a misconfigured run rather than a reason to walk the tree
+    # instead.
+    source = build_document_source(nav_results_root, results_db_url=results_db_url)
+    try:
+        documents, unreadable = source.read_documents(arguments.mission)
+    finally:
+        source.close()
     MAIN_LOGGER.info(
-        'Read %d %s metadata document(s) under %s',
+        'Read %d %s metadata document(s) from %s',
         len(documents),
         arguments.mission,
-        nav_results_root.as_posix(),
+        source.describe(),
     )
     for path, reason in unreadable:
         MAIN_LOGGER.error('Could not read %s: %s', path.as_posix(), reason)

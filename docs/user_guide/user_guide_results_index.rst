@@ -113,6 +113,10 @@ Which programs read it
        it decides there is work to do.
    * - ``sd_mosaic``, ``sd_mosaic_cloud_tasks``
      - The pointing each contributing image is reprojected with.
+   * - ``sd_create_ck``
+     - One mission's records in one query: which images carry a corrected
+       attitude, the attitude itself, the exposure epochs, and the kernels the
+       run recorded.
 
 Every other program reads the tree. Two do so for a reason that will not
 change: ``sd_create_bundle`` serializes the whole navigation document into the
@@ -694,6 +698,12 @@ pair with ``ON DELETE CASCADE``.
        field. Offset statistics group by this: pointing error belongs to
        the camera, not the spacecraft. NULL when the document carries no
        camera; it is never inferred from the image name.
+   * - ``shutter_mode``
+     - TEXT
+     - How the exposure was commanded, from ``observation.shutter_mode``.
+       NULL for a dataset that records none. Two cameras exposed together
+       share one bus attitude that cannot honor two different corrections,
+       and this is what tells the kernel writer an exposure was one of a pair.
    * - ``image_path``
      - TEXT
      - Absolute path of the source image at navigate time.
@@ -789,6 +799,13 @@ pair with ``ON DELETE CASCADE``.
    * - ``pipeline_run``
      - TEXT
      - UTC ISO8601 timestamp of the navigation run.
+   * - ``spice_kernels``
+     - JSON
+     - The kernel basenames the run recorded, in the order recorded. A
+       corrected C-kernel overlays one original, and these are what say which
+       originals an attitude was measured against. An empty list is a run that
+       recorded none; NULL is a document with no provenance block, and also a
+       block holding anything but a list of names, which its readers refuse.
    * - ``image_number``
      - BIGINT
      - Numeric portion of the image name (the first digit run in the
@@ -802,6 +819,13 @@ pair with ``ON DELETE CASCADE``.
    * - ``sclk_start``, ``sclk_midtime``, ``sclk_stop``
      - TEXT
      - The same three instants as spacecraft-clock strings.
+   * - ``camera_frame``
+     - TEXT
+     - SPICE name of the frame a recorded attitude is expressed in, from
+       ``navigation_result.pointing.camera_frame``. A kernel writer looks it
+       up among the frame kernels it furnishes; a reader that gates an attitude
+       against the observation takes the identity from the observation and
+       consults neither this nor the identifier below.
    * - ``camera_frame_id``, ``ck_frame_id``
      - INTEGER
      - SPICE frame identifiers of the camera and of the C-kernel a corrected

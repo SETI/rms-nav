@@ -26,9 +26,10 @@ Only the fields the index holds for these two readers: the top-level ``status``,
 ``status_error`` and ``offset``, and the ``navigation_result`` ``times`` and
 ``pointing`` blocks the C-matrix mechanism needs.  It is not the document; it is
 the part of the document that decides a pointing.  The ``pointing`` block's
-``camera_frame`` name is deliberately absent, because no reader consults it: the
-frame identity a recorded attitude is gated against is taken from the
-observation, never from the record.
+``camera_frame`` name is left out deliberately, though the index carries it for
+another reader: the frame identity a recorded attitude is gated against is taken
+from the observation, never from the record, so nothing here would consult a
+rebuilt name.
 
 A field the row does not carry is rebuilt as a field the document did not have,
 rather than as one holding null, because the record is read as a document would

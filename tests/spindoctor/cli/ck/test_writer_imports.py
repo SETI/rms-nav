@@ -3,8 +3,11 @@
 The writer exists so that a navigated attitude can be turned into a kernel
 without the geometry stack, and one convenience import from
 ``spindoctor.support`` -- where the module that computes the C-matrix lives --
-would drag oops in transitively.  Reading the source cannot prove that, since
-the offending import could be two modules deep, so the check runs a fresh
+would drag oops in transitively.  The database layer is held out on the same
+terms: one module of the package reads navigation records out of a results
+index, and re-exporting it from the package would load SQLAlchemy into every
+importer of the writer.  Reading the source cannot prove either, since the
+offending import could be two modules deep, so the check runs a fresh
 interpreter and looks at what actually loaded.
 """
 
@@ -27,7 +30,8 @@ import spindoctor.cli.ck  # noqa: F401
 forbidden = sorted(
     name
     for name in sys.modules
-    if name == 'oops' or name.startswith('oops.') or name.startswith('spindoctor.support')
+    if name in ('oops', 'sqlalchemy')
+    or name.startswith(('oops.', 'sqlalchemy.', 'spindoctor.support'))
 )
 print(json.dumps({'forbidden': forbidden, 'loaded': sorted(sys.modules)}))
 """
@@ -60,10 +64,10 @@ def probed_modules() -> dict[str, list[str]]:
     return result
 
 
-def test_writer_package_loads_no_oops_and_no_support(
+def test_writer_package_loads_no_oops_no_support_and_no_database(
     probed_modules: dict[str, list[str]],
 ) -> None:
-    """Importing the writer pulls in neither oops nor spindoctor.support."""
+    """Importing the writer pulls in none of oops, spindoctor.support, SQLAlchemy."""
     assert probed_modules['forbidden'] == []
 
 

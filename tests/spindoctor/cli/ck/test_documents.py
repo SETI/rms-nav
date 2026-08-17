@@ -1,0 +1,481 @@
+"""The two ways a C-kernel run gets its navigation records, held to each other.
+
+A run reads every document of one mission under a results root, from the tree
+or from a results index.  What the readers downstream do with them must not
+depend on which: the same images, in the same order, eligible or omitted for
+the same reasons, with the same matrices, epochs, kernels and reported facts.
+So the tests here drive both sources over one tree and compare what the
+generator's own readers make of each.
+
+The one difference the seam permits is tested too, as a difference: a value the
+ingest could not store is rebuilt as one the document never recorded, so the
+index path reports an image whose record the tree path refuses outright.
+"""
+
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pdslogger
+import pytest
+from filecache import FCPath
+from tests.spindoctor.cli.ck.ck_helpers import KernelPool, image_metadata
+from tests.spindoctor.cli.stats.conftest import index_url, ingest_tree, write_metadata
+
+from spindoctor.cli.ck.documents import (
+    IndexDocumentSource,
+    TreeDocumentSource,
+    build_document_source,
+)
+from spindoctor.cli.ck.images import ImageEntry
+from spindoctor.cli.ck.inputs import Document
+from spindoctor.cli.ck.report import read_image_facts
+from spindoctor.results_index import open_index
+
+MISSION = 'coiss'
+"""The instrument identity the runs below write kernels for."""
+
+OTHER_MISSION = 'vgiss'
+"""An instrument identity of another mission's documents in the same tree."""
+
+CORRECTED = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+"""A corrected attitude, whose values must survive the round trip exactly."""
+
+ORIGINAL = np.array(
+    [
+        [0.9999999, -0.0004472, 0.0],
+        [0.0004472, 0.9999999, 0.0],
+        [0.0, 0.0, 1.0],
+    ]
+)
+"""The uncorrected attitude beside it, deliberately not the identity."""
+
+KERNELS = ('cas00172.tsc', 'naif0012.tls', '18001_18031ra.bc')
+"""The kernel basenames a document records, in the order it records them."""
+
+
+def null_logger() -> pdslogger.PdsLogger:
+    """Return a logger that keeps the ingest quiet.
+
+    Returns:
+        A logger discarding everything written to it.
+    """
+    return pdslogger.NullLogger()
+
+
+def _navigated(image_name: str, **overrides: Any) -> dict[str, Any]:
+    """Build one navigated image's document, in the shape the pipeline writes.
+
+    Parameters:
+        image_name: Basename recorded for the image.
+        overrides: Fields of :func:`image_metadata` to replace.
+
+    Returns:
+        The document.
+    """
+    fields: dict[str, Any] = {
+        'image_name': image_name,
+        'cmatrix': CORRECTED,
+        'cmatrix_original': ORIGINAL,
+        'camera_frame': 'CASSINI_ISS_NAC',
+        'ck_frame_id': -82000,
+        'start_et': 100.0,
+        'stop_et': 102.0,
+        'sclk_midtime': '1/1454725799.100',
+        'instrument': MISSION,
+        'camera': 'NAC',
+        'shutter_mode': 'BOTSIM',
+        'kernels': KERNELS,
+        'offset': (1.5, -2.5),
+        'sigma_px': (0.1, 0.2),
+        'confidence': 0.87,
+        'confidence_rank': 'high',
+        'status_reason': 'ok',
+    }
+    fields.update(overrides)
+    return image_metadata(**fields)
+
+
+def _tree(tmp_path: Path) -> Path:
+    """Write a results root holding what one mission's run considers.
+
+    It holds a navigated image with a corrected attitude, one that navigated
+    without one, and one belonging to another mission entirely.
+
+    Parameters:
+        tmp_path: Directory the root is written under.
+
+    Returns:
+        The results root.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'COISS_2001/data/N1454725799_1_CALIB', _navigated('N1454725799_1.IMG'))
+    write_metadata(
+        root,
+        'COISS_2001/data/N1454725800_1_CALIB',
+        _navigated('N1454725800_1.IMG', cmatrix=None, camera='WAC', offset=None),
+    )
+    write_metadata(
+        root,
+        'VGISS_5101/data/C1454725_CALIB',
+        _navigated('C1454725.IMG', instrument=OTHER_MISSION, camera=None, shutter_mode=None),
+    )
+    return root
+
+
+def _both_sources(tmp_path: Path) -> tuple[TreeDocumentSource, IndexDocumentSource]:
+    """Ingest a tree and return a source reading each of its two storages.
+
+    Parameters:
+        tmp_path: Directory the root and the index are written under.
+
+    Returns:
+        The tree source and the index source, over the same root.
+    """
+    root = _tree(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=null_logger())
+    index_source = build_document_source(FCPath(root), results_db_url=url)
+    assert isinstance(index_source, IndexDocumentSource)
+    return TreeDocumentSource(FCPath(root)), index_source
+
+
+def _entries(documents: list[Document]) -> list[ImageEntry]:
+    """Read the generator's entry for each document.
+
+    Parameters:
+        documents: The documents to read.
+
+    Returns:
+        One entry per document, in the order given.
+    """
+    return [ImageEntry.from_metadata(document.metadata) for document in documents]
+
+
+def test_the_two_sources_return_the_same_images(tmp_path: Path) -> None:
+    """The mission's images, and only that mission's, from either storage."""
+    tree, index = _both_sources(tmp_path)
+    try:
+        from_tree, _ = tree.read_documents(MISSION)
+        from_index, _ = index.read_documents(MISSION)
+    finally:
+        index.close()
+    assert [document.stub for document in from_index] == [document.stub for document in from_tree]
+
+
+def test_the_two_sources_agree_on_which_images_are_eligible(tmp_path: Path) -> None:
+    """Eligibility decides which images get a segment at all."""
+    tree, index = _both_sources(tmp_path)
+    try:
+        from_tree, _ = tree.read_documents(MISSION)
+        from_index, _ = index.read_documents(MISSION)
+    finally:
+        index.close()
+    assert [entry.is_eligible for entry in _entries(from_index)] == [
+        entry.is_eligible for entry in _entries(from_tree)
+    ]
+
+
+def test_the_two_sources_agree_on_the_omission_reasons(tmp_path: Path) -> None:
+    """An image with no correction is left out for the same recorded reason."""
+    tree, index = _both_sources(tmp_path)
+    try:
+        from_tree, _ = tree.read_documents(MISSION)
+        from_index, _ = index.read_documents(MISSION)
+    finally:
+        index.close()
+    assert [entry.ineligibility_reason for entry in _entries(from_index)] == [
+        entry.ineligibility_reason for entry in _entries(from_tree)
+    ]
+
+
+def test_the_two_sources_agree_on_the_corrected_attitude(tmp_path: Path) -> None:
+    """The matrix a segment is built from must survive the row exactly."""
+    tree, index = _both_sources(tmp_path)
+    try:
+        from_tree, _ = tree.read_documents(MISSION)
+        from_index, _ = index.read_documents(MISSION)
+    finally:
+        index.close()
+    tree_pointing = _entries(from_tree)[0].pointing
+    index_pointing = _entries(from_index)[0].pointing
+    assert tree_pointing is not None
+    assert index_pointing is not None
+    assert index_pointing.cmatrix.tolist() == tree_pointing.cmatrix.tolist()
+
+
+def test_the_two_sources_agree_on_the_baseline_attitude(tmp_path: Path) -> None:
+    """And so must the attitude the correction is measured against."""
+    tree, index = _both_sources(tmp_path)
+    try:
+        from_tree, _ = tree.read_documents(MISSION)
+        from_index, _ = index.read_documents(MISSION)
+    finally:
+        index.close()
+    tree_pointing = _entries(from_tree)[0].pointing
+    index_pointing = _entries(from_index)[0].pointing
+    assert tree_pointing is not None
+    assert index_pointing is not None
+    assert index_pointing.cmatrix_original.tolist() == tree_pointing.cmatrix_original.tolist()
+
+
+def test_the_two_sources_agree_on_the_exposure_epochs(tmp_path: Path) -> None:
+    """A segment covers exactly its exposure, so the epochs decide its extent."""
+    tree, index = _both_sources(tmp_path)
+    try:
+        from_tree, _ = tree.read_documents(MISSION)
+        from_index, _ = index.read_documents(MISSION)
+    finally:
+        index.close()
+    tree_pointing = _entries(from_tree)[0].pointing
+    index_pointing = _entries(from_index)[0].pointing
+    assert tree_pointing is not None
+    assert index_pointing is not None
+    assert (
+        index_pointing.start_et,
+        index_pointing.stop_et,
+        index_pointing.midtime_et,
+        index_pointing.exposure_s,
+    ) == (
+        tree_pointing.start_et,
+        tree_pointing.stop_et,
+        tree_pointing.midtime_et,
+        tree_pointing.exposure_s,
+    )
+
+
+def test_the_two_sources_agree_on_the_camera_frame(tmp_path: Path) -> None:
+    """The frame name is what the writer looks up among the furnished kernels."""
+    tree, index = _both_sources(tmp_path)
+    try:
+        from_tree, _ = tree.read_documents(MISSION)
+        from_index, _ = index.read_documents(MISSION)
+    finally:
+        index.close()
+    tree_pointing = _entries(from_tree)[0].pointing
+    index_pointing = _entries(from_index)[0].pointing
+    assert tree_pointing is not None
+    assert index_pointing is not None
+    assert index_pointing.camera_frame == tree_pointing.camera_frame
+
+
+def test_the_two_sources_agree_on_the_recorded_kernels(tmp_path: Path) -> None:
+    """The recorded basenames are what assign a correction to its baseline."""
+    tree, index = _both_sources(tmp_path)
+    try:
+        from_tree, _ = tree.read_documents(MISSION)
+        from_index, _ = index.read_documents(MISSION)
+    finally:
+        index.close()
+    assert _entries(from_index)[0].kernel_basenames == _entries(from_tree)[0].kernel_basenames
+
+
+def test_the_two_sources_agree_on_the_shutter_mode(tmp_path: Path) -> None:
+    """Two cameras exposed together share a bus attitude, and this is what says so."""
+    tree, index = _both_sources(tmp_path)
+    try:
+        from_tree, _ = tree.read_documents(MISSION)
+        from_index, _ = index.read_documents(MISSION)
+    finally:
+        index.close()
+    assert [entry.shutter_mode for entry in _entries(from_index)] == [
+        entry.shutter_mode for entry in _entries(from_tree)
+    ]
+
+
+def test_the_two_sources_agree_on_the_camera(tmp_path: Path) -> None:
+    """The camera decides which member of a simultaneous pair yields."""
+    tree, index = _both_sources(tmp_path)
+    try:
+        from_tree, _ = tree.read_documents(MISSION)
+        from_index, _ = index.read_documents(MISSION)
+    finally:
+        index.close()
+    assert [entry.camera for entry in _entries(from_index)] == [
+        entry.camera for entry in _entries(from_tree)
+    ]
+
+
+def test_the_two_sources_agree_on_the_reported_facts(tmp_path: Path, pool: KernelPool) -> None:
+    """Every column of the report an operator reads the run's outcome from.
+
+    Parameters:
+        tmp_path: Directory the root and the index are written under.
+        pool: Furnishes the leapseconds kernel the UTC column is converted with.
+    """
+    tree, index = _both_sources(tmp_path)
+    try:
+        from_tree, _ = tree.read_documents(MISSION)
+        from_index, _ = index.read_documents(MISSION)
+    finally:
+        index.close()
+    assert [read_image_facts(document.metadata) for document in from_index] == [
+        read_image_facts(document.metadata) for document in from_tree
+    ]
+
+
+def test_the_index_source_names_the_file_each_row_was_read_from(tmp_path: Path) -> None:
+    """A message about a document names the file an operator would open."""
+    tree, index = _both_sources(tmp_path)
+    try:
+        from_tree, _ = tree.read_documents(MISSION)
+        from_index, _ = index.read_documents(MISSION)
+    finally:
+        index.close()
+    assert [document.path.as_posix() for document in from_index] == [
+        document.path.as_posix() for document in from_tree
+    ]
+
+
+def test_another_roots_images_are_not_this_runs(tmp_path: Path) -> None:
+    """One index serves several roots, and a query blind to the root writes both.
+
+    The second root holds an image of the same mission, so a query that filtered
+    only on the instrument would hand this run an image nobody asked for -- and
+    write it into a kernel.
+    """
+    root = _tree(tmp_path)
+    other = tmp_path / 'other-results'
+    write_metadata(other, 'COISS_2002/data/N1454999999_1_CALIB', _navigated('N1454999999_1.IMG'))
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root, other], logger=null_logger())
+    source = build_document_source(FCPath(root), results_db_url=url)
+    try:
+        documents, _unreadable = source.read_documents(MISSION)
+    finally:
+        source.close()
+    assert [document.stub for document in documents] == [
+        'COISS_2001/data/N1454725799_1_CALIB',
+        'COISS_2001/data/N1454725800_1_CALIB',
+    ]
+
+
+def test_a_document_the_ingest_refused_is_reported_as_unreadable(tmp_path: Path) -> None:
+    """It is a file that exists and holds no record, which is what stops the run.
+
+    The file path reports a document it cannot read and exits nonzero; a
+    refused document is the index's account of exactly that file, and reporting
+    nothing would let a run write a kernel set that silently left it out.
+    """
+    root = _tree(tmp_path)
+    (root / 'COISS_2001' / 'data' / 'junk_metadata.json').write_text('{}', encoding='utf-8')
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=null_logger())
+    source = build_document_source(FCPath(root), results_db_url=url)
+    try:
+        _documents, unreadable = source.read_documents(MISSION)
+    finally:
+        source.close()
+    assert [path.as_posix() for path, _reason in unreadable] == [
+        (root / 'COISS_2001' / 'data' / 'junk_metadata.json').as_posix()
+    ]
+
+
+def test_the_refusal_reason_travels_with_the_file(tmp_path: Path) -> None:
+    """What the ingest could not read is what an operator has to go and fix."""
+    root = _tree(tmp_path)
+    (root / 'COISS_2001' / 'data' / 'junk_metadata.json').write_text('{}', encoding='utf-8')
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=null_logger())
+    source = build_document_source(FCPath(root), results_db_url=url)
+    try:
+        _documents, unreadable = source.read_documents(MISSION)
+    finally:
+        source.close()
+    assert 'navigation document' in unreadable[0][1]
+
+
+def test_a_root_with_no_completed_ingest_is_refused(tmp_path: Path) -> None:
+    """Absence of a row would otherwise read as a mission with no images."""
+    root = _tree(tmp_path)
+    other = tmp_path / 'other-results'
+    write_metadata(other, 'COISS_2002/data/N1454999999_1_CALIB', _navigated('N1454999999_1.IMG'))
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [other], logger=null_logger())
+    with pytest.raises(ValueError, match='no completed ingest'):
+        build_document_source(FCPath(root), results_db_url=url)
+
+
+def test_no_index_url_reads_the_tree(tmp_path: Path) -> None:
+    """Reading files is the default, and nothing opens a database to do it."""
+    root = _tree(tmp_path)
+    source = build_document_source(FCPath(root), results_db_url=None)
+    try:
+        assert isinstance(source, TreeDocumentSource)
+    finally:
+        source.close()
+
+
+def test_the_index_source_says_which_index_it_read(tmp_path: Path) -> None:
+    """The run log has to say where the records came from, not just how many."""
+    _tree, index = _both_sources(tmp_path)
+    try:
+        described = index.describe()
+    finally:
+        index.close()
+    assert 'results index' in described
+
+
+def test_the_description_hides_a_password_in_the_index_url(tmp_path: Path) -> None:
+    """A run log reaches a console, a file, and whoever is sent one."""
+    root = _tree(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=null_logger())
+    source = IndexDocumentSource(
+        open_index(url),
+        FCPath(root).as_posix(),
+        'postgresql+psycopg://svc:sup3rs3cr3t@db.example/spindoctor',
+    )
+    try:
+        described = source.describe()
+    finally:
+        source.close()
+    assert 'sup3rs3cr3t' not in described
+
+
+def test_a_value_the_ingest_could_not_store_reads_as_one_never_recorded(
+    tmp_path: Path, pool: KernelPool
+) -> None:
+    """The one difference the seam permits, in the direction it permits it.
+
+    An offset of three numbers is a defect in the record, and the tree path
+    refuses the document naming it.  The index stores an offset it cannot read
+    whole as NULL, exactly as it stores an absent one, so the row cannot say
+    which it was and the rebuilt document reads as one that recorded none.
+
+    Parameters:
+        tmp_path: Directory the root and the index are written under.
+        pool: Furnishes the leapseconds kernel the UTC column is converted with.
+    """
+    root = tmp_path / 'results'
+    write_metadata(
+        root,
+        'COISS_2001/data/N1454725799_1_CALIB',
+        _navigated('N1454725799_1.IMG', offset=(1.5, -2.5, 0.5)),
+    )
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=null_logger())
+    source = build_document_source(FCPath(root), results_db_url=url)
+    try:
+        documents, _unreadable = source.read_documents(MISSION)
+    finally:
+        source.close()
+    assert read_image_facts(documents[0].metadata).offset_dv is None
+
+
+def test_the_tree_path_refuses_the_same_document(tmp_path: Path, pool: KernelPool) -> None:
+    """The control for the difference above: the file path stops the run on it.
+
+    Parameters:
+        tmp_path: Directory the root is written under.
+        pool: Furnishes the leapseconds kernel the UTC column is converted with.
+    """
+    root = tmp_path / 'results'
+    write_metadata(
+        root,
+        'COISS_2001/data/N1454725799_1_CALIB',
+        _navigated('N1454725799_1.IMG', offset=(1.5, -2.5, 0.5)),
+    )
+    documents, _unreadable = TreeDocumentSource(FCPath(root)).read_documents(MISSION)
+    with pytest.raises(ValueError, match='offset'):
+        read_image_facts(documents[0].metadata)

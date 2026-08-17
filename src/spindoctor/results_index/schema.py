@@ -88,7 +88,7 @@ __all__ = [
     'UNKNOWN_STATUS',
 ]
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 """Column-set version of the index.
 
 Incremented by any change to the column set of any table, and by any change to
@@ -155,6 +155,10 @@ IMAGES = sqlalchemy.Table(
     sqlalchemy.Column('image_name', sqlalchemy.Text, nullable=False),
     sqlalchemy.Column('instrument', sqlalchemy.Text, nullable=False),
     sqlalchemy.Column('camera', sqlalchemy.Text),
+    # What the exposure was commanded as, where the dataset records one.  Two
+    # cameras exposed together share one bus attitude that cannot honor two
+    # different corrections, and this is what says an exposure was one of them.
+    sqlalchemy.Column('shutter_mode', sqlalchemy.Text),
     sqlalchemy.Column('image_path', sqlalchemy.Text),
     sqlalchemy.Column('image_et', sqlalchemy.Double),
     sqlalchemy.Column('image_date', sqlalchemy.Text),
@@ -194,6 +198,12 @@ IMAGES = sqlalchemy.Table(
     sqlalchemy.Column('config_hash', sqlalchemy.Text),
     sqlalchemy.Column('git_sha', sqlalchemy.Text),
     sqlalchemy.Column('pipeline_run', sqlalchemy.Text),
+    # The kernels the run recorded, as basenames in the order recorded.  A
+    # correction is an overlay on one original kernel, and this is what says
+    # which originals the attitude it corrects was measured against.  An empty
+    # list is a statement -- the run named none -- and NULL is a document with
+    # no provenance block at all.
+    sqlalchemy.Column('spice_kernels', _JSON),
     # The numeric portion of the image name, so a range filter compares against a
     # column instead of calling a function.  BigInteger because an instrument
     # naming scheme is free to run past the 32-bit range a dialect may impose.
@@ -214,6 +224,11 @@ IMAGES = sqlalchemy.Table(
     sqlalchemy.Column('sclk_start', sqlalchemy.Text),
     sqlalchemy.Column('sclk_midtime', sqlalchemy.Text),
     sqlalchemy.Column('sclk_stop', sqlalchemy.Text),
+    # The frame the recorded attitude is expressed in, by name and by id.  The
+    # name is what a kernel writer looks up in the frame kernels it furnishes;
+    # readers that gate an attitude against the observation take the identity
+    # from the observation instead, and consult neither.
+    sqlalchemy.Column('camera_frame', sqlalchemy.Text),
     sqlalchemy.Column('camera_frame_id', sqlalchemy.Integer),
     sqlalchemy.Column('ck_frame_id', sqlalchemy.Integer),
     sqlalchemy.Column('cmatrix', _JSON),

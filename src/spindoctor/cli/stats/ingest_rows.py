@@ -259,6 +259,30 @@ def _str_or_none(value: Any) -> str | None:
     return None
 
 
+def _text_list_or_none(value: Any) -> list[str] | None:
+    """Store a JSON list of text as it stands, or None.
+
+    Nothing is coerced and nothing is dropped.  The consumer of this column
+    refuses a provenance block that is not a list of names, and refuses one
+    naming nothing where an attitude was recorded, so a column that filtered
+    the bad members out or rendered a malformed block as an empty list would
+    answer for a document the reader would have refused.
+
+    Parameters:
+        value: The value as it was parsed.
+
+    Returns:
+        The list, or None when the value is absent or is not a list of strings.
+        An empty list is kept, because a run that recorded no kernels is a
+        statement about the run and its consumer says so.
+    """
+    if not isinstance(value, list):
+        return None
+    if not all(isinstance(member, str) for member in value):
+        return None
+    return list(value)
+
+
 def _pair(value: Any) -> tuple[float | None, float | None]:
     """Split a two-element JSON list into a pair of finite floats.
 
@@ -597,6 +621,7 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         # image that never loaded; NULL only when the dataset has no camera
         # column at all.  It is never inferred from the image name.
         'camera': _str_or_none(observation.get('camera')),
+        'shutter_mode': _str_or_none(observation.get('shutter_mode')),
         'image_path': _str_or_none(observation.get('image_path')),
         'image_et': image_et,
         'image_date': date_from_image_et(image_et),
@@ -639,6 +664,12 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         'config_hash': _str_or_none(provenance.get('config_hash')),
         'git_sha': _str_or_none(provenance.get('spindoctor_git_sha')),
         'pipeline_run': _str_or_none(provenance.get('pipeline_run_iso8601')),
+        # Stored only as the list of text the document holds, so that a
+        # consumer reading the rebuilt record refuses the same malformed
+        # provenance the document would have made it refuse.  A block that is
+        # not a list of names is stored as none at all rather than as an empty
+        # one, which is a run that named no kernels.
+        'spice_kernels': _text_list_or_none(provenance.get('spice_kernels')),
         'image_number': image_number_from_name(image_name),
         'start_et': finite_float(times.get('start_et')),
         'stop_et': finite_float(times.get('stop_et')),
@@ -652,6 +683,7 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         'sclk_start': _str_or_none(times.get('sclk_start')),
         'sclk_midtime': _str_or_none(times.get('sclk_midtime')),
         'sclk_stop': _str_or_none(times.get('sclk_stop')),
+        'camera_frame': _str_or_none(pointing.get('camera_frame')),
         'camera_frame_id': _int_or_none(pointing.get('camera_frame_id')),
         'ck_frame_id': _int_or_none(pointing.get('ck_frame_id')),
         'cmatrix': _cmatrix_or_none(pointing.get('cmatrix')),

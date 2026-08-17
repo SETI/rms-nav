@@ -32,6 +32,15 @@ carries no stability promise, and it has no page in the API reference, which
 covers the library packages.  Every other ``spindoctor.cli`` subpackage stands
 the same way.
 
+One module of this package is deliberately absent from the surface below.
+:mod:`spindoctor.cli.ck.documents` is where a run gets the navigation records
+it writes kernels from, and its index-backed half imports the results-index
+layer -- SQLAlchemy, and the accessors every consumer reads a record through.
+Re-exporting it here would load all of that into every importer of this
+package, which is what the import guarantee above exists to prevent, so the
+driver imports that module directly and the guarantee stays a property of the
+writer.
+
 One global to respect: ``cspyce.use_errors()`` / ``cspyce.use_flags()`` is
 process-wide and shared with oops.  This package assumes the exceptions regime
 (``use_errors``, the package default) and never flips it.
