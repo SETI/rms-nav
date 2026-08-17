@@ -45,8 +45,17 @@ operator runs rather than an API a consumer calls.
        absence of a row readable.
    * - :mod:`spindoctor.results_index.selection`
      - The one query answering the results-based selection filters.
+   * - :mod:`spindoctor.results_index.rebuild`
+     - The one correspondence between a row's columns and a record's fields, and
+       the rebuild that reads it.
+   * - :mod:`spindoctor.results_index.record_source`
+     - The seam every program reads records through, over either storage.
    * - :mod:`spindoctor.results_index.drop`
      - Reading what a database holds, and removing the index's own tables.
+   * - :mod:`spindoctor.support.nav_document`
+     - Not part of this package: what a document is named, where one lives under
+       a root, and how one is read. Reading a document needs no database, so
+       every reader shares it whether or not its program can read an index.
    * - ``spindoctor.cli.stats.ingest``
      - The pass itself: walk, select, read, write, prune, complete --- in one
        process or divided into queue tasks.
@@ -83,6 +92,52 @@ completed pass over that root; otherwise it means nothing at all.
 asks before it reads absence as an answer, and a completed run is necessary but
 not sufficient: a document the ingest refused has a row in ``failed_files`` and
 none in ``images``, so both tables are read before absence is reported.
+
+One seam for records
+====================
+
+Five programs read navigation records, and every one of them can read either the
+documents or the index. What decides whether they agree is that none of them
+reads a storage itself: they all go through
+:class:`~spindoctor.results_index.record_source.RecordSource`, which answers in
+the two shapes the programs ask in --- one image by its stub, and one mission in
+bulk --- over either storage.
+
+The seam is one piece of code for a reason worth stating, because it was two.
+Each consumer used to carry its own row-to-record rebuild, its own open-and-check
+ceremony and its own account of how the two storages could differ. Two rebuilds
+of one row are two answers about what a document said: they agreed the day they
+were written, and then each grew a rule the other did not. The defect that made
+the point was an ``ORDER BY`` in one of them --- correct under SQLite's default
+collation, wrong under a PostgreSQL locale collation, and impossible for the
+other consumer to have because it read one row at a time.
+
+Three rules hold at the seam:
+
+**A consumer names the columns it reads.** A row is only cheaper than a document
+while it carries less, so nobody selects forty columns to read five. The columns
+are declared beside the consumer --- ``_ROW_COLUMNS`` for the reprojection and
+backplane stages, ``RECORD_COLUMNS`` for the kernel writer --- and a test holds
+each list to the fields the rebuild knows a place for, since a column selected
+that no field is rebuilt from is paid for on every read and then dropped.
+
+**The rebuild is a table, not a function per consumer.**
+:data:`~spindoctor.results_index.rebuild.RECORD_FIELDS` maps each column to its
+place in the record. Every column of ``images`` is deliberately one of three
+things --- a record field, part of a row's identity, or a value the ingest
+computed rather than copied --- and a test asserts the three are a partition of
+the table, so a column added to the schema and to the ingest and to nobody's
+consumer is caught rather than read as absent by everything.
+
+**A record read from a document carries every field it has; one rebuilt from a
+row carries what its consumer selected.** That is the one difference a consumer
+has to know about, and it is why the columns are pinned rather than assumed.
+
+:func:`~spindoctor.results_index.roots.open_index_for_roots` is the other half of
+the unification: it opens an index, refuses a root the index has no completed
+ingest of, and disposes of the engine before the refusal leaves it. Written out
+per call site, that sequence lost a step at a time --- an engine left undisposed
+on a refusal, a root checked after the first query rather than before it.
 
 Opening an index
 ================
@@ -196,21 +251,31 @@ version gate is what makes that happen rather than being discovered later.
    consumers read it through. The invariant is that a record rebuilt from the
    columns classifies exactly as its document does; a second set of rules in
    the store is a second reader of the record, and the two drift.
-4. Read it wherever it is consumed, and extend the reason vocabulary if the
-   consumer classifies on it.
-5. Update the column-set test in
+4. Sort it into one of the three groups in
+   :mod:`spindoctor.results_index.rebuild`. A column copied out of one field of
+   one document is an entry in ``RECORD_FIELDS`` naming where in a record that
+   field sits; one that says where the document is belongs to
+   ``IDENTITY_COLUMNS``; one the ingest computes rather than copies --- an epoch
+   read from either of two fields, a count of a list, a value stored sorted ---
+   belongs to ``DERIVED_COLUMNS``, because no field of a record is what it came
+   from. The three are asserted to be a partition of the table, so a column left
+   out of all three fails rather than reading as absent from every record.
+5. Read it wherever it is consumed, by adding it to that consumer's column list,
+   and extend the reason vocabulary if the consumer classifies on it. A consumer
+   that does not select a column reads its field as absent.
+6. Update the column-set test in
    ``tests/spindoctor/results_index/test_schema.py``, which pins each table's
    columns, their types, their nullability and their order, and holds the
    schema version the column set belongs to. A version compared only against
    itself agrees with every value it could be given, which is why the number
    is written down beside the columns as well as in the schema.
-6. Update the schema tables in
+7. Update the schema tables in
    :doc:`/user_guide/user_guide_results_index`, which document the index for
    somebody writing SQL against it.
 
 Dropping a column is the same list, and the same version bump.
 
-The five edits, in the order the list gives them:
+The edits, in the order the list gives them:
 
 .. code-block:: python
 
@@ -231,8 +296,17 @@ The five edits, in the order the list gives them:
         'shutter_mode': _str_or_none(observation.get('shutter_mode')),
     }
 
-    # The consumer, reading the column it was added for
-    mode = row.shutter_mode
+    # spindoctor/results_index/rebuild.py, inside RECORD_FIELDS
+    RecordField(('shutter_mode',), _OBSERVATION, 'shutter_mode'),
+
+    # The consumer's own column list, which is what decides that it is read
+    RECORD_COLUMNS = (
+        ...,
+        IMAGES.c.shutter_mode,
+    )
+
+    # The consumer, reading the field the column was rebuilt into
+    mode = record['observation'].get('shutter_mode')
 
     # tests/spindoctor/results_index/test_schema.py
     IMAGES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (

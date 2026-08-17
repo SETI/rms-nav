@@ -9,43 +9,41 @@ results index answers the same questions with one row.  So the seam is explicit:
 :class:`PointingSource` names it, :class:`FilePointingSource` reads documents,
 and :class:`IndexPointingSource` reads rows.
 
-Neither implementation classifies anything itself.  The index-backed one rebuilds
-the shape of the document from the row and hands it to the one classifier,
-:func:`spindoctor.cli.reproj.offsets.select_pointing`, so the two paths cannot
+Neither implementation classifies anything itself, and neither reads its storage
+itself.  Both are thin wrappers over
+:mod:`spindoctor.results_index.record_source`, the one seam every program reads
+navigation records through, and both hand what it returns to the one classifier,
+:func:`spindoctor.cli.reproj.offsets.select_pointing`.  So the two paths cannot
 disagree about which pointing a record supplies -- there is only one ladder, and
-it is the same code in both modes.  That holds only while the columns the
-rebuild reads say what the document's own fields said, which is why ingest fills
-every one of them through :mod:`spindoctor.support.nav_record`, the module these
-readers read the same fields through.  A column filled by a rule of its own,
-even one that agreed when it was written, is a second reader of the record.
+it is the same code in both modes -- and neither can disagree with the other
+programs about what a row says, because no rebuild of a row lives here.  That
+holds only while the columns the rebuild reads say what the document's own fields
+said, which is why ingest fills every one of them through
+:mod:`spindoctor.support.nav_record`, the module these readers read the same
+fields through.  A column filled by a rule of its own, even one that agreed when
+it was written, is a second reader of the record.
 
 What the rebuilt record carries
 -------------------------------
 
-Only the fields the index holds for these two readers: the top-level ``status``,
+:data:`_ROW_COLUMNS` is this consumer's declaration of what it reads, and a
+rebuilt record carries those columns and nothing else: the top-level ``status``,
 ``status_error`` and ``offset``, and the ``navigation_result`` ``times`` and
 ``pointing`` blocks the C-matrix mechanism needs.  It is not the document; it is
 the part of the document that decides a pointing.  The ``pointing`` block's
-``camera_frame`` name is left out deliberately, though the index carries it for
-another reader: the frame identity a recorded attitude is gated against is taken
-from the observation, never from the record, so nothing here would consult a
-rebuilt name.
+``camera_frame`` is not among them although the index carries it for another
+reader: the frame identity a recorded attitude is gated against is taken from the
+observation, never from the record, so nothing here would consult a rebuilt name.
+Selecting no column for it is the whole of how that is arranged.
 
-A field the row does not carry is rebuilt as a field the document did not have,
-rather than as one holding null, because the record is read as a document would
-be.  ``offset`` is the one exception: it is rebuilt as a key holding null,
-because ingest stores an absent, null, malformed and non-finite offset alike as
-NULL and the rebuild has to render the pair as one of them.  Which one is
-chosen makes no difference to the pointing, since none of the four supplies
-one; it does decide the name the shortfall is counted under, and the null-valued
-key is what makes ``null_offset`` the row's reason for all four, as class 1
-below states.  The ``status`` column
-is NOT NULL and stands in for a document that named no outcome with
-:data:`~spindoctor.support.nav_record.UNKNOWN_STATUS`; that value is rebuilt as
-the absent field it stands for, and both are then read as naming no outcome by
-:func:`~spindoctor.support.nav_record.record_status`, so a document naming that
-word for itself and one naming nothing are reported alike rather than one of
-them as nothing.
+How an absent column, a NOT NULL status and half a pair are rebuilt is
+:mod:`spindoctor.results_index.rebuild`'s to state, since every consumer depends
+on the same answers.  Two of them decide a reason this module reports, so they
+are worth repeating here: ``offset`` is rebuilt as a key holding null, which is
+what makes ``null_offset`` this path's reason for all four unusable offsets, as
+class 1 below states; and the sentinel ``status`` is rebuilt as the absent field
+it stands for, so a document naming no outcome and one naming that word for
+itself are reported alike rather than one of them as nothing.
 
 Where the two paths differ
 --------------------------
@@ -173,10 +171,8 @@ matrices, the midtime, the offset, the outcome and the error are identical in
 the two paths.
 """
 
-import json
 from typing import Any, Protocol
 
-import sqlalchemy
 from filecache import FCPath
 from sqlalchemy.engine import Engine
 
@@ -192,15 +188,14 @@ from spindoctor.cli.reproj.offsets import (
 from spindoctor.config import IMAGE_LOGGER
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.results_index import (
-    FAILED_FILES,
     IMAGES,
+    IndexRecordSource,
+    RecordSource,
     masked_url,
     normalize_root_url,
-    open_index,
-    reporting_a_failed_read,
-    require_ingested_roots,
+    open_index_for_roots,
 )
-from spindoctor.support.nav_record import UNKNOWN_STATUS
+from spindoctor.support.nav_document import read_document
 
 __all__ = [
     'FilePointingSource',
@@ -226,7 +221,14 @@ _ROW_COLUMNS = (
     IMAGES.c.cmatrix,
     IMAGES.c.cmatrix_original,
 )
-"""Every column a rebuilt navigation record is made of, read in one SELECT."""
+"""Every column these two readers read, and the whole of what a lookup selects.
+
+A row is only cheaper than a document while it carries less, so this is a
+declaration rather than a convenience: what is not here is not read, and what is
+read is here.  A test holds the list to the fields
+:mod:`spindoctor.results_index.rebuild` knows a place for, since a column
+selected that no field is rebuilt from would be paid for and dropped.
+"""
 
 
 class PointingSource(Protocol):
@@ -316,17 +318,19 @@ class FilePointingSource:
                 f'{image_file.results_path_stub}: no navigation results root was resolved, '
                 f'so no navigation record can be read for this image'
             )
-        # Resolved through the one guard both readers share rather than joined
-        # here: the class would otherwise apply different rules about which
-        # paths a results root may be read at depending on which of its two
-        # methods was called.
+        # Resolved through the one guard every reader of a document shares
+        # rather than joined here: the class would otherwise apply different
+        # rules about which paths a results root may be read at depending on
+        # which of its two methods was called.  This wrapper of the guard is the
+        # one that reports a refused path against the image, which is why this
+        # method calls it rather than asking the seam for the document.
         metadata_file = resolved_nav_metadata_path(self._nav_results_root, image_file)
         if metadata_file is None:
             raise FileNotFoundError(
                 f'{image_file.results_path_stub}: does not name a navigation record under '
                 f'{self._nav_results_root}, so none can be read for this image'
             )
-        return _json_object_from_text(metadata_file.read_text(), source=str(metadata_file))
+        return read_document(metadata_file)
 
     def load_pointing(self, image_file: ImageFile) -> PointingSelection:
         """Load and classify one image's recorded pointing from its document.
@@ -347,9 +351,11 @@ class FilePointingSource:
 class IndexPointingSource:
     """A navigation record rebuilt from one row of the results index.
 
-    One lookup is one SELECT on the index's primary key, filtered on the root as
-    well as the stub: one index can hold several results roots, and two roots may
-    hold the same stub.
+    Everything about reading the row is
+    :class:`~spindoctor.results_index.record_source.IndexRecordSource`'s: the one
+    statement over the primary key, the root the key is filtered on, the refusal
+    table read in the same statement, and the rebuild.  What is left here is what
+    this consumer does with what comes back, which is to classify it.
 
     Parameters:
         engine: An open index, which this source disposes of when it is closed.
@@ -358,115 +364,21 @@ class IndexPointingSource:
     """
 
     def __init__(self, engine: Engine, root_url: str) -> None:
-        """Take the open index and the root this source answers from.
+        """Build the seam over this index, and name it for the messages.
 
         The index is named for messages here rather than by each caller, and is
         rendered with its credentials hidden: these messages reach run logs and
         bug reports, and a connection URL can carry a database password.
         """
-        self._engine = engine
-        self._root_url = root_url
-        self._url = masked_url(engine.url.render_as_string(hide_password=False))
+        url = engine.url.render_as_string(hide_password=False)
+        self._records: RecordSource = IndexRecordSource(engine, root_url, url, _ROW_COLUMNS)
         # An index is a snapshot of its last ingest, so a row can be absent
         # because nothing navigated the image or because the image was
         # navigated after that ingest.  Neither the row nor its absence can say
         # which, so the message says what was searched and leaves the reader
         # able to tell.
         self._storage = (
-            f'the results index {self._url}, a snapshot of its last ingest of {root_url}'
-        )
-
-    def _row(self, image_file: ImageFile) -> sqlalchemy.Row[Any]:
-        """Read what the index holds about one image, from both of its tables.
-
-        One query rather than a record lookup followed by a refusal lookup: an
-        image with no record is the common case on a partially navigated root,
-        and it is the case that would pay the second round trip -- against the
-        stage whose whole purpose is removing one per image.  The key is
-        selected as a row of its own and both tables are joined onto it, so
-        exactly one row comes back whether the index holds a record, a refusal
-        or neither.
-
-        Parameters:
-            image_file: The image to look up.
-
-        Returns:
-            The row.  ``record_stub`` carries the stub when the index holds a
-            navigation record for it and nothing otherwise, and
-            ``refusal_reason`` carries the recorded reason when the index holds
-            a refusal for it and nothing otherwise; a stub the index knows
-            nothing about answers to neither.  Both halves are read rather than
-            one, because a stub in both tables is a record with a stale refusal
-            beside it and must be read as the record it is.
-
-        Raises:
-            ValueError: If the index cannot be read at all -- a lost
-                connection, a table the account may not read, a partially
-                restored database.  Translated here for the same reason the
-                selection seam translates it: a caller of this module reports
-                the failure against one image, and the database layer's own
-                exception types are ones it cannot name.
-        """
-        key = sqlalchemy.select(
-            sqlalchemy.literal(self._root_url, sqlalchemy.Text).label('root_url'),
-            sqlalchemy.literal(image_file.results_path_stub, sqlalchemy.Text).label(
-                'results_path_stub'
-            ),
-        ).subquery()
-        statement = (
-            sqlalchemy.select(
-                IMAGES.c.results_path_stub.label('record_stub'),
-                FAILED_FILES.c.reason.label('refusal_reason'),
-                *_ROW_COLUMNS,
-            )
-            .select_from(key)
-            .outerjoin(
-                IMAGES,
-                sqlalchemy.and_(
-                    IMAGES.c.root_url == key.c.root_url,
-                    IMAGES.c.results_path_stub == key.c.results_path_stub,
-                ),
-            )
-            .outerjoin(
-                FAILED_FILES,
-                sqlalchemy.and_(
-                    FAILED_FILES.c.root_url == key.c.root_url,
-                    FAILED_FILES.c.results_path_stub == key.c.results_path_stub,
-                ),
-            )
-        )
-        url = self._engine.url.render_as_string(hide_password=False)
-        with reporting_a_failed_read(url), self._engine.connect() as connection:
-            row = connection.execute(statement).first()
-        # The key is selected as a row of its own and both tables are joined
-        # onto it, so the statement answers with one row for every stub,
-        # including one neither table knows.
-        assert row is not None
-        return row
-
-    def _refuse_a_document_the_ingest_refused(self, image_file: ImageFile, reason: Any) -> None:
-        """Fail an image whose document the ingest recorded as one it could not read.
-
-        Parameters:
-            image_file: The image whose record was not found.
-            reason: What the index records as the reason it could not read that
-                image's document, or None when it records no refusal for it.
-
-        Raises:
-            ValueError: If the index records this stub as a document the ingest
-                refused, naming the stub, the index and the recorded reason. A
-                refusal means the index cannot answer for this image, which is
-                a different fact from nothing having navigated it, and reading
-                the one as the other builds a product from the document under
-                one storage and from uncorrected pointing under the other.
-        """
-        if reason is None:
-            return
-        raise ValueError(
-            f'{image_file.results_path_stub}: {self._storage} records the navigation '
-            f'document for this image as one the ingest could not read ({reason}), so '
-            f'the index cannot say what it recorded. Read the navigation documents '
-            f'instead, or fix the document and ingest that root again.'
+            f'the results index {masked_url(url)}, a snapshot of its last ingest of {root_url}'
         )
 
     def read_record(self, image_file: ImageFile) -> dict[str, Any]:
@@ -480,11 +392,7 @@ class IndexPointingSource:
 
         Raises:
             FileNotFoundError: If the index holds no row for this stub under this
-                root, naming both and the index, and saying that the index is a
-                snapshot: the row is absent either because nothing navigated
-                the image or because it was navigated after the last ingest,
-                and the message names the snapshot so the two can be told
-                apart. A missing document raises the same way, so the caller
+                root. A missing document raises the same way, so the caller
                 reports both the same way.
             ValueError: If the index records the document for this stub as one
                 the ingest refused. Deliberately not the same exception: a
@@ -492,14 +400,7 @@ class IndexPointingSource:
                 and this image was navigated -- the index simply cannot say
                 what it recorded.
         """
-        row = self._row(image_file)
-        if row.record_stub is None:
-            self._refuse_a_document_the_ingest_refused(image_file, row.refusal_reason)
-            raise FileNotFoundError(
-                f'{image_file.results_path_stub}: no navigation record for this image in '
-                f'{self._storage}'
-            )
-        return _record_from_row(row)
+        return self._records.read_record(image_file.results_path_stub)
 
     def load_pointing(self, image_file: ImageFile) -> PointingSelection:
         """Read and classify one image's recorded pointing from its row.
@@ -516,126 +417,20 @@ class IndexPointingSource:
                 the ingest refused. A record that supplies no pointing is
                 classified and counted; a document the index cannot answer for
                 is neither, because the same document read as a file may well
-                supply one and the product would differ in silence.
+                supply one and the product would differ in silence.  The seam
+                raises this and it is deliberately not caught: only the absence
+                of a row is a classifiable answer.
         """
-        row = self._row(image_file)
-        if row.record_stub is None:
-            self._refuse_a_document_the_ingest_refused(image_file, row.refusal_reason)
+        try:
+            record = self._records.read_record(image_file.results_path_stub)
+        except FileNotFoundError:
             IMAGE_LOGGER.warning(NO_METADATA_MESSAGE, image_file.image_file_url, self._storage)
             return none_selection(NO_METADATA)
-        return select_pointing(_record_from_row(row), subject=image_file.image_file_url.as_posix())
+        return select_pointing(record, subject=image_file.image_file_url.as_posix())
 
     def close(self) -> None:
-        """Dispose of the engine, closing every connection it pooled."""
-        self._engine.dispose()
-
-
-def _json_object_from_text(text: str, *, source: str) -> dict[str, Any]:
-    """Parse text as a JSON object.
-
-    Parameters:
-        text: The document text.
-        source: Path or URL of the document, for the refusal message.
-
-    Returns:
-        The parsed object.
-
-    Raises:
-        ValueError: If the text is not valid JSON, or is valid JSON that is not
-            an object. ``json.JSONDecodeError`` is itself a ``ValueError``, so
-            one type covers both.
-    """
-    record = json.loads(text)
-    if not isinstance(record, dict):
-        raise ValueError(f'{source}: navigation metadata is not a JSON object')
-    return record
-
-
-def _present(values: tuple[tuple[str, Any], ...]) -> dict[str, Any]:
-    """Return the named values that are not NULL, as one block of a record.
-
-    A column the row does not carry is a field the document did not have, and a
-    reader distinguishes an absent field from a present one, so an absent value
-    is left out rather than written as null.
-
-    Parameters:
-        values: Field names paired with what the row holds for each.
-
-    Returns:
-        The fields that carry a value, in the order they were given.
-    """
-    return {name: value for name, value in values if value is not None}
-
-
-def _record_from_row(row: sqlalchemy.Row[Any]) -> dict[str, Any]:
-    """Rebuild the navigation record one index row records.
-
-    The result carries the fields the pointing classifier and the backplane
-    status check read, in the shapes the navigator writes them: the top-level
-    ``status``, ``status_error`` and ``offset``, and the ``times`` and
-    ``pointing`` blocks of ``navigation_result``.
-
-    Parameters:
-        row: One row of the index, carrying every column of ``_ROW_COLUMNS``.
-
-    Returns:
-        The rebuilt record.
-    """
-    # The offset key is always written, with a null value where the row carries
-    # no usable pair.  Ingest stores an absent, null, malformed and non-finite
-    # offset alike as NULL, so the rebuild has to render the pair as one of
-    # them.  None of the four supplies a pointing, so the choice cannot change a
-    # product; it does decide the name the shortfall is counted under, and this
-    # one is what makes ``null_offset`` the row's reason for all of them rather
-    # than ``missing_offset_key``.
-    offset: list[float] | None = None
-    if row.offset_dv is not None and row.offset_du is not None:
-        offset = [row.offset_dv, row.offset_du]
-    # ``status`` and ``status_error`` are rendered back as the fields they
-    # stand for, absent ones included, so the record reads as the document it
-    # came from.  The status column is NOT NULL and records a document that
-    # named no outcome as ``UNKNOWN_STATUS``, which is that document's absent
-    # field and is rebuilt as one; a document naming that same word for itself
-    # is rebuilt without the field too, and both are then read as naming no
-    # outcome by the one function every consumer reads the field through.
-    record: dict[str, Any] = _present((('status_error', row.status_error),))
-    if row.status != UNKNOWN_STATUS:
-        record['status'] = row.status
-    record['offset'] = offset
-    navigation_result: dict[str, Any] = {}
-    times = _present(
-        (
-            ('start_et', row.start_et),
-            ('stop_et', row.stop_et),
-            ('midtime_et', row.midtime_et),
-            ('exposure_s', row.exposure_s),
-            ('sclk_start', row.sclk_start),
-            ('sclk_midtime', row.sclk_midtime),
-            ('sclk_stop', row.sclk_stop),
-        )
-    )
-    if times:
-        navigation_result['times'] = times
-    # The pointing block exists whenever any of its columns does, not only when
-    # the corrected attitude does.  Its producer writes the baseline and the
-    # frame identities for every navigated image and the corrected attitude only
-    # where one was computed, so a block with none of the four is a record that
-    # had no pointing block, and a block missing only the corrected attitude is a
-    # result that fitted a camera rotation.  Keying on the corrected attitude
-    # alone cannot tell those two apart.
-    pointing = _present(
-        (
-            ('cmatrix', row.cmatrix),
-            ('cmatrix_original', row.cmatrix_original),
-            ('camera_frame_id', row.camera_frame_id),
-            ('ck_frame_id', row.ck_frame_id),
-        )
-    )
-    if pointing:
-        navigation_result['pointing'] = pointing
-    if navigation_result:
-        record['navigation_result'] = navigation_result
-    return record
+        """Close the seam, which disposes of the index it holds open."""
+        self._records.close()
 
 
 def build_pointing_source(
@@ -679,11 +474,4 @@ def build_pointing_source(
             f'under. Name one, or pass --results-db none to read navigation documents.'
         )
     root_url = normalize_root_url(nav_results_root)
-    engine = open_index(results_db_url, create=False)
-    try:
-        with engine.connect() as connection:
-            require_ingested_roots(connection, [root_url], url=results_db_url)
-    except Exception:
-        engine.dispose()
-        raise
-    return IndexPointingSource(engine, root_url)
+    return IndexPointingSource(open_index_for_roots(results_db_url, [root_url]), root_url)

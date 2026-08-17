@@ -1,5 +1,6 @@
 """Pytest configuration and shared fixtures."""
 
+import os
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 import pdslogger
 import pytest
 
+import spindoctor
 from spindoctor.config import (
     DEFAULT_CONFIG,
     IMAGE_LOGGER,
@@ -238,3 +240,32 @@ def strict_log_scope() -> Iterator[None]:
     set_strict_scope(True)
     yield
     set_strict_scope(None)
+
+
+def child_interpreter_environment() -> dict[str, str]:
+    """Return the environment a subprocess probe must run under.
+
+    Several assertions in this suite are about what a *fresh* interpreter does --
+    which modules an import pulls in, what a program writes to stdout -- and can
+    only be made in a subprocess, because by the time any test runs this process
+    has imported half the tree.  Every one of those probes has to be told which
+    copy of SpinDoctor to import.
+
+    Left to the inherited environment they are not: the suite runs each test from
+    a directory of its own, so a relative ``PYTHONPATH=src`` resolves against
+    that directory and the child imports whichever copy is installed instead.
+    The probe then answers for somebody else's code, and it answers the same
+    whatever the checkout under test does -- which is a test that cannot fail.
+    This names the package by where *this* process imported it from.
+
+    Returns:
+        A copy of the environment with this checkout's source directory first on
+        ``PYTHONPATH``, keeping whatever was already there behind it.
+    """
+    source_root = Path(spindoctor.__file__).resolve().parent.parent
+    environment = dict(os.environ)
+    inherited = environment.get('PYTHONPATH')
+    environment['PYTHONPATH'] = (
+        f'{source_root}{os.pathsep}{inherited}' if inherited else str(source_root)
+    )
+    return environment

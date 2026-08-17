@@ -400,7 +400,7 @@ The command-line tools are composed of three layers:
      (see :doc:`dev_guide_ck_kernels` for the reader mechanism and its
      fallback ladder). The same selection and application serve
      ``src/spindoctor/cli/backplanes/backplanes.py``.
-   - ``pointing_source.py`` — where a record comes from.
+   - ``pointing_source.py`` — where a record comes from, for these two stages.
      :class:`~spindoctor.cli.reproj.pointing_source.PointingSource` is the
      seam, with
      :class:`~spindoctor.cli.reproj.pointing_source.FilePointingSource` reading
@@ -408,9 +408,13 @@ The command-line tools are composed of three layers:
      :class:`~spindoctor.cli.reproj.pointing_source.IndexPointingSource`
      reading one row of a results index per image;
      :func:`~spindoctor.cli.reproj.pointing_source.build_pointing_source`
-     chooses between them from the resolved ``--results-db`` URL. Neither
-     classifies anything itself: the index-backed one rebuilds the shape of
-     the document from the row and calls the same
+     chooses between them from the resolved ``--results-db`` URL. Both are thin:
+     the reading itself is
+     :mod:`spindoctor.results_index.record_source`, the one seam every program
+     reads records through (see :doc:`dev_guide_results_index`), and what is
+     here is what these stages do with a record. ``_ROW_COLUMNS`` is their
+     declaration of which columns they read, and neither implementation
+     classifies anything itself: both call the same
      :func:`~spindoctor.cli.reproj.offsets.select_pointing`, so the two paths
      cannot drift apart. That holds because the store fills every one of those
      columns through :mod:`spindoctor.support.nav_record`, the module the

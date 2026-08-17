@@ -25,6 +25,7 @@ from typing import Any, cast
 import pytest
 import sqlalchemy
 from filecache import FCPath
+from tests.conftest import child_interpreter_environment
 from tests.spindoctor.cli.stats.conftest import (
     index_url,
     ingest_tree,
@@ -607,7 +608,11 @@ def test_importing_the_dataset_package_does_not_import_sqlalchemy() -> None:
         'if name.split(".")[0] == "sqlalchemy")))\n'
     )
     completed = subprocess.run(
-        [sys.executable, '-c', probe], capture_output=True, text=True, check=False
+        [sys.executable, '-c', probe],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=child_interpreter_environment(),
     )
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout) == []

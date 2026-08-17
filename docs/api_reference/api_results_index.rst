@@ -36,6 +36,16 @@ spindoctor.results_index
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.results_index.rebuild
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.results_index.record_source
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.results_index.selection
    :members:
    :undoc-members:

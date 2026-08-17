@@ -18,6 +18,7 @@ from pathlib import Path
 import pdslogger
 import pytest
 from filecache import FCPath
+from tests.conftest import child_interpreter_environment
 
 from spindoctor.support.command_line import masked_command_line
 from spindoctor.support.misc import log_run_environment
@@ -473,7 +474,11 @@ def test_masking_a_line_with_no_url_imports_no_database_layer() -> None:
         'if name.split(".")[0] == "sqlalchemy")))\n'
     )
     completed = subprocess.run(
-        [sys.executable, '-c', probe], capture_output=True, text=True, check=False
+        [sys.executable, '-c', probe],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=child_interpreter_environment(),
     )
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout) == []

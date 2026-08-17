@@ -7,12 +7,12 @@ SPICE-aware tool with a ``furnsh`` instead of having to be applied as a pixel
 offset by hand.
 
 The package consumes the recorded C-matrix and performs no offset-to-rotation
-conversion of its own.  It imports ``cspyce`` and **nothing** from oops, and
-nothing from ``spindoctor.support`` either, since the module that computes the
-C-matrix lives there and imports oops: one convenience import would pull the
-whole geometry stack into a program that only writes kernels.  That guarantee
-is checked on ``sys.modules`` in a fresh interpreter rather than by reading the
-source.
+conversion of its own.  It imports ``cspyce`` and **nothing** from oops: the
+module that computes a C-matrix from a navigated offset imports the whole
+geometry stack, and one convenience import of it would pull that stack into a
+program that only writes kernels.  What the guarantee is about is oops, so that
+is what is asserted, on ``sys.modules`` in a fresh interpreter rather than by
+reading the source -- the offending import could be two modules deep.
 
 The one table it shares with the attitude computation -- which spacecraft clock
 each CK object's time tags are encoded against -- lives in
@@ -32,14 +32,11 @@ carries no stability promise, and it has no page in the API reference, which
 covers the library packages.  Every other ``spindoctor.cli`` subpackage stands
 the same way.
 
-One module of this package is deliberately absent from the surface below.
-:mod:`spindoctor.cli.ck.documents` is where a run gets the navigation records
-it writes kernels from, and its index-backed half imports the results-index
-layer -- SQLAlchemy, and the accessors every consumer reads a record through.
-Re-exporting it here would load all of that into every importer of this
-package, which is what the import guarantee above exists to prevent, so the
-driver imports that module directly and the guarantee stays a property of the
-writer.
+Where a run gets the records it writes kernels from is not this package's.  It
+reads them through :mod:`spindoctor.results_index.record_source`, the one seam
+every program reads navigation records through, so that a results tree and an
+ingested index are read here by the same code that reads them for the
+reprojection, backplane and statistics programs.
 
 One global to respect: ``cspyce.use_errors()`` / ``cspyce.use_flags()`` is
 process-wide and shared with oops.  This package assumes the exceptions regime
@@ -82,12 +79,10 @@ from spindoctor.cli.ck.index import (
     kernel_class_for_basename,
 )
 from spindoctor.cli.ck.inputs import (
-    Document,
     clock_kernels,
     furnish_frame_kernels,
     furnish_supporting_kernels,
     kernel_paths,
-    read_documents,
     recorded_basenames,
     resolve_one,
     select_by_time,
@@ -129,7 +124,6 @@ __all__ = [
     'CkSegment',
     'CommentArea',
     'CoverageInterval',
-    'Document',
     'ImageEntry',
     'ImageFacts',
     'ImagePointing',
@@ -161,7 +155,6 @@ __all__ = [
     'object_frame_is_defined',
     'output_basename',
     'read_comment_area',
-    'read_documents',
     'read_image_facts',
     'recorded_basenames',
     'report_text',

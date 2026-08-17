@@ -114,9 +114,9 @@ Which programs read it
    * - ``sd_mosaic``, ``sd_mosaic_cloud_tasks``
      - The pointing each contributing image is reprojected with.
    * - ``sd_create_ck``
-     - One mission's records in one query: which images carry a corrected
-       attitude, the attitude itself, the exposure epochs, and the kernels the
-       run recorded.
+     - One mission's records, read in bulk rather than one document per image:
+       which images carry a corrected attitude, the attitude itself, the exposure
+       epochs, and the kernels the run recorded.
 
 Every other program reads the tree. Two do so for a reason that will not
 change: ``sd_create_bundle`` serializes the whole navigation document into the

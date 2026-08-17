@@ -23,15 +23,17 @@ from filecache import FCPath
 from tests.spindoctor.cli.ck.ck_helpers import KernelPool, image_metadata
 from tests.spindoctor.cli.stats.conftest import index_url, ingest_tree, write_metadata
 
-from spindoctor.cli.ck.documents import (
-    IndexDocumentSource,
-    TreeDocumentSource,
-    build_document_source,
-)
 from spindoctor.cli.ck.images import ImageEntry
-from spindoctor.cli.ck.inputs import Document
+from spindoctor.cli.ck.inputs import RECORD_COLUMNS
 from spindoctor.cli.ck.report import read_image_facts
-from spindoctor.results_index import IMAGES, open_index
+from spindoctor.results_index import (
+    IMAGES,
+    IndexRecordSource,
+    TreeRecordSource,
+    build_record_source,
+    open_index,
+)
+from spindoctor.support.nav_record import NavRecord
 
 MISSION = 'coiss'
 """The instrument identity the runs below write kernels for."""
@@ -51,8 +53,8 @@ ORIGINAL = np.array(
 )
 """The uncorrected attitude beside it, deliberately not the identity."""
 
-BothReadings = tuple[list[Document], list[Document]]
-"""One mission's documents read from the tree and from the index, in that order."""
+BothReadings = tuple[list[NavRecord], list[NavRecord]]
+"""One mission's records read from the tree and from the index, in that order."""
 
 KERNELS = ('cas00172.tsc', 'naif0012.tls', '18001_18031ra.bc')
 """The kernel basenames a document records, in the order it records them."""
@@ -127,7 +129,7 @@ def _tree(tmp_path: Path) -> Path:
     return root
 
 
-def _both_sources(tmp_path: Path) -> tuple[TreeDocumentSource, IndexDocumentSource]:
+def _both_sources(tmp_path: Path) -> tuple[TreeRecordSource, IndexRecordSource]:
     """Ingest a tree and return a source reading each of its two storages.
 
     Parameters:
@@ -139,9 +141,9 @@ def _both_sources(tmp_path: Path) -> tuple[TreeDocumentSource, IndexDocumentSour
     root = _tree(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=null_logger())
-    index_source = build_document_source(FCPath(root), results_db_url=url)
-    assert isinstance(index_source, IndexDocumentSource)
-    return TreeDocumentSource(FCPath(root)), index_source
+    index_source = build_record_source(FCPath(root), results_db_url=url, columns=RECORD_COLUMNS)
+    assert isinstance(index_source, IndexRecordSource)
+    return TreeRecordSource(FCPath(root)), index_source
 
 
 @pytest.fixture
@@ -167,14 +169,14 @@ def both_readings(tmp_path: Path) -> BothReadings:
     """
     tree, index = _both_sources(tmp_path)
     try:
-        from_tree, _ = tree.read_documents(MISSION)
-        from_index, _ = index.read_documents(MISSION)
+        from_tree, _ = tree.read_records(MISSION)
+        from_index, _ = index.read_records(MISSION)
     finally:
         index.close()
     return from_tree, from_index
 
 
-def _entries(documents: list[Document]) -> list[ImageEntry]:
+def _entries(documents: list[NavRecord]) -> list[ImageEntry]:
     """Read the generator's entry for each document.
 
     Parameters:
@@ -214,9 +216,9 @@ def test_the_source_orders_the_rows_rather_than_trusting_their_order(tmp_path: P
             connection.execute(IMAGES.insert(), list(reversed(stored)))
     finally:
         engine.dispose()
-    source = build_document_source(FCPath(root), results_db_url=url)
+    source = build_record_source(FCPath(root), results_db_url=url, columns=RECORD_COLUMNS)
     try:
-        documents, _ = source.read_documents(MISSION)
+        documents, _ = source.read_records(MISSION)
     finally:
         source.close()
     paths = [document.path.as_posix() for document in documents]
@@ -348,9 +350,9 @@ def test_another_roots_images_are_not_this_runs(tmp_path: Path) -> None:
     write_metadata(other, 'COISS_2002/data/N1454999999_1_CALIB', _navigated('N1454999999_1.IMG'))
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root, other], logger=null_logger())
-    source = build_document_source(FCPath(root), results_db_url=url)
+    source = build_record_source(FCPath(root), results_db_url=url, columns=RECORD_COLUMNS)
     try:
-        documents, _unreadable = source.read_documents(MISSION)
+        documents, _unreadable = source.read_records(MISSION)
     finally:
         source.close()
     assert [document.stub for document in documents] == [
@@ -370,9 +372,9 @@ def test_a_document_the_ingest_refused_is_reported_as_unreadable(tmp_path: Path)
     (root / 'COISS_2001' / 'data' / 'junk_metadata.json').write_text('{}', encoding='utf-8')
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=null_logger())
-    source = build_document_source(FCPath(root), results_db_url=url)
+    source = build_record_source(FCPath(root), results_db_url=url, columns=RECORD_COLUMNS)
     try:
-        _documents, unreadable = source.read_documents(MISSION)
+        _documents, unreadable = source.read_records(MISSION)
     finally:
         source.close()
     assert [path.as_posix() for path, _reason in unreadable] == [
@@ -386,9 +388,9 @@ def test_the_refusal_reason_travels_with_the_file(tmp_path: Path) -> None:
     (root / 'COISS_2001' / 'data' / 'junk_metadata.json').write_text('{}', encoding='utf-8')
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=null_logger())
-    source = build_document_source(FCPath(root), results_db_url=url)
+    source = build_record_source(FCPath(root), results_db_url=url, columns=RECORD_COLUMNS)
     try:
-        _documents, unreadable = source.read_documents(MISSION)
+        _documents, unreadable = source.read_records(MISSION)
     finally:
         source.close()
     assert 'navigation document' in unreadable[0][1]
@@ -402,15 +404,15 @@ def test_a_root_with_no_completed_ingest_is_refused(tmp_path: Path) -> None:
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [other], logger=null_logger())
     with pytest.raises(ValueError, match='no completed ingest'):
-        build_document_source(FCPath(root), results_db_url=url)
+        build_record_source(FCPath(root), results_db_url=url, columns=RECORD_COLUMNS)
 
 
 def test_no_index_url_reads_the_tree(tmp_path: Path) -> None:
     """Reading files is the default, and nothing opens a database to do it."""
     root = _tree(tmp_path)
-    source = build_document_source(FCPath(root), results_db_url=None)
+    source = build_record_source(FCPath(root), results_db_url=None, columns=RECORD_COLUMNS)
     try:
-        assert isinstance(source, TreeDocumentSource)
+        assert isinstance(source, TreeRecordSource)
     finally:
         source.close()
 
@@ -430,10 +432,11 @@ def test_the_description_hides_a_password_in_the_index_url(tmp_path: Path) -> No
     root = _tree(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=null_logger())
-    source = IndexDocumentSource(
+    source = IndexRecordSource(
         open_index(url),
         FCPath(root).as_posix(),
         'postgresql+psycopg://svc:sup3rs3cr3t@db.example/spindoctor',
+        RECORD_COLUMNS,
     )
     try:
         described = source.describe()
@@ -464,9 +467,9 @@ def test_a_value_the_ingest_could_not_store_reads_as_one_never_recorded(
     )
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=null_logger())
-    source = build_document_source(FCPath(root), results_db_url=url)
+    source = build_record_source(FCPath(root), results_db_url=url, columns=RECORD_COLUMNS)
     try:
-        documents, _unreadable = source.read_documents(MISSION)
+        documents, _unreadable = source.read_records(MISSION)
     finally:
         source.close()
     assert read_image_facts(documents[0].metadata).offset_dv is None
@@ -485,6 +488,6 @@ def test_the_tree_path_refuses_the_same_document(tmp_path: Path, pool: KernelPoo
         'COISS_2001/data/N1454725799_1_CALIB',
         _navigated('N1454725799_1.IMG', offset=(1.5, -2.5, 0.5)),
     )
-    documents, _unreadable = TreeDocumentSource(FCPath(root)).read_documents(MISSION)
+    documents, _unreadable = TreeRecordSource(FCPath(root)).read_records(MISSION)
     with pytest.raises(ValueError, match='offset'):
         read_image_facts(documents[0].metadata)

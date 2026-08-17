@@ -22,9 +22,9 @@ attitude:
    half imports ``oops``, because it has to read the observation's own frame
    and field of view.
 2. The :mod:`spindoctor.cli.ck` package reads those recorded matrices back out
-   of the metadata and writes type-3 C-kernel segments. This half imports
-   neither ``oops`` nor anything from :mod:`spindoctor.support`, and the
-   guarantee is enforced by test rather than by convention.
+   of the records and writes type-3 C-kernel segments. This half imports no
+   ``oops``, transitively or otherwise, and the guarantee is enforced by test
+   rather than by convention.
 
 The recorded matrices have a second consumer inside SpinDoctor itself: the
 backplane and reprojection stages apply them back onto observations through
@@ -41,6 +41,15 @@ kernels at all. The claim is scoped to the package: the ``sd_create_ck``
 program that drives it shares the pipeline's logging and configuration
 surface, which does import ``oops``, so it is the package, not the program,
 that carries the guarantee.
+
+What the guarantee forbids is oops, and that is what the probe asserts. Naming a
+whole package as a proxy for it would forbid modules that import no geometry at
+all: the values a record carries
+(:mod:`spindoctor.support.nav_record`), the document one is written to
+(:mod:`spindoctor.support.nav_document`) and the seam a run reads records through
+(:mod:`spindoctor.results_index.record_source`) are all in the writer's imports
+and none of them reaches oops. A rule that forbids the harmless is one that gets
+worked around rather than kept.
 
 The two halves share exactly one table -- which spacecraft clock each C-kernel
 object's time tags are encoded against -- and it lives in

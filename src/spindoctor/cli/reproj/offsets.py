@@ -48,7 +48,6 @@ anything short about it.
 import enum
 import json
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Literal
 
 import oops
@@ -69,6 +68,11 @@ from spindoctor.support.cmatrix import (
     validated_record_rotation,
 )
 from spindoctor.support.exceptions import NavPointingError
+from spindoctor.support.nav_document import (
+    ABSOLUTE_PATH_FRAGMENT,
+    NULL_BYTE_IN_PATH,
+    resolved_document_path,
+)
 
 # Which values of a record a reader can use at all is decided in one place, and
 # the results index stores what that place returns, so a record rebuilt from a
@@ -210,9 +214,11 @@ def resolved_nav_metadata_path(
 
     Rejects null bytes, absolute ``results_path_stub`` fragments, and any resolved
     path that escapes ``nav_results_root`` (e.g. ``..`` segments in ``stub``).
-    Every reader of a navigation document resolves its path through here, so one
-    rule decides which paths a results root may be read at rather than each
-    reader deciding for itself.
+    Which paths a results root may be read at is decided by
+    :func:`spindoctor.support.nav_document.resolved_document_path`, for every
+    reader of a document and both storages; this is the wrapper that reports a
+    refusal against the image, which is what the per-image readers need and what
+    a reader handing back the record itself cannot do.
 
     Parameters:
         nav_results_root: Root the navigator wrote its documents under.
@@ -222,31 +228,28 @@ def resolved_nav_metadata_path(
         The resolved path, or None when the stub does not name one this root
         may be read at, with the reason written to the image's log.
     """
-    rel_name = f'{image_file.results_path_stub}_metadata.json'
-    if '\x00' in rel_name:
+    resolved = resolved_document_path(nav_results_root, image_file.results_path_stub)
+    if resolved.path is not None:
+        return resolved.path
+    if resolved.refusal == NULL_BYTE_IN_PATH:
         IMAGE_LOGGER.warning(
             'nav_results_root: metadata path contains null byte; refusing pointing load for %s.',
             image_file.image_file_url,
         )
-        return None
-    if Path(rel_name).is_absolute():
+    elif resolved.refusal == ABSOLUTE_PATH_FRAGMENT:
         IMAGE_LOGGER.warning(
             'nav_results_root: metadata path fragment is absolute; refusing pointing load for %s.',
             image_file.image_file_url,
         )
-        return None
-    root = FCPath(nav_results_root).expanduser().resolve()
-    candidate = (root / rel_name).resolve()
-    if not candidate.is_relative_to(root):
+    else:
         IMAGE_LOGGER.warning(
             'nav_results_root: resolved metadata path %s is outside root %s; refusing '
             'pointing load for %s (check results_path_stub for path traversal).',
-            candidate,
-            root,
+            resolved.resolved,
+            resolved.root,
             image_file.image_file_url,
         )
-        return None
-    return candidate
+    return None
 
 
 _OFFSET_REASON_MESSAGES = {

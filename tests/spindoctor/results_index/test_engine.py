@@ -36,6 +36,7 @@ from spindoctor.results_index import (
     SCHEMA_VERSION,
     open_database,
     open_index,
+    reporting_a_failed_read,
 )
 
 MISSING_DRIVER_URL = 'postgresql+psycopg://user@localhost:5432/spindoctor'
@@ -519,3 +520,42 @@ def test_a_refused_open_does_not_hand_back_the_pool_it_disposed(
     """
     refused = _refuse_an_open(_index_stamped_with_another_version(tmp_path), monkeypatch)
     assert refused.engine.pool is not refused.pool
+
+
+def _timed_out() -> sqlalchemy.exc.SQLAlchemyError:
+    """Return a database failure that carries no driver exception under it.
+
+    Every failure a dropped table provokes is a statement a driver answered, so
+    it has an ``orig`` to report.  A pool that ran out of connections, a
+    connection used after it closed, and a result read after it was consumed do
+    not: they are raised by the database layer itself, before or after any
+    driver was asked anything, and they are what a production index under load
+    produces.
+
+    Returns:
+        The failure, with the sentence it carries as its own.
+    """
+    return sqlalchemy.exc.TimeoutError(
+        'QueuePool limit of size 5 overflow 10 reached, connection timed out'
+    )
+
+
+def test_a_failure_with_no_driver_message_reports_the_sentence_it_has(tmp_path: Path) -> None:
+    """The report carries the driver's sentence, and this failure's own is all there is."""
+    url = sqlite_url_for(tmp_path / 'index.sqlite3')
+    with (
+        pytest.raises(ValueError, match='connection timed out'),
+        reporting_a_failed_read(url),
+    ):
+        raise _timed_out()
+
+
+def test_a_failure_with_no_driver_message_does_not_report_the_word_none(tmp_path: Path) -> None:
+    """``str(None)`` is ``'None'``, which reads as a driver that answered that."""
+    url = sqlite_url_for(tmp_path / 'index.sqlite3')
+    with (
+        pytest.raises(ValueError) as excinfo,
+        reporting_a_failed_read(url),
+    ):
+        raise _timed_out()
+    assert 'None' not in str(excinfo.value)

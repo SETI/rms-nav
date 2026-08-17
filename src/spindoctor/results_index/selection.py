@@ -67,20 +67,18 @@ that finished a second ago, which is why each is stated here rather than left to
 be read off the stamp.
 """
 
-import contextlib
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 import sqlalchemy
 from filecache import FCPath
 
-from spindoctor.results_index.engine import open_index
-from spindoctor.results_index.masking import masked_url
+from spindoctor.results_index.engine import reporting_a_failed_read
 from spindoctor.results_index.roots import (
     newest_finish_time,
     normalize_root_url,
-    require_ingested_roots,
+    open_index_for_roots,
 )
 from spindoctor.results_index.schema import FAILED_FILES, IMAGES
 
@@ -89,7 +87,6 @@ __all__ = [
     'SPICE_STATUS_ERROR',
     'ResultStubs',
     'read_result_stubs',
-    'reporting_a_failed_read',
 ]
 
 FATAL_STATUS = 'error'
@@ -218,55 +215,6 @@ def _stub_query(
     return documents.union_all(refusals)
 
 
-@contextlib.contextmanager
-def reporting_a_failed_read(url: str) -> Iterator[None]:
-    """Report a database failure as the refusal every consumer already catches.
-
-    :func:`~spindoctor.results_index.engine.open_index` goes to some length to
-    make every way of failing to open the index a ``ValueError``, so that a
-    consumer reporting the cause rather than crashing catches one type.  The
-    queries issued afterwards are outside that guarantee on their own: a table
-    the account may not read, a database holding part of the schema, or a
-    connection lost between the open and the query raises the database layer's
-    own exception, which a caller that deliberately never imports SQLAlchemy
-    cannot name in an ``except`` clause.
-
-    The whole family is caught rather than the operational failures alone: a
-    missing table is one class on SQLite and another on PostgreSQL, a database
-    whose file is damaged is a third, and a caller that cannot name any of them
-    is not helped by a distinction between them.
-
-    What the report carries is the driver's own sentence.  The database layer
-    renders a failed statement with the SQL, the bound parameters and a link to
-    its own documentation, which is eight lines and a thousand characters of
-    machinery around the one sentence that says what to change -- and this
-    wrapper exists precisely so that the sentence is what an operator reads.
-
-    Parameters:
-        url: The index URL, masked here so that the report names which index
-            was asked without printing its password.
-
-    Yields:
-        Nothing; the queries run inside the translation.
-
-    Raises:
-        ValueError: If the block raises anything the database layer raised.
-    """
-    try:
-        yield
-    except sqlalchemy.exc.SQLAlchemyError as exc:
-        # Compared against None rather than taken for its truth: str(None) is
-        # 'None', which would read as a driver that said so.
-        driver_error = getattr(exc, 'orig', None)
-        detail = (str(driver_error).strip() if driver_error is not None else '') or str(exc)
-        raise ValueError(
-            f'{masked_url(url)}: the results index could not be read '
-            f'({type(exc).__name__}: {detail}). Check that this URL names an index '
-            f'sd_stats_ingest wrote and that the account it is opened with may read '
-            f'every table of it.'
-        ) from exc
-
-
 def read_result_stubs(
     url: str,
     nav_results_root: str | Path | FCPath,
@@ -329,10 +277,9 @@ def read_result_stubs(
     )
     with_metadata: set[str] = set()
     matching_error: set[str] = set()
-    engine = open_index(url)
+    engine = open_index_for_roots(url, [root_url])
     try:
         with reporting_a_failed_read(url), engine.connect() as connection:
-            require_ingested_roots(connection, [root_url], url=url)
             ingested_utc = newest_finish_time(connection, root_url)
             for stub, matches_error in connection.execute(query):
                 stub_text = str(stub)

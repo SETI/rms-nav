@@ -2404,16 +2404,30 @@ File as tracking issues alongside the implementation issue:
   widening for one out-of-package tool, wanted only if triage's ten
   rglobs-per-frame remain a practical pain after the pipeline consumers are
   converted.
-- **`sd_create_ck` reads one document per image** (#507), **closed.** It reads
-  one mission's records through a document source now, which the index answers
-  in one query: `spindoctor/cli/ck/documents.py` holds the seam, and the
-  program declares `--results-db` like every other index-backed one. Three of
-  the fields it reads were not columns and were added with it --
-  `observation.shutter_mode`, which is what detects a simultaneous exposure;
-  `navigation_result.provenance.spice_kernels`, which assigns a correction to
-  the original it overlays; and `navigation_result.pointing.camera_frame`,
-  which the earlier phases left out on the grounds that no reader consulted it.
-  That is what raised the schema version to 8.
+- **`sd_create_ck` reads one document per image** (#507), **closed.** It reads one
+  mission's records in bulk now, and it reads them through the seam every program
+  reads records through, so converting it unified the back end rather than adding
+  a second one: `spindoctor/results_index/record_source.py` answers both shapes --
+  one image by its stub, one mission in bulk -- over either storage, and
+  `spindoctor/results_index/rebuild.py` holds the one column-to-field
+  correspondence both shapes rebuild through. The program declares
+  `--results-db` like every other index-backed one. Three of the fields it reads
+  were not columns and were added with it -- `observation.shutter_mode`, which is
+  what detects a simultaneous exposure;
+  `navigation_result.provenance.spice_kernels`, which assigns a correction to the
+  original it overlays; and `navigation_result.pointing.camera_frame`, which the
+  earlier phases left out on the grounds that no reader consulted it. That is
+  what raised the schema version to 8.
+- **Two rebuilds of one row were two answers**, **closed with the phase above.**
+  Each consumer carried its own row-to-record rebuild, its own open-and-check
+  ceremony and its own account of how the two storages could differ. They agreed
+  when they were written and then each grew a rule the other did not: the
+  `ORDER BY` that was right under SQLite's collation and wrong under a
+  PostgreSQL locale collation could only exist in the consumer that read in
+  bulk. There is now one rebuild, one `open_index_for_roots`, and one place that
+  states what the two storages may differ about; every column of `images` is
+  asserted to be a record field, part of a row's identity or a value the ingest
+  derived, so a column added for one consumer cannot read as absent to the rest.
 - **Shipping the index to cloud workers** (#466). Publishing the SQLite file to the
   results bucket and having each worker download it once is the alternative
   to a PostgreSQL instance, and needs a documented workflow either way.

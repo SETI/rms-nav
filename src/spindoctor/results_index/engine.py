@@ -30,9 +30,11 @@ PostgreSQL is the option for sharing one index across machines, and its driver
 ships as an optional extra.
 """
 
+import contextlib
 import datetime
 import os
 import sqlite3
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -51,7 +53,12 @@ from spindoctor.results_index.scope import (
     resolved_schema,
 )
 
-__all__ = ['SQLITE_BUSY_TIMEOUT_MS', 'open_database', 'open_index']
+__all__ = [
+    'SQLITE_BUSY_TIMEOUT_MS',
+    'open_database',
+    'open_index',
+    'reporting_a_failed_read',
+]
 
 SQLITE_BUSY_TIMEOUT_MS = 30000
 """How long a SQLite connection waits for a competing writer before failing.
@@ -963,3 +970,51 @@ def open_database(url: str) -> Engine:
             filesystem will not let this user write.
     """
     return _translated(url, _DROPPING)
+
+
+@contextlib.contextmanager
+def reporting_a_failed_read(url: str) -> Iterator[None]:
+    """Report a database failure as the refusal every consumer already catches.
+
+    :func:`open_index` goes to some length to make every way of failing to open
+    the index a ``ValueError``, so that a consumer reporting the cause rather
+    than crashing catches one type.  The queries issued afterwards are outside
+    that guarantee on their own: a table the account may not read, a database
+    holding part of the schema, or a connection lost between the open and the
+    query raises the database layer's own exception, which a caller that
+    deliberately never imports SQLAlchemy cannot name in an ``except`` clause.
+
+    The whole family is caught rather than the operational failures alone: a
+    missing table is one class on SQLite and another on PostgreSQL, a database
+    whose file is damaged is a third, and a caller that cannot name any of them
+    is not helped by a distinction between them.
+
+    What the report carries is the driver's own sentence.  The database layer
+    renders a failed statement with the SQL, the bound parameters and a link to
+    its own documentation, which is eight lines and a thousand characters of
+    machinery around the one sentence that says what to change -- and this
+    wrapper exists precisely so that the sentence is what an operator reads.
+
+    Parameters:
+        url: The index URL, masked here so that the report names which index
+            was asked without printing its password.
+
+    Yields:
+        Nothing; the queries run inside the translation.
+
+    Raises:
+        ValueError: If the block raises anything the database layer raised.
+    """
+    try:
+        yield
+    except sqlalchemy.exc.SQLAlchemyError as exc:
+        # Compared against None rather than taken for its truth: str(None) is
+        # 'None', which would read as a driver that said so.
+        driver_error = getattr(exc, 'orig', None)
+        detail = (str(driver_error).strip() if driver_error is not None else '') or str(exc)
+        raise ValueError(
+            f'{masked_url(url)}: the results index could not be read '
+            f'({type(exc).__name__}: {detail}). Check that this URL names an index '
+            f'sd_stats_ingest wrote and that the account it is opened with may read '
+            f'every table of it.'
+        ) from exc

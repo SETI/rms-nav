@@ -33,12 +33,11 @@ sys.path.insert(0, package_source_path)
 from spindoctor import __version__
 from spindoctor.cli.ck.assignment import Assignment, assign_images, group_for_output
 from spindoctor.cli.ck.comments import CommentArea, build_comment_lines
-from spindoctor.cli.ck.documents import build_document_source
 from spindoctor.cli.ck.images import ImageEntry, OmissionReason
 from spindoctor.cli.ck.index import CkFile, build_ck_index
 from spindoctor.cli.ck.inputs import (
     LSK_SUFFIXES,
-    Document,
+    RECORD_COLUMNS,
     clock_kernels,
     furnish_frame_kernels,
     furnish_supporting_kernels,
@@ -71,7 +70,9 @@ from spindoctor.config import (
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_CREATE_CK
+from spindoctor.results_index import build_record_source
 from spindoctor.support.misc import log_run_environment
+from spindoctor.support.nav_record import NavRecord
 
 PROGRAM_NAME = SD_CREATE_CK
 """Program identity: names the main log directory and the
@@ -237,7 +238,7 @@ class BuiltOutputs:
     omissions: Mapping[str, OmissionReason]
 
 
-def image_facts(documents: Sequence[Document]) -> dict[str, ImageFacts]:
+def image_facts(documents: Sequence[NavRecord]) -> dict[str, ImageFacts]:
     """Read the facts the report and the comment areas both carry, by image name.
 
     Parameters:
@@ -605,7 +606,7 @@ def pointing_of(assignment: Assignment) -> ImagePointing:
 
 
 def log_dispositions(
-    documents: Sequence[Document], assignments: Sequence[Assignment], run_logging: RunLogging
+    documents: Sequence[NavRecord], assignments: Sequence[Assignment], run_logging: RunLogging
 ) -> Counter[str]:
     """Report what became of each image, to that image's log and to the run's.
 
@@ -649,7 +650,7 @@ def _disposition_of(assignment: Assignment) -> str:
 
 
 def _log_one_disposition(
-    document: Document, assignment: Assignment, run_logging: RunLogging
+    document: NavRecord, assignment: Assignment, run_logging: RunLogging
 ) -> None:
     """Write one image's disposition to its own log, and any omission to the run's.
 
@@ -748,9 +749,11 @@ def main() -> None:
     # an index that cannot be opened, or that has no completed ingest of this
     # root, is a misconfigured run rather than a reason to walk the tree
     # instead.
-    source = build_document_source(nav_results_root, results_db_url=results_db_url)
+    source = build_record_source(
+        nav_results_root, results_db_url=results_db_url, columns=RECORD_COLUMNS
+    )
     try:
-        documents, unreadable = source.read_documents(arguments.mission)
+        documents, unreadable = source.read_records(arguments.mission)
     finally:
         source.close()
     MAIN_LOGGER.info(
@@ -887,7 +890,7 @@ def _selection_et(flag: str, value: str | None) -> float | None:
         raise ValueError(f'{flag} {value!r} is not a UTC time SPICE can read: {exc}') from exc
 
 
-def _entry_for(document: Document) -> ImageEntry:
+def _entry_for(document: NavRecord) -> ImageEntry:
     """Read one document's generator entry, naming the image if it cannot be read.
 
     Parameters:
