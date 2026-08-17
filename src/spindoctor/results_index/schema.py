@@ -226,8 +226,9 @@ IMAGES = sqlalchemy.Table(
     sqlalchemy.Column('sclk_stop', sqlalchemy.Text),
     # The frame the recorded attitude is expressed in, by name and by id.  The
     # name is what a kernel writer looks up in the frame kernels it furnishes;
-    # readers that gate an attitude against the observation take the identity
-    # from the observation instead, and consult neither.
+    # readers that gate an attitude against the observation take the frame
+    # identity from the observation instead and never consult the name.  Both
+    # identifiers are read back by every consumer that rebuilds a pointing.
     sqlalchemy.Column('camera_frame', sqlalchemy.Text),
     sqlalchemy.Column('camera_frame_id', sqlalchemy.Integer),
     sqlalchemy.Column('ck_frame_id', sqlalchemy.Integer),

@@ -119,8 +119,8 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         metavar='URL',
         help="""Connection URL of the results index to write (a sqlite: URL
         naming a local path, or a postgresql+psycopg: URL naming a server);
-        overrides NAV_RESULTS_DB and the environment.results_db configuration
-        variable. The tables are created if they are absent, in the schema this
+        overrides the environment.results_db configuration variable and
+        NAV_RESULTS_DB. The tables are created if they are absent, in the schema this
         database's own schema_meta stamp was found in or, where there is no such
         stamp, the one a table created without a schema name lands in. That
         schema is refused, and nothing is created or stamped in it, when it

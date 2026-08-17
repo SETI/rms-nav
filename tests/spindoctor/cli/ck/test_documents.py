@@ -18,6 +18,7 @@ from typing import Any
 import numpy as np
 import pdslogger
 import pytest
+import sqlalchemy
 from filecache import FCPath
 from tests.spindoctor.cli.ck.ck_helpers import KernelPool, image_metadata
 from tests.spindoctor.cli.stats.conftest import index_url, ingest_tree, write_metadata
@@ -30,7 +31,7 @@ from spindoctor.cli.ck.documents import (
 from spindoctor.cli.ck.images import ImageEntry
 from spindoctor.cli.ck.inputs import Document
 from spindoctor.cli.ck.report import read_image_facts
-from spindoctor.results_index import open_index
+from spindoctor.results_index import IMAGES, open_index
 
 MISSION = 'coiss'
 """The instrument identity the runs below write kernels for."""
@@ -49,6 +50,9 @@ ORIGINAL = np.array(
     ]
 )
 """The uncorrected attitude beside it, deliberately not the identity."""
+
+BothReadings = tuple[list[Document], list[Document]]
+"""One mission's documents read from the tree and from the index, in that order."""
 
 KERNELS = ('cas00172.tsc', 'naif0012.tls', '18001_18031ra.bc')
 """The kernel basenames a document records, in the order it records them."""
@@ -140,6 +144,36 @@ def _both_sources(tmp_path: Path) -> tuple[TreeDocumentSource, IndexDocumentSour
     return TreeDocumentSource(FCPath(root)), index_source
 
 
+@pytest.fixture
+def both_readings(tmp_path: Path) -> BothReadings:
+    """Read one mission's documents from both sources over the same tree.
+
+    Every parity test below builds the same two sources, reads the same
+    mission out of each and closes the index; only what it then compares
+    differs.  They stay separate tests rather than one parametrized case
+    because the comparisons are not one shape -- some read a field off the
+    first entry behind a ``None`` guard, some map over every entry, one needs
+    SPICE furnished -- and because each test's docstring says why that
+    particular field is load-bearing, which a parameter id cannot.
+
+    The index is closed before the documents are handed over, so there is
+    nothing to tear down afterwards: what a test receives is two lists.
+
+    Parameters:
+        tmp_path: Directory the root and the index are written under.
+
+    Returns:
+        The tree documents and the index documents, in that order.
+    """
+    tree, index = _both_sources(tmp_path)
+    try:
+        from_tree, _ = tree.read_documents(MISSION)
+        from_index, _ = index.read_documents(MISSION)
+    finally:
+        index.close()
+    return from_tree, from_index
+
+
 def _entries(documents: list[Document]) -> list[ImageEntry]:
     """Read the generator's entry for each document.
 
@@ -152,51 +186,62 @@ def _entries(documents: list[Document]) -> list[ImageEntry]:
     return [ImageEntry.from_metadata(document.metadata) for document in documents]
 
 
-def test_the_two_sources_return_the_same_images(tmp_path: Path) -> None:
+def test_the_two_sources_return_the_same_images(both_readings: BothReadings) -> None:
     """The mission's images, and only that mission's, from either storage."""
-    tree, index = _both_sources(tmp_path)
-    try:
-        from_tree, _ = tree.read_documents(MISSION)
-        from_index, _ = index.read_documents(MISSION)
-    finally:
-        index.close()
+    from_tree, from_index = both_readings
     assert [document.stub for document in from_index] == [document.stub for document in from_tree]
 
 
-def test_the_two_sources_agree_on_which_images_are_eligible(tmp_path: Path) -> None:
-    """Eligibility decides which images get a segment at all."""
-    tree, index = _both_sources(tmp_path)
+def test_the_source_orders_the_rows_rather_than_trusting_their_order(tmp_path: Path) -> None:
+    """The query asks for no order, so the source is the only thing imposing one.
+
+    A server sorts text under its own collation, and a locale collation orders
+    a separator against an underscore differently from the codepoint order the
+    walk sorts its paths by -- so an ORDER BY would agree with the walk on
+    SQLite and disagree on PostgreSQL, which the SQLite-only tier here could
+    never show.  The rows are therefore put back in an order no walk would
+    produce, which is what the unordered query then returns them in: the run
+    must still get them in path order.
+    """
+    root = _tree(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=null_logger())
+    engine = open_index(url)
     try:
-        from_tree, _ = tree.read_documents(MISSION)
-        from_index, _ = index.read_documents(MISSION)
+        with engine.begin() as connection:
+            stored = [dict(row._mapping) for row in connection.execute(sqlalchemy.select(IMAGES))]
+            connection.execute(sqlalchemy.delete(IMAGES))
+            connection.execute(IMAGES.insert(), list(reversed(stored)))
     finally:
-        index.close()
+        engine.dispose()
+    source = build_document_source(FCPath(root), results_db_url=url)
+    try:
+        documents, _ = source.read_documents(MISSION)
+    finally:
+        source.close()
+    paths = [document.path.as_posix() for document in documents]
+    assert paths == sorted(paths)
+
+
+def test_the_two_sources_agree_on_which_images_are_eligible(both_readings: BothReadings) -> None:
+    """Eligibility decides which images get a segment at all."""
+    from_tree, from_index = both_readings
     assert [entry.is_eligible for entry in _entries(from_index)] == [
         entry.is_eligible for entry in _entries(from_tree)
     ]
 
 
-def test_the_two_sources_agree_on_the_omission_reasons(tmp_path: Path) -> None:
+def test_the_two_sources_agree_on_the_omission_reasons(both_readings: BothReadings) -> None:
     """An image with no correction is left out for the same recorded reason."""
-    tree, index = _both_sources(tmp_path)
-    try:
-        from_tree, _ = tree.read_documents(MISSION)
-        from_index, _ = index.read_documents(MISSION)
-    finally:
-        index.close()
+    from_tree, from_index = both_readings
     assert [entry.ineligibility_reason for entry in _entries(from_index)] == [
         entry.ineligibility_reason for entry in _entries(from_tree)
     ]
 
 
-def test_the_two_sources_agree_on_the_corrected_attitude(tmp_path: Path) -> None:
+def test_the_two_sources_agree_on_the_corrected_attitude(both_readings: BothReadings) -> None:
     """The matrix a segment is built from must survive the row exactly."""
-    tree, index = _both_sources(tmp_path)
-    try:
-        from_tree, _ = tree.read_documents(MISSION)
-        from_index, _ = index.read_documents(MISSION)
-    finally:
-        index.close()
+    from_tree, from_index = both_readings
     tree_pointing = _entries(from_tree)[0].pointing
     index_pointing = _entries(from_index)[0].pointing
     assert tree_pointing is not None
@@ -204,14 +249,9 @@ def test_the_two_sources_agree_on_the_corrected_attitude(tmp_path: Path) -> None
     assert index_pointing.cmatrix.tolist() == tree_pointing.cmatrix.tolist()
 
 
-def test_the_two_sources_agree_on_the_baseline_attitude(tmp_path: Path) -> None:
+def test_the_two_sources_agree_on_the_baseline_attitude(both_readings: BothReadings) -> None:
     """And so must the attitude the correction is measured against."""
-    tree, index = _both_sources(tmp_path)
-    try:
-        from_tree, _ = tree.read_documents(MISSION)
-        from_index, _ = index.read_documents(MISSION)
-    finally:
-        index.close()
+    from_tree, from_index = both_readings
     tree_pointing = _entries(from_tree)[0].pointing
     index_pointing = _entries(from_index)[0].pointing
     assert tree_pointing is not None
@@ -219,14 +259,9 @@ def test_the_two_sources_agree_on_the_baseline_attitude(tmp_path: Path) -> None:
     assert index_pointing.cmatrix_original.tolist() == tree_pointing.cmatrix_original.tolist()
 
 
-def test_the_two_sources_agree_on_the_exposure_epochs(tmp_path: Path) -> None:
+def test_the_two_sources_agree_on_the_exposure_epochs(both_readings: BothReadings) -> None:
     """A segment covers exactly its exposure, so the epochs decide its extent."""
-    tree, index = _both_sources(tmp_path)
-    try:
-        from_tree, _ = tree.read_documents(MISSION)
-        from_index, _ = index.read_documents(MISSION)
-    finally:
-        index.close()
+    from_tree, from_index = both_readings
     tree_pointing = _entries(from_tree)[0].pointing
     index_pointing = _entries(from_index)[0].pointing
     assert tree_pointing is not None
@@ -244,14 +279,9 @@ def test_the_two_sources_agree_on_the_exposure_epochs(tmp_path: Path) -> None:
     )
 
 
-def test_the_two_sources_agree_on_the_camera_frame(tmp_path: Path) -> None:
+def test_the_two_sources_agree_on_the_camera_frame(both_readings: BothReadings) -> None:
     """The frame name is what the writer looks up among the furnished kernels."""
-    tree, index = _both_sources(tmp_path)
-    try:
-        from_tree, _ = tree.read_documents(MISSION)
-        from_index, _ = index.read_documents(MISSION)
-    finally:
-        index.close()
+    from_tree, from_index = both_readings
     tree_pointing = _entries(from_tree)[0].pointing
     index_pointing = _entries(from_index)[0].pointing
     assert tree_pointing is not None
@@ -259,69 +289,48 @@ def test_the_two_sources_agree_on_the_camera_frame(tmp_path: Path) -> None:
     assert index_pointing.camera_frame == tree_pointing.camera_frame
 
 
-def test_the_two_sources_agree_on_the_recorded_kernels(tmp_path: Path) -> None:
+def test_the_two_sources_agree_on_the_recorded_kernels(both_readings: BothReadings) -> None:
     """The recorded basenames are what assign a correction to its baseline."""
-    tree, index = _both_sources(tmp_path)
-    try:
-        from_tree, _ = tree.read_documents(MISSION)
-        from_index, _ = index.read_documents(MISSION)
-    finally:
-        index.close()
+    from_tree, from_index = both_readings
     assert _entries(from_index)[0].kernel_basenames == _entries(from_tree)[0].kernel_basenames
 
 
-def test_the_two_sources_agree_on_the_shutter_mode(tmp_path: Path) -> None:
+def test_the_two_sources_agree_on_the_shutter_mode(both_readings: BothReadings) -> None:
     """Two cameras exposed together share a bus attitude, and this is what says so."""
-    tree, index = _both_sources(tmp_path)
-    try:
-        from_tree, _ = tree.read_documents(MISSION)
-        from_index, _ = index.read_documents(MISSION)
-    finally:
-        index.close()
+    from_tree, from_index = both_readings
     assert [entry.shutter_mode for entry in _entries(from_index)] == [
         entry.shutter_mode for entry in _entries(from_tree)
     ]
 
 
-def test_the_two_sources_agree_on_the_camera(tmp_path: Path) -> None:
+def test_the_two_sources_agree_on_the_camera(both_readings: BothReadings) -> None:
     """The camera decides which member of a simultaneous pair yields."""
-    tree, index = _both_sources(tmp_path)
-    try:
-        from_tree, _ = tree.read_documents(MISSION)
-        from_index, _ = index.read_documents(MISSION)
-    finally:
-        index.close()
+    from_tree, from_index = both_readings
     assert [entry.camera for entry in _entries(from_index)] == [
         entry.camera for entry in _entries(from_tree)
     ]
 
 
-def test_the_two_sources_agree_on_the_reported_facts(tmp_path: Path, pool: KernelPool) -> None:
+def test_the_two_sources_agree_on_the_reported_facts(
+    both_readings: BothReadings, pool: KernelPool
+) -> None:
     """Every column of the report an operator reads the run's outcome from.
 
     Parameters:
-        tmp_path: Directory the root and the index are written under.
+        both_readings: The same mission read from the tree and from the index.
         pool: Furnishes the leapseconds kernel the UTC column is converted with.
     """
-    tree, index = _both_sources(tmp_path)
-    try:
-        from_tree, _ = tree.read_documents(MISSION)
-        from_index, _ = index.read_documents(MISSION)
-    finally:
-        index.close()
+    from_tree, from_index = both_readings
     assert [read_image_facts(document.metadata) for document in from_index] == [
         read_image_facts(document.metadata) for document in from_tree
     ]
 
 
-def test_the_index_source_names_the_file_each_row_was_read_from(tmp_path: Path) -> None:
+def test_the_index_source_names_the_file_each_row_was_read_from(
+    both_readings: BothReadings,
+) -> None:
     """A message about a document names the file an operator would open."""
-    tree, index = _both_sources(tmp_path)
-    try:
-        from_tree, _ = tree.read_documents(MISSION)
-        from_index, _ = index.read_documents(MISSION)
-    finally:
-        index.close()
+    from_tree, from_index = both_readings
     assert [document.path.as_posix() for document in from_index] == [
         document.path.as_posix() for document in from_tree
     ]

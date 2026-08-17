@@ -207,23 +207,26 @@ class IndexDocumentSource:
                 against ``observation.instrument``.
 
         Returns:
-            The documents, ordered by their stub, and one entry per file the
-            ingest refused under this root, pairing it with the recorded
-            reason.
+            The documents, ordered by their path under the root as the walk
+            orders them, and one entry per file the ingest refused under this
+            root, pairing it with the recorded reason.
 
         Raises:
             ValueError: If the index cannot be read, naming it with any
                 password masked.
         """
-        images = (
-            sqlalchemy.select(*_ROW_COLUMNS)
-            .where(IMAGES.c.root_url == self._root_url, IMAGES.c.instrument == mission)
-            .order_by(IMAGES.c.results_path_stub)
+        # Neither statement orders: ordering is done below, on the rebuilt
+        # paths.  A server sorts text under its own collation, and a locale
+        # collation orders a separator against an underscore differently from
+        # the codepoint order the walk sorts its paths by, so an ORDER BY here
+        # would hand back one order from SQLite and another from PostgreSQL for
+        # the same tree.  Sorting the paths is the one key the two storages
+        # share, and it is what lets a run be held to the walk on any backend.
+        images = sqlalchemy.select(*_ROW_COLUMNS).where(
+            IMAGES.c.root_url == self._root_url, IMAGES.c.instrument == mission
         )
-        refused = (
-            sqlalchemy.select(FAILED_FILES.c.results_path_stub, FAILED_FILES.c.reason)
-            .where(FAILED_FILES.c.root_url == self._root_url)
-            .order_by(FAILED_FILES.c.results_path_stub)
+        refused = sqlalchemy.select(FAILED_FILES.c.results_path_stub, FAILED_FILES.c.reason).where(
+            FAILED_FILES.c.root_url == self._root_url
         )
         with reporting_a_failed_read(self._url), self._engine.connect() as connection:
             documents = [self._document_of(row) for row in connection.execute(images)]
@@ -231,6 +234,8 @@ class IndexDocumentSource:
                 (self._path_of(str(row.results_path_stub)), str(row.reason))
                 for row in connection.execute(refused)
             ]
+        documents.sort(key=lambda document: document.path.as_posix())
+        unreadable.sort(key=lambda entry: entry[0].as_posix())
         return documents, unreadable
 
     def describe(self) -> str:

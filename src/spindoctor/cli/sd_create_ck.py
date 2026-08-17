@@ -148,8 +148,8 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         metavar='URL',
         help="""Connection URL of the results index written by sd_stats_ingest (a
         sqlite: URL naming a local path, or a postgresql+psycopg: URL naming a
-        server); overrides NAV_RESULTS_DB and the environment.results_db
-        configuration variable. The run then reads the mission's navigation records
+        server); overrides the environment.results_db configuration variable
+        and NAV_RESULTS_DB. The run then reads the mission's navigation records
         as rows of one query instead of one file per image. Pass --results-db none
         to read the files even where an index is configured. Without an index the
         navigation results tree is read directly, which is the default.""",

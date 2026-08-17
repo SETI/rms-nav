@@ -395,8 +395,8 @@ Environment options
   the mission's records as the rows of one query instead of walking the tree
   and reading one file per image, which is what makes a cloud results root
   affordable: an archive-scale root costs one paid round trip per image
-  otherwise. Takes precedence over ``NAV_RESULTS_DB`` and the
-  ``environment.results_db`` configuration variable. ``--results-db none``
+  otherwise. Takes precedence over the ``environment.results_db``
+  configuration variable and ``NAV_RESULTS_DB``. ``--results-db none``
   names no index, which is how a machine that has one configured is told to
   read the tree for this run. Without an index the tree is read, which is the
   default.

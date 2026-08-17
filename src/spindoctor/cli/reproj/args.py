@@ -68,8 +68,8 @@ def add_common_env_args(parser: argparse.ArgumentParser) -> None:
         help=(
             'Connection URL of the results index written by sd_stats_ingest (a sqlite: '
             'URL naming a local path, or a postgresql+psycopg: URL naming a server); '
-            'overrides NAV_RESULTS_DB and the environment.results_db configuration '
-            "variable. Each image's navigation record is then read as one row instead of "
+            'overrides the environment.results_db configuration variable and '
+            "NAV_RESULTS_DB. Each image's navigation record is then read as one row instead of "
             'one file, and --nav-results-root names the ingested root the rows are read '
             'under. Pass --results-db none to read the files even where an index is '
             'configured.'

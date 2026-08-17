@@ -824,12 +824,13 @@ pair with ``ON DELETE CASCADE``.
      - SPICE name of the frame a recorded attitude is expressed in, from
        ``navigation_result.pointing.camera_frame``. A kernel writer looks it
        up among the frame kernels it furnishes; a reader that gates an attitude
-       against the observation takes the identity from the observation and
-       consults neither this nor the identifier below.
+       against the observation takes the frame identity from the observation
+       and never consults this name.
    * - ``camera_frame_id``, ``ck_frame_id``
      - INTEGER
      - SPICE frame identifiers of the camera and of the C-kernel a corrected
-       attitude targets.
+       attitude targets. Unlike the name above, both are read back by every
+       consumer that rebuilds a pointing block.
    * - ``cmatrix``, ``cmatrix_original``
      - JSON
      - Corrected and as-flown camera attitude, nine floats row-major.

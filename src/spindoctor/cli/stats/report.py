@@ -786,8 +786,8 @@ def main_report(cmdline: list[str] | None = None) -> int:
         metavar='URL',
         help='Connection URL of the results index written by sd_stats_ingest '
         '(a sqlite: URL naming a local path, or a postgresql+psycopg: URL); '
-        'overrides NAV_RESULTS_DB and the environment.results_db configuration '
-        'variable',
+        'overrides the environment.results_db configuration variable and '
+        'NAV_RESULTS_DB',
     )
     parser.add_argument(
         '--root',
