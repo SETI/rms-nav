@@ -181,7 +181,7 @@ def require_ingested_roots(
     )
 
 
-def open_index_for_roots(url: str, roots: Sequence[str], *, create: bool = False) -> Engine:
+def open_index_for_roots(url: str, roots: Sequence[str]) -> Engine:
     """Open an index and refuse it if a root the caller means to read is not in it.
 
     Every consumer that reads rows under a named root opens the index this way,
@@ -194,14 +194,16 @@ def open_index_for_roots(url: str, roots: Sequence[str], *, create: bool = False
 
     Nothing here falls back to the documents.  A URL that cannot be opened, or a
     root nobody has ingested, fails the run: turning either into a slow read of
-    the tree would make a misconfigured run a silently different one.
+    the tree would make a misconfigured run a silently different one.  Nor does
+    anything here create an index: a consumer that created one would answer every
+    question with "nothing was navigated", so creating is the writer's alone and
+    the writer requires no root to be ingested.
 
     Parameters:
         url: Connection URL of the results index.
         roots: The normalized roots the caller means to read.  Empty means the
             caller reads whatever the index holds and names no root of its own,
             which the report does.
-        create: Whether to create the schema, for the one caller that writes.
 
     Returns:
         The open index, which the caller closes when it is done with it.
@@ -213,7 +215,7 @@ def open_index_for_roots(url: str, roots: Sequence[str], *, create: bool = False
             engine is disposed of before the refusal leaves here, so a refused
             caller has nothing to close.
     """
-    engine = open_index(url, create=create)
+    engine = open_index(url, create=False)
     try:
         with reporting_a_failed_read(url), engine.connect() as connection:
             require_ingested_roots(connection, list(roots), url=url)
